@@ -40,7 +40,7 @@ def compute_vwap_context(price: float, vwap: float, eps: float) -> VWAPContext:
 
 
 # =========================================================
-# Existing VWAP Mean Reversion Logic (UNCHANGED)
+# Existing VWAP Mean Reversion Logic
 # =========================================================
 def compute_vwap(prices: List[float], volumes: List[float]) -> Optional[float]:
     """
@@ -97,3 +97,19 @@ def build_vwap_payload(
     if isinstance(extra, dict):
         payload.update(extra)
     return payload
+
+
+# =========================================================
+# Payload Builder with Default EPS (STEP 6)
+# =========================================================
+def build_vwap_payload_default_eps(
+    price: float,
+    vwap: float,
+    extra: Optional[Dict] = None,
+    pct: float = 0.0005
+) -> Dict:
+    """
+    Builds VWAP payload using default epsilon.
+    """
+    eps = default_vwap_eps(vwap, pct=pct)
+    return build_vwap_payload(price=price, vwap=vwap, eps=eps, extra=extra)
