@@ -9,6 +9,8 @@ from regime.gate import RegimeGate, RegimeResult, RegimeDecision
 from signals.vwap_mean_reversion import VWAPMeanReversionEngine, SignalPolicy, SignalPrompt
 from signals.queue import SignalApprovalQueue, QueuePolicy
 
+from module3_signal import VWAPMeanReversionSignal
+
 
 @dataclass
 class EngineConfig:
@@ -24,6 +26,29 @@ class EngineConfig:
     # Default operating risk level (advisory only, 1–5)
     default_risk_level: int = 2
 
+    # -------------------------------
+    # Module 3 prompt-generation knobs
+    # -------------------------------
+    vwap_reversion_bps: float = 12.0
+    min_confidence: float = 0.65
+    prompt_cooldown_bars: int = 5
+
+
+@dataclass(frozen=True)
+class SignalState:
+    """
+    Minimal state passed to Module 3 prompt generator.
+    Python 3.14 safe (immutable).
+    """
+    symbol: str
+    ts: str
+    bar_index: int
+    price: float
+    vwap: float
+    regime_allow: bool
+    regime_reason: str
+    momentum_slowing: bool
+
 
 class REACapitalEngineLoop:
     """
@@ -33,7 +58,8 @@ class REACapitalEngineLoop:
     Wires together:
     - Module 1: DataController (1m validation, safe mode, 5m builder, session gating)
     - Module 2: RegimeGate (vol, trend, macro/political gate)
-    - Module 3: VWAP mean-reversion signal engine (prompt-only)
+    - Module 3a: VWAPMeanReversionEngine (existing prompt-only engine)
+    - Module 3b: VWAPMeanReversionSignal (new prompt generator)
     - SignalApprovalQueue (stores pending prompts)
 
     Non-negotiable:
@@ -46,15 +72,16 @@ class REACapitalEngineLoop:
         self.cfg = cfg or EngineConfig()
 
         # Module 1
-        self.data = DataController(
-            ControllerConfig(symbol=self.cfg.symbol),
-        )
+        self.data = DataController(ControllerConfig(symbol=self.cfg.symbol))
 
         # Module 2
         self.regime = RegimeGate()
 
-        # Module 3
+        # Module 3a (existing)
         self.signal_engine = VWAPMeanReversionEngine(self.cfg.signal_policy)
+
+        # Module 3b (new prompt generator)
+        self.prompt_engine = VWAPMeanReversionSignal(self.cfg)
 
         # Queue
         self.queue = SignalApprovalQueue(self.cfg.queue_policy)
@@ -68,9 +95,8 @@ class REACapitalEngineLoop:
         # Last known regime result (visibility)
         self.last_regime: Optional[RegimeResult] = None
 
-    # -----------------------
-    # Manual controls (never auto)
-    # -----------------------
+        # 5m bar counter for prompt state indexing
+        self._bar5m_index: int = 0
 
     def set_risk_level(self, level: int) -> None:
         """
@@ -83,21 +109,31 @@ class REACapitalEngineLoop:
     def bars_5m(self) -> List[Bar]:
         return list(self._bars_5m)
 
-    # -----------------------
-    # Main ingestion method
-    # -----------------------
+    def _compute_vwap_5m(self, bars_5m: List[Bar]) -> float:
+        total_v = sum(b.v for b in bars_5m)
+        if total_v <= 0:
+            return sum(b.c for b in bars_5m) / len(bars_5m)
+        return sum(b.c * b.v for b in bars_5m) / total_v
+
+    def _momentum_slowing_5m(self, bars_5m: List[Bar]) -> bool:
+        """
+        Simple, robust momentum-slowing proxy:
+        last 3 absolute returns are decreasing: |r3| < |r2| < |r1|
+        """
+        if len(bars_5m) < 4:
+            return False
+        c0 = bars_5m[-4].c
+        c1 = bars_5m[-3].c
+        c2 = bars_5m[-2].c
+        c3 = bars_5m[-1].c
+        r1 = c1 - c0
+        r2 = c2 - c1
+        r3 = c3 - c2
+        return abs(r3) < abs(r2) < abs(r1)
 
     def on_bar_1m(self, bar1m: Bar, received_at_utc: Optional[datetime] = None) -> Dict[str, Any]:
         """
         Ingest one 1-minute bar and return a structured snapshot.
-
-        Returns a dict with:
-        - data_ok/time_ok eligibility
-        - safe mode status
-        - last regime decision/reasons (evaluated when 5m bar completes)
-        - any prompt queued
-        - queue summary
-        - risk level (persistent until user changes it)
         """
         if received_at_utc is None:
             received_at_utc = datetime.now(timezone.utc)
@@ -128,6 +164,8 @@ class REACapitalEngineLoop:
             if len(self._bars_5m) > self.cfg.max_5m_history:
                 self._bars_5m = self._bars_5m[-self.cfg.max_5m_history :]
 
+            self._bar5m_index += 1
+
             # Evaluate regime on each completed 5m bar
             self.last_regime = self.regime.evaluate(self._bars_5m, as_of_utc=received_at_utc)
 
@@ -141,7 +179,8 @@ class REACapitalEngineLoop:
             # Attempt signals only if eligible and regime allows
             elig = snap["eligibility"]
             if elig["time_ok"] and elig["data_ok"] and self.last_regime.decision == RegimeDecision.ALLOW:
-                prompt = self.signal_engine.evaluate(
+                # Module 3a: existing prompt engine
+                prompt_a = self.signal_engine.evaluate(
                     symbol=self.cfg.symbol,
                     bars_5m=self._bars_5m,
                     regime=self.last_regime,
@@ -149,12 +188,49 @@ class REACapitalEngineLoop:
                     current_risk_level=self.risk_level,
                 )
 
-                if isinstance(prompt, SignalPrompt):
-                    accepted, msg = self.queue.enqueue(prompt, now_utc=received_at_utc.replace(tzinfo=None))
-                    snap["prompt_queued"] = bool(accepted)
-                    snap["prompt_summary"] = prompt.summary() + (f"\nQueue: {msg}" if msg else "")
+                # Module 3b: new prompt generator
+                vwap = self._compute_vwap_5m(self._bars_5m)
+                price = self._bars_5m[-1].c
+                momentum_slowing = self._momentum_slowing_5m(self._bars_5m)
 
-        # Queue summary always
+                state = SignalState(
+                    symbol=self.cfg.symbol,
+                    ts=received_at_utc.isoformat(),
+                    bar_index=self._bar5m_index,
+                    price=price,
+                    vwap=vwap,
+                    regime_allow=True,
+                    regime_reason="; ".join(self.last_regime.reasons),
+                    momentum_slowing=momentum_slowing,
+                )
+
+                prompt_b = self.prompt_engine.evaluate(state)
+
+                # Queue whichever prompt fires (priority: new prompt engine first)
+                if isinstance(prompt_b, dict):
+                    accepted, msg = self.queue.enqueue(
+                        SignalPrompt(
+                            symbol=prompt_b["symbol"],
+                            direction="LONG_REVERT" if prompt_b["bias"] == "LONG" else "SHORT_REVERT",
+                            zscore=0.0,
+                            vwap=prompt_b["vwap"],
+                            last_price=prompt_b["price"],
+                            volatility=0.0,
+                            suggested_risk_level=self.risk_level,
+                            confidence=prompt_b["confidence"],
+                            as_of_utc=received_at_utc.replace(tzinfo=None),
+                            rationale=[prompt_b["regime_reason"], f"dist_bps={prompt_b['dist_bps']}"],
+                        ),
+                        now_utc=received_at_utc.replace(tzinfo=None),
+                    )
+                    snap["prompt_queued"] = bool(accepted)
+                    snap["prompt_summary"] = f"Module3B queued: {prompt_b} | Queue: {msg}"
+
+                elif isinstance(prompt_a, SignalPrompt):
+                    accepted, msg = self.queue.enqueue(prompt_a, now_utc=received_at_utc.replace(tzinfo=None))
+                    snap["prompt_queued"] = bool(accepted)
+                    snap["prompt_summary"] = prompt_a.summary() + (f"\nQueue: {msg}" if msg else "")
+
         snap["queue_pending_count"] = len(self.queue.list_pending())
         snap["queue_top"] = [x.prompt.summary() for x in self.queue.top_n(3)]
         return snap
