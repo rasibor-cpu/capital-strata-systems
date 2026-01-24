@@ -24,10 +24,6 @@ class VWAPDistanceBucket(Enum):
 # DEFAULT VWAP EPSILON (STEP 5)
 # =========================================
 def default_vwap_eps(vwap: float, pct: float = 0.0005) -> float:
-    """
-    Default tolerance for VWAP comparisons.
-    pct default = 0.05% of VWAP.
-    """
     if vwap <= 0:
         return 0.0
     return vwap * pct
@@ -37,9 +33,6 @@ def default_vwap_eps(vwap: float, pct: float = 0.0005) -> float:
 # VWAP CONTEXT COMPUTATION (STEP 2)
 # =========================================
 def compute_vwap_context(price: float, vwap: float, eps: float) -> VWAPContext:
-    """
-    Classifies price position relative to VWAP using a tolerance eps.
-    """
     if price > vwap + eps:
         return VWAPContext.ABOVE
     if price < vwap - eps:
@@ -56,9 +49,6 @@ def compute_vwap_distance_bucket(
     near_pct: float = 0.001,
     far_pct: float = 0.003
 ) -> VWAPDistanceBucket:
-    """
-    Buckets absolute distance from VWAP using % thresholds.
-    """
     if vwap <= 0:
         return VWAPDistanceBucket.NEAR
 
@@ -72,12 +62,9 @@ def compute_vwap_distance_bucket(
 
 
 # =========================================================
-# VWAP CALCULATION (UNCHANGED)
+# VWAP CALCULATION
 # =========================================================
 def compute_vwap(prices: List[float], volumes: List[float]) -> Optional[float]:
-    """
-    Existing VWAP computation.
-    """
     if not prices or not volumes:
         return None
 
@@ -92,10 +79,6 @@ def compute_vwap(prices: List[float], volumes: List[float]) -> Optional[float]:
 # PROMPT GENERATOR (STEP 9)
 # =========================================================
 def generate_vwap_prompt(payload: Dict) -> Optional[Dict]:
-    """
-    Prompt-only generator.
-    Requires both vwap_context and vwap_distance_bucket in payload.
-    """
     if not isinstance(payload, dict):
         return None
 
@@ -120,12 +103,6 @@ def build_vwap_payload(
     eps: float,
     extra: Optional[Dict] = None
 ) -> Dict:
-    """
-    Builds VWAP payload including:
-      - vwap_context
-      - vwap_distance_bucket
-    Prompt-only. No execution.
-    """
     payload = {
         "price": price,
         "vwap": vwap,
@@ -146,15 +123,12 @@ def build_vwap_payload_default_eps(
     extra: Optional[Dict] = None,
     pct: float = 0.0005
 ) -> Dict:
-    """
-    Builds VWAP payload using default epsilon.
-    """
     eps = default_vwap_eps(vwap, pct=pct)
     return build_vwap_payload(price=price, vwap=vwap, eps=eps, extra=extra)
 
 
 # =========================================================
-# PAYLOAD + PROMPT HELPER (STEP 10)
+# PAYLOAD + PROMPT HELPER (STEP 10 — FIXED)
 # =========================================================
 def build_vwap_prompt_default_eps(
     price: float,
@@ -162,10 +136,10 @@ def build_vwap_prompt_default_eps(
     extra: Optional[Dict] = None,
     pct: float = 0.0005
 ) -> Optional[Dict]:
-    """
-    Convenience wrapper:
-      1) builds payload with default eps
-      2) returns prompt if guards pass
-    """
-    payload = build_vwap_payload_default_eps(price=price, vwap=vwap, extra=extra, pct=pct)
+    payload = build_vwap_payload_default_eps(
+        price=price,
+        vwap=vwap,
+        extra=extra,
+        pct=pct
+    )
     return generate_vwap_prompt(payload)
