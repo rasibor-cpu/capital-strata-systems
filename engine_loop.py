@@ -1,4 +1,3 @@
-from __future__ import annotations
 """
 engine_loop.py — REA Capital Trading Engine (Prompt-Only)
 
@@ -18,6 +17,7 @@ import csv
 import os
 from datetime import datetime, timezone
 
+
 # =============================
 # REQUIRED: VWAP prompt builder
 # =============================
@@ -27,6 +27,7 @@ except Exception as e:
     raise ImportError(
         "Missing signals.vwap_mean_reversion.build_vwap_prompt_default_eps"
     ) from e
+
 
 # =============================
 # OPTIONAL: Regime Gate
@@ -168,7 +169,7 @@ class EngineLoop:
 
 
 # =============================
-# CSV LOADER (YOUR FORMAT)
+# CSV LOADER (YOUR EXISTING FORMAT)
 # =============================
 def load_bars_from_csv(path: str, symbol: str) -> List[Bar]:
     bars: List[Bar] = []
