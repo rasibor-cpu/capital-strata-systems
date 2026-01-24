@@ -1,15 +1,14 @@
 from __future__ import annotations
-
 """
 engine_loop.py — REA Capital Trading Engine (Prompt-Only)
 
 Integrates Module 3 VWAP mean-reversion prompt generation via:
-  signals.vwap_mean_reversion.build_vwap_prompt_default_eps
+    signals.vwap_mean_reversion.build_vwap_prompt_default_eps
 
-Hard constraints:
+HARD CONSTRAINTS:
 - NO trade execution
 - NO auto-risk escalation
-- Prompt/diagnostics only
+- Prompt / diagnostics only
 """
 
 from dataclasses import dataclass
@@ -19,27 +18,28 @@ import csv
 import os
 from datetime import datetime, timezone
 
-
-# --- Module 3 VWAP helper (required) ---
+# =============================
+# REQUIRED: VWAP prompt builder
+# =============================
 try:
     from signals.vwap_mean_reversion import build_vwap_prompt_default_eps
 except Exception as e:
     raise ImportError(
-        "Could not import build_vwap_prompt_default_eps from signals.vwap_mean_reversion. "
-        "Confirm signals/vwap_mean_reversion.py defines that function."
+        "Missing signals.vwap_mean_reversion.build_vwap_prompt_default_eps"
     ) from e
 
-
-# --- RegimeGate (optional; allow by default if unavailable) ---
+# =============================
+# OPTIONAL: Regime Gate
+# =============================
 try:
     from regime.gate import RegimeGate  # type: ignore
 except Exception:
     RegimeGate = None  # type: ignore
 
 
-# -----------------------------
-# Data model (minimal)
-# -----------------------------
+# =============================
+# DATA MODEL
+# =============================
 @dataclass
 class Bar:
     ts_utc: datetime
@@ -48,9 +48,9 @@ class Bar:
     volume: float = 1.0
 
 
-# -----------------------------
-# Config
-# -----------------------------
+# =============================
+# CONFIG
+# =============================
 @dataclass
 class EngineConfig:
     symbol: str = "SPY"
@@ -60,95 +60,73 @@ class EngineConfig:
     print_prompts: bool = True
 
 
-# -----------------------------
-# Helpers
-# -----------------------------
-def _parse_ts_utc(ts_raw: str) -> Optional[datetime]:
-    """
-    Parses timestamps from:
-      - 2026-01-22T14:45:00Z
-      - 2026-01-24 09:30:00
-      - ISO with timezone
-    Returns timezone-aware UTC datetime.
-    """
-    s = (ts_raw or "").strip()
-    if not s:
-        return None
+# =============================
+# HELPERS
+# =============================
+def parse_ts_utc(raw: str) -> datetime:
+    raw = (raw or "").strip()
 
-    # ISO 'Z' support
+    if not raw:
+        return datetime.now(timezone.utc)
+
     try:
-        return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(timezone.utc)
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(timezone.utc)
     except Exception:
         pass
 
-    # Common formats
-    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%m/%d/%Y %H:%M:%S"):
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
         try:
-            return datetime.strptime(s, fmt).replace(tzinfo=timezone.utc)
+            return datetime.strptime(raw, fmt).replace(tzinfo=timezone.utc)
         except Exception:
             continue
 
-    return None
+    return datetime.now(timezone.utc)
 
 
-def compute_vwap_from_window(window: Deque[Bar]) -> Optional[float]:
+def compute_vwap(window: Deque[Bar]) -> Optional[float]:
     if not window:
         return None
-    vol_sum = 0.0
-    pv_sum = 0.0
+
+    pv = 0.0
+    vol = 0.0
+
     for b in window:
-        v = float(b.volume) if b.volume is not None else 1.0
-        p = float(b.close)
-        vol_sum += v
-        pv_sum += p * v
-    if vol_sum <= 0:
-        return None
-    return pv_sum / vol_sum
+        v = float(b.volume) if b.volume else 1.0
+        pv += b.close * v
+        vol += v
+
+    return pv / vol if vol > 0 else None
 
 
-# -----------------------------
-# Engine loop (prompt-only)
-# -----------------------------
+# =============================
+# ENGINE LOOP (PROMPT ONLY)
+# =============================
 class EngineLoop:
     def __init__(self, cfg: EngineConfig):
         self.cfg = cfg
-        self._window: Deque[Bar] = deque(maxlen=max(5, cfg.vwap_window_bars))
-        self._prompts: List[Dict[str, Any]] = []
+        self.window: Deque[Bar] = deque(maxlen=cfg.vwap_window_bars)
+        self.prompts: List[Dict[str, Any]] = []
 
-        self._regime = None
-        if RegimeGate is not None:
+        self.regime = None
+        if RegimeGate:
             try:
-                self._regime = RegimeGate()
+                self.regime = RegimeGate()
             except Exception:
-                self._regime = None
+                self.regime = None
 
-    @property
-    def prompts(self) -> List[Dict[str, Any]]:
-        return self._prompts
-
-    def _regime_allows(self) -> bool:
-        """
-        Uses RegimeGate if available; otherwise allows prompts by default.
-        If RegimeGate call errors, blocks prompts (safe).
-        """
-        if self._regime is None:
+    def regime_allows(self) -> bool:
+        if not self.regime:
             return True
 
-        for method_name in ("allow", "is_allowed", "decision", "evaluate", "check"):
-            fn = getattr(self._regime, method_name, None)
+        for name in ("allow", "is_allowed", "decision", "evaluate", "check"):
+            fn = getattr(self.regime, name, None)
             if callable(fn):
                 try:
-                    out = fn()
-                    if isinstance(out, bool):
-                        return out
-                    if isinstance(out, dict) and "allow" in out:
-                        return bool(out["allow"])
-                    if hasattr(out, "allow"):
-                        return bool(getattr(out, "allow"))
-                    if hasattr(out, "result"):
-                        return str(getattr(out, "result")).upper() == "ALLOW"
-                    if hasattr(out, "status"):
-                        return str(getattr(out, "status")).upper() == "ALLOW"
+                    r = fn()
+                    if isinstance(r, bool):
+                        return r
+                    if isinstance(r, dict) and "allow" in r:
+                        return bool(r["allow"])
                 except Exception:
                     return False
 
@@ -158,111 +136,86 @@ class EngineLoop:
         if bar.symbol != self.cfg.symbol:
             return None
 
-        self._window.append(bar)
+        self.window.append(bar)
 
-        if len(self._window) < self.cfg.min_bars_before_signals:
+        if len(self.window) < self.cfg.min_bars_before_signals:
             return None
 
-        if not self._regime_allows():
+        if not self.regime_allows():
             return None
 
-        vwap = compute_vwap_from_window(self._window)
+        vwap = compute_vwap(self.window)
         if vwap is None:
             return None
 
         prompt = build_vwap_prompt_default_eps(
-            price=float(bar.close),
-            vwap=float(vwap),
+            price=bar.close,
+            vwap=vwap,
+            pct=self.cfg.vwap_eps_pct,
             extra={
                 "symbol": bar.symbol,
                 "as_of_utc": bar.ts_utc.isoformat(),
-                "vwap_window_bars": self.cfg.vwap_window_bars,
+                "window": self.cfg.vwap_window_bars,
             },
-            pct=self.cfg.vwap_eps_pct,
         )
 
         if isinstance(prompt, dict):
-            self._prompts.append(prompt)
+            self.prompts.append(prompt)
             if self.cfg.print_prompts:
                 print(prompt)
 
         return prompt
 
 
-# -----------------------------
-# CSV demo runner
-# -----------------------------
-def load_bars_from_csv(filepath: str, symbol: str) -> List[Bar]:
-    """
-    Supports BOTH formats:
-      A) ts_utc,o,h,l,c,v   (your current file)
-      B) timestamp,close,volume (simple smoke format)
-    """
+# =============================
+# CSV LOADER (YOUR FORMAT)
+# =============================
+def load_bars_from_csv(path: str, symbol: str) -> List[Bar]:
     bars: List[Bar] = []
-    with open(filepath, "r", newline="", encoding="utf-8", errors="replace") as f:
+
+    with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
 
         for row in reader:
-            # Timestamp columns (prefer ts_utc)
-            ts_raw = (
-                (row.get("ts_utc") or "")
-                or (row.get("timestamp") or "")
-                or (row.get("datetime") or "")
-                or (row.get("time") or "")
-                or (row.get("date") or "")
-            ).strip()
-
-            ts = _parse_ts_utc(ts_raw) or datetime.now(timezone.utc)
-
-            # Close columns (prefer 'c' then 'close')
-            close_raw = (
-                (row.get("c") or "")
-                or (row.get("close") or "")
-                or (row.get("Close") or "")
-            ).strip()
-
-            # Volume columns (prefer 'v' then 'volume')
-            vol_raw = (
-                (row.get("v") or "")
-                or (row.get("volume") or "")
-                or (row.get("Volume") or "")
-            ).strip()
+            ts = parse_ts_utc(row.get("ts_utc") or row.get("timestamp"))
+            close = row.get("c") or row.get("close")
+            volume = row.get("v") or row.get("volume")
 
             try:
-                close = float(close_raw)
+                bars.append(
+                    Bar(
+                        ts_utc=ts,
+                        symbol=symbol,
+                        close=float(close),
+                        volume=float(volume) if volume else 1.0,
+                    )
+                )
             except Exception:
                 continue
-
-            try:
-                volume = float(vol_raw) if vol_raw else 1.0
-            except Exception:
-                volume = 1.0
-
-            bars.append(Bar(ts_utc=ts, symbol=symbol, close=close, volume=volume))
 
     return bars
 
 
+# =============================
+# MAIN (SMOKE TEST)
+# =============================
 def main() -> None:
     cfg = EngineConfig()
+    engine = EngineLoop(cfg)
 
-    repo_root = os.getcwd()
-    candidates = [
-        os.path.join(repo_root, "sample_spy_1m.csv"),
-        os.path.join(repo_root, "sample_spy_1m_long.csv"),
-    ]
-    csv_path = next((p for p in candidates if os.path.exists(p)), None)
+    csv_path = os.path.join(os.getcwd(), "sample_spy_1m.csv")
 
-    loop = EngineLoop(cfg)
+    if not os.path.exists(csv_path):
+        print("No sample_spy_1m.csv found.")
+        print("Engine ready. Use EngineLoop(cfg).on_bar(bar)")
+        return
 
-    if csv_path:
-        bars = load_bars_from_csv(csv_path, cfg.symbol)
-        for b in bars:
-            loop.on_bar(b)
-        print(f"\nDone. Prompts generated: {len(loop.prompts)}")
-    else:
-        print("No sample CSV found. Place sample_spy_1m.csv in repo root to run demo.")
-        print("EngineLoop is ready. Call EngineLoop(cfg).on_bar(bar) from your replay pipeline.")
+    bars = load_bars_from_csv(csv_path, cfg.symbol)
+
+    for b in bars:
+        engine.on_bar(b)
+
+    print(f"\nDone. Prompts generated: {len(engine.prompts)}")
 
 
 if __name__ == "__main__":
