@@ -89,17 +89,20 @@ def compute_vwap(prices: List[float], volumes: List[float]) -> Optional[float]:
 
 
 # =========================================================
-# PROMPT GENERATOR (STEP 3)
+# PROMPT GENERATOR (STEP 9 — UPDATED GUARD)
 # =========================================================
 def generate_vwap_prompt(payload: Dict) -> Optional[Dict]:
     """
     Prompt-only generator.
-    Requires vwap_context in payload.
+    Step 9: requires both vwap_context and vwap_distance_bucket in payload.
     """
     if not isinstance(payload, dict):
         return None
 
     if "vwap_context" not in payload:
+        return None
+
+    if "vwap_distance_bucket" not in payload:
         return None
 
     return {
@@ -109,7 +112,7 @@ def generate_vwap_prompt(payload: Dict) -> Optional[Dict]:
 
 
 # =========================================================
-# PAYLOAD BUILDER (STEP 8 — UPDATED)
+# PAYLOAD BUILDER (STEP 8)
 # =========================================================
 def build_vwap_payload(
     price: float,
