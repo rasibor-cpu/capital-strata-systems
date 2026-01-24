@@ -1,3 +1,4 @@
+from signals.vwap_mean_reversion import VWAPMeanReversionPrompt
 from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
