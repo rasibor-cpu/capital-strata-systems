@@ -19,6 +19,7 @@ import csv
 import os
 from datetime import datetime, timezone
 
+
 # --- Module 3 VWAP helper (required) ---
 try:
     from signals.vwap_mean_reversion import build_vwap_prompt_default_eps
@@ -27,6 +28,7 @@ except Exception as e:
         "Could not import build_vwap_prompt_default_eps from signals.vwap_mean_reversion. "
         "Confirm signals/vwap_mean_reversion.py defines that function."
     ) from e
+
 
 # --- RegimeGate (optional; allow by default if unavailable) ---
 try:
@@ -59,8 +61,36 @@ class EngineConfig:
 
 
 # -----------------------------
-# VWAP calculation (local)
+# Helpers
 # -----------------------------
+def _parse_ts_utc(ts_raw: str) -> Optional[datetime]:
+    """
+    Parses timestamps from:
+      - 2026-01-22T14:45:00Z
+      - 2026-01-24 09:30:00
+      - ISO with timezone
+    Returns timezone-aware UTC datetime.
+    """
+    s = (ts_raw or "").strip()
+    if not s:
+        return None
+
+    # ISO 'Z' support
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except Exception:
+        pass
+
+    # Common formats
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%m/%d/%Y %H:%M:%S"):
+        try:
+            return datetime.strptime(s, fmt).replace(tzinfo=timezone.utc)
+        except Exception:
+            continue
+
+    return None
+
+
 def compute_vwap_from_window(window: Deque[Bar]) -> Optional[float]:
     if not window:
         return None
@@ -122,7 +152,6 @@ class EngineLoop:
                 except Exception:
                     return False
 
-        # Unknown interface: allow prompt-only mode
         return True
 
     def on_bar(self, bar: Bar) -> Optional[Dict[str, Any]]:
@@ -161,36 +190,43 @@ class EngineLoop:
 
 
 # -----------------------------
-# CSV demo runner (optional)
+# CSV demo runner
 # -----------------------------
 def load_bars_from_csv(filepath: str, symbol: str) -> List[Bar]:
+    """
+    Supports BOTH formats:
+      A) ts_utc,o,h,l,c,v   (your current file)
+      B) timestamp,close,volume (simple smoke format)
+    """
     bars: List[Bar] = []
     with open(filepath, "r", newline="", encoding="utf-8", errors="replace") as f:
         reader = csv.DictReader(f)
+
         for row in reader:
+            # Timestamp columns (prefer ts_utc)
             ts_raw = (
-                (row.get("timestamp") or "")
+                (row.get("ts_utc") or "")
+                or (row.get("timestamp") or "")
                 or (row.get("datetime") or "")
                 or (row.get("time") or "")
                 or (row.get("date") or "")
             ).strip()
 
-            ts = None
-            if ts_raw:
-                try:
-                    ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00")).astimezone(timezone.utc)
-                except Exception:
-                    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%m/%d/%Y %H:%M:%S"):
-                        try:
-                            ts = datetime.strptime(ts_raw, fmt).replace(tzinfo=timezone.utc)
-                            break
-                        except Exception:
-                            continue
-            if ts is None:
-                ts = datetime.now(timezone.utc)
+            ts = _parse_ts_utc(ts_raw) or datetime.now(timezone.utc)
 
-            close_raw = (row.get("close") or row.get("Close") or row.get("c") or "").strip()
-            vol_raw = (row.get("volume") or row.get("Volume") or row.get("v") or "").strip()
+            # Close columns (prefer 'c' then 'close')
+            close_raw = (
+                (row.get("c") or "")
+                or (row.get("close") or "")
+                or (row.get("Close") or "")
+            ).strip()
+
+            # Volume columns (prefer 'v' then 'volume')
+            vol_raw = (
+                (row.get("v") or "")
+                or (row.get("volume") or "")
+                or (row.get("Volume") or "")
+            ).strip()
 
             try:
                 close = float(close_raw)
@@ -203,6 +239,7 @@ def load_bars_from_csv(filepath: str, symbol: str) -> List[Bar]:
                 volume = 1.0
 
             bars.append(Bar(ts_utc=ts, symbol=symbol, close=close, volume=volume))
+
     return bars
 
 
