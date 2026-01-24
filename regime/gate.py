@@ -1,5 +1,5 @@
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import List, Optional
@@ -27,16 +27,11 @@ class RegimeResult:
 @dataclass
 class RegimePolicy:
     """
-    Regime filters (Module 2).
-    - Volatility expansion filter
-    - Trend-day risk filter
-    - Macro / political event gate (BLOCK-only)
-
-    All filters are defensive.
+    Regime filters (Module 2) — dataclass-safe defaults.
     """
-    vol_policy: VolatilityPolicy = VolatilityPolicy()
-    trend_policy: TrendPolicy = TrendPolicy()
-    event_policy: EventPolicy = EventPolicy()
+    vol_policy: VolatilityPolicy = field(default_factory=VolatilityPolicy)
+    trend_policy: TrendPolicy = field(default_factory=TrendPolicy)
+    event_policy: EventPolicy = field(default_factory=EventPolicy)
     min_bars_5m: int = 40  # conservative baseline (≈200 minutes)
 
 
@@ -70,9 +65,7 @@ class RegimeGate:
             )
 
         # 1) Volatility expansion filter (mean-reversion safety)
-        is_expanding, why_vol, ratio = volatility_expansion_check(
-            bars_5m, self.policy.vol_policy
-        )
+        is_expanding, why_vol, ratio = volatility_expansion_check(bars_5m, self.policy.vol_policy)
         if is_expanding:
             return RegimeResult(
                 decision=RegimeDecision.BLOCK,
@@ -84,9 +77,7 @@ class RegimeGate:
         reasons.append("Volatility stable (no expansion block).")
 
         # 2) Trend-day risk filter
-        is_trending, why_trend, eff = trend_day_check(
-            bars_5m, self.policy.trend_policy
-        )
+        is_trending, why_trend, eff = trend_day_check(bars_5m, self.policy.trend_policy)
         if is_trending:
             return RegimeResult(
                 decision=RegimeDecision.BLOCK,
@@ -109,7 +100,6 @@ class RegimeGate:
 
         reasons.append("No blocking macro/political events detected.")
 
-        # If we reach here, regime is acceptable
         return RegimeResult(
             decision=RegimeDecision.ALLOW,
             reasons=reasons,
