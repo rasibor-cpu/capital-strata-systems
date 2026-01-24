@@ -2,7 +2,7 @@ from __future__ import annotations
 import csv
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional, Iterator, Dict, Any, List
+from typing import Optional, Iterator, Dict, Any
 
 from data.models import Bar
 from engine_loop import REACapitalEngineLoop, EngineConfig
@@ -18,14 +18,10 @@ class CSVReplayConfig:
       2026-01-22T14:45:00Z
     or
       2026-01-22T14:45:00+00:00
-
-    Notes:
-    - timeframe is assumed 1m
-    - symbol is taken from EngineConfig.symbol
     """
     csv_path: str
     max_rows: Optional[int] = None
-    print_every: int = 25  # print progress every N bars
+    print_every: int = 5
     print_prompts: bool = True
     print_regime: bool = True
 
@@ -80,6 +76,7 @@ def replay(cfg: CSVReplayConfig, engine: REACapitalEngineLoop) -> Dict[str, Any]
 
         if not snap["ok_1m"] and snap["issue"]:
             stats["safe_mode_issues"] += 1
+            print(f"[DATA ISSUE] {snap['issue']['code']} | {snap['issue']['message']}")
 
         if snap.get("bar5m_created"):
             stats["bars_5m"] += 1
@@ -87,7 +84,7 @@ def replay(cfg: CSVReplayConfig, engine: REACapitalEngineLoop) -> Dict[str, Any]
         if snap.get("regime") is not None:
             stats["last_regime"] = snap["regime"]
             if cfg.print_regime:
-                print(f"[REGIME] {snap['regime']['decision']} | {', '.join(snap['regime']['reasons'][:2])}")
+                print(f"[REGIME] {snap['regime']['decision']} | {', '.join(snap['regime']['reasons'])}")
 
             if snap["regime"]["decision"] == "ALLOW":
                 stats["regime_allow"] += 1
@@ -104,7 +101,7 @@ def replay(cfg: CSVReplayConfig, engine: REACapitalEngineLoop) -> Dict[str, Any]
             print(
                 f"[{stats['bars_1m']} bars] "
                 f"5m={stats['bars_5m']} "
-                f"safe_mode={elig.get('data_ok') is False} "
+                f"data_ok={elig.get('data_ok')} "
                 f"time_ok={elig.get('time_ok')} "
                 f"queue_pending={snap.get('queue_pending_count')}"
             )
@@ -113,9 +110,14 @@ def replay(cfg: CSVReplayConfig, engine: REACapitalEngineLoop) -> Dict[str, Any]
 
 
 if __name__ == "__main__":
-    # Adjust CSV path to your file name when running locally
-    # Example CSV headers: ts_utc,o,h,l,c,v
-    cfg = CSVReplayConfig(csv_path="spy_1m.csv", max_rows=None)
+    # DEFAULT: use the sample file you added to the repo
+    cfg = CSVReplayConfig(
+        csv_path="sample_spy_1m.csv",
+        max_rows=None,
+        print_every=5,
+        print_prompts=True,
+        print_regime=True,
+    )
 
     engine = REACapitalEngineLoop(EngineConfig(symbol="SPY"))
     results = replay(cfg, engine)
@@ -123,3 +125,4 @@ if __name__ == "__main__":
     print("\n=== REPLAY SUMMARY ===")
     for k, v in results.items():
         print(f"{k}: {v}")
+
