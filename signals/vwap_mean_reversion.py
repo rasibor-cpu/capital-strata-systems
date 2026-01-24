@@ -12,6 +12,15 @@ class VWAPContext(Enum):
 
 
 # =========================================
+# VWAP DISTANCE BUCKET ENUM (STEP 7)
+# =========================================
+class VWAPDistanceBucket(Enum):
+    NEAR = "NEAR_VWAP"
+    MID = "MID_FROM_VWAP"
+    FAR = "FAR_FROM_VWAP"
+
+
+# =========================================
 # DEFAULT VWAP EPSILON (STEP 5)
 # =========================================
 def default_vwap_eps(vwap: float, pct: float = 0.0005) -> float:
@@ -37,6 +46,33 @@ def compute_vwap_context(price: float, vwap: float, eps: float) -> VWAPContext:
     if price < vwap - eps:
         return VWAPContext.BELOW
     return VWAPContext.AT
+
+
+# =========================================
+# VWAP DISTANCE BUCKETING (STEP 7)
+# =========================================
+def compute_vwap_distance_bucket(
+    price: float,
+    vwap: float,
+    near_pct: float = 0.001,
+    far_pct: float = 0.003
+) -> VWAPDistanceBucket:
+    """
+    Buckets absolute distance from VWAP using % thresholds.
+    Defaults:
+      near_pct = 0.10%
+      far_pct  = 0.30%
+    """
+    if vwap <= 0:
+        return VWAPDistanceBucket.NEAR
+
+    dist_pct = abs(price - vwap) / vwap
+
+    if dist_pct <= near_pct:
+        return VWAPDistanceBucket.NEAR
+    if dist_pct >= far_pct:
+        return VWAPDistanceBucket.FAR
+    return VWAPDistanceBucket.MID
 
 
 # =========================================================
