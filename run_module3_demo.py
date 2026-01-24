@@ -1,7 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, timezone
 
 from engine_loop import REACapitalEngineLoop, EngineConfig
 from replay_csv import CSVReplayConfig, replay
@@ -9,41 +8,38 @@ from replay_csv import CSVReplayConfig, replay
 
 @dataclass
 class DemoConfig:
-    """
-    Module 3 Demo Runner (Prompt-only).
-    Uses CSV replay to validate:
-      - data controller
-      - regime gate
-      - signal construction (VWAP + vol normalization)
-      - approval queue
-    """
-    csv_path: str = "sample_spy_1m.csv"
-    max_rows: Optional[int] = None
-    print_every: int = 5
-    print_prompts: bool = True
-    print_regime: bool = True
+    # Use the long CSV so the regime gate can pass the minimum 5m history check
+    csv_path: str = "sample_spy_1m_long.csv"
+
+    # Leave None to run the full file
+    max_rows: int | None = None
+
+    # Print progress every N 1m bars
+    print_every: int = 25
+
+    # Replay will simulate on-time arrivals (see replay_csv.py)
+    arrival_delay_seconds: int = 20
 
 
 def main() -> None:
     cfg = DemoConfig()
 
-    # Engine is broker-free and prompt-only.
     engine = REACapitalEngineLoop(EngineConfig(symbol="SPY"))
 
-    # Replay runner expects CSV headers: ts_utc,o,h,l,c,v
     replay_cfg = CSVReplayConfig(
         csv_path=cfg.csv_path,
         max_rows=cfg.max_rows,
         print_every=cfg.print_every,
-        print_prompts=cfg.print_prompts,
-        print_regime=cfg.print_regime,
+        print_prompts=True,
+        print_regime=True,
+        arrival_delay_seconds=cfg.arrival_delay_seconds,
     )
 
     print("=== REA Capital – Trading Engine ===")
     print("Module 3 Demo (Prompt-only)")
     print(f"CSV: {cfg.csv_path}")
-    print(f"Started: {datetime.utcnow().isoformat()}Z")
-    print("NOTE: Sample CSV is small; signals may be blocked due to minimum-history rules.\n")
+    print(f"Started: {datetime.now(timezone.utc).isoformat()}Z")
+    print("NOTE: This run is PROMPT-ONLY. No trades are executed.\n")
 
     results = replay(replay_cfg, engine)
 
