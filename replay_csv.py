@@ -1,7 +1,7 @@
 from __future__ import annotations
 import csv
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, Iterator, Dict, Any
 
 from data.models import Bar
@@ -24,6 +24,9 @@ class CSVReplayConfig:
     print_every: int = 5
     print_prompts: bool = True
     print_regime: bool = True
+
+    # Simulate arrival time as bar_close + N seconds (so validator passes)
+    arrival_delay_seconds: int = 20
 
 
 def _parse_ts_utc(s: str) -> datetime:
@@ -71,7 +74,11 @@ def replay(cfg: CSVReplayConfig, engine: REACapitalEngineLoop) -> Dict[str, Any]
     }
 
     for bar in iter_csv_bars(cfg, engine.cfg.symbol):
-        snap = engine.on_bar_1m(bar, received_at_utc=datetime.now(timezone.utc))
+        # Simulate that we received the bar shortly after it closes:
+        # bar.ts is open time; close is +1 minute.
+        received_at = (bar.ts + timedelta(minutes=1) + timedelta(seconds=cfg.arrival_delay_seconds))
+
+        snap = engine.on_bar_1m(bar, received_at_utc=received_at)
         stats["bars_1m"] += 1
 
         if not snap["ok_1m"] and snap["issue"]:
@@ -110,13 +117,13 @@ def replay(cfg: CSVReplayConfig, engine: REACapitalEngineLoop) -> Dict[str, Any]
 
 
 if __name__ == "__main__":
-    # DEFAULT: use the sample file you added to the repo
     cfg = CSVReplayConfig(
         csv_path="sample_spy_1m.csv",
         max_rows=None,
         print_every=5,
         print_prompts=True,
         print_regime=True,
+        arrival_delay_seconds=20,
     )
 
     engine = REACapitalEngineLoop(EngineConfig(symbol="SPY"))
@@ -125,4 +132,3 @@ if __name__ == "__main__":
     print("\n=== REPLAY SUMMARY ===")
     for k, v in results.items():
         print(f"{k}: {v}")
-
