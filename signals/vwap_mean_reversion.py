@@ -12,6 +12,19 @@ class VWAPContext(Enum):
 
 
 # =========================================
+# DEFAULT VWAP EPSILON (STEP 5)
+# =========================================
+def default_vwap_eps(vwap: float, pct: float = 0.0005) -> float:
+    """
+    Default tolerance for VWAP comparisons.
+    pct default = 0.05% of VWAP.
+    """
+    if vwap <= 0:
+        return 0.0
+    return vwap * pct
+
+
+# =========================================
 # VWAP CONTEXT COMPUTATION (STEP 2)
 # =========================================
 def compute_vwap_context(price: float, vwap: float, eps: float) -> VWAPContext:
@@ -44,7 +57,7 @@ def compute_vwap(prices: List[float], volumes: List[float]) -> Optional[float]:
 
 
 # =========================================================
-# Prompt Generator (STEP 3 change)
+# Prompt Generator (STEP 3)
 # =========================================================
 def generate_vwap_prompt(payload: Dict) -> Optional[Dict]:
     """
