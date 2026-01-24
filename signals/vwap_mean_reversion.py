@@ -39,7 +39,6 @@ def default_vwap_eps(vwap: float, pct: float = 0.0005) -> float:
 def compute_vwap_context(price: float, vwap: float, eps: float) -> VWAPContext:
     """
     Classifies price position relative to VWAP using a tolerance eps.
-    Pure function. No side effects.
     """
     if price > vwap + eps:
         return VWAPContext.ABOVE
@@ -59,9 +58,6 @@ def compute_vwap_distance_bucket(
 ) -> VWAPDistanceBucket:
     """
     Buckets absolute distance from VWAP using % thresholds.
-    Defaults:
-      near_pct = 0.10%
-      far_pct  = 0.30%
     """
     if vwap <= 0:
         return VWAPDistanceBucket.NEAR
@@ -76,7 +72,7 @@ def compute_vwap_distance_bucket(
 
 
 # =========================================================
-# Existing VWAP Mean Reversion Logic
+# VWAP CALCULATION (UNCHANGED)
 # =========================================================
 def compute_vwap(prices: List[float], volumes: List[float]) -> Optional[float]:
     """
@@ -93,11 +89,11 @@ def compute_vwap(prices: List[float], volumes: List[float]) -> Optional[float]:
 
 
 # =========================================================
-# Prompt Generator (STEP 3)
+# PROMPT GENERATOR (STEP 3)
 # =========================================================
 def generate_vwap_prompt(payload: Dict) -> Optional[Dict]:
     """
-    Prompt generator (prompt-only).
+    Prompt-only generator.
     Requires vwap_context in payload.
     """
     if not isinstance(payload, dict):
@@ -113,7 +109,7 @@ def generate_vwap_prompt(payload: Dict) -> Optional[Dict]:
 
 
 # =========================================================
-# Payload Builder (STEP 4)
+# PAYLOAD BUILDER (STEP 8 — UPDATED)
 # =========================================================
 def build_vwap_payload(
     price: float,
@@ -122,13 +118,16 @@ def build_vwap_payload(
     extra: Optional[Dict] = None
 ) -> Dict:
     """
-    Builds a standard VWAP payload including vwap_context.
-    Does not generate prompts or execute trades.
+    Builds VWAP payload including:
+      - vwap_context
+      - vwap_distance_bucket
+    Prompt-only. No execution.
     """
     payload = {
         "price": price,
         "vwap": vwap,
         "vwap_context": compute_vwap_context(price, vwap, eps).value,
+        "vwap_distance_bucket": compute_vwap_distance_bucket(price, vwap).value,
     }
     if isinstance(extra, dict):
         payload.update(extra)
@@ -136,7 +135,7 @@ def build_vwap_payload(
 
 
 # =========================================================
-# Payload Builder with Default EPS (STEP 6)
+# PAYLOAD BUILDER WITH DEFAULT EPS (STEP 6)
 # =========================================================
 def build_vwap_payload_default_eps(
     price: float,
