@@ -9,7 +9,6 @@ Hard constraints:
 - NO auto-risk escalation
 - Prompt/diagnostics only
 """
-
 from __future__ import annotations
 
 from dataclasses import dataclass
