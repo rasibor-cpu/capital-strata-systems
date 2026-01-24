@@ -32,7 +32,6 @@ def compute_vwap_context(price: float, vwap: float, eps: float) -> VWAPContext:
 def compute_vwap(prices: List[float], volumes: List[float]) -> Optional[float]:
     """
     Existing VWAP computation.
-    DO NOT MODIFY in Step 3.
     """
     if not prices or not volumes:
         return None
@@ -49,8 +48,8 @@ def compute_vwap(prices: List[float], volumes: List[float]) -> Optional[float]:
 # =========================================================
 def generate_vwap_prompt(payload: Dict) -> Optional[Dict]:
     """
-    Prompt generator (still prompt-only).
-    Step 3: require vwap_context in payload.
+    Prompt generator (prompt-only).
+    Requires vwap_context in payload.
     """
     if not isinstance(payload, dict):
         return None
@@ -62,3 +61,26 @@ def generate_vwap_prompt(payload: Dict) -> Optional[Dict]:
         "signal": "VWAP_MEAN_REVERSION",
         "payload": payload,
     }
+
+
+# =========================================================
+# Payload Builder (STEP 4)
+# =========================================================
+def build_vwap_payload(
+    price: float,
+    vwap: float,
+    eps: float,
+    extra: Optional[Dict] = None
+) -> Dict:
+    """
+    Builds a standard VWAP payload including vwap_context.
+    Does not generate prompts or execute trades.
+    """
+    payload = {
+        "price": price,
+        "vwap": vwap,
+        "vwap_context": compute_vwap_context(price, vwap, eps).value,
+    }
+    if isinstance(extra, dict):
+        payload.update(extra)
+    return payload
