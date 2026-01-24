@@ -89,12 +89,12 @@ def compute_vwap(prices: List[float], volumes: List[float]) -> Optional[float]:
 
 
 # =========================================================
-# PROMPT GENERATOR (STEP 9 — UPDATED GUARD)
+# PROMPT GENERATOR (STEP 9)
 # =========================================================
 def generate_vwap_prompt(payload: Dict) -> Optional[Dict]:
     """
     Prompt-only generator.
-    Step 9: requires both vwap_context and vwap_distance_bucket in payload.
+    Requires both vwap_context and vwap_distance_bucket in payload.
     """
     if not isinstance(payload, dict):
         return None
@@ -151,3 +151,21 @@ def build_vwap_payload_default_eps(
     """
     eps = default_vwap_eps(vwap, pct=pct)
     return build_vwap_payload(price=price, vwap=vwap, eps=eps, extra=extra)
+
+
+# =========================================================
+# PAYLOAD + PROMPT HELPER (STEP 10)
+# =========================================================
+def build_vwap_prompt_default_eps(
+    price: float,
+    vwap: float,
+    extra: Optional[Dict] = None,
+    pct: float = 0.0005
+) -> Optional[Dict]:
+    """
+    Convenience wrapper:
+      1) builds payload with default eps
+      2) returns prompt if guards pass
+    """
+    payload = build_vwap_payload_default_eps(price=price, vwap=vwap, extra=extra, pct=pct)
+    return generate_vwap_prompt(payload)
