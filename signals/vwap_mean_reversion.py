@@ -2,36 +2,24 @@ from enum import Enum
 from typing import Optional, Dict, List
 
 
-# =========================
-# VWAP CONTEXT ENUM
-# =========================
 class VWAPContext(Enum):
     ABOVE = "ABOVE_VWAP"
     BELOW = "BELOW_VWAP"
     AT = "AT_VWAP"
 
 
-# =========================
-# VWAP DISTANCE BUCKET ENUM
-# =========================
 class VWAPDistanceBucket(Enum):
     NEAR = "NEAR_VWAP"
     MID = "MID_FROM_VWAP"
     FAR = "FAR_FROM_VWAP"
 
 
-# =========================
-# DEFAULT VWAP EPSILON
-# =========================
 def default_vwap_eps(vwap: float, pct: float = 0.0005) -> float:
     if vwap <= 0:
         return 0.0
     return vwap * pct
 
 
-# =========================
-# VWAP CONTEXT
-# =========================
 def compute_vwap_context(price: float, vwap: float, eps: float) -> VWAPContext:
     if price > vwap + eps:
         return VWAPContext.ABOVE
@@ -40,9 +28,6 @@ def compute_vwap_context(price: float, vwap: float, eps: float) -> VWAPContext:
     return VWAPContext.AT
 
 
-# =========================
-# VWAP DISTANCE BUCKETING
-# =========================
 def compute_vwap_distance_bucket(
     price: float,
     vwap: float,
@@ -61,23 +46,15 @@ def compute_vwap_distance_bucket(
     return VWAPDistanceBucket.MID
 
 
-# =========================
-# VWAP CALCULATION
-# =========================
 def compute_vwap(prices: List[float], volumes: List[float]) -> Optional[float]:
     if not prices or not volumes:
         return None
-
     total_volume = sum(volumes)
     if total_volume == 0:
         return None
-
     return sum(p * v for p, v in zip(prices, volumes)) / total_volume
 
 
-# =========================
-# PROMPT GENERATOR (guards)
-# =========================
 def generate_vwap_prompt(payload: Dict) -> Optional[Dict]:
     if not isinstance(payload, dict):
         return None
@@ -88,9 +65,6 @@ def generate_vwap_prompt(payload: Dict) -> Optional[Dict]:
     return {"signal": "VWAP_MEAN_REVERSION", "payload": payload}
 
 
-# =========================
-# PAYLOAD BUILDER
-# =========================
 def build_vwap_payload(
     price: float,
     vwap: float,
@@ -118,9 +92,6 @@ def build_vwap_payload_default_eps(
     return build_vwap_payload(price=price, vwap=vwap, eps=eps, extra=extra)
 
 
-# =========================
-# PAYLOAD + PROMPT HELPER
-# =========================
 def build_vwap_prompt_default_eps(
     price: float,
     vwap: float,
