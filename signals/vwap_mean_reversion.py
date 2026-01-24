@@ -32,7 +32,7 @@ def compute_vwap_context(price: float, vwap: float, eps: float) -> VWAPContext:
 def compute_vwap(prices: List[float], volumes: List[float]) -> Optional[float]:
     """
     Existing VWAP computation.
-    DO NOT MODIFY in Step 2.
+    DO NOT MODIFY in Step 3.
     """
     if not prices or not volumes:
         return None
@@ -44,11 +44,20 @@ def compute_vwap(prices: List[float], volumes: List[float]) -> Optional[float]:
     return sum(p * v for p, v in zip(prices, volumes)) / total_volume
 
 
-def generate_vwap_prompt(payload: Dict) -> Dict:
+# =========================================================
+# Prompt Generator (STEP 3 change)
+# =========================================================
+def generate_vwap_prompt(payload: Dict) -> Optional[Dict]:
     """
-    Existing prompt generator.
-    DO NOT MODIFY in Step 2.
+    Prompt generator (still prompt-only).
+    Step 3: require vwap_context in payload.
     """
+    if not isinstance(payload, dict):
+        return None
+
+    if "vwap_context" not in payload:
+        return None
+
     return {
         "signal": "VWAP_MEAN_REVERSION",
         "payload": payload,
