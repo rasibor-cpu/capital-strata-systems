@@ -55,8 +55,8 @@ class Bar:
 @dataclass
 class EngineConfig:
     symbol: str = "SPY"
-    vwap_window_bars: int = 30
-    min_bars_before_signals: int = 30
+    vwap_window_bars: int = 5
+    min_bars_before_signals: int = 5
     vwap_eps_pct: float = 0.0005
     print_prompts: bool = True
 
