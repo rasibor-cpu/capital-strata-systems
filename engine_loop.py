@@ -17,6 +17,7 @@ import csv
 import os
 from datetime import datetime, timezone
 
+from utils.diagnostics import log_engine_diagnostics
 
 # =============================
 # REQUIRED: VWAP prompt builder
@@ -57,7 +58,9 @@ class EngineConfig:
     symbol: str = "SPY"
     vwap_window_bars: int = 5
     min_bars_before_signals: int = 5
-    vwap_eps_pct: float = 0.0001 # 🔴 FORCE SIGNAL
+    # NOTE: This is intentionally small in your current file (you labeled it "FORCE SIGNAL").
+    # Diagnostics works regardless; you can tune later.
+    vwap_eps_pct: float = 0.0001
     print_prompts: bool = True
 
 
@@ -139,15 +142,41 @@ class EngineLoop:
 
         self.window.append(bar)
 
+        # --- Diagnostics helper (read-only) ---
+        def _diag(*, reason: str, regime_state: str = "UNKNOWN", vwap: Optional[float] = None) -> None:
+            vwap_deviation = None
+            if vwap is not None and vwap != 0:
+                vwap_deviation = abs((bar.close - vwap) / vwap)
+
+            log_engine_diagnostics(
+                timestamp=bar.ts_utc.isoformat(),
+                bars_5m=len(self.window),
+                min_bars_required=self.cfg.min_bars_before_signals,
+                session_name="N/A",
+                session_open=True,
+                regime_state=regime_state,
+                vwap_deviation=vwap_deviation,
+                vwap_threshold=self.cfg.vwap_eps_pct,
+                reason=reason,
+            )
+
+        # Not enough bars yet
         if len(self.window) < self.cfg.min_bars_before_signals:
+            _diag(reason="Insufficient bars for signals", regime_state="BLOCK")
             return None
 
+        # Regime gate blocked
         if not self.regime_allows():
+            _diag(reason="Regime gate blocked signals", regime_state="BLOCK")
             return None
 
         vwap = compute_vwap(self.window)
         if vwap is None:
+            _diag(reason="VWAP unavailable (window empty or invalid)", regime_state="ALLOW", vwap=None)
             return None
+
+        # At this point: engine is READY + regime allows + VWAP computed
+        _diag(reason="Conditions met; prompt evaluation proceeds", regime_state="ALLOW", vwap=vwap)
 
         prompt = build_vwap_prompt_default_eps(
             price=bar.close,
