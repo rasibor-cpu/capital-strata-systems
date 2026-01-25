@@ -57,7 +57,7 @@ class EngineConfig:
     symbol: str = "SPY"
     vwap_window_bars: int = 5
     min_bars_before_signals: int = 5
-    vwap_eps_pct: float = 0.0005
+    vwap_eps_pct: float = 0.0001 # 🔴 FORCE SIGNAL
     print_prompts: bool = True
 
 
