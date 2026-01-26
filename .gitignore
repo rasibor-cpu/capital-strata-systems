@@ -2,3 +2,7 @@
 *__OLD_DO_NOT_USE.py
 run_*_demo.py
 print_last_*.py
+__pycache__/
+**/__pycache__/
+*.pyc
+*_OLD_DO_NOT_USE.py
