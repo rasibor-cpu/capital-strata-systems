@@ -1,13 +1,19 @@
 """
 engine_loop.py — REA Capital Trading Engine (Prompt-Only)
+---------------------------------------------------------
+Module 1: Data readiness (min bars)
+Module 2: Regime gate (conservative by default)
+Module 3: VWAP mean-reversion prompt generation (prompt-only)
 
-Integrates Module 3 VWAP mean-reversion prompt generation via:
-    signals.vwap_mean_reversion.build_vwap_prompt_default_eps
-
-HARD CONSTRAINTS:
+Hard constraints:
 - NO trade execution
 - NO auto-risk escalation
 - Prompt / diagnostics only
+
+Step-2 enhancement:
+- Expose prompt fields in a consistent way (prompt_payload, prompt_text, prompt)
+- Attach normalized_prompt using utils.prompt_export.normalize_prompt
+- Optionally write last prompt JSON to disk (OFF by default)
 """
 
 from dataclasses import dataclass
@@ -27,6 +33,13 @@ try:
 except Exception:
     build_vwap_prompt_default_eps = None  # graceful fallback
 
+# Prompt export (added)
+try:
+    from utils.prompt_export import normalize_prompt, write_prompt_to_file  # type: ignore
+except Exception:
+    normalize_prompt = None
+    write_prompt_to_file = None
+
 
 # =============================
 # DATA MODEL
@@ -38,6 +51,10 @@ class EngineConfig:
     min_bars_before_signals: int = 5
     vwap_eps_pct: float = 0.0001
     print_prompts: bool = True
+
+    # Export control (OFF by default)
+    export_last_prompt_json: bool = False
+    export_last_prompt_path: str = "last_prompt.json"
 
 
 @dataclass
@@ -128,7 +145,7 @@ class EngineLoop:
         self.window.append(bar)
 
         # --- Diagnostics helper (read-only) ---
-        def _diag(*, reason: str, regime_state: str = "UNKNOWN", vwap: Optional[float] = None) -> None:
+        def _diag(*, reason: str, regime_state: str = "UNKNOWN") -> None:
             print("=" * 60)
             try:
                 ts_str = bar.ts_utc.isoformat()
@@ -148,7 +165,7 @@ class EngineLoop:
             print(f"Regime State: {regime_state}")
 
             print("\n[VWAP]")
-            print(f"VWAP Deviation: N/A")
+            print("VWAP Deviation: N/A")
             print(f"VWAP Threshold: {self.cfg.vwap_eps_pct:.4f}")
 
             print("\n[DECISION]")
@@ -169,11 +186,11 @@ class EngineLoop:
         # VWAP compute
         vwap = compute_vwap(self.window)
         if vwap is None or build_vwap_prompt_default_eps is None:
-            _diag(reason="VWAP unavailable or prompt builder missing", regime_state="ALLOW", vwap=vwap)
+            _diag(reason="VWAP unavailable or prompt builder missing", regime_state="ALLOW")
             return None
 
         # At this point: engine is READY + regime allows + VWAP computed
-        _diag(reason="Conditions met; prompt evaluation proceeds", regime_state="ALLOW", vwap=vwap)
+        _diag(reason="Conditions met; prompt evaluation proceeds", regime_state="ALLOW")
 
         prompt = build_vwap_prompt_default_eps(
             price=bar.close,
@@ -190,12 +207,25 @@ class EngineLoop:
             # Store the raw prompt
             self.prompts.append(prompt)
 
-            # ✅ Step-2 change: expose prompt fields in a consistent way for wrappers/loggers.
-            # This is PROMPT-ONLY metadata; it does NOT trigger execution.
+            # Expose prompt fields for wrappers/loggers (prompt-only)
             payload = prompt.get("payload", {})
             prompt.setdefault("prompt_payload", payload)
             prompt.setdefault("prompt_text", f"{prompt.get('signal', 'SIGNAL')}: {payload}")
             prompt.setdefault("prompt", prompt["prompt_text"])
+
+            # Attach normalized prompt for stable downstream use
+            if callable(normalize_prompt):
+                try:
+                    prompt["normalized_prompt"] = normalize_prompt(prompt)
+                except Exception:
+                    prompt["normalized_prompt"] = {}
+
+            # Optional: write last prompt to disk (OFF by default)
+            if self.cfg.export_last_prompt_json and callable(write_prompt_to_file):
+                try:
+                    write_prompt_to_file(prompt, self.cfg.export_last_prompt_path)
+                except Exception:
+                    pass
 
             if self.cfg.print_prompts:
                 print(prompt)
