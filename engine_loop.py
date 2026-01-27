@@ -15,90 +15,70 @@ from typing import Optional, List, Dict, Any, Deque
 from collections import deque
 import csv
 import os
-from datetime import datetime, timezone
 
-from utils.diagnostics import log_engine_diagnostics
-
-# =============================
-# REQUIRED: VWAP prompt builder
-# =============================
-try:
-    from signals.vwap_mean_reversion import build_vwap_prompt_default_eps
-except Exception as e:
-    raise ImportError(
-        "Missing signals.vwap_mean_reversion.build_vwap_prompt_default_eps"
-    ) from e
-
-
-# =============================
-# OPTIONAL: Regime Gate
-# =============================
+# Optional imports (project may include these)
 try:
     from regime.gate import RegimeGate  # type: ignore
 except Exception:
-    RegimeGate = None  # type: ignore
+    RegimeGate = None  # graceful fallback
+
+try:
+    from signals.vwap_mean_reversion import build_vwap_prompt_default_eps  # type: ignore
+except Exception:
+    build_vwap_prompt_default_eps = None  # graceful fallback
 
 
 # =============================
 # DATA MODEL
 # =============================
 @dataclass
+class EngineConfig:
+    symbol: str = "SPY"
+    vwap_window_bars: int = 5
+    min_bars_before_signals: int = 5
+    vwap_eps_pct: float = 0.0001
+    print_prompts: bool = True
+
+
+@dataclass
 class Bar:
-    ts_utc: datetime
+    ts_utc: Any
     symbol: str
     close: float
     volume: float = 1.0
 
 
 # =============================
-# CONFIG
-# =============================
-@dataclass
-class EngineConfig:
-    symbol: str = "SPY"
-    vwap_window_bars: int = 5
-    min_bars_before_signals: int = 5
-    # NOTE: This is intentionally small in your current file (you labeled it "FORCE SIGNAL").
-    # Diagnostics works regardless; you can tune later.
-    vwap_eps_pct: float = 0.0001
-    print_prompts: bool = True
-
-
-# =============================
 # HELPERS
 # =============================
-def parse_ts_utc(raw: str) -> datetime:
-    raw = (raw or "").strip()
-
-    if not raw:
-        return datetime.now(timezone.utc)
-
+def parse_ts_utc(v: Optional[str]):
+    """
+    Minimal timestamp parser.
+    Accepts ISO strings; if parsing fails, returns raw.
+    """
+    if v is None:
+        return None
+    s = str(v).strip()
+    if not s:
+        return None
     try:
-        return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(timezone.utc)
+        # Python ISO handling (works with "+00:00")
+        from datetime import datetime
+
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        return datetime.fromisoformat(s)
     except Exception:
-        pass
-
-    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
-        try:
-            return datetime.strptime(raw, fmt).replace(tzinfo=timezone.utc)
-        except Exception:
-            continue
-
-    return datetime.now(timezone.utc)
+        return s
 
 
 def compute_vwap(window: Deque[Bar]) -> Optional[float]:
-    if not window:
-        return None
-
     pv = 0.0
     vol = 0.0
-
     for b in window:
-        v = float(b.volume) if b.volume else 1.0
-        pv += b.close * v
+        v = float(b.volume) if b.volume else 0.0
+        pv += float(b.close) * v
         vol += v
-
     return pv / vol if vol > 0 else None
 
 
@@ -114,19 +94,24 @@ class EngineLoop:
         self.regime = None
         if RegimeGate:
             try:
-                self.regime = RegimeGate()
+                self.regime = RegimeGate()  # may exist in your project
             except Exception:
                 self.regime = None
 
     def regime_allows(self) -> bool:
+        """
+        Regime gating. Conservative by default.
+        If RegimeGate exists and returns a boolean/allow field, use it.
+        Otherwise default allow = True.
+        """
         if not self.regime:
             return True
 
-        for name in ("allow", "is_allowed", "decision", "evaluate", "check"):
-            fn = getattr(self.regime, name, None)
-            if callable(fn):
+        # Common call patterns
+        for meth in ("allow", "allows", "evaluate", "check", "on_bar"):
+            if hasattr(self.regime, meth):
                 try:
-                    r = fn()
+                    r = getattr(self.regime, meth)()
                     if isinstance(r, bool):
                         return r
                     if isinstance(r, dict) and "allow" in r:
@@ -144,35 +129,47 @@ class EngineLoop:
 
         # --- Diagnostics helper (read-only) ---
         def _diag(*, reason: str, regime_state: str = "UNKNOWN", vwap: Optional[float] = None) -> None:
-            vwap_deviation = None
-            if vwap is not None and vwap != 0:
-                vwap_deviation = abs((bar.close - vwap) / vwap)
+            print("=" * 60)
+            try:
+                ts_str = bar.ts_utc.isoformat()
+            except Exception:
+                ts_str = str(bar.ts_utc)
 
-            log_engine_diagnostics(
-                timestamp=bar.ts_utc.isoformat(),
-                bars_5m=len(self.window),
-                min_bars_required=self.cfg.min_bars_before_signals,
-                session_name="N/A",
-                session_open=True,
-                regime_state=regime_state,
-                vwap_deviation=vwap_deviation,
-                vwap_threshold=self.cfg.vwap_eps_pct,
-                reason=reason,
-            )
+            print(f"Timestamp (UTC): {ts_str}")
+            print("\n[DATA READINESS]")
+            print(f"5m Bars: {len(self.window)} / {self.cfg.min_bars_before_signals}")
+            print("Status: READY" if len(self.window) >= self.cfg.min_bars_before_signals else "Status: NOT READY")
 
-        # Not enough bars yet
+            print("\n[SESSION]")
+            print("Session Name: N/A")
+            print("Session Open: True")
+
+            print("\n[REGIME GATE]")
+            print(f"Regime State: {regime_state}")
+
+            print("\n[VWAP]")
+            print(f"VWAP Deviation: N/A")
+            print(f"VWAP Threshold: {self.cfg.vwap_eps_pct:.4f}")
+
+            print("\n[DECISION]")
+            print("Outcome: NO SIGNAL")
+            print(f"Reason: {reason}")
+            print("=" * 60)
+
+        # Readiness
         if len(self.window) < self.cfg.min_bars_before_signals:
             _diag(reason="Insufficient bars for signals", regime_state="BLOCK")
             return None
 
-        # Regime gate blocked
+        # Regime gate
         if not self.regime_allows():
             _diag(reason="Regime gate blocked signals", regime_state="BLOCK")
             return None
 
+        # VWAP compute
         vwap = compute_vwap(self.window)
-        if vwap is None:
-            _diag(reason="VWAP unavailable (window empty or invalid)", regime_state="ALLOW", vwap=None)
+        if vwap is None or build_vwap_prompt_default_eps is None:
+            _diag(reason="VWAP unavailable or prompt builder missing", regime_state="ALLOW", vwap=vwap)
             return None
 
         # At this point: engine is READY + regime allows + VWAP computed
@@ -184,13 +181,22 @@ class EngineLoop:
             pct=self.cfg.vwap_eps_pct,
             extra={
                 "symbol": bar.symbol,
-                "as_of_utc": bar.ts_utc.isoformat(),
+                "as_of_utc": bar.ts_utc.isoformat() if hasattr(bar.ts_utc, "isoformat") else str(bar.ts_utc),
                 "window": self.cfg.vwap_window_bars,
             },
         )
 
         if isinstance(prompt, dict):
+            # Store the raw prompt
             self.prompts.append(prompt)
+
+            # ✅ Step-2 change: expose prompt fields in a consistent way for wrappers/loggers.
+            # This is PROMPT-ONLY metadata; it does NOT trigger execution.
+            payload = prompt.get("payload", {})
+            prompt.setdefault("prompt_payload", payload)
+            prompt.setdefault("prompt_text", f"{prompt.get('signal', 'SIGNAL')}: {payload}")
+            prompt.setdefault("prompt", prompt["prompt_text"])
+
             if self.cfg.print_prompts:
                 print(prompt)
 
@@ -226,15 +232,11 @@ def load_bars_from_csv(path: str, symbol: str) -> List[Bar]:
     return bars
 
 
-# =============================
-# MAIN (SMOKE TEST)
-# =============================
-def main() -> None:
-    cfg = EngineConfig()
+def main():
+    cfg = EngineConfig(symbol="SPY", print_prompts=True)
     engine = EngineLoop(cfg)
 
-    csv_path = os.path.join(os.getcwd(), "sample_spy_1m.csv")
-
+    csv_path = "sample_spy_1m.csv"
     if not os.path.exists(csv_path):
         print("No sample_spy_1m.csv found.")
         print("Engine ready. Use EngineLoop(cfg).on_bar(bar)")
