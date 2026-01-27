@@ -1,134 +1,205 @@
-from __future__ import annotations
-import csv
+"""
+CSV Replay Engine (EngineLoop-compatible, ts_utc fix)
+----------------------------------------------------
+Replays OHLCV bars into EngineLoop.
+
+Fixes:
+- Bar is a dataclass with attributes (bar.symbol, bar.open, ...)
+- Adds bar.ts_utc as a timezone-aware datetime (EngineLoop requires it)
+- Robust CSV header mapping (Open/open/Adj Close/etc.)
+- Calls engine.on_bar(...) with only supported kwargs (signature-inspected)
+"""
+
 from dataclasses import dataclass
-from datetime import datetime, timezone, timedelta
-from typing import Optional, Iterator, Dict, Any
+from typing import Dict, Any, Iterator, Optional, List
+import csv
+from datetime import datetime, timezone
+import inspect
 
-from data.models import Bar
-from engine_loop import REACapitalEngineLoop, EngineConfig
 
-
+# -------------------------
+# Config
+# -------------------------
 @dataclass
 class CSVReplayConfig:
-    """
-    CSV format (required headers):
-      ts_utc,o,h,l,c,v
-
-    ts_utc must be ISO-8601, e.g.:
-      2026-01-22T14:45:00Z
-    or
-      2026-01-22T14:45:00+00:00
-    """
     csv_path: str
-    max_rows: Optional[int] = None
-    print_every: int = 5
-    print_prompts: bool = True
-    print_regime: bool = True
-
-    # Simulate arrival time as bar_close + N seconds (so validator passes)
-    arrival_delay_seconds: int = 20
+    symbol: str = "SPY"
 
 
-def _parse_ts_utc(s: str) -> datetime:
-    s = s.strip()
-    if s.endswith("Z"):
-        s = s[:-1] + "+00:00"
-    dt = datetime.fromisoformat(s)
-    if dt.tzinfo is None:
-        raise ValueError("ts_utc must be timezone-aware (include Z or +00:00).")
-    return dt.astimezone(timezone.utc)
+# -------------------------
+# Bar object (EngineLoop expects attributes)
+# -------------------------
+@dataclass
+class Bar:
+    symbol: str
+    ts_utc: datetime
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float = 0.0
+    timestamp_raw: Optional[str] = None  # optional: keep original string
 
 
-def iter_csv_bars(cfg: CSVReplayConfig, symbol: str) -> Iterator[Bar]:
-    with open(cfg.csv_path, "r", newline="", encoding="utf-8") as f:
-        r = csv.DictReader(f)
-        required = {"ts_utc", "o", "h", "l", "c", "v"}
-        if not required.issubset(set(r.fieldnames or [])):
-            raise ValueError(f"CSV must contain headers: {sorted(required)}")
+# -------------------------
+# Helpers
+# -------------------------
+def _norm_key(k: str) -> str:
+    return (k or "").strip().lower()
 
-        count = 0
-        for row in r:
-            ts = _parse_ts_utc(row["ts_utc"])
-            o = float(row["o"])
-            h = float(row["h"])
-            l = float(row["l"])
-            c = float(row["c"])
-            v = float(row.get("v") or 0.0)
+def _to_float(x: Any) -> float:
+    if x is None:
+        return 0.0
+    s = str(x).strip()
+    if s == "":
+        return 0.0
+    s = s.replace(",", "")
+    return float(s)
 
-            yield Bar(symbol=symbol, timeframe="1m", ts=ts, o=o, h=h, l=l, c=c, v=v)
+def _pick(row_norm: Dict[str, Any], keys: List[str]) -> Optional[Any]:
+    for k in keys:
+        if k in row_norm and row_norm[k] not in (None, ""):
+            return row_norm[k]
+    return None
 
-            count += 1
-            if cfg.max_rows is not None and count >= cfg.max_rows:
-                return
+def _available_headers(fieldnames: Optional[List[str]]) -> List[str]:
+    return [h for h in (fieldnames or []) if h is not None]
+
+def _parse_ts_utc(ts: Optional[Any]) -> datetime:
+    """
+    Parse timestamp into timezone-aware UTC datetime.
+    Supports:
+      - Unix epoch seconds / milliseconds
+      - ISO 8601 strings (with or without Z)
+    Falls back to now(UTC) if unknown.
+    """
+    if ts is None:
+        return datetime.now(timezone.utc)
+
+    s = str(ts).strip()
+    if s == "":
+        return datetime.now(timezone.utc)
+
+    # Numeric epoch?
+    try:
+        num = float(s)
+        # if looks like milliseconds
+        if num > 10_000_000_000:  # ~ year 2286 in seconds; so likely ms
+            num = num / 1000.0
+        return datetime.fromtimestamp(num, tz=timezone.utc)
+    except Exception:
+        pass
+
+    # ISO-like strings
+    try:
+        # Handle trailing Z
+        if s.endswith("Z"):
+            s2 = s[:-1] + "+00:00"
+        else:
+            s2 = s
+
+        dt = datetime.fromisoformat(s2)
+        # If naive, assume UTC
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        else:
+            dt = dt.astimezone(timezone.utc)
+        return dt
+    except Exception:
+        return datetime.now(timezone.utc)
 
 
-def replay(cfg: CSVReplayConfig, engine: REACapitalEngineLoop) -> Dict[str, Any]:
-    stats = {
-        "bars_1m": 0,
-        "bars_5m": 0,
-        "safe_mode_issues": 0,
-        "regime_allow": 0,
-        "regime_block": 0,
-        "prompts_queued": 0,
-        "last_regime": None,
-    }
+# -------------------------
+# CSV iterator
+# -------------------------
+def iter_csv_bars(cfg: CSVReplayConfig) -> Iterator[Bar]:
+    """
+    Yield Bar objects from CSV.
 
-    for bar in iter_csv_bars(cfg, engine.cfg.symbol):
-        # Simulate that we received the bar shortly after it closes:
-        # bar.ts is open time; close is +1 minute.
-        received_at = (bar.ts + timedelta(minutes=1) + timedelta(seconds=cfg.arrival_delay_seconds))
+    Required: open/high/low/close (case-insensitive, supports variants)
+    Optional: volume
+    Optional: timestamp/time/datetime/date
+    """
+    with open(cfg.csv_path, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        headers = _available_headers(reader.fieldnames)
 
-        snap = engine.on_bar_1m(bar, received_at_utc=received_at)
-        stats["bars_1m"] += 1
+        ts_keys = ["timestamp", "time", "datetime", "date", "dt"]
+        open_keys = ["open", "o", "open_price"]
+        high_keys = ["high", "h", "high_price"]
+        low_keys  = ["low", "l", "low_price"]
+        close_keys = [
+            "close", "c", "close_price",
+            "adj close", "adj_close",
+            "adjusted close", "adjusted_close"
+        ]
+        vol_keys = ["volume", "vol", "v"]
 
-        if not snap["ok_1m"] and snap["issue"]:
-            stats["safe_mode_issues"] += 1
-            print(f"[DATA ISSUE] {snap['issue']['code']} | {snap['issue']['message']}")
+        for row in reader:
+            row_norm = {_norm_key(k): v for k, v in (row or {}).items()}
 
-        if snap.get("bar5m_created"):
-            stats["bars_5m"] += 1
+            ts_raw = _pick(row_norm, ts_keys)
+            o = _pick(row_norm, open_keys)
+            h = _pick(row_norm, high_keys)
+            l = _pick(row_norm, low_keys)
+            c = _pick(row_norm, close_keys)
+            v = _pick(row_norm, vol_keys)
 
-        if snap.get("regime") is not None:
-            stats["last_regime"] = snap["regime"]
-            if cfg.print_regime:
-                print(f"[REGIME] {snap['regime']['decision']} | {', '.join(snap['regime']['reasons'])}")
+            if o is None or h is None or l is None or c is None:
+                raise KeyError(
+                    "CSV is missing one or more OHLC columns. "
+                    f"Found headers: {headers}. "
+                    "Expected variants like Open/High/Low/Close (case-insensitive) "
+                    "or Adj Close for close."
+                )
 
-            if snap["regime"]["decision"] == "ALLOW":
-                stats["regime_allow"] += 1
-            else:
-                stats["regime_block"] += 1
-
-        if snap.get("prompt_queued"):
-            stats["prompts_queued"] += 1
-            if cfg.print_prompts and snap.get("prompt_summary"):
-                print("\n" + snap["prompt_summary"] + "\n")
-
-        if cfg.print_every and stats["bars_1m"] % cfg.print_every == 0:
-            elig = snap.get("eligibility", {})
-            print(
-                f"[{stats['bars_1m']} bars] "
-                f"5m={stats['bars_5m']} "
-                f"data_ok={elig.get('data_ok')} "
-                f"time_ok={elig.get('time_ok')} "
-                f"queue_pending={snap.get('queue_pending_count')}"
+            yield Bar(
+                symbol=cfg.symbol,
+                ts_utc=_parse_ts_utc(ts_raw),
+                open=_to_float(o),
+                high=_to_float(h),
+                low=_to_float(l),
+                close=_to_float(c),
+                volume=_to_float(v) if v is not None else 0.0,
+                timestamp_raw=str(ts_raw) if ts_raw is not None else None,
             )
 
-    return stats
 
+# -------------------------
+# Replay
+# -------------------------
+def replay(cfg: CSVReplayConfig, engine) -> Dict[str, Any]:
+    """
+    Replay CSV bars through EngineLoop.
 
-if __name__ == "__main__":
-    cfg = CSVReplayConfig(
-        csv_path="sample_spy_1m.csv",
-        max_rows=None,
-        print_every=5,
-        print_prompts=True,
-        print_regime=True,
-        arrival_delay_seconds=20,
-    )
+    Calls engine.on_bar(bar, ...) using only supported kwargs.
+    """
+    bars_1m = 0
+    prompts = 0
 
-    engine = REACapitalEngineLoop(EngineConfig(symbol="SPY"))
-    results = replay(cfg, engine)
+    on_bar_sig = inspect.signature(engine.on_bar)
+    accepted = set(on_bar_sig.parameters.keys())
 
-    print("\n=== REPLAY SUMMARY ===")
-    for k, v in results.items():
-        print(f"{k}: {v}")
+    for bar in iter_csv_bars(cfg):
+        received_at = datetime.now(timezone.utc)
+
+        kwargs = {}
+        if "received_at_utc" in accepted:
+            kwargs["received_at_utc"] = received_at
+        elif "received_at" in accepted:
+            kwargs["received_at"] = received_at
+        elif "ts" in accepted:
+            kwargs["ts"] = received_at
+
+        snap = engine.on_bar(bar, **kwargs)
+
+        bars_1m += 1
+
+        if isinstance(snap, dict):
+            if snap.get("prompt") or snap.get("prompt_text") or snap.get("prompt_payload"):
+                prompts += 1
+
+    return {
+        "bars_1m": bars_1m,
+        "prompts_queued": prompts,
+    }
