@@ -1,19 +1,23 @@
 """
-engine_loop.py — REA Capital Trading Engine (Prompt-Only)
+engine_loop.py — REA Capital Trading Engine (Prompt-Only by default)
 ---------------------------------------------------------
 Module 1: Data readiness (min bars)
 Module 2: Regime gate (conservative by default)
 Module 3: VWAP mean-reversion prompt generation (prompt-only)
 
-Hard constraints:
-- NO trade execution
+Hard constraints (DEFAULT MODE):
+- NO trade execution (unless explicitly enabled)
 - NO auto-risk escalation
 - Prompt / diagnostics only
 
-Step-2 enhancement:
+Enhancements:
 - Expose prompt fields in a consistent way (prompt_payload, prompt_text, prompt)
 - Attach normalized_prompt using utils.prompt_export.normalize_prompt
 - Optionally write last prompt JSON to disk (OFF by default)
+
+Module 8.4.x wiring:
+- Execution Router + PaperBrokerAdapter are initialized safely
+- Execution remains OFF by default (cfg.enable_paper_execution=False)
 """
 
 from dataclasses import dataclass
@@ -21,6 +25,11 @@ from typing import Optional, List, Dict, Any, Deque
 from collections import deque
 import csv
 import os
+from datetime import datetime
+
+# Module 8.4.x: execution routing (safe, OFF by default)
+from engine.execution.order_router import OrderRouter, ExecutionRoutingConfig
+from engine.domain.fees import FeeSchedule
 
 # Optional imports (project may include these)
 try:
@@ -40,6 +49,12 @@ except Exception:
     normalize_prompt = None
     write_prompt_to_file = None
 
+# Optional OrderIntent import (only used if execution is enabled)
+try:
+    from engine.domain.orders import OrderIntent  # type: ignore
+except Exception:
+    OrderIntent = None
+
 
 # =============================
 # DATA MODEL
@@ -55,6 +70,13 @@ class EngineConfig:
     # Export control (OFF by default)
     export_last_prompt_json: bool = False
     export_last_prompt_path: str = "last_prompt.json"
+
+    # Execution control (OFF by default: prompt-only)
+    enable_paper_execution: bool = False
+
+    # Fee schedule defaults (manager-controlled later)
+    commission_rate_pct: float = 0.10  # example 0.10%
+    tax_rate_pct: float = 0.00
 
 
 @dataclass
@@ -79,9 +101,6 @@ def parse_ts_utc(v: Optional[str]):
     if not s:
         return None
     try:
-        # Python ISO handling (works with "+00:00")
-        from datetime import datetime
-
         if s.endswith("Z"):
             s = s[:-1] + "+00:00"
         return datetime.fromisoformat(s)
@@ -100,7 +119,7 @@ def compute_vwap(window: Deque[Bar]) -> Optional[float]:
 
 
 # =============================
-# ENGINE LOOP (PROMPT ONLY)
+# ENGINE LOOP
 # =============================
 class EngineLoop:
     def __init__(self, cfg: EngineConfig):
@@ -108,12 +127,48 @@ class EngineLoop:
         self.window: Deque[Bar] = deque(maxlen=cfg.vwap_window_bars)
         self.prompts: List[Dict[str, Any]] = []
 
+        # Regime gate (optional)
         self.regime = None
         if RegimeGate:
             try:
-                self.regime = RegimeGate()  # may exist in your project
+                self.regime = RegimeGate()
             except Exception:
                 self.regime = None
+
+        # Module 8.4.x: router initialized but execution OFF by default
+        self.order_router: Optional[OrderRouter] = None
+        self._init_execution_router()
+
+    def _init_execution_router(self) -> None:
+        """
+        Initialize the router safely. This does not execute anything.
+        Execution happens only if cfg.enable_paper_execution == True.
+        """
+        # Fee schedule: later replaced by RBAC / manager-approved config store
+        fee_schedule = FeeSchedule(
+            fee_schedule_id="DEFAULT",
+            version="v1",
+            effective_from=datetime.utcnow(),  # placeholder; can be replaced by real effective date
+            effective_to=None,
+            commission_rate_pct=float(self.cfg.commission_rate_pct),
+            tax_rate_pct=float(self.cfg.tax_rate_pct),
+            scope_company_id=None,
+            scope_branch_id=None,
+            scope_department_id=None,
+            approved_by_user_id=None,
+            approved_at=None,
+            notes="Engine default fee schedule (replace with manager-approved schedule).",
+        )
+
+        routing_cfg = ExecutionRoutingConfig(
+            execution_mode="PAPER",
+            paper_seed=42,
+            base_latency_ms=25,
+            slippage_bps=1.0,
+            broker_name="PAPER",
+        )
+
+        self.order_router = OrderRouter(fee_schedule=fee_schedule, cfg=routing_cfg)
 
     def regime_allows(self) -> bool:
         """
@@ -124,7 +179,6 @@ class EngineLoop:
         if not self.regime:
             return True
 
-        # Common call patterns
         for meth in ("allow", "allows", "evaluate", "check", "on_bar"):
             if hasattr(self.regime, meth):
                 try:
@@ -169,7 +223,7 @@ class EngineLoop:
             print(f"VWAP Threshold: {self.cfg.vwap_eps_pct:.4f}")
 
             print("\n[DECISION]")
-            print("Outcome: NO SIGNAL")
+            print("Outcome: PROMPT-ONLY" if not self.cfg.enable_paper_execution else "Outcome: PAPER-EXECUTION ENABLED")
             print(f"Reason: {reason}")
             print("=" * 60)
 
@@ -189,7 +243,6 @@ class EngineLoop:
             _diag(reason="VWAP unavailable or prompt builder missing", regime_state="ALLOW")
             return None
 
-        # At this point: engine is READY + regime allows + VWAP computed
         _diag(reason="Conditions met; prompt evaluation proceeds", regime_state="ALLOW")
 
         prompt = build_vwap_prompt_default_eps(
@@ -207,7 +260,7 @@ class EngineLoop:
             # Store the raw prompt
             self.prompts.append(prompt)
 
-            # Expose prompt fields for wrappers/loggers (prompt-only)
+            # Expose prompt fields for wrappers/loggers
             payload = prompt.get("payload", {})
             prompt.setdefault("prompt_payload", payload)
             prompt.setdefault("prompt_text", f"{prompt.get('signal', 'SIGNAL')}: {payload}")
@@ -230,7 +283,73 @@ class EngineLoop:
             if self.cfg.print_prompts:
                 print(prompt)
 
+            # OPTIONAL: paper execution path (OFF by default)
+            if self.cfg.enable_paper_execution:
+                self._paper_execute_from_prompt(prompt, bar)
+
         return prompt
+
+    def _paper_execute_from_prompt(self, prompt: Dict[str, Any], bar: Bar) -> None:
+        """
+        Converts a prompt into a paper-execution OrderIntent (if possible) and routes it.
+        This remains OFF unless cfg.enable_paper_execution=True.
+
+        NOTE: This function is intentionally conservative:
+        - If OrderIntent is not available or prompt missing fields, it does nothing.
+        - It does NOT auto-escalate risk.
+        """
+        if not self.order_router or OrderIntent is None:
+            return
+
+        # Very conservative mapping: only execute if prompt contains explicit direction and qty
+        signal = str(prompt.get("signal", "")).upper()
+        payload = prompt.get("payload", {}) or {}
+
+        side = payload.get("side") or payload.get("action") or ""
+        qty = payload.get("quantity") or payload.get("qty")
+
+        if not side or qty is None:
+            return
+
+        side_u = str(side).upper()
+        if side_u not in ("BUY", "SELL"):
+            return
+
+        try:
+            qty_f = float(qty)
+        except Exception:
+            return
+
+        if qty_f <= 0:
+            return
+
+        # Create an OrderIntent (LIMIT at bar.close to keep deterministic)
+        order_intent = OrderIntent(
+            order_id=f"paper-{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}",
+            user_id=str(payload.get("user_id") or "system"),
+            company_id=payload.get("company_id"),
+            branch_id=payload.get("branch_id"),
+            department_id=payload.get("department_id"),
+            symbol=self.cfg.symbol,
+            side=side_u,
+            quantity=qty_f,
+            order_type="LIMIT",
+            limit_price=float(bar.close),
+            currency=str(payload.get("currency") or "USD"),
+            order_date=datetime.utcnow(),
+            requested_exec_date=None,
+            session_id=str(payload.get("session_id") or "N/A"),
+            regime_tag=str(payload.get("regime_tag") or "ALLOW"),
+            counterparty_id=payload.get("counterparty_id"),
+            counterparty_name=payload.get("counterparty_name"),
+            counterparty_account=payload.get("counterparty_account"),
+            meta={"source_signal": signal},
+        )
+
+        reports = self.order_router.submit(order_intent)
+
+        # Print minimal confirmation (ticket printing happens via reports module separately)
+        print(f"[PAPER EXEC] Executed {len(reports)} order(s). Last execution_id={reports[-1].execution_id if reports else 'N/A'}")
 
 
 # =============================
@@ -263,7 +382,7 @@ def load_bars_from_csv(path: str, symbol: str) -> List[Bar]:
 
 
 def main():
-    cfg = EngineConfig(symbol="SPY", print_prompts=True)
+    cfg = EngineConfig(symbol="SPY", print_prompts=True, enable_paper_execution=False)
     engine = EngineLoop(cfg)
 
     csv_path = "sample_spy_1m.csv"
