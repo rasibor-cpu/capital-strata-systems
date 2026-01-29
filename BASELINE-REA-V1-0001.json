@@ -1,0 +1,63 @@
+=== ANALYTICS HARNESS OUTPUT (SAMPLE) ===
+{
+  "experiment_id": "SAMPLE-DRYRUN",
+  "timestamp_utc": "2026-01-29T23:57:50+00:00",
+  "engine_version": "GIT_HEAD",
+  "architecture_version": "v1.0",
+  "classification": "RESEARCH_ONLY",
+  "dataset": {
+    "source": "CSV",
+    "symbol": "EURUSD",
+    "timeframe": "1m",
+    "bars_1m": 260,
+    "bars_5m": 52,
+    "date_range": "SAMPLE",
+    "dataset_hash": "HASH-PLACEHOLDER"
+  },
+  "configuration": {
+    "regime": {
+      "min_bars_5m": 40
+    },
+    "signal": {
+      "strategy": "VWAP_MR",
+      "mode": "prompt_only"
+    },
+    "risk": {
+      "risk_per_trade": 0.01
+    },
+    "execution": {
+      "analysis_only": true
+    }
+  },
+  "counters": {
+    "signals_generated_total": 0,
+    "regime_allow": 13,
+    "regime_block": 39,
+    "risk_decisions_total": 10,
+    "risk_allowed": 10,
+    "risk_blocked": 0,
+    "execution_decisions_total": 10,
+    "execution_allowed": 0,
+    "execution_blocked": 10
+  },
+  "metrics": {
+    "signal_frequency": 0.0,
+    "zero_signal_confirmed": true,
+    "regime_allow_ratio": 0.25,
+    "risk_allow_ratio": 1.0,
+    "execution_block_ratio": 1.0,
+    "execution_guard_integrity": true
+  },
+  "baseline_comparison": {
+    "baseline_id": "BASELINE-UNSET",
+    "counter_invariance": null,
+    "metric_deltas": {}
+  },
+  "integrity": {
+    "determinism_hash": "b6a7e194b19a11ea95165630467c1f8c177a20bac28222131fd84f1baa7c7aba",
+    "analysis_only_confirmed": true,
+    "execution_allowed_zero": true
+  },
+  "overall_status": "PASS",
+  "notes": "Self-test analytics harness run"
+}
