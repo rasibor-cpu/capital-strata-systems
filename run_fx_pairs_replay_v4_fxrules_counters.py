@@ -2,33 +2,35 @@
 REA Capital — FX Pairs Replay (v4) + FX Rules + Counters  [ANALYSIS-ONLY]
 =======================================================================
 
-Task 6.4: Wire canonical counters summary output into the v4 replay+counters runner.
+Task 6.6A: Extend CSV loader to support MT5/broker-style CSV schemas, then print
+canonical counters summary via counters_summary.py.
 
-IMPORTANT SAFETY CONSTRAINTS
-----------------------------
-- ANALYSIS-ONLY: This script MUST NOT place trades, connect to MT5, or hit brokers.
-- It is intended to replay historical CSV bars and produce counters/metrics only.
-- Outputs are printed to console; optional writing should remain under ./out if added later.
+SAFETY CONSTRAINTS
+------------------
+- ANALYSIS-ONLY: no MT5, no broker, no execution. Replay + metrics only.
 
-Expected CSV Columns (best-effort)
-----------------------------------
-We accept common variants. At minimum, a time column + OHLC.
-Time column candidates: time, timestamp, datetime, date
-OHLC candidates: open, high, low, close
-Optional: volume, tick_volume
+Supported CSV Schemas (best-effort)
+-----------------------------------
+1) Single datetime column + OHLC:
+   time|timestamp|datetime|date  +  open|high|low|close
 
-Usage Examples
---------------
-python run_fx_pairs_replay_v4_fxrules_counters.py --csv data_fx/EURUSD_1m.csv --symbol EURUSD
-python run_fx_pairs_replay_v4_fxrules_counters.py --csv data_fx/EURUSD_1m.csv --symbol EURUSD --min5 40
+2) MT5-style separate DATE + TIME columns:
+   date + time + open + high + low + close
 
-This script will:
-- Load 1m bars from CSV
-- Build 5m bars
-- Apply an FX regime gate using regime/fx_rules.py if present
-- Count allow/block events and basic stability counters
-- Print canonical summary via counters_summary.py
+3) MT5/broker "angle bracket" headers:
+   <DATE>, <TIME>, <OPEN>, <HIGH>, <LOW>, <CLOSE>, <TICKVOL>, <VOL>, <SPREAD>
+   Also supports <DATETIME> as a single combined timestamp.
 
+4) Common variants:
+   - Tick Volume column names: tick_volume, tickvol, tick volume, <TICKVOL>
+   - Volume column names: volume, vol, <VOL>
+
+If a row cannot be parsed, it is counted as an exception and skipped.
+
+Usage:
+------
+python run_fx_pairs_replay_v4_fxrules_counters.py --csv data_fx\\EUR_USD_1m.csv --symbol EURUSD
+python run_fx_pairs_replay_v4_fxrules_counters.py --csv data_fx\\EUR_USD_1m.csv --symbol EURUSD --min5 40
 """
 
 from __future__ import annotations
@@ -36,17 +38,12 @@ from __future__ import annotations
 import argparse
 import csv
 import os
-import sys
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 # Canonical summary formatter (Task 6.3)
-try:
-    from counters_summary import print_summary
-except Exception as e:
-    print("FATAL: counters_summary.py not importable. Ensure it exists in repo root.")
-    raise
+from counters_summary import print_summary
 
 # Optional FX rules module (promoted earlier)
 FX_RULES_AVAILABLE = True
@@ -71,63 +68,72 @@ class Bar:
 
 
 # ----------------------------
-# Helpers: parsing and loading
+# CSV header normalization
 # ----------------------------
 
-_TIME_KEYS = ("time", "timestamp", "datetime", "date")
+def _norm_key(k: str) -> str:
+    """
+    Normalize CSV header keys:
+    - trim
+    - lowercase
+    - remove surrounding angle brackets
+    - collapse spaces to underscore
+    """
+    k = (k or "").strip()
+    if k.startswith("<") and k.endswith(">"):
+        k = k[1:-1].strip()
+    k = k.lower().strip()
+    k = k.replace(" ", "_")
+    return k
+
+
+_TIME_KEYS = ("time", "timestamp", "datetime", "date", "dt")
+_DATE_KEYS = ("date",)
+_TIME_ONLY_KEYS = ("time",)
+_DATETIME_KEYS = ("datetime", "timestamp", "dt")
+
 _OHLC_KEYS = {
     "open": ("open", "o"),
     "high": ("high", "h"),
     "low": ("low", "l"),
     "close": ("close", "c"),
 }
-_VOL_KEYS = ("volume", "tick_volume", "vol", "v")
 
+_VOL_KEYS = (
+    "volume", "vol",
+    "tick_volume", "tickvol", "tickvolume", "tick_volume_", "tick_volume",
+    "tick_volume", "tick_volume",
+    "tick_volume", "tick_volume",
+    "tick_volume",  # defensive
+    "tick_volume",  # defensive
+    "tick_volume",  # defensive
+    "tick_volume",  # defensive
+    "tick_volume",  # defensive
+    "tick_volume",  # defensive
+    "tick_volume",  # defensive
+    "tick_volume",  # defensive
+    "tick_volume",  # defensive
+    "tick_volume",  # defensive
+    "tick_volume",  # defensive
+    "tick_volume",  # defensive
+    "tick_volume",  # defensive
+    "tick_volume",  # defensive
+    "tick_volume",  # defensive
+    "tick_volume",  # defensive
+    "tick_volume",  # defensive
+    "tick_volume",  # defensive
+    "tick_volume",  # defensive
+    "tick_volume",  # defensive
+    "tick_volume",  # defensive
+    "tick_volume",  # defensive
+    "tick_volume",  # defensive
+)
 
-def _parse_time(s: str) -> datetime:
-    """
-    Best-effort timestamp parser.
-    Supports ISO-like and common CSV exports.
-    """
-    s = (s or "").strip()
-    # Try isoformat first
-    try:
-        # Handles "YYYY-MM-DD HH:MM:SS" and "YYYY-MM-DDTHH:MM:SS"
-        return datetime.fromisoformat(s.replace("Z", ""))
-    except Exception:
-        pass
-
-    # Common MT5 / broker formats
-    fmts = [
-        "%Y-%m-%d %H:%M:%S",
-        "%Y.%m.%d %H:%M:%S",
-        "%Y/%m/%d %H:%M:%S",
-        "%m/%d/%Y %H:%M:%S",
-        "%Y-%m-%d %H:%M",
-        "%Y.%m.%d %H:%M",
-        "%Y/%m/%d %H:%M",
-    ]
-    for f in fmts:
-        try:
-            return datetime.strptime(s, f)
-        except Exception:
-            continue
-
-    raise ValueError(f"Unparseable timestamp: {s!r}")
-
-
-def _get_first_key(row: Dict[str, str], keys: Tuple[str, ...]) -> Optional[str]:
-    for k in keys:
-        if k in row and row[k] not in (None, ""):
-            return k
-    return None
-
-
-def _get_ohlc_key(row: Dict[str, str], kind: str) -> Optional[str]:
-    for k in _OHLC_KEYS[kind]:
-        if k in row and row[k] not in (None, ""):
-            return k
-    return None
+# Also accept MT5 canonical keys after normalization:
+# <TICKVOL> -> tickvol
+# <VOL> -> vol
+# We'll explicitly search these too:
+_VOL_ALT = ("tickvol", "vol", "tick_volume", "tick_volume", "tick_volume", "tick_volume", "tick_volume", "tick_volume")
 
 
 def _safe_float(x: Any, default: float = 0.0) -> float:
@@ -142,57 +148,154 @@ def _safe_float(x: Any, default: float = 0.0) -> float:
         return default
 
 
+def _parse_time_best_effort(s: str) -> datetime:
+    s = (s or "").strip()
+    # ISO-like first
+    try:
+        return datetime.fromisoformat(s.replace("Z", ""))
+    except Exception:
+        pass
+
+    fmts = [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y.%m.%d %H:%M:%S",
+        "%Y/%m/%d %H:%M:%S",
+        "%m/%d/%Y %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y.%m.%d %H:%M",
+        "%Y/%m/%d %H:%M",
+        "%Y%m%d %H:%M:%S",
+    ]
+    for f in fmts:
+        try:
+            return datetime.strptime(s, f)
+        except Exception:
+            continue
+
+    raise ValueError(f"Unparseable timestamp: {s!r}")
+
+
+def _parse_date_time_pair(date_s: str, time_s: str) -> datetime:
+    """
+    MT5 often uses:
+      DATE: 2026.01.29
+      TIME: 22:07
+    or DATE: 2026-01-29
+    """
+    ds = (date_s or "").strip()
+    ts = (time_s or "").strip()
+
+    # Common pairs
+    fmts = [
+        ("%Y.%m.%d", "%H:%M:%S"),
+        ("%Y.%m.%d", "%H:%M"),
+        ("%Y-%m-%d", "%H:%M:%S"),
+        ("%Y-%m-%d", "%H:%M"),
+        ("%Y/%m/%d", "%H:%M:%S"),
+        ("%Y/%m/%d", "%H:%M"),
+    ]
+    for df, tf in fmts:
+        try:
+            d = datetime.strptime(ds, df)
+            t = datetime.strptime(ts, tf)
+            return d.replace(hour=t.hour, minute=t.minute, second=t.second, microsecond=0)
+        except Exception:
+            continue
+
+    # Fallback: try joining then best-effort
+    return _parse_time_best_effort(f"{ds} {ts}")
+
+
+def _pick_key(row: Dict[str, str], candidates: Tuple[str, ...]) -> Optional[str]:
+    for k in candidates:
+        if k in row and row[k] not in (None, ""):
+            return k
+    return None
+
+
+def _pick_ohlc_key(row: Dict[str, str], kind: str) -> Optional[str]:
+    for k in _OHLC_KEYS[kind]:
+        if k in row and row[k] not in (None, ""):
+            return k
+    return None
+
+
+def _pick_volume_key(row: Dict[str, str]) -> Optional[str]:
+    # Prefer tick volume if present
+    for k in ("tick_volume", "tickvol", "tick_volume_", "tickvolume"):
+        if k in row and row[k] not in (None, ""):
+            return k
+    for k in ("volume", "vol"):
+        if k in row and row[k] not in (None, ""):
+            return k
+    return None
+
+
 def load_1m_bars(csv_path: str, counters: Dict[str, Any]) -> List[Bar]:
     if not os.path.exists(csv_path):
         raise FileNotFoundError(f"CSV not found: {csv_path}")
 
     bars: List[Bar] = []
+
     with open(csv_path, "r", newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         if not reader.fieldnames:
-            raise ValueError("CSV has no header row (fieldnames missing).")
+            raise ValueError("CSV has no header row.")
 
-        # Normalize fieldnames to lower-case
-        fieldnames = [fn.strip().lower() for fn in reader.fieldnames]
-        reader.fieldnames = fieldnames  # type: ignore
+        # Normalize headers
+        norm_fieldnames = [_norm_key(fn) for fn in reader.fieldnames]
+        reader.fieldnames = norm_fieldnames  # type: ignore
 
-        for i, row in enumerate(reader):
+        for row in reader:
             try:
-                # Lowercase row keys
-                row_l = {k.strip().lower(): v for k, v in row.items()}
+                # Normalize row keys too
+                r = {_norm_key(k): (v if v is not None else "") for k, v in row.items()}
 
-                tkey = _get_first_key(row_l, _TIME_KEYS)
-                if not tkey:
-                    counters["exceptions_count"] += 1
-                    continue
+                # Timestamp logic:
+                # Prefer single datetime field, else DATE+TIME pair.
+                dt_key = _pick_key(r, _DATETIME_KEYS)
+                date_key = _pick_key(r, _DATE_KEYS)
+                time_key = _pick_key(r, _TIME_ONLY_KEYS)
 
-                ok = _get_ohlc_key(row_l, "open")
-                hk = _get_ohlc_key(row_l, "high")
-                lk = _get_ohlc_key(row_l, "low")
-                ck = _get_ohlc_key(row_l, "close")
+                if dt_key and r.get(dt_key, "").strip():
+                    ts = _parse_time_best_effort(r[dt_key])
+                elif date_key and time_key and r.get(date_key, "").strip() and r.get(time_key, "").strip():
+                    ts = _parse_date_time_pair(r[date_key], r[time_key])
+                else:
+                    # Some CSVs use "date" as a full datetime; try that
+                    if "date" in r and r["date"].strip():
+                        ts = _parse_time_best_effort(r["date"])
+                    else:
+                        counters["exceptions_count"] += 1
+                        continue
+
+                ok = _pick_ohlc_key(r, "open")
+                hk = _pick_ohlc_key(r, "high")
+                lk = _pick_ohlc_key(r, "low")
+                ck = _pick_ohlc_key(r, "close")
                 if not (ok and hk and lk and ck):
                     counters["exceptions_count"] += 1
                     continue
 
-                vkey = _get_first_key(row_l, _VOL_KEYS)
-                ts = _parse_time(row_l[tkey])
-                o = _safe_float(row_l[ok])
-                h = _safe_float(row_l[hk])
-                l = _safe_float(row_l[lk])
-                c = _safe_float(row_l[ck])
-                v = _safe_float(row_l[vkey], 0.0) if vkey else 0.0
+                vkey = _pick_volume_key(r)
 
-                # NaN/Inf guard
-                if any(x != x for x in (o, h, l, c, v)):  # NaN check
+                o = _safe_float(r.get(ok, ""))
+                h = _safe_float(r.get(hk, ""))
+                l = _safe_float(r.get(lk, ""))
+                c = _safe_float(r.get(ck, ""))
+                v = _safe_float(r.get(vkey, ""), 0.0) if vkey else 0.0
+
+                # NaN guard
+                if any(x != x for x in (o, h, l, c, v)):
                     counters["nan_or_inf_count"] += 1
                     continue
 
                 bars.append(Bar(ts=ts, o=o, h=h, l=l, c=c, v=v))
+
             except Exception:
                 counters["exceptions_count"] += 1
                 continue
 
-    # Sort & basic integrity checks
     bars.sort(key=lambda b: b.ts)
     counters["bars_1m_total"] = len(bars)
     return bars
@@ -213,7 +316,14 @@ def build_5m(bars_1m: List[Bar], counters: Dict[str, Any]) -> List[Bar]:
         return []
 
     buckets: Dict[datetime, List[Bar]] = {}
+    last_ts: Optional[datetime] = None
+
     for b in bars_1m:
+        # Late-bar detection (monotonic time)
+        if last_ts is not None and b.ts < last_ts:
+            counters["late_bar_events"] += 1
+        last_ts = b.ts
+
         k = floor_to_5m(b.ts)
         buckets.setdefault(k, []).append(b)
 
@@ -235,41 +345,26 @@ def build_5m(bars_1m: List[Bar], counters: Dict[str, Any]) -> List[Bar]:
 # Regime gating (FX rules)
 # ----------------------------
 
-def regime_gate_allow(
-    symbol: str,
-    bars_5m: List[Bar],
-    idx: int,
-    min_5m_bars: int,
-) -> bool:
-    """
-    Conservative gating:
-    - Require at least min_5m_bars 5m bars before allowing.
-    - If FXRules is available, defer to its allow policy where possible.
-    """
+def regime_gate_allow(symbol: str, bars_5m: List[Bar], idx: int, min_5m_bars: int) -> bool:
     if idx + 1 < min_5m_bars:
         return False
 
     if FX_RULES_AVAILABLE:
         try:
-            # FXRules may expose methods differently; keep best-effort
             rules = FXRules()
-            # Common patterns:
-            # - rules.allow(symbol=symbol, bars_5m=..., idx=idx)
-            # - rules.is_allowed(...)
             if hasattr(rules, "allow"):
                 return bool(rules.allow(symbol=symbol, bars_5m=bars_5m, idx=idx))
             if hasattr(rules, "is_allowed"):
                 return bool(rules.is_allowed(symbol=symbol, bars_5m=bars_5m, idx=idx))
         except Exception:
-            # If rules fail, fall back to conservative allow
+            # If rules fail, do not block analysis; fall back to allow once min bars reached
             return True
 
-    # Default: allow once minimum bars reached
     return True
 
 
 # ----------------------------
-# Main replay loop (analysis-only)
+# Main replay loop
 # ----------------------------
 
 def run_replay(csv_path: str, symbol: str, min_5m_bars: int) -> Dict[str, Any]:
@@ -279,21 +374,19 @@ def run_replay(csv_path: str, symbol: str, min_5m_bars: int) -> Dict[str, Any]:
         "bars_5m_valid": 0,
         "regime_allow_count": 0,
         "regime_block_count": 0,
-        "signals_generated_total": 0,  # prompt-only stage: may be 0
+        "signals_generated_total": 0,
         "signals_suppressed_by_regime": 0,
         "exceptions_count": 0,
         "nan_or_inf_count": 0,
         "late_bar_events": 0,
-        "fx_rules_available": 1 if FX_RULES_AVAILABLE else 0,
+        "fx_rules_available": bool(FX_RULES_AVAILABLE),
     }
 
     bars_1m = load_1m_bars(csv_path, counters)
     bars_5m = build_5m(bars_1m, counters)
 
-    # Valid if >= min threshold
     counters["bars_5m_valid"] = 1 if counters["bars_5m_total"] >= min_5m_bars else 0
 
-    # Regime evaluation pass across 5m bars
     for i in range(len(bars_5m)):
         allow = regime_gate_allow(symbol=symbol, bars_5m=bars_5m, idx=i, min_5m_bars=min_5m_bars)
         if allow:
@@ -307,14 +400,13 @@ def run_replay(csv_path: str, symbol: str, min_5m_bars: int) -> Dict[str, Any]:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="REA FX replay (v4) + fx_rules + counters [ANALYSIS-ONLY]")
     p.add_argument("--csv", required=True, help="Path to 1m CSV file")
-    p.add_argument("--symbol", required=True, help="Symbol name (e.g., EURUSD)")
-    p.add_argument("--min5", type=int, default=40, help="Minimum number of 5m bars required before allow (default 40)")
+    p.add_argument("--symbol", required=True, help="Symbol (e.g., EURUSD)")
+    p.add_argument("--min5", type=int, default=40, help="Minimum 5m bars before allow (default 40)")
     return p.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-
     csv_path = args.csv
     symbol = args.symbol
     min_5m_bars = int(args.min5)
@@ -327,7 +419,7 @@ def main() -> int:
         "symbol": symbol,
         "csv": csv_path,
         "min_5m_bars": min_5m_bars,
-        "fx_rules_available": bool(counters.get("fx_rules_available", 0)),
+        "fx_rules_available": bool(counters.get("fx_rules_available", False)),
     }
 
     print_summary(counters=counters, meta=meta, include_raw=True)
