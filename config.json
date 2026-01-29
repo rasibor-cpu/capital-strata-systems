@@ -47,7 +47,7 @@
     }
   },
   "risk": {
-    "trading_enabled": false,
+    "trading_enabled": true,
     "manual_confirm_required": true,
     "max_trades_per_day": 5,
     "default_units": 1000,
