@@ -1,0 +1,14 @@
+{
+  "EURUSD": {
+    "trades": 2,
+    "wins": 1,
+    "losses": 1,
+    "accuracy": 0.5
+  },
+  "USDJPY": {
+    "trades": 1,
+    "wins": 1,
+    "losses": 0,
+    "accuracy": 1.0
+  }
+}
