@@ -1,141 +1,138 @@
 from __future__ import annotations
+
 """
-REA Engine — Personal Core (Registry-Wired, Locked Baseline)
+REA Core Engine — Personal Version (Registry-Wired, Feb 10 Baseline)
 
-Role:
-- Central decision engine for REA Capital
-- Consumes price + mean levels
-- Uses instrument_registry as the ONLY source of:
-  • instruments
-  • pip sizing
-  • epsilon logic
-- Produces deterministic signals
-- Tracks per-instrument accuracy stats (in-memory, append-ready)
+Purpose:
+- Central decision engine for FX signals
+- Registry-driven (pip size, epsilon, instruments)
+- Exposes ALL attributes required by runners
+- Per-instrument accuracy tracking
+- Sanity-Probe aligned defaults
 
-NO broker execution
-NO MT5 dependency
-NO CSV logic
-Pure decision + accounting layer
+THIS FILE IS AUTHORITATIVE.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, Literal
-import time
+from typing import Dict
 
 import instrument_registry as ir
 
 
-Signal = Literal["BUY", "SELL", "NO_TRADE"]
-
-
-# -------------------------------------------------
-# Data structures
-# -------------------------------------------------
+# -------------------------
+# Result container
+# -------------------------
 
 @dataclass
-class SignalDecision:
-    instrument: str
-    signal: Signal
+class EngineResult:
+    symbol: str
     price: float
-    mean_level: float
-    epsilon_price: float
-    timestamp: float = field(default_factory=time.time)
+    mean: float
+    epsilon: float
+    signal: str          # BUY / SELL / NO_TRADE
+    bars_used: int
 
 
-@dataclass
-class InstrumentStats:
-    total_signals: int = 0
-    correct_signals: int = 0
-
-    @property
-    def accuracy(self) -> float:
-        if self.total_signals == 0:
-            return 0.0
-        return self.correct_signals / self.total_signals
-
-
-# -------------------------------------------------
-# Engine
-# -------------------------------------------------
+# -------------------------
+# Core Engine
+# -------------------------
 
 class REAEngine:
     """
-    Registry-driven decision engine.
+    Registry-wired FX decision engine
     """
 
-    def __init__(self, accuracy_mode: str = ir.DEFAULT_ACCURACY_MODE):
-        self.accuracy_mode = accuracy_mode
-        self.stats: Dict[str, InstrumentStats] = {}
+    def __init__(
+        self,
+        accuracy_mode: str | None = None,
+        lookback_bars: int | None = None,
+    ):
+        # ----- Locked defaults -----
+        self.accuracy_mode = (
+            accuracy_mode.strip().lower()
+            if accuracy_mode
+            else ir.DEFAULT_ACCURACY_MODE
+        )
+
+        self.lookback_bars = (
+            int(lookback_bars)
+            if lookback_bars is not None
+            else ir.DEFAULT_LOOKBACK_BARS
+        )
+
+        # ----- Per-instrument stats -----
+        self.stats: Dict[str, Dict[str, int]] = {}
+
+    # -------------------------
+    # Internal helpers
+    # -------------------------
+
+    def _init_symbol(self, symbol: str) -> None:
+        if symbol not in self.stats:
+            self.stats[symbol] = {
+                "total": 0,
+                "wins": 0,
+                "losses": 0,
+                "no_trade": 0,
+            }
 
     # -------------------------
     # Core signal logic
     # -------------------------
 
-    def decide(
+    def evaluate(
         self,
-        instrument: str,
+        symbol: str,
         price: float,
         mean_level: float,
-    ) -> SignalDecision:
+    ) -> EngineResult:
+        """
+        Evaluate a single instrument at a point in time.
+        """
 
-        spec = ir.get_instrument(instrument)
-        epsilon_price = ir.epsilon_price(instrument, self.accuracy_mode)
+        symbol = symbol.upper()
+        self._init_symbol(symbol)
 
+        epsilon_price = ir.epsilon_price(symbol, self.accuracy_mode)
+
+        # ---- Sanity Probe Logic ----
         if abs(price - mean_level) < epsilon_price:
-            signal: Signal = "NO_TRADE"
+            signal = "NO_TRADE"
+            self.stats[symbol]["no_trade"] += 1
         elif price < mean_level:
             signal = "BUY"
+            self.stats[symbol]["total"] += 1
         else:
             signal = "SELL"
+            self.stats[symbol]["total"] += 1
 
-        return SignalDecision(
-            instrument=instrument,
-            signal=signal,
+        return EngineResult(
+            symbol=symbol,
             price=price,
-            mean_level=mean_level,
-            epsilon_price=epsilon_price,
+            mean=mean_level,
+            epsilon=epsilon_price,
+            signal=signal,
+            bars_used=self.lookback_bars,
         )
 
     # -------------------------
-    # Accuracy tracking
+    # Accuracy update (manual)
     # -------------------------
 
-    def record_outcome(
-        self,
-        instrument: str,
-        was_correct: bool,
-    ) -> None:
-        if instrument not in self.stats:
-            self.stats[instrument] = InstrumentStats()
+    def record_outcome(self, symbol: str, win: bool) -> None:
+        self._init_symbol(symbol)
+        if win:
+            self.stats[symbol]["wins"] += 1
+        else:
+            self.stats[symbol]["losses"] += 1
 
-        s = self.stats[instrument]
-        s.total_signals += 1
-        if was_correct:
-            s.correct_signals += 1
+    # -------------------------
+    # Reporting
+    # -------------------------
 
-    def get_accuracy(self, instrument: str) -> float:
-        if instrument not in self.stats:
+    def accuracy(self, symbol: str) -> float:
+        s = self.stats.get(symbol)
+        if not s:
             return 0.0
-        return self.stats[instrument].accuracy
-
-    def summary(self) -> Dict[str, float]:
-        """
-        Returns accuracy per instrument.
-        """
-        return {k: v.accuracy for k, v in self.stats.items()}
-
-
-# -------------------------------------------------
-# Self-test (SAFE)
-# -------------------------------------------------
-
-if __name__ == "__main__":
-    engine = REAEngine()
-
-    decision = engine.decide(
-        instrument="EURUSD",
-        price=1.0000,
-        mean_level=1.0020,
-    )
-
-    print(decision)
+        total = s["wins"] + s["losses"]
+        return (s["wins"] / total) if total > 0 else 0.0
