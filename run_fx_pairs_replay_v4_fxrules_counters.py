@@ -1,22 +1,16 @@
 """
-REA Capital — FX Replay v4 + FX Rules + Counters (ANALYSIS-ONLY)
-===============================================================
+REA Capital — FX Replay v4 + FX Rules + Counters + Signals (ANALYSIS-ONLY)
+========================================================================
 
-Task 6.6D: Provide a robust, user-friendly runner that:
-- Uses data_adapters.py (auto-detect by default)
+Task 7.2: Wire VWAP mean reversion signals behind the regime gate, still analysis-only.
+- Uses data_adapters.py (auto-detect CSV formats)
 - Builds 5m bars from 1m
-- Applies conservative regime gate (min 5m bars + optional fx_rules)
+- Applies regime gate
+- Generates signals ONLY when regime allows
+- Tracks signal counters (generated + suppressed)
 - Prints canonical counters summary via counters_summary.py
-- Provides clearer CLI help and safer defaults
-- ANALYSIS-ONLY: no MT5, no broker, no execution
 
-Recommended command (copy/paste):
---------------------------------
-python run_fx_pairs_replay_v4_fxrules_counters.py --csv "C:\\Users\\rasib\\source\\REA-capital-trading-engine\\data_fx\\EUR_USD_1m.csv" --symbol EURUSD --adapter auto
-
-You may also pass csv as the first positional argument:
-------------------------------------------------------
-python run_fx_pairs_replay_v4_fxrules_counters.py "C:\\path\\to\\file.csv" --symbol EURUSD
+NO EXECUTION. NO MT5. NO BROKER.
 """
 
 from __future__ import annotations
@@ -24,12 +18,12 @@ from __future__ import annotations
 import argparse
 import os
 import re
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from counters_summary import print_summary
 from data_adapters import Bar, load_bars_from_csv
+from signals.vwap_mean_reversion import generate_vwap_mean_reversion_signals
 
 # Optional FX rules module (safe import)
 FX_RULES_AVAILABLE = True
@@ -44,18 +38,9 @@ except Exception:
 # ----------------------------
 
 def _infer_symbol_from_path(path: str) -> str:
-    """
-    Best-effort symbol inference from filename.
-    Examples:
-      EUR_USD_1m.csv -> EURUSD
-      EURUSD.csv -> EURUSD
-      SPY_5m.csv -> SPY
-    """
     base = os.path.basename(path)
     name = os.path.splitext(base)[0]
-    # remove timeframe suffix like _1m, _5m, etc.
     name = re.sub(r"(_\d+[mhdw])$", "", name, flags=re.IGNORECASE)
-    # remove separators
     name = name.replace("_", "").replace("-", "").replace(" ", "")
     return name.upper() if name else "UNKNOWN"
 
@@ -115,11 +100,9 @@ def build_5m(bars_1m: List[Bar], counters: Dict[str, Any]) -> List[Bar]:
 # ----------------------------
 
 def regime_gate_allow(symbol: str, bars_5m: List[Bar], idx: int, min_5m_bars: int) -> bool:
-    # Conservative: require enough history
     if idx + 1 < min_5m_bars:
         return False
 
-    # Optional: defer to FXRules if present
     if FX_RULES_AVAILABLE:
         try:
             rules = FXRules()
@@ -128,17 +111,59 @@ def regime_gate_allow(symbol: str, bars_5m: List[Bar], idx: int, min_5m_bars: in
             if hasattr(rules, "is_allowed"):
                 return bool(rules.is_allowed(symbol=symbol, bars_5m=bars_5m, idx=idx))
         except Exception:
-            # If rules fail, do not block analysis-only replay
             return True
 
     return True
 
 
 # ----------------------------
+# Signal generation (analysis-only)
+# ----------------------------
+
+def bars_to_dicts(bars: List[Bar]) -> List[Dict[str, Any]]:
+    return [{"ts": b.ts, "o": b.o, "h": b.h, "l": b.l, "c": b.c, "v": b.v} for b in bars]
+
+
+def generate_signals_if_allowed(
+    symbol: str,
+    bars_5m: List[Bar],
+    idx: int,
+    allowed: bool,
+    counters: Dict[str, Any],
+    lookback: int,
+    z_threshold: float,
+) -> None:
+    """
+    Counts signals:
+      - If allowed: generate and count
+      - If blocked: we *simulate* whether a signal would have existed, and count as suppressed
+    """
+    # Need at least lookback window ending at idx
+    if idx + 1 < lookback:
+        return
+
+    window = bars_5m[: idx + 1]
+    window_tail = window[-lookback:]
+    window_dicts = bars_to_dicts(window_tail)
+
+    sigs = generate_vwap_mean_reversion_signals(
+        bars_5m=window_dicts,
+        lookback=lookback,
+        z_threshold=z_threshold,
+    )
+
+    if allowed:
+        counters["signals_generated_total"] += len(sigs)
+    else:
+        # any signal that would have been emitted becomes "suppressed by regime"
+        counters["signals_suppressed_by_regime"] += len(sigs)
+
+
+# ----------------------------
 # Replay
 # ----------------------------
 
-def run_replay(csv_path: str, symbol: str, min_5m_bars: int, adapter: str) -> Dict[str, Any]:
+def run_replay(csv_path: str, symbol: str, min_5m_bars: int, adapter: str, lookback: int, z_threshold: float) -> Dict[str, Any]:
     counters: Dict[str, Any] = {
         "bars_1m_total": 0,
         "bars_5m_total": 0,
@@ -167,11 +192,22 @@ def run_replay(csv_path: str, symbol: str, min_5m_bars: int, adapter: str) -> Di
     counters["bars_5m_valid"] = 1 if counters["bars_5m_total"] >= min_5m_bars else 0
 
     for i in range(len(bars_5m)):
-        allow = regime_gate_allow(symbol=symbol, bars_5m=bars_5m, idx=i, min_5m_bars=min_5m_bars)
-        if allow:
+        allowed = regime_gate_allow(symbol=symbol, bars_5m=bars_5m, idx=i, min_5m_bars=min_5m_bars)
+        if allowed:
             counters["regime_allow_count"] += 1
         else:
             counters["regime_block_count"] += 1
+
+        # Signal generation behind gate (analysis-only)
+        generate_signals_if_allowed(
+            symbol=symbol,
+            bars_5m=bars_5m,
+            idx=i,
+            allowed=allowed,
+            counters=counters,
+            lookback=lookback,
+            z_threshold=z_threshold,
+        )
 
     return counters
 
@@ -182,21 +218,20 @@ def run_replay(csv_path: str, symbol: str, min_5m_bars: int, adapter: str) -> Di
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="REA FX replay v4 + fx_rules + counters [ANALYSIS-ONLY]",
-        epilog=(
-            "Example:\n"
-            "  python run_fx_pairs_replay_v4_fxrules_counters.py --csv \"data_fx\\\\EUR_USD_1m.csv\" --symbol EURUSD --adapter auto\n"
-        ),
+        description="REA FX replay v4 + fx_rules + counters + signals [ANALYSIS-ONLY]",
         formatter_class=argparse.RawTextHelpFormatter,
     )
 
-    # Allow csv as positional OR --csv
     p.add_argument("csv_pos", nargs="?", help="CSV path (optional positional). If provided, overrides --csv.")
     p.add_argument("--csv", dest="csv_opt", help="CSV path (preferred).")
 
     p.add_argument("--symbol", default="", help="Symbol label (e.g., EURUSD). If omitted, inferred from filename.")
     p.add_argument("--min5", type=int, default=40, help="Minimum 5m bars before allow (default 40).")
     p.add_argument("--adapter", default="auto", help="Adapter: auto | std_ohlcv | mt5_csv | generic_ohlc")
+
+    # Signal params
+    p.add_argument("--sig_lookback", type=int, default=20, help="VWAP lookback window on 5m bars (default 20).")
+    p.add_argument("--sig_z", type=float, default=1.5, help="VWAP deviation threshold (percent proxy) (default 1.5).")
 
     return p.parse_args()
 
@@ -210,12 +245,10 @@ def main() -> int:
         print("Try:\n  python run_fx_pairs_replay_v4_fxrules_counters.py --csv \"data_fx\\EUR_USD_1m.csv\" --symbol EURUSD --adapter auto\n")
         return 2
 
-    # Normalize relative path
     csv_path = os.path.normpath(csv_path)
 
     if not os.path.exists(csv_path):
         print(f"ERROR: CSV not found: {csv_path}\n")
-        # Helpful listing
         candidates = _list_csvs_under("data_fx")
         if candidates:
             print("Found these CSVs under ./data_fx:")
@@ -234,10 +267,12 @@ def main() -> int:
         symbol=symbol,
         min_5m_bars=int(args.min5),
         adapter=str(args.adapter or "auto"),
+        lookback=int(args.sig_lookback),
+        z_threshold=float(args.sig_z),
     )
 
     meta = {
-        "mode": "replay_v4_fxrules_counters",
+        "mode": "replay_v4_fxrules_counters_signals",
         "analysis_only": True,
         "symbol": symbol,
         "csv": csv_path,
@@ -245,6 +280,8 @@ def main() -> int:
         "fx_rules_available": bool(counters.get("fx_rules_available", False)),
         "adapter_used": counters.get("adapter_used", ""),
         "delimiter_used": counters.get("delimiter_used", ""),
+        "sig_lookback": int(args.sig_lookback),
+        "sig_z": float(args.sig_z),
     }
 
     print_summary(counters=counters, meta=meta, include_raw=True)
