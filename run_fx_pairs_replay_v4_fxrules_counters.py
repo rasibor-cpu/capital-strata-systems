@@ -1,13 +1,15 @@
 """
-REA Capital — FX Replay v4 + FX Rules + Counters + Signals (ANALYSIS-ONLY)
-========================================================================
+REA Capital — FX Replay v4 + FX Rules + Counters + Multi-Signals (ANALYSIS-ONLY)
+=============================================================================
 
-Task 7.2: Wire VWAP mean reversion signals behind the regime gate, still analysis-only.
+Task 7.5: Wire multiple signal generators behind the regime gate, still analysis-only.
 - Uses data_adapters.py (auto-detect CSV formats)
 - Builds 5m bars from 1m
 - Applies regime gate
-- Generates signals ONLY when regime allows
-- Tracks signal counters (generated + suppressed)
+- Runs TWO signal models:
+    1) VWAP mean reversion
+    2) Breakout momentum
+- Counts signals generated vs suppressed-by-regime
 - Prints canonical counters summary via counters_summary.py
 
 NO EXECUTION. NO MT5. NO BROKER.
@@ -19,11 +21,12 @@ import argparse
 import os
 import re
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from counters_summary import print_summary
 from data_adapters import Bar, load_bars_from_csv
 from signals.vwap_mean_reversion import generate_vwap_mean_reversion_signals
+from signals.breakout_momentum import generate_breakout_signals
 
 # Optional FX rules module (safe import)
 FX_RULES_AVAILABLE = True
@@ -54,6 +57,10 @@ def _list_csvs_under(folder: str) -> List[str]:
             if fn.lower().endswith(".csv"):
                 out.append(os.path.join(root, fn))
     return out
+
+
+def bars_to_dicts(bars: List[Bar]) -> List[Dict[str, Any]]:
+    return [{"ts": b.ts, "o": b.o, "h": b.h, "l": b.l, "c": b.c, "v": b.v} for b in bars]
 
 
 # ----------------------------
@@ -120,50 +127,64 @@ def regime_gate_allow(symbol: str, bars_5m: List[Bar], idx: int, min_5m_bars: in
 # Signal generation (analysis-only)
 # ----------------------------
 
-def bars_to_dicts(bars: List[Bar]) -> List[Dict[str, Any]]:
-    return [{"ts": b.ts, "o": b.o, "h": b.h, "l": b.l, "c": b.c, "v": b.v} for b in bars]
-
-
-def generate_signals_if_allowed(
-    symbol: str,
+def count_signals(
     bars_5m: List[Bar],
     idx: int,
     allowed: bool,
     counters: Dict[str, Any],
-    lookback: int,
-    z_threshold: float,
+    # VWAP params
+    vwap_lookback: int,
+    vwap_z: float,
+    # Breakout params
+    brk_lookback: int,
+    brk_buffer_pct: float,
 ) -> None:
     """
-    Counts signals:
-      - If allowed: generate and count
-      - If blocked: we *simulate* whether a signal would have existed, and count as suppressed
+    Runs both models on a window ending at idx and updates counters.
+    If regime BLOCK: signals are counted as suppressed.
     """
-    # Need at least lookback window ending at idx
-    if idx + 1 < lookback:
-        return
-
+    # Build the window up to idx (inclusive)
     window = bars_5m[: idx + 1]
-    window_tail = window[-lookback:]
-    window_dicts = bars_to_dicts(window_tail)
+    window_dicts = bars_to_dicts(window)
 
-    sigs = generate_vwap_mean_reversion_signals(
+    total_new = 0
+
+    # Model 1: VWAP mean reversion (runs on tail window internally)
+    sigs1 = generate_vwap_mean_reversion_signals(
         bars_5m=window_dicts,
-        lookback=lookback,
-        z_threshold=z_threshold,
+        lookback=vwap_lookback,
+        z_threshold=vwap_z,
     )
+    total_new += len(sigs1)
+
+    # Model 2: Breakout momentum
+    sigs2 = generate_breakout_signals(
+        bars_5m=window_dicts,
+        lookback=brk_lookback,
+        buffer_pct=brk_buffer_pct,
+    )
+    total_new += len(sigs2)
 
     if allowed:
-        counters["signals_generated_total"] += len(sigs)
+        counters["signals_generated_total"] += total_new
     else:
-        # any signal that would have been emitted becomes "suppressed by regime"
-        counters["signals_suppressed_by_regime"] += len(sigs)
+        counters["signals_suppressed_by_regime"] += total_new
 
 
 # ----------------------------
 # Replay
 # ----------------------------
 
-def run_replay(csv_path: str, symbol: str, min_5m_bars: int, adapter: str, lookback: int, z_threshold: float) -> Dict[str, Any]:
+def run_replay(
+    csv_path: str,
+    symbol: str,
+    min_5m_bars: int,
+    adapter: str,
+    vwap_lookback: int,
+    vwap_z: float,
+    brk_lookback: int,
+    brk_buffer_pct: float,
+) -> Dict[str, Any]:
     counters: Dict[str, Any] = {
         "bars_1m_total": 0,
         "bars_5m_total": 0,
@@ -198,15 +219,15 @@ def run_replay(csv_path: str, symbol: str, min_5m_bars: int, adapter: str, lookb
         else:
             counters["regime_block_count"] += 1
 
-        # Signal generation behind gate (analysis-only)
-        generate_signals_if_allowed(
-            symbol=symbol,
+        count_signals(
             bars_5m=bars_5m,
             idx=i,
             allowed=allowed,
             counters=counters,
-            lookback=lookback,
-            z_threshold=z_threshold,
+            vwap_lookback=vwap_lookback,
+            vwap_z=vwap_z,
+            brk_lookback=brk_lookback,
+            brk_buffer_pct=brk_buffer_pct,
         )
 
     return counters
@@ -218,7 +239,7 @@ def run_replay(csv_path: str, symbol: str, min_5m_bars: int, adapter: str, lookb
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="REA FX replay v4 + fx_rules + counters + signals [ANALYSIS-ONLY]",
+        description="REA FX replay v4 + fx_rules + counters + multi-signals [ANALYSIS-ONLY]",
         formatter_class=argparse.RawTextHelpFormatter,
     )
 
@@ -229,9 +250,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--min5", type=int, default=40, help="Minimum 5m bars before allow (default 40).")
     p.add_argument("--adapter", default="auto", help="Adapter: auto | std_ohlcv | mt5_csv | generic_ohlc")
 
-    # Signal params
-    p.add_argument("--sig_lookback", type=int, default=20, help="VWAP lookback window on 5m bars (default 20).")
-    p.add_argument("--sig_z", type=float, default=1.5, help="VWAP deviation threshold (percent proxy) (default 1.5).")
+    # VWAP params
+    p.add_argument("--vwap_lookback", type=int, default=20, help="VWAP lookback on 5m bars (default 20).")
+    p.add_argument("--vwap_z", type=float, default=1.5, help="VWAP deviation threshold (percent proxy) (default 1.5).")
+
+    # Breakout params
+    p.add_argument("--brk_lookback", type=int, default=10, help="Breakout lookback (default 10).")
+    p.add_argument("--brk_buffer", type=float, default=0.05, help="Breakout buffer percent (default 0.05).")
 
     return p.parse_args()
 
@@ -267,12 +292,14 @@ def main() -> int:
         symbol=symbol,
         min_5m_bars=int(args.min5),
         adapter=str(args.adapter or "auto"),
-        lookback=int(args.sig_lookback),
-        z_threshold=float(args.sig_z),
+        vwap_lookback=int(args.vwap_lookback),
+        vwap_z=float(args.vwap_z),
+        brk_lookback=int(args.brk_lookback),
+        brk_buffer_pct=float(args.brk_buffer),
     )
 
     meta = {
-        "mode": "replay_v4_fxrules_counters_signals",
+        "mode": "replay_v4_fxrules_counters_multi_signals",
         "analysis_only": True,
         "symbol": symbol,
         "csv": csv_path,
@@ -280,8 +307,10 @@ def main() -> int:
         "fx_rules_available": bool(counters.get("fx_rules_available", False)),
         "adapter_used": counters.get("adapter_used", ""),
         "delimiter_used": counters.get("delimiter_used", ""),
-        "sig_lookback": int(args.sig_lookback),
-        "sig_z": float(args.sig_z),
+        "vwap_lookback": int(args.vwap_lookback),
+        "vwap_z": float(args.vwap_z),
+        "brk_lookback": int(args.brk_lookback),
+        "brk_buffer": float(args.brk_buffer),
     }
 
     print_summary(counters=counters, meta=meta, include_raw=True)
