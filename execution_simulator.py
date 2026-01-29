@@ -1,117 +1,123 @@
 from __future__ import annotations
+
 """
-Execution Simulator — Non-Broker Adapter (LOCKED)
+Execution Simulator — Registry-Wired, Persistent Metrics
 
 Purpose:
-- Consume engine signals
-- Simulate trade outcome deterministically
-- Track per-instrument performance
-- Persist metrics safely (JSON)
+- Central execution + accounting layer
+- Receives decisions from rea_engine_personal.py
+- Tracks per-instrument accuracy, wins/losses, abstentions
+- Persists metrics to disk
+- Produces a human-readable report
 
-This file NEVER talks to a broker.
+NO BROKER CONNECTION
+NO AUTO-EXECUTION
 """
 
 import json
 import os
-from dataclasses import dataclass
+from datetime import datetime
 from typing import Dict
 
+import instrument_registry as ir
 
-METRICS_PATH = "data/metrics.json"
+# -------------------------------------------------
+# Storage
+# -------------------------------------------------
 
-
-@dataclass
-class TradeResult:
-    symbol: str
-    side: str
-    win: bool
+METRICS_FILE = "out/metrics.json"
 
 
-# -------------------------
-# Metrics persistence
-# -------------------------
+def _empty_metrics() -> Dict[str, Dict[str, int]]:
+    metrics = {}
+    for sym in ir.list_instruments():
+        metrics[sym] = {
+            "signals": 0,
+            "wins": 0,
+            "losses": 0,
+            "no_trade": 0,
+        }
+    return metrics
 
-def load_metrics() -> Dict[str, Dict[str, float]]:
-    if not os.path.exists("data"):
-        os.makedirs("data")
 
-    if not os.path.exists(METRICS_PATH):
-        return {}
+def load_metrics() -> Dict[str, Dict[str, int]]:
+    if not os.path.exists(METRICS_FILE):
+        return _empty_metrics()
 
-    with open(METRICS_PATH, "r", encoding="utf-8") as f:
+    with open(METRICS_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
-def save_metrics(metrics: Dict[str, Dict[str, float]]) -> None:
-    with open(METRICS_PATH, "w", encoding="utf-8") as f:
+def save_metrics(metrics: Dict[str, Dict[str, int]]) -> None:
+    os.makedirs("out", exist_ok=True)
+    with open(METRICS_FILE, "w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=2)
 
 
-# -------------------------
-# Simulation logic
-# -------------------------
+# -------------------------------------------------
+# Recording outcomes
+# -------------------------------------------------
 
-def simulate_trade(result: TradeResult) -> None:
-    """
-    Deterministic simulation:
-    - BUY wins if win=True
-    - SELL wins if win=True
-    """
-
+def record_no_trade(symbol: str) -> None:
     metrics = load_metrics()
+    metrics.setdefault(symbol, _empty_metrics().get(symbol, {}))
+    metrics[symbol]["no_trade"] += 1
+    save_metrics(metrics)
 
-    sym = result.symbol
-    if sym not in metrics:
-        metrics[sym] = {
-            "trades": 0,
-            "wins": 0,
-            "losses": 0,
-            "accuracy": 0.0,
-        }
 
-    metrics[sym]["trades"] += 1
+def record_trade(symbol: str, win: bool) -> None:
+    metrics = load_metrics()
+    metrics.setdefault(symbol, _empty_metrics().get(symbol, {}))
 
-    if result.win:
-        metrics[sym]["wins"] += 1
+    metrics[symbol]["signals"] += 1
+    if win:
+        metrics[symbol]["wins"] += 1
     else:
-        metrics[sym]["losses"] += 1
-
-    trades = metrics[sym]["trades"]
-    wins = metrics[sym]["wins"]
-    metrics[sym]["accuracy"] = round(wins / trades, 4)
+        metrics[symbol]["losses"] += 1
 
     save_metrics(metrics)
 
 
-# -------------------------
-# Report helper
-# -------------------------
+# -------------------------------------------------
+# Reporting
+# -------------------------------------------------
+
+def generate_report() -> str:
+    metrics = load_metrics()
+    lines = []
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    lines.append("=" * 72)
+    lines.append("REA ENGINE — PERFORMANCE REPORT")
+    lines.append(f"Generated: {ts}")
+    lines.append("=" * 72)
+
+    for sym, m in metrics.items():
+        signals = m["signals"]
+        wins = m["wins"]
+        losses = m["losses"]
+        no_trade = m["no_trade"]
+
+        accuracy = (wins / signals * 100.0) if signals > 0 else 0.0
+
+        lines.append(f"\nInstrument: {sym}")
+        lines.append(f"  Signals:   {signals}")
+        lines.append(f"  Wins:      {wins}")
+        lines.append(f"  Losses:    {losses}")
+        lines.append(f"  No-Trade:  {no_trade}")
+        lines.append(f"  Accuracy:  {accuracy:.2f}%")
+
+    lines.append("\n" + "=" * 72)
+    return "\n".join(lines)
+
 
 def print_report() -> None:
-    metrics = load_metrics()
-
-    if not metrics:
-        print("No trades recorded yet.")
-        return
-
-    print("\nPER-INSTRUMENT PERFORMANCE")
-    print("-" * 40)
-    for sym, m in metrics.items():
-        print(
-            f"{sym:7} | trades={m['trades']:3} "
-            f"wins={m['wins']:3} "
-            f"losses={m['losses']:3} "
-            f"accuracy={m['accuracy']:.2%}"
-        )
-    print("-" * 40)
+    print(generate_report())
 
 
-# -------------------------
-# Manual test
-# -------------------------
+# -------------------------------------------------
+# CLI entry
+# -------------------------------------------------
 
 if __name__ == "__main__":
-    simulate_trade(TradeResult("EURUSD", "buy", True))
-    simulate_trade(TradeResult("EURUSD", "sell", False))
-    simulate_trade(TradeResult("USDJPY", "buy", True))
     print_report()
