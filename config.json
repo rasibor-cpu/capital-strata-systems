@@ -1,0 +1,67 @@
+{
+  "system": {
+    "name": "REA Personal FX Platform",
+    "mode": "live_manual_confirm",
+    "timezone": "America/Chicago",
+    "run_id_prefix": "rea_personal"
+  },
+  "oanda": {
+    "environment": "practice",
+    "api_url_practice": "https://api-fxpractice.oanda.com",
+    "api_url_live": "https://api-fxtrade.oanda.com",
+    "account_id_env": "OANDA_ACCOUNT_ID",
+    "token_env": "OANDA_TOKEN"
+  },
+  "instruments": {
+    "enabled": [
+      "EUR_USD",
+      "GBP_USD",
+      "USD_JPY",
+      "AUD_USD",
+      "USD_CHF",
+      "USD_CAD"
+    ],
+    "price_poll_seconds": 3,
+    "max_spread_pips": 2.5
+  },
+  "strategy": {
+    "family": "vwap_mean_reversion_simple",
+    "accuracy_mode": "conservative",
+    "lookback_points": 30,
+    "modes": {
+      "conservative": {
+        "epsilon_gate": 0.00025,
+        "min_seconds_between_signals": 180,
+        "block_on_event_risk": true
+      },
+      "balanced": {
+        "epsilon_gate": 0.00015,
+        "min_seconds_between_signals": 120,
+        "block_on_event_risk": true
+      },
+      "aggressive": {
+        "epsilon_gate": 0.00008,
+        "min_seconds_between_signals": 60,
+        "block_on_event_risk": false
+      }
+    }
+  },
+  "risk": {
+    "trading_enabled": false,
+    "manual_confirm_required": true,
+    "max_trades_per_day": 5,
+    "default_units": 1000,
+    "max_units": 5000,
+    "require_sl_tp": false,
+    "default_sl_pips": 20,
+    "default_tp_pips": 30,
+    "kill_switch": false
+  },
+  "logging": {
+    "out_dir": "out",
+    "tickets_log": "out\\trade_tickets.log",
+    "orders_log": "out\\oanda_orders.log",
+    "prices_log": "out\\live_prices.log",
+    "signals_log": "out\\signals.log"
+  }
+}
