@@ -1,48 +1,40 @@
-# =========================
-# REA Capital – Git Ignore
-# =========================
+# === REA Engine: local runtime artifacts (do NOT commit) ===
 
-# ---- Runtime / audit artifacts ----
-audit_logs/
+# FX data / downloads
+data_fx/
+data_fx/**
+
+# Feeds / captured streams
+feeds/
+feeds/**
+
+# Outputs / logs / reports
+out/
+out/**
+logs/
+logs/**
+
+# Local MT5 / env artifacts
 *.log
-*.jsonl
-
-# ---- Python cache ----
+*.tmp
+*.bak
+*.swp
 __pycache__/
-*.py[cod]
-*$py.class
+**/__pycache__/
+*.pyc
+*.pyo
 
-# ---- Virtual environments ----
+# Local CSVs (keep samples only if explicitly promoted)
+*.csv
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Python virtualenvs
 .venv/
 venv/
 ENV/
 env/
-
-# ---- OS / editor junk ----
-.DS_Store
-Thumbs.db
-desktop.ini
-*.swp
-*.swo
-*.tmp
-*.bak
-
-# ---- IDEs ----
-.vscode/
-.idea/
-
-# ---- Data & outputs (generated) ----
-last_prompt.json
-*.csv~
-*.csv.bak
-
-# ---- Security / secrets (never commit) ----
-.env
-.env.*
-*.key
-*.pem
-
-# ---- Misc ----
-coverage/
-dist/
-build/
