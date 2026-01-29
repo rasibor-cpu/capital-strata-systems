@@ -1,101 +1,79 @@
-from enum import Enum
-from typing import Optional, Dict, List
+"""
+VWAP Mean Reversion Signal Generator
+-----------------------------------
+Analysis-only signal module.
+No execution, no broker, no side effects.
+
+Inputs:
+- bars_5m: list[dict] with keys:
+    ts, o, h, l, c, v
+
+Outputs:
+- list of signal dicts
+"""
+
+from typing import List, Dict
+import math
 
 
-class VWAPContext(Enum):
-    ABOVE = "ABOVE_VWAP"
-    BELOW = "BELOW_VWAP"
-    AT = "AT_VWAP"
+def compute_vwap(bars: List[Dict]) -> float:
+    pv_sum = 0.0
+    v_sum = 0.0
+    for b in bars:
+        price = (b["h"] + b["l"] + b["c"]) / 3.0
+        vol = b.get("v", 0.0)
+        pv_sum += price * vol
+        v_sum += vol
+    if v_sum == 0:
+        return math.nan
+    return pv_sum / v_sum
 
 
-class VWAPDistanceBucket(Enum):
-    NEAR = "NEAR_VWAP"
-    MID = "MID_FROM_VWAP"
-    FAR = "FAR_FROM_VWAP"
+def generate_vwap_mean_reversion_signals(
+    bars_5m: List[Dict],
+    lookback: int = 20,
+    z_threshold: float = 1.5,
+) -> List[Dict]:
+    """
+    Generates BUY/SELL signals when price deviates
+    from VWAP by a z-score threshold.
+    """
 
+    signals = []
 
-def default_vwap_eps(vwap: float, pct: float = 0.0005) -> float:
-    if vwap <= 0:
-        return 0.0
-    return vwap * pct
+    if len(bars_5m) < lookback:
+        return signals
 
+    window = bars_5m[-lookback:]
+    vwap = compute_vwap(window)
 
-def compute_vwap_context(price: float, vwap: float, eps: float) -> VWAPContext:
-    if price > vwap + eps:
-        return VWAPContext.ABOVE
-    if price < vwap - eps:
-        return VWAPContext.BELOW
-    return VWAPContext.AT
+    if not math.isfinite(vwap):
+        return signals
 
+    last = bars_5m[-1]
+    price = last["c"]
 
-def compute_vwap_distance_bucket(
-    price: float,
-    vwap: float,
-    near_pct: float = 0.001,
-    far_pct: float = 0.003
-) -> VWAPDistanceBucket:
-    if vwap <= 0:
-        return VWAPDistanceBucket.NEAR
+    # simple deviation proxy (not true z-score yet)
+    deviation = (price - vwap) / vwap
 
-    dist_pct = abs(price - vwap) / vwap
-    if dist_pct <= near_pct:
-        return VWAPDistanceBucket.NEAR
-    if dist_pct >= far_pct:
-        return VWAPDistanceBucket.FAR
-    return VWAPDistanceBucket.MID
+    if deviation <= -z_threshold / 100:
+        signals.append({
+            "ts": last["ts"],
+            "type": "BUY",
+            "price": price,
+            "vwap": vwap,
+            "deviation": deviation,
+            "model": "vwap_mean_reversion",
+        })
 
+    elif deviation >= z_threshold / 100:
+        signals.append({
+            "ts": last["ts"],
+            "type": "SELL",
+            "price": price,
+            "vwap": vwap,
+            "deviation": deviation,
+            "model": "vwap_mean_reversion",
+        })
 
-def compute_vwap(prices: List[float], volumes: List[float]) -> Optional[float]:
-    if not prices or not volumes:
-        return None
-    total_volume = sum(volumes)
-    if total_volume == 0:
-        return None
-    return sum(p * v for p, v in zip(prices, volumes)) / total_volume
-
-
-def generate_vwap_prompt(payload: Dict) -> Optional[Dict]:
-    if not isinstance(payload, dict):
-        return None
-    if "vwap_context" not in payload:
-        return None
-    if "vwap_distance_bucket" not in payload:
-        return None
-    return {"signal": "VWAP_MEAN_REVERSION", "payload": payload}
-
-
-def build_vwap_payload(
-    price: float,
-    vwap: float,
-    eps: float,
-    extra: Optional[Dict] = None
-) -> Dict:
-    payload = {
-        "price": price,
-        "vwap": vwap,
-        "vwap_context": compute_vwap_context(price, vwap, eps).value,
-        "vwap_distance_bucket": compute_vwap_distance_bucket(price, vwap).value,
-    }
-    if isinstance(extra, dict):
-        payload.update(extra)
-    return payload
-
-
-def build_vwap_payload_default_eps(
-    price: float,
-    vwap: float,
-    extra: Optional[Dict] = None,
-    pct: float = 0.0005
-) -> Dict:
-    eps = default_vwap_eps(vwap, pct=pct)
-    return build_vwap_payload(price=price, vwap=vwap, eps=eps, extra=extra)
-
-
-def build_vwap_prompt_default_eps(
-    price: float,
-    vwap: float,
-    extra: Optional[Dict] = None,
-    pct: float = 0.0005
-) -> Optional[Dict]:
-    payload = build_vwap_payload_default_eps(price=price, vwap=vwap, extra=extra, pct=pct)
-    return generate_vwap_prompt(payload)
+    return signals
