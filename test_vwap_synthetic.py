@@ -45,3 +45,21 @@ def main():
 
     signals = generate_vwap_mean_reversion_signals(
         bars_5m=bars,
+        lookback=10,
+        z_threshold=1.0,   # correct parameter name
+    )
+
+    print("\n[Signals Returned]")
+    for s in signals:
+        print(s)
+
+    if not signals:
+        print("\nNO SIGNALS — investigate")
+    else:
+        print("\nSUCCESS — VWAP signal fired")
+
+    print("\nDone.")
+
+
+if __name__ == "__main__":
+    main()
