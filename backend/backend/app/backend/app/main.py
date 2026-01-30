@@ -1,6 +1,7 @@
-# REA Capital Trading Engine
-# Backend API entry point
-# Placeholder – logic to be added incrementally
+from fastapi import FastAPI
 
-def health_check():
+app = FastAPI(title="REA Capital Backend", version="0.1.0")
+
+@app.get("/")
+def health():
     return {"status": "ok"}
