@@ -83,12 +83,45 @@ def load_5m_bars(csv_path: str) -> List[Any]:
                 l=c,
                 c=c,
                 v=v,
-                close=c,      # keep friendly aliases (harmless)
+                close=c,      # harmless aliases
                 volume=v,
             )
             bars.append(bar)
 
     return bars
+
+
+def _decision_to_allow(decision: Any) -> Optional[bool]:
+    """
+    Normalize various decision representations to allow/block:
+    - Enum-like objects: .name or .value
+    - Strings: "ALLOW" / "BLOCK"
+    Returns True/False or None if unknown.
+    """
+    if decision is None:
+        return None
+
+    # Enum-like
+    name = getattr(decision, "name", None)
+    value = getattr(decision, "value", None)
+
+    cand = name or value or decision
+    try:
+        s = str(cand).strip().upper()
+    except Exception:
+        return None
+
+    # Handle formats like "RegimeDecision.ALLOW"
+    if "ALLOW" in s and "BLOCK" not in s:
+        return True
+    if "BLOCK" in s:
+        return False
+    if s == "ALLOW":
+        return True
+    if s == "BLOCK":
+        return False
+
+    return None
 
 
 def main() -> int:
@@ -128,14 +161,34 @@ def main() -> int:
     print("\n[Raw Result]")
     print(result)
 
-    allow = None
-    reason = None
+    allow: Optional[bool] = None
+    reason: Optional[str] = None
 
+    # Legacy result types
     if isinstance(result, bool):
         allow = result
     elif isinstance(result, dict):
         allow = bool(result.get("allow"))
         reason = result.get("reason") or result.get("block_reason")
+
+    # Object / dataclass-like RegimeResult
+    if allow is None and hasattr(result, "decision"):
+        allow = _decision_to_allow(getattr(result, "decision", None))
+
+    # Reasons list on object
+    if reason is None and hasattr(result, "reasons"):
+        reasons = getattr(result, "reasons", None)
+        if isinstance(reasons, list) and reasons:
+            reason = "; ".join(str(x) for x in reasons)
+
+    # Optional single-string reason fields
+    if reason is None:
+        for key in ("reason", "block_reason", "explanation"):
+            if hasattr(result, key):
+                val = getattr(result, key, None)
+                if val:
+                    reason = str(val)
+                    break
 
     print("\n[Decision]")
     print("ALLOW:", allow)
