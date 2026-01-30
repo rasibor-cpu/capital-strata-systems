@@ -14,11 +14,11 @@ from signals.vwap_mean_reversion import generate_vwap_mean_reversion_signals
 def make_bar(ts, price, vol=1.0):
     """
     VWAP signal code expects dict bars with keys:
-      ts_utc, h, l, c, v
+      ts, h, l, c, v
     We'll set h=l=c=price for deterministic synthetic behavior.
     """
     return {
-        "ts_utc": ts,
+        "ts": ts,                 # <-- REQUIRED by VWAP code
         "h": float(price),
         "l": float(price),
         "c": float(price),
