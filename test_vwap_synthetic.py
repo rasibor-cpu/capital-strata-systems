@@ -34,7 +34,7 @@ def main():
     ]
 
     bars = []
-    for i, p in enumerate(prices):
+    for p in prices:
         bars.append(make_bar(now, p))
 
     print("=" * 70)
@@ -45,7 +45,7 @@ def main():
     signals = generate_vwap_mean_reversion_signals(
         bars_5m=bars,
         lookback=10,
-        threshold=1.0,   # permissive but not forced
+        z_threshold=1.0,   # correct parameter name
     )
 
     print("\n[Signals Returned]")
