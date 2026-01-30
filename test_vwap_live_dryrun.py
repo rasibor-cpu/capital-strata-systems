@@ -4,6 +4,13 @@ Purpose:
 - Live-data (CSV) dry-run: RegimeGate + VWAP signal generation
 - LOG-ONLY (no execution, no orders)
 - Confirms end-to-end: load bars -> regime allow -> signal(s)
+
+Design:
+- VWAP signal expects dict bars: ts,h,l,c,v
+- RegimeGate expects attribute-style bars: bar.c, bar.h, bar.l, bar.v, bar.ts_utc
+So we load ONCE, then generate:
+  (A) bars_dict  for VWAP
+  (B) bars_attr  for RegimeGate
 """
 
 from __future__ import annotations
@@ -11,7 +18,8 @@ from __future__ import annotations
 import csv
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from types import SimpleNamespace
+from typing import Any, Dict, List, Optional, Tuple
 
 from regime.gate import RegimeGate  # type: ignore
 from signals.vwap_mean_reversion import generate_vwap_mean_reversion_signals
@@ -33,14 +41,17 @@ def parse_ts(v: str) -> Optional[datetime]:
         return None
 
 
-def load_5m_bars_for_vwap(csv_path: str) -> List[Dict[str, Any]]:
+def load_5m_bars_dual(csv_path: str) -> Tuple[List[Dict[str, Any]], List[Any]]:
     """
-    Load 5m bars into VWAP-signal dict schema:
-      ts, h, l, c, v
+    Load 5m bars once, output both:
+      - bars_dict (for VWAP): {"ts","h","l","c","v"}
+      - bars_attr (for RegimeGate): bar.ts_utc, bar.h, bar.l, bar.c, bar.v
     Accepts common CSV headers:
-      ts_utc/timestamp, high/low/close, h/l/c, volume/v
+      ts/ts_utc/timestamp, high/low/close (or h/l/c), volume (or v)
     """
-    bars: List[Dict[str, Any]] = []
+    bars_dict: List[Dict[str, Any]] = []
+    bars_attr: List[Any] = []
+
     with open(csv_path, newline="", encoding="utf-8") as f:
         r = csv.DictReader(f)
         for row in r:
@@ -62,8 +73,39 @@ def load_5m_bars_for_vwap(csv_path: str) -> List[Dict[str, Any]]:
             except Exception:
                 continue
 
-            bars.append({"ts": ts, "h": h, "l": l, "c": c, "v": v})
-    return bars
+            d = {"ts": ts, "h": h, "l": l, "c": c, "v": v}
+            bars_dict.append(d)
+
+            a = SimpleNamespace(
+                ts_utc=ts,
+                h=h,
+                l=l,
+                c=c,
+                v=v,
+                # harmless aliases
+                close=c,
+                volume=v,
+            )
+            bars_attr.append(a)
+
+    return bars_dict, bars_attr
+
+
+def _decision_to_allow(decision: Any) -> Optional[bool]:
+    if decision is None:
+        return None
+    name = getattr(decision, "name", None)
+    value = getattr(decision, "value", None)
+    cand = name or value or decision
+    try:
+        s = str(cand).strip().upper()
+    except Exception:
+        return None
+    if "BLOCK" in s:
+        return False
+    if "ALLOW" in s:
+        return True
+    return None
 
 
 def main() -> int:
@@ -73,49 +115,55 @@ def main() -> int:
         print("Put a 5-minute CSV in project root named sample_spy_5m.csv and rerun.")
         return 2
 
-    bars = load_5m_bars_for_vwap(csv_path)
-    if len(bars) < 20:
-        print("Not enough usable bars loaded:", len(bars))
+    bars_dict, bars_attr = load_5m_bars_dual(csv_path)
+    if len(bars_dict) < 20 or len(bars_attr) < 20:
+        print("Not enough usable bars loaded:", len(bars_dict))
         print("Need at least 20 for lookback.")
         return 3
 
-    as_of = bars[-1]["ts"]
+    as_of = bars_dict[-1]["ts"]
 
     print("=" * 70)
     print("REA – Live Dry Run (CSV) — RegimeGate + VWAP (LOG ONLY)")
-    print("Bars loaded:", len(bars))
+    print("Bars loaded:", len(bars_dict))
     print("As-of UTC:", as_of)
     print("=" * 70)
 
-    # 1) Regime gate check (uses bars_5m; it may accept dicts or objects depending on implementation)
+    # 1) Regime gate check (attribute-style bars)
     gate = RegimeGate()
     try:
-        rg = gate.evaluate(bars_5m=bars, as_of_utc=as_of)  # type: ignore
+        rg = gate.evaluate(bars_5m=bars_attr, as_of_utc=as_of)  # type: ignore
     except Exception as e:
         print("RegimeGate.evaluate FAILED:", repr(e))
-        print("Note: your RegimeGate may require attribute-style bars; if so we will adapt safely next step.")
         return 4
 
     print("\n[RegimeGate Raw]")
     print(rg)
 
-    # Interpret decision
     allow = None
+    reason = None
+
     if isinstance(rg, bool):
         allow = rg
     elif isinstance(rg, dict):
         allow = bool(rg.get("allow"))
+        reason = rg.get("reason") or rg.get("block_reason")
     elif hasattr(rg, "decision"):
-        d = str(getattr(rg, "decision", "")).upper()
-        allow = ("ALLOW" in d) and ("BLOCK" not in d)
+        allow = _decision_to_allow(getattr(rg, "decision", None))
+        if hasattr(rg, "reasons"):
+            rs = getattr(rg, "reasons", None)
+            if isinstance(rs, list) and rs:
+                reason = "; ".join(str(x) for x in rs)
 
     print("\n[RegimeGate Decision]")
     print("ALLOW:", allow)
+    if reason:
+        print("Reason:", reason)
 
-    # 2) VWAP signals (log only)
+    # 2) VWAP signals (dict bars)
     print("\n[VWAP Signals]")
     signals = generate_vwap_mean_reversion_signals(
-        bars_5m=bars,
+        bars_5m=bars_dict,
         lookback=20,
         z_threshold=1.5,
     )
