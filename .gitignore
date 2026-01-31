@@ -15,3 +15,15 @@ __pycache__/
 # --- OS ---
 .DS_Store
 Thumbs.db
+.env
+.env.*
+__pycache__/
+artifacts/
+audit_logs/
+*.cmd
+*.ext
+float
+int
+str
+Bar
+BaseAdapter
