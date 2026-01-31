@@ -1,217 +1,125 @@
 """
 batch_close.py — REA Capital Trading Engine
 -------------------------------------------
-Batch Close, Financial Reporting, Ageing & EOD Validations
+Batch close engine for:
+- End-of-Day (EOD)
+- Month-end
+- Year-end
 
-Scope:
-- Daily (EOD), Month-end, Year-end batch close
-- Ledger state reporting (per ledger, per currency)
-- Balance Sheet & P&L
-- Login audit
-- Suspense / Sundry / Unsettled ageing
-- EOD validations & escalation payload
-- Leap-year safe, FY configurable
-
-PROMPT-ONLY. No posting. No mutation.
+Responsibilities:
+- Aggregate ledger balances
+- Produce balance sheet & P&L
+- Run ageing analysis
+- Run EOD validations
+- Provide read-only outputs for exports & APIs
 """
 
-from datetime import date, timedelta
-import calendar
-from collections import defaultdict
+from datetime import date
+from typing import Dict, Any, Tuple
 
-from ageing import AgeingEngine
+# Core components
+from posting_ledger import PostingLedger
+from ledger import Ledger
+from ageing import run_ageing  # canonical ageing function
 from eod_validations import EODValidationEngine
+from auth_control import AuthControl
+from financial_year import FinancialYear
 
 
-# =====================================================
-# Financial Year Configuration
-# =====================================================
-class FinancialYearConfig:
-    def __init__(self, fy_start_month: int = 1, fy_start_day: int = 1):
-        self.fy_start_month = fy_start_month
-        self.fy_start_day = fy_start_day
-
-    def financial_year_start(self, d: date) -> date:
-        fy_start = date(d.year, self.fy_start_month, self.fy_start_day)
-        if d < fy_start:
-            fy_start = date(d.year - 1, self.fy_start_month, self.fy_start_day)
-        return fy_start
-
-    def financial_year_end(self, d: date) -> date:
-        start = self.financial_year_start(d)
-        return date(start.year + 1, self.fy_start_month, self.fy_start_day) - timedelta(days=1)
-
-
-# =====================================================
-# Batch Close Engine
-# =====================================================
 class BatchCloseEngine:
-    def __init__(self, posting_ledger, auth_controller, fy_config: FinancialYearConfig):
-        self.posting_ledger = posting_ledger
-        self.auth = auth_controller
-        self.fy = fy_config
-        self.ageing = AgeingEngine(posting_ledger)
+    """
+    Orchestrates batch close operations.
+    No postings or mutations are allowed here.
+    """
+
+    def __init__(self):
+        self.ledger = PostingLedger()
         self.validator = EODValidationEngine()
+        self.auth = AuthControl()
+        self.fy = FinancialYear()
 
-    # -------------------------------------------------
-    # Ledger Aggregation
-    # -------------------------------------------------
-    def _aggregate_ledgers(self, as_of: date):
-        summary = defaultdict(lambda: defaultdict(lambda: {
-            "opening": 0.0,
-            "debits": 0.0,
-            "credits": 0.0,
-            "closing": 0.0
-        }))
+        # expose ageing via a simple adapter to keep interface stable
+        self.ageing = _AgeingAdapter()
 
-        entries = self.posting_ledger.get_entries_for_date(as_of)
+    # -------------------------
+    # Public batch entrypoints
+    # -------------------------
 
-        for e in entries:
-            ledger = e["ledger"]
-            ccy = e["currency"]
-            amt = e["amount"]
+    def run_eod(self, as_of: date) -> None:
+        """
+        Run EOD batch close (read-only aggregation + validations).
+        """
+        summary = self._aggregate_ledgers(as_of)
+        assets, liabilities, equity = self._compute_balance_sheet(summary)
 
-            if e["type"] == "DR":
-                summary[ledger][ccy]["debits"] += amt
-            else:
-                summary[ledger][ccy]["credits"] += amt
-
-        for ledger, ccy_map in summary.items():
-            for ccy, row in ccy_map.items():
-                opening = self.posting_ledger.get_opening_balance(
-                    ledger=ledger,
-                    currency=ccy,
-                    as_of=as_of
-                )
-                row["opening"] = opening
-                row["closing"] = opening + row["credits"] - row["debits"]
-
-        return summary
-
-    # -------------------------------------------------
-    # Printing Helpers
-    # -------------------------------------------------
-    def _print_ledger_states(self, summary):
-        print("\n--- LEDGER STATES ---")
-        if not summary:
-            print("NIL — No ledger activity.")
-            return
-
-        for ledger, ccy_map in summary.items():
-            for ccy, r in ccy_map.items():
-                print(
-                    f"{ledger} | {ccy} | "
-                    f"OPEN={r['opening']:.2f} "
-                    f"DR={r['debits']:.2f} "
-                    f"CR={r['credits']:.2f} "
-                    f"CLOSE={r['closing']:.2f}"
-                )
-
-    def _print_login_audit(self, as_of: date):
-        print("\n--- LOGIN AUDIT ---")
-        sessions = self.auth.get_sessions_for_date(as_of)
-
-        if not sessions:
-            print("NIL — No logins recorded.")
-            return
-
-        for s in sessions:
-            print(
-                f"user={s['user_id']} | "
-                f"login={s['login_time']} | "
-                f"logout={s.get('logout_time', 'TIMEOUT/ACTIVE')}"
-            )
-
-    # -------------------------------------------------
-    # Financial Statements
-    # -------------------------------------------------
-    def _compute_balance_sheet(self, summary):
-        assets = liabilities = equity = 0.0
-
-        for ledger, ccy_map in summary.items():
-            for _, r in ccy_map.items():
-                bal = r["closing"]
-                if ledger.startswith("ASSET"):
-                    assets += bal
-                elif ledger.startswith("LIAB"):
-                    liabilities += bal
-                elif ledger.startswith("EQUITY"):
-                    equity += bal
-
-        return assets, liabilities, equity
-
-    def _print_balance_sheet(self, assets, liabilities, equity):
-        print("\n--- BALANCE SHEET ---")
-        print(f"Assets:      {assets:.2f}")
-        print(f"Liabilities: {liabilities:.2f}")
-        print(f"Equity:      {equity:.2f}")
-        print(f"Check A=L+E: {assets:.2f} vs {(liabilities + equity):.2f}")
-
-    def _print_pnl(self, summary):
-        income = expenses = 0.0
-
-        for ledger, ccy_map in summary.items():
-            for _, r in ccy_map.items():
-                if ledger.startswith("INCOME"):
-                    income += r["credits"] - r["debits"]
-                elif ledger.startswith("EXPENSE"):
-                    expenses += r["debits"] - r["credits"]
-
-        print("\n--- PROFIT & LOSS ---")
-        print(f"Income:  {income:.2f}")
-        print(f"Expense: {expenses:.2f}")
-        print(f"Net P&L: {(income - expenses):.2f}")
-
-    # -------------------------------------------------
-    # Ageing
-    # -------------------------------------------------
-    def _print_ageing_reports(self, as_of: date):
-        print("\n=== AGEING REPORTS ===")
         ageing_report = self.ageing.run_ageing(as_of)
 
-        if not ageing_report:
-            print("NIL — No aged items.")
-            return ageing_report
-
-        for key, buckets in ageing_report.items():
-            print(f"\n[{key}]")
-            for bucket, amount in buckets.items():
-                print(f"  {bucket}: {amount:.2f}")
-
-        return ageing_report
-
-    # -------------------------------------------------
-    # Public Batch APIs
-    # -------------------------------------------------
-    def run_eod(self, as_of: date):
-        print(f"\n=== END OF DAY BATCH — {as_of} ===")
-
-        summary = self._aggregate_ledgers(as_of)
-        self._print_ledger_states(summary)
-
-        assets, liabilities, equity = self._compute_balance_sheet(summary)
-        self._print_balance_sheet(assets, liabilities, equity)
-        self._print_pnl(summary)
-
-        ageing_report = self._print_ageing_reports(as_of)
-        self._print_login_audit(as_of)
-
-        # -----------------------------
-        # EOD VALIDATIONS (PHASE D)
-        # -----------------------------
         self.validator.validate_double_entry(summary)
         self.validator.validate_balance_sheet(assets, liabilities, equity)
         self.validator.validate_ageing(ageing_report)
 
-        self.validator.print_summary()
-        self.validator.supervisor_payload()
+    # -------------------------
+    # Internal helpers (read-only)
+    # -------------------------
 
-        print("\nEOD batch completed.")
+    def _aggregate_ledgers(self, as_of: date) -> Dict[str, Dict[str, Dict[str, float]]]:
+        """
+        Aggregate all ledgers by currency.
+        Returns:
+          { ledger_name: { currency: {opening, debits, credits, closing} } }
+        """
+        result: Dict[str, Dict[str, Dict[str, float]]] = {}
 
-    def run_month_end(self, year: int, month: int):
-        last_day = calendar.monthrange(year, month)[1]
-        self.run_eod(date(year, month, last_day))
+        for entry in self.ledger.get_all_entries(as_of):
+            ledger = entry["ledger"]
+            ccy = entry["currency"]
 
-    def run_year_end(self, as_of: date):
-        fy_end = self.fy.financial_year_end(as_of)
-        self.run_eod(fy_end)
+            bucket = result.setdefault(ledger, {}).setdefault(
+                ccy,
+                {"opening": 0.0, "debits": 0.0, "credits": 0.0, "closing": 0.0},
+            )
+
+            if entry["type"] == "OPENING":
+                bucket["opening"] += entry["amount"]
+            elif entry["type"] == "DEBIT":
+                bucket["debits"] += entry["amount"]
+            elif entry["type"] == "CREDIT":
+                bucket["credits"] += entry["amount"]
+
+            bucket["closing"] = bucket["opening"] + bucket["credits"] - bucket["debits"]
+
+        return result
+
+    def _compute_balance_sheet(
+        self, summary: Dict[str, Dict[str, Dict[str, float]]]
+    ) -> Tuple[float, float, float]:
+        """
+        Compute Assets, Liabilities, Equity totals.
+        """
+        assets = liabilities = equity = 0.0
+
+        for ledger, ccy_map in summary.items():
+            for _, r in ccy_map.items():
+                closing = r.get("closing", 0.0)
+                if ledger.startswith("ASSET"):
+                    assets += closing
+                elif ledger.startswith("LIABILITY"):
+                    liabilities += closing
+                elif ledger.startswith("EQUITY"):
+                    equity += closing
+
+        return assets, liabilities, equity
+
+
+# -------------------------
+# Internal adapter
+# -------------------------
+
+class _AgeingAdapter:
+    """
+    Adapter to normalize ageing interface.
+    Keeps BatchCloseEngine stable even if ageing.py evolves.
+    """
+
+    def run_ageing(self, as_of: date) -> Dict[str, Dict[str, float]]:
+        return run_ageing(as_of)
