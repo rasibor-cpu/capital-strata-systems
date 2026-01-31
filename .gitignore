@@ -1,65 +1,17 @@
-# ===============================
-# Python
-# ===============================
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-
-# ===============================
-# Virtual env / secrets
-# ===============================
+# --- Environment / secrets ---
 .env
 .env.*
 !.env.example
 
-# ===============================
-# OS / editor noise
-# ===============================
+# --- Runtime outputs ---
+out/
+feeds/
+data_fx/
+
+# --- Python cache ---
+__pycache__/
+*.pyc
+
+# --- OS ---
 .DS_Store
 Thumbs.db
-.vscode/
-.idea/
-
-# ===============================
-# Runtime artifacts
-# ===============================
-artifacts/
-audit_logs/
-logs/
-output/
-reports/
-
-# ===============================
-# Generated data / CSVs
-# ===============================
-*.csv
-!sample_*.csv
-
-# ===============================
-# Scratch / temp helpers (phone experiments)
-# ===============================
-Bar
-BaseAdapter
-datetime
-float
-int
-str
-filename.ext
-_find_csv.cmd
-
-# ===============================
-# FX / MT5 / replay scratch
-# ===============================
-make_5m_csv.py
-mt5_barfeed_csv.py
-run_replay.cmd
-fx_autorun.py
-diagnose_regime_gate.py
-test_regime_gate_v2.py
-
-# ===============================
-# Safety
-# ===============================
-*.bak
-*.tmp
