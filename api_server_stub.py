@@ -1,36 +1,29 @@
 """
 api_server_stub.py — REA Capital Trading Engine (Local API Stub)
 ---------------------------------------------------------------
-Purpose:
-- Provide a local HTTP API surface for READ-ONLY queries
-- Implements the v1 contracts in api_contracts.md
-- Standard library only (no installs)
-- Safe: no posting/mutation endpoints
+READ-ONLY v1 API surface. Standard library only.
 
 Endpoints:
+- GET /health
+- GET /api/ledger/list
 - GET /api/ledger/balances?ledger=...&currency=...&as_of=YYYY-MM-DD
 - GET /api/ledger/state/eod?as_of=YYYY-MM-DD
 - GET /api/reports/ageing?as_of=YYYY-MM-DD
 - GET /api/eod/validations?as_of=YYYY-MM-DD
 - GET /api/financials?as_of=YYYY-MM-DD&period=daily|monthly|yearly
-- GET /health
 
 Notes:
-- This is a stub. It expects an adapter object with methods:
-    get_ledger_balances(ledger, currency, as_of)
-    get_eod_state(as_of)
-    get_ageing(as_of)
-    get_eod_validations(as_of)
-    get_financials(as_of, period)
-- For now, a DemoAdapter is provided so the server runs immediately.
+- Uses an Adapter interface. DemoAdapter is provided to run immediately.
+- Later we replace DemoAdapter with a RealAdapter that reads from:
+  batch_close.py, ageing.py, eod_validations.py, posting_ledger.py
 """
 
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 
 # =====================================================
@@ -38,7 +31,8 @@ from typing import Any, Dict, Optional
 # =====================================================
 
 def _utc_now() -> str:
-    return datetime.utcnow().isoformat() + "Z"
+    # Python 3.14+ safe (timezone-aware)
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _json(handler: BaseHTTPRequestHandler, status_code: int, payload: Dict[str, Any]) -> None:
@@ -68,17 +62,55 @@ def _not_found(handler: BaseHTTPRequestHandler, request_id: str) -> None:
     })
 
 
+def _get_qs(qs: Dict[str, Any], key: str) -> Optional[str]:
+    v = qs.get(key)
+    if not v:
+        return None
+    if isinstance(v, list) and len(v) > 0:
+        return str(v[0])
+    return str(v)
+
+
+# =====================================================
+# Adapter Interface (documented by behavior)
+# =====================================================
+
+class Adapter:
+    def list_ledgers(self) -> List[Dict[str, Any]]:
+        raise NotImplementedError
+
+    def get_ledger_balances(self, ledger: str, currency: str, as_of: str) -> Dict[str, Any]:
+        raise NotImplementedError
+
+    def get_eod_state(self, as_of: str) -> Dict[str, Any]:
+        raise NotImplementedError
+
+    def get_ageing(self, as_of: str) -> Dict[str, Any]:
+        raise NotImplementedError
+
+    def get_eod_validations(self, as_of: str) -> Dict[str, Any]:
+        raise NotImplementedError
+
+    def get_financials(self, as_of: str, period: str) -> Dict[str, Any]:
+        raise NotImplementedError
+
+
 # =====================================================
 # Demo Adapter (runs immediately)
 # Replace later with RealAdapter wiring to your engines.
 # =====================================================
 
-class DemoAdapter:
+class DemoAdapter(Adapter):
+    def list_ledgers(self) -> List[Dict[str, Any]]:
+        return [
+            {"ledger": "LEDGER-ACME-USD", "currency": "USD", "domain": "TREASURY"},
+            {"ledger": "LEDGER-SUSPENSE-USD", "currency": "USD", "domain": "TREASURY"},
+            {"ledger": "LEDGER-SUNDRY-USD", "currency": "USD", "domain": "TREASURY"},
+        ]
+
     def get_ledger_balances(self, ledger: str, currency: str, as_of: str) -> Dict[str, Any]:
         return {
             "status": "OK",
-            "timestamp": _utc_now(),
-            "request_id": str(uuid.uuid4()),
             "ledger": ledger,
             "currency": currency,
             "as_of": as_of,
@@ -91,8 +123,6 @@ class DemoAdapter:
     def get_eod_state(self, as_of: str) -> Dict[str, Any]:
         return {
             "status": "OK",
-            "timestamp": _utc_now(),
-            "request_id": str(uuid.uuid4()),
             "as_of": as_of,
             "ledgers": []
         }
@@ -100,8 +130,6 @@ class DemoAdapter:
     def get_ageing(self, as_of: str) -> Dict[str, Any]:
         return {
             "status": "OK",
-            "timestamp": _utc_now(),
-            "request_id": str(uuid.uuid4()),
             "as_of": as_of,
             "ageing": {}
         }
@@ -109,8 +137,6 @@ class DemoAdapter:
     def get_eod_validations(self, as_of: str) -> Dict[str, Any]:
         return {
             "status": "OK",
-            "timestamp": _utc_now(),
-            "request_id": str(uuid.uuid4()),
             "as_of": as_of,
             "breaches": []
         }
@@ -118,8 +144,6 @@ class DemoAdapter:
     def get_financials(self, as_of: str, period: str) -> Dict[str, Any]:
         return {
             "status": "OK",
-            "timestamp": _utc_now(),
-            "request_id": str(uuid.uuid4()),
             "period": period,
             "as_of": as_of,
             "balance_sheet": {"assets": 0.0, "liabilities": 0.0, "equity": 0.0},
@@ -132,7 +156,7 @@ class DemoAdapter:
 # =====================================================
 
 class APIServerHandler(BaseHTTPRequestHandler):
-    adapter = DemoAdapter()
+    adapter: Adapter = DemoAdapter()
 
     def log_message(self, format: str, *args: Any) -> None:
         # quiet default logging
@@ -154,6 +178,16 @@ class APIServerHandler(BaseHTTPRequestHandler):
                 "version": "v1"
             })
 
+        # GET /api/ledger/list
+        if path == "/api/ledger/list":
+            items = self.adapter.list_ledgers()
+            return _json(self, 200, {
+                "status": "OK",
+                "timestamp": _utc_now(),
+                "request_id": request_id,
+                "ledgers": items
+            })
+
         # GET /api/ledger/balances
         if path == "/api/ledger/balances":
             ledger = _get_qs(qs, "ledger")
@@ -161,6 +195,7 @@ class APIServerHandler(BaseHTTPRequestHandler):
             as_of = _get_qs(qs, "as_of")
             if not ledger or not currency or not as_of:
                 return _bad_request(self, request_id, "Missing required params: ledger, currency, as_of")
+
             payload = self.adapter.get_ledger_balances(ledger, currency, as_of)
             payload["request_id"] = request_id
             payload["timestamp"] = _utc_now()
@@ -171,6 +206,7 @@ class APIServerHandler(BaseHTTPRequestHandler):
             as_of = _get_qs(qs, "as_of")
             if not as_of:
                 return _bad_request(self, request_id, "Missing required param: as_of")
+
             payload = self.adapter.get_eod_state(as_of)
             payload["request_id"] = request_id
             payload["timestamp"] = _utc_now()
@@ -181,6 +217,7 @@ class APIServerHandler(BaseHTTPRequestHandler):
             as_of = _get_qs(qs, "as_of")
             if not as_of:
                 return _bad_request(self, request_id, "Missing required param: as_of")
+
             payload = self.adapter.get_ageing(as_of)
             payload["request_id"] = request_id
             payload["timestamp"] = _utc_now()
@@ -191,6 +228,7 @@ class APIServerHandler(BaseHTTPRequestHandler):
             as_of = _get_qs(qs, "as_of")
             if not as_of:
                 return _bad_request(self, request_id, "Missing required param: as_of")
+
             payload = self.adapter.get_eod_validations(as_of)
             payload["request_id"] = request_id
             payload["timestamp"] = _utc_now()
@@ -204,21 +242,13 @@ class APIServerHandler(BaseHTTPRequestHandler):
                 return _bad_request(self, request_id, "Missing required param: as_of")
             if period not in ("daily", "monthly", "yearly"):
                 return _bad_request(self, request_id, "Invalid period. Use daily|monthly|yearly")
+
             payload = self.adapter.get_financials(as_of, period)
             payload["request_id"] = request_id
             payload["timestamp"] = _utc_now()
             return _json(self, 200, payload)
 
         return _not_found(self, request_id)
-
-
-def _get_qs(qs: Dict[str, Any], key: str) -> Optional[str]:
-    v = qs.get(key)
-    if not v:
-        return None
-    if isinstance(v, list) and len(v) > 0:
-        return str(v[0])
-    return str(v)
 
 
 # =====================================================
@@ -232,6 +262,7 @@ def main() -> None:
     print(f"REA API stub running on http://{host}:{port}")
     print("Try:")
     print("  http://127.0.0.1:8080/health")
+    print("  http://127.0.0.1:8080/api/ledger/list")
     print("  http://127.0.0.1:8080/api/ledger/balances?ledger=LEDGER-ACME-USD&currency=USD&as_of=2026-01-30")
     httpd.serve_forever()
 
