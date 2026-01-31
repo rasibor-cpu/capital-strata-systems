@@ -1,26 +1,26 @@
 """
 batch_close.py — REA Capital Trading Engine
 -------------------------------------------
-Batch Close, Financial Reporting & Ageing Integration
+Batch Close, Financial Reporting, Ageing & EOD Validations
 
 Scope:
 - Daily (EOD), Month-end, Year-end batch close
 - Ledger state reporting (per ledger, per currency)
 - Balance Sheet & P&L
 - Login audit
-- Suspense / Sundry / Unsettled ageing (T+ buckets)
+- Suspense / Sundry / Unsettled ageing
+- EOD validations & escalation payload
 - Leap-year safe, FY configurable
 
-PROMPT-ONLY. No posting, no execution.
+PROMPT-ONLY. No posting. No mutation.
 """
 
 from datetime import date, timedelta
 import calendar
 from collections import defaultdict
-from typing import Dict, Any
 
-# External modules (authoritative)
 from ageing import AgeingEngine
+from eod_validations import EODValidationEngine
 
 
 # =====================================================
@@ -51,6 +51,7 @@ class BatchCloseEngine:
         self.auth = auth_controller
         self.fy = fy_config
         self.ageing = AgeingEngine(posting_ledger)
+        self.validator = EODValidationEngine()
 
     # -------------------------------------------------
     # Ledger Aggregation
@@ -124,7 +125,7 @@ class BatchCloseEngine:
     # -------------------------------------------------
     # Financial Statements
     # -------------------------------------------------
-    def _print_balance_sheet(self, summary):
+    def _compute_balance_sheet(self, summary):
         assets = liabilities = equity = 0.0
 
         for ledger, ccy_map in summary.items():
@@ -137,6 +138,9 @@ class BatchCloseEngine:
                 elif ledger.startswith("EQUITY"):
                     equity += bal
 
+        return assets, liabilities, equity
+
+    def _print_balance_sheet(self, assets, liabilities, equity):
         print("\n--- BALANCE SHEET ---")
         print(f"Assets:      {assets:.2f}")
         print(f"Liabilities: {liabilities:.2f}")
@@ -159,21 +163,22 @@ class BatchCloseEngine:
         print(f"Net P&L: {(income - expenses):.2f}")
 
     # -------------------------------------------------
-    # Ageing Integration (NEW — LOCKED)
+    # Ageing
     # -------------------------------------------------
     def _print_ageing_reports(self, as_of: date):
-        print("\n=== AGEING REPORTS (Suspense / Sundry / Unsettled) ===")
+        print("\n=== AGEING REPORTS ===")
+        ageing_report = self.ageing.run_ageing(as_of)
 
-        reports = self.ageing.run_ageing(as_of)
-
-        if not reports:
+        if not ageing_report:
             print("NIL — No aged items.")
-            return
+            return ageing_report
 
-        for key, buckets in reports.items():
+        for key, buckets in ageing_report.items():
             print(f"\n[{key}]")
             for bucket, amount in buckets.items():
                 print(f"  {bucket}: {amount:.2f}")
+
+        return ageing_report
 
     # -------------------------------------------------
     # Public Batch APIs
@@ -182,12 +187,24 @@ class BatchCloseEngine:
         print(f"\n=== END OF DAY BATCH — {as_of} ===")
 
         summary = self._aggregate_ledgers(as_of)
-
         self._print_ledger_states(summary)
-        self._print_balance_sheet(summary)
+
+        assets, liabilities, equity = self._compute_balance_sheet(summary)
+        self._print_balance_sheet(assets, liabilities, equity)
         self._print_pnl(summary)
-        self._print_ageing_reports(as_of)
+
+        ageing_report = self._print_ageing_reports(as_of)
         self._print_login_audit(as_of)
+
+        # -----------------------------
+        # EOD VALIDATIONS (PHASE D)
+        # -----------------------------
+        self.validator.validate_double_entry(summary)
+        self.validator.validate_balance_sheet(assets, liabilities, equity)
+        self.validator.validate_ageing(ageing_report)
+
+        self.validator.print_summary()
+        self.validator.supervisor_payload()
 
         print("\nEOD batch completed.")
 
