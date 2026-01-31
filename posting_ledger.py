@@ -1,17 +1,18 @@
 """
-posting_ledger.py — Customer Posting Ledger (Governance-Grade)
---------------------------------------------------------------
-Purpose:
-- Enforce onboarding: customer must exist (have customer number) before postings
-- Enforce approvals: ACCOUNT_OPEN requires at least SUPERVISOR approval
-- Support system accounts: SUSPENSE and SUNDRY
-- Record customer-related postings (DR/CR, FX, transfers, adjustments)
-- Provide full customer + ledger + transaction context for breach reporting
+posting_ledger.py — Customer Posting Ledger (Governance-Grade, Domain-Separated)
+--------------------------------------------------------------------------------
+Enhancements (LOCKED):
+- Enforce onboarding: no postings without customer number
+- ACCOUNT_OPEN requires SUPERVISOR+ approval
+- Domain-separated system accounts:
+    * TREASURY: SUSPENSE / SUNDRY
+    * TRADING:  SUSPENSE / SUNDRY
+- Backward compatibility for legacy SYS-SUSPENSE / SYS-SUNDRY IDs
+- Append-only, audit-safe
 
-Design:
-- Append-only ledger entries
-- Deterministic, in-memory (demo-grade). Production would persist.
-- No execution / no settlement
+Design intent:
+- Clean separation of operational breaks by domain
+- Regulator-friendly ageing and control reporting
 """
 
 from dataclasses import dataclass, asdict
@@ -21,7 +22,7 @@ import uuid
 
 
 # -----------------------------
-# Enums / levels (string-based)
+# Approval levels
 # -----------------------------
 APPROVAL_ORDER = {
     "AUTO": 0,
@@ -63,21 +64,22 @@ class PostingEntry:
     customer_type: str          # CUSTOMER / SYSTEM
 
     # Ledger context
-    ledger_type: str            # CUSTOMER / TREASURY / INTERNAL
+    ledger_type: str            # CUSTOMER / TREASURY / TRADING / INTERNAL
     ledger_id: str
+    domain: str                 # TREASURY / TRADING
 
     # Transaction context
     transaction_type: str       # ACCOUNT_OPEN / POSTING / TRANSFER / FX / ADJUSTMENT
     side: str                   # DR / CR
-    currency: str               # e.g. USD, NGN, EUR
+    currency: str
     notional: float
-    fx_pair: Optional[str]      # e.g. USDNGN (if FX)
+    fx_pair: Optional[str]
     price: Optional[float]
     value_date: Optional[str]
     booking_date: str
     description: str
 
-    # Approval metadata (where applicable)
+    # Approval metadata
     approved_by: Optional[str]
     approval_level: Optional[str]
 
@@ -91,16 +93,26 @@ class PostingLedger:
         self.entries: List[PostingEntry] = []
         self.customers: Dict[str, CustomerRecord] = {}
 
-        # Pre-board system accounts (required by your governance rule)
+        # Domain-separated SYSTEM accounts (authoritative)
         self._ensure_system_account(
-            customer_id="SYS-SUSPENSE",
-            customer_name="Suspense Account",
-            account_ref="SUSPENSE-001",
+            "SYS-SUSPENSE-TREASURY", "Treasury Suspense Account", "SUSP-TREAS-001"
         )
         self._ensure_system_account(
-            customer_id="SYS-SUNDRY",
-            customer_name="Sundry Account",
-            account_ref="SUNDRY-001",
+            "SYS-SUNDRY-TREASURY", "Treasury Sundry Account", "SUND-TREAS-001"
+        )
+        self._ensure_system_account(
+            "SYS-SUSPENSE-TRADING", "Trading Suspense Account", "SUSP-TRAD-001"
+        )
+        self._ensure_system_account(
+            "SYS-SUNDRY-TRADING", "Trading Sundry Account", "SUND-TRAD-001"
+        )
+
+        # Backward compatibility (legacy IDs)
+        self._ensure_system_account(
+            "SYS-SUSPENSE", "Legacy Suspense Account", "SUSP-LEGACY"
+        )
+        self._ensure_system_account(
+            "SYS-SUNDRY", "Legacy Sundry Account", "SUND-LEGACY"
         )
 
     # -------------------------
@@ -115,15 +127,9 @@ class PostingLedger:
         approval_level: str,
         customer_id: Optional[str] = None,
     ) -> CustomerRecord:
-        """
-        Opens/boards a customer onto the system and issues a customer number.
-
-        Governance:
-        - ACCOUNT_OPEN requires at least SUPERVISOR approval.
-        """
         level = (approval_level or "").upper().strip()
         if APPROVAL_ORDER.get(level, -1) < APPROVAL_ORDER["SUPERVISOR"]:
-            raise ValueError("ACCOUNT_OPEN requires at least SUPERVISOR approval_level")
+            raise ValueError("ACCOUNT_OPEN requires at least SUPERVISOR approval")
 
         cid = customer_id or f"CUST-{uuid.uuid4().hex[:8].upper()}"
         rec = CustomerRecord(
@@ -137,11 +143,12 @@ class PostingLedger:
         )
         self.customers[cid] = rec
 
-        # Record the onboarding as a ledger event (append-only)
+        # Ledger event for account opening
         self._append_entry(
             customer=rec,
             ledger_type="CUSTOMER",
             ledger_id=f"LEDGER-{account_ref}",
+            domain="TREASURY",
             transaction_type="ACCOUNT_OPEN",
             side="CR",
             currency="N/A",
@@ -156,12 +163,9 @@ class PostingLedger:
         return rec
 
     def _ensure_system_account(self, customer_id: str, customer_name: str, account_ref: str) -> None:
-        """
-        System accounts are considered pre-approved internal constructs.
-        """
         if customer_id in self.customers:
             return
-        rec = CustomerRecord(
+        self.customers[customer_id] = CustomerRecord(
             customer_id=customer_id,
             customer_name=customer_name,
             account_ref=account_ref,
@@ -170,7 +174,6 @@ class PostingLedger:
             approved_by="SYSTEM_BOOTSTRAP",
             approval_level="ADMIN",
         )
-        self.customers[customer_id] = rec
 
     def is_customer_onboarded(self, customer_id: str) -> bool:
         return customer_id in self.customers
@@ -184,6 +187,7 @@ class PostingLedger:
         customer_id: str,
         ledger_type: str,
         ledger_id: str,
+        domain: str,
         transaction_type: str,
         side: str,
         currency: str,
@@ -195,13 +199,7 @@ class PostingLedger:
         approved_by: Optional[str] = None,
         approval_level: Optional[str] = None,
     ) -> PostingEntry:
-        """
-        Posts a transaction for an onboarded customer or system account.
 
-        Governance:
-        - customer_id must exist (onboarded) BEFORE any posting is allowed.
-        - ACCOUNT_OPEN must be done via open_customer_account() (supervisor-approved).
-        """
         if not self.is_customer_onboarded(customer_id):
             raise ValueError("Customer not onboarded: customer_id must exist before postings")
 
@@ -209,12 +207,17 @@ class PostingLedger:
         if ttype == "ACCOUNT_OPEN":
             raise ValueError("Use open_customer_account() for ACCOUNT_OPEN transactions")
 
+        dom = (domain or "").upper().strip()
+        if dom not in ("TREASURY", "TRADING"):
+            raise ValueError("domain must be TREASURY or TRADING")
+
         customer = self.customers[customer_id]
 
         return self._append_entry(
             customer=customer,
             ledger_type=ledger_type,
             ledger_id=ledger_id,
+            domain=dom,
             transaction_type=ttype,
             side=side,
             currency=currency,
@@ -236,6 +239,7 @@ class PostingLedger:
         customer: CustomerRecord,
         ledger_type: str,
         ledger_id: str,
+        domain: str,
         transaction_type: str,
         side: str,
         currency: str,
@@ -247,6 +251,7 @@ class PostingLedger:
         approved_by: Optional[str],
         approval_level: Optional[str],
     ) -> PostingEntry:
+
         entry = PostingEntry(
             entry_id=str(uuid.uuid4()),
 
@@ -257,6 +262,7 @@ class PostingLedger:
 
             ledger_type=ledger_type,
             ledger_id=ledger_id,
+            domain=domain,
 
             transaction_type=transaction_type,
             side=side,
@@ -275,7 +281,7 @@ class PostingLedger:
         return entry
 
     # -------------------------
-    # Snapshot / export
+    # Snapshots
     # -------------------------
 
     def snapshot(self) -> List[Dict[str, Any]]:
