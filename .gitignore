@@ -27,3 +27,12 @@ int
 str
 Bar
 BaseAdapter
+# local scratch / dev utilities
+datetime
+diagnose_regime_gate.py
+fx_autorun.py
+make_5m_csv.py
+mt5_barfeed_csv.py
+test_regime_gate_v2.py
+postings/checker_screen_builder.py
+
