@@ -1,40 +1,65 @@
-# === REA Engine: local runtime artifacts (do NOT commit) ===
-
-# FX data / downloads
-data_fx/
-data_fx/**
-
-# Feeds / captured streams
-feeds/
-feeds/**
-
-# Outputs / logs / reports
-out/
-out/**
-logs/
-logs/**
-
-# Local MT5 / env artifacts
-*.log
-*.tmp
-*.bak
-*.swp
+# ===============================
+# Python
+# ===============================
 __pycache__/
-**/__pycache__/
 *.pyc
 *.pyo
+*.pyd
 
-# Local CSVs (keep samples only if explicitly promoted)
-*.csv
+# ===============================
+# Virtual env / secrets
+# ===============================
+.env
+.env.*
+!.env.example
 
-# OS / editor
+# ===============================
+# OS / editor noise
+# ===============================
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
 
-# Python virtualenvs
-.venv/
-venv/
-ENV/
-env/
+# ===============================
+# Runtime artifacts
+# ===============================
+artifacts/
+audit_logs/
+logs/
+output/
+reports/
+
+# ===============================
+# Generated data / CSVs
+# ===============================
+*.csv
+!sample_*.csv
+
+# ===============================
+# Scratch / temp helpers (phone experiments)
+# ===============================
+Bar
+BaseAdapter
+datetime
+float
+int
+str
+filename.ext
+_find_csv.cmd
+
+# ===============================
+# FX / MT5 / replay scratch
+# ===============================
+make_5m_csv.py
+mt5_barfeed_csv.py
+run_replay.cmd
+fx_autorun.py
+diagnose_regime_gate.py
+test_regime_gate_v2.py
+
+# ===============================
+# Safety
+# ===============================
+*.bak
+*.tmp
