@@ -7,10 +7,15 @@ Purpose:
 - Optionally simulates fills (dry-run)
 - Emits prompt + ledger snapshot
 - NO execution, NO broker calls, NO auto-risk escalation
+
+Compatibility:
+- Supports RegimeGate.evaluate returning either:
+  (a) tuple: (allowed: bool, regime_label: str|None)
+  (b) object: RegimeResult with fields like .allowed / .regime_label / .label / .regime
 """
 
-from typing import Dict, Any, Optional
-from datetime import datetime
+from typing import Dict, Any, Optional, Tuple
+from datetime import datetime, timezone
 
 # Optional imports (graceful fallbacks)
 try:
@@ -29,6 +34,40 @@ except Exception:
     normalize_prompt = None
 
 from ledger import TradeLedger
+
+
+def _parse_regime_result(result: Any) -> Tuple[bool, Optional[str]]:
+    """
+    Normalize RegimeGate.evaluate output to (allowed, regime_label).
+
+    Supports:
+    - (allowed, label) tuples
+    - RegimeResult-like objects with common attribute names
+    """
+    # Tuple/list style
+    if isinstance(result, (tuple, list)) and len(result) >= 1:
+        allowed = bool(result[0])
+        label = None
+        if len(result) >= 2:
+            label = result[1]
+        return allowed, label
+
+    # Object style
+    # Common attribute candidates
+    allowed = getattr(result, "allowed", None)
+    if allowed is None:
+        allowed = getattr(result, "is_allowed", None)
+    if allowed is None:
+        # Conservative default if unknown: block
+        allowed = False
+
+    label = getattr(result, "regime_label", None)
+    if label is None:
+        label = getattr(result, "label", None)
+    if label is None:
+        label = getattr(result, "regime", None)
+
+    return bool(allowed), label
 
 
 class EngineLoop:
@@ -62,7 +101,7 @@ class EngineLoop:
 
         diagnostics: Dict[str, Any] = {
             "symbol": symbol,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "bars_available": bars_available,
             "regime_allowed": False,
             "prompt_generated": False,
@@ -78,9 +117,16 @@ class EngineLoop:
         # 2. Regime gate
         regime_label: Optional[str] = None
         if self.regime_gate:
-            allowed, regime_label = self.regime_gate.evaluate(market_context)
+            as_of_utc = diagnostics["timestamp"]
+            raw_result = self.regime_gate.evaluate(market_context, as_of_utc)
+
+            allowed, regime_label = _parse_regime_result(raw_result)
+
             diagnostics["regime_allowed"] = allowed
             diagnostics["regime"] = regime_label
+            diagnostics["regime_raw_type"] = type(raw_result).__name__
+
+            # Conservative block if not allowed
             if not allowed:
                 diagnostics["blocked_reason"] = "REGIME_BLOCK"
                 return diagnostics
