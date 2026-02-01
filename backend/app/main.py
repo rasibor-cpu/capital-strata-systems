@@ -8,43 +8,22 @@ HARD CONSTRAINTS (ENFORCED):
 - NO auto-risk escalation
 - Prompt / diagnostics / routing ONLY
 
-Architecture (Phase 12.3):
-- main.py is a thin orchestration gateway
+Architecture:
+- main.py is thin orchestration gateway
 - screen handlers live under backend/app/screens/
 - screen taxonomy is authoritative
+- contracts are centralized in orchestrator_contracts.py
 """
 
-from typing import Dict, Callable, Any, Optional
-from dataclasses import dataclass
-import datetime
-
+from typing import Dict, Callable
 from .screen_taxonomy import SCREEN_INDEX, list_screen_ids
+from .orchestrator_contracts import ScreenRequest, ScreenResponse
+
 from .screens.core import (
     health_check_handler,
     diagnostics_handler,
     screen_index_handler,
 )
-
-
-# ---------------------------------------------------------------------
-# Screen Request / Response Contracts
-# ---------------------------------------------------------------------
-
-@dataclass
-class ScreenRequest:
-    screen_id: str
-    action: str
-    payload: Dict[str, Any]
-    user_id: Optional[str] = None
-    timestamp: datetime.datetime = datetime.datetime.utcnow()
-
-
-@dataclass
-class ScreenResponse:
-    screen_id: str
-    status: str
-    message: str
-    data: Dict[str, Any]
 
 
 # ---------------------------------------------------------------------
@@ -63,7 +42,6 @@ class ScreenRegistry:
         self._registry[screen_id] = handler
 
     def registry_map(self) -> Dict[str, bool]:
-        """Return {screen_id: registered_bool} across the full taxonomy."""
         return {sid: (sid in self._registry) for sid in list_screen_ids()}
 
     def dispatch(self, request: ScreenRequest) -> ScreenResponse:
@@ -95,17 +73,32 @@ SCREEN_REGISTRY = ScreenRegistry()
 
 def health_check_screen(request: ScreenRequest) -> ScreenResponse:
     data = health_check_handler(SCREEN_REGISTRY.registry_map())
-    return ScreenResponse(screen_id=request.screen_id, status="ok", message="Backend orchestration online", data=data)
+    return ScreenResponse(
+        screen_id=request.screen_id,
+        status="ok",
+        message="Backend orchestration online",
+        data=data,
+    )
 
 
 def diagnostics_screen(request: ScreenRequest) -> ScreenResponse:
     data = diagnostics_handler(request.action, request.payload, request.screen_id)
-    return ScreenResponse(screen_id=request.screen_id, status="ok", message="Diagnostics endpoint", data=data)
+    return ScreenResponse(
+        screen_id=request.screen_id,
+        status="ok",
+        message="Diagnostics endpoint",
+        data=data,
+    )
 
 
 def screen_index_screen(request: ScreenRequest) -> ScreenResponse:
     data = screen_index_handler(SCREEN_REGISTRY.registry_map())
-    return ScreenResponse(screen_id=request.screen_id, status="ok", message="Screen index", data=data)
+    return ScreenResponse(
+        screen_id=request.screen_id,
+        status="ok",
+        message="Screen index",
+        data=data,
+    )
 
 
 # ---------------------------------------------------------------------
@@ -121,12 +114,7 @@ SCREEN_REGISTRY.register("screen_index", screen_index_screen)
 # Orchestration Entry Function
 # ---------------------------------------------------------------------
 
-def handle_screen_request(
-    screen_id: str,
-    action: str,
-    payload: Dict[str, Any],
-    user_id: Optional[str] = None,
-) -> ScreenResponse:
+def handle_screen_request(screen_id: str, action: str, payload: dict, user_id: str | None = None) -> ScreenResponse:
     request = ScreenRequest(
         screen_id=screen_id,
         action=action,
