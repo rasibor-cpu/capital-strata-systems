@@ -1,6 +1,7 @@
 """
 REA Capital Trading Engine
 Phase 12 — Screen & UI Orchestration (Backend Entry Point)
+Phase 13.2 — Posting screens registered as safe placeholders
 
 HARD CONSTRAINTS (ENFORCED):
 - NO trade execution
@@ -13,9 +14,6 @@ Architecture:
 - screen handlers live under backend/app/screens/
 - screen taxonomy is authoritative
 - contracts are centralized in orchestrator_contracts.py
-
-Phase 12.5 enhancement:
-- Pre-wire taxonomy-defined screens as safe placeholders (not implemented).
 """
 
 from typing import Dict, Callable
@@ -106,9 +104,6 @@ def screen_index_screen(request: ScreenRequest) -> ScreenResponse:
 
 
 def placeholder_screen(request: ScreenRequest) -> ScreenResponse:
-    """
-    Generic handler for screens defined in taxonomy but not implemented yet.
-    """
     data = not_implemented_payload(request.screen_id, request.action)
     return ScreenResponse(
         screen_id=request.screen_id,
@@ -132,6 +127,12 @@ SCREEN_REGISTRY.register("engine_replay_runner", placeholder_screen)
 SCREEN_REGISTRY.register("risk_override_review", placeholder_screen)
 SCREEN_REGISTRY.register("reports_center", placeholder_screen)
 
+# Phase 13 — Posting screens (placeholder now; implement next)
+SCREEN_REGISTRY.register("posting_entry", placeholder_screen)
+SCREEN_REGISTRY.register("posting_review", placeholder_screen)
+SCREEN_REGISTRY.register("posting_approval", placeholder_screen)
+SCREEN_REGISTRY.register("posting_result", placeholder_screen)
+
 
 # ---------------------------------------------------------------------
 # Orchestration Entry Function
@@ -154,5 +155,5 @@ def handle_screen_request(screen_id: str, action: str, payload: dict, user_id: s
 if __name__ == "__main__":
     print(handle_screen_request("health_check", "ping", {}))
     print(handle_screen_request("screen_index", "list", {}))
-    print(handle_screen_request("engine_replay_runner", "start", {"source": "csv"}))
+    print(handle_screen_request("posting_entry", "open", {}))
     print(handle_screen_request("unknown_screen", "noop", {}))
