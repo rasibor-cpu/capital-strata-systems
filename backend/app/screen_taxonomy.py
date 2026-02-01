@@ -1,9 +1,10 @@
 """
 REA Capital Trading Engine
-Phase 12.2 — Screen Taxonomy & Deterministic Screen IDs
+Phase 12.2+ — Screen Taxonomy & Deterministic Screen IDs
+Phase 13.1 — Posting Screens added
 
 Purpose
-- Provide a single source of truth for screen identifiers.
+- Single source of truth for screen identifiers.
 - Enforce deterministic naming across UI surfaces (web/admin/ops/mobile/cli).
 - Prevent "stringly-typed" screen routing chaos.
 
@@ -31,6 +32,7 @@ DOMAIN = {
     "risk": "risk controls and governance",
     "reporting": "reports and exports",
     "admin": "system administration",
+    "posting": "maker-checker posting, approvals, tickets, ledger posting",
 }
 
 # Screen categories (how the screen behaves)
@@ -58,7 +60,9 @@ class ScreenDef:
 
 
 SCREENS: List[ScreenDef] = [
-    # Core
+    # -------------------------
+    # Core / Ops (implemented)
+    # -------------------------
     ScreenDef(
         screen_id="health_check",
         domain="core",
@@ -66,8 +70,6 @@ SCREENS: List[ScreenDef] = [
         title="Health Check",
         description="Sanity check that orchestration is online (prompt-only).",
     ),
-
-    # Ops / Diagnostics
     ScreenDef(
         screen_id="diagnostics",
         domain="ops",
@@ -75,8 +77,6 @@ SCREENS: List[ScreenDef] = [
         title="Diagnostics Console",
         description="Basic diagnostics and request echo for troubleshooting.",
     ),
-
-    # Future Phase 12.x (pre-declared to stabilize IDs early)
     ScreenDef(
         screen_id="screen_index",
         domain="core",
@@ -84,6 +84,11 @@ SCREENS: List[ScreenDef] = [
         title="Screen Index",
         description="List and search all registered screens (admin/dev use).",
     ),
+
+    # -------------------------
+    # Engine / Risk / Reporting
+    # (taxonomy-stable IDs)
+    # -------------------------
     ScreenDef(
         screen_id="engine_replay_runner",
         domain="engine",
@@ -104,6 +109,39 @@ SCREENS: List[ScreenDef] = [
         category="report",
         title="Reports Center",
         description="Generate and export system reports (EOD/monthly/year-end).",
+    ),
+
+    # -------------------------
+    # Phase 13 — Posting Screens
+    # (maker-checker flow)
+    # -------------------------
+    ScreenDef(
+        screen_id="posting_entry",
+        domain="posting",
+        category="form",
+        title="Posting Entry",
+        description="Maker creates a posting ticket (no execution; draft/pending only).",
+    ),
+    ScreenDef(
+        screen_id="posting_review",
+        domain="posting",
+        category="viewer",
+        title="Posting Review",
+        description="Read-only review of a posting ticket prior to approval.",
+    ),
+    ScreenDef(
+        screen_id="posting_approval",
+        domain="posting",
+        category="wizard",
+        title="Posting Approval",
+        description="Checker approves/rejects/returns posting ticket (no ledger write yet).",
+    ),
+    ScreenDef(
+        screen_id="posting_result",
+        domain="posting",
+        category="viewer",
+        title="Posting Result",
+        description="Shows outcome, approvals, and audit trail for a ticket.",
     ),
 ]
 
