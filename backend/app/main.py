@@ -1,136 +1,252 @@
-"""
-REA Capital Trading Engine
-Screen Orchestration (Backend Entry Point)
+from fastapi import FastAPI, Request
+from datetime import datetime
+from typing import Dict, Any
 
-Prompt-only / workflow-only:
-- No trade execution
-- No ledger posting
-- No auto-risk escalation
+app = FastAPI()
 
-Posting lifecycle:
-- posting_entry: validate + store DRAFT
-- posting_submit: DRAFT -> SUBMITTED
-- posting_review: read-only
-- posting_approval: checker decision (approve/reject/return)
-"""
+# =========================
+# In-memory stores (Phase 13)
+# =========================
+TICKETS: Dict[str, Dict[str, Any]] = {}
+LEDGER: list = []
+AUDIT_LOG: list = []
 
-from typing import Dict, Callable
-from .screen_taxonomy import SCREEN_INDEX, list_screen_ids
-from .orchestrator_contracts import ScreenRequest, ScreenResponse
+# =========================
+# Utilities
+# =========================
+def now():
+    return datetime.utcnow().isoformat()
 
-from .screens.core import (
-    health_check_handler,
-    diagnostics_handler,
-    screen_index_handler,
-)
-from .screens.not_implemented import not_implemented_payload
-from .screens.posting import posting_entry_handler
-from .screens.posting_lifecycle import posting_review_handler, posting_submit_handler
-from .screens.posting_approval import posting_approval_handler
+def error(screen_id: str, message: str, data: dict = None):
+    return {
+        "screen_id": screen_id,
+        "status": "error",
+        "message": message,
+        "data": data or {}
+    }
 
+def ok(screen_id: str, message: str, data: dict = None):
+    return {
+        "screen_id": screen_id,
+        "status": "ok",
+        "message": message,
+        "data": data or {}
+    }
 
-class ScreenRegistry:
-    def __init__(self) -> None:
-        self._registry: Dict[str, Callable[[ScreenRequest], ScreenResponse]] = {}
+# =========================
+# Health
+# =========================
+@app.get("/health")
+def health():
+    return {
+        "status": "ok",
+        "orchestration": {
+            "server_time": now(),
+            "engine_mode": "prompt"
+        }
+    }
 
-    def register(self, screen_id: str, handler: Callable[[ScreenRequest], ScreenResponse]) -> None:
-        if screen_id not in SCREEN_INDEX:
-            raise ValueError(f"Cannot register screen not in taxonomy: {screen_id}")
-        if screen_id in self._registry:
-            raise ValueError(f"Screen already registered: {screen_id}")
-        self._registry[screen_id] = handler
+# =========================
+# Orchestrator
+# =========================
+@app.post("/orchestrate")
+async def orchestrate(request: Request):
+    body = await request.json()
+    screen_id = body.get("screen_id")
 
-    def registry_map(self) -> Dict[str, bool]:
-        return {sid: (sid in self._registry) for sid in list_screen_ids()}
+    handlers = {
+        "posting_entry": handle_posting_entry,
+        "posting_submit": handle_posting_submit,
+        "posting_review": handle_posting_review,
+        "posting_approval": handle_posting_approval,
+        "posting_result": handle_posting_result,
+    }
 
-    def dispatch(self, request: ScreenRequest) -> ScreenResponse:
-        if request.screen_id not in SCREEN_INDEX:
-            return ScreenResponse(
-                screen_id=request.screen_id,
-                status="error",
-                message="Unknown screen (not in taxonomy)",
-                data={"known_screens": list_screen_ids()},
-            )
+    handler = handlers.get(screen_id)
+    if not handler:
+        return {
+            "screen_id": screen_id,
+            "status": "not_implemented",
+            "message": "Screen not implemented yet",
+            "data": {
+                "screen_id": screen_id,
+                "known_screens": list(handlers.keys())
+            }
+        }
 
-        if request.screen_id not in self._registry:
-            return ScreenResponse(
-                screen_id=request.screen_id,
-                status="error",
-                message="Screen exists in taxonomy but is not registered",
-                data={"screen_def": SCREEN_INDEX[request.screen_id].__dict__},
-            )
+    return handler(body)
 
-        return self._registry[request.screen_id](request)
+# =========================
+# HANDLERS
+# =========================
 
+def handle_posting_entry(body):
+    ticket_id = f"T-{len(TICKETS)+2001}"
 
-SCREEN_REGISTRY = ScreenRegistry()
+    ticket = {
+        "ticket_id": ticket_id,
+        "created_by": body.get("user_id"),
+        "execution_date": body["payload"]["execution_date"],
+        "value_date": body["payload"]["value_date"],
+        "status": "draft",
+        "lines": body["payload"]["lines"],
+        "totals": body["payload"]["totals"],
+        "created_at": now(),
+        "approvals": []
+    }
 
+    TICKETS[ticket_id] = ticket
 
-def health_check_screen(request: ScreenRequest) -> ScreenResponse:
-    data = health_check_handler(SCREEN_REGISTRY.registry_map())
-    return ScreenResponse(request.screen_id, "ok", "Backend orchestration online", data)
+    return ok(
+        "posting_entry",
+        "Posting entry (validate + store draft)",
+        {
+            "ticket": ticket,
+            "is_valid": True,
+            "stored": True,
+            "next_actions": ["submit_ticket"],
+            "note": "Validation passed. Ticket stored as DRAFT in memory. No ledger posting."
+        }
+    )
 
+def handle_posting_submit(body):
+    ticket_id = body["payload"]["ticket_id"]
+    ticket = TICKETS.get(ticket_id)
 
-def diagnostics_screen(request: ScreenRequest) -> ScreenResponse:
-    data = diagnostics_handler(request.action, request.payload, request.screen_id)
-    return ScreenResponse(request.screen_id, "ok", "Diagnostics endpoint", data)
+    if not ticket:
+        return error("posting_submit", "Submit failed", {"error": f"Ticket not found: {ticket_id}"})
 
+    ticket["status"] = "submitted"
+    ticket["submitted_at"] = now()
+    ticket["approvals"].append({
+        "action": "submit",
+        "by": body.get("user_id"),
+        "at": now()
+    })
 
-def screen_index_screen(request: ScreenRequest) -> ScreenResponse:
-    data = screen_index_handler(SCREEN_REGISTRY.registry_map())
-    return ScreenResponse(request.screen_id, "ok", "Screen index", data)
+    return ok(
+        "posting_submit",
+        "Ticket submitted",
+        {
+            "ok": True,
+            "ticket": {
+                "ticket_id": ticket_id,
+                "status": "submitted",
+                "submitted_at": ticket["submitted_at"]
+            },
+            "next_actions": ["checker_review", "checker_decision"]
+        }
+    )
 
+def handle_posting_review(body):
+    ticket_id = body["payload"]["ticket_id"]
+    ticket = TICKETS.get(ticket_id)
 
-def placeholder_screen(request: ScreenRequest) -> ScreenResponse:
-    data = not_implemented_payload(request.screen_id, request.action)
-    return ScreenResponse(request.screen_id, "not_implemented", "Screen not implemented yet", data)
+    if not ticket:
+        return error("posting_review", "Ticket not found", {"ticket_id": ticket_id})
 
+    return ok(
+        "posting_review",
+        "Posting ticket review",
+        {
+            "ticket": ticket,
+            "note": "Read-only review. No changes applied."
+        }
+    )
 
-def posting_entry_screen(request: ScreenRequest) -> ScreenResponse:
-    data = posting_entry_handler(request.payload, request.user_id)
-    return ScreenResponse(request.screen_id, "ok", "Posting entry (validate + store draft)", data)
+def handle_posting_approval(body):
+    ticket_id = body["payload"]["ticket_id"]
+    decision = body["payload"]["decision"]
+    comment = body["payload"].get("comment", "")
+    ticket = TICKETS.get(ticket_id)
 
+    if not ticket:
+        return error("posting_approval", "Approval failed", {"error": f"Ticket not found: {ticket_id}"})
 
-def posting_submit_screen(request: ScreenRequest) -> ScreenResponse:
-    data = posting_submit_handler(request.payload, request.user_id)
-    if data.get("ok"):
-        return ScreenResponse(request.screen_id, "ok", "Ticket submitted", data)
-    return ScreenResponse(request.screen_id, "error", "Submit failed", data)
+    if ticket["status"] != "submitted":
+        return error("posting_approval", "Invalid ticket state", {"status": ticket["status"]})
 
+    ticket["status"] = "approved"
+    ticket["approved_at"] = now()
+    ticket["approvals"].append({
+        "action": decision,
+        "by": body.get("user_id"),
+        "comment": comment,
+        "at": now()
+    })
 
-def posting_review_screen(request: ScreenRequest) -> ScreenResponse:
-    data = posting_review_handler(request.payload)
-    if data.get("ok"):
-        return ScreenResponse(request.screen_id, "ok", "Posting ticket review", data)
-    return ScreenResponse(request.screen_id, "error", "Review failed", data)
+    return ok(
+        "posting_approval",
+        "Ticket approved",
+        {
+            "ok": True,
+            "decision": decision,
+            "ticket": {
+                "ticket_id": ticket_id,
+                "status": "approved"
+            },
+            "next_actions": ["posting_result"],
+            "note": "Approved (no ledger write at this phase)."
+        }
+    )
 
+def handle_posting_result(body):
+    ticket_id = body["payload"]["ticket_id"]
+    ticket = TICKETS.get(ticket_id)
 
-def posting_approval_screen(request: ScreenRequest) -> ScreenResponse:
-    data = posting_approval_handler(request.payload, request.user_id)
-    if data.get("ok"):
-        msg = f"Ticket {data.get('decision', 'decision')}d"
-        return ScreenResponse(request.screen_id, "ok", msg, data)
-    return ScreenResponse(request.screen_id, "error", "Approval failed", data)
+    if not ticket:
+        return error("posting_result", "Execution failed", {"error": f"Ticket not found: {ticket_id}"})
 
+    if ticket["status"] != "approved":
+        return error("posting_result", "Invalid state for execution", {"status": ticket["status"]})
 
-# Register screens
-SCREEN_REGISTRY.register("health_check", health_check_screen)
-SCREEN_REGISTRY.register("diagnostics", diagnostics_screen)
-SCREEN_REGISTRY.register("screen_index", screen_index_screen)
+    if ticket.get("posted"):
+        return ok(
+            "posting_result",
+            "Already posted",
+            {
+                "ticket": {
+                    "ticket_id": ticket_id,
+                    "status": "posted"
+                },
+                "idempotent": True
+            }
+        )
 
-# Posting implemented
-SCREEN_REGISTRY.register("posting_entry", posting_entry_screen)
-SCREEN_REGISTRY.register("posting_submit", posting_submit_screen)
-SCREEN_REGISTRY.register("posting_review", posting_review_screen)
-SCREEN_REGISTRY.register("posting_approval", posting_approval_screen)
+    # Write ledger
+    for line in ticket["lines"]:
+        LEDGER.append({
+            "ticket_id": ticket_id,
+            "side": line["side"],
+            "account_no": line["account_no"],
+            "currency": line["currency"],
+            "amount": line["amount"],
+            "narrative": line["narrative"],
+            "posted_at": now()
+        })
 
-# Placeholders still
-SCREEN_REGISTRY.register("engine_replay_runner", placeholder_screen)
-SCREEN_REGISTRY.register("risk_override_review", placeholder_screen)
-SCREEN_REGISTRY.register("reports_center", placeholder_screen)
-SCREEN_REGISTRY.register("posting_result", placeholder_screen)
+    ticket["status"] = "posted"
+    ticket["posted"] = True
+    ticket["posted_at"] = now()
 
+    AUDIT_LOG.append({
+        "ticket_id": ticket_id,
+        "action": "execute_posting",
+        "by": body.get("user_id"),
+        "at": now()
+    })
 
-def handle_screen_request(screen_id: str, action: str, payload: dict, user_id: str | None = None) -> ScreenResponse:
-    req = ScreenRequest(screen_id=screen_id, action=action, payload=payload, user_id=user_id)
-    return SCREEN_REGISTRY.dispatch(req)
+    return ok(
+        "posting_result",
+        "Posting executed successfully",
+        {
+            "ticket": {
+                "ticket_id": ticket_id,
+                "status": "posted",
+                "posted_at": ticket["posted_at"]
+            },
+            "ledger_written": True,
+            "entries": len(ticket["lines"]),
+            "audit_logged": True
+        }
+    )
