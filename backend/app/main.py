@@ -1,7 +1,6 @@
 """
 REA Capital Trading Engine
-Phase 12 — Screen & UI Orchestration (Backend Entry Point)
-Phase 13.3 — posting_entry implemented (validation-only)
+Screen Orchestration (Backend Entry Point)
 
 HARD CONSTRAINTS (ENFORCED):
 - NO trade execution
@@ -14,6 +13,12 @@ Architecture:
 - screen handlers live under backend/app/screens/
 - screen taxonomy is authoritative
 - contracts are centralized in orchestrator_contracts.py
+
+Posting (Phase 13):
+- posting_entry: validate + store DRAFT
+- posting_submit: DRAFT -> SUBMITTED
+- posting_review: read-only ticket view
+- posting_approval/result remain placeholders (next)
 """
 
 from typing import Dict, Callable
@@ -27,6 +32,7 @@ from .screens.core import (
 )
 from .screens.not_implemented import not_implemented_payload
 from .screens.posting import posting_entry_handler
+from .screens.posting_lifecycle import posting_review_handler, posting_submit_handler
 
 
 # ---------------------------------------------------------------------
@@ -119,7 +125,41 @@ def posting_entry_screen(request: ScreenRequest) -> ScreenResponse:
     return ScreenResponse(
         screen_id=request.screen_id,
         status="ok",
-        message="Posting entry validation",
+        message="Posting entry (validate + store draft)",
+        data=data,
+    )
+
+
+def posting_submit_screen(request: ScreenRequest) -> ScreenResponse:
+    data = posting_submit_handler(request.payload, request.user_id)
+    if data.get("ok"):
+        return ScreenResponse(
+            screen_id=request.screen_id,
+            status="ok",
+            message="Ticket submitted",
+            data=data,
+        )
+    return ScreenResponse(
+        screen_id=request.screen_id,
+        status="error",
+        message="Submit failed",
+        data=data,
+    )
+
+
+def posting_review_screen(request: ScreenRequest) -> ScreenResponse:
+    data = posting_review_handler(request.payload)
+    if data.get("ok"):
+        return ScreenResponse(
+            screen_id=request.screen_id,
+            status="ok",
+            message="Posting ticket review",
+            data=data,
+        )
+    return ScreenResponse(
+        screen_id=request.screen_id,
+        status="error",
+        message="Review failed",
         data=data,
     )
 
@@ -133,16 +173,17 @@ SCREEN_REGISTRY.register("health_check", health_check_screen)
 SCREEN_REGISTRY.register("diagnostics", diagnostics_screen)
 SCREEN_REGISTRY.register("screen_index", screen_index_screen)
 
-# Phase 13 implemented (validation-only)
-SCREEN_REGISTRY.register("posting_entry", posting_entry_screen)
-
-# Placeholder (taxonomy-defined, not implemented yet)
+# Engine/Risk/Reporting placeholders
 SCREEN_REGISTRY.register("engine_replay_runner", placeholder_screen)
 SCREEN_REGISTRY.register("risk_override_review", placeholder_screen)
 SCREEN_REGISTRY.register("reports_center", placeholder_screen)
 
-# Phase 13 — Posting screens (placeholder until implemented)
-SCREEN_REGISTRY.register("posting_review", placeholder_screen)
+# Posting screens (implemented)
+SCREEN_REGISTRY.register("posting_entry", posting_entry_screen)
+SCREEN_REGISTRY.register("posting_submit", posting_submit_screen)
+SCREEN_REGISTRY.register("posting_review", posting_review_screen)
+
+# Posting placeholders (next)
 SCREEN_REGISTRY.register("posting_approval", placeholder_screen)
 SCREEN_REGISTRY.register("posting_result", placeholder_screen)
 

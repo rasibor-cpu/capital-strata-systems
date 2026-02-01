@@ -1,7 +1,6 @@
 """
 REA Capital Trading Engine
-Phase 12.2+ — Screen Taxonomy & Deterministic Screen IDs
-Phase 13.1 — Posting Screens added
+Screen Taxonomy & Deterministic Screen IDs
 
 Purpose
 - Single source of truth for screen identifiers.
@@ -23,7 +22,6 @@ from typing import Dict, List
 # Taxonomy dimensions
 # ---------------------------------------------------------------------
 
-# Domain areas (what business/system area the screen belongs to)
 DOMAIN = {
     "core": "core platform screens",
     "auth": "user access and security",
@@ -35,7 +33,6 @@ DOMAIN = {
     "posting": "maker-checker posting, approvals, tickets, ledger posting",
 }
 
-# Screen categories (how the screen behaves)
 CATEGORY = {
     "dashboard": "overview / summary",
     "form": "data entry or configuration",
@@ -61,7 +58,7 @@ class ScreenDef:
 
 SCREENS: List[ScreenDef] = [
     # -------------------------
-    # Core / Ops (implemented)
+    # Core / Ops
     # -------------------------
     ScreenDef(
         screen_id="health_check",
@@ -87,7 +84,6 @@ SCREENS: List[ScreenDef] = [
 
     # -------------------------
     # Engine / Risk / Reporting
-    # (taxonomy-stable IDs)
     # -------------------------
     ScreenDef(
         screen_id="engine_replay_runner",
@@ -112,15 +108,21 @@ SCREENS: List[ScreenDef] = [
     ),
 
     # -------------------------
-    # Phase 13 — Posting Screens
-    # (maker-checker flow)
+    # Posting (Maker-Checker)
     # -------------------------
     ScreenDef(
         screen_id="posting_entry",
         domain="posting",
         category="form",
         title="Posting Entry",
-        description="Maker creates a posting ticket (no execution; draft/pending only).",
+        description="Maker creates a posting ticket (draft; validation + store).",
+    ),
+    ScreenDef(
+        screen_id="posting_submit",
+        domain="posting",
+        category="wizard",
+        title="Posting Submit",
+        description="Maker submits DRAFT ticket for checker review (DRAFT -> SUBMITTED).",
     ),
     ScreenDef(
         screen_id="posting_review",
@@ -147,7 +149,7 @@ SCREENS: List[ScreenDef] = [
 
 
 # ---------------------------------------------------------------------
-# Validation helpers (used in main orchestration)
+# Validation helpers
 # ---------------------------------------------------------------------
 
 def build_screen_index() -> Dict[str, ScreenDef]:
