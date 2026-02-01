@@ -1,264 +1,223 @@
-from fastapi import FastAPI, Request
-from datetime import datetime
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any
+from datetime import date
+from fastapi import Request
 
-from .ledger_registry import (
-    post_journal_entry,
-    get_full_journal,
-    get_all_balances_for_customer,
+from backend.app.ticket_store import (
+    create_or_update_ticket,
+    get_ticket,
+    update_ticket_status,
 )
 
-app = FastAPI(title="REA Capital Trading Engine")
+from backend.app.posting_store import (
+    validate_posting_lines,
+)
 
-# -----------------------------
-# In-memory ticket store
-# -----------------------------
-TICKETS: Dict[str, Dict[str, Any]] = {}
-_TICKET_SEQ = 5000
+from backend.app.journal import post_to_journal
 
+from backend.app.credit_limits import evaluate_credit_position
 
-def _now() -> str:
-    return datetime.utcnow().isoformat()
+from backend.app.reporting_store import (
+    get_journal_entries_for_year,
+)
 
+# -------------------------------
+# Core Orchestrator
+# -------------------------------
 
-def _new_ticket_id() -> str:
-    global _TICKET_SEQ
-    _TICKET_SEQ += 1
-    return f"T-{_TICKET_SEQ}"
-
-
-def ok(screen_id: str, message: str, data: Optional[dict] = None) -> Dict[str, Any]:
-    return {"screen_id": screen_id, "status": "ok", "message": message, "data": data or {}}
-
-
-def error(screen_id: str, message: str, data: Optional[dict] = None) -> Dict[str, Any]:
-    return {"screen_id": screen_id, "status": "error", "message": message, "data": data or {}}
-
-
-@app.get("/health")
-def health():
-    return {"status": "ok"}
-
-
-@app.post("/orchestrate")
-async def orchestrate(request: Request):
+async def orchestrate(request: Request) -> Dict[str, Any]:
     body = await request.json()
-
     screen_id = body.get("screen_id")
     action = body.get("action")
-    payload = body.get("payload", {}) or {}
-    user_id = body.get("user_id") or "anonymous"
+    payload = body.get("payload", {})
+    user_id = body.get("user_id", "unknown")
+
+    if screen_id == "health":
+        return ok("health", "Service healthy")
 
     if screen_id == "posting_entry":
-        return handle_posting_entry(payload, user_id, action)
+        return handle_posting_entry(payload, user_id)
 
     if screen_id == "posting_submit":
-        return handle_posting_submit(payload, user_id, action)
+        return handle_posting_submit(payload, user_id)
 
     if screen_id == "posting_approval":
-        return handle_posting_approval(payload, user_id, action)
+        return handle_posting_approval(payload, user_id)
 
     if screen_id == "posting_result":
-        return handle_posting_result(payload, user_id, action)
+        return handle_posting_execution(payload, user_id)
 
-    # NEW: reporting screens (read-only)
     if screen_id == "ledger_journal":
-        return handle_ledger_journal(payload, user_id, action)
+        return handle_ledger_journal(payload)
 
-    if screen_id == "customer_balances":
-        return handle_customer_balances(payload, user_id, action)
-
-    return {
-        "screen_id": screen_id,
-        "status": "not_implemented",
-        "message": "Screen not implemented",
-        "data": {"known_screens": ["posting_entry", "posting_submit", "posting_approval", "posting_result",
-                                  "ledger_journal", "customer_balances"]},
-    }
+    return error(screen_id, "Unknown screen_id")
 
 
-# -----------------------------
-# Handlers: posting lifecycle
-# -----------------------------
+# -------------------------------
+# Posting Entry (Maker)
+# -------------------------------
 
-def handle_posting_entry(payload: Dict[str, Any], user_id: str, action: Optional[str]):
-    lines = payload.get("lines", [])
-    if not isinstance(lines, list) or len(lines) < 2:
-        return error("posting_entry", "Validation failed", {"ok": False, "error": "lines must be a list with >= 2 legs"})
+def handle_posting_entry(payload: Dict[str, Any], user_id: str):
+    validate_posting_lines(payload["lines"])
 
-    dr = sum(float(l.get("amount", 0)) for l in lines if str(l.get("side", "")).upper() == "DR")
-    cr = sum(float(l.get("amount", 0)) for l in lines if str(l.get("side", "")).upper() == "CR")
-    if abs(dr - cr) > 1e-9:
-        return error("posting_entry", "Validation failed", {"ok": False, "error": f"Not balanced (DR={dr}, CR={cr})"})
-
-    ticket_id = str(payload.get("ticket_id") or _new_ticket_id()).strip()
-    if ticket_id in TICKETS:
-        return error("posting_entry", "Store failed", {"ok": False, "error": f"Ticket already exists: {ticket_id}"})
-
-    TICKETS[ticket_id] = {
-        "ticket_id": ticket_id,
-        "status": "draft",
-        "created_by": user_id,
-        "created_at": _now(),
-        "execution_date": payload.get("execution_date"),
-        "value_date": payload.get("value_date"),
-        "lines": lines,
-        "posted": False,
-        "approvals": [],
-    }
+    ticket = create_or_update_ticket(
+        payload=payload,
+        created_by=user_id,
+        status="draft"
+    )
 
     return ok(
         "posting_entry",
-        "Draft stored",
-        {"ok": True, "ticket_id": ticket_id, "status": "draft", "next_actions": ["posting_submit"]},
+        f"Draft stored",
+        {"ticket_id": ticket["ticket_id"], "status": "draft"}
     )
 
 
-def handle_posting_submit(payload: Dict[str, Any], user_id: str, action: Optional[str]):
-    ticket_id = str(payload.get("ticket_id", "")).strip()
-    t = TICKETS.get(ticket_id)
-    if not t:
-        return error("posting_submit", "Submit failed", {"ok": False, "error": f"Ticket not found: {ticket_id}"})
+# -------------------------------
+# Submit (Maker)
+# -------------------------------
 
-    if t["status"] != "draft":
-        return error("posting_submit", "Submit failed", {"ok": False, "error": f"Ticket not in draft state (current={t['status']})"})
+def handle_posting_submit(payload: Dict[str, Any], user_id: str):
+    ticket_id = payload["ticket_id"]
+    ticket = get_ticket(ticket_id)
 
-    t["status"] = "submitted"
-    t["submitted_at"] = _now()
-    t["approvals"].append({"action": "submit", "by": user_id, "at": t["submitted_at"]})
+    if ticket["status"] != "draft":
+        return error("posting_submit", "Only draft tickets can be submitted")
+
+    update_ticket_status(ticket_id, "submitted")
 
     return ok(
         "posting_submit",
         "Ticket submitted",
-        {"ok": True, "ticket_id": ticket_id, "status": "submitted", "next_actions": ["posting_approval"]},
+        {"ticket_id": ticket_id, "status": "submitted"}
     )
 
 
-def handle_posting_approval(payload: Dict[str, Any], user_id: str, action: Optional[str]):
-    ticket_id = str(payload.get("ticket_id", "")).strip()
-    decision = str(payload.get("decision", "")).strip().lower()
-    comment = str(payload.get("comment", "")).strip()
+# -------------------------------
+# Approval (Checker) – CREDIT GATED
+# -------------------------------
 
-    t = TICKETS.get(ticket_id)
-    if not t:
-        return error("posting_approval", "Approval failed", {"ok": False, "error": f"Ticket not found: {ticket_id}"})
+def handle_posting_approval(payload: Dict[str, Any], user_id: str):
+    ticket_id = payload["ticket_id"]
+    decision = payload["decision"]
+    comment = payload.get("comment", "")
 
-    if t["status"] != "submitted":
-        return error("posting_approval", "Approval failed", {"ok": False, "error": f"Ticket not submitted (current={t['status']})"})
+    ticket = get_ticket(ticket_id)
+
+    if ticket["status"] != "submitted":
+        return error("posting_approval", "Only submitted tickets can be approved")
 
     if decision != "approve":
-        return error("posting_approval", "Approval failed", {"ok": False, "error": "Only decision='approve' enabled in this phase"})
+        update_ticket_status(ticket_id, "rejected", comment)
+        return ok(
+            "posting_approval",
+            "Ticket rejected",
+            {"ticket_id": ticket_id, "status": "rejected"}
+        )
 
-    if user_id == t["created_by"]:
-        return error("posting_approval", "Approval failed", {"ok": False, "error": "Maker cannot approve own ticket"})
+    # -------------------------------
+    # CREDIT LIMIT HARD CHECK
+    # -------------------------------
+    customer_id = ticket["payload"].get("customer_id")
 
-    t["status"] = "approved"
-    t["approved_at"] = _now()
-    t["approvals"].append({"action": "approve", "by": user_id, "comment": comment, "at": t["approved_at"]})
+    credit_result = evaluate_credit_position(customer_id)
+
+    if credit_result["decision"] == "BLOCK":
+        update_ticket_status(
+            ticket_id,
+            "rejected",
+            f"Credit limit breach: {credit_result['reason']}"
+        )
+
+        return error(
+            "posting_approval",
+            "Approval blocked by credit limits",
+            credit_result
+        )
+
+    update_ticket_status(ticket_id, "approved", comment)
 
     return ok(
         "posting_approval",
         "Approved",
-        {"ok": True, "ticket_id": ticket_id, "status": "approved", "next_actions": ["posting_result"]},
+        {"ticket_id": ticket_id, "status": "approved"}
     )
 
 
-def handle_posting_result(payload: Dict[str, Any], user_id: str, action: Optional[str]):
-    ticket_id = str(payload.get("ticket_id", "")).strip()
-    t = TICKETS.get(ticket_id)
-    if not t:
-        return error("posting_result", "Execution failed", {"ok": False, "error": f"Ticket not found: {ticket_id}"})
+# -------------------------------
+# Execution (System)
+# -------------------------------
 
-    if t["status"] != "approved":
-        return error("posting_result", "Execution failed", {"ok": False, "error": "Ticket not approved"})
+def handle_posting_execution(payload: Dict[str, Any], user_id: str):
+    ticket_id = payload["ticket_id"]
+    ticket = get_ticket(ticket_id)
 
-    if t.get("posted") is True:
-        return error("posting_result", "Execution blocked", {"ok": False, "error": "Ticket already posted"})
-
-    journal_entries = []
-    for line in t["lines"]:
-        entry = post_journal_entry(
-            ticket_id=ticket_id,
-            user_id="system",
-            side=str(line.get("side", "")).upper(),
-            base_account_no=str(line.get("base_account_no", "")).strip(),
-            account_type_code=str(line.get("account_type_code", "")).strip().upper(),
-            currency=str(line.get("currency", "")).strip().upper(),
-            amount=float(line.get("amount", 0.0)),
-            narrative=str(line.get("narrative", "")).strip(),
+    if ticket["status"] != "approved":
+        return error(
+            "posting_result",
+            "Execution failed",
+            {"ok": False, "error": "Ticket not approved"}
         )
-        journal_entries.append(entry)
 
-    t["posted"] = True
-    t["status"] = "posted"
-    t["posted_at"] = _now()
+    journal_entries = post_to_journal(
+        ticket_id=ticket_id,
+        payload=ticket["payload"],
+        executed_by=user_id
+    )
+
+    update_ticket_status(ticket_id, "posted")
 
     return ok(
         "posting_result",
         "Posting executed (double-entry ledger)",
-        {"ok": True, "ticket_id": ticket_id, "status": "posted", "journal_entries": journal_entries,
-         "ledger_integrity": "DR=CR enforced via journal"},
+        {
+            "ticket_id": ticket_id,
+            "status": "posted",
+            "journal_entries": journal_entries,
+            "ledger_integrity": "DR=CR enforced via journal"
+        }
     )
 
 
-# -----------------------------
-# NEW: Reporting handlers (read-only)
-# -----------------------------
+# -------------------------------
+# Ledger Journal Reporting
+# -------------------------------
 
-def handle_ledger_journal(payload: Dict[str, Any], user_id: str, action: Optional[str]):
-    """
-    Read-only: returns journal lines from the SERVER process.
-    Filters:
-      - date_prefix: 'YYYY-MM-DD' (optional)
-      - user_filter: user_id (optional)
-      - ticket_id: ticket id (optional)
-    """
-    date_prefix = str(payload.get("date_prefix", "")).strip()
-    user_filter = str(payload.get("user_filter", "")).strip()
-    ticket_id = str(payload.get("ticket_id", "")).strip()
+def handle_ledger_journal(payload: Dict[str, Any]):
+    year = int(payload.get("year", date.today().year))
+    entries = get_journal_entries_for_year(year)
 
-    j = get_full_journal()
-
-    def keep(x: Dict[str, Any]) -> bool:
-        if date_prefix and not str(x.get("posted_at", "")).startswith(date_prefix):
-            return False
-        if user_filter and str(x.get("user_id", "")) != user_filter:
-            return False
-        if ticket_id and str(x.get("ticket_id", "")) != ticket_id:
-            return False
-        return True
-
-    out = [x for x in j if keep(x)]
-
-    total_dr = sum(abs(float(x["delta"])) for x in out if x.get("side") == "DR")
-    total_cr = sum(abs(float(x["delta"])) for x in out if x.get("side") == "CR")
+    total_dr = sum(abs(e["delta"]) for e in entries if e["side"] == "DR")
+    total_cr = sum(abs(e["delta"]) for e in entries if e["side"] == "CR")
 
     return ok(
         "ledger_journal",
         "Journal lines",
         {
-            "ok": True,
-            "filters": {"date_prefix": date_prefix, "user_filter": user_filter, "ticket_id": ticket_id},
-            "lines": len(out),
-            "total_dr": total_dr,
-            "total_cr": total_cr,
-            "entries": out,
-        },
+            "lines": len(entries),
+            "total_dr": round(total_dr, 2),
+            "total_cr": round(total_cr, 2),
+            "balanced": round(total_dr - total_cr, 2) == 0.0
+        }
     )
 
 
-def handle_customer_balances(payload: Dict[str, Any], user_id: str, action: Optional[str]):
-    """
-    Read-only: returns all sub-account balances for base_account_no.
-    """
-    base_account_no = str(payload.get("base_account_no", "")).strip()
-    if not base_account_no:
-        return error("customer_balances", "base_account_no required", {"ok": False})
+# -------------------------------
+# Response Helpers
+# -------------------------------
 
-    balances = get_all_balances_for_customer(base_account_no)
+def ok(screen_id: str, message: str, data: Dict[str, Any] = None):
+    return {
+        "screen_id": screen_id,
+        "status": "ok",
+        "message": message,
+        "data": data or {}
+    }
 
-    return ok(
-        "customer_balances",
-        "Customer balances",
-        {"ok": True, "base_account_no": base_account_no, "sub_accounts": balances},
-    )
+
+def error(screen_id: str, message: str, data: Dict[str, Any] = None):
+    return {
+        "screen_id": screen_id,
+        "status": "error",
+        "message": message,
+        "data": data or {}
+    }
