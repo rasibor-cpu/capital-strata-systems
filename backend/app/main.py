@@ -13,6 +13,9 @@ Architecture:
 - screen handlers live under backend/app/screens/
 - screen taxonomy is authoritative
 - contracts are centralized in orchestrator_contracts.py
+
+Phase 12.5 enhancement:
+- Pre-wire taxonomy-defined screens as safe placeholders (not implemented).
 """
 
 from typing import Dict, Callable
@@ -24,6 +27,7 @@ from .screens.core import (
     diagnostics_handler,
     screen_index_handler,
 )
+from .screens.not_implemented import not_implemented_payload
 
 
 # ---------------------------------------------------------------------
@@ -101,13 +105,32 @@ def screen_index_screen(request: ScreenRequest) -> ScreenResponse:
     )
 
 
+def placeholder_screen(request: ScreenRequest) -> ScreenResponse:
+    """
+    Generic handler for screens defined in taxonomy but not implemented yet.
+    """
+    data = not_implemented_payload(request.screen_id, request.action)
+    return ScreenResponse(
+        screen_id=request.screen_id,
+        status="not_implemented",
+        message="Screen not implemented yet",
+        data=data,
+    )
+
+
 # ---------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------
 
+# Implemented screens
 SCREEN_REGISTRY.register("health_check", health_check_screen)
 SCREEN_REGISTRY.register("diagnostics", diagnostics_screen)
 SCREEN_REGISTRY.register("screen_index", screen_index_screen)
+
+# Placeholder (taxonomy-defined, not implemented yet)
+SCREEN_REGISTRY.register("engine_replay_runner", placeholder_screen)
+SCREEN_REGISTRY.register("risk_override_review", placeholder_screen)
+SCREEN_REGISTRY.register("reports_center", placeholder_screen)
 
 
 # ---------------------------------------------------------------------
@@ -131,4 +154,5 @@ def handle_screen_request(screen_id: str, action: str, payload: dict, user_id: s
 if __name__ == "__main__":
     print(handle_screen_request("health_check", "ping", {}))
     print(handle_screen_request("screen_index", "list", {}))
+    print(handle_screen_request("engine_replay_runner", "start", {"source": "csv"}))
     print(handle_screen_request("unknown_screen", "noop", {}))
