@@ -1,18 +1,24 @@
 """
-Posting screen handlers (Phase 13.3)
+Posting screen handlers (Phase 13)
 
-Implements posting_entry as validation-first (no persistence, no execution).
+Implements posting_entry as:
+- Build PostingTicket from payload
+- Validate (balanced DR/CR, currency full-text, dates, etc.)
+- If valid: create DRAFT ticket in in-memory store
+- NO persistence beyond in-memory store
+- NO ledger writes
 """
 
 from typing import Dict, Any
 
-from ..posting_contracts import PostingTicket, PostingLine, ticket_totals
+from ..posting_contracts import PostingTicket, PostingLine, ticket_totals, TicketStatus
 from ..posting_validation import validate_ticket
+from ..posting_store import create_ticket
 
 
 def posting_entry_handler(payload: Dict[str, Any], user_id: str | None) -> Dict[str, Any]:
     """
-    Expected payload (draft form):
+    Expected payload:
       {
         "ticket_id": "T-0001",
         "execution_date": "2026-02-01",
@@ -23,10 +29,9 @@ def posting_entry_handler(payload: Dict[str, Any], user_id: str | None) -> Dict[
         ]
       }
 
-    Returns:
-      - normalized totals
-      - validation errors list
-      - is_valid boolean
+    Behavior:
+    - Validate ticket
+    - If valid: store as DRAFT in posting_store
     """
     lines_in = payload.get("lines", []) or []
 
@@ -57,20 +62,47 @@ def posting_entry_handler(payload: Dict[str, Any], user_id: str | None) -> Dict[
     errors = validate_ticket(ticket)
     totals = ticket_totals(ticket)
 
+    if errors:
+        return {
+            "ticket": {
+                "ticket_id": ticket.ticket_id,
+                "created_by": ticket.created_by,
+                "execution_date": ticket.execution_date,
+                "value_date": ticket.value_date,
+                "status": ticket.status.value,
+                "line_count": len(ticket.lines),
+            },
+            "totals": totals,
+            "errors": errors,
+            "is_valid": False,
+            "stored": False,
+            "next_actions": ["fix_errors"],
+            "note": "Validation failed. Ticket was NOT stored.",
+        }
+
+    # Store draft ticket (in-memory)
+    try:
+        ticket.status = TicketStatus.DRAFT
+        create_ticket(ticket)
+        stored_ok = True
+        store_error = ""
+    except Exception as e:
+        stored_ok = False
+        store_error = str(e)
+
     return {
         "ticket": {
             "ticket_id": ticket.ticket_id,
             "created_by": ticket.created_by,
             "execution_date": ticket.execution_date,
             "value_date": ticket.value_date,
-            "is_fx": ticket.is_fx,
-            "rate": ticket.rate,
-            "counter_currency": ticket.counter_currency,
+            "status": ticket.status.value,
             "line_count": len(ticket.lines),
         },
         "totals": totals,
-        "errors": errors,
-        "is_valid": len(errors) == 0,
-        "next_actions": ["submit_ticket"] if len(errors) == 0 else ["fix_errors"],
-        "note": "Validation-only. No persistence or ledger posting occurs at this stage.",
+        "errors": ([] if stored_ok else [f"Store error: {store_error}"]),
+        "is_valid": stored_ok,
+        "stored": stored_ok,
+        "next_actions": (["submit_ticket"] if stored_ok else ["retry_store"]),
+        "note": "Validation passed. Ticket stored as DRAFT in memory. No ledger posting.",
     }
