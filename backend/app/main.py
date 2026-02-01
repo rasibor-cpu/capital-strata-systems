@@ -14,11 +14,17 @@ HARD CONSTRAINTS (ENFORCED):
 
 All screens must register here.
 All UI requests must pass through the ScreenRegistry.
+
+Phase 12.2 enhancement:
+- Screen taxonomy (deterministic screen IDs) is authoritative.
+- Unknown screens are rejected before handler lookup.
 """
 
 from typing import Dict, Callable, Any, Optional
 from dataclasses import dataclass
 import datetime
+
+from .screen_taxonomy import SCREEN_INDEX, list_screen_ids
 
 
 # ---------------------------------------------------------------------
@@ -61,18 +67,33 @@ class ScreenRegistry:
         self._registry: Dict[str, Callable[[ScreenRequest], ScreenResponse]] = {}
 
     def register(self, screen_id: str, handler: Callable[[ScreenRequest], ScreenResponse]) -> None:
+        # Taxonomy is authoritative
+        if screen_id not in SCREEN_INDEX:
+            raise ValueError(f"Cannot register screen not in taxonomy: {screen_id}")
+
         if screen_id in self._registry:
             raise ValueError(f"Screen already registered: {screen_id}")
+
         self._registry[screen_id] = handler
 
     def dispatch(self, request: ScreenRequest) -> ScreenResponse:
+        # Taxonomy first: deterministic rejection
+        if request.screen_id not in SCREEN_INDEX:
+            return ScreenResponse(
+                screen_id=request.screen_id,
+                status="error",
+                message="Unknown screen (not in taxonomy)",
+                data={"known_screens": list_screen_ids()},
+            )
+
         if request.screen_id not in self._registry:
             return ScreenResponse(
                 screen_id=request.screen_id,
                 status="error",
-                message="Unknown screen",
-                data={}
+                message="Screen exists in taxonomy but is not registered",
+                data={"screen_def": SCREEN_INDEX[request.screen_id].__dict__},
             )
+
         handler = self._registry[request.screen_id]
         return handler(request)
 
@@ -85,8 +106,7 @@ SCREEN_REGISTRY = ScreenRegistry()
 
 
 # ---------------------------------------------------------------------
-# Example / Placeholder Screen Handlers
-# (These will be replaced incrementally in Phase 12.x)
+# Screen Handlers
 # ---------------------------------------------------------------------
 
 def health_check_screen(request: ScreenRequest) -> ScreenResponse:
@@ -97,8 +117,9 @@ def health_check_screen(request: ScreenRequest) -> ScreenResponse:
         data={
             "server_time": datetime.datetime.utcnow().isoformat(),
             "engine_mode": "prompt-only",
-            "execution_enabled": False
-        }
+            "execution_enabled": False,
+            "registered_screens": sorted(SCREEN_REGISTRY._registry.keys()),
+        },
     )
 
 
@@ -109,8 +130,30 @@ def diagnostics_screen(request: ScreenRequest) -> ScreenResponse:
         message="Diagnostics endpoint",
         data={
             "requested_action": request.action,
-            "payload_keys": list(request.payload.keys())
+            "payload_keys": list(request.payload.keys()),
+            "screen_def": SCREEN_INDEX[request.screen_id].__dict__,
+        },
+    )
+
+
+def screen_index_screen(request: ScreenRequest) -> ScreenResponse:
+    # Simple read-only index for developers/admin
+    items = [
+        {
+            "screen_id": sid,
+            "domain": SCREEN_INDEX[sid].domain,
+            "category": SCREEN_INDEX[sid].category,
+            "title": SCREEN_INDEX[sid].title,
+            "description": SCREEN_INDEX[sid].description,
+            "registered": sid in SCREEN_REGISTRY._registry,
         }
+        for sid in list_screen_ids()
+    ]
+    return ScreenResponse(
+        screen_id=request.screen_id,
+        status="ok",
+        message="Screen index",
+        data={"screens": items},
     )
 
 
@@ -120,6 +163,7 @@ def diagnostics_screen(request: ScreenRequest) -> ScreenResponse:
 
 SCREEN_REGISTRY.register("health_check", health_check_screen)
 SCREEN_REGISTRY.register("diagnostics", diagnostics_screen)
+SCREEN_REGISTRY.register("screen_index", screen_index_screen)
 
 
 # ---------------------------------------------------------------------
@@ -130,19 +174,17 @@ def handle_screen_request(
     screen_id: str,
     action: str,
     payload: Dict[str, Any],
-    user_id: Optional[str] = None
+    user_id: Optional[str] = None,
 ) -> ScreenResponse:
     """
     Single entry point for ALL UI → backend interactions.
     """
-
     request = ScreenRequest(
         screen_id=screen_id,
         action=action,
         payload=payload,
-        user_id=user_id
+        user_id=user_id,
     )
-
     return SCREEN_REGISTRY.dispatch(request)
 
 
@@ -151,10 +193,7 @@ def handle_screen_request(
 # ---------------------------------------------------------------------
 
 if __name__ == "__main__":
-    # Simple sanity check
-    resp = handle_screen_request(
-        screen_id="health_check",
-        action="ping",
-        payload={}
-    )
-    print(resp)
+    # Quick sanity checks (prompt-only, no execution)
+    print(handle_screen_request("health_check", "ping", {}))
+    print(handle_screen_request("screen_index", "list", {}))
+    print(handle_screen_request("unknown_screen", "noop", {}))
