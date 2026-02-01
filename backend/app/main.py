@@ -8,17 +8,15 @@ HARD CONSTRAINTS (ENFORCED):
 - NO auto-risk escalation
 - Prompt / diagnostics / routing ONLY
 
-Architecture:
-- main.py is thin orchestration gateway
-- screen handlers live under backend/app/screens/
-- screen taxonomy is authoritative
-- contracts are centralized in orchestrator_contracts.py
-
 Posting (Phase 13):
-- posting_entry: validate + store DRAFT
+- posting_entry: validate + store DRAFT (in-memory)
 - posting_submit: DRAFT -> SUBMITTED
 - posting_review: read-only ticket view
-- posting_approval/result remain placeholders (next)
+- posting_approval: checker APPROVE / REJECT / RETURN (state transitions only)
+- posting_result: placeholder (next)
+
+NOTE:
+- Store is in-memory; restart clears tickets (expected at this phase).
 """
 
 from typing import Dict, Callable
@@ -33,6 +31,8 @@ from .screens.core import (
 from .screens.not_implemented import not_implemented_payload
 from .screens.posting import posting_entry_handler
 from .screens.posting_lifecycle import posting_review_handler, posting_submit_handler
+
+from .posting_store import approve_ticket, reject_ticket, return_ticket
 
 
 # ---------------------------------------------------------------------
@@ -164,16 +164,114 @@ def posting_review_screen(request: ScreenRequest) -> ScreenResponse:
     )
 
 
+def posting_approval_screen(request: ScreenRequest) -> ScreenResponse:
+    """
+    Checker decision screen.
+
+    Expected payload:
+      {
+        "ticket_id": "T-1002",
+        "decision": "approve" | "reject" | "return",
+        "reason": "optional but recommended"
+      }
+
+    Enforces maker-checker separation via posting_store rules.
+    """
+    ticket_id = str(request.payload.get("ticket_id", "")).strip()
+    decision = str(request.payload.get("decision", "")).strip().lower()
+    reason = str(request.payload.get("reason", "")).strip()
+    checker_id = request.user_id or "anonymous_checker"
+
+    if not ticket_id:
+        return ScreenResponse(
+            screen_id=request.screen_id,
+            status="error",
+            message="Approval failed",
+            data={"ok": False, "error": "ticket_id is required"},
+        )
+
+    if decision not in {"approve", "reject", "return"}:
+        return ScreenResponse(
+            screen_id=request.screen_id,
+            status="error",
+            message="Approval failed",
+            data={"ok": False, "error": "decision must be one of: approve, reject, return"},
+        )
+
+    try:
+        if decision == "approve":
+            t = approve_ticket(ticket_id, checker_id)
+            data = {
+                "ok": True,
+                "decision": "approve",
+                "ticket": {"ticket_id": t.ticket_id, "status": t.status.value},
+                "next_actions": ["posting_result"],
+                "note": "Approved (no ledger write yet).",
+            }
+            return ScreenResponse(
+                screen_id=request.screen_id,
+                status="ok",
+                message="Ticket approved",
+                data=data,
+            )
+
+        if decision == "reject":
+            if not reason:
+                reason = "Rejected by checker"
+            t = reject_ticket(ticket_id, checker_id, reason)
+            data = {
+                "ok": True,
+                "decision": "reject",
+                "ticket": {"ticket_id": t.ticket_id, "status": t.status.value},
+                "reason": reason,
+                "next_actions": ["posting_result"],
+                "note": "Rejected (no ledger write).",
+            }
+            return ScreenResponse(
+                screen_id=request.screen_id,
+                status="ok",
+                message="Ticket rejected",
+                data=data,
+            )
+
+        # decision == "return"
+        if not reason:
+            reason = "Returned for correction"
+        t = return_ticket(ticket_id, checker_id, reason)
+        data = {
+            "ok": True,
+            "decision": "return",
+            "ticket": {"ticket_id": t.ticket_id, "status": t.status.value},
+            "reason": reason,
+            "next_actions": ["posting_entry", "posting_submit"],
+            "note": "Returned to maker (no ledger write).",
+        }
+        return ScreenResponse(
+            screen_id=request.screen_id,
+            status="ok",
+            message="Ticket returned",
+            data=data,
+        )
+
+    except Exception as e:
+        return ScreenResponse(
+            screen_id=request.screen_id,
+            status="error",
+            message="Approval failed",
+            data={"ok": False, "error": str(e)},
+        )
+
+
 # ---------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------
 
-# Implemented screens
+# Core screens
 SCREEN_REGISTRY.register("health_check", health_check_screen)
 SCREEN_REGISTRY.register("diagnostics", diagnostics_screen)
 SCREEN_REGISTRY.register("screen_index", screen_index_screen)
 
-# Engine/Risk/Reporting placeholders
+# Engine/Risk/Reporting placeholders (for now)
 SCREEN_REGISTRY.register("engine_replay_runner", placeholder_screen)
 SCREEN_REGISTRY.register("risk_override_review", placeholder_screen)
 SCREEN_REGISTRY.register("reports_center", placeholder_screen)
@@ -182,9 +280,9 @@ SCREEN_REGISTRY.register("reports_center", placeholder_screen)
 SCREEN_REGISTRY.register("posting_entry", posting_entry_screen)
 SCREEN_REGISTRY.register("posting_submit", posting_submit_screen)
 SCREEN_REGISTRY.register("posting_review", posting_review_screen)
+SCREEN_REGISTRY.register("posting_approval", posting_approval_screen)
 
-# Posting placeholders (next)
-SCREEN_REGISTRY.register("posting_approval", placeholder_screen)
+# Posting result placeholder (next)
 SCREEN_REGISTRY.register("posting_result", placeholder_screen)
 
 
