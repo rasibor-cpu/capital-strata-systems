@@ -1,7 +1,7 @@
 """
 REA Capital Trading Engine
 Phase 12 — Screen & UI Orchestration (Backend Entry Point)
-Phase 13.2 — Posting screens registered as safe placeholders
+Phase 13.3 — posting_entry implemented (validation-only)
 
 HARD CONSTRAINTS (ENFORCED):
 - NO trade execution
@@ -26,6 +26,7 @@ from .screens.core import (
     screen_index_handler,
 )
 from .screens.not_implemented import not_implemented_payload
+from .screens.posting import posting_entry_handler
 
 
 # ---------------------------------------------------------------------
@@ -113,6 +114,16 @@ def placeholder_screen(request: ScreenRequest) -> ScreenResponse:
     )
 
 
+def posting_entry_screen(request: ScreenRequest) -> ScreenResponse:
+    data = posting_entry_handler(request.payload, request.user_id)
+    return ScreenResponse(
+        screen_id=request.screen_id,
+        status="ok",
+        message="Posting entry validation",
+        data=data,
+    )
+
+
 # ---------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------
@@ -122,13 +133,15 @@ SCREEN_REGISTRY.register("health_check", health_check_screen)
 SCREEN_REGISTRY.register("diagnostics", diagnostics_screen)
 SCREEN_REGISTRY.register("screen_index", screen_index_screen)
 
+# Phase 13 implemented (validation-only)
+SCREEN_REGISTRY.register("posting_entry", posting_entry_screen)
+
 # Placeholder (taxonomy-defined, not implemented yet)
 SCREEN_REGISTRY.register("engine_replay_runner", placeholder_screen)
 SCREEN_REGISTRY.register("risk_override_review", placeholder_screen)
 SCREEN_REGISTRY.register("reports_center", placeholder_screen)
 
-# Phase 13 — Posting screens (placeholder now; implement next)
-SCREEN_REGISTRY.register("posting_entry", placeholder_screen)
+# Phase 13 — Posting screens (placeholder until implemented)
 SCREEN_REGISTRY.register("posting_review", placeholder_screen)
 SCREEN_REGISTRY.register("posting_approval", placeholder_screen)
 SCREEN_REGISTRY.register("posting_result", placeholder_screen)
@@ -146,14 +159,3 @@ def handle_screen_request(screen_id: str, action: str, payload: dict, user_id: s
         user_id=user_id,
     )
     return SCREEN_REGISTRY.dispatch(request)
-
-
-# ---------------------------------------------------------------------
-# Manual Test Hook (safe, non-executing)
-# ---------------------------------------------------------------------
-
-if __name__ == "__main__":
-    print(handle_screen_request("health_check", "ping", {}))
-    print(handle_screen_request("screen_index", "list", {}))
-    print(handle_screen_request("posting_entry", "open", {}))
-    print(handle_screen_request("unknown_screen", "noop", {}))
