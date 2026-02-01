@@ -1,14 +1,17 @@
 from fastapi import FastAPI, Request
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
-# IMPORTANT: Use RELATIVE imports only (no "backend." absolute imports)
-from .ledger_registry import post_journal_entry
+from .ledger_registry import (
+    post_journal_entry,
+    get_full_journal,
+    get_all_balances_for_customer,
+)
 
 app = FastAPI(title="REA Capital Trading Engine")
 
 # -----------------------------
-# In-memory ticket store (Phase 13/14 prototype)
+# In-memory ticket store
 # -----------------------------
 TICKETS: Dict[str, Dict[str, Any]] = {}
 _TICKET_SEQ = 5000
@@ -42,7 +45,7 @@ async def orchestrate(request: Request):
     body = await request.json()
 
     screen_id = body.get("screen_id")
-    action = body.get("action")  # api.py enforces, but we won't crash if missing
+    action = body.get("action")
     payload = body.get("payload", {}) or {}
     user_id = body.get("user_id") or "anonymous"
 
@@ -58,31 +61,31 @@ async def orchestrate(request: Request):
     if screen_id == "posting_result":
         return handle_posting_result(payload, user_id, action)
 
+    # NEW: reporting screens (read-only)
+    if screen_id == "ledger_journal":
+        return handle_ledger_journal(payload, user_id, action)
+
+    if screen_id == "customer_balances":
+        return handle_customer_balances(payload, user_id, action)
+
     return {
         "screen_id": screen_id,
         "status": "not_implemented",
         "message": "Screen not implemented",
-        "data": {"known_screens": ["posting_entry", "posting_submit", "posting_approval", "posting_result"]},
+        "data": {"known_screens": ["posting_entry", "posting_submit", "posting_approval", "posting_result",
+                                  "ledger_journal", "customer_balances"]},
     }
 
 
 # -----------------------------
-# Handlers
+# Handlers: posting lifecycle
 # -----------------------------
 
 def handle_posting_entry(payload: Dict[str, Any], user_id: str, action: Optional[str]):
-    """
-    Creates a DRAFT ticket.
-    If payload.ticket_id is provided, we respect it. Otherwise we auto-generate.
-    Required fields:
-      - lines: list of DR/CR legs
-      - execution_date, value_date are optional in this prototype
-    """
     lines = payload.get("lines", [])
     if not isinstance(lines, list) or len(lines) < 2:
         return error("posting_entry", "Validation failed", {"ok": False, "error": "lines must be a list with >= 2 legs"})
 
-    # Basic DR=CR validation on amounts
     dr = sum(float(l.get("amount", 0)) for l in lines if str(l.get("side", "")).upper() == "DR")
     cr = sum(float(l.get("amount", 0)) for l in lines if str(l.get("side", "")).upper() == "CR")
     if abs(dr - cr) > 1e-9:
@@ -92,7 +95,6 @@ def handle_posting_entry(payload: Dict[str, Any], user_id: str, action: Optional
     if ticket_id in TICKETS:
         return error("posting_entry", "Store failed", {"ok": False, "error": f"Ticket already exists: {ticket_id}"})
 
-    # Store DRAFT
     TICKETS[ticket_id] = {
         "ticket_id": ticket_id,
         "status": "draft",
@@ -108,12 +110,7 @@ def handle_posting_entry(payload: Dict[str, Any], user_id: str, action: Optional
     return ok(
         "posting_entry",
         "Draft stored",
-        {
-            "ok": True,
-            "ticket_id": ticket_id,
-            "status": "draft",
-            "next_actions": ["posting_submit"],
-        },
+        {"ok": True, "ticket_id": ticket_id, "status": "draft", "next_actions": ["posting_submit"]},
     )
 
 
@@ -152,7 +149,6 @@ def handle_posting_approval(payload: Dict[str, Any], user_id: str, action: Optio
     if decision != "approve":
         return error("posting_approval", "Approval failed", {"ok": False, "error": "Only decision='approve' enabled in this phase"})
 
-    # maker-checker separation
     if user_id == t["created_by"]:
         return error("posting_approval", "Approval failed", {"ok": False, "error": "Maker cannot approve own ticket"})
 
@@ -168,11 +164,6 @@ def handle_posting_approval(payload: Dict[str, Any], user_id: str, action: Optio
 
 
 def handle_posting_result(payload: Dict[str, Any], user_id: str, action: Optional[str]):
-    """
-    Executes immutable double-entry ledger write.
-    Writes journal entries ONLY via ledger_registry.post_journal_entry().
-    Idempotent: blocks if already posted.
-    """
     ticket_id = str(payload.get("ticket_id", "")).strip()
     t = TICKETS.get(ticket_id)
     if not t:
@@ -186,8 +177,6 @@ def handle_posting_result(payload: Dict[str, Any], user_id: str, action: Optiona
 
     journal_entries = []
     for line in t["lines"]:
-        # REQUIRED line fields for multi-account/multi-currency customer model:
-        # base_account_no, account_type_code, currency, side, amount
         entry = post_journal_entry(
             ticket_id=ticket_id,
             user_id="system",
@@ -207,11 +196,69 @@ def handle_posting_result(payload: Dict[str, Any], user_id: str, action: Optiona
     return ok(
         "posting_result",
         "Posting executed (double-entry ledger)",
+        {"ok": True, "ticket_id": ticket_id, "status": "posted", "journal_entries": journal_entries,
+         "ledger_integrity": "DR=CR enforced via journal"},
+    )
+
+
+# -----------------------------
+# NEW: Reporting handlers (read-only)
+# -----------------------------
+
+def handle_ledger_journal(payload: Dict[str, Any], user_id: str, action: Optional[str]):
+    """
+    Read-only: returns journal lines from the SERVER process.
+    Filters:
+      - date_prefix: 'YYYY-MM-DD' (optional)
+      - user_filter: user_id (optional)
+      - ticket_id: ticket id (optional)
+    """
+    date_prefix = str(payload.get("date_prefix", "")).strip()
+    user_filter = str(payload.get("user_filter", "")).strip()
+    ticket_id = str(payload.get("ticket_id", "")).strip()
+
+    j = get_full_journal()
+
+    def keep(x: Dict[str, Any]) -> bool:
+        if date_prefix and not str(x.get("posted_at", "")).startswith(date_prefix):
+            return False
+        if user_filter and str(x.get("user_id", "")) != user_filter:
+            return False
+        if ticket_id and str(x.get("ticket_id", "")) != ticket_id:
+            return False
+        return True
+
+    out = [x for x in j if keep(x)]
+
+    total_dr = sum(abs(float(x["delta"])) for x in out if x.get("side") == "DR")
+    total_cr = sum(abs(float(x["delta"])) for x in out if x.get("side") == "CR")
+
+    return ok(
+        "ledger_journal",
+        "Journal lines",
         {
             "ok": True,
-            "ticket_id": ticket_id,
-            "status": "posted",
-            "journal_entries": journal_entries,
-            "ledger_integrity": "DR=CR enforced via journal",
+            "filters": {"date_prefix": date_prefix, "user_filter": user_filter, "ticket_id": ticket_id},
+            "lines": len(out),
+            "total_dr": total_dr,
+            "total_cr": total_cr,
+            "entries": out,
         },
+    )
+
+
+def handle_customer_balances(payload: Dict[str, Any], user_id: str, action: Optional[str]):
+    """
+    Read-only: returns all sub-account balances for base_account_no.
+    """
+    base_account_no = str(payload.get("base_account_no", "")).strip()
+    if not base_account_no:
+        return error("customer_balances", "base_account_no required", {"ok": False})
+
+    balances = get_all_balances_for_customer(base_account_no)
+
+    return ok(
+        "customer_balances",
+        "Customer balances",
+        {"ok": True, "base_account_no": base_account_no, "sub_accounts": balances},
     )
