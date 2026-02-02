@@ -1,14 +1,9 @@
 """
-REA Capital – GDELT News/Event Radar Adapter (FREE, HARDENED)
-------------------------------------------------------------
-Purpose:
-- Pull near-real-time global headlines from GDELT (v2 DOC API)
-- Normalize to REA-friendly RiskHeadline objects
-- Fail gracefully on empty / non-JSON responses
-
+REA Capital – GDELT News/Event Radar Adapter (FREE, HARDENED, COMPAT)
+--------------------------------------------------------------------
 Public API:
 - fetch_headlines(query, minutes, max_records)
-- fetch_gdelt_headlines(query, minutes, max_records)  # stable alias
+- fetch_gdelt_headlines(query, minutes=..., max_records=..., max_items=...)  # compat alias
 """
 
 from __future__ import annotations
@@ -49,13 +44,9 @@ def fmt_gdelt_dt(dt: datetime) -> str:
 def http_get_json(url: str, timeout: int = 20) -> Dict[str, Any]:
     req = urllib.request.Request(
         url,
-        headers={
-            "User-Agent": "REA-Capital/1.0 (gdelt adapter)",
-            "Accept": "application/json",
-        },
+        headers={"User-Agent": "REA-Capital/1.0 (gdelt adapter)", "Accept": "application/json"},
         method="GET",
     )
-
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         raw = resp.read().decode("utf-8", errors="replace").strip()
 
@@ -142,9 +133,21 @@ def fetch_headlines(query: str, minutes: int = 60, max_records: int = 25) -> Lis
     return out
 
 
-# Stable alias (do not remove): used by other modules / overlays
-def fetch_gdelt_headlines(query: str, minutes: int = 60, max_records: int = 25) -> List[RiskHeadline]:
-    return fetch_headlines(query=query, minutes=minutes, max_records=max_records)
+def fetch_gdelt_headlines(
+    query: str,
+    minutes: int = 60,
+    max_records: Optional[int] = None,
+    max_items: Optional[int] = None,
+) -> List[RiskHeadline]:
+    """
+    Compatibility alias.
+    Accepts either max_records (preferred) or max_items (legacy).
+    """
+    if max_records is None and max_items is not None:
+        max_records = int(max_items)
+    if max_records is None:
+        max_records = 25
+    return fetch_headlines(query=query, minutes=minutes, max_records=int(max_records))
 
 
 def write_audit(headlines: List[RiskHeadline], query: str) -> Path:
