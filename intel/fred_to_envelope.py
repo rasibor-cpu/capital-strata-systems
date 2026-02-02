@@ -1,190 +1,125 @@
 """
-FRED → IntelEnvelope Transformer
---------------------------------
-Converts FRED macro series points into standardized IntelEnvelope
-objects consumable by the REA engine (regime gate, risk, prompts).
+REA Capital — FRED → IntelEnvelope Transformer
+Phase 6.2.3 (corrected)
 
-Design goals:
-- Deterministic
-- Stateless
-- Audit-friendly
-- No trading decisions here
+Converts FRED records into canonical IntelEnvelope objects:
+- Uses IntelEnvelope.create(...)
+- Stores FRED fields inside envelope.raw (never as top-level args)
+- Deterministic severity/confidence mapping
 """
 
-from datetime import datetime, timezone
-from typing import Dict, Any, List
+from __future__ import annotations
+
+from typing import Dict, Any
+from intel.intel_envelope import IntelEnvelope
 
 
-def _utc_now():
-    return datetime.now(timezone.utc).isoformat()
+# -----------------------------
+# Series classification map
+# -----------------------------
+
+SERIES_MAP = {
+    "DGS10": {"signal_class": "rates", "instrument_scope": "GLOBAL", "severity_scale": (3.0, 6.0)},
+    "DGS2": {"signal_class": "rates", "instrument_scope": "GLOBAL", "severity_scale": (2.0, 6.0)},
+    "T10Y2Y": {"signal_class": "rates", "instrument_scope": "GLOBAL", "severity_scale": (-1.0, 2.0)},
+    "CPIAUCSL": {"signal_class": "inflation", "instrument_scope": "GLOBAL", "severity_scale": (2.0, 5.0)},
+    "UNRATE": {"signal_class": "labor", "instrument_scope": "GLOBAL", "severity_scale": (3.0, 10.0)},
+    "FEDFUNDS": {"signal_class": "policy", "instrument_scope": "GLOBAL", "severity_scale": (1.0, 6.0)},
+}
 
 
-def fred_point_to_envelope(
-    *,
-    series_id: str,
-    observation_date: str,
-    value: float,
-    frequency: str = "unknown",
-    source: str = "fred",
-) -> Dict[str, Any]:
-    """
-    Convert a single FRED observation into an IntelEnvelope dict.
-    """
+def _clamp01(x: float) -> float:
+    if x < 0.0:
+        return 0.0
+    if x > 1.0:
+        return 1.0
+    return x
 
+
+def compute_confidence(source_quality: str) -> float:
+    # Official macro series: high confidence by default
     return {
-        "ts_utc": _utc_now(),
-        "provider": source,
-        "intel_type": "macro",
-        "signal_class": "macro_indicator",
+        "official": 0.95,
+        "high": 0.90,
+        "medium": 0.75,
+        "low": 0.55,
+    }.get((source_quality or "official").lower(), 0.80)
+
+
+def compute_severity(value: float, lo: float, hi: float) -> float:
+    # Maps value onto [0.2..0.9] linearly between (lo..hi)
+    if hi == lo:
+        return 0.5
+    if value <= lo:
+        return 0.2
+    if value >= hi:
+        return 0.9
+    return round(0.2 + 0.7 * ((value - lo) / (hi - lo)), 3)
+
+
+def fred_record_to_envelope(record: Dict[str, Any]) -> IntelEnvelope:
+    """
+    record shape expected:
+      {
+        "series_id": "DGS10",
+        "observation_date": "2026-01-01",
+        "value": 5.28,
+        "frequency": "daily",
+        "source_quality": "official"
+      }
+    """
+    series_id = str(record["series_id"])
+    cfg = SERIES_MAP.get(series_id)
+
+    # Fail-closed: unknown series must be explicitly mapped
+    if not cfg:
+        raise ValueError(f"Unsupported FRED series_id '{series_id}'. Add to SERIES_MAP.")
+
+    value = float(record["value"])
+    obs_date = str(record.get("observation_date") or record.get("date") or "")
+
+    lo, hi = cfg["severity_scale"]
+    severity = compute_severity(value, lo, hi)
+    confidence = compute_confidence(str(record.get("source_quality", "official")))
+
+    raw = {
         "series_id": series_id,
-        "observation_date": observation_date,
+        "observation_date": obs_date,
         "value": value,
-        "frequency": frequency,
-        "instrument_scope": "GLOBAL",
-        "confidence": "official",
-        "source_quality": "high",
+        "frequency": record.get("frequency", "unknown"),
+        "realtime_start": record.get("realtime_start"),
+        "realtime_end": record.get("realtime_end"),
+        "source_quality": record.get("source_quality", "official"),
     }
 
-
-def fred_series_to_envelopes(
-    *,
-    series_id: str,
-    observations: List[Dict[str, Any]],
-    frequency: str = "unknown",
-    source: str = "fred",
-) -> List[Dict[str, Any]]:
-    """
-    Convert a list of FRED observations into IntelEnvelope objects.
-    """
-
-    envelopes = []
-
-    for obs in observations:
-        try:
-            val = float(obs["value"])
-        except (KeyError, ValueError, TypeError):
-            continue
-
-        env = fred_point_to_envelope(
-            series_id=series_id,
-            observation_date=obs.get("date"),
-            value=val,
-            frequency=frequency,
-            source=source,
-        )
-        envelopes.append(env)
-
-    return envelopes
-
-
-# ---------------- SELF TEST ----------------
-
-if __name__ == "__main__":
-    sample = [
-        {"date": "2025-12-01", "value": "5.33"},
-        {"date": "2026-01-01", "value": "5.28"},
-    ]
-
-    out = fred_series_to_envelopes(
-        series_id="DGS10",
-        observations=sample,
-        frequency="daily",
+    return IntelEnvelope.create(
+        provider="fred",
+        intel_type="macro",
+        signal_class=cfg["signal_class"],
+        instrument_scope=cfg["instrument_scope"],
+        raw=raw,
+        rea_instrument=None,
+        confidence=_clamp01(confidence),
+        severity=_clamp01(severity),
     )
-"""
-FRED → IntelEnvelope Transformer
---------------------------------
-Converts FRED macro series points into standardized IntelEnvelope
-objects consumable by the REA engine (regime gate, risk, prompts).
-
-Design goals:
-- Deterministic
-- Stateless
-- Audit-friendly
-- No trading decisions here
-"""
-
-from datetime import datetime, timezone
-from typing import Dict, Any, List
 
 
-def _utc_now():
-    return datetime.now(timezone.utc).isoformat()
+# -----------------------------
+# Self-test
+# -----------------------------
 
-
-def fred_point_to_envelope(
-    *,
-    series_id: str,
-    observation_date: str,
-    value: float,
-    frequency: str = "unknown",
-    source: str = "fred",
-) -> Dict[str, Any]:
-    """
-    Convert a single FRED observation into an IntelEnvelope dict.
-    """
-
-    return {
-        "ts_utc": _utc_now(),
-        "provider": source,
-        "intel_type": "macro",
-        "signal_class": "macro_indicator",
-        "series_id": series_id,
-        "observation_date": observation_date,
-        "value": value,
-        "frequency": frequency,
-        "instrument_scope": "GLOBAL",
-        "confidence": "official",
-        "source_quality": "high",
+def _self_test():
+    sample = {
+        "series_id": "DGS10",
+        "observation_date": "2026-01-01",
+        "value": 5.28,
+        "frequency": "daily",
+        "source_quality": "official",
     }
+    env = fred_record_to_envelope(sample)
+    print("FRED_TO_ENVELOPE_OK")
+    print(env)
 
-
-def fred_series_to_envelopes(
-    *,
-    series_id: str,
-    observations: List[Dict[str, Any]],
-    frequency: str = "unknown",
-    source: str = "fred",
-) -> List[Dict[str, Any]]:
-    """
-    Convert a list of FRED observations into IntelEnvelope objects.
-    """
-
-    envelopes = []
-
-    for obs in observations:
-        try:
-            val = float(obs["value"])
-        except (KeyError, ValueError, TypeError):
-            continue
-
-        env = fred_point_to_envelope(
-            series_id=series_id,
-            observation_date=obs.get("date"),
-            value=val,
-            frequency=frequency,
-            source=source,
-        )
-        envelopes.append(env)
-
-    return envelopes
-
-
-# ---------------- SELF TEST ----------------
 
 if __name__ == "__main__":
-    sample = [
-        {"date": "2025-12-01", "value": "5.33"},
-        {"date": "2026-01-01", "value": "5.28"},
-    ]
-
-    out = fred_series_to_envelopes(
-        series_id="DGS10",
-        observations=sample,
-        frequency="daily",
-    )
-
-    for e in out:
-        print(e)
-
-    for e in out:
-        print(e)
+    _self_test()
