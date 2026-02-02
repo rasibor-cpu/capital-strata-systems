@@ -1,0 +1,6 @@
+{
+  "alpaca": {
+    "REA:CRYPTO:BTCUSD": "BTC/USD",
+    "REA:CRYPTO:ETHUSD": "ETH/USD"
+  }
+}
