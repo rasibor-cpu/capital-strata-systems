@@ -5,6 +5,10 @@ Purpose:
 - Pull near-real-time global headlines from GDELT (v2 DOC API)
 - Normalize to REA-friendly RiskHeadline objects
 - Fail gracefully on empty / non-JSON responses
+
+Public API:
+- fetch_headlines(query, minutes, max_records)
+- fetch_gdelt_headlines(query, minutes, max_records)  # stable alias
 """
 
 from __future__ import annotations
@@ -18,10 +22,6 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-
-# -----------------------------
-# Model
-# -----------------------------
 
 @dataclass(frozen=True)
 class RiskHeadline:
@@ -38,10 +38,6 @@ class RiskHeadline:
     relevance: Optional[float]
 
 
-# -----------------------------
-# Time helpers
-# -----------------------------
-
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -49,10 +45,6 @@ def utc_now() -> datetime:
 def fmt_gdelt_dt(dt: datetime) -> str:
     return dt.strftime("%Y%m%d%H%M%S")
 
-
-# -----------------------------
-# HTTP helper (safe)
-# -----------------------------
 
 def http_get_json(url: str, timeout: int = 20) -> Dict[str, Any]:
     req = urllib.request.Request(
@@ -73,23 +65,13 @@ def http_get_json(url: str, timeout: int = 20) -> Dict[str, Any]:
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
-        # GDELT sometimes returns HTML or empty payloads
         return {}
 
-
-# -----------------------------
-# GDELT DOC API
-# -----------------------------
 
 GDELT_DOC_ENDPOINT = "https://api.gdeltproject.org/api/v2/doc/doc"
 
 
-def build_gdelt_doc_url(
-    query: str,
-    start: datetime,
-    end: datetime,
-    max_records: int,
-) -> str:
+def build_gdelt_doc_url(query: str, start: datetime, end: datetime, max_records: int) -> str:
     params = {
         "query": query,
         "mode": "ArtList",
@@ -111,7 +93,6 @@ def normalize_article(article: Dict[str, Any], query: str) -> RiskHeadline:
 
     title = s(article.get("title")) or ""
     url = s(article.get("url")) or ""
-
     if not title or not url:
         raise ValueError("Missing title/url")
 
@@ -144,28 +125,27 @@ def normalize_article(article: Dict[str, Any], query: str) -> RiskHeadline:
     )
 
 
-def fetch_headlines(query: str, minutes: int, max_records: int) -> List[RiskHeadline]:
+def fetch_headlines(query: str, minutes: int = 60, max_records: int = 25) -> List[RiskHeadline]:
     end = utc_now()
     start = end - timedelta(minutes=minutes)
-
     url = build_gdelt_doc_url(query, start, end, max_records)
+
     payload = http_get_json(url)
-
     articles = parse_articles(payload)
-    out: List[RiskHeadline] = []
 
+    out: List[RiskHeadline] = []
     for a in articles:
         try:
             out.append(normalize_article(a, query))
         except Exception:
             continue
-
     return out
 
 
-# -----------------------------
-# Audit logging
-# -----------------------------
+# Stable alias (do not remove): used by other modules / overlays
+def fetch_gdelt_headlines(query: str, minutes: int = 60, max_records: int = 25) -> List[RiskHeadline]:
+    return fetch_headlines(query=query, minutes=minutes, max_records=max_records)
+
 
 def write_audit(headlines: List[RiskHeadline], query: str) -> Path:
     log_dir = Path("audit_logs")
@@ -181,14 +161,9 @@ def write_audit(headlines: List[RiskHeadline], query: str) -> Path:
         "count": len(headlines),
         "headlines": [asdict(h) for h in headlines],
     }
-
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return path
 
-
-# -----------------------------
-# CLI
-# -----------------------------
 
 def main() -> int:
     p = argparse.ArgumentParser(description="GDELT News/Event Radar (REA)")
@@ -199,7 +174,6 @@ def main() -> int:
     args = p.parse_args()
 
     headlines = fetch_headlines(args.query, args.minutes, args.max)
-
     print(json.dumps([asdict(h) for h in headlines], indent=2))
 
     if args.audit:
