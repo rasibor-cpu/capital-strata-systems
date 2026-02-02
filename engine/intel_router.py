@@ -12,29 +12,19 @@ Design principles:
 - No execution logic
 """
 
-from typing import Optional
 from intel.intel_envelope import IntelEnvelope
 from engine.regime_signal import RegimeSignal
 
 
-# -----------------------------
-# Routing rules
-# -----------------------------
-
 def _route_macro(env: IntelEnvelope) -> RegimeSignal:
-    """
-    Macro signals (rates, inflation, policy)
-    """
     signal_class = env.signal_class
 
     if signal_class in {"rates", "policy"}:
         dimension = "risk"
         direction = "tightening" if env.severity >= 0.6 else "easing"
-
     elif signal_class == "inflation":
         dimension = "inflation"
         direction = "rising" if env.severity >= 0.6 else "stable"
-
     else:
         raise ValueError(f"Unsupported macro signal_class '{signal_class}'")
 
@@ -46,17 +36,11 @@ def _route_macro(env: IntelEnvelope) -> RegimeSignal:
         confidence=env.confidence,
         direction=direction,
         raw_ref=env.intel_id,
-        meta={
-            "signal_class": env.signal_class,
-            "raw": env.raw,
-        },
+        meta={"signal_class": env.signal_class, "raw": env.raw},
     )
 
 
 def _route_news(env: IntelEnvelope) -> RegimeSignal:
-    """
-    News / geopolitical shocks (GDELT, Reuters, Bloomberg headlines)
-    """
     tone = (env.raw or {}).get("tone")
     shock = env.severity
 
@@ -75,22 +59,13 @@ def _route_news(env: IntelEnvelope) -> RegimeSignal:
         confidence=env.confidence,
         direction=direction,
         raw_ref=env.intel_id,
-        meta={
-            "tone": tone,
-            "raw": env.raw,
-        },
+        meta={"tone": tone, "raw": env.raw},
     )
 
 
-# -----------------------------
-# Public router
-# -----------------------------
-
 def route_intel(env: IntelEnvelope) -> RegimeSignal:
     """
-    Route an IntelEnvelope into a RegimeSignal.
-
-    This function MUST be deterministic and side-effect free.
+    Primary public router entrypoint.
     """
     if not isinstance(env, IntelEnvelope):
         raise TypeError("route_intel expects IntelEnvelope")
@@ -104,12 +79,16 @@ def route_intel(env: IntelEnvelope) -> RegimeSignal:
     raise ValueError(f"Unsupported intel_type '{env.intel_type}'")
 
 
-# -----------------------------
-# Self-test
-# -----------------------------
+# Stable alias (future-proof for other modules / providers)
+def route_intel_envelope(env: IntelEnvelope) -> RegimeSignal:
+    """
+    Stable alias for route_intel (do not remove).
+    """
+    return route_intel(env)
 
+
+# Self-test
 if __name__ == "__main__":
-    # Minimal mock objects for self-test only
     macro_env = IntelEnvelope.create(
         provider="fred",
         intel_type="macro",
