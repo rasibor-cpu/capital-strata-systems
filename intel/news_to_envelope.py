@@ -1,8 +1,5 @@
 """
 News → IntelEnvelope transformer
---------------------------------
-Converts structured news dicts (from news_feed_adapter) into IntelEnvelope.
-
 Run:
   python -m intel.news_to_envelope
 """
