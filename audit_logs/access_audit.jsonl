@@ -1,0 +1,1044 @@
+{"ts_utc": "2026-01-29T03:26:05+00:00", "event": "diagnostics_start", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"tool": "diagnose_regime_gate", "ts": "2026-01-29T03:26:05+00:00"}}
+{"ts_utc": "2026-01-29T03:26:05+00:00", "event": "diagnostics_result", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"tool": "diagnose_regime_gate", "inferred_allow": null, "results": {"evaluate": {"error": "TypeError calling evaluate(): RegimeGate.evaluate() missing 2 required positional arguments: 'bars_5m' and 'as_of_utc'"}}}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "session_start", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"runner": "run_prompts_regime_aware"}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "regime_eval", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"allow": true, "reasons": "['Volatility stable (no expansion block).', 'No trend-day risk (mean-reversion regime acceptable).', 'No blocking macro/political events detected.']"}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 1}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 2}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 3}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 4}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 5}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 6}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 7}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 8}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 9}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 10}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 11}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 12}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 13}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 14}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 15}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 16}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 17}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 18}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 19}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 20}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 21}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 22}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 23}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 24}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 25}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 26}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 27}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 28}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 29}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 30}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 31}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 32}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 33}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 34}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 35}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 36}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 37}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 38}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 39}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 40}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 41}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 42}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 43}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 44}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 45}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 46}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 47}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 48}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 49}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 50}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 51}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 52}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 53}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 54}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 55}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 56}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 57}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 58}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 59}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 60}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 61}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 62}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 63}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 64}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 65}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 66}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 67}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 68}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 69}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 70}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 71}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 72}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 73}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 74}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 75}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 76}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 77}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 78}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 79}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 80}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 81}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 82}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 83}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 84}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 85}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 86}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 87}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 88}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 89}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 90}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 91}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 92}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 93}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 94}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 95}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 96}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 97}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 98}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 99}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 100}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 101}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 102}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 103}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 104}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 105}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 106}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 107}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 108}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 109}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 110}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 111}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 112}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 113}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 114}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 115}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 116}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 117}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 118}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 119}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 120}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 121}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 122}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 123}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 124}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 125}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 126}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 127}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 128}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 129}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 130}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 131}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 132}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 133}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 134}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 135}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 136}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 137}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 138}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 139}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 140}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 141}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 142}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 143}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 144}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 145}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 146}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 147}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 148}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 149}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 150}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 151}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 152}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 153}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 154}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 155}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 156}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 157}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 158}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 159}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 160}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 161}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 162}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 163}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 164}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 165}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 166}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 167}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 168}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 169}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 170}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 171}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 172}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 173}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 174}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 175}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 176}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 177}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 178}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 179}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 180}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 181}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 182}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 183}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 184}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 185}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 186}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 187}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 188}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 189}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 190}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 191}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 192}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 193}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 194}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 195}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 196}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 197}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 198}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 199}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 200}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 201}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 202}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 203}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 204}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 205}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 206}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 207}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 208}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 209}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 210}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 211}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 212}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 213}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 214}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 215}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 216}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 217}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 218}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 219}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 220}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 221}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 222}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 223}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 224}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 225}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 226}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 227}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 228}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 229}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 230}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 231}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 232}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 233}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 234}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 235}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 236}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 237}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 238}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 239}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 240}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 241}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 242}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 243}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 244}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 245}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 246}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 247}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 248}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 249}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 250}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 251}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 252}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 253}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 254}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 255}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "prompt_generated", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"count": 256}}
+{"ts_utc": "2026-01-29T03:39:13+00:00", "event": "session_end", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"prompts_generated": 256}}
+{"ts_utc": "2026-01-29T04:00:28+00:00", "event": "session_start", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"runner": "run_fx_live_prompts"}}
+{"ts_utc": "2026-01-29T04:02:28+00:00", "event": "session_start", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"runner": "run_fx_live_prompts"}}
+{"ts_utc": "2026-01-29T04:04:45+00:00", "event": "session_start", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"runner": "run_fx_live_prompts"}}
+{"ts_utc": "2026-01-29T04:07:49+00:00", "event": "session_start", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"runner": "run_fx_live_prompts"}}
+{"ts_utc": "2026-01-29T04:10:32+00:00", "event": "session_start", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"runner": "run_fx_live_prompts"}}
+{"ts_utc": "2026-01-29T04:14:07+00:00", "event": "session_start", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"runner": "run_fx_live_prompts"}}
+{"ts_utc": "2026-01-29T04:16:19+00:00", "event": "session_start", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"runner": "run_fx_live_prompts"}}
+{"ts_utc": "2026-01-29T04:19:08+00:00", "event": "session_end", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"prompts_generated": 0}}
+{"ts_utc": "2026-01-29T04:26:19+00:00", "event": "session_start", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"runner": "run_fx_pairs_replay"}}
+{"ts_utc": "2026-01-29T04:26:19+00:00", "event": "fx_pairs_start", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"pairs": ["EUR_USD", "GBP_USD", "USD_JPY"], "csv": "sample_spy_1m_long.csv", "speed": 200.0}}
+{"ts_utc": "2026-01-29T04:26:20+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 1}}
+{"ts_utc": "2026-01-29T04:26:20+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 2}}
+{"ts_utc": "2026-01-29T04:26:20+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 3}}
+{"ts_utc": "2026-01-29T04:26:21+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 4}}
+{"ts_utc": "2026-01-29T04:26:21+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 5}}
+{"ts_utc": "2026-01-29T04:26:21+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 6}}
+{"ts_utc": "2026-01-29T04:26:21+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 7}}
+{"ts_utc": "2026-01-29T04:26:21+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 8}}
+{"ts_utc": "2026-01-29T04:26:21+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 9}}
+{"ts_utc": "2026-01-29T04:26:21+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 10}}
+{"ts_utc": "2026-01-29T04:26:21+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 11}}
+{"ts_utc": "2026-01-29T04:26:21+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 12}}
+{"ts_utc": "2026-01-29T04:26:21+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 13}}
+{"ts_utc": "2026-01-29T04:26:22+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 14}}
+{"ts_utc": "2026-01-29T04:26:22+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 15}}
+{"ts_utc": "2026-01-29T04:26:22+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 16}}
+{"ts_utc": "2026-01-29T04:26:22+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 17}}
+{"ts_utc": "2026-01-29T04:26:22+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 18}}
+{"ts_utc": "2026-01-29T04:26:22+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 19}}
+{"ts_utc": "2026-01-29T04:26:22+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 20}}
+{"ts_utc": "2026-01-29T04:26:22+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 21}}
+{"ts_utc": "2026-01-29T04:26:22+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 22}}
+{"ts_utc": "2026-01-29T04:26:23+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 23}}
+{"ts_utc": "2026-01-29T04:26:23+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 24}}
+{"ts_utc": "2026-01-29T04:26:23+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 25}}
+{"ts_utc": "2026-01-29T04:26:23+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 26}}
+{"ts_utc": "2026-01-29T04:26:23+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 27}}
+{"ts_utc": "2026-01-29T04:26:23+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 28}}
+{"ts_utc": "2026-01-29T04:26:23+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 29}}
+{"ts_utc": "2026-01-29T04:26:23+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 30}}
+{"ts_utc": "2026-01-29T04:26:23+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 31}}
+{"ts_utc": "2026-01-29T04:26:23+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 32}}
+{"ts_utc": "2026-01-29T04:26:24+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 33}}
+{"ts_utc": "2026-01-29T04:26:24+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 34}}
+{"ts_utc": "2026-01-29T04:26:24+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 35}}
+{"ts_utc": "2026-01-29T04:26:24+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 36}}
+{"ts_utc": "2026-01-29T04:26:24+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 37}}
+{"ts_utc": "2026-01-29T04:26:24+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 38}}
+{"ts_utc": "2026-01-29T04:26:24+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 39}}
+{"ts_utc": "2026-01-29T04:26:24+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 40}}
+{"ts_utc": "2026-01-29T04:26:24+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 41}}
+{"ts_utc": "2026-01-29T04:26:25+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 42}}
+{"ts_utc": "2026-01-29T04:26:25+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 43}}
+{"ts_utc": "2026-01-29T04:26:25+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 44}}
+{"ts_utc": "2026-01-29T04:26:25+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 45}}
+{"ts_utc": "2026-01-29T04:26:25+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 46}}
+{"ts_utc": "2026-01-29T04:26:25+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 47}}
+{"ts_utc": "2026-01-29T04:26:25+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 48}}
+{"ts_utc": "2026-01-29T04:26:25+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 49}}
+{"ts_utc": "2026-01-29T04:26:25+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 50}}
+{"ts_utc": "2026-01-29T04:26:25+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 51}}
+{"ts_utc": "2026-01-29T04:26:26+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 52}}
+{"ts_utc": "2026-01-29T04:26:26+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 53}}
+{"ts_utc": "2026-01-29T04:26:26+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 54}}
+{"ts_utc": "2026-01-29T04:26:26+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 55}}
+{"ts_utc": "2026-01-29T04:26:26+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 56}}
+{"ts_utc": "2026-01-29T04:26:26+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 57}}
+{"ts_utc": "2026-01-29T04:26:26+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 58}}
+{"ts_utc": "2026-01-29T04:26:26+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 59}}
+{"ts_utc": "2026-01-29T04:26:26+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 60}}
+{"ts_utc": "2026-01-29T04:26:27+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 61}}
+{"ts_utc": "2026-01-29T04:26:27+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 62}}
+{"ts_utc": "2026-01-29T04:26:27+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 63}}
+{"ts_utc": "2026-01-29T04:26:27+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 64}}
+{"ts_utc": "2026-01-29T04:26:27+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 65}}
+{"ts_utc": "2026-01-29T04:26:27+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 66}}
+{"ts_utc": "2026-01-29T04:26:27+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 67}}
+{"ts_utc": "2026-01-29T04:26:27+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 68}}
+{"ts_utc": "2026-01-29T04:26:27+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 69}}
+{"ts_utc": "2026-01-29T04:26:27+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 70}}
+{"ts_utc": "2026-01-29T04:26:28+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 71}}
+{"ts_utc": "2026-01-29T04:26:28+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 72}}
+{"ts_utc": "2026-01-29T04:26:28+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 73}}
+{"ts_utc": "2026-01-29T04:26:28+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 74}}
+{"ts_utc": "2026-01-29T04:26:28+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 75}}
+{"ts_utc": "2026-01-29T04:26:28+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 76}}
+{"ts_utc": "2026-01-29T04:26:28+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 77}}
+{"ts_utc": "2026-01-29T04:26:28+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 78}}
+{"ts_utc": "2026-01-29T04:26:28+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 79}}
+{"ts_utc": "2026-01-29T04:26:29+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 80}}
+{"ts_utc": "2026-01-29T04:26:29+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 81}}
+{"ts_utc": "2026-01-29T04:26:29+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 82}}
+{"ts_utc": "2026-01-29T04:26:29+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 83}}
+{"ts_utc": "2026-01-29T04:26:29+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 84}}
+{"ts_utc": "2026-01-29T04:26:29+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 85}}
+{"ts_utc": "2026-01-29T04:26:29+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 86}}
+{"ts_utc": "2026-01-29T04:26:29+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 87}}
+{"ts_utc": "2026-01-29T04:26:29+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 88}}
+{"ts_utc": "2026-01-29T04:26:29+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 89}}
+{"ts_utc": "2026-01-29T04:26:30+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 90}}
+{"ts_utc": "2026-01-29T04:26:30+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 91}}
+{"ts_utc": "2026-01-29T04:26:30+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 92}}
+{"ts_utc": "2026-01-29T04:26:30+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 93}}
+{"ts_utc": "2026-01-29T04:26:30+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 94}}
+{"ts_utc": "2026-01-29T04:26:30+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 95}}
+{"ts_utc": "2026-01-29T04:26:30+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 96}}
+{"ts_utc": "2026-01-29T04:26:30+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 97}}
+{"ts_utc": "2026-01-29T04:26:30+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 98}}
+{"ts_utc": "2026-01-29T04:26:31+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 99}}
+{"ts_utc": "2026-01-29T04:26:31+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 100}}
+{"ts_utc": "2026-01-29T04:26:31+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 101}}
+{"ts_utc": "2026-01-29T04:26:31+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 102}}
+{"ts_utc": "2026-01-29T04:26:31+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 103}}
+{"ts_utc": "2026-01-29T04:26:31+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 104}}
+{"ts_utc": "2026-01-29T04:26:31+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 105}}
+{"ts_utc": "2026-01-29T04:26:31+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 106}}
+{"ts_utc": "2026-01-29T04:26:31+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 107}}
+{"ts_utc": "2026-01-29T04:26:31+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 108}}
+{"ts_utc": "2026-01-29T04:26:32+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 109}}
+{"ts_utc": "2026-01-29T04:26:32+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 110}}
+{"ts_utc": "2026-01-29T04:26:32+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 111}}
+{"ts_utc": "2026-01-29T04:26:32+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 112}}
+{"ts_utc": "2026-01-29T04:26:32+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 113}}
+{"ts_utc": "2026-01-29T04:26:32+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 114}}
+{"ts_utc": "2026-01-29T04:26:32+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 115}}
+{"ts_utc": "2026-01-29T04:26:32+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 116}}
+{"ts_utc": "2026-01-29T04:26:32+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 117}}
+{"ts_utc": "2026-01-29T04:26:33+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 118}}
+{"ts_utc": "2026-01-29T04:26:33+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 119}}
+{"ts_utc": "2026-01-29T04:26:33+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 120}}
+{"ts_utc": "2026-01-29T04:26:33+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 121}}
+{"ts_utc": "2026-01-29T04:26:33+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 122}}
+{"ts_utc": "2026-01-29T04:26:33+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 123}}
+{"ts_utc": "2026-01-29T04:26:33+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 124}}
+{"ts_utc": "2026-01-29T04:26:33+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 125}}
+{"ts_utc": "2026-01-29T04:26:33+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 126}}
+{"ts_utc": "2026-01-29T04:26:34+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 127}}
+{"ts_utc": "2026-01-29T04:26:34+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 128}}
+{"ts_utc": "2026-01-29T04:26:34+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 129}}
+{"ts_utc": "2026-01-29T04:26:34+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 130}}
+{"ts_utc": "2026-01-29T04:26:34+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 131}}
+{"ts_utc": "2026-01-29T04:26:34+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 132}}
+{"ts_utc": "2026-01-29T04:26:34+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 133}}
+{"ts_utc": "2026-01-29T04:26:34+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 134}}
+{"ts_utc": "2026-01-29T04:26:34+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 135}}
+{"ts_utc": "2026-01-29T04:26:34+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 136}}
+{"ts_utc": "2026-01-29T04:26:35+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 137}}
+{"ts_utc": "2026-01-29T04:26:35+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 138}}
+{"ts_utc": "2026-01-29T04:26:35+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 139}}
+{"ts_utc": "2026-01-29T04:26:35+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 140}}
+{"ts_utc": "2026-01-29T04:26:35+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 141}}
+{"ts_utc": "2026-01-29T04:26:35+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 142}}
+{"ts_utc": "2026-01-29T04:26:35+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 143}}
+{"ts_utc": "2026-01-29T04:26:35+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 144}}
+{"ts_utc": "2026-01-29T04:26:35+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 145}}
+{"ts_utc": "2026-01-29T04:26:36+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 146}}
+{"ts_utc": "2026-01-29T04:26:36+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 147}}
+{"ts_utc": "2026-01-29T04:26:36+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 148}}
+{"ts_utc": "2026-01-29T04:26:36+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 149}}
+{"ts_utc": "2026-01-29T04:26:36+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 150}}
+{"ts_utc": "2026-01-29T04:26:36+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 151}}
+{"ts_utc": "2026-01-29T04:26:36+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 152}}
+{"ts_utc": "2026-01-29T04:26:36+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 153}}
+{"ts_utc": "2026-01-29T04:26:36+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 154}}
+{"ts_utc": "2026-01-29T04:26:36+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 155}}
+{"ts_utc": "2026-01-29T04:26:37+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 156}}
+{"ts_utc": "2026-01-29T04:26:37+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 157}}
+{"ts_utc": "2026-01-29T04:26:37+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 158}}
+{"ts_utc": "2026-01-29T04:26:37+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 159}}
+{"ts_utc": "2026-01-29T04:26:37+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 160}}
+{"ts_utc": "2026-01-29T04:26:37+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 161}}
+{"ts_utc": "2026-01-29T04:26:37+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 162}}
+{"ts_utc": "2026-01-29T04:26:37+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 163}}
+{"ts_utc": "2026-01-29T04:26:37+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 164}}
+{"ts_utc": "2026-01-29T04:26:38+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 165}}
+{"ts_utc": "2026-01-29T04:26:38+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 166}}
+{"ts_utc": "2026-01-29T04:26:38+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 167}}
+{"ts_utc": "2026-01-29T04:26:38+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 168}}
+{"ts_utc": "2026-01-29T04:26:38+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 169}}
+{"ts_utc": "2026-01-29T04:26:38+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 170}}
+{"ts_utc": "2026-01-29T04:26:38+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 171}}
+{"ts_utc": "2026-01-29T04:26:38+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 172}}
+{"ts_utc": "2026-01-29T04:26:38+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 173}}
+{"ts_utc": "2026-01-29T04:26:38+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 174}}
+{"ts_utc": "2026-01-29T04:26:39+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 175}}
+{"ts_utc": "2026-01-29T04:26:39+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 176}}
+{"ts_utc": "2026-01-29T04:26:39+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 177}}
+{"ts_utc": "2026-01-29T04:26:39+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 178}}
+{"ts_utc": "2026-01-29T04:26:39+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 179}}
+{"ts_utc": "2026-01-29T04:26:39+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 180}}
+{"ts_utc": "2026-01-29T04:26:39+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 181}}
+{"ts_utc": "2026-01-29T04:26:39+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 182}}
+{"ts_utc": "2026-01-29T04:26:39+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 183}}
+{"ts_utc": "2026-01-29T04:26:40+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 184}}
+{"ts_utc": "2026-01-29T04:26:40+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 185}}
+{"ts_utc": "2026-01-29T04:26:40+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 186}}
+{"ts_utc": "2026-01-29T04:26:40+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 187}}
+{"ts_utc": "2026-01-29T04:26:40+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 188}}
+{"ts_utc": "2026-01-29T04:26:40+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 189}}
+{"ts_utc": "2026-01-29T04:26:40+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 190}}
+{"ts_utc": "2026-01-29T04:26:40+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 191}}
+{"ts_utc": "2026-01-29T04:26:40+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 192}}
+{"ts_utc": "2026-01-29T04:26:40+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 193}}
+{"ts_utc": "2026-01-29T04:26:41+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 194}}
+{"ts_utc": "2026-01-29T04:26:41+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 195}}
+{"ts_utc": "2026-01-29T04:26:41+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 196}}
+{"ts_utc": "2026-01-29T04:26:41+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 197}}
+{"ts_utc": "2026-01-29T04:26:41+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 198}}
+{"ts_utc": "2026-01-29T04:26:41+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 199}}
+{"ts_utc": "2026-01-29T04:26:41+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 200}}
+{"ts_utc": "2026-01-29T04:26:41+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 201}}
+{"ts_utc": "2026-01-29T04:26:41+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 202}}
+{"ts_utc": "2026-01-29T04:26:42+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 203}}
+{"ts_utc": "2026-01-29T04:26:42+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 204}}
+{"ts_utc": "2026-01-29T04:26:42+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 205}}
+{"ts_utc": "2026-01-29T04:26:42+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 206}}
+{"ts_utc": "2026-01-29T04:26:42+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 207}}
+{"ts_utc": "2026-01-29T04:26:42+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 208}}
+{"ts_utc": "2026-01-29T04:26:42+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 209}}
+{"ts_utc": "2026-01-29T04:26:42+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 210}}
+{"ts_utc": "2026-01-29T04:26:42+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 211}}
+{"ts_utc": "2026-01-29T04:26:42+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 212}}
+{"ts_utc": "2026-01-29T04:26:43+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 213}}
+{"ts_utc": "2026-01-29T04:26:43+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 214}}
+{"ts_utc": "2026-01-29T04:26:43+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 215}}
+{"ts_utc": "2026-01-29T04:26:43+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 216}}
+{"ts_utc": "2026-01-29T04:26:43+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 217}}
+{"ts_utc": "2026-01-29T04:26:43+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 218}}
+{"ts_utc": "2026-01-29T04:26:43+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 219}}
+{"ts_utc": "2026-01-29T04:26:43+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 220}}
+{"ts_utc": "2026-01-29T04:26:43+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 221}}
+{"ts_utc": "2026-01-29T04:26:44+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 222}}
+{"ts_utc": "2026-01-29T04:26:44+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 223}}
+{"ts_utc": "2026-01-29T04:26:44+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 224}}
+{"ts_utc": "2026-01-29T04:26:44+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 225}}
+{"ts_utc": "2026-01-29T04:26:44+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 226}}
+{"ts_utc": "2026-01-29T04:26:44+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 227}}
+{"ts_utc": "2026-01-29T04:26:44+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 228}}
+{"ts_utc": "2026-01-29T04:26:44+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 229}}
+{"ts_utc": "2026-01-29T04:26:44+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 230}}
+{"ts_utc": "2026-01-29T04:26:44+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 231}}
+{"ts_utc": "2026-01-29T04:26:45+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 232}}
+{"ts_utc": "2026-01-29T04:26:45+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 233}}
+{"ts_utc": "2026-01-29T04:26:45+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 234}}
+{"ts_utc": "2026-01-29T04:26:45+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 235}}
+{"ts_utc": "2026-01-29T04:26:45+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 236}}
+{"ts_utc": "2026-01-29T04:26:45+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 237}}
+{"ts_utc": "2026-01-29T04:26:45+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 238}}
+{"ts_utc": "2026-01-29T04:26:45+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 239}}
+{"ts_utc": "2026-01-29T04:26:45+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 240}}
+{"ts_utc": "2026-01-29T04:26:46+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 241}}
+{"ts_utc": "2026-01-29T04:26:46+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 242}}
+{"ts_utc": "2026-01-29T04:26:46+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 243}}
+{"ts_utc": "2026-01-29T04:26:46+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 244}}
+{"ts_utc": "2026-01-29T04:26:46+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 245}}
+{"ts_utc": "2026-01-29T04:26:46+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 246}}
+{"ts_utc": "2026-01-29T04:26:46+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 247}}
+{"ts_utc": "2026-01-29T04:26:46+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 248}}
+{"ts_utc": "2026-01-29T04:26:46+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 249}}
+{"ts_utc": "2026-01-29T04:26:46+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 250}}
+{"ts_utc": "2026-01-29T04:26:47+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 251}}
+{"ts_utc": "2026-01-29T04:26:47+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 252}}
+{"ts_utc": "2026-01-29T04:26:47+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 253}}
+{"ts_utc": "2026-01-29T04:26:47+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 254}}
+{"ts_utc": "2026-01-29T04:26:47+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 255}}
+{"ts_utc": "2026-01-29T04:26:47+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 256}}
+{"ts_utc": "2026-01-29T04:26:47+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 257}}
+{"ts_utc": "2026-01-29T04:26:47+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 258}}
+{"ts_utc": "2026-01-29T04:26:47+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 259}}
+{"ts_utc": "2026-01-29T04:26:48+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 260}}
+{"ts_utc": "2026-01-29T04:26:48+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 261}}
+{"ts_utc": "2026-01-29T04:26:48+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 262}}
+{"ts_utc": "2026-01-29T04:26:48+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 263}}
+{"ts_utc": "2026-01-29T04:26:48+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 264}}
+{"ts_utc": "2026-01-29T04:26:48+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 265}}
+{"ts_utc": "2026-01-29T04:26:48+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 266}}
+{"ts_utc": "2026-01-29T04:26:48+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 267}}
+{"ts_utc": "2026-01-29T04:26:48+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 268}}
+{"ts_utc": "2026-01-29T04:26:48+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 269}}
+{"ts_utc": "2026-01-29T04:26:49+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 270}}
+{"ts_utc": "2026-01-29T04:26:49+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 271}}
+{"ts_utc": "2026-01-29T04:26:49+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 272}}
+{"ts_utc": "2026-01-29T04:26:49+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 273}}
+{"ts_utc": "2026-01-29T04:26:49+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 274}}
+{"ts_utc": "2026-01-29T04:26:49+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 275}}
+{"ts_utc": "2026-01-29T04:26:49+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 276}}
+{"ts_utc": "2026-01-29T04:26:49+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 277}}
+{"ts_utc": "2026-01-29T04:26:49+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 278}}
+{"ts_utc": "2026-01-29T04:26:50+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 279}}
+{"ts_utc": "2026-01-29T04:26:50+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 280}}
+{"ts_utc": "2026-01-29T04:26:50+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 281}}
+{"ts_utc": "2026-01-29T04:26:50+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 282}}
+{"ts_utc": "2026-01-29T04:26:50+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 283}}
+{"ts_utc": "2026-01-29T04:26:50+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 284}}
+{"ts_utc": "2026-01-29T04:26:50+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 285}}
+{"ts_utc": "2026-01-29T04:26:50+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 286}}
+{"ts_utc": "2026-01-29T04:26:50+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 287}}
+{"ts_utc": "2026-01-29T04:26:50+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 288}}
+{"ts_utc": "2026-01-29T04:26:51+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 289}}
+{"ts_utc": "2026-01-29T04:26:51+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 290}}
+{"ts_utc": "2026-01-29T04:26:51+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 291}}
+{"ts_utc": "2026-01-29T04:26:51+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 292}}
+{"ts_utc": "2026-01-29T04:26:51+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 293}}
+{"ts_utc": "2026-01-29T04:26:51+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 294}}
+{"ts_utc": "2026-01-29T04:26:51+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 295}}
+{"ts_utc": "2026-01-29T04:26:51+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 296}}
+{"ts_utc": "2026-01-29T04:26:51+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 297}}
+{"ts_utc": "2026-01-29T04:26:52+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 298}}
+{"ts_utc": "2026-01-29T04:26:52+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 299}}
+{"ts_utc": "2026-01-29T04:26:52+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 300}}
+{"ts_utc": "2026-01-29T04:26:52+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 301}}
+{"ts_utc": "2026-01-29T04:26:52+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 302}}
+{"ts_utc": "2026-01-29T04:26:52+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 303}}
+{"ts_utc": "2026-01-29T04:26:52+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 304}}
+{"ts_utc": "2026-01-29T04:26:52+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 305}}
+{"ts_utc": "2026-01-29T04:26:52+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 306}}
+{"ts_utc": "2026-01-29T04:26:53+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 307}}
+{"ts_utc": "2026-01-29T04:26:53+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 308}}
+{"ts_utc": "2026-01-29T04:26:53+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 309}}
+{"ts_utc": "2026-01-29T04:26:53+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 310}}
+{"ts_utc": "2026-01-29T04:26:53+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 311}}
+{"ts_utc": "2026-01-29T04:26:53+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 312}}
+{"ts_utc": "2026-01-29T04:26:53+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 313}}
+{"ts_utc": "2026-01-29T04:26:53+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 314}}
+{"ts_utc": "2026-01-29T04:26:53+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 315}}
+{"ts_utc": "2026-01-29T04:26:53+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 316}}
+{"ts_utc": "2026-01-29T04:26:54+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 317}}
+{"ts_utc": "2026-01-29T04:26:54+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 318}}
+{"ts_utc": "2026-01-29T04:26:54+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 319}}
+{"ts_utc": "2026-01-29T04:26:54+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 320}}
+{"ts_utc": "2026-01-29T04:26:54+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 321}}
+{"ts_utc": "2026-01-29T04:26:54+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 322}}
+{"ts_utc": "2026-01-29T04:26:54+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 323}}
+{"ts_utc": "2026-01-29T04:26:54+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 324}}
+{"ts_utc": "2026-01-29T04:26:54+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 325}}
+{"ts_utc": "2026-01-29T04:26:55+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 326}}
+{"ts_utc": "2026-01-29T04:26:55+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 327}}
+{"ts_utc": "2026-01-29T04:26:55+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 328}}
+{"ts_utc": "2026-01-29T04:26:55+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 329}}
+{"ts_utc": "2026-01-29T04:26:55+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 330}}
+{"ts_utc": "2026-01-29T04:26:55+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 331}}
+{"ts_utc": "2026-01-29T04:26:55+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 332}}
+{"ts_utc": "2026-01-29T04:26:55+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 333}}
+{"ts_utc": "2026-01-29T04:26:55+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 334}}
+{"ts_utc": "2026-01-29T04:26:55+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 335}}
+{"ts_utc": "2026-01-29T04:26:56+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 336}}
+{"ts_utc": "2026-01-29T04:26:56+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 337}}
+{"ts_utc": "2026-01-29T04:26:56+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 338}}
+{"ts_utc": "2026-01-29T04:26:56+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 339}}
+{"ts_utc": "2026-01-29T04:26:56+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 340}}
+{"ts_utc": "2026-01-29T04:26:56+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 341}}
+{"ts_utc": "2026-01-29T04:26:56+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 342}}
+{"ts_utc": "2026-01-29T04:26:56+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 343}}
+{"ts_utc": "2026-01-29T04:26:56+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 344}}
+{"ts_utc": "2026-01-29T04:26:57+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 345}}
+{"ts_utc": "2026-01-29T04:26:57+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 346}}
+{"ts_utc": "2026-01-29T04:26:57+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 347}}
+{"ts_utc": "2026-01-29T04:26:57+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 348}}
+{"ts_utc": "2026-01-29T04:26:57+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 349}}
+{"ts_utc": "2026-01-29T04:26:57+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 350}}
+{"ts_utc": "2026-01-29T04:26:57+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 351}}
+{"ts_utc": "2026-01-29T04:26:57+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 352}}
+{"ts_utc": "2026-01-29T04:26:57+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 353}}
+{"ts_utc": "2026-01-29T04:26:58+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 354}}
+{"ts_utc": "2026-01-29T04:26:58+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 355}}
+{"ts_utc": "2026-01-29T04:26:58+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 356}}
+{"ts_utc": "2026-01-29T04:26:58+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 357}}
+{"ts_utc": "2026-01-29T04:26:58+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 358}}
+{"ts_utc": "2026-01-29T04:26:58+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 359}}
+{"ts_utc": "2026-01-29T04:26:58+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 360}}
+{"ts_utc": "2026-01-29T04:26:58+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 361}}
+{"ts_utc": "2026-01-29T04:26:58+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 362}}
+{"ts_utc": "2026-01-29T04:26:58+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 363}}
+{"ts_utc": "2026-01-29T04:26:59+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 364}}
+{"ts_utc": "2026-01-29T04:26:59+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 365}}
+{"ts_utc": "2026-01-29T04:26:59+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 366}}
+{"ts_utc": "2026-01-29T04:26:59+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 367}}
+{"ts_utc": "2026-01-29T04:26:59+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 368}}
+{"ts_utc": "2026-01-29T04:26:59+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 369}}
+{"ts_utc": "2026-01-29T04:26:59+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 370}}
+{"ts_utc": "2026-01-29T04:26:59+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 371}}
+{"ts_utc": "2026-01-29T04:26:59+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 372}}
+{"ts_utc": "2026-01-29T04:27:00+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 373}}
+{"ts_utc": "2026-01-29T04:27:00+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 374}}
+{"ts_utc": "2026-01-29T04:27:00+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 375}}
+{"ts_utc": "2026-01-29T04:27:00+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 376}}
+{"ts_utc": "2026-01-29T04:27:00+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 377}}
+{"ts_utc": "2026-01-29T04:27:00+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 378}}
+{"ts_utc": "2026-01-29T04:27:00+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 379}}
+{"ts_utc": "2026-01-29T04:27:00+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 380}}
+{"ts_utc": "2026-01-29T04:27:00+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 381}}
+{"ts_utc": "2026-01-29T04:27:00+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 382}}
+{"ts_utc": "2026-01-29T04:27:01+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 383}}
+{"ts_utc": "2026-01-29T04:27:01+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 384}}
+{"ts_utc": "2026-01-29T04:27:01+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 385}}
+{"ts_utc": "2026-01-29T04:27:01+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 386}}
+{"ts_utc": "2026-01-29T04:27:01+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 387}}
+{"ts_utc": "2026-01-29T04:27:01+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 388}}
+{"ts_utc": "2026-01-29T04:27:01+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 389}}
+{"ts_utc": "2026-01-29T04:27:01+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 390}}
+{"ts_utc": "2026-01-29T04:27:01+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 391}}
+{"ts_utc": "2026-01-29T04:27:02+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 392}}
+{"ts_utc": "2026-01-29T04:27:02+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 393}}
+{"ts_utc": "2026-01-29T04:27:02+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 394}}
+{"ts_utc": "2026-01-29T04:27:02+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 395}}
+{"ts_utc": "2026-01-29T04:27:02+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 396}}
+{"ts_utc": "2026-01-29T04:27:02+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 397}}
+{"ts_utc": "2026-01-29T04:27:02+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 398}}
+{"ts_utc": "2026-01-29T04:27:02+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 399}}
+{"ts_utc": "2026-01-29T04:27:02+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 400}}
+{"ts_utc": "2026-01-29T04:27:02+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 401}}
+{"ts_utc": "2026-01-29T04:27:03+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 402}}
+{"ts_utc": "2026-01-29T04:27:03+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 403}}
+{"ts_utc": "2026-01-29T04:27:03+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 404}}
+{"ts_utc": "2026-01-29T04:27:03+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 405}}
+{"ts_utc": "2026-01-29T04:27:03+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 406}}
+{"ts_utc": "2026-01-29T04:27:03+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 407}}
+{"ts_utc": "2026-01-29T04:27:03+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 408}}
+{"ts_utc": "2026-01-29T04:27:03+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 409}}
+{"ts_utc": "2026-01-29T04:27:03+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 410}}
+{"ts_utc": "2026-01-29T04:27:04+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 411}}
+{"ts_utc": "2026-01-29T04:27:04+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 412}}
+{"ts_utc": "2026-01-29T04:27:04+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 413}}
+{"ts_utc": "2026-01-29T04:27:04+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 414}}
+{"ts_utc": "2026-01-29T04:27:04+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 415}}
+{"ts_utc": "2026-01-29T04:27:04+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 416}}
+{"ts_utc": "2026-01-29T04:27:04+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 417}}
+{"ts_utc": "2026-01-29T04:27:04+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 418}}
+{"ts_utc": "2026-01-29T04:27:04+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 419}}
+{"ts_utc": "2026-01-29T04:27:04+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 420}}
+{"ts_utc": "2026-01-29T04:27:05+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 421}}
+{"ts_utc": "2026-01-29T04:27:05+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 422}}
+{"ts_utc": "2026-01-29T04:27:05+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 423}}
+{"ts_utc": "2026-01-29T04:27:05+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 424}}
+{"ts_utc": "2026-01-29T04:27:05+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 425}}
+{"ts_utc": "2026-01-29T04:27:05+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 426}}
+{"ts_utc": "2026-01-29T04:27:05+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 427}}
+{"ts_utc": "2026-01-29T04:27:05+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 428}}
+{"ts_utc": "2026-01-29T04:27:05+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 429}}
+{"ts_utc": "2026-01-29T04:27:06+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 430}}
+{"ts_utc": "2026-01-29T04:27:06+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 431}}
+{"ts_utc": "2026-01-29T04:27:06+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 432}}
+{"ts_utc": "2026-01-29T04:27:06+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 433}}
+{"ts_utc": "2026-01-29T04:27:06+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 434}}
+{"ts_utc": "2026-01-29T04:27:06+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 435}}
+{"ts_utc": "2026-01-29T04:27:06+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 436}}
+{"ts_utc": "2026-01-29T04:27:06+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 437}}
+{"ts_utc": "2026-01-29T04:27:06+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 438}}
+{"ts_utc": "2026-01-29T04:27:06+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 439}}
+{"ts_utc": "2026-01-29T04:27:07+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 440}}
+{"ts_utc": "2026-01-29T04:27:07+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 441}}
+{"ts_utc": "2026-01-29T04:27:07+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 442}}
+{"ts_utc": "2026-01-29T04:27:07+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 443}}
+{"ts_utc": "2026-01-29T04:27:07+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 444}}
+{"ts_utc": "2026-01-29T04:27:07+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 445}}
+{"ts_utc": "2026-01-29T04:27:07+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 446}}
+{"ts_utc": "2026-01-29T04:27:07+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 447}}
+{"ts_utc": "2026-01-29T04:27:07+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 448}}
+{"ts_utc": "2026-01-29T04:27:08+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 449}}
+{"ts_utc": "2026-01-29T04:27:08+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 450}}
+{"ts_utc": "2026-01-29T04:27:08+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 451}}
+{"ts_utc": "2026-01-29T04:27:08+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 452}}
+{"ts_utc": "2026-01-29T04:27:08+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 453}}
+{"ts_utc": "2026-01-29T04:27:08+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 454}}
+{"ts_utc": "2026-01-29T04:27:08+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 455}}
+{"ts_utc": "2026-01-29T04:27:08+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 456}}
+{"ts_utc": "2026-01-29T04:27:08+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 457}}
+{"ts_utc": "2026-01-29T04:27:09+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 458}}
+{"ts_utc": "2026-01-29T04:27:09+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 459}}
+{"ts_utc": "2026-01-29T04:27:09+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 460}}
+{"ts_utc": "2026-01-29T04:27:09+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 461}}
+{"ts_utc": "2026-01-29T04:27:09+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 462}}
+{"ts_utc": "2026-01-29T04:27:09+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 463}}
+{"ts_utc": "2026-01-29T04:27:09+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 464}}
+{"ts_utc": "2026-01-29T04:27:09+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 465}}
+{"ts_utc": "2026-01-29T04:27:09+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 466}}
+{"ts_utc": "2026-01-29T04:27:09+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 467}}
+{"ts_utc": "2026-01-29T04:27:10+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 468}}
+{"ts_utc": "2026-01-29T04:27:10+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 469}}
+{"ts_utc": "2026-01-29T04:27:10+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 470}}
+{"ts_utc": "2026-01-29T04:27:10+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 471}}
+{"ts_utc": "2026-01-29T04:27:10+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 472}}
+{"ts_utc": "2026-01-29T04:27:10+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 473}}
+{"ts_utc": "2026-01-29T04:27:10+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 474}}
+{"ts_utc": "2026-01-29T04:27:10+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 475}}
+{"ts_utc": "2026-01-29T04:27:10+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 476}}
+{"ts_utc": "2026-01-29T04:27:11+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 477}}
+{"ts_utc": "2026-01-29T04:27:11+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 478}}
+{"ts_utc": "2026-01-29T04:27:11+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 479}}
+{"ts_utc": "2026-01-29T04:27:11+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 480}}
+{"ts_utc": "2026-01-29T04:27:11+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 481}}
+{"ts_utc": "2026-01-29T04:27:11+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 482}}
+{"ts_utc": "2026-01-29T04:27:11+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 483}}
+{"ts_utc": "2026-01-29T04:27:11+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 484}}
+{"ts_utc": "2026-01-29T04:27:11+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 485}}
+{"ts_utc": "2026-01-29T04:27:11+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 486}}
+{"ts_utc": "2026-01-29T04:27:12+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 487}}
+{"ts_utc": "2026-01-29T04:27:12+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 488}}
+{"ts_utc": "2026-01-29T04:27:12+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 489}}
+{"ts_utc": "2026-01-29T04:27:12+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 490}}
+{"ts_utc": "2026-01-29T04:27:12+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 491}}
+{"ts_utc": "2026-01-29T04:27:12+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 492}}
+{"ts_utc": "2026-01-29T04:27:12+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 493}}
+{"ts_utc": "2026-01-29T04:27:12+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 494}}
+{"ts_utc": "2026-01-29T04:27:12+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 495}}
+{"ts_utc": "2026-01-29T04:27:13+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 496}}
+{"ts_utc": "2026-01-29T04:27:13+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 497}}
+{"ts_utc": "2026-01-29T04:27:13+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 498}}
+{"ts_utc": "2026-01-29T04:27:13+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 499}}
+{"ts_utc": "2026-01-29T04:27:13+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 500}}
+{"ts_utc": "2026-01-29T04:27:13+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 501}}
+{"ts_utc": "2026-01-29T04:27:13+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 502}}
+{"ts_utc": "2026-01-29T04:27:13+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 503}}
+{"ts_utc": "2026-01-29T04:27:13+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 504}}
+{"ts_utc": "2026-01-29T04:27:13+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 505}}
+{"ts_utc": "2026-01-29T04:27:14+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 506}}
+{"ts_utc": "2026-01-29T04:27:14+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 507}}
+{"ts_utc": "2026-01-29T04:27:14+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 508}}
+{"ts_utc": "2026-01-29T04:27:14+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 509}}
+{"ts_utc": "2026-01-29T04:27:14+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 510}}
+{"ts_utc": "2026-01-29T04:27:14+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 511}}
+{"ts_utc": "2026-01-29T04:27:14+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 512}}
+{"ts_utc": "2026-01-29T04:27:14+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 513}}
+{"ts_utc": "2026-01-29T04:27:14+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 514}}
+{"ts_utc": "2026-01-29T04:27:15+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 515}}
+{"ts_utc": "2026-01-29T04:27:15+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 516}}
+{"ts_utc": "2026-01-29T04:27:15+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 517}}
+{"ts_utc": "2026-01-29T04:27:15+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 518}}
+{"ts_utc": "2026-01-29T04:27:15+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 519}}
+{"ts_utc": "2026-01-29T04:27:15+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 520}}
+{"ts_utc": "2026-01-29T04:27:15+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 521}}
+{"ts_utc": "2026-01-29T04:27:15+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 522}}
+{"ts_utc": "2026-01-29T04:27:15+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 523}}
+{"ts_utc": "2026-01-29T04:27:15+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 524}}
+{"ts_utc": "2026-01-29T04:27:16+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 525}}
+{"ts_utc": "2026-01-29T04:27:16+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 526}}
+{"ts_utc": "2026-01-29T04:27:16+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 527}}
+{"ts_utc": "2026-01-29T04:27:16+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 528}}
+{"ts_utc": "2026-01-29T04:27:16+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 529}}
+{"ts_utc": "2026-01-29T04:27:16+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 530}}
+{"ts_utc": "2026-01-29T04:27:16+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 531}}
+{"ts_utc": "2026-01-29T04:27:16+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 532}}
+{"ts_utc": "2026-01-29T04:27:16+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 533}}
+{"ts_utc": "2026-01-29T04:27:17+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 534}}
+{"ts_utc": "2026-01-29T04:27:17+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 535}}
+{"ts_utc": "2026-01-29T04:27:17+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 536}}
+{"ts_utc": "2026-01-29T04:27:17+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 537}}
+{"ts_utc": "2026-01-29T04:27:17+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 538}}
+{"ts_utc": "2026-01-29T04:27:17+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 539}}
+{"ts_utc": "2026-01-29T04:27:17+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 540}}
+{"ts_utc": "2026-01-29T04:27:17+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 541}}
+{"ts_utc": "2026-01-29T04:27:17+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 542}}
+{"ts_utc": "2026-01-29T04:27:17+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 543}}
+{"ts_utc": "2026-01-29T04:27:18+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 544}}
+{"ts_utc": "2026-01-29T04:27:18+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 545}}
+{"ts_utc": "2026-01-29T04:27:18+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 546}}
+{"ts_utc": "2026-01-29T04:27:18+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 547}}
+{"ts_utc": "2026-01-29T04:27:18+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 548}}
+{"ts_utc": "2026-01-29T04:27:18+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 549}}
+{"ts_utc": "2026-01-29T04:27:18+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 550}}
+{"ts_utc": "2026-01-29T04:27:18+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 551}}
+{"ts_utc": "2026-01-29T04:27:18+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 552}}
+{"ts_utc": "2026-01-29T04:27:19+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 553}}
+{"ts_utc": "2026-01-29T04:27:19+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 554}}
+{"ts_utc": "2026-01-29T04:27:19+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 555}}
+{"ts_utc": "2026-01-29T04:27:19+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 556}}
+{"ts_utc": "2026-01-29T04:27:19+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 557}}
+{"ts_utc": "2026-01-29T04:27:19+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 558}}
+{"ts_utc": "2026-01-29T04:27:19+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 559}}
+{"ts_utc": "2026-01-29T04:27:19+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 560}}
+{"ts_utc": "2026-01-29T04:27:19+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 561}}
+{"ts_utc": "2026-01-29T04:27:19+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 562}}
+{"ts_utc": "2026-01-29T04:27:20+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 563}}
+{"ts_utc": "2026-01-29T04:27:20+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 564}}
+{"ts_utc": "2026-01-29T04:27:20+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 565}}
+{"ts_utc": "2026-01-29T04:27:20+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 566}}
+{"ts_utc": "2026-01-29T04:27:20+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 567}}
+{"ts_utc": "2026-01-29T04:27:20+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 568}}
+{"ts_utc": "2026-01-29T04:27:20+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 569}}
+{"ts_utc": "2026-01-29T04:27:20+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 570}}
+{"ts_utc": "2026-01-29T04:27:20+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 571}}
+{"ts_utc": "2026-01-29T04:27:21+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 572}}
+{"ts_utc": "2026-01-29T04:27:21+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 573}}
+{"ts_utc": "2026-01-29T04:27:21+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 574}}
+{"ts_utc": "2026-01-29T04:27:21+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 575}}
+{"ts_utc": "2026-01-29T04:27:21+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 576}}
+{"ts_utc": "2026-01-29T04:27:21+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 577}}
+{"ts_utc": "2026-01-29T04:27:21+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 578}}
+{"ts_utc": "2026-01-29T04:27:21+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 579}}
+{"ts_utc": "2026-01-29T04:27:21+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 580}}
+{"ts_utc": "2026-01-29T04:27:22+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 581}}
+{"ts_utc": "2026-01-29T04:27:22+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 582}}
+{"ts_utc": "2026-01-29T04:27:22+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 583}}
+{"ts_utc": "2026-01-29T04:27:22+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 584}}
+{"ts_utc": "2026-01-29T04:27:22+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 585}}
+{"ts_utc": "2026-01-29T04:27:22+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 586}}
+{"ts_utc": "2026-01-29T04:27:22+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 587}}
+{"ts_utc": "2026-01-29T04:27:22+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 588}}
+{"ts_utc": "2026-01-29T04:27:22+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 589}}
+{"ts_utc": "2026-01-29T04:27:23+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 590}}
+{"ts_utc": "2026-01-29T04:27:23+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 591}}
+{"ts_utc": "2026-01-29T04:27:23+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 592}}
+{"ts_utc": "2026-01-29T04:27:23+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 593}}
+{"ts_utc": "2026-01-29T04:27:23+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 594}}
+{"ts_utc": "2026-01-29T04:27:23+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 595}}
+{"ts_utc": "2026-01-29T04:27:23+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 596}}
+{"ts_utc": "2026-01-29T04:27:23+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 597}}
+{"ts_utc": "2026-01-29T04:27:23+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 598}}
+{"ts_utc": "2026-01-29T04:27:23+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 599}}
+{"ts_utc": "2026-01-29T04:27:24+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 600}}
+{"ts_utc": "2026-01-29T04:27:24+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 601}}
+{"ts_utc": "2026-01-29T04:27:24+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 602}}
+{"ts_utc": "2026-01-29T04:27:24+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 603}}
+{"ts_utc": "2026-01-29T04:27:24+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 604}}
+{"ts_utc": "2026-01-29T04:27:24+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 605}}
+{"ts_utc": "2026-01-29T04:27:24+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 606}}
+{"ts_utc": "2026-01-29T04:27:24+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 607}}
+{"ts_utc": "2026-01-29T04:27:24+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 608}}
+{"ts_utc": "2026-01-29T04:27:24+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 609}}
+{"ts_utc": "2026-01-29T04:27:25+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 610}}
+{"ts_utc": "2026-01-29T04:27:25+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 611}}
+{"ts_utc": "2026-01-29T04:27:25+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 612}}
+{"ts_utc": "2026-01-29T04:27:25+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 613}}
+{"ts_utc": "2026-01-29T04:27:25+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 614}}
+{"ts_utc": "2026-01-29T04:27:25+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 615}}
+{"ts_utc": "2026-01-29T04:27:25+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 616}}
+{"ts_utc": "2026-01-29T04:27:25+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 617}}
+{"ts_utc": "2026-01-29T04:27:25+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 618}}
+{"ts_utc": "2026-01-29T04:27:26+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 619}}
+{"ts_utc": "2026-01-29T04:27:26+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 620}}
+{"ts_utc": "2026-01-29T04:27:26+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 621}}
+{"ts_utc": "2026-01-29T04:27:26+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 622}}
+{"ts_utc": "2026-01-29T04:27:26+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 623}}
+{"ts_utc": "2026-01-29T04:27:26+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 624}}
+{"ts_utc": "2026-01-29T04:27:26+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 625}}
+{"ts_utc": "2026-01-29T04:27:26+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 626}}
+{"ts_utc": "2026-01-29T04:27:26+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 627}}
+{"ts_utc": "2026-01-29T04:27:26+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 628}}
+{"ts_utc": "2026-01-29T04:27:27+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 629}}
+{"ts_utc": "2026-01-29T04:27:27+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 630}}
+{"ts_utc": "2026-01-29T04:27:27+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 631}}
+{"ts_utc": "2026-01-29T04:27:27+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 632}}
+{"ts_utc": "2026-01-29T04:27:27+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 633}}
+{"ts_utc": "2026-01-29T04:27:27+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 634}}
+{"ts_utc": "2026-01-29T04:27:27+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 635}}
+{"ts_utc": "2026-01-29T04:27:27+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 636}}
+{"ts_utc": "2026-01-29T04:27:27+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 637}}
+{"ts_utc": "2026-01-29T04:27:28+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 638}}
+{"ts_utc": "2026-01-29T04:27:28+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 639}}
+{"ts_utc": "2026-01-29T04:27:28+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 640}}
+{"ts_utc": "2026-01-29T04:27:28+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 641}}
+{"ts_utc": "2026-01-29T04:27:28+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 642}}
+{"ts_utc": "2026-01-29T04:27:28+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 643}}
+{"ts_utc": "2026-01-29T04:27:28+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 644}}
+{"ts_utc": "2026-01-29T04:27:28+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 645}}
+{"ts_utc": "2026-01-29T04:27:28+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 646}}
+{"ts_utc": "2026-01-29T04:27:28+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 647}}
+{"ts_utc": "2026-01-29T04:27:29+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 648}}
+{"ts_utc": "2026-01-29T04:27:29+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 649}}
+{"ts_utc": "2026-01-29T04:27:29+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 650}}
+{"ts_utc": "2026-01-29T04:27:29+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 651}}
+{"ts_utc": "2026-01-29T04:27:29+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 652}}
+{"ts_utc": "2026-01-29T04:27:29+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 653}}
+{"ts_utc": "2026-01-29T04:27:29+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 654}}
+{"ts_utc": "2026-01-29T04:27:29+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 655}}
+{"ts_utc": "2026-01-29T04:27:29+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 656}}
+{"ts_utc": "2026-01-29T04:27:30+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 657}}
+{"ts_utc": "2026-01-29T04:27:30+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 658}}
+{"ts_utc": "2026-01-29T04:27:30+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 659}}
+{"ts_utc": "2026-01-29T04:27:30+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 660}}
+{"ts_utc": "2026-01-29T04:27:30+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 661}}
+{"ts_utc": "2026-01-29T04:27:30+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 662}}
+{"ts_utc": "2026-01-29T04:27:30+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 663}}
+{"ts_utc": "2026-01-29T04:27:30+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 664}}
+{"ts_utc": "2026-01-29T04:27:30+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 665}}
+{"ts_utc": "2026-01-29T04:27:31+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 666}}
+{"ts_utc": "2026-01-29T04:27:31+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 667}}
+{"ts_utc": "2026-01-29T04:27:31+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 668}}
+{"ts_utc": "2026-01-29T04:27:31+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 669}}
+{"ts_utc": "2026-01-29T04:27:31+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 670}}
+{"ts_utc": "2026-01-29T04:27:31+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 671}}
+{"ts_utc": "2026-01-29T04:27:31+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 672}}
+{"ts_utc": "2026-01-29T04:27:31+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 673}}
+{"ts_utc": "2026-01-29T04:27:31+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 674}}
+{"ts_utc": "2026-01-29T04:27:32+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 675}}
+{"ts_utc": "2026-01-29T04:27:32+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 676}}
+{"ts_utc": "2026-01-29T04:27:32+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 677}}
+{"ts_utc": "2026-01-29T04:27:32+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 678}}
+{"ts_utc": "2026-01-29T04:27:32+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 679}}
+{"ts_utc": "2026-01-29T04:27:32+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 680}}
+{"ts_utc": "2026-01-29T04:27:32+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 681}}
+{"ts_utc": "2026-01-29T04:27:32+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 682}}
+{"ts_utc": "2026-01-29T04:27:32+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 683}}
+{"ts_utc": "2026-01-29T04:27:32+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 684}}
+{"ts_utc": "2026-01-29T04:27:33+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 685}}
+{"ts_utc": "2026-01-29T04:27:33+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 686}}
+{"ts_utc": "2026-01-29T04:27:33+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 687}}
+{"ts_utc": "2026-01-29T04:27:33+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 688}}
+{"ts_utc": "2026-01-29T04:27:33+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 689}}
+{"ts_utc": "2026-01-29T04:27:33+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 690}}
+{"ts_utc": "2026-01-29T04:27:33+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 691}}
+{"ts_utc": "2026-01-29T04:27:33+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 692}}
+{"ts_utc": "2026-01-29T04:27:33+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 693}}
+{"ts_utc": "2026-01-29T04:27:34+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 694}}
+{"ts_utc": "2026-01-29T04:27:34+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 695}}
+{"ts_utc": "2026-01-29T04:27:34+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 696}}
+{"ts_utc": "2026-01-29T04:27:34+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 697}}
+{"ts_utc": "2026-01-29T04:27:34+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 698}}
+{"ts_utc": "2026-01-29T04:27:34+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 699}}
+{"ts_utc": "2026-01-29T04:27:34+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 700}}
+{"ts_utc": "2026-01-29T04:27:34+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 701}}
+{"ts_utc": "2026-01-29T04:27:34+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 702}}
+{"ts_utc": "2026-01-29T04:27:34+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 703}}
+{"ts_utc": "2026-01-29T04:27:35+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 704}}
+{"ts_utc": "2026-01-29T04:27:35+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 705}}
+{"ts_utc": "2026-01-29T04:27:35+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 706}}
+{"ts_utc": "2026-01-29T04:27:35+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 707}}
+{"ts_utc": "2026-01-29T04:27:35+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 708}}
+{"ts_utc": "2026-01-29T04:27:35+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 709}}
+{"ts_utc": "2026-01-29T04:27:35+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 710}}
+{"ts_utc": "2026-01-29T04:27:35+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 711}}
+{"ts_utc": "2026-01-29T04:27:35+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 712}}
+{"ts_utc": "2026-01-29T04:27:36+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 713}}
+{"ts_utc": "2026-01-29T04:27:36+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 714}}
+{"ts_utc": "2026-01-29T04:27:36+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 715}}
+{"ts_utc": "2026-01-29T04:27:36+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 716}}
+{"ts_utc": "2026-01-29T04:27:36+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 717}}
+{"ts_utc": "2026-01-29T04:27:36+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 718}}
+{"ts_utc": "2026-01-29T04:27:36+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 719}}
+{"ts_utc": "2026-01-29T04:27:36+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 720}}
+{"ts_utc": "2026-01-29T04:27:36+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 721}}
+{"ts_utc": "2026-01-29T04:27:36+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 722}}
+{"ts_utc": "2026-01-29T04:27:37+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 723}}
+{"ts_utc": "2026-01-29T04:27:37+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 724}}
+{"ts_utc": "2026-01-29T04:27:37+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 725}}
+{"ts_utc": "2026-01-29T04:27:37+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 726}}
+{"ts_utc": "2026-01-29T04:27:37+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 727}}
+{"ts_utc": "2026-01-29T04:27:37+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 728}}
+{"ts_utc": "2026-01-29T04:27:37+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 729}}
+{"ts_utc": "2026-01-29T04:27:37+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 730}}
+{"ts_utc": "2026-01-29T04:27:37+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 731}}
+{"ts_utc": "2026-01-29T04:27:37+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 732}}
+{"ts_utc": "2026-01-29T04:27:38+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 733}}
+{"ts_utc": "2026-01-29T04:27:38+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 734}}
+{"ts_utc": "2026-01-29T04:27:38+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 735}}
+{"ts_utc": "2026-01-29T04:27:38+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 736}}
+{"ts_utc": "2026-01-29T04:27:38+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 737}}
+{"ts_utc": "2026-01-29T04:27:38+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 738}}
+{"ts_utc": "2026-01-29T04:27:38+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 739}}
+{"ts_utc": "2026-01-29T04:27:38+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 740}}
+{"ts_utc": "2026-01-29T04:27:38+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 741}}
+{"ts_utc": "2026-01-29T04:27:39+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 742}}
+{"ts_utc": "2026-01-29T04:27:39+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 743}}
+{"ts_utc": "2026-01-29T04:27:39+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 744}}
+{"ts_utc": "2026-01-29T04:27:39+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 745}}
+{"ts_utc": "2026-01-29T04:27:39+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 746}}
+{"ts_utc": "2026-01-29T04:27:39+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 747}}
+{"ts_utc": "2026-01-29T04:27:39+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 748}}
+{"ts_utc": "2026-01-29T04:27:39+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 749}}
+{"ts_utc": "2026-01-29T04:27:39+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 750}}
+{"ts_utc": "2026-01-29T04:27:39+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 751}}
+{"ts_utc": "2026-01-29T04:27:40+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 752}}
+{"ts_utc": "2026-01-29T04:27:40+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 753}}
+{"ts_utc": "2026-01-29T04:27:40+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 754}}
+{"ts_utc": "2026-01-29T04:27:40+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 755}}
+{"ts_utc": "2026-01-29T04:27:40+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 756}}
+{"ts_utc": "2026-01-29T04:27:40+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 757}}
+{"ts_utc": "2026-01-29T04:27:40+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 758}}
+{"ts_utc": "2026-01-29T04:27:40+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 759}}
+{"ts_utc": "2026-01-29T04:27:40+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 760}}
+{"ts_utc": "2026-01-29T04:27:41+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 761}}
+{"ts_utc": "2026-01-29T04:27:41+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 762}}
+{"ts_utc": "2026-01-29T04:27:41+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 763}}
+{"ts_utc": "2026-01-29T04:27:41+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 764}}
+{"ts_utc": "2026-01-29T04:27:41+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 765}}
+{"ts_utc": "2026-01-29T04:27:41+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "EUR_USD", "count": 766}}
+{"ts_utc": "2026-01-29T04:27:41+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "GBP_USD", "count": 767}}
+{"ts_utc": "2026-01-29T04:27:41+00:00", "event": "fx_prompt", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"instrument": "USD_JPY", "count": 768}}
+{"ts_utc": "2026-01-29T04:27:41+00:00", "event": "session_end", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"prompts_generated": 768}}
+{"ts_utc": "2026-01-29T04:49:05+00:00", "event": "session_start", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"runner": "run_fx_live_prompts"}}
+{"ts_utc": "2026-01-29T04:50:25+00:00", "event": "session_end", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"prompts_generated": 0}}
+{"ts_utc": "2026-01-29T04:53:06+00:00", "event": "session_start", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"runner": "run_fx_live_prompts"}}
+{"ts_utc": "2026-01-29T04:54:09+00:00", "event": "session_end", "user": "rasib", "host": "ROBERT-HP-DESKTOP", "details": {"prompts_generated": 0}}
