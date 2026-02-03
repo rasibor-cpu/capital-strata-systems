@@ -24,9 +24,9 @@ from typing import Dict, Optional, Tuple
 # -----------------------------
 @dataclass(frozen=True)
 class InstrumentMapping:
-    strategy_concept: str       # e.g., "FX_EURUSD_MR"
-    rea_instrument: str         # e.g., "FX.EURUSD.SPOT"
-    broker_symbol: str          # e.g., "EUR/USD" or "EURUSD"
+    strategy_concept: str
+    rea_instrument: str
+    broker_symbol: str
     proxy_note: Optional[str] = None
 
 
@@ -41,9 +41,6 @@ class ResolutionResult:
 # -----------------------------
 # Governance Mapping Registry
 # -----------------------------
-# IMPORTANT:
-# Keep this list small, explicit, and reviewed.
-# Add instruments only via governance commit.
 MAPPINGS = [
     InstrumentMapping(
         strategy_concept="FX_EURUSD_MR",
@@ -64,20 +61,15 @@ def _build_indexes() -> Tuple[Dict[str, InstrumentMapping], Dict[str, Instrument
 
     for m in MAPPINGS:
         if m.strategy_concept in by_strategy:
-            raise RuntimeError(
-                f"Ambiguous mapping: duplicate strategy_concept={m.strategy_concept}"
-            )
+            raise RuntimeError(f"Ambiguous mapping: duplicate strategy_concept={m.strategy_concept}")
         if m.rea_instrument in by_rea:
-            raise RuntimeError(
-                f"Ambiguous mapping: duplicate rea_instrument={m.rea_instrument}"
-            )
+            raise RuntimeError(f"Ambiguous mapping: duplicate rea_instrument={m.rea_instrument}")
         by_strategy[m.strategy_concept] = m
         by_rea[m.rea_instrument] = m
 
     return by_strategy, by_rea
 
 
-# Build at import-time (startup hard-fail if invalid)
 _BY_STRATEGY, _BY_REA = _build_indexes()
 
 
@@ -109,13 +101,8 @@ def resolve_by_rea(rea_instrument: str) -> ResolutionResult:
 
 
 def broker_symbol_for_rea(rea_instrument: str) -> str:
-    """
-    Convenience: used by LiveQuoteRouter mapping dict build.
-    Hard-fails if missing.
-    """
     return resolve_by_rea(rea_instrument).broker_symbol
 
 
 if __name__ == "__main__":
-    raise RuntimeError(
-        "rea_symbol_map is a governance module only; it
+    raise RuntimeError("rea_symbol_map is a governance module only; do not run it directly.")
