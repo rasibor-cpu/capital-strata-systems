@@ -21,3 +21,6 @@ live_data/*.log
 
 # Local helper scripts
 _find_csv.cmd
+# junk/encoding artifacts accidentally created at repo root
+e*.py*
+tatus
