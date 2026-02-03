@@ -11,6 +11,31 @@ data_fx/
 # --- Python cache ---
 __pycache__/
 *.pyc
+# =============================
+# Local data (never commit)
+# =============================
+data/
+*.csv
+
+# =============================
+# Experimental / test scripts
+# =============================
+test_*.py
+run_live_*.py
+run_fx_pairs_replay_*_fxrulesless_*.py
+
+# =============================
+# Live adapters (separate branch only)
+# =============================
+live_data/
+
+# =============================
+# Scratch / temp
+# =============================
+str/
+__pycache__/
+*.pyc
+
 
 # --- OS ---
 .DS_Store
