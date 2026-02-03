@@ -1,43 +1,51 @@
 """
 REA Capital Trading Engine
-Liquidity Gate (Execution Safety Layer)
+Liquidity Gate (Execution Veto Layer)
 
-Constitutional Authority:
-- Layer 5: Execution Control
-- This module has VETO power only
-- It NEVER authorizes trades, it only blocks unsafe execution
+Purpose:
+- Enforce market safety checks before any execution consideration
+- READ-ONLY
+- No broker calls
+- No execution
 
-Design Principles:
-- Default = BLOCK
-- Liquidity uncertainty = NO EXECUTION
-- No retries, no averaging, no assumptions
+Veto Rules (Hard):
+1. Quote freshness (age <= MAX_QUOTE_AGE_MS)
+2. Spread sanity (if available)
+
+This gate is authoritative and blocks downstream execution logic.
 """
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional
-import time
 
 
 # -----------------------------
-# Decision Object (Immutable)
+# Policy Constants (LOCKED)
+# -----------------------------
+MAX_QUOTE_AGE_MS = 3000      # 3 seconds (institutional standard)
+MAX_SPREAD_PCT = 0.002       # 0.20% max spread (defensive default)
+
+
+# -----------------------------
+# Snapshot Input
+# -----------------------------
+@dataclass(frozen=True)
+class LiquiditySnapshot:
+    quote_age_ms: int
+    bid: Optional[float]
+    ask: Optional[float]
+    mid: Optional[float]
+
+
+# -----------------------------
+# Decision Output
 # -----------------------------
 @dataclass(frozen=True)
 class LiquidityDecision:
     allow: bool
     reason: str
-    timestamp: float
-
-
-# -----------------------------
-# Liquidity Snapshot
-# -----------------------------
-@dataclass
-class LiquiditySnapshot:
-    bid: Optional[float]
-    ask: Optional[float]
-    spread: Optional[float]
-    volume: Optional[float]
-    quote_age_ms: Optional[int]
 
 
 # -----------------------------
@@ -45,84 +53,39 @@ class LiquiditySnapshot:
 # -----------------------------
 class LiquidityGate:
     """
-    LiquidityGate enforces execution safety.
-    It does NOT optimize fills.
-    It only answers: should execution be attempted at all?
+    Authoritative liquidity veto layer.
     """
 
-    def __init__(
-        self,
-        max_spread_pct: float,
-        min_volume: float,
-        max_quote_age_ms: int,
-    ):
-        self.max_spread_pct = max_spread_pct
-        self.min_volume = min_volume
-        self.max_quote_age_ms = max_quote_age_ms
-
-    # -------------------------
-    # Core Evaluation
-    # -------------------------
-    def evaluate(self, snapshot: LiquiditySnapshot) -> LiquidityDecision:
-        now = time.time()
-
-        # ---- Hard Fail: Missing Data ----
-        if snapshot.bid is None or snapshot.ask is None:
-            return self._block("Missing bid/ask data", now)
-
-        if snapshot.spread is None:
-            return self._block("Spread not computable", now)
-
-        if snapshot.volume is None:
-            return self._block("Volume data missing", now)
-
-        if snapshot.quote_age_ms is None:
-            return self._block("Quote age unknown", now)
-
-        # ---- Spread Check ----
-        mid_price = (snapshot.bid + snapshot.ask) / 2.0
-        spread_pct = snapshot.spread / mid_price
-
-        if spread_pct > self.max_spread_pct:
-            return self._block(
-                f"Spread too wide ({spread_pct:.4%})", now
+    def evaluate(self, snap: LiquiditySnapshot) -> LiquidityDecision:
+        # ---- Rule 1: Quote freshness ----
+        if snap.quote_age_ms > MAX_QUOTE_AGE_MS:
+            return LiquidityDecision(
+                allow=False,
+                reason=f"Stale quote: age={snap.quote_age_ms}ms exceeds {MAX_QUOTE_AGE_MS}ms",
             )
 
-        # ---- Volume Check ----
-        if snapshot.volume < self.min_volume:
-            return self._block(
-                f"Insufficient liquidity (volume={snapshot.volume})", now
-            )
+        # ---- Rule 2: Spread sanity (if available) ----
+        if snap.bid is not None and snap.ask is not None and snap.mid:
+            spread = snap.ask - snap.bid
+            if spread < 0:
+                return LiquidityDecision(
+                    allow=False,
+                    reason="Invalid spread (ask < bid)",
+                )
 
-        # ---- Staleness Check ----
-        if snapshot.quote_age_ms > self.max_quote_age_ms:
-            return self._block(
-                f"Stale quote ({snapshot.quote_age_ms}ms)", now
-            )
+            spread_pct = spread / snap.mid if snap.mid > 0 else 0.0
+            if spread_pct > MAX_SPREAD_PCT:
+                return LiquidityDecision(
+                    allow=False,
+                    reason=f"Excessive spread: {spread_pct:.4%}",
+                )
 
-        # ---- If ALL checks pass ----
+        # ---- Passed ----
         return LiquidityDecision(
             allow=True,
-            reason="Liquidity conditions acceptable",
-            timestamp=now,
-        )
-
-    # -------------------------
-    # Internal Helper
-    # -------------------------
-    def _block(self, reason: str, ts: float) -> LiquidityDecision:
-        return LiquidityDecision(
-            allow=False,
-            reason=reason,
-            timestamp=ts,
+            reason="Liquidity checks passed",
         )
 
 
-# -----------------------------
-# Constitutional Assertion
-# -----------------------------
 if __name__ == "__main__":
-    raise RuntimeError(
-        "LiquidityGate is not executable standalone. "
-        "It must be called by the Execution Control pipeline."
-    )
+    raise RuntimeError("LiquidityGate is a library module only.")
