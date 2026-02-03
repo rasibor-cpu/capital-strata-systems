@@ -1,168 +1,107 @@
+# engine/execution/execution_gate.py
 """
-Execution Gate (Hard-Lock, Pre-Trade)
-------------------------------------
-Final governance barrier BEFORE any order can be placed.
+Execution Gate — HARD GOVERNANCE LOCK (FAIL-CLOSED)
 
-This module enforces:
-- Global execution enable switch
-- Max trades/day
-- Max concurrent positions
-- Per-trade equity risk caps
-- Drawdown cap
-- Loss streak cooldown rules
-- Human override requirements for high-risk trades
+Final authority before any execution.
 
-It does NOT place orders. It only returns ALLOW/BLOCK decisions + reasons.
-
-IMPORTANT:
-- Keep deterministic and auditable.
-- BLOCK by default on missing/invalid inputs.
+ALLOW only if ALL pass:
+1) execution_policy.json loads + validates
+2) instrument is whitelisted
+3) risk_pct <= max_equity_risk_per_trade_pct
+4) live_state == ARMED_ACTIVE and not expired
+5) rate-limit OK
+6) no auto-disarm reason
 """
 
-from dataclasses import dataclass
-from typing import Dict, Any, Optional
-import time
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Dict, Any, List
+
+from engine.execution.execution_policy_loader import load_execution_policy
+from engine.execution.live_state import get_live_state
+from engine.execution.rate_limiter import check_rate_limit
+from engine.execution.auto_disarm import check_auto_disarm
 
 
-@dataclass(frozen=True)
-class ExecutionDecision:
-    decision: str           # "ALLOW" | "BLOCK"
-    reason: str             # reason code
-    meta: Dict[str, Any]
+class ExecutionGateDecision:
+    ALLOW = "ALLOW"
+    BLOCK = "BLOCK"
 
 
-class ExecutionGate:
+def _flatten_whitelist(wl: Dict[str, Any]) -> List[str]:
+    out: List[str] = []
+    for k in ("fx", "crypto", "equities", "options"):
+        v = wl.get(k, [])
+        if isinstance(v, list):
+            out.extend([str(x).upper() for x in v])
+    return out
+
+
+def execution_gate_check(context: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Governance thresholds (approved).
+    context expects:
+      - instrument: str (e.g., EURUSD)
+      - risk_pct: float (0..100) intended equity risk for this trade
     """
+    # FAIL-CLOSED default
+    result = {
+        "decision": ExecutionGateDecision.BLOCK,
+        "reason": "unknown",
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "meta": {},
+    }
 
-    # --- Global hard lock ---
-    EXECUTION_ENABLED_DEFAULT: bool = False
+    instrument = str(context.get("instrument", "")).upper().strip()
+    risk_pct = float(context.get("risk_pct", 0.0) or 0.0)
 
-    # --- Operational limits (approved) ---
-    MAX_TRADES_PER_DAY: int = 10
-    MAX_CONCURRENT_POSITIONS: int = 20
+    # 1) Load policy (validated)
+    try:
+        policy = load_execution_policy()
+    except Exception as e:
+        result["reason"] = f"policy_load_failed: {e}"
+        return result
 
-    # --- Risk caps (approved) ---
-    # Up to 20% of total equity per single trade (bank single-obligor style limit)
-    MAX_SINGLE_TRADE_EQUITY_PCT: float = 0.20
+    # 2) Instrument whitelist
+    wl = policy.get("instrument_whitelist", {})
+    allowed_instruments = _flatten_whitelist(wl)
+    if not instrument or instrument not in allowed_instruments:
+        result["reason"] = "instrument_not_whitelisted"
+        result["meta"] = {"instrument": instrument}
+        return result
 
-    # Drawdown cap (absolute portfolio equity drawdown)
-    MAX_DRAWDOWN_PCT: float = 0.25
+    # 3) Risk cap per trade
+    cap = policy.get("capital_protection", {})
+    max_risk = float(cap.get("max_equity_risk_per_trade_pct", 0.0) or 0.0)
+    if risk_pct > max_risk:
+        result["reason"] = "risk_pct_exceeds_policy"
+        result["meta"] = {"risk_pct": risk_pct, "max_allowed_pct": max_risk}
+        return result
 
-    # Human override required if a proposed trade risks > 25% of equity
-    OVERRIDE_REQUIRED_ABOVE_EQUITY_PCT: float = 0.25
+    # 4) Live state must be ARMED_ACTIVE
+    ls = get_live_state()
+    if ls.state != "ARMED_ACTIVE":
+        result["reason"] = f"not_armed ({ls.state})"
+        result["meta"] = {"armed_state": ls.state}
+        return result
+    if ls.is_expired():
+        result["reason"] = "arming_expired"
+        result["meta"] = {"expires_at_utc": ls.expires_at_utc}
+        return result
 
-    # --- Cooldown rules (approved) ---
-    # 5 losses triggers 12h cooldown (global)
-    GLOBAL_LOSS_STREAK_LIMIT: int = 5
-    GLOBAL_COOLDOWN_SECONDS: int = 12 * 60 * 60
+    # 5) Rate limit
+    if not check_rate_limit():
+        result["reason"] = "rate_limit_exceeded"
+        return result
 
-    # 3 losses per pair triggers pair block
-    PAIR_LOSS_STREAK_LIMIT: int = 3
+    # 6) Auto-disarm checks
+    disarm_reason = check_auto_disarm()
+    if disarm_reason:
+        result["reason"] = f"auto_disarm: {disarm_reason}"
+        return result
 
-    @classmethod
-    def evaluate(
-        cls,
-        *,
-        now_ts: Optional[float],
-        execution_enabled: Optional[bool],
-        equity: Optional[float],
-        peak_equity: Optional[float],
-        current_equity: Optional[float],
-        proposed_risk_amount: Optional[float],
-        trades_today: Optional[int],
-        open_positions: Optional[int],
-        global_loss_streak: Optional[int],
-        global_cooldown_until_ts: Optional[float],
-        pair_loss_streak: Optional[int],
-        has_human_override: Optional[bool],
-        override_confirmations: Optional[int],
-        extra: Optional[Dict[str, Any]] = None,
-    ) -> ExecutionDecision:
-        """
-        Inputs must be supplied by the engine state manager / risk engine.
-
-        proposed_risk_amount: worst-case loss amount (in account currency) for this trade
-                              after stop placement and slippage assumptions (conservative).
-
-        override_confirmations: count of password confirmations collected (must be >=2)
-        """
-        meta = extra.copy() if extra else {}
-        ts = now_ts if now_ts is not None else time.time()
-
-        # Helper for consistent blocking
-        def block(reason: str) -> ExecutionDecision:
-            meta.update({"ts": ts})
-            return ExecutionDecision("BLOCK", reason, meta)
-
-        def allow(reason: str) -> ExecutionDecision:
-            meta.update({"ts": ts})
-            return ExecutionDecision("ALLOW", reason, meta)
-
-        # 0) Hard lock: execution enabled
-        if execution_enabled is None:
-            return block("execution_enabled_missing")
-        if execution_enabled is False:
-            return block("execution_disabled")
-
-        # 1) Basic required fields
-        if any(v is None for v in [equity, peak_equity, current_equity, proposed_risk_amount,
-                                   trades_today, open_positions, global_loss_streak,
-                                   global_cooldown_until_ts, pair_loss_streak,
-                                   has_human_override, override_confirmations]):
-            return block("missing_required_inputs")
-
-        if equity <= 0 or peak_equity <= 0 or current_equity <= 0:
-            return block("invalid_equity_values")
-
-        if proposed_risk_amount < 0:
-            return block("invalid_risk_amount")
-
-        # 2) Daily / concurrent limits
-        if trades_today >= cls.MAX_TRADES_PER_DAY:
-            return block("max_trades_per_day_reached")
-
-        if open_positions >= cls.MAX_CONCURRENT_POSITIONS:
-            return block("max_concurrent_positions_reached")
-
-        # 3) Drawdown cap
-        dd = (peak_equity - current_equity) / peak_equity
-        meta.update({"drawdown_pct": dd})
-        if dd >= cls.MAX_DRAWDOWN_PCT:
-            return block("drawdown_cap_reached")
-
-        # 4) Global cooldown
-        if global_loss_streak >= cls.GLOBAL_LOSS_STREAK_LIMIT:
-            if ts < global_cooldown_until_ts:
-                meta.update({"cooldown_until_ts": global_cooldown_until_ts})
-                return block("global_cooldown_active")
-            # cooldown elapsed → allow continuing, but still cautious
-            meta.update({"global_cooldown_elapsed": True})
-
-        # 5) Pair loss streak
-        if pair_loss_streak >= cls.PAIR_LOSS_STREAK_LIMIT:
-            return block("pair_loss_streak_block")
-
-        # 6) Per-trade equity cap (approved: 20%)
-        risk_pct = proposed_risk_amount / equity if equity > 0 else 1.0
-        meta.update({"proposed_risk_pct_equity": risk_pct})
-
-        if risk_pct > cls.MAX_SINGLE_TRADE_EQUITY_PCT:
-            return block("single_trade_risk_cap_exceeded")
-
-        # 7) Override requirement above 25% equity risk
-        # Note: this is stricter than the 20% cap, but we keep it here for completeness and future tuning.
-        if risk_pct > cls.OVERRIDE_REQUIRED_ABOVE_EQUITY_PCT:
-            # Must have override + double confirmation
-            if not has_human_override:
-                return block("override_required_missing")
-            if override_confirmations < 2:
-                return block("override_double_confirm_required")
-
-        return allow("ok")
-
-
-# Safety invariant
-if __name__ == "__main__":
-    raise RuntimeError("execution_gate.py is a library module only and must not be executed directly.")
+    # ✅ All pass
+    result["decision"] = ExecutionGateDecision.ALLOW
+    result["reason"] = "ok"
+    result["meta"] = {"instrument": instrument, "risk_pct": risk_pct}
+    return result
