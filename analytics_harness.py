@@ -1,12 +1,12 @@
 """
-Phase 12.3 — Analytics Harness (READ-ONLY)
+Phase 12.3 CTO Analytics Harness (READ-ONLY)
 
 Purpose:
 - Consume counters from dry-run harnesses
 - Compute Phase 12.1 metrics
 - Emit Phase 12.2-compliant experiment log
 - NO execution
-- NO broker access
+- No broker access
 - Deterministic and audit-safe
 """
 
@@ -16,9 +16,9 @@ from datetime import datetime, timezone
 from typing import Dict, Any
 
 
-# -------------------------
+# ------------------------
 # Helpers
-# -------------------------
+# ------------------------
 
 def _safe_div(n: float, d: float) -> float:
     return 0.0 if d == 0 else n / d
@@ -29,9 +29,39 @@ def _determinism_hash(payload: Dict[str, Any]) -> str:
     return hashlib.sha256(blob).hexdigest()
 
 
-# -------------------------
+def _governance_snapshot() -> Dict[str, Any]:
+    """
+    Governance snapshot for audit. Read-only import.
+    If governance module ever becomes unavailable, we degrade safely to a stub
+    (still read-only; still deterministic).
+    """
+    try:
+        from governance.profit_taking_policy import (
+            DEFAULT_PROFIT_TAKING_POLICY,
+            policy_as_dict,
+        )
+
+        return {
+            "profit_taking_policy": policy_as_dict(DEFAULT_PROFIT_TAKING_POLICY),
+            "source": "governance/profit_taking_policy.py",
+            "notes": (
+                "Governance-locked profit-taking tiers and re-entry constraints. "
+                "No martingale. No unrealized-gains re-entry."
+            ),
+        }
+    except Exception as e:
+        # Safe fallback: still deterministic, still audit-friendly.
+        return {
+            "profit_taking_policy": None,
+            "source": "governance/profit_taking_policy.py",
+            "notes": "Governance policy import failed (read-only harness fallback).",
+            "error": f"{type(e).__name__}: {e}",
+        }
+
+
+# ------------------------
 # Metrics (Phase 12.1)
-# -------------------------
+# ------------------------
 
 def compute_metrics(counters: Dict[str, int], replay_units: int) -> Dict[str, Any]:
     signals = counters.get("signals_generated_total", 0)
@@ -64,9 +94,9 @@ def compute_metrics(counters: Dict[str, int], replay_units: int) -> Dict[str, An
     return metrics
 
 
-# -------------------------
+# ------------------------
 # Experiment Log Builder
-# -------------------------
+# ------------------------
 
 def build_experiment_log(
     experiment_id: str,
@@ -75,16 +105,20 @@ def build_experiment_log(
     counters: Dict[str, int],
     replay_units: int,
     baseline_id: str = "BASELINE-UNSET",
-    notes: str = ""
+    notes: str = "",
 ) -> Dict[str, Any]:
 
     metrics = compute_metrics(counters, replay_units)
 
+    governance = _governance_snapshot()
+
+    # Include governance in the determinism hash payload so policy changes are detectable.
     integrity_payload = {
         "counters": counters,
         "metrics": metrics,
         "configuration": configuration,
         "dataset": dataset,
+        "governance": governance,
     }
 
     integrity = {
@@ -107,13 +141,16 @@ def build_experiment_log(
         "dataset": dataset,
         "configuration": configuration,
 
+        # Governance: included for audit + operator visibility (prompt-only)
+        "governance": governance,
+
         "counters": counters,
         "metrics": metrics,
 
         "baseline_comparison": {
             "baseline_id": baseline_id,
             "counter_invariance": None,
-            "metric_deltas": {}
+            "metric_deltas": {},
         },
 
         "integrity": integrity,
@@ -122,9 +159,9 @@ def build_experiment_log(
     }
 
 
-# -------------------------
+# ------------------------
 # Self-Test (Safe)
-# -------------------------
+# ------------------------
 
 if __name__ == "__main__":
     # Example counters from dry-run harnesses
