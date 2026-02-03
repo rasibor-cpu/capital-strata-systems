@@ -3,7 +3,7 @@ Paper Simulation Runner (SAFE)
 ------------------------------
 End-to-end SAFE simulation that routes through:
 
-Signals → Arbitration → Regime Gate → Execution Gate → Paper Simulator
+Signals → Arbitration → Regime Gate → Execution Gate → Paper Simulator → Metrics
 
 Rules:
 - NEVER places live orders
@@ -21,6 +21,7 @@ from engine.signals.signal_arbitrator import SignalArbitrator
 from engine.regime.regime_gate import RegimeGate
 from engine.execution.execution_gate import ExecutionGate
 from engine.sim.paper_simulator import PaperSimulator
+from engine.sim.metrics import metrics_from_simulator
 
 
 def main():
@@ -90,6 +91,9 @@ def main():
 
     print("\n[1] Arbitration")
     print(f"  allowed: {arb.allowed} | reason: {arb.reason}")
+    print(f"  conflict_score: {round(arb.conflict_score, 3)}")
+    print(f"  agg_value: {round(arb.aggregated_value, 3)}")
+    print(f"  agg_conf: {round(arb.aggregated_confidence, 3)}")
 
     print("\n[2] Regime Gate")
     print(f"  decision: {regime.decision} | reason: {regime.reason}")
@@ -98,6 +102,7 @@ def main():
     print(f"  decision: {exec_decision.decision} | reason: {exec_decision.reason}")
 
     # --- Paper trade decision ---
+    traded = False
     if arb.allowed and regime.decision == "ALLOW":
         print("\n[4] Paper Simulator")
         trade = sim.simulate_trade(
@@ -112,18 +117,33 @@ def main():
                 "execution_gate": exec_decision.reason,
             },
         )
+        traded = True
         print(f"  Simulated trade PnL: {round(trade.pnl, 2)}")
     else:
         print("\n[4] Paper Simulator")
         print("  Trade skipped due to upstream gate")
 
-    # --- Snapshot ---
+    # --- Snapshot (simple) ---
     snap = sim.snapshot()
     print("\n[5] Simulator Snapshot")
     for k, v in snap.items():
         print(f"  {k}: {v}")
 
-    print("\nNOTE: Live execution remains disabled. This is a SAFE simulation.\n")
+    # --- Metrics rollup ---
+    report = metrics_from_simulator(sim)
+    print("\n[6] Metrics Rollup")
+    print(f"  trades: {report.trades} | wins: {report.wins} | losses: {report.losses}")
+    print(f"  win_rate: {report.win_rate}")
+    print(f"  avg_win: {report.avg_win} | avg_loss: {report.avg_loss}")
+    print(f"  payoff_ratio: {report.payoff_ratio}")
+    print(f"  expectancy: {report.expectancy}")
+    print(f"  max_drawdown_pct: {report.max_drawdown_pct}")
+    print(f"  equity_curve: {report.equity_curve}")
+
+    print("\nNOTE: Live execution remains disabled. This is a SAFE simulation.")
+    if traded:
+        print("NOTE: A simulated trade executed because arbitration+regime allowed it (paper-only).")
+    print("")
 
 
 if __name__ == "__main__":
