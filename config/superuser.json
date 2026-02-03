@@ -1,1 +1,18 @@
-{"superuser_email":"your_email@example.com"}
+{
+  "primary": {
+    "name": "Robert Asibor",
+    "email": "rasibor@gmail.com",
+    "phone_e164": "+12149726804"
+  },
+  "delegates": [
+    {
+      "name": "Delegate 1",
+      "email": "delegate1@example.com",
+      "phone_e164": "+12145551235"
+    }
+  ],
+  "notify_channels": {
+    "email": true,
+    "sms": true
+  }
+}
