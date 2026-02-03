@@ -11,6 +11,7 @@ Responsibilities:
 - Enforces branch-scoped permissions (except superuser)
 - Resolves unit_code → allowed screen/function bundle
 - Binds AuditContext exactly once per engine run
+- Binds Permissions (modules allowlist) for enforcement via access_control
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ from backend.app.security.user_registry import (
     branch_allowed,
 )
 from backend.app.security.unit_router import resolve_unit_bundle, UnitBundle
+from backend.app.security.access_control import set_permissions
 
 log = get_logger("security.auth_gate")
 
@@ -97,7 +99,7 @@ def await_login_ready_state(timeout_s: int = 0) -> AuthContext:
         else:
             bundle = resolve_unit_bundle(rec.unit_code)
 
-        # Bind audit context
+        # Bind audit context (traceability)
         set_audit_context(
             AuditContext(
                 user_id=rec.user_id,
@@ -108,6 +110,9 @@ def await_login_ready_state(timeout_s: int = 0) -> AuthContext:
                 issued_at_utc=time.time(),
             )
         )
+
+        # Bind permissions allowlist (enforcement)
+        set_permissions(user_id=rec.user_id, role=rec.role, modules=bundle.modules)
 
         adapter.info(
             "LOGIN_OK | method=env | user_id=%s | role=%s | unit=%s | branch=%s",
@@ -178,6 +183,7 @@ def await_login_ready_state(timeout_s: int = 0) -> AuthContext:
             else:
                 bundle = resolve_unit_bundle(rec.unit_code)
 
+            # Bind audit context (traceability)
             set_audit_context(
                 AuditContext(
                     user_id=rec.user_id,
@@ -188,6 +194,9 @@ def await_login_ready_state(timeout_s: int = 0) -> AuthContext:
                     issued_at_utc=time.time(),
                 )
             )
+
+            # Bind permissions allowlist (enforcement)
+            set_permissions(user_id=rec.user_id, role=rec.role, modules=bundle.modules)
 
             adapter.info(
                 "LOGIN_OK | method=interactive | user_id=%s | role=%s | unit=%s | branch=%s",
