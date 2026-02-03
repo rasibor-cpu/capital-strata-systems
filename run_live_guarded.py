@@ -3,27 +3,29 @@ run_live_guarded.py
 
 Guarded live runner for REA Capital Trading Engine.
 
-Key protections:
+Protections:
 - Token validation hook (confirm-token step)
-- Global + pair kill-switch checks (env + runtime file)
+- Kill-switch checks (env + runtime file)
 - Watchdog timeout wrapper to prevent "freeze while processing"
 - Clean CTRL+C exit
-- Fail-closed session gating stubs (optional)
+- Session gating (conservative; fail-closed for non-whitelisted asset classes)
 
-This file is designed to be a SAFE wrapper. It should not break any adapters.
+Binding:
+- Set REA_ENGINE_ENTRYPOINT="module.path:function_name"
+  Example: REA_ENGINE_ENTRYPOINT="backend.app.main:main"
 """
 
 from __future__ import annotations
 
+import importlib
 import os
 import signal
 import sys
 import threading
 import time
 from dataclasses import dataclass
-from typing import Callable, Optional, Any
+from typing import Callable, Optional, Any, Tuple
 
-# Observability modules (added earlier)
 from backend.app.observability.logger import init_logging, get_logger, with_trace, log_startup_banner
 from backend.app.observability.kill_switch import assert_not_killed
 from backend.app.observability.session_time import assert_session_allowed
@@ -37,6 +39,7 @@ log = get_logger("run_live_guarded")
 
 DEFAULT_COMMAND_TIMEOUT_SECONDS = int(os.getenv("REA_COMMAND_TIMEOUT_SECONDS", "45"))
 DEFAULT_ASSET_CLASS = os.getenv("REA_ASSET_CLASS", "fx")  # fx | crypto | equities | options
+ENGINE_ENTRYPOINT = os.getenv("REA_ENGINE_ENTRYPOINT", "").strip()
 
 
 @dataclass(frozen=True)
@@ -53,17 +56,13 @@ class GuardResult:
 def validate_token_or_fail() -> GuardResult:
     """
     Hook point: confirm-token validation.
-    If you already have engine/execution/confirm_token.py, we import and call it.
-    If not present, we fail CLOSED in live mode only.
-
-    This is intentionally conservative.
+    If engine/execution/confirm_token.py exposes validate_token(), we call it.
+    Fail-closed if missing or errors.
     """
     start = time.time()
     adapter = with_trace(log, "TOKEN")
 
     try:
-        # If your confirm_token.py exposes a function, call it.
-        # We try common names; you can standardize later.
         from engine.execution.confirm_token import validate_token  # type: ignore
         ok = bool(validate_token())
         if ok:
@@ -73,7 +72,6 @@ def validate_token_or_fail() -> GuardResult:
         return GuardResult(False, "token_fail", time.time() - start)
 
     except Exception as e:
-        # Fail-closed if token module not available
         adapter.error("TOKEN_CHECK_ERROR | %s", str(e))
         return GuardResult(False, "token_check_error_or_missing", time.time() - start)
 
@@ -88,11 +86,10 @@ class TimeoutError(Exception):
 
 def run_with_timeout(fn: Callable[[], Any], timeout_s: int, trace_id: str) -> Any:
     """
-    Runs fn() in a thread and raises TimeoutError if not completed in timeout_s.
-    This does NOT kill the process thread forcibly (Python can't safely),
-    but it prevents the runner from waiting forever and enables a controlled shutdown.
+    Runs fn() in a daemon thread and raises TimeoutError if not completed in timeout_s.
 
-    Combined with kill-switch checks, the next loop will stop.
+    Note: This cannot forcibly kill a stuck native call, but it prevents the runner
+    from waiting forever and enables a controlled stop/exit path.
     """
     result_container = {"done": False, "value": None, "err": None}
 
@@ -136,12 +133,55 @@ def stop_requested() -> bool:
 
 
 # -----------------------------
-# Guarded Command Runner
+# Entry point resolver (BIND)
+# -----------------------------
+
+def resolve_entrypoint(spec: str) -> Tuple[Optional[Callable[[], Any]], str]:
+    """
+    Resolves REA_ENGINE_ENTRYPOINT="module.path:function"
+    Returns (callable_or_none, reason)
+    """
+    if not spec:
+        return None, "REA_ENGINE_ENTRYPOINT_not_set"
+
+    if ":" not in spec:
+        return None, "REA_ENGINE_ENTRYPOINT_invalid_format_use_module:function"
+
+    mod_path, func_name = spec.split(":", 1)
+    mod_path = mod_path.strip()
+    func_name = func_name.strip()
+
+    if not mod_path or not func_name:
+        return None, "REA_ENGINE_ENTRYPOINT_invalid_module_or_function"
+
+    try:
+        mod = importlib.import_module(mod_path)
+    except Exception as e:
+        return None, f"import_module_failed:{mod_path}:{e}"
+
+    try:
+        fn = getattr(mod, func_name)
+    except Exception:
+        return None, f"function_not_found:{func_name}"
+
+    if not callable(fn):
+        return None, f"not_callable:{mod_path}:{func_name}"
+
+    # Normalize to a zero-arg callable wrapper
+    def _wrapped():
+        return fn()
+
+    return _wrapped, "ok"
+
+
+# -----------------------------
+# Guarded Step Runner
 # -----------------------------
 
 def guarded_step(step_name: str, fn: Callable[[], Any], timeout_s: int) -> GuardResult:
     """
     Runs one guarded step:
+    - stop request check
     - kill switch check (pre)
     - session allowed check (pre)
     - timeout watchdog
@@ -150,23 +190,19 @@ def guarded_step(step_name: str, fn: Callable[[], Any], timeout_s: int) -> Guard
     adapter = with_trace(log, f"STEP:{step_name}")
     start = time.time()
 
-    # STOP request check
     if stop_requested():
         adapter.warning("STEP_ABORT | reason=stop_requested")
         return GuardResult(False, "stop_requested", time.time() - start)
 
-    # Kill switch (global/pair)
     if not assert_not_killed(pair="GLOBAL"):
         adapter.critical("STEP_BLOCK | reason=kill_switch_active(pre)")
         return GuardResult(False, "kill_switch_active_pre", time.time() - start)
 
-    # Session gating (fail-closed for asset classes not whitelisted)
     decision = assert_session_allowed(asset_class=DEFAULT_ASSET_CLASS, hard_fail=True)
     if not decision.allowed:
         adapter.warning("STEP_BLOCK | reason=session_blocked | state=%s | detail=%s", decision.state, decision.reason)
         return GuardResult(False, f"session_blocked:{decision.reason}", time.time() - start)
 
-    # Execute with timeout
     try:
         run_with_timeout(fn, timeout_s=timeout_s, trace_id=f"STEP:{step_name}")
     except TimeoutError as te:
@@ -176,7 +212,6 @@ def guarded_step(step_name: str, fn: Callable[[], Any], timeout_s: int) -> Guard
         adapter.error("STEP_ERROR | %s", str(e))
         return GuardResult(False, "exception", time.time() - start)
 
-    # Kill switch post-check (so we don't proceed into next step)
     if not assert_not_killed(pair="GLOBAL"):
         adapter.critical("STEP_BLOCK | reason=kill_switch_active(post)")
         return GuardResult(False, "kill_switch_active_post", time.time() - start)
@@ -193,11 +228,15 @@ def main() -> int:
     init_logging(os.getenv("LOG_LEVEL", "INFO"))
     log_startup_banner(log)
 
-    # signal handler for CTRL+C
     signal.signal(signal.SIGINT, _handle_sigint)
 
     adapter = with_trace(log, "MAIN")
-    adapter.info("RUN_LIVE_GUARDED_START | timeout=%ss | asset_class=%s", DEFAULT_COMMAND_TIMEOUT_SECONDS, DEFAULT_ASSET_CLASS)
+    adapter.info(
+        "RUN_LIVE_GUARDED_START | timeout=%ss | asset_class=%s | entrypoint=%s",
+        DEFAULT_COMMAND_TIMEOUT_SECONDS,
+        DEFAULT_ASSET_CLASS,
+        ENGINE_ENTRYPOINT or "NOT_SET",
+    )
 
     # Step A: Token validation (fail-closed)
     token_res = guarded_step("token_validation", validate_token_or_fail, timeout_s=15)
@@ -205,32 +244,19 @@ def main() -> int:
         adapter.critical("ABORT | token step failed | reason=%s", token_res.reason)
         return 2
 
-    # Step B: Your engine start hook (pluggable)
-    def _start_engine():
-        """
-        Hook point: call your engine runner.
-        Update import path to your real entrypoint when ready.
-        """
-        try:
-            # If you have a canonical runner, call it here.
-            # Example placeholder:
-            from engine.execution.notify_outbox import flush_outbox  # type: ignore
-            flush_outbox()  # harmless preflight if present
-        except Exception:
-            pass
+    # Step B: Bind to real engine entrypoint
+    fn, reason = resolve_entrypoint(ENGINE_ENTRYPOINT)
+    if fn is None:
+        adapter.critical("ABORT | entrypoint_bind_failed | reason=%s", reason)
+        adapter.critical('Set REA_ENGINE_ENTRYPOINT like: "backend.app.main:main"')
+        return 4
 
-        # Placeholder: simulate "engine running" loop.
-        # Replace with your actual engine loop start.
-        for _ in range(3):
-            if stop_requested():
-                return
-            if not assert_not_killed(pair="GLOBAL"):
-                return
-            time.sleep(0.25)
+    adapter.info("ENTRYPOINT_BOUND_OK | %s", ENGINE_ENTRYPOINT)
 
-    eng_res = guarded_step("engine_start", _start_engine, timeout_s=DEFAULT_COMMAND_TIMEOUT_SECONDS)
+    # Step C: Run the engine entrypoint guarded
+    eng_res = guarded_step("engine_entrypoint", fn, timeout_s=DEFAULT_COMMAND_TIMEOUT_SECONDS)
     if not eng_res.ok:
-        adapter.critical("ABORT | engine start failed | reason=%s", eng_res.reason)
+        adapter.critical("ABORT | engine entrypoint failed | reason=%s", eng_res.reason)
         return 3
 
     adapter.info("RUN_LIVE_GUARDED_OK")
