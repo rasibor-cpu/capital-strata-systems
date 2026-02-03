@@ -13,13 +13,22 @@ Optional env:
   REA_KILL_SWITCH=1
 """
 
+# --- REQUIRED: ensure repo root is on PYTHONPATH (fixes "No module named backend") ---
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+# -------------------------------------------------------------------------------
+
 from __future__ import annotations
 
 import os
-import sys
+import sys as _sys
 from dataclasses import dataclass
-from pathlib import Path
-from typing import List, Tuple, Optional
+from pathlib import Path as _Path
+from typing import List
 
 # Observability modules (must be present)
 from backend.app.observability.logger import init_logging, get_logger, with_trace
@@ -51,7 +60,6 @@ def _red(name: str, detail: str) -> CheckResult:
 
 
 def _print_results(results: List[CheckResult]) -> None:
-    # Plain stdout (works even if logging is disabled)
     print("\n=== PRE-LIVE CHECK RESULTS ===")
     for r in results:
         print(f"{r.state:5} | {r.name:22} | {r.detail}")
@@ -67,9 +75,9 @@ def _final_state(results: List[CheckResult]) -> str:
 
 
 def check_python() -> CheckResult:
-    v = sys.version.split()[0]
-    major = sys.version_info.major
-    minor = sys.version_info.minor
+    v = _sys.version.split()[0]
+    major = _sys.version_info.major
+    minor = _sys.version_info.minor
     if major < 3 or (major == 3 and minor < 10):
         return _red("python_version", f"{v} (need >= 3.10)")
     return _ok("python_version", v)
@@ -77,11 +85,11 @@ def check_python() -> CheckResult:
 
 def check_repo_layout() -> CheckResult:
     must = [
-        Path("run_live_guarded.py"),
-        Path("engine/run_engine.py"),
-        Path("backend/app/observability/logger.py"),
-        Path("backend/app/observability/kill_switch.py"),
-        Path("backend/app/observability/session_time.py"),
+        _Path("run_live_guarded.py"),
+        _Path("engine/run_engine.py"),
+        _Path("backend/app/observability/logger.py"),
+        _Path("backend/app/observability/kill_switch.py"),
+        _Path("backend/app/observability/session_time.py"),
     ]
     missing = [str(p) for p in must if not p.exists()]
     if missing:
@@ -90,7 +98,7 @@ def check_repo_layout() -> CheckResult:
 
 
 def check_runtime_controls() -> CheckResult:
-    rt = Path("runtime")
+    rt = _Path("runtime")
     if not rt.exists():
         return _amber("runtime_dir", "missing (ok; will be created on demand)")
     return _ok("runtime_dir", "present")
@@ -128,7 +136,7 @@ def check_entrypoint_import() -> CheckResult:
 
     try:
         __import__(mod_path)
-        mod = sys.modules[mod_path]
+        mod = _sys.modules[mod_path]
     except Exception as e:
         return _red("entrypoint", f"import failed: {mod_path} | {e}")
 
@@ -140,10 +148,8 @@ def check_entrypoint_import() -> CheckResult:
 
 
 def main() -> int:
-    # Minimal logging initialization
     init_logging(os.getenv("LOG_LEVEL", "INFO"))
     adapter = with_trace(log, "CHECK")
-
     adapter.info("PRE_LIVE_CHECK_START")
 
     results: List[CheckResult] = []
