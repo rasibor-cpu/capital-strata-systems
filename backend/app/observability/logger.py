@@ -2,9 +2,13 @@
 Centralized Logging & Audit Module
 REA Capital Trading Engine
 
-FIXED:
-- Prevents duplicate 'trace_id' injection
-- Safe with LoggerAdapter + LogRecordFactory
+Correct design:
+- Do NOT inject 'trace_id' via LogRecordFactory (it breaks LoggerAdapter extra).
+- Use a logging.Filter to add defaults AFTER extras are applied.
+- Keep ENGINE_RUN_ID always present.
+
+This prevents:
+KeyError: "Attempt to overwrite 'trace_id' in LogRecord"
 """
 
 import logging
@@ -35,29 +39,22 @@ LOG_FORMAT = (
 
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
-# -------------------------------------------------------------------
-# Custom Log Record Factory (SAFE)
-# -------------------------------------------------------------------
 
-_old_factory = logging.getLogRecordFactory()
+class _DefaultsFilter(logging.Filter):
+    """
+    Ensures required fields exist on every record.
 
-def record_factory(*args, **kwargs):
-    record = _old_factory(*args, **kwargs)
+    IMPORTANT: This runs after LoggerAdapter 'extra' is merged,
+    so it will NOT conflict with trace_id passed via LoggerAdapter.
+    """
 
-    # Always inject ENGINE_RUN_ID
-    record.engine_run_id = ENGINE_RUN_ID
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not hasattr(record, "engine_run_id"):
+            record.engine_run_id = ENGINE_RUN_ID
+        if not hasattr(record, "trace_id"):
+            record.trace_id = "N/A"
+        return True
 
-    # Inject TRACE_ID only if not already present
-    if not hasattr(record, "trace_id"):
-        record.trace_id = "N/A"
-
-    return record
-
-logging.setLogRecordFactory(record_factory)
-
-# -------------------------------------------------------------------
-# Logger Initializer
-# -------------------------------------------------------------------
 
 def init_logging(level: str = "INFO") -> None:
     """
@@ -67,51 +64,40 @@ def init_logging(level: str = "INFO") -> None:
     numeric_level = getattr(logging, level.upper(), logging.INFO)
 
     handler = logging.StreamHandler(sys.stdout)
+    handler.addFilter(_DefaultsFilter())
+
     formatter = logging.Formatter(LOG_FORMAT, DATE_FORMAT)
     handler.setFormatter(formatter)
 
     root = logging.getLogger()
     root.setLevel(numeric_level)
 
+    # Avoid duplicates on reload
     if not root.handlers:
         root.addHandler(handler)
 
-    # IMPORTANT: do NOT pass trace_id here
-    root.info("Logging initialized")
+    root.info("Logging initialized")  # do NOT pass trace_id here
 
-# -------------------------------------------------------------------
-# Logger Access Helper
-# -------------------------------------------------------------------
 
 def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
 
-# -------------------------------------------------------------------
-# TRACE Context Helper (ONLY source of trace_id override)
-# -------------------------------------------------------------------
 
-def with_trace(
-    logger: logging.Logger,
-    trace_id: Optional[str] = None
-) -> logging.LoggerAdapter:
+def with_trace(logger: logging.Logger, trace_id: Optional[str] = None) -> logging.LoggerAdapter:
     """
     Attach or propagate a TRACE_ID safely.
     """
     if trace_id is None:
         trace_id = str(uuid.uuid4())
-
     return logging.LoggerAdapter(logger, {"trace_id": trace_id})
 
-# -------------------------------------------------------------------
-# Override / Human Action Audit Helper
-# -------------------------------------------------------------------
 
 def log_override(
     logger: logging.Logger,
     actor: str,
     action: str,
     reason: str,
-    trace_id: Optional[str] = None
+    trace_id: Optional[str] = None,
 ) -> None:
     adapter = with_trace(logger, trace_id)
     adapter.warning(
@@ -121,9 +107,6 @@ def log_override(
         reason,
     )
 
-# -------------------------------------------------------------------
-# Startup Banner Helper
-# -------------------------------------------------------------------
 
 def log_startup_banner(logger: logging.Logger) -> None:
     adapter = with_trace(logger, "STARTUP")
