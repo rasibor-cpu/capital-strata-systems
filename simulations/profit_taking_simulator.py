@@ -6,16 +6,16 @@ Purpose:
 - Prove governance-locked profit-taking rules
 - Simulate tiered cash-out + capped re-entry
 - Deterministic, auditable output
+
+Canonical governance source:
+- governance/profit_taking_policy.py (get_policy_snapshot)
 """
 
 from __future__ import annotations
-from typing import List, Dict
+from typing import List
 from dataclasses import dataclass
 
-from governance.profit_taking_policy import (
-    DEFAULT_PROFIT_TAKING_POLICY,
-    policy_as_dict,
-)
+from governance.profit_taking_policy import get_policy_snapshot
 
 
 @dataclass
@@ -36,7 +36,7 @@ def simulate_profit_lifecycle(
     Example: 0.12 means +12%
     """
 
-    policy = policy_as_dict(DEFAULT_PROFIT_TAKING_POLICY)
+    policy = get_policy_snapshot()
 
     tiers = sorted(policy["profit_tiers"])
     max_reentry_frac = policy["max_reentry_fraction_of_realized_profit"]
@@ -87,8 +87,9 @@ def simulate_profit_lifecycle(
 if __name__ == "__main__":
     print("\n=== REA GOVERNANCE PROFIT-TAKING SIMULATION ===\n")
 
-    policy = policy_as_dict(DEFAULT_PROFIT_TAKING_POLICY)
-    print("LOCKED POLICY:")
+    policy = get_policy_snapshot()
+
+    print("LOCKED POLICY (CANONICAL):")
     for k, v in policy.items():
         print(f"  {k}: {v}")
 
