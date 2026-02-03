@@ -15,6 +15,9 @@ import hashlib
 from datetime import datetime, timezone
 from typing import Dict, Any
 
+# Canonical governance snapshot (single source of truth)
+from governance.profit_taking_policy import get_policy_snapshot
+
 
 # ------------------------
 # Helpers
@@ -27,36 +30,6 @@ def _safe_div(n: float, d: float) -> float:
 def _determinism_hash(payload: Dict[str, Any]) -> str:
     blob = json.dumps(payload, sort_keys=True).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()
-
-
-def _governance_snapshot() -> Dict[str, Any]:
-    """
-    Governance snapshot for audit. Read-only import.
-    If governance module ever becomes unavailable, we degrade safely to a stub
-    (still read-only; still deterministic).
-    """
-    try:
-        from governance.profit_taking_policy import (
-            DEFAULT_PROFIT_TAKING_POLICY,
-            policy_as_dict,
-        )
-
-        return {
-            "profit_taking_policy": policy_as_dict(DEFAULT_PROFIT_TAKING_POLICY),
-            "source": "governance/profit_taking_policy.py",
-            "notes": (
-                "Governance-locked profit-taking tiers and re-entry constraints. "
-                "No martingale. No unrealized-gains re-entry."
-            ),
-        }
-    except Exception as e:
-        # Safe fallback: still deterministic, still audit-friendly.
-        return {
-            "profit_taking_policy": None,
-            "source": "governance/profit_taking_policy.py",
-            "notes": "Governance policy import failed (read-only harness fallback).",
-            "error": f"{type(e).__name__}: {e}",
-        }
 
 
 # ------------------------
@@ -110,7 +83,7 @@ def build_experiment_log(
 
     metrics = compute_metrics(counters, replay_units)
 
-    governance = _governance_snapshot()
+    governance = get_policy_snapshot()
 
     # Include governance in the determinism hash payload so policy changes are detectable.
     integrity_payload = {
