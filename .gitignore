@@ -51,6 +51,7 @@ live_data/*.log
 _find_csv.cmd
 # junk/encoding artifacts accidentally created at repo root
 e*.py*
-!engine/execution/execution_gate.py
+!engine/execution/execution_gate.py!test_end_to_end_dryrun.py
+
 
 tatus
