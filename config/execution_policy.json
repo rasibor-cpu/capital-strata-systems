@@ -1,0 +1,61 @@
+{
+  "version": "1.0",
+  "status": "LOCKED",
+  "scope": "execution_gate_policy",
+
+  "capital_protection": {
+    "max_equity_risk_per_trade_pct": 20,
+    "max_total_equity_at_risk_pct": 40,
+    "max_drawdown_hard_stop_pct": 25,
+    "daily_loss_limit_pct": 5
+  },
+
+  "position_controls": {
+    "max_concurrent_positions": 20,
+    "max_trades_per_day": 10,
+    "max_trades_per_pair_per_day": 3
+  },
+
+  "instrument_whitelist": {
+    "fx": ["EURUSD", "GBPUSD", "USDJPY", "USDCAD"],
+    "crypto": ["BTCUSD", "ETHUSD"],
+    "equities": [],
+    "options": []
+  },
+
+  "volatility_filters": {
+    "max_spread_bps": 12,
+    "min_liquidity_score": 0.6,
+    "high_risk_news_block": true,
+    "vix_threshold": 35
+  },
+
+  "cooldown_rules": {
+    "losses_trigger": 5,
+    "cooldown_hours": 12,
+    "per_pair_loss_limit": 3
+  },
+
+  "profit_management": {
+    "take_profit_tiers_pct": [20, 35, 50],
+    "profit_bank_fraction_pct": 50
+  },
+
+  "human_override": {
+    "required_if_equity_risk_pct_exceeds": 25,
+    "override_authorities": ["PRIMARY_SUPERUSER"],
+    "password_entries_required": 2
+  },
+
+  "enforcement": {
+    "policy_violation_action": "BLOCK_EXECUTION",
+    "audit_required": true,
+    "immutable": true
+  },
+
+  "notes": [
+    "Evaluated by ExecutionGate only.",
+    "Fail-closed if missing/invalid.",
+    "No broker execution is enabled by this policy."
+  ]
+}
