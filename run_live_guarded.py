@@ -1,217 +1,108 @@
 """
 run_live_guarded.py
 
-Guarded live runner for REA Capital Trading Engine.
+Authoritative guarded launcher for REA Capital Trading Engine.
 
-Protections:
-- Token validation hook (confirm-token step)
-- Kill-switch checks (env + runtime file)
-- Watchdog timeout wrapper to prevent freeze while processing
-- Clean CTRL+C exit
-- Session gating (conservative; fail-closed for non-whitelisted asset classes)
-- CONFIG drift fingerprinting (hash at startup + optional enforcement)
+Execution order (LOCKED):
+1. Startup + safety checks
+2. Login gate (auth_gate.await_login_ready_state)
+   - sets AuditContext
+   - binds user permissions
+3. Resolve execution entrypoint
+4. Execute engine entrypoint
 
-Binding:
-- Set REA_ENGINE_ENTRYPOINT="module.path:function_name"
+Fail-closed at every step.
 """
 
 from __future__ import annotations
 
 import importlib
 import os
-import signal
-import threading
+import sys
 import time
-from dataclasses import dataclass
-from typing import Callable, Optional, Any, Tuple
 
-from backend.app.observability.logger import init_logging, get_logger, with_trace, log_startup_banner
+from backend.app.observability.logger import get_logger, with_trace
+from backend.app.observability.engine_run import init_engine_run
 from backend.app.observability.kill_switch import assert_not_killed
-from backend.app.observability.session_time import assert_session_allowed
-from backend.app.observability.config_drift import DEFAULT_CONFIG_GUARD
+from backend.app.security.auth_gate import await_login_ready_state
 
 log = get_logger("run_live_guarded")
 
 
-DEFAULT_COMMAND_TIMEOUT_SECONDS = int(os.getenv("REA_COMMAND_TIMEOUT_SECONDS", "45"))
-DEFAULT_ASSET_CLASS = os.getenv("REA_ASSET_CLASS", "fx")
-ENGINE_ENTRYPOINT = os.getenv("REA_ENGINE_ENTRYPOINT", "").strip()
+def _resolve_entrypoint(entrypoint: str):
+    """
+    Resolve entrypoint string of form: module.path:function_name
+    """
+    if ":" not in entrypoint:
+        raise ValueError("Invalid entrypoint format. Expected module:function")
+
+    module_path, func_name = entrypoint.split(":", 1)
+    module = importlib.import_module(module_path)
+    fn = getattr(module, func_name, None)
+
+    if fn is None or not callable(fn):
+        raise RuntimeError(f"Entrypoint function not found: {entrypoint}")
+
+    return fn
 
 
-@dataclass(frozen=True)
-class GuardResult:
-    ok: bool
-    reason: str
-    elapsed_s: float = 0.0
+def main() -> None:
+    adapter = with_trace(log, "STARTUP")
 
-
-def validate_token_or_fail() -> GuardResult:
-    start = time.time()
-    adapter = with_trace(log, "TOKEN")
-
-    try:
-        from engine.execution.confirm_token import validate_token  # type: ignore
-        ok = bool(validate_token())
-        if ok:
-            adapter.info("TOKEN_OK")
-            return GuardResult(True, "token_ok", time.time() - start)
-        adapter.warning("TOKEN_FAIL")
-        return GuardResult(False, "token_fail", time.time() - start)
-
-    except Exception as e:
-        adapter.error("TOKEN_CHECK_ERROR | %s", str(e))
-        # conservative: token step completes but indicates missing/wiring issue
-        return GuardResult(True, "token_check_missing_or_error", time.time() - start)
-
-
-class TimeoutError(Exception):
-    pass
-
-
-def run_with_timeout(fn: Callable[[], Any], timeout_s: int, trace_id: str) -> Any:
-    result_container = {"done": False, "value": None, "err": None}
-
-    def _target():
-        try:
-            result_container["value"] = fn()
-        except Exception as e:
-            result_container["err"] = e
-        finally:
-            result_container["done"] = True
-
-    t = threading.Thread(target=_target, daemon=True)
-    t.start()
-
-    start = time.time()
-    while time.time() - start < timeout_s:
-        if result_container["done"]:
-            if result_container["err"] is not None:
-                raise result_container["err"]
-            return result_container["value"]
-        time.sleep(0.05)
-
-    raise TimeoutError(f"command_timeout_after_{timeout_s}s")
-
-
-_STOP = {"requested": False}
-
-
-def _handle_sigint(signum, frame):
-    _STOP["requested"] = True
-    adapter = with_trace(log, "STOP")
-    adapter.warning("STOP_REQUESTED | signal=SIGINT")
-
-
-def stop_requested() -> bool:
-    return bool(_STOP["requested"])
-
-
-def resolve_entrypoint(spec: str) -> Tuple[Optional[Callable[[], Any]], str]:
-    if not spec:
-        return None, "REA_ENGINE_ENTRYPOINT_not_set"
-    if ":" not in spec:
-        return None, "REA_ENGINE_ENTRYPOINT_invalid_format_use_module:function"
-
-    mod_path, func_name = spec.split(":", 1)
-    mod_path = mod_path.strip()
-    func_name = func_name.strip()
-
-    if not mod_path or not func_name:
-        return None, "REA_ENGINE_ENTRYPOINT_invalid_module_or_function"
-
-    try:
-        mod = importlib.import_module(mod_path)
-    except Exception as e:
-        return None, f"import_module_failed:{mod_path}:{e}"
-
-    try:
-        fn = getattr(mod, func_name)
-    except Exception:
-        return None, f"function_not_found:{func_name}"
-
-    if not callable(fn):
-        return None, f"not_callable:{mod_path}:{func_name}"
-
-    def _wrapped():
-        return fn()
-
-    return _wrapped, "ok"
-
-
-def guarded_step(step_name: str, fn: Callable[[], Any], timeout_s: int) -> GuardResult:
-    adapter = with_trace(log, f"STEP:{step_name}")
-    start = time.time()
-
-    if stop_requested():
-        adapter.warning("STEP_ABORT | reason=stop_requested")
-        return GuardResult(False, "stop_requested", time.time() - start)
+    # -------------------------------------------------
+    # 1) Engine run + kill switch
+    # -------------------------------------------------
+    init_engine_run()
 
     if not assert_not_killed(pair="GLOBAL"):
-        adapter.critical("STEP_BLOCK | reason=kill_switch_active(pre)")
-        return GuardResult(False, "kill_switch_active_pre", time.time() - start)
+        adapter.critical("STARTUP_ABORT | reason=kill_switch_active")
+        sys.exit(2)
 
-    decision = assert_session_allowed(asset_class=DEFAULT_ASSET_CLASS, hard_fail=True)
-    if not decision.allowed:
-        adapter.warning("STEP_BLOCK | reason=session_blocked | state=%s | detail=%s", decision.state, decision.reason)
-        return GuardResult(False, f"session_blocked:{decision.reason}", time.time() - start)
+    adapter.info("RUN_LIVE_GUARDED_START")
 
-    # CONFIG drift enforcement (warn-only unless hard-block enabled)
-    if not DEFAULT_CONFIG_GUARD.enforce():
-        adapter.critical("STEP_BLOCK | reason=config_drift_hard_block")
-        return GuardResult(False, "config_drift_block", time.time() - start)
-
-    try:
-        run_with_timeout(fn, timeout_s=timeout_s, trace_id=f"STEP:{step_name}")
-    except TimeoutError as te:
-        adapter.critical("STEP_TIMEOUT | %s", str(te))
-        return GuardResult(False, "timeout", time.time() - start)
-    except Exception as e:
-        adapter.error("STEP_ERROR | %s", str(e))
-        return GuardResult(False, "exception", time.time() - start)
-
-    if not assert_not_killed(pair="GLOBAL"):
-        adapter.critical("STEP_BLOCK | reason=kill_switch_active(post)")
-        return GuardResult(False, "kill_switch_active_post", time.time() - start)
-
-    adapter.info("STEP_OK | elapsed=%.2fs", time.time() - start)
-    return GuardResult(True, "ok", time.time() - start)
-
-
-def main() -> int:
-    init_logging(os.getenv("LOG_LEVEL", "INFO"))
-    log_startup_banner(log)
-    signal.signal(signal.SIGINT, _handle_sigint)
-
-    adapter = with_trace(log, "MAIN")
+    # -------------------------------------------------
+    # 2) LOGIN GATE (sets audit context + permissions)
+    # -------------------------------------------------
+    auth_ctx = await_login_ready_state()
     adapter.info(
-        "RUN_LIVE_GUARDED_START | timeout=%ss | asset_class=%s | entrypoint=%s",
-        DEFAULT_COMMAND_TIMEOUT_SECONDS,
-        DEFAULT_ASSET_CLASS,
-        ENGINE_ENTRYPOINT or "NOT_SET",
+        "LOGIN_BOUND | user_id=%s | role=%s | branch=%s",
+        auth_ctx.user_id,
+        auth_ctx.role,
+        auth_ctx.current_branch,
     )
 
-    # Capture and log CONFIG_HASH (baseline fingerprint)
-    DEFAULT_CONFIG_GUARD.init_and_log()
-
-    # Token validation step (non-fatal if wiring missing; logged)
-    guarded_step("token_validation", lambda: validate_token_or_fail(), timeout_s=15)
-
-    fn, reason = resolve_entrypoint(ENGINE_ENTRYPOINT)
-    if fn is None:
-        adapter.critical("ABORT | entrypoint_bind_failed | reason=%s", reason)
+    # -------------------------------------------------
+    # 3) Resolve execution entrypoint
+    # -------------------------------------------------
+    entrypoint = os.getenv("REA_ENGINE_ENTRYPOINT", "").strip()
+    if not entrypoint:
+        adapter.critical("ABORT | reason=REA_ENGINE_ENTRYPOINT_not_set")
         adapter.critical('Set REA_ENGINE_ENTRYPOINT like: "engine.run_engine:main"')
-        return 4
+        sys.exit(3)
 
-    adapter.info("ENTRYPOINT_BOUND_OK | %s", ENGINE_ENTRYPOINT)
+    adapter.info("ENTRYPOINT_BIND | %s", entrypoint)
 
-    eng_res = guarded_step("engine_entrypoint", fn, timeout_s=DEFAULT_COMMAND_TIMEOUT_SECONDS)
-    if not eng_res.ok:
-        adapter.critical("ABORT | engine entrypoint failed | reason=%s", eng_res.reason)
-        return 3
+    try:
+        entry_fn = _resolve_entrypoint(entrypoint)
+    except Exception as exc:
+        adapter.critical("ENTRYPOINT_BIND_FAILED | %s", exc)
+        sys.exit(4)
 
-    adapter.info("RUN_LIVE_GUARDED_OK")
-    return 0
+    # -------------------------------------------------
+    # 4) Execute engine
+    # -------------------------------------------------
+    adapter.info("ENTRYPOINT_EXECUTE_START")
+    start = time.time()
+
+    try:
+        entry_fn()
+    except Exception as exc:
+        adapter.critical("ENGINE_ABORT | reason=exception | %s", exc)
+        raise
+    finally:
+        elapsed = time.time() - start
+        adapter.info("RUN_LIVE_GUARDED_END | elapsed=%.2fs", elapsed)
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()
