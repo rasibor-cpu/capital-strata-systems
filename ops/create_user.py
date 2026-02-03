@@ -1,25 +1,25 @@
 """
 ops/create_user.py
 
-Create a user in runtime/users.json with branch-scoped permissions.
+Create a user in runtime/users.json with:
+- numeric unique user_id
+- unit_code (department/function) that drives screen/function auto-load
+- branch-scoped permissions (except superuser)
 
 Usage:
-  python ops/create_user.py 2001 "Trader A" operator
-  python ops/create_user.py 2002 "Ops Admin" admin
+  python ops/create_user.py 2001 "Trader A" TRADING_DESK operator
+  python ops/create_user.py 2002 "Ops Admin" OPS admin
+  python ops/create_user.py 2003 "Risk Checker" RISK operator
 
-Notes:
-- user_id must be numeric and unique
-- home_branch auto-resolves from .git/HEAD (or REA_GIT_BRANCH override)
-- superuser id 1369 is reserved (Robert Asibor)
-- runtime/users.json is intentionally gitignored
+runtime/users.json is intentionally gitignored.
 """
 
 from __future__ import annotations
 
 import sys
-
-# Ensure repo root on path (so `backend.*` imports work even when running from ops/)
 from pathlib import Path
+
+# Ensure repo root on path (so backend imports work when running from ops/)
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -31,16 +31,19 @@ from backend.app.security.user_registry import (
     get_current_branch,
     SUPERUSER_ID,
 )
+from backend.app.security.unit_router import list_unit_codes, resolve_unit_bundle
 
 
 def main() -> int:
-    if len(sys.argv) < 3:
-        print("Usage: python ops/create_user.py <user_id> \"Full Name\" [role]")
+    if len(sys.argv) < 4:
+        print("Usage: python ops/create_user.py <user_id> \"Full Name\" <UNIT_CODE> [role]")
+        print(f"Allowed UNIT_CODE: {', '.join(list_unit_codes())}")
         return 2
 
     user_id = str(sys.argv[1]).strip()
     display_name = str(sys.argv[2]).strip()
-    role = str(sys.argv[3]).strip() if len(sys.argv) >= 4 else "operator"
+    unit_code = str(sys.argv[3]).strip().upper()
+    role = str(sys.argv[4]).strip() if len(sys.argv) >= 5 else "operator"
 
     if not user_id.isdigit():
         print("ERROR: user_id must be numeric.")
@@ -54,22 +57,34 @@ def main() -> int:
         print("ERROR: display_name is required.")
         return 2
 
+    try:
+        bundle = resolve_unit_bundle(unit_code)
+    except Exception as e:
+        print(f"ERROR: invalid unit_code '{unit_code}'.")
+        print(f"Allowed UNIT_CODE: {', '.join(list_unit_codes())}")
+        print(f"Detail: {e}")
+        return 2
+
     ensure_superuser_exists()
 
-    # Duplicate check (clear error)
     users = load_users()
     if user_id in users:
         u = users[user_id]
-        print(f"ERROR: user_id already exists: {user_id} ({u.display_name}, role={u.role}, branch={u.home_branch})")
+        print(
+            f"ERROR: user_id already exists: {user_id} "
+            f"({u.display_name}, role={u.role}, unit={u.unit_code}, branch={u.home_branch})"
+        )
         return 2
 
-    rec = create_user(user_id=user_id, display_name=display_name, role=role)
+    rec = create_user(user_id=user_id, display_name=display_name, unit_code=unit_code, role=role)
 
     branch = get_current_branch()
     print("USER_CREATED")
     print(f"- user_id:      {rec.user_id}")
     print(f"- display_name: {rec.display_name}")
     print(f"- role:         {rec.role}")
+    print(f"- unit_code:    {rec.unit_code} ({bundle.label})")
+    print(f"- modules:      {', '.join(bundle.modules)}")
     print(f"- home_branch:  {rec.home_branch}")
     print(f"- current:      {branch}")
     print("")
@@ -79,4 +94,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

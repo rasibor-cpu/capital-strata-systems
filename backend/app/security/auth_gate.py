@@ -5,11 +5,12 @@ Startup authentication gate for REA Capital Trading Engine.
 
 Responsibilities:
 - Engine boots into READY state
-- Blocks execution until valid login is completed
+- Blocks until valid login is completed
 - Enforces kill-switch (fail-closed)
-- Validates numeric user_id against registry
+- Validates numeric user_id
 - Enforces branch-scoped permissions (except superuser)
-- Binds authenticated AuditContext ONCE per engine run
+- Resolves unit_code → allowed screen/function bundle
+- Binds AuditContext exactly once per engine run
 """
 
 from __future__ import annotations
@@ -18,21 +19,20 @@ import getpass
 import os
 import time
 from dataclasses import dataclass
+from typing import List
 
 from backend.app.observability.logger import get_logger, with_trace
 from backend.app.observability.kill_switch import assert_not_killed
 from backend.app.observability.engine_run import get_engine_run_id
-from backend.app.observability.audit_context import (
-    set_audit_context,
-    AuditContext,
-)
+from backend.app.observability.audit_context import set_audit_context, AuditContext
+
 from backend.app.security.user_registry import (
     ensure_superuser_exists,
     get_user,
     get_current_branch,
     branch_allowed,
-    SUPERUSER_ID,
 )
+from backend.app.security.unit_router import resolve_unit_bundle, UnitBundle
 
 log = get_logger("security.auth_gate")
 
@@ -41,6 +41,9 @@ log = get_logger("security.auth_gate")
 class AuthContext:
     user_id: str
     role: str
+    unit_code: str
+    unit_label: str
+    modules: List[str]
     home_branch: str
     current_branch: str
     auth_method: str
@@ -48,21 +51,11 @@ class AuthContext:
 
 
 def await_login_ready_state(timeout_s: int = 0) -> AuthContext:
-    """
-    Blocks until a valid login is completed.
-
-    Environment (non-interactive) mode:
-      REA_NONINTERACTIVE_USER_ID
-      REA_NONINTERACTIVE_AUTH_KEY
-      REA_EXPECTED_AUTH_KEY   (required)
-
-    Interactive mode:
-      Prompts user_id + key securely
-    """
     adapter = with_trace(log, "LOGIN")
 
     ensure_superuser_exists()
 
+    # --- kill switch
     if not assert_not_killed(pair="GLOBAL"):
         adapter.critical("LOGIN_BLOCK | reason=kill_switch_active")
         raise RuntimeError("kill_switch_active")
@@ -75,9 +68,9 @@ def await_login_ready_state(timeout_s: int = 0) -> AuthContext:
     current_branch = get_current_branch()
     engine_run_id = get_engine_run_id()
 
-    # -------------------------
-    # Non-interactive login
-    # -------------------------
+    # =============================
+    # Non-interactive login (CI / service)
+    # =============================
     env_user = os.getenv("REA_NONINTERACTIVE_USER_ID", "").strip()
     env_key = os.getenv("REA_NONINTERACTIVE_AUTH_KEY", "").strip()
 
@@ -98,6 +91,13 @@ def await_login_ready_state(timeout_s: int = 0) -> AuthContext:
             )
             raise PermissionError("branch_restricted")
 
+        # Unit bundle resolution
+        if rec.role.lower() == "superuser":
+            bundle = UnitBundle(unit_code="SUPER", label="Super User", modules=["*"])
+        else:
+            bundle = resolve_unit_bundle(rec.unit_code)
+
+        # Bind audit context
         set_audit_context(
             AuditContext(
                 user_id=rec.user_id,
@@ -110,22 +110,25 @@ def await_login_ready_state(timeout_s: int = 0) -> AuthContext:
         )
 
         adapter.info(
-            "LOGIN_OK | method=env | user_id=%s | role=%s | branch=%s",
-            rec.user_id, rec.role, current_branch
+            "LOGIN_OK | method=env | user_id=%s | role=%s | unit=%s | branch=%s",
+            rec.user_id, rec.role, bundle.unit_code, current_branch
         )
 
         return AuthContext(
             user_id=rec.user_id,
             role=rec.role,
+            unit_code=bundle.unit_code,
+            unit_label=bundle.label,
+            modules=bundle.modules,
             home_branch=rec.home_branch,
             current_branch=current_branch,
             auth_method="env",
             issued_at_utc=time.time(),
         )
 
-    # -------------------------
+    # =============================
     # Interactive login
-    # -------------------------
+    # =============================
     adapter.info("READY_STATE | awaiting_login=true | branch=%s", current_branch)
     start = time.time()
 
@@ -170,6 +173,11 @@ def await_login_ready_state(timeout_s: int = 0) -> AuthContext:
                 print(f"Access denied: restricted to branch '{rec.home_branch}'.")
                 continue
 
+            if rec.role.lower() == "superuser":
+                bundle = UnitBundle(unit_code="SUPER", label="Super User", modules=["*"])
+            else:
+                bundle = resolve_unit_bundle(rec.unit_code)
+
             set_audit_context(
                 AuditContext(
                     user_id=rec.user_id,
@@ -182,13 +190,16 @@ def await_login_ready_state(timeout_s: int = 0) -> AuthContext:
             )
 
             adapter.info(
-                "LOGIN_OK | method=interactive | user_id=%s | role=%s | branch=%s",
-                rec.user_id, rec.role, current_branch
+                "LOGIN_OK | method=interactive | user_id=%s | role=%s | unit=%s | branch=%s",
+                rec.user_id, rec.role, bundle.unit_code, current_branch
             )
 
             return AuthContext(
                 user_id=rec.user_id,
                 role=rec.role,
+                unit_code=bundle.unit_code,
+                unit_label=bundle.label,
+                modules=bundle.modules,
                 home_branch=rec.home_branch,
                 current_branch=current_branch,
                 auth_method="interactive",
@@ -201,4 +212,3 @@ def await_login_ready_state(timeout_s: int = 0) -> AuthContext:
         except Exception as exc:
             adapter.error("LOGIN_ERROR | %s", str(exc))
             print("Login error. Try again.")
-
