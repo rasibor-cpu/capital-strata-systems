@@ -13,6 +13,8 @@ Optional env:
   REA_KILL_SWITCH=1
 """
 
+from __future__ import annotations
+
 # --- REQUIRED: ensure repo root is on PYTHONPATH (fixes "No module named backend") ---
 import sys
 from pathlib import Path
@@ -22,10 +24,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 # -------------------------------------------------------------------------------
 
-from __future__ import annotations
-
 import os
-import sys as _sys
 from dataclasses import dataclass
 from pathlib import Path as _Path
 from typing import List
@@ -75,9 +74,9 @@ def _final_state(results: List[CheckResult]) -> str:
 
 
 def check_python() -> CheckResult:
-    v = _sys.version.split()[0]
-    major = _sys.version_info.major
-    minor = _sys.version_info.minor
+    v = sys.version.split()[0]
+    major = sys.version_info.major
+    minor = sys.version_info.minor
     if major < 3 or (major == 3 and minor < 10):
         return _red("python_version", f"{v} (need >= 3.10)")
     return _ok("python_version", v)
@@ -116,7 +115,6 @@ def check_session() -> CheckResult:
     decision = assert_session_allowed(asset_class=asset_class, hard_fail=False)
     if decision.allowed:
         return _ok("session_gate", f"ALLOW | {asset_class} | {decision.reason}")
-    # Session blocked can be expected (e.g., weekend). That’s AMBER, not RED.
     return _amber("session_gate", f"BLOCK | {asset_class} | {decision.reason} ({decision.state})")
 
 
@@ -136,7 +134,7 @@ def check_entrypoint_import() -> CheckResult:
 
     try:
         __import__(mod_path)
-        mod = _sys.modules[mod_path]
+        mod = sys.modules[mod_path]
     except Exception as e:
         return _red("entrypoint", f"import failed: {mod_path} | {e}")
 
@@ -152,14 +150,15 @@ def main() -> int:
     adapter = with_trace(log, "CHECK")
     adapter.info("PRE_LIVE_CHECK_START")
 
-    results: List[CheckResult] = []
-    results.append(check_python())
-    results.append(check_repo_layout())
-    results.append(check_runtime_controls())
-    results.append(check_kill())
-    results.append(check_session())
-    results.append(check_config_hash())
-    results.append(check_entrypoint_import())
+    results: List[CheckResult] = [
+        check_python(),
+        check_repo_layout(),
+        check_runtime_controls(),
+        check_kill(),
+        check_session(),
+        check_config_hash(),
+        check_entrypoint_import(),
+    ]
 
     _print_results(results)
 
