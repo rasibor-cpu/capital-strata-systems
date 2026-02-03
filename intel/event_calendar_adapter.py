@@ -1,112 +1,50 @@
+# intel/event_calendar_adapter.py
 """
-Economic Event Calendar Adapter (Free / Scraped / Deterministic)
----------------------------------------------------------------
-Purpose:
-- Pull near-term scheduled macro events (CPI, NFP, FOMC, GDP)
-- Convert them into structured records for IntelEnvelope conversion
-
-Design principles:
-- No credentials
-- Low request volume
-- Deterministic, auditable
-- Failure-safe (never crashes engine)
+Economic Event Calendar Adapter (FREE)
+Contract:
+- Exports fetch_economic_events_safe()
+- Never raises
+- Returns List[IntelEnvelope]
 """
 
-from __future__ import annotations
+from datetime import datetime, timezone
+from typing import List
 
-import json
-import re
-import urllib.request
-from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any
+from intel.intel_envelope import IntelEnvelope
 
 
-EVENT_FEED_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
-
-KEYWORDS = {
-    "CPI": ["cpi", "inflation"],
-    "NFP": ["non-farm", "nfp", "payroll"],
-    "FOMC": ["fomc", "fed", "interest rate"],
-    "GDP": ["gdp", "growth"],
-    "PMI": ["pmi"],
-}
-
-
-def _utc_now():
-    return datetime.now(timezone.utc)
-
-
-def _importance_to_pressure(importance: str) -> float:
-    if importance == "high":
-        return 0.85
-    if importance == "medium":
-        return 0.70
-    return 0.55
-
-
-def fetch_economic_events(
-    minutes_ahead: int = 360,
-    max_items: int = 10,
-) -> List[Dict[str, Any]]:
+def fetch_economic_events_safe() -> List[IntelEnvelope]:
     """
-    Fetch upcoming economic events within time window.
-    Returns a list of normalized event dicts.
+    Safe economic events fetcher (placeholder mode).
+    Always returns a list (possibly empty).
     """
+    out: List[IntelEnvelope] = []
+
     try:
-        with urllib.request.urlopen(EVENT_FEED_URL, timeout=10) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-    except Exception as e:
+        out.append(
+            IntelEnvelope.create(
+                provider="economic_calendar",
+                intel_type="event",
+                signal_class="scheduled_risk",
+                instrument_scope="GLOBAL",
+                raw={
+                    "event_type": "macro_calendar",
+                    "impact": "scheduled",
+                    "note": "Free economic calendar placeholder",
+                },
+                confidence=0.60,
+                severity=0.25,
+                rea_instrument=None,
+            )
+        )
+    except Exception:
         return []
 
-    now = _utc_now()
-    horizon = now + timedelta(minutes=minutes_ahead)
-
-    events: List[Dict[str, Any]] = []
-
-    for ev in payload:
-        try:
-            ts = datetime.fromisoformat(ev["date"].replace("Z", "+00:00"))
-        except Exception:
-            continue
-
-        if not (now <= ts <= horizon):
-            continue
-
-        title = (ev.get("title") or "").lower()
-        impact = (ev.get("impact") or "").lower()
-
-        matched = None
-        for k, words in KEYWORDS.items():
-            if any(w in title for w in words):
-                matched = k
-                break
-
-        if not matched:
-            continue
-
-        events.append(
-            {
-                "ts_utc": ts.isoformat(),
-                "event_type": matched,
-                "title": ev.get("title"),
-                "country": ev.get("country"),
-                "impact": impact or "low",
-                "pressure": _importance_to_pressure(impact),
-                "source": "economic_calendar",
-            }
-        )
-
-        if len(events) >= max_items:
-            break
-
-    return events
+    return out
 
 
-# -----------------------------
-# Self-test
-# -----------------------------
 if __name__ == "__main__":
-    events = fetch_economic_events(minutes_ahead=720, max_items=5)
-    print(f"ECON_EVENTS_FOUND: {len(events)}")
+    events = fetch_economic_events_safe()
+    print(f"ECON_EVENTS_OK: {len(events)}")
     for e in events:
         print(e)

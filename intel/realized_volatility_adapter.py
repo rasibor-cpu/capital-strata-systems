@@ -1,24 +1,29 @@
 """
-Realized Volatility Adapter (FREE, SOURCE-AGNOSTIC)
+Realized Volatility Adapter (FREE, ALWAYS-ON)
+--------------------------------------------
+Exports:
+- compute_vol_signal(...)                 (utility)
+- fetch_realized_volatility_safe()        (collector contract)
 
-Computes historical / realized volatility from price series you already ingest.
-Designed to be the PRIMARY volatility signal when VIX is unavailable.
-
-Outputs IntelEnvelope-compatible dicts (later wrapped by IntelEnvelope.create).
+This adapter computes realized volatility from a provided close series.
+In collector-safe mode, it runs a DEMO placeholder unless you wire real closes.
 """
 
 from __future__ import annotations
+
 from datetime import datetime, timezone
 import math
-from typing import List, Dict, Optional
+from typing import List, Dict
+
+from intel.intel_envelope import IntelEnvelope
 
 
 def _log_returns(prices: List[float]) -> List[float]:
     rets = []
     for i in range(1, len(prices)):
-        if prices[i - 1] <= 0 or prices[i] <= 0:
-            continue
-        rets.append(math.log(prices[i] / prices[i - 1]))
+        p0, p1 = prices[i - 1], prices[i]
+        if p0 > 0 and p1 > 0:
+            rets.append(math.log(p1 / p0))
     return rets
 
 
@@ -30,13 +35,7 @@ def _stddev(values: List[float]) -> float:
     return math.sqrt(var)
 
 
-def realized_volatility(
-    closes: List[float],
-    periods_per_year: int = 252,
-) -> float:
-    """
-    Annualized realized volatility using log returns.
-    """
+def realized_volatility(closes: List[float], periods_per_year: int = 252) -> float:
     rets = _log_returns(closes)
     if not rets:
         return 0.0
@@ -47,38 +46,26 @@ def realized_volatility(
 def compute_vol_signal(
     symbol: str,
     closes: List[float],
-    window: int,
+    window: int = 20,
     periods_per_year: int = 252,
     source: str = "internal_prices",
 ) -> Dict:
-    """
-    Returns a normalized volatility signal dict.
-    """
     if len(closes) < window + 1:
         return {
-            "ts_utc": datetime.now(timezone.utc).isoformat(),
-            "source": source,
-            "signal_class": "volatility",
-            "regime_dimension": "risk",
-            "pressure": 0.0,
-            "confidence": 0.0,
-            "direction": "neutral",
-            "meta": {
-                "symbol": symbol,
-                "window": window,
-                "status": "insufficient_data",
-            },
+            "status": "insufficient_data",
+            "symbol": symbol,
+            "window": window,
         }
 
     window_closes = closes[-(window + 1):]
     vol = realized_volatility(window_closes, periods_per_year)
 
-    # Normalize pressure (heuristic bands; conservative)
+    # Deterministic pressure bands
     if vol < 0.10:
-        pressure = 0.2
+        pressure = 0.20
         direction = "risk_on"
     elif vol < 0.20:
-        pressure = 0.4
+        pressure = 0.40
         direction = "neutral"
     elif vol < 0.35:
         pressure = 0.65
@@ -89,33 +76,56 @@ def compute_vol_signal(
 
     return {
         "ts_utc": datetime.now(timezone.utc).isoformat(),
-        "source": source,
-        "signal_class": "volatility",
-        "regime_dimension": "risk",
+        "provider": source,
+        "symbol": symbol,
+        "window": window,
+        "realized_vol": round(vol, 6),
         "pressure": round(pressure, 3),
-        "confidence": 0.9,
+        "confidence": 0.90,
         "direction": direction,
-        "meta": {
-            "symbol": symbol,
-            "window": window,
-            "realized_vol": round(vol, 4),
-            "method": "log_returns_annualized",
-        },
     }
 
 
-def demo():
-    # Minimal sanity demo with synthetic prices
-    prices = [
-        100, 101, 102, 101.5, 100.8, 99.9, 100.3,
-        101.2, 102.8, 103.1, 102.4, 101.9, 101.7,
-        102.5, 103.4, 104.2, 103.9, 104.6, 105.1,
-    ]
-    sig20 = compute_vol_signal("DEMO", prices, window=20)
-    sig60 = compute_vol_signal("DEMO", prices, window=60)
-    print("VOL_20_OK", sig20)
-    print("VOL_60_OK", sig60)
+def fetch_realized_volatility_safe() -> List[IntelEnvelope]:
+    """
+    Collector-safe wrapper.
+    For now: DEMO mode using a tiny synthetic series (always works).
+    Later: wire real closes from your data pipeline and replace the demo.
+    """
+    try:
+        demo_prices = [
+            100, 101, 102, 101.5, 100.8, 99.9, 100.3, 101.2, 102.8,
+            103.1, 102.4, 101.9, 101.7, 102.5, 103.4, 104.2, 103.9,
+            104.6, 105.1, 104.7, 104.9, 105.4, 105.2
+        ]
+
+        sig = compute_vol_signal("DEMO", demo_prices, window=20, periods_per_year=252)
+
+        if sig.get("status") == "insufficient_data":
+            return []
+
+        env = IntelEnvelope.create(
+            provider=sig.get("provider", "internal_prices"),
+            intel_type="market",
+            signal_class="volatility",
+            instrument_scope="GLOBAL",
+            raw={
+                "symbol": sig["symbol"],
+                "window": sig["window"],
+                "realized_vol": sig["realized_vol"],
+                "direction": sig["direction"],
+            },
+            confidence=float(sig.get("confidence", 0.9)),
+            severity=float(sig.get("pressure", 0.0)),
+            rea_instrument=None,
+        )
+        return [env]
+    except Exception:
+        return []
 
 
 if __name__ == "__main__":
-    demo()
+    envs = fetch_realized_volatility_safe()
+    print(f"REALIZED_VOL_SAFE_OK: {len(envs)}")
+    for e in envs:
+        print(e)
