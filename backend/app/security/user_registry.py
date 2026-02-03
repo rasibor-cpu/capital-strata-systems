@@ -1,183 +1,221 @@
 """
 backend/app/security/user_registry.py
 
-User identity + branch-scoped permission registry.
+User registry with branch-scoped permissions and per-user password support.
 
-Rules:
-- User IDs are numeric strings (e.g., "1369")
-- Super user bypasses branch restriction
-- Other users are restricted to their home_branch (the branch where the user was created)
-- Each user has a unit_code that maps to allowed screens/functions via unit_router
-- Registry stored in runtime/users.json by default (override with REA_USERS_DB_PATH)
+Storage:
+- runtime/users.json (ignored by git). This is intentional: credentials must not be committed.
+
+Security model:
+- Each user has:
+  - user_id (string, numeric)
+  - role (superuser/admin/operator/...)
+  - unit_code (department/unit)
+  - home_branch (branch they belong to)
+  - must_change_password (bool)
+  - password_hash (pbkdf2-hmac-sha256, salted)
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import os
+import secrets
+import hashlib
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Dict, Optional, Any
+from typing import Optional, Dict, Any
 
-from backend.app.security.unit_router import resolve_unit_bundle, list_unit_codes
 
-DEFAULT_USERS_DB_PATH = os.getenv("REA_USERS_DB_PATH", r"runtime\users.json")
+RUNTIME_DIR = "runtime"
+USERS_PATH = os.path.join(RUNTIME_DIR, "users.json")
+
 SUPERUSER_ID = "1369"
+SUPERUSER_ROLE = "superuser"
+SUPERUSER_UNIT = "SUPER"
+DEFAULT_BRANCH = "main"
 
 
 @dataclass(frozen=True)
 class UserRecord:
-    user_id: str               # numeric string
+    user_id: str
     display_name: str
-    role: str                  # "superuser" | "admin" | "operator" | etc
-    unit_code: str             # OPS, RISK, FINCTRL, TRADING_DESK, COMPLIANCE (or SUPER)
-    home_branch: str           # branch where the user was created
-    is_active: bool = True
+    role: str
+    unit_code: str
+    home_branch: str
+    must_change_password: bool
 
 
-def _read_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8")
+def _ensure_runtime_dir() -> None:
+    os.makedirs(RUNTIME_DIR, exist_ok=True)
 
 
-def _write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+def _load_users() -> Dict[str, Any]:
+    _ensure_runtime_dir()
+    if not os.path.exists(USERS_PATH):
+        return {"users": {}}
+    with open(USERS_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _save_users(db: Dict[str, Any]) -> None:
+    _ensure_runtime_dir()
+    with open(USERS_PATH, "w", encoding="utf-8") as f:
+        json.dump(db, f, indent=2, sort_keys=True)
+
+
+def _pbkdf2_hash(password: str, salt: bytes) -> str:
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 200_000)
+    return base64.b64encode(dk).decode("ascii")
+
+
+def _new_salt() -> bytes:
+    return secrets.token_bytes(16)
+
+
+def _b64(b: bytes) -> str:
+    return base64.b64encode(b).decode("ascii")
+
+
+def _unb64(s: str) -> bytes:
+    return base64.b64decode(s.encode("ascii"))
 
 
 def get_current_branch() -> str:
     """
-    Resolve current git branch without calling git executable.
-    Works from repo root. Allows override via REA_GIT_BRANCH.
+    Branch scoping rule source.
+    Priority:
+      1) REA_CURRENT_BRANCH env
+      2) GIT_BRANCH env
+      3) DEFAULT_BRANCH
     """
-    env_branch = os.getenv("REA_GIT_BRANCH", "").strip()
-    if env_branch:
-        return env_branch
-
-    head = Path(".git") / "HEAD"
-    try:
-        content = _read_text(head).strip()
-        if content.startswith("ref:"):
-            ref = content.split(":", 1)[1].strip()
-            return ref.split("/")[-1]
-        return "DETACHED"
-    except Exception:
-        return "UNKNOWN"
+    b = (os.getenv("REA_CURRENT_BRANCH", "") or os.getenv("GIT_BRANCH", "")).strip()
+    return b or DEFAULT_BRANCH
 
 
-def load_users(db_path: str = DEFAULT_USERS_DB_PATH) -> Dict[str, UserRecord]:
-    p = Path(db_path)
-    if not p.exists():
-        return {}
+def ensure_superuser_exists() -> None:
+    db = _load_users()
+    users = db.get("users", {})
 
-    raw = json.loads(_read_text(p))
-    users: Dict[str, UserRecord] = {}
-
-    for uid, u in raw.get("users", {}).items():
-        unit_code = str(u.get("unit_code", "")).strip().upper()
-
-        # Validate unit_code (fail-closed if invalid)
-        # SUPER is allowed for superuser
-        if unit_code and unit_code != "SUPER":
-            resolve_unit_bundle(unit_code)
-
-        users[str(uid)] = UserRecord(
-            user_id=str(uid),
-            display_name=str(u.get("display_name", "")),
-            role=str(u.get("role", "operator")),
-            unit_code=unit_code,
-            home_branch=str(u.get("home_branch", "UNKNOWN")),
-            is_active=bool(u.get("is_active", True)),
-        )
-
-    return users
-
-
-def save_users(users: Dict[str, UserRecord], db_path: str = DEFAULT_USERS_DB_PATH) -> None:
-    p = Path(db_path)
-    payload: Dict[str, Any] = {"users": {}}
-    for uid, u in users.items():
-        payload["users"][uid] = {
-            "display_name": u.display_name,
-            "role": u.role,
-            "unit_code": u.unit_code,
-            "home_branch": u.home_branch,
-            "is_active": u.is_active,
-        }
-    _write_text(p, json.dumps(payload, indent=2, sort_keys=True))
-
-
-def ensure_superuser_exists(db_path: str = DEFAULT_USERS_DB_PATH) -> None:
-    users = load_users(db_path)
     if SUPERUSER_ID in users:
         return
 
-    branch = get_current_branch()
-    users[SUPERUSER_ID] = UserRecord(
-        user_id=SUPERUSER_ID,
-        display_name="Robert Asibor",
-        role="superuser",
-        unit_code="SUPER",
-        home_branch=branch,
-        is_active=True,
-    )
-    save_users(users, db_path)
+    # Create superuser with a generated temp password (printed once).
+    temp_pw = generate_temp_password()
+    salt = _new_salt()
+    users[SUPERUSER_ID] = {
+        "user_id": SUPERUSER_ID,
+        "display_name": "Robert Asibor",
+        "role": SUPERUSER_ROLE,
+        "unit_code": SUPERUSER_UNIT,
+        "home_branch": DEFAULT_BRANCH,
+        "must_change_password": True,
+        "password_salt_b64": _b64(salt),
+        "password_hash_b64": _pbkdf2_hash(temp_pw, salt),
+    }
+    db["users"] = users
+    _save_users(db)
+
+    print("SUPERUSER_CREATED | user_id=1369 | TEMP_PASSWORD_ISSUED")
+    print(f"SUPERUSER_TEMP_PASSWORD: {temp_pw}")
+    print("ACTION_REQUIRED: login once and change password immediately.")
 
 
-def get_user(user_id: str, db_path: str = DEFAULT_USERS_DB_PATH) -> Optional[UserRecord]:
-    users = load_users(db_path)
-    return users.get(str(user_id))
+def generate_temp_password() -> str:
+    """
+    Human-typable but strong-ish temp password.
+    """
+    # 4 blocks of 4 chars: XXXX-XXXX-XXXX-XXXX
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    blocks = ["".join(secrets.choice(alphabet) for _ in range(4)) for _ in range(4)]
+    return "-".join(blocks)
 
 
 def create_user(
     user_id: str,
     display_name: str,
+    role: str,
     unit_code: str,
-    role: str = "operator",
-    db_path: str = DEFAULT_USERS_DB_PATH,
-) -> UserRecord:
+    home_branch: str,
+) -> str:
     """
-    Create a user on the CURRENT branch. Enforces unique numeric ID and known unit_code.
+    Creates a user and returns the generated temporary password.
     """
-    uid = str(user_id).strip()
-    if not uid.isdigit():
-        raise ValueError("user_id must be numeric")
+    if not user_id.isdigit():
+        raise ValueError("user_id must be numeric (string).")
 
-    if uid == SUPERUSER_ID:
-        raise ValueError(f"user_id {SUPERUSER_ID} is reserved for superuser")
+    db = _load_users()
+    users = db.get("users", {})
 
-    code = (unit_code or "").strip().upper()
-    if not code:
-        raise ValueError(f"unit_code is required. Allowed: {', '.join(list_unit_codes())}")
+    if user_id in users:
+        raise ValueError("user_id already exists.")
 
-    if code != "SUPER":
-        resolve_unit_bundle(code)
+    temp_pw = generate_temp_password()
+    salt = _new_salt()
 
-    users = load_users(db_path)
-    if uid in users:
-        raise ValueError(f"user_id already exists: {uid}")
+    users[user_id] = {
+        "user_id": user_id,
+        "display_name": display_name,
+        "role": role,
+        "unit_code": unit_code,
+        "home_branch": home_branch,
+        "must_change_password": True,
+        "password_salt_b64": _b64(salt),
+        "password_hash_b64": _pbkdf2_hash(temp_pw, salt),
+    }
 
-    branch = get_current_branch()
-    rec = UserRecord(
-        user_id=uid,
-        display_name=display_name.strip(),
-        role=role.strip(),
-        unit_code=code,
-        home_branch=branch,
-        is_active=True,
+    db["users"] = users
+    _save_users(db)
+    return temp_pw
+
+
+def get_user(user_id: str) -> Optional[UserRecord]:
+    db = _load_users()
+    rec = db.get("users", {}).get(user_id)
+    if not rec:
+        return None
+    return UserRecord(
+        user_id=rec["user_id"],
+        display_name=rec.get("display_name", ""),
+        role=rec.get("role", "operator"),
+        unit_code=rec.get("unit_code", "OPS"),
+        home_branch=rec.get("home_branch", DEFAULT_BRANCH),
+        must_change_password=bool(rec.get("must_change_password", False)),
     )
-    users[uid] = rec
-    save_users(users, db_path)
-    return rec
 
 
 def branch_allowed(user: UserRecord, current_branch: str) -> bool:
-    """
-    Branch restriction logic:
-    - superuser: always allowed
-    - others: only allowed on home_branch
-    """
-    if not user.is_active:
-        return False
-    if user.role.lower() == "superuser":
+    if user.role.lower() == SUPERUSER_ROLE:
         return True
-    return user.home_branch == current_branch
+    return (user.home_branch or DEFAULT_BRANCH) == (current_branch or DEFAULT_BRANCH)
+
+
+def verify_password(user_id: str, password: str) -> bool:
+    db = _load_users()
+    rec = db.get("users", {}).get(user_id)
+    if not rec:
+        return False
+    salt = _unb64(rec["password_salt_b64"])
+    expected = rec["password_hash_b64"]
+    got = _pbkdf2_hash(password, salt)
+    return secrets.compare_digest(got, expected)
+
+
+def set_new_password(user_id: str, new_password: str) -> None:
+    if len(new_password) < 10:
+        raise ValueError("password too short (min 10 chars).")
+
+    db = _load_users()
+    users = db.get("users", {})
+    rec = users.get(user_id)
+    if not rec:
+        raise ValueError("unknown user_id")
+
+    salt = _new_salt()
+    rec["password_salt_b64"] = _b64(salt)
+    rec["password_hash_b64"] = _pbkdf2_hash(new_password, salt)
+    rec["must_change_password"] = False
+
+    users[user_id] = rec
+    db["users"] = users
+    _save_users(db)
