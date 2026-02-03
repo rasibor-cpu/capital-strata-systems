@@ -16,7 +16,7 @@ Rules:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 
 # -----------------------------
@@ -27,6 +27,7 @@ class InstrumentMapping:
     strategy_concept: str       # e.g., "FX_EURUSD_MR"
     rea_instrument: str         # e.g., "FX.EURUSD.SPOT"
     broker_symbol: str          # e.g., "EUR/USD" or "EURUSD"
+    proxy_note: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -34,7 +35,7 @@ class ResolutionResult:
     strategy_concept: str
     rea_instrument: str
     broker_symbol: str
-    proxy_note: Optional[str]   # disclose if this is a proxy mapping
+    proxy_note: Optional[str]
 
 
 # -----------------------------
@@ -44,7 +45,6 @@ class ResolutionResult:
 # Keep this list small, explicit, and reviewed.
 # Add instruments only via governance commit.
 MAPPINGS = [
-    # Example canonical FX spot instruments:
     InstrumentMapping(
         strategy_concept="FX_EURUSD_MR",
         rea_instrument="FX.EURUSD.SPOT",
@@ -58,7 +58,7 @@ MAPPINGS = [
 ]
 
 
-def _build_indexes():
+def _build_indexes() -> Tuple[Dict[str, InstrumentMapping], Dict[str, InstrumentMapping]]:
     by_strategy: Dict[str, InstrumentMapping] = {}
     by_rea: Dict[str, InstrumentMapping] = {}
 
@@ -86,17 +86,36 @@ _BY_STRATEGY, _BY_REA = _build_indexes()
 # -----------------------------
 def resolve_by_strategy(strategy_concept: str) -> ResolutionResult:
     if strategy_concept not in _BY_STRATEGY:
-        raise KeyError(
-            f"Missing mapping for strategy_concept={strategy_concept}"
-        )
+        raise KeyError(f"Missing mapping for strategy_concept={strategy_concept}")
     m = _BY_STRATEGY[strategy_concept]
     return ResolutionResult(
         strategy_concept=m.strategy_concept,
         rea_instrument=m.rea_instrument,
         broker_symbol=m.broker_symbol,
-        proxy_note=None,
+        proxy_note=m.proxy_note,
     )
 
 
 def resolve_by_rea(rea_instrument: str) -> ResolutionResult:
-    if rea_instrument not in _BY_RE_
+    if rea_instrument not in _BY_REA:
+        raise KeyError(f"Missing mapping for rea_instrument={rea_instrument}")
+    m = _BY_REA[rea_instrument]
+    return ResolutionResult(
+        strategy_concept=m.strategy_concept,
+        rea_instrument=m.rea_instrument,
+        broker_symbol=m.broker_symbol,
+        proxy_note=m.proxy_note,
+    )
+
+
+def broker_symbol_for_rea(rea_instrument: str) -> str:
+    """
+    Convenience: used by LiveQuoteRouter mapping dict build.
+    Hard-fails if missing.
+    """
+    return resolve_by_rea(rea_instrument).broker_symbol
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "rea_symbol_map is a governance module only; it
