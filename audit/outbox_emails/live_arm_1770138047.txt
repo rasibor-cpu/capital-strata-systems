@@ -1,0 +1,19 @@
+TO: your_email@example.com
+SUBJECT: REA Engine: LIVE ARM REQUESTED (CONFIRM REQUIRED)
+DATE_UTC: 2026-02-03T17:00:47.292531+00:00
+
+Live arming has been requested.
+
+STATE: ARMED_PENDING
+TIME_UTC: 2026-02-03T17:00:47.291963+00:00
+HOST_PID: 26752
+
+To activate, the superuser (or delegate) must reconfirm using the token below.
+TOKEN (expires in 15 minutes): scw7UkSEN_qTFZkIdyz6jg
+
+Confirm command:
+  python run_live_guarded.py --confirm-live scw7UkSEN_qTFZkIdyz6jg
+
+Disarm command:
+  python run_live_guarded.py --disarm
+
