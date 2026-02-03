@@ -1,34 +1,37 @@
 """
 REA Capital Trading Engine
-Slippage Guard (Execution Control – Layer 5)
+Slippage Guard (Execution Veto Layer)
 
-Constitutional Authority:
-- Layer 5: Execution Control
-- This module has ABSOLUTE VETO power
-- It never improves price, retries orders, or adapts
+Purpose:
+- Prevent execution when live price deviates materially from expected signal price
+- READ-ONLY
+- No broker calls
+- No execution
 
-Doctrine:
-- Slippage must be bounded BEFORE execution
-- Breach = CANCEL
-- Uncertainty = NO EXECUTION
+Veto Rule (Hard):
+- |live_mid - expected_price| / expected_price <= MAX_SLIPPAGE_PCT
 """
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional
-import time
 
 
 # -----------------------------
-# Decision Object (Immutable)
+# Policy Constants (LOCKED)
+# -----------------------------
+MAX_SLIPPAGE_PCT = 0.0010  # 0.10% max deviation
+
+
+# -----------------------------
+# Decision Output
 # -----------------------------
 @dataclass(frozen=True)
 class SlippageDecision:
     allow: bool
-    expected_price: float
-    max_allowed_price: float
-    actual_price: Optional[float]
     reason: str
-    timestamp: float
+    slippage_pct: Optional[float]
 
 
 # -----------------------------
@@ -36,120 +39,47 @@ class SlippageDecision:
 # -----------------------------
 class SlippageGuard:
     """
-    SlippageGuard enforces price reality discipline.
-    It compares expected vs actual prices and vetoes execution
-    if tolerance is breached.
+    Authoritative slippage veto layer.
     """
 
-    def __init__(self, max_slippage_pct: float):
-        """
-        max_slippage_pct: e.g. 0.001 = 0.10%
-        """
-        if max_slippage_pct <= 0:
-            raise ValueError("max_slippage_pct must be positive")
-
-        self.max_slippage_pct = max_slippage_pct
-
-    # -------------------------
-    # Pre-Execution Check
-    # -------------------------
-    def pre_check(self, expected_price: float) -> SlippageDecision:
-        """
-        Called BEFORE sending an order.
-        Establishes the maximum acceptable execution price.
-        """
-        ts = time.time()
+    def pre_check(
+        self,
+        expected_price: Optional[float],
+        live_mid: Optional[float],
+    ) -> SlippageDecision:
+        # If either price is missing, be conservative and veto
+        if expected_price is None or live_mid is None:
+            return SlippageDecision(
+                allow=False,
+                reason="Missing price for slippage check",
+                slippage_pct=None,
+            )
 
         if expected_price <= 0:
-            return self._block(
-                expected_price,
-                None,
-                "Invalid expected price",
-                ts,
+            return SlippageDecision(
+                allow=False,
+                reason="Invalid expected_price for slippage check",
+                slippage_pct=None,
             )
 
-        max_price = expected_price * (1 + self.max_slippage_pct)
+        slippage_pct = abs(live_mid - expected_price) / expected_price
 
-        return SlippageDecision(
-            allow=True,
-            expected_price=expected_price,
-            max_allowed_price=max_price,
-            actual_price=None,
-            reason="Slippage bounds established",
-            timestamp=ts,
-        )
-
-    # -------------------------
-    # Post-Execution Check
-    # -------------------------
-    def post_check(
-        self,
-        expected_price: float,
-        actual_price: Optional[float],
-    ) -> SlippageDecision:
-        """
-        Called AFTER a fill (real or simulated).
-        """
-        ts = time.time()
-
-        if actual_price is None:
-            return self._block(
-                expected_price,
-                actual_price,
-                "Missing actual execution price",
-                ts,
-            )
-
-        max_price = expected_price * (1 + self.max_slippage_pct)
-
-        if actual_price > max_price:
-            return self._block(
-                expected_price,
-                actual_price,
-                f"Slippage breach (actual={actual_price}, max={max_price})",
-                ts,
+        if slippage_pct > MAX_SLIPPAGE_PCT:
+            return SlippageDecision(
+                allow=False,
+                reason=(
+                    f"Excessive slippage: {slippage_pct:.4%} "
+                    f"exceeds {MAX_SLIPPAGE_PCT:.2%}"
+                ),
+                slippage_pct=slippage_pct,
             )
 
         return SlippageDecision(
             allow=True,
-            expected_price=expected_price,
-            max_allowed_price=max_price,
-            actual_price=actual_price,
-            reason="Execution within slippage tolerance",
-            timestamp=ts,
-        )
-
-    # -------------------------
-    # Internal Helper
-    # -------------------------
-    def _block(
-        self,
-        expected_price: float,
-        actual_price: Optional[float],
-        reason: str,
-        ts: float,
-    ) -> SlippageDecision:
-        max_price = (
-            expected_price * (1 + self.max_slippage_pct)
-            if expected_price > 0
-            else 0.0
-        )
-
-        return SlippageDecision(
-            allow=False,
-            expected_price=expected_price,
-            max_allowed_price=max_price,
-            actual_price=actual_price,
-            reason=reason,
-            timestamp=ts,
+            reason="Slippage within tolerance",
+            slippage_pct=slippage_pct,
         )
 
 
-# -----------------------------
-# Constitutional Assertion
-# -----------------------------
 if __name__ == "__main__":
-    raise RuntimeError(
-        "SlippageGuard is a control module only. "
-        "It cannot be executed standalone."
-    )
+    raise RuntimeError("SlippageGuard is a library module only.")
