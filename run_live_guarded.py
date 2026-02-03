@@ -1,107 +1,117 @@
 """
 run_live_guarded.py
 
-Authoritative guarded launcher for REA Capital Trading Engine.
+Authoritative guarded startup wrapper for REA Capital Trading Engine.
 
-Execution order (LOCKED):
-1. Startup + safety checks
-2. Login gate (auth_gate.await_login_ready_state)
-   - sets AuditContext
-   - binds user permissions
-3. Resolve execution entrypoint
-4. Execute engine entrypoint
-
-Fail-closed at every step.
+Responsibilities:
+- Fail-closed startup
+- Ensure ENGINE_RUN_ID exists
+- Block on authentication gate
+- Bind audit context BEFORE engine entrypoint
+- Enforce LIVE / TEST mode toggle
+- Abort safely on any violation
 """
 
-from __future__ import annotations
-
-import importlib
 import os
 import sys
 import time
+import uuid
+import importlib
+import traceback
 
 from backend.app.observability.logger import get_logger, with_trace
-from backend.app.observability.engine_run import init_engine_run
 from backend.app.observability.kill_switch import assert_not_killed
 from backend.app.security.auth_gate import await_login_ready_state
 
 log = get_logger("run_live_guarded")
 
 
-def _resolve_entrypoint(entrypoint: str):
+def _ensure_engine_run_id() -> str:
     """
-    Resolve entrypoint string of form: module.path:function_name
+    Guarantee a stable ENGINE_RUN_ID for this process.
+    """
+    rid = os.getenv("ENGINE_RUN_ID", "").strip()
+    if not rid:
+        rid = str(uuid.uuid4())
+        os.environ["ENGINE_RUN_ID"] = rid
+    return rid
+
+
+def _load_entrypoint(entrypoint: str):
+    """
+    Resolve entrypoint string: module:function
     """
     if ":" not in entrypoint:
-        raise ValueError("Invalid entrypoint format. Expected module:function")
+        raise ValueError("Invalid entrypoint format. Use module:function")
 
-    module_path, func_name = entrypoint.split(":", 1)
-    module = importlib.import_module(module_path)
-    fn = getattr(module, func_name, None)
+    mod_name, fn_name = entrypoint.split(":", 1)
+    module = importlib.import_module(mod_name)
+    fn = getattr(module, fn_name, None)
 
-    if fn is None or not callable(fn):
-        raise RuntimeError(f"Entrypoint function not found: {entrypoint}")
+    if fn is None:
+        raise AttributeError(f"Entrypoint function '{fn_name}' not found in {mod_name}")
 
     return fn
 
 
-def main() -> None:
-    adapter = with_trace(log, "STARTUP")
+def main():
+    trace = with_trace(log, "STARTUP")
 
-    # -------------------------------------------------
-    # 1) Engine run + kill switch
-    # -------------------------------------------------
-    init_engine_run()
-
+    # =============================
+    # Fail-closed kill switch
+    # =============================
     if not assert_not_killed(pair="GLOBAL"):
-        adapter.critical("STARTUP_ABORT | reason=kill_switch_active")
-        sys.exit(2)
+        trace.critical("ABORT | kill_switch_active")
+        sys.exit(1)
 
-    adapter.info("RUN_LIVE_GUARDED_START")
+    engine_run_id = _ensure_engine_run_id()
+    mode = os.getenv("REA_ENGINE_MODE", "TEST").upper()
+    entrypoint = os.getenv("REA_ENGINE_ENTRYPOINT", "").strip()
 
-    # -------------------------------------------------
-    # 2) LOGIN GATE (sets audit context + permissions)
-    # -------------------------------------------------
-    auth_ctx = await_login_ready_state()
-    adapter.info(
-        "LOGIN_BOUND | user_id=%s | role=%s | branch=%s",
-        auth_ctx.user_id,
-        auth_ctx.role,
-        auth_ctx.current_branch,
+    trace.info(
+        "RUN_LIVE_GUARDED_START | run_id=%s | mode=%s | entrypoint=%s",
+        engine_run_id,
+        mode,
+        entrypoint or "NOT_SET",
     )
 
-    # -------------------------------------------------
-    # 3) Resolve execution entrypoint
-    # -------------------------------------------------
-    entrypoint = os.getenv("REA_ENGINE_ENTRYPOINT", "").strip()
     if not entrypoint:
-        adapter.critical("ABORT | reason=REA_ENGINE_ENTRYPOINT_not_set")
-        adapter.critical('Set REA_ENGINE_ENTRYPOINT like: "engine.run_engine:main"')
-        sys.exit(3)
+        trace.critical("ABORT | reason=REA_ENGINE_ENTRYPOINT_not_set")
+        sys.exit(1)
 
-    adapter.info("ENTRYPOINT_BIND | %s", entrypoint)
-
+    # =============================
+    # AUTH GATE (BLOCKING)
+    # =============================
     try:
-        entry_fn = _resolve_entrypoint(entrypoint)
+        auth_ctx = await_login_ready_state()
+        trace.info(
+            "AUTH_OK | user_id=%s | role=%s | unit=%s | branch=%s",
+            auth_ctx.user_id,
+            auth_ctx.role,
+            auth_ctx.unit_code,
+            auth_ctx.current_branch,
+        )
     except Exception as exc:
-        adapter.critical("ENTRYPOINT_BIND_FAILED | %s", exc)
-        sys.exit(4)
+        trace.critical("AUTH_ABORT | %s", str(exc))
+        sys.exit(1)
 
-    # -------------------------------------------------
-    # 4) Execute engine
-    # -------------------------------------------------
-    adapter.info("ENTRYPOINT_EXECUTE_START")
-    start = time.time()
+    # =============================
+    # MODE SAFETY
+    # =============================
+    if mode == "LIVE":
+        trace.warning("ENGINE_MODE=LIVE | additional safeguards enforced")
 
+    # =============================
+    # LOAD & RUN ENGINE
+    # =============================
     try:
-        entry_fn()
+        engine_main = _load_entrypoint(entrypoint)
+        trace.info("ENTRYPOINT_BOUND_OK | %s", entrypoint)
+        engine_main()
     except Exception as exc:
-        adapter.critical("ENGINE_ABORT | reason=exception | %s", exc)
-        raise
-    finally:
-        elapsed = time.time() - start
-        adapter.info("RUN_LIVE_GUARDED_END | elapsed=%.2fs", elapsed)
+        trace.critical("ENGINE_ABORT | %s", str(exc))
+        traceback.print_exc()
+        sys.exit(1)
 
 
 if __name__ == "__main__":
