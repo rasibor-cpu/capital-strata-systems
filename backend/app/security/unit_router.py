@@ -1,108 +1,78 @@
 """
 backend/app/security/unit_router.py
 
-Maps a user's unit_code (department/function) to a stable set of allowed modules.
-This drives "screen/function auto-load" for CLI now and UI later.
+Unit routing: unit_code -> UnitBundle (label + allowed modules/screens)
 
-Design:
-- unit_code is a short stable code (e.g., RISK, OPS, FINCTRL, TRADING_DESK)
-- a "module" is a named capability bundle (e.g., "positions.view", "limits.manage")
-- deterministic + version-controlled in code
+Rules:
+- unit_code is required for non-superusers
+- Unknown unit_code must fail-closed
+- Bundles should be conservative (least privilege) and expanded by governance later
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import List, Dict
 
 
 @dataclass(frozen=True)
 class UnitBundle:
     unit_code: str
     label: str
-    modules: List[str]  # "screens/functions" allowlist
+    modules: List[str]
 
 
-# Canonical bundles (extend carefully; treat names as API)
-BUNDLES: Dict[str, UnitBundle] = {
-    # Trading desk: view signals, request orders (execution still governed), monitor positions
-    "TRADING_DESK": UnitBundle(
-        unit_code="TRADING_DESK",
-        label="Trading Desk",
-        modules=[
-            "dashboard.view",
-            "signals.view",
-            "marketdata.view",
-            "positions.view",
-            "orders.request",
-            "execution.status.view",
-            "reports.daily.view",
-        ],
-    ),
-    # Risk: manage limits, approve overrides, view exposures
-    "RISK": UnitBundle(
-        unit_code="RISK",
-        label="Risk Management",
-        modules=[
-            "dashboard.view",
-            "limits.view",
-            "limits.manage",
-            "exposure.view",
-            "override.approve",
-            "reports.risk.view",
-            "audit.view",
-        ],
-    ),
-    # Ops: session tools, notifications, runbooks
-    "OPS": UnitBundle(
-        unit_code="OPS",
-        label="Operations",
-        modules=[
-            "dashboard.view",
-            "session.view",
-            "session.manage",
-            "notify.manage",
-            "outbox.view",
-            "reports.ops.view",
-            "audit.view",
-        ],
-    ),
-    # Financial control: ledgers, postings, statements
-    "FINCTRL": UnitBundle(
-        unit_code="FINCTRL",
-        label="Financial Control",
-        modules=[
-            "dashboard.view",
-            "ledger.view",
-            "ledger.post",
-            "trialbalance.view",
-            "statements.view",
-            "reports.finance.view",
-            "audit.view",
-        ],
-    ),
-    # Compliance: audit + policy reports
-    "COMPLIANCE": UnitBundle(
-        unit_code="COMPLIANCE",
-        label="Compliance",
-        modules=[
-            "dashboard.view",
-            "audit.view",
-            "policy.view",
-            "reports.compliance.view",
-        ],
-    ),
+# Canonical unit bundles (expand over time)
+UNIT_BUNDLES: Dict[str, UnitBundle] = {
+    # Core Ops / Admin
+    "OPS": UnitBundle("OPS", "Operations", modules=[
+        "ops.*",
+        "reporting.*",
+        "security.*",
+        "health.*",
+    ]),
+    "ADMIN": UnitBundle("ADMIN", "Administration", modules=[
+        "ops.*",
+        "reporting.*",
+        "security.*",
+        "health.*",
+    ]),
+
+    # Trading desk / execution
+    "TRADING": UnitBundle("TRADING", "Trading Desk", modules=[
+        "engine.*",
+        "execution.*",
+        "risk.*",
+        "data_live.*",
+        "reporting.trades*",
+        "reporting.positions*",
+        "health.*",
+    ]),
+
+    # Risk & controls
+    "RISK": UnitBundle("RISK", "Risk Control", modules=[
+        "risk.*",
+        "engine.*",
+        "reporting.*",
+        "ops.pre_live_check*",
+        "health.*",
+    ]),
+
+    # Finance / ledger / reconciliation
+    "FIN": UnitBundle("FIN", "Finance & Control", modules=[
+        "ledger.*",
+        "reporting.financials*",
+        "reporting.*",
+        "ops.*",
+        "health.*",
+    ]),
 }
 
 
 def resolve_unit_bundle(unit_code: str) -> UnitBundle:
-    code = (unit_code or "").strip().upper()
-    if not code:
-        raise ValueError("unit_code is required")
-    if code not in BUNDLES:
-        raise ValueError(f"Unknown unit_code: {code}")
-    return BUNDLES[code]
-
-
-def list_unit_codes() -> List[str]:
-    return sorted(BUNDLES.keys())
+    if not unit_code:
+        raise ValueError("unit_code required")
+    uc = unit_code.strip().upper()
+    if uc not in UNIT_BUNDLES:
+        raise ValueError(f"Unknown unit_code: {uc}")
+    return UNIT_BUNDLES[uc]
