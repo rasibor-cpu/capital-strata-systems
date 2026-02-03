@@ -2,12 +2,9 @@
 Centralized Logging & Audit Module
 REA Capital Trading Engine
 
-Purpose:
-- Deterministic, structured logs
-- One ENGINE_RUN_ID per engine start
-- TRACE_ID support per trade / action
-- Override-safe (even if overrides not yet wired)
-- No side effects on strategy or execution
+FIXED:
+- Prevents duplicate 'trace_id' injection
+- Safe with LoggerAdapter + LogRecordFactory
 """
 
 import logging
@@ -39,15 +36,21 @@ LOG_FORMAT = (
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 # -------------------------------------------------------------------
-# Custom Log Record Factory
+# Custom Log Record Factory (SAFE)
 # -------------------------------------------------------------------
 
 _old_factory = logging.getLogRecordFactory()
 
 def record_factory(*args, **kwargs):
     record = _old_factory(*args, **kwargs)
+
+    # Always inject ENGINE_RUN_ID
     record.engine_run_id = ENGINE_RUN_ID
-    record.trace_id = getattr(record, "trace_id", "N/A")
+
+    # Inject TRACE_ID only if not already present
+    if not hasattr(record, "trace_id"):
+        record.trace_id = "N/A"
+
     return record
 
 logging.setLogRecordFactory(record_factory)
@@ -70,32 +73,33 @@ def init_logging(level: str = "INFO") -> None:
     root = logging.getLogger()
     root.setLevel(numeric_level)
 
-    # Avoid duplicate handlers on reload
     if not root.handlers:
         root.addHandler(handler)
 
-    root.info("Logging initialized", extra={"trace_id": "SYSTEM"})
+    # IMPORTANT: do NOT pass trace_id here
+    root.info("Logging initialized")
 
 # -------------------------------------------------------------------
 # Logger Access Helper
 # -------------------------------------------------------------------
 
 def get_logger(name: str) -> logging.Logger:
-    """
-    Obtain a standard logger.
-    """
     return logging.getLogger(name)
 
 # -------------------------------------------------------------------
-# TRACE Context Helper
+# TRACE Context Helper (ONLY source of trace_id override)
 # -------------------------------------------------------------------
 
-def with_trace(logger: logging.Logger, trace_id: Optional[str] = None) -> logging.LoggerAdapter:
+def with_trace(
+    logger: logging.Logger,
+    trace_id: Optional[str] = None
+) -> logging.LoggerAdapter:
     """
-    Attach or propagate a TRACE_ID.
+    Attach or propagate a TRACE_ID safely.
     """
     if trace_id is None:
         trace_id = str(uuid.uuid4())
+
     return logging.LoggerAdapter(logger, {"trace_id": trace_id})
 
 # -------------------------------------------------------------------
@@ -109,10 +113,6 @@ def log_override(
     reason: str,
     trace_id: Optional[str] = None
 ) -> None:
-    """
-    Log a human override or privileged action.
-    This does NOT execute anything — audit only.
-    """
     adapter = with_trace(logger, trace_id)
     adapter.warning(
         "HUMAN_OVERRIDE | actor=%s | action=%s | reason=%s",
@@ -126,9 +126,6 @@ def log_override(
 # -------------------------------------------------------------------
 
 def log_startup_banner(logger: logging.Logger) -> None:
-    """
-    Emit a deterministic startup banner.
-    """
     adapter = with_trace(logger, "STARTUP")
     adapter.info("========================================")
     adapter.info("REA CAPITAL TRADING ENGINE — STARTUP")
