@@ -57,6 +57,9 @@ e*.py*
 audit/
 state/
 *.log
+# Runtime controls (never commit)
+runtime/
+
 
 
 
