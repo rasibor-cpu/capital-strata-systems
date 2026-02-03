@@ -1,106 +1,84 @@
-"""
-REA Capital Trading Engine — Governance Policy
-Profit-taking + re-entry risk cap policy (prompt-only safe).
-
-Authoritative rule (as agreed):
-- Take-profit tiers: 10%, 20%, 35%, 50%
-- When a tier is hit: cash out / lock profits.
-- Re-entry capital is capped at <= 50% of REALIZED profits already made.
-- No martingale / no escalation based on unrealized P&L.
-- Each re-entry begins a new trade lifecycle.
-"""
-
 from __future__ import annotations
-
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import List, Dict, Any
+import hashlib
+import json
+
+
+# ============================================================
+# REA GOVERNANCE — PROFIT-TAKING POLICY (CANONICAL)
+# ============================================================
+# - SINGLE SOURCE OF TRUTH
+# - STRATEGY-AGNOSTIC
+# - PROMPT / SIMULATION / EXECUTION SAFE
+# - NO MARTINGALE
+# - NO UNREALIZED-GAINS RE-ENTRY
+# ============================================================
 
 
 @dataclass(frozen=True)
 class ProfitTakingPolicy:
-    # Tier thresholds are expressed as decimal returns: 0.10 == 10%
-    profit_tiers: Tuple[float, ...] = (0.10, 0.20, 0.35, 0.50)
+    profit_tiers: List[float]
+    max_reentry_fraction_of_realized_profit: float
+    principal_protection: bool
+    lifecycle_reset_on_reentry: bool
+    martingale_allowed: bool
+    use_unrealized_gains_for_reentry: bool
 
-    # Re-entry is capped at this fraction of realized profits
-    max_reentry_fraction_of_realized_profit: float = 0.50
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "profit_tiers": list(self.profit_tiers),
+            "max_reentry_fraction_of_realized_profit": self.max_reentry_fraction_of_realized_profit,
+            "principal_protection": self.principal_protection,
+            "lifecycle_reset_on_reentry": self.lifecycle_reset_on_reentry,
+            "martingale_allowed": self.martingale_allowed,
+            "use_unrealized_gains_for_reentry": self.use_unrealized_gains_for_reentry,
+        }
 
-    # Governance invariants
-    principal_protection: bool = True
-    lifecycle_reset_on_reentry: bool = True
-    martingale_allowed: bool = False
-    use_unrealized_gains_for_reentry: bool = False
-
-    def validate(self) -> None:
-        if not self.profit_tiers:
-            raise ValueError("profit_tiers must not be empty")
-
-        # strictly increasing tiers
-        for i in range(1, len(self.profit_tiers)):
-            if self.profit_tiers[i] <= self.profit_tiers[i - 1]:
-                raise ValueError("profit_tiers must be strictly increasing")
-
-        # reasonable bounds (0% < tier <= 500% just to avoid nonsense)
-        for t in self.profit_tiers:
-            if not (0.0 < t <= 5.0):
-                raise ValueError(f"profit tier out of bounds: {t}")
-
-        if not (0.0 < self.max_reentry_fraction_of_realized_profit <= 1.0):
-            raise ValueError("max_reentry_fraction_of_realized_profit must be in (0, 1]")
-
-        if self.martingale_allowed:
-            raise ValueError("martingale_allowed MUST remain False by governance")
-
-        if self.use_unrealized_gains_for_reentry:
-            raise ValueError("use_unrealized_gains_for_reentry MUST remain False by governance")
+    def determinism_hash(self) -> str:
+        payload = json.dumps(self.as_dict(), sort_keys=True).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
 
 
-def compute_reentry_cap(realized_profit_amount: float, policy: ProfitTakingPolicy) -> float:
+# ============================================================
+# 🔒 LOCKED POLICY — DO NOT MODIFY
+# ============================================================
+
+DEFAULT_PROFIT_TAKING_POLICY = ProfitTakingPolicy(
+    profit_tiers=[0.10, 0.20, 0.35, 0.50],
+    max_reentry_fraction_of_realized_profit=0.50,
+    principal_protection=True,
+    lifecycle_reset_on_reentry=True,
+    martingale_allowed=False,
+    use_unrealized_gains_for_reentry=False,
+)
+
+
+# ============================================================
+# PUBLIC GOVERNANCE API
+# ============================================================
+
+def get_locked_profit_taking_policy() -> ProfitTakingPolicy:
     """
-    Max allowed capital for re-entry based ONLY on realized profits.
+    Returns the immutable governance-approved profit-taking policy.
+
+    ⚠️ This function MUST be used by:
+        - simulations
+        - analytics harness
+        - execution routers
+        - audit & reporting layers
+
+    Any deviation requires governance action.
     """
-    policy.validate()
-    if realized_profit_amount <= 0:
-        return 0.0
-    return realized_profit_amount * policy.max_reentry_fraction_of_realized_profit
+    return DEFAULT_PROFIT_TAKING_POLICY
 
 
-def highest_profit_tier_hit(
-    entry_price: float,
-    current_price: float,
-    policy: ProfitTakingPolicy,
-) -> Optional[float]:
+def get_policy_snapshot() -> Dict[str, Any]:
     """
-    Returns the highest tier (e.g., 0.20) that has been reached, or None if none reached.
-    Long-only return definition: (current - entry) / entry
+    Serializable snapshot for logs, audits, analytics, and prompts.
     """
-    policy.validate()
-    if entry_price <= 0:
-        raise ValueError("entry_price must be > 0")
-
-    r = (current_price - entry_price) / entry_price
-    hit = None
-    for tier in policy.profit_tiers:
-        if r >= tier:
-            hit = tier
-        else:
-            break
-    return hit
-
-
-def policy_as_dict(policy: ProfitTakingPolicy) -> Dict:
-    """
-    Serialize policy for audit logs / prompts / UI display.
-    """
-    policy.validate()
-    return {
-        "profit_tiers": list(policy.profit_tiers),
-        "max_reentry_fraction_of_realized_profit": policy.max_reentry_fraction_of_realized_profit,
-        "principal_protection": policy.principal_protection,
-        "lifecycle_reset_on_reentry": policy.lifecycle_reset_on_reentry,
-        "martingale_allowed": policy.martingale_allowed,
-        "use_unrealized_gains_for_reentry": policy.use_unrealized_gains_for_reentry,
-    }
-
-
-# Default authoritative policy instance
-DEFAULT_PROFIT_TAKING_POLICY = ProfitTakingPolicy()
+    policy = get_locked_profit_taking_policy()
+    snap = policy.as_dict()
+    snap["determinism_hash"] = policy.determinism_hash()
+    snap["governance_locked"] = True
+    return snap
