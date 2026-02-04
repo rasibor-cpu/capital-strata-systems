@@ -18,6 +18,7 @@ from typing import Dict, Any
 
 from engine.brokers.base_broker import BaseBroker
 from engine.brokers.alpaca_paper_broker import AlpacaPaperBroker
+from engine.brokers.oanda_paper_broker import OandaPaperBroker
 
 
 class ExecutionRouter:
@@ -29,6 +30,7 @@ class ExecutionRouter:
         # Register paper brokers only
         self._brokers: Dict[str, BaseBroker] = {
             "ALPACA_PAPER": AlpacaPaperBroker(),
+            "OANDA_PAPER": OandaPaperBroker(),
         }
 
     def route(
