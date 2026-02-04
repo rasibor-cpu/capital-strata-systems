@@ -1,13 +1,13 @@
 """
 backend/app/security/auth_gate.py
 
-Interactive login gate with mandatory first-login password change.
+Interactive login gate with:
+- per-user authentication via user_registry.authenticate()
+- mandatory first-login password change via user_registry.change_password()
+- branch-scoped permissions (except superuser)
+- unit routing -> module allowlist
 
-Flow:
-1) user_id + password
-2) if temp password valid AND must_change_password:
-      force password change (enter twice)
-3) bind audit context + permissions
+Fail-closed by design.
 """
 
 from __future__ import annotations
@@ -26,10 +26,10 @@ from backend.app.observability.audit_context import AuditContext, set_audit_cont
 from backend.app.security.user_registry import (
     ensure_superuser_exists,
     get_user,
+    authenticate,
+    change_password,
     get_current_branch,
     branch_allowed,
-    verify_password,
-    set_new_password,
 )
 from backend.app.security.unit_router import resolve_unit_bundle, UnitBundle
 from backend.app.security.access_control import set_permissions
@@ -60,6 +60,10 @@ def _ensure_engine_run_id() -> str:
 
 
 def await_login_ready_state(timeout_s: int = 0) -> AuthContext:
+    """
+    Blocks until a valid login occurs.
+    Enforces mandatory password change on first login.
+    """
     adapter = with_trace(log, "LOGIN")
 
     ensure_superuser_exists()
@@ -107,30 +111,32 @@ def await_login_ready_state(timeout_s: int = 0) -> AuthContext:
             print(f"Access denied: restricted to branch '{rec.home_branch}'.")
             continue
 
-        if not verify_password(user_id, pw):
+        # Authenticate (raises ValueError("bad_password") on failure)
+        try:
+            rec = authenticate(user_id, pw)
+        except Exception:
             adapter.warning("LOGIN_FAIL | user_id=%s | reason=bad_password", user_id)
             print("Invalid credentials.")
             continue
 
-        # Mandatory change on first login (or any must_change_password flag)
-        if rec.must_change_password:
+        # Mandatory change on first login
+        if getattr(rec, "first_login_required", False):
             print("FIRST_LOGIN_PASSWORD_CHANGE_REQUIRED")
             while True:
-                np1 = getpass.getpass("NEW PASSWORD (min 10 chars): ").strip()
+                np1 = getpass.getpass("NEW PASSWORD (min 6 chars): ").strip()
                 np2 = getpass.getpass("CONFIRM NEW PASSWORD: ").strip()
-                if np1 != np2:
-                    print("Passwords do not match. Try again.")
-                    continue
                 try:
-                    set_new_password(user_id, np1)
+                    change_password(user_id, np1, np2)
+                    print("PASSWORD_CHANGED_SUCCESSFULLY")
                     break
                 except Exception as exc:
                     print(f"Password rejected: {exc}")
                     continue
-            # Re-load record after change
+
+            # Reload after change
             rec = get_user(user_id)
 
-        # Resolve unit bundle
+        # Resolve unit bundle + modules
         if rec.role.lower() == "superuser":
             bundle = UnitBundle(unit_code="SUPER", label="Super User", modules=["*"])
         else:
