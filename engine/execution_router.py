@@ -1,128 +1,88 @@
 """
-Execution Router — DRY RUN ONLY
-===============================
+Execution Router (Paper-Safe)
+=============================
 
-Task 8.1:
-- Accepts candidate signals
-- Applies final execution eligibility checks
-- Logs intended actions
-- NEVER places trades
-- NO MT5, NO broker, NO side effects
+Responsibilities:
+- Consume execution decision envelope
+- Enforce firewall outcome
+- Route orders to paper broker adapters
+- Return normalized execution receipt
 
-This module exists to prove execution plumbing
-without risk or live interaction.
+This module NEVER decides.
+It only enforces.
 """
 
-from typing import Dict, List, Any
-from datetime import datetime
+from __future__ import annotations
 
+from typing import Dict, Any
 
-class ExecutionDecision:
-    """
-    Immutable execution decision record.
-    """
-
-    def __init__(
-        self,
-        ts: datetime,
-        symbol: str,
-        action: str,
-        price: float,
-        model: str,
-        reason: str,
-        allowed: bool,
-    ):
-        self.ts = ts
-        self.symbol = symbol
-        self.action = action
-        self.price = price
-        self.model = model
-        self.reason = reason
-        self.allowed = allowed
-
-    def as_dict(self) -> Dict[str, Any]:
-        return {
-            "ts": self.ts,
-            "symbol": self.symbol,
-            "action": self.action,
-            "price": self.price,
-            "model": self.model,
-            "allowed": self.allowed,
-            "reason": self.reason,
-        }
+from engine.brokers.base_broker import BaseBroker
+from engine.brokers.alpaca_paper_broker import AlpacaPaperBroker
 
 
 class ExecutionRouter:
     """
-    Routes candidate signals to DRY-RUN execution decisions.
+    Routes execution to the correct broker.
     """
 
-    def __init__(self, analysis_only: bool = True):
-        self.analysis_only = analysis_only
-        self.decisions: List[ExecutionDecision] = []
-
-    def route_signal(
-        self,
-        symbol: str,
-        signal: Dict[str, Any],
-        regime_allowed: bool,
-        additional_checks: Dict[str, bool] | None = None,
-    ) -> ExecutionDecision:
-        """
-        Determines whether a signal would be executed.
-        """
-
-        ts = signal.get("ts")
-        action = signal.get("type")
-        price = float(signal.get("price"))
-        model = signal.get("model", "unknown")
-
-        # Default: block unless explicitly allowed
-        allowed = bool(regime_allowed)
-        reasons: List[str] = []
-
-        if not regime_allowed:
-            reasons.append("blocked_by_regime")
-
-        if additional_checks:
-            for check, ok in additional_checks.items():
-                if not ok:
-                    allowed = False
-                    reasons.append(f"check_failed:{check}")
-
-        if self.analysis_only:
-            reasons.append("analysis_only_mode")
-
-        decision = ExecutionDecision(
-            ts=ts,
-            symbol=symbol,
-            action=action,
-            price=price,
-            model=model,
-            allowed=allowed,
-            reason=";".join(reasons) if reasons else "ok",
-        )
-
-        self.decisions.append(decision)
-        return decision
-
-    def summary(self) -> Dict[str, Any]:
-        """
-        Summarize dry-run execution decisions.
-        """
-        total = len(self.decisions)
-        allowed = sum(1 for d in self.decisions if d.allowed)
-        blocked = total - allowed
-
-        return {
-            "decisions_total": total,
-            "decisions_allowed": allowed,
-            "decisions_blocked": blocked,
-            "analysis_only": self.analysis_only,
+    def __init__(self) -> None:
+        # Register paper brokers only
+        self._brokers: Dict[str, BaseBroker] = {
+            "ALPACA_PAPER": AlpacaPaperBroker(),
         }
 
-    def dump(self) -> List[Dict[str, Any]]:
+    def route(
+        self,
+        *,
+        broker_name: str,
+        instrument: str,
+        side: str,
+        quantity: float,
+        order_type: str,
+        price: float | None,
+        decision_envelope: Dict[str, Any],
+        firewall_result: Dict[str, Any],
+    ) -> Dict[str, Any]:
         """
-        Return all decisions as serializable dicts.
+        Route execution to broker after ALL checks.
         """
-        return [d.as_dict() for d in self.decisions]
+
+        # ---------------------------------------------------------
+        # Firewall enforcement
+        # ---------------------------------------------------------
+        if not firewall_result.get("allowed"):
+            raise RuntimeError(
+                f"Execution blocked by firewall: {firewall_result.get('reason')}"
+            )
+
+        # ---------------------------------------------------------
+        # Decision enforcement
+        # ---------------------------------------------------------
+        if decision_envelope.get("final_decision") != "ALLOW":
+            raise RuntimeError(
+                f"Execution denied: decision envelope = {decision_envelope.get('final_decision')}"
+            )
+
+        # ---------------------------------------------------------
+        # Broker selection
+        # ---------------------------------------------------------
+        broker = self._brokers.get(broker_name)
+        if broker is None:
+            raise ValueError(f"Unknown broker: {broker_name}")
+
+        # ---------------------------------------------------------
+        # Submit order
+        # ---------------------------------------------------------
+        execution_result = broker.submit_order(
+            instrument=instrument,
+            side=side,
+            quantity=quantity,
+            order_type=order_type,
+            price=price,
+            decision_envelope=decision_envelope,
+        )
+
+        return {
+            "broker": broker_name,
+            "execution": execution_result,
+        }
