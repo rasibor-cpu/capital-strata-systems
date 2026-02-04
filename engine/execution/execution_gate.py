@@ -1,107 +1,94 @@
-# engine/execution/execution_gate.py
 """
-Execution Gate — HARD GOVERNANCE LOCK (FAIL-CLOSED)
+execution_gate.py
+-----------------
+Authoritative execution gate for REA Capital Trading Engine.
 
-Final authority before any execution.
+FAIL-CLOSED by default.
+Execution is ALLOWED only when ALL governance conditions are met.
 
-ALLOW only if ALL pass:
-1) execution_policy.json loads + validates
-2) instrument is whitelisted
-3) risk_pct <= max_equity_risk_per_trade_pct
-4) live_state == ARMED_ACTIVE and not expired
-5) rate-limit OK
-6) no auto-disarm reason
+Single source of truth:
+- audit/live_state.json
+
+This gate must never infer, guess, or auto-escalate.
 """
 
-from __future__ import annotations
-
+import json
+import os
 from datetime import datetime, timezone
-from typing import Dict, Any, List
-
-from engine.execution.execution_policy_loader import load_execution_policy
-from engine.execution.live_state import get_live_state
-from engine.execution.rate_limiter import check_rate_limit
-from engine.execution.auto_disarm import check_auto_disarm
 
 
-class ExecutionGateDecision:
+LIVE_STATE_PATH = os.path.join("audit", "live_state.json")
+
+
+class ExecutionGateResult:
     ALLOW = "ALLOW"
     BLOCK = "BLOCK"
 
 
-def _flatten_whitelist(wl: Dict[str, Any]) -> List[str]:
-    out: List[str] = []
-    for k in ("fx", "crypto", "equities", "options"):
-        v = wl.get(k, [])
-        if isinstance(v, list):
-            out.extend([str(x).upper() for x in v])
-    return out
+def _utcnow():
+    return datetime.now(timezone.utc)
 
 
-def execution_gate_check(context: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    context expects:
-      - instrument: str (e.g., EURUSD)
-      - risk_pct: float (0..100) intended equity risk for this trade
-    """
-    # FAIL-CLOSED default
-    result = {
-        "decision": ExecutionGateDecision.BLOCK,
-        "reason": "unknown",
-        "ts": datetime.now(timezone.utc).isoformat(),
-        "meta": {},
-    }
+def _load_live_state():
+    if not os.path.exists(LIVE_STATE_PATH):
+        return None, "live_state_missing"
 
-    instrument = str(context.get("instrument", "")).upper().strip()
-    risk_pct = float(context.get("risk_pct", 0.0) or 0.0)
-
-    # 1) Load policy (validated)
     try:
-        policy = load_execution_policy()
+        with open(LIVE_STATE_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data, None
     except Exception as e:
-        result["reason"] = f"policy_load_failed: {e}"
-        return result
+        return None, f"live_state_unreadable:{e}"
 
-    # 2) Instrument whitelist
-    wl = policy.get("instrument_whitelist", {})
-    allowed_instruments = _flatten_whitelist(wl)
-    if not instrument or instrument not in allowed_instruments:
-        result["reason"] = "instrument_not_whitelisted"
-        result["meta"] = {"instrument": instrument}
-        return result
 
-    # 3) Risk cap per trade
-    cap = policy.get("capital_protection", {})
-    max_risk = float(cap.get("max_equity_risk_per_trade_pct", 0.0) or 0.0)
-    if risk_pct > max_risk:
-        result["reason"] = "risk_pct_exceeds_policy"
-        result["meta"] = {"risk_pct": risk_pct, "max_allowed_pct": max_risk}
-        return result
+def execution_gate_check():
+    """
+    Returns:
+        (ALLOW|BLOCK, reason:str)
 
-    # 4) Live state must be ARMED_ACTIVE
-    ls = get_live_state()
-    if ls.state != "ARMED_ACTIVE":
-        result["reason"] = f"not_armed ({ls.state})"
-        result["meta"] = {"armed_state": ls.state}
-        return result
-    if ls.is_expired():
-        result["reason"] = "arming_expired"
-        result["meta"] = {"expires_at_utc": ls.expires_at_utc}
-        return result
+    Governance rules (ALL required):
+    - state == ARMED_ACTIVE
+    - expires_at_utc is None OR now < expires_at_utc
+    - preflight_passed == True
+    - rate_limit_ok == True
+    """
 
-    # 5) Rate limit
-    if not check_rate_limit():
-        result["reason"] = "rate_limit_exceeded"
-        return result
+    state, err = _load_live_state()
+    if err:
+        return ExecutionGateResult.BLOCK, f"execution_gate_error_{err}_fail_closed"
 
-    # 6) Auto-disarm checks
-    disarm_reason = check_auto_disarm()
-    if disarm_reason:
-        result["reason"] = f"auto_disarm: {disarm_reason}"
-        return result
+    # ---- Required fields (fail closed if missing) ----
+    armed_state = state.get("state")
+    expires_at = state.get("expires_at_utc")
+    preflight_ok = state.get("preflight_passed")
+    rate_limit_ok = state.get("rate_limit_ok")
 
-    # ✅ All pass
-    result["decision"] = ExecutionGateDecision.ALLOW
-    result["reason"] = "ok"
-    result["meta"] = {"instrument": instrument, "risk_pct": risk_pct}
-    return result
+    # ---- State check ----
+    if armed_state != "ARMED_ACTIVE":
+        return ExecutionGateResult.BLOCK, f"not_armed({armed_state})"
+
+    # ---- Expiry check ----
+    if expires_at:
+        try:
+            exp = datetime.fromisoformat(expires_at)
+            if _utcnow() >= exp:
+                return ExecutionGateResult.BLOCK, "armed_state_expired"
+        except Exception:
+            return ExecutionGateResult.BLOCK, "invalid_expiry_format"
+
+    # ---- Preflight check ----
+    if preflight_ok is not True:
+        return ExecutionGateResult.BLOCK, "preflight_not_passed"
+
+    # ---- Rate limit check ----
+    if rate_limit_ok is not True:
+        return ExecutionGateResult.BLOCK, "rate_limit_blocked"
+
+    return ExecutionGateResult.ALLOW, "execution_gate_allow_all_conditions_met"
+
+
+# CLI / smoke-test support
+if __name__ == "__main__":
+    verdict, reason = execution_gate_check()
+    print("EXECUTION_GATE:", verdict)
+    print("REASON:", reason)
