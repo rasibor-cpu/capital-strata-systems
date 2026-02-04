@@ -23,4 +23,6 @@ def get_configured_gates() -> Dict[str, GateFn]:
         # "liquidity_gate": evaluate_liquidity,
         # "slippage_guard": evaluate_slippage,
         # "risk_guard": evaluate_risk,
+#from engine.adapters.volatility_gate_adapter import evaluate_volatility,
+
     }
