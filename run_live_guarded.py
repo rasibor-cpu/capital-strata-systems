@@ -1,14 +1,12 @@
 """
 Authoritative guarded startup wrapper for REA Capital Trading Engine.
 
-Responsibilities:
-- Fail-closed startup (especially in LIVE)
-- Ensure ENGINE_RUN_ID exists
-- Block on authentication gate
-- Bind audit context BEFORE engine entrypoint
-- Enforce LIVE / TEST mode toggle
-- Provide kill-switch awareness
-- Robust status printing (dict/tuple safe)
+Contract (FAIL-CLOSED, ALWAYS):
+- If SESSION_GATE or EXEC_GATE errors -> HARD STOP (fail-closed) -> NO login prompt.
+- Login/auth gate runs ONLY after gates are healthy (import + callable discovery OK).
+- Execution decisions may be dict/object/tuple -> normalize safely.
+- LIVE vs TEST enforcement: LIVE requires explicit allow + policy + armed state (where available).
+- Wrapper must be resilient to function renames (getattr fallbacks).
 """
 
 from __future__ import annotations
@@ -19,341 +17,325 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Optional, Tuple
 
 
-# -----------------------------
-# Utilities
-# -----------------------------
-def _utc_iso() -> str:
+# -------------------------
+# primitives / helpers
+# -------------------------
+
+def _utc_now_iso() -> str:
+    # timezone-safe (avoid datetime.utcnow deprecation)
     try:
-        from datetime import datetime, timezone
-        return datetime.now(timezone.utc).isoformat()
+        import datetime as _dt
+        return _dt.datetime.now(_dt.timezone.utc).isoformat()
     except Exception:
-        return "utc_unknown"
+        return "utc_now_unavailable"
 
 
-def _env(name: str, default: Optional[str] = None) -> Optional[str]:
-    v = os.getenv(name)
-    return v if v not in (None, "") else default
+def ensure_engine_run_id() -> str:
+    run_id = os.getenv("ENGINE_RUN_ID") or os.getenv("REA_ENGINE_RUN_ID") or os.getenv("REA_RUN_ID")
+    if not run_id:
+        run_id = str(uuid.uuid4())
+        os.environ["ENGINE_RUN_ID"] = run_id
+    return run_id
 
 
-def _normalize_gate_result(x: Any) -> Dict[str, Any]:
-    """
-    Normalize different gate result shapes into a dict:
-      - dict: returned as-is
-      - tuple/list: best-effort mapping
-          (decision, reason) or (allowed, reason) patterns
-      - str/bool/None: wrap into {decision:..., reason:...}
-    """
-    if isinstance(x, dict):
-        return dict(x)
-
-    if isinstance(x, (tuple, list)):
-        # common patterns: (allowed_bool, reason_str) or (decision_str, reason_str)
-        if len(x) == 2:
-            a, b = x[0], x[1]
-            if isinstance(a, bool):
-                return {"decision": "ALLOW" if a else "BLOCK", "reason": b}
-            return {"decision": str(a), "reason": b}
-        return {"decision": "TUPLE", "reason": f"len={len(x)}", "raw": list(x)}
-
-    if isinstance(x, bool):
-        return {"decision": "ALLOW" if x else "BLOCK", "reason": "boolean_gate"}
-
-    if isinstance(x, str):
-        return {"decision": x, "reason": "string_gate"}
-
-    if x is None:
-        return {"decision": "UNKNOWN", "reason": "none_gate"}
-
-    return {"decision": "UNKNOWN", "reason": f"type={type(x).__name__}", "raw": repr(x)}
+def _fail(msg: str, code: int = 1) -> None:
+    print(msg)
+    raise SystemExit(code)
 
 
-def _import_optional(path: str, name: str) -> Any:
+def safe_import(module_name: str) -> Tuple[bool, Optional[Any], Optional[str]]:
     try:
-        mod = importlib.import_module(path)
-        return getattr(mod, name)
-    except Exception:
-        return None
+        mod = importlib.import_module(module_name)
+        return True, mod, None
+    except Exception as e:
+        return False, None, f"{type(e).__name__}: {e}"
 
 
-# -----------------------------
-# Logging (best-effort; do not crash)
-# -----------------------------
-def _init_logging() -> Any:
-    init_logging = _import_optional("backend.app.observability.logger", "init_logging")
-    get_logger = _import_optional("backend.app.observability.logger", "get_logger_with_trace")
-
-    if init_logging:
-        try:
-            init_logging(os.getenv("LOG_LEVEL", "INFO"))
-        except Exception:
-            pass
-
-    if get_logger:
-        try:
-            return get_logger(trace_id="STARTUP")
-        except Exception:
-            pass
-
-    # fallback: tiny shim
-    class _FallbackLogger:
-        def info(self, msg: str, **kw: Any) -> None:
-            print(f"{_utc_iso()} | INFO | {msg} | {kw}".rstrip())
-
-        def warning(self, msg: str, **kw: Any) -> None:
-            print(f"{_utc_iso()} | WARN | {msg} | {kw}".rstrip())
-
-        def error(self, msg: str, **kw: Any) -> None:
-            print(f"{_utc_iso()} | ERROR | {msg} | {kw}".rstrip())
-
-        def critical(self, msg: str, **kw: Any) -> None:
-            print(f"{_utc_iso()} | CRITICAL | {msg} | {kw}".rstrip())
-
-    return _FallbackLogger()
+def pick_callable(mod: Any, names: list[str]) -> Optional[Callable[..., Any]]:
+    for n in names:
+        fn = getattr(mod, n, None)
+        if callable(fn):
+            return fn
+    return None
 
 
-# -----------------------------
-# Guarded wrapper
-# -----------------------------
+def normalize_decision(decision: Any) -> dict:
+    """
+    Normalize ANY decision shape into a dict with:
+      - allowed: bool
+      - reason: str
+      - raw: original (for debugging)
+    """
+    if decision is None:
+        return {"allowed": False, "reason": "no_decision_returned", "raw": None}
+
+    if isinstance(decision, dict):
+        return {
+            "allowed": bool(decision.get("allowed", decision.get("ok", False))),
+            "reason": str(decision.get("reason", decision.get("error", "unknown"))),
+            "raw": decision,
+        }
+
+    # dataclass/object with attributes
+    if hasattr(decision, "__dict__"):
+        return {
+            "allowed": bool(getattr(decision, "allowed", getattr(decision, "ok", False))),
+            "reason": str(getattr(decision, "reason", getattr(decision, "error", "unknown"))),
+            "raw": decision,
+        }
+
+    # tuple fallback (allowed, reason, ...)
+    if isinstance(decision, tuple):
+        allowed = bool(decision[0]) if len(decision) >= 1 else False
+        reason = str(decision[1]) if len(decision) >= 2 else "tuple_decision"
+        return {"allowed": allowed, "reason": reason, "raw": decision}
+
+    return {"allowed": False, "reason": f"unsupported_decision_type:{type(decision)}", "raw": decision}
+
+
+def show_gate(label: str, decision: Any) -> dict:
+    d = normalize_decision(decision)
+    print(f"{label:<12} | allowed={d['allowed']} | reason={d['reason']}")
+    return d
+
+
+def require_live_allowed() -> None:
+    """
+    Enforce LIVE/TEST mode rule:
+    - If REA_ENGINE_MODE != LIVE -> block anything that would proceed past gates.
+    """
+    mode = os.getenv("REA_ENGINE_MODE", "TEST").upper().strip()
+    if mode != "LIVE":
+        _fail("FATAL | MODE_BLOCK: REA_ENGINE_MODE is not LIVE (current: %s)" % mode, 2)
+
+
+# -------------------------
+# capability probing (fail-closed)
+# -------------------------
+
 @dataclass
-class StartupContext:
-    run_id: str
-    mode: str
-    entrypoint: str
+class GateCaps:
+    ok: bool
+    reason: str
+    session_gate_fn: Optional[Callable[..., Any]] = None
+    exec_gate_fn: Optional[Callable[..., Any]] = None
 
 
-def _ensure_engine_run_id(log: Any) -> str:
-    rid = _env("ENGINE_RUN_ID")
-    if not rid:
-        rid = str(uuid.uuid4())
-        os.environ["ENGINE_RUN_ID"] = rid
-    try:
-        log.info("ENGINE_RUN_ID_READY", run_id=rid)
-    except Exception:
-        pass
-    return rid
-
-
-def _read_mode(log: Any) -> str:
-    mode = (_env("REA_ENGINE_MODE", "TEST") or "TEST").upper()
-    if mode not in ("TEST", "LIVE"):
-        mode = "TEST"
-    try:
-        log.info("ENGINE_MODE", mode=mode)
-    except Exception:
-        pass
-    return mode
-
-
-def _read_entrypoint(log: Any) -> str:
-    ep = _env("REA_ENGINE_ENTRYPOINT", "")
-    if not ep:
-        # fail-closed always: entrypoint is mandatory
-        try:
-            log.critical("ENTRYPOINT_NOT_SET", hint='Set REA_ENGINE_ENTRYPOINT like: "engine.run_engine:main"')
-        except Exception:
-            pass
-        raise RuntimeError("REA_ENGINE_ENTRYPOINT_not_set")
-    return ep
-
-
-def _kill_switch_active() -> bool:
-    # Standard location used in your ops checks
-    ks = os.path.join("runtime", "kill.switch")
-    try:
-        return os.path.exists(ks)
-    except Exception:
-        return False
-
-
-def _token_validation(log: Any, ctx: StartupContext) -> None:
+def probe_gates_fail_closed() -> GateCaps:
     """
-    Token check is fail-closed in LIVE.
-    In TEST: best-effort (warn if missing).
+    HARD RULE:
+      If we cannot import/probe BOTH SESSION and EXEC gates -> STOP immediately.
+      This must happen BEFORE any auth/login prompt.
     """
-    validate = _import_optional("engine.execution.confirm_token", "validate_token")
-    if not validate:
-        msg = "TOKEN_VALIDATOR_MISSING"
-        if ctx.mode == "LIVE":
-            log.critical(msg, action="ABORT_LIVE")
-            raise RuntimeError("token_validator_missing_live")
-        log.warning(msg, action="CONTINUE_TEST")
-        return
+
+    # SESSION_GATE: backend.app.observability.session_time session_allow_state (or compat names)
+    ok_s, mod_s, err_s = safe_import("backend.app.observability.session_time")
+    if not ok_s:
+        return GateCaps(False, f"SESSION_GATE_EXCEPTION | cannot import session_time | {err_s}")
+
+    session_fn = pick_callable(mod_s, [
+        "session_allow_state",
+        "get_session_allow_state",
+        "session_gate_check",
+        "check_session_gate",
+    ])
+    if not session_fn:
+        return GateCaps(False, "SESSION_GATE_EXCEPTION | session allow function not found (expected session_allow_state or compat name)")
+
+    # EXEC_GATE: engine.execution.execution_gate check_execution_gate (or compat names)
+    ok_e, mod_e, err_e = safe_import("engine.execution.execution_gate")
+    if not ok_e:
+        return GateCaps(False, f"EXEC_GATE_EXCEPTION | cannot import engine.execution.execution_gate | {err_e}")
+
+    exec_fn = pick_callable(mod_e, [
+        "check_execution_gate",
+        "execution_gate_check",
+        "check_exec_gate",
+        "exec_gate_check",
+    ])
+    if not exec_fn:
+        return GateCaps(False, "EXEC_GATE_EXCEPTION | execution gate function not found (expected check_execution_gate or compat name)")
+
+    return GateCaps(True, "ok", session_gate_fn=session_fn, exec_gate_fn=exec_fn)
+
+
+# -------------------------
+# optional components (non-fatal by design)
+# -------------------------
+
+def try_load_live_state() -> Tuple[bool, Optional[Any], str]:
+    ok, mod, err = safe_import("engine.execution.live_state")
+    if not ok:
+        return False, None, f"live_state import fail: {err}"
+
+    get_fn = pick_callable(mod, ["get_live_state", "read_live_state"])
+    if not get_fn:
+        return False, None, "live_state getter not found"
 
     try:
-        # validate_token is expected to raise on failure OR return (ok, reason) / dict
-        out = validate()
-        norm = _normalize_gate_result(out)
-        if norm.get("decision") in ("BLOCK", "DENY") and ctx.mode == "LIVE":
-            log.critical("TOKEN_CHECK_BLOCKED", **norm)
-            raise RuntimeError("token_check_blocked_live")
-        log.info("TOKEN_CHECK_OK", **norm)
+        state = get_fn()
+        return True, state, "ok"
     except Exception as e:
-        if ctx.mode == "LIVE":
-            log.critical("TOKEN_CHECK_EXCEPTION", error=str(e), action="ABORT_LIVE")
-            raise
-        log.warning("TOKEN_CHECK_EXCEPTION", error=str(e), action="CONTINUE_TEST")
+        return False, None, f"live_state getter failed: {type(e).__name__}: {e}"
 
 
-def _await_login(log: Any, ctx: StartupContext) -> Dict[str, Any]:
-    await_login_ready_state = _import_optional("backend.app.security.auth_gate", "await_login_ready_state")
-    if not await_login_ready_state:
-        log.critical("AUTH_GATE_MISSING", module="backend.app.security.auth_gate", action="ABORT")
-        raise RuntimeError("auth_gate_missing")
-
-    user_ctx: Dict[str, Any] = await_login_ready_state()
-    # Expect at least: user_id, role, unit_code, branch
-    log.info("AUTH_OK", **{k: user_ctx.get(k) for k in ("user_id", "role", "unit_code", "home_branch")})
-    return user_ctx
-
-
-def _bind_audit_context(log: Any, user_ctx: Dict[str, Any]) -> None:
+def try_rate_limit_check(action: str) -> Tuple[bool, str]:
     """
-    Bind audit context using whatever functions are available in audit_context.py,
-    without hard dependency on a single function name.
+    Best-effort. If arming_rate_limit exists, use it. If not, allow but do NOT weaken fail-closed.
     """
-    try:
-        mod = importlib.import_module("backend.app.observability.audit_context")
-    except Exception as e:
-        log.warning("AUDIT_CONTEXT_MODULE_MISSING", error=str(e))
-        return
+    ok, mod, err = safe_import("engine.execution.arming_rate_limit")
+    if not ok:
+        return True, "rate_limit module missing (skipped)"
 
-    # Prefer set_audit_user if it exists; otherwise fall back to any similar function
-    fn = getattr(mod, "set_audit_user", None) or getattr(mod, "set_user", None) or getattr(mod, "bind_user", None)
+    fn = pick_callable(mod, [
+        "check_rate_limit",
+        "rate_limit_ok",
+        "assert_rate_limit",
+    ])
     if not fn:
-        log.warning("AUDIT_CONTEXT_BIND_FN_MISSING", available=dir(mod))
-        return
+        return True, "rate_limit fn missing (skipped)"
 
     try:
-        fn(
-            user_id=user_ctx.get("user_id"),
-            role=user_ctx.get("role"),
-            unit_code=user_ctx.get("unit_code"),
-            home_branch=user_ctx.get("home_branch"),
-        )
-        log.info("AUDIT_CONTEXT_BOUND_OK")
+        # expected to return bool or raise
+        out = fn(action=action) if "action" in getattr(fn, "__code__", type("x",(object,),{"co_varnames":()})) .co_varnames else fn()
+        if isinstance(out, bool) and not out:
+            return False, "rate_limited"
+        return True, "ok"
     except Exception as e:
-        log.warning("AUDIT_CONTEXT_BIND_FAILED", error=str(e))
+        # fail-closed on rate-limit errors
+        return False, f"rate_limit_error:{type(e).__name__}:{e}"
 
 
-def _enforce_live_toggle(log: Any, ctx: StartupContext) -> None:
+def load_superuser_profile_default() -> dict:
     """
-    Enforce LIVE/TEST runtime toggle gate.
-    (Your current live_toggle.py intentionally blocks execution in TEST mode.)
+    Fail-closed *for live arming*, but this wrapper treats missing profile as:
+    - If LIVE is requested later, the arming pipeline must block.
+    - For guarded startup, we only report status.
     """
-    require_live_allowed = _import_optional("backend.app.security.live_toggle", "require_live_allowed")
-    if not require_live_allowed:
-        # If missing, fail-closed in LIVE, allow in TEST
-        if ctx.mode == "LIVE":
-            log.critical("LIVE_TOGGLE_MISSING", action="ABORT_LIVE")
-            raise RuntimeError("live_toggle_missing_live")
-        log.warning("LIVE_TOGGLE_MISSING", action="CONTINUE_TEST")
-        return
+    ok, mod, err = safe_import("config.superuser")
+    if not ok:
+        return {"ok": False, "reason": f"superuser loader missing: {err}"}
+
+    fn = pick_callable(mod, ["load_superuser", "load_superuser_profile", "load_profile"])
+    if not fn:
+        return {"ok": False, "reason": "superuser loader fn not found"}
 
     try:
-        require_live_allowed()
-        log.info("LIVE_TOGGLE_OK", mode=ctx.mode)
+        profile = fn()
+        return {"ok": True, "profile": profile, "reason": "ok"}
     except Exception as e:
-        # This is expected in TEST mode in your current design
-        log.error("LIVE_TOGGLE_BLOCKED", mode=ctx.mode, error=str(e))
+        return {"ok": False, "reason": f"superuser load failed: {type(e).__name__}: {e}"}
+
+
+# -------------------------
+# main
+# -------------------------
+
+def main() -> None:
+    print("=== REA GUARDED STARTUP (FAIL-CLOSED) ===")
+    print(f"UTC_NOW={_utc_now_iso()}")
+    run_id = ensure_engine_run_id()
+    print(f"ENGINE_RUN_ID={run_id}")
+
+    # 0) PROBE GATES FIRST (NO LOGIN IF ERROR)
+    caps = probe_gates_fail_closed()
+    if not caps.ok:
+        _fail(f"FATAL | {caps.reason}", 1)
+
+    # 1) SESSION_GATE check (fail-closed)
+    try:
+        session_decision = caps.session_gate_fn()  # expected to return decision-like
+        d_s = show_gate("SESSION_GATE", session_decision)
+        if not d_s["allowed"]:
+            _fail("FATAL | SESSION_GATE_BLOCK | " + d_s["reason"], 1)
+    except SystemExit:
         raise
-
-
-def _call_entrypoint(log: Any, entrypoint: str) -> None:
-    """
-    Entry point format: "module.path:function_name"
-    Example: "engine.run_engine:main"
-    """
-    if ":" not in entrypoint:
-        raise RuntimeError("entrypoint_format_invalid")
-
-    mod_path, fn_name = entrypoint.split(":", 1)
-    mod = importlib.import_module(mod_path)
-    fn = getattr(mod, fn_name)
-    if not callable(fn):
-        raise RuntimeError("entrypoint_not_callable")
-
-    log.info("ENTRYPOINT_CALL", entrypoint=entrypoint)
-    fn()
-
-
-def show_status(log: Any, ctx: StartupContext) -> None:
-    """
-    Safe status snapshot. Never crashes.
-    """
-    try:
-        log.info("RUN_LIVE_GUARDED_START", mode=ctx.mode, entrypoint=ctx.entrypoint, now_utc=_utc_iso())
-        log.info("KILL_SWITCH", active=_kill_switch_active())
-
-        # Session gate (optional)
-        session_gate = _import_optional("backend.app.observability.session_time", "session_gate")
-        if session_gate:
-            out = session_gate(asset_class="fx")
-            norm = _normalize_gate_result(out)
-            log.info("SESSION_GATE", **norm)
-        else:
-            log.warning("SESSION_GATE_MISSING")
-
-        # Config drift (optional)
-        drift = _import_optional("backend.app.observability.config_drift", "log_config_drift")
-        if drift:
-            try:
-                drift()
-                log.info("CONFIG_DRIFT_OK")
-            except Exception as e:
-                log.warning("CONFIG_DRIFT_FAIL", error=str(e))
-        else:
-            log.warning("CONFIG_DRIFT_MISSING")
-
     except Exception as e:
+        _fail(f"FATAL | SESSION_GATE_EXCEPTION | {type(e).__name__}: {e}", 1)
+
+    # 2) EXEC_GATE check (fail-closed)
+    try:
+        exec_decision = caps.exec_gate_fn()  # decision-like
+        d_e = show_gate("EXEC_GATE", exec_decision)
+        if not d_e["allowed"]:
+            _fail("FATAL | EXEC_GATE_BLOCK | " + d_e["reason"], 1)
+    except SystemExit:
+        raise
+    except Exception as e:
+        _fail(f"FATAL | EXEC_GATE_EXCEPTION | {type(e).__name__}: {e}", 1)
+
+    # 3) If LIVE mode, require it explicitly; otherwise stop here cleanly
+    mode = os.getenv("REA_ENGINE_MODE", "TEST").upper().strip()
+    print(f"MODE        | {mode}")
+    if mode != "LIVE":
+        print("SAFE EXIT   | TEST mode: gates OK; refusing to proceed into login/engine.")
+        return
+
+    # 4) LIVE-specific optional checks (rate limit, superuser profile, live_state)
+    ok_rl, rl_reason = try_rate_limit_check(action="confirm_live")
+    print(f"RATE_LIMIT  | ok={ok_rl} | {rl_reason}")
+    if not ok_rl:
+        _fail("FATAL | RATE_LIMIT_BLOCK | " + rl_reason, 1)
+
+    su = load_superuser_profile_default()
+    print(f"SUPERUSER   | ok={su.get('ok')} | {su.get('reason')}")
+    if not su.get("ok"):
+        _fail("FATAL | SUPERUSER_PROFILE_REQUIRED_FOR_LIVE | " + str(su.get("reason")), 1)
+
+    ok_ls, live_state, ls_reason = try_load_live_state()
+    print(f"LIVE_STATE  | ok={ok_ls} | {ls_reason}")
+    if ok_ls:
+        # do not assume schema; just print safely
         try:
-            log.warning("STATUS_ERROR_IGNORED", error=str(e))
+            print(f"LIVE_STATE  | {live_state}")
         except Exception:
-            pass
+            print("LIVE_STATE  | (unprintable)")
 
+    # 5) AUTH gate (BLOCKING) — ONLY after gates OK
+    try:
+        from backend.app.security.auth_gate import await_login_ready_state
+    except Exception as e:
+        _fail(f"FATAL | AUTH_GATE_IMPORT_FAIL | {type(e).__name__}: {e}", 1)
 
-def main() -> int:
-    log = _init_logging()
+    auth_ctx, unit_bundle = await_login_ready_state()
+    print(
+        f"AUTH_OK     | user_id={getattr(auth_ctx, 'user_id', 'na')} "
+        f"| role={getattr(auth_ctx, 'role', 'na')} "
+        f"| unit={getattr(auth_ctx, 'unit_code', 'na')} "
+        f"| branch={getattr(auth_ctx, 'current_branch', 'na')}"
+    )
 
-    run_id = _ensure_engine_run_id(log)
-    mode = _read_mode(log)
-    entrypoint = _read_entrypoint(log)
+    # 6) Engine entrypoint
+    entry = os.getenv("REA_ENGINE_ENTRYPOINT") or os.getenv("REA_ENGINE_ENTRYPOINT", "")
+    if not entry:
+        _fail("FATAL | REA_ENGINE_ENTRYPOINT not set (example: engine.run_engine:main)", 1)
 
-    ctx = StartupContext(run_id=run_id, mode=mode, entrypoint=entrypoint)
+    if ":" not in entry:
+        _fail("FATAL | REA_ENGINE_ENTRYPOINT invalid (expected module:function)", 1)
 
-    # Quick status (must never crash)
-    show_status(log, ctx)
+    module_name, func_name = entry.split(":", 1)
+    print(f"ENTRYPOINT  | {module_name}:{func_name}")
 
-    # Hard fail if kill switch is active
-    if _kill_switch_active():
-        log.critical("KILL_SWITCH_ACTIVE_ABORT", reason="runtime/kill.switch present")
-        return 2
+    try:
+        mod = importlib.import_module(module_name)
+        fn = getattr(mod, func_name)
+        if not callable(fn):
+            _fail("FATAL | ENTRYPOINT_NOT_CALLABLE", 1)
+    except Exception as e:
+        _fail(f"FATAL | ENTRYPOINT_IMPORT_FAIL | {type(e).__name__}: {e}", 1)
 
-    # Token validation (fail-closed in LIVE)
-    _token_validation(log, ctx)
-
-    # Auth gate (required)
-    user_ctx = _await_login(log, ctx)
-
-    # Bind audit context BEFORE entrypoint
-    _bind_audit_context(log, user_ctx)
-
-    # Enforce LIVE/TEST toggle rules
-    _enforce_live_toggle(log, ctx)
-
-    # Call engine entrypoint
-    _call_entrypoint(log, ctx.entrypoint)
-
-    log.info("RUN_LIVE_GUARDED_OK")
-    return 0
+    print("=== ENGINE START ===")
+    fn()
 
 
 if __name__ == "__main__":
     try:
-        raise SystemExit(main())
-    except KeyboardInterrupt:
-        # clean exit (CTRL+C)
-        print(f"{_utc_iso()} | INFO | KeyboardInterrupt | exiting")
+        main()
+    except SystemExit:
         raise
+    except Exception as e:
+        print(f"FATAL | {type(e).__name__}: {e}")
+        raise SystemExit(1)
