@@ -20,6 +20,7 @@ from engine.brokers.base_broker import BaseBroker
 from engine.brokers.alpaca_paper_broker import AlpacaPaperBroker
 from engine.brokers.oanda_paper_broker import OandaPaperBroker
 from engine.brokers.binance_paper_broker import BinancePaperBroker
+from engine.brokers.ibkr_paper_broker import IbkrPaperBroker
 
 
 class ExecutionRouter:
@@ -33,6 +34,7 @@ class ExecutionRouter:
             "ALPACA_PAPER": AlpacaPaperBroker(),
             "OANDA_PAPER": OandaPaperBroker(),
             "BINANCE_PAPER": BinancePaperBroker(),
+            "IBKR_PAPER": IbkrPaperBroker(),
         }
 
     def route(
