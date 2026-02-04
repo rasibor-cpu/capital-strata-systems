@@ -60,6 +60,10 @@ state/
 # Runtime controls (never commit)
 runtime/
 !engine/execution_decision.py
+!engine/test_execution_decision_runner.py
+!engine/execution_decision.py
+!engine/adapters/regime_gate_adapter.py
+
 
 
 
