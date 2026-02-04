@@ -45,7 +45,15 @@ __pycache__/
 Thumbs.db
 # Runtime audit artifacts
 audit_logs/
-live_data/*.log
+# --- live market adapters (TRACKED) ---
+!live_data/
+!live_data/*.py
+
+# --- ignore runtime noise ---
+live_data/__pycache__/
+live_data/**/*.log
+
+
 
 # Local helper scripts
 _find_csv.cmd
@@ -84,3 +92,4 @@ runtime/
 # ================================
 !engine/execution_firewall.py
 tatus
+git diff --cached --name-only
