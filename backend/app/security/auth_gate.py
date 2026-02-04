@@ -1,210 +1,252 @@
-"""
-Auth gate for REA Capital Trading Engine.
-
-Responsibilities:
-- Fail-closed authentication gate (per-user auth; no global secret dependency)
-- Enforce branch-scoped permissions (except superuser)
-- First-login mandatory password change (min length configurable)
-- Bind unit_code -> unit_router bundle (fail-closed if unknown)
-- Ensure ENGINE_RUN_ID exists (audit-safe)
-"""
-
 from __future__ import annotations
 
+import json
 import os
-import subprocess
-import uuid
-import getpass
-from dataclasses import dataclass
-from typing import Optional, Tuple
+from dataclasses import asdict, is_dataclass
+from getpass import getpass
+from typing import Any, Dict, Optional, Tuple
 
 
-# ---- configuration ----
-
-MIN_PASSWORD_LEN = 6  # <-- per instruction (was 10 in earlier iterations)
-
-
-# ---- helpers ----
-
-def _ensure_engine_run_id() -> str:
-    """
-    Ensure ENGINE_RUN_ID exists for audit trail.
-    If missing, generate a uuid4 and set into env.
-    """
-    run_id = os.getenv("ENGINE_RUN_ID") or os.getenv("REA_ENGINE_RUN_ID")
-    if not run_id:
-        run_id = str(uuid.uuid4())
-        os.environ["ENGINE_RUN_ID"] = run_id
-    return run_id
+# -----------------------------
+# Storage (single source of truth)
+# Prefer runtime\users.json if present; fallback to data\users.json.
+# -----------------------------
+def _users_path() -> str:
+    runtime_path = os.path.join("runtime", "users.json")
+    data_path = os.path.join("data", "users.json")
+    if os.path.exists(runtime_path):
+        return runtime_path
+    if os.path.exists(data_path):
+        return data_path
+    # default: create runtime/users.json
+    os.makedirs("runtime", exist_ok=True)
+    return runtime_path
 
 
-def _current_branch() -> str:
-    """
-    Determine current git branch, with safe fallbacks.
-    """
-    # explicit override
-    env_branch = os.getenv("REA_CURRENT_BRANCH")
-    if env_branch:
-        return env_branch.strip()
+def _load_users() -> Dict[str, Any]:
+    path = _users_path()
+    if not os.path.exists(path):
+        return {"users": []}
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
+
+def _save_users(doc: Dict[str, Any]) -> None:
+    path = _users_path()
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(doc, f, indent=2, sort_keys=True)
+
+
+def _to_dict(obj: Any) -> Dict[str, Any]:
+    if obj is None:
+        return {}
+    if isinstance(obj, dict):
+        return obj
+    if is_dataclass(obj):
+        return asdict(obj)
+    # last resort
+    return dict(obj) if hasattr(obj, "items") else {"value": str(obj)}
+
+
+def _find_user(doc: Dict[str, Any], user_id: int) -> Optional[Dict[str, Any]]:
+    users = doc.get("users", [])
+    for u in users:
+        try:
+            if int(u.get("user_id")) == int(user_id):
+                return u
+        except Exception:
+            continue
+    return None
+
+
+# -----------------------------
+# Optional integration with user_registry.py (if functions exist)
+# -----------------------------
+def _user_registry_module():
     try:
-        out = subprocess.check_output(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            stderr=subprocess.DEVNULL,
-            text=True,
-        ).strip()
-        if out:
-            return out
+        from backend.app.security import user_registry  # type: ignore
+        return user_registry
     except Exception:
-        pass
-
-    return "unknown"
+        return None
 
 
-def _safe_set_audit_user(user_id: int, role: str, unit_code: str, branch: str) -> None:
+def _ur_authenticate(user_id: int, password: str) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
     """
-    Bind user to audit context if the helper exists.
-    This must never crash login (audit binding is best-effort here).
+    Try to authenticate via user_registry if available.
+    Return: (ok, reason, user_dict)
     """
-    try:
-        from backend.app.observability import audit_context  # type: ignore
+    ur = _user_registry_module()
+    if not ur:
+        return False, "user_registry_missing", None
 
-        if hasattr(audit_context, "set_audit_user"):
-            audit_context.set_audit_user(
-                user_id=user_id,
-                role=role,
-                unit_code=unit_code,
-                branch=branch,
-            )
-    except Exception:
-        # fail-closed is for AUTH; audit binding is best-effort at this layer
-        return
+    # Prefer a single call if provided by your registry
+    fn = getattr(ur, "authenticate", None) or getattr(ur, "authenticate_user", None)
+    if callable(fn):
+        try:
+            out = fn(user_id, password)
+            # Allow registry to return (ok, reason, user) OR dict OR bool
+            if isinstance(out, tuple) and len(out) == 3:
+                ok, reason, user = out
+                return bool(ok), str(reason), _to_dict(user)
+            if isinstance(out, tuple) and len(out) == 2:
+                ok, reason = out
+                return bool(ok), str(reason), None
+            if isinstance(out, dict):
+                # assume {"ok":..., "reason":..., "user":...}
+                return bool(out.get("ok", False)), str(out.get("reason", "unknown")), _to_dict(out.get("user"))
+            if isinstance(out, bool):
+                return out, "ok" if out else "bad_password", None
+            return False, "unexpected_auth_return", None
+        except Exception as e:
+            return False, f"auth_exception:{e}", None
+
+    return False, "no_auth_fn", None
 
 
-def _unit_bundle_or_fail(unit_code: str):
+def _ur_change_password(user_id: int, old_pw: str, new_pw: str) -> Tuple[bool, str]:
+    ur = _user_registry_module()
+    if not ur:
+        return False, "user_registry_missing"
+
+    fn = getattr(ur, "change_password", None) or getattr(ur, "set_password", None)
+    if callable(fn):
+        try:
+            out = fn(user_id, old_pw, new_pw) if fn.__code__.co_argcount >= 3 else fn(user_id, new_pw)
+            if isinstance(out, tuple) and len(out) == 2:
+                return bool(out[0]), str(out[1])
+            if isinstance(out, bool):
+                return out, "ok" if out else "failed"
+            if isinstance(out, dict):
+                return bool(out.get("ok", False)), str(out.get("reason", "unknown"))
+            return False, "unexpected_change_return"
+        except Exception as e:
+            return False, f"change_exception:{e}"
+
+    return False, "no_change_fn"
+
+
+# -----------------------------
+# Auth gate public API
+# -----------------------------
+def await_login_ready_state() -> Dict[str, Any]:
     """
-    Resolve unit bundle via unit_router.
-    Fail-closed if unit_code is unknown.
+    Blocks until valid credentials are provided.
+    Returns a user context dict used by run_live_guarded.
     """
-    from backend.app.security.unit_router import resolve_unit_bundle, list_unit_codes  # type: ignore
-
-    bundle = resolve_unit_bundle(unit_code)
-    if bundle is None:
-        allowed = ", ".join(list_unit_codes())
-        raise RuntimeError(f"Unknown unit_code: {unit_code}. Allowed: {allowed}")
-    return bundle
-
-
-# ---- output model ----
-
-@dataclass(frozen=True)
-class AuthContext:
-    user_id: int
-    display_name: str
-    role: str
-    unit_code: str
-    home_branch: str
-    current_branch: str
-    is_superuser: bool
-
-
-# ---- main gate ----
-
-def await_login_ready_state() -> Tuple[AuthContext, object]:
-    """
-    Blocks until valid credentials are supplied.
-    Returns:
-      (auth_context, unit_bundle)
-    """
-    _ensure_engine_run_id()
-
-    from backend.app.security.user_registry import (  # type: ignore
-        authenticate,
-        change_password,
-        get_user,
-        is_first_login_password_change_required,
-    )
-
-    cur_branch = _current_branch()
-
-    # ---- prompt user ----
+    # Hard rule: user_id must be numeric
     while True:
-        raw_user = input("REA LOGIN | user_id (numeric): ").strip()
-        if not raw_user.isdigit():
+        raw_id = input("REA LOGIN | user_id (numeric): ").strip()
+        try:
+            user_id = int(raw_id)
+        except Exception:
             print("user_id must be numeric.")
             continue
-        user_id = int(raw_user)
 
-        pw = getpass.getpass("REA LOGIN | password: ").strip()
-        ok, reason = authenticate(user_id=user_id, password=pw)
-        if not ok:
-            print(f"Invalid credentials. ({reason})")
+        pw = getpass("REA LOGIN | password: ").strip()
+
+        # 1) try registry-based auth (preferred)
+        ok, reason, user_from_registry = _ur_authenticate(user_id, pw)
+
+        if ok:
+            user_ctx = user_from_registry or _load_user_ctx_from_file(user_id)
+            user_ctx["user_id"] = user_id
+
+            # First-login password change policy (min 6 chars)
+            if _needs_first_login_change(user_ctx):
+                _force_first_login_password_change(user_id, pw, user_ctx)
+
+            return _finalize_user_ctx(user_ctx)
+
+        # 2) fallback: file-based auth if registry missing / not wired
+        if reason in ("user_registry_missing", "no_auth_fn", "unexpected_auth_return", "no_auth_fn"):
+            ok2, user_ctx2 = _file_authenticate(user_id, pw)
+            if ok2:
+                if _needs_first_login_change(user_ctx2):
+                    _force_first_login_password_change(user_id, pw, user_ctx2)
+                return _finalize_user_ctx(user_ctx2)
+
+        print(f"LOGIN_FAIL | user_id={user_id} | reason={reason}")
+        print("Invalid credentials.")
+
+
+def _load_user_ctx_from_file(user_id: int) -> Dict[str, Any]:
+    doc = _load_users()
+    u = _find_user(doc, user_id)
+    return dict(u) if u else {}
+
+
+def _file_authenticate(user_id: int, password: str) -> Tuple[bool, Dict[str, Any]]:
+    doc = _load_users()
+    u = _find_user(doc, user_id)
+    if not u:
+        return False, {}
+    # user record stores either "password" (plain for now) or "password_hash"
+    # We support "password" for the current bootstrap stage.
+    stored = (u.get("password") or "").strip()
+    if stored and stored == password:
+        return True, dict(u)
+    # If password not stored (e.g., registry uses hashed only), fail here.
+    return False, {}
+
+
+def _needs_first_login_change(user_ctx: Dict[str, Any]) -> bool:
+    # Accept multiple flags so we don’t break if naming differs across versions
+    return bool(
+        user_ctx.get("must_change_password")
+        or user_ctx.get("first_login_change_required")
+        or user_ctx.get("temp_password_issued")
+        or user_ctx.get("first_login", False)
+    )
+
+
+def _force_first_login_password_change(user_id: int, old_pw: str, user_ctx: Dict[str, Any]) -> None:
+    print("FIRST_LOGIN_PASSWORD_CHANGE_REQUIRED")
+    while True:
+        new_pw = getpass("NEW PASSWORD (min 6 chars): ").strip()
+        if len(new_pw) < 6:
+            print("Password must be at least 6 characters.")
+            continue
+        confirm = getpass("CONFIRM NEW PASSWORD: ").strip()
+        if confirm != new_pw:
+            print("Passwords do not match.")
             continue
 
-        # user exists and is authenticated
-        user = get_user(user_id)
-        if user is None:
-            print("AUTH_ABORT | user not found (registry inconsistency).")
-            continue
+        # Try registry change first
+        ok, reason = _ur_change_password(user_id, old_pw, new_pw)
+        if ok:
+            print("PASSWORD CHANGED SUCCESSFULLY")
+            return
 
-        # ---- first-login forced password change ----
-        if is_first_login_password_change_required(user_id):
-            print("FIRST_LOGIN_PASSWORD_CHANGE_REQUIRED")
-            while True:
-                new_pw = getpass.getpass(f"NEW PASSWORD (min {MIN_PASSWORD_LEN} chars): ").strip()
-                if len(new_pw) < MIN_PASSWORD_LEN:
-                    print(f"Password too short. Min length = {MIN_PASSWORD_LEN}.")
-                    continue
-                confirm_pw = getpass.getpass("CONFIRM NEW PASSWORD: ").strip()
-                if new_pw != confirm_pw:
-                    print("Passwords do not match. Try again.")
-                    continue
+        # Fallback: file update (bootstrap)
+        if reason in ("user_registry_missing", "no_change_fn", "unexpected_change_return", "no_change_fn"):
+            doc = _load_users()
+            u = _find_user(doc, user_id)
+            if not u:
+                print("Cannot update password (user missing in file store).")
+                return
+            u["password"] = new_pw
+            u["must_change_password"] = False
+            u["first_login_change_required"] = False
+            u["temp_password_issued"] = False
+            _save_users(doc)
+            print("PASSWORD CHANGED SUCCESSFULLY")
+            return
 
-                ok2, reason2 = change_password(user_id=user_id, old_password=pw, new_password=new_pw)
-                if not ok2:
-                    print(f"Password change failed. ({reason2})")
-                    # keep them in change loop; do NOT fall through
-                    continue
+        print(f"PASSWORD CHANGE FAILED: {reason}")
 
-                print("PASSWORD_CHANGED_SUCCESSFULLY")
-                break
 
-        # ---- branch scope enforcement ----
-        role = getattr(user, "role", "operator")
-        unit_code = getattr(user, "unit_code", "CORE")
-        home_branch = getattr(user, "home_branch", "main")
-        display_name = getattr(user, "display_name", f"user_{user_id}")
+def _finalize_user_ctx(user_ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Enforce required fields and defaults.
+    """
+    # Mandatory fields (with safe defaults for bootstrap)
+    role = (user_ctx.get("role") or "operator").strip()
+    unit_code = (user_ctx.get("unit_code") or "CORE").strip()
+    home_branch = (user_ctx.get("home_branch") or "main").strip()
 
-        is_super = (role == "super_user") or (user_id == 1369)
-
-        if (not is_super) and (cur_branch != home_branch):
-            print(
-                f"AUTH_ABORT | branch_scope_violation | user_branch={home_branch} | current_branch={cur_branch}"
-            )
-            continue
-
-        # ---- unit routing (fail-closed if unknown) ----
-        try:
-            unit_bundle = _unit_bundle_or_fail(unit_code)
-        except Exception as e:
-            print(f"AUTH_ABORT | {e}")
-            continue
-
-        # ---- bind audit user (best-effort) ----
-        _safe_set_audit_user(
-            user_id=user_id,
-            role=role,
-            unit_code=unit_code,
-            branch=cur_branch,
-        )
-
-        ctx = AuthContext(
-            user_id=user_id,
-            display_name=display_name,
-            role=role,
-            unit_code=unit_code,
-            home_branch=home_branch,
-            current_branch=cur_branch,
-            is_superuser=is_super,
-        )
-        return ctx, unit_bundle
+    out = dict(user_ctx)
+    out["role"] = role
+    out["unit_code"] = unit_code
+    out["home_branch"] = home_branch
+    return out
