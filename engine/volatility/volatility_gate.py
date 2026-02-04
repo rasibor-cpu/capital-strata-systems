@@ -31,7 +31,7 @@ class VolatilityPolicy:
     """
     max_vol_ratio: Maximum allowed ratio of current volatility
                    to recent baseline volatility.
-                   e.g. 2.0 = current vol <= 2x baseline.
+                   e.g. 2.5 = current vol <= 2.5x baseline.
     min_baseline_vol: Minimum acceptable baseline volatility (>0).
     hard_block: If True, breaches block execution.
     """
@@ -67,4 +67,87 @@ class VolatilityResult:
 
 
 def _is_num(x) -> bool:
-    return isinstance
+    return isinstance(x, (int, float))
+
+
+def evaluate_volatility(
+    *,
+    snapshot: VolatilitySnapshot,
+    policy: VolatilityPolicy = VolatilityPolicy(),
+) -> VolatilityResult:
+    """
+    Evaluate whether current volatility is acceptable.
+
+    Safe-default behavior:
+    - Missing or invalid volatility data => BLOCK
+    """
+
+    if snapshot.current_vol is None or snapshot.baseline_vol is None:
+        return VolatilityResult(
+            decision=VolatilityDecision.BLOCK,
+            vol_ratio=None,
+            reason=f"{policy.reason_prefix}: BLOCK — missing volatility data.",
+        )
+
+    if not _is_num(snapshot.current_vol) or not _is_num(snapshot.baseline_vol):
+        return VolatilityResult(
+            decision=VolatilityDecision.BLOCK,
+            vol_ratio=None,
+            reason=f"{policy.reason_prefix}: BLOCK — non-numeric volatility data.",
+        )
+
+    current_vol = float(snapshot.current_vol)
+    baseline_vol = float(snapshot.baseline_vol)
+
+    if baseline_vol <= policy.min_baseline_vol:
+        return VolatilityResult(
+            decision=VolatilityDecision.BLOCK,
+            vol_ratio=None,
+            reason=(
+                f"{policy.reason_prefix}: BLOCK — baseline volatility too low "
+                f"({baseline_vol})."
+            ),
+        )
+
+    if current_vol < 0:
+        return VolatilityResult(
+            decision=VolatilityDecision.BLOCK,
+            vol_ratio=None,
+            reason=f"{policy.reason_prefix}: BLOCK — invalid current volatility.",
+        )
+
+    vol_ratio = current_vol / baseline_vol
+
+    if vol_ratio > policy.max_vol_ratio:
+        action = "BLOCK" if policy.hard_block else "WARN"
+        return VolatilityResult(
+            decision=VolatilityDecision.BLOCK if policy.hard_block else VolatilityDecision.WARN,
+            vol_ratio=vol_ratio,
+            reason=(
+                f"{policy.reason_prefix}: {action} — volatility ratio "
+                f"{vol_ratio:.2f} exceeds limit {policy.max_vol_ratio:.2f}."
+            ),
+        )
+
+    return VolatilityResult(
+        decision=VolatilityDecision.ALLOW,
+        vol_ratio=vol_ratio,
+        reason=f"{policy.reason_prefix}: ALLOW — volatility within limits.",
+    )
+
+
+def quick_self_test() -> None:
+    snap_ok = VolatilitySnapshot(current_vol=1.2, baseline_vol=1.0, symbol="TEST")
+    snap_bad = VolatilitySnapshot(current_vol=3.5, baseline_vol=1.0, symbol="TEST")
+
+    pol = VolatilityPolicy(max_vol_ratio=2.5, hard_block=True)
+
+    r1 = evaluate_volatility(snapshot=snap_ok, policy=pol)
+    r2 = evaluate_volatility(snapshot=snap_bad, policy=pol)
+
+    print(r1)
+    print(r2)
+
+
+if __name__ == "__main__":
+    quick_self_test()
