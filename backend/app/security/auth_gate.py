@@ -1,179 +1,42 @@
-"""
-backend/app/security/auth_gate.py
+# backend/app/security/auth_gate.py
 
-Interactive login gate with:
-- per-user authentication via user_registry.authenticate()
-- mandatory first-login password change via user_registry.change_password()
-- branch-scoped permissions (except superuser)
-- unit routing -> module allowlist
-
-Fail-closed by design.
-"""
-
-from __future__ import annotations
-
-import getpass
-import os
-import time
-import uuid
-from dataclasses import dataclass
-from typing import List
-
-from backend.app.observability.logger import get_logger, with_trace
-from backend.app.observability.kill_switch import assert_not_killed
-from backend.app.observability.audit_context import AuditContext, set_audit_context
-
-from backend.app.security.user_registry import (
-    ensure_superuser_exists,
-    get_user,
-    authenticate,
-    change_password,
-    get_current_branch,
-    branch_allowed,
-)
-from backend.app.security.unit_router import resolve_unit_bundle, UnitBundle
-from backend.app.security.access_control import set_permissions
-
-log = get_logger("security.auth_gate")
+from backend.app.security.user_registry import authenticate, change_password
+from backend.app.observability.audit_context import set_audit_user
 
 
-@dataclass(frozen=True)
-class AuthContext:
-    user_id: str
-    role: str
-    unit_code: str
-    unit_label: str
-    modules: List[str]
-    home_branch: str
-    current_branch: str
-    auth_method: str
-    issued_at_utc: float
-    engine_run_id: str
+def await_login_ready_state() -> dict:
+    print("REA LOGIN | user_id (numeric): ", end="")
+    user_id = int(input().strip())
 
+    print("REA LOGIN | password: ", end="")
+    password = input().strip()
 
-def _ensure_engine_run_id() -> str:
-    rid = os.getenv("ENGINE_RUN_ID", "").strip()
-    if not rid:
-        rid = str(uuid.uuid4())
-        os.environ["ENGINE_RUN_ID"] = rid
-    return rid
+    user = authenticate(user_id, password)
 
+    if user.must_change_password:
+        print("FIRST_LOGIN_PASSWORD_CHANGE_REQUIRED")
+        print("NEW PASSWORD (min 6 chars): ", end="")
+        new_pw = input().strip()
+        print("CONFIRM NEW PASSWORD: ", end="")
+        confirm_pw = input().strip()
 
-def await_login_ready_state(timeout_s: int = 0) -> AuthContext:
-    """
-    Blocks until a valid login occurs.
-    Enforces mandatory password change on first login.
-    """
-    adapter = with_trace(log, "LOGIN")
+        if new_pw != confirm_pw:
+            raise RuntimeError("PASSWORD_MISMATCH")
 
-    ensure_superuser_exists()
+        change_password(user_id, new_pw)
+        print("PASSWORD_CHANGED_SUCCESSFULLY")
 
-    if not assert_not_killed(pair="GLOBAL"):
-        adapter.critical("LOGIN_BLOCK | reason=kill_switch_active")
-        raise RuntimeError("kill_switch_active")
+        user = authenticate(user_id, new_pw)
 
-    current_branch = get_current_branch()
-    engine_run_id = _ensure_engine_run_id()
+    set_audit_user(
+        user_id=user.user_id,
+        display_name=user.display_name,
+        role=user.role,
+        unit_code=user.unit_code,
+    )
 
-    adapter.info("READY_STATE | awaiting_login=true | branch=%s", current_branch)
-
-    start = time.time()
-
-    while True:
-        if not assert_not_killed(pair="GLOBAL"):
-            adapter.critical("LOGIN_ABORT | reason=kill_switch_active")
-            raise RuntimeError("kill_switch_active")
-
-        if timeout_s and (time.time() - start) > timeout_s:
-            adapter.critical("LOGIN_TIMEOUT | timeout_s=%s", timeout_s)
-            raise TimeoutError("login_timeout")
-
-        user_id = input("REA LOGIN | user_id (numeric): ").strip()
-        if not user_id.isdigit():
-            print("user_id must be numeric.")
-            continue
-
-        pw = getpass.getpass("REA LOGIN | password: ").strip()
-
-        rec = get_user(user_id)
-        if rec is None:
-            adapter.warning("LOGIN_FAIL | user_id=%s | reason=unknown_user", user_id)
-            print("Unknown user_id.")
-            continue
-
-        if not branch_allowed(rec, current_branch):
-            adapter.critical(
-                "LOGIN_FAIL | user_id=%s | reason=branch_restricted | home=%s | current=%s",
-                rec.user_id,
-                rec.home_branch,
-                current_branch,
-            )
-            print(f"Access denied: restricted to branch '{rec.home_branch}'.")
-            continue
-
-        # Authenticate (raises ValueError("bad_password") on failure)
-        try:
-            rec = authenticate(user_id, pw)
-        except Exception:
-            adapter.warning("LOGIN_FAIL | user_id=%s | reason=bad_password", user_id)
-            print("Invalid credentials.")
-            continue
-
-        # Mandatory change on first login
-        if getattr(rec, "first_login_required", False):
-            print("FIRST_LOGIN_PASSWORD_CHANGE_REQUIRED")
-            while True:
-                np1 = getpass.getpass("NEW PASSWORD (min 6 chars): ").strip()
-                np2 = getpass.getpass("CONFIRM NEW PASSWORD: ").strip()
-                try:
-                    change_password(user_id, np1, np2)
-                    print("PASSWORD_CHANGED_SUCCESSFULLY")
-                    break
-                except Exception as exc:
-                    print(f"Password rejected: {exc}")
-                    continue
-
-            # Reload after change
-            rec = get_user(user_id)
-
-        # Resolve unit bundle + modules
-        if rec.role.lower() == "superuser":
-            bundle = UnitBundle(unit_code="SUPER", label="Super User", modules=["*"])
-        else:
-            bundle = resolve_unit_bundle(rec.unit_code)
-
-        # Bind audit context (traceability)
-        set_audit_context(
-            AuditContext(
-                user_id=rec.user_id,
-                role=rec.role,
-                home_branch=rec.home_branch,
-                current_branch=current_branch,
-                engine_run_id=engine_run_id,
-                issued_at_utc=time.time(),
-            )
-        )
-
-        # Bind permissions allowlist
-        set_permissions(user_id=rec.user_id, role=rec.role, modules=bundle.modules)
-
-        adapter.info(
-            "LOGIN_OK | user_id=%s | role=%s | unit=%s | branch=%s",
-            rec.user_id,
-            rec.role,
-            bundle.unit_code,
-            current_branch,
-        )
-
-        return AuthContext(
-            user_id=rec.user_id,
-            role=rec.role,
-            unit_code=bundle.unit_code,
-            unit_label=bundle.label,
-            modules=bundle.modules,
-            home_branch=rec.home_branch,
-            current_branch=current_branch,
-            auth_method="interactive",
-            issued_at_utc=time.time(),
-            engine_run_id=engine_run_id,
-        )
+    return {
+        "user_id": user.user_id,
+        "role": user.role,
+        "unit_code": user.unit_code,
+    }
