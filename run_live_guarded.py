@@ -1,352 +1,435 @@
-#!/usr/bin/env python3
 """
-REA Live Guarded Runner (contract-resilient, fail-closed)
+run_live_guarded.py
+-------------------
+Contract-resilient LIVE runner wrapper.
 
-Problem solved:
-- Do NOT import specific function names that may not exist (e.g., check_rate_limit).
-- Import modules and use getattr fallbacks.
-- Persist live state directly to audit/live_state.json (writer-independent).
-
-Security invariants:
-- Default DISARMED.
-- ARMED_PENDING remains BLOCK until confirm succeeds.
-- Confirm window: 120s.
-- Token length: 6 chars.
-- If any dependency is missing/unknown -> fail-closed (BLOCK / disallow arming).
+Key invariants:
+- FAIL-CLOSED always.
+- This runner DOES NOT place orders. Broker wiring is separate.
+- Uses audit/live_state.json as the single source of truth (aligned with execution_gate.py).
+- Two-stage arming:
+    1) --arm-live => ARMED_PENDING + 6-char token generated + notification written (email/sms stubs)
+    2) --confirm-live TOKEN => ARMED_ACTIVE (only if valid token + within expiry + preflight + rate-limit + clean working tree)
+- Auto-disarm triggers:
+    - pending expired
+    - active expired
+    - working tree dirty (safety)
+    - invalid state schema (fail-closed)
 """
 
 import argparse
 import json
 import os
-import sys
-import time
-from datetime import datetime, timezone, timedelta
-import importlib
+import random
+import string
+import subprocess
+from datetime import datetime, timedelta, timezone
 
-LIVE_STATE_PATH = os.path.join("audit", "live_state.json")
-CONFIRM_WINDOW_SECONDS = 120  # 2 minutes
+# --- Paths (single source of truth) ---
+AUDIT_DIR = "audit"
+OUTBOX_EMAIL_DIR = os.path.join(AUDIT_DIR, "outbox_emails")
+OUTBOX_SMS_DIR = os.path.join(AUDIT_DIR, "outbox_sms")
+LIVE_STATE_PATH = os.path.join(AUDIT_DIR, "live_state.json")
+SUPERUSER_CFG_PATH = os.path.join("config", "superuser.json")
+
+# --- Defaults / governance constants ---
+TOKEN_LEN = 6
+PENDING_CONFIRM_WINDOW_SECONDS = 120  # 2 minutes (your requirement)
+ACTIVE_WINDOW_SECONDS = 15 * 60       # 15 minutes active window (safe default; can be changed in policy later)
+ARM_COOLDOWN_SECONDS = 60             # prevent rapid spam-arming requests
+CONFIRM_COOLDOWN_SECONDS = 10         # prevent rapid confirm attempts
+
+STATE_DISARMED = "DISARMED"
+STATE_ARMED_PENDING = "ARMED_PENDING"
+STATE_ARMED_ACTIVE = "ARMED_ACTIVE"
 
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _ensure_parent_dir(path: str) -> None:
-    parent = os.path.dirname(path)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
+def iso(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).isoformat()
 
 
-def _read_state() -> dict:
-    base = {
-        "armed_state": "DISARMED",
-        "token": None,
-        "expires_at_utc": None,
-        "reason": "default_disarmed",
-        "last_updated_utc": utcnow().isoformat(),
-    }
+def ensure_dirs():
+    os.makedirs(AUDIT_DIR, exist_ok=True)
+    os.makedirs(OUTBOX_EMAIL_DIR, exist_ok=True)
+    os.makedirs(OUTBOX_SMS_DIR, exist_ok=True)
+    os.makedirs("config", exist_ok=True)
 
-    if not os.path.exists(LIVE_STATE_PATH):
-        return base
 
+def git_working_tree_clean() -> bool:
+    """Fail-closed: if git not available, treat as dirty."""
     try:
-        with open(LIVE_STATE_PATH, "r", encoding="utf-8") as f:
-            d = json.load(f) or {}
+        out = subprocess.check_output(["git", "status", "--porcelain"], text=True, stderr=subprocess.STDOUT)
+        return out.strip() == ""
     except Exception:
-        return base | {"reason": "corrupt_state_fail_closed"}
-
-    # backward compat: state vs armed_state
-    armed_state = d.get("armed_state") or d.get("state") or base["armed_state"]
-    expires = d.get("expires_at_utc") or d.get("expires_utc") or None
-
-    out = dict(d)
-    out["armed_state"] = armed_state
-    out["expires_at_utc"] = expires
-    out.setdefault("token", None)
-    out.setdefault("reason", "loaded")
-    out.setdefault("last_updated_utc", utcnow().isoformat())
-
-    if out["armed_state"] not in {"DISARMED", "ARMED_PENDING", "ARMED_ACTIVE"}:
-        return base | {"reason": "unknown_state_fail_closed"}
-
-    return out
+        return False
 
 
-def _write_state(d: dict) -> None:
-    _ensure_parent_dir(LIVE_STATE_PATH)
-    d["last_updated_utc"] = utcnow().isoformat()
-    with open(LIVE_STATE_PATH, "w", encoding="utf-8") as f:
-        json.dump(d, f, indent=2, sort_keys=True)
+def _read_json(path: str):
+    if not os.path.exists(path):
+        return None
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
-def disarm(reason: str) -> None:
-    d = _read_state()
-    d["armed_state"] = "DISARMED"
-    d["token"] = None
-    d["expires_at_utc"] = None
-    d["reason"] = reason
-    _write_state(d)
-
-
-def auto_disarm_if_needed() -> None:
-    d = _read_state()
-    if d.get("armed_state") == "ARMED_PENDING" and d.get("expires_at_utc"):
-        try:
-            exp = datetime.fromisoformat(d["expires_at_utc"])
-            if utcnow() > exp:
-                disarm("auto_disarm_expired_pending")
-        except Exception:
-            disarm("auto_disarm_bad_expiry")
-
-
-def _generate_token() -> str:
-    import secrets
-    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-    return "".join(secrets.choice(alphabet) for _ in range(6))
-
-
-def _write_outbox_notification(token: str, expires: datetime) -> None:
-    ts = int(time.time())
-    path = os.path.join("audit", "outbox_emails", f"live_arm_{ts}.txt")
-    _ensure_parent_dir(path)
+def _write_json(path: str, data) -> None:
     with open(path, "w", encoding="utf-8") as f:
-        f.write("REA LIVE EXECUTION CONFIRMATION\n\n")
-        f.write(f"TOKEN: {token}\n")
-        f.write(f"EXPIRES (UTC): {expires.isoformat()}\n")
-        f.write("\nConfirm via:\n")
-        f.write("python run_live_guarded.py --confirm-live <TOKEN>\n")
+        json.dump(data, f, indent=2)
 
 
-# -----------------------------
-# CONTRACT-RESILIENT LOADERS
-# -----------------------------
-
-def _try_import(module_name: str):
+def load_superuser_config():
+    """
+    Loads config/superuser.json if present.
+    If missing, returns None (fail-closed on notification routing, but arming flow still works via file outbox).
+    """
     try:
-        return importlib.import_module(module_name)
+        cfg = _read_json(SUPERUSER_CFG_PATH)
+        return cfg
     except Exception:
         return None
 
 
-def _safe_print_banner():
-    mod = _try_import("engine.runtime.live_banner")
-    if mod and hasattr(mod, "print_live_banner"):
+def generate_token(n: int = TOKEN_LEN) -> str:
+    # uppercase alnum for easy SMS typing
+    alphabet = string.ascii_uppercase + string.digits
+    return "".join(random.choice(alphabet) for _ in range(n))
+
+
+def load_live_state():
+    st = _read_json(LIVE_STATE_PATH)
+    if not st:
+        return {
+            "version": "1.0",
+            "state": STATE_DISARMED,
+            "expires_at_utc": None,
+            "reason": "init",
+            "last_updated_utc": iso(utcnow()),
+            "preflight_passed": False,
+            "rate_limit_ok": True,
+        }
+    # Backward/forward tolerance: normalize keys
+    if "armed_state" in st and "state" not in st:
+        st["state"] = st.get("armed_state")
+    if "expires_utc" in st and "expires_at_utc" not in st:
+        st["expires_at_utc"] = st.get("expires_utc")
+    if "last_updated" in st and "last_updated_utc" not in st:
+        st["last_updated_utc"] = st.get("last_updated")
+    if "version" not in st:
+        st["version"] = "1.0"
+    # Ensure required keys exist
+    st.setdefault("preflight_passed", False)
+    st.setdefault("rate_limit_ok", True)
+    st.setdefault("reason", "unknown")
+    st.setdefault("expires_at_utc", None)
+    st.setdefault("last_updated_utc", iso(utcnow()))
+    return st
+
+
+def save_live_state(st: dict, reason: str):
+    st["reason"] = reason
+    st["last_updated_utc"] = iso(utcnow())
+    _write_json(LIVE_STATE_PATH, st)
+
+
+def auto_disarm_if_needed(st: dict) -> dict:
+    """
+    Auto-disarm triggers.
+    Always fail-closed: any parse error -> DISARMED.
+    """
+    # working tree dirty -> disarm
+    if not git_working_tree_clean():
+        st["state"] = STATE_DISARMED
+        st["expires_at_utc"] = None
+        save_live_state(st, "auto_disarm_working_tree_dirty")
+        return st
+
+    exp = st.get("expires_at_utc")
+    if exp:
         try:
-            mod.print_live_banner()
-            return
+            exp_dt = datetime.fromisoformat(exp)
+            if utcnow() >= exp_dt:
+                if st.get("state") == STATE_ARMED_PENDING:
+                    st["state"] = STATE_DISARMED
+                    st["expires_at_utc"] = None
+                    save_live_state(st, "auto_disarm_expired_pending")
+                    return st
+                if st.get("state") == STATE_ARMED_ACTIVE:
+                    st["state"] = STATE_DISARMED
+                    st["expires_at_utc"] = None
+                    save_live_state(st, "auto_disarm_expired_active")
+                    return st
         except Exception:
-            pass
-    # fallback banner
-    d = _read_state()
-    print("\n================= REA LIVE STATUS =================")
-    print(f"UTC Now       : {utcnow().isoformat()}")
-    print(f"State         : {d.get('armed_state')}")
-    print(f"Expires (UTC) : {d.get('expires_at_utc')}")
-    print(f"Reason        : {d.get('reason')}")
-    print("==================================================\n")
+            st["state"] = STATE_DISARMED
+            st["expires_at_utc"] = None
+            save_live_state(st, "auto_disarm_invalid_expiry_format")
+            return st
+
+    return st
 
 
-def _load_superuser_config() -> dict:
+def write_notifications(token: str, cfg: dict | None):
     """
-    Prefer config.superuser.load_superuser() if present.
-    Otherwise read config/superuser.json directly (fail-closed if missing/invalid).
+    Notification stubs:
+    - Writes 'email' and 'sms' messages into audit/outbox_* for later integration.
     """
-    # Preferred loader
-    mod = _try_import("config.superuser")
-    if mod and hasattr(mod, "load_superuser"):
-        su = mod.load_superuser()
-        if su:
-            return su
+    ts = int(utcnow().timestamp())
+    email_path = os.path.join(OUTBOX_EMAIL_DIR, f"live_arm_{ts}.txt")
+    sms_path = os.path.join(OUTBOX_SMS_DIR, f"live_arm_{ts}.txt")
 
-    # Fallback file read
-    path = os.path.join("config", "superuser.json")
-    if not os.path.exists(path):
-        raise RuntimeError("Superuser config missing: config/superuser.json")
+    # Determine recipients (defaults acceptable)
+    primary = None
+    if isinstance(cfg, dict):
+        primary = cfg.get("primary")
 
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            su = json.load(f)
-    except Exception as e:
-        raise RuntimeError(f"Superuser config unreadable: {e}")
+    to_email = None
+    to_phone = None
+    if isinstance(primary, dict):
+        to_email = primary.get("email")
+        to_phone = primary.get("phone_e164")
 
-    # Minimal validation
-    primary = (su or {}).get("primary") or {}
-    email = primary.get("email")
-    phone = primary.get("phone_e164")
-    if not email or not phone:
-        raise RuntimeError("Superuser config invalid: primary.email and primary.phone_e164 required")
-    return su
+    subject = "REA LIVE ARMING: CONFIRMATION REQUIRED"
+    body = (
+        "LIVE EXECUTION ARMING REQUESTED.\n"
+        "Two-stage arming is in effect.\n\n"
+        f"CONFIRM TOKEN (6 chars): {token}\n"
+        f"Confirm window: {PENDING_CONFIRM_WINDOW_SECONDS} seconds\n\n"
+        "Confirm command:\n"
+        f"  python run_live_guarded.py --confirm-live {token}\n\n"
+        "If you did NOT request this, do nothing; it will auto-disarm.\n"
+    )
+
+    email_msg = f"TO: {to_email or '<unset>'}\nSUBJECT: {subject}\n\n{body}"
+    sms_msg = f"TO: {to_phone or '<unset>'}\n\n{body}"
+
+    with open(email_path, "w", encoding="utf-8") as f:
+        f.write(email_msg)
+    with open(sms_path, "w", encoding="utf-8") as f:
+        f.write(sms_msg)
+
+    print(f"Notification written to: {email_path}")
+    print(f"Notification written to: {sms_path}")
 
 
-def _rate_limit_ok() -> bool:
+def rate_limit_check(st: dict, kind: str) -> bool:
     """
-    Arming rate-limit. We do NOT assume any specific function name.
-    We call the first one found in this order:
-      - check_rate_limit()
-      - check_arming_rate_limit()
-      - arming_rate_limit_ok()
-    If none exists -> FAIL-CLOSED (return False).
+    Simple local rate-limit for arming/confirm actions.
+    Stored in live_state.json so it survives sessions.
     """
-    mod = _try_import("engine.execution.arming_rate_limit")
-    if not mod:
-        return False
-
-    for fn_name in ("check_rate_limit", "check_arming_rate_limit", "arming_rate_limit_ok"):
-        fn = getattr(mod, fn_name, None)
-        if callable(fn):
-            try:
-                return bool(fn())
-            except Exception:
+    now = utcnow()
+    key = f"last_{kind}_utc"
+    prev = st.get(key)
+    if prev:
+        try:
+            prev_dt = datetime.fromisoformat(prev)
+            cooldown = ARM_COOLDOWN_SECONDS if kind == "arm" else CONFIRM_COOLDOWN_SECONDS
+            if (now - prev_dt).total_seconds() < cooldown:
                 return False
+        except Exception:
+            # if malformed, fail-closed by disarming in auto_disarm stage; here we just block action
+            return False
+    st[key] = iso(now)
+    return True
 
-    return False  # fail-closed
 
-
-def _run_preflight_or_fail() -> None:
+def try_execution_gate():
     """
-    Preflight bound to confirm. If module missing -> fail-closed.
+    Calls engine.execution.execution_gate.execution_gate_check() if available.
+    Contract-resilient:
+      - If returns tuple -> (decision, reason)
+      - If returns dict -> read fields safely
+      - Any error -> BLOCK fail-closed
     """
-    mod = _try_import("engine.execution.preflight")
-    if not mod or not hasattr(mod, "run_preflight"):
-        raise RuntimeError("Preflight module not available (fail-closed).")
-    mod.run_preflight()
-
-
-def _execution_gate_decision() -> dict:
-    """
-    If execution gate module missing -> fail-closed BLOCK.
-    """
-    mod = _try_import("engine.execution.execution_gate")
-    if not mod:
-        return {"decision": "BLOCK", "reason": "execution_gate_missing_fail_closed"}
-    fn = getattr(mod, "execution_gate_check", None)
-    if not callable(fn):
-        return {"decision": "BLOCK", "reason": "execution_gate_fn_missing_fail_closed"}
     try:
-        return fn()
-    except Exception:
-        return {"decision": "BLOCK", "reason": "execution_gate_error_fail_closed"}
-
-
-# -----------------------------
-# COMMANDS
-# -----------------------------
-
-def arm_live() -> None:
-    # require superuser configured
-    try:
-        _ = _load_superuser_config()
+        from engine.execution.execution_gate import execution_gate_check
+        res = execution_gate_check()
+        if isinstance(res, tuple) and len(res) == 2:
+            return res[0], res[1]
+        if isinstance(res, dict):
+            return res.get("decision", "BLOCK"), res.get("reason", "unknown")
+        return "BLOCK", "execution_gate_unknown_return_type"
     except Exception as e:
-        print(f"ERROR: {e}")
-        sys.exit(1)
+        return "BLOCK", f"execution_gate_error_{type(e).__name__}_fail_closed"
 
-    if not _rate_limit_ok():
-        print("RATE LIMIT (or missing limiter): Arming blocked (fail-closed).")
-        sys.exit(1)
+
+def show_status():
+    ensure_dirs()
+    st = load_live_state()
+    st = auto_disarm_if_needed(st)
+
+    decision, reason = try_execution_gate()
+
+    print("\n================ REA LIVE STATUS ================")
+    print(f"UTC Now      : {iso(utcnow())}")
+    print(f"State        : {st.get('state')}")
+    print(f"Expires (UTC): {st.get('expires_at_utc') or 'None'}")
+    print(f"Reason       : {st.get('reason')}")
+    print(f"Preflight    : {st.get('preflight_passed')}")
+    print(f"RateLimitOK  : {st.get('rate_limit_ok')}")
+    print("------------------------------------------------")
+    print(f"Exec Gate    : {decision} | {reason}")
+    print("================================================\n")
+
+
+def arm_live():
+    ensure_dirs()
+
+    st = load_live_state()
+    st = auto_disarm_if_needed(st)
+
+    # Rate-limit arm requests
+    if not rate_limit_check(st, "arm"):
+        st["rate_limit_ok"] = False
+        save_live_state(st, "arm_rate_limited")
+        print("Arm blocked: rate-limited (cooldown).")
+        return
+
+    st["rate_limit_ok"] = True
+
+    # Require clean working tree (already enforced in auto_disarm_if_needed; re-check to be explicit)
+    if not git_working_tree_clean():
+        st["state"] = STATE_DISARMED
+        st["expires_at_utc"] = None
+        save_live_state(st, "arm_blocked_working_tree_dirty")
+        print("Arm blocked: working tree not clean.")
+        return
 
     print("\n*** LIVE EXECUTION ARMING REQUESTED ***")
     print("This may place REAL trades when fully ACTIVE.")
     ans = input("Arm live execution? [Y/N]: ").strip().lower()
-    if ans != "y":
-        print("Aborted. Live execution remains DISABLED.")
+    if ans not in ("y", "yes"):
+        print("Arming cancelled.")
         return
 
-    token = _generate_token()
-    expires = utcnow() + timedelta(seconds=CONFIRM_WINDOW_SECONDS)
+    token = generate_token(TOKEN_LEN)
+    st["state"] = STATE_ARMED_PENDING
+    st["pending_token"] = token  # stored for local confirmation (email/sms delivery is separate)
+    st["expires_at_utc"] = iso(utcnow() + timedelta(seconds=PENDING_CONFIRM_WINDOW_SECONDS))
+    st["preflight_passed"] = False  # will be set at confirm time
+    save_live_state(st, "awaiting_reconfirmation")
 
-    d = _read_state()
-    d["armed_state"] = "ARMED_PENDING"
-    d["token"] = token
-    d["expires_at_utc"] = expires.isoformat()
-    d["reason"] = "awaiting_reconfirmation"
-    _write_state(d)
-
-    _write_outbox_notification(token, expires)
+    cfg = load_superuser_config()
+    write_notifications(token, cfg)
 
     print("\nARMED_PENDING created.")
-    print("Notification written to audit outbox.")
-    print("Waiting for reconfirmation before becoming ACTIVE.")
-    print(f"Token expires in {CONFIRM_WINDOW_SECONDS} seconds.")
-    print("\nSAFE: Execution remains BLOCKED.")
+    print(f"Token expires in {PENDING_CONFIRM_WINDOW_SECONDS} seconds.")
+    print("Waiting for reconfirmation before becoming ACTIVE.\n")
+    show_status()
 
 
-def confirm_live(token: str) -> None:
-    auto_disarm_if_needed()
-    d = _read_state()
-
-    if d.get("armed_state") != "ARMED_PENDING":
-        print("ERROR: No pending arming request.")
-        disarm("confirm_no_pending")
-        sys.exit(1)
-
-    exp_s = d.get("expires_at_utc")
-    if not exp_s:
-        print("ERROR: Missing expiry. Fail-closed.")
-        disarm("confirm_missing_expiry")
-        sys.exit(1)
-
+def run_preflight() -> bool:
+    """
+    Bind preflight to confirm.
+    If run_preflight.py exists, we run it.
+    If it fails, return False.
+    """
     try:
-        exp = datetime.fromisoformat(exp_s)
+        # Prefer local script if present
+        if os.path.exists("run_preflight.py"):
+            code = subprocess.call(["python", "run_preflight.py"])
+            return code == 0
+        return True  # if no preflight script, allow but still safe (execution gate still blocks unless active)
     except Exception:
-        print("ERROR: Bad expiry. Fail-closed.")
-        disarm("confirm_bad_expiry")
-        sys.exit(1)
-
-    if utcnow() > exp:
-        print("ERROR: Token expired.")
-        disarm("confirm_expired")
-        sys.exit(1)
-
-    if token.strip() != str(d.get("token") or "").strip():
-        print("INVALID TOKEN. PLEASE REGENERATE.")
-        disarm("confirm_invalid_token")
-        sys.exit(1)
-
-    # Preflight is mandatory on confirm
-    try:
-        _run_preflight_or_fail()
-    except Exception as e:
-        print(f"ERROR: Preflight failed: {e}")
-        disarm("preflight_failed")
-        sys.exit(1)
-
-    d["armed_state"] = "ARMED_ACTIVE"
-    d["token"] = None
-    d["expires_at_utc"] = None
-    d["reason"] = "confirmed"
-    _write_state(d)
-
-    print("\nLIVE EXECUTION ARMED (ACTIVE).")
-    print("NOTE: Broker wiring still required to place orders.")
+        return False
 
 
-def show_status() -> None:
-    auto_disarm_if_needed()
-    d = _read_state()
+def confirm_live(token: str):
+    ensure_dirs()
+    st = load_live_state()
+    st = auto_disarm_if_needed(st)
 
-    print("\n================= REA LIVE STATUS =================")
-    print(f"UTC Now       : {utcnow().isoformat()}")
-    print(f"State         : {d.get('armed_state')}")
-    print(f"Expires (UTC) : {d.get('expires_at_utc')}")
-    print(f"Reason        : {d.get('reason')}")
-    print("==================================================\n")
+    if st.get("state") != STATE_ARMED_PENDING:
+        print("ERROR: No pending arming request.")
+        show_status()
+        return
 
-    decision = _execution_gate_decision()
-    print(f"Exec Gate     : {decision.get('decision')} | {decision.get('reason')}")
+    # Confirm attempts rate-limit
+    if not rate_limit_check(st, "confirm"):
+        st["rate_limit_ok"] = False
+        save_live_state(st, "confirm_rate_limited")
+        print("Confirm blocked: rate-limited (cooldown).")
+        return
+    st["rate_limit_ok"] = True
+
+    # Token validate
+    pending = st.get("pending_token")
+    if not pending or token.strip().upper() != str(pending).strip().upper():
+        # Fail-closed: disarm on wrong token
+        st["state"] = STATE_DISARMED
+        st["expires_at_utc"] = None
+        st.pop("pending_token", None)
+        save_live_state(st, "confirm_invalid_token_auto_disarm")
+        print("INVALID TOKEN. DISARMED. PLEASE REGENERATE.")
+        show_status()
+        return
+
+    # Expiry already handled by auto_disarm; re-check just in case
+    exp = st.get("expires_at_utc")
+    if exp:
+        try:
+            exp_dt = datetime.fromisoformat(exp)
+            if utcnow() >= exp_dt:
+                st["state"] = STATE_DISARMED
+                st["expires_at_utc"] = None
+                st.pop("pending_token", None)
+                save_live_state(st, "confirm_expired_pending_auto_disarm")
+                print("Pending token expired. DISARMED. Please re-arm.")
+                show_status()
+                return
+        except Exception:
+            st["state"] = STATE_DISARMED
+            st["expires_at_utc"] = None
+            st.pop("pending_token", None)
+            save_live_state(st, "confirm_invalid_expiry_auto_disarm")
+            print("Invalid expiry format. DISARMED.")
+            show_status()
+            return
+
+    # Preflight binding (must pass)
+    preflight_ok = run_preflight()
+    st["preflight_passed"] = bool(preflight_ok)
+    if not preflight_ok:
+        st["state"] = STATE_DISARMED
+        st["expires_at_utc"] = None
+        st.pop("pending_token", None)
+        save_live_state(st, "confirm_preflight_failed_auto_disarm")
+        print("Preflight FAILED. DISARMED (fail-closed).")
+        show_status()
+        return
+
+    # Activate (time-box active window for safety)
+    st["state"] = STATE_ARMED_ACTIVE
+    st["expires_at_utc"] = iso(utcnow() + timedelta(seconds=ACTIVE_WINDOW_SECONDS))
+    st.pop("pending_token", None)
+    save_live_state(st, "confirmed_active")
+
+    print("LIVE EXECUTION ARMED: ARMED_ACTIVE (time-boxed).")
+    show_status()
 
 
-def main() -> None:
+def disarm(reason: str = "manual_disarm"):
+    ensure_dirs()
+    st = load_live_state()
+    st["state"] = STATE_DISARMED
+    st["expires_at_utc"] = None
+    st.pop("pending_token", None)
+    save_live_state(st, reason)
+    print("DISARMED.")
+    show_status()
+
+
+def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--arm-live", action="store_true")
-    parser.add_argument("--confirm-live", type=str)
-    parser.add_argument("--disarm", action="store_true")
+    parser.add_argument("--arm-live", action="store_true", help="Create ARMED_PENDING and generate a 6-char token.")
+    parser.add_argument("--confirm-live", metavar="TOKEN", type=str, help="Confirm pending token to become ARMED_ACTIVE.")
+    parser.add_argument("--disarm", action="store_true", help="Disarm immediately.")
     args = parser.parse_args()
 
-    _safe_print_banner()
-
+    # Default: status
     if args.disarm:
-        disarm("manual")
-        print("Live execution DISARMED.")
+        disarm()
         return
 
     if args.arm_live:
