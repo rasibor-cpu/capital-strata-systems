@@ -2,10 +2,11 @@
 Gates Registry – Adapter-Based (Fail-Closed)
 ===========================================
 
-All gates are loaded via adapters to avoid brittle imports.
+All execution safety checks are loaded via adapters.
 
 Order matters:
-- First BLOCK becomes the primary_reason in the envelope.
+- Gates are evaluated in sequence
+- First BLOCK becomes the primary_reason in the envelope
 """
 
 from __future__ import annotations
@@ -17,17 +18,21 @@ from engine.adapters.regime_gate_adapter import evaluate_regime
 from engine.adapters.volatility_gate_adapter import evaluate_volatility
 from engine.adapters.liquidity_gate_adapter import evaluate_liquidity
 from engine.adapters.slippage_guard_adapter import evaluate_slippage
+from engine.adapters.risk_guard_adapter import evaluate_risk
 
 GateFn = Callable[[GateInputs], Any]
 
 
 def get_configured_gates() -> Dict[str, GateFn]:
     return {
+        # Market condition gates
         "regime_gate": evaluate_regime,
         "volatility_gate": evaluate_volatility,
+
+        # Execution quality gates
         "liquidity_gate": evaluate_liquidity,
         "slippage_guard": evaluate_slippage,
 
-        # Next adapter:
-        # "risk_guard": evaluate_risk,
+        # Portfolio protection gate
+        "risk_guard": evaluate_risk,
     }
