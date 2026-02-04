@@ -1,42 +1,48 @@
 # ops/create_user.py
-# Usage:
-#   python ops\create_user.py <user_id> "<display_name>" <role> <unit_code> <home_branch> [temp_password]
+# REA Capital Trading Engine — User Creation Utility
 #
-# Example:
-#   python ops\create_user.py 1369 "Robert Asibor" super_user CORE main CHANGE_ME_NOW_1369
-#
-# Notes:
-# - temp_password is REQUIRED by the underlying create_user() API.
-# - If omitted, we auto-generate a temp password and print it ONCE.
+# This script is executed as a top-level tool.
+# We explicitly bind the project root to sys.path
+# so that backend.app.* imports are always resolvable.
 
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 import secrets
 import string
-import sys
 
+# ---------------------------------------------------------------------
+# HARD BIND PROJECT ROOT (authoritative, production-safe for ops tools)
+# ---------------------------------------------------------------------
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+# ---------------------------------------------------------------------
+# Imports (now guaranteed to resolve)
+# ---------------------------------------------------------------------
 from backend.app.security.user_registry import create_user
 
 
-def _gen_temp_password(length: int = 14) -> str:
-    alphabet = string.ascii_uppercase + string.ascii_lowercase + string.digits
-    # Avoid punctuation to reduce shell/typing issues
+def _generate_temp_password(length: int = 14) -> str:
+    alphabet = string.ascii_letters + string.digits
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
 def main() -> int:
-    p = argparse.ArgumentParser()
-    p.add_argument("user_id", type=int)
-    p.add_argument("display_name", type=str)
-    p.add_argument("role", type=str)       # e.g. super_user, admin, operator
-    p.add_argument("unit_code", type=str)  # e.g. CORE, TRADING, OPS, RISK
-    p.add_argument("home_branch", type=str)
-    p.add_argument("temp_password", nargs="?", default=None)
+    parser = argparse.ArgumentParser(description="Create REA system user")
+    parser.add_argument("user_id", type=int)
+    parser.add_argument("display_name", type=str)
+    parser.add_argument("role", type=str)
+    parser.add_argument("unit_code", type=str)
+    parser.add_argument("home_branch", type=str)
+    parser.add_argument("temp_password", nargs="?", default=None)
 
-    args = p.parse_args()
+    args = parser.parse_args()
 
-    temp_pw = args.temp_password or _gen_temp_password()
+    temp_pw = args.temp_password or _generate_temp_password()
 
     try:
         create_user(
@@ -45,22 +51,23 @@ def main() -> int:
             role=args.role,
             unit_code=args.unit_code,
             home_branch=args.home_branch,
-            temp_password=temp_pw,   # ✅ FIX: pass required argument
+            temp_password=temp_pw,
         )
-    except Exception as e:
-        print(f"USER_CREATE_FAIL | reason={e}")
+    except Exception as exc:
+        print(f"USER_CREATE_FAIL | reason={exc}")
         return 2
 
     print("USER_CREATED")
-    print(f"- user_id:       {args.user_id}")
-    print(f"- display_name:  {args.display_name}")
-    print(f"- role:          {args.role}")
-    print(f"- unit_code:     {args.unit_code}")
-    print(f"- home_branch:   {args.home_branch}")
+    print(f"- user_id:      {args.user_id}")
+    print(f"- display_name: {args.display_name}")
+    print(f"- role:         {args.role}")
+    print(f"- unit_code:    {args.unit_code}")
+    print(f"- home_branch:  {args.home_branch}")
     print("")
     print("TEMP_PASSWORD_ISSUED (one-time display):")
     print(temp_pw)
     print("ACTION_REQUIRED: user must change password on first login.")
+
     return 0
 
 
