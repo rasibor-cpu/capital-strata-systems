@@ -65,10 +65,22 @@ runtime/
 !engine/adapters/regime_gate_adapter.py
 # --- REA Phase-1: allow tracked tests + decision envelope ---
 !engine/test_execution_decision_runner.py
+!engine/execution_decision.py# --- GOVERNANCE CRITICAL (explicitly tracked) ---
+!engine/execution_firewall.py
 !engine/execution_decision.py
+!engine/execution_router.py
+# --- GOVERNANCE CRITICAL (explicitly tracked) ---
+!engine/execution_firewall.py
+!engine/execution_router.py
+# ================================
+# GOVERNANCE CRITICAL (TRACKED)
+# ================================
 
-
-
-
-
+!engine/
+!engine/execution/
+!engine/execution/execution_firewall.py
+# ================================
+# GOVERNANCE CRITICAL (TRACKED)
+# ================================
+!engine/execution_firewall.py
 tatus
