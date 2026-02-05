@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>REA – Login</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; max-width: 720px; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; }
+    label { display:block; margin-top: 12px; }
+    input { width: 100%; padding: 10px; margin-top: 6px; }
+    button { margin-top: 14px; padding: 10px 14px; cursor: pointer; }
+    pre { background: #f7f7f7; padding: 12px; border-radius: 8px; overflow: auto; }
+    .row { display:flex; gap: 10px; flex-wrap: wrap; }
+    .row button { flex: 1; }
+    .muted { color: #666; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h2>REA Capital – Trading Engine</h2>
+  <p class="muted">Standalone login UI (Option 2). This page calls your local API to get a session token.</p>
+
+  <div class="card">
+    <label>API Base URL</label>
+    <input id="baseUrl" value="http://127.0.0.1:8000" />
+
+    <label>Username</label>
+    <input id="username" value="robert" />
+
+    <label>Password</label>
+    <input id="password" type="password" value="123456" />
+
+    <div class="row">
+      <button id="loginBtn">Login</button>
+      <button id="whoamiBtn">Who am I?</button>
+      <button id="logoutBtn">Logout</button>
+    </div>
+
+    <h3>Token</h3>
+    <pre id="tokenBox">(not logged in)</pre>
+
+    <div class="row">
+      <button id="copyBtn">Copy token</button>
+      <button id="copyBearerBtn">Copy Authorization header</button>
+    </div>
+
+    <h3>Output</h3>
+    <pre id="out"></pre>
+  </div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+
+  function setOut(obj) {
+    $("out").textContent = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
+  }
+
+  function getToken() {
+    return localStorage.getItem("rea_token") || "";
+  }
+
+  function setToken(t) {
+    if (t) localStorage.setItem("rea_token", t);
+    else localStorage.removeItem("rea_token");
+    $("tokenBox").textContent = t ? t : "(not logged in)";
+  }
+
+  setToken(getToken());
+
+  async function postJson(url, payload, token="") {
+    const headers = { "Content-Type": "application/json" };
+    if (token) headers["Authorization"] = "Bearer " + token;
+    const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(payload) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw { status: res.status, data };
+    return data;
+  }
+
+  async function getJson(url, token="") {
+    const headers = {};
+    if (token) headers["Authorization"] = "Bearer " + token;
+    const res = await fetch(url, { method: "GET", headers });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw { status: res.status, data };
+    return data;
+  }
+
+  $("loginBtn").onclick = async () => {
+    try {
+      const base = $("baseUrl").value.trim();
+      const payload = { username: $("username").value.trim(), password: $("password").value };
+      const data = await postJson(base + "/auth/login", payload);
+      setToken(data.token);
+      setOut({ ok: true, login: data });
+    } catch (e) {
+      setOut({ ok: false, error: e });
+    }
+  };
+
+  $("whoamiBtn").onclick = async () => {
+    try {
+      const base = $("baseUrl").value.trim();
+      const data = await getJson(base + "/auth/me", getToken());
+      setOut({ ok: true, me: data });
+    } catch (e) {
+      setOut({ ok: false, error: e });
+    }
+  };
+
+  $("logoutBtn").onclick = async () => {
+    try {
+      const base = $("baseUrl").value.trim();
+      const data = await postJson(base + "/auth/logout", {}, getToken());
+      setToken("");
+      setOut({ ok: true, logout: data });
+    } catch (e) {
+      setOut({ ok: false, error: e });
+    }
+  };
+
+  $("copyBtn").onclick = async () => {
+    const t = getToken();
+    if (!t) return setOut("No token to copy.");
+    await navigator.clipboard.writeText(t);
+    setOut("Copied token to clipboard.");
+  };
+
+  $("copyBearerBtn").onclick = async () => {
+    const t = getToken();
+    if (!t) return setOut("No token to copy.");
+    await navigator.clipboard.writeText("Authorization: Bearer " + t);
+    setOut("Copied Authorization header to clipboard.");
+  };
+</script>
+</body>
+</html>

@@ -1,101 +1,84 @@
-# backend/app/ledger_registry.py
-# Authoritative Ledger Registry
-# Balances are DERIVED from immutable journal entries only
+"""
+Ledger Registry – REA Capital Trading Engine
+--------------------------------------------
 
-from datetime import datetime
-from collections import defaultdict
-from typing import Dict, List
+Purpose:
+- Provide a stable API surface for ledger/balance lookups used by limits & reporting.
+- Fix import contracts expected by other modules (credit_limits.py).
 
-# In-memory immutable journal store (later DB-backed)
-_JOURNAL: List[dict] = []
+Phase-1 approach:
+- Implement get_all_balances() with fail-closed behavior:
+    - If no ledger backend is configured/available, return {}.
+- Provide optional hooks to integrate with your existing ledger/reporting store later.
 
-# Cached balances (derived, never manually edited)
-_BALANCE_CACHE: Dict[str, float] = defaultdict(float)
+This avoids server-start crashes while preserving safety (no fake balances).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Dict, Any, Optional
+import os
 
 
-def _sub_account_id(base_account_no: str, account_type_code: str, currency: str) -> str:
-    return f"{base_account_no}-{account_type_code}-{currency}"
-
-
-def post_journal_entry(
-    *,
-    ticket_id: str,
-    user_id: str,
-    side: str,  # "DR" or "CR"
-    base_account_no: str,
-    account_type_code: str,
-    currency: str,
-    amount: float,
-    narrative: str,
-) -> dict:
+@dataclass(frozen=True)
+class BalanceSnapshot:
     """
-    Append an immutable journal entry and derive new balance.
+    A minimal balance snapshot container.
+
+    balances: mapping like {"USD": 1000.0, "NGN": 250000.0}
+    meta: optional metadata (timestamp, source, run_id, etc.)
     """
-
-    if side not in ("DR", "CR"):
-        raise ValueError("Invalid journal side")
-
-    if amount <= 0:
-        raise ValueError("Journal amount must be positive")
-
-    sub_account = _sub_account_id(base_account_no, account_type_code, currency)
-
-    delta = amount if side == "DR" else -amount
-
-    journal_id = f"J-{len(_JOURNAL) + 1:06d}"
-
-    entry = {
-        "journal_id": journal_id,
-        "ticket_id": ticket_id,
-        "user_id": user_id,
-        "posted_at": datetime.utcnow().isoformat(),
-        "side": side,
-        "base_account_no": base_account_no,
-        "account_type_code": account_type_code,
-        "currency": currency,
-        "sub_account_id": sub_account,
-        "delta": delta,
-        "narrative": narrative,
-    }
-
-    _JOURNAL.append(entry)
-
-    # Derive balance strictly via journal delta
-    _BALANCE_CACHE[sub_account] += delta
-
-    return {
-        "journal_id": journal_id,
-        "sub_account_id": sub_account,
-        "delta": delta,
-        "new_balance": _BALANCE_CACHE[sub_account],
-    }
+    balances: Dict[str, float]
+    meta: Dict[str, Any]
 
 
-def get_sub_account_balance(
-    base_account_no: str,
-    account_type_code: str,
-    currency: str,
-) -> float:
+def _safe_float(x: Any) -> Optional[float]:
+    try:
+        return float(x)
+    except Exception:
+        return None
+
+
+def get_all_balances(*, fail_closed: bool = True) -> Dict[str, float]:
     """
-    Read-only derived balance.
+    Return a dict of all known balances by currency.
+
+    Phase-1 default:
+    - If no backend exists, return {}.
+    - Returning {} is fail-closed because callers should BLOCK or downgrade
+      when balances are missing (no risk scaling on unknown equity).
+
+    If fail_closed=False, still returns {} (we do NOT invent balances).
     """
-    sub_account = _sub_account_id(base_account_no, account_type_code, currency)
-    return _BALANCE_CACHE.get(sub_account, 0.0)
+    # Optional future env-based wiring (kept non-breaking):
+    # Example: REA_LEDGER_BALANCES_JSON='{"USD": 1000, "NGN": 250000}'
+    raw = os.getenv("REA_LEDGER_BALANCES_JSON", "").strip()
+    if raw:
+        # minimal JSON parse without adding hard dependencies
+        try:
+            import json  # stdlib
+            obj = json.loads(raw)
+            if isinstance(obj, dict):
+                out: Dict[str, float] = {}
+                for k, v in obj.items():
+                    f = _safe_float(v)
+                    if f is not None:
+                        out[str(k).strip().upper()] = f
+                return out
+        except Exception:
+            # fail closed => fall through to {}
+            pass
+
+    return {}
 
 
-def get_all_balances_for_customer(base_account_no: str) -> Dict[str, float]:
+def get_balance(currency: str, *, fail_closed: bool = True) -> Optional[float]:
     """
-    Returns all sub-account balances for a customer.
+    Convenience getter for a single currency.
+    Returns None if missing.
     """
-    return {
-        k: v
-        for k, v in _BALANCE_CACHE.items()
-        if k.startswith(f"{base_account_no}-")
-    }
-
-
-def get_full_journal() -> List[dict]:
-    """
-    Immutable journal view.
-    """
-    return list(_JOURNAL)
+    c = (currency or "").strip().upper()
+    if not c:
+        return None
+    return get_all_balances(fail_closed=fail_closed).get(c)
