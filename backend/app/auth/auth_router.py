@@ -1,10 +1,9 @@
 """
 Auth Router – REA Capital Trading Engine (Phase 1)
 
-Endpoints:
-- POST /auth/login  -> returns token (TTL)
-- GET  /auth/me     -> validates token, returns identity/roles
-- POST /auth/logout -> revokes token
+Correct workflow (2-step):
+1) POST /auth/login (username+password) -> returns 6-digit challenge code
+2) POST /auth/verify (challenge code)   -> returns 6-digit session token (used for LIVE)
 """
 
 from __future__ import annotations
@@ -31,7 +30,18 @@ class LoginRequest(BaseModel):
 
 
 class LoginResponse(BaseModel):
-    token: str
+    challenge_code: str  # 6 digits
+    expires_in_minutes: int
+    username: str
+    roles: List[str]
+
+
+class VerifyRequest(BaseModel):
+    challenge_code: str = Field(..., min_length=6, max_length=6)
+
+
+class VerifyResponse(BaseModel):
+    token: str  # 6-digit session token
     token_type: str = "bearer"
     expires_in_minutes: int
     username: str
@@ -58,12 +68,32 @@ def login(payload: LoginRequest) -> LoginResponse:
     password = payload.password
 
     if username != REA_SUPERUSER or password != REA_SUPERPASS:
-        raise HTTPException(status_code=401, detail="Invalid credentials.")
+        raise HTTPException(status_code=401, detail="Invalid username/password.")
 
     roles = ["superuser"]
-    session = token_store.issue(username=username, roles=roles, ttl_minutes=REA_TOKEN_TTL_MINUTES)
+    challenge = token_store.issue_challenge(username=username, roles=roles, ttl_minutes=REA_TOKEN_TTL_MINUTES)
 
     return LoginResponse(
+        challenge_code=challenge.code,
+        expires_in_minutes=REA_TOKEN_TTL_MINUTES,
+        username=challenge.username,
+        roles=challenge.roles,
+    )
+
+
+@router.post("/verify", response_model=VerifyResponse)
+def verify(payload: VerifyRequest) -> VerifyResponse:
+    code = (payload.challenge_code or "").strip()
+    if (not code.isdigit()) or len(code) != 6:
+        raise HTTPException(status_code=400, detail="Challenge code must be exactly 6 digits.")
+
+    challenge = token_store.consume_challenge(code)
+    if challenge is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired challenge code.")
+
+    session = token_store.issue_session(username=challenge.username, roles=challenge.roles, ttl_minutes=REA_TOKEN_TTL_MINUTES)
+
+    return VerifyResponse(
         token=session.token,
         expires_in_minutes=REA_TOKEN_TTL_MINUTES,
         username=session.username,
@@ -74,9 +104,9 @@ def login(payload: LoginRequest) -> LoginResponse:
 @router.get("/me")
 def me(authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
     token = _extract_bearer(authorization)
-    info = token_store.validate(token or "")
+    info = token_store.validate_session(token or "")
     if info is None:
-        raise HTTPException(status_code=401, detail="Invalid or expired token.")
+        raise HTTPException(status_code=401, detail="Invalid or expired session token.")
 
     return {
         "username": info.username,
