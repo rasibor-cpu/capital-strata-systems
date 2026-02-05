@@ -1,50 +1,70 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+from typing import Any, Dict
+
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, RedirectResponse, JSONResponse
 
-app = FastAPI(title="REA Capital – Trading Engine", version="phase-1")
-
-# CORS for local dev (still fine)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # local dev only
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# --- Auth router ---
-AUTH_LOADED = False
-AUTH_ERROR = None
+# Existing imports (keep yours if present)
+# If your file already imports auth router elsewhere, keep it.
 try:
-    from backend.app.auth.auth_router import router as auth_router  # type: ignore
-    app.include_router(auth_router)
-    AUTH_LOADED = True
+    from backend.app.auth.auth_router import router as auth_router
+    AUTH_OK = True
+    AUTH_ERR = None
 except Exception as e:
-    AUTH_ERROR = repr(e)
+    auth_router = None
+    AUTH_OK = False
+    AUTH_ERR = repr(e)
 
+app = FastAPI(title="REA Capital – Trading Engine")
+
+# -----------------------------
+# UI file locations
+# -----------------------------
+REPO_ROOT = Path(__file__).resolve().parents[2]  # ...\REA-capital-trading-engine
+UI_DIR = REPO_ROOT / "ui"
+
+LOGIN_HTML = UI_DIR / "login.html"
+MENU_HTML = UI_DIR / "menu.html"
+
+
+# -----------------------------
+# API routes
+# -----------------------------
 @app.get("/health")
-def health() -> dict:
-    return {"status": "ok", "auth_loaded": AUTH_LOADED, "auth_error": AUTH_ERROR}
+def health() -> Dict[str, Any]:
+    return {"status": "ok", "auth_loaded": bool(AUTH_OK), "auth_error": AUTH_ERR}
+
 
 @app.get("/routes")
-def routes() -> dict:
-    return {
-        "auth_loaded": AUTH_LOADED,
-        "auth_error": AUTH_ERROR,
-        "paths": sorted({getattr(r, "path", "") for r in app.router.routes}),
-    }
+def routes() -> Dict[str, Any]:
+    paths = sorted([r.path for r in app.routes if hasattr(r, "path")])
+    return {"auth_loaded": bool(AUTH_OK), "auth_error": AUTH_ERR, "paths": paths}
 
-@app.get("/login", response_class=HTMLResponse)
-def login_page() -> str:
-    # Serve UI over HTTP to avoid file:// fetch issues
-    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    ui_path = os.path.join(repo_root, "ui", "login.html")
-    try:
-        with open(ui_path, "r", encoding="utf-8") as f:
-            return f.read()
-    except Exception as e:
-        return f"<h3>UI file not found</h3><pre>{ui_path}\n{e}</pre>"
+
+if auth_router is not None:
+    app.include_router(auth_router)
+
+
+# -----------------------------
+# UI routes (seamless navigation)
+# -----------------------------
+@app.get("/")
+def root():
+    return RedirectResponse(url="/login")
+
+
+@app.get("/login")
+def login_page():
+    if not LOGIN_HTML.exists():
+        return JSONResponse(status_code=404, content={"detail": f"Missing UI file: {LOGIN_HTML}"})
+    return FileResponse(str(LOGIN_HTML))
+
+
+@app.get("/menu")
+def menu_page():
+    if not MENU_HTML.exists():
+        return JSONResponse(status_code=404, content={"detail": f"Missing UI file: {MENU_HTML}"})
+    return FileResponse(str(MENU_HTML))

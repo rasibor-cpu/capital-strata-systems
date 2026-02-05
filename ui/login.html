@@ -5,23 +5,26 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>REA – Login</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 24px; max-width: 760px; }
-    .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; }
-    label { display:block; margin-top: 12px; }
-    input { width: 100%; padding: 10px; margin-top: 6px; }
+    body { font-family: Arial, sans-serif; margin: 24px; max-width: 820px; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; }
+    label { display:block; margin-top: 12px; font-weight: 600; }
+    input { width: 100%; padding: 10px; margin-top: 6px; box-sizing: border-box; }
     button { margin-top: 14px; padding: 10px 14px; cursor: pointer; }
-    pre { background: #f7f7f7; padding: 12px; border-radius: 8px; overflow: auto; }
     .row { display:flex; gap: 10px; flex-wrap: wrap; }
     .row button { flex: 1; }
     .muted { color: #666; font-size: 13px; }
     .ok { color: #0a7; font-weight: 700; }
     .bad { color: #c00; font-weight: 700; }
+    pre { background: #f7f7f7; padding: 12px; border-radius: 8px; overflow: auto; }
+    .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; background:#efefef; font-size:12px; margin-left:8px; }
   </style>
 </head>
 <body>
   <h2>REA Capital – Trading Engine</h2>
   <p class="muted">
-    Option A (Auto): Login runs a 2-step flow automatically (login → verify) and stores a 6-digit session token.
+    Seamless login workflow:
+    <span class="pill">Step 1</span> Username + Password → Get 6-digit Token
+    <span class="pill">Step 2</span> Enter Token → Validate → Enter Menu
   </p>
 
   <div class="card">
@@ -29,24 +32,28 @@
     <input id="baseUrl" value="http://127.0.0.1:8000" />
 
     <label>Username</label>
-    <input id="username" value="robert" />
+    <input id="username" value="robert" autocomplete="username" />
 
     <label>Password</label>
-    <input id="password" type="password" value="123456" />
+    <input id="password" type="password" value="123456" autocomplete="current-password" />
+
+    <label>6-digit Token (issued after Step 1)</label>
+    <input id="token" inputmode="numeric" maxlength="6" placeholder="e.g. 936792" />
 
     <div class="row">
-      <button id="loginBtn">Login (auto)</button>
+      <button id="getTokenBtn">1) Get Token</button>
+      <button id="validateBtn">2) Validate & Enter</button>
       <button id="whoamiBtn">Who am I?</button>
       <button id="logoutBtn">Logout</button>
     </div>
 
     <p id="statusLine" class="muted"></p>
 
-    <h3>Session Token (6 digits)</h3>
-    <pre id="tokenBox">(not logged in)</pre>
+    <h3>Session Token</h3>
+    <pre id="tokenBox">(none)</pre>
 
     <h3>Output</h3>
-    <pre id="out"></pre>
+    <pre id="out">{}</pre>
   </div>
 
 <script>
@@ -62,17 +69,18 @@
     el.className = ok === true ? "ok" : ok === false ? "bad" : "muted";
   }
 
-  function getSessionToken() {
+  function getStoredSessionToken() {
     return localStorage.getItem("rea_session_token") || "";
   }
 
-  function setSessionToken(t) {
+  function setStoredSessionToken(t) {
     if (t) localStorage.setItem("rea_session_token", t);
     else localStorage.removeItem("rea_session_token");
-    $("tokenBox").textContent = t ? t : "(not logged in)";
+    $("tokenBox").textContent = t ? t : "(none)";
   }
 
-  setSessionToken(getSessionToken());
+  // init
+  setStoredSessionToken(getStoredSessionToken());
 
   async function readJsonSafe(res) {
     const text = await res.text().catch(() => "");
@@ -111,68 +119,111 @@
     return data;
   }
 
-  // AUTO FLOW:
-  // 1) POST /auth/login -> returns {challenge_code}
-  // 2) POST /auth/verify -> returns {token} (session token)
-  $("loginBtn").onclick = async () => {
+  function mustBe6Digits(x) {
+    return typeof x === "string" && /^\d{6}$/.test(x);
+  }
+
+  // STEP 1: username/password -> /auth/login -> challenge_code
+  $("getTokenBtn").onclick = async () => {
     try {
-      setStatus("Logging in…", null);
+      setStatus("Requesting token…", null);
       const base = $("baseUrl").value.trim();
 
-      const loginResp = await postJson(base + "/auth/login", {
+      const resp = await postJson(base + "/auth/login", {
         username: $("username").value.trim(),
         password: $("password").value
       });
 
-      const challenge = loginResp.challenge_code;
-      if (!challenge) throw { message: "No challenge_code returned from /auth/login", loginResp };
+      const challenge = String(resp.challenge_code || "").trim();
+      if (!mustBe6Digits(challenge)) {
+        setStatus("Login OK but token not returned. Check backend response.", false);
+        setOut({ ok:false, note:"Missing/invalid challenge_code", resp });
+        return;
+      }
 
-      setStatus("Verifying challenge…", null);
+      // Show token to user to type (OTP-style)
+      $("token").value = challenge;
 
-      const verifyResp = await postJson(base + "/auth/verify", {
-        challenge_code: String(challenge).trim()
-      });
-
-      if (!verifyResp.token) throw { message: "No session token returned from /auth/verify", verifyResp };
-
-      setSessionToken(verifyResp.token);
-      setStatus("Login OK. Session token issued.", true);
-
-      setOut({
-        ok: true,
-        login_step1: loginResp,
-        verify_step2: verifyResp
-      });
+      setStatus("Token issued. Now click: Validate & Enter.", true);
+      setOut({ ok:true, step:"login", challenge_code: challenge, raw: resp });
     } catch (e) {
-      setStatus("Login failed.", false);
-      setOut({ ok: false, error: e });
+      setStatus("Get Token failed.", false);
+      setOut({ ok:false, error:e });
+    }
+  };
+
+  // STEP 2: token -> /auth/verify -> session token -> store -> redirect to /menu
+  $("validateBtn").onclick = async () => {
+    try {
+      const base = $("baseUrl").value.trim();
+      const challenge = $("token").value.trim();
+
+      if (!mustBe6Digits(challenge)) {
+        setStatus("Token must be exactly 6 digits.", false);
+        return;
+      }
+
+      setStatus("Validating token…", null);
+
+      const verify = await postJson(base + "/auth/verify", { challenge_code: challenge });
+
+      const sessionToken = String(verify.token || "").trim();
+      if (!mustBe6Digits(sessionToken)) {
+        setStatus("Verify failed: session token not returned.", false);
+        setOut({ ok:false, note:"Missing/invalid verify.token", verify });
+        return;
+      }
+
+      setStoredSessionToken(sessionToken);
+
+      // sanity check identity
+      const me = await getJson(base + "/auth/me", sessionToken);
+
+      setStatus("Validated. Entering system…", true);
+      setOut({ ok:true, step:"verify", session_token: sessionToken, me, raw: verify });
+
+      // Seamless transition
+      window.location.href = "/menu";
+
+    } catch (e) {
+      setStatus("Validate failed.", false);
+      setOut({ ok:false, error:e });
     }
   };
 
   $("whoamiBtn").onclick = async () => {
     try {
-      setStatus("Checking session…", null);
       const base = $("baseUrl").value.trim();
-      const me = await getJson(base + "/auth/me", getSessionToken());
+      const t = getStoredSessionToken();
+      if (!mustBe6Digits(t)) {
+        setStatus("No valid session token stored. Login first.", false);
+        return;
+      }
+      setStatus("Checking session…", null);
+      const me = await getJson(base + "/auth/me", t);
       setStatus("Session valid.", true);
-      setOut({ ok: true, me });
+      setOut({ ok:true, me });
     } catch (e) {
       setStatus("Session invalid.", false);
-      setOut({ ok: false, error: e });
+      setOut({ ok:false, error:e });
     }
   };
 
   $("logoutBtn").onclick = async () => {
     try {
-      setStatus("Logging out…", null);
       const base = $("baseUrl").value.trim();
-      const resp = await postJson(base + "/auth/logout", {}, getSessionToken());
-      setSessionToken("");
+      const t = getStoredSessionToken();
+      if (mustBe6Digits(t)) {
+        // best-effort server logout
+        try { await postJson(base + "/auth/logout", {}, t); } catch (_) {}
+      }
+      setStoredSessionToken("");
+      $("token").value = "";
       setStatus("Logged out.", true);
-      setOut({ ok: true, logout: resp });
+      setOut({ ok:true });
     } catch (e) {
       setStatus("Logout failed.", false);
-      setOut({ ok: false, error: e });
+      setOut({ ok:false, error:e });
     }
   };
 </script>

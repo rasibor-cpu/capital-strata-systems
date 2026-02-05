@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>REA – Menu</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; max-width: 900px; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; }
+    .muted { color: #666; font-size: 13px; }
+    .row { display:flex; gap: 12px; flex-wrap: wrap; margin-top: 10px; }
+    .tile {
+      flex: 1;
+      min-width: 240px;
+      border: 1px solid #e1e1e1;
+      border-radius: 12px;
+      padding: 14px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .tile:hover { background: #f7f7f7; }
+    .title { font-weight: 700; margin-bottom: 6px; }
+    .tag { display:inline-block; font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #efefef; margin-left: 8px; }
+    pre { background: #f7f7f7; padding: 12px; border-radius: 8px; overflow:auto; }
+    button { padding: 10px 14px; cursor: pointer; margin-right: 8px; }
+  </style>
+</head>
+<body>
+  <h2>REA Capital – Trading Engine</h2>
+  <p class="muted">This menu is role-based. Your session token is stored for the duration of your session until you logout.</p>
+
+  <div class="card">
+    <div id="who" class="muted">Loading identity…</div>
+    <div style="margin-top:12px;">
+      <button id="logoutBtn">Logout</button>
+    </div>
+
+    <h3 style="margin-top:18px;">Your Menu</h3>
+    <div id="menu" class="row"></div>
+
+    <h3 style="margin-top:18px;">Output</h3>
+    <pre id="out">{}</pre>
+  </div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+
+  function setOut(obj) { $("out").textContent = JSON.stringify(obj, null, 2); }
+
+  function getToken() { return localStorage.getItem("rea_session_token") || ""; }
+  function clearToken() { localStorage.removeItem("rea_session_token"); }
+
+  async function readJsonSafe(res) {
+    const text = await res.text().catch(() => "");
+    try { return text ? JSON.parse(text) : {}; } catch { return { raw: text }; }
+  }
+
+  async function getJson(url, bearer="") {
+    const headers = {};
+    if (bearer) headers["Authorization"] = "Bearer " + bearer;
+    const res = await fetch(url, { method: "GET", headers });
+    const data = await readJsonSafe(res);
+    if (!res.ok) throw { status: res.status, data };
+    return data;
+  }
+
+  function hasRole(roles, role) {
+    return Array.isArray(roles) && roles.includes(role);
+  }
+
+  function renderMenu(me) {
+    const roles = me.roles || [];
+    $("menu").innerHTML = "";
+
+    const items = [
+      { id:"dashboard", title:"Dashboard", badge:"Read", allow:true,
+        desc:"System status and read-only snapshot." },
+      { id:"engine", title:"Engine Console", badge:"Operator",
+        allow: hasRole(roles,"superuser") || hasRole(roles,"operator"),
+        desc:"Start DRY-RUN, view signals, health checks." },
+      { id:"risk", title:"Risk Controls", badge:"Risk",
+        allow: hasRole(roles,"superuser") || hasRole(roles,"risk"),
+        desc:"Limits, cool-downs, overrides (Phase 2)." },
+      { id:"ledger", title:"Ledger / Statements", badge:"Finance",
+        allow: hasRole(roles,"superuser") || hasRole(roles,"finance") || hasRole(roles,"auditor"),
+        desc:"Trial balance, P&L, reports." },
+      { id:"admin", title:"Admin", badge:"Admin",
+        allow: hasRole(roles,"superuser"),
+        desc:"User/roles management (Phase 3)." }
+    ];
+
+    const allowed = items.filter(x => x.allow);
+    if (!allowed.length) {
+      $("menu").innerHTML = "<div class='muted'>No features assigned to this user.</div>";
+      return;
+    }
+
+    for (const it of allowed) {
+      const tile = document.createElement("div");
+      tile.className = "tile";
+      tile.onclick = () => setOut({ selected: it.id, note: "Next we wire each screen + backend enforcement." });
+      tile.innerHTML = `
+        <div class="title">${it.title}<span class="tag">${it.badge}</span></div>
+        <div class="muted">${it.desc}</div>
+      `;
+      $("menu").appendChild(tile);
+    }
+  }
+
+  async function boot() {
+    const token = getToken();
+    if (!token) {
+      $("who").textContent = "No active session. Please login.";
+      renderMenu({roles:[]});
+      return;
+    }
+
+    try {
+      const me = await getJson("http://127.0.0.1:8000/auth/me", token);
+      $("who").textContent = `Logged in as: ${me.username} | Roles: ${(me.roles||[]).join(", ")}`;
+      renderMenu(me);
+      setOut({ ok:true, me });
+    } catch (e) {
+      $("who").textContent = "Session expired/invalid. Please login again.";
+      setOut({ ok:false, error:e });
+      renderMenu({roles:[]});
+    }
+  }
+
+  $("logoutBtn").onclick = () => { clearToken(); window.location.href = "/login"; };
+
+  boot();
+</script>
+</body>
+</html>
