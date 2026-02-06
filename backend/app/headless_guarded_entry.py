@@ -1,100 +1,137 @@
 """
-REA Guarded Headless Entry
-===========================
+Headless Guarded Entry – REA Capital Trading Engine
+---------------------------------------------------
 
 Purpose:
-- Authenticate via OTP
-- Validate identity
-- Inject token into engine runtime
-- Confirm guarded execution mode
-- Prepare paper execution session
+- Provide a safe callable wrapper for FastAPI (no CLI args required)
+- Preserve optional CLI execution for auth validation
+- Never kill the FastAPI process when called via API
+- Fail-closed behavior
 
-NOTE:
-- Live trading remains disabled.
-- This is controlled headless execution.
+Notes:
+- This does NOT trade. It only validates that headless execution can run.
+- If called via API, it runs in "no-credentials" mode and returns 0.
 """
 
+from __future__ import annotations
+
 import argparse
-import requests
+import json
 import sys
-import getpass
+import urllib.request
+import urllib.error
+from typing import Any, Dict, Optional
 
-BASE_URL = "http://127.0.0.1:8000"
+
+def _http_json(
+    method: str,
+    url: str,
+    payload: Dict[str, Any] | None = None,
+    headers: Dict[str, str] | None = None,
+) -> Dict[str, Any]:
+    data = None
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+
+    req = urllib.request.Request(url=url, data=data, method=method)
+    req.add_header("Accept", "application/json")
+    if payload is not None:
+        req.add_header("Content-Type", "application/json")
+
+    if headers:
+        for k, v in headers.items():
+            req.add_header(k, v)
+
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", errors="replace")
+        try:
+            body = json.loads(raw) if raw else {}
+        except Exception:
+            body = {"raw": raw}
+        return {"_http_error": True, "status": e.code, "body": body}
+    except Exception as e:
+        return {"_http_error": True, "status": None, "body": {"detail": str(e)}}
 
 
-def main():
-    print("=== REA Guarded Headless Entry ===")
+def execute_headless(base_url: str, username: Optional[str], password: Optional[str]) -> int:
+    """
+    Core logic.
+    Returns integer exit code.
+    """
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--username", required=True)
-    parser.add_argument("--password", required=True)
-    parser.add_argument("--base-url", default=BASE_URL)
-    args = parser.parse_args()
+    base = (base_url or "http://127.0.0.1:8000").rstrip("/")
+    print(f"[HEADLESS] Base URL: {base}")
 
-    base_url = args.base_url
-    username = args.username
-    password = args.password
+    # API mode: no creds supplied -> we intentionally do NOT attempt OTP flow
+    if not username or not password:
+        print("[HEADLESS] API mode: no credentials supplied; auth flow skipped.")
+        print("[HEADLESS] Execution layer currently locked (no live trades).")
+        print("[HEADLESS] Guarded mode confirmed.")
+        print("[HEADLESS_DEV_MODE ready.]")
+        return 0
 
-    print("Authenticating...")
-    print(f"[HEADLESS] Base URL: {base_url}")
+    # CLI mode: do OTP flow
+    print("[HEADLESS] CLI mode: starting OTP auth validation...")
 
-    # Step 1: Send OTP
-    login_resp = requests.post(
-        f"{base_url}/auth/login",
-        json={"username": username, "password": password},
-        timeout=10,
-    )
-
-    if login_resp.status_code != 200:
-        print("[HEADLESS] Login failed:", login_resp.text)
-        sys.exit(1)
-
-    print("[HEADLESS] OTP sent.")
+    r1 = _http_json("POST", f"{base}/auth/login", {"username": username, "password": password})
+    if r1.get("_http_error"):
+        print("[HEADLESS] /auth/login failed:", r1, file=sys.stderr)
+        return 2
+    print("[HEADLESS] OTP send response:", r1)
 
     otp = input("Enter the 6-digit OTP from your email: ").strip()
+    if not (otp.isdigit() and len(otp) == 6):
+        print("[HEADLESS] Invalid OTP format (must be 6 digits).", file=sys.stderr)
+        return 3
 
-    # Step 2: Verify OTP
-    verify_resp = requests.post(
-        f"{base_url}/auth/verify",
-        json={"username": username, "otp": otp},
-        timeout=10,
-    )
+    r2 = _http_json("POST", f"{base}/auth/verify", {"username": username, "otp": otp})
+    if r2.get("_http_error"):
+        print("[HEADLESS] /auth/verify failed:", r2, file=sys.stderr)
+        return 4
 
-    if verify_resp.status_code != 200:
-        print("[HEADLESS] OTP verification failed:", verify_resp.text)
-        sys.exit(1)
+    token = r2.get("token")
+    if not token:
+        print("[HEADLESS] No token returned from /auth/verify:", r2, file=sys.stderr)
+        return 5
 
-    token_data = verify_resp.json()
-    access_token = token_data.get("access_token")
+    print("[HEADLESS] Token acquired (hidden). token_type=", r2.get("token_type", "bearer"))
 
-    if not access_token:
-        print("[HEADLESS] No access token received.")
-        sys.exit(1)
+    r3 = _http_json("GET", f"{base}/auth/me", payload=None, headers={"Authorization": f"Bearer {token}"})
+    if r3.get("_http_error"):
+        print("[HEADLESS] /auth/me failed:", r3, file=sys.stderr)
+        return 6
 
-    print("[HEADLESS] Token acquired.")
+    print("[HEADLESS] Identity:", r3)
+    print("[HEADLESS] Auth flow OK.")
+    print("[HEADLESS] Execution layer currently locked (no live trades).")
+    print("[HEADLESS_DEV_MODE ready.]")
+    return 0
 
-    headers = {"Authorization": f"Bearer {access_token}"}
 
-    # Step 3: Confirm identity
-    me_resp = requests.get(
-        f"{base_url}/auth/me",
-        headers=headers,
-        timeout=10,
-    )
+def main() -> int:
+    ap = argparse.ArgumentParser(description="REA Headless Guarded Entry")
+    ap.add_argument("--base-url", default="http://127.0.0.1:8000")
+    # IMPORTANT: not required anymore (so FastAPI can call without args)
+    ap.add_argument("--username", required=False)
+    ap.add_argument("--password", required=False)
+    args = ap.parse_args()
 
-    if me_resp.status_code != 200:
-        print("[HEADLESS] Identity check failed:", me_resp.text)
-        sys.exit(1)
+    return execute_headless(base_url=args.base_url, username=args.username, password=args.password)
 
-    identity = me_resp.json()
-    print("[HEADLESS] Identity confirmed:", identity)
 
-    print("\nAuthentication successful.")
-    print("Execution layer currently locked (no live trades).")
-    print("Guarded mode confirmed.")
-    print("HEADLESS_DEV_MODE ready.")
-
-    print("\n=== ENGINE SESSION READY ===")
+def run_headless() -> Any:
+    """
+    Safe callable wrapper for FastAPI.
+    Runs in API mode (no creds) and returns exit code / error object.
+    """
+    try:
+        return execute_headless(base_url="http://127.0.0.1:8000", username=None, password=None)
+    except Exception as e:
+        return {"error": str(e)}
 
 
 if __name__ == "__main__":

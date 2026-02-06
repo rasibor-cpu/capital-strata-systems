@@ -1,4 +1,5 @@
 from __future__ import annotations
+from backend.app.headless_guarded_entry import run_headless
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,6 +33,14 @@ except Exception as e:
 def health():
     return {"status": "ok", "auth_loaded": auth_loaded, "auth_error": auth_error}
 
+@app.post("/engine/headless/run")
+def engine_headless_run():
+    """
+    Triggers headless guarded entry in TEST mode.
+    Returns execution result without killing server.
+    """
+    result = run_headless()
+    return {"headless_result": result}
 
 @app.get("/routes")
 def routes():
