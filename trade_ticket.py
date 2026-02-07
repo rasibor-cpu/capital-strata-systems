@@ -1,90 +1,143 @@
+"""
+Trade Ticket – REA Capital Trading Engine (V1)
+
+Adds:
+- Unique Transaction Reference Number (UTRN) per trade
+- Duplicate trade warning (non-blocking) with override flag
+- Canonical ticket fields needed for downstream logging + audit
+
+Notes:
+- Duplicate detection is WARN by default; execution can proceed.
+- UI button later maps to override_duplicate=True.
+"""
+
 from __future__ import annotations
 
-"""
-Manual Trade Ticket (HARD GATE)
-
-Purpose:
-- Present a clear trade ticket
-- Require explicit human confirmation
-- Log every intent and decision
-- Never auto-send orders
-
-This is the LAST gate before any broker call.
-"""
-
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Optional, Dict, Any
-import json
 import os
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional
+
+from engine.security.duplicate_trade_guard import check_duplicate_trade, DuplicateCheckResult
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _utc_date_iso() -> str:
+    return datetime.now(timezone.utc).date().isoformat()
+
+
+def generate_utrn(prefix: str = "UTRN") -> str:
+    """
+    Generates a unique transaction reference number.
+    Example: UTRN-20260207-1F3A9C2B
+    """
+    d = datetime.now(timezone.utc).strftime("%Y%m%d")
+    rnd = uuid.uuid4().hex[:8].upper()
+    return f"{prefix}-{d}-{rnd}"
+
+
+def _ledger_path_for_mode(mode: str) -> str:
+    """
+    Separate physical ledger files (Option A).
+    """
+    mode_u = str(mode or "TEST").upper().strip()
+    if mode_u == "LIVE":
+        return os.getenv("REA_PNL_LEDGER_LIVE_PATH", "reporting_store/pnl_ledger_live.jsonl")
+    return os.getenv("REA_PNL_LEDGER_TEST_PATH", "reporting_store/pnl_ledger_test.jsonl")
 
 
 @dataclass
 class TradeTicket:
-    instrument: str
-    side: str              # 'buy' or 'sell'
-    units: int
-    price_snapshot: float
-    stop_loss: Optional[float] = None
-    take_profit: Optional[float] = None
-    reason: str = ""
-    created_utc: str = ""
+    # Identity / audit
+    utrn: str = field(default_factory=generate_utrn)
+    created_utc: str = field(default_factory=_utc_now_iso)
+    engine_run_id: str = field(default_factory=lambda: os.getenv("ENGINE_RUN_ID", "NO_ENGINE_RUN_ID"))
 
-    def finalize(self) -> None:
-        self.created_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+    # Trade intent
+    mode: str = "TEST"             # TEST or LIVE
+    trade_type: str = "SPOT"       # SPOT / FWD / SWAP / OPTION / CRYPTO / EQUITY
+    symbol: str = ""
+    side: str = ""                # BUY/SELL (or LONG/SHORT)
+    currency: str = "USD"
+    amount: float = 0.0           # notional in currency
+    qty: float = 0.0              # units (optional; may be derived)
+    entry_px: float = 0.0         # optional
+    requested_px: float = 0.0     # optional
 
+    # Dates
+    execution_date: str = field(default_factory=_utc_date_iso)
+    value_date: str = field(default_factory=_utc_date_iso)
 
-class ManualTradeGate:
-    def __init__(self, log_path: str) -> None:
-        self.log_path = log_path
-        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    # FX info (optional)
+    fx_rate: float = 1.0
+    exchange_rate_text: str = ""
 
-    def _log(self, record: Dict[str, Any]) -> None:
-        with open(self.log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record) + "\n")
+    # Duplicate warning controls
+    override_duplicate: bool = False
+    duplicate_check: Optional[Dict[str, Any]] = None  # stored for audit/log display
 
-    def present_and_confirm(self, t: TradeTicket) -> bool:
+    # Free-form
+    tag: str = ""
+    note: str = ""
+
+    def ledger_path(self) -> str:
+        return _ledger_path_for_mode(self.mode)
+
+    def run_duplicate_check(self, lookback_days: int = 30, price_tol: float = 1e-6) -> DuplicateCheckResult:
         """
-        Returns True ONLY if user explicitly confirms.
+        Runs duplicate detection against the appropriate ledger for this mode.
+        Stores results in ticket. Does not block execution.
         """
-        t.finalize()
-
-        print("\n" + "=" * 60)
-        print("MANUAL TRADE TICKET — CONFIRMATION REQUIRED")
-        print("=" * 60)
-        print(f"Time (UTC):      {t.created_utc}")
-        print(f"Instrument:      {t.instrument}")
-        print(f"Side:            {t.side.upper()}")
-        print(f"Units:           {t.units}")
-        print(f"Price snapshot:  {t.price_snapshot:.6f}")
-
-        if t.stop_loss is not None:
-            print(f"Stop Loss:       {t.stop_loss:.6f}")
-        else:
-            print("Stop Loss:       NONE")
-
-        if t.take_profit is not None:
-            print(f"Take Profit:     {t.take_profit:.6f}")
-        else:
-            print("Take Profit:     NONE")
-
-        if t.reason:
-            print(f"Reason:          {t.reason}")
-
-        print("=" * 60)
-        ans = input("Type EXACTLY 'YES' to send this order: ").strip()
-
-        decision = {
-            "ticket": t.__dict__,
-            "confirmed": ans == "YES",
-            "confirmed_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+        res = check_duplicate_trade(
+            ledger_path=self.ledger_path(),
+            symbol=self.symbol,
+            side=self.side,
+            trade_type=self.trade_type,
+            currency=self.currency,
+            amount=self.amount,
+            execution_date=self.execution_date,
+            entry_px=self.entry_px if self.entry_px > 0 else None,
+            price_tol=price_tol,
+            lookback_days=lookback_days,
+            override_duplicate=self.override_duplicate,
+        )
+        self.duplicate_check = {
+            "decision": res.decision,
+            "reason": res.reason,
+            "matches": res.matches,
+            "sample_match": res.sample_match,
         }
+        return res
 
-        self._log(decision)
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "utrn": self.utrn,
+            "created_utc": self.created_utc,
+            "engine_run_id": self.engine_run_id,
 
-        if ans == "YES":
-            print("✔ Order CONFIRMED — sending to broker.")
-            return True
+            "mode": self.mode,
+            "trade_type": self.trade_type,
+            "symbol": self.symbol,
+            "side": self.side,
+            "currency": self.currency,
+            "amount": float(self.amount),
+            "qty": float(self.qty),
+            "entry_px": float(self.entry_px),
+            "requested_px": float(self.requested_px),
 
-        print("✖ Order CANCELLED by user.")
-        return False
+            "execution_date": self.execution_date,
+            "value_date": self.value_date,
+
+            "fx_rate": float(self.fx_rate),
+            "exchange_rate_text": self.exchange_rate_text,
+
+            "override_duplicate": bool(self.override_duplicate),
+            "duplicate_check": self.duplicate_check,
+
+            "tag": self.tag,
+            "note": self.note,
+        }
