@@ -93,3 +93,6 @@ runtime/
 !engine/execution_firewall.py
 tatus
 git diff --cached --name-only
+# Runtime reporting
+reporting_store/
+*.jsonl
