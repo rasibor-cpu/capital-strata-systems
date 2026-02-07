@@ -1,150 +1,193 @@
 """
+Risk Governor – Core Enforcement Layer
 REA Capital Trading Engine
-Capital Risk Governor (Layer 4 – Loss Containment)
 
-Constitutional Authority:
-- Layer 4: Capital Risk
-- This module has ABSOLUTE VETO power over exposure
-- Strategy may REQUEST, Risk Governor DECIDES
+Integrated Micro Mode support (toggle via REA_MICRO_MODE=1)
 
-Doctrine:
-- Survival precedes profitability
-- Loss must be bounded BEFORE execution
-- Default state = NO TRADE
+NOTE:
+We are keeping Micro Mode inside this file for now.
+Later we will extract it into a separate policy layer module.
 """
 
+from __future__ import annotations
+
+import os
 from dataclasses import dataclass
-from typing import Optional, Dict
-import time
+from datetime import datetime, timezone, timedelta
+from typing import Dict, Any, Optional
 
 
-# -----------------------------
-# Risk Decision (Immutable)
-# -----------------------------
+ALLOW = "ALLOW"
+BLOCK = "BLOCK"
+
+
+# ============================================================
+# Policy Definitions
+# ============================================================
+
 @dataclass(frozen=True)
-class RiskDecision:
-    allow: bool
-    approved_size: float
-    max_loss: float
-    reason: str
-    timestamp: float
+class RiskPolicy:
+    name: str
+    max_trades_per_day: int
+    max_concurrent_positions: int
+    max_consecutive_losses: int
+    max_losses_per_pair: int
+    cooldown_hours: int
+    max_equity_risk_per_trade: float
 
 
-# -----------------------------
-# Risk Context Snapshot
-# -----------------------------
-@dataclass
-class RiskContext:
-    equity: float
-    volatility: float
-    session_drawdown: float
-    daily_drawdown: float
-    correlated_exposure: float
+def micro_mode_enabled() -> bool:
+    return os.environ.get("REA_MICRO_MODE", "0") == "1"
 
 
-# -----------------------------
-# Capital Risk Governor
-# -----------------------------
+def load_policy() -> RiskPolicy:
+    if micro_mode_enabled():
+        return RiskPolicy(
+            name="MICRO_MODE",
+            max_trades_per_day=5,
+            max_concurrent_positions=3,
+            max_consecutive_losses=3,
+            max_losses_per_pair=2,
+            cooldown_hours=12,
+            max_equity_risk_per_trade=0.01,
+        )
+
+    return RiskPolicy(
+        name="NORMAL",
+        max_trades_per_day=15,
+        max_concurrent_positions=20,
+        max_consecutive_losses=5,
+        max_losses_per_pair=3,
+        cooldown_hours=12,
+        max_equity_risk_per_trade=0.02,
+    )
+
+
+# ============================================================
+# Governor
+# ============================================================
+
 class RiskGovernor:
-    """
-    RiskGovernor enforces capital preservation.
-    It does not optimize returns.
-    It only answers: can we survive if this is wrong?
-    """
 
-    def __init__(
-        self,
-        max_risk_fraction: float,
-        max_session_drawdown: float,
-        max_daily_drawdown: float,
-        min_volatility: float = 1e-8,
-    ):
-        if max_risk_fraction <= 0:
-            raise ValueError("max_risk_fraction must be positive")
+    def __init__(self):
+        self.policy = load_policy()
 
-        self.max_risk_fraction = max_risk_fraction
-        self.max_session_drawdown = max_session_drawdown
-        self.max_daily_drawdown = max_daily_drawdown
-        self.min_volatility = min_volatility
+    def refresh(self):
+        self.policy = load_policy()
 
-    # -------------------------
-    # Core Evaluation
-    # -------------------------
+    def _utc_today(self) -> str:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
     def evaluate(
         self,
-        requested_size: float,
-        stop_distance: Optional[float],
-        ctx: RiskContext,
-    ) -> RiskDecision:
-        ts = time.time()
+        *,
+        instrument: str,
+        equity_risk: Optional[float],
+        state: Dict[str, Any],
+    ) -> Dict[str, Any]:
 
-        # ---- Hard Fails ----
-        if ctx.equity <= 0:
-            return self._block("Invalid equity", ts)
+        self.refresh()
+        p = self.policy
+        reasons = []
 
-        if requested_size <= 0:
-            return self._block("Requested size invalid", ts)
+        # Validate state (fail closed)
+        required = [
+            "day_key",
+            "trades_today",
+            "open_positions",
+            "consecutive_losses",
+            "losses_by_pair",
+        ]
 
-        if stop_distance is None or stop_distance <= 0:
-            return self._block("Undefined maximum loss (stop distance)", ts)
+        for r in required:
+            if r not in state:
+                return {
+                    "decision": BLOCK,
+                    "policy": p.name,
+                    "reasons": [f"Missing state field: {r}"],
+                }
 
-        # ---- Drawdown Gates ----
-        if ctx.session_drawdown >= self.max_session_drawdown:
-            return self._block("Session drawdown limit breached", ts)
+        # Daily reset
+        today = self._utc_today()
+        if state["day_key"] != today:
+            state["day_key"] = today
+            state["trades_today"] = 0
+            state["consecutive_losses"] = 0
+            state["losses_by_pair"] = {}
+            state["cooldown_until"] = None
 
-        if ctx.daily_drawdown >= self.max_daily_drawdown:
-            return self._block("Daily drawdown limit breached", ts)
+        # Cooldown check
+        cd = state.get("cooldown_until")
+        if cd:
+            until = datetime.fromisoformat(cd)
+            if datetime.now(timezone.utc) < until:
+                return {
+                    "decision": BLOCK,
+                    "policy": p.name,
+                    "reasons": [f"Cooldown active until {cd}"],
+                }
 
-        # ---- Risk Budget ----
-        max_risk_amount = ctx.equity * self.max_risk_fraction
+        # Hard Limits
+        if state["trades_today"] >= p.max_trades_per_day:
+            return {
+                "decision": BLOCK,
+                "policy": p.name,
+                "reasons": ["Max trades per day reached"],
+            }
 
-        # ---- Volatility Scaling ----
-        effective_vol = max(ctx.volatility, self.min_volatility)
-        volatility_scale = 1.0 / effective_vol
+        if state["open_positions"] >= p.max_concurrent_positions:
+            return {
+                "decision": BLOCK,
+                "policy": p.name,
+                "reasons": ["Max concurrent positions reached"],
+            }
 
-        # ---- Size Based on Risk ----
-        raw_size = max_risk_amount / stop_distance
-        scaled_size = raw_size * volatility_scale
+        if state["consecutive_losses"] >= p.max_consecutive_losses:
+            until = datetime.now(timezone.utc) + timedelta(hours=p.cooldown_hours)
+            state["cooldown_until"] = until.isoformat()
+            return {
+                "decision": BLOCK,
+                "policy": p.name,
+                "reasons": ["Consecutive loss cap hit – cooldown engaged"],
+            }
 
-        # ---- Correlation Clamp ----
-        net_size = max(0.0, scaled_size - ctx.correlated_exposure)
+        pair_losses = state["losses_by_pair"].get(instrument, 0)
+        if pair_losses >= p.max_losses_per_pair:
+            return {
+                "decision": BLOCK,
+                "policy": p.name,
+                "reasons": ["Instrument loss cap reached"],
+            }
 
-        if net_size <= 0:
-            return self._block("Correlated exposure cap reached", ts)
+        # Equity Risk Cap
+        if equity_risk is not None:
+            if equity_risk > p.max_equity_risk_per_trade:
+                return {
+                    "decision": BLOCK,
+                    "policy": p.name,
+                    "reasons": ["Equity risk exceeds policy cap"],
+                }
 
-        approved_size = min(net_size, requested_size)
-
-        max_loss = approved_size * stop_distance
-
-        if max_loss > max_risk_amount:
-            return self._block("Risk exceeds maximum allowed", ts)
-
-        return RiskDecision(
-            allow=True,
-            approved_size=approved_size,
-            max_loss=max_loss,
-            reason="Risk approved within limits",
-            timestamp=ts,
-        )
-
-    # -------------------------
-    # Internal Helper
-    # -------------------------
-    def _block(self, reason: str, ts: float) -> RiskDecision:
-        return RiskDecision(
-            allow=False,
-            approved_size=0.0,
-            max_loss=0.0,
-            reason=reason,
-            timestamp=ts,
-        )
+        return {
+            "decision": ALLOW,
+            "policy": p.name,
+            "reasons": ["Risk checks passed"],
+        }
 
 
-# -----------------------------
-# Constitutional Assertion
-# -----------------------------
-if __name__ == "__main__":
-    raise RuntimeError(
-        "RiskGovernor is a control module only. "
-        "It must be invoked by the execution pipeline."
-    )
+# ============================================================
+# State Update Helpers
+# ============================================================
+
+def apply_trade(state: Dict[str, Any]) -> Dict[str, Any]:
+    state["trades_today"] += 1
+    return state
+
+
+def apply_result(state: Dict[str, Any], instrument: str, pnl: float) -> Dict[str, Any]:
+    if pnl < 0:
+        state["consecutive_losses"] += 1
+        state["losses_by_pair"][instrument] = state["losses_by_pair"].get(instrument, 0) + 1
+    else:
+        state["consecutive_losses"] = 0
+    return state
