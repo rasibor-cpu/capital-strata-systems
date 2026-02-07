@@ -1,0 +1,82 @@
+{
+  "source": "oanda",
+  "instrument": "EUR_USD",
+  "time": "2026-02-06T21:59:05.176136400Z",
+  "bid": 1.18136,
+  "ask": 1.182,
+  "mid": 1.18168,
+  "spread": 0.0006399999999999739,
+  "status": "non-tradeable",
+  "tradeable": false,
+  "ts_utc": "2026-02-07T04:52:17.335251+00:00",
+  "raw": {
+    "type": "PRICE",
+    "time": "2026-02-06T21:59:05.176136400Z",
+    "bids": [
+      {
+        "price": "1.18136",
+        "liquidity": 500000
+      },
+      {
+        "price": "1.18135",
+        "liquidity": 500000
+      },
+      {
+        "price": "1.18134",
+        "liquidity": 2000000
+      },
+      {
+        "price": "1.18133",
+        "liquidity": 2000000
+      },
+      {
+        "price": "1.18132",
+        "liquidity": 5000000
+      },
+      {
+        "price": "1.18130",
+        "liquidity": 10000000
+      },
+      {
+        "price": "1.18127",
+        "liquidity": 10000000
+      }
+    ],
+    "asks": [
+      {
+        "price": "1.18200",
+        "liquidity": 500000
+      },
+      {
+        "price": "1.18202",
+        "liquidity": 2500000
+      },
+      {
+        "price": "1.18203",
+        "liquidity": 2000000
+      },
+      {
+        "price": "1.18204",
+        "liquidity": 5000000
+      },
+      {
+        "price": "1.18207",
+        "liquidity": 10000000
+      },
+      {
+        "price": "1.18210",
+        "liquidity": 10000000
+      }
+    ],
+    "closeoutBid": "1.18127",
+    "closeoutAsk": "1.18210",
+    "status": "non-tradeable",
+    "tradeable": false,
+    "quoteHomeConversionFactors": {
+      "positiveUnits": "1.00000000",
+      "negativeUnits": "1.00000000"
+    },
+    "instrument": "EUR_USD"
+  },
+  "rea_instrument": "REA:FX:EURUSD"
+}

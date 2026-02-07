@@ -1,6 +1,10 @@
 {
   "alpaca": {
-    "REA:CRYPTO:BTCUSD": "BTC/USD",
-    "REA:CRYPTO:ETHUSD": "ETH/USD"
+    "REA:CRYPTO:BTCUSD": "BTC/USD"
+  },
+  "oanda": {
+    "REA:FX:EURUSD": "EUR_USD",
+    "REA:FX:GBPUSD": "GBP_USD",
+    "REA:FX:USDJPY": "USD_JPY"
   }
 }
