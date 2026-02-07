@@ -95,3 +95,5 @@ git diff --cached --name-only
 # Runtime reporting
 reporting_store/
 *.jsonl
+# Find/grep scratch outputs
+_find_*.txt
