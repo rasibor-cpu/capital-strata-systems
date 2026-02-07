@@ -1,14 +1,11 @@
 """
 Paper Broker – REA Capital Trading Engine (V1 Freeze)
 
-Responsibilities:
-- Simulate execution
-- Close trades
-- Auto-log to correct ledger (TEST or LIVE)
-- Enforce duplicate warning (non-blocking)
-- Preserve UTRN across lifecycle
-
-This is the canonical trade-close logging point.
+Canonical paper close path:
+- Duplicate warning (non-blocking)
+- PnL calc
+- Auto-ledger logging (TEST vs LIVE separate files)
+- ALWAYS returns a PaperFillResult (never None)
 """
 
 from __future__ import annotations
@@ -25,7 +22,7 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-@dataclass
+@dataclass(frozen=True)
 class PaperFillResult:
     utrn: str
     pnl: float
@@ -36,8 +33,6 @@ class PaperFillResult:
 class PaperBroker:
     """
     Central paper execution handler.
-
-    Any broker adapter should route simulated fills here.
     """
 
     def execute_and_close(
@@ -46,34 +41,59 @@ class PaperBroker:
         fill_price: float,
         fees: float = 0.0,
     ) -> PaperFillResult:
-        """
-        Simulates immediate fill and close (paper mode).
-
-        ticket.mode determines which ledger file is used.
-        """
-
+        if ticket is None:
+            raise ValueError("ticket is required")
         if not isinstance(ticket, TradeTicket):
             raise TypeError("execute_and_close requires TradeTicket")
+        if fill_price is None:
+            raise ValueError("fill_price is required")
 
-        # ---------------------------------------------------
-        # Duplicate Warning (non-blocking)
-        # ---------------------------------------------------
+        # Duplicate warning (non-blocking)
         dup = ticket.run_duplicate_check()
         if dup.decision == "WARN":
-            print(f"\nWARNING | DUPLICATE_TRADE | {dup.reason}")
+            print(f"WARNING | DUPLICATE_TRADE | {dup.reason}")
             print(f"WARNING | UTRN={ticket.utrn}")
 
-        # ---------------------------------------------------
-        # Basic PnL Calculation
-        # ---------------------------------------------------
+        # Qty derive
         if ticket.entry_px <= 0:
-            raise ValueError("entry_px must be set on ticket")
+            raise ValueError("ticket.entry_px must be > 0")
 
-        qty = ticket.qty
-        if qty <= 0:
-            qty = ticket.amount / ticket.entry_px
+        qty = float(ticket.qty or 0.0)
+        if qty <= 0.0:
+            qty = float(ticket.amount) / float(ticket.entry_px)
 
-        if ticket.side.upper() in ("BUY", "LONG"):
-            pnl = (fill_price - ticket.entry_px) * qty
+        # PnL calc
+        side = str(ticket.side).upper().strip()
+        if side in ("BUY", "LONG"):
+            pnl = (float(fill_price) - float(ticket.entry_px)) * qty
         else:
-            pnl
+            pnl = (float(ticket.entry_px) - float(fill_price)) * qty
+
+        # Auto-ledger
+        append_pnl_event(
+            mode=ticket.mode,
+            symbol=ticket.symbol,
+            side=ticket.side,
+            qty=qty,
+            entry_px=ticket.entry_px,
+            exit_px=float(fill_price),
+            fees=float(fees),
+            trade_type=ticket.trade_type,
+            execution_date=ticket.execution_date,
+            value_date=ticket.value_date,
+            currency=ticket.currency,
+            amount=ticket.amount,
+            fx_rate=ticket.fx_rate,
+            exchange_rate_text=ticket.exchange_rate_text,
+            tag=ticket.tag,
+            trade_id=ticket.utrn,
+            ledger_path=ticket.ledger_path(),
+        )
+
+        # GUARANTEED return
+        return PaperFillResult(
+            utrn=ticket.utrn,
+            pnl=float(pnl),
+            exit_px=float(fill_price),
+            timestamp_utc=_utc_now_iso(),
+        )
