@@ -1,181 +1,141 @@
 """
 REA Live Data Controller (Provider-Agnostic)
---------------------------------------------
-Purpose:
-- Enforce governance-locked mapping:
-    Strategy Concept -> Canonical REA Instrument -> Provider Symbol
-  (For now we implement Canonical REA Instrument -> Provider Symbol mapping via JSON)
 
-- Pull a snapshot tick from Alpaca (crypto)
-- Emit normalized MarketDataTick JSON to stdout (and optionally to audit_logs)
-
-Run:
-  python live_data\\rea_live_data_controller.py --provider alpaca --rea REA:CRYPTO:BTCUSD
-
-Optional:
-  set REA_PROVIDER_MAP=data\\provider_symbol_map.json
+Responsibilities:
+- Strategy Concept -> Canonical REA Instrument
+- Canonical REA Instrument -> Provider Symbol (via JSON map)
+- Snapshot fetching via provider adapters
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import os
-from dataclasses import dataclass, asdict
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Dict, Any
+from datetime import datetime, timezone
 
+# Existing Alpaca crypto adapter
+from live_data.alpaca_client import quotes, CryptoLatestQuoteRequest
 
-# -----------------------------
-# Normalized tick model
-# -----------------------------
+# OANDA broker adapter
+import broker_oanda
 
-@dataclass(frozen=True)
-class MarketDataTick:
-    ts_utc: str
-    provider: str
-    rea_instrument: str
-    provider_symbol: str
-    bid: Optional[float]
-    ask: Optional[float]
-    mid: Optional[float]
-    source: str = "snapshot"
-
-
-def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-# -----------------------------
-# Governance mapping loader
-# -----------------------------
 
 DEFAULT_MAP_PATH = Path("data") / "provider_symbol_map.json"
 
 
+# -------------------------------------------------
+# Provider Symbol Mapping
+# -------------------------------------------------
+
 def load_provider_symbol_map(path: Path) -> Dict[str, Dict[str, str]]:
     if not path.exists():
         raise FileNotFoundError(
-            f"Provider map not found: {path}. Create it (data/provider_symbol_map.json)."
+            f"Provider map not found: {path}. "
+            "Create it (data/provider_symbol_map.json)."
         )
 
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    with open(path, "r") as f:
+        raw = json.load(f)
+
     if not isinstance(raw, dict):
-        raise ValueError("provider_symbol_map.json must be a JSON object at top level.")
+        raise ValueError("provider_symbol_map.json must be a JSON object.")
 
-    # expected shape: { "alpaca": { "REA:CRYPTO:BTCUSD": "BTC/USD", ... }, "other": {...} }
-    out: Dict[str, Dict[str, str]] = {}
-    for provider, mapping in raw.items():
-        if not isinstance(provider, str) or not isinstance(mapping, dict):
-            raise ValueError("Invalid provider map structure.")
-        out[provider] = {}
-        for rea_inst, prov_sym in mapping.items():
-            if not isinstance(rea_inst, str) or not isinstance(prov_sym, str):
-                raise ValueError("Mapping entries must be strings.")
-            out[provider][rea_inst] = prov_sym
-    return out
+    return raw
 
 
-def resolve_provider_symbol(provider: str, rea_instrument: str, mapping: Dict[str, Dict[str, str]]) -> str:
+def resolve_provider_symbol(
+    provider: str,
+    rea_instrument: str,
+    mapping: Dict[str, Dict[str, str]],
+) -> str:
+
     prov_map = mapping.get(provider)
     if not prov_map:
         raise KeyError(f"No mappings found for provider '{provider}'.")
-    sym = prov_map.get(rea_instrument)
-    if not sym:
+
+    symbol = prov_map.get(rea_instrument)
+    if not symbol:
         raise KeyError(
-            f"Missing mapping for rea_instrument='{rea_instrument}' under provider='{provider}'. "
-            f"Update data/provider_symbol_map.json (governance-controlled)."
+            f"Missing mapping for rea_instrument='{rea_instrument}' "
+            f"under provider='{provider}'."
         )
-    return sym
+
+    return symbol
 
 
-# -----------------------------
-# Provider adapters (snapshot)
-# -----------------------------
+# -------------------------------------------------
+# Alpaca Crypto Adapter
+# -------------------------------------------------
 
 def alpaca_crypto_snapshot(provider_symbol: str) -> Dict[str, Any]:
-    # We reuse the logic style in live_data/alpaca_adapter.py (alpaca-py)
-    from alpaca.data.historical import CryptoHistoricalDataClient
-    from alpaca.data.requests import CryptoLatestQuoteRequest
-
-    client = CryptoHistoricalDataClient()
     req = CryptoLatestQuoteRequest(symbol_or_symbols=provider_symbol)
-    quotes = client.get_crypto_latest_quote(req)
-
     q = quotes.get(provider_symbol)
+
     if not q:
         raise RuntimeError(f"No quote returned for {provider_symbol}")
 
-    bid = float(q.bid_price) if q.bid_price is not None else None
-    ask = float(q.ask_price) if q.ask_price is not None else None
+    return {
+        "bid": float(q.bid_price),
+        "ask": float(q.ask_price),
+        "provider": "alpaca",
+        "symbol": provider_symbol,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
 
-    mid = None
-    if bid is not None and ask is not None:
-        mid = (bid + ask) / 2.0
 
-    ts = q.timestamp.isoformat() if q.timestamp else utc_now_iso()
+# -------------------------------------------------
+# OANDA FX Adapter
+# -------------------------------------------------
 
-    return {"bid": bid, "ask": ask, "mid": mid, "ts": ts}
+def oanda_fx_snapshot(provider_symbol: str) -> Dict[str, Any]:
 
+    token = os.environ.get("OANDA_TOKEN")
+    account_id = os.environ.get("OANDA_ACCOUNT_ID")
+
+    if not token or not account_id:
+        raise RuntimeError("OANDA_TOKEN or OANDA_ACCOUNT_ID not set.")
+
+    pricing = broker_oanda.get_pricing(
+        account_id=account_id,
+        token=token,
+        instruments=provider_symbol,
+    )
+
+    prices = pricing.get("prices")
+    if not prices:
+        raise RuntimeError("No prices returned from OANDA.")
+
+    p = prices[0]
+
+    bid = float(p["bids"][0]["price"])
+    ask = float(p["asks"][0]["price"])
+
+    return {
+        "bid": bid,
+        "ask": ask,
+        "provider": "oanda",
+        "symbol": provider_symbol,
+        "timestamp": p["time"],
+    }
+
+
+# -------------------------------------------------
+# Snapshot Router
+# -------------------------------------------------
 
 def fetch_snapshot(provider: str, provider_symbol: str) -> Dict[str, Any]:
+
     provider = provider.lower().strip()
+
     if provider == "alpaca":
         return alpaca_crypto_snapshot(provider_symbol)
 
-    raise ValueError(f"Unsupported provider '{provider}'. Implement adapter in this controller.")
+    if provider == "oanda":
+        return oanda_fx_snapshot(provider_symbol)
 
-
-# -----------------------------
-# Output + optional audit log
-# -----------------------------
-
-def write_audit_log(tick: MarketDataTick) -> Path:
-    log_dir = Path("audit_logs")
-    log_dir.mkdir(parents=True, exist_ok=True)
-
-    # filename safe
-    safe_inst = tick.rea_instrument.replace(":", "_").replace("/", "_")
-    fname = f"live_tick_{tick.provider}_{safe_inst}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json"
-    path = log_dir / fname
-    path.write_text(json.dumps(asdict(tick), indent=2), encoding="utf-8")
-    return path
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description="REA Live Data Controller (snapshot)")
-    parser.add_argument("--provider", required=True, help="Provider key (e.g., alpaca)")
-    parser.add_argument("--rea", required=True, help="Canonical REA instrument id (e.g., REA:CRYPTO:BTCUSD)")
-    parser.add_argument("--audit", action="store_true", help="Write tick JSON to audit_logs/")
-    args = parser.parse_args()
-
-    map_path = Path(os.environ.get("REA_PROVIDER_MAP", str(DEFAULT_MAP_PATH)))
-
-    mapping = load_provider_symbol_map(map_path)
-    provider_symbol = resolve_provider_symbol(args.provider, args.rea, mapping)
-
-    snap = fetch_snapshot(args.provider, provider_symbol)
-
-    tick = MarketDataTick(
-        ts_utc=snap.get("ts") or utc_now_iso(),
-        provider=args.provider.lower(),
-        rea_instrument=args.rea,
-        provider_symbol=provider_symbol,
-        bid=snap.get("bid"),
-        ask=snap.get("ask"),
-        mid=snap.get("mid"),
-        source="snapshot",
+    raise ValueError(
+        f"Unsupported provider '{provider}'. "
+        "Implement adapter in this controller."
     )
-
-    print(json.dumps(asdict(tick), indent=2))
-
-    if args.audit:
-        p = write_audit_log(tick)
-        print(f"\nAUDIT_LOG_WRITTEN: {p}")
-
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
