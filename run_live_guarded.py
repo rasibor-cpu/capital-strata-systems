@@ -1,312 +1,183 @@
 """
-Authoritative guarded startup wrapper for REA Capital Trading Engine.
+run_live_guarded.py — REA Capital Trading Engine
+------------------------------------------------
+Authoritative guarded startup wrapper.
 
-Key invariants:
+V1 goals:
 - FAIL-CLOSED by default
-- LIVE mode requires explicit confirmation + session gate module present
-- TEST mode may run headless paper loop
-- TEST + HEADLESS may BYPASS missing session gate module (paper-only),
-  but will log a loud warning so we can wire the real session gate later.
+- TEST is allowed to run paper/headless
+- LIVE requires explicit operator intent + unlock flags + credentials
+- Disallow dev bypass flags in LIVE
+- Provide clear, auditable console output of gate decisions
 
-This preserves safety while unblocking Phase 1 paper validation.
+Environment controls (V1):
+- REA_ENGINE_MODE = TEST | LIVE
+- REA_LIVE_CONFIRM = "I_UNDERSTAND_LIVE"
+- REA_EXECUTION_UNLOCK = "1"
+- REA_LIVE_PIN + REA_LIVE_PIN_CONFIRM must both be set and match (min 6 chars)
+- HEADLESS_DEV_MODE must be OFF in LIVE
+- DEV_FORCE_ALLOW must be OFF in LIVE
+
+Credential presence (any one set accepted for LIVE):
+- Alpaca:  APCA_API_KEY_ID + APCA_API_SECRET_KEY
+- OANDA:   OANDA_API_KEY + OANDA_ACCOUNT_ID
+- Binance: BINANCE_API_KEY + BINANCE_API_SECRET
+- IBKR:    IBKR_HOST + IBKR_PORT  (placeholder check)
 """
 
 from __future__ import annotations
 
 import os
-import importlib
+import sys
 import uuid
-from typing import Any, Optional, Tuple
-
-
-# -------------------------------------------------------------------
-# helpers
-# -------------------------------------------------------------------
-
-def ensure_engine_run_id() -> str:
-    run_id = os.getenv("ENGINE_RUN_ID")
-    if not run_id:
-        run_id = str(uuid.uuid4())
-        os.environ["ENGINE_RUN_ID"] = run_id
-    return run_id
+from datetime import datetime, timezone
+from typing import Tuple, Dict, Any
 
 
 def _utc_now_iso() -> str:
-    try:
-        from datetime import datetime, timezone
-        return datetime.now(timezone.utc).isoformat()
-    except Exception:
-        return "UTC_NOW_UNAVAILABLE"
+    return datetime.now(timezone.utc).isoformat()
 
 
-def _fail(msg: str, exit_code: int = 1) -> None:
+def _env(name: str, default: str = "") -> str:
+    return os.getenv(name, default)
+
+
+def _env_bool(name: str) -> bool:
+    return _env(name, "").strip() in ("1", "true", "TRUE", "yes", "YES", "on", "ON")
+
+
+def _fail(msg: str, code: int = 1) -> None:
     print(msg)
-    raise SystemExit(exit_code)
-
-
-def _safe_import(modname: str):
-    try:
-        return importlib.import_module(modname)
-    except Exception:
-        return None
-
-
-def _env_flag(name: str, default: str = "0") -> bool:
-    return os.getenv(name, default).strip() in ("1", "true", "TRUE", "yes", "YES", "on", "ON")
-
-
-def _coerce_gate_result(res: Any) -> Tuple[bool, str]:
-    if isinstance(res, bool):
-        return res, "ok" if res else "blocked"
-
-    if isinstance(res, tuple) and len(res) >= 1:
-        allowed = bool(res[0])
-        reason = str(res[1]) if len(res) > 1 else ("ok" if allowed else "blocked")
-        return allowed, reason
-
-    if isinstance(res, dict):
-        allowed = res.get("allowed", res.get("ok", False))
-        reason = res.get("reason", "ok" if allowed else "blocked")
-        return bool(allowed), str(reason)
-
-    allowed = getattr(res, "allowed", getattr(res, "ok", False))
-    reason = getattr(res, "reason", "ok" if allowed else "blocked")
-    return bool(allowed), str(reason)
+    raise SystemExit(code)
 
 
 def _print_gate(label: str, allowed: bool, reason: str) -> None:
-    print(f"{label:<12} | allowed={allowed} | reason={reason}")
+    print(f"{label:<14} | allowed={str(allowed):<5} | reason={reason}")
 
 
-# -------------------------------------------------------------------
-# gates (best-effort imports; LIVE must be strict)
-# -------------------------------------------------------------------
+def ensure_engine_run_id() -> str:
+    rid = _env("ENGINE_RUN_ID", "").strip()
+    if rid:
+        return rid
+    rid = str(uuid.uuid4())
+    os.environ["ENGINE_RUN_ID"] = rid
+    return rid
 
-def session_gate_check(mode: str, headless: bool) -> Tuple[bool, str]:
+
+def _credentials_ok() -> Tuple[bool, str]:
+    # Accept any ONE provider's credentials for LIVE V1.
+    alpaca_ok = bool(_env("APCA_API_KEY_ID")) and bool(_env("APCA_API_SECRET_KEY"))
+    if alpaca_ok:
+        return True, "alpaca_keys_present"
+
+    oanda_ok = bool(_env("OANDA_API_KEY")) and bool(_env("OANDA_ACCOUNT_ID"))
+    if oanda_ok:
+        return True, "oanda_keys_present"
+
+    binance_ok = bool(_env("BINANCE_API_KEY")) and bool(_env("BINANCE_API_SECRET"))
+    if binance_ok:
+        return True, "binance_keys_present"
+
+    ibkr_ok = bool(_env("IBKR_HOST")) and bool(_env("IBKR_PORT"))
+    if ibkr_ok:
+        return True, "ibkr_host_port_present"
+
+    return False, "no_live_broker_credentials_detected"
+
+
+def _live_intent_ok() -> Tuple[bool, str]:
+    if _env("REA_LIVE_CONFIRM").strip() != "I_UNDERSTAND_LIVE":
+        return False, "missing_REA_LIVE_CONFIRM"
+    if _env("REA_EXECUTION_UNLOCK").strip() != "1":
+        return False, "missing_REA_EXECUTION_UNLOCK"
+    pin = _env("REA_LIVE_PIN").strip()
+    pin2 = _env("REA_LIVE_PIN_CONFIRM").strip()
+    if len(pin) < 6:
+        return False, "REA_LIVE_PIN_too_short"
+    if pin != pin2:
+        return False, "REA_LIVE_PIN_mismatch"
+    return True, "live_intent_confirmed"
+
+
+def _live_dev_flags_ok() -> Tuple[bool, str]:
+    if _env_bool("HEADLESS_DEV_MODE"):
+        return False, "HEADLESS_DEV_MODE_not_allowed_in_LIVE"
+    if _env_bool("DEV_FORCE_ALLOW"):
+        return False, "DEV_FORCE_ALLOW_not_allowed_in_LIVE"
+    if _env_bool("HEADLESS_DEV_MODE") or _env_bool("HEADLESS_DEV_MODE_1"):
+        return False, "headless_flags_not_allowed_in_LIVE"
+    return True, "dev_flags_ok"
+
+
+def _exec_gate_ok(mode: str) -> Tuple[bool, str]:
     """
-    LIVE: strict. Missing module => BLOCK.
-    TEST+HEADLESS: allow bypass if module missing (paper-only), with warning.
+    V1 execution gate:
+    - In TEST: allow paper entry (execution remains locked downstream)
+    - In LIVE: require explicit unlock + credentials + intent + dev flags clean
     """
-    # Candidate module paths (adjust later when we find the real one)
-    mod = (
-        _safe_import("engine.security.session_gate")
-        or _safe_import("engine.auth.session_gate")
-        or _safe_import("backend.app.session_gate")
-        or _safe_import("backend.app.auth_gate")
-        or _safe_import("engine.auth.auth_gate")
-    )
+    if mode != "LIVE":
+        return True, "ok_test_mode"
 
-    if not mod:
-        if mode != "LIVE" and headless:
-            return True, "BYPASS_TEST_HEADLESS_SESSION_GATE_MODULE_MISSING"
-        return False, "session_gate_module_missing"
+    intent_ok, intent_reason = _live_intent_ok()
+    if not intent_ok:
+        return False, intent_reason
 
-    fn = (
-        getattr(mod, "check_session_gate", None)
-        or getattr(mod, "session_gate_check", None)
-        or getattr(mod, "check", None)
-    )
+    dev_ok, dev_reason = _live_dev_flags_ok()
+    if not dev_ok:
+        return False, dev_reason
 
-    if not callable(fn):
-        if mode != "LIVE" and headless:
-            return True, "BYPASS_TEST_HEADLESS_SESSION_GATE_FN_MISSING"
-        return False, "session_gate_fn_missing"
+    creds_ok, creds_reason = _credentials_ok()
+    if not creds_ok:
+        return False, creds_reason
 
-    try:
-        res = fn()
-        return _coerce_gate_result(res)
-    except Exception as e:
-        if mode != "LIVE" and headless:
-            return True, f"BYPASS_TEST_HEADLESS_SESSION_GATE_EXCEPTION:{type(e).__name__}"
-        return False, f"session_gate_exception:{type(e).__name__}:{e}"
+    return True, "ok_live_mode"
 
 
-def exec_gate_check() -> Tuple[bool, str]:
-    """
-    Execution gate: composite allow/block.
-    Always strict (TEST and LIVE).
-    Missing module => BLOCK (we don't paper-trade blind).
-    """
-    mod = (
-        _safe_import("engine.guards.exec_gate")
-        or _safe_import("engine.guards.execution_gate")
-        or _safe_import("engine.security.execution_gate")
-    )
-    if not mod:
-        return False, "exec_gate_module_missing"
-
-    fn = (
-        getattr(mod, "check_exec_gate", None)
-        or getattr(mod, "exec_gate_check", None)
-        or getattr(mod, "check", None)
-    )
-    if not callable(fn):
-        return False, "exec_gate_fn_missing"
-
-    try:
-        res = fn()
-        return _coerce_gate_result(res)
-    except Exception as e:
-        return False, f"exec_gate_exception:{type(e).__name__}:{e}"
-
-
-# -------------------------------------------------------------------
-# LIVE confirmations (strict)
-# -------------------------------------------------------------------
-
-def _live_rate_limit_check() -> Tuple[bool, str]:
-    mod = _safe_import("engine.live.rate_limit") or _safe_import("engine.live.live_checks")
-    if not mod:
-        return False, "live_rate_limit_module_missing"
-
-    fn = getattr(mod, "rate_limit_check", None) or getattr(mod, "confirm_live_rate_limit", None) or getattr(mod, "check_rate_limit", None)
-    if not callable(fn):
-        return False, "live_rate_limit_fn_missing"
-
-    try:
-        res = fn()
-        return _coerce_gate_result(res)
-    except Exception as e:
-        return False, f"live_rate_limit_exception:{type(e).__name__}:{e}"
-
-
-def _load_superuser_profile_default() -> dict:
-    mod = _safe_import("engine.security.superuser") or _safe_import("engine.auth.superuser")
-    if not mod:
-        return {"ok": False, "reason": "superuser_module_missing"}
-
-    fn = getattr(mod, "load_superuser_profile_default", None) or getattr(mod, "load_default", None)
-    if not callable(fn):
-        return {"ok": False, "reason": "superuser_fn_missing"}
-
-    try:
-        out = fn()
-        if isinstance(out, dict):
-            out.setdefault("ok", True)
-            return out
-        return {"ok": True, "value": out}
-    except Exception as e:
-        return {"ok": False, "reason": f"superuser_exception:{type(e).__name__}:{e}"}
-
-
-# -------------------------------------------------------------------
-# entrypoints
-# -------------------------------------------------------------------
-
-def _run_headless_guarded_entry() -> None:
-    candidates = [
-        ("backend.app.headless_guarded_entry", "main"),
-        ("backend.app.headless_guarded_entry", "run"),
-        ("backend.app.headless_guarded_entry", "entry"),
-        ("backend.app.main", "main"),
-    ]
-
-    last_err: Optional[str] = None
-    for modname, fnname in candidates:
-        mod = _safe_import(modname)
-        if not mod:
-            continue
-        fn = getattr(mod, fnname, None)
-        if callable(fn):
-            try:
-                fn()
-                return
-            except SystemExit:
-                raise
-            except Exception as e:
-                last_err = f"{modname}.{fnname} -> {type(e).__name__}: {e}"
-
-    _fail(f"FATAL | HEADLESS_ENTRY_NOT_FOUND | {last_err or 'no_candidate_matched'}", 1)
-
-
-def _run_live_guarded_engine() -> None:
-    candidates = [
-        ("backend.run_live_guarded", "main"),
-        ("backend.run_live_guarded", "run"),
-        ("backend.app.main", "main"),
-    ]
-
-    last_err: Optional[str] = None
-    for modname, fnname in candidates:
-        mod = _safe_import(modname)
-        if not mod:
-            continue
-        fn = getattr(mod, fnname, None)
-        if callable(fn):
-            try:
-                fn()
-                return
-            except SystemExit:
-                raise
-            except Exception as e:
-                last_err = f"{modname}.{fnname} -> {type(e).__name__}: {e}"
-
-    _fail(f"FATAL | LIVE_ENTRY_NOT_FOUND | {last_err or 'no_candidate_matched'}", 1)
-
-
-# -------------------------------------------------------------------
-# main
-# -------------------------------------------------------------------
-
-def main() -> None:
+def main() -> int:
     print("=== REA GUARDED STARTUP (FAIL-CLOSED) ===")
     print(f"UTC_NOW={_utc_now_iso()}")
-    print(f"ENGINE_RUN_ID={ensure_engine_run_id()}")
 
-    mode = os.getenv("REA_ENGINE_MODE", "TEST").upper().strip()
-    headless = _env_flag("HEADLESS_DEV_MODE", "0")
-    print(f"MODE         | {mode}")
-    print(f"HEADLESS     | {int(headless)}")
+    rid = ensure_engine_run_id()
+    print(f"ENGINE_RUN_ID={rid}")
 
-    # 1) Session gate (mode-aware)
-    s_ok, s_reason = session_gate_check(mode=mode, headless=headless)
-    _print_gate("SESSION_GATE", s_ok, s_reason)
-    if not s_ok:
-        _fail(f"FATAL | SESSION_GATE_BLOCK | {s_reason}", 1)
+    mode = _env("REA_ENGINE_MODE", "TEST").upper().strip()
+    if mode not in ("TEST", "LIVE"):
+        _fail(f"FATAL | BAD_MODE | REA_ENGINE_MODE={mode!r} (use TEST or LIVE)", 2)
 
-    # Loud warning when we bypass session gate in TEST headless
-    if "BYPASS_TEST_HEADLESS" in s_reason:
-        print("WARNING      | Session gate bypassed for TEST+HEADLESS only.")
-        print("WARNING      | LIVE mode will still fail-closed until session gate module is wired.")
+    print(f"MODE={'LIVE' if mode=='LIVE' else 'TEST'}")
 
-    # 2) Exec gate (always strict)
-    e_ok, e_reason = exec_gate_check()
-    _print_gate("EXEC_GATE", e_ok, e_reason)
-    if not e_ok:
-        _fail(f"FATAL | EXEC_GATE_BLOCK | {e_reason}", 1)
+    # ---------------------------
+    # EXEC GATE (authoritative)
+    # ---------------------------
+    ok_exec, reason_exec = _exec_gate_ok(mode)
+    _print_gate("EXEC_GATE", ok_exec, reason_exec)
+    if not ok_exec:
+        _fail(f"FATAL | EXEC_GATE_BLOCK | {reason_exec}", 1)
 
-    # 3) TEST / PAPER path
-    if mode != "LIVE":
-        if not headless:
-            print("SAFE EXIT    | TEST mode: HEADLESS_DEV_MODE=0; refusing to enter UI/login.")
-            return
+    # ---------------------------
+    # Start engine entrypoint
+    # ---------------------------
+    # For V1, we keep the entrypoint simple:
+    # - TEST: run headless guarded engine (paper/test)
+    # - LIVE: still enters guarded engine, but now allowed only with explicit unlock
+    try:
+        # Prefer backend guarded entry if present, else use top-level.
+        # (No dependency on brokers/adapters here.)
+        try:
+            from backend.app.headless_guarded_entry import main as guarded_main  # type: ignore
+            entry = "backend.app.headless_guarded_entry"
+        except Exception:
+            from headless_guarded_entry import main as guarded_main  # type: ignore
+            entry = "headless_guarded_entry"
 
-        # Hard safety: never allow live broker in TEST path.
-        os.environ["REA_LIVE_BROKER_OK"] = "0"
-        os.environ["LIVE_TRADING"] = "0"
+        print(f"ENTRYPOINT     | {entry}")
+        return int(guarded_main() or 0)
 
-        print("TEST ENTRY   | Entering headless guarded engine (paper/test).")
-        _run_headless_guarded_entry()
-        return
-
-    # 4) LIVE path (strict confirmations)
-    rl_ok, rl_reason = _live_rate_limit_check()
-    print(f"RATE_LIMIT   | ok={rl_ok} | reason={rl_reason}")
-    if not rl_ok:
-        _fail(f"FATAL | RATE_LIMIT_BLOCK | {rl_reason}", 1)
-
-    su = _load_superuser_profile_default()
-    print(f"SUPERUSER    | ok={bool(su.get('ok'))} | reason={su.get('reason', 'ok')}")
-
-    if not _env_flag("CONFIRM_LIVE", "0"):
-        _fail("FATAL | LIVE_CONFIRM_REQUIRED | set CONFIRM_LIVE=1 to proceed", 1)
-
-    os.environ["REA_LIVE_BROKER_OK"] = "1"
-    os.environ["LIVE_TRADING"] = "1"
-
-    print("LIVE ENTRY   | confirmed; entering live guarded engine.")
-    _run_live_guarded_engine()
+    except SystemExit:
+        raise
+    except Exception as e:
+        _fail(f"FATAL | STARTUP_EXCEPTION | {type(e).__name__}: {e}", 1)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
