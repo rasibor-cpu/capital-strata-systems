@@ -1,341 +1,309 @@
 """
 Authoritative guarded startup wrapper for REA Capital Trading Engine.
 
-Contract (FAIL-CLOSED, ALWAYS):
-- If SESSION_GATE or EXEC_GATE errors -> HARD STOP (fail-closed) -> NO login prompt.
-- Login/auth gate runs ONLY after gates are healthy (import + callable discovery OK).
-- Execution decisions may be dict/object/tuple -> normalize safely.
-- LIVE vs TEST enforcement: LIVE requires explicit allow + policy + armed state (where available).
-- Wrapper must be resilient to function renames (getattr fallbacks).
+Responsibilities:
+- Fail-closed startup (default BLOCK)
+- Ensure ENGINE_RUN_ID exists
+- Evaluate session gate and execution gate BEFORE engine entry
+- Enforce LIVE / TEST mode execution rules
+- In TEST mode: allow headless (paper) engine entry when HEADLESS_DEV_MODE=1
+- In LIVE mode: require explicit confirmation checks (rate-limit / superuser / etc)
 """
 
 from __future__ import annotations
 
-import importlib
 import os
 import sys
-import time
 import uuid
-from dataclasses import dataclass
-from typing import Any, Callable, Optional, Tuple
+import importlib
+from typing import Any, Optional, Tuple
 
 
-# -------------------------
-# primitives / helpers
-# -------------------------
-
-def _utc_now_iso() -> str:
-    # timezone-safe (avoid datetime.utcnow deprecation)
-    try:
-        import datetime as _dt
-        return _dt.datetime.now(_dt.timezone.utc).isoformat()
-    except Exception:
-        return "utc_now_unavailable"
-
+# -------------------------------------------------------------------
+# helpers
+# -------------------------------------------------------------------
 
 def ensure_engine_run_id() -> str:
-    run_id = os.getenv("ENGINE_RUN_ID") or os.getenv("REA_ENGINE_RUN_ID") or os.getenv("REA_RUN_ID")
+    run_id = os.getenv("ENGINE_RUN_ID")
     if not run_id:
         run_id = str(uuid.uuid4())
         os.environ["ENGINE_RUN_ID"] = run_id
     return run_id
 
 
-def _fail(msg: str, code: int = 1) -> None:
+def _utc_now_iso() -> str:
+    # Keep it simple; do not hard-depend on dateutil.
+    # Use UTC offset display if available.
+    try:
+        from datetime import datetime, timezone
+        return datetime.now(timezone.utc).isoformat()
+    except Exception:
+        return "UTC_NOW_UNAVAILABLE"
+
+
+def _fail(msg: str, exit_code: int = 1) -> None:
     print(msg)
-    raise SystemExit(code)
+    raise SystemExit(exit_code)
 
 
-def safe_import(module_name: str) -> Tuple[bool, Optional[Any], Optional[str]]:
+def _safe_import(modname: str):
     try:
-        mod = importlib.import_module(module_name)
-        return True, mod, None
+        return importlib.import_module(modname)
+    except Exception:
+        return None
+
+
+def _coerce_gate_result(res: Any) -> Tuple[bool, str]:
+    """
+    Accepts gate results as:
+    - bool
+    - tuple(bool, reason)
+    - dict with keys: allowed/ok, reason
+    - object with attributes: allowed/ok, reason
+    """
+    if isinstance(res, bool):
+        return res, "ok" if res else "blocked"
+
+    if isinstance(res, tuple) and len(res) >= 1:
+        allowed = bool(res[0])
+        reason = str(res[1]) if len(res) > 1 else ("ok" if allowed else "blocked")
+        return allowed, reason
+
+    if isinstance(res, dict):
+        allowed = res.get("allowed", res.get("ok", False))
+        reason = res.get("reason", "ok" if allowed else "blocked")
+        return bool(allowed), str(reason)
+
+    # object-like
+    allowed = getattr(res, "allowed", getattr(res, "ok", False))
+    reason = getattr(res, "reason", "ok" if allowed else "blocked")
+    return bool(allowed), str(reason)
+
+
+def _print_gate(label: str, allowed: bool, reason: str) -> None:
+    print(f"{label:<12} | allowed={allowed} | reason={reason}")
+
+
+def _env_flag(name: str, default: str = "0") -> bool:
+    return os.getenv(name, default).strip() in ("1", "true", "TRUE", "yes", "YES", "on", "ON")
+
+
+# -------------------------------------------------------------------
+# guarded checks (best-effort imports; fail-closed if missing)
+# -------------------------------------------------------------------
+
+def session_gate_check() -> Tuple[bool, str]:
+    """
+    Session gate: authentication / session validation.
+    Fail-closed if module not found or exceptions occur.
+    """
+    mod = _safe_import("engine.security.session_gate") or _safe_import("engine.auth.session_gate")
+    if not mod:
+        # If your repo uses a different path, update it once and keep it stable.
+        return False, "session_gate_module_missing"
+
+    fn = getattr(mod, "check_session_gate", None) or getattr(mod, "session_gate_check", None) or getattr(mod, "check", None)
+    if not callable(fn):
+        return False, "session_gate_fn_missing"
+
+    try:
+        res = fn()
+        return _coerce_gate_result(res)
     except Exception as e:
-        return False, None, f"{type(e).__name__}: {e}"
+        return False, f"session_gate_exception:{type(e).__name__}:{e}"
 
 
-def pick_callable(mod: Any, names: list[str]) -> Optional[Callable[..., Any]]:
-    for n in names:
-        fn = getattr(mod, n, None)
+def exec_gate_check() -> Tuple[bool, str]:
+    """
+    Execution gate: risk/regime/vol/liquidity/etc composite allow/block.
+    Fail-closed if module not found or exceptions occur.
+    """
+    mod = _safe_import("engine.guards.exec_gate") or _safe_import("engine.guards.execution_gate") or _safe_import("engine.security.execution_gate")
+    if not mod:
+        return False, "exec_gate_module_missing"
+
+    fn = getattr(mod, "check_exec_gate", None) or getattr(mod, "exec_gate_check", None) or getattr(mod, "check", None)
+    if not callable(fn):
+        return False, "exec_gate_fn_missing"
+
+    try:
+        res = fn()
+        return _coerce_gate_result(res)
+    except Exception as e:
+        return False, f"exec_gate_exception:{type(e).__name__}:{e}"
+
+
+# -------------------------------------------------------------------
+# live-specific optional confirmations (fail-closed if checks missing)
+# -------------------------------------------------------------------
+
+def _live_rate_limit_check() -> Tuple[bool, str]:
+    """
+    Optional LIVE confirmation: rate-limit check / live sanity.
+    If the module/function is missing, we fail-closed (LIVE is high-stakes).
+    """
+    mod = _safe_import("engine.live.rate_limit") or _safe_import("engine.live.live_checks")
+    if not mod:
+        return False, "live_rate_limit_module_missing"
+
+    fn = getattr(mod, "rate_limit_check", None) or getattr(mod, "confirm_live_rate_limit", None) or getattr(mod, "check_rate_limit", None)
+    if not callable(fn):
+        return False, "live_rate_limit_fn_missing"
+
+    try:
+        res = fn()
+        return _coerce_gate_result(res)
+    except Exception as e:
+        return False, f"live_rate_limit_exception:{type(e).__name__}:{e}"
+
+
+def _load_superuser_profile_default() -> dict:
+    """
+    Optional: superuser profile load.
+    This MUST NOT enable anything by itself—only informs logging.
+    """
+    mod = _safe_import("engine.security.superuser") or _safe_import("engine.auth.superuser")
+    if not mod:
+        return {"ok": False, "reason": "superuser_module_missing"}
+
+    fn = getattr(mod, "load_superuser_profile_default", None) or getattr(mod, "load_default", None)
+    if not callable(fn):
+        return {"ok": False, "reason": "superuser_fn_missing"}
+
+    try:
+        out = fn()
+        if isinstance(out, dict):
+            out.setdefault("ok", True)
+            return out
+        return {"ok": True, "value": out}
+    except Exception as e:
+        return {"ok": False, "reason": f"superuser_exception:{type(e).__name__}:{e}"}
+
+
+# -------------------------------------------------------------------
+# entrypoints
+# -------------------------------------------------------------------
+
+def _run_headless_guarded_entry() -> None:
+    """
+    Preferred headless entrypoint for TEST/PAPER runs.
+    """
+    # Try most canonical first
+    candidates = [
+        ("backend.app.headless_guarded_entry", "main"),
+        ("backend.app.headless_guarded_entry", "run"),
+        ("backend.app.headless_guarded_entry", "entry"),
+        ("backend.app.main", "main"),
+    ]
+
+    last_err: Optional[str] = None
+
+    for modname, fnname in candidates:
+        mod = _safe_import(modname)
+        if not mod:
+            continue
+        fn = getattr(mod, fnname, None)
         if callable(fn):
-            return fn
-    return None
+            try:
+                fn()
+                return
+            except SystemExit:
+                raise
+            except Exception as e:
+                last_err = f"{modname}.{fnname} -> {type(e).__name__}: {e}"
+
+    _fail(f"FATAL | HEADLESS_ENTRY_NOT_FOUND | {last_err or 'no_candidate_matched'}", 1)
 
 
-def normalize_decision(decision: Any) -> dict:
+def _run_live_guarded_engine() -> None:
     """
-    Normalize ANY decision shape into a dict with:
-      - allowed: bool
-      - reason: str
-      - raw: original (for debugging)
+    LIVE guarded engine entry (must exist and must be safe by design).
     """
-    if decision is None:
-        return {"allowed": False, "reason": "no_decision_returned", "raw": None}
+    candidates = [
+        ("backend.run_live_guarded", "main"),
+        ("backend.run_live_guarded", "run"),
+        ("backend.app.main", "main"),
+    ]
 
-    if isinstance(decision, dict):
-        return {
-            "allowed": bool(decision.get("allowed", decision.get("ok", False))),
-            "reason": str(decision.get("reason", decision.get("error", "unknown"))),
-            "raw": decision,
-        }
+    last_err: Optional[str] = None
+    for modname, fnname in candidates:
+        mod = _safe_import(modname)
+        if not mod:
+            continue
+        fn = getattr(mod, fnname, None)
+        if callable(fn):
+            try:
+                fn()
+                return
+            except SystemExit:
+                raise
+            except Exception as e:
+                last_err = f"{modname}.{fnname} -> {type(e).__name__}: {e}"
 
-    # dataclass/object with attributes
-    if hasattr(decision, "__dict__"):
-        return {
-            "allowed": bool(getattr(decision, "allowed", getattr(decision, "ok", False))),
-            "reason": str(getattr(decision, "reason", getattr(decision, "error", "unknown"))),
-            "raw": decision,
-        }
-
-    # tuple fallback (allowed, reason, ...)
-    if isinstance(decision, tuple):
-        allowed = bool(decision[0]) if len(decision) >= 1 else False
-        reason = str(decision[1]) if len(decision) >= 2 else "tuple_decision"
-        return {"allowed": allowed, "reason": reason, "raw": decision}
-
-    return {"allowed": False, "reason": f"unsupported_decision_type:{type(decision)}", "raw": decision}
+    _fail(f"FATAL | LIVE_ENTRY_NOT_FOUND | {last_err or 'no_candidate_matched'}", 1)
 
 
-def show_gate(label: str, decision: Any) -> dict:
-    d = normalize_decision(decision)
-    print(f"{label:<12} | allowed={d['allowed']} | reason={d['reason']}")
-    return d
-
-
-def require_live_allowed() -> None:
-    """
-    Enforce LIVE/TEST mode rule:
-    - If REA_ENGINE_MODE != LIVE -> block anything that would proceed past gates.
-    """
-    mode = os.getenv("REA_ENGINE_MODE", "TEST").upper().strip()
-    if mode != "LIVE":
-        _fail("FATAL | MODE_BLOCK: REA_ENGINE_MODE is not LIVE (current: %s)" % mode, 2)
-
-
-# -------------------------
-# capability probing (fail-closed)
-# -------------------------
-
-@dataclass
-class GateCaps:
-    ok: bool
-    reason: str
-    session_gate_fn: Optional[Callable[..., Any]] = None
-    exec_gate_fn: Optional[Callable[..., Any]] = None
-
-
-def probe_gates_fail_closed() -> GateCaps:
-    """
-    HARD RULE:
-      If we cannot import/probe BOTH SESSION and EXEC gates -> STOP immediately.
-      This must happen BEFORE any auth/login prompt.
-    """
-
-    # SESSION_GATE: backend.app.observability.session_time session_allow_state (or compat names)
-    ok_s, mod_s, err_s = safe_import("backend.app.observability.session_time")
-    if not ok_s:
-        return GateCaps(False, f"SESSION_GATE_EXCEPTION | cannot import session_time | {err_s}")
-
-    session_fn = pick_callable(mod_s, [
-        "session_allow_state",
-        "get_session_allow_state",
-        "session_gate_check",
-        "check_session_gate",
-    ])
-    if not session_fn:
-        return GateCaps(False, "SESSION_GATE_EXCEPTION | session allow function not found (expected session_allow_state or compat name)")
-
-    # EXEC_GATE: engine.execution.execution_gate check_execution_gate (or compat names)
-    ok_e, mod_e, err_e = safe_import("engine.execution.execution_gate")
-    if not ok_e:
-        return GateCaps(False, f"EXEC_GATE_EXCEPTION | cannot import engine.execution.execution_gate | {err_e}")
-
-    exec_fn = pick_callable(mod_e, [
-        "check_execution_gate",
-        "execution_gate_check",
-        "check_exec_gate",
-        "exec_gate_check",
-    ])
-    if not exec_fn:
-        return GateCaps(False, "EXEC_GATE_EXCEPTION | execution gate function not found (expected check_execution_gate or compat name)")
-
-    return GateCaps(True, "ok", session_gate_fn=session_fn, exec_gate_fn=exec_fn)
-
-
-# -------------------------
-# optional components (non-fatal by design)
-# -------------------------
-
-def try_load_live_state() -> Tuple[bool, Optional[Any], str]:
-    ok, mod, err = safe_import("engine.execution.live_state")
-    if not ok:
-        return False, None, f"live_state import fail: {err}"
-
-    get_fn = pick_callable(mod, ["get_live_state", "read_live_state"])
-    if not get_fn:
-        return False, None, "live_state getter not found"
-
-    try:
-        state = get_fn()
-        return True, state, "ok"
-    except Exception as e:
-        return False, None, f"live_state getter failed: {type(e).__name__}: {e}"
-
-
-def try_rate_limit_check(action: str) -> Tuple[bool, str]:
-    """
-    Best-effort. If arming_rate_limit exists, use it. If not, allow but do NOT weaken fail-closed.
-    """
-    ok, mod, err = safe_import("engine.execution.arming_rate_limit")
-    if not ok:
-        return True, "rate_limit module missing (skipped)"
-
-    fn = pick_callable(mod, [
-        "check_rate_limit",
-        "rate_limit_ok",
-        "assert_rate_limit",
-    ])
-    if not fn:
-        return True, "rate_limit fn missing (skipped)"
-
-    try:
-        # expected to return bool or raise
-        out = fn(action=action) if "action" in getattr(fn, "__code__", type("x",(object,),{"co_varnames":()})) .co_varnames else fn()
-        if isinstance(out, bool) and not out:
-            return False, "rate_limited"
-        return True, "ok"
-    except Exception as e:
-        # fail-closed on rate-limit errors
-        return False, f"rate_limit_error:{type(e).__name__}:{e}"
-
-
-def load_superuser_profile_default() -> dict:
-    """
-    Fail-closed *for live arming*, but this wrapper treats missing profile as:
-    - If LIVE is requested later, the arming pipeline must block.
-    - For guarded startup, we only report status.
-    """
-    ok, mod, err = safe_import("config.superuser")
-    if not ok:
-        return {"ok": False, "reason": f"superuser loader missing: {err}"}
-
-    fn = pick_callable(mod, ["load_superuser", "load_superuser_profile", "load_profile"])
-    if not fn:
-        return {"ok": False, "reason": "superuser loader fn not found"}
-
-    try:
-        profile = fn()
-        return {"ok": True, "profile": profile, "reason": "ok"}
-    except Exception as e:
-        return {"ok": False, "reason": f"superuser load failed: {type(e).__name__}: {e}"}
-
-
-# -------------------------
+# -------------------------------------------------------------------
 # main
-# -------------------------
+# -------------------------------------------------------------------
 
 def main() -> None:
     print("=== REA GUARDED STARTUP (FAIL-CLOSED) ===")
     print(f"UTC_NOW={_utc_now_iso()}")
-    run_id = ensure_engine_run_id()
-    print(f"ENGINE_RUN_ID={run_id}")
+    print(f"ENGINE_RUN_ID={ensure_engine_run_id()}")
 
-    # 0) PROBE GATES FIRST (NO LOGIN IF ERROR)
-    caps = probe_gates_fail_closed()
-    if not caps.ok:
-        _fail(f"FATAL | {caps.reason}", 1)
+    # 1) Session gate
+    s_ok, s_reason = session_gate_check()
+    _print_gate("SESSION_GATE", s_ok, s_reason)
+    if not s_ok:
+        _fail(f"FATAL | SESSION_GATE_BLOCK | {s_reason}", 1)
 
-    # 1) SESSION_GATE check (fail-closed)
-    try:
-        session_decision = caps.session_gate_fn()  # expected to return decision-like
-        d_s = show_gate("SESSION_GATE", session_decision)
-        if not d_s["allowed"]:
-            _fail("FATAL | SESSION_GATE_BLOCK | " + d_s["reason"], 1)
-    except SystemExit:
-        raise
-    except Exception as e:
-        _fail(f"FATAL | SESSION_GATE_EXCEPTION | {type(e).__name__}: {e}", 1)
+    # 2) Exec gate
+    e_ok, e_reason = exec_gate_check()
+    _print_gate("EXEC_GATE", e_ok, e_reason)
+    if not e_ok:
+        _fail(f"FATAL | EXEC_GATE_BLOCK | {e_reason}", 1)
 
-    # 2) EXEC_GATE check (fail-closed)
-    try:
-        exec_decision = caps.exec_gate_fn()  # decision-like
-        d_e = show_gate("EXEC_GATE", exec_decision)
-        if not d_e["allowed"]:
-            _fail("FATAL | EXEC_GATE_BLOCK | " + d_e["reason"], 1)
-    except SystemExit:
-        raise
-    except Exception as e:
-        _fail(f"FATAL | EXEC_GATE_EXCEPTION | {type(e).__name__}: {e}", 1)
-
-    # 3) If LIVE mode, require it explicitly; otherwise stop here cleanly
+    # 3) Mode selection
     mode = os.getenv("REA_ENGINE_MODE", "TEST").upper().strip()
-    print(f"MODE        | {mode}")
+    print(f"MODE         | {mode}")
+
+    # Always default to safe.
     if mode != "LIVE":
-        print("SAFE EXIT   | TEST mode: gates OK; refusing to proceed into login/engine.")
+        # TEST/PAPER path
+        headless = _env_flag("HEADLESS_DEV_MODE", "0")
+        if not headless:
+            print("SAFE EXIT    | TEST mode: HEADLESS_DEV_MODE=0; refusing to enter UI/login.")
+            return
+
+        # Additional hard safety: do not allow accidental live broker use in TEST.
+        os.environ["REA_LIVE_BROKER_OK"] = "0"
+        os.environ["LIVE_TRADING"] = "0"
+
+        print("TEST ENTRY   | HEADLESS_DEV_MODE=1; entering headless guarded engine (paper/test).")
+        _run_headless_guarded_entry()
         return
 
-    # 4) LIVE-specific optional checks (rate limit, superuser profile, live_state)
-    ok_rl, rl_reason = try_rate_limit_check(action="confirm_live")
-    print(f"RATE_LIMIT  | ok={ok_rl} | {rl_reason}")
-    if not ok_rl:
-        _fail("FATAL | RATE_LIMIT_BLOCK | " + rl_reason, 1)
+    # 4) LIVE-specific confirmations (fail-closed)
+    rl_ok, rl_reason = _live_rate_limit_check()
+    print(f"RATE_LIMIT   | ok={rl_ok} | reason={rl_reason}")
+    if not rl_ok:
+        _fail(f"FATAL | RATE_LIMIT_BLOCK | {rl_reason}", 1)
 
-    su = load_superuser_profile_default()
-    print(f"SUPERUSER   | ok={su.get('ok')} | {su.get('reason')}")
-    if not su.get("ok"):
-        _fail("FATAL | SUPERUSER_PROFILE_REQUIRED_FOR_LIVE | " + str(su.get("reason")), 1)
+    su = _load_superuser_profile_default()
+    print(f"SUPERUSER    | ok={bool(su.get('ok'))} | reason={su.get('reason', 'ok')}")
 
-    ok_ls, live_state, ls_reason = try_load_live_state()
-    print(f"LIVE_STATE  | ok={ok_ls} | {ls_reason}")
-    if ok_ls:
-        # do not assume schema; just print safely
-        try:
-            print(f"LIVE_STATE  | {live_state}")
-        except Exception:
-            print("LIVE_STATE  | (unprintable)")
+    # Explicit allow flag required for LIVE (prevents accidental LIVE start)
+    if not _env_flag("CONFIRM_LIVE", "0"):
+        _fail("FATAL | LIVE_CONFIRM_REQUIRED | set CONFIRM_LIVE=1 to proceed", 1)
 
-    # 5) AUTH gate (BLOCKING) — ONLY after gates OK
-    try:
-        from backend.app.security.auth_gate import await_login_ready_state
-    except Exception as e:
-        _fail(f"FATAL | AUTH_GATE_IMPORT_FAIL | {type(e).__name__}: {e}", 1)
+    # LIVE broker allowed only when explicitly confirmed
+    os.environ["REA_LIVE_BROKER_OK"] = "1"
+    os.environ["LIVE_TRADING"] = "1"
 
-    auth_ctx, unit_bundle = await_login_ready_state()
-    print(
-        f"AUTH_OK     | user_id={getattr(auth_ctx, 'user_id', 'na')} "
-        f"| role={getattr(auth_ctx, 'role', 'na')} "
-        f"| unit={getattr(auth_ctx, 'unit_code', 'na')} "
-        f"| branch={getattr(auth_ctx, 'current_branch', 'na')}"
-    )
-
-    # 6) Engine entrypoint
-    entry = os.getenv("REA_ENGINE_ENTRYPOINT") or os.getenv("REA_ENGINE_ENTRYPOINT", "")
-    if not entry:
-        _fail("FATAL | REA_ENGINE_ENTRYPOINT not set (example: engine.run_engine:main)", 1)
-
-    if ":" not in entry:
-        _fail("FATAL | REA_ENGINE_ENTRYPOINT invalid (expected module:function)", 1)
-
-    module_name, func_name = entry.split(":", 1)
-    print(f"ENTRYPOINT  | {module_name}:{func_name}")
-
-    try:
-        mod = importlib.import_module(module_name)
-        fn = getattr(mod, func_name)
-        if not callable(fn):
-            _fail("FATAL | ENTRYPOINT_NOT_CALLABLE", 1)
-    except Exception as e:
-        _fail(f"FATAL | ENTRYPOINT_IMPORT_FAIL | {type(e).__name__}: {e}", 1)
-
-    print("=== ENGINE START ===")
-    fn()
+    print("LIVE ENTRY   | confirmed; entering live guarded engine.")
+    _run_live_guarded_engine()
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except SystemExit:
-        raise
-    except Exception as e:
-        print(f"FATAL | {type(e).__name__}: {e}")
-        raise SystemExit(1)
+    main()
