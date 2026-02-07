@@ -1,12 +1,13 @@
 """
-P&L Reporting Engine – Extended Transaction View
+P&L Reporting Engine – Extended Transaction View (V1)
 REA Capital Trading Engine
 
 Provides:
 - Daily / WTD / MTD / YTD summaries
 - Custom date range summaries
-- Detailed transaction summaries
+- Detailed transaction summaries (includes UTRN)
 - Cumulative P&L tracking within selected period
+- Separate physical ledgers for TEST vs LIVE (Option A)
 """
 
 from __future__ import annotations
@@ -15,17 +16,18 @@ import json
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import List, Tuple
-
-
-DEFAULT_LEDGER_PATH = os.getenv(
-    "REA_PNL_LEDGER_PATH",
-    "reporting_store/pnl_ledger.jsonl"
-)
+from typing import List, Tuple, Optional
 
 
 def _parse_ts(ts: str) -> datetime:
     return datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(timezone.utc)
+
+
+def _ledger_path_for_mode(mode: str) -> str:
+    mode_u = str(mode or "TEST").upper().strip()
+    if mode_u == "LIVE":
+        return os.getenv("REA_PNL_LEDGER_LIVE_PATH", "reporting_store/pnl_ledger_live.jsonl")
+    return os.getenv("REA_PNL_LEDGER_TEST_PATH", "reporting_store/pnl_ledger_test.jsonl")
 
 
 def _load_events(path: str) -> List[dict]:
@@ -53,10 +55,18 @@ class Summary:
 
 
 def _filter_period(events: List[dict], start: datetime, end: datetime) -> List[dict]:
-    return [
-        e for e in events
-        if start <= _parse_ts(e["ts_utc"]) < end
-    ]
+    out = []
+    for e in events:
+        ts = e.get("ts_utc")
+        if not ts:
+            continue
+        try:
+            dt = _parse_ts(ts)
+        except Exception:
+            continue
+        if start <= dt < end:
+            out.append(e)
+    return out
 
 
 def _summarize(events: List[dict], label: str) -> Summary:
@@ -75,63 +85,81 @@ def _summarize(events: List[dict], label: str) -> Summary:
 # PUBLIC REPORT FUNCTIONS
 # ------------------------------------------------
 
-def today() -> Tuple[Summary, List[dict]]:
+def today(mode: str = "TEST") -> Tuple[Summary, List[dict]]:
     now = datetime.now(timezone.utc)
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     end = now
-    events = _filter_period(_load_events(DEFAULT_LEDGER_PATH), start, end)
-    return _summarize(events, "TODAY (UTC)"), events
+    events = _filter_period(_load_events(_ledger_path_for_mode(mode)), start, end)
+    return _summarize(events, f"TODAY (UTC) [{mode.upper()}]"), events
 
 
-def wtd() -> Tuple[Summary, List[dict]]:
+def wtd(mode: str = "TEST") -> Tuple[Summary, List[dict]]:
     now = datetime.now(timezone.utc)
     iso_year, iso_week, _ = now.isocalendar()
 
     events = []
-    for e in _load_events(DEFAULT_LEDGER_PATH):
-        dt = _parse_ts(e["ts_utc"])
+    for e in _load_events(_ledger_path_for_mode(mode)):
+        ts = e.get("ts_utc")
+        if not ts:
+            continue
+        try:
+            dt = _parse_ts(ts)
+        except Exception:
+            continue
         y, w, _ = dt.isocalendar()
         if y == iso_year and w == iso_week:
             events.append(e)
 
-    return _summarize(events, "WTD (UTC ISO)"), events
+    return _summarize(events, f"WTD (UTC ISO) [{mode.upper()}]"), events
 
 
-def mtd() -> Tuple[Summary, List[dict]]:
+def mtd(mode: str = "TEST") -> Tuple[Summary, List[dict]]:
     now = datetime.now(timezone.utc)
     events = []
-    for e in _load_events(DEFAULT_LEDGER_PATH):
-        dt = _parse_ts(e["ts_utc"])
+    for e in _load_events(_ledger_path_for_mode(mode)):
+        ts = e.get("ts_utc")
+        if not ts:
+            continue
+        try:
+            dt = _parse_ts(ts)
+        except Exception:
+            continue
         if dt.year == now.year and dt.month == now.month:
             events.append(e)
 
-    return _summarize(events, "MTD (UTC)"), events
+    return _summarize(events, f"MTD (UTC) [{mode.upper()}]"), events
 
 
-def ytd() -> Tuple[Summary, List[dict]]:
+def ytd(mode: str = "TEST") -> Tuple[Summary, List[dict]]:
     now = datetime.now(timezone.utc)
     events = []
-    for e in _load_events(DEFAULT_LEDGER_PATH):
-        dt = _parse_ts(e["ts_utc"])
+    for e in _load_events(_ledger_path_for_mode(mode)):
+        ts = e.get("ts_utc")
+        if not ts:
+            continue
+        try:
+            dt = _parse_ts(ts)
+        except Exception:
+            continue
         if dt.year == now.year:
             events.append(e)
 
-    return _summarize(events, "YTD (UTC)"), events
+    return _summarize(events, f"YTD (UTC) [{mode.upper()}]"), events
 
 
-def custom_range(start_iso: str, end_iso: str) -> Tuple[Summary, List[dict]]:
+def custom_range(start_iso: str, end_iso: str, mode: str = "TEST") -> Tuple[Summary, List[dict]]:
     start = datetime.fromisoformat(start_iso).astimezone(timezone.utc)
     end = datetime.fromisoformat(end_iso).astimezone(timezone.utc)
 
-    events = _filter_period(_load_events(DEFAULT_LEDGER_PATH), start, end)
-    return _summarize(events, f"RANGE {start_iso} → {end_iso}"), events
+    events = _filter_period(_load_events(_ledger_path_for_mode(mode)), start, end)
+    return _summarize(events, f"RANGE {start_iso} → {end_iso} [{mode.upper()}]"), events
 
 
 # ------------------------------------------------
 # PRINT FUNCTIONS
 # ------------------------------------------------
 
-def print_summary(summary: Summary):
+def print_summary(summary: Summary) -> None:
     print(f"\n=== {summary.label} ===")
     print(f"Trades:   {summary.trades}")
     print(f"Wins:     {summary.wins}")
@@ -141,7 +169,7 @@ def print_summary(summary: Summary):
     print(f"Fees:     {summary.fees:.2f}")
 
 
-def print_transaction_details(events: List[dict]):
+def print_transaction_details(events: List[dict]) -> None:
     print("\n--- TRANSACTION DETAILS ---")
     cumulative = 0.0
 
@@ -149,7 +177,10 @@ def print_transaction_details(events: List[dict]):
         pnl = float(e.get("pnl", 0.0))
         cumulative += pnl
 
+        utrn = e.get("trade_id", "") or e.get("utrn", "")  # tolerate either key
+
         print(f"\nTrade #{i}")
+        print(f"UTRN:            {utrn}")
         print(f"Trade Type:      {e.get('trade_type', '')}")
         print(f"Symbol:          {e.get('symbol', '')}")
         print(f"Side:            {e.get('side', '')}")
