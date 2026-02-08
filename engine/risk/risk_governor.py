@@ -2,16 +2,14 @@
 Risk Governor – Core Enforcement Layer
 REA Capital Trading Engine
 
-Integrated Micro Mode support (toggle via REA_MICRO_MODE=1)
-
-Phase 1 Hardened:
-- Defensive state validation
-- Self-healing schema
-- Negative counter prevention
+Phase 1 Fully Hardened:
+- Defensive state schema
+- Consecutive loss caps
 - Instrument loss caps
-- Consecutive loss cooldown
-- Daily trade limits
+- Daily trade caps
+- Concurrent position caps
 - Equity risk caps
+- Daily drawdown kill-switch
 """
 
 from __future__ import annotations
@@ -27,7 +25,7 @@ BLOCK = "BLOCK"
 
 
 # ============================================================
-# Policy Definitions
+# Policy
 # ============================================================
 
 @dataclass(frozen=True)
@@ -39,6 +37,7 @@ class RiskPolicy:
     max_losses_per_pair: int
     cooldown_hours: int
     max_equity_risk_per_trade: float
+    max_daily_drawdown_pct: float
 
 
 def micro_mode_enabled() -> bool:
@@ -55,6 +54,7 @@ def load_policy() -> RiskPolicy:
             max_losses_per_pair=2,
             cooldown_hours=12,
             max_equity_risk_per_trade=0.01,
+            max_daily_drawdown_pct=0.03,  # 3%
         )
 
     return RiskPolicy(
@@ -65,11 +65,12 @@ def load_policy() -> RiskPolicy:
         max_losses_per_pair=3,
         cooldown_hours=12,
         max_equity_risk_per_trade=0.02,
+        max_daily_drawdown_pct=0.10,  # 10%
     )
 
 
 # ============================================================
-# State Schema Enforcement
+# State Integrity
 # ============================================================
 
 def _utc_today() -> str:
@@ -77,17 +78,6 @@ def _utc_today() -> str:
 
 
 def ensure_state_schema(state: Dict[str, Any]) -> None:
-    """
-    Production-grade validation and self-healing.
-
-    Guarantees:
-    - All required keys exist
-    - Counters are non-negative integers
-    - daily_pnl is float
-    - losses_by_pair is dict[str, int]
-    - cooldown_until is ISO string or None
-    """
-
     defaults = {
         "day_key": "1970-01-01",
         "trades_today": 0,
@@ -98,35 +88,25 @@ def ensure_state_schema(state: Dict[str, Any]) -> None:
         "daily_pnl": 0.0,
     }
 
-    for key, default in defaults.items():
-        state.setdefault(key, default)
+    for k, v in defaults.items():
+        state.setdefault(k, v)
 
-    # Normalize numeric fields
-    state["trades_today"] = max(int(state.get("trades_today", 0)), 0)
-    state["open_positions"] = max(int(state.get("open_positions", 0)), 0)
-    state["consecutive_losses"] = max(int(state.get("consecutive_losses", 0)), 0)
-    state["daily_pnl"] = float(state.get("daily_pnl", 0.0))
+    state["trades_today"] = max(int(state["trades_today"]), 0)
+    state["open_positions"] = max(int(state["open_positions"]), 0)
+    state["consecutive_losses"] = max(int(state["consecutive_losses"]), 0)
+    state["daily_pnl"] = float(state["daily_pnl"])
 
-    # Normalize losses_by_pair
-    if not isinstance(state.get("losses_by_pair"), dict):
+    if not isinstance(state["losses_by_pair"], dict):
         state["losses_by_pair"] = {}
 
-    clean_losses = {}
+    clean = {}
     for k, v in state["losses_by_pair"].items():
         try:
-            clean_losses[str(k)] = max(int(v), 0)
+            clean[str(k)] = max(int(v), 0)
         except Exception:
-            clean_losses[str(k)] = 0
+            clean[str(k)] = 0
 
-    state["losses_by_pair"] = clean_losses
-
-    # Validate cooldown timestamp
-    cd = state.get("cooldown_until")
-    if cd is not None:
-        try:
-            datetime.fromisoformat(cd)
-        except Exception:
-            state["cooldown_until"] = None
+    state["losses_by_pair"] = clean
 
 
 # ============================================================
@@ -146,16 +126,16 @@ class RiskGovernor:
         *,
         instrument: str,
         equity_risk: Optional[float],
+        equity: float,
         state: Dict[str, Any],
     ) -> Dict[str, Any]:
 
         self.refresh()
         p = self.policy
 
-        # Ensure state integrity before evaluation
         ensure_state_schema(state)
 
-        # Daily reset (UTC)
+        # Daily reset
         today = _utc_today()
         if state["day_key"] != today:
             state["day_key"] = today
@@ -165,7 +145,17 @@ class RiskGovernor:
             state["cooldown_until"] = None
             state["daily_pnl"] = 0.0
 
-        # Cooldown enforcement
+        # 🔴 DAILY DRAWDOWN KILL SWITCH
+        if equity > 0:
+            drawdown_pct = abs(state["daily_pnl"]) / equity
+            if state["daily_pnl"] < 0 and drawdown_pct >= p.max_daily_drawdown_pct:
+                return {
+                    "decision": BLOCK,
+                    "policy": p.name,
+                    "reasons": ["Daily drawdown limit reached"],
+                }
+
+        # Cooldown
         cd = state.get("cooldown_until")
         if cd:
             until = datetime.fromisoformat(cd)
@@ -176,7 +166,6 @@ class RiskGovernor:
                     "reasons": [f"Cooldown active until {cd}"],
                 }
 
-        # Daily trade cap
         if state["trades_today"] >= p.max_trades_per_day:
             return {
                 "decision": BLOCK,
@@ -184,7 +173,6 @@ class RiskGovernor:
                 "reasons": ["Max trades per day reached"],
             }
 
-        # Concurrent positions cap
         if state["open_positions"] >= p.max_concurrent_positions:
             return {
                 "decision": BLOCK,
@@ -192,7 +180,6 @@ class RiskGovernor:
                 "reasons": ["Max concurrent positions reached"],
             }
 
-        # Consecutive loss cap
         if state["consecutive_losses"] >= p.max_consecutive_losses:
             until = datetime.now(timezone.utc) + timedelta(hours=p.cooldown_hours)
             state["cooldown_until"] = until.isoformat()
@@ -202,16 +189,13 @@ class RiskGovernor:
                 "reasons": ["Consecutive loss cap hit – cooldown engaged"],
             }
 
-        # Instrument loss cap
-        pair_losses = state["losses_by_pair"].get(instrument, 0)
-        if pair_losses >= p.max_losses_per_pair:
+        if state["losses_by_pair"].get(instrument, 0) >= p.max_losses_per_pair:
             return {
                 "decision": BLOCK,
                 "policy": p.name,
                 "reasons": ["Instrument loss cap reached"],
             }
 
-        # Equity risk cap
         if equity_risk is not None and equity_risk > p.max_equity_risk_per_trade:
             return {
                 "decision": BLOCK,
@@ -227,7 +211,7 @@ class RiskGovernor:
 
 
 # ============================================================
-# State Update Helpers
+# State Updates
 # ============================================================
 
 def apply_trade(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -240,10 +224,7 @@ def apply_trade(state: Dict[str, Any]) -> Dict[str, Any]:
 def apply_result(state: Dict[str, Any], instrument: str, pnl: float) -> Dict[str, Any]:
     ensure_state_schema(state)
 
-    # Decrement open positions safely
     state["open_positions"] = max(state["open_positions"] - 1, 0)
-
-    # Track daily pnl
     state["daily_pnl"] += float(pnl)
 
     if pnl < 0:
