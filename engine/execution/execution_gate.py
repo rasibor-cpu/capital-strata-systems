@@ -1,43 +1,58 @@
 """
-EXECUTION GATE — canonical execution permission check.
+Execution Gate – Central Trade Approval Layer
+REA Capital Trading Engine
 
-Contract:
-- MUST export: check_execution_gate()
-- MUST NOT raise on import
-- MUST return decision-like object
+Integrated with RiskGovernor
+Fail-closed by design.
 """
 
 from __future__ import annotations
-from typing import Dict
-import os
+
+from typing import Dict, Any
+
+from engine.risk.risk_governor import RiskGovernor, apply_trade
 
 
-def check_execution_gate() -> Dict[str, str | bool]:
-    """
-    Determines whether execution is permitted.
+class ExecutionGate:
 
-    Returns:
-        {
-            "allowed": bool,
-            "reason": str
+    def __init__(self):
+        self.risk_governor = RiskGovernor()
+
+        # In-memory state (Phase 1)
+        self.state = {
+            "day_key": "1970-01-01",
+            "trades_today": 0,
+            "open_positions": 0,
+            "consecutive_losses": 0,
+            "losses_by_pair": {},
+            "cooldown_until": None,
         }
-    """
 
-    # Fail-closed default
-    allowed = True
-    reason = "ok"
+    def evaluate_trade(
+        self,
+        *,
+        instrument: str,
+        equity_risk: float,
+    ) -> Dict[str, Any]:
 
-    # Hard global kill-switch
-    if os.getenv("REA_EXECUTION_DISABLED", "0") == "1":
-        allowed = False
-        reason = "execution_disabled"
+        decision = self.risk_governor.evaluate(
+            instrument=instrument,
+            equity_risk=equity_risk,
+            state=self.state,
+        )
 
-    # Optional liquidity / volatility brakes (future hooks)
-    if os.getenv("REA_VOLATILITY_HALT", "0") == "1":
-        allowed = False
-        reason = "volatility_halt"
+        if decision["decision"] == "BLOCK":
+            return {
+                "status": "REJECTED",
+                "risk_policy": decision["policy"],
+                "reasons": decision["reasons"],
+            }
 
-    return {
-        "allowed": allowed,
-        "reason": reason,
-    }
+        # If allowed → increment trade counter
+        apply_trade(self.state)
+
+        return {
+            "status": "APPROVED",
+            "risk_policy": decision["policy"],
+            "reasons": decision["reasons"],
+        }
