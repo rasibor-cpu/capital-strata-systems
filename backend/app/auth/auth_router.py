@@ -1,14 +1,22 @@
 """
-Auth Router — REA Capital Trading Engine
+Auth Router - REA Capital Trading Engine
 
 Workflow:
 1) POST /auth/login  (username+password) -> sends OTP (email), returns expires_in_seconds
 2) POST /auth/verify (username+otp)      -> returns session token (bearer)
 3) GET  /auth/me     (Authorization: Bearer <token>) -> identity
 4) POST /auth/logout (Authorization: Bearer <token>) -> revoke
+
+HEADLESS_DEV_MODE:
+- In headless dev mode we DO NOT require SMTP/email delivery.
+- /auth/login generates OTP but does NOT email it; it returns the OTP in the message field
+  so you can immediately verify via /auth/verify.
+- Production behavior remains unchanged.
 """
 
 from __future__ import annotations
+
+import os
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -23,6 +31,14 @@ from .token_store import token_store
 from .otp_sender import send_otp_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _env_true(name: str) -> bool:
+    v = os.getenv(name, "")
+    return v.strip().lower() in ("1", "true", "yes", "y", "on")
+
+
+HEADLESS_DEV_MODE = _env_true("HEADLESS_DEV_MODE")
 
 
 class LoginRequest(BaseModel):
@@ -57,7 +73,10 @@ def _require_bearer(authorization: str | None) -> str:
         raise HTTPException(status_code=401, detail="Missing Authorization header")
     parts = authorization.split()
     if len(parts) != 2 or parts[0].lower() != "bearer":
-        raise HTTPException(status_code=401, detail="Invalid Authorization header (expected Bearer token)")
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid Authorization header (expected Bearer token)",
+        )
     return parts[1].strip()
 
 
@@ -70,12 +89,24 @@ def login(req: LoginRequest) -> LoginResponse:
     if username != REA_SUPERUSER_USERNAME.strip().lower() or password != REA_SUPERUSER_PASSWORD:
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
-    # Generate OTP + email it (never return OTP to the UI)
+    # Generate OTP
     otp_code = token_store.generate_otp(username)
+
+    # HEADLESS DEV MODE: do not email OTP; return it in message so you can verify immediately.
+    if HEADLESS_DEV_MODE:
+        return LoginResponse(
+            ok=True,
+            message=f"HEADLESS_DEV_MODE: OTP={otp_code}",
+            expires_in_seconds=int(OTP_TTL_SECONDS),
+            username=username,
+            roles=list(REA_SUPERUSER_ROLES),
+        )
+
+    # Normal mode: email OTP (never return OTP to UI)
     try:
         send_otp_email(otp_code=otp_code, username=username)
     except Exception as e:
-        # keep OTP but tell user delivery failed
+        # Keep OTP but tell user delivery failed
         raise HTTPException(status_code=502, detail=f"OTP delivery failed: {e}")
 
     return LoginResponse(
@@ -97,6 +128,7 @@ def verify(req: VerifyRequest) -> VerifyResponse:
 
     # Create session token (bearer)
     token = token_store.create_session(username=username, roles=list(REA_SUPERUSER_ROLES), minutes=60)
+
     return VerifyResponse(
         ok=True,
         token=token,
