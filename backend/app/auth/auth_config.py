@@ -25,20 +25,24 @@ def _getenv_int(name: str, default: int) -> int:
         return default
 
 
-# -------------------------------------------------------------------
+# --------------------------------------------------------------------
 # Superuser (dev baseline)
-# -------------------------------------------------------------------
-REA_SUPERUSER_USERNAME: str = _getenv("REA_SUPERUSER_USERNAME", "robert").strip() or "robert"
-REA_SUPERUSER_PASSWORD: str = _getenv("REA_SUPERUSER_PASSWORD", "123456").strip() or "123456"
+# --------------------------------------------------------------------
+# IMPORTANT:
+# - Default username must be "admin" (per project decision)
+# - Default password must be "123456" (6 digits)
+# - Can be overridden via env vars
+REA_SUPERUSER_USERNAME: str = (_getenv("REA_SUPERUSER_USERNAME", "admin").strip() or "admin")
+REA_SUPERUSER_PASSWORD: str = (_getenv("REA_SUPERUSER_PASSWORD", "123456").strip() or "123456")
 
 # Comma-separated roles, default "superuser"
 _roles_raw = _getenv("REA_SUPERUSER_ROLES", "superuser")
 REA_SUPERUSER_ROLES: List[str] = [r.strip() for r in _roles_raw.split(",") if r.strip()] or ["superuser"]
 
 
-# -------------------------------------------------------------------
+# --------------------------------------------------------------------
 # OTP / Email
-# -------------------------------------------------------------------
+# --------------------------------------------------------------------
 OTP_TTL_SECONDS: int = _getenv_int("OTP_TTL_SECONDS", 300)
 
 OTP_SMTP_HOST: str = _getenv("OTP_SMTP_HOST", "").strip()
