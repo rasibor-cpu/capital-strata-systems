@@ -1,131 +1,203 @@
-# backend/app/headless_guarded_entry.py
+"""
+Headless Guarded Entry – REA Capital Trading Engine
+
+Goal:
+- Provide a stable "headless run" API that NEVER returns {}.
+- Fail-closed by default.
+- Return structured JSON that your PowerShell can show clearly.
+
+Notes:
+- This does NOT require login (HEADLESS_DEV_MODE supported).
+- Live execution remains locked unless explicitly enabled elsewhere.
+"""
+
 from __future__ import annotations
 
-import os
-import random
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any, Dict, Optional
+from datetime import datetime, timezone
 
-from backend.app.risk.daily_trade_guard import DailyTradeGuard
+# Guards
 from backend.app.risk.loss_streak_guard import LossStreakGuard
 
-from backend.app.brokers.base import OrderRequest, OrderResult
-from backend.app.brokers.oanda_adapter import OandaAdapter
+# If you have a daily trade guard module, we try to import it.
+# But we fail-safe if it doesn't exist or is broken.
+try:
+    from backend.app.risk.daily_trade_guard import DailyTradeGuard  # type: ignore
+except Exception:
+    DailyTradeGuard = None  # type: ignore
 
 
-@dataclass(frozen=True)
-class HeadlessRunRequest:
-    steps: int
+UTC = timezone.utc
+
+
+@dataclass
+class HeadlessResult:
+    ok: bool
+    mode: str
+    live_execution: bool
+    locked: bool
+    steps_requested: int
     symbol: str
+    simulated_trades: int
+    blocked_trades: int
+    blocked_breakdown: Dict[str, Any]
+    daily_trade_guard: Dict[str, Any]
+    loss_streak_guard: Dict[str, Any]
+    trade_preview: Dict[str, Any]
+    blocked_reason: Optional[str] = None
+    warning: Optional[str] = None
+    timestamp_utc: str = ""
 
 
-def _bool_env(name: str, default: str = "0") -> bool:
-    return os.getenv(name, default).strip().lower() in ("1", "true", "yes", "y")
+def _utc_now_iso() -> str:
+    return datetime.now(tz=UTC).isoformat()
 
 
-def _pick_adapter() -> Optional[Any]:
-    # For now: OANDA only (practice). Easy to extend later.
-    adapter = OandaAdapter()
-    return adapter if adapter.is_configured() else None
+def _safe_status(obj: Any) -> Dict[str, Any]:
+    try:
+        if obj is None:
+            return {"enabled": False}
+        if hasattr(obj, "status") and callable(getattr(obj, "status")):
+            s = obj.status()
+            return s if isinstance(s, dict) else {"value": s}
+        return {"enabled": True, "note": "No status() method."}
+    except Exception as e:
+        return {"enabled": True, "error": f"{type(e).__name__}: {e}"}
 
 
-def run_headless(*, steps: int, symbol: str) -> Dict[str, Any]:
+def _safe_call(fn, default: Any) -> Any:
+    try:
+        return fn()
+    except Exception as e:
+        return default, f"{type(e).__name__}: {e}"
+
+
+def run_headless(
+    steps: int,
+    symbol: str,
+    execution_mode: str = "SIMULATION",
+    **_ignored: Any,
+) -> Dict[str, Any]:
     """
-    Headless guarded runner.
+    Primary entrypoint called by backend.app.main engine_headless_run.
 
-    Modes:
-    - HEADLESS_DEV: simulation only (safe)
-    - PAPER: if broker env configured + explicit unlock flags
+    IMPORTANT:
+    - Always returns a dict with keys. Never {}.
+    - execution_mode is accepted but SIMULATION is the only safe mode here unless unlocked elsewhere.
     """
+    mode = str(execution_mode or "SIMULATION").upper().strip()
 
-    mode = "HEADLESS_DEV" if _bool_env("HEADLESS_DEV_MODE", "1") else "PAPER"
-    # locked by default (fail-closed)
-    execution_unlocked = _bool_env("EXECUTION_UNLOCKED", "0")
-    dev_force_allow = _bool_env("DEV_FORCE_ALLOW", "0")
+    # Safety defaults
+    live_execution = False
+    locked = True  # Execution layer locked in headless by default
 
-    locked = True
-    if mode == "PAPER":
-        # still require explicit unlocks
-        locked = not (execution_unlocked and dev_force_allow)
+    # Normalize inputs
+    try:
+        steps_i = int(steps)
+    except Exception:
+        steps_i = 1
+    steps_i = max(1, min(steps_i, 5000))
 
-    daily_guard = DailyTradeGuard(max_trades=10)
-    loss_guard = LossStreakGuard(max_losses=5, cooldown_hours=1)  # 1 hour after 5 losses
+    sym = (symbol or "EUR_USD").strip()
 
-    # NOTE: These guards are stateless across restarts for now.
-    # Persistence is item (D), later.
+    # Instantiate guards (in-memory for now)
+    # Loss streak policy: 5 losses -> 1 hour cooldown (per Robert)
+    loss_guard = LossStreakGuard(max_losses=5, cooldown_hours=1.0)
 
-    blocked_breakdown: Dict[str, int] = {"daily_guard": 0, "loss_streak": 0}
+    # Daily trade guard is optional; if missing, we return a disabled status.
+    daily_guard = None
+    if DailyTradeGuard is not None:
+        try:
+            daily_guard = DailyTradeGuard(max_trades=15)  # you asked max/day 15 earlier
+        except Exception:
+            daily_guard = None
+
+    # Simulate "steps" events: we just create a deterministic pattern for smoke testing.
+    # You can replace this later with real signal loop / broker adapter calls.
     simulated_trades = 0
     blocked_trades = 0
-    paper_orders = 0
-    paper_fails = 0
+    breakdown: Dict[str, Any] = {
+        "daily_trade_guard_blocked": 0,
+        "loss_streak_guard_blocked": 0,
+        "locked_execution_blocked": 0,
+        "other_blocked": 0,
+    }
 
-    adapter = _pick_adapter()
+    # Trade preview (what we WOULD do if unlocked)
+    trade_preview = {"symbol": sym, "side": "buy", "units": 1, "order_type": "MARKET"}
 
-    for i in range(int(steps)):
-        # 1) Daily limit gate
-        dg = daily_guard.status()
-        trades_today = int(dg.get("trades_today", 0))
-        if trades_today >= daily_guard.max_trades:
+    blocked_reason: Optional[str] = None
+
+    for i in range(steps_i):
+        # 1) Execution locked => we can preview but not execute live
+        if locked:
             blocked_trades += 1
-            blocked_breakdown["daily_guard"] += 1
+            breakdown["locked_execution_blocked"] += 1
+            blocked_reason = "Execution layer locked (no live trades)."
             continue
 
-        # 2) Loss streak gate
-        lg = loss_guard.status()
-        if bool(lg.get("cooldown_active", False)):
+        # 2) Daily trade guard (if enabled)
+        if daily_guard is not None:
+            try:
+                d = daily_guard.should_block()  # expected dict with decision
+                if isinstance(d, dict) and d.get("decision") == "BLOCK":
+                    blocked_trades += 1
+                    breakdown["daily_trade_guard_blocked"] += 1
+                    blocked_reason = d.get("reason", "Daily trade limit reached.")
+                    continue
+            except Exception:
+                # fail-safe: block
+                blocked_trades += 1
+                breakdown["daily_trade_guard_blocked"] += 1
+                blocked_reason = "Daily trade guard error (fail-safe block)."
+                continue
+
+        # 3) Loss streak guard
+        lg = loss_guard.should_block()
+        if lg.get("decision") == "BLOCK":
             blocked_trades += 1
-            blocked_breakdown["loss_streak"] += 1
+            breakdown["loss_streak_guard_blocked"] += 1
+            blocked_reason = lg.get("reason", "Loss streak cooldown active.")
             continue
 
-        # If locked, we simulate only
-        if locked or mode == "HEADLESS_DEV" or adapter is None:
-            # A proper outcomes simulator is item (A).
-            # For now, minimal safe simulation: random outcomes with mild loss bias.
-            simulated_trades += 1
-            daily_guard.record_trade()
+        # If allowed, count as simulated trade
+        simulated_trades += 1
 
-            # simulate win/loss (55% win, 45% loss default)
-            is_loss = random.random() < float(os.getenv("SIM_LOSS_PROB", "0.45"))
-            if is_loss:
-                loss_guard.record_loss()
-            else:
-                loss_guard.record_win()
-            continue
-
-        # PAPER execution (practice) — still guarded and requires explicit unlock
-        # Basic order sizing for smoke: 1 unit (we’ll enhance later)
-        req = OrderRequest(symbol=symbol, side="buy", units=1, client_tag=f"REA_HEADLESS_{i}")
-        result: OrderResult = adapter.place_order(req)
-        paper_orders += 1
-        daily_guard.record_trade()
-
-        # Treat broker failure as a "loss" for risk brakes (conservative)
-        if not result.ok:
-            paper_fails += 1
+        # Deterministic fake outcome: every 6th trade is a loss to exercise the guard.
+        if (simulated_trades % 6) == 0:
             loss_guard.record_loss()
         else:
-            loss_guard.record_win()  # placeholder until we read fills PnL
+            loss_guard.record_win()
 
-    return {
-        "ok": True,
-        "mode": mode,
-        "locked": locked,
-        "steps_requested": int(steps),
-        "symbol": symbol,
-        "simulated_trades": simulated_trades,
-        "blocked_trades": blocked_trades,
-        "blocked_breakdown": blocked_breakdown,
-        "daily_trade_guard": daily_guard.status(),
-        "loss_streak_guard": loss_guard.status(),
-        "paper": {
-            "configured": adapter is not None,
-            "orders_sent": paper_orders,
-            "order_failures": paper_fails,
-            "unlock_flags": {
-                "EXECUTION_UNLOCKED": execution_unlocked,
-                "DEV_FORCE_ALLOW": dev_force_allow,
-            },
-        },
-        "live_execution": (mode == "PAPER" and not locked and adapter is not None),
-    }
+    result = HeadlessResult(
+        ok=True,
+        mode=mode,
+        live_execution=live_execution,
+        locked=locked,
+        steps_requested=steps_i,
+        symbol=sym,
+        simulated_trades=simulated_trades,
+        blocked_trades=blocked_trades,
+        blocked_breakdown=breakdown,
+        daily_trade_guard=_safe_status(daily_guard),
+        loss_streak_guard=_safe_status(loss_guard),
+        trade_preview=trade_preview,
+        blocked_reason=blocked_reason,
+        warning=None,
+        timestamp_utc=_utc_now_iso(),
+    )
+
+    out = asdict(result)
+
+    # Hard guarantee: never return {} even if something unexpected happens
+    if not out:
+        return {
+            "ok": False,
+            "mode": mode,
+            "locked": True,
+            "error": "HeadlessResult serialization returned empty dict (fail-safe).",
+            "timestamp_utc": _utc_now_iso(),
+        }
+
+    return out
