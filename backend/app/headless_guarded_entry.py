@@ -1,50 +1,45 @@
 """
-Headless Guarded Entry – REA Capital Trading Engine
-
-Purpose:
-- Safe, non-live execution wrapper
-- No broker calls
-- No real trades
-- Pure simulation path
+Headless guarded entry – REA Capital Trading Engine
+Self-contained version (no simulator dependency)
 """
 
 from __future__ import annotations
-from typing import Dict, Any
+
+import os
+from typing import Dict
 
 
-def run_headless(*, steps: int = 50, symbol: str = "EURUSD") -> Dict[str, Any]:
-    """
-    Dev-only headless execution.
+def _env_bool(name: str, default: str = "0") -> bool:
+    v = os.getenv(name, default)
+    return str(v).lower() in ("1", "true", "yes", "y", "on")
 
-    Accepts:
-        steps  – number of simulated iterations
-        symbol – trading symbol
 
-    Returns structured summary JSON.
-    """
+def run_headless(*, steps: int = 50, symbol: str = "EURUSD", **_ignored) -> Dict:
+    headless_dev = _env_bool("HEADLESS_DEV_MODE", "0")
+    locked = True
 
-    print(f"[HEADLESS] Base URL: http://127.0.0.1:8000")
-    print("[HEADLESS] API mode: no credentials supplied; auth flow skipped.")
-    print("[HEADLESS] Execution layer currently locked (no live trades).")
-    print("[HEADLESS] Guarded mode confirmed.")
-    print("[HEADLESS_DEV_MODE ready.]")
+    # --- Daily Trade Guard ---
+    from backend.app.risk.daily_trade_guard import DailyTradeGuard
 
-    # --- simple simulation loop ---
-    simulated_trades = 0
-    blocked_trades = 0
+    guard = DailyTradeGuard(max_trades=15)
 
-    for i in range(steps):
-        # For now just simulate blocks every 5 steps
-        if i % 5 == 0:
-            blocked_trades += 1
-        else:
-            simulated_trades += 1
+    steps = int(steps)
+
+    # Simulate trades internally
+    simulated_trades = steps
+    allowed_trades = min(simulated_trades, guard.max_trades)
+    blocked_trades = max(0, simulated_trades - guard.max_trades)
+
+    for _ in range(allowed_trades):
+        guard.register_trade()
 
     return {
-        "mode": "HEADLESS_DEV",
+        "mode": "HEADLESS_DEV" if headless_dev else "HEADLESS",
         "symbol": symbol,
         "steps_requested": steps,
-        "simulated_trades": simulated_trades,
+        "simulated_trades": allowed_trades,
         "blocked_trades": blocked_trades,
         "live_execution": False,
+        "locked": locked,
+        "daily_trade_guard": guard.status(),
     }
