@@ -1,141 +1,104 @@
 """
 Loss Streak Guard – REA Capital Trading Engine
+---------------------------------------------
 
-Purpose:
-- Block trading after N consecutive losses.
-- Enforce a cooldown window after the loss streak triggers.
-- Provide structured status for audit + headless runs.
+Goal:
+- If consecutive losses reach threshold => BLOCK and enforce cooldown.
+- Safe/structured output for audit.
+- Exported API expected by headless_guarded_entry.py:
 
-Policy (per Robert):
-- Trigger: 5 consecutive losses
-- Cooldown: 1 hour (NOT 12 hours)
-- Fail-safe: if state is invalid, default to BLOCK.
+    evaluate_loss_streak(
+        consecutive_losses: int,
+        max_consecutive_losses: int,
+        cooldown_seconds: int
+    ) -> dict
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, Optional
 
 
-UTC = timezone.utc
+@dataclass(frozen=True)
+class LossStreakState:
+    consecutive_losses: int
+    max_consecutive_losses: int
+    cooldown_seconds: int
+    cooldown_until_utc: str
+    last_event_utc: str
+    decision: str
+    reason: str
+    cooldown_remaining_seconds: int
 
 
-@dataclass
-class LossStreakPolicy:
-    max_consecutive_losses: int = 5
-    cooldown_seconds: int = 60 * 60  # 1 hour
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
 
 
-class LossStreakGuard:
+def _safe_int(x: Any, default: int = 0) -> int:
+    try:
+        return int(x)
+    except Exception:
+        return default
+
+
+def evaluate_loss_streak(
+    consecutive_losses: int,
+    max_consecutive_losses: int,
+    cooldown_seconds: int,
+) -> Dict[str, Any]:
     """
-    Stateful loss-streak guard.
-
-    Methods expected by engine/headless:
-    - record_loss()
-    - record_win()
-    - should_block()
-    - status()
-    - reset()
+    Decision logic:
+    - If max_consecutive_losses <= 0 => BLOCK (invalid policy)
+    - If consecutive_losses < max_consecutive_losses => ALLOW
+    - If consecutive_losses >= max_consecutive_losses => BLOCK with cooldown
     """
+    losses = max(0, _safe_int(consecutive_losses, 0))
+    max_losses = _safe_int(max_consecutive_losses, 5)
+    cd = _safe_int(cooldown_seconds, 3600)
 
-    def __init__(
-        self,
-        max_losses: int = 5,
-        cooldown_hours: float = 1.0,
-    ) -> None:
-        # Keep names stable but map to policy
-        cooldown_seconds = int(round(float(cooldown_hours) * 3600))
-        self.policy = LossStreakPolicy(
-            max_consecutive_losses=int(max_losses),
-            cooldown_seconds=cooldown_seconds,
+    now = _now_utc()
+
+    # invalid policy => fail closed
+    if max_losses <= 0 or cd <= 0:
+        state = LossStreakState(
+            consecutive_losses=losses,
+            max_consecutive_losses=max_losses,
+            cooldown_seconds=cd,
+            cooldown_until_utc="",
+            last_event_utc=now.isoformat(),
+            decision="BLOCK",
+            reason="Invalid loss-streak policy (fail-closed).",
+            cooldown_remaining_seconds=cd if cd > 0 else 0,
         )
+        return state.__dict__
 
-        self._consecutive_losses: int = 0
-        self._cooldown_until: Optional[datetime] = None
-        self._last_event_utc: Optional[datetime] = None
+    # within limits
+    if losses < max_losses:
+        state = LossStreakState(
+            consecutive_losses=losses,
+            max_consecutive_losses=max_losses,
+            cooldown_seconds=cd,
+            cooldown_until_utc="",
+            last_event_utc=now.isoformat(),
+            decision="ALLOW",
+            reason="Loss-streak within limits.",
+            cooldown_remaining_seconds=0,
+        )
+        return state.__dict__
 
-    # -------------------------
-    # event recorders
-    # -------------------------
-    def record_loss(self) -> None:
-        now = datetime.now(tz=UTC)
-        self._last_event_utc = now
-        self._consecutive_losses += 1
-
-        if self._consecutive_losses >= self.policy.max_consecutive_losses:
-            self._cooldown_until = now + timedelta(seconds=self.policy.cooldown_seconds)
-
-    def record_win(self) -> None:
-        now = datetime.now(tz=UTC)
-        self._last_event_utc = now
-        # win breaks streak immediately
-        self._consecutive_losses = 0
-        self._cooldown_until = None
-
-    def reset(self) -> None:
-        self._consecutive_losses = 0
-        self._cooldown_until = None
-        self._last_event_utc = None
-
-    # -------------------------
-    # decisions
-    # -------------------------
-    def should_block(self) -> Dict[str, Any]:
-        """
-        Returns:
-          {
-            "decision": "ALLOW" | "BLOCK",
-            "reason": str,
-            "consecutive_losses": int,
-            "cooldown_until_utc": str|None,
-            "cooldown_remaining_seconds": int,
-          }
-        """
-        try:
-            now = datetime.now(tz=UTC)
-            if self._cooldown_until and now < self._cooldown_until:
-                remaining = int((self._cooldown_until - now).total_seconds())
-                return {
-                    "decision": "BLOCK",
-                    "reason": f"Loss-streak cooldown active ({self.policy.max_consecutive_losses} losses).",
-                    "consecutive_losses": self._consecutive_losses,
-                    "cooldown_until_utc": self._cooldown_until.isoformat(),
-                    "cooldown_remaining_seconds": max(0, remaining),
-                }
-
-            # If cooldown expired, clear it but keep streak counter (optional).
-            if self._cooldown_until and now >= self._cooldown_until:
-                self._cooldown_until = None
-
-            # If we've hit threshold but cooldown cleared, allow again
-            return {
-                "decision": "ALLOW",
-                "reason": "Loss-streak within limits.",
-                "consecutive_losses": self._consecutive_losses,
-                "cooldown_until_utc": None,
-                "cooldown_remaining_seconds": 0,
-            }
-        except Exception as e:
-            # fail-safe
-            return {
-                "decision": "BLOCK",
-                "reason": f"LossStreakGuard error (fail-safe block): {type(e).__name__}: {e}",
-                "consecutive_losses": self._consecutive_losses,
-                "cooldown_until_utc": self._cooldown_until.isoformat() if self._cooldown_until else None,
-                "cooldown_remaining_seconds": 0,
-            }
-
-    def status(self) -> Dict[str, Any]:
-        block = self.should_block()
-        return {
-            "consecutive_losses": self._consecutive_losses,
-            "max_consecutive_losses": self.policy.max_consecutive_losses,
-            "cooldown_seconds": self.policy.cooldown_seconds,
-            "cooldown_until_utc": self._cooldown_until.isoformat() if self._cooldown_until else None,
-            "last_event_utc": self._last_event_utc.isoformat() if self._last_event_utc else None,
-            "decision": block.get("decision"),
-            "reason": block.get("reason"),
-            "cooldown_remaining_seconds": block.get("cooldown_remaining_seconds", 0),
-        }
+    # hit/exceeded streak => block + cooldown
+    cooldown_until = now + timedelta(seconds=cd)
+    state = LossStreakState(
+        consecutive_losses=losses,
+        max_consecutive_losses=max_losses,
+        cooldown_seconds=cd,
+        cooldown_until_utc=cooldown_until.isoformat(),
+        last_event_utc=now.isoformat(),
+        decision="BLOCK",
+        reason=f"Loss-streak hit ({losses} >= {max_losses}). Cooldown active.",
+        cooldown_remaining_seconds=cd,
+    )
+    return state.__dict__
