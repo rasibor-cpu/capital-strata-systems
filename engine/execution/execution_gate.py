@@ -5,146 +5,76 @@ REA Capital Trading Engine
 Integrated with RiskGovernor
 Fail-closed by design.
 
-Phase-1:
-- In-memory state
-- Micro mode compatible
-- Tracks open positions correctly
-- Records trade results
-- Passes equity into RiskGovernor (required for daily drawdown kill-switch)
-
-Equity sourcing (Phase-1 safe):
-- Preferred: caller passes equity=...
-- Fallback: REA_DEFAULT_EQUITY env var (float) if caller does not pass equity
-- Fail-closed if no equity available
+Phase 1 additions:
+- Optional persistence for risk state (REA_PERSIST_RISK_STATE=1)
 """
 
 from __future__ import annotations
 
-import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 from engine.risk.risk_governor import RiskGovernor, apply_trade, apply_result
+from engine.risk.risk_state_store import load_state, save_state
 
 
 class ExecutionGate:
+
     def __init__(self):
         self.risk_governor = RiskGovernor()
 
-        # Phase-1 in-memory state
-        self.state: Dict[str, Any] = {
-            "day_key": "1970-01-01",
-            "trades_today": 0,
-            "open_positions": 0,
-            "consecutive_losses": 0,
-            "losses_by_pair": {},
-            "cooldown_until": None,
-            "daily_pnl": 0.0,
-        }
+        # Phase 1: state may be persisted (or defaulted) via state store
+        self.state = load_state()
 
-    # ============================================================
-    # Helpers
-    # ============================================================
-
-    def _get_equity(self, equity: Optional[float]) -> Optional[float]:
-        """
-        Phase-1 safe equity retrieval.
-
-        Preferred: explicit equity passed by caller (broker adapter will do this).
-        Fallback: REA_DEFAULT_EQUITY env var for local testing.
-
-        Returns:
-            float equity or None if not available.
-        """
-        if equity is not None:
-            try:
-                eq = float(equity)
-                return eq if eq > 0 else None
-            except Exception:
-                return None
-
-        env_val = os.environ.get("REA_DEFAULT_EQUITY", "").strip()
-        if env_val:
-            try:
-                eq = float(env_val)
-                return eq if eq > 0 else None
-            except Exception:
-                return None
-
-        return None
-
-    def _risk_snapshot(self, instrument: str) -> Dict[str, Any]:
+    def snapshot(self, instrument: str) -> Dict[str, Any]:
+        # safe shallow snapshot for prints / audit
         return {
             "instrument": instrument,
             "day_key": self.state.get("day_key"),
-            "trades_today": int(self.state.get("trades_today", 0)),
-            "open_positions": int(self.state.get("open_positions", 0)),
-            "consecutive_losses": int(self.state.get("consecutive_losses", 0)),
-            "losses_by_pair": int(self.state.get("losses_by_pair", {}).get(instrument, 0)),
+            "trades_today": self.state.get("trades_today"),
+            "open_positions": self.state.get("open_positions"),
+            "consecutive_losses": self.state.get("consecutive_losses"),
+            "losses_by_pair": self.state.get("losses_by_pair", {}).get(instrument, 0),
             "cooldown_until": self.state.get("cooldown_until"),
-            "daily_pnl": float(self.state.get("daily_pnl", 0.0)),
+            "daily_pnl": self.state.get("daily_pnl", 0.0),
         }
-
-    # ============================================================
-    # Trade Evaluation
-    # ============================================================
 
     def evaluate_trade(
         self,
         *,
         instrument: str,
         equity_risk: float,
-        equity: Optional[float] = None,
     ) -> Dict[str, Any]:
-        """
-        Evaluate whether a trade is allowed under current risk policy.
-
-        equity:
-            Should be supplied by broker layer (OANDA/Alpaca) as account equity.
-            In Phase-1 local tests, you can set REA_DEFAULT_EQUITY.
-        """
-
-        eq = self._get_equity(equity)
-
-        if eq is None:
-            # Fail-closed: we cannot enforce daily drawdown without equity
-            snap = self._risk_snapshot(instrument)
-            return {
-                "status": "REJECTED",
-                "risk_policy": "UNKNOWN",
-                "reasons": ["Missing equity (pass equity=... or set REA_DEFAULT_EQUITY)"],
-                "snapshot": snap,
-            }
 
         decision = self.risk_governor.evaluate(
             instrument=instrument,
             equity_risk=equity_risk,
-            equity=eq,
             state=self.state,
         )
 
         if decision["decision"] == "BLOCK":
-            snap = self._risk_snapshot(instrument)
-            return {
+            out = {
                 "status": "REJECTED",
                 "risk_policy": decision["policy"],
                 "reasons": decision["reasons"],
-                "snapshot": snap,
+                "snapshot": self.snapshot(instrument),
             }
+            save_state(self.state)
+            return out
 
-        # Approved → increment counters
+        # Allowed → increment trade counter + open position (Phase 1 simplified)
         apply_trade(self.state)
+        self.state["open_positions"] = int(self.state.get("open_positions") or 0) + 1
 
-        snap = self._risk_snapshot(instrument)
-        return {
+        out = {
             "status": "APPROVED",
             "risk_policy": decision["policy"],
             "reasons": decision["reasons"],
-            "snapshot": snap,
+            "open_positions": self.state["open_positions"],
+            "snapshot": self.snapshot(instrument),
         }
 
-    # ============================================================
-    # Trade Result Recording
-    # ============================================================
+        save_state(self.state)
+        return out
 
     def record_trade_result(
         self,
@@ -153,12 +83,19 @@ class ExecutionGate:
         pnl: float,
     ) -> Dict[str, Any]:
         """
-        Record a realized PnL for a closed trade (or simulated result).
+        Record realized PnL and update loss counters.
+        Assumption (Phase 1): each recorded result closes 1 open position.
         """
-        apply_result(self.state, instrument, pnl)
 
-        snap = self._risk_snapshot(instrument)
-        snap["pnl"] = float(pnl)
+        # Close one position if any are open
+        if int(self.state.get("open_positions") or 0) > 0:
+            self.state["open_positions"] -= 1
+
+        apply_result(self.state, instrument=instrument, pnl=pnl)
+        save_state(self.state)
+
+        snap = self.snapshot(instrument)
+        snap["pnl"] = pnl
 
         return {
             "status": "RECORDED",

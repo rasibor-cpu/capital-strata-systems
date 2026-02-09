@@ -99,3 +99,9 @@ reporting_store/
 *.jsonl
 # Find/grep scratch outputs
 _find_*.txt
+# REA engine runtime state / logs (never commit)
+engine/risk/risk_state.json
+engine/risk/*.json
+live_tick_*.json
+*.log
+
