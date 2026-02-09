@@ -1,3 +1,12 @@
+"""
+backend.app.main – REA Capital Trading Engine API
+
+Goal of this file:
+- Never discard/overwrite headless payloads.
+- Keep auth optional for HEADLESS_DEV endpoints.
+- Provide /health and /routes for quick diagnostics.
+"""
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
@@ -6,97 +15,94 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-# Headless runner (prints [HEADLESS] logs)
-from backend.app.headless_guarded_entry import run_headless
+
+app = FastAPI(title="REA Capital Trading Engine", version="0.1")
 
 
-# -----------------------------------------------------------------------------
-# App
-# -----------------------------------------------------------------------------
-
-auth_loaded: bool = False
-auth_error: Optional[str] = None
-
-app = FastAPI(title="REA Capital Trading Engine", version="0.1.0")
-
-# CORS: UI is loaded via file:// (Origin: null), so allow all for local dev
+# ------------------------------------------------------------
+# CORS (dev friendly)
+# ------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Try-load auth router (fail-closed but server still boots)
+
+# ------------------------------------------------------------
+# Optional auth wiring (do NOT hard-fail startup)
+# ------------------------------------------------------------
+_AUTH_LOADED: bool = False
+_AUTH_ERROR: Optional[str] = None
+
 try:
-    from backend.app.auth.auth_router import router as auth_router  # type: ignore
+    # If your project has an auth router, we include it.
+    # This MUST NOT break headless.
+    from backend.app.auth.router import router as auth_router  # type: ignore
 
-    app.include_router(auth_router)
-    auth_loaded = True
-except Exception as e:  # pragma: no cover
-    auth_loaded = False
-    auth_error = f"{type(e).__name__}: {e}"
+    app.include_router(auth_router, prefix="/auth", tags=["auth"])
+    _AUTH_LOADED = True
+except Exception as e:
+    _AUTH_LOADED = False
+    _AUTH_ERROR = f"{type(e).__name__}: {e}"
 
 
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------
 # Models
-# -----------------------------------------------------------------------------
-
+# ------------------------------------------------------------
 class HeadlessRunRequest(BaseModel):
-    steps: int = Field(default=50, ge=1, le=1_000_000)
-    symbol: str = Field(default="EURUSD", min_length=1, max_length=32)
+    steps: int = Field(default=50, ge=1, le=5000)
+    symbol: str = Field(default="EURUSD", min_length=3, max_length=30)
 
 
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------
 # Routes
-# -----------------------------------------------------------------------------
-
-@app.get("/health")
+# ------------------------------------------------------------
+@app.get("/health", tags=["system"])
 def health() -> Dict[str, Any]:
-    return {
-        "status": "ok",
-        "auth_loaded": auth_loaded,
-        "auth_error": auth_error,
-    }
+    return {"status": "ok", "auth_loaded": _AUTH_LOADED, "auth_error": _AUTH_ERROR}
 
 
-@app.get("/routes")
+@app.get("/routes", tags=["system"])
 def routes() -> List[str]:
-    # Return visible routes for debugging
-    return [getattr(r, "path", str(r)) for r in app.router.routes]
+    return [getattr(r, "path", "") for r in app.router.routes]
 
 
-@app.post("/engine/headless/run")
+@app.post("/engine/headless/run", tags=["engine"])
 def engine_headless_run(req: HeadlessRunRequest) -> Dict[str, Any]:
     """
-    HEADLESS DEV endpoint.
-    IMPORTANT: We must never return null; always return a JSON object.
-
-    The runner may currently return None (which becomes JSON null).
-    So we wrap it and always return a summary payload.
+    CRITICAL: return the run_headless(...) dict AS-IS.
+    No wrapper that can overwrite result with {}.
     """
-    result = run_headless(steps=req.steps, symbol=req.symbol)
+    try:
+        from backend.app.headless_guarded_entry import run_headless  # type: ignore
 
-    # Force a useful JSON response even if runner returns None
-    if result is None:
+        payload = run_headless(steps=req.steps, symbol=req.symbol)
+
+        # Enforce predictable structure: never allow accidental {}
+        if not isinstance(payload, dict):
+            return {
+                "ok": False,
+                "error_type": "TypeError",
+                "error": f"run_headless returned non-dict: {type(payload).__name__}",
+                "hint": "run_headless must return a dict.",
+            }
+
+        # If older code returns {}, we surface it clearly
+        if payload.get("ok") is True and payload.get("result") in (None, {}, []):
+            payload["warning"] = (
+                "Headless returned empty result. "
+                "This indicates the underlying headless implementation is still returning {}."
+            )
+
+        return payload
+
+    except Exception as e:
         return {
-            "ok": True,
-            "mode": "HEADLESS_DEV",
-            "locked": True,
-            "steps": req.steps,
-            "symbol": req.symbol,
-            "result": None,
-            "notes": [
-                "Runner returned None (no payload yet) — returning summary wrapper.",
-                "Execution layer locked (no live trades).",
-            ],
+            "ok": False,
+            "error_type": type(e).__name__,
+            "error": str(e),
+            "hint": "Dev-safe wrapper. Root cause is inside headless_guarded_entry.run_headless(...) or its imports.",
         }
-
-    return {
-        "ok": True,
-        "mode": "HEADLESS_DEV",
-        "locked": True,
-        "steps": req.steps,
-        "symbol": req.symbol,
-        "result": result,
-    }
