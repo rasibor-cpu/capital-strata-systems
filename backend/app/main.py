@@ -1,108 +1,57 @@
-"""
-backend.app.main – REA Capital Trading Engine API
-
-Goal of this file:
-- Never discard/overwrite headless payloads.
-- Keep auth optional for HEADLESS_DEV endpoints.
-- Provide /health and /routes for quick diagnostics.
-"""
-
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
-
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+from typing import Optional, Dict, Any
+
+from backend.app.headless_guarded_entry import run_headless, HeadlessConfig
+
+app = FastAPI(title="REA Capital – Trading Engine")
 
 
-app = FastAPI(title="REA Capital Trading Engine", version="0.1")
+class HeadlessRequest(BaseModel):
+    steps: int = 5
+    symbol: str = "EURUSD"
+    execution_mode: str = "SIMULATION"  # reserved for future
+    current_open_positions: int = 0
+    trades_today: int = 0
+    consecutive_losses: int = 0
 
 
-# ------------------------------------------------------------
-# CORS (dev friendly)
-# ------------------------------------------------------------
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-# ------------------------------------------------------------
-# Optional auth wiring (do NOT hard-fail startup)
-# ------------------------------------------------------------
-_AUTH_LOADED: bool = False
-_AUTH_ERROR: Optional[str] = None
-
-try:
-    # If your project has an auth router, we include it.
-    # This MUST NOT break headless.
-    from backend.app.auth.router import router as auth_router  # type: ignore
-
-    app.include_router(auth_router, prefix="/auth", tags=["auth"])
-    _AUTH_LOADED = True
-except Exception as e:
-    _AUTH_LOADED = False
-    _AUTH_ERROR = f"{type(e).__name__}: {e}"
-
-
-# ------------------------------------------------------------
-# Models
-# ------------------------------------------------------------
-class HeadlessRunRequest(BaseModel):
-    steps: int = Field(default=50, ge=1, le=5000)
-    symbol: str = Field(default="EURUSD", min_length=3, max_length=30)
-
-
-# ------------------------------------------------------------
-# Routes
-# ------------------------------------------------------------
-@app.get("/health", tags=["system"])
+@app.get("/health")
 def health() -> Dict[str, Any]:
-    return {"status": "ok", "auth_loaded": _AUTH_LOADED, "auth_error": _AUTH_ERROR}
+    # Keep health endpoint fail-safe. We DO NOT hard-import auth router here.
+    return {
+        "status": "ok",
+        "time_utc": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+        "auth_loaded": False,
+        "auth_error": "Auth router not loaded in Phase 1 headless mode (expected).",
+    }
 
 
-@app.get("/routes", tags=["system"])
-def routes() -> List[str]:
-    return [getattr(r, "path", "") for r in app.router.routes]
+@app.post("/engine/headless/run")
+def engine_headless_run(req: HeadlessRequest) -> Dict[str, Any]:
+    # Phase 1: execution is locked (fail-closed). Headless is used for testing guards + wiring.
+    cfg = HeadlessConfig(
+        max_trades_per_day=15,
+        max_consecutive_losses=5,
+        cooldown_seconds=3600,
+        max_concurrent_positions=20,
+        execution_locked=True,  # <-- this MUST exist in HeadlessConfig now
+    )
 
+    result = run_headless(
+        steps=req.steps,
+        symbol=req.symbol,
+        cfg=cfg,
+        current_open_positions=req.current_open_positions,
+        trades_today=req.trades_today,
+        consecutive_losses=req.consecutive_losses,
+    )
 
-@app.post("/engine/headless/run", tags=["engine"])
-def engine_headless_run(req: HeadlessRunRequest) -> Dict[str, Any]:
-    """
-    CRITICAL: return the run_headless(...) dict AS-IS.
-    No wrapper that can overwrite result with {}.
-    """
-    try:
-        from backend.app.headless_guarded_entry import run_headless  # type: ignore
-
-        payload = run_headless(steps=req.steps, symbol=req.symbol)
-
-        # Enforce predictable structure: never allow accidental {}
-        if not isinstance(payload, dict):
-            return {
-                "ok": False,
-                "error_type": "TypeError",
-                "error": f"run_headless returned non-dict: {type(payload).__name__}",
-                "hint": "run_headless must return a dict.",
-            }
-
-        # If older code returns {}, we surface it clearly
-        if payload.get("ok") is True and payload.get("result") in (None, {}, []):
-            payload["warning"] = (
-                "Headless returned empty result. "
-                "This indicates the underlying headless implementation is still returning {}."
-            )
-
-        return payload
-
-    except Exception as e:
-        return {
-            "ok": False,
-            "error_type": type(e).__name__,
-            "error": str(e),
-            "hint": "Dev-safe wrapper. Root cause is inside headless_guarded_entry.run_headless(...) or its imports.",
-        }
+    return {
+        "ok": True,
+        "mode": "SIMULATION",
+        "live_execution": False,
+        **result,
+    }
