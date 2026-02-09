@@ -40,6 +40,34 @@ def engine_headless_run():
     Returns execution result without killing server.
     """
     result = run_headless()
+import os
+from fastapi import Body
+
+def _env_true(name: str) -> bool:
+    v = os.getenv(name, "")
+    return v.strip().lower() in ("1", "true", "yes", "y", "on")
+
+HEADLESS_DEV_MODE = _env_true("HEADLESS_DEV_MODE")
+
+@app.post("/dev/run_paper_smoketest")
+def run_paper_smoketest(payload: dict = Body(default={})):
+    """
+    DEV ONLY. Requires HEADLESS_DEV_MODE=1.
+    Runs a short paper/sim loop to validate engine wiring + risk gates without login.
+    """
+    if not HEADLESS_DEV_MODE:
+        return {"ok": False, "detail": "dev endpoint disabled (set HEADLESS_DEV_MODE=1)"}
+
+    # Optional knobs
+    steps = int(payload.get("steps", 50))
+    symbol = str(payload.get("symbol", "EURUSD")).upper()
+
+    # Import here to avoid import-time side effects
+    from backend.app.simulator import run_simulation_smoke  # adapt if name differs
+
+    result = run_simulation_smoke(steps=steps, symbol=symbol)
+    return {"ok": True, "result": result}
+
     return {"headless_result": result}
 
 @app.get("/routes")
