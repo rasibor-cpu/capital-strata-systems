@@ -1,71 +1,46 @@
 """
 Daily Trade Guard – REA Capital Trading Engine
-----------------------------------------------
-
+---------------------------------------------
 Purpose:
-- Enforce maximum trades per day.
-- Reset automatically at UTC date change.
-- Provide structured status response.
-- Fail-safe: missing state initializes safely.
+- Enforce max number of trades per day (UTC day).
+- Safe output: always returns structured dict.
 
-Policy:
-- max_trades = 10 per calendar UTC day
+This module exports:
+- evaluate_daily_trade_guard(trades_today: int, max_trades: int) -> dict
 """
 
 from __future__ import annotations
-from dataclasses import dataclass
+
 from datetime import datetime, timezone
+from typing import Dict
 
 
-@dataclass
-class DailyTradeState:
-    trades_today: int = 0
-    current_day: str = ""
+def evaluate_daily_trade_guard(trades_today: int, max_trades: int) -> Dict[str, object]:
+    # sanitize
+    try:
+        trades_today_i = int(trades_today)
+    except Exception:
+        trades_today_i = 0
 
+    try:
+        max_trades_i = int(max_trades)
+    except Exception:
+        max_trades_i = 0
 
-class DailyTradeGuard:
-    def __init__(self, max_trades: int = 10):
-        self.max_trades = max_trades
-        self.state = DailyTradeState()
-        self._initialize_day()
+    if max_trades_i < 0:
+        max_trades_i = 0
+    if trades_today_i < 0:
+        trades_today_i = 0
 
-    # -------------------------------------------------------
-    # internal helpers
-    # -------------------------------------------------------
+    remaining = max(0, max_trades_i - trades_today_i)
+    allowed = trades_today_i < max_trades_i if max_trades_i > 0 else False
 
-    def _today_utc(self) -> str:
-        return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    current_day = datetime.now(timezone.utc).date().isoformat()
 
-    def _initialize_day(self):
-        today = self._today_utc()
-        if not self.state.current_day:
-            self.state.current_day = today
-            self.state.trades_today = 0
-
-    def _rollover_if_new_day(self):
-        today = self._today_utc()
-        if self.state.current_day != today:
-            self.state.current_day = today
-            self.state.trades_today = 0
-
-    # -------------------------------------------------------
-    # public interface
-    # -------------------------------------------------------
-
-    def can_trade(self) -> bool:
-        self._rollover_if_new_day()
-        return self.state.trades_today < self.max_trades
-
-    def record_trade(self):
-        self._rollover_if_new_day()
-        self.state.trades_today += 1
-
-    def status(self) -> dict:
-        self._rollover_if_new_day()
-        return {
-            "current_day": self.state.current_day,
-            "trades_today": self.state.trades_today,
-            "max_trades": self.max_trades,
-            "remaining": max(self.max_trades - self.state.trades_today, 0),
-            "allowed": self.state.trades_today < self.max_trades,
-        }
+    return {
+        "current_day": current_day,
+        "trades_today": trades_today_i,
+        "max_trades": max_trades_i,
+        "remaining": remaining,
+        "allowed": allowed,
+    }
