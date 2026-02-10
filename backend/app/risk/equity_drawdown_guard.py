@@ -3,88 +3,74 @@ Equity Drawdown Guard – REA Capital Trading Engine
 --------------------------------------------------
 
 Purpose:
-- Enforce global equity drawdown cap
-- Enforce per-trade risk cap
-- Block or require override for excessive risk
+- Protect total capital from catastrophic erosion.
+- Block trading if equity drawdown exceeds configured threshold.
+- Fail-closed: missing equity data => BLOCK.
 
-Safe Default:
-- Missing equity data => BLOCK
 """
 
 from dataclasses import dataclass
-from enum import Enum
-from typing import Optional
 from datetime import datetime, timezone
 
 
-class EquityDecision(str, Enum):
-    ALLOW = "ALLOW"
-    BLOCK = "BLOCK"
-    REQUIRE_OVERRIDE = "REQUIRE_OVERRIDE"
-
-
 @dataclass(frozen=True)
-class EquityPolicy:
-    max_drawdown_pct: float = 0.25        # 25%
-    max_trade_risk_pct: float = 0.20      # 20% per trade
+class EquityDrawdownPolicy:
+    max_drawdown_pct: float = 25.0  # 25% cap
 
 
-@dataclass
-class EquitySnapshot:
-    current_equity: float
-    peak_equity: float
-    requested_trade_risk: float
-
-
-def evaluate_equity_risk(
-    snapshot: EquitySnapshot,
-    policy: EquityPolicy = EquityPolicy(),
+def evaluate_equity_drawdown(
+    current_equity: float | None,
+    peak_equity: float | None,
+    policy: EquityDrawdownPolicy,
 ) -> dict:
 
-    now = datetime.now(timezone.utc)
+    timestamp = datetime.now(timezone.utc).isoformat()
 
-    if (
-        snapshot.current_equity <= 0
-        or snapshot.peak_equity <= 0
-    ):
+    if current_equity is None or peak_equity is None:
         return {
-            "decision": EquityDecision.BLOCK,
-            "reason": "Invalid equity values",
-            "timestamp_utc": now,
+            "decision": "BLOCK",
+            "reason": "Equity data missing (fail-closed).",
+            "current_equity": current_equity,
+            "peak_equity": peak_equity,
+            "drawdown_pct": None,
+            "max_drawdown_pct": policy.max_drawdown_pct,
+            "allowed": False,
+            "timestamp_utc": timestamp,
         }
 
-    drawdown_pct = (
-        (snapshot.peak_equity - snapshot.current_equity)
-        / snapshot.peak_equity
-    )
+    if peak_equity <= 0:
+        return {
+            "decision": "BLOCK",
+            "reason": "Invalid peak equity value.",
+            "current_equity": current_equity,
+            "peak_equity": peak_equity,
+            "drawdown_pct": None,
+            "max_drawdown_pct": policy.max_drawdown_pct,
+            "allowed": False,
+            "timestamp_utc": timestamp,
+        }
 
-    trade_risk_pct = (
-        snapshot.requested_trade_risk
-        / snapshot.current_equity
-        if snapshot.current_equity > 0
-        else 1.0
-    )
+    drawdown_pct = ((peak_equity - current_equity) / peak_equity) * 100
 
     if drawdown_pct >= policy.max_drawdown_pct:
         return {
-            "decision": EquityDecision.BLOCK,
-            "reason": "Max drawdown exceeded",
-            "drawdown_pct": drawdown_pct,
-            "timestamp_utc": now,
-        }
-
-    if trade_risk_pct > policy.max_trade_risk_pct:
-        return {
-            "decision": EquityDecision.REQUIRE_OVERRIDE,
-            "reason": "Trade risk exceeds 20% equity",
-            "trade_risk_pct": trade_risk_pct,
-            "timestamp_utc": now,
+            "decision": "BLOCK",
+            "reason": "Max equity drawdown exceeded.",
+            "current_equity": current_equity,
+            "peak_equity": peak_equity,
+            "drawdown_pct": round(drawdown_pct, 2),
+            "max_drawdown_pct": policy.max_drawdown_pct,
+            "allowed": False,
+            "timestamp_utc": timestamp,
         }
 
     return {
-        "decision": EquityDecision.ALLOW,
-        "reason": "Within equity limits",
-        "drawdown_pct": drawdown_pct,
-        "trade_risk_pct": trade_risk_pct,
-        "timestamp_utc": now,
+        "decision": "ALLOW",
+        "reason": "Drawdown within limits.",
+        "current_equity": current_equity,
+        "peak_equity": peak_equity,
+        "drawdown_pct": round(drawdown_pct, 2),
+        "max_drawdown_pct": policy.max_drawdown_pct,
+        "allowed": True,
+        "timestamp_utc": timestamp,
     }
