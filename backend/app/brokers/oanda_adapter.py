@@ -1,266 +1,244 @@
 """
-OANDA Broker Adapter (V20 REST)
+OANDA Adapter — REA Capital Trading Engine
+-----------------------------------------
 
-Design goals:
-- Minimal, reliable wiring for Phase 1.
-- Works for PRACTICE and LIVE by switching OANDA_BASE_URL + token + account id.
-- Fail-closed: missing config => not configured.
-- Provides: get_account_summary(), place_order(), close_trade() for smoke tests.
-
-Env vars expected:
-- OANDA_API_KEY        (personal access token)
-- OANDA_ACCOUNT_ID     (account id string, e.g. 101-001-... for practice)
-- OANDA_BASE_URL       (https://api-fxpractice.oanda.com OR https://api-fxtrade.oanda.com)
-Optional:
-- OANDA_TIMEOUT_SECS   (default 15)
+Goals:
+- Minimal but robust OANDA REST adapter for Practice/Live.
+- Fail-safe: missing creds => not configured.
+- Structured responses with status + error snippets to avoid "None" mysteries.
+- Supports smoke tests + guarded execution micro-trade.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import urllib.request
-import urllib.error
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Union
+
+try:
+    from dotenv import load_dotenv  # type: ignore
+except Exception:  # pragma: no cover
+    load_dotenv = None  # type: ignore
+
+try:
+    import requests  # type: ignore
+except Exception as e:  # pragma: no cover
+    raise RuntimeError("Missing dependency: requests. Install with: pip install requests") from e
 
 
-def _env(name: str, default: str = "") -> str:
-    return (os.getenv(name, default) or "").strip()
-
+# -----------------------------
+# Data contracts (lightweight)
+# -----------------------------
 
 @dataclass(frozen=True)
-class OandaConfig:
-    base_url: str
-    api_key: str
-    account_id: str
-    timeout_secs: int
+class OrderRequest:
+    """
+    Engine-level order intent. Keep it tiny and resilient.
+    """
+    symbol: str
+    units: int
+    side: str = "BUY"          # BUY / SELL
+    order_type: str = "MARKET" # MARKET only for now (micro-test)
 
-    @staticmethod
-    def from_env() -> "OandaConfig":
-        base_url = _env("OANDA_BASE_URL", "https://api-fxpractice.oanda.com")
-        api_key = _env("OANDA_API_KEY", "")
-        account_id = _env("OANDA_ACCOUNT_ID", "")
-        timeout = _env("OANDA_TIMEOUT_SECS", "15")
-        try:
-            timeout_i = int(timeout)
-        except Exception:
-            timeout_i = 15
 
-        # normalize base url
-        base_url = base_url.rstrip("/")
-
-        return OandaConfig(
-            base_url=base_url,
-            api_key=api_key,
-            account_id=account_id,
-            timeout_secs=timeout_i,
-        )
-
+# -----------------------------
+# Adapter
+# -----------------------------
 
 class OandaAdapter:
-    """
-    Small adapter used by:
-    - backend.app.simulator (Phase 1 smoke test)
-    - backend.app.run_live_guarded (guarded micro-trade harness)
+    def __init__(self) -> None:
+        # Load .env if python-dotenv exists
+        if load_dotenv is not None:
+            load_dotenv()
 
-    Keep the surface area small and predictable.
-    """
+        self.api_key = (os.getenv("OANDA_API_KEY") or "").strip()
+        self.account_id = (os.getenv("OANDA_ACCOUNT_ID") or "").strip()
 
-    def __init__(self, config: Optional[OandaConfig] = None):
-        self._cfg = config or OandaConfig.from_env()
+        # IMPORTANT:
+        # - Your .env currently uses practice: https://api-fxpractice.oanda.com
+        # - OANDA API paths include /v3/...
+        raw_base = (os.getenv("OANDA_BASE_URL") or "").strip().rstrip("/")
+        self.base_url = raw_base
 
-    @property
+        # Optional (nice for printing / future routing)
+        self.env = (os.getenv("OANDA_ENV") or "").strip().upper()  # PRACTICE / LIVE optional
+
+        # Conservative request timeouts
+        self.timeout_s = 20
+
     def name(self) -> str:
         return "oanda"
 
     def is_configured(self) -> bool:
-        return bool(self._cfg.api_key and self._cfg.account_id and self._cfg.base_url)
+        return bool(self.api_key and self.account_id and self.base_url)
 
     # -----------------------------
-    # Internal HTTP helpers
+    # Internals
     # -----------------------------
+
     def _headers(self) -> Dict[str, str]:
-        # Do NOT print api key anywhere.
         return {
-            "Authorization": f"Bearer {self._cfg.api_key}",
-            "Accept": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
+            "Accept": "application/json",
         }
 
     def _url(self, path: str) -> str:
-        # path can be "v3/accounts" or "/v3/accounts"
-        p = path.lstrip("/")
-        return f"{self._cfg.base_url}/{p}"
+        # Ensure path begins with /
+        p = path if path.startswith("/") else f"/{path}"
+        return f"{self.base_url}{p}"
 
-    def _request_json(self, method: str, path: str, body: Optional[Dict[str, Any]] = None) -> Tuple[bool, int, Dict[str, Any]]:
-        """
-        Returns (ok, http_status, json_dict).
-        If non-JSON response, json_dict contains {"raw": "..."}.
-        """
+    def _request_json(self, method: str, path: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         if not self.is_configured():
             raise RuntimeError("OANDA not configured: set OANDA_API_KEY, OANDA_ACCOUNT_ID and OANDA_BASE_URL.")
 
-        data = None
-        if body is not None:
-            data = json.dumps(body).encode("utf-8")
-
-        req = urllib.request.Request(
-            self._url(path),
-            data=data,
-            method=method.upper(),
-            headers=self._headers(),
-        )
-
+        url = self._url(path)
         try:
-            with urllib.request.urlopen(req, timeout=self._cfg.timeout_secs) as resp:
-                status = getattr(resp, "status", 200)
-                raw = resp.read().decode("utf-8", errors="replace")
-                try:
-                    j = json.loads(raw) if raw else {}
-                except Exception:
-                    j = {"raw": raw}
-                return True, int(status), j
-
-        except urllib.error.HTTPError as e:
-            status = int(getattr(e, "code", 0) or 0)
-            raw = ""
-            try:
-                raw = e.read().decode("utf-8", errors="replace")
-            except Exception:
-                raw = ""
-            try:
-                j = json.loads(raw) if raw else {}
-            except Exception:
-                j = {"raw": raw}
-            return False, status, j
-
+            resp = requests.request(
+                method=method.upper(),
+                url=url,
+                headers=self._headers(),
+                data=None if payload is None else json.dumps(payload),
+                timeout=self.timeout_s,
+            )
         except Exception as e:
-            return False, 0, {"error": str(e)}
+            return {
+                "ok": False,
+                "status": None,
+                "data": None,
+                "error": f"request_failed: {e}",
+                "url": url,
+                "method": method.upper(),
+            }
 
-    # -----------------------------
-    # Public API used by our tests
-    # -----------------------------
-    def get_account_summary(self) -> Dict[str, Any]:
-        """
-        Returns a normalized summary:
-        { ok, status, balance, nav, currency, raw }
-        """
-        ok, status, j = self._request_json("GET", f"v3/accounts/{self._cfg.account_id}/summary")
+        # Best-effort JSON
+        try:
+            data = resp.json()
+        except Exception:
+            data = None
 
-        # OANDA returns numeric fields as strings
-        acct = (j.get("account") or {}) if isinstance(j, dict) else {}
-        balance = acct.get("balance")
-        nav = acct.get("NAV") or acct.get("nav")
-        currency = acct.get("currency")
-
-        def _to_float(x: Any) -> Optional[float]:
-            try:
-                if x is None:
-                    return None
-                return float(x)
-            except Exception:
-                return None
+        ok = 200 <= resp.status_code < 300
+        err_snip = None
+        if not ok:
+            # Provide a small snippet for debugging (avoid dumping huge blobs)
+            if isinstance(data, dict):
+                err_snip = data.get("errorMessage") or data.get("message") or str(data)[:300]
+            else:
+                err_snip = (resp.text or "")[:300] if resp.text is not None else None
 
         return {
-            "ok": bool(ok),
-            "status": int(status),
-            "balance": _to_float(balance),
-            "nav": _to_float(nav),
-            "currency": currency,
-            "raw": j,
+            "ok": ok,
+            "status": resp.status_code,
+            "data": data,
+            "error": err_snip,
+            "url": url,
+            "method": method.upper(),
         }
 
-    def place_order(
-        self,
-        symbol: Optional[str] = None,
-        units: int = 1,
-        side: str = "BUY",
-        order_type: str = "MARKET",
-        *,
-        instrument: Optional[str] = None,
-        **kwargs: Any,
-    ) -> Dict[str, Any]:
-        """
-        Places a basic MARKET order (FOK). Returns normalized order result.
+    # -----------------------------
+    # Public API used by engine/tests
+    # -----------------------------
 
-        Accepts either:
-          - symbol="EUR_USD"  (preferred in our engine)
-          - instrument="EUR_USD" (compat with earlier harness)
-        side:
-          - BUY  -> positive units
-          - SELL -> negative units
-        """
-        # tolerate either arg name
-        instrument_final = (symbol or instrument or "").strip()
-        if not instrument_final:
-            return {"ok": False, "broker": "oanda", "error": "Missing instrument/symbol."}
+    def list_accounts(self) -> Dict[str, Any]:
+        # GET /v3/accounts
+        return self._request_json("GET", "/v3/accounts")
 
-        side_u = (side or "BUY").upper().strip()
-        signed_units = int(units)
-        if side_u == "SELL":
-            signed_units = -abs(signed_units)
+    def get_account_summary(self) -> Dict[str, Any]:
+        # GET /v3/accounts/{accountID}/summary
+        res = self._request_json("GET", f"/v3/accounts/{self.account_id}/summary")
+        if not res.get("ok"):
+            return res
+
+        data = res.get("data") or {}
+        acct = data.get("account") if isinstance(data, dict) else None
+        if not isinstance(acct, dict):
+            # Keep structured response but flag parsing issue
+            res["ok"] = False
+            res["error"] = "parse_error: response missing 'account' dict"
+            return res
+
+        # OANDA returns balance & NAV as strings
+        balance = acct.get("balance")
+        nav = acct.get("NAV") or acct.get("nav")  # belt & suspenders
+
+        res["summary"] = {
+            "balance": balance,
+            "NAV": nav,
+            "currency": acct.get("currency"),
+            "id": acct.get("id"),
+        }
+        return res
+
+    def get_open_positions(self) -> Dict[str, Any]:
+        # GET /v3/accounts/{accountID}/openPositions
+        return self._request_json("GET", f"/v3/accounts/{self.account_id}/openPositions")
+
+    def get_position_for_instrument(self, symbol: str) -> Dict[str, Any]:
+        sym = (symbol or "").strip()
+        if not sym:
+            return {"ok": False, "status": None, "data": None, "error": "invalid_symbol"}
+        # GET /v3/accounts/{accountID}/positions/{instrument}
+        return self._request_json("GET", f"/v3/accounts/{self.account_id}/positions/{sym}")
+
+    def place_order(self, req_or_symbol: Union[OrderRequest, str], units: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Accepts:
+          - OrderRequest(symbol="EUR_USD", units=1, side="BUY"/"SELL")
+          - symbol string + units (int). Side defaults BUY for units>0, SELL for units<0.
+
+        For now: MARKET only.
+        """
+        # Normalize
+        if isinstance(req_or_symbol, OrderRequest):
+            symbol = (req_or_symbol.symbol or "").strip()
+            u = int(req_or_symbol.units)
+            side = (req_or_symbol.side or "BUY").upper()
+            order_type = (req_or_symbol.order_type or "MARKET").upper()
         else:
-            signed_units = abs(signed_units)
+            symbol = (req_or_symbol or "").strip()
+            if units is None:
+                return {"ok": False, "status": None, "data": None, "error": "units_required_when_symbol_string"}
+            u = int(units)
+            side = "BUY" if u >= 0 else "SELL"
+            order_type = "MARKET"
 
-        order_payload = {
+        if not symbol:
+            return {"ok": False, "status": None, "data": None, "error": "invalid_symbol"}
+
+        if order_type != "MARKET":
+            return {"ok": False, "status": None, "data": None, "error": f"unsupported_order_type:{order_type}"}
+
+        # OANDA: units sign indicates direction (positive=buy, negative=sell)
+        final_units = abs(u)
+        if side == "SELL":
+            final_units = -final_units
+
+        payload = {
             "order": {
-                "type": order_type.upper(),
-                "instrument": instrument_final,
-                "units": str(signed_units),
+                "type": "MARKET",
+                "instrument": symbol,
+                "units": str(final_units),
                 "timeInForce": "FOK",
                 "positionFill": "DEFAULT",
             }
         }
 
-        ok, status, j = self._request_json("POST", f"v3/accounts/{self._cfg.account_id}/orders", body=order_payload)
+        # POST /v3/accounts/{accountID}/orders
+        return self._request_json("POST", f"/v3/accounts/{self.account_id}/orders", payload)
 
-        # Extract order_id / trade_id best-effort from common fields
-        order_id = None
-        trade_id = None
-
-        if isinstance(j, dict):
-            fill = j.get("orderFillTransaction") or {}
-            create = j.get("orderCreateTransaction") or {}
-            order_id = (fill.get("orderID") or create.get("id") or create.get("orderID") or fill.get("id"))
-
-            # OANDA fill transaction often contains tradeOpened / tradeReduced etc.
-            trade_opened = fill.get("tradeOpened") or {}
-            trade_reduced = fill.get("tradeReduced") or {}
-            trade_id = trade_opened.get("tradeID") or trade_reduced.get("tradeID") or fill.get("tradeID")
-
-        return {
-            "ok": bool(ok),
-            "status": int(status),
-            "broker": "oanda",
-            "symbol": instrument_final,
-            "side": side_u,
-            "units": abs(int(units)),
-            "order_id": order_id,
-            "trade_id": trade_id,
-            "error": "" if ok else (j.get("errorMessage") if isinstance(j, dict) else "Order failed"),
-            "raw": j,
-        }
-
-    def close_trade(self, trade_id: str) -> Dict[str, Any]:
-        """
-        Close a trade by trade_id.
-        """
-        tid = (trade_id or "").strip()
+    def close_trade(self, trade_id: Union[str, int]) -> Dict[str, Any]:
+        tid = str(trade_id).strip()
         if not tid:
-            return {"ok": False, "broker": "oanda", "error": "Missing trade_id."}
+            return {"ok": False, "status": None, "data": None, "error": "invalid_trade_id"}
+        # PUT /v3/accounts/{accountID}/trades/{tradeID}/close
+        return self._request_json("PUT", f"/v3/accounts/{self.account_id}/trades/{tid}/close", {})
 
-        ok, status, j = self._request_json(
-            "PUT",
-            f"v3/accounts/{self._cfg.account_id}/trades/{tid}/close",
-            body={"units": "ALL"},
-        )
-
-        return {
-            "ok": bool(ok),
-            "status": int(status),
-            "broker": "oanda",
-            "trade_id": tid,
-            "error": "" if ok else (j.get("errorMessage") if isinstance(j, dict) else "Close failed"),
-            "raw": j,
-        }
+    def close_position(self, symbol: str) -> Dict[str, Any]:
+        sym = (symbol or "").strip()
+        if not sym:
+            return {"ok": False, "status": None, "data": None, "error": "invalid_symbol"}
+        # PUT /v3/accounts/{accountID}/positions/{instrument}/close
+        # Close long and short if present
+        payload = {"longUnits": "ALL", "shortUnits": "ALL"}
+        return self._request_json("PUT", f"/v3/accounts/{self.account_id}/positions/{sym}/close", payload)
