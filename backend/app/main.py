@@ -1,218 +1,252 @@
+"""
+backend/app/main.py
+
+Phase 1 (Headless) API for REA Capital Trading Engine.
+
+Goals:
+- Keep /health stable even if auth router is absent (expected in Phase 1 headless).
+- Provide /engine/headless/run with robust compatibility against evolving run_headless() signatures.
+- Fail-closed: default execution remains locked unless the underlying engine explicitly allows otherwise.
+"""
+
 from __future__ import annotations
 
 import inspect
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-# We are in Phase 1 headless mode. Auth router may not exist yet.
-AUTH_IMPORT_ERROR: Optional[str] = None
-HEADLESS_IMPORT_ERROR: Optional[str] = None
+# -------------------------------------------------------------------
+# App
+# -------------------------------------------------------------------
 
-try:
-    from backend.app.headless_guarded_entry import run_headless, HeadlessConfig  # type: ignore
-except Exception as e:  # pragma: no cover
-    run_headless = None  # type: ignore
-    HeadlessConfig = None  # type: ignore
-    HEADLESS_IMPORT_ERROR = f"{type(e).__name__}: {e}"
+app = FastAPI(title="REA Capital Trading Engine (Phase 1 Headless)")
 
 
-def utc_now_iso() -> str:
+# -------------------------------------------------------------------
+# Models
+# -------------------------------------------------------------------
+
+class HeadlessRunRequest(BaseModel):
+    steps: int = Field(default=5, ge=1, le=500)
+    symbol: str = Field(default="EURUSD", min_length=1)
+    execution_mode: str = Field(default="SIMULATION")  # SIMULATION | PAPER | LIVE (engine decides)
+    current_open_positions: int = Field(default=0, ge=0)
+    trades_today: int = Field(default=0, ge=0)
+    consecutive_losses: int = Field(default=0, ge=0)
+
+
+# -------------------------------------------------------------------
+# Helpers (signature-safe)
+# -------------------------------------------------------------------
+
+def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-class HeadlessRunRequest(BaseModel):
-    # Core
-    steps: int = Field(5, ge=1, le=10_000)
-    symbol: str = Field(..., min_length=1)
-    execution_mode: str = Field(..., min_length=1)  # e.g. "SIMULATION"
-
-    # Risk-state inputs (optional)
-    current_open_positions: int = Field(0, ge=0)
-    trades_today: int = Field(0, ge=0)
-    consecutive_losses: int = Field(0, ge=0)
-
-    # Optional: equity drawdown % (if/when you wire it)
-    equity_drawdown_pct: Optional[float] = Field(None, ge=0.0)
-
-
-def _safe_construct(cls: Any, proposed: Dict[str, Any]) -> Any:
+def _filter_kwargs_for_callable(callable_obj: Any, desired: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Construct an object but only pass kwargs that exist in the target __init__ signature.
-    This prevents breakages when HeadlessConfig fields change.
+    Return only kwargs that the callable (function or class __init__) accepts.
     """
-    if cls is None:
-        raise RuntimeError("HeadlessConfig is not available (import failed).")
-
     try:
-        sig = inspect.signature(cls)
-        allowed = set(sig.parameters.keys())
-        filtered = {k: v for k, v in proposed.items() if k in allowed}
-        return cls(**filtered)
-    except TypeError:
-        # Some classes (e.g. dataclasses) still show signature fine; this is a last resort.
-        return cls()
+        sig = inspect.signature(callable_obj)
+        accepted = set(sig.parameters.keys())
+        return {k: v for k, v in desired.items() if k in accepted}
+    except Exception:
+        # If signature cannot be inspected, fall back to nothing to avoid TypeError.
+        return {}
 
 
-def _call_run_headless(fn: Any, payload: Dict[str, Any], cfg: Any) -> Any:
+def _build_headless_config() -> Tuple[Optional[Any], Optional[str]]:
     """
-    Call run_headless using signature inspection to support different function shapes.
+    Build HeadlessConfig using only parameters it supports (avoids 'unexpected keyword' errors).
     """
-    if fn is None:
-        raise RuntimeError("run_headless is not available (import failed).")
+    try:
+        from backend.app.headless_guarded_entry import HeadlessConfig  # type: ignore
+    except Exception as e:
+        return None, f"HeadlessConfig import failed: {e!r}"
 
-    sig = inspect.signature(fn)
-    params = list(sig.parameters.values())
+    desired = {
+        # Risk governor defaults (your current Phase 1 targets)
+        "max_trades_per_day": 15,
+        "max_positions": 20,
+        "max_consecutive_losses": 5,
+        "cooldown_seconds": 3600,
 
-    # Build candidate kwargs
-    symbol = payload.get("symbol")
-    execution_mode = payload.get("execution_mode")
-    steps = payload.get("steps")
-    current_open_positions = payload.get("current_open_positions")
-    trades_today = payload.get("trades_today")
-    consecutive_losses = payload.get("consecutive_losses")
-    equity_drawdown_pct = payload.get("equity_drawdown_pct")
-
-    candidate_kwargs: Dict[str, Any] = {}
-
-    # Common names in our codebase
-    name_map = {
-        "symbol": symbol,
-        "pair": symbol,
-        "instrument": symbol,
-        "execution_mode": execution_mode,
-        "mode": execution_mode,
-        "executionMode": execution_mode,
-        "steps": steps,
-        "steps_requested": steps,
-        "n_steps": steps,
-        "current_open_positions": current_open_positions,
-        "open_positions": current_open_positions,
-        "trades_today": trades_today,
-        "consecutive_losses": consecutive_losses,
-        "equity_drawdown_pct": equity_drawdown_pct,
-        "drawdown_pct": equity_drawdown_pct,
-        "cfg": cfg,
-        "config": cfg,
+        # Execution must remain fail-closed. Different builds used different names.
+        # We pass only what HeadlessConfig actually supports (filtered below).
+        "execution_locked": True,
+        "locked": True,
+        "lock_execution": True,
+        "live_execution": False,
     }
 
-    for p in params:
-        if p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD):
-            continue
-        if p.name in name_map and name_map[p.name] is not None:
-            candidate_kwargs[p.name] = name_map[p.name]
-
-    # If function requires positional args for symbol/execution_mode, supply them.
-    # We try the most likely ordering: (symbol, execution_mode, cfg, ...)
-    # but we do it defensively based on parameter names.
-    required = [
-        p for p in params
-        if p.default is inspect._empty
-        and p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
-    ]
-
-    # Build positional list if needed
-    positional: list[Any] = []
-    used_names: set[str] = set()
-
-    for p in required:
-        if p.name in ("symbol", "pair", "instrument"):
-            positional.append(symbol)
-            used_names.add(p.name)
-        elif p.name in ("execution_mode", "mode", "executionMode"):
-            positional.append(execution_mode)
-            used_names.add(p.name)
-        elif p.name in ("cfg", "config"):
-            positional.append(cfg)
-            used_names.add(p.name)
-        else:
-            # Not sure what it needs; fall back to kwargs or raise cleanly
-            if p.name in candidate_kwargs:
-                used_names.add(p.name)
-            else:
-                raise TypeError(
-                    f"run_headless requires '{p.name}' but it is not provided by payload/config."
-                )
-
-    # Remove any kwargs that we already satisfied positionally
-    for n in list(candidate_kwargs.keys()):
-        if n in used_names:
-            candidate_kwargs.pop(n, None)
-
-    return fn(*positional, **candidate_kwargs)
+    kwargs = _filter_kwargs_for_callable(HeadlessConfig, desired)
+    try:
+        return HeadlessConfig(**kwargs), None
+    except Exception as e:
+        return None, f"HeadlessConfig init failed: {e!r}"
 
 
-app = FastAPI(title="REA Capital Trading Engine – Phase 1 (Headless)")
+def _call_run_headless(run_headless: Any, cfg: Any, req: HeadlessRunRequest) -> Dict[str, Any]:
+    """
+    Compatibility wrapper: tries multiple known run_headless() calling conventions.
+    Returns a structured dict, fail-closed on errors.
+    """
+    attempts = []
+    last_err: Optional[Exception] = None
 
+    # Prepare common payloads
+    req_dict = req.model_dump()
+
+    # Figure out param names (best-effort)
+    try:
+        sig = inspect.signature(run_headless)
+        params = list(sig.parameters.keys())
+        param_set = set(params)
+    except Exception:
+        params = []
+        param_set = set()
+
+    def _try(call_desc: str, fn_call):
+        nonlocal last_err
+        try:
+            out = fn_call()
+            # Normalize to dict for API response
+            if isinstance(out, dict):
+                return out
+            # Dataclass / pydantic / object: try dict-ish
+            if hasattr(out, "model_dump"):
+                return out.model_dump()
+            if hasattr(out, "__dict__"):
+                return dict(out.__dict__)
+            return {"ok": True, "result": str(out)}
+        except TypeError as e:
+            last_err = e
+            attempts.append(f"{call_desc}: TypeError: {e}")
+            return None
+        except Exception as e:
+            last_err = e
+            attempts.append(f"{call_desc}: Exception: {e!r}")
+            return None
+
+    # 1) Keyword style: run_headless(req=..., cfg=...)
+    if {"req", "cfg"}.issubset(param_set):
+        r = _try("kw(req, cfg)", lambda: run_headless(req=req_dict, cfg=cfg))
+        if r is not None:
+            return r
+
+    # 2) Keyword style: run_headless(request=..., config=...)
+    if {"request", "config"}.issubset(param_set):
+        r = _try("kw(request, config)", lambda: run_headless(request=req_dict, config=cfg))
+        if r is not None:
+            return r
+
+    # 3) Positional common variants
+    r = _try("pos(cfg, req)", lambda: run_headless(cfg, req_dict))
+    if r is not None:
+        return r
+
+    r = _try("pos(req, cfg)", lambda: run_headless(req_dict, cfg))
+    if r is not None:
+        return r
+
+    # 4) Legacy positional signature: run_headless(symbol, execution_mode, ...)
+    # We only pass args it likely expects; extra args avoided by filtering kwargs.
+    if len(params) >= 2 and ("symbol" in param_set or params[0] == "symbol") and (
+        "execution_mode" in param_set or "mode" in param_set or params[1] in {"execution_mode", "mode"}
+    ):
+        # Prefer 'execution_mode' key over legacy 'mode'
+        mode_key = "execution_mode" if "execution_mode" in param_set else ("mode" if "mode" in param_set else params[1])
+        base_kwargs = {
+            "steps": req.steps,
+            "current_open_positions": req.current_open_positions,
+            "trades_today": req.trades_today,
+            "consecutive_losses": req.consecutive_losses,
+            "cfg": cfg,
+            "config": cfg,
+        }
+        filtered = _filter_kwargs_for_callable(run_headless, base_kwargs)
+        r = _try(
+            f"pos(symbol, {mode_key}) + filtered kwargs",
+            lambda: run_headless(req.symbol, getattr(req, "execution_mode"), **filtered),
+        )
+        if r is not None:
+            return r
+
+    # If we got here: fail-closed with diagnostics
+    return {
+        "ok": False,
+        "timestamp_utc": _utc_now_iso(),
+        "error": f"TypeError: run_headless signature mismatch after attempts. Last error: {last_err}",
+        "attempts": attempts,
+    }
+
+
+# -------------------------------------------------------------------
+# Routes
+# -------------------------------------------------------------------
 
 @app.get("/health")
 def health() -> Dict[str, Any]:
+    # Auth router may not exist in Phase 1 headless mode (expected).
+    auth_loaded = False
+    auth_error: Optional[str] = None
+    try:
+        # If/when you add it later, this will flip to loaded=True.
+        import backend.app.auth.router  # type: ignore
+        auth_loaded = True
+    except Exception:
+        auth_loaded = False
+        auth_error = "Auth router not loaded in Phase 1 headless mode (expected)."
+
+    # Headless engine import check
+    headless_loaded = False
+    headless_error: Optional[str] = None
+    try:
+        from backend.app.headless_guarded_entry import run_headless  # type: ignore
+        headless_loaded = callable(run_headless)
+    except Exception as e:
+        headless_loaded = False
+        headless_error = f"{e.__class__.__name__}: {e}"
+
     return {
         "status": "ok",
-        "time_utc": utc_now_iso(),
-        "auth_loaded": False,
-        "auth_error": "Auth router not loaded in Phase 1 headless mode (expected)."
-        if AUTH_IMPORT_ERROR is None
-        else AUTH_IMPORT_ERROR,
-        "headless_loaded": HEADLESS_IMPORT_ERROR is None,
-        "headless_error": HEADLESS_IMPORT_ERROR,
+        "time_utc": _utc_now_iso(),
+        "auth_loaded": auth_loaded,
+        "auth_error": auth_error,
+        "headless_loaded": headless_loaded,
+        "headless_error": headless_error,
     }
 
 
 @app.post("/engine/headless/run")
-def engine_headless_run(req: HeadlessRunRequest):
+def engine_headless_run(req: HeadlessRunRequest) -> Dict[str, Any]:
+    # Import run_headless
     try:
-        if run_headless is None or HeadlessConfig is None:
-            return JSONResponse(
-                status_code=500,
-                content={
-                    "ok": False,
-                    "error": "Headless imports not available.",
-                    "detail": HEADLESS_IMPORT_ERROR,
-                    "timestamp_utc": utc_now_iso(),
-                },
-            )
-
-        # Phase-1 defaults (safe, fail-closed)
-        # NOTE: We only pass fields that exist in your current HeadlessConfig.
-        proposed_cfg = {
-            "max_trades_per_day": 15,
-            "max_trades": 15,  # some variants may use this name
-            "max_concurrent_positions": 20,
-            "max_positions": 20,
-            "max_consecutive_losses": 5,
-            "cooldown_seconds": 3600,
-            "execution_locked": True,
-            "locked": True,
-            "live_execution": False,
-        }
-        cfg = _safe_construct(HeadlessConfig, proposed_cfg)
-
-        payload = req.model_dump()
-
-        result = _call_run_headless(run_headless, payload, cfg)
-
-        # Make sure result is JSON-serializable
-        if isinstance(result, (dict, list, str, int, float, bool)) or result is None:
-            out = result
-        else:
-            out = str(result)
-
-        return {
-            "ok": True,
-            "timestamp_utc": utc_now_iso(),
-            "result": out,
-        }
-
+        from backend.app.headless_guarded_entry import run_headless  # type: ignore
     except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={
-                "ok": False,
-                "error": f"{type(e).__name__}: {e}",
-                "timestamp_utc": utc_now_iso(),
-            },
-        )
+        return {
+            "ok": False,
+            "timestamp_utc": _utc_now_iso(),
+            "error": f"ImportError: {e}",
+        }
+
+    # Build config safely
+    cfg, cfg_err = _build_headless_config()
+    if cfg is None:
+        return {
+            "ok": False,
+            "timestamp_utc": _utc_now_iso(),
+            "error": cfg_err or "HeadlessConfig build failed",
+        }
+
+    # Call engine (signature-safe)
+    result = _call_run_headless(run_headless, cfg, req)
+
+    # Ensure some top-level fields are always present for your console readability
+    if isinstance(result, dict):
+        result.setdefault("timestamp_utc", _utc_now_iso())
+    return result
