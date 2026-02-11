@@ -1,126 +1,55 @@
-from __future__ import annotations
+"""
+REA Capital – Risk Governor (Phase 1 Demo Hardening)
 
-from datetime import datetime, timedelta, timezone
+Responsibilities:
+- Enforce trade limits
+- Enforce loss streak limits
+- Enforce cooldown after streak
+- Enforce max concurrent trades
+"""
 
-
-# --------------------------------------------------
-# CONFIG
-# --------------------------------------------------
-
-MAX_TRADES_PER_DAY = 15
-MAX_CONSECUTIVE_LOSSES = 5
-MAX_DAILY_DRAWDOWN_PCT = 0.05
-MAX_PEAK_DRAWDOWN_PCT = 0.20
-COOLDOWN_MINUTES = 30
+from datetime import datetime, timedelta
 
 
-# --------------------------------------------------
-# UTIL
-# --------------------------------------------------
+class RiskGovernor:
 
-def _utc_now():
-    return datetime.now(timezone.utc)
+    MAX_TRADES_PER_DAY = 10
+    MAX_CONCURRENT_POSITIONS = 20
+    MAX_CONSECUTIVE_LOSSES = 3
+    COOLDOWN_HOURS = 8
 
+    def __init__(self):
+        self.trade_count_today = 0
+        self.consecutive_losses = 0
+        self.cooldown_until = None
+        self.current_open_positions = 0
 
-# --------------------------------------------------
-# MAIN EVALUATOR
-# --------------------------------------------------
+    def register_open_positions(self, count: int):
+        self.current_open_positions = count
 
-def evaluate_risk(simulator, requested_size: float):
+    def can_trade(self):
+        now = datetime.utcnow()
 
-    state = simulator.risk_state()
+        if self.cooldown_until and now < self.cooldown_until:
+            return False, f"Cooldown active until {self.cooldown_until}"
 
-    trades_today = state["trades_today"]
-    daily_pnl = state["daily_pnl"]
-    consecutive_losses = state["consecutive_losses"]
-    equity = simulator.equity
-    equity_peak = state["equity_peak"]
+        if self.trade_count_today >= self.MAX_TRADES_PER_DAY:
+            return False, "Max trades per day reached"
 
-    # --------------------------------------------------
-    # 1. TRADE COUNT LIMIT
-    # --------------------------------------------------
+        if self.current_open_positions >= self.MAX_CONCURRENT_POSITIONS:
+            return False, "Max concurrent positions reached"
 
-    if trades_today >= MAX_TRADES_PER_DAY:
-        return _block(
-            "MAX_TRADES_PER_DAY_EXCEEDED",
-            state
-        )
+        return True, "OK"
 
-    # --------------------------------------------------
-    # 2. DAILY DRAWDOWN
-    # --------------------------------------------------
+    def record_trade(self):
+        self.trade_count_today += 1
 
-    if daily_pnl <= -(simulator.starting_equity * MAX_DAILY_DRAWDOWN_PCT):
-        return _block(
-            "MAX_DAILY_DRAWDOWN_EXCEEDED",
-            state
-        )
+    def record_result(self, pnl: float):
+        if pnl < 0:
+            self.consecutive_losses += 1
+        else:
+            self.consecutive_losses = 0
 
-    # --------------------------------------------------
-    # 3. PEAK DRAWDOWN
-    # --------------------------------------------------
-
-    drawdown_pct = (equity - equity_peak) / equity_peak
-
-    if drawdown_pct <= -MAX_PEAK_DRAWDOWN_PCT:
-        return _block(
-            "MAX_PEAK_DRAWDOWN_EXCEEDED",
-            state
-        )
-
-    # --------------------------------------------------
-    # 4. CONSECUTIVE LOSSES + COOLDOWN
-    # --------------------------------------------------
-
-    if consecutive_losses >= MAX_CONSECUTIVE_LOSSES:
-
-        cooldown_until = _utc_now() + timedelta(minutes=COOLDOWN_MINUTES)
-
-        simulator.cooldown_active = True
-        simulator.cooldown_until = cooldown_until
-
-        state["cooldown_active"] = True
-        state["cooldown_until_utc"] = cooldown_until.isoformat()
-
-        return _block(
-            "MAX_CONSECUTIVE_LOSSES_EXCEEDED",
-            state
-        )
-
-    # --------------------------------------------------
-    # 5. FLOATING SIZE REDUCTION
-    # --------------------------------------------------
-
-    multiplier = 1.0
-
-    current_drawdown = (equity - equity_peak) / equity_peak
-
-    if current_drawdown <= -0.10:
-        multiplier = 0.25
-    elif current_drawdown <= -0.05:
-        multiplier = 0.5
-
-    adjusted_size = requested_size * multiplier
-
-    return {
-        "decision": "APPROVED",
-        "reason": "Risk checks passed",
-        "adjusted_size": adjusted_size,
-        "multiplier": multiplier,
-        "risk_state": state,
-    }
-
-
-# --------------------------------------------------
-# BLOCK RESPONSE
-# --------------------------------------------------
-
-def _block(reason: str, state: dict):
-
-    return {
-        "decision": "BLOCKED",
-        "reason": reason,
-        "adjusted_size": 0,
-        "multiplier": 0,
-        "risk_state": state,
-    }
+        if self.consecutive_losses >= self.MAX_CONSECUTIVE_LOSSES:
+            self.cooldown_until = datetime.utcnow() + timedelta(hours=self.COOLDOWN_HOURS)
+            self.consecutive_losses = 0

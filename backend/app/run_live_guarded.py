@@ -1,266 +1,166 @@
 """
-run_live_guarded.py – REA Capital Trading Engine (Phase 1/2)
+Capital Strata Systems
+REA Core – Guarded LIVE Runner (FAIL-CLOSED)
 
-Goals:
-- LIVE mode: fail-closed auth gate before any engine action
-- Seamless operator flow options:
-  A) Provide a 6-digit session token: --token 123456
-  B) OR provide username/password and auto-generate session token in one flow:
-       --username robert --password 123456 --auto-token
-  C) OR omit token in LIVE and it will prompt you to paste it.
+STRICT GOVERNANCE RULES:
+- MUST be CS_MODE=live
+- MUST be OANDA_ENV=live
+- MUST be HEADLESS_DEV_MODE=true
+- MUST be EXECUTION_ARMED=true
+- MUST pass RiskGovernor evaluation
+- MUST NOT have global shutdown active
 
-Auth model (2-step on API):
-- POST /auth/login  -> returns challenge_code (6 digits)
-- POST /auth/verify -> returns session token (6 digits)
-- GET  /auth/me     -> validates token and returns identity + roles
-
-Phase 2 wiring:
-- After LIVE ALLOW, we enter engine_entry.start_engine() in DRY_RUN mode (safe).
-
-Usage:
-  # TEST mode (no token required)
-  python -m backend.app.run_live_guarded --mode TEST
-
-  # LIVE mode with session token (generated from UI or auto-token)
-  python -m backend.app.run_live_guarded --mode LIVE --token 936792
-
-  # LIVE seamless: username+password -> auto-login+verify -> uses issued session token
-  python -m backend.app.run_live_guarded --mode LIVE --auto-token --username robert --password 123456
-
-Notes:
-- API server must be running:
-    python -m uvicorn backend.app.main:app --reload
+This file is the final execution boundary.
 """
 
 from __future__ import annotations
 
-import argparse
-import json
 import os
-import sys
-import uuid
-from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
-from urllib.request import Request, urlopen
-from urllib.error import URLError, HTTPError
+from dotenv import load_dotenv
+
+from backend.app.brokers.oanda_adapter import OandaAdapter, OrderRequest
+from engine.execution.execution_gate import ExecutionGate
+from engine.risk.risk_state_store import load_state
 
 
-# -------------------------------------------------------------------
-# basics
-# -------------------------------------------------------------------
+# ---------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------
 
-def ensure_engine_run_id() -> str:
-    run_id = os.getenv("ENGINE_RUN_ID", "").strip()
-    if not run_id:
-        run_id = str(uuid.uuid4())
-        os.environ["ENGINE_RUN_ID"] = run_id
-    return run_id
+def _env(name: str, default: str = "") -> str:
+    return (os.getenv(name) or default).strip()
 
 
-def _read_json_safe(raw: str) -> Dict[str, Any]:
-    raw = raw or ""
-    try:
-        return json.loads(raw) if raw else {}
-    except Exception:
-        return {"raw": raw}
+# ---------------------------------------------------------
+# Main
+# ---------------------------------------------------------
 
+def main() -> None:
+    load_dotenv()
 
-def _http_json(method: str, url: str, payload: Optional[Dict[str, Any]] = None,
-               headers: Optional[Dict[str, str]] = None, timeout: int = 10) -> Tuple[int, Dict[str, Any]]:
-    headers = headers or {}
-    body = None
-    if payload is not None:
-        body = json.dumps(payload).encode("utf-8")
-        headers["Content-Type"] = "application/json"
+    cs_mode = _env("CS_MODE").lower()
+    oanda_env = _env("OANDA_ENV").lower()
+    headless = _env("HEADLESS_DEV_MODE", "false").lower() == "true"
+    armed = _env("EXECUTION_ARMED", "false").lower() == "true"
 
-    req = Request(url, data=body, headers=headers, method=method.upper())
+    print("\n" + "=" * 70)
+    print("CAPITAL STRATA SYSTEMS — GUARDED LIVE (FAIL-CLOSED)")
+    print("=" * 70)
+    print(f"CS_MODE            : {cs_mode or '(missing)'}")
+    print(f"OANDA_ENV          : {oanda_env or '(missing)'}")
+    print(f"OANDA_BASE_URL     : {_env('OANDA_BASE_URL') or '(missing)'}")
+    print(f"HEADLESS_DEV_MODE  : {headless}")
+    print(f"EXECUTION_ARMED    : {armed}")
+    print("")
 
-    try:
-        with urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-            return resp.status, _read_json_safe(raw)
+    # ---------------------------------------------------------
+    # HARD FAIL CONDITIONS
+    # ---------------------------------------------------------
 
-    except HTTPError as e:
-        raw = ""
-        try:
-            raw = e.read().decode("utf-8", errors="replace")
-        except Exception:
-            raw = ""
-        return int(getattr(e, "code", 0) or 0), _read_json_safe(raw)
+    if cs_mode != "live":
+        print("ABORT: Live runner requires CS_MODE=live.")
+        return
 
-    except URLError as e:
-        return 0, {"error": "network_error", "detail": str(e)}
+    if oanda_env != "live":
+        print("ABORT: Live runner requires OANDA_ENV=live.")
+        return
 
-    except Exception as e:
-        return 0, {"error": "unknown_error", "detail": str(e)}
+    if not headless:
+        print("ABORT: HEADLESS_DEV_MODE must be true.")
+        return
 
+    if not armed:
+        print("SAFE MODE: EXECUTION_ARMED is false.")
+        print("No live trade will be placed.")
+        return
 
-def _extract_bearer(token: str) -> str:
-    token = (token or "").strip()
-    return token
+    # ---------------------------------------------------------
+    # GLOBAL SHUTDOWN CHECK (ABSOLUTE BARRIER)
+    # ---------------------------------------------------------
 
+    state = load_state()
 
-# -------------------------------------------------------------------
-# auth decisions
-# -------------------------------------------------------------------
+    if state.get("global_shutdown"):
+        print("ABORT: GLOBAL SHUTDOWN ACTIVE.")
+        print("Reason:", state.get("global_shutdown_reason"))
+        print("Manual reset required via reset_global_lock.")
+        return
 
-@dataclass(frozen=True)
-class AuthDecision:
-    allow: bool
-    reason: str
-    token: str = ""
-    me: Optional[Dict[str, Any]] = None
+    # ---------------------------------------------------------
+    # BROKER INITIALIZATION
+    # ---------------------------------------------------------
 
+    adapter = OandaAdapter()
 
-def _require_6_digits(value: str, field_name: str) -> Optional[str]:
-    v = (value or "").strip()
-    if not v:
-        return f"Missing {field_name}."
-    if (not v.isdigit()) or len(v) != 6:
-        return f"{field_name} must be exactly 6 digits."
-    return None
+    if not adapter.is_configured():
+        print("ABORT: OANDA credentials missing or invalid.")
+        return
 
+    summary = adapter.get_account_summary()
 
-def validate_session_token(base_url: str, token: str, require_superuser: bool) -> AuthDecision:
-    token = _extract_bearer(token)
-    err = _require_6_digits(token, "Session token")
-    if err:
-        return AuthDecision(False, err, token=token, me=None)
+    if not summary.get("ok"):
+        print("ABORT: account summary failed.")
+        print(summary.get("error"))
+        return
 
-    url = base_url.rstrip("/") + "/auth/me"
-    status, data = _http_json("GET", url, headers={"Authorization": f"Bearer {token}"})
+    bn = adapter.extract_balance_nav(summary)
 
-    if status != 200:
-        return AuthDecision(False, f"Token validation failed (status={status}).", token=token, me=data)
+    print("OANDA ACCOUNT SUMMARY")
+    print("-" * 40)
+    print(f"Balance: {bn['balance']}")
+    print(f"NAV    : {bn['nav']}")
+    print("")
 
-    roles = data.get("roles") or []
-    if require_superuser and "superuser" not in roles:
-        return AuthDecision(False, "Token valid but missing required role: superuser.", token=token, me=data)
+    current_equity = float(bn["nav"])
 
-    return AuthDecision(True, "Token valid.", token=token, me=data)
+    # ---------------------------------------------------------
+    # RISK GOVERNOR EVALUATION (LIVE MODE)
+    # ---------------------------------------------------------
 
+    gate = ExecutionGate()
 
-def auto_issue_session_token(base_url: str, username: str, password: str) -> Tuple[Optional[str], Dict[str, Any]]:
-    """
-    Seamless flow:
-      1) POST /auth/login  (username/password) -> challenge_code
-      2) POST /auth/verify (challenge_code)    -> session token
-    Returns: (token|None, debug_info)
-    """
-    debug: Dict[str, Any] = {"step1": None, "step2": None}
+    decision = gate.evaluate_trade(
+        instrument="EUR_USD",
+        equity_risk=current_equity,
+    )
 
-    # Step 1
-    s1_url = base_url.rstrip("/") + "/auth/login"
-    s1_status, s1_data = _http_json("POST", s1_url, payload={"username": username, "password": password})
-    debug["step1"] = {"status": s1_status, "data": s1_data}
+    if decision["status"] != "APPROVED":
+        print("ABORT: RiskGovernor blocked trade.")
+        print("Reasons:", decision.get("reasons"))
+        return
 
-    if s1_status != 200:
-        return None, debug
+    # ---------------------------------------------------------
+    # PLACE MICRO LIVE TRADE (STRICT)
+    # ---------------------------------------------------------
 
-    challenge = (s1_data.get("challenge_code") or "").strip()
-    err = _require_6_digits(challenge, "Challenge code")
-    if err:
-        debug["step1_error"] = err
-        return None, debug
+    order = OrderRequest(
+        symbol="EUR_USD",
+        side="BUY",
+        units=1,
+        order_type="MARKET",
+    )
 
-    # Step 2
-    s2_url = base_url.rstrip("/") + "/auth/verify"
-    s2_status, s2_data = _http_json("POST", s2_url, payload={"challenge_code": challenge})
-    debug["step2"] = {"status": s2_status, "data": s2_data}
+    print("Placing LIVE micro trade (EUR_USD, BUY 1 unit)...")
 
-    if s2_status != 200:
-        return None, debug
+    result = adapter.place_order(order=order)
 
-    token = (s2_data.get("token") or "").strip()
-    err = _require_6_digits(token, "Session token")
-    if err:
-        debug["step2_error"] = err
-        return None, debug
+    print("\nORDER RESULT")
+    print("-" * 40)
+    print(f"ok     : {result.get('ok')}")
+    print(f"status : {result.get('status')}")
+    print(f"error  : {result.get('error')}")
 
-    return token, debug
+    data = result.get("data") or {}
+    trade_id = None
 
+    if isinstance(data, dict):
+        opened = data.get("orderFillTransaction") or {}
+        trade_opened = opened.get("tradeOpened") or {}
+        trade_id = trade_opened.get("tradeID")
 
-# -------------------------------------------------------------------
-# main
-# -------------------------------------------------------------------
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description="REA – run_live_guarded")
-    parser.add_argument("--mode", choices=["TEST", "LIVE"], default="TEST")
-    parser.add_argument("--base-url", default=os.getenv("REA_API_BASE_URL", "http://127.0.0.1:8000"))
-    parser.add_argument("--token", default=os.getenv("REA_BEARER_TOKEN", ""))
-    parser.add_argument("--auto-token", action="store_true", help="Auto issue a session token using username/password.")
-    parser.add_argument("--username", default=os.getenv("REA_SUPERUSER", ""))
-    parser.add_argument("--password", default=os.getenv("REA_SUPERPASS", ""))
-    args = parser.parse_args()
-
-    run_id = ensure_engine_run_id()
-    mode = args.mode.upper().strip()
-    base_url = args.base_url.strip()
-
-    print(f"[INFO] ENGINE_RUN_ID={run_id}")
-    print(f"[INFO] MODE={mode}")
-    print(f"[INFO] API_BASE_URL={base_url}")
-
-    token = (args.token or "").strip()
-
-    # --- Seamless token issuance (single-flow) ---
-    if mode == "LIVE" and args.auto_token:
-        u = (args.username or "").strip()
-        p = (args.password or "")
-        if not u or not p:
-            print("[BLOCK] --auto-token requires --username and --password.")
-            return 1
-
-        issued, dbg = auto_issue_session_token(base_url, u, p)
-        if not issued:
-            print("[BLOCK] Auto token issuance failed.")
-            print(f"[BLOCK] Debug: {dbg}")
-            return 1
-
-        token = issued
-        print(f"[INFO] Auto-issued session token: {token}")
-
-    # --- Prompt for token if LIVE and missing ---
-    if mode == "LIVE" and not token:
-        token = input("Enter 6-digit session token: ").strip()
-
-    if mode == "LIVE":
-        decision = validate_session_token(base_url, token, require_superuser=True)
-        if not decision.allow:
-            print(f"[BLOCK] LIVE auth gate: {decision.reason}")
-            if decision.me is not None:
-                print(f"[BLOCK] Details: {decision.me}")
-            return 1
-
-        print("[ALLOW] LIVE auth gate passed.")
-        print(f"[ALLOW] Identity: {decision.me}")
-
-        # ---- Phase 2: enter engine (DRY-RUN only) ----
-        try:
-            from backend.app.engine_entry import start_engine
-            rc = start_engine(mode="LIVE", identity=decision.me or {}, dry_run=True)
-            print(f"[ENGINE] Exit code={rc}")
-        except Exception as e:
-            print(f"[BLOCK] Engine entry failed: {e}")
-            return 2
-
-    else:
-        # TEST mode
-        if token:
-            decision = validate_session_token(base_url, token, require_superuser=False)
-            if decision.allow:
-                print("[INFO] TEST token valid.")
-                print(f"[INFO] Identity: {decision.me}")
-            else:
-                print(f"[WARN] TEST token invalid: {decision.reason}")
-                print(f"[WARN] Details: {decision.me}")
-        else:
-            print("[INFO] TEST mode: no token provided (ok).")
-
-    print("[INFO] Guard complete. Engine start not invoked beyond DRY_RUN entry (by design).")
-    return 0
+    print(f"tradeID: {trade_id}")
+    print("\nDONE.\n")
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()

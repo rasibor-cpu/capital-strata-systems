@@ -1,96 +1,115 @@
+
+"""
+REA Capital – Phase 1 Smoke Test
+--------------------------------
+
+Purpose:
+- Load .env reliably
+- Validate OANDA adapter import
+- Validate configuration
+- Perform OANDA account summary handshake
+- Display balance + NAV cleanly
+"""
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import os
+import traceback
+from pathlib import Path
 
 
-class Simulator:
+def _load_env() -> str:
+    """
+    Loads .env using python-dotenv.
+    Returns the path used (or '' if not loaded).
+    """
+    try:
+        from dotenv import load_dotenv
+    except Exception:
+        return ""
 
-    def __init__(self, starting_equity: float = 100000.0):
-        self.starting_equity = starting_equity
-        self.equity = starting_equity
+    # Try common locations:
+    # 1) current working dir
+    # 2) repo root inferred from this file location (backend/app/simulator.py -> repo root)
+    candidates = []
 
-        self.position = None
-        self.trades_today = 0
-        self.daily_pnl = 0.0
-        self.consecutive_losses = 0
+    cwd_env = Path.cwd() / ".env"
+    candidates.append(cwd_env)
 
-        self.cooldown_active = False
-        self.cooldown_until = None
+    repo_root = Path(__file__).resolve().parents[2]  # .../backend/app -> repo root
+    candidates.append(repo_root / ".env")
 
-        self.equity_peak = starting_equity
+    for p in candidates:
+        if p.exists():
+            load_dotenv(dotenv_path=p, override=True)
+            return str(p)
 
-    # --------------------------------------------------
+    # fallback: try default behavior (looks in cwd)
+    load_dotenv(override=True)
+    return ""
 
-    def reset(self):
-        self.__init__(self.starting_equity)
 
-    # --------------------------------------------------
+def run_smoke_test() -> None:
+    env_path = _load_env()
 
-    def inject_win(self, pnl: float):
-        self.equity += pnl
-        self.daily_pnl += pnl
-        self.trades_today += 1
-        self.consecutive_losses = 0
+    print("=" * 70)
+    print("REA CAPITAL – PHASE 1 SMOKE TEST")
+    print("=" * 70)
+    print(f"dotenv_loaded_from: {env_path or '(default/unknown)'}")
+    print(f"OANDA_API_KEY set?     {'YES' if os.getenv('OANDA_API_KEY') else 'NO'}")
+    print(f"OANDA_ACCOUNT_ID set?  {'YES' if os.getenv('OANDA_ACCOUNT_ID') else 'NO'}")
+    print(f"OANDA_BASE_URL:        {os.getenv('OANDA_BASE_URL', '(not set)')}")
+    print()
 
-        if self.equity > self.equity_peak:
-            self.equity_peak = self.equity
+    # -------------------------------------------------------------
+    # Import Adapter
+    # -------------------------------------------------------------
+    try:
+        from backend.app.brokers.oanda_adapter import OandaAdapter
+        print("OANDA ADAPTER IMPORT: OK")
+    except Exception as e:
+        print("OANDA ADAPTER IMPORT: FAILED")
+        print("Reason:", e)
+        return
 
-        return pnl
+    # -------------------------------------------------------------
+    # Instantiate Adapter
+    # -------------------------------------------------------------
+    try:
+        adapter = OandaAdapter()
+        print("OANDA CONFIG:", "OK" if adapter.is_configured() else "MISSING CREDS")
+    except Exception as e:
+        print("OANDA INIT FAILED")
+        print("Reason:", e)
+        return
 
-    # --------------------------------------------------
+    print()
 
-    def inject_loss(self, pnl: float):
-        self.equity += pnl
-        self.daily_pnl += pnl
-        self.trades_today += 1
-        self.consecutive_losses += 1
+    # -------------------------------------------------------------
+    # Account Summary Handshake
+    # -------------------------------------------------------------
+    try:
+        summary = adapter.get_account_summary()
+        account = summary.get("account", {})
 
-        return pnl
+        balance = account.get("balance")
+        nav = account.get("NAV")
 
-    # --------------------------------------------------
+        print("OANDA ACCOUNT SUMMARY")
+        print("-" * 30)
+        print(f"Balance: {balance}")
+        print(f"NAV    : {nav}")
 
-    def open_position(self, side: str, entry_price: float, size: float):
-        self.position = {
-            "side": side,
-            "entry_price": entry_price,
-            "size": size,
-            "entry_tick_id": 0,
-            "stop_distance": 1.0,
-        }
-        return self.position
+    except Exception as e:
+        print("OANDA HANDSHAKE FAILED")
+        print("Reason:", e)
+        traceback.print_exc()
 
-    # --------------------------------------------------
+    print()
+    print("=" * 70)
+    print("SIMULATOR COMPLETE")
+    print("=" * 70)
 
-    def close_position(self, pnl: float):
-        self.equity += pnl
-        self.daily_pnl += pnl
-        self.trades_today += 1
 
-        if pnl < 0:
-            self.consecutive_losses += 1
-        else:
-            self.consecutive_losses = 0
-
-        if self.equity > self.equity_peak:
-            self.equity_peak = self.equity
-
-        self.position = None
-        return pnl
-
-    # --------------------------------------------------
-
-    def risk_state(self):
-        return {
-            "trades_today": self.trades_today,
-            "open_positions": 1 if self.position else 0,
-            "daily_pnl": self.daily_pnl,
-            "consecutive_losses": self.consecutive_losses,
-            "cooldown_active": self.cooldown_active,
-            "cooldown_until_utc": (
-                self.cooldown_until.isoformat()
-                if self.cooldown_until
-                else None
-            ),
-            "equity_peak": self.equity_peak,
-        }
-
+if __name__ == "__main__":
+    run_smoke_test()
