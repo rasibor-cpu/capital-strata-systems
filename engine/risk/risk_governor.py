@@ -1,197 +1,185 @@
 """
-Capital Strata Systems
-Risk Governor – Regime + Drawdown + Portfolio Governance
-
-Features:
-- Equity peak persistence
-- Drawdown tracking
-- Adaptive portfolio cap (tightens in drawdown)
-- Regime-based risk scaling (CALM / UNSTABLE / CRISIS)
-- Portfolio exposure check (cross-asset buckets)
+Risk Governor – Central Risk Policy Layer
+Capital Strata Systems / REA Capital Trading Engine
 
 Fail-closed by design.
+
+Now includes:
+- Adaptive Portfolio Cap Scaling (dynamic risk + notional caps)
 """
 
 from __future__ import annotations
 
-from typing import Dict, Any
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any, Dict, List
 
-from engine.risk.regime_engine import RegimeEngine
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+@dataclass
+class TradeRequest:
+    instrument: str
+    side: str  # "buy" / "sell"
+    notional: float
+    stop_distance_pct: float  # used to approximate risk, e.g. 0.01 for 1%
+    policy: str = "core"
+
+
+@dataclass
+class RiskDecision:
+    ok: bool
+    reasons: List[str]
+    caps: Dict[str, Any]
+    timestamp_utc: str
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "reasons": self.reasons,
+            "caps": self.caps,
+            "timestamp_utc": self.timestamp_utc,
+        }
 
 
 class RiskGovernor:
+    """
+    Phase 1 in-memory risk governor.
+
+    Assumes you track:
+      equity, equity_peak, cooldown_active, trades_today, daily_pnl, consecutive_losses
+    """
+
+    # Hard failsafes
+    MAX_TRADES_PER_DAY = 8
+    MAX_CONSECUTIVE_LOSSES = 3
+
+    # If daily loss exceeds this fraction of equity, we halt
+    MAX_DAILY_LOSS_PCT = 0.02  # 2%
 
     def __init__(self) -> None:
-        self.policy = "live"
-
-        # Hard stop
-        self.max_drawdown_pct = 0.05
-
-        # Trade throttle
-        self.max_trades_per_day = 20
-        self.trades_today = 0
-
-        # Portfolio cap baseline (pre-adaptive)
-        self.base_portfolio_cap = 0.08
-
-        # Regime engine
-        self.regime_engine = RegimeEngine()
-
-    # --------------------------------------------------------
-    # Adaptive Portfolio Cap
-    # --------------------------------------------------------
-
-    def _adaptive_portfolio_cap(self, drawdown: float) -> float:
-        """
-        Tightens portfolio cap as drawdown increases.
-        """
-        if drawdown >= 0.04:
-            return 0.04  # 4%
-        elif drawdown >= 0.02:
-            return 0.06  # 6%
-        return 0.08      # 8%
-
-    # --------------------------------------------------------
-    # Drawdown multiplier (capital stress)
-    # --------------------------------------------------------
-
-    def _drawdown_multiplier(self, drawdown: float) -> float:
-        """
-        Reduces risk as drawdown increases.
-        """
-        if drawdown >= 0.04:
-            return 0.5
-        elif drawdown >= 0.02:
-            return 0.75
-        return 1.0
-
-    # --------------------------------------------------------
-    # Main Evaluation
-    # --------------------------------------------------------
-
-    def evaluate(
-        self,
-        *,
-        instrument: str,
-        equity: float,
-        trade_risk: float,
-        state: Dict[str, Any],
-    ) -> Dict[str, Any]:
-
-        equity = float(equity)
-        trade_risk = float(trade_risk)
-
-        # -----------------------------------------------
-        # Equity peak persistence
-        # -----------------------------------------------
-
-        equity_peak = float(state.get("equity_peak", equity))
-        if equity > equity_peak:
-            equity_peak = equity
-        state["equity_peak"] = equity_peak
-
-        # -----------------------------------------------
-        # Drawdown tracking
-        # -----------------------------------------------
-
-        drawdown = 0.0
-        if equity_peak > 0:
-            drawdown = (equity_peak - equity) / equity_peak
-
-        state["current_drawdown"] = drawdown
-
-        if drawdown >= self.max_drawdown_pct:
-            return {
-                "decision": "BLOCK",
-                "policy": self.policy,
-                "reasons": ["GLOBAL_DRAWDOWN_LIMIT"],
-                "drawdown": round(drawdown, 6),
-            }
-
-        # -----------------------------------------------
-        # Daily trade throttle
-        # -----------------------------------------------
-
-        if self.trades_today >= self.max_trades_per_day:
-            return {
-                "decision": "BLOCK",
-                "policy": self.policy,
-                "reasons": ["TRADE_LIMIT_REACHED"],
-            }
-
-        # -----------------------------------------------
-        # Regime classification (market stress)
-        # -----------------------------------------------
-
-        vol_ratio = float(state.get("volatility_ratio", 1.0))
-        regime = self.regime_engine.classify(vol_ratio)
-
-        state["regime"] = regime.regime
-        state["volatility_ratio"] = regime.volatility_ratio
-
-        # -----------------------------------------------
-        # Dual scaling: drawdown × regime
-        # -----------------------------------------------
-
-        dd_mult = self._drawdown_multiplier(drawdown)
-        final_multiplier = dd_mult * float(regime.risk_multiplier)
-
-        state["risk_multiplier"] = final_multiplier
-
-        effective_trade_risk = trade_risk * final_multiplier
-
-        # -----------------------------------------------
-        # Portfolio exposure (cross-asset)
-        # -----------------------------------------------
-
-        open_futures_risk = float(state.get("open_futures_risk", 0.0))
-        open_fx_risk = float(state.get("open_fx_risk", 0.0))
-        open_equities_risk = float(state.get("open_equities_risk", 0.0))
-        open_crypto_risk = float(state.get("open_crypto_risk", 0.0))
-        open_rates_risk = float(state.get("open_rates_risk", 0.0))
-
-        total_open_risk = (
-            open_futures_risk
-            + open_fx_risk
-            + open_equities_risk
-            + open_crypto_risk
-            + open_rates_risk
-        )
-
-        portfolio_total_risk = total_open_risk + effective_trade_risk
-
-        allocation_pct = 0.0
-        if equity > 0:
-            allocation_pct = portfolio_total_risk / equity
-
-        adaptive_cap = self._adaptive_portfolio_cap(drawdown)
-        state["adaptive_portfolio_cap"] = adaptive_cap
-
-        if allocation_pct > adaptive_cap:
-            return {
-                "decision": "BLOCK",
-                "policy": self.policy,
-                "reasons": [
-                    "PORTFOLIO_RISK_CAP_EXCEEDED",
-                    f"{allocation_pct:.2%} > {adaptive_cap:.2%}",
-                ],
-                "portfolio_allocation_pct": round(allocation_pct, 6),
-                "portfolio_total_risk": round(portfolio_total_risk, 6),
-                "adaptive_cap": adaptive_cap,
-                "risk_multiplier": round(final_multiplier, 6),
-                "drawdown": round(drawdown, 6),
-                "regime": regime.regime,
-                "volatility_ratio": regime.volatility_ratio,
-            }
-
-        return {
-            "decision": "ALLOW",
-            "policy": self.policy,
-            "portfolio_allocation_pct": round(allocation_pct, 6),
-            "portfolio_total_risk": round(portfolio_total_risk, 6),
-            "adaptive_cap": adaptive_cap,
-            "risk_multiplier": round(final_multiplier, 6),
-            "drawdown": round(drawdown, 6),
-            "regime": regime.regime,
-            "volatility_ratio": regime.volatility_ratio,
+        self.state: Dict[str, Any] = {
+            "day_key": "1970-01-01",
+            "equity": 100000.0,
+            "equity_peak": 100000.0,
+            "trades_today": 0,
+            "daily_pnl": 0.0,
+            "consecutive_losses": 0,
+            "cooldown_active": False,
+            "regime": "normal",  # "normal" / "cautious" / "aggressive"
         }
+
+    def set_day(self, day_key: str) -> None:
+        if day_key != self.state.get("day_key"):
+            self.state["day_key"] = day_key
+            self.state["trades_today"] = 0
+            self.state["daily_pnl"] = 0.0
+            self.state["consecutive_losses"] = 0
+
+    def update_equity(self, equity: float) -> None:
+        self.state["equity"] = float(equity)
+        if self.state["equity"] > self.state.get("equity_peak", 0.0):
+            self.state["equity_peak"] = float(self.state["equity"])
+
+    def set_regime(self, regime: str) -> None:
+        self.state["regime"] = str(regime)
+
+    def set_cooldown(self, active: bool) -> None:
+        self.state["cooldown_active"] = bool(active)
+
+    def record_trade_outcome(self, pnl: float) -> None:
+        self.state["daily_pnl"] = float(self.state.get("daily_pnl", 0.0)) + float(pnl)
+        if pnl < 0:
+            self.state["consecutive_losses"] = int(self.state.get("consecutive_losses", 0)) + 1
+        else:
+            self.state["consecutive_losses"] = 0
+
+    def allow_trade(self, req: TradeRequest) -> RiskDecision:
+        reasons: List[str] = []
+        ts = _utc_now_iso()
+
+        # Basic validations (fail-closed)
+        if req.notional <= 0:
+            return RiskDecision(False, ["invalid_notional"], {}, ts)
+
+        if req.stop_distance_pct <= 0 or req.stop_distance_pct >= 0.25:
+            return RiskDecision(False, ["invalid_stop_distance_pct"], {}, ts)
+
+        equity = float(self.state.get("equity", 0.0))
+        equity_peak = float(self.state.get("equity_peak", 0.0))
+        cooldown_active = bool(self.state.get("cooldown_active", False))
+        regime = str(self.state.get("regime", "normal"))
+
+        trades_today = int(self.state.get("trades_today", 0))
+        daily_pnl = float(self.state.get("daily_pnl", 0.0))
+        consecutive_losses = int(self.state.get("consecutive_losses", 0))
+
+        # Global halts
+        if trades_today >= self.MAX_TRADES_PER_DAY:
+            return RiskDecision(False, ["max_trades_per_day_reached"], {}, ts)
+
+        if consecutive_losses >= self.MAX_CONSECUTIVE_LOSSES:
+            return RiskDecision(False, ["max_consecutive_losses_reached"], {}, ts)
+
+        if equity <= 0:
+            return RiskDecision(False, ["invalid_equity_fail_closed"], {}, ts)
+
+        if daily_pnl < 0 and abs(daily_pnl) / equity >= self.MAX_DAILY_LOSS_PCT:
+            return RiskDecision(False, ["max_daily_loss_reached"], {}, ts)
+
+        # Adaptive Cap Scaling (core)
+        caps: Dict[str, Any] = {}
+        try:
+            from engine.capital.adaptive_cap_scaler import AdaptiveCapScaler  # type: ignore
+
+            scaler = AdaptiveCapScaler()
+            cap_dec = scaler.compute(
+                equity=equity,
+                equity_peak=equity_peak,
+                regime=regime,
+                cooldown_active=cooldown_active,
+            )
+            caps = cap_dec.as_dict()
+            reasons.extend(cap_dec.reasons)
+
+            # Convert caps to absolute limits
+            risk_budget_abs = caps["risk_budget_pct"] * equity
+            max_notional_abs = caps["max_position_notional_pct"] * equity
+
+            # Approximate trade risk = notional * stop_distance_pct
+            approx_risk_abs = req.notional * req.stop_distance_pct
+
+            if req.notional > max_notional_abs:
+                reasons.append("notional_exceeds_dynamic_cap")
+                return RiskDecision(False, reasons, caps, ts)
+
+            if approx_risk_abs > risk_budget_abs:
+                reasons.append("risk_exceeds_dynamic_budget")
+                return RiskDecision(False, reasons, caps, ts)
+
+        except Exception as e:
+            return RiskDecision(
+                False,
+                ["cap_scaler_error_fail_closed", f"{type(e).__name__}"],
+                {"error": str(e)},
+                ts,
+            )
+
+        # Approved
+        self.state["trades_today"] = trades_today + 1
+        reasons.append("approved")
+        return RiskDecision(True, reasons, caps, ts)
+
+
+def apply_trade(governor: RiskGovernor, req_dict: Dict[str, Any]) -> Dict[str, Any]:
+    req = TradeRequest(
+        instrument=str(req_dict.get("instrument", "")),
+        side=str(req_dict.get("side", "")),
+        notional=float(req_dict.get("notional", 0.0)),
+        stop_distance_pct=float(req_dict.get("stop_distance_pct", 0.0)),
+        policy=str(req_dict.get("policy", "core")),
+    )
+    decision = governor.allow_trade(req)
+    return decision.as_dict()
