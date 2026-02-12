@@ -1,53 +1,52 @@
 """
 Capital Strata Systems
-Risk Governor – v3.4.1 Portfolio Governed
+Risk Governor – Adaptive Portfolio Governance
 
-Institutional risk enforcement layer.
-
-Enforces:
-1. Rolling drawdown cap
-2. Daily trade throttle
-3. Cross-asset portfolio risk cap
-
+Live capital-aware risk enforcement layer.
+Includes adaptive portfolio cap scaling.
 Fail-closed by design.
 """
 
 from __future__ import annotations
 
-from typing import Dict, Any, List
-
-from backend.app.execution_journal import record_trade_decision
-from backend.app.risk.portfolio_risk_engine import PortfolioRiskEngine
+from typing import Dict, Any
 
 
 class RiskGovernor:
 
+    # --------------------------------------------------------
+    # Initialization
+    # --------------------------------------------------------
+
     def __init__(self) -> None:
-
-        # ----------------------------
-        # Core Risk Controls
-        # ----------------------------
-
-        self.global_dd_limit = 0.05              # 5% rolling drawdown
-        self.global_throttle_limit = 0.03        # 3% daily throttle
-        self.max_portfolio_risk_pct = 0.08       # 8% total portfolio cap
-        self.max_trades_per_day = 10
-
-        # ----------------------------
-        # Runtime State
-        # ----------------------------
-
-        self.trades_today = 0
-        self.equity_peak = 0.0
-
-        self.portfolio_engine = PortfolioRiskEngine()
-
-        # Operational context
         self.policy = "live"
-        self.mode = "live"
+
+        # Static hard protections
+        self.max_drawdown_pct = 0.05          # 5% global shutdown
+        self.max_trades_per_day = 20
+        self.max_portfolio_risk_pct = 0.08    # Base ceiling (pre-adaptive)
+
+        # Daily tracking
+        self.trades_today = 0
 
     # --------------------------------------------------------
-    # Evaluate Trade
+    # Adaptive Portfolio Cap
+    # --------------------------------------------------------
+
+    def _adaptive_portfolio_cap(self, drawdown: float) -> float:
+        """
+        Tightens portfolio risk cap as drawdown increases.
+        """
+
+        if drawdown >= 0.04:
+            return 0.04  # 4%
+        elif drawdown >= 0.02:
+            return 0.06  # 6%
+        else:
+            return 0.08  # 8%
+
+    # --------------------------------------------------------
+    # Main Evaluation
     # --------------------------------------------------------
 
     def evaluate(
@@ -59,42 +58,26 @@ class RiskGovernor:
         state: Dict[str, Any],
     ) -> Dict[str, Any]:
 
-        equity = float(equity)
-        trade_risk = float(trade_risk)
-
-        if self.equity_peak <= 0:
-            self.equity_peak = equity
-
-        self.equity_peak = max(self.equity_peak, equity)
-
-        reasons: List[str] = []
+        equity_peak = float(state.get("equity_peak", equity))
+        open_futures_risk = float(state.get("open_futures_risk", 0.0))
+        open_fx_risk = float(state.get("open_fx_risk", 0.0))
+        open_equities_risk = float(state.get("open_equities_risk", 0.0))
+        open_crypto_risk = float(state.get("open_crypto_risk", 0.0))
+        open_rates_risk = float(state.get("open_rates_risk", 0.0))
 
         # ----------------------------------------------------
-        # 1. Rolling Drawdown
+        # 1. Global Drawdown Check
         # ----------------------------------------------------
 
-        if self.equity_peak > 0:
-            drawdown = (self.equity_peak - equity) / self.equity_peak
-        else:
-            drawdown = 0.0
+        drawdown = 0.0
+        if equity_peak > 0:
+            drawdown = (equity_peak - equity) / equity_peak
 
-        if drawdown >= self.global_dd_limit:
-            decision = "BLOCK"
-            reasons.append("GLOBAL_DRAWDOWN_LIMIT")
-
-            self._log(
-                instrument=instrument,
-                decision=decision,
-                reasons=reasons,
-                equity=equity,
-                state=state,
-                trade_risk=trade_risk,
-            )
-
+        if drawdown >= self.max_drawdown_pct:
             return {
-                "decision": decision,
+                "decision": "BLOCK",
                 "policy": self.policy,
-                "reasons": reasons,
+                "reasons": ["GLOBAL_DRAWDOWN_LIMIT"],
                 "drawdown": round(drawdown, 6),
             }
 
@@ -103,122 +86,55 @@ class RiskGovernor:
         # ----------------------------------------------------
 
         if self.trades_today >= self.max_trades_per_day:
-            decision = "BLOCK"
-            reasons.append("TRADE_LIMIT_REACHED")
-
-            self._log(
-                instrument=instrument,
-                decision=decision,
-                reasons=reasons,
-                equity=equity,
-                state=state,
-                trade_risk=trade_risk,
-            )
-
             return {
-                "decision": decision,
+                "decision": "BLOCK",
                 "policy": self.policy,
-                "reasons": reasons,
+                "reasons": ["TRADE_LIMIT_REACHED"],
             }
 
         # ----------------------------------------------------
-        # 3. Portfolio Exposure Enforcement
+        # 3. Portfolio Exposure Calculation
         # ----------------------------------------------------
 
-        open_futures_risk = float(state.get("open_futures_risk", 0.0))
-
-        snapshot = self.portfolio_engine.snapshot(
-            equity=equity,
-            fx_risk=trade_risk,
-            futures_risk=open_futures_risk,
+        total_open_risk = (
+            open_futures_risk
+            + open_fx_risk
+            + open_equities_risk
+            + open_crypto_risk
+            + open_rates_risk
         )
 
-        total_risk = snapshot.total_risk
-        allocation_pct = snapshot.allocation_pct
-        components = snapshot.components
+        portfolio_total_risk = total_open_risk + trade_risk
 
-        if allocation_pct > self.max_portfolio_risk_pct:
+        allocation_pct = 0.0
+        if equity > 0:
+            allocation_pct = portfolio_total_risk / equity
 
-            decision = "BLOCK"
-            reasons.append(
-                f"PORTFOLIO_RISK_CAP_EXCEEDED: "
-                f"{allocation_pct:.2%} > cap {self.max_portfolio_risk_pct:.2%}"
-            )
+        adaptive_cap = self._adaptive_portfolio_cap(drawdown)
 
-            self._log(
-                instrument=instrument,
-                decision=decision,
-                reasons=reasons,
-                equity=equity,
-                state=state,
-                trade_risk=trade_risk,
-                portfolio_total_risk=total_risk,
-                portfolio_allocation_pct=allocation_pct,
-                portfolio_components=components,
-            )
-
+        if allocation_pct > adaptive_cap:
             return {
-                "decision": decision,
+                "decision": "BLOCK",
                 "policy": self.policy,
-                "reasons": reasons,
+                "reasons": [
+                    "PORTFOLIO_RISK_CAP_EXCEEDED",
+                    f"allocation {allocation_pct:.2%} > cap {adaptive_cap:.2%}",
+                ],
                 "portfolio_allocation_pct": round(allocation_pct, 6),
-                "portfolio_total_risk": round(total_risk, 6),
-                "portfolio_components": components,
+                "portfolio_total_risk": round(portfolio_total_risk, 6),
+                "adaptive_cap": adaptive_cap,
+                "drawdown": round(drawdown, 6),
             }
 
         # ----------------------------------------------------
-        # 4. APPROVED
+        # APPROVED
         # ----------------------------------------------------
-
-        decision = "ALLOW"
-
-        self._log(
-            instrument=instrument,
-            decision=decision,
-            reasons=["APPROVED"],
-            equity=equity,
-            state=state,
-            trade_risk=trade_risk,
-            portfolio_total_risk=total_risk,
-            portfolio_allocation_pct=allocation_pct,
-            portfolio_components=components,
-        )
 
         return {
-            "decision": decision,
+            "decision": "ALLOW",
             "policy": self.policy,
             "portfolio_allocation_pct": round(allocation_pct, 6),
+            "portfolio_total_risk": round(portfolio_total_risk, 6),
+            "adaptive_cap": adaptive_cap,
+            "drawdown": round(drawdown, 6),
         }
-
-    # --------------------------------------------------------
-    # Logging Wrapper
-    # --------------------------------------------------------
-
-    def _log(
-        self,
-        *,
-        instrument: str,
-        decision: str,
-        reasons: List[str],
-        equity: float,
-        state: Dict[str, Any],
-        trade_risk: float,
-        portfolio_total_risk: float | None = None,
-        portfolio_allocation_pct: float | None = None,
-        portfolio_components: Dict[str, float] | None = None,
-    ) -> None:
-
-        record_trade_decision(
-            instrument=instrument,
-            decision=decision,
-            policy=self.policy,
-            reasons=reasons,
-            equity=equity,
-            equity_peak=self.equity_peak,
-            mode=self.mode,
-            portfolio_total_risk=portfolio_total_risk,
-            portfolio_allocation_pct=portfolio_allocation_pct,
-            portfolio_components=portfolio_components,
-            max_portfolio_risk_pct=self.max_portfolio_risk_pct,
-            equity_reference=equity,
-        )
