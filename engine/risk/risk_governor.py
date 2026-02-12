@@ -1,10 +1,11 @@
 """
 Capital Strata Systems
-Risk Governor – Adaptive Portfolio Governance
+Risk Governor – Adaptive Portfolio Governance (State-Aware)
 
-Live capital-aware risk enforcement layer.
-Includes adaptive portfolio cap scaling.
-Fail-closed by design.
+Adds:
+- Equity peak persistence
+- Drawdown tracking
+- Adaptive cap memory
 """
 
 from __future__ import annotations
@@ -14,36 +15,25 @@ from typing import Dict, Any
 
 class RiskGovernor:
 
-    # --------------------------------------------------------
-    # Initialization
-    # --------------------------------------------------------
-
     def __init__(self) -> None:
         self.policy = "live"
 
-        # Static hard protections
-        self.max_drawdown_pct = 0.05          # 5% global shutdown
+        self.max_drawdown_pct = 0.05
         self.max_trades_per_day = 20
-        self.max_portfolio_risk_pct = 0.08    # Base ceiling (pre-adaptive)
+        self.base_portfolio_cap = 0.08
 
-        # Daily tracking
         self.trades_today = 0
 
     # --------------------------------------------------------
-    # Adaptive Portfolio Cap
+    # Adaptive Cap Logic
     # --------------------------------------------------------
 
     def _adaptive_portfolio_cap(self, drawdown: float) -> float:
-        """
-        Tightens portfolio risk cap as drawdown increases.
-        """
-
         if drawdown >= 0.04:
-            return 0.04  # 4%
+            return 0.04
         elif drawdown >= 0.02:
-            return 0.06  # 6%
-        else:
-            return 0.08  # 8%
+            return 0.06
+        return 0.08
 
     # --------------------------------------------------------
     # Main Evaluation
@@ -58,20 +48,24 @@ class RiskGovernor:
         state: Dict[str, Any],
     ) -> Dict[str, Any]:
 
-        equity_peak = float(state.get("equity_peak", equity))
-        open_futures_risk = float(state.get("open_futures_risk", 0.0))
-        open_fx_risk = float(state.get("open_fx_risk", 0.0))
-        open_equities_risk = float(state.get("open_equities_risk", 0.0))
-        open_crypto_risk = float(state.get("open_crypto_risk", 0.0))
-        open_rates_risk = float(state.get("open_rates_risk", 0.0))
+        # -----------------------------------------------
+        # Update equity peak
+        # -----------------------------------------------
 
-        # ----------------------------------------------------
-        # 1. Global Drawdown Check
-        # ----------------------------------------------------
+        equity_peak = float(state.get("equity_peak", equity))
+        if equity > equity_peak:
+            equity_peak = equity
+        state["equity_peak"] = equity_peak
+
+        # -----------------------------------------------
+        # Compute drawdown
+        # -----------------------------------------------
 
         drawdown = 0.0
         if equity_peak > 0:
             drawdown = (equity_peak - equity) / equity_peak
+
+        state["current_drawdown"] = drawdown
 
         if drawdown >= self.max_drawdown_pct:
             return {
@@ -81,9 +75,9 @@ class RiskGovernor:
                 "drawdown": round(drawdown, 6),
             }
 
-        # ----------------------------------------------------
-        # 2. Trade Throttle
-        # ----------------------------------------------------
+        # -----------------------------------------------
+        # Trade throttle
+        # -----------------------------------------------
 
         if self.trades_today >= self.max_trades_per_day:
             return {
@@ -92,9 +86,15 @@ class RiskGovernor:
                 "reasons": ["TRADE_LIMIT_REACHED"],
             }
 
-        # ----------------------------------------------------
-        # 3. Portfolio Exposure Calculation
-        # ----------------------------------------------------
+        # -----------------------------------------------
+        # Portfolio exposure
+        # -----------------------------------------------
+
+        open_futures_risk = float(state.get("open_futures_risk", 0.0))
+        open_fx_risk = float(state.get("open_fx_risk", 0.0))
+        open_equities_risk = float(state.get("open_equities_risk", 0.0))
+        open_crypto_risk = float(state.get("open_crypto_risk", 0.0))
+        open_rates_risk = float(state.get("open_rates_risk", 0.0))
 
         total_open_risk = (
             open_futures_risk
@@ -112,23 +112,21 @@ class RiskGovernor:
 
         adaptive_cap = self._adaptive_portfolio_cap(drawdown)
 
+        state["adaptive_portfolio_cap"] = adaptive_cap
+
         if allocation_pct > adaptive_cap:
             return {
                 "decision": "BLOCK",
                 "policy": self.policy,
                 "reasons": [
                     "PORTFOLIO_RISK_CAP_EXCEEDED",
-                    f"allocation {allocation_pct:.2%} > cap {adaptive_cap:.2%}",
+                    f"{allocation_pct:.2%} > {adaptive_cap:.2%}",
                 ],
                 "portfolio_allocation_pct": round(allocation_pct, 6),
                 "portfolio_total_risk": round(portfolio_total_risk, 6),
                 "adaptive_cap": adaptive_cap,
                 "drawdown": round(drawdown, 6),
             }
-
-        # ----------------------------------------------------
-        # APPROVED
-        # ----------------------------------------------------
 
         return {
             "decision": "ALLOW",
