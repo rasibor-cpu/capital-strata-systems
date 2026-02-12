@@ -1,17 +1,22 @@
 """
 Capital Strata Systems
-Risk Governor – Dual Adaptive Scaling
+Risk Governor – Regime + Drawdown + Portfolio Governance
 
 Features:
 - Equity peak persistence
-- Drawdown-based scaling
-- Volatility-based scaling
-- Adaptive portfolio cap
+- Drawdown tracking
+- Adaptive portfolio cap (tightens in drawdown)
+- Regime-based risk scaling (CALM / UNSTABLE / CRISIS)
+- Portfolio exposure check (cross-asset buckets)
+
+Fail-closed by design.
 """
 
 from __future__ import annotations
 
 from typing import Dict, Any
+
+from engine.risk.regime_engine import RegimeEngine
 
 
 class RiskGovernor:
@@ -19,28 +24,41 @@ class RiskGovernor:
     def __init__(self) -> None:
         self.policy = "live"
 
+        # Hard stop
         self.max_drawdown_pct = 0.05
+
+        # Trade throttle
         self.max_trades_per_day = 20
+        self.trades_today = 0
+
+        # Portfolio cap baseline (pre-adaptive)
         self.base_portfolio_cap = 0.08
 
-        self.trades_today = 0
+        # Regime engine
+        self.regime_engine = RegimeEngine()
 
     # --------------------------------------------------------
     # Adaptive Portfolio Cap
     # --------------------------------------------------------
 
     def _adaptive_portfolio_cap(self, drawdown: float) -> float:
+        """
+        Tightens portfolio cap as drawdown increases.
+        """
         if drawdown >= 0.04:
-            return 0.04
+            return 0.04  # 4%
         elif drawdown >= 0.02:
-            return 0.06
-        return 0.08
+            return 0.06  # 6%
+        return 0.08      # 8%
 
     # --------------------------------------------------------
-    # Drawdown Multiplier
+    # Drawdown multiplier (capital stress)
     # --------------------------------------------------------
 
     def _drawdown_multiplier(self, drawdown: float) -> float:
+        """
+        Reduces risk as drawdown increases.
+        """
         if drawdown >= 0.04:
             return 0.5
         elif drawdown >= 0.02:
@@ -48,18 +66,7 @@ class RiskGovernor:
         return 1.0
 
     # --------------------------------------------------------
-    # Volatility Multiplier
-    # --------------------------------------------------------
-
-    def _volatility_multiplier(self, vol_ratio: float) -> float:
-        if vol_ratio > 1.5:
-            return 0.6
-        elif vol_ratio > 1.0:
-            return 0.8
-        return 1.0
-
-    # --------------------------------------------------------
-    # Evaluation
+    # Main Evaluation
     # --------------------------------------------------------
 
     def evaluate(
@@ -71,12 +78,21 @@ class RiskGovernor:
         state: Dict[str, Any],
     ) -> Dict[str, Any]:
 
-        equity_peak = float(state.get("equity_peak", equity))
+        equity = float(equity)
+        trade_risk = float(trade_risk)
 
+        # -----------------------------------------------
+        # Equity peak persistence
+        # -----------------------------------------------
+
+        equity_peak = float(state.get("equity_peak", equity))
         if equity > equity_peak:
             equity_peak = equity
-
         state["equity_peak"] = equity_peak
+
+        # -----------------------------------------------
+        # Drawdown tracking
+        # -----------------------------------------------
 
         drawdown = 0.0
         if equity_peak > 0:
@@ -92,6 +108,10 @@ class RiskGovernor:
                 "drawdown": round(drawdown, 6),
             }
 
+        # -----------------------------------------------
+        # Daily trade throttle
+        # -----------------------------------------------
+
         if self.trades_today >= self.max_trades_per_day:
             return {
                 "decision": "BLOCK",
@@ -99,24 +119,30 @@ class RiskGovernor:
                 "reasons": ["TRADE_LIMIT_REACHED"],
             }
 
-        # -----------------------------------------
-        # Dual Adaptive Scaling
-        # -----------------------------------------
+        # -----------------------------------------------
+        # Regime classification (market stress)
+        # -----------------------------------------------
 
         vol_ratio = float(state.get("volatility_ratio", 1.0))
+        regime = self.regime_engine.classify(vol_ratio)
 
-        dd_multiplier = self._drawdown_multiplier(drawdown)
-        vol_multiplier = self._volatility_multiplier(vol_ratio)
+        state["regime"] = regime.regime
+        state["volatility_ratio"] = regime.volatility_ratio
 
-        final_multiplier = dd_multiplier * vol_multiplier
+        # -----------------------------------------------
+        # Dual scaling: drawdown × regime
+        # -----------------------------------------------
+
+        dd_mult = self._drawdown_multiplier(drawdown)
+        final_multiplier = dd_mult * float(regime.risk_multiplier)
 
         state["risk_multiplier"] = final_multiplier
 
         effective_trade_risk = trade_risk * final_multiplier
 
-        # -----------------------------------------
-        # Portfolio Risk
-        # -----------------------------------------
+        # -----------------------------------------------
+        # Portfolio exposure (cross-asset)
+        # -----------------------------------------------
 
         open_futures_risk = float(state.get("open_futures_risk", 0.0))
         open_fx_risk = float(state.get("open_fx_risk", 0.0))
@@ -152,9 +178,10 @@ class RiskGovernor:
                 "portfolio_allocation_pct": round(allocation_pct, 6),
                 "portfolio_total_risk": round(portfolio_total_risk, 6),
                 "adaptive_cap": adaptive_cap,
-                "risk_multiplier": final_multiplier,
+                "risk_multiplier": round(final_multiplier, 6),
                 "drawdown": round(drawdown, 6),
-                "volatility_ratio": vol_ratio,
+                "regime": regime.regime,
+                "volatility_ratio": regime.volatility_ratio,
             }
 
         return {
@@ -163,7 +190,8 @@ class RiskGovernor:
             "portfolio_allocation_pct": round(allocation_pct, 6),
             "portfolio_total_risk": round(portfolio_total_risk, 6),
             "adaptive_cap": adaptive_cap,
-            "risk_multiplier": final_multiplier,
+            "risk_multiplier": round(final_multiplier, 6),
             "drawdown": round(drawdown, 6),
-            "volatility_ratio": vol_ratio,
+            "regime": regime.regime,
+            "volatility_ratio": regime.volatility_ratio,
         }
