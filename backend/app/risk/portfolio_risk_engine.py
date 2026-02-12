@@ -1,51 +1,93 @@
 """
-Portfolio Risk Engine
-Capital Strata Systems – Phase 15
+Capital Strata Systems
+Portfolio Risk Engine (Standalone)
 
-Enforces futures allocation cap
-within overall global drawdown architecture.
+Purpose:
+- Aggregate cross-asset risk into ONE portfolio view (FX + Futures + others later)
+- Compute total portfolio risk amount and allocation % vs equity
+- MUST NOT import RiskGovernor (avoid circular imports)
+
+This module is intentionally "dumb + pure":
+- No broker calls
+- No engine state mutations
+- No imports from engine.*
 """
 
+from __future__ import annotations
+
+from dataclasses import dataclass
 from typing import Dict, Any
-from engine.risk.risk_governor import RiskGovernor
+
+
+@dataclass(frozen=True)
+class PortfolioRiskSnapshot:
+    total_risk: float
+    allocation_pct: float
+    components: Dict[str, float]
 
 
 class PortfolioRiskEngine:
+    """
+    Simple portfolio risk aggregator.
+    All inputs are absolute "risk money" amounts (same base currency).
+    Example:
+      fx_risk = 120.0      # dollars at risk on next FX trade
+      futures_risk = 500.0 # dollars at risk across open futures
+    """
 
-    def __init__(self):
-        self.risk_governor = RiskGovernor()
-
-        # 3% futures allocation cap
-        self.futures_allocation_cap = 0.03
-
-    # --------------------------------------------------
-
-    def evaluate_futures_trade(
+    def calculate_total_risk(
         self,
-        current_equity: float,
-        open_futures_risk: float,
-        new_trade_risk: float,
-    ) -> Dict[str, Any]:
+        *,
+        fx_risk: float = 0.0,
+        futures_risk: float = 0.0,
+        equities_risk: float = 0.0,
+        crypto_risk: float = 0.0,
+        rates_risk: float = 0.0,
+    ) -> float:
+        total = (
+            float(fx_risk)
+            + float(futures_risk)
+            + float(equities_risk)
+            + float(crypto_risk)
+            + float(rates_risk)
+        )
+        return max(total, 0.0)
 
-        if current_equity <= 0:
-            return {
-                "decision": "BLOCK",
-                "reason": "Invalid equity"
-            }
+    def snapshot(
+        self,
+        *,
+        equity: float,
+        fx_risk: float = 0.0,
+        futures_risk: float = 0.0,
+        equities_risk: float = 0.0,
+        crypto_risk: float = 0.0,
+        rates_risk: float = 0.0,
+    ) -> PortfolioRiskSnapshot:
+        eq = float(equity)
+        total = self.calculate_total_risk(
+            fx_risk=fx_risk,
+            futures_risk=futures_risk,
+            equities_risk=equities_risk,
+            crypto_risk=crypto_risk,
+            rates_risk=rates_risk,
+        )
+        allocation = (total / eq) if eq > 0 else 0.0
 
-        total_futures_risk = open_futures_risk + new_trade_risk
+        return PortfolioRiskSnapshot(
+            total_risk=round(total, 6),
+            allocation_pct=round(allocation, 6),
+            components={
+                "fx_risk": round(float(fx_risk), 6),
+                "futures_risk": round(float(futures_risk), 6),
+                "equities_risk": round(float(equities_risk), 6),
+                "crypto_risk": round(float(crypto_risk), 6),
+                "rates_risk": round(float(rates_risk), 6),
+            },
+        )
 
-        allocation_pct = total_futures_risk / current_equity
-
-        if allocation_pct > self.futures_allocation_cap:
-            return {
-                "decision": "BLOCK",
-                "reason": f"Futures allocation cap exceeded: "
-                          f"{round(allocation_pct*100, 2)}% > "
-                          f"{self.futures_allocation_cap*100:.2f}%"
-            }
-
+    def to_dict(self, snap: PortfolioRiskSnapshot) -> Dict[str, Any]:
         return {
-            "decision": "ALLOW",
-            "allocation_pct": round(allocation_pct, 4),
+            "total_risk": snap.total_risk,
+            "allocation_pct": snap.allocation_pct,
+            "components": dict(snap.components),
         }
