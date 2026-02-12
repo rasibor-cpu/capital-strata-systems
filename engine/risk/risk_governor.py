@@ -1,12 +1,12 @@
 """
 Capital Strata Systems
-Risk Governor – Adaptive Portfolio + Position Scaling
+Risk Governor – Dual Adaptive Scaling
 
 Features:
 - Equity peak persistence
-- Drawdown tracking
+- Drawdown-based scaling
+- Volatility-based scaling
 - Adaptive portfolio cap
-- Adaptive position size multiplier
 """
 
 from __future__ import annotations
@@ -37,14 +37,25 @@ class RiskGovernor:
         return 0.08
 
     # --------------------------------------------------------
-    # Adaptive Position Multiplier
+    # Drawdown Multiplier
     # --------------------------------------------------------
 
-    def _risk_multiplier(self, drawdown: float) -> float:
+    def _drawdown_multiplier(self, drawdown: float) -> float:
         if drawdown >= 0.04:
             return 0.5
         elif drawdown >= 0.02:
             return 0.75
+        return 1.0
+
+    # --------------------------------------------------------
+    # Volatility Multiplier
+    # --------------------------------------------------------
+
+    def _volatility_multiplier(self, vol_ratio: float) -> float:
+        if vol_ratio > 1.5:
+            return 0.6
+        elif vol_ratio > 1.0:
+            return 0.8
         return 1.0
 
     # --------------------------------------------------------
@@ -89,16 +100,22 @@ class RiskGovernor:
             }
 
         # -----------------------------------------
-        # Adaptive Trade Scaling
+        # Dual Adaptive Scaling
         # -----------------------------------------
 
-        multiplier = self._risk_multiplier(drawdown)
-        effective_trade_risk = trade_risk * multiplier
+        vol_ratio = float(state.get("volatility_ratio", 1.0))
 
-        state["risk_multiplier"] = multiplier
+        dd_multiplier = self._drawdown_multiplier(drawdown)
+        vol_multiplier = self._volatility_multiplier(vol_ratio)
+
+        final_multiplier = dd_multiplier * vol_multiplier
+
+        state["risk_multiplier"] = final_multiplier
+
+        effective_trade_risk = trade_risk * final_multiplier
 
         # -----------------------------------------
-        # Portfolio Risk Calculation
+        # Portfolio Risk
         # -----------------------------------------
 
         open_futures_risk = float(state.get("open_futures_risk", 0.0))
@@ -135,8 +152,9 @@ class RiskGovernor:
                 "portfolio_allocation_pct": round(allocation_pct, 6),
                 "portfolio_total_risk": round(portfolio_total_risk, 6),
                 "adaptive_cap": adaptive_cap,
-                "risk_multiplier": multiplier,
+                "risk_multiplier": final_multiplier,
                 "drawdown": round(drawdown, 6),
+                "volatility_ratio": vol_ratio,
             }
 
         return {
@@ -145,6 +163,7 @@ class RiskGovernor:
             "portfolio_allocation_pct": round(allocation_pct, 6),
             "portfolio_total_risk": round(portfolio_total_risk, 6),
             "adaptive_cap": adaptive_cap,
-            "risk_multiplier": multiplier,
+            "risk_multiplier": final_multiplier,
             "drawdown": round(drawdown, 6),
+            "volatility_ratio": vol_ratio,
         }
