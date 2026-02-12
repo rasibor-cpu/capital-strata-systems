@@ -1,11 +1,12 @@
 """
 Capital Strata Systems
-Risk Governor – Adaptive Portfolio Governance (State-Aware)
+Risk Governor – Adaptive Portfolio + Position Scaling
 
-Adds:
+Features:
 - Equity peak persistence
 - Drawdown tracking
-- Adaptive cap memory
+- Adaptive portfolio cap
+- Adaptive position size multiplier
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ class RiskGovernor:
         self.trades_today = 0
 
     # --------------------------------------------------------
-    # Adaptive Cap Logic
+    # Adaptive Portfolio Cap
     # --------------------------------------------------------
 
     def _adaptive_portfolio_cap(self, drawdown: float) -> float:
@@ -36,7 +37,18 @@ class RiskGovernor:
         return 0.08
 
     # --------------------------------------------------------
-    # Main Evaluation
+    # Adaptive Position Multiplier
+    # --------------------------------------------------------
+
+    def _risk_multiplier(self, drawdown: float) -> float:
+        if drawdown >= 0.04:
+            return 0.5
+        elif drawdown >= 0.02:
+            return 0.75
+        return 1.0
+
+    # --------------------------------------------------------
+    # Evaluation
     # --------------------------------------------------------
 
     def evaluate(
@@ -48,18 +60,12 @@ class RiskGovernor:
         state: Dict[str, Any],
     ) -> Dict[str, Any]:
 
-        # -----------------------------------------------
-        # Update equity peak
-        # -----------------------------------------------
-
         equity_peak = float(state.get("equity_peak", equity))
+
         if equity > equity_peak:
             equity_peak = equity
-        state["equity_peak"] = equity_peak
 
-        # -----------------------------------------------
-        # Compute drawdown
-        # -----------------------------------------------
+        state["equity_peak"] = equity_peak
 
         drawdown = 0.0
         if equity_peak > 0:
@@ -75,10 +81,6 @@ class RiskGovernor:
                 "drawdown": round(drawdown, 6),
             }
 
-        # -----------------------------------------------
-        # Trade throttle
-        # -----------------------------------------------
-
         if self.trades_today >= self.max_trades_per_day:
             return {
                 "decision": "BLOCK",
@@ -86,9 +88,18 @@ class RiskGovernor:
                 "reasons": ["TRADE_LIMIT_REACHED"],
             }
 
-        # -----------------------------------------------
-        # Portfolio exposure
-        # -----------------------------------------------
+        # -----------------------------------------
+        # Adaptive Trade Scaling
+        # -----------------------------------------
+
+        multiplier = self._risk_multiplier(drawdown)
+        effective_trade_risk = trade_risk * multiplier
+
+        state["risk_multiplier"] = multiplier
+
+        # -----------------------------------------
+        # Portfolio Risk Calculation
+        # -----------------------------------------
 
         open_futures_risk = float(state.get("open_futures_risk", 0.0))
         open_fx_risk = float(state.get("open_fx_risk", 0.0))
@@ -104,14 +115,13 @@ class RiskGovernor:
             + open_rates_risk
         )
 
-        portfolio_total_risk = total_open_risk + trade_risk
+        portfolio_total_risk = total_open_risk + effective_trade_risk
 
         allocation_pct = 0.0
         if equity > 0:
             allocation_pct = portfolio_total_risk / equity
 
         adaptive_cap = self._adaptive_portfolio_cap(drawdown)
-
         state["adaptive_portfolio_cap"] = adaptive_cap
 
         if allocation_pct > adaptive_cap:
@@ -125,6 +135,7 @@ class RiskGovernor:
                 "portfolio_allocation_pct": round(allocation_pct, 6),
                 "portfolio_total_risk": round(portfolio_total_risk, 6),
                 "adaptive_cap": adaptive_cap,
+                "risk_multiplier": multiplier,
                 "drawdown": round(drawdown, 6),
             }
 
@@ -134,5 +145,6 @@ class RiskGovernor:
             "portfolio_allocation_pct": round(allocation_pct, 6),
             "portfolio_total_risk": round(portfolio_total_risk, 6),
             "adaptive_cap": adaptive_cap,
+            "risk_multiplier": multiplier,
             "drawdown": round(drawdown, 6),
         }
