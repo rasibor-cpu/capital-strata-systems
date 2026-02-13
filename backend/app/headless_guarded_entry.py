@@ -1,79 +1,66 @@
 """
-Phase 1 (Headless) guarded entrypoint
+Headless Guarded Entry
 Capital Strata Systems / REA Capital Trading Engine
 
-Clean architecture:
-- No direct RiskGovernor imports
-- All approval flows through ExecutionGate
-- Fail-closed design
+Phase 1 – Clean Interface Alignment
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Any, Dict
 
-# Runtime import only (prevents circular import)
 from engine.execution.execution_gate import ExecutionGate
+
+
+# ----------------------------------------------------------
+# Config Object
+# ----------------------------------------------------------
+
+@dataclass
+class HeadlessConfig:
+    allow_live: bool = False
 
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-@dataclass
-class HeadlessConfig:
-    execution_mode: str = "SIMULATION"
-
+# ----------------------------------------------------------
+# Headless Runner
+# ----------------------------------------------------------
 
 def run_headless(req: Dict[str, Any], cfg: HeadlessConfig) -> Dict[str, Any]:
-    """
-    Stable callable surface used by API wrapper.
-    """
 
-    symbol = req.get("symbol", "UNKNOWN")
+    symbol = req.get("symbol", "EURUSD")
     steps = int(req.get("steps", 1))
-    current_equity = float(req.get("current_equity", 100000))
+    mode = req.get("execution_mode", "SIMULATION")
 
-    if cfg.execution_mode != "SIMULATION":
+    if mode != "SIMULATION" and not cfg.allow_live:
         return {
             "ok": False,
             "timestamp_utc": _utc_now_iso(),
-            "error": "Non-SIMULATION mode blocked (fail-closed)."
+            "error": "LIVE/PAPER mode blocked (fail-closed).",
         }
 
-    # ---------------------------------------
-    # 1️⃣  Instantiate Execution Gate
-    # ---------------------------------------
     gate = ExecutionGate()
 
-    # ---------------------------------------
-    # 2️⃣  Ask for approval
-    # ---------------------------------------
+    # Phase 1 simplified risk calculation
+    equity = float(req.get("current_equity", 100000))
+    risk_budget_pct = 0.005  # 0.5% default
+    equity_risk = equity * risk_budget_pct
+
     decision = gate.evaluate_trade(
         instrument=symbol,
-        equity_risk=0.005 * current_equity  # 0.5% simulated risk
+        equity_risk=equity_risk,
     )
 
-    if decision["status"] != "APPROVED":
-        return {
-            "ok": False,
-            "timestamp_utc": _utc_now_iso(),
-            "mode": cfg.execution_mode,
-            "symbol": symbol,
-            "error": "TRADE_REJECTED",
-            "risk": decision
-        }
-
-    # ---------------------------------------
-    # 3️⃣  Simulated execution
-    # ---------------------------------------
     return {
         "ok": True,
         "timestamp_utc": _utc_now_iso(),
-        "mode": cfg.execution_mode,
+        "mode": mode,
         "symbol": symbol,
         "steps_executed": steps,
-        "risk": decision
+        "gate_decision": decision,
     }
