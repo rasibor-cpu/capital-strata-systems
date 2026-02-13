@@ -1,148 +1,185 @@
 """
-backend/app/headless_guarded_entry.py
+Risk Governor – Central Risk Policy Layer
+Capital Strata Systems / REA Capital Trading Engine
 
-Phase 1 – Headless Guarded Entry
-Aligned with engine.risk.risk_governor (RiskGovernor + apply_trade).
+Fail-closed by design.
 
-Fail-closed:
-- Default execution is locked
-- We evaluate a synthetic TradeRequest derived from the headless run request
+Notes:
+- This module MUST remain import-clean (stdlib-only at module import time)
+  to avoid circular imports across the engine.
+- Any optional engine dependencies are imported lazily inside functions.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from datetime import datetime, timezone
+from typing import Any, Dict, List
 
-from engine.risk.risk_governor import RiskGovernor, apply_trade
 
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
-# ---------------------------------------------------------
-# Configuration (Phase 1)
-# ---------------------------------------------------------
 
 @dataclass
-class HeadlessConfig:
-    # NOTE: RiskGovernor has internal hard limits too.
-    execution_locked: bool = True  # Fail-closed default
+class TradeRequest:
+    instrument: str
+    side: str  # "buy" / "sell"
+    notional: float
+    stop_distance_pct: float  # e.g. 0.01 for 1%
+    policy: str = "core"
 
 
-# ---------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------
+@dataclass
+class RiskDecision:
+    ok: bool
+    reasons: List[str]
+    caps: Dict[str, Any]
+    timestamp_utc: str
 
-def _normalize_symbol(symbol: str) -> str:
-    # Your RiskGovernor expects "instrument"
-    return (symbol or "").strip() or "EURUSD"
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "reasons": self.reasons,
+            "caps": self.caps,
+            "timestamp_utc": self.timestamp_utc,
+        }
 
 
-def _mode(mode: str) -> str:
-    return (mode or "SIMULATION").strip().upper()
-
-
-def _coerce_stop_distance_pct(steps: int) -> float:
+class RiskGovernor:
     """
-    We need a stop_distance_pct for risk approximation.
-    For Phase 1 headless we choose a safe, conservative default.
+    Phase 1 in-memory risk governor.
 
-    Keep within RiskGovernor validation: (0, 0.25)
+    Tracks:
+      equity, equity_peak, cooldown_active, trades_today, daily_pnl, consecutive_losses
     """
-    # Conservative fixed 1% stop distance approximation
-    return 0.01
+
+    # Hard failsafes
+    MAX_TRADES_PER_DAY = 8
+    MAX_CONSECUTIVE_LOSSES = 3
+
+    # If daily loss exceeds this fraction of equity, we halt
+    MAX_DAILY_LOSS_PCT = 0.02  # 2%
+
+    def __init__(self) -> None:
+        self.state: Dict[str, Any] = {
+            "day_key": "1970-01-01",
+            "equity": 100000.0,
+            "equity_peak": 100000.0,
+            "trades_today": 0,
+            "daily_pnl": 0.0,
+            "consecutive_losses": 0,
+            "cooldown_active": False,
+            "regime": "normal",  # "normal" / "cautious" / "aggressive"
+        }
+
+    def set_day(self, day_key: str) -> None:
+        if day_key != self.state.get("day_key"):
+            self.state["day_key"] = day_key
+            self.state["trades_today"] = 0
+            self.state["daily_pnl"] = 0.0
+            self.state["consecutive_losses"] = 0
+
+    def update_equity(self, equity: float) -> None:
+        self.state["equity"] = float(equity)
+        if self.state["equity"] > float(self.state.get("equity_peak", 0.0)):
+            self.state["equity_peak"] = float(self.state["equity"])
+
+    def set_regime(self, regime: str) -> None:
+        self.state["regime"] = str(regime)
+
+    def set_cooldown(self, active: bool) -> None:
+        self.state["cooldown_active"] = bool(active)
+
+    def record_trade_outcome(self, pnl: float) -> None:
+        self.state["daily_pnl"] = float(self.state.get("daily_pnl", 0.0)) + float(pnl)
+        if pnl < 0:
+            self.state["consecutive_losses"] = int(self.state.get("consecutive_losses", 0)) + 1
+        else:
+            self.state["consecutive_losses"] = 0
+
+    def allow_trade(self, req: TradeRequest) -> RiskDecision:
+        reasons: List[str] = []
+        ts = _utc_now_iso()
+
+        # Basic validations (fail-closed)
+        if req.notional <= 0:
+            return RiskDecision(False, ["invalid_notional"], {}, ts)
+
+        if req.stop_distance_pct <= 0 or req.stop_distance_pct >= 0.25:
+            return RiskDecision(False, ["invalid_stop_distance_pct"], {}, ts)
+
+        equity = float(self.state.get("equity", 0.0))
+        equity_peak = float(self.state.get("equity_peak", 0.0))
+        cooldown_active = bool(self.state.get("cooldown_active", False))
+        regime = str(self.state.get("regime", "normal"))
+
+        trades_today = int(self.state.get("trades_today", 0))
+        daily_pnl = float(self.state.get("daily_pnl", 0.0))
+        consecutive_losses = int(self.state.get("consecutive_losses", 0))
+
+        # Global halts
+        if trades_today >= self.MAX_TRADES_PER_DAY:
+            return RiskDecision(False, ["max_trades_per_day_reached"], {}, ts)
+
+        if consecutive_losses >= self.MAX_CONSECUTIVE_LOSSES:
+            return RiskDecision(False, ["max_consecutive_losses_reached"], {}, ts)
+
+        if equity <= 0:
+            return RiskDecision(False, ["invalid_equity_fail_closed"], {}, ts)
+
+        if daily_pnl < 0 and abs(daily_pnl) / equity >= self.MAX_DAILY_LOSS_PCT:
+            return RiskDecision(False, ["max_daily_loss_reached"], {}, ts)
+
+        # Adaptive Cap Scaling (lazy import to avoid circulars)
+        caps: Dict[str, Any] = {}
+        try:
+            from engine.capital.adaptive_cap_scaler import AdaptiveCapScaler  # type: ignore
+
+            scaler = AdaptiveCapScaler()
+            cap_dec = scaler.compute(
+                equity=equity,
+                equity_peak=equity_peak,
+                regime=regime,
+                cooldown_active=cooldown_active,
+            )
+            caps = cap_dec.as_dict()
+            reasons.extend(list(getattr(cap_dec, "reasons", [])))
+
+            risk_budget_abs = float(caps.get("risk_budget_pct", 0.0)) * equity
+            max_notional_abs = float(caps.get("max_position_notional_pct", 0.0)) * equity
+
+            approx_risk_abs = req.notional * req.stop_distance_pct
+
+            if max_notional_abs > 0 and req.notional > max_notional_abs:
+                reasons.append("notional_exceeds_dynamic_cap")
+                return RiskDecision(False, reasons, caps, ts)
+
+            if risk_budget_abs > 0 and approx_risk_abs > risk_budget_abs:
+                reasons.append("risk_exceeds_dynamic_budget")
+                return RiskDecision(False, reasons, caps, ts)
+
+        except Exception as e:
+            return RiskDecision(
+                False,
+                ["cap_scaler_error_fail_closed", f"{type(e).__name__}"],
+                {"error": str(e)},
+                ts,
+            )
+
+        # Approved
+        self.state["trades_today"] = trades_today + 1
+        reasons.append("approved")
+        return RiskDecision(True, reasons, caps, ts)
 
 
-def _coerce_notional(steps: int) -> float:
-    """
-    Headless run doesn't currently carry notional.
-    For Phase 1 we use a small deterministic notional that should usually pass caps
-    (unless caps are intentionally very tight).
-    """
-    # Deterministic small notional for simulation
-    return 1000.0
-
-
-# ---------------------------------------------------------
-# Entry
-# ---------------------------------------------------------
-
-def run_headless(
-    *,
-    steps: int,
-    symbol: str,
-    execution_mode: str,
-    current_open_positions: int = 0,
-    trades_today: int = 0,
-    consecutive_losses: int = 0,
-    current_equity: Optional[float] = None,
-    peak_equity: Optional[float] = None,
-    cfg: Optional[HeadlessConfig] = None,
-) -> Dict[str, Any]:
-
-    if cfg is None:
-        cfg = HeadlessConfig()
-
-    # -----------------------------
-    # Build Governor (Phase 1 memory)
-    # -----------------------------
-    governor = RiskGovernor()
-
-    # Hydrate governor state from request (Phase 1 emulation)
-    # NOTE: RiskGovernor tracks equity, equity_peak, trades_today, consecutive_losses internally.
-    if current_equity is not None:
-        governor.update_equity(float(current_equity))
-    if peak_equity is not None:
-        # RiskGovernor updates peak internally only when equity exceeds peak,
-        # so we directly set peak via internal state for Phase 1 compatibility.
-        governor.state["equity_peak"] = float(peak_equity)
-
-    governor.state["trades_today"] = int(trades_today)
-    governor.state["consecutive_losses"] = int(consecutive_losses)
-
-    # current_open_positions isn't modeled in RiskGovernor state yet.
-    # We'll include it in the response for visibility only.
-    # (If you later add position tracking, we can wire it in.)
-
-    # -----------------------------
-    # Convert Headless request -> TradeRequest dict
-    # -----------------------------
-    req_dict = {
-        "instrument": _normalize_symbol(symbol),
-        "side": "buy",  # Phase 1 default (doesn't matter for caps)
-        "notional": _coerce_notional(steps),
-        "stop_distance_pct": _coerce_stop_distance_pct(steps),
-        "policy": "core",
-    }
-
-    # -----------------------------
-    # Risk Decision
-    # -----------------------------
-    decision = apply_trade(governor, req_dict)  # returns dict with "ok", "reasons", "caps", "timestamp_utc"
-
-    blocked = not bool(decision.get("ok", False))
-
-    # -----------------------------
-    # Fail-closed execution policy
-    # -----------------------------
-    exec_mode = _mode(execution_mode)
-    execution_allowed = (not blocked) and (not cfg.execution_locked) and (exec_mode != "LIVE")
-
-    return {
-        "ok": execution_allowed,
-        "blocked": blocked,
-        "execution_locked": cfg.execution_locked,
-        "execution_mode": exec_mode,
-        "steps": int(steps),
-        "symbol": _normalize_symbol(symbol),
-
-        # visibility / debug
-        "input_state": {
-            "trades_today": int(trades_today),
-            "consecutive_losses": int(consecutive_losses),
-            "current_open_positions": int(current_open_positions),
-            "current_equity": current_equity,
-            "peak_equity": peak_equity,
-        },
-        "trade_request": req_dict,
-        "risk_decision": decision,
-        "note": "Phase 1 headless evaluation complete (RiskGovernor.allow_trade).",
-    }
+def apply_trade(governor: RiskGovernor, req_dict: Dict[str, Any]) -> Dict[str, Any]:
+    req = TradeRequest(
+        instrument=str(req_dict.get("instrument", "")),
+        side=str(req_dict.get("side", "")),
+        notional=float(req_dict.get("notional", 0.0)),
+        stop_distance_pct=float(req_dict.get("stop_distance_pct", 0.0)),
+        policy=str(req_dict.get("policy", "core")),
+    )
+    decision = governor.allow_trade(req)
+    return decision.as_dict()
