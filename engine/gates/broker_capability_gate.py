@@ -1,9 +1,12 @@
 """
 Capital Strata Systems
-Broker Capability Gate – Phase 2A
+Broker Capability Gate – Phase 2B (Mapping-Aware)
 
 Goal:
-Prevent accidental routing of Futures flow into non-futures adapters.
+Prevent accidental routing of Futures flow into non-futures adapters,
+and enforce the 3-layer invariant:
+
+Strategy Concept → Canonical REA Instrument → Broker Symbol
 
 Design:
 - Pure python / stdlib only
@@ -12,8 +15,9 @@ Design:
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 @dataclass(frozen=True)
@@ -31,9 +35,13 @@ class BrokerCapabilityGate:
     Expected state keys (fail-closed if missing):
       - adapter_name: str
       - adapter_capabilities: dict[str,bool] OR list[str]
-        Examples:
-          {"fx": True, "futures": False}
-          ["fx"]
+      - asset_class: str (optional; caller may pass separately)
+      - strategy_id: str (required for futures mapping-aware validation)
+
+    Notes:
+    - For FX: capability-level check is sufficient.
+    - For Futures: we also require that strategy_id resolves to a broker symbol
+      for the active adapter via instruments mapping.
     """
 
     def evaluate(
@@ -55,25 +63,59 @@ class BrokerCapabilityGate:
 
         caps = state.get("adapter_capabilities")
 
-        # Case 1: dict capabilities
-        if isinstance(caps, dict):
-            allowed = bool(caps.get(asset_class, False))
-            if not allowed:
-                reasons.append(f"adapter_not_capable:{adapter_name}:{asset_class}")
-                return CapabilityDecision(ok=False, decision="BLOCK", reasons=reasons)
-            return CapabilityDecision(ok=True, decision="ALLOW", reasons=[f"adapter_capable:{adapter_name}:{asset_class}"])
+        # First: coarse capability check (fail-closed)
+        if not self._capability_allows(asset_class=asset_class, caps=caps):
+            return CapabilityDecision(
+                ok=False,
+                decision="BLOCK",
+                reasons=[f"adapter_not_capable:{adapter_name}:{asset_class}"],
+            )
 
-        # Case 2: list/set/tuple of capability strings
-        if isinstance(caps, (list, set, tuple)):
-            allowed = asset_class in [str(x) for x in caps]
-            if not allowed:
-                reasons.append(f"adapter_not_capable:{adapter_name}:{asset_class}")
-                return CapabilityDecision(ok=False, decision="BLOCK", reasons=reasons)
-            return CapabilityDecision(ok=True, decision="ALLOW", reasons=[f"adapter_capable:{adapter_name}:{asset_class}"])
+        # Second: mapping-aware enforcement for futures
+        if str(asset_class).lower() == "futures":
+            strategy_id = state.get("strategy_id")
+            if not strategy_id or not isinstance(strategy_id, str):
+                return CapabilityDecision(
+                    ok=False,
+                    decision="BLOCK",
+                    reasons=["missing_strategy_id_for_futures_mapping"],
+                )
 
-        # Missing or invalid capabilities → fail-closed
+            # Mapping resolution hard-fails by design; we convert to BLOCK here.
+            try:
+                from engine.instruments.mapping import resolve_broker_symbol
+                _ = resolve_broker_symbol(strategy_id=strategy_id, adapter_name=adapter_name)
+            except Exception as e:
+                return CapabilityDecision(
+                    ok=False,
+                    decision="BLOCK",
+                    reasons=[f"mapping_block:{adapter_name}:{strategy_id}:{type(e).__name__}"],
+                )
+
+            return CapabilityDecision(
+                ok=True,
+                decision="ALLOW",
+                reasons=[f"adapter_capable_and_mapped:{adapter_name}:{strategy_id}"],
+            )
+
+        # Non-futures: capability check is sufficient
         return CapabilityDecision(
-            ok=False,
-            decision="BLOCK",
-            reasons=["missing_or_invalid_adapter_capabilities"],
+            ok=True,
+            decision="ALLOW",
+            reasons=[f"adapter_capable:{adapter_name}:{asset_class}"],
         )
+
+    def _capability_allows(self, *, asset_class: str, caps: Any) -> bool:
+        ac = str(asset_class).lower().strip()
+
+        # dict capabilities
+        if isinstance(caps, dict):
+            return bool(caps.get(ac, False))
+
+        # list/set/tuple of capability strings
+        if isinstance(caps, (list, set, tuple)):
+            normalized = [str(x).lower().strip() for x in caps]
+            return ac in normalized
+
+        # missing/invalid
+        return False
