@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
+from engine.capital.futures_capital_bucket import FuturesCapitalBucket
+
 
 # ---------------------------
 # Helpers
@@ -169,6 +171,25 @@ class RiskGovernor:
             "reasons": reasons,
             "caps": caps,
         }
+
+    # ---------------------------------------------------
+    # Futures Capital Enforcement (Phase 2A)
+    # ---------------------------------------------------
+
+    def validate_futures_capital(
+        self,
+        *,
+        total_equity: float,
+        proposed_futures_exposure: float,
+    ) -> bool:
+        """
+        Validates that futures exposure stays within the 25% allocation bucket.
+
+        This does NOT enable futures execution.
+        It is a structural validation layer only.
+        """
+        bucket = FuturesCapitalBucket(total_equity=total_equity)
+        return bucket.futures_within_limit(proposed_futures_exposure)
 
     def compute_caps_and_sizing(
         self,
