@@ -72,20 +72,39 @@ def normalize_gate_output(gate_name: str, raw: Any) -> GateResult:
 # decision builder config
 # -------------------------
 
-@dataclass(frozen=True)
+@dataclass
 class GateInputs:
     """
     Inputs container. Keep it generic so adapters can feed it.
 
     You will pass what you have available; missing required data
     should make the specific gate BLOCK safely.
+
+    Phase 2A:
+    - state is introduced to carry adapter identity and capability metadata
+      (used by BrokerCapabilityGate and future multi-asset routing).
     """
     instrument: str
-    snapshot: Dict[str, Any]                    # price/ohlc/vwap/etc
-    volatility: Optional[Dict[str, Any]] = None # atr, stdev, vix_proxy, baseline
-    liquidity: Optional[Dict[str, Any]] = None  # spread, depth, volume proxies
-    slippage: Optional[Dict[str, Any]] = None   # expected vs max slippage
-    risk: Optional[Dict[str, Any]] = None       # equity, risk_pct, limits, streaks
+    snapshot: Dict[str, Any]                          # price/ohlc/vwap/etc
+    volatility: Optional[Dict[str, Any]] = None       # atr, stdev, vix_proxy, baseline
+    liquidity: Optional[Dict[str, Any]] = None        # spread, depth, volume proxies
+    slippage: Optional[Dict[str, Any]] = None         # expected vs max slippage
+    risk: Optional[Dict[str, Any]] = None             # equity, risk_pct, limits, streaks
+    state: Optional[Dict[str, Any]] = None            # adapter metadata + general context
+
+
+def _ensure_state_defaults(inputs: GateInputs) -> None:
+    """
+    Ensure inputs.state exists and has minimum adapter metadata defaults.
+    This keeps Phase 1 behavior intact while enabling Phase 2A capability gating.
+    """
+    if inputs.state is None or not isinstance(inputs.state, dict):
+        inputs.state = {}
+
+    # Default identity (until broker adapters set explicit identity)
+    inputs.state.setdefault("adapter_name", "default_fx_adapter")
+    inputs.state.setdefault("adapter_capabilities", {"fx": True, "futures": False})
+    inputs.state.setdefault("asset_class", "fx")
 
 
 def build_trade_execution_decision(
@@ -105,6 +124,9 @@ def build_trade_execution_decision(
 
     If gates is None, returns BLOCK (fail-closed).
     """
+
+    # Phase 2A: always ensure state defaults exist before gates execute
+    _ensure_state_defaults(inputs)
 
     if not gates:
         gate_results = {
