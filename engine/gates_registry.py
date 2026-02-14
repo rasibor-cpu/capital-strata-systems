@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict
 
 from engine.decision_builder import GateInputs
+from engine.adapters.broker_capability_gate_adapter import evaluate_broker_capability
 from engine.adapters.regime_gate_adapter import evaluate_regime
 from engine.adapters.volatility_gate_adapter import evaluate_volatility
 from engine.adapters.liquidity_gate_adapter import evaluate_liquidity
@@ -25,6 +26,9 @@ GateFn = Callable[[GateInputs], Any]
 
 def get_configured_gates() -> Dict[str, GateFn]:
     return {
+        # Capability gate (blocks misrouting early)
+        "broker_capability_gate": evaluate_broker_capability,
+
         # Market condition gates
         "regime_gate": evaluate_regime,
         "volatility_gate": evaluate_volatility,
