@@ -1,23 +1,38 @@
 """
-Capital Strata Systems
-Gates Registry
+Gates Registry – Adapter-Based (Fail-Closed)
+===========================================
 
-Central registry of gate evaluators used by governance lattice.
-Pure python / stdlib only.
+All execution safety checks are loaded via adapters.
+
+Order matters:
+- Gates are evaluated in sequence
+- First BLOCK becomes the primary_reason in the envelope
 """
 
 from __future__ import annotations
-from typing import Any, Dict
 
-# Gate imports (pure engine modules only)
-from engine.gates.broker_capability_gate import BrokerCapabilityGate
+from typing import Any, Callable, Dict
+
+from engine.decision_builder import GateInputs
+from engine.adapters.regime_gate_adapter import evaluate_regime
+from engine.adapters.volatility_gate_adapter import evaluate_volatility
+from engine.adapters.liquidity_gate_adapter import evaluate_liquidity
+from engine.adapters.slippage_guard_adapter import evaluate_slippage
+from engine.adapters.risk_guard_adapter import evaluate_risk
+
+GateFn = Callable[[GateInputs], Any]
 
 
-def build_gates() -> Dict[str, Any]:
-    """
-    Returns instantiated gate objects.
-    Keys are stable gate IDs for logging and enforcement.
-    """
+def get_configured_gates() -> Dict[str, GateFn]:
     return {
-        "broker_capability": BrokerCapabilityGate(),
+        # Market condition gates
+        "regime_gate": evaluate_regime,
+        "volatility_gate": evaluate_volatility,
+
+        # Execution quality gates
+        "liquidity_gate": evaluate_liquidity,
+        "slippage_guard": evaluate_slippage,
+
+        # Portfolio protection gate
+        "risk_guard": evaluate_risk,
     }
