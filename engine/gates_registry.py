@@ -10,6 +10,7 @@ Order matters:
 """
 
 from __future__ import annotations
+import engine.instruments  # noqa: F401 (startup validation)
 
 from typing import Any, Callable, Dict
 
