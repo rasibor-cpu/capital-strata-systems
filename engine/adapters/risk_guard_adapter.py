@@ -21,12 +21,32 @@ Expected risk inputs (dict):
 
 from __future__ import annotations
 
-from typing import Dict, Any
+from typing import Any, Dict
 
 from engine.decision_builder import GateInputs
 
 
 def evaluate_risk(inputs: GateInputs) -> Dict[str, str]:
+    """
+    Adapter-based risk guard.
+
+    Phase 2A: ensure adapter metadata defaults exist so BrokerCapabilityGate
+    can evaluate deterministically without breaking existing FX flow.
+    """
+    # ---------------------------------------------------
+    # Phase 2A: Ensure adapter metadata defaults exist
+    # ---------------------------------------------------
+    state = getattr(inputs, "state", {}) or {}
+
+    if "adapter_name" not in state:
+        state["adapter_name"] = "default_fx_adapter"
+
+    if "adapter_capabilities" not in state:
+        # Default safe assumption: FX only
+        state["adapter_capabilities"] = {"fx": True, "futures": False}
+
+    inputs.state = state
+
     try:
         risk = inputs.risk
         if not isinstance(risk, dict):
