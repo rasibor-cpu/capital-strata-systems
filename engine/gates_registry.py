@@ -10,9 +10,11 @@ Order matters:
 """
 
 from __future__ import annotations
-import engine.instruments  # noqa: F401 (startup validation)
 
 from typing import Any, Callable, Dict
+
+# Startup validation import (ensures canonical instruments load early)
+import engine.instruments  # noqa: F401
 
 from engine.decision_builder import GateInputs
 from engine.adapters.broker_capability_gate_adapter import evaluate_broker_capability
@@ -26,8 +28,11 @@ GateFn = Callable[[GateInputs], Any]
 
 
 def get_configured_gates() -> Dict[str, GateFn]:
+    """
+    Returns adapter-based gate functions in strict evaluation order.
+    """
     return {
-        # Capability gate (blocks misrouting early)
+        # Structural gate (MUST RUN FIRST)
         "broker_capability_gate": evaluate_broker_capability,
 
         # Market condition gates
@@ -38,6 +43,6 @@ def get_configured_gates() -> Dict[str, GateFn]:
         "liquidity_gate": evaluate_liquidity,
         "slippage_guard": evaluate_slippage,
 
-        # Portfolio protection gate
+        # Portfolio protection gate (runs last)
         "risk_guard": evaluate_risk,
     }
