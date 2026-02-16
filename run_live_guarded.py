@@ -1,182 +1,237 @@
 """
-run_live_guarded.py — REA Capital Trading Engine
-------------------------------------------------
-Authoritative guarded startup wrapper.
+run_live_guarded.py
+===================
 
-V1 goals:
-- FAIL-CLOSED by default
-- TEST is allowed to run paper/headless
-- LIVE requires explicit operator intent + unlock flags + credentials
-- Disallow dev bypass flags in LIVE
-- Provide clear, auditable console output of gate decisions
+Guarded LIVE runner (FAIL-CLOSED) for REA / CSS.
 
-Environment controls (V1):
-- REA_ENGINE_MODE = TEST | LIVE
-- REA_LIVE_CONFIRM = "I_UNDERSTAND_LIVE"
-- REA_EXECUTION_UNLOCK = "1"
-- REA_LIVE_PIN + REA_LIVE_PIN_CONFIRM must both be set and match (min 6 chars)
-- HEADLESS_DEV_MODE must be OFF in LIVE
-- DEV_FORCE_ALLOW must be OFF in LIVE
+This runner calls the canonical guarded entrypoint:
+    backend.app.headless_guarded_entry.run_headless(req, cfg)
 
-Credential presence (any one set accepted for LIVE):
-- Alpaca:  APCA_API_KEY_ID + APCA_API_SECRET_KEY
-- OANDA:   OANDA_API_KEY + OANDA_ACCOUNT_ID
-- Binance: BINANCE_API_KEY + BINANCE_API_SECRET
-- IBKR:    IBKR_HOST + IBKR_PORT  (placeholder check)
+Facts (verified via introspection):
+- run_headless(req: Dict[str, Any], cfg: HeadlessConfig) -> Dict[str, Any]
+- HeadlessConfig(allow_live: bool = False)
+
+We default to FAIL-CLOSED + NO-LIVE (allow_live=False).
+Safe for first boot validation on a new machine.
+
+Usage:
+  python -u run_live_guarded.py
+
+Optional env knobs (safe; still fail-closed):
+  # Market diagnostics inputs (feed RegimeGate / volatility layers)
+  CSS_BARS_5M=60
+  CSS_VOL_NORM_0_1=0.35
+  CSS_SPREAD_BPS=1.2
+  CSS_HIGH_RISK_NEWS=0
+  CSS_VOLATILITY_RATIO=1.0
+
+  # Optional SAFE trade test payload (still allow_live=False, execution_armed=False)
+  CSS_TRADE_TEST=1
+  CSS_SIDE=BUY
+  CSS_NOTIONAL=10000
+  CSS_STOP_DISTANCE_PCT=0.005
 """
 
 from __future__ import annotations
 
 import os
 import sys
-import uuid
+import json
+import traceback
 from datetime import datetime, timezone
-from typing import Tuple, Dict, Any
+from pathlib import Path
+from uuid import uuid4
+from typing import Any, Dict, Optional
 
 
-def _utc_now_iso() -> str:
+def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _env(name: str, default: str = "") -> str:
-    return os.getenv(name, default)
-
-
-def _env_bool(name: str) -> bool:
-    return _env(name, "").strip() in ("1", "true", "TRUE", "yes", "YES", "on", "ON")
-
-
-def _fail(msg: str, code: int = 1) -> None:
-    print(msg)
-    raise SystemExit(code)
-
-
-def _print_gate(label: str, allowed: bool, reason: str) -> None:
-    print(f"{label:<14} | allowed={str(allowed):<5} | reason={reason}")
-
-
-def ensure_engine_run_id() -> str:
-    rid = _env("ENGINE_RUN_ID", "").strip()
-    if rid:
-        return rid
-    rid = str(uuid.uuid4())
-    os.environ["ENGINE_RUN_ID"] = rid
-    return rid
-
-
-def _credentials_ok() -> Tuple[bool, str]:
-    # Accept any ONE provider's credentials for LIVE V1.
-    alpaca_ok = bool(_env("APCA_API_KEY_ID")) and bool(_env("APCA_API_SECRET_KEY"))
-    if alpaca_ok:
-        return True, "alpaca_keys_present"
-
-    oanda_ok = bool(_env("OANDA_API_KEY")) and bool(_env("OANDA_ACCOUNT_ID"))
-    if oanda_ok:
-        return True, "oanda_keys_present"
-
-    binance_ok = bool(_env("BINANCE_API_KEY")) and bool(_env("BINANCE_API_SECRET"))
-    if binance_ok:
-        return True, "binance_keys_present"
-
-    ibkr_ok = bool(_env("IBKR_HOST")) and bool(_env("IBKR_PORT"))
-    if ibkr_ok:
-        return True, "ibkr_host_port_present"
-
-    return False, "no_live_broker_credentials_detected"
-
-
-def _live_intent_ok() -> Tuple[bool, str]:
-    if _env("REA_LIVE_CONFIRM").strip() != "I_UNDERSTAND_LIVE":
-        return False, "missing_REA_LIVE_CONFIRM"
-    if _env("REA_EXECUTION_UNLOCK").strip() != "1":
-        return False, "missing_REA_EXECUTION_UNLOCK"
-    pin = _env("REA_LIVE_PIN").strip()
-    pin2 = _env("REA_LIVE_PIN_CONFIRM").strip()
-    if len(pin) < 6:
-        return False, "REA_LIVE_PIN_too_short"
-    if pin != pin2:
-        return False, "REA_LIVE_PIN_mismatch"
-    return True, "live_intent_confirmed"
-
-
-def _live_dev_flags_ok() -> Tuple[bool, str]:
-    if _env_bool("HEADLESS_DEV_MODE"):
-        return False, "HEADLESS_DEV_MODE_not_allowed_in_LIVE"
-    if _env_bool("DEV_FORCE_ALLOW"):
-        return False, "DEV_FORCE_ALLOW_not_allowed_in_LIVE"
-    if _env_bool("HEADLESS_DEV_MODE") or _env_bool("HEADLESS_DEV_MODE_1"):
-        return False, "headless_flags_not_allowed_in_LIVE"
-    return True, "dev_flags_ok"
-
-
-def _exec_gate_ok(mode: str) -> Tuple[bool, str]:
+def _load_env() -> None:
     """
-    V1 execution gate:
-    - In TEST: allow paper entry (execution remains locked downstream)
-    - In LIVE: require explicit unlock + credentials + intent + dev flags clean
+    Best-effort .env load from repo root.
+    Requires python-dotenv (you installed it).
     """
-    if mode != "LIVE":
-        return True, "ok_test_mode"
+    env_path = Path(".env")
+    if not env_path.exists():
+        print("[env] .env not found in repo root.")
+        return
 
-    intent_ok, intent_reason = _live_intent_ok()
-    if not intent_ok:
-        return False, intent_reason
+    try:
+        from dotenv import load_dotenv  # type: ignore
+    except Exception:
+        print("[env] python-dotenv not available; skipping .env load.")
+        return
 
-    dev_ok, dev_reason = _live_dev_flags_ok()
-    if not dev_ok:
-        return False, dev_reason
+    load_dotenv(dotenv_path=str(env_path), override=False)
+    print("[env] .env loaded.")
 
-    creds_ok, creds_reason = _credentials_ok()
-    if not creds_ok:
-        return False, creds_reason
 
-    return True, "ok_live_mode"
+def _print_banner(engine_run_id: str) -> None:
+    print("=== REA / CSS GUARDED STARTUP (FAIL-CLOSED) ===")
+    print(f"UTC_NOW={_utc_now()}")
+    print(f"ENGINE_RUN_ID={engine_run_id}")
+    print(f"CWD={Path.cwd()}")
+    print(f"PY={sys.version.split()[0]}")
+    print(f"VENV={os.environ.get('VIRTUAL_ENV', '')}")
+
+
+def _env_float(name: str, default: float) -> float:
+    v = os.environ.get(name, None)
+    if v is None or str(v).strip() == "":
+        return float(default)
+    try:
+        return float(v)
+    except Exception:
+        return float(default)
+
+
+def _env_int(name: str, default: int) -> int:
+    v = os.environ.get(name, None)
+    if v is None or str(v).strip() == "":
+        return int(default)
+    try:
+        return int(float(v))
+    except Exception:
+        return int(default)
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    v = os.environ.get(name, None)
+    if v is None:
+        return bool(default)
+    s = str(v).strip().lower()
+    return s in ("1", "true", "yes", "y", "on")
+
+
+def _maybe_trade_test_payload() -> Optional[Dict[str, Any]]:
+    """
+    Optional SAFE trade payload for exercising the full pipeline.
+    Still fail-closed because:
+      - cfg.allow_live=False
+      - req.allow_live=False
+      - req.execution_armed=False
+    """
+    if not _env_bool("CSS_TRADE_TEST", False):
+        return None
+
+    side = os.environ.get("CSS_SIDE", "BUY").strip().upper()
+    notional = _env_float("CSS_NOTIONAL", 10000.0)
+    stop_distance_pct = _env_float("CSS_STOP_DISTANCE_PCT", 0.005)
+
+    return {
+        "side": side,
+        "notional": notional,
+        "stop_distance_pct": stop_distance_pct,
+    }
+
+
+def _build_req(engine_run_id: str) -> Dict[str, Any]:
+    """
+    Request payload for run_headless.
+    Conservative defaults:
+    - No secrets
+    - No "live" enablement
+    - Explicit fail-closed flags
+    - Optional diagnostic inputs for gate stacking
+    - Optional safe trade test payload
+    """
+    fx_provider = os.environ.get("FX_PROVIDER", os.environ.get("FX_PROVIDER", "oanda"))
+    fx_instrument = os.environ.get("FX_INSTRUMENT", "EUR_USD")
+
+    req: Dict[str, Any] = {
+        "engine_run_id": engine_run_id,
+        "ts_utc": _utc_now(),
+        "mode": os.environ.get("MODE", "TEST"),
+        "fx_provider": fx_provider,
+        "fx_instrument": fx_instrument,
+        "fx_timeframe": os.environ.get("FX_TIMEFRAME", "1m"),
+        "oanda_env": os.environ.get("OANDA_ENV", "practice"),
+        # Explicit safety flags:
+        "allow_live": False,
+        "execution_armed": False,
+        # Market diagnostics inputs (used by RegimeGate / volatility layers):
+        "bars_5m": _env_int("CSS_BARS_5M", 60),
+        "vol_norm_0_1": _env_float("CSS_VOL_NORM_0_1", 0.35),
+        "spread_bps": _env_float("CSS_SPREAD_BPS", 1.2),
+        "high_risk_news": _env_bool("CSS_HIGH_RISK_NEWS", False),
+        # For AdaptiveCapital layer (volatility suppression):
+        "volatility_ratio": _env_float("CSS_VOLATILITY_RATIO", 1.0),
+        # Optional free-form notes:
+        "note": "Guarded boot validation (fail-closed) + diagnostic inputs enabled.",
+    }
+
+    trade_payload = _maybe_trade_test_payload()
+    if trade_payload:
+        req["trade_test"] = True
+        req.update(trade_payload)
+        req["note"] = "Guarded SAFE trade-test payload included (still fail-closed; no-live)."
+
+    return req
 
 
 def main() -> int:
-    print("=== REA GUARDED STARTUP (FAIL-CLOSED) ===")
-    print(f"UTC_NOW={_utc_now_iso()}")
+    engine_run_id = f"ae{uuid4()}"
+    _print_banner(engine_run_id)
 
-    rid = ensure_engine_run_id()
-    print(f"ENGINE_RUN_ID={rid}")
+    # Ensure repo root is importable (so backend.* imports work)
+    repo_root = str(Path(__file__).resolve().parent)
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
 
-    mode = _env("REA_ENGINE_MODE", "TEST").upper().strip()
-    if mode not in ("TEST", "LIVE"):
-        _fail(f"FATAL | BAD_MODE | REA_ENGINE_MODE={mode!r} (use TEST or LIVE)", 2)
+    _load_env()
 
-    print(f"MODE={'LIVE' if mode=='LIVE' else 'TEST'}")
-
-    # ---------------------------
-    # EXEC GATE (authoritative)
-    # ---------------------------
-    ok_exec, reason_exec = _exec_gate_ok(mode)
-    _print_gate("EXEC_GATE", ok_exec, reason_exec)
-    if not ok_exec:
-        _fail(f"FATAL | EXEC_GATE_BLOCK | {reason_exec}", 1)
-
-    # ---------------------------
-    # Start engine entrypoint
-    # ---------------------------
-    # For V1, we keep the entrypoint simple:
-    # - TEST: run headless guarded engine (paper/test)
-    # - LIVE: still enters guarded engine, but now allowed only with explicit unlock
+    # Import guarded entry + config
     try:
-        # Prefer backend guarded entry if present, else use top-level.
-        # (No dependency on brokers/adapters here.)
-        try:
-            from backend.app.headless_guarded_entry import main as guarded_main  # type: ignore
-            entry = "backend.app.headless_guarded_entry"
-        except Exception:
-            from headless_guarded_entry import main as guarded_main  # type: ignore
-            entry = "headless_guarded_entry"
+        from backend.app.headless_guarded_entry import run_headless, HeadlessConfig  # type: ignore
+    except Exception:
+        print("FATAL | STARTUP_EXCEPTION | Failed to import guarded entrypoint")
+        traceback.print_exc()
+        return 2
 
-        print(f"ENTRYPOINT     | {entry}")
-        return int(guarded_main() or 0)
+    # Construct cfg (fail-closed: allow_live=False)
+    try:
+        cfg = HeadlessConfig(allow_live=False)  # type: ignore[call-arg]
+    except Exception:
+        print("FATAL | STARTUP_EXCEPTION | Failed to construct HeadlessConfig")
+        traceback.print_exc()
+        return 3
 
-    except SystemExit:
-        raise
-    except Exception as e:
-        _fail(f"FATAL | STARTUP_EXCEPTION | {type(e).__name__}: {e}", 1)
+    req = _build_req(engine_run_id)
+
+    # Echo minimal config (no secrets)
+    print(f"MODE={req.get('mode')}")
+    print(f"FX_PROVIDER={req.get('fx_provider')}")
+    print(f"FX_INSTRUMENT={req.get('fx_instrument')}")
+    print(f"OANDA_ENV={req.get('oanda_env')}")
+    print(f"BARS_5M={req.get('bars_5m')} VOL_NORM_0_1={req.get('vol_norm_0_1')} SPREAD_BPS={req.get('spread_bps')} HIGH_RISK_NEWS={req.get('high_risk_news')}")
+    print(f"VOLATILITY_RATIO={req.get('volatility_ratio')}")
+    print(f"TRADE_TEST={req.get('trade_test', False)}")
+    print("EXEC_GATE | allowed=False | reason=guarded_fail_closed_default")
+    print("-" * 70)
+
+    # Run (fail-closed)
+    try:
+        result = run_headless(req, cfg)  # type: ignore[misc]
+    except KeyboardInterrupt:
+        print("STOPPED | KeyboardInterrupt")
+        return 0
+    except Exception:
+        print("FATAL | STARTUP_EXCEPTION | Exception raised by run_headless(req, cfg)")
+        traceback.print_exc()
+        return 4
+
+    # Print returned diagnostics cleanly
+    print("[guarded] run_headless returned diagnostics:")
+    try:
+        print(json.dumps(result, indent=2, default=str))
+    except Exception:
+        print(result)
+
+    print("-" * 70)
+    print("OK | GUARDED_STARTUP_COMPLETE")
+    return 0
 
 
 if __name__ == "__main__":
