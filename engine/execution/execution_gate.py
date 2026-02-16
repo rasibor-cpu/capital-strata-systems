@@ -4,12 +4,14 @@ Capital Strata Systems / REA Capital Trading Engine
 
 Fail-closed by design.
 
-Phase 1 additions:
-- Optional persistence for risk state (REA_PERSIST_RISK_STATE=1)
+Compatibility goals:
+- tolerate RiskGovernor implementations that DO NOT expose:
+  - .state
+  - TradeRequest dataclass
+  - strict allow_trade(TradeRequest) signatures
+- tolerate upstream callers that "probe" the gate without full trade fields
 
-IMPORTANT:
-- No module-level imports from engine.risk.* to avoid circular imports.
-  RiskGovernor + TradeRequest are lazy-imported inside __init__ / evaluate_trade.
+This file is deliberately defensive and audit-friendly.
 """
 
 from __future__ import annotations
@@ -23,24 +25,19 @@ class ExecutionGate:
     """
     Thin orchestration layer around RiskGovernor.
 
-    This gate:
-    - loads persisted state (if enabled)
-    - hydrates RiskGovernor.state
-    - evaluates trades via RiskGovernor.allow_trade()
-    - updates open_positions locally (Phase 1 simplified)
-    - records realized outcomes via RiskGovernor.record_trade_outcome()
-
-    Compatibility:
-    - Some callers may "probe" the gate with partial context (instrument only).
-      In that case, we return a structured fail-closed rejection instead of raising.
+    Responsibilities:
+    - load/merge persisted state into a dict-like governor state container
+    - provide evaluate_trade() API for headless + runners
+    - keep a Phase-1 simplified open_positions counter
     """
 
     def __init__(self) -> None:
+        # Lazy import to avoid circular imports
         from engine.risk.risk_governor import RiskGovernor  # type: ignore
 
         self.risk_governor = RiskGovernor()
 
-        # Compatibility: ensure we have a dict-like state container
+        # Ensure dict-like state exists (some governors don't expose it)
         gov_state = getattr(self.risk_governor, "state", None)
         if not isinstance(gov_state, dict):
             gov_state = {}
@@ -51,18 +48,18 @@ class ExecutionGate:
 
         self.state: Dict[str, Any] = gov_state
 
-        # Load persisted state (or defaults)
+        # Merge persisted state
         persisted = load_state()
         if isinstance(persisted, dict) and persisted:
             self.state.update(persisted)
 
-        # Ensure governor.state points to same dict
+        # Keep governor.state aligned to our dict
         try:
             setattr(self.risk_governor, "state", self.state)
         except Exception:
             pass
 
-        # Defaults (safe)
+        # Safe defaults
         self.state.setdefault("open_positions", 0)
         self.state.setdefault("day_key", None)
         self.state.setdefault("equity", None)
@@ -94,48 +91,6 @@ class ExecutionGate:
             "last_extras": self.state.get("last_extras"),
         }
 
-    def sync_context(
-        self,
-        *,
-        day_key: Optional[str] = None,
-        equity: Optional[float] = None,
-        equity_peak: Optional[float] = None,
-        cooldown_active: Optional[bool] = None,
-        regime: Optional[str] = None,
-        open_positions: Optional[int] = None,
-    ) -> None:
-        if day_key is not None:
-            try:
-                self.risk_governor.set_day(str(day_key))
-            except Exception:
-                self.state["day_key"] = str(day_key)
-
-        if equity is not None:
-            try:
-                self.risk_governor.update_equity(float(equity))
-            except Exception:
-                self.state["equity"] = float(equity)
-
-        if equity_peak is not None:
-            self.state["equity_peak"] = float(equity_peak)
-
-        if cooldown_active is not None:
-            try:
-                self.risk_governor.set_cooldown(bool(cooldown_active))
-            except Exception:
-                self.state["cooldown_active"] = bool(cooldown_active)
-
-        if regime is not None:
-            try:
-                self.risk_governor.set_regime(str(regime))
-            except Exception:
-                self.state["regime"] = str(regime)
-
-        if open_positions is not None:
-            self.state["open_positions"] = int(open_positions)
-
-        self._persist()
-
     def evaluate_trade(
         self,
         *,
@@ -152,10 +107,13 @@ class ExecutionGate:
         Full mode:
           requires side, notional, stop_distance_pct
 
-        Probe mode (compatibility):
-          if any required fields missing, return a structured fail-closed rejection.
+        Probe mode:
+          if missing required fields → fail-closed structured rejection (no crash)
+
+        RiskGovernor API compatibility:
+          - if TradeRequest exists, use it
+          - else pass a dict payload to allow_trade()
         """
-        # Record extras (e.g., equity_risk) for diagnostics
         self.state["last_extras"] = {k: extras[k] for k in sorted(extras.keys())} if extras else None
 
         missing = []
@@ -167,7 +125,6 @@ class ExecutionGate:
             missing.append("stop_distance_pct")
 
         if missing:
-            # Fail-closed, structured response (no exception)
             out = {
                 "status": "REJECTED",
                 "decision": {
@@ -181,19 +138,55 @@ class ExecutionGate:
             self._persist()
             return out
 
-        # Full evaluation path
-        from engine.risk.risk_governor import TradeRequest  # type: ignore
+        # Build a normalized request payload
+        req_payload: Dict[str, Any] = {
+            "instrument": str(instrument),
+            "side": str(side),
+            "notional": float(notional),
+            "stop_distance_pct": float(stop_distance_pct),
+            "policy": str(policy),
+        }
 
-        req = TradeRequest(
-            instrument=str(instrument),
-            side=str(side),
-            notional=float(notional),
-            stop_distance_pct=float(stop_distance_pct),
-            policy=str(policy),
-        )
+        # 1) Try TradeRequest if present
+        req_obj: Any = req_payload
+        try:
+            from engine.risk.risk_governor import TradeRequest  # type: ignore
 
-        dec = self.risk_governor.allow_trade(req).as_dict()
+            req_obj = TradeRequest(**req_payload)  # type: ignore[arg-type]
+        except Exception:
+            # TradeRequest not available → we fall back to dict payload
+            req_obj = req_payload
 
+        # 2) Call allow_trade defensively
+        try:
+            allow_fn = getattr(self.risk_governor, "allow_trade", None)
+            if allow_fn is None:
+                raise AttributeError("RiskGovernor has no allow_trade()")
+
+            result = allow_fn(req_obj)
+
+            # Normalize decision into dict
+            if isinstance(result, dict):
+                dec = result
+            else:
+                # Many governors return an object with .as_dict()
+                as_dict = getattr(result, "as_dict", None)
+                dec = as_dict() if callable(as_dict) else {"ok": bool(result), "raw": str(result)}
+
+        except Exception as e:
+            out = {
+                "status": "REJECTED",
+                "decision": {
+                    "ok": False,
+                    "reason": "allow_trade_exception",
+                    "error": str(e),
+                },
+                "snapshot": self.snapshot(str(instrument)),
+            }
+            self._persist()
+            return out
+
+        # Fail-closed if decision does not explicitly ok=True
         if not dec.get("ok", False):
             out = {
                 "status": "REJECTED",
@@ -203,6 +196,7 @@ class ExecutionGate:
             self._persist()
             return out
 
+        # Approved → increment open_positions
         self.state["open_positions"] = int(self.state.get("open_positions") or 0) + 1
 
         out = {
@@ -214,18 +208,18 @@ class ExecutionGate:
         self._persist()
         return out
 
-    def record_trade_result(
-        self,
-        *,
-        instrument: str,
-        pnl: float,
-    ) -> Dict[str, Any]:
+    def record_trade_result(self, *, instrument: str, pnl: float) -> Dict[str, Any]:
         if int(self.state.get("open_positions") or 0) > 0:
             self.state["open_positions"] = int(self.state.get("open_positions") or 0) - 1
 
         try:
-            self.risk_governor.record_trade_outcome(float(pnl))
+            fn = getattr(self.risk_governor, "record_trade_outcome", None)
+            if callable(fn):
+                fn(float(pnl))
+            else:
+                raise AttributeError("RiskGovernor has no record_trade_outcome()")
         except Exception:
+            # Basic fallback accounting
             self.state["daily_pnl"] = float(self.state.get("daily_pnl") or 0.0) + float(pnl)
             if float(pnl) < 0:
                 self.state["consecutive_losses"] = int(self.state.get("consecutive_losses") or 0) + 1
@@ -236,8 +230,4 @@ class ExecutionGate:
 
         snap = self.snapshot(str(instrument))
         snap["pnl"] = float(pnl)
-
-        return {
-            "status": "RECORDED",
-            "snapshot": snap,
-        }
+        return {"status": "RECORDED", "snapshot": snap}
