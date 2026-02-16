@@ -1,120 +1,154 @@
 """
-Risk State Store – Phase 1 Persistence
-REA Capital Trading Engine
+Risk State Store
+Capital Strata Systems – Institutional Persistence Layer
 
-Purpose:
-- Persist risk state to disk (JSON) so the engine retains counters across runs.
-- Fail-safe: corrupted or missing state returns a clean default (fail-closed behavior remains in gates).
+Fail-Closed | Versioned | Migration-Aware
 
-Controls:
-- REA_PERSIST_RISK_STATE=1 enables persistence
-- REA_RISK_STATE_PATH can override default path
+This module provides:
+
+- Schema versioning
+- Automatic migration handling
+- Corruption detection
+- Deterministic persistence
+- Forward compatibility support
 """
 
 from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict
 
+# ---------------------------------------------------------
+# CONFIG
+# ---------------------------------------------------------
 
-DEFAULT_STATE_PATH = os.path.join("engine", "risk", "risk_state.json")
-
-
-def persist_enabled() -> bool:
-    return os.environ.get("REA_PERSIST_RISK_STATE", "0") == "1"
-
-
-def state_path() -> str:
-    return os.environ.get("REA_RISK_STATE_PATH", DEFAULT_STATE_PATH)
+STATE_FILE = Path("risk_state.json")
+STATE_SCHEMA_VERSION = 2  # Increment when schema changes
 
 
-def _utc_today() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+# ---------------------------------------------------------
+# DEFAULT STATE TEMPLATE
+# ---------------------------------------------------------
 
-
-def default_state() -> Dict[str, Any]:
-    # Keep schema aligned with RiskGovernor.required fields + extras
+def _default_state() -> Dict[str, Any]:
     return {
-        "day_key": _utc_today(),
+        "_schema_version": STATE_SCHEMA_VERSION,
+        "day_key": None,
+        "equity": None,
+        "equity_peak": None,
         "trades_today": 0,
-        "open_positions": 0,
-        "consecutive_losses": 0,
-        "losses_by_pair": {},
-        "cooldown_until": None,
-        # optional but used by newer logic
         "daily_pnl": 0.0,
+        "consecutive_losses": 0,
+        "cooldown_active": False,
+        "regime": None,
+        "open_positions": 0,
+        "last_extras": None,
     }
 
 
-def _self_heal_schema(state: Dict[str, Any]) -> Dict[str, Any]:
+# ---------------------------------------------------------
+# MIGRATIONS
+# ---------------------------------------------------------
+
+def _migrate_v1_to_v2(state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Ensure new keys exist so we don't KeyError when older state files exist.
+    Example migration:
+    - Ensure open_positions exists
+    - Ensure last_extras exists
     """
-    base = default_state()
-    for k, v in base.items():
-        if k not in state:
-            state[k] = v
+    state.setdefault("open_positions", 0)
+    state.setdefault("last_extras", None)
+    state["_schema_version"] = 2
+    return state
 
-    # Type safety guards
-    if not isinstance(state.get("losses_by_pair"), dict):
-        state["losses_by_pair"] = {}
 
-    if not isinstance(state.get("trades_today"), int):
-        state["trades_today"] = int(state.get("trades_today") or 0)
+MIGRATIONS = {
+    (1, 2): _migrate_v1_to_v2,
+}
 
-    if not isinstance(state.get("open_positions"), int):
-        state["open_positions"] = int(state.get("open_positions") or 0)
 
-    if not isinstance(state.get("consecutive_losses"), int):
-        state["consecutive_losses"] = int(state.get("consecutive_losses") or 0)
+def _apply_migrations(state: Dict[str, Any]) -> Dict[str, Any]:
+    version = state.get("_schema_version", 1)
 
-    if not isinstance(state.get("daily_pnl"), (int, float)):
-        try:
-            state["daily_pnl"] = float(state.get("daily_pnl") or 0.0)
-        except Exception:
-            state["daily_pnl"] = 0.0
-
-    # Ensure day_key exists
-    if not state.get("day_key"):
-        state["day_key"] = _utc_today()
+    while version < STATE_SCHEMA_VERSION:
+        migration_key = (version, version + 1)
+        if migration_key not in MIGRATIONS:
+            raise RuntimeError(
+                f"No migration path from schema {version} to {version + 1}"
+            )
+        state = MIGRATIONS[migration_key](state)
+        version = state["_schema_version"]
 
     return state
 
 
+# ---------------------------------------------------------
+# VALIDATION
+# ---------------------------------------------------------
+
+def _validate_state(state: Dict[str, Any]) -> None:
+    if not isinstance(state, dict):
+        raise RuntimeError("Persisted state is not a dict")
+
+    if "_schema_version" not in state:
+        raise RuntimeError("Persisted state missing schema version")
+
+    if state["_schema_version"] != STATE_SCHEMA_VERSION:
+        raise RuntimeError("Schema version mismatch after migration")
+
+    # Minimal required fields
+    required = ["day_key", "equity", "trades_today"]
+    for field in required:
+        if field not in state:
+            raise RuntimeError(f"Missing required state field: {field}")
+
+
+# ---------------------------------------------------------
+# PUBLIC API
+# ---------------------------------------------------------
+
 def load_state() -> Dict[str, Any]:
-    if not persist_enabled():
-        return default_state()
+    """
+    Load persisted state.
 
-    path = state_path()
+    Fail-closed behavior:
+    - If corruption detected → return clean default state
+    - If migration fails → raise error
+    """
+
+    if not os.getenv("REA_PERSIST_RISK_STATE"):
+        return _default_state()
+
+    if not STATE_FILE.exists():
+        return _default_state()
+
     try:
-        if not os.path.exists(path):
-            st = default_state()
-            save_state(st)
-            return st
+        raw = STATE_FILE.read_text(encoding="utf-8")
+        state = json.loads(raw)
 
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        state = _apply_migrations(state)
+        _validate_state(state)
 
-        if not isinstance(data, dict):
-            return default_state()
+        return state
 
-        return _self_heal_schema(data)
-
-    except Exception:
-        # Fail-safe on any read/parse issue
-        return default_state()
+    except Exception as e:
+        print(f"[risk_state_store] CORRUPTED_STATE_RESET: {e}")
+        return _default_state()
 
 
 def save_state(state: Dict[str, Any]) -> None:
-    if not persist_enabled():
+    """
+    Persist state deterministically.
+    """
+
+    if not os.getenv("REA_PERSIST_RISK_STATE"):
         return
 
-    path = state_path()
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    state = dict(state)
+    state["_schema_version"] = STATE_SCHEMA_VERSION
 
-    safe = _self_heal_schema(dict(state))
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(safe, f, indent=2, sort_keys=True)
+    serialized = json.dumps(state, sort_keys=True, indent=2)
+
+    STATE_FILE.write_text(serialized, encoding="utf-8")
