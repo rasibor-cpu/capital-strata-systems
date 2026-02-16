@@ -1,11 +1,13 @@
 """
 Execution Gate – Central Trade Approval Layer
-Capital Strata Systems
-
-Stack Order:
-Volatility → Regime → AdaptiveCapital → RiskGovernor
+Capital Strata Systems / REA Capital
 
 Fail-closed by design.
+
+Key design rules:
+- Accepts extra diagnostic / capital inputs safely
+- Validates only required trade fields
+- Ignores non-trade parameters (probe / guarded mode)
 """
 
 from __future__ import annotations
@@ -13,30 +15,36 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from engine.risk.risk_state_store import load_state, save_state
-from engine.capital.adaptive_capital import AdaptiveCapitalEngine
 
 
 class ExecutionGate:
-    def __init__(self) -> None:
+    """
+    Thin orchestration layer around RiskGovernor.
 
+    Responsibilities:
+    - Load persisted risk state
+    - Hydrate RiskGovernor.state
+    - Evaluate trade permission
+    - Track open positions (Phase 1)
+    """
+
+    def __init__(self) -> None:
         from engine.risk.risk_governor import RiskGovernor  # lazy import
 
         self.risk_governor = RiskGovernor()
-        self.capital_engine = AdaptiveCapitalEngine()
 
         persisted = load_state()
         if isinstance(persisted, dict) and persisted:
-            if hasattr(self.risk_governor, "state"):
-                self.risk_governor.state.update(persisted)
+            self.risk_governor.state.update(persisted)
 
-        self.state: Dict[str, Any] = getattr(self.risk_governor, "state", {})
+        self.state: Dict[str, Any] = self.risk_governor.state
 
         if "open_positions" not in self.state:
             self.state["open_positions"] = 0
 
-    # ---------------------------------------------------------
-    # Utilities
-    # ---------------------------------------------------------
+    # ------------------------------------------------------------
+    # internal helpers
+    # ------------------------------------------------------------
 
     def _persist(self) -> None:
         save_state(self.state)
@@ -53,11 +61,12 @@ class ExecutionGate:
             "cooldown_active": self.state.get("cooldown_active"),
             "regime": self.state.get("regime"),
             "open_positions": self.state.get("open_positions"),
+            "last_extras": self.state.get("last_extras"),
         }
 
-    # ---------------------------------------------------------
-    # Core Evaluation
-    # ---------------------------------------------------------
+    # ------------------------------------------------------------
+    # public API
+    # ------------------------------------------------------------
 
     def evaluate_trade(
         self,
@@ -67,93 +76,89 @@ class ExecutionGate:
         notional: Optional[float] = None,
         stop_distance_pct: Optional[float] = None,
         policy: str = "core",
-        volatility_ratio: Optional[float] = None,
+        **extras: Any,
     ) -> Dict[str, Any]:
+        """
+        Evaluate whether a trade is allowed.
 
-        # -------------------------------
-        # Probe Mode (fail-soft)
-        # -------------------------------
-        if side is None or notional is None or stop_distance_pct is None:
-            return {
+        NOTES:
+        - extras absorbs diagnostic / capital inputs (equity_risk, volatility, etc.)
+        - missing trade fields => clean rejection (probe-safe)
+        """
+
+        # Store extras for diagnostics / audit
+        if extras:
+            self.state["last_extras"] = extras
+
+        # Required trade fields check
+        missing = []
+        if side is None:
+            missing.append("side")
+        if notional is None:
+            missing.append("notional")
+        if stop_distance_pct is None:
+            missing.append("stop_distance_pct")
+
+        if missing:
+            out = {
                 "status": "REJECTED",
                 "decision": {
                     "ok": False,
                     "reason": "missing_required_fields",
-                    "missing": [
-                        x for x in ["side", "notional", "stop_distance_pct"]
-                        if locals()[x] is None
-                    ],
+                    "missing": missing,
+                    "note": "Caller must provide side/notional/stop_distance_pct for full evaluation",
                 },
                 "snapshot": self.snapshot(instrument),
             }
+            self._persist()
+            return out
 
-        # -------------------------------
-        # Capital Multiplier Layer
-        # -------------------------------
-        capital_result = self.capital_engine.compute_multiplier(
-            equity=self.state.get("equity"),
-            equity_peak=self.state.get("equity_peak"),
-            consecutive_losses=self.state.get("consecutive_losses") or 0,
-            regime=self.state.get("regime"),
-            volatility_ratio=volatility_ratio,
+        # Lazy import to avoid circulars
+        from engine.risk.risk_governor import TradeRequest
+
+        req = TradeRequest(
+            instrument=str(instrument),
+            side=str(side),
+            notional=float(notional),
+            stop_distance_pct=float(stop_distance_pct),
+            policy=str(policy),
         )
 
-        multiplier = capital_result["multiplier"]
+        decision = self.risk_governor.allow_trade(req).as_dict()
 
-        if multiplier <= 0:
-            return {
+        if not decision.get("ok", False):
+            out = {
                 "status": "REJECTED",
-                "decision": {
-                    "ok": False,
-                    "reason": "capital_multiplier_zero",
-                    "capital_reason": capital_result["reason"],
-                },
+                "decision": decision,
                 "snapshot": self.snapshot(instrument),
             }
+            self._persist()
+            return out
 
-        adjusted_notional = float(notional) * float(multiplier)
+        # Phase 1: increment open positions
+        self.state["open_positions"] = int(self.state.get("open_positions") or 0) + 1
 
-        # -------------------------------
-        # RiskGovernor Layer
-        # -------------------------------
-        try:
-            from engine.risk.risk_governor import TradeRequest
+        out = {
+            "status": "APPROVED",
+            "decision": decision,
+            "open_positions": self.state["open_positions"],
+            "snapshot": self.snapshot(instrument),
+        }
 
-            req = TradeRequest(
-                instrument=instrument,
-                side=side,
-                notional=adjusted_notional,
-                stop_distance_pct=stop_distance_pct,
-                policy=policy,
-            )
+        self._persist()
+        return out
 
-            dec = self.risk_governor.allow_trade(req).as_dict()
+    def record_trade_result(self, *, instrument: str, pnl: float) -> Dict[str, Any]:
+        if int(self.state.get("open_positions") or 0) > 0:
+            self.state["open_positions"] -= 1
 
-        except Exception as e:
-            return {
-                "status": "REJECTED",
-                "decision": {
-                    "ok": False,
-                    "reason": "allow_trade_exception",
-                    "error": str(e),
-                },
-                "snapshot": self.snapshot(instrument),
-            }
-
-        if not dec.get("ok", False):
-            return {
-                "status": "REJECTED",
-                "decision": dec,
-                "snapshot": self.snapshot(instrument),
-            }
-
-        self.state["open_positions"] += 1
+        self.risk_governor.record_trade_outcome(float(pnl))
         self._persist()
 
+        snap = self.snapshot(instrument)
+        snap["pnl"] = float(pnl)
+
         return {
-            "status": "APPROVED",
-            "decision": dec,
-            "capital_multiplier": multiplier,
-            "adjusted_notional": adjusted_notional,
-            "snapshot": self.snapshot(instrument),
+            "status": "RECORDED",
+            "snapshot": snap,
         }
