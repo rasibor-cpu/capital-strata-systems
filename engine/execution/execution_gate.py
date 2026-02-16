@@ -1,116 +1,168 @@
 """
 Execution Gate – Central Trade Approval Layer
-Capital Strata Systems / REA Capital
+Capital Strata Systems / REA Capital Trading Engine
 
 Fail-closed by design.
 
-This version is GOVERNOR-AGNOSTIC:
-- Does NOT assume RiskGovernor exposes .state
-- Maintains its own persisted state dict (open_positions, last_extras, etc.)
-- Attempts to hydrate RiskGovernor only if supported
-- Probe-safe: missing trade fields => clean rejection (no crash)
+Goal:
+- Provide a stable, governor-API-adaptive execution gate.
+- Tolerate diagnostic/probe calls (missing trade fields) without crashing.
+- Normalize outputs into a consistent decision dict.
+
+Key behaviors:
+- If side/notional/stop_distance_pct are missing -> REJECTED with missing_required_fields
+- If RiskGovernor API differs across versions, we auto-detect callable methods:
+    allow_trade, allow, evaluate_trade, evaluate, decide, check
+  and normalize their return.
+- Any exception -> REJECTED (fail-closed).
+
+Note:
+- We do NOT assume RiskGovernor exposes .state or specific attributes.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Callable
 import inspect
-
-from engine.risk.risk_state_store import load_state, save_state
 
 
 class ExecutionGate:
-    """
-    Thin orchestration layer around RiskGovernor.
-
-    Responsibilities:
-    - Load persisted state (ExecutionGate-owned)
-    - Attempt to hydrate RiskGovernor (if supported)
-    - Evaluate trades via RiskGovernor.allow_trade()
-    - Track open positions (Phase 1 simplified)
-    """
-
     def __init__(self) -> None:
         # Lazy import to avoid circular imports
         from engine.risk.risk_governor import RiskGovernor  # type: ignore
 
         self.risk_governor = RiskGovernor()
 
-        # ----------------------------
-        # ExecutionGate-owned state
-        # ----------------------------
-        persisted = load_state()
-        if isinstance(persisted, dict):
-            self.state: Dict[str, Any] = dict(persisted)
-        else:
-            self.state = {}
-
-        # Defaults
-        self.state.setdefault("open_positions", 0)
-        self.state.setdefault("last_extras", None)
-
-        # Best-effort: hydrate governor if it supports any known mechanism
-        self._try_hydrate_governor(self.state)
-
-        # Persist immediately so brand-new machines get a clean baseline file
-        self._persist()
-
-    # ------------------------------------------------------------
-    # internal helpers
-    # ------------------------------------------------------------
-
-    def _persist(self) -> None:
-        save_state(self.state)
-
-    def _try_hydrate_governor(self, state: Dict[str, Any]) -> None:
-        """
-        Best-effort governor hydration.
-
-        We try a few common patterns WITHOUT assuming any one exists:
-        - governor.state (dict)  [older builds]
-        - governor.hydrate(state_dict)
-        - governor.load_state(state_dict)
-        - governor.set_state(state_dict)
-        """
-        rg = self.risk_governor
-
-        try:
-            if hasattr(rg, "state") and isinstance(getattr(rg, "state"), dict):
-                getattr(rg, "state").update(state)  # type: ignore[attr-defined]
-                return
-        except Exception:
-            pass
-
-        for meth_name in ("hydrate", "load_state", "set_state"):
-            try:
-                meth = getattr(rg, meth_name, None)
-                if callable(meth):
-                    meth(state)  # type: ignore[misc]
-                    return
-            except Exception:
-                # ignore — fail-closed behavior is enforced at decision time
-                pass
-
-    def snapshot(self, instrument: str) -> Dict[str, Any]:
-        # Keep snapshot stable even if state is minimal
-        return {
-            "instrument": instrument,
-            "day_key": self.state.get("day_key"),
-            "equity": self.state.get("equity"),
-            "equity_peak": self.state.get("equity_peak"),
-            "trades_today": self.state.get("trades_today"),
-            "daily_pnl": self.state.get("daily_pnl", 0.0),
-            "consecutive_losses": self.state.get("consecutive_losses", 0),
-            "cooldown_active": self.state.get("cooldown_active", False),
-            "regime": self.state.get("regime"),
-            "open_positions": self.state.get("open_positions", 0),
-            "last_extras": self.state.get("last_extras"),
+    # -----------------------------
+    # helpers (normalization)
+    # -----------------------------
+    def _rej(self, reason: str, **extras: Any) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "ok": False,
+            "reason": reason,
         }
+        if extras:
+            out.update(extras)
+        return out
 
-    # ------------------------------------------------------------
+    def _ok(self, **extras: Any) -> Dict[str, Any]:
+        out: Dict[str, Any] = {"ok": True}
+        if extras:
+            out.update(extras)
+        return out
+
+    def _call_if_exists(self, name: str) -> Optional[Callable[..., Any]]:
+        fn = getattr(self.risk_governor, name, None)
+        return fn if callable(fn) else None
+
+    def _normalize_governor_result(self, res: Any) -> Dict[str, Any]:
+        """
+        Normalizes a governor response into:
+          {"ok": bool, "reason": str, ...optional fields...}
+        """
+        # dict-like
+        if isinstance(res, dict):
+            if "ok" in res:
+                return dict(res)
+            if "allowed" in res:
+                return {"ok": bool(res.get("allowed")), "reason": str(res.get("reason") or "")}
+            if "decision" in res and isinstance(res["decision"], str):
+                ok = res["decision"].upper() in ("ALLOW", "ALLOWED", "APPROVE", "APPROVED", "OK", "PASS")
+                return {"ok": ok, "reason": str(res.get("reason") or res.get("message") or "") , "raw": res}
+            return {"ok": False, "reason": "unrecognized_governor_dict", "raw": res}
+
+        # object with as_dict()
+        if hasattr(res, "as_dict") and callable(getattr(res, "as_dict")):
+            try:
+                d = res.as_dict()
+                if isinstance(d, dict):
+                    return self._normalize_governor_result(d)
+            except Exception:
+                return self._rej("governor_as_dict_failed")
+
+        # object with .ok / .allowed
+        if hasattr(res, "ok"):
+            try:
+                return {"ok": bool(getattr(res, "ok")), "reason": str(getattr(res, "reason", "") or "")}
+            except Exception:
+                return self._rej("governor_result_ok_unreadable")
+
+        if hasattr(res, "allowed"):
+            try:
+                return {"ok": bool(getattr(res, "allowed")), "reason": str(getattr(res, "reason", "") or "")}
+            except Exception:
+                return self._rej("governor_result_allowed_unreadable")
+
+        # bool
+        if isinstance(res, bool):
+            return {"ok": bool(res), "reason": ""}
+
+        # string
+        if isinstance(res, str):
+            ok = res.upper() in ("ALLOW", "ALLOWED", "APPROVE", "APPROVED", "OK", "PASS")
+            return {"ok": ok, "reason": "" if ok else res}
+
+        return self._rej("unrecognized_governor_result_type", raw=str(type(res)))
+
+    def _governor_decide(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Try multiple known RiskGovernor APIs across versions.
+        """
+        # Common method candidates (most specific first)
+        candidates = [
+            "allow_trade",
+            "evaluate_trade",
+            "allow",
+            "evaluate",
+            "decide",
+            "check",
+        ]
+
+        last_err: Optional[str] = None
+
+        for name in candidates:
+            fn = self._call_if_exists(name)
+            if not fn:
+                continue
+
+            try:
+                # Try calling with a single payload dict
+                try:
+                    res = fn(payload)
+                    return self._normalize_governor_result(res)
+                except TypeError:
+                    # Try calling with kwargs if it supports it
+                    sig = None
+                    try:
+                        sig = inspect.signature(fn)
+                    except Exception:
+                        sig = None
+
+                    if sig is not None:
+                        # Only pass kwargs the function can accept (unless **kwargs present)
+                        accepts_varkw = any(p.kind == p.VAR_KEYWORD for p in sig.parameters.values())
+                        if accepts_varkw:
+                            res = fn(**payload)  # type: ignore[arg-type]
+                            return self._normalize_governor_result(res)
+
+                        allowed_keys = {k for k in payload.keys() if k in sig.parameters}
+                        trimmed = {k: payload[k] for k in allowed_keys}
+                        res = fn(**trimmed)  # type: ignore[arg-type]
+                        return self._normalize_governor_result(res)
+
+                    # If we can't inspect signature, fail this candidate
+                    last_err = f"{name}: TypeError"
+                    continue
+
+            except Exception as e:
+                last_err = f"{name}: {type(e).__name__}: {e}"
+                continue
+
+        return self._rej("no_supported_risk_governor_api", detail=last_err or "")
+
+    # -----------------------------
     # public API
-    # ------------------------------------------------------------
-
+    # -----------------------------
     def evaluate_trade(
         self,
         *,
@@ -119,24 +171,34 @@ class ExecutionGate:
         notional: Optional[float] = None,
         stop_distance_pct: Optional[float] = None,
         policy: str = "core",
-        **extras: Any,
+        extras: Any = None,
+        **diagnostic_kwargs: Any,
     ) -> Dict[str, Any]:
         """
-        Evaluate whether a trade is allowed.
+        Evaluate whether a proposed trade is allowed.
 
-        Probe-safe:
-        - If required fields are missing, we REJECT with a clear payload.
-        Governor-agnostic:
-        - We attempt to build a TradeRequest if available; else pass dict into allow_trade().
+        Supports:
+        - probe/diagnostic calls where side/notional/stop_distance_pct are missing
+        - extra diagnostic kwargs like equity_risk, spread_bps, vol_norm_0_1, high_risk_news, etc.
+
+        Returns:
+          {
+            "status": "APPROVED"|"REJECTED",
+            "decision": {...},
+            "snapshot": {...},
+            "note": "...",
+          }
         """
+        # Snapshot is intentionally minimal and governor-agnostic
+        snapshot: Dict[str, Any] = {
+            "instrument": str(instrument),
+            "open_positions": 0,
+            "last_extras": diagnostic_kwargs or None,
+        }
 
-        # Store extras for diagnostics / audit
-        if extras:
-            self.state["last_extras"] = extras
-
-        # Required trade fields check
+        # Missing required trade fields -> fail-closed but non-crashing
         missing = []
-        if side is None:
+        if not side:
             missing.append("side")
         if notional is None:
             missing.append("notional")
@@ -144,21 +206,19 @@ class ExecutionGate:
             missing.append("stop_distance_pct")
 
         if missing:
-            out = {
+            decision = self._rej(
+                "missing_required_fields",
+                missing=missing,
+                note="Caller must provide side/notional/stop_distance_pct for full evaluation.",
+            )
+            return {
                 "status": "REJECTED",
-                "decision": {
-                    "ok": False,
-                    "reason": "missing_required_fields",
-                    "missing": missing,
-                    "note": "Caller must provide side/notional/stop_distance_pct for full evaluation",
-                },
-                "snapshot": self.snapshot(instrument),
+                "decision": decision,
+                "snapshot": snapshot,
             }
-            self._persist()
-            return out
 
-        # Build request payload (works for both object-based and dict-based governors)
-        req_dict = {
+        # Build payload for governor (dict is safest cross-version)
+        payload: Dict[str, Any] = {
             "instrument": str(instrument),
             "side": str(side),
             "notional": float(notional),
@@ -166,111 +226,25 @@ class ExecutionGate:
             "policy": str(policy),
         }
 
-        # Try to use TradeRequest if it exists in this build; otherwise, pass dict.
-        req_obj: Any = req_dict
-        try:
-            from engine.risk.risk_governor import TradeRequest  # type: ignore
+        # Add diagnostics/extras without breaking older governors
+        if isinstance(diagnostic_kwargs, dict) and diagnostic_kwargs:
+            payload.update(diagnostic_kwargs)
 
-            req_obj = TradeRequest(
-                instrument=req_dict["instrument"],
-                side=req_dict["side"],
-                notional=req_dict["notional"],
-                stop_distance_pct=req_dict["stop_distance_pct"],
-                policy=req_dict["policy"],
-            )
-        except Exception:
-            # No TradeRequest in this build; dict fallback is intentional
-            req_obj = req_dict
+        if extras is not None:
+            payload["extras"] = extras
 
-        # Call governor.allow_trade (fail-closed)
-        try:
-            allow_trade = getattr(self.risk_governor, "allow_trade")
-            if not callable(allow_trade):
-                raise AttributeError("RiskGovernor.allow_trade is not callable")
-
-            # Some governors might accept kwargs instead of a single req object
-            sig = None
-            try:
-                sig = inspect.signature(allow_trade)
-            except Exception:
-                sig = None
-
-            if sig and len(sig.parameters) >= 2:
-                # Prefer passing a single req object/dict
-                decision = allow_trade(req_obj)  # type: ignore[misc]
-            else:
-                # Extremely defensive fallback
-                decision = allow_trade(req_obj)  # type: ignore[misc]
-
-        except Exception as e:
-            out = {
-                "status": "REJECTED",
-                "decision": {
-                    "ok": False,
-                    "reason": "allow_trade_exception",
-                    "error": str(e),
-                },
-                "snapshot": self.snapshot(instrument),
-            }
-            self._persist()
-            return out
-
-        # Normalize decision to dict
-        try:
-            if hasattr(decision, "as_dict") and callable(getattr(decision, "as_dict")):
-                dec = decision.as_dict()
-            elif isinstance(decision, dict):
-                dec = decision
-            else:
-                # best-effort stringify
-                dec = {"ok": False, "reason": "unrecognized_decision_format", "raw": str(decision)}
-        except Exception as e:
-            dec = {"ok": False, "reason": "decision_normalization_exception", "error": str(e)}
+        # Governor decision (API adaptive)
+        dec = self._governor_decide(payload)
 
         if not dec.get("ok", False):
-            out = {
+            return {
                 "status": "REJECTED",
                 "decision": dec,
-                "snapshot": self.snapshot(instrument),
+                "snapshot": snapshot,
             }
-            self._persist()
-            return out
 
-        # Allowed → increment open_positions (Phase 1)
-        self.state["open_positions"] = int(self.state.get("open_positions") or 0) + 1
-
-        out = {
+        return {
             "status": "APPROVED",
             "decision": dec,
-            "open_positions": self.state["open_positions"],
-            "snapshot": self.snapshot(instrument),
+            "snapshot": snapshot,
         }
-        self._persist()
-        return out
-
-    def record_trade_result(self, *, instrument: str, pnl: float) -> Dict[str, Any]:
-        """
-        Record realized PnL.
-
-        Phase 1 assumption:
-        - each recorded result closes 1 open position (if any are open)
-
-        If governor exposes record_trade_outcome(), we call it.
-        """
-        if int(self.state.get("open_positions") or 0) > 0:
-            self.state["open_positions"] = int(self.state.get("open_positions") or 0) - 1
-
-        try:
-            rto = getattr(self.risk_governor, "record_trade_outcome", None)
-            if callable(rto):
-                rto(float(pnl))  # type: ignore[misc]
-        except Exception:
-            # fail-closed mindset: we still persist local state
-            pass
-
-        self._persist()
-
-        snap = self.snapshot(instrument)
-        snap["pnl"] = float(pnl)
-
-        return {"status": "RECORDED", "snapshot": snap}
