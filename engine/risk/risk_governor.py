@@ -1,357 +1,226 @@
 """
-Risk Governor – Capital Strata Systems / REA Capital Trading Engine
+RiskGovernor v2
+===============
 
-Phase 1 focus:
-- Deterministic, testable caps + sizing
-- Fail-closed trade decisions
-- No backend imports (avoid circular imports)
-- Headless-compatible (pure python, stdlib only)
+Governor-native capital engine.
 
-Key outputs (used by headless endpoint):
-- caps: risk_budget_pct, max_position_notional_pct, regime, cooldown_active, reasons
-- sizing: risk_budget_abs, theoretical_notional, max_notional_abs, final_notional, capital_utilization_pct
+Design:
+- No TradeRequest dependency
+- No external .state mutation assumptions
+- Primitive-based allow_trade interface
+- Computes and overrides notional when necessary
+- Institutional stacking model
+
+Capital Strata Systems
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Optional, Dict, Any
 
 
-# ---------------------------
-# Helpers
-# ---------------------------
+# ============================================================
+# Decision Object
+# ============================================================
 
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+@dataclass
+class RiskDecision:
+    ok: bool
+    status: str
+    reason: str
+    requested_notional: float
+    recommended_notional: float
+    equity_risk: float
+    risk_pct: float
+    adjusted: bool
 
-def _iso(dt: datetime) -> str:
-    return dt.isoformat()
-
-def _safe_float(x: Any, default: float = 0.0) -> float:
-    try:
-        return float(x)
-    except Exception:
-        return default
-
-def _safe_int(x: Any, default: int = 0) -> int:
-    try:
-        return int(x)
-    except Exception:
-        return default
-
-
-# ---------------------------
-# Configuration
-# ---------------------------
-
-@dataclass(frozen=True)
-class DrawdownBand:
-    name: str
-    max_dd: float               # upper bound inclusive for that band (e.g. 0.03 = 3%)
-    risk_budget_pct: float      # fraction of equity allowed at risk (e.g. 0.005 = 0.5%)
-    max_position_notional_pct: float  # max gross notional as % of equity (e.g. 0.20 = 20%)
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "status": self.status,
+            "reason": self.reason,
+            "requested_notional": self.requested_notional,
+            "recommended_notional": self.recommended_notional,
+            "equity_risk": self.equity_risk,
+            "risk_pct": self.risk_pct,
+            "adjusted": self.adjusted,
+        }
 
 
-# NOTE: These defaults match your observed output:
-# risk_budget_pct = 0.005, max_position_notional_pct = 0.2 in drawdown_band_0_3
-DEFAULT_DRAWDOWN_BANDS: List[DrawdownBand] = [
-    DrawdownBand(name="drawdown_band_0_3",   max_dd=0.03, risk_budget_pct=0.005,  max_position_notional_pct=0.20),
-    DrawdownBand(name="drawdown_band_3_6",   max_dd=0.06, risk_budget_pct=0.0035, max_position_notional_pct=0.12),
-    DrawdownBand(name="drawdown_band_6_10",  max_dd=0.10, risk_budget_pct=0.0020, max_position_notional_pct=0.08),
-    DrawdownBand(name="drawdown_band_10_15", max_dd=0.15, risk_budget_pct=0.0010, max_position_notional_pct=0.05),
-    # beyond this: effectively "halt / micro-mode only"
-]
-
-# Cooldown policy (Phase 1)
-MAX_CONSECUTIVE_LOSSES_BEFORE_COOLDOWN = 3
-COOLDOWN_MINUTES = 30
-
-# Micro-mode triggers (Phase 1)
-MICRO_MODE_DRAWDOWN_TRIGGER = 0.06     # >=6% drawdown -> micro mode
-MICRO_MODE_CONSEC_LOSSES_TRIGGER = 2   # >=2 consecutive losses -> micro mode scaling
-
-
-# ---------------------------
-# Core Governor
-# ---------------------------
+# ============================================================
+# Governor
+# ============================================================
 
 class RiskGovernor:
     """
-    Decision engine.
-    Input:
-      - instrument: symbol/pair
-      - equity_risk: requested risk amount or proxy (Phase 1: accepted but not trusted)
-      - state: dict containing session risk state
-    Output:
-      dict with:
-        decision: "ALLOW" | "BLOCK"
-        policy: string
-        reasons: list[str]
-        caps: dict
+    Governor-native capital engine.
+
+    Owns:
+        equity
+        equity_peak
+        daily_pnl
+        consecutive_losses
+        trades_today
     """
 
-    def __init__(self, bands: Optional[List[DrawdownBand]] = None):
-        self.bands = bands or DEFAULT_DRAWDOWN_BANDS
+    # --- Config Defaults ---
+    BASE_RISK_PCT = 0.01          # 1%
+    MAX_RISK_PCT = 0.02           # 2%
+    MAX_DAILY_LOSS_PCT = 0.05     # 5%
+    LOSS_STREAK_COMPRESSION = 0.5
+    MIN_NOTIONAL = 1.0
 
-    # ---------- Public API ----------
+    def __init__(self) -> None:
+        self.equity: Optional[float] = None
+        self.equity_peak: Optional[float] = None
+        self.daily_pnl: float = 0.0
+        self.consecutive_losses: int = 0
+        self.trades_today: int = 0
 
-    def evaluate(
+    # ========================================================
+    # Context Setters
+    # ========================================================
+
+    def set_equity(self, equity: float) -> None:
+        self.equity = float(equity)
+        if self.equity_peak is None:
+            self.equity_peak = float(equity)
+        else:
+            self.equity_peak = max(self.equity_peak, float(equity))
+
+    def record_trade_outcome(self, pnl: float) -> None:
+        pnl = float(pnl)
+        self.daily_pnl += pnl
+        self.trades_today += 1
+
+        if pnl < 0:
+            self.consecutive_losses += 1
+        else:
+            self.consecutive_losses = 0
+
+        if self.equity is not None:
+            self.equity += pnl
+
+    # ========================================================
+    # Core Evaluation
+    # ========================================================
+
+    def allow_trade(
         self,
         *,
         instrument: str,
-        equity_risk: float,
-        state: Dict[str, Any],
-        current_equity: Optional[float] = None,
-        peak_equity: Optional[float] = None,
-    ) -> Dict[str, Any]:
-        """
-        Fail-closed:
-          - If required state fields are missing, we default them safely.
-          - If cooldown is active, BLOCK.
-          - Otherwise ALLOW (Phase 1) but return tight caps.
-        """
+        side: str,
+        notional: float,
+        stop_distance_pct: float,
+        policy: str = "core",
+        regime_persistence: Optional[float] = None,
+        vol_ratio: Optional[float] = None,
+        spread_bps: Optional[float] = None,
+        high_risk_news: Optional[bool] = None,
+    ) -> RiskDecision:
 
-        # Build equity inputs from either explicit args or state
-        eq = _safe_float(current_equity, _safe_float(state.get("equity", 100000.0), 100000.0))
-        peak = _safe_float(peak_equity, _safe_float(state.get("equity_peak", eq), eq))
-        peak = max(peak, 1.0)  # avoid division by zero
+        # -------------------------
+        # Validate equity
+        # -------------------------
+        if self.equity is None:
+            return RiskDecision(
+                ok=False,
+                status="REJECTED",
+                reason="equity_not_initialized",
+                requested_notional=notional,
+                recommended_notional=0.0,
+                equity_risk=0.0,
+                risk_pct=0.0,
+                adjusted=False,
+            )
 
-        dd = self._drawdown_pct(eq, peak)
+        if stop_distance_pct <= 0:
+            return RiskDecision(
+                ok=False,
+                status="REJECTED",
+                reason="invalid_stop_distance",
+                requested_notional=notional,
+                recommended_notional=0.0,
+                equity_risk=0.0,
+                risk_pct=0.0,
+                adjusted=False,
+            )
 
-        # Cooldown check
-        cooldown_until = state.get("cooldown_until")
-        if cooldown_until:
-            try:
-                until_dt = datetime.fromisoformat(str(cooldown_until))
-                if until_dt.tzinfo is None:
-                    until_dt = until_dt.replace(tzinfo=timezone.utc)
-                if _utc_now() < until_dt:
-                    caps = self._caps(eq, peak, dd, state)
-                    return {
-                        "decision": "BLOCK",
-                        "policy": "cooldown_active",
-                        "reasons": ["cooldown_active"],
-                        "caps": caps,
-                    }
-            except Exception:
-                # If cooldown_until is malformed, fail-closed into cooldown for safety
-                caps = self._caps(eq, peak, dd, state)
-                return {
-                    "decision": "BLOCK",
-                    "policy": "cooldown_active",
-                    "reasons": ["cooldown_active", "cooldown_timestamp_malformed"],
-                    "caps": caps,
-                }
+        # -------------------------
+        # Base Risk %
+        # -------------------------
+        risk_pct = self.BASE_RISK_PCT
 
-        # Drawdown hard-stop (beyond bands)
-        if dd > self.bands[-1].max_dd:
-            caps = self._caps(eq, peak, dd, state, force_micro=True)
-            return {
-                "decision": "BLOCK",
-                "policy": "drawdown_hard_stop",
-                "reasons": ["drawdown_hard_stop"],
-                "caps": caps,
-            }
+        # Loss streak compression
+        if self.consecutive_losses >= 2:
+            risk_pct *= self.LOSS_STREAK_COMPRESSION
 
-        # Phase 1: allow trade requests, but caps determine final sizing downstream
-        caps = self._caps(eq, peak, dd, state)
+        # Regime persistence multiplier
+        if regime_persistence is not None:
+            risk_pct *= float(regime_persistence)
 
-        # Basic sanity on equity_risk (do not block, but record note)
-        reasons = list(caps.get("reasons", []))
-        if _safe_float(equity_risk, 0.0) < 0:
-            reasons.append("equity_risk_negative_ignored")
+        # Volatility compression
+        if vol_ratio is not None and vol_ratio > 1.5:
+            risk_pct *= 0.5
 
-        return {
-            "decision": "ALLOW",
-            "policy": "phase1_allow_with_caps",
-            "reasons": reasons,
-            "caps": caps,
-        }
+        # Spread penalty
+        if spread_bps is not None and spread_bps > 3:
+            risk_pct *= 0.75
 
-    def compute_caps_and_sizing(
-        self,
-        *,
-        current_equity: float,
-        peak_equity: float,
-        current_open_positions: int,
-        trades_today: int,
-        consecutive_losses: int,
-    ) -> Dict[str, Any]:
-        """
-        Headless helper: compute caps + a deterministic sizing suggestion.
-        This is what your /engine/headless/run endpoint should use.
+        # High risk news clamp
+        if high_risk_news:
+            risk_pct *= 0.5
 
-        Returns:
-          {
-            "caps": {...},
-            "sizing": {...}
-          }
-        """
-        eq = max(_safe_float(current_equity, 100000.0), 1.0)
-        peak = max(_safe_float(peak_equity, eq), 1.0)
-        dd = self._drawdown_pct(eq, peak)
+        # Clamp risk %
+        risk_pct = min(risk_pct, self.MAX_RISK_PCT)
 
-        state_stub: Dict[str, Any] = {
-            "open_positions": _safe_int(current_open_positions, 0),
-            "trades_today": _safe_int(trades_today, 0),
-            "consecutive_losses": _safe_int(consecutive_losses, 0),
-            "equity": eq,
-            "equity_peak": peak,
-        }
+        # -------------------------
+        # Daily loss guard
+        # -------------------------
+        if self.equity_peak:
+            dd_pct = (self.equity_peak - self.equity) / self.equity_peak
+            if dd_pct >= self.MAX_DAILY_LOSS_PCT:
+                return RiskDecision(
+                    ok=False,
+                    status="REJECTED",
+                    reason="max_drawdown_exceeded",
+                    requested_notional=notional,
+                    recommended_notional=0.0,
+                    equity_risk=0.0,
+                    risk_pct=0.0,
+                    adjusted=False,
+                )
 
-        caps = self._caps(eq, peak, dd, state_stub)
+        # -------------------------
+        # Compute allowed notional
+        # -------------------------
+        equity_risk = self.equity * risk_pct
+        max_allowed_notional = equity_risk / stop_distance_pct
 
-        sizing = self._sizing(eq, caps)
+        recommended_notional = min(notional, max_allowed_notional)
 
-        return {"caps": caps, "sizing": sizing}
+        if recommended_notional < self.MIN_NOTIONAL:
+            return RiskDecision(
+                ok=False,
+                status="REJECTED",
+                reason="notional_too_small_after_risk_adjustment",
+                requested_notional=notional,
+                recommended_notional=0.0,
+                equity_risk=equity_risk,
+                risk_pct=risk_pct,
+                adjusted=True,
+            )
 
-    # ---------- Internal ----------
+        adjusted = recommended_notional < notional
 
-    def _drawdown_pct(self, equity: float, peak: float) -> float:
-        if peak <= 0:
-            return 0.0
-        dd = (peak - equity) / peak
-        # clamp
-        if dd < 0:
-            return 0.0
-        if dd > 1:
-            return 1.0
-        return dd
-
-    def _select_band(self, dd: float) -> DrawdownBand:
-        for b in self.bands:
-            if dd <= b.max_dd:
-                return b
-        return self.bands[-1]
-
-    def _caps(
-        self,
-        equity: float,
-        peak: float,
-        dd: float,
-        state: Dict[str, Any],
-        *,
-        force_micro: bool = False,
-    ) -> Dict[str, Any]:
-        band = self._select_band(dd)
-
-        reasons: List[str] = [band.name]
-
-        # Regime (Phase 1)
-        regime = "normal"
-        if dd >= 0.03:
-            regime = "defensive"
-            reasons.append("regime_defensive")
-        else:
-            reasons.append("regime_normal")
-
-        # Micro-mode scaling (defensive throttle)
-        consec = _safe_int(state.get("consecutive_losses"), 0)
-        micro = force_micro or (dd >= MICRO_MODE_DRAWDOWN_TRIGGER) or (consec >= MICRO_MODE_CONSEC_LOSSES_TRIGGER)
-
-        risk_budget_pct = band.risk_budget_pct
-        max_pos_pct = band.max_position_notional_pct
-
-        if micro:
-            # Micro-mode: scale down both risk and exposure further
-            # Keep deterministic, no randomness.
-            reasons.append("micro_mode_active")
-            risk_budget_pct = max(risk_budget_pct * 0.5, 0.0005)  # floor at 0.05%
-            max_pos_pct = max(max_pos_pct * 0.5, 0.02)            # floor at 2%
-
-        # Cooldown flag (informational; actual block is handled in evaluate())
-        cooldown_active = False
-        cooldown_until = state.get("cooldown_until")
-        if cooldown_until:
-            try:
-                until_dt = datetime.fromisoformat(str(cooldown_until))
-                if until_dt.tzinfo is None:
-                    until_dt = until_dt.replace(tzinfo=timezone.utc)
-                cooldown_active = _utc_now() < until_dt
-            except Exception:
-                cooldown_active = True
-                reasons.append("cooldown_timestamp_malformed")
-
-        return {
-            "ok": True,
-            "equity": float(equity),
-            "equity_peak": float(peak),
-            "drawdown_pct": float(dd),
-            "risk_budget_pct": float(risk_budget_pct),
-            "max_position_notional_pct": float(max_pos_pct),
-            "regime": regime,
-            "cooldown_active": bool(cooldown_active),
-            "reasons": reasons,
-            "source": "AdaptiveCapScaler",
-        }
-
-    def _sizing(self, equity: float, caps: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Deterministic sizing for Phase 1.
-        Assumptions:
-          - theoretical_notional = equity * 0.50 (placeholder heuristic)
-          - max_notional_abs = equity * max_position_notional_pct (hard cap)
-          - final_notional = min(theoretical_notional, max_notional_abs)
-        """
-        risk_budget_pct = _safe_float(caps.get("risk_budget_pct"), 0.0)
-        max_pos_pct = _safe_float(caps.get("max_position_notional_pct"), 0.0)
-
-        risk_budget_abs = equity * risk_budget_pct
-
-        theoretical_notional = equity * 0.50
-        max_notional_abs = equity * max_pos_pct
-        final_notional = min(theoretical_notional, max_notional_abs)
-
-        cap_util = 0.0
-        if equity > 0:
-            cap_util = final_notional / equity
-            if cap_util < 0:
-                cap_util = 0.0
-            if cap_util > 1:
-                cap_util = 1.0
-
-        return {
-            "ok": True,
-            "risk_budget_abs": float(risk_budget_abs),
-            "theoretical_notional": float(theoretical_notional),
-            "max_notional_abs": float(max_notional_abs),
-            "final_notional": float(final_notional),
-            "capital_utilization_pct": float(cap_util),
-        }
-
-
-# ---------------------------
-# State mutations (ExecutionGate relies on these)
-# ---------------------------
-
-def apply_trade(state: Dict[str, Any]) -> None:
-    state["trades_today"] = _safe_int(state.get("trades_today"), 0) + 1
-
-def apply_result(state: Dict[str, Any], *, instrument: str, pnl: float) -> None:
-    pnl_f = _safe_float(pnl, 0.0)
-
-    # daily pnl
-    state["daily_pnl"] = _safe_float(state.get("daily_pnl"), 0.0) + pnl_f
-
-    # equity peak tracking (best effort)
-    eq = _safe_float(state.get("equity"), 0.0)
-    peak = _safe_float(state.get("equity_peak"), eq)
-    if eq > peak:
-        state["equity_peak"] = eq
-
-    # losses tracking
-    if pnl_f < 0:
-        state["consecutive_losses"] = _safe_int(state.get("consecutive_losses"), 0) + 1
-        losses_by_pair = state.get("losses_by_pair") or {}
-        if not isinstance(losses_by_pair, dict):
-            losses_by_pair = {}
-        losses_by_pair[instrument] = _safe_int(losses_by_pair.get(instrument), 0) + 1
-        state["losses_by_pair"] = losses_by_pair
-    else:
-        state["consecutive_losses"] = 0
-
-    # cooldown activation
-    if _safe_int(state.get("consecutive_losses"), 0) >= MAX_CONSECUTIVE_LOSSES_BEFORE_COOLDOWN:
-        state["cooldown_until"] = _iso(_utc_now() + timedelta(minutes=COOLDOWN_MINUTES))
+        return RiskDecision(
+            ok=True,
+            status="APPROVED_WITH_ADJUSTMENT" if adjusted else "APPROVED",
+            reason="ok",
+            requested_notional=notional,
+            recommended_notional=recommended_notional,
+            equity_risk=equity_risk,
+            risk_pct=risk_pct,
+            adjusted=adjusted,
+        )

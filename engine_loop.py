@@ -1,184 +1,107 @@
 """
-engine_loop.py — REA Capital Trading Engine (Prompt-Only, Ledger-Aware)
----------------------------------------------------------------------
-Purpose:
-- Orchestrates data readiness, regime gating, signal prompting
-- Registers trade intents into the canonical ledger
-- Optionally simulates fills (dry-run)
-- Emits prompt + ledger snapshot
-- NO execution, NO broker calls, NO auto-risk escalation
+run_engine_loop.py
+==================
 
-Compatibility:
-- Supports RegimeGate.evaluate returning either:
-  (a) tuple: (allowed: bool, regime_label: str|None)
-  (b) object: RegimeResult with fields like .allowed / .regime_label / .label / .regime
+Canonical local runner for the EngineLoop module.
+
+Why this exists:
+- engine_loop.py is primarily a library/module (EngineLoop exposes .step()).
+- Running engine_loop.py directly may do nothing if it has no __main__ entrypoint.
+- This runner drives EngineLoop.step() in a controlled loop and prints diagnostics.
+
+Safety:
+- Runs a bounded number of steps by default (safe boot validation).
+- Use CTRL+C to stop any time.
+
+Usage:
+  python -u run_engine_loop.py
 """
 
-from typing import Dict, Any, Optional, Tuple
-from datetime import datetime, timezone
+from __future__ import annotations
 
-# Optional imports (graceful fallbacks)
-try:
-    from regime.gate import RegimeGate  # type: ignore
-except Exception:
-    RegimeGate = None
-
-try:
-    from signals.vwap_mean_reversion import build_vwap_prompt_default_eps  # type: ignore
-except Exception:
-    build_vwap_prompt_default_eps = None
-
-try:
-    from utils.prompt_export import normalize_prompt  # type: ignore
-except Exception:
-    normalize_prompt = None
-
-from ledger import TradeLedger
+import os
+import sys
+import time
+import traceback
+from pathlib import Path
 
 
-def _parse_regime_result(result: Any) -> Tuple[bool, Optional[str]]:
+def _banner() -> None:
+    print("=" * 72)
+    print("REA Capital / CSS — EngineLoop Runner")
+    print(f"cwd: {Path.cwd()}")
+    print(f"python: {sys.version.split()[0]}")
+    print(f"venv: {os.environ.get('VIRTUAL_ENV', '')}")
+    print("=" * 72)
+
+
+def _load_env_if_needed() -> None:
     """
-    Normalize RegimeGate.evaluate output to (allowed, regime_label).
-
-    Supports:
-    - (allowed, label) tuples
-    - RegimeResult-like objects with common attribute names
+    Best-effort load .env via python-dotenv if installed.
+    If not installed, we assume the environment is already set.
     """
-    # Tuple/list style
-    if isinstance(result, (tuple, list)) and len(result) >= 1:
-        allowed = bool(result[0])
-        label = None
-        if len(result) >= 2:
-            label = result[1]
-        return allowed, label
+    env_path = Path(".env")
+    if not env_path.exists():
+        print("[runner] .env not found in repo root. (This may be OK if env is set elsewhere.)")
+        return
 
-    # Object style
-    # Common attribute candidates
-    allowed = getattr(result, "allowed", None)
-    if allowed is None:
-        allowed = getattr(result, "is_allowed", None)
-    if allowed is None:
-        # Conservative default if unknown: block
-        allowed = False
+    try:
+        from dotenv import load_dotenv  # type: ignore
+    except Exception:
+        print("[runner] python-dotenv not installed; skipping .env autoload.")
+        return
 
-    label = getattr(result, "regime_label", None)
-    if label is None:
-        label = getattr(result, "label", None)
-    if label is None:
-        label = getattr(result, "regime", None)
-
-    return bool(allowed), label
+    loaded = load_dotenv(dotenv_path=str(env_path), override=False)
+    print(f"[runner] .env load attempted: loaded={loaded}")
 
 
-class EngineLoop:
-    def __init__(
-        self,
-        min_bars_required: int = 40,
-        per_symbol_limit: float = 5_000_000,
-        gross_limit: float = 20_000_000,
-        simulate_fills: bool = False,
-    ):
-        self.min_bars_required = min_bars_required
-        self.simulate_fills = simulate_fills
+def main() -> int:
+    _banner()
+    _load_env_if_needed()
 
-        self.ledger = TradeLedger(
-            per_symbol_limit=per_symbol_limit,
-            gross_limit=gross_limit,
-        )
+    # Import AFTER env load so providers can read environment variables
+    try:
+        import engine_loop  # noqa: F401
+        from engine_loop import EngineLoop  # type: ignore
+    except Exception:
+        print("[runner] failed to import engine_loop / EngineLoop:")
+        traceback.print_exc()
+        return 2
 
-        self.regime_gate = RegimeGate() if RegimeGate else None
+    # Construct loop
+    try:
+        loop = EngineLoop()  # type: ignore[call-arg]
+    except Exception:
+        print("[runner] failed to construct EngineLoop():")
+        traceback.print_exc()
+        return 3
 
-    # -------------------------------------------------
-    # Core engine step (called per symbol / timeframe)
-    # -------------------------------------------------
+    # Controlled loop (safe defaults)
+    max_steps = int(os.environ.get("ENGINE_MAX_STEPS", "50"))
+    sleep_seconds = float(os.environ.get("ENGINE_STEP_SLEEP", "0.25"))
 
-    def step(
-        self,
-        symbol: str,
-        bars_available: int,
-        market_context: Dict[str, Any],
-    ) -> Dict[str, Any]:
+    print(f"[runner] driving EngineLoop.step() | max_steps={max_steps} | sleep={sleep_seconds}s")
+    print("[runner] press CTRL+C to stop.")
+    print("-" * 72)
 
-        diagnostics: Dict[str, Any] = {
-            "symbol": symbol,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "bars_available": bars_available,
-            "regime_allowed": False,
-            "prompt_generated": False,
-            "intent_registered": False,
-            "ledger_snapshot": None,
-        }
+    for i in range(1, max_steps + 1):
+        try:
+            out = loop.step()
+            print(f"[runner] step {i}/{max_steps} OK | out={out}")
+        except KeyboardInterrupt:
+            print("\n[runner] stopped by user (CTRL+C).")
+            return 0
+        except Exception:
+            print(f"[runner] step {i} FAILED:")
+            traceback.print_exc()
+            return 4
 
-        # 1. Data readiness
-        if bars_available < self.min_bars_required:
-            diagnostics["blocked_reason"] = "INSUFFICIENT_BARS"
-            return diagnostics
+        time.sleep(sleep_seconds)
 
-        # 2. Regime gate
-        regime_label: Optional[str] = None
-        if self.regime_gate:
-            as_of_utc = diagnostics["timestamp"]
-            raw_result = self.regime_gate.evaluate(market_context, as_of_utc)
+    print("-" * 72)
+    print("[runner] completed bounded run successfully.")
+    return 0
 
-            allowed, regime_label = _parse_regime_result(raw_result)
 
-            diagnostics["regime_allowed"] = allowed
-            diagnostics["regime"] = regime_label
-            diagnostics["regime_raw_type"] = type(raw_result).__name__
-
-            # Conservative block if not allowed
-            if not allowed:
-                diagnostics["blocked_reason"] = "REGIME_BLOCK"
-                return diagnostics
-        else:
-            diagnostics["regime_allowed"] = True
-            regime_label = "UNKNOWN"
-
-        # 3. Prompt generation
-        if not build_vwap_prompt_default_eps:
-            diagnostics["blocked_reason"] = "SIGNAL_BUILDER_MISSING"
-            return diagnostics
-
-        prompt_payload = build_vwap_prompt_default_eps(
-            symbol=symbol,
-            market_context=market_context,
-        )
-
-        diagnostics["prompt_generated"] = True
-        diagnostics["raw_prompt"] = prompt_payload
-
-        # Optional normalization
-        if normalize_prompt:
-            diagnostics["normalized_prompt"] = normalize_prompt(prompt_payload)
-
-        # 4. Register trade intent (prompt-only)
-        intent = self.ledger.register_intent(
-            symbol=symbol,
-            side=prompt_payload.get("side", "BUY"),
-            notional=float(prompt_payload.get("notional", 0)),
-            rationale=prompt_payload.get("rationale", "VWAP mean-reversion signal"),
-            regime=regime_label,
-            price_hint=prompt_payload.get("price"),
-        )
-
-        diagnostics["intent_registered"] = True
-        diagnostics["intent_id"] = intent.intent_id
-
-        # 5. Optional simulation (dry-run only)
-        if self.simulate_fills:
-            ticket = self.ledger.approve_intent(
-                intent_id=intent.intent_id,
-                approved_by="ENGINE_AUTO",
-                approval_level="AUTO",
-                notes="Dry-run simulation",
-            )
-            breaches = self.ledger.simulate_fill(ticket.ticket_id)
-            diagnostics["simulation"] = {
-                "ticket_id": ticket.ticket_id,
-                "breaches": breaches,
-            }
-
-        # 6. Emit ledger snapshot
-        diagnostics["ledger_snapshot"] = self.ledger.snapshot()
-
-        return diagnostics
+if __name__ == "__main__":
+    raise SystemExit(main())
