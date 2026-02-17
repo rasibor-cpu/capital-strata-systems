@@ -101,7 +101,7 @@ class ExecutionGate:
                 continue
 
             try:
-                # Prefer single payload dict
+                # Prefer single payload dict for older builds that expect it
                 try:
                     res = fn(payload)
                     return self._normalize_governor_result(res)
@@ -240,6 +240,19 @@ class ExecutionGate:
 
         # Apply controlled compounding ONLY when regime_persistence is present
         comp = self._compute_equity_risk_if_possible(payload)
+
+        # -------------------------------------------------------
+        # HYDRATE GOVERNOR STATE (critical for RiskGovernor v2)
+        # -------------------------------------------------------
+        equity = payload.get("equity", None)
+        if equity is not None:
+            try:
+                # RiskGovernor v2 uses set_equity(), and requires equity before allow_trade()
+                self.risk_governor.set_equity(float(equity))  # type: ignore[attr-defined]
+            except Exception:
+                # Fail-closed philosophy: we do NOT crash the engine for hydration failure.
+                # Governor will reject if it truly needs equity.
+                pass
 
         # Governor decision (API adaptive)
         dec = self._governor_decide(payload)
