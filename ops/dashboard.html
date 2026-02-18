@@ -1,0 +1,62 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>CSS Operational Readiness Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: Arial, sans-serif; margin: 16px; }
+    .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 12px; }
+    .muted { color: #666; font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; }
+    .TODO { color: #8a6d3b; }
+    .DOING { color: #31708f; }
+    .DONE { color: #3c763d; }
+    .BLOCKED { color: #a94442; font-weight: bold; }
+    @media (max-width: 900px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  </style>
+</head>
+<body>
+  <h2>CSS Operational Readiness Dashboard</h2>
+  <div class="muted">Generated: 2026-02-18 10:48:34</div>
+
+  <div class="kpis">
+    <div class="card"><div class="muted">Week</div><div style="font-size: 24px;">1</div></div>
+    <div class="card"><div class="muted">Completion</div><div style="font-size: 24px;">60%</div></div>
+    <div class="card"><div class="muted">Open (TODO+DOING)</div><div style="font-size: 24px;">2</div></div>
+    <div class="card"><div class="muted">Blocked</div><div style="font-size: 24px;">0</div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px;">
+    <div class="muted">Week Summary</div>
+    <pre style="white-space: pre-wrap; margin: 0;">TODO (2):
+  - W1-004 [P1] DATA: Create repeatable replay run command
+  - W1-005 [P1] OPS: Generate dashboard and weekly summary
+
+DONE (3):
+  - W1-001 [P0] ENGINE: Exception handling hardened with stable reason + debug field
+  - W1-002 [P0] GOVERNANCE: Policy fingerprint + hash added; session reset enforced; validate_trade adapter implemented
+  - W1-003 [P0] ENGINE: scale_risk_pct adapter added; 20% breaker validated via test</pre>
+  </div>
+
+  <div class="card">
+    <div class="muted">Tasks</div>
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th><th>Week</th><th>Category</th><th>Task ID</th><th>Priority</th><th>Status</th><th>Artifact/File</th><th>Target</th><th>Actual</th><th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>2026-02-18</td><td>1</td><td>ENGINE</td><td>W1-001</td><td>P0</td><td class='DONE'>DONE</td><td>engine/execution/execution_gate.py</td><td>Fail-closed always BLOCK on exception</td><td></td><td>Exception handling hardened with stable reason + debug field</td></tr>
+<tr><td>2026-02-18</td><td>1</td><td>GOVERNANCE</td><td>W1-002</td><td>P0</td><td class='DONE'>DONE</td><td>engine/risk/risk_governor.py</td><td>Policy loaded at session init only</td><td></td><td>Policy fingerprint + hash added; session reset enforced; validate_trade adapter implemented</td></tr>
+<tr><td>2026-02-18</td><td>1</td><td>ENGINE</td><td>W1-003</td><td>P0</td><td class='DONE'>DONE</td><td>engine/risk/drawdown_scaler.py</td><td>Hard 20% kill-switch enforced</td><td></td><td>scale_risk_pct adapter added; 20% breaker validated via test</td></tr>
+<tr><td>2026-02-18</td><td>1</td><td>DATA</td><td>W1-004</td><td>P1</td><td class='TODO'>TODO</td><td>engine/replay/</td><td>30-day replay script runnable</td><td></td><td>Create repeatable replay run command</td></tr>
+<tr><td>2026-02-18</td><td>1</td><td>OPS</td><td>W1-005</td><td>P1</td><td class='TODO'>TODO</td><td>ops/tracker.py</td><td>Dashboard generates cleanly</td><td></td><td>Generate dashboard and weekly summary</td></tr>
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>

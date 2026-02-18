@@ -14,6 +14,7 @@ Capital Strata Systems
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Optional
 
@@ -47,21 +48,13 @@ class DrawdownScaler:
     ) -> DrawdownResult:
 
         if equity is None or equity_peak is None or equity_peak <= 0:
-            return DrawdownResult(
-                drawdown_pct=0.0,
-                multiplier=1.0,
-                hard_stop=False,
-            )
+            return DrawdownResult(drawdown_pct=0.0, multiplier=1.0, hard_stop=False)
 
         dd = (equity_peak - equity) / equity_peak
 
         # Hard institutional breaker
         if dd >= self.HARD_LIMIT:
-            return DrawdownResult(
-                drawdown_pct=dd,
-                multiplier=0.0,
-                hard_stop=True,
-            )
+            return DrawdownResult(drawdown_pct=dd, multiplier=0.0, hard_stop=True)
 
         # Tiered compression
         if dd < 0.05:
@@ -73,8 +66,29 @@ class DrawdownScaler:
         else:
             mult = 0.25
 
-        return DrawdownResult(
-            drawdown_pct=dd,
-            multiplier=mult,
-            hard_stop=False,
-        )
+        return DrawdownResult(drawdown_pct=dd, multiplier=mult, hard_stop=False)
+
+    # ------------------------------------------------------------------
+    # Adapter used by ExecutionGate
+    # ------------------------------------------------------------------
+    def scale_risk_pct(
+        self,
+        *,
+        base_risk_pct: float,
+        equity: float,
+        equity_peak: float,
+        policy: str = "core",
+    ) -> float:
+        # Policy gate (explicit)
+        if policy != "core":
+            return 0.0
+
+        if base_risk_pct is None or float(base_risk_pct) <= 0:
+            return 0.0
+
+        res = self.evaluate(equity=equity, equity_peak=equity_peak)
+        if res.hard_stop:
+            return 0.0
+
+        scaled = float(base_risk_pct) * float(res.multiplier)
+        return max(0.0, scaled)

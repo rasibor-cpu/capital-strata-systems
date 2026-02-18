@@ -1,0 +1,51 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>CSS Operational Readiness Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: Arial, sans-serif; margin: 16px; }
+    .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 12px; }
+    .muted { color: #666; font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; }
+    .TODO { color: #8a6d3b; }
+    .DOING { color: #31708f; }
+    .DONE { color: #3c763d; }
+    .BLOCKED { color: #a94442; font-weight: bold; }
+    @media (max-width: 900px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  </style>
+</head>
+<body>
+  <h2>CSS Operational Readiness Dashboard</h2>
+  <div class="muted">Generated: {{generated_at}}</div>
+
+  <div class="kpis">
+    <div class="card"><div class="muted">Week</div><div style="font-size: 24px;">{{current_week}}</div></div>
+    <div class="card"><div class="muted">Completion</div><div style="font-size: 24px;">{{pct_done}}%</div></div>
+    <div class="card"><div class="muted">Open (TODO+DOING)</div><div style="font-size: 24px;">{{open_count}}</div></div>
+    <div class="card"><div class="muted">Blocked</div><div style="font-size: 24px;">{{blocked_count}}</div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px;">
+    <div class="muted">Week Summary</div>
+    <pre style="white-space: pre-wrap; margin: 0;">{{week_summary}}</pre>
+  </div>
+
+  <div class="card">
+    <div class="muted">Tasks</div>
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th><th>Week</th><th>Category</th><th>Task ID</th><th>Priority</th><th>Status</th><th>Artifact/File</th><th>Target</th><th>Actual</th><th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{rows}}
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>

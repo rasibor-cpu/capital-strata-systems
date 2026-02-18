@@ -11,10 +11,17 @@ Features:
 - Spread penalty
 - High-risk news clamp
 - Primitive allow_trade interface
+
+Institutional hardening added:
+- policy_fingerprint() + policy_hash() for session-init logging
+- reset_session_state() for deterministic session resets
+- validate_trade() adapter for ExecutionGate compatibility (uses provided risk_pct)
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from typing import Optional, Dict, Any
 
@@ -52,7 +59,7 @@ class RiskDecision:
 # ============================================================
 
 class RiskGovernor:
-
+    # ---- Core policy constants (immutable per session) ----
     BASE_RISK_PCT = 0.01
     MAX_RISK_PCT = 0.02
     MAX_DRAWDOWN_LIMIT = 0.20
@@ -60,6 +67,33 @@ class RiskGovernor:
     MIN_NOTIONAL = 1.0
 
     def __init__(self) -> None:
+        # session state (mutable, but should be reset per session)
+        self.reset_session_state()
+
+    # ========================================================
+    # Policy fingerprint (for logging at session init)
+    # ========================================================
+
+    @classmethod
+    def policy_fingerprint(cls) -> Dict[str, Any]:
+        return {
+            "BASE_RISK_PCT": cls.BASE_RISK_PCT,
+            "MAX_RISK_PCT": cls.MAX_RISK_PCT,
+            "MAX_DRAWDOWN_LIMIT": cls.MAX_DRAWDOWN_LIMIT,
+            "LOSS_STREAK_COMPRESSION": cls.LOSS_STREAK_COMPRESSION,
+            "MIN_NOTIONAL": cls.MIN_NOTIONAL,
+        }
+
+    @classmethod
+    def policy_hash(cls) -> str:
+        payload = json.dumps(cls.policy_fingerprint(), sort_keys=True).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
+    # ========================================================
+    # Session state control
+    # ========================================================
+
+    def reset_session_state(self) -> None:
         self.equity: Optional[float] = None
         self.equity_peak: Optional[float] = None
         self.daily_pnl: float = 0.0
@@ -96,10 +130,8 @@ class RiskGovernor:
     # ========================================================
 
     def _drawdown_multiplier(self) -> float:
-
         if self.equity is None or self.equity_peak is None:
             return 1.0
-
         if self.equity_peak == 0:
             return 1.0
 
@@ -117,7 +149,124 @@ class RiskGovernor:
             return 1.0
 
     # ========================================================
-    # Core Evaluation
+    # Adapter method for ExecutionGate compatibility
+    # Uses provided risk_pct (already computed upstream).
+    # ========================================================
+
+    def validate_trade(
+        self,
+        *,
+        instrument: str,
+        side: str,
+        requested_notional: float,
+        stop_distance_pct: float,
+        equity: float,
+        risk_pct: float,
+        policy: str = "core",
+        **_kwargs: Any,
+    ) -> Dict[str, Any]:
+        # policy must not be silently accepted if unknown
+        if policy != "core":
+            return RiskDecision(
+                ok=False,
+                status="REJECTED",
+                reason="unsupported_policy",
+                requested_notional=requested_notional,
+                recommended_notional=0.0,
+                equity_risk=0.0,
+                risk_pct=0.0,
+                adjusted=False,
+            ).as_dict()
+
+        # initialize / update equity context
+        self.set_equity(equity)
+
+        if self.equity is None:
+            return RiskDecision(
+                ok=False,
+                status="REJECTED",
+                reason="equity_not_initialized",
+                requested_notional=requested_notional,
+                recommended_notional=0.0,
+                equity_risk=0.0,
+                risk_pct=0.0,
+                adjusted=False,
+            ).as_dict()
+
+        if stop_distance_pct <= 0:
+            return RiskDecision(
+                ok=False,
+                status="REJECTED",
+                reason="invalid_stop_distance",
+                requested_notional=requested_notional,
+                recommended_notional=0.0,
+                equity_risk=0.0,
+                risk_pct=0.0,
+                adjusted=False,
+            ).as_dict()
+
+        # Hard drawdown rejection (defensive)
+        dd_mult = self._drawdown_multiplier()
+        if dd_mult == 0.0:
+            return RiskDecision(
+                ok=False,
+                status="REJECTED",
+                reason="hard_drawdown_limit_reached",
+                requested_notional=requested_notional,
+                recommended_notional=0.0,
+                equity_risk=0.0,
+                risk_pct=0.0,
+                adjusted=False,
+            ).as_dict()
+
+        # Use upstream risk_pct, but cap it to MAX_RISK_PCT
+        effective_risk_pct = float(risk_pct or 0.0)
+        if effective_risk_pct <= 0:
+            return RiskDecision(
+                ok=False,
+                status="REJECTED",
+                reason="risk_pct<=0",
+                requested_notional=requested_notional,
+                recommended_notional=0.0,
+                equity_risk=0.0,
+                risk_pct=0.0,
+                adjusted=False,
+            ).as_dict()
+
+        effective_risk_pct = min(effective_risk_pct, self.MAX_RISK_PCT)
+
+        equity_risk = self.equity * effective_risk_pct
+        max_allowed_notional = equity_risk / stop_distance_pct
+        recommended_notional = min(float(requested_notional), float(max_allowed_notional))
+
+        if recommended_notional < self.MIN_NOTIONAL:
+            return RiskDecision(
+                ok=False,
+                status="REJECTED",
+                reason="notional_too_small_after_risk_adjustment",
+                requested_notional=requested_notional,
+                recommended_notional=0.0,
+                equity_risk=equity_risk,
+                risk_pct=effective_risk_pct,
+                adjusted=True,
+            ).as_dict()
+
+        adjusted = recommended_notional < float(requested_notional)
+
+        return RiskDecision(
+            ok=True,
+            status="APPROVED_WITH_ADJUSTMENT" if adjusted else "APPROVED",
+            reason="ok",
+            requested_notional=float(requested_notional),
+            recommended_notional=float(recommended_notional),
+            equity_risk=float(equity_risk),
+            risk_pct=float(effective_risk_pct),
+            adjusted=adjusted,
+        ).as_dict()
+
+    # ========================================================
+    # Core Evaluation (legacy interface)
+    # Computes risk_pct internally.
     # ========================================================
 
     def allow_trade(
@@ -133,6 +282,18 @@ class RiskGovernor:
         spread_bps: Optional[float] = None,
         high_risk_news: Optional[bool] = None,
     ) -> RiskDecision:
+
+        if policy != "core":
+            return RiskDecision(
+                ok=False,
+                status="REJECTED",
+                reason="unsupported_policy",
+                requested_notional=notional,
+                recommended_notional=0.0,
+                equity_risk=0.0,
+                risk_pct=0.0,
+                adjusted=False,
+            )
 
         if self.equity is None:
             return RiskDecision(
