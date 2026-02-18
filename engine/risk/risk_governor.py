@@ -1,17 +1,16 @@
 """
-RiskGovernor v2
-===============
-
-Governor-native capital engine.
-
-Design:
-- No TradeRequest dependency
-- No external .state mutation assumptions
-- Primitive-based allow_trade interface
-- Computes and overrides notional when necessary
-- Institutional stacking model
-
+RiskGovernor v3 – Institutional CORE Policy
 Capital Strata Systems
+
+Features:
+- Regime-aware scaling
+- Anti-martingale loss compression
+- Progressive drawdown throttle
+- Hard 20% drawdown rejection
+- Volatility compression
+- Spread penalty
+- High-risk news clamp
+- Primitive allow_trade interface
 """
 
 from __future__ import annotations
@@ -53,21 +52,10 @@ class RiskDecision:
 # ============================================================
 
 class RiskGovernor:
-    """
-    Governor-native capital engine.
 
-    Owns:
-        equity
-        equity_peak
-        daily_pnl
-        consecutive_losses
-        trades_today
-    """
-
-    # --- Config Defaults ---
-    BASE_RISK_PCT = 0.01          # 1%
-    MAX_RISK_PCT = 0.02           # 2%
-    MAX_DAILY_LOSS_PCT = 0.05     # 5%
+    BASE_RISK_PCT = 0.01
+    MAX_RISK_PCT = 0.02
+    MAX_DRAWDOWN_LIMIT = 0.20
     LOSS_STREAK_COMPRESSION = 0.5
     MIN_NOTIONAL = 1.0
 
@@ -79,7 +67,7 @@ class RiskGovernor:
         self.trades_today: int = 0
 
     # ========================================================
-    # Context Setters
+    # Context
     # ========================================================
 
     def set_equity(self, equity: float) -> None:
@@ -101,6 +89,32 @@ class RiskGovernor:
 
         if self.equity is not None:
             self.equity += pnl
+            self.equity_peak = max(self.equity_peak or self.equity, self.equity)
+
+    # ========================================================
+    # Drawdown Throttle (CORE Policy)
+    # ========================================================
+
+    def _drawdown_multiplier(self) -> float:
+
+        if self.equity is None or self.equity_peak is None:
+            return 1.0
+
+        if self.equity_peak == 0:
+            return 1.0
+
+        dd = (self.equity_peak - self.equity) / self.equity_peak
+
+        if dd >= self.MAX_DRAWDOWN_LIMIT:
+            return 0.0
+        elif dd >= 0.15:
+            return 0.25
+        elif dd >= 0.10:
+            return 0.50
+        elif dd >= 0.05:
+            return 0.75
+        else:
+            return 1.0
 
     # ========================================================
     # Core Evaluation
@@ -120,9 +134,6 @@ class RiskGovernor:
         high_risk_news: Optional[bool] = None,
     ) -> RiskDecision:
 
-        # -------------------------
-        # Validate equity
-        # -------------------------
         if self.equity is None:
             return RiskDecision(
                 ok=False,
@@ -148,56 +159,64 @@ class RiskGovernor:
             )
 
         # -------------------------
-        # Base Risk %
+        # Base Risk × Drawdown Throttle
         # -------------------------
-        risk_pct = self.BASE_RISK_PCT
 
-        # Loss streak compression
+        dd_mult = self._drawdown_multiplier()
+
+        if dd_mult == 0.0:
+            return RiskDecision(
+                ok=False,
+                status="REJECTED",
+                reason="hard_drawdown_limit_reached",
+                requested_notional=notional,
+                recommended_notional=0.0,
+                equity_risk=0.0,
+                risk_pct=0.0,
+                adjusted=False,
+            )
+
+        risk_pct = self.BASE_RISK_PCT * dd_mult
+
+        # -------------------------
+        # Anti-Martingale
+        # -------------------------
+
         if self.consecutive_losses >= 2:
             risk_pct *= self.LOSS_STREAK_COMPRESSION
 
-        # Regime persistence multiplier
+        # -------------------------
+        # Regime Scaling
+        # -------------------------
+
         if regime_persistence is not None:
             risk_pct *= float(regime_persistence)
 
-        # Volatility compression
+        # -------------------------
+        # Volatility Compression
+        # -------------------------
+
         if vol_ratio is not None and vol_ratio > 1.5:
             risk_pct *= 0.5
 
-        # Spread penalty
+        # -------------------------
+        # Spread Penalty
+        # -------------------------
+
         if spread_bps is not None and spread_bps > 3:
             risk_pct *= 0.75
 
-        # High risk news clamp
+        # -------------------------
+        # News Clamp
+        # -------------------------
+
         if high_risk_news:
             risk_pct *= 0.5
 
-        # Clamp risk %
         risk_pct = min(risk_pct, self.MAX_RISK_PCT)
 
-        # -------------------------
-        # Daily loss guard
-        # -------------------------
-        if self.equity_peak:
-            dd_pct = (self.equity_peak - self.equity) / self.equity_peak
-            if dd_pct >= self.MAX_DAILY_LOSS_PCT:
-                return RiskDecision(
-                    ok=False,
-                    status="REJECTED",
-                    reason="max_drawdown_exceeded",
-                    requested_notional=notional,
-                    recommended_notional=0.0,
-                    equity_risk=0.0,
-                    risk_pct=0.0,
-                    adjusted=False,
-                )
-
-        # -------------------------
-        # Compute allowed notional
-        # -------------------------
         equity_risk = self.equity * risk_pct
         max_allowed_notional = equity_risk / stop_distance_pct
-
         recommended_notional = min(notional, max_allowed_notional)
 
         if recommended_notional < self.MIN_NOTIONAL:
