@@ -3,63 +3,27 @@ Super Execution Gate Adapter
 --------------------------------
 Wraps ExecutionGate into the Phase-2A Gate Registry system.
 
-This allows the full ExecutionGate stack
-(compounding + drawdown compression + breaker + risk governor)
-to behave like a standard adapter-based gate.
+Returns THIS repo's GateResult shape:
+  GateResult(gate_name=..., decision=..., reason=...)
 
-Fail-closed.
-First BLOCK wins (handled by DecisionBuilder).
+ExecutionGate returns:
+  {"decision": "...", "reason": "..."}
 """
 
 from __future__ import annotations
 
 from typing import Any, Dict
 
-from engine.execution.execution_gate import (
-    ExecutionGate,
-    TradeIntent,
-    EquityContext,
-    MarketContext,
-)
-
+from engine.execution.execution_gate import ExecutionGate, TradeIntent, EquityContext, MarketContext
 from engine.execution_decision import GateResult
 
 
 class SuperExecutionGateAdapter:
-    """
-    Adapter wrapper for ExecutionGate.
-    """
-
     def __init__(self) -> None:
         self._gate = ExecutionGate()
 
-    # ----------------------------------------------------------
-    # Adapter Interface (Phase-2A compatible)
-    # ----------------------------------------------------------
     def evaluate(self, *, state: Dict[str, Any]) -> GateResult:
-        """
-        Expected state fields:
-
-        REQUIRED:
-        - instrument
-        - side
-        - notional
-        - stop_distance_pct
-        - equity
-        - equity_peak
-
-        OPTIONAL:
-        - policy
-        - regime_persistence
-        - vol_ratio
-        - spread_bps
-        - high_risk_news
-        """
-
         try:
-            # --------------------------
-            # Build Intent
-            # --------------------------
             intent = TradeIntent(
                 instrument=state["instrument"],
                 side=state["side"],
@@ -68,59 +32,37 @@ class SuperExecutionGateAdapter:
                 policy=state.get("policy", "core"),
             )
 
-            # --------------------------
-            # Equity Context
-            # --------------------------
             eq = EquityContext(
                 equity=state["equity"],
                 equity_peak=state["equity_peak"],
             )
 
-            # --------------------------
-            # Market Context (optional)
-            # --------------------------
+            # MarketContext currently supports ONLY regime_persistence
             mkt = MarketContext(
                 regime_persistence=state.get("regime_persistence"),
-                vol_ratio=state.get("vol_ratio"),
-                spread_bps=state.get("spread_bps"),
-                high_risk_news=state.get("high_risk_news"),
             )
 
-            # --------------------------
-            # Evaluate via ExecutionGate
-            # --------------------------
-            decision = self._gate.evaluate_trade(
-                intent=intent,
-                eq=eq,
-                mkt=mkt,
-            )
+            result = self._gate.evaluate_trade(intent=intent, eq=eq, mkt=mkt)
 
-            # --------------------------
-            # Normalize to GateResult
-            # --------------------------
-            if decision.decision == "ALLOW":
-                return GateResult(
-                    ok=True,
-                    gate="super_execution_gate",
-                    reason="allowed",
-                    data=decision.meta,
-                )
+            decision = "BLOCK"
+            reason = "UNEXPECTED_EXECUTION_GATE_OUTPUT"
+
+            if isinstance(result, dict):
+                decision = str(result.get("decision", "BLOCK")).upper()
+                reason = str(result.get("reason", "BLOCKED_BY_SUPER_EXECUTION_GATE"))
+
+            if decision not in ("ALLOW", "BLOCK"):
+                decision = "BLOCK"
 
             return GateResult(
-                ok=False,
-                gate="super_execution_gate",
-                reason="blocked",
-                data={
-                    "reasons": decision.reasons,
-                    "meta": decision.meta,
-                },
+                gate_name="super_execution_gate",
+                decision=decision,
+                reason=reason,
             )
 
         except Exception as e:
-            # Fail-closed enforcement
             return GateResult(
-                ok=False,
-                gate="super_execution_gate",
-                reason="exception",
-                data={"error": str(e)},
+                gate_name="super_execution_gate",
+                decision="BLOCK",
+                reason=f"EXCEPTION: {type(e).__name__}: {e}",
             )

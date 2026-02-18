@@ -2,10 +2,16 @@
 run_engine_loop.py
 ==================
 
-Canonical local runner for EngineLoop.
+Canonical local runner for engine_loop.py.
 
-This file safely drives EngineLoop.step() in a bounded loop
-so we can validate boot, environment loading, and provider wiring.
+Reality check (your repo):
+- engine_loop.py exports `main` (not `EngineLoop` class)
+
+So this runner:
+- loads .env (best-effort)
+- imports engine_loop
+- calls engine_loop.main() if present
+- prints clean diagnostics if something is missing
 
 Usage:
     python -u run_engine_loop.py
@@ -15,14 +21,13 @@ from __future__ import annotations
 
 import os
 import sys
-import time
 import traceback
 from pathlib import Path
 
 
 def banner() -> None:
     print("=" * 70)
-    print("REA Capital / CSS — EngineLoop Runner")
+    print("REA Capital / CSS — Engine Loop Runner")
     print(f"Working directory: {Path.cwd()}")
     print(f"Python version: {sys.version.split()[0]}")
     print(f"Virtualenv: {os.environ.get('VIRTUAL_ENV', 'None')}")
@@ -48,42 +53,35 @@ def main() -> int:
     load_env()
 
     try:
-        from engine_loop import EngineLoop  # type: ignore
+        import engine_loop as el  # type: ignore
     except Exception:
-        print("[runner] Failed to import EngineLoop:")
+        print("[runner] Failed to import engine_loop:")
         traceback.print_exc()
         return 1
 
-    try:
-        loop = EngineLoop()
-    except Exception:
-        print("[runner] Failed to initialize EngineLoop:")
-        traceback.print_exc()
-        return 2
-
-    max_steps = int(os.environ.get("ENGINE_MAX_STEPS", "50"))
-    sleep_time = float(os.environ.get("ENGINE_STEP_SLEEP", "0.25"))
-
-    print(f"[runner] Starting loop for {max_steps} steps...")
-    print("-" * 70)
-
-    for i in range(1, max_steps + 1):
+    # Prefer canonical entrypoint: engine_loop.main()
+    if hasattr(el, "main") and callable(getattr(el, "main")):
         try:
-            result = loop.step()
-            print(f"[runner] Step {i}/{max_steps} OK -> {result}")
+            rc = el.main()  # type: ignore[call-arg]
+            # engine_loop.main may return None; treat None as success
+            if rc is None:
+                rc = 0
+            print(f"[runner] engine_loop.main() finished with code: {rc}")
+            return int(rc)
         except KeyboardInterrupt:
             print("\n[runner] Stopped by user.")
             return 0
         except Exception:
-            print(f"[runner] Step {i} FAILED:")
+            print("[runner] engine_loop.main() raised an exception:")
             traceback.print_exc()
-            return 3
+            return 2
 
-        time.sleep(sleep_time)
-
-    print("-" * 70)
-    print("[runner] Completed successfully.")
-    return 0
+    # Fallback: print exports so we can align naming quickly
+    exports = [n for n in dir(el) if not n.startswith("_")]
+    print("[runner] engine_loop has no callable main().")
+    print("[runner] Public exports:", exports)
+    print("[runner] ACTION: ensure engine_loop.py defines a `main()` function.")
+    return 3
 
 
 if __name__ == "__main__":
