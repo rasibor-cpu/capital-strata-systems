@@ -6,13 +6,17 @@ Canonical paper close path:
 - PnL calc
 - Auto-ledger logging (TEST vs LIVE separate files)
 - ALWAYS returns a PaperFillResult (never None)
+
+NEW (v4.6):
+- Optional RiskGovernor outcome recording at the close boundary
+  (updates daily PnL, loss streak, equity, and InstrumentPerformanceLedger).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Any
 
 from trade_ticket import TradeTicket
 from engine.reporting.pnl_ledger import append_pnl_event
@@ -40,6 +44,8 @@ class PaperBroker:
         ticket: TradeTicket,
         fill_price: float,
         fees: float = 0.0,
+        *,
+        risk_governor: Optional[Any] = None,
     ) -> PaperFillResult:
         if ticket is None:
             raise ValueError("ticket is required")
@@ -89,6 +95,16 @@ class PaperBroker:
             trade_id=ticket.utrn,
             ledger_path=ticket.ledger_path(),
         )
+
+        # Optional governance outcome recording (fail-soft)
+        try:
+            if risk_governor is not None:
+                # record_trade_outcome supports instrument + timestamp in v4.4+
+                ts = datetime.now(timezone.utc)
+                risk_governor.record_trade_outcome(float(pnl), instrument=str(ticket.symbol), timestamp=ts)
+        except Exception:
+            # Never block closing; accounting should be resilient
+            pass
 
         # GUARANTEED return
         return PaperFillResult(
