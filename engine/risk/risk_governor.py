@@ -16,6 +16,9 @@ Institutional hardening added:
 - policy_fingerprint() + policy_hash() for session-init logging
 - reset_session_state() for deterministic session resets
 - validate_trade() adapter for ExecutionGate compatibility (uses provided risk_pct)
+
+NEW (v4.4):
+- InstrumentPerformanceLedger integration for multi-timeframe PnL tracking
 """
 
 from __future__ import annotations
@@ -23,7 +26,10 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
+
+from engine.performance.instrument_performance_ledger import InstrumentPerformanceLedger
 
 
 # ============================================================
@@ -67,7 +73,7 @@ class RiskGovernor:
     MIN_NOTIONAL = 1.0
 
     def __init__(self) -> None:
-        # session state (mutable, but should be reset per session)
+        self.ledger = InstrumentPerformanceLedger()
         self.reset_session_state()
 
     # ========================================================
@@ -111,7 +117,20 @@ class RiskGovernor:
         else:
             self.equity_peak = max(self.equity_peak, float(equity))
 
-    def record_trade_outcome(self, pnl: float) -> None:
+    def record_trade_outcome(
+        self,
+        pnl: float,
+        *,
+        instrument: Optional[str] = None,
+        timestamp: Optional[datetime] = None,
+    ) -> None:
+        """
+        Records the PnL of a COMPLETED trade.
+        Backward compatible: old callers can pass only pnl.
+
+        If instrument is provided, we also record multi-timeframe PnL lines
+        into InstrumentPerformanceLedger.
+        """
         pnl = float(pnl)
         self.daily_pnl += pnl
         self.trades_today += 1
@@ -124,6 +143,10 @@ class RiskGovernor:
         if self.equity is not None:
             self.equity += pnl
             self.equity_peak = max(self.equity_peak or self.equity, self.equity)
+
+        if instrument:
+            ts = timestamp or datetime.now(timezone.utc)
+            self.ledger.record_trade(instrument=str(instrument), pnl=pnl, timestamp=ts)
 
     # ========================================================
     # Drawdown Throttle (CORE Policy)
@@ -165,7 +188,6 @@ class RiskGovernor:
         policy: str = "core",
         **_kwargs: Any,
     ) -> Dict[str, Any]:
-        # policy must not be silently accepted if unknown
         if policy != "core":
             return RiskDecision(
                 ok=False,
@@ -178,7 +200,6 @@ class RiskGovernor:
                 adjusted=False,
             ).as_dict()
 
-        # initialize / update equity context
         self.set_equity(equity)
 
         if self.equity is None:
@@ -205,7 +226,6 @@ class RiskGovernor:
                 adjusted=False,
             ).as_dict()
 
-        # Hard drawdown rejection (defensive)
         dd_mult = self._drawdown_multiplier()
         if dd_mult == 0.0:
             return RiskDecision(
@@ -219,7 +239,6 @@ class RiskGovernor:
                 adjusted=False,
             ).as_dict()
 
-        # Use upstream risk_pct, but cap it to MAX_RISK_PCT
         effective_risk_pct = float(risk_pct or 0.0)
         if effective_risk_pct <= 0:
             return RiskDecision(
@@ -266,7 +285,6 @@ class RiskGovernor:
 
     # ========================================================
     # Core Evaluation (legacy interface)
-    # Computes risk_pct internally.
     # ========================================================
 
     def allow_trade(
@@ -319,12 +337,7 @@ class RiskGovernor:
                 adjusted=False,
             )
 
-        # -------------------------
-        # Base Risk × Drawdown Throttle
-        # -------------------------
-
         dd_mult = self._drawdown_multiplier()
-
         if dd_mult == 0.0:
             return RiskDecision(
                 ok=False,
@@ -339,37 +352,17 @@ class RiskGovernor:
 
         risk_pct = self.BASE_RISK_PCT * dd_mult
 
-        # -------------------------
-        # Anti-Martingale
-        # -------------------------
-
         if self.consecutive_losses >= 2:
             risk_pct *= self.LOSS_STREAK_COMPRESSION
-
-        # -------------------------
-        # Regime Scaling
-        # -------------------------
 
         if regime_persistence is not None:
             risk_pct *= float(regime_persistence)
 
-        # -------------------------
-        # Volatility Compression
-        # -------------------------
-
         if vol_ratio is not None and vol_ratio > 1.5:
             risk_pct *= 0.5
 
-        # -------------------------
-        # Spread Penalty
-        # -------------------------
-
         if spread_bps is not None and spread_bps > 3:
             risk_pct *= 0.75
-
-        # -------------------------
-        # News Clamp
-        # -------------------------
 
         if high_risk_news:
             risk_pct *= 0.5
