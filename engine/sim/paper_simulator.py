@@ -7,14 +7,24 @@ Purpose:
 - Simulate position entry/exit
 - Apply conservative slippage + fees
 - Track PnL, equity, drawdown
-- Emit journal entries (append-only)
+- Optionally route CLOSE through PaperBroker (canonical close boundary):
+    - PnL ledger append (engine.reporting.pnl_ledger)
+    - RiskGovernor.record_trade_outcome() + InstrumentPerformanceLedger
 
-NO broker calls. NO live execution. NO side effects outside memory.
+NO broker calls. NO live execution.
+Side effects:
+- In default mode: memory only
+- If use_broker_close=True: writes to configured pnl ledger path via TradeTicket.ledger_path()
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 import time
+
+from engine.execution.paper_broker import PaperBroker, PaperFillResult
 
 
 @dataclass
@@ -28,6 +38,11 @@ class SimulatedTrade:
     opened_ts: float
     closed_ts: float
     meta: Dict[str, Any] = field(default_factory=dict)
+
+    # Optional broker-return metadata
+    utrn: Optional[str] = None
+    exit_px_effective: Optional[float] = None
+    timestamp_utc: Optional[str] = None
 
 
 @dataclass
@@ -54,6 +69,7 @@ class PaperSimulator:
             peak_equity=starting_equity,
             drawdown_pct=0.0,
         )
+        self._broker = PaperBroker()
 
     def _apply_costs(self, price: float, side: str) -> float:
         """
@@ -64,6 +80,13 @@ class PaperSimulator:
             return price + cost
         return price - cost
 
+    def _pnl_math(self, *, direction: str, entry_px: float, exit_px: float, size: float) -> float:
+        if direction == "LONG":
+            return (exit_px - entry_px) * size
+        if direction == "SHORT":
+            return (entry_px - exit_px) * size
+        raise ValueError("direction must be LONG or SHORT")
+
     def simulate_trade(
         self,
         *,
@@ -73,21 +96,51 @@ class PaperSimulator:
         exit_price: float,
         size: float,
         meta: Optional[Dict[str, Any]] = None,
+        # Optional canonical close routing
+        use_broker_close: bool = False,
+        trade_ticket: Optional[Any] = None,
+        risk_governor: Optional[Any] = None,
+        fees: float = 0.0,
     ) -> SimulatedTrade:
+        """
+        If use_broker_close=False (default): pure in-memory simulation.
+
+        If use_broker_close=True:
+            - requires trade_ticket (TradeTicket) with:
+                symbol, side, amount/qty, entry_px, mode, ledger_path()
+            - calls PaperBroker.execute_and_close(ticket, fill_price, fees, risk_governor=...)
+            - uses broker-returned pnl as authoritative pnl
+        """
         now = time.time()
+        meta = meta or {}
 
-        # Apply conservative costs
-        entry_px = self._apply_costs(entry_price, "entry")
-        exit_px = self._apply_costs(exit_price, "exit")
+        # Conservative costs applied to what the strategy "thinks" it traded.
+        entry_px_eff = self._apply_costs(entry_price, "entry")
+        exit_px_eff = self._apply_costs(exit_price, "exit")
 
-        if direction == "LONG":
-            pnl = (exit_px - entry_px) * size
-        elif direction == "SHORT":
-            pnl = (entry_px - exit_px) * size
-        else:
-            raise ValueError("direction must be LONG or SHORT")
+        pnl = self._pnl_math(direction=direction, entry_px=entry_px_eff, exit_px=exit_px_eff, size=size)
 
-        # Update equity
+        utrn = None
+        exit_px_authoritative = exit_px_eff
+        ts_utc = datetime.now(timezone.utc).isoformat()
+
+        if use_broker_close:
+            if trade_ticket is None:
+                raise ValueError("use_broker_close=True requires trade_ticket (TradeTicket)")
+            # The broker close is the canonical boundary; it writes PnL ledger and records governor outcome.
+            fill: PaperFillResult = self._broker.execute_and_close(
+                trade_ticket,
+                fill_price=float(exit_price),
+                fees=float(fees),
+                risk_governor=risk_governor,
+            )
+            # Use broker PnL as authoritative
+            pnl = float(fill.pnl)
+            utrn = str(fill.utrn)
+            exit_px_authoritative = float(fill.exit_px)
+            ts_utc = str(fill.timestamp_utc)
+
+        # Update equity based on authoritative pnl
         self.state.equity += pnl
         self.state.peak_equity = max(self.state.peak_equity, self.state.equity)
         dd = (self.state.peak_equity - self.state.equity) / self.state.peak_equity
@@ -96,13 +149,16 @@ class PaperSimulator:
         trade = SimulatedTrade(
             instrument=instrument,
             direction=direction,
-            entry_price=entry_px,
-            exit_price=exit_px,
+            entry_price=entry_px_eff,
+            exit_price=exit_px_authoritative,
             size=size,
             pnl=pnl,
             opened_ts=now,
             closed_ts=now,
-            meta=meta or {},
+            meta=meta,
+            utrn=utrn,
+            exit_px_effective=exit_px_authoritative,
+            timestamp_utc=ts_utc,
         )
         self.state.trades.append(trade)
         return trade
