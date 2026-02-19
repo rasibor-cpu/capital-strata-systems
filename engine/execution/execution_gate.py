@@ -8,6 +8,11 @@ Fail-closed with structured debug.
 Weekly Rebalance enforcement (dynamic drift):
 - If Friday 17:00 ET window AND drift threshold exceeded => BLOCK new trades.
 - Does NOT mutate capital mid-session. Enforcement only.
+
+Upgrade (EquityAuthority integration):
+- Supports injected RiskGovernor (preferred)
+- If governor is bound to EquityAuthority, validate_trade will NOT receive equity input
+  (prevents shadow equity and eliminates ok_input_fallback mode).
 """
 
 from __future__ import annotations
@@ -24,8 +29,9 @@ HARD_DRAWDOWN_CIRCUIT_BREAKER_PCT = 0.20
 
 
 class ExecutionGate:
-    def __init__(self) -> None:
-        self.risk_governor = RiskGovernor()
+    def __init__(self, risk_governor: Optional[RiskGovernor] = None) -> None:
+        # Prefer injected governor (authority-bound). Fall back to default for legacy callers.
+        self.risk_governor = risk_governor or RiskGovernor()
         self.compounding = CompoundingEngine()
         self.drawdown_scaler = DrawdownScaler()
         self._rebalance_engine: Optional[WeeklyRebalanceEngine] = None
@@ -136,7 +142,7 @@ class ExecutionGate:
                 return block
 
             # -------------------------
-            # Compounding (correct signature)
+            # Compounding
             # -------------------------
             risk_pct = self.compounding.compute_dynamic_risk(
                 equity=equity,
@@ -165,15 +171,30 @@ class ExecutionGate:
             # -------------------------
             # RiskGovernor (validate_trade)
             # -------------------------
-            decision = self.risk_governor.validate_trade(
-                instrument=instrument,
-                side=side,
-                requested_notional=scaled_notional,
-                stop_distance_pct=stop_distance_pct,
-                equity=equity,
-                risk_pct=risk_pct,
-                policy=policy,
-            )
+            # If governor is authority-bound, do NOT pass equity (prevents shadow equity & fallback mode).
+            gov = self.risk_governor
+            use_authority = bool(getattr(gov, "equity_authority", None) is not None)
+
+            if use_authority:
+                decision = gov.validate_trade(
+                    instrument=instrument,
+                    side=side,
+                    requested_notional=scaled_notional,
+                    stop_distance_pct=stop_distance_pct,
+                    equity=0.0,           # ignored by authority path; kept for signature stability
+                    risk_pct=risk_pct,
+                    policy=policy,
+                )
+            else:
+                decision = gov.validate_trade(
+                    instrument=instrument,
+                    side=side,
+                    requested_notional=scaled_notional,
+                    stop_distance_pct=stop_distance_pct,
+                    equity=equity,
+                    risk_pct=risk_pct,
+                    policy=policy,
+                )
 
             debug["governor_response"] = decision
 
