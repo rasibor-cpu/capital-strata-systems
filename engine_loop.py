@@ -48,7 +48,11 @@ class EngineLoop:
         # --------------------------------------------------
         # CORE SYSTEM COMPONENTS
         # --------------------------------------------------
-        self.gate = ExecutionGate(risk_governor=self.risk_governor)
+        self.gate = ExecutionGate(
+    risk_governor=self.risk_governor,
+    equity_authority=self.equity_authority,
+)
+
 
         self.telemetry = RiskTelemetry()
         self.ledger = PerformanceLedger()

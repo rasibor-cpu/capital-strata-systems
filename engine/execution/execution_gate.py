@@ -1,18 +1,13 @@
 """
-Execution Gate – Canonical Flat Interface
+Execution Gate – Canonical Flat Interface (Authority-Native)
 Capital Strata Systems
 
-Flat interface for EngineLoop compatibility.
-Fail-closed with structured debug.
+Fail-closed.
 
-Weekly Rebalance enforcement (dynamic drift):
-- If Friday 17:00 ET window AND drift threshold exceeded => BLOCK new trades.
-- Does NOT mutate capital mid-session. Enforcement only.
-
-Upgrade (EquityAuthority integration):
-- Supports injected RiskGovernor (preferred)
-- If governor is bound to EquityAuthority, validate_trade will NOT receive equity input
-  (prevents shadow equity and eliminates ok_input_fallback mode).
+Authority Purity:
+- Reads equity directly from EquityAuthority if provided.
+- Caller-supplied equity becomes optional compatibility input.
+- Eliminates shadow capital completely.
 """
 
 from __future__ import annotations
@@ -24,17 +19,42 @@ from engine.capital.compounding_engine import CompoundingEngine
 from engine.risk.drawdown_scaler import DrawdownScaler
 from engine.risk.risk_governor import RiskGovernor
 from engine.capital.weekly_rebalance_engine import WeeklyRebalanceEngine
+from engine.equity_authority import EquityAuthority
 
 HARD_DRAWDOWN_CIRCUIT_BREAKER_PCT = 0.20
 
 
 class ExecutionGate:
-    def __init__(self, risk_governor: Optional[RiskGovernor] = None) -> None:
-        # Prefer injected governor (authority-bound). Fall back to default for legacy callers.
+
+    def __init__(
+        self,
+        risk_governor: Optional[RiskGovernor] = None,
+        equity_authority: Optional[EquityAuthority] = None,
+    ) -> None:
+
         self.risk_governor = risk_governor or RiskGovernor()
+        self.equity_authority = equity_authority
+
         self.compounding = CompoundingEngine()
         self.drawdown_scaler = DrawdownScaler()
         self._rebalance_engine: Optional[WeeklyRebalanceEngine] = None
+
+    # --------------------------------------------------------
+    # Authority helpers
+    # --------------------------------------------------------
+
+    def _resolve_equity(self, equity: float, equity_peak: float) -> tuple[float, float]:
+        """
+        If authority present → use it.
+        Otherwise fall back to caller inputs.
+        """
+        if self.equity_authority is not None:
+            return (
+                float(self.equity_authority.current_equity()),
+                float(self.equity_authority.peak_equity()),
+            )
+
+        return float(equity), float(equity_peak)
 
     # --------------------------------------------------------
     # Rebalance Enforcement
@@ -88,8 +108,8 @@ class ExecutionGate:
         side: str,
         notional: float,
         stop_distance_pct: float,
-        equity: float,
-        equity_peak: float,
+        equity: float = 0.0,           # compatibility only
+        equity_peak: float = 0.0,      # compatibility only
         regime_persistence: float,
         policy: str = "core",
         current_allocations: Optional[Dict[str, float]] = None,
@@ -102,14 +122,16 @@ class ExecutionGate:
 
         try:
 
-            # -------------------------
-            # Basic validation
-            # -------------------------
             if notional <= 0:
                 return {"decision": {"final": "BLOCK"}, "reason": "notional_invalid", "debug": debug}
 
             if stop_distance_pct <= 0:
                 return {"decision": {"final": "BLOCK"}, "reason": "stop_distance_invalid", "debug": debug}
+
+            # -------------------------
+            # Resolve authoritative equity
+            # -------------------------
+            equity, equity_peak = self._resolve_equity(equity, equity_peak)
 
             if equity <= 0:
                 return {"decision": {"final": "BLOCK"}, "reason": "equity_invalid", "debug": debug}
@@ -169,39 +191,32 @@ class ExecutionGate:
             debug["scaled_notional"] = scaled_notional
 
             # -------------------------
-            # RiskGovernor (validate_trade)
+            # RiskGovernor (authority-native)
             # -------------------------
-            # If governor is authority-bound, do NOT pass equity (prevents shadow equity & fallback mode).
-            gov = self.risk_governor
-            use_authority = bool(getattr(gov, "equity_authority", None) is not None)
-
-            if use_authority:
-                decision = gov.validate_trade(
-                    instrument=instrument,
-                    side=side,
-                    requested_notional=scaled_notional,
-                    stop_distance_pct=stop_distance_pct,
-                    equity=0.0,           # ignored by authority path; kept for signature stability
-                    risk_pct=risk_pct,
-                    policy=policy,
-                )
-            else:
-                decision = gov.validate_trade(
-                    instrument=instrument,
-                    side=side,
-                    requested_notional=scaled_notional,
-                    stop_distance_pct=stop_distance_pct,
-                    equity=equity,
-                    risk_pct=risk_pct,
-                    policy=policy,
-                )
+            decision = self.risk_governor.validate_trade(
+                instrument=instrument,
+                side=side,
+                requested_notional=scaled_notional,
+                stop_distance_pct=stop_distance_pct,
+                equity=equity,     # ignored if authority-bound
+                risk_pct=risk_pct,
+                policy=policy,
+            )
 
             debug["governor_response"] = decision
 
             if not decision.get("ok", False):
-                return {"decision": {"final": "BLOCK"}, "reason": decision.get("reason", "governor_reject"), "debug": debug}
+                return {
+                    "decision": {"final": "BLOCK"},
+                    "reason": decision.get("reason", "governor_reject"),
+                    "debug": debug,
+                }
 
             return {"decision": {"final": "ALLOW"}, "reason": "approved", "debug": debug}
 
         except Exception as e:
-            return {"decision": {"final": "BLOCK"}, "reason": "execution_gate_exception", "debug": {"exception": str(e)}}
+            return {
+                "decision": {"final": "BLOCK"},
+                "reason": "execution_gate_exception",
+                "debug": {"exception": str(e)},
+            }
