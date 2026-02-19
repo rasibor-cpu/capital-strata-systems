@@ -35,10 +35,6 @@ def _safe_str(x: Any) -> str:
 
 
 def _call_any(obj: Any, names: list[str], *args: Any, **kwargs: Any) -> Any:
-    """
-    Try calling obj.<name>(*args, **kwargs) across multiple possible method names.
-    Returns (called, value, used_name).
-    """
     for n in names:
         fn = getattr(obj, n, None)
         if callable(fn):
@@ -47,10 +43,6 @@ def _call_any(obj: Any, names: list[str], *args: Any, **kwargs: Any) -> Any:
 
 
 def _call_any_adaptive(obj: Any, names: list[str], kwargs_variants: list[Dict[str, Any]]) -> tuple[bool, Any, str, str]:
-    """
-    Try method names, and for each, try multiple kwargs variants.
-    Returns (called, value, used_name, used_variant_tag)
-    """
     for n in names:
         fn = getattr(obj, n, None)
         if not callable(fn):
@@ -165,14 +157,16 @@ class ExecutionGate:
                 return block
 
             # -------------------------
-            # Compounding (adaptive kwargs)
+            # Compounding (FIXED: match CompoundingEngine signature)
             # -------------------------
             comp_called, dyn_risk, comp_name, comp_tag = _call_any_adaptive(
                 self.compounding,
                 ["compute_dynamic_risk", "dynamic_risk", "compute_risk_pct"],
                 kwargs_variants=[
-                    {"_tag": "full", "equity": equity, "regime_persistence": regime_persistence, "policy": policy},
-                    {"_tag": "no_policy", "equity": equity, "regime_persistence": regime_persistence},
+                    # ✅ canonical in this repo:
+                    {"_tag": "equity+peak+regime", "equity": equity, "equity_peak": equity_peak, "regime_persistence": regime_persistence},
+                    # fallbacks (in case other builds exist)
+                    {"_tag": "equity+regime", "equity": equity, "regime_persistence": regime_persistence},
                     {"_tag": "equity_only", "equity": equity},
                 ],
             )
@@ -269,8 +263,4 @@ class ExecutionGate:
             return {"decision": {"final": "ALLOW"}, "reason": "approved", "debug": debug}
 
         except Exception as e:
-            return {
-                "decision": {"final": "BLOCK"},
-                "reason": "execution_gate_exception",
-                "debug": {**debug, "exception": _safe_str(e)},
-            }
+            return {"decision": {"final": "BLOCK"}, "reason": "execution_gate_exception", "debug": {**debug, "exception": _safe_str(e)}}
