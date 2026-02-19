@@ -2,64 +2,79 @@
 EngineLoop – Canonical Capital Execution Loop
 Capital Strata Systems
 
-Includes:
-- RiskTelemetry integration
-- 20% institutional hard kill-switch
-- Structured risk reporting
-- PerformanceLedger (multi-asset, multi-period tracking)
+Now includes:
+- EquityAuthority (single equity source of truth)
+- PnLTracker (multi-instrument, multi-timeframe PnL)
+- RiskTelemetry
+- PerformanceLedger
+- Weekly AssetAllocator (50% intensity)
+- Hard kill-switch
 
-Repo-safe:
-- PerformanceLedger API may differ across iterations
-- We call summary/report/as_dict if available; otherwise print exports
+Key rule:
+- EngineLoop must NOT maintain shadow equity state.
+  Equity is owned by PnLTracker and exposed via EquityAuthority.
 """
 
 from __future__ import annotations
 
 import uuid
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from engine.execution.execution_gate import ExecutionGate
 from engine.risk.risk_telemetry import RiskTelemetry
 from engine.performance.performance_ledger import PerformanceLedger
+from engine.allocation.asset_allocator import AssetAllocator
 
-
-def _ledger_best_effort_summary(ledger: Any) -> Dict[str, Any]:
-    """
-    Adapter-safe summary accessor for PerformanceLedger.
-    Tries common method names; otherwise returns exports for debugging.
-    """
-    for name in ("summary", "report", "as_dict", "to_dict", "export", "snapshot"):
-        fn = getattr(ledger, name, None)
-        if callable(fn):
-            try:
-                out = fn()
-                # normalize to dict if possible
-                if isinstance(out, dict):
-                    return {"method": name, "data": out}
-                return {"method": name, "data": {"value": out}}
-            except Exception as e:
-                return {"method": name, "error": f"{type(e).__name__}: {e}"}
-
-    exports = [n for n in dir(ledger) if not n.startswith("_")]
-    return {"method": None, "data": {"exports": exports}}
+from engine.performance.pnl_tracker import PnLTracker
+from engine.equity_authority import EquityAuthority
+from engine.risk.risk_governor import RiskGovernor
 
 
 class EngineLoop:
+
+    WEEKLY_REBALANCE_INTERVAL = 10  # simulate weekly every 10 steps
+
     def __init__(self) -> None:
         self.engine_run_id = f"css-{uuid.uuid4()}"
 
+        # --- Capital state (authoritative) ---
+        self.tracker = PnLTracker(starting_equity=100000.0)
+        self.equity_authority = EquityAuthority()
+        self.equity_authority.bind_tracker(self.tracker)
+
+        # --- Core components ---
         self.gate = ExecutionGate()
         self.telemetry = RiskTelemetry()
         self.ledger = PerformanceLedger()
+        self.allocator = AssetAllocator(intensity=0.5)
 
-        # Initial simulated capital
-        self.equity = 100000.0
-        self.equity_peak = 100000.0
+        # --- Risk governor (bound to authority + tracker) ---
+        # Even if ExecutionGate uses its own governor internally,
+        # we still bind this instance for canonical usage and future injection.
+        self.risk_governor = RiskGovernor(
+            equity_authority=self.equity_authority,
+            pnl_tracker=self.tracker,
+        )
 
-        self.telemetry.update_equity(self.equity)
+        self.step_count = 0
 
-    def step(self, step_index: int) -> Dict[str, Any]:
-        # ---- Kill-switch enforcement ----
+        # seed telemetry from authoritative equity
+        self.telemetry.update_equity(self.equity_authority.current_equity())
+
+    # --------------------------------------------------
+
+    def _simulate_pnl(self, step: int) -> float:
+        # Deterministic pattern for testing
+        pattern = [800, 900, 1000, -2500, 900, 1000, -1500, 800, 900, 1000]
+        return float(pattern[step % len(pattern)])
+
+    # --------------------------------------------------
+
+    def step(self, step: int) -> Dict[str, Any]:
+
+        self.step_count += 1
+
+        # Kill switch (telemetry-owned). Telemetry currently reads equity updates we feed it.
         if self.telemetry.kill_switch_triggered:
             return {
                 "status": "HALTED",
@@ -67,75 +82,104 @@ class EngineLoop:
                 "drawdown_pct": self.telemetry._compute_drawdown_pct(),
             }
 
-        instrument = "EUR_USD"
-        asset_class = "FX"  # required by PerformanceLedger.record_trade()
+        regime_strength = 0.85
 
-        # ---- Trade proposal (simulation) ----
+        # Use authoritative equity values
+        equity = self.equity_authority.current_equity()
+        equity_peak = self.equity_authority.peak_equity()
+
         decision = self.gate.evaluate_trade(
-            instrument=instrument,
+            instrument="EUR_USD",
             side="BUY",
             notional=10000.0,
             stop_distance_pct=0.01,
-            equity=self.equity,
-            equity_peak=self.equity_peak,
-            regime_persistence=0.85,
+            equity=equity,
+            equity_peak=equity_peak,
+            regime_persistence=regime_strength,
         )
 
-        # ---- Simulated PnL Pattern ----
-        simulated_sequence = [800, 900, 1000, -2500, 900, 1000, -1500, 1000, 1000, 0]
-        pnl = float(simulated_sequence[step_index % len(simulated_sequence)])
+        pnl = self._simulate_pnl(step)
 
-        # ---- Apply PnL ----
-        self.equity += pnl
-        self.equity_peak = max(self.equity_peak, self.equity)
+        # Record PnL in authoritative tracker (updates equity)
+        self.tracker.record_trade(
+            instrument="EUR_USD",
+            realized_pnl=pnl,
+            unrealized_pnl=0.0,
+        )
 
-        self.telemetry.update_equity(self.equity)
+        # Inform governor about completed outcome (for loss-streak compression)
+        # (uses tracker journal when instrument is supplied)
+        self.risk_governor.record_trade_outcome(
+            pnl,
+            instrument="EUR_USD",
+        )
 
-        # ---- Record Performance (only if pnl != 0; capture losses too) ----
-        if pnl != 0:
-            self.ledger.record_trade(
-                asset_class=asset_class,
-                instrument=instrument,
-                pnl=pnl,
+        # Update telemetry from authoritative equity
+        self.telemetry.update_equity(self.equity_authority.current_equity())
+
+        # Record PnL in existing ledger (kept for allocator compatibility for now)
+        self.ledger.record_trade(
+            instrument="EUR_USD",
+            asset_class="FX",
+            pnl=pnl,
+        )
+
+        # -------------------------
+        # WEEKLY REBALANCE TRIGGER
+        # -------------------------
+
+        allocation_snapshot: Optional[Dict[str, Any]] = None
+
+        if self.step_count % self.WEEKLY_REBALANCE_INTERVAL == 0:
+            allocation_snapshot = self.allocator.rebalance(
+                performance_snapshot=self.ledger.snapshot()
             )
-
-        # ---- Risk Snapshot ----
-        comp_applied = decision.get("decision", {}).get("compounding", {}).get("applied", False)
 
         snapshot = self.telemetry.snapshot(
             effective_risk_pct=0.01,
-            compounding_applied=comp_applied,
-            regime_persistence=0.85,
+            compounding_applied=decision.get("decision", {}).get("compounding", {}).get("applied", False),
+            regime_persistence=regime_strength,
         )
 
         return {
             "engine_run_id": self.engine_run_id,
-            "step": step_index,
+            "step": step,
             "pnl": pnl,
             "decision": decision,
-            "equity": self.equity,
+            "equity": self.equity_authority.current_equity(),
             "telemetry": snapshot.as_dict(),
+            "rebalance": allocation_snapshot,
         }
+
+    # --------------------------------------------------
+
+    def run(self, steps: int = 20) -> None:
+
+        print("==== WEEKLY REBALANCE SIMULATION ====")
+
+        for i in range(steps):
+            result = self.step(i)
+            print(result)
+
+            if result.get("status") == "HALTED":
+                print("⚠️ ENGINE HALTED")
+                break
+
+        print("\n==== LEDGER SUMMARY ====")
+        print(self.ledger.snapshot())
+
+        print("\n==== PNL TRACKER SUMMARY ====")
+        print(self.tracker.equity_snapshot())
+        print(self.tracker.instrument_summary())
+
+        print("\n==== RUN SUMMARY ====")
+        print(f"engine_run_id: {self.engine_run_id}")
+        print(f"steps: {self.step_count}")
 
 
 def main() -> int:
     loop = EngineLoop()
-
-    print("==== CONTROLLER TIER ESCALATION TEST ====")
-
-    for i in range(12):
-        result = loop.step(i)
-        print(result)
-
-        if result.get("status") == "HALTED":
-            print("⚠️ ENGINE HALTED")
-            break
-
-    print("\n===== LEDGER SUMMARY (BEST EFFORT) =====")
-    print(_ledger_best_effort_summary(loop.ledger))
-
-    print("\n===== RUN SUMMARY =====")
-    print(f"engine_run_id: {loop.engine_run_id}")
+    loop.run(steps=20)
     return 0
 
 
