@@ -6,7 +6,7 @@ Hybrid enforcement:
 - Calendar window: Friday 17:00 ET onward
 - Only triggers if allocation drift exceeds dynamic threshold
 - Used as a BLOCK gate for new trades (no mid-session capital mutation)
-- Fail-closed
+- Fail-closed (but timezone lookup must never crash)
 """
 
 from __future__ import annotations
@@ -38,16 +38,17 @@ class WeeklyRebalanceEngine:
     # time gate (Friday 17:00 ET)
     # -------------------------
     def _is_rebalance_time(self, now_utc: datetime) -> bool:
+        # If tzdata is missing (common on Windows), fall back safely to UTC gate.
         if ZoneInfo is None:
-            # fallback: UTC only (safe + explicit)
-            # Friday=4; 17:00 UTC is NOT the same as ET, but we fail gracefully
             return now_utc.weekday() == 4 and now_utc.hour >= 17
 
-        et = ZoneInfo("America/New_York")
-        now_et = now_utc.astimezone(et)
-
-        # Friday = 4
-        return now_et.weekday() == 4 and now_et.hour >= 17
+        try:
+            et = ZoneInfo("America/New_York")
+            now_et = now_utc.astimezone(et)
+            return now_et.weekday() == 4 and now_et.hour >= 17
+        except Exception:
+            # Fail-safe fallback: UTC gating, never crash the engine.
+            return now_utc.weekday() == 4 and now_utc.hour >= 17
 
     # -------------------------
     # dynamic threshold
@@ -93,12 +94,7 @@ class WeeklyRebalanceEngine:
     ) -> RebalanceResult:
         try:
             if not self.target_weights:
-                return RebalanceResult(
-                    False,
-                    "No target weights configured (rebalance skipped)",
-                    {},
-                    0.0,
-                )
+                return RebalanceResult(False, "No target weights configured (rebalance skipped)", {}, 0.0)
 
             if not self._is_rebalance_time(now_utc):
                 return RebalanceResult(False, "Not rebalance window", {}, 0.0)

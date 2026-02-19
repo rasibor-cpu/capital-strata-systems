@@ -5,9 +5,13 @@ Capital Strata Systems
 Flat interface for EngineLoop compatibility.
 Fail-closed with structured debug.
 
-NEW (v): Weekly Rebalance enforcement (dynamic drift):
+Weekly Rebalance enforcement (dynamic drift):
 - If Friday 17:00 ET window AND drift threshold exceeded => BLOCK new trades.
 - Does NOT mutate capital mid-session. Enforcement only.
+
+Compatibility:
+- Compounding / scaler / governor APIs may vary across builds.
+- We retry on TypeError with reduced kwargs (institution-safe).
 """
 
 from __future__ import annotations
@@ -42,14 +46,30 @@ def _call_any(obj: Any, names: list[str], *args: Any, **kwargs: Any) -> Any:
     return False, None, ""
 
 
+def _call_any_adaptive(obj: Any, names: list[str], kwargs_variants: list[Dict[str, Any]]) -> tuple[bool, Any, str, str]:
+    """
+    Try method names, and for each, try multiple kwargs variants.
+    Returns (called, value, used_name, used_variant_tag)
+    """
+    for n in names:
+        fn = getattr(obj, n, None)
+        if not callable(fn):
+            continue
+        for variant in kwargs_variants:
+            tag = variant.get("_tag", "")
+            call_kwargs = {k: v for k, v in variant.items() if k != "_tag"}
+            try:
+                return True, fn(**call_kwargs), n, tag
+            except TypeError:
+                continue
+    return False, None, "", ""
+
+
 class ExecutionGate:
     def __init__(self) -> None:
         self.risk_governor = RiskGovernor()
         self.compounding = CompoundingEngine()
         self.drawdown_scaler = DrawdownScaler()
-
-        # Rebalance engine is instantiated lazily per call because targets
-        # may come from session config/context.
         self._rebalance_engine: Optional[WeeklyRebalanceEngine] = None
 
     def _rebalance_check(
@@ -62,9 +82,6 @@ class ExecutionGate:
         regime_state: str,
         debug: Dict[str, Any],
     ) -> Optional[Dict[str, Any]]:
-        """
-        Returns a BLOCK decision dict or None if not blocking.
-        """
         if not target_weights:
             debug["rebalance"] = {"skipped": True, "reason": "no_target_weights"}
             return None
@@ -89,11 +106,7 @@ class ExecutionGate:
         }
 
         if res.should_rebalance:
-            return {
-                "decision": {"final": "BLOCK"},
-                "reason": "weekly_rebalance_window_active",
-                "debug": debug,
-            }
+            return {"decision": {"final": "BLOCK"}, "reason": "weekly_rebalance_window_active", "debug": debug}
 
         return None
 
@@ -108,20 +121,13 @@ class ExecutionGate:
         equity_peak: float,
         regime_persistence: float,
         policy: str = "core",
-        # -----------------------------
-        # NEW (optional, default-safe):
-        # -----------------------------
         current_allocations: Optional[Dict[str, float]] = None,
         rebalance_target_weights: Optional[Dict[str, float]] = None,
         volatility_state: str = "MEDIUM",
         regime_state: str = "NORMAL",
     ) -> Dict[str, Any]:
 
-        debug: Dict[str, Any] = {
-            "instrument": instrument,
-            "side": side,
-            "policy": policy,
-        }
+        debug: Dict[str, Any] = {"instrument": instrument, "side": side, "policy": policy}
 
         try:
             # -------------------------
@@ -129,10 +135,8 @@ class ExecutionGate:
             # -------------------------
             if notional <= 0:
                 return {"decision": {"final": "BLOCK"}, "reason": "notional_invalid", "debug": debug}
-
             if stop_distance_pct <= 0:
                 return {"decision": {"final": "BLOCK"}, "reason": "stop_distance_invalid", "debug": debug}
-
             if equity <= 0:
                 return {"decision": {"final": "BLOCK"}, "reason": "equity_invalid", "debug": debug}
 
@@ -143,14 +147,10 @@ class ExecutionGate:
                 dd_pct = (equity_peak - equity) / equity_peak
                 debug["drawdown_pct"] = dd_pct
                 if dd_pct >= HARD_DRAWDOWN_CIRCUIT_BREAKER_PCT:
-                    return {
-                        "decision": {"final": "BLOCK"},
-                        "reason": "hard_drawdown_circuit_breaker",
-                        "debug": debug,
-                    }
+                    return {"decision": {"final": "BLOCK"}, "reason": "hard_drawdown_circuit_breaker", "debug": debug}
 
             # -------------------------
-            # Weekly rebalance enforcement (BLOCK new trades)
+            # Weekly rebalance enforcement
             # -------------------------
             now_utc = datetime.utcnow()
             block = self._rebalance_check(
@@ -165,28 +165,30 @@ class ExecutionGate:
                 return block
 
             # -------------------------
-            # Compounding (dynamic risk)
+            # Compounding (adaptive kwargs)
             # -------------------------
-            called, dyn_risk, used = _call_any(
+            comp_called, dyn_risk, comp_name, comp_tag = _call_any_adaptive(
                 self.compounding,
                 ["compute_dynamic_risk", "dynamic_risk", "compute_risk_pct"],
-                equity=equity,
-                regime_persistence=regime_persistence,
-                policy=policy,
+                kwargs_variants=[
+                    {"_tag": "full", "equity": equity, "regime_persistence": regime_persistence, "policy": policy},
+                    {"_tag": "no_policy", "equity": equity, "regime_persistence": regime_persistence},
+                    {"_tag": "equity_only", "equity": equity},
+                ],
             )
-            if not called:
-                # If compounding method changes across builds, fail-closed.
+            if not comp_called:
                 return {
                     "decision": {"final": "BLOCK"},
                     "reason": "compounding_api_missing",
-                    "debug": {**debug, "compounding_error": "no_supported_method"},
+                    "debug": {**debug, "compounding_error": "no_supported_signature"},
                 }
 
-            debug["compounding_method"] = used
+            debug["compounding_method"] = comp_name
+            debug["compounding_sig"] = comp_tag
             debug["dynamic_risk_pct"] = float(dyn_risk)
 
             # -------------------------
-            # Drawdown scaling
+            # Drawdown scaling (best-effort)
             # -------------------------
             scaled_notional = notional
             dd_called, scaled_val, dd_used = _call_any(
@@ -202,11 +204,10 @@ class ExecutionGate:
                 debug["drawdown_scale_method"] = dd_used
                 debug["scaled_notional"] = scaled_notional
             else:
-                # If scaler API differs, we allow pass-through but log it.
                 debug["drawdown_scale_method"] = "pass_through"
 
             # -------------------------
-            # RiskGovernor validation (adapter-safe)
+            # RiskGovernor validation (adaptive kwargs)
             # -------------------------
             trade = {
                 "instrument": instrument,
@@ -222,41 +223,40 @@ class ExecutionGate:
                 "volatility_state": volatility_state,
             }
 
-            rg_called, rg_res, rg_used = _call_any(
+            rg_called, rg_res, rg_name, rg_tag = _call_any_adaptive(
                 self.risk_governor,
                 ["evaluate_trade", "evaluate", "decide", "check"],
-                trade=trade,
-                policy=policy,
+                kwargs_variants=[
+                    {"_tag": "trade+policy", "trade": trade, "policy": policy},
+                    {"_tag": "trade_only", "trade": trade},
+                ],
             )
-            debug["risk_governor_method"] = rg_used if rg_called else "missing"
+            debug["risk_governor_method"] = rg_name if rg_called else "missing"
+            debug["risk_governor_sig"] = rg_tag
 
             if not rg_called:
                 return {
                     "decision": {"final": "BLOCK"},
                     "reason": "risk_governor_api_missing",
-                    "debug": {**debug, "risk_governor_error": "no_supported_method"},
+                    "debug": {**debug, "risk_governor_error": "no_supported_signature"},
                 }
 
-            # Normalize RiskGovernor response
+            # Normalize response
             ok = True
             reason = "approved"
 
             if isinstance(rg_res, dict):
-                # common patterns
                 if "ok" in rg_res:
                     ok = bool(rg_res.get("ok"))
                     reason = rg_res.get("reason", reason)
                 elif "decision" in rg_res and isinstance(rg_res["decision"], dict):
-                    # if governor returns a decision envelope
                     final = rg_res["decision"].get("final")
                     ok = (final == "ALLOW")
                     reason = rg_res.get("reason", reason)
                 else:
-                    # default allow unless explicitly says block
                     ok = bool(rg_res.get("allow", True))
                     reason = rg_res.get("reason", reason)
             else:
-                # object w/ attributes
                 ok = bool(getattr(rg_res, "ok", True))
                 reason = getattr(rg_res, "reason", reason)
 
