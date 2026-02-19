@@ -2,17 +2,12 @@
 EngineLoop – Canonical Capital Execution Loop
 Capital Strata Systems
 
-Now includes:
-- EquityAuthority (single equity source of truth)
-- PnLTracker (multi-instrument, multi-timeframe PnL)
-- RiskTelemetry
-- PerformanceLedger
+Authoritative Capital Control:
+- PnLTracker (single equity source)
+- EquityAuthority (exposes equity to system)
+- RiskGovernor bound to authority
 - Weekly AssetAllocator (50% intensity)
-- Hard kill-switch
-
-Key rule:
-- EngineLoop must NOT maintain shadow equity state.
-  Equity is owned by PnLTracker and exposed via EquityAuthority.
+- RiskTelemetry integration
 """
 
 from __future__ import annotations
@@ -32,39 +27,42 @@ from engine.risk.risk_governor import RiskGovernor
 
 class EngineLoop:
 
-    WEEKLY_REBALANCE_INTERVAL = 10  # simulate weekly every 10 steps
+    WEEKLY_REBALANCE_INTERVAL = 10
 
     def __init__(self) -> None:
         self.engine_run_id = f"css-{uuid.uuid4()}"
 
-        # --- Capital state (authoritative) ---
+        # --------------------------------------------------
+        # AUTHORITATIVE CAPITAL STATE
+        # --------------------------------------------------
         self.tracker = PnLTracker(starting_equity=100000.0)
+
         self.equity_authority = EquityAuthority()
         self.equity_authority.bind_tracker(self.tracker)
 
-        # --- Core components ---
-        self.gate = ExecutionGate()
-        self.telemetry = RiskTelemetry()
-        self.ledger = PerformanceLedger()
-        self.allocator = AssetAllocator(intensity=0.5)
-
-        # --- Risk governor (bound to authority + tracker) ---
-        # Even if ExecutionGate uses its own governor internally,
-        # we still bind this instance for canonical usage and future injection.
         self.risk_governor = RiskGovernor(
             equity_authority=self.equity_authority,
             pnl_tracker=self.tracker,
         )
 
+        # --------------------------------------------------
+        # CORE SYSTEM COMPONENTS
+        # --------------------------------------------------
+        self.gate = ExecutionGate()
+        self.telemetry = RiskTelemetry()
+        self.ledger = PerformanceLedger()
+        self.allocator = AssetAllocator(intensity=0.5)
+
         self.step_count = 0
 
-        # seed telemetry from authoritative equity
-        self.telemetry.update_equity(self.equity_authority.current_equity())
+        # Seed telemetry from authoritative equity
+        self.telemetry.update_equity(
+            self.equity_authority.current_equity()
+        )
 
     # --------------------------------------------------
 
     def _simulate_pnl(self, step: int) -> float:
-        # Deterministic pattern for testing
         pattern = [800, 900, 1000, -2500, 900, 1000, -1500, 800, 900, 1000]
         return float(pattern[step % len(pattern)])
 
@@ -74,7 +72,6 @@ class EngineLoop:
 
         self.step_count += 1
 
-        # Kill switch (telemetry-owned). Telemetry currently reads equity updates we feed it.
         if self.telemetry.kill_switch_triggered:
             return {
                 "status": "HALTED",
@@ -84,7 +81,7 @@ class EngineLoop:
 
         regime_strength = 0.85
 
-        # Use authoritative equity values
+        # Authoritative equity
         equity = self.equity_authority.current_equity()
         equity_peak = self.equity_authority.peak_equity()
 
@@ -100,39 +97,46 @@ class EngineLoop:
 
         pnl = self._simulate_pnl(step)
 
-        # Record PnL in authoritative tracker (updates equity)
+        # --------------------------------------------------
+        # AUTHORITATIVE PNL RECORDING
+        # --------------------------------------------------
         self.tracker.record_trade(
             instrument="EUR_USD",
             realized_pnl=pnl,
             unrealized_pnl=0.0,
         )
 
-        # Inform governor about completed outcome (for loss-streak compression)
-        # (uses tracker journal when instrument is supplied)
         self.risk_governor.record_trade_outcome(
             pnl,
             instrument="EUR_USD",
         )
 
         # Update telemetry from authoritative equity
-        self.telemetry.update_equity(self.equity_authority.current_equity())
+        self.telemetry.update_equity(
+            self.equity_authority.current_equity()
+        )
 
-        # Record PnL in existing ledger (kept for allocator compatibility for now)
+        # Maintain existing PerformanceLedger (for allocator compatibility)
         self.ledger.record_trade(
             instrument="EUR_USD",
             asset_class="FX",
             pnl=pnl,
         )
 
-        # -------------------------
-        # WEEKLY REBALANCE TRIGGER
-        # -------------------------
-
+        # --------------------------------------------------
+        # WEEKLY REBALANCE
+        # --------------------------------------------------
         allocation_snapshot: Optional[Dict[str, Any]] = None
 
         if self.step_count % self.WEEKLY_REBALANCE_INTERVAL == 0:
-            allocation_snapshot = self.allocator.rebalance(
-                performance_snapshot=self.ledger.snapshot()
+            week_key = "SIM-WEEK"
+            allocation_snapshot = (
+                self.allocator
+                .rebalance_weekly(
+                    week_key=week_key,
+                    ledger_snapshot=self.ledger.snapshot(),
+                )
+                .as_dict()
             )
 
         snapshot = self.telemetry.snapshot(
@@ -164,9 +168,6 @@ class EngineLoop:
             if result.get("status") == "HALTED":
                 print("⚠️ ENGINE HALTED")
                 break
-
-        print("\n==== LEDGER SUMMARY ====")
-        print(self.ledger.snapshot())
 
         print("\n==== PNL TRACKER SUMMARY ====")
         print(self.tracker.equity_snapshot())
