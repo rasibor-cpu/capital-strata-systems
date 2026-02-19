@@ -1,14 +1,16 @@
 """
-EngineLoop – Canonical Capital Execution Loop
+EngineLoop – Multi-Pair Controlled Paper Mode
 Capital Strata Systems
 
-Authoritative Architecture:
-- PnLTracker (single source of capital truth)
-- EquityAuthority (capital exposure layer)
-- RiskGovernor (bound to authority)
-- ExecutionGate (authority-native)
-- Weekly AssetAllocator (driven by PnLTracker)
-- RiskTelemetry integration
+Phase C – Realistic FX Rotation (Controlled)
+
+Features:
+- 5-pair FX universe
+- Instrument-specific stop distances
+- Allocator weight applied to notional
+- Authority-native execution
+- PnLTracker driven allocation
+- Weekly rebalance enforcement
 """
 
 from __future__ import annotations
@@ -28,6 +30,23 @@ from engine.risk.risk_governor import RiskGovernor
 class EngineLoop:
 
     WEEKLY_REBALANCE_INTERVAL = 10
+
+    FX_UNIVERSE = [
+        "EUR_USD",
+        "GBP_USD",
+        "USD_JPY",
+        "AUD_USD",
+        "USD_CHF",
+    ]
+
+    # Instrument-specific stop distances
+    STOP_MAP = {
+        "EUR_USD": 0.010,   # 1.0%
+        "GBP_USD": 0.012,   # 1.2%
+        "USD_JPY": 0.009,   # 0.9%
+        "AUD_USD": 0.011,   # 1.1%
+        "USD_CHF": 0.008,   # 0.8%
+    }
 
     def __init__(self) -> None:
 
@@ -58,20 +77,28 @@ class EngineLoop:
         self.allocator = AssetAllocator(intensity=0.5)
 
         self.step_count = 0
+        self.last_allocation: Dict[str, float] = {}
 
-        # Seed telemetry from authority
         self.telemetry.update_equity(
             self.equity_authority.current_equity()
         )
 
     # --------------------------------------------------
+    # Instrument-specific deterministic PnL profiles
+    # --------------------------------------------------
 
-    def _simulate_pnl(self, step: int) -> float:
-        """
-        Deterministic pattern for controlled testing.
-        """
-        pattern = [800, 900, 1000, -2500, 900, 1000, -1500, 800, 900, 1000]
-        return float(pattern[step % len(pattern)])
+    def _simulate_pnl(self, instrument: str, step: int) -> float:
+
+        profiles = {
+            "EUR_USD": [600, 700, 800, -900, 700],
+            "GBP_USD": [900, -1200, 1100, -1500, 1300],
+            "USD_JPY": [400, -300, 350, -250, 300],
+            "AUD_USD": [700, 800, -1000, 900, -800],
+            "USD_CHF": [300, 350, -400, 320, -280],
+        }
+
+        series = profiles[instrument]
+        return float(series[step % len(series)])
 
     # --------------------------------------------------
 
@@ -89,41 +116,52 @@ class EngineLoop:
         regime_strength = 0.85
 
         # --------------------------------------------------
+        # ROTATE INSTRUMENT
+        # --------------------------------------------------
+        instrument = self.FX_UNIVERSE[step % len(self.FX_UNIVERSE)]
+
+        stop_distance_pct = self.STOP_MAP[instrument]
+
+        # --------------------------------------------------
+        # APPLY ALLOCATOR WEIGHT
+        # --------------------------------------------------
+        base_notional = 10000.0
+        weight = self.last_allocation.get(instrument, 1.0)
+        weighted_notional = base_notional * weight
+
+        # --------------------------------------------------
         # TRADE DECISION
         # --------------------------------------------------
         decision = self.gate.evaluate_trade(
-            instrument="EUR_USD",
+            instrument=instrument,
             side="BUY",
-            notional=10000.0,
-            stop_distance_pct=0.01,
+            notional=weighted_notional,
+            stop_distance_pct=stop_distance_pct,
             regime_persistence=regime_strength,
         )
 
         # --------------------------------------------------
         # SIMULATED EXECUTION
         # --------------------------------------------------
-        pnl = self._simulate_pnl(step)
+        pnl = self._simulate_pnl(instrument, step)
 
-        # Record trade in authoritative tracker
         self.tracker.record_trade(
-            instrument="EUR_USD",
+            instrument=instrument,
             realized_pnl=pnl,
             unrealized_pnl=0.0,
         )
 
-        # Inform governor (loss streak logic etc.)
         self.risk_governor.record_trade_outcome(
             pnl,
-            instrument="EUR_USD",
+            instrument=instrument,
         )
 
-        # Update telemetry from authority
         self.telemetry.update_equity(
             self.equity_authority.current_equity()
         )
 
         # --------------------------------------------------
-        # WEEKLY REBALANCE (PnLTracker-driven)
+        # WEEKLY REBALANCE
         # --------------------------------------------------
         allocation_snapshot: Optional[Dict[str, Any]] = None
 
@@ -131,13 +169,16 @@ class EngineLoop:
 
             week_key = "SIM-WEEK"
 
-            allocation_snapshot = (
-                self.allocator
-                .rebalance_weekly(
-                    week_key=week_key,
-                    ledger_snapshot=self.tracker.weekly_snapshot(),
-                )
-                .as_dict()
+            allocation_result = self.allocator.rebalance_weekly(
+                week_key=week_key,
+                ledger_snapshot=self.tracker.weekly_snapshot(),
+            )
+
+            allocation_snapshot = allocation_result.as_dict()
+
+            # store instrument weights
+            self.last_allocation = allocation_snapshot.get(
+                "instrument_weights", {}
             )
 
         snapshot = self.telemetry.snapshot(
@@ -149,7 +190,9 @@ class EngineLoop:
         return {
             "engine_run_id": self.engine_run_id,
             "step": step,
+            "instrument": instrument,
             "pnl": pnl,
+            "weighted_notional": weighted_notional,
             "decision": decision,
             "equity": self.equity_authority.current_equity(),
             "telemetry": snapshot.as_dict(),
@@ -158,9 +201,9 @@ class EngineLoop:
 
     # --------------------------------------------------
 
-    def run(self, steps: int = 20) -> None:
+    def run(self, steps: int = 25) -> None:
 
-        print("==== WEEKLY REBALANCE SIMULATION ====")
+        print("==== MULTI-PAIR FX SIMULATION ====")
 
         for i in range(steps):
             result = self.step(i)
@@ -181,7 +224,7 @@ class EngineLoop:
 
 def main() -> int:
     loop = EngineLoop()
-    loop.run(steps=20)
+    loop.run(steps=25)
     return 0
 
 
