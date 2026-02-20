@@ -1,15 +1,14 @@
 """
-PositionBook – Canonical Position Lifecycle Engine
+PositionBook v2 – Institutional Position Lifecycle Engine
 Capital Strata Systems (CSS)
 
-Purpose:
-- Maintain authoritative open positions
-- Track entry price, size, direction
-- Compute realized + unrealized PnL
-- Support partial closes
-- Futures-ready design
-
-Fail-safe: deterministic, no external side effects
+Features:
+- Multi-bar hold
+- Stop-loss enforcement
+- Take-profit support
+- Max-hold time stop
+- Opposite-signal exit
+- Deterministic & side-effect free
 """
 
 from __future__ import annotations
@@ -19,15 +18,19 @@ from typing import Dict, Optional
 
 
 # ============================================================
-# DATA STRUCTURES
+# POSITION STRUCTURE
 # ============================================================
 
 @dataclass
 class Position:
     instrument: str
-    side: str            # "BUY" or "SELL"
-    size: float          # position size (notional units)
-    avg_entry_price: float
+    side: str                      # "BUY" | "SELL"
+    size: float
+    entry_price: float
+    opened_step: int
+    stop_distance_pct: float
+    take_profit_pct: Optional[float]
+    max_hold_steps: int
     realized_pnl: float = 0.0
 
 
@@ -41,172 +44,125 @@ class PositionBook:
         self.positions: Dict[str, Position] = {}
 
     # ----------------------------------------------------------
-    # OPEN OR INCREASE POSITION
+    # OPEN POSITION
     # ----------------------------------------------------------
 
-    def open_or_increase(
+    def open_position(
         self,
         *,
         instrument: str,
         side: str,
         size: float,
         price: float,
+        step: int,
+        stop_distance_pct: float = 0.01,
+        take_profit_pct: Optional[float] = 0.02,
+        max_hold_steps: int = 10,
     ) -> None:
 
-        if size <= 0 or price <= 0:
-            return
-
-        existing = self.positions.get(instrument)
-
-        if existing is None:
-            self.positions[instrument] = Position(
-                instrument=instrument,
-                side=side,
-                size=size,
-                avg_entry_price=price,
-            )
-            return
-
-        # If same direction, adjust weighted average entry
-        if existing.side == side:
-            total_size = existing.size + size
-            weighted_price = (
-                (existing.avg_entry_price * existing.size) +
-                (price * size)
-            ) / total_size
-
-            existing.size = total_size
-            existing.avg_entry_price = weighted_price
-            return
-
-        # Opposite direction => reduce or flip
-        self._reduce_or_flip(
-            instrument=instrument,
-            incoming_side=side,
-            size=size,
-            price=price,
-        )
-
-    # ----------------------------------------------------------
-    # REDUCE OR FLIP POSITION
-    # ----------------------------------------------------------
-
-    def _reduce_or_flip(
-        self,
-        *,
-        instrument: str,
-        incoming_side: str,
-        size: float,
-        price: float,
-    ) -> None:
-
-        existing = self.positions.get(instrument)
-        if existing is None:
-            return
-
-        if size < existing.size:
-            # Partial close
-            pnl = self._calculate_pnl(
-                side=existing.side,
-                entry_price=existing.avg_entry_price,
-                exit_price=price,
-                size=size,
-            )
-            existing.size -= size
-            existing.realized_pnl += pnl
-            return
-
-        if size == existing.size:
-            # Full close
-            pnl = self._calculate_pnl(
-                side=existing.side,
-                entry_price=existing.avg_entry_price,
-                exit_price=price,
-                size=size,
-            )
-            existing.realized_pnl += pnl
-            del self.positions[instrument]
-            return
-
-        # Flip position
-        close_size = existing.size
-        pnl = self._calculate_pnl(
-            side=existing.side,
-            entry_price=existing.avg_entry_price,
-            exit_price=price,
-            size=close_size,
-        )
-        remaining = size - close_size
-
-        del self.positions[instrument]
+        if instrument in self.positions:
+            return  # Already open — no pyramiding for now
 
         self.positions[instrument] = Position(
             instrument=instrument,
-            side=incoming_side,
-            size=remaining,
-            avg_entry_price=price,
-            realized_pnl=pnl,
+            side=side,
+            size=size,
+            entry_price=price,
+            opened_step=step,
+            stop_distance_pct=stop_distance_pct,
+            take_profit_pct=take_profit_pct,
+            max_hold_steps=max_hold_steps,
         )
 
     # ----------------------------------------------------------
-    # CALCULATE PNL
+    # EVALUATE EXIT CONDITIONS
     # ----------------------------------------------------------
 
-    def _calculate_pnl(
+    def evaluate_exit(
         self,
         *,
-        side: str,
-        entry_price: float,
-        exit_price: float,
-        size: float,
+        instrument: str,
+        current_price: float,
+        current_step: int,
+        incoming_signal: Optional[str] = None,
     ) -> float:
+        """
+        Returns realized pnl if position closed.
+        Returns 0.0 if still open.
+        """
 
-        if side == "BUY":
-            return (exit_price - entry_price) * size
-        else:
-            return (entry_price - exit_price) * size
+        pos = self.positions.get(instrument)
+        if pos is None:
+            return 0.0
 
-    # ----------------------------------------------------------
-    # UNREALIZED PNL SNAPSHOT
-    # ----------------------------------------------------------
+        # Calculate pnl helper
+        def calc_pnl(exit_price: float) -> float:
+            if pos.side == "BUY":
+                return (exit_price - pos.entry_price) * pos.size
+            else:
+                return (pos.entry_price - exit_price) * pos.size
 
-    def unrealized_snapshot(
-        self,
-        *,
-        market_prices: Dict[str, float],
-    ) -> Dict[str, float]:
+        # 1) Stop Loss
+        stop_level = (
+            pos.entry_price * (1 - pos.stop_distance_pct)
+            if pos.side == "BUY"
+            else pos.entry_price * (1 + pos.stop_distance_pct)
+        )
 
-        snapshot: Dict[str, float] = {}
+        if (pos.side == "BUY" and current_price <= stop_level) or (
+            pos.side == "SELL" and current_price >= stop_level
+        ):
+            pnl = calc_pnl(current_price)
+            del self.positions[instrument]
+            return pnl
 
-        for inst, pos in self.positions.items():
-            current_price = market_prices.get(inst)
-            if current_price is None:
-                continue
-
-            pnl = self._calculate_pnl(
-                side=pos.side,
-                entry_price=pos.avg_entry_price,
-                exit_price=current_price,
-                size=pos.size,
+        # 2) Take Profit
+        if pos.take_profit_pct is not None:
+            tp_level = (
+                pos.entry_price * (1 + pos.take_profit_pct)
+                if pos.side == "BUY"
+                else pos.entry_price * (1 - pos.take_profit_pct)
             )
 
-            snapshot[inst] = pnl
+            if (pos.side == "BUY" and current_price >= tp_level) or (
+                pos.side == "SELL" and current_price <= tp_level
+            ):
+                pnl = calc_pnl(current_price)
+                del self.positions[instrument]
+                return pnl
 
-        return snapshot
+        # 3) Opposite Signal Exit
+        if incoming_signal and incoming_signal != pos.side:
+            pnl = calc_pnl(current_price)
+            del self.positions[instrument]
+            return pnl
+
+        # 4) Max Hold Exit
+        if current_step - pos.opened_step >= pos.max_hold_steps:
+            pnl = calc_pnl(current_price)
+            del self.positions[instrument]
+            return pnl
+
+        return 0.0
 
     # ----------------------------------------------------------
-    # POSITION SUMMARY
+    # CHECK IF POSITION EXISTS
+    # ----------------------------------------------------------
+
+    def has_position(self, instrument: str) -> bool:
+        return instrument in self.positions
+
+    # ----------------------------------------------------------
+    # SUMMARY
     # ----------------------------------------------------------
 
     def summary(self) -> Dict[str, Dict]:
         out: Dict[str, Dict] = {}
-
         for inst, pos in self.positions.items():
             out[inst] = {
                 "side": pos.side,
                 "size": pos.size,
-                "avg_entry_price": pos.avg_entry_price,
-                "realized_pnl": pos.realized_pnl,
+                "entry_price": pos.entry_price,
+                "opened_step": pos.opened_step,
             }
-
         return out
