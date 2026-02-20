@@ -1,14 +1,8 @@
 """
 engine/engine_loop.py
 
-Canonical Institutional Engine Loop v4
-Capital Strata Systems (CSS)
-
-Upgrades:
-- PositionBook integration
-- Realized PnL via lifecycle engine
-- Self-governing capital tilt
-- Weekly clamp + drawdown control
+Canonical Institutional Engine Loop v5
+Signal-driven + Behaviour-aware
 """
 
 from __future__ import annotations
@@ -20,25 +14,29 @@ from datetime import datetime, timezone
 from engine.execution.execution_gate import ExecutionGate
 from engine.execution.execution_cost_engine import ExecutionCostEngine
 from engine.performance.pnl_tracker import PnLTracker
-from engine.core.rebalancer import Rebalancer
 from engine.core.position_book import PositionBook
+from engine.strategy.behaviour_mapper import get_profile_for_behaviour
+from engine.strategy.signal_engine import SignalEngine
 
 
-WEEKLY_REBALANCE_INTERVAL = 20
 WEEKLY_INSTRUMENT_CLAMP_PCT = 0.05
 
 
 class EngineLoop:
 
-    def __init__(self) -> None:
+    def __init__(self, behaviour: str = "C") -> None:
+
         self.engine_run_id = f"css-{uuid.uuid4()}"
         self.equity_start = 100000.0
 
         self.pnl_tracker = PnLTracker(self.equity_start)
         self.gate = ExecutionGate()
         self.costs = ExecutionCostEngine(deterministic=True)
-        self.rebalancer = Rebalancer()
         self.position_book = PositionBook()
+
+        # Behaviour → StrategyProfile
+        self.profile = get_profile_for_behaviour(behaviour)
+        self.signal_engine = SignalEngine(self.profile)
 
         self.step_count = 0
         self.instrument_suspensions: Dict[str, str] = {}
@@ -51,22 +49,17 @@ class EngineLoop:
             "USD_CHF",
         ]
 
-        equal_weight = 1.0 / len(self.instruments)
-        self.capital_weights = {inst: equal_weight for inst in self.instruments}
-
     # --------------------------------------------------
 
     def _synthetic_price(self, instrument: str, step: int) -> float:
-        base_prices = {
+        base = {
             "EUR_USD": 1.10,
             "GBP_USD": 1.30,
             "USD_JPY": 110.0,
             "AUD_USD": 0.70,
             "USD_CHF": 0.90,
         }
-
-        drift = (step % 5) * 0.001
-        return base_prices[instrument] + drift
+        return base[instrument] + (step % 5) * 0.001
 
     # --------------------------------------------------
 
@@ -77,12 +70,13 @@ class EngineLoop:
     # --------------------------------------------------
 
     def _check_weekly_clamp(self, instrument: str) -> bool:
+
         snapshot = self.pnl_tracker.weekly_snapshot()
         if not snapshot:
             return False
 
-        instrument_perf = snapshot.get("instrument_performance", {})
-        pnl = float(instrument_perf.get(instrument, {}).get("net_pnl", 0.0))
+        inst_totals = snapshot.get("weekly_instrument_totals", {})
+        pnl = float(inst_totals.get(instrument, 0.0))
 
         clamp_threshold = -self.equity_start * WEEKLY_INSTRUMENT_CLAMP_PCT
 
@@ -94,51 +88,41 @@ class EngineLoop:
 
     # --------------------------------------------------
 
-    def _rebalance_if_needed(self):
-
-        if self.step_count % WEEKLY_REBALANCE_INTERVAL != 0:
-            return
-
-        signal = self.pnl_tracker.rebalancing_signal()
-        adjustments = self.rebalancer.generate_adjustments(signal)
-
-        self.capital_weights = self.rebalancer.apply_adjustments(
-            current_weights=self.capital_weights,
-            adjustments=adjustments,
-        )
-
-        print("\n==== WEEKLY REBALANCE EVENT ====")
-        print("Signal:", signal)
-        print("Adjustments:", adjustments)
-        print("New Weights:", self.capital_weights)
-        print("================================\n")
-
-    # --------------------------------------------------
-
     def step(self, step: int) -> Dict[str, Any]:
 
         self.step_count += 1
         instrument = self.instruments[step % len(self.instruments)]
-        week_key = self._current_week_key()
 
-        if instrument in self.instrument_suspensions:
-            if self.instrument_suspensions[instrument] != week_key:
-                del self.instrument_suspensions[instrument]
+        # --------------------------
+        # Generate signal
+        # --------------------------
 
-        if instrument in self.instrument_suspensions:
-            return {"status": "SUSPENDED", "instrument": instrument}
+        price_now = self._synthetic_price(instrument, step)
+        price_prev = self._synthetic_price(instrument, step - 1)
+        moving_avg = self._synthetic_price(instrument, step - 3)
 
-        self._rebalance_if_needed()
+        signal = self.signal_engine.generate(
+            instrument=instrument,
+            price_now=price_now,
+            price_prev=price_prev,
+            moving_avg=moving_avg,
+        )
 
-        weight = float(self.capital_weights.get(instrument, 1.0))
-        notional = 10000.0 * weight
+        if signal.direction == "FLAT":
+            return {"status": "NO_TRADE", "instrument": instrument}
+
+        # --------------------------
+        # Governance check
+        # --------------------------
+
+        notional = 10000.0 * signal.strength
 
         equity = self.pnl_tracker.current_equity
         equity_peak = self.pnl_tracker.peak_equity
 
         decision = self.gate.evaluate_trade(
             instrument=instrument,
-            side="BUY",
+            side=signal.direction,
             notional=notional,
             stop_distance_pct=0.01,
             equity=equity,
@@ -149,40 +133,35 @@ class EngineLoop:
         if decision["decision"]["final"] == "BLOCK":
             return {"status": "BLOCKED", "reason": decision.get("reason")}
 
-        # -------------------------
-        # POSITION LIFECYCLE
-        # -------------------------
+        # --------------------------
+        # Position lifecycle
+        # --------------------------
 
-        entry_price = self._synthetic_price(instrument, step)
-        exit_price = self._synthetic_price(instrument, step + 1)
+        size = notional / price_now
 
-        size = notional / entry_price
-
-        # Open
         self.position_book.open_or_increase(
             instrument=instrument,
-            side="BUY",
+            side=signal.direction,
             size=size,
-            price=entry_price,
+            price=price_now,
         )
 
-        # Close immediately (1-step hold model)
+        # One-step exit model
+        exit_price = self._synthetic_price(instrument, step + 1)
+
+        opposite = "SELL" if signal.direction == "BUY" else "BUY"
+
         self.position_book.open_or_increase(
             instrument=instrument,
-            side="SELL",
+            side=opposite,
             size=size,
             price=exit_price,
         )
 
-        realized = self.position_book.positions.get(instrument)
-        realized_pnl = 0.0
+        realized_pnl = (exit_price - price_now) * size
+        if signal.direction == "SELL":
+            realized_pnl = -realized_pnl
 
-        if realized is None:
-            # Position fully closed; extract realized from internal record
-            # Simplest approach: calculate directly
-            realized_pnl = (exit_price - entry_price) * size
-
-        # Apply cost friction
         pnl_after_costs = self.costs.apply_costs(
             instrument=instrument,
             notional=notional,
@@ -200,8 +179,8 @@ class EngineLoop:
         return {
             "step": step,
             "instrument": instrument,
-            "entry_price": entry_price,
-            "exit_price": exit_price,
+            "signal": signal.direction,
+            "strength": signal.strength,
             "pnl_after_costs": pnl_after_costs,
             "equity": self.pnl_tracker.current_equity,
         }
@@ -210,23 +189,26 @@ class EngineLoop:
 
     def run(self, steps: int = 200) -> None:
 
-        print("==== INSTITUTIONAL POSITION SIMULATION ====")
+        print("==== SIGNAL DRIVEN SIMULATION ====")
+        print("Behaviour:", self.profile.name)
 
         for i in range(steps):
             print(self.step(i))
 
-        print("\n==== PNL TRACKER SUMMARY ====")
+        print("\n==== FINAL EQUITY SNAPSHOT ====")
         print(self.pnl_tracker.equity_snapshot())
+
+        print("\n==== INSTRUMENT SUMMARY ====")
         print(self.pnl_tracker.instrument_summary())
 
         print("\n==== RUN SUMMARY ====")
-        print(f"engine_run_id: {self.engine_run_id}")
-        print(f"steps: {self.step_count}")
-        print("\n==== SIMULATION COMPLETE ====")
+        print("engine_run_id:", self.engine_run_id)
+        print("steps:", self.step_count)
+        print("\n==== COMPLETE ====")
 
 
 def main() -> int:
-    loop = EngineLoop()
+    loop = EngineLoop(behaviour="C")
     loop.run(steps=200)
     return 0
 
