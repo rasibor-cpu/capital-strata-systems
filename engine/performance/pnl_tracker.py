@@ -1,16 +1,13 @@
 """
-PnLTracker – Institutional Performance Ledger
+PnLTracker – Institutional Performance Ledger v2
 Capital Strata Systems (CSS)
 
-Authoritative equity spine.
-
-Features:
-- Multi-instrument PnL separation
-- Realized vs Unrealized tracking
-- Time-bucket aggregation (weekly, monthly, quarterly, annual)
-- Drawdown tracking
-- Append-only journal integrity
-- Weekly snapshot support for AssetAllocator
+Upgrades:
+- Rolling weekly window
+- Instrument performance classification
+- Rebalancing signal generation
+- Capital weight suggestion logic
+- Institutional reporting spine
 """
 
 from __future__ import annotations
@@ -59,7 +56,7 @@ class PnLTracker:
         self.instrument_ledgers: Dict[str, InstrumentLedger] = {}
         self.journal: List[JournalEntry] = []
 
-        # time buckets (net totals)
+        # time buckets
         self.weekly = defaultdict(float)
         self.monthly = defaultdict(float)
         self.quarterly = defaultdict(float)
@@ -79,7 +76,6 @@ class PnLTracker:
 
         timestamp = timestamp or datetime.utcnow()
 
-        # instrument ledger
         ledger = self.instrument_ledgers.setdefault(
             instrument, InstrumentLedger()
         )
@@ -88,7 +84,7 @@ class PnLTracker:
         ledger.unrealized_pnl = unrealized_pnl
         ledger.trades += 1
 
-        # equity update (realized only)
+        # equity update
         self.current_equity += realized_pnl
 
         if self.current_equity > self.peak_equity:
@@ -108,7 +104,7 @@ class PnLTracker:
         self.quarterly[quarter_key] += realized_pnl
         self.annual[year_key] += realized_pnl
 
-        # append-only journal
+        # journal append
         self.journal.append(
             JournalEntry(
                 entry_id=str(uuid.uuid4()),
@@ -121,42 +117,27 @@ class PnLTracker:
         )
 
     # ========================================================
-    # SNAPSHOT FOR ALLOCATOR (WEEKLY)
+    # WEEK IDENTIFICATION
     # ========================================================
 
-    def weekly_snapshot(self) -> Dict[str, Dict[str, float]]:
-        """
-        Returns allocator-compatible structure:
-
-        {
-            "weekly_instrument_totals": {...},
-            "weekly_instrument_abs_totals": {...},
-            "weekly_asset_totals": {...},
-            "weekly_asset_abs_totals": {...},
-        }
-
-        Asset class mapping:
-        - Currently simple default: everything = "FX"
-        - Later replace with instrument registry
-        """
-
+    def _latest_week_key(self) -> Optional[str]:
         if not self.journal:
-            return {}
+            return None
+        entry = self.journal[-1]
+        return f"{entry.timestamp.year}-W{entry.timestamp.isocalendar().week}"
 
-        # find latest week in journal
-        latest_week = None
-        for entry in reversed(self.journal):
-            latest_week = f"{entry.timestamp.year}-W{entry.timestamp.isocalendar().week}"
-            break
+    # ========================================================
+    # WEEKLY SNAPSHOT + CLASSIFICATION
+    # ========================================================
 
-        if latest_week is None:
+    def weekly_snapshot(self) -> Dict:
+
+        latest_week = self._latest_week_key()
+        if not latest_week:
             return {}
 
         instrument_net = defaultdict(float)
         instrument_abs = defaultdict(float)
-
-        asset_net = defaultdict(float)
-        asset_abs = defaultdict(float)
 
         for entry in self.journal:
             wk = f"{entry.timestamp.year}-W{entry.timestamp.isocalendar().week}"
@@ -167,17 +148,76 @@ class PnLTracker:
             instrument_net[entry.instrument] += pnl
             instrument_abs[entry.instrument] += abs(pnl)
 
-            # simple FX default mapping
-            asset_class = "FX"
-            asset_net[asset_class] += pnl
-            asset_abs[asset_class] += abs(pnl)
+        classification = {}
+        for inst, pnl in instrument_net.items():
+            if pnl > 0:
+                status = "WINNING"
+            elif pnl < 0:
+                status = "LOSING"
+            else:
+                status = "FLAT"
+
+            classification[inst] = {
+                "net_pnl": pnl,
+                "abs_pnl": instrument_abs[inst],
+                "status": status,
+            }
 
         return {
-            "weekly_instrument_totals": dict(instrument_net),
-            "weekly_instrument_abs_totals": dict(instrument_abs),
-            "weekly_asset_totals": dict(asset_net),
-            "weekly_asset_abs_totals": dict(asset_abs),
+            "week": latest_week,
+            "instrument_performance": classification,
+            "portfolio_net": sum(instrument_net.values()),
         }
+
+    # ========================================================
+    # ROLLING 4-WEEK PERFORMANCE
+    # ========================================================
+
+    def rolling_4week_summary(self) -> Dict[str, float]:
+
+        if not self.journal:
+            return {}
+
+        weeks = sorted(set(
+            f"{e.timestamp.year}-W{e.timestamp.isocalendar().week}"
+            for e in self.journal
+        ))
+
+        last_4 = weeks[-4:]
+
+        summary = defaultdict(float)
+
+        for entry in self.journal:
+            wk = f"{entry.timestamp.year}-W{entry.timestamp.isocalendar().week}"
+            if wk in last_4:
+                summary[entry.instrument] += entry.realized_pnl
+
+        return dict(summary)
+
+    # ========================================================
+    # REBALANCING SIGNAL ENGINE
+    # ========================================================
+
+    def rebalancing_signal(self) -> Dict[str, float]:
+        """
+        Suggest capital tilt based on rolling 4-week performance.
+        Winning instruments gain weight.
+        Losing instruments lose weight.
+        """
+
+        perf = self.rolling_4week_summary()
+        if not perf:
+            return {}
+
+        total_abs = sum(abs(v) for v in perf.values())
+        if total_abs == 0:
+            return {k: 0.0 for k in perf.keys()}
+
+        weights = {}
+        for inst, pnl in perf.items():
+            weights[inst] = pnl / total_abs
+
+        return weights
 
     # ========================================================
     # METRICS
