@@ -6,13 +6,16 @@ Signal-driven + Multi-bar hold model (correct exit sweep)
 
 Key Fix:
 - Evaluate exits for ALL open positions every step
+
+Profitability SAFE TUNING:
+- Minimum signal strength filter (quality gate)
+  Balanced default: MIN_SIGNAL_STRENGTH = 0.70
 """
 
 from __future__ import annotations
 
 import uuid
 from typing import Dict, Any, List
-from datetime import datetime, timezone
 
 from engine.execution.execution_gate import ExecutionGate
 from engine.execution.execution_cost_engine import ExecutionCostEngine
@@ -23,6 +26,9 @@ from engine.strategy.signal_engine import SignalEngine
 
 
 WEEKLY_INSTRUMENT_CLAMP_PCT = 0.05
+
+# SAFE profitability tuning: filter weak signals (reduces trade count, improves quality)
+MIN_SIGNAL_STRENGTH = 0.70
 
 
 class EngineLoop:
@@ -41,6 +47,11 @@ class EngineLoop:
         self.signal_engine = SignalEngine(self.profile)
 
         self.step_count = 0
+
+        # Diagnostics for tuning
+        self.skipped_weak_signals = 0
+        self.attempted_entries = 0
+        self.opened_entries = 0
 
         self.instruments: List[str] = [
             "EUR_USD",
@@ -133,11 +144,27 @@ class EngineLoop:
         # 3) Open if allowed
         opened = False
 
+        # SAFE QUALITY FILTER: block weak signals before any sizing/gating
+        if signal.direction != "FLAT" and float(signal.strength) < float(MIN_SIGNAL_STRENGTH):
+            self.skipped_weak_signals += 1
+            return {
+                "step": step,
+                "instrument": instrument,
+                "signal": signal.direction,
+                "opened": False,
+                "closed": closed,
+                "equity": self.pnl_tracker.current_equity,
+                "open_positions": self.position_book.summary(),
+                "skipped_weak_signals": self.skipped_weak_signals,
+            }
+
         if (
             signal.direction != "FLAT"
             and not self.position_book.has_position(instrument)
             and not self._check_weekly_clamp(instrument)
         ):
+            self.attempted_entries += 1
+
             notional = 10000.0 * signal.strength
 
             decision = self.gate.evaluate_trade(
@@ -163,6 +190,7 @@ class EngineLoop:
                     max_hold_steps=4,
                 )
                 opened = True
+                self.opened_entries += 1
 
         return {
             "step": step,
@@ -172,6 +200,9 @@ class EngineLoop:
             "closed": closed,
             "equity": self.pnl_tracker.current_equity,
             "open_positions": self.position_book.summary(),
+            "skipped_weak_signals": self.skipped_weak_signals,
+            "attempted_entries": self.attempted_entries,
+            "opened_entries": self.opened_entries,
         }
 
     # --------------------------------------------------
@@ -180,6 +211,7 @@ class EngineLoop:
 
         print("==== SIGNAL + HOLD SIMULATION (EXIT SWEEP) ====")
         print("Behaviour:", self.profile.name)
+        print("MIN_SIGNAL_STRENGTH:", MIN_SIGNAL_STRENGTH)
 
         for i in range(steps):
             print(self.step(i))
@@ -193,6 +225,9 @@ class EngineLoop:
         print("\n==== RUN SUMMARY ====")
         print("engine_run_id:", self.engine_run_id)
         print("steps:", self.step_count)
+        print("skipped_weak_signals:", self.skipped_weak_signals)
+        print("attempted_entries:", self.attempted_entries)
+        print("opened_entries:", self.opened_entries)
         print("\n==== COMPLETE ====")
 
 
