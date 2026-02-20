@@ -7,9 +7,8 @@ Signal-driven + Multi-bar hold model (correct exit sweep)
 Key Fix:
 - Evaluate exits for ALL open positions every step
 
-Profitability SAFE TUNING:
-- Minimum signal strength filter (quality gate)
-  Balanced default: MIN_SIGNAL_STRENGTH = 0.70
+Inspection mode:
+- Prints signal strength so we can calibrate MIN_SIGNAL_STRENGTH safely.
 """
 
 from __future__ import annotations
@@ -27,8 +26,8 @@ from engine.strategy.signal_engine import SignalEngine
 
 WEEKLY_INSTRUMENT_CLAMP_PCT = 0.05
 
-# SAFE profitability tuning: filter weak signals (reduces trade count, improves quality)
-MIN_SIGNAL_STRENGTH = 0.70
+# INSPECTION: allow all strengths so we can observe distribution
+MIN_SIGNAL_STRENGTH = 0.0
 
 
 class EngineLoop:
@@ -141,16 +140,19 @@ class EngineLoop:
             moving_avg=moving_avg,
         )
 
+        strength = float(signal.strength)
+
         # 3) Open if allowed
         opened = False
 
-        # SAFE QUALITY FILTER: block weak signals before any sizing/gating
-        if signal.direction != "FLAT" and float(signal.strength) < float(MIN_SIGNAL_STRENGTH):
+        # Quality filter (currently disabled for inspection unless you set MIN_SIGNAL_STRENGTH > 0)
+        if signal.direction != "FLAT" and strength < float(MIN_SIGNAL_STRENGTH):
             self.skipped_weak_signals += 1
             return {
                 "step": step,
                 "instrument": instrument,
                 "signal": signal.direction,
+                "strength": strength,
                 "opened": False,
                 "closed": closed,
                 "equity": self.pnl_tracker.current_equity,
@@ -165,7 +167,7 @@ class EngineLoop:
         ):
             self.attempted_entries += 1
 
-            notional = 10000.0 * signal.strength
+            notional = 10000.0 * strength
 
             decision = self.gate.evaluate_trade(
                 instrument=instrument,
@@ -196,6 +198,7 @@ class EngineLoop:
             "step": step,
             "instrument": instrument,
             "signal": signal.direction,
+            "strength": strength,
             "opened": opened,
             "closed": closed,
             "equity": self.pnl_tracker.current_equity,
