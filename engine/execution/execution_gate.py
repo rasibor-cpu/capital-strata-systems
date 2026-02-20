@@ -1,13 +1,16 @@
 """
-Execution Gate – Canonical Flat Interface (Authority-Native)
+Execution Gate – Canonical Flat Interface (Volatility-Aware)
 Capital Strata Systems
 
-Fail-closed.
+Upgrades:
+- Hard drawdown circuit breaker
+- Weekly rebalance enforcement
+- Authority-aware RiskGovernor integration
+- Instrument-specific VolatilityPositionSizer (NEW)
+- Fail-closed behavior
 
-Authority Purity:
-- Reads equity directly from EquityAuthority if provided.
-- Caller-supplied equity becomes optional compatibility input.
-- Eliminates shadow capital completely.
+Volatility sizing sits between:
+    Allocator -> VolSizer -> DrawdownScaler -> Governor
 """
 
 from __future__ import annotations
@@ -19,46 +22,24 @@ from engine.capital.compounding_engine import CompoundingEngine
 from engine.risk.drawdown_scaler import DrawdownScaler
 from engine.risk.risk_governor import RiskGovernor
 from engine.capital.weekly_rebalance_engine import WeeklyRebalanceEngine
-from engine.equity_authority import EquityAuthority
+from engine.risk.volatility_position_sizer import VolatilityPositionSizer
+
 
 HARD_DRAWDOWN_CIRCUIT_BREAKER_PCT = 0.20
 
 
 class ExecutionGate:
 
-    def __init__(
-        self,
-        risk_governor: Optional[RiskGovernor] = None,
-        equity_authority: Optional[EquityAuthority] = None,
-    ) -> None:
-
+    def __init__(self, risk_governor: Optional[RiskGovernor] = None) -> None:
         self.risk_governor = risk_governor or RiskGovernor()
-        self.equity_authority = equity_authority
-
         self.compounding = CompoundingEngine()
         self.drawdown_scaler = DrawdownScaler()
+        self.vol_sizer = VolatilityPositionSizer()
         self._rebalance_engine: Optional[WeeklyRebalanceEngine] = None
 
-    # --------------------------------------------------------
-    # Authority helpers
-    # --------------------------------------------------------
-
-    def _resolve_equity(self, equity: float, equity_peak: float) -> tuple[float, float]:
-        """
-        If authority present → use it.
-        Otherwise fall back to caller inputs.
-        """
-        if self.equity_authority is not None:
-            return (
-                float(self.equity_authority.current_equity()),
-                float(self.equity_authority.peak_equity()),
-            )
-
-        return float(equity), float(equity_peak)
-
-    # --------------------------------------------------------
+    # =========================================================
     # Rebalance Enforcement
-    # --------------------------------------------------------
+    # =========================================================
 
     def _rebalance_check(
         self,
@@ -75,8 +56,12 @@ class ExecutionGate:
             debug["rebalance"] = {"skipped": True, "reason": "no_target_weights"}
             return None
 
-        if self._rebalance_engine is None or getattr(self._rebalance_engine, "target_weights", None) != target_weights:
-            self._rebalance_engine = WeeklyRebalanceEngine(target_weights=target_weights)
+        if self._rebalance_engine is None or getattr(
+            self._rebalance_engine, "target_weights", None
+        ) != target_weights:
+            self._rebalance_engine = WeeklyRebalanceEngine(
+                target_weights=target_weights
+            )
 
         res = self._rebalance_engine.evaluate(
             now_utc=now_utc,
@@ -93,13 +78,17 @@ class ExecutionGate:
         }
 
         if res.should_rebalance:
-            return {"decision": {"final": "BLOCK"}, "reason": "weekly_rebalance_window_active", "debug": debug}
+            return {
+                "decision": {"final": "BLOCK"},
+                "reason": "weekly_rebalance_window_active",
+                "debug": debug,
+            }
 
         return None
 
-    # --------------------------------------------------------
+    # =========================================================
     # Main Evaluation
-    # --------------------------------------------------------
+    # =========================================================
 
     def evaluate_trade(
         self,
@@ -108,8 +97,8 @@ class ExecutionGate:
         side: str,
         notional: float,
         stop_distance_pct: float,
-        equity: float = 0.0,           # compatibility only
-        equity_peak: float = 0.0,      # compatibility only
+        equity: float,
+        equity_peak: float,
         regime_persistence: float,
         policy: str = "core",
         current_allocations: Optional[Dict[str, float]] = None,
@@ -122,19 +111,29 @@ class ExecutionGate:
 
         try:
 
+            # -------------------------
+            # Basic validation
+            # -------------------------
             if notional <= 0:
-                return {"decision": {"final": "BLOCK"}, "reason": "notional_invalid", "debug": debug}
+                return {
+                    "decision": {"final": "BLOCK"},
+                    "reason": "notional_invalid",
+                    "debug": debug,
+                }
 
             if stop_distance_pct <= 0:
-                return {"decision": {"final": "BLOCK"}, "reason": "stop_distance_invalid", "debug": debug}
-
-            # -------------------------
-            # Resolve authoritative equity
-            # -------------------------
-            equity, equity_peak = self._resolve_equity(equity, equity_peak)
+                return {
+                    "decision": {"final": "BLOCK"},
+                    "reason": "stop_distance_invalid",
+                    "debug": debug,
+                }
 
             if equity <= 0:
-                return {"decision": {"final": "BLOCK"}, "reason": "equity_invalid", "debug": debug}
+                return {
+                    "decision": {"final": "BLOCK"},
+                    "reason": "equity_invalid",
+                    "debug": debug,
+                }
 
             # -------------------------
             # Hard circuit breaker
@@ -149,7 +148,7 @@ class ExecutionGate:
                     }
 
             # -------------------------
-            # Weekly Rebalance
+            # Weekly rebalance enforcement
             # -------------------------
             now_utc = datetime.utcnow()
             block = self._rebalance_check(
@@ -160,11 +159,12 @@ class ExecutionGate:
                 regime_state=regime_state,
                 debug=debug,
             )
+
             if block:
                 return block
 
             # -------------------------
-            # Compounding
+            # Compounding layer
             # -------------------------
             risk_pct = self.compounding.compute_dynamic_risk(
                 equity=equity,
@@ -175,33 +175,54 @@ class ExecutionGate:
             debug["risk_pct"] = risk_pct
 
             # -------------------------
-            # Drawdown Scaling
+            # Volatility sizing (NEW)
             # -------------------------
-            scaled_notional = notional
-            try:
-                scaled_notional = self.drawdown_scaler.scale(
-                    notional=notional,
-                    equity=equity,
-                    equity_peak=equity_peak,
-                    policy=policy,
-                )
-            except Exception:
-                pass
+            vol_scaled_notional = self.vol_sizer.size(
+                instrument=instrument,
+                base_notional=notional,
+                volatility_state=volatility_state,
+            )
+
+            debug["vol_scaled_notional"] = vol_scaled_notional
+
+            # -------------------------
+            # Drawdown scaling
+            # -------------------------
+            scaled_notional = self.drawdown_scaler.scale(
+                notional=vol_scaled_notional,
+                equity=equity,
+                equity_peak=equity_peak,
+                policy=policy,
+            )
 
             debug["scaled_notional"] = scaled_notional
 
             # -------------------------
-            # RiskGovernor (authority-native)
+            # RiskGovernor
             # -------------------------
-            decision = self.risk_governor.validate_trade(
-                instrument=instrument,
-                side=side,
-                requested_notional=scaled_notional,
-                stop_distance_pct=stop_distance_pct,
-                equity=equity,     # ignored if authority-bound
-                risk_pct=risk_pct,
-                policy=policy,
-            )
+            gov = self.risk_governor
+            use_authority = bool(getattr(gov, "equity_authority", None) is not None)
+
+            if use_authority:
+                decision = gov.validate_trade(
+                    instrument=instrument,
+                    side=side,
+                    requested_notional=scaled_notional,
+                    stop_distance_pct=stop_distance_pct,
+                    equity=0.0,
+                    risk_pct=risk_pct,
+                    policy=policy,
+                )
+            else:
+                decision = gov.validate_trade(
+                    instrument=instrument,
+                    side=side,
+                    requested_notional=scaled_notional,
+                    stop_distance_pct=stop_distance_pct,
+                    equity=equity,
+                    risk_pct=risk_pct,
+                    policy=policy,
+                )
 
             debug["governor_response"] = decision
 
@@ -212,7 +233,11 @@ class ExecutionGate:
                     "debug": debug,
                 }
 
-            return {"decision": {"final": "ALLOW"}, "reason": "approved", "debug": debug}
+            return {
+                "decision": {"final": "ALLOW"},
+                "reason": "approved",
+                "debug": debug,
+            }
 
         except Exception as e:
             return {

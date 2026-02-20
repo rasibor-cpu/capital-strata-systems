@@ -32,10 +32,6 @@ def main() -> int:
 
     gate = ExecutionGate()
 
-    # -------------------------------------
-    # Simulated Inputs
-    # -------------------------------------
-
     instrument = "EUR_USD"
     side = "BUY"
     notional = 100000.0
@@ -47,31 +43,20 @@ def main() -> int:
     regime_persistence = 0.65
     policy = "core"
 
-    # -------------------------------------
-    # Rebalance Activation Inputs
-    # -------------------------------------
-
-    # Target allocation model (example)
     rebalance_target_weights = {
         "EUR_USD": 0.40,
         "GBP_USD": 0.30,
         "USD_JPY": 0.30,
     }
 
-    # Simulated current exposure (intentionally drifted)
     current_allocations = {
         "EUR_USD": 70000.0,
         "GBP_USD": 20000.0,
         "USD_JPY": 10000.0,
     }
 
-    # Volatility + Regime States
     volatility_state = "HIGH"
     regime_state = "DEFENSIVE"
-
-    # -------------------------------------
-    # Gate Evaluation
-    # -------------------------------------
 
     decision = gate.evaluate_trade(
         instrument=instrument,
@@ -90,6 +75,22 @@ def main() -> int:
 
     print("\n--- DECISION ---")
     print(json.dumps(decision, indent=2))
+
+    # ---------------------------------------------------------
+    # Post-ALLOW: simulate a completed trade + record PnL lines
+    # ---------------------------------------------------------
+    if decision.get("decision", {}).get("final") == "ALLOW":
+        pnl = 250.0
+        print(f"\n--- SIMULATED CLOSE ---\nrecord_trade_outcome(pnl={pnl}, instrument={instrument})")
+
+        try:
+            gate.risk_governor.record_trade_outcome(pnl, instrument=instrument)
+            snap = gate.risk_governor.ledger.snapshot()
+            print("\n--- LEDGER SNAPSHOT ---")
+            print(json.dumps(snap, indent=2))
+        except Exception as e:
+            print("\n--- LEDGER SNAPSHOT ---")
+            print(f"FAILED: {e}")
 
     return 0
 
