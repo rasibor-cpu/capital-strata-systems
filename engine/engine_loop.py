@@ -1,14 +1,14 @@
 """
 engine/engine_loop.py
 
-Canonical Institutional Engine Loop v3
+Canonical Institutional Engine Loop v4
 Capital Strata Systems (CSS)
 
 Upgrades:
-- Surfaces ExecutionGate debug payload
-- Clean diagnostic output
-- Self-governing capital tilt engine
-- Weekly clamp enforcement
+- PositionBook integration
+- Realized PnL via lifecycle engine
+- Self-governing capital tilt
+- Weekly clamp + drawdown control
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from engine.execution.execution_gate import ExecutionGate
 from engine.execution.execution_cost_engine import ExecutionCostEngine
 from engine.performance.pnl_tracker import PnLTracker
 from engine.core.rebalancer import Rebalancer
+from engine.core.position_book import PositionBook
 
 
 WEEKLY_REBALANCE_INTERVAL = 20
@@ -37,6 +38,7 @@ class EngineLoop:
         self.gate = ExecutionGate()
         self.costs = ExecutionCostEngine(deterministic=True)
         self.rebalancer = Rebalancer()
+        self.position_book = PositionBook()
 
         self.step_count = 0
         self.instrument_suspensions: Dict[str, str] = {}
@@ -54,15 +56,17 @@ class EngineLoop:
 
     # --------------------------------------------------
 
-    def _simulate_pnl(self, instrument: str, step: int) -> float:
-        patterns = {
-            "EUR_USD": [800, 900, 1000, -2500, 900],
-            "GBP_USD": [-300, -400, -500, 1000, 1200],
-            "USD_JPY": [600, 700, -800, 900, 1000],
-            "AUD_USD": [200, 300, -200, 400, -500],
-            "USD_CHF": [-100, -200, -300, 400, -600],
+    def _synthetic_price(self, instrument: str, step: int) -> float:
+        base_prices = {
+            "EUR_USD": 1.10,
+            "GBP_USD": 1.30,
+            "USD_JPY": 110.0,
+            "AUD_USD": 0.70,
+            "USD_CHF": 0.90,
         }
-        return float(patterns[instrument][step % len(patterns[instrument])])
+
+        drift = (step % 5) * 0.001
+        return base_prices[instrument] + drift
 
     # --------------------------------------------------
 
@@ -114,7 +118,6 @@ class EngineLoop:
     def step(self, step: int) -> Dict[str, Any]:
 
         self.step_count += 1
-
         instrument = self.instruments[step % len(self.instruments)]
         week_key = self._current_week_key()
 
@@ -123,11 +126,7 @@ class EngineLoop:
                 del self.instrument_suspensions[instrument]
 
         if instrument in self.instrument_suspensions:
-            return {
-                "status": "SUSPENDED",
-                "instrument": instrument,
-                "reason": "weekly_loss_clamp_active",
-            }
+            return {"status": "SUSPENDED", "instrument": instrument}
 
         self._rebalance_if_needed()
 
@@ -147,20 +146,47 @@ class EngineLoop:
             regime_persistence=0.85,
         )
 
-        # 🔥 FULL DEBUG SURFACE
         if decision["decision"]["final"] == "BLOCK":
-            return {
-                "status": "BLOCKED",
-                "reason": decision.get("reason"),
-                "debug": decision.get("debug"),
-            }
+            return {"status": "BLOCKED", "reason": decision.get("reason")}
 
-        raw_pnl = self._simulate_pnl(instrument, step)
+        # -------------------------
+        # POSITION LIFECYCLE
+        # -------------------------
 
+        entry_price = self._synthetic_price(instrument, step)
+        exit_price = self._synthetic_price(instrument, step + 1)
+
+        size = notional / entry_price
+
+        # Open
+        self.position_book.open_or_increase(
+            instrument=instrument,
+            side="BUY",
+            size=size,
+            price=entry_price,
+        )
+
+        # Close immediately (1-step hold model)
+        self.position_book.open_or_increase(
+            instrument=instrument,
+            side="SELL",
+            size=size,
+            price=exit_price,
+        )
+
+        realized = self.position_book.positions.get(instrument)
+        realized_pnl = 0.0
+
+        if realized is None:
+            # Position fully closed; extract realized from internal record
+            # Simplest approach: calculate directly
+            realized_pnl = (exit_price - entry_price) * size
+
+        # Apply cost friction
         pnl_after_costs = self.costs.apply_costs(
             instrument=instrument,
             notional=notional,
-            raw_pnl=raw_pnl,
+            raw_pnl=realized_pnl,
         )
 
         self.pnl_tracker.record_trade(
@@ -169,20 +195,14 @@ class EngineLoop:
         )
 
         if self._check_weekly_clamp(instrument):
-            return {
-                "status": "SUSPENDED",
-                "instrument": instrument,
-                "reason": "weekly_loss_clamp_triggered",
-            }
+            return {"status": "SUSPENDED", "instrument": instrument}
 
         return {
-            "engine_run_id": self.engine_run_id,
             "step": step,
             "instrument": instrument,
-            "raw_pnl": raw_pnl,
+            "entry_price": entry_price,
+            "exit_price": exit_price,
             "pnl_after_costs": pnl_after_costs,
-            "notional": notional,
-            "weight": weight,
             "equity": self.pnl_tracker.current_equity,
         }
 
@@ -190,11 +210,10 @@ class EngineLoop:
 
     def run(self, steps: int = 200) -> None:
 
-        print("==== INSTITUTIONAL SIMULATION (DIAGNOSTIC MODE) ====")
+        print("==== INSTITUTIONAL POSITION SIMULATION ====")
 
         for i in range(steps):
-            result = self.step(i)
-            print(result)
+            print(self.step(i))
 
         print("\n==== PNL TRACKER SUMMARY ====")
         print(self.pnl_tracker.equity_snapshot())
