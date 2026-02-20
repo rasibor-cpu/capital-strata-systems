@@ -1,17 +1,16 @@
 """
 engine/engine_loop.py
 
-Canonical Institutional Engine Loop
+Canonical Institutional Engine Loop v2
 Capital Strata Systems (CSS)
 
-Integrated Layers:
-- Multi-instrument rotation
-- Allocator weighting
-- Weekly instrument clamp
+Integrated:
+- PnLTracker v2 rolling performance
+- Rebalancer capital tilt engine
+- Weekly loss clamp
 - ExecutionGate enforcement
 - ExecutionCostEngine friction
-- PnLTracker authoritative equity spine
-- Futures-ready architecture (adapter hook)
+- Governance-first design
 """
 
 from __future__ import annotations
@@ -23,7 +22,7 @@ from datetime import datetime, timezone
 from engine.execution.execution_gate import ExecutionGate
 from engine.execution.execution_cost_engine import ExecutionCostEngine
 from engine.performance.pnl_tracker import PnLTracker
-from engine.allocation.asset_allocator import AssetAllocator
+from engine.core.rebalancer import Rebalancer
 
 
 WEEKLY_REBALANCE_INTERVAL = 20
@@ -39,12 +38,11 @@ class EngineLoop:
         self.pnl_tracker = PnLTracker(self.equity_start)
         self.gate = ExecutionGate()
         self.costs = ExecutionCostEngine(deterministic=True)
-        self.allocator = AssetAllocator(intensity=0.5)
+        self.rebalancer = Rebalancer()
 
         self.step_count = 0
         self.instrument_suspensions: Dict[str, str] = {}
 
-        # Futures-ready registry hook
         self.instruments = [
             "EUR_USD",
             "GBP_USD",
@@ -52,6 +50,10 @@ class EngineLoop:
             "AUD_USD",
             "USD_CHF",
         ]
+
+        # Equal initial capital weights
+        equal_weight = 1.0 / len(self.instruments)
+        self.capital_weights = {inst: equal_weight for inst in self.instruments}
 
     # --------------------------------------------------
 
@@ -75,21 +77,40 @@ class EngineLoop:
 
     def _check_weekly_clamp(self, instrument: str) -> bool:
         snapshot = self.pnl_tracker.weekly_snapshot()
-        week_key = self._current_week_key()
-
         if not snapshot:
             return False
 
-        weekly_inst = snapshot.get("weekly_instrument_totals", {})
-        pnl = float(weekly_inst.get(instrument, 0.0))
+        instrument_perf = snapshot.get("instrument_performance", {})
+        pnl = float(instrument_perf.get(instrument, {}).get("net_pnl", 0.0))
 
         clamp_threshold = -self.equity_start * WEEKLY_INSTRUMENT_CLAMP_PCT
 
         if pnl <= clamp_threshold:
-            self.instrument_suspensions[instrument] = week_key
+            self.instrument_suspensions[instrument] = self._current_week_key()
             return True
 
         return False
+
+    # --------------------------------------------------
+
+    def _rebalance_if_needed(self):
+
+        if self.step_count % WEEKLY_REBALANCE_INTERVAL != 0:
+            return
+
+        signal = self.pnl_tracker.rebalancing_signal()
+        adjustments = self.rebalancer.generate_adjustments(signal)
+
+        self.capital_weights = self.rebalancer.apply_adjustments(
+            current_weights=self.capital_weights,
+            adjustments=adjustments,
+        )
+
+        print("\n==== WEEKLY REBALANCE EVENT ====")
+        print("Signal:", signal)
+        print("Adjustments:", adjustments)
+        print("New Weights:", self.capital_weights)
+        print("================================\n")
 
     # --------------------------------------------------
 
@@ -112,15 +133,9 @@ class EngineLoop:
                 "reason": "weekly_loss_clamp_active",
             }
 
-        # Allocator weighting
-        weight = 1.0
-        if self.step_count % WEEKLY_REBALANCE_INTERVAL == 0:
-            alloc = self.allocator.rebalance_weekly(
-                week_key="SIM-WEEK",
-                ledger_snapshot=self.pnl_tracker.weekly_snapshot(),
-            )
-            weight = float(alloc.instrument_weights.get(instrument, 1.0))
+        self._rebalance_if_needed()
 
+        weight = float(self.capital_weights.get(instrument, 1.0))
         notional = 10000.0 * weight
 
         equity = self.pnl_tracker.current_equity
@@ -174,7 +189,7 @@ class EngineLoop:
 
     def run(self, steps: int = 200) -> None:
 
-        print("==== INSTITUTIONAL SIMULATION (WITH FRICTION) ====")
+        print("==== INSTITUTIONAL SIMULATION (SELF-GOVERNING) ====")
 
         for i in range(steps):
             result = self.step(i)
