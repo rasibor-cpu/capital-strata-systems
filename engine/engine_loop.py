@@ -1,8 +1,8 @@
 """
 engine/engine_loop.py
 
-Canonical Institutional Engine Loop v5
-Signal-driven + Behaviour-aware
+Canonical Institutional Engine Loop v6
+Signal-driven + Multi-bar hold model
 """
 
 from __future__ import annotations
@@ -34,7 +34,6 @@ class EngineLoop:
         self.costs = ExecutionCostEngine(deterministic=True)
         self.position_book = PositionBook()
 
-        # Behaviour → StrategyProfile
         self.profile = get_profile_for_behaviour(behaviour)
         self.signal_engine = SignalEngine(self.profile)
 
@@ -63,12 +62,6 @@ class EngineLoop:
 
     # --------------------------------------------------
 
-    def _current_week_key(self) -> str:
-        now = datetime.now(timezone.utc)
-        return f"{now.year}-W{now.isocalendar().week}"
-
-    # --------------------------------------------------
-
     def _check_weekly_clamp(self, instrument: str) -> bool:
 
         snapshot = self.pnl_tracker.weekly_snapshot()
@@ -81,7 +74,6 @@ class EngineLoop:
         clamp_threshold = -self.equity_start * WEEKLY_INSTRUMENT_CLAMP_PCT
 
         if pnl <= clamp_threshold:
-            self.instrument_suspensions[instrument] = self._current_week_key()
             return True
 
         return False
@@ -93,13 +85,35 @@ class EngineLoop:
         self.step_count += 1
         instrument = self.instruments[step % len(self.instruments)]
 
-        # --------------------------
-        # Generate signal
-        # --------------------------
-
         price_now = self._synthetic_price(instrument, step)
         price_prev = self._synthetic_price(instrument, step - 1)
         moving_avg = self._synthetic_price(instrument, step - 3)
+
+        # --------------------------------------------------
+        # First evaluate exit on existing position
+        # --------------------------------------------------
+
+        realized_exit_pnl = self.position_book.evaluate_exit(
+            instrument=instrument,
+            current_price=price_now,
+            current_step=step,
+        )
+
+        if realized_exit_pnl != 0.0:
+            pnl_after_costs = self.costs.apply_costs(
+                instrument=instrument,
+                notional=10000.0,
+                raw_pnl=realized_exit_pnl,
+            )
+
+            self.pnl_tracker.record_trade(
+                instrument=instrument,
+                realized_pnl=pnl_after_costs,
+            )
+
+        # --------------------------------------------------
+        # Generate new signal
+        # --------------------------------------------------
 
         signal = self.signal_engine.generate(
             instrument=instrument,
@@ -108,88 +122,59 @@ class EngineLoop:
             moving_avg=moving_avg,
         )
 
-        if signal.direction == "FLAT":
-            return {"status": "NO_TRADE", "instrument": instrument}
+        # --------------------------------------------------
+        # Open new position only if none exists
+        # --------------------------------------------------
 
-        # --------------------------
-        # Governance check
-        # --------------------------
+        if (
+            signal.direction != "FLAT"
+            and not self.position_book.has_position(instrument)
+            and not self._check_weekly_clamp(instrument)
+        ):
 
-        notional = 10000.0 * signal.strength
+            notional = 10000.0 * signal.strength
 
-        equity = self.pnl_tracker.current_equity
-        equity_peak = self.pnl_tracker.peak_equity
+            equity = self.pnl_tracker.current_equity
+            equity_peak = self.pnl_tracker.peak_equity
 
-        decision = self.gate.evaluate_trade(
-            instrument=instrument,
-            side=signal.direction,
-            notional=notional,
-            stop_distance_pct=0.01,
-            equity=equity,
-            equity_peak=equity_peak,
-            regime_persistence=0.85,
-        )
+            decision = self.gate.evaluate_trade(
+                instrument=instrument,
+                side=signal.direction,
+                notional=notional,
+                stop_distance_pct=0.01,
+                equity=equity,
+                equity_peak=equity_peak,
+                regime_persistence=0.85,
+            )
 
-        if decision["decision"]["final"] == "BLOCK":
-            return {"status": "BLOCKED", "reason": decision.get("reason")}
+            if decision["decision"]["final"] == "ALLOW":
 
-        # --------------------------
-        # Position lifecycle
-        # --------------------------
+                size = notional / price_now
 
-        size = notional / price_now
-
-        self.position_book.open_or_increase(
-            instrument=instrument,
-            side=signal.direction,
-            size=size,
-            price=price_now,
-        )
-
-        # One-step exit model
-        exit_price = self._synthetic_price(instrument, step + 1)
-
-        opposite = "SELL" if signal.direction == "BUY" else "BUY"
-
-        self.position_book.open_or_increase(
-            instrument=instrument,
-            side=opposite,
-            size=size,
-            price=exit_price,
-        )
-
-        realized_pnl = (exit_price - price_now) * size
-        if signal.direction == "SELL":
-            realized_pnl = -realized_pnl
-
-        pnl_after_costs = self.costs.apply_costs(
-            instrument=instrument,
-            notional=notional,
-            raw_pnl=realized_pnl,
-        )
-
-        self.pnl_tracker.record_trade(
-            instrument=instrument,
-            realized_pnl=pnl_after_costs,
-        )
-
-        if self._check_weekly_clamp(instrument):
-            return {"status": "SUSPENDED", "instrument": instrument}
+                self.position_book.open_position(
+                    instrument=instrument,
+                    side=signal.direction,
+                    size=size,
+                    price=price_now,
+                    step=step,
+                    stop_distance_pct=0.002,
+                    take_profit_pct=0.004,
+                    max_hold_steps=4,
+                )
 
         return {
             "step": step,
             "instrument": instrument,
-            "signal": signal.direction,
-            "strength": signal.strength,
-            "pnl_after_costs": pnl_after_costs,
+            "price": price_now,
             "equity": self.pnl_tracker.current_equity,
+            "open_positions": self.position_book.summary(),
         }
 
     # --------------------------------------------------
 
     def run(self, steps: int = 200) -> None:
 
-        print("==== SIGNAL DRIVEN SIMULATION ====")
+        print("==== SIGNAL + HOLD SIMULATION ====")
         print("Behaviour:", self.profile.name)
 
         for i in range(steps):
