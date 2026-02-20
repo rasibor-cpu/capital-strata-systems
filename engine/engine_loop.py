@@ -1,16 +1,14 @@
 """
 engine/engine_loop.py
 
-Canonical Institutional Engine Loop v2
+Canonical Institutional Engine Loop v3
 Capital Strata Systems (CSS)
 
-Integrated:
-- PnLTracker v2 rolling performance
-- Rebalancer capital tilt engine
-- Weekly loss clamp
-- ExecutionGate enforcement
-- ExecutionCostEngine friction
-- Governance-first design
+Upgrades:
+- Surfaces ExecutionGate debug payload
+- Clean diagnostic output
+- Self-governing capital tilt engine
+- Weekly clamp enforcement
 """
 
 from __future__ import annotations
@@ -51,7 +49,6 @@ class EngineLoop:
             "USD_CHF",
         ]
 
-        # Equal initial capital weights
         equal_weight = 1.0 / len(self.instruments)
         self.capital_weights = {inst: equal_weight for inst in self.instruments}
 
@@ -121,7 +118,6 @@ class EngineLoop:
         instrument = self.instruments[step % len(self.instruments)]
         week_key = self._current_week_key()
 
-        # Release suspension if new week
         if instrument in self.instrument_suspensions:
             if self.instrument_suspensions[instrument] != week_key:
                 del self.instrument_suspensions[instrument]
@@ -151,8 +147,13 @@ class EngineLoop:
             regime_persistence=0.85,
         )
 
+        # 🔥 FULL DEBUG SURFACE
         if decision["decision"]["final"] == "BLOCK":
-            return {"status": "BLOCKED", "reason": decision.get("reason")}
+            return {
+                "status": "BLOCKED",
+                "reason": decision.get("reason"),
+                "debug": decision.get("debug"),
+            }
 
         raw_pnl = self._simulate_pnl(instrument, step)
 
@@ -189,7 +190,7 @@ class EngineLoop:
 
     def run(self, steps: int = 200) -> None:
 
-        print("==== INSTITUTIONAL SIMULATION (SELF-GOVERNING) ====")
+        print("==== INSTITUTIONAL SIMULATION (DIAGNOSTIC MODE) ====")
 
         for i in range(steps):
             result = self.step(i)
