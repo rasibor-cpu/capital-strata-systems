@@ -7,8 +7,9 @@ Signal-driven + Multi-bar hold model (correct exit sweep)
 Key Fix:
 - Evaluate exits for ALL open positions every step
 
-Inspection mode:
-- Prints signal strength so we can calibrate MIN_SIGNAL_STRENGTH safely.
+Profitability SAFE TUNING:
+- Minimum signal strength quality gate
+  Locked (Balanced-safe): MIN_SIGNAL_STRENGTH = 0.61
 """
 
 from __future__ import annotations
@@ -26,8 +27,8 @@ from engine.strategy.signal_engine import SignalEngine
 
 WEEKLY_INSTRUMENT_CLAMP_PCT = 0.05
 
-# INSPECTION: allow all strengths so we can observe distribution
-MIN_SIGNAL_STRENGTH = 0.0
+# SAFE profitability tuning: filter weak signals (calibrated to observed signal scale)
+MIN_SIGNAL_STRENGTH = 0.61
 
 
 class EngineLoop:
@@ -145,7 +146,7 @@ class EngineLoop:
         # 3) Open if allowed
         opened = False
 
-        # Quality filter (currently disabled for inspection unless you set MIN_SIGNAL_STRENGTH > 0)
+        # SAFE QUALITY FILTER: block weak signals before any sizing/gating
         if signal.direction != "FLAT" and strength < float(MIN_SIGNAL_STRENGTH):
             self.skipped_weak_signals += 1
             return {
@@ -232,6 +233,10 @@ class EngineLoop:
         print("attempted_entries:", self.attempted_entries)
         print("opened_entries:", self.opened_entries)
         print("\n==== COMPLETE ====")
+
+    def main(self) -> int:
+        self.run(steps=200)
+        return 0
 
 
 def main() -> int:
