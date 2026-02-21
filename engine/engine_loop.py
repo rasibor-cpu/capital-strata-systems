@@ -1,20 +1,17 @@
 """
 engine/engine_loop.py
 
-Canonical Institutional Engine Loop v8
-Signal-driven + Multi-bar hold model
-Threshold configurable via environment variable
-
-Enhancement:
-- MIN_SIGNAL_STRENGTH defaults to 0.61
-- Override via env var CSS_MIN_SIGNAL_STRENGTH
+Canonical Institutional Engine Loop v8.1
+- Signal threshold configurable via env var CSS_MIN_SIGNAL_STRENGTH
+- Adds required PnLTracker(starting_equity=...) wiring
+- Defaults starting_equity to 1000.0 for pilot runs
 """
 
 from __future__ import annotations
 
 import os
 import uuid
-from typing import Dict, Any, List
+from typing import Dict, Any
 from datetime import datetime, timezone
 
 from engine.execution.execution_gate import ExecutionGate
@@ -44,25 +41,29 @@ except ValueError:
 # ============================================================
 
 class EngineLoop:
-
-    def __init__(self, behaviour: str = "BALANCED"):
-
+    def __init__(self, behaviour: str = "D", starting_equity: float = 1000.0):
+        """
+        behaviour: must be one of ['A','B','C','D','E'] in this repo
+        starting_equity: required by PnLTracker in this repo
+        """
         self.profile = get_profile_for_behaviour(behaviour)
         self.signal_engine = SignalEngine(self.profile)
+
         self.execution_gate = ExecutionGate()
         self.cost_engine = ExecutionCostEngine()
         self.position_book = PositionBook()
-        self.pnl_tracker = PnLTracker()
+
+        # FIX: repo requires starting_equity
+        self.pnl_tracker = PnLTracker(starting_equity=starting_equity)
 
         self.trade_count = 0
+        self.behaviour = behaviour
+        self.starting_equity = starting_equity
 
     # ----------------------------------------------------------
     # PROCESS BAR
     # ----------------------------------------------------------
-
     def process_bar(self, instrument: str, price: float) -> None:
-
-        # 1. Generate signal
         signal = self.signal_engine.generate(instrument, price)
 
         if signal.direction == "FLAT":
@@ -71,22 +72,17 @@ class EngineLoop:
         if signal.strength < MIN_SIGNAL_STRENGTH:
             return
 
-        # 2. Gate approval
         decision = self.execution_gate.evaluate(
             instrument=instrument,
             direction=signal.direction,
             price=price,
             strength=signal.strength,
         )
-
         if not decision.ok:
             return
 
-        # 3. Execute simulated trade
         trade_id = str(uuid.uuid4())
-        execution_price = self.cost_engine.apply_costs(
-            instrument, price, signal.direction
-        )
+        execution_price = self.cost_engine.apply_costs(instrument, price, signal.direction)
 
         pnl = self.position_book.open_position(
             trade_id,
@@ -107,12 +103,12 @@ class EngineLoop:
     # ----------------------------------------------------------
     # SUMMARY
     # ----------------------------------------------------------
-
     def summary(self) -> Dict[str, Any]:
-
         return {
             "trades": self.trade_count,
             "net_pnl": self.pnl_tracker.total_pnl(),
             "max_drawdown": self.pnl_tracker.max_drawdown(),
             "min_signal_strength": MIN_SIGNAL_STRENGTH,
+            "behaviour": self.behaviour,
+            "starting_equity": self.starting_equity,
         }
