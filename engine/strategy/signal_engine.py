@@ -1,34 +1,33 @@
 """
-SignalEngine – Hybrid Regime-Aware Alpha Layer (v2)
+SignalEngine – Hybrid Regime-Aware Alpha Layer (Calibrated)
 Capital Strata Systems (CSS)
 
-Generates:
-- BUY / SELL / FLAT
-- Signal strength (0.0 – 1.0)
-- style: TREND / MEAN_REVERSION / NONE
+Calibrations (based on harness diagnostics):
+- Regime gating re-enabled with calibrated thresholds:
+    * TREND gate: trend_conf >= 0.15
+    * MEAN_REVERSION gate: range_conf >= 0.15
+  (Previous 0.30 was too strict for this repo’s regime scale.)
 
-Upgrades:
-- Integrates MarketRegimeModel + RegimeController (EMA smoothing)
-- Uses regime confidence to bias signal strengths (no hard switching)
-- Keeps SignalEngine interface simple for EngineLoop
+- Volatility kill-switch kept:
+    * high_vol_conf >= 0.70 => FLAT
+
+- Threshold enforcement remains:
+    * profile.min_signal_strength controls pass/fail (default set by caller)
+  NOTE: harness showed 0.65 produced best behavior; 0.75 produced 0 trades.
+
+Repo-compatibility:
+- Does NOT import engine.regime.regime_types (not present)
+- Uses string-matching on regime_conf keys for derived confidences
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 
 from engine.strategy.strategy_mode import StrategyProfile
 from engine.regime.market_regime_model import MarketRegimeModel
 from engine.regime.regime_controller import RegimeController
-from engine.regime.regime_state import (
-    TREND_UP,
-    TREND_DOWN,
-    RANGE,
-    HIGH_VOLATILITY,
-    LOW_VOLATILITY,
-    RegimeConfidence,
-)
 
 
 # ============================================================
@@ -50,91 +49,130 @@ class Signal:
 # ============================================================
 
 class SignalEngine:
+    # Calibrated soft gates (matched to observed regime_conf scale)
+    TREND_GATE_MIN = 0.15
+    RANGE_GATE_MIN = 0.15
+
+    # Defensive kill-switch
+    HIGH_VOL_KILL = 0.70
 
     def __init__(self, profile: StrategyProfile, behaviour_name: str = "BALANCED"):
         self.profile = profile
 
-        # Regime stack (raw + smoothed)
+        # Regime stack (raw -> smoothed)
         self.regime_model = MarketRegimeModel()
         self.regime_controller = RegimeController(behaviour=behaviour_name)
 
-        # Price history per instrument (lightweight memory)
+        # Price history per instrument (lightweight)
         self.price_history: Dict[str, List[float]] = {}
 
     # ----------------------------------------------------------
     # SYNTHETIC TREND DETECTOR
     # ----------------------------------------------------------
-
     def _trend_signal(self, price_now: float, price_prev: float) -> Signal:
-
         if price_now > price_prev:
             return Signal("", "BUY", 0.6, "TREND")
-
         if price_now < price_prev:
             return Signal("", "SELL", 0.6, "TREND")
-
         return Signal("", "FLAT", 0.0, "NONE")
 
     # ----------------------------------------------------------
     # SYNTHETIC MEAN REVERSION DETECTOR
     # ----------------------------------------------------------
-
-    def _mean_reversion_signal(
-        self,
-        price_now: float,
-        moving_avg: float,
-    ) -> Signal:
+    def _mean_reversion_signal(self, price_now: float, moving_avg: float) -> Signal:
+        if moving_avg == 0:
+            return Signal("", "FLAT", 0.0, "NONE")
 
         deviation = (price_now - moving_avg) / moving_avg
 
-        if deviation > 0.01:
-            return Signal("", "SELL", min(abs(deviation) * 10, 1.0), "MEAN_REVERSION")
+        # deadzone
+        if abs(deviation) < 0.01:
+            return Signal("", "FLAT", 0.0, "NONE")
 
-        if deviation < -0.01:
-            return Signal("", "BUY", min(abs(deviation) * 10, 1.0), "MEAN_REVERSION")
+        strength = min(abs(deviation) * 10.0, 1.0)
 
-        return Signal("", "FLAT", 0.0, "NONE")
+        if deviation > 0:
+            return Signal("", "SELL", strength, "MEAN_REVERSION")
+        return Signal("", "BUY", strength, "MEAN_REVERSION")
 
     # ----------------------------------------------------------
-    # REGIME BIAS (CONFIDENCE-WEIGHTED)
+    # Regime confidence extraction (repo-robust)
     # ----------------------------------------------------------
+    def _conf_to_str_dict(self, conf: Any) -> Dict[str, float]:
+        out: Dict[str, float] = {}
+        if not isinstance(conf, dict):
+            return out
+        for k, v in conf.items():
+            ks = str(k)
+            try:
+                out[ks] = float(v)
+            except Exception:
+                continue
+        return out
 
-    def _apply_regime_bias(self, sig: Signal, regime: RegimeConfidence) -> Signal:
+    def _derive_regime_scores(self, conf_str: Dict[str, float]) -> Dict[str, float]:
         """
-        Bias logic (soft):
-        - Trend signals are boosted when TREND_UP/TREND_DOWN confidence is high
-        - Mean reversion signals are boosted when RANGE or LOW_VOLATILITY is high
-        - High volatility reduces overall strength (defensive friction)
+        Derive:
+          - trend_conf: TREND_UP + TREND_DOWN (pattern)
+          - range_conf: RANGE + LOW_VOL (pattern)
+          - high_vol_conf: HIGH_VOL (pattern)
         """
+        trend_conf = 0.0
+        range_conf = 0.0
+        high_vol_conf = 0.0
 
-        conf = regime.as_dict()
+        for ks, v in conf_str.items():
+            u = ks.upper()
 
-        trend_conf = conf.get(TREND_UP, 0.0) + conf.get(TREND_DOWN, 0.0)
-        range_conf = conf.get(RANGE, 0.0) + conf.get(LOW_VOLATILITY, 0.0)
-        high_vol_conf = conf.get(HIGH_VOLATILITY, 0.0)
+            # Trend bucket
+            if "TREND_UP" in u or "TREND_DOWN" in u or ("TREND" in u and "RANGE" not in u):
+                trend_conf += v
 
-        strength = float(sig.strength)
+            # Range / low vol bucket
+            if "RANGE" in u or "LOW_VOL" in u or "LOWVOL" in u:
+                range_conf += v
+
+            # High vol bucket
+            if "HIGH_VOL" in u or "HIGHVOL" in u or ("VOL" in u and "LOW" not in u):
+                high_vol_conf += v
+
+        # Clamp
+        trend_conf = max(0.0, min(1.0, trend_conf))
+        range_conf = max(0.0, min(1.0, range_conf))
+        high_vol_conf = max(0.0, min(1.0, high_vol_conf))
+
+        return {
+            "trend_conf": trend_conf,
+            "range_conf": range_conf,
+            "high_vol_conf": high_vol_conf,
+        }
+
+    # ----------------------------------------------------------
+    # Regime bias (confidence-weighted)
+    # ----------------------------------------------------------
+    def _apply_regime_bias(self, sig: Signal, scores: Dict[str, float]) -> Signal:
+        trend_conf = float(scores.get("trend_conf", 0.0))
+        range_conf = float(scores.get("range_conf", 0.0))
+        high_vol_conf = float(scores.get("high_vol_conf", 0.0))
+
+        s = float(sig.strength)
 
         if sig.style == "TREND":
-            strength *= (1.0 + 0.75 * trend_conf)
-            strength *= (1.0 - 0.50 * high_vol_conf)
+            # Boost when trend confidence is present; add friction under high vol
+            s *= (1.0 + 0.50 * trend_conf)
+            s *= (1.0 - 0.40 * high_vol_conf)
 
         elif sig.style == "MEAN_REVERSION":
-            strength *= (1.0 + 0.75 * range_conf)
-            strength *= (1.0 - 0.35 * high_vol_conf)
+            # Boost when range confidence is present; add friction under high vol
+            s *= (1.0 + 0.50 * range_conf)
+            s *= (1.0 - 0.30 * high_vol_conf)
 
-        # clamp
-        strength = max(0.0, min(1.0, strength))
-
-        sig.strength = strength
-        sig.regime = regime.dominant()
-        sig.regime_conf = conf
+        sig.strength = max(0.0, min(1.0, s))
         return sig
 
     # ----------------------------------------------------------
     # PUBLIC INTERFACE
     # ----------------------------------------------------------
-
     def generate(
         self,
         instrument: str,
@@ -147,30 +185,74 @@ class SignalEngine:
         hist = self.price_history.setdefault(instrument, [])
         hist.append(float(price_now))
         if len(hist) > 60:
-            del hist[: len(hist) - 60]
+            del hist[0]
 
         # Compute raw + smoothed regime
         raw_regime = self.regime_model.evaluate(hist)
-        smoothed_regime = self.regime_controller.update(raw_regime)
+        regime = self.regime_controller.update(raw_regime)
 
-        candidate_signals: List[Signal] = []
+        # Extract confidence dict safely
+        conf = regime.as_dict() if hasattr(regime, "as_dict") else {}
+        conf_str = self._conf_to_str_dict(conf)
+        scores = self._derive_regime_scores(conf_str)
 
-        # Trend allowed?
+        # Volatility kill-switch (defensive)
+        if scores["high_vol_conf"] >= self.HIGH_VOL_KILL:
+            return Signal(
+                instrument, "FLAT", 0.0, "NONE",
+                getattr(regime, "dominant", lambda: None)(),
+                conf_str
+            )
+
+        # Candidate signals
+        candidates: List[Signal] = []
+
         if getattr(self.profile, "allow_trend", True):
-            candidate_signals.append(self._trend_signal(price_now, price_prev))
+            candidates.append(self._trend_signal(price_now, price_prev))
 
-        # Mean reversion allowed?
         if getattr(self.profile, "allow_mean_reversion", True):
-            candidate_signals.append(self._mean_reversion_signal(price_now, moving_avg))
+            candidates.append(self._mean_reversion_signal(price_now, moving_avg))
 
-        # Choose strongest (pre-bias)
-        best = max(candidate_signals, key=lambda s: s.strength)
+        if not candidates:
+            return Signal(
+                instrument, "FLAT", 0.0, "NONE",
+                getattr(regime, "dominant", lambda: None)(),
+                conf_str
+            )
 
-        # Apply regime bias (soft)
-        best = self._apply_regime_bias(best, smoothed_regime)
+        best = max(candidates, key=lambda s: s.strength)
 
-        # Apply threshold filter
-        if best.strength < float(getattr(self.profile, "min_signal_strength", 0.0)):
-            return Signal(instrument, "FLAT", 0.0, "NONE", smoothed_regime.dominant(), smoothed_regime.as_dict())
+        # Apply regime bias (boost/friction)
+        best = self._apply_regime_bias(best, scores)
 
-        return Signal(instrument, best.direction, best.strength, best.style, best.regime, best.regime_conf)
+        # ------------------------------------------------------
+        # Calibrated regime gating (re-enabled)
+        # ------------------------------------------------------
+        if best.style == "TREND" and scores["trend_conf"] < self.TREND_GATE_MIN:
+            return Signal(
+                instrument, "FLAT", 0.0, "NONE",
+                getattr(regime, "dominant", lambda: None)(),
+                conf_str
+            )
+
+        if best.style == "MEAN_REVERSION" and scores["range_conf"] < self.RANGE_GATE_MIN:
+            return Signal(
+                instrument, "FLAT", 0.0, "NONE",
+                getattr(regime, "dominant", lambda: None)(),
+                conf_str
+            )
+
+        # Threshold enforcement
+        threshold = float(getattr(self.profile, "min_signal_strength", 0.0))
+        if best.strength < threshold:
+            return Signal(
+                instrument, "FLAT", 0.0, "NONE",
+                getattr(regime, "dominant", lambda: None)(),
+                conf_str
+            )
+
+        # Finalize
+        best.instrument = instrument
+        best.regime = getattr(regime, "dominant", lambda: None)()
+        best.regime_conf = conf_str
+        return best
