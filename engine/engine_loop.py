@@ -1,21 +1,20 @@
 """
 engine/engine_loop.py
 
-Canonical Institutional Engine Loop v11 (Diagnostic + Gate API adaptive)
+Canonical Institutional Engine Loop v12
+- Diagnostic counters retained
+- SignalEngine wired
+- ExecutionGate.evaluate_trade signature aligned to repo
 
-Fix:
-- ExecutionGate.evaluate_trade() exists but signature differs across builds.
-- Use an adaptive caller: try common kwarg names, else positional.
-
-Still includes:
-- suppression counters
-- replay-safe PnL approximation
+Gate signature (from inspect):
+(self, *, instrument: str, side: str, notional: float, stop_distance_pct: float,
+ equity: float, equity_peak: float, regime_persistence: float, policy='core', ... ) -> Dict[str, Any]
 """
 
 from __future__ import annotations
 
 import os
-from typing import Dict, Any, Deque, Optional, Callable
+from typing import Dict, Any, Deque, Optional
 from datetime import datetime
 from collections import deque
 
@@ -25,9 +24,14 @@ from engine.strategy.signal_engine import SignalEngine
 from engine.performance.pnl_tracker import PnLTracker
 
 
+# ============================================================
+# CONFIG
+# ============================================================
+
 DEFAULT_MIN_SIGNAL_STRENGTH = 0.61
 MA_WINDOW = 20
 
+# Replay PnL scaling helper
 try:
     PIP_SCALE = float(os.getenv("CSS_PIP_SCALE", "10000"))
 except ValueError:
@@ -38,6 +42,29 @@ try:
 except ValueError:
     MIN_SIGNAL_STRENGTH = DEFAULT_MIN_SIGNAL_STRENGTH
 
+# Gate inputs (safe defaults for replay)
+# Notional: 1 unit (paper)
+try:
+    GATE_NOTIONAL = float(os.getenv("CSS_GATE_NOTIONAL", "1.0"))
+except ValueError:
+    GATE_NOTIONAL = 1.0
+
+# Stop distance percent: default 0.20% (0.002) unless overridden
+try:
+    GATE_STOP_DISTANCE_PCT = float(os.getenv("CSS_GATE_STOP_PCT", "0.002"))
+except ValueError:
+    GATE_STOP_DISTANCE_PCT = 0.002
+
+# Regime persistence: neutral 0.50 unless overridden
+try:
+    GATE_REGIME_PERSISTENCE = float(os.getenv("CSS_GATE_REGIME_PERSISTENCE", "0.50"))
+except ValueError:
+    GATE_REGIME_PERSISTENCE = 0.50
+
+
+# ============================================================
+# ENGINE LOOP
+# ============================================================
 
 class EngineLoop:
     def __init__(self, behaviour: str = "D", starting_equity: float = 1000.0):
@@ -65,32 +92,24 @@ class EngineLoop:
             return None
         return sum(self.price_window) / len(self.price_window)
 
-    def _call_gate(self, instrument: str, direction: str, price: float, strength: float):
+    def _gate_ok(self, decision: Any) -> bool:
         """
-        Gate API adaptor.
-        We try common parameter names used across iterations, else positional call.
-
-        Goal: do not break as ExecutionGate evolves.
+        ExecutionGate returns Dict[str, Any] in this repo.
+        We accept common allow keys defensively.
         """
-        fn: Callable = getattr(self.execution_gate, "evaluate_trade")
-
-        # try common kwarg variants
-        attempts = [
-            dict(instrument=instrument, direction=direction, price=price, strength=strength),
-            dict(instrument=instrument, side=direction, price=price, strength=strength),
-            dict(instrument=instrument, action=direction, price=price, strength=strength),
-            dict(symbol=instrument, direction=direction, price=price, strength=strength),
-            dict(symbol=instrument, side=direction, price=price, strength=strength),
-        ]
-
-        for kwargs in attempts:
-            try:
-                return fn(**kwargs)
-            except TypeError:
-                continue
-
-        # last resort: positional call (instrument, direction, price, strength)
-        return fn(instrument, direction, price, strength)
+        if isinstance(decision, dict):
+            if "ok" in decision:
+                return bool(decision["ok"])
+            if "allow" in decision:
+                return bool(decision["allow"])
+            if "approved" in decision:
+                return bool(decision["approved"])
+            if "pass" in decision:
+                return bool(decision["pass"])
+        # fallback: if it returns True/False directly
+        if isinstance(decision, bool):
+            return decision
+        return False
 
     def process_bar(self, instrument: str, price: float) -> None:
         self.price_window.append(float(price))
@@ -113,28 +132,40 @@ class EngineLoop:
 
         self.total_signals += 1
 
+        # Signal flat
         if signal.direction == "FLAT":
             self.regime_flat_blocks += 1
             self.prev_price = float(price)
             return
 
+        # Strength filter
         if float(signal.strength) < float(MIN_SIGNAL_STRENGTH):
             self.threshold_blocks += 1
             self.prev_price = float(price)
             return
 
-        decision = self._call_gate(
+        # Gate expects side + equity context
+        decision = self.execution_gate.evaluate_trade(
             instrument=instrument,
-            direction=signal.direction,
-            price=float(price),
-            strength=float(signal.strength),
+            side=str(signal.direction),
+            notional=float(GATE_NOTIONAL),
+            stop_distance_pct=float(GATE_STOP_DISTANCE_PCT),
+            equity=float(self.pnl_tracker.current_equity),
+            equity_peak=float(self.pnl_tracker.peak_equity),
+            regime_persistence=float(GATE_REGIME_PERSISTENCE),
+            policy="core",
+            current_allocations=None,
+            rebalance_target_weights=None,
+            volatility_state="MEDIUM",
+            regime_state="NORMAL",
         )
 
-        if not getattr(decision, "ok", False):
+        if not self._gate_ok(decision):
             self.gate_blocks += 1
             self.prev_price = float(price)
             return
 
+        # Replay-safe PnL approximation (no broker)
         direction_sign = 1.0 if signal.direction == "BUY" else -1.0
         delta = float(price) - float(self.prev_price)
         realized_pnl = delta * direction_sign * float(PIP_SCALE)
