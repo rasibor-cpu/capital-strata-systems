@@ -1,16 +1,16 @@
 """
-SignalEngine – Hybrid Regime-Aware Alpha Layer (Volatility Friction Model)
+SignalEngine – Phase 1 FX Baseline (No Hard Regime Gating)
 Capital Strata Systems (CSS)
 
-Changes:
-- Removed hard volatility kill-switch
-- Volatility now reduces signal strength (friction only)
-- Regime gating preserved
-- Threshold enforcement preserved
+Design:
+- No hard regime gating
+- No volatility kill-switch
+- Regime used ONLY for strength bias
+- Profile threshold preserved
 
-Institutional Philosophy:
-- High volatility = reduce conviction
-- Not automatic flat
+Purpose:
+- Establish functional FX trading baseline
+- Prevent regime paralysis
 """
 
 from __future__ import annotations
@@ -43,10 +43,7 @@ class Signal:
 
 class SignalEngine:
 
-    TREND_GATE_MIN = 0.02
-    RANGE_GATE_MIN = 0.02
-
-    # Volatility friction coefficient (reduced from previous 0.40 penalty)
+    # Volatility friction coefficient
     VOL_FRICTION = 0.30
 
     def __init__(self, profile: StrategyProfile, behaviour_name: str = "BALANCED"):
@@ -69,15 +66,17 @@ class SignalEngine:
     # MEAN REVERSION SIGNAL
     # ----------------------------------------------------------
     def _mean_reversion_signal(self, price_now: float, moving_avg: float) -> Signal:
+
         if moving_avg == 0:
             return Signal("", "FLAT", 0.0, "NONE")
 
         deviation = (price_now - moving_avg) / moving_avg
 
-        if abs(deviation) < 0.01:
+        # Reduced deadzone for FX (from 1% to 0.1%)
+        if abs(deviation) < 0.001:
             return Signal("", "FLAT", 0.0, "NONE")
 
-        strength = min(abs(deviation) * 10.0, 1.0)
+        strength = min(abs(deviation) * 15.0, 1.0)
 
         if deviation > 0:
             return Signal("", "SELL", strength, "MEAN_REVERSION")
@@ -126,7 +125,7 @@ class SignalEngine:
         }
 
     # ----------------------------------------------------------
-    # REGIME BIAS (WITH VOL FRICTION ONLY)
+    # REGIME BIAS (NO HARD GATING)
     # ----------------------------------------------------------
     def _apply_regime_bias(self, sig: Signal, scores: Dict[str, float]) -> Signal:
 
@@ -142,7 +141,7 @@ class SignalEngine:
         elif sig.style == "MEAN_REVERSION":
             s *= (1.0 + 0.50 * range_conf)
 
-        # Volatility friction (no hard kill)
+        # Volatility friction only
         s *= (1.0 - self.VOL_FRICTION * high_vol_conf)
 
         sig.strength = max(0.0, min(1.0, s))
@@ -185,14 +184,7 @@ class SignalEngine:
         best = max(candidates, key=lambda s: s.strength)
         best = self._apply_regime_bias(best, scores)
 
-        # Regime gating preserved
-        if best.style == "TREND" and scores["trend_conf"] < self.TREND_GATE_MIN:
-            return Signal(instrument, "FLAT", 0.0, "NONE")
-
-        if best.style == "MEAN_REVERSION" and scores["range_conf"] < self.RANGE_GATE_MIN:
-            return Signal(instrument, "FLAT", 0.0, "NONE")
-
-        # Profile threshold
+        # Profile threshold enforcement only
         threshold = float(getattr(self.profile, "min_signal_strength", 0.0))
         if best.strength < threshold:
             return Signal(instrument, "FLAT", 0.0, "NONE")
