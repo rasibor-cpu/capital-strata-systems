@@ -1,17 +1,18 @@
 """
 engine/engine_loop.py
 
-Canonical Institutional Engine Loop v8.2
-- Supports SignalEngine.generate(instrument, price_prev, moving_avg)
-- Adds rolling MA state
-- Passes starting_equity to PnLTracker
+Canonical Institutional Engine Loop v8.3
+- Corrects SignalEngine.generate(instrument, price_prev, moving_avg) call
+- Rolling MA state (window=20)
+- PnLTracker requires starting_equity
+- Threshold configurable via env var CSS_MIN_SIGNAL_STRENGTH
 """
 
 from __future__ import annotations
 
 import os
 import uuid
-from typing import Dict, Any, Deque
+from typing import Dict, Any, Deque, Optional
 from datetime import datetime, timezone
 from collections import deque
 
@@ -30,14 +31,11 @@ from engine.strategy.signal_engine import SignalEngine
 DEFAULT_MIN_SIGNAL_STRENGTH = 0.61
 
 try:
-    MIN_SIGNAL_STRENGTH = float(
-        os.getenv("CSS_MIN_SIGNAL_STRENGTH", DEFAULT_MIN_SIGNAL_STRENGTH)
-    )
+    MIN_SIGNAL_STRENGTH = float(os.getenv("CSS_MIN_SIGNAL_STRENGTH", DEFAULT_MIN_SIGNAL_STRENGTH))
 except ValueError:
     MIN_SIGNAL_STRENGTH = DEFAULT_MIN_SIGNAL_STRENGTH
 
-
-MA_WINDOW = 20  # simple rolling average window
+MA_WINDOW = 20
 
 
 # ============================================================
@@ -59,37 +57,33 @@ class EngineLoop:
         self.behaviour = behaviour
         self.starting_equity = starting_equity
 
-        # --- NEW: price state ---
-        self.prev_price: float | None = None
+        # --- price state ---
+        self.prev_price: Optional[float] = None
         self.price_window: Deque[float] = deque(maxlen=MA_WINDOW)
 
-    # ----------------------------------------------------------
-    def _moving_average(self) -> float | None:
-        if not self.price_window:
+    def _moving_average(self) -> Optional[float]:
+        if len(self.price_window) == 0:
             return None
         return sum(self.price_window) / len(self.price_window)
 
-    # ----------------------------------------------------------
     def process_bar(self, instrument: str, price: float) -> None:
-        # update MA window
+        # Update MA window
         self.price_window.append(price)
 
+        # Need at least one prior price
         if self.prev_price is None:
             self.prev_price = price
-            return  # need at least one previous price
+            return
 
         moving_avg = self._moving_average()
         if moving_avg is None:
             self.prev_price = price
             return
 
-        # FIX: call correct signal signature
-        signal = self.signal_engine.generate(
-            instrument,
-            self.prev_price,
-            moving_avg
-        )
+        # ✅ FIX: pass all required args inside the call
+        signal = self.signal_engine.generate(instrument, self.prev_price, moving_avg)
 
+        # advance state
         self.prev_price = price
 
         if signal.direction == "FLAT":
@@ -126,7 +120,6 @@ class EngineLoop:
 
         self.trade_count += 1
 
-    # ----------------------------------------------------------
     def summary(self) -> Dict[str, Any]:
         return {
             "trades": self.trade_count,
@@ -135,4 +128,5 @@ class EngineLoop:
             "min_signal_strength": MIN_SIGNAL_STRENGTH,
             "behaviour": self.behaviour,
             "starting_equity": self.starting_equity,
+            "ma_window": MA_WINDOW,
         }
