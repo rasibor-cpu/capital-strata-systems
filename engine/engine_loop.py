@@ -1,10 +1,11 @@
 """
 engine/engine_loop.py
 
-Canonical Institutional Engine Loop v10 (Diagnostic + ExecutionGate API aligned)
+Canonical Institutional Engine Loop v11 (Diagnostic + Gate API adaptive)
 
 Fix:
-- ExecutionGate method name is evaluate_trade() in this repo (not evaluate()).
+- ExecutionGate.evaluate_trade() exists but signature differs across builds.
+- Use an adaptive caller: try common kwarg names, else positional.
 
 Still includes:
 - suppression counters
@@ -14,7 +15,7 @@ Still includes:
 from __future__ import annotations
 
 import os
-from typing import Dict, Any, Deque, Optional
+from typing import Dict, Any, Deque, Optional, Callable
 from datetime import datetime
 from collections import deque
 
@@ -23,10 +24,6 @@ from engine.strategy.behaviour_mapper import get_profile_for_behaviour
 from engine.strategy.signal_engine import SignalEngine
 from engine.performance.pnl_tracker import PnLTracker
 
-
-# ============================================================
-# CONFIG
-# ============================================================
 
 DEFAULT_MIN_SIGNAL_STRENGTH = 0.61
 MA_WINDOW = 20
@@ -42,14 +39,9 @@ except ValueError:
     MIN_SIGNAL_STRENGTH = DEFAULT_MIN_SIGNAL_STRENGTH
 
 
-# ============================================================
-# ENGINE LOOP
-# ============================================================
-
 class EngineLoop:
     def __init__(self, behaviour: str = "D", starting_equity: float = 1000.0):
         self.profile = get_profile_for_behaviour(behaviour)
-        # SignalEngine accepts behaviour_name but we keep it stable for now
         self.signal_engine = SignalEngine(self.profile, behaviour_name="BALANCED")
 
         self.execution_gate = ExecutionGate()
@@ -73,6 +65,33 @@ class EngineLoop:
             return None
         return sum(self.price_window) / len(self.price_window)
 
+    def _call_gate(self, instrument: str, direction: str, price: float, strength: float):
+        """
+        Gate API adaptor.
+        We try common parameter names used across iterations, else positional call.
+
+        Goal: do not break as ExecutionGate evolves.
+        """
+        fn: Callable = getattr(self.execution_gate, "evaluate_trade")
+
+        # try common kwarg variants
+        attempts = [
+            dict(instrument=instrument, direction=direction, price=price, strength=strength),
+            dict(instrument=instrument, side=direction, price=price, strength=strength),
+            dict(instrument=instrument, action=direction, price=price, strength=strength),
+            dict(symbol=instrument, direction=direction, price=price, strength=strength),
+            dict(symbol=instrument, side=direction, price=price, strength=strength),
+        ]
+
+        for kwargs in attempts:
+            try:
+                return fn(**kwargs)
+            except TypeError:
+                continue
+
+        # last resort: positional call (instrument, direction, price, strength)
+        return fn(instrument, direction, price, strength)
+
     def process_bar(self, instrument: str, price: float) -> None:
         self.price_window.append(float(price))
 
@@ -94,20 +113,17 @@ class EngineLoop:
 
         self.total_signals += 1
 
-        # Regime/signal flat
         if signal.direction == "FLAT":
             self.regime_flat_blocks += 1
             self.prev_price = float(price)
             return
 
-        # Strength filter (env var / global)
         if float(signal.strength) < float(MIN_SIGNAL_STRENGTH):
             self.threshold_blocks += 1
             self.prev_price = float(price)
             return
 
-        # Governance layer (repo API: evaluate_trade)
-        decision = self.execution_gate.evaluate_trade(
+        decision = self._call_gate(
             instrument=instrument,
             direction=signal.direction,
             price=float(price),
@@ -119,7 +135,6 @@ class EngineLoop:
             self.prev_price = float(price)
             return
 
-        # Replay-safe PnL approximation
         direction_sign = 1.0 if signal.direction == "BUY" else -1.0
         delta = float(price) - float(self.prev_price)
         realized_pnl = delta * direction_sign * float(PIP_SCALE)
