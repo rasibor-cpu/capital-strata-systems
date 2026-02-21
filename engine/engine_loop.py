@@ -1,16 +1,14 @@
 """
 engine/engine_loop.py
 
-Canonical Institutional Engine Loop v9 (Diagnostic Instrumented)
+Canonical Institutional Engine Loop v10 (Diagnostic + ExecutionGate API aligned)
 
-Purpose:
-- Isolate suppression layer
-- Measure:
-    * total signals generated
-    * regime FLAT suppressions
-    * threshold suppressions
-    * execution gate suppressions
-    * executed trades
+Fix:
+- ExecutionGate method name is evaluate_trade() in this repo (not evaluate()).
+
+Still includes:
+- suppression counters
+- replay-safe PnL approximation
 """
 
 from __future__ import annotations
@@ -51,6 +49,7 @@ except ValueError:
 class EngineLoop:
     def __init__(self, behaviour: str = "D", starting_equity: float = 1000.0):
         self.profile = get_profile_for_behaviour(behaviour)
+        # SignalEngine accepts behaviour_name but we keep it stable for now
         self.signal_engine = SignalEngine(self.profile, behaviour_name="BALANCED")
 
         self.execution_gate = ExecutionGate()
@@ -75,56 +74,55 @@ class EngineLoop:
         return sum(self.price_window) / len(self.price_window)
 
     def process_bar(self, instrument: str, price: float) -> None:
-
-        self.price_window.append(price)
+        self.price_window.append(float(price))
 
         if self.prev_price is None:
-            self.prev_price = price
+            self.prev_price = float(price)
             return
 
         moving_avg = self._moving_average()
         if moving_avg is None:
-            self.prev_price = price
+            self.prev_price = float(price)
             return
 
         signal = self.signal_engine.generate(
-            instrument,
-            price,
-            self.prev_price,
-            moving_avg,
+            instrument=instrument,
+            price_now=float(price),
+            price_prev=float(self.prev_price),
+            moving_avg=float(moving_avg),
         )
 
         self.total_signals += 1
 
-        # Regime flat
+        # Regime/signal flat
         if signal.direction == "FLAT":
             self.regime_flat_blocks += 1
-            self.prev_price = price
+            self.prev_price = float(price)
             return
 
-        # Strength filter
-        if signal.strength < MIN_SIGNAL_STRENGTH:
+        # Strength filter (env var / global)
+        if float(signal.strength) < float(MIN_SIGNAL_STRENGTH):
             self.threshold_blocks += 1
-            self.prev_price = price
+            self.prev_price = float(price)
             return
 
-        # Governance layer
-        decision = self.execution_gate.evaluate(
+        # Governance layer (repo API: evaluate_trade)
+        decision = self.execution_gate.evaluate_trade(
             instrument=instrument,
             direction=signal.direction,
-            price=price,
-            strength=signal.strength,
+            price=float(price),
+            strength=float(signal.strength),
         )
 
         if not getattr(decision, "ok", False):
             self.gate_blocks += 1
-            self.prev_price = price
+            self.prev_price = float(price)
             return
 
-        # Validation PnL approximation
+        # Replay-safe PnL approximation
         direction_sign = 1.0 if signal.direction == "BUY" else -1.0
-        delta = price - self.prev_price
-        realized_pnl = delta * direction_sign * PIP_SCALE
+        delta = float(price) - float(self.prev_price)
+        realized_pnl = delta * direction_sign * float(PIP_SCALE)
 
         self.pnl_tracker.record_trade(
             instrument=instrument,
@@ -134,10 +132,9 @@ class EngineLoop:
         )
 
         self.trade_count += 1
-        self.prev_price = price
+        self.prev_price = float(price)
 
     def summary(self) -> Dict[str, Any]:
-
         net_pnl = float(self.pnl_tracker.current_equity - self.pnl_tracker.starting_equity)
 
         try:
@@ -147,18 +144,18 @@ class EngineLoop:
 
         return {
             "bars_ma_window": MA_WINDOW,
-            "pip_scale": PIP_SCALE,
-            "min_signal_strength": MIN_SIGNAL_STRENGTH,
+            "pip_scale": float(PIP_SCALE),
+            "min_signal_strength": float(MIN_SIGNAL_STRENGTH),
             "behaviour": self.behaviour,
 
-            "total_signals": self.total_signals,
-            "regime_flat_blocks": self.regime_flat_blocks,
-            "threshold_blocks": self.threshold_blocks,
-            "gate_blocks": self.gate_blocks,
+            "total_signals": int(self.total_signals),
+            "regime_flat_blocks": int(self.regime_flat_blocks),
+            "threshold_blocks": int(self.threshold_blocks),
+            "gate_blocks": int(self.gate_blocks),
 
-            "trades": self.trade_count,
+            "trades": int(self.trade_count),
             "starting_equity": float(self.pnl_tracker.starting_equity),
             "ending_equity": float(self.pnl_tracker.current_equity),
-            "net_pnl": net_pnl,
-            "current_drawdown": cur_dd,
+            "net_pnl": float(net_pnl),
+            "current_drawdown": float(cur_dd),
         }
