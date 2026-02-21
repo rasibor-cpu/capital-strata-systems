@@ -1,11 +1,12 @@
 """
 engine/engine_loop.py
 
-Canonical Institutional Engine Loop v8.3
-- Corrects SignalEngine.generate(instrument, price_prev, moving_avg) call
-- Rolling MA state (window=20)
-- PnLTracker requires starting_equity
-- Threshold configurable via env var CSS_MIN_SIGNAL_STRENGTH
+Canonical Institutional Engine Loop v8.4
+- Correct SignalEngine signature:
+    generate(instrument, price_now, price_prev, moving_avg)
+- Rolling moving average state (window=20)
+- PnLTracker(starting_equity=...)
+- Threshold via env var CSS_MIN_SIGNAL_STRENGTH
 """
 
 from __future__ import annotations
@@ -67,10 +68,10 @@ class EngineLoop:
         return sum(self.price_window) / len(self.price_window)
 
     def process_bar(self, instrument: str, price: float) -> None:
-        # Update MA window
+        # Update MA window with current price
         self.price_window.append(price)
 
-        # Need at least one prior price
+        # Need a previous price first
         if self.prev_price is None:
             self.prev_price = price
             return
@@ -80,10 +81,11 @@ class EngineLoop:
             self.prev_price = price
             return
 
-        # ✅ FIX: pass all required args inside the call
-        signal = self.signal_engine.generate(instrument, self.prev_price, moving_avg)
+        # ✅ Correct signature order:
+        # generate(instrument, price_now, price_prev, moving_avg)
+        signal = self.signal_engine.generate(instrument, price, self.prev_price, moving_avg)
 
-        # advance state
+        # advance state after signal computed
         self.prev_price = price
 
         if signal.direction == "FLAT":
