@@ -1,28 +1,36 @@
 """
 engine/engine_loop.py
 
-Canonical Institutional Engine Loop v8.4
+Canonical Institutional Engine Loop v8.5 (Phase 1.3 Validation Wiring)
 - Correct SignalEngine signature:
     generate(instrument, price_now, price_prev, moving_avg)
-- Rolling moving average state (window=20)
-- PnLTracker(starting_equity=...)
-- Threshold via env var CSS_MIN_SIGNAL_STRENGTH
+- Correct PnLTracker contract (this repo):
+    PnLTracker(starting_equity=...)
+    record_trade(instrument, realized_pnl, unrealized_pnl=0.0, timestamp=...)
+    current_drawdown()
+    equity_snapshot()
+    attributes: current_equity, starting_equity, max_drawdown
+
+NOTE (validation-only):
+- Uses a one-bar realized PnL approximation for replay sweeps:
+    pnl = (price_now - price_prev) * direction_sign * PIP_SCALE
+  This enables threshold sensitivity comparisons without relying on a
+  full position lifecycle implementation.
 """
 
 from __future__ import annotations
 
 import os
-import uuid
 from typing import Dict, Any, Deque, Optional
-from datetime import datetime, timezone
+from datetime import datetime
 from collections import deque
 
 from engine.execution.execution_gate import ExecutionGate
-from engine.execution.execution_cost_engine import ExecutionCostEngine
-from engine.performance.pnl_tracker import PnLTracker
-from engine.core.position_book import PositionBook
 from engine.strategy.behaviour_mapper import get_profile_for_behaviour
 from engine.strategy.signal_engine import SignalEngine
+
+# IMPORTANT: your repo's PnLTracker is under engine.performance.* (confirmed)
+from engine.performance.pnl_tracker import PnLTracker
 
 
 # ============================================================
@@ -30,13 +38,19 @@ from engine.strategy.signal_engine import SignalEngine
 # ============================================================
 
 DEFAULT_MIN_SIGNAL_STRENGTH = 0.61
+MA_WINDOW = 20
+
+# Convert FX price deltas into "pips-like" units for readability in validation.
+# Example: GBPUSD move of 0.00010 ~ 1 pip => scale 10000
+try:
+    PIP_SCALE = float(os.getenv("CSS_PIP_SCALE", "10000"))
+except ValueError:
+    PIP_SCALE = 10000.0
 
 try:
     MIN_SIGNAL_STRENGTH = float(os.getenv("CSS_MIN_SIGNAL_STRENGTH", DEFAULT_MIN_SIGNAL_STRENGTH))
 except ValueError:
     MIN_SIGNAL_STRENGTH = DEFAULT_MIN_SIGNAL_STRENGTH
-
-MA_WINDOW = 20
 
 
 # ============================================================
@@ -49,29 +63,24 @@ class EngineLoop:
         self.signal_engine = SignalEngine(self.profile)
 
         self.execution_gate = ExecutionGate()
-        self.cost_engine = ExecutionCostEngine()
-        self.position_book = PositionBook()
-
-        self.pnl_tracker = PnLTracker(starting_equity=starting_equity)
+        self.pnl_tracker = PnLTracker(starting_equity=float(starting_equity))
 
         self.trade_count = 0
         self.behaviour = behaviour
-        self.starting_equity = starting_equity
+        self.starting_equity = float(starting_equity)
 
-        # --- price state ---
         self.prev_price: Optional[float] = None
         self.price_window: Deque[float] = deque(maxlen=MA_WINDOW)
 
     def _moving_average(self) -> Optional[float]:
-        if len(self.price_window) == 0:
+        if not self.price_window:
             return None
         return sum(self.price_window) / len(self.price_window)
 
     def process_bar(self, instrument: str, price: float) -> None:
-        # Update MA window with current price
+        # Update MA window
         self.price_window.append(price)
 
-        # Need a previous price first
         if self.prev_price is None:
             self.prev_price = price
             return
@@ -81,54 +90,67 @@ class EngineLoop:
             self.prev_price = price
             return
 
-        # ✅ Correct signature order:
+        # ✅ Correct signal signature (confirmed):
         # generate(instrument, price_now, price_prev, moving_avg)
         signal = self.signal_engine.generate(instrument, price, self.prev_price, moving_avg)
 
-        # advance state after signal computed
-        self.prev_price = price
-
-        if signal.direction == "FLAT":
+        # Gate: ignore flats + weak signals
+        if signal.direction == "FLAT" or signal.strength < MIN_SIGNAL_STRENGTH:
+            self.prev_price = price
             return
 
-        if signal.strength < MIN_SIGNAL_STRENGTH:
-            return
-
+        # Gate approval (governance)
         decision = self.execution_gate.evaluate(
             instrument=instrument,
             direction=signal.direction,
             price=price,
             strength=signal.strength,
         )
-        if not decision.ok:
+        if not getattr(decision, "ok", False):
+            self.prev_price = price
             return
 
-        trade_id = str(uuid.uuid4())
-        execution_price = self.cost_engine.apply_costs(instrument, price, signal.direction)
+        # ------------------------------------------------------------
+        # Phase 1.3 validation PnL approximation (one-bar realized pnl)
+        # ------------------------------------------------------------
+        direction_sign = 1.0 if signal.direction == "BUY" else -1.0
+        delta = (price - self.prev_price)
+        realized_pnl = delta * direction_sign * PIP_SCALE
 
-        pnl = self.position_book.open_position(
-            trade_id,
-            instrument,
-            signal.direction,
-            execution_price,
-        )
-
+        # ✅ Correct PnLTracker API (confirmed):
         self.pnl_tracker.record_trade(
-            trade_id=trade_id,
             instrument=instrument,
-            pnl=pnl,
-            timestamp=datetime.now(timezone.utc),
+            realized_pnl=float(realized_pnl),
+            unrealized_pnl=0.0,
+            timestamp=datetime.utcnow(),
         )
 
         self.trade_count += 1
+        self.prev_price = price
 
     def summary(self) -> Dict[str, Any]:
+        # Net PnL = current_equity - starting_equity (repo semantics)
+        net_pnl = float(self.pnl_tracker.current_equity - self.pnl_tracker.starting_equity)
+
+        # max_drawdown is an attribute in your implementation
+        max_dd = float(getattr(self.pnl_tracker, "max_drawdown", 0.0))
+
+        # current_drawdown is a method (present in your method list)
+        try:
+            cur_dd = float(self.pnl_tracker.current_drawdown())
+        except Exception:
+            cur_dd = 0.0
+
         return {
-            "trades": self.trade_count,
-            "net_pnl": self.pnl_tracker.total_pnl(),
-            "max_drawdown": self.pnl_tracker.max_drawdown(),
+            "bars_ma_window": MA_WINDOW,
+            "pip_scale": PIP_SCALE,
             "min_signal_strength": MIN_SIGNAL_STRENGTH,
             "behaviour": self.behaviour,
-            "starting_equity": self.starting_equity,
-            "ma_window": MA_WINDOW,
+
+            "trades": self.trade_count,
+            "starting_equity": float(self.pnl_tracker.starting_equity),
+            "ending_equity": float(self.pnl_tracker.current_equity),
+            "net_pnl": net_pnl,
+            "max_drawdown": max_dd,
+            "current_drawdown": cur_dd,
         }
