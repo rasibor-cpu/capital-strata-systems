@@ -43,8 +43,8 @@ class Signal:
 
 class SignalEngine:
 
-    TREND_GATE_MIN = 0.15
-    RANGE_GATE_MIN = 0.15
+    TREND_GATE_MIN = 0.02
+    RANGE_GATE_MIN = 0.02
 
     # Volatility friction coefficient (reduced from previous 0.40 penalty)
     VOL_FRICTION = 0.30
