@@ -40,6 +40,12 @@ __pycache__/
 !engine/execution/execution_gate.py
 !engine/execution/
 !engine/execution/execution_gate.py
+analysis/
+*.csv
+*.log
+*.json
+__pycache__/
+*.pyc
 
 
 # --- OS ---
