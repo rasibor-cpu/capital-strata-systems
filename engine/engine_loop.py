@@ -5,18 +5,17 @@ Replay/Simulation Engine Loop (SAFE)
 ------------------------------------
 Deterministic offline runner used by tools/run_replay_csv_threshold_sweep.py.
 
-Compatibility upgrades:
+Key upgrades:
 1) Gate decision parsing accepts ALLOW shapes (not only {"ok": True}).
-2) Gate call is signature-aware:
-   - Avoids passing unsupported kwargs
-   - Supplies required keyword-only governance fields when present:
-       notional, stop_distance_pct, equity, equity_peak, regime_persistence
+2) Gate call is signature-aware and supplies required governance args when required.
+3) Replay PnL is now RISK-CONSISTENT (recommended mode "B"):
 
-Replay assumptions (conservative, explicit):
-- notional defaults to current equity (1x notional proxy)
-- stop_distance_pct defaults to env CSS_STOP_DISTANCE_PCT else 0.01 (1%)
-- regime_persistence defaults to env CSS_GATE_REGIME_PERSISTENCE else 0.95
-- equity_peak tracked locally (max of equity through run)
+   pnl = move_ratio * (equity * risk_pct) * direction_sign
+   where move_ratio = (price - prev_price) / (price * stop_distance_pct)
+
+   Interpretation:
+   - A move equal to the stop distance corresponds to ~1R gain/loss.
+   - Produces meaningful equity peaks/troughs so drawdown governance is realistic.
 """
 
 from __future__ import annotations
@@ -50,6 +49,9 @@ MIN_SIGNAL_STRENGTH = _env_float("CSS_MIN_SIGNAL_STRENGTH", 0.61)
 DEFAULT_STOP_DISTANCE_PCT = _env_float("CSS_STOP_DISTANCE_PCT", 0.01)
 DEFAULT_REGIME_PERSISTENCE = _env_float("CSS_GATE_REGIME_PERSISTENCE", 0.95)
 
+# Prevent pathological spikes if CSV has jumps (caps R-multiple per bar)
+MAX_R_PER_BAR = _env_float("CSS_MAX_R_PER_BAR", 3.0)
+
 
 class EngineLoop:
     def __init__(self, behaviour: str = "D", starting_equity: float = 1000.0):
@@ -63,7 +65,7 @@ class EngineLoop:
         self.prev_price: Optional[float] = None
         self.price_window: Deque[float] = deque(maxlen=MA_WINDOW)
 
-        # Local equity peak tracker (some PnLTrackers may not expose peak)
+        # Local equity peak tracker (for feeding gate/governor)
         self.equity_peak: float = float(starting_equity)
 
         # Diagnostics
@@ -83,15 +85,6 @@ class EngineLoop:
         return sum(self.price_window) / len(self.price_window)
 
     def _gate_ok(self, decision: Any) -> bool:
-        """
-        Accept multiple ExecutionGate decision shapes.
-
-        True if:
-          - {"ok": True}
-          - {"final": "ALLOW"}
-          - {"decision": {"final": "ALLOW"}}
-          - {"governor_response": {"ok": True}} or status APPROVED
-        """
         if not isinstance(decision, dict):
             return False
 
@@ -136,12 +129,29 @@ class EngineLoop:
                 return f"governor_ok:{bool(gov.get('ok'))}"
         return "unknown"
 
+    def _extract_risk_pct(self, decision: Any, fallback: float = 0.01) -> float:
+        """
+        Try to recover risk_pct from decision payload.
+        Your debug already shows this exists (e.g. 0.0125).
+        """
+        try:
+            if isinstance(decision, dict):
+                dbg = decision.get("debug")
+                if isinstance(dbg, dict):
+                    rp = dbg.get("risk_pct")
+                    if rp is not None:
+                        return float(rp)
+                # Sometimes nested
+                inner = decision.get("decision")
+                if isinstance(inner, dict):
+                    dbg2 = inner.get("debug")
+                    if isinstance(dbg2, dict) and dbg2.get("risk_pct") is not None:
+                        return float(dbg2["risk_pct"])
+        except Exception:
+            pass
+        return float(fallback)
+
     def _call_execution_gate(self, **kwargs: Any) -> Any:
-        """
-        Signature-aware gate call:
-        - Pass only supported kwargs
-        - Ensure required keyword-only params are provided when gate requires them
-        """
         gate = self.execution_gate
         if not hasattr(gate, "evaluate_trade"):
             return {"ok": False, "reason": "missing_evaluate_trade"}
@@ -152,27 +162,24 @@ class EngineLoop:
             sig = inspect.signature(fn)
             params = sig.parameters
         except Exception:
-            # If introspection fails, fail-closed conservatively
             return {"ok": False, "reason": "gate_signature_unavailable"}
 
-        # Build a candidate argument dict with governance context
         equity = float(getattr(self.pnl_tracker, "current_equity", self.pnl_tracker.starting_equity))
         self.equity_peak = max(self.equity_peak, equity)
 
         candidate: Dict[str, Any] = dict(kwargs)
 
-        # Provide governance-required fields (defaults are explicit and conservative)
+        # Governance context defaults (safe, explicit)
         candidate.setdefault("equity", equity)
         candidate.setdefault("equity_peak", self.equity_peak)
         candidate.setdefault("regime_persistence", DEFAULT_REGIME_PERSISTENCE)
         candidate.setdefault("stop_distance_pct", DEFAULT_STOP_DISTANCE_PCT)
         candidate.setdefault("notional", equity)  # replay proxy: 1x notional
 
-        # Filter to only supported parameters
         allowed = set(params.keys())
         filtered = {k: v for k, v in candidate.items() if k in allowed}
 
-        # Check for missing required keyword-only args
+        # Validate required params
         missing_required = []
         for name, p in params.items():
             if name == "self":
@@ -236,10 +243,34 @@ class EngineLoop:
             self.prev_price = float(price)
             return
 
-        # Simple replay PnL model (delta * direction * pip_scale)
+        # ----------------------------
+        # RISK-CONSISTENT REPLAY PnL (Mode B)
+        # ----------------------------
         direction_sign = 1.0 if signal.direction == "BUY" else -1.0
-        delta = float(price) - float(self.prev_price)
-        realized_pnl = delta * direction_sign * PIP_SCALE
+
+        equity = float(getattr(self.pnl_tracker, "current_equity", self.pnl_tracker.starting_equity))
+        self.equity_peak = max(self.equity_peak, equity)
+
+        risk_pct = self._extract_risk_pct(decision, fallback=0.01)
+        stop_distance_pct = float(DEFAULT_STOP_DISTANCE_PCT)
+
+        # Avoid divide-by-zero and nonsense
+        if stop_distance_pct <= 0.0 or float(price) <= 0.0:
+            self.prev_price = float(price)
+            return
+
+        # Move ratio relative to stop distance
+        move_ratio = (float(price) - float(self.prev_price)) / (float(price) * stop_distance_pct)
+
+        # Cap per-bar R to avoid CSV gaps causing absurd equity jumps
+        if move_ratio > MAX_R_PER_BAR:
+            move_ratio = MAX_R_PER_BAR
+        elif move_ratio < -MAX_R_PER_BAR:
+            move_ratio = -MAX_R_PER_BAR
+
+        risk_amount = equity * float(risk_pct)
+
+        realized_pnl = float(move_ratio) * float(risk_amount) * float(direction_sign)
 
         self.pnl_tracker.record_trade(
             instrument=instrument,
@@ -248,9 +279,8 @@ class EngineLoop:
             timestamp=datetime.utcnow(),
         )
 
-        # Update local equity peak after trade record
-        equity = float(getattr(self.pnl_tracker, "current_equity", self.pnl_tracker.starting_equity))
-        self.equity_peak = max(self.equity_peak, equity)
+        equity2 = float(getattr(self.pnl_tracker, "current_equity", self.pnl_tracker.starting_equity))
+        self.equity_peak = max(self.equity_peak, equity2)
 
         self.trade_count += 1
         self.prev_price = float(price)
