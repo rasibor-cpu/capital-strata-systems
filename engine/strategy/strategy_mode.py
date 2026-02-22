@@ -58,7 +58,8 @@ STRATEGY_PROFILES: Dict[str, StrategyProfile] = {
     "BALANCED": StrategyProfile(
         name="BALANCED",
         description="Institutional hybrid posture",
-        min_signal_strength=0.5,
+        # Locked via cross-validated threshold sweeps (SPY 1m 30d + USD/GBP 10k)
+        min_signal_strength=0.80,
         max_trades_per_week=20,
         allow_trend=True,
         allow_mean_reversion=True,
