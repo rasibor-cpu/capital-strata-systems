@@ -153,7 +153,7 @@ class EngineLoop:
             equity=float(self.pnl_tracker.current_equity),
             equity_peak=float(self.pnl_tracker.peak_equity),
             regime_persistence=float(GATE_REGIME_PERSISTENCE),
-            policy="core",
+            policy=os.getenv("CSS_GATE_POLICY", "core"),
             current_allocations=None,
             rebalance_target_weights=None,
             volatility_state="MEDIUM",
