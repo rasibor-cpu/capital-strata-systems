@@ -11,7 +11,6 @@ Purpose:
 Usage:
     python -m engine.replay.run <ENGINE_RUN_ID>
 """
-
 from __future__ import annotations
 
 import sys

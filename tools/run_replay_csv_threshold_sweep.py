@@ -1,20 +1,15 @@
 """
 tools/run_replay_csv_threshold_sweep.py
 
-CSV Replay Runner (SAFE) + Equal-Population Strength Deciles
------------------------------------------------------------
-Purpose:
-- Read CSV with at least: timestamp,price  (timestamp optional)
-- Generate signals from SignalEngine (alpha-layer)
-- Apply minsig threshold gating
-- Compute simple 1-bar PnL (directional) for expectancy testing
-- Produce equal-population strength decile stats
-- Write JSON summary to: audit_logs/threshold_sweep/minsig_<X>.json
+Institutional Replay Runner (FULL PATH + Cost Shock Controls)
+-------------------------------------------------------------
+- Deterministic CSV replay (research-only)
+- minsig gating
+- institutional cost model (spread/slip/commission/impact)
+- cost-shock multipliers via CLI
+- writes trade_pnls + equity_curve to JSON for true drawdown analysis
 
-IMPORTANT:
-- This is ALPHA-LAYER expectancy (SignalEngine only).
-- It is intentionally independent of ExecutionGate/RiskGovernor to avoid
-  mixing signal ranking with governance throttles when testing monotonicity.
+SAFE: no broker calls.
 """
 
 from __future__ import annotations
@@ -22,192 +17,282 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-from pathlib import Path
+import os
+import inspect
 from datetime import datetime, timezone
-from statistics import mean
-from typing import List, Tuple, Dict, Any
 from collections import deque
-
+from typing import List, Dict, Any, Optional
 
 from engine.strategy.signal_engine import SignalEngine
-
-# Behaviour -> StrategyProfile mapping (authoritative in your repo)
 from engine.strategy.behaviour_mapper import get_profile_for_behaviour
+from engine.performance.pnl_tracker import PnLTracker
 
 
-MA_WINDOW = 20
-DEFAULT_PIP_SCALE = 10000.0
+# ============================================================
+# INSTITUTIONAL COST MODEL (pips)
+# ============================================================
+
+class InstitutionalCostModel:
+    pip_scale: float = 10000.0
+
+    spread_pips_roundtrip: float = 0.4
+    base_slip_pips_per_side: float = 0.1
+    vol_slip_factor: float = 0.05
+    commission_pips_roundtrip: float = 0.1
+    impact_pips_per_side: float = 0.05
+
+    def roundtrip_cost_pips(self, bar_range_pips: float) -> float:
+        spread = self.spread_pips_roundtrip
+        slip = (2 * self.base_slip_pips_per_side) + (self.vol_slip_factor * bar_range_pips)
+        commission = self.commission_pips_roundtrip
+        impact = 2 * self.impact_pips_per_side
+        return spread + slip + commission + impact
+
+    def as_dict(self) -> Dict[str, float]:
+        return {
+            "spread_pips_roundtrip": self.spread_pips_roundtrip,
+            "base_slip_pips_per_side": self.base_slip_pips_per_side,
+            "vol_slip_factor": self.vol_slip_factor,
+            "commission_pips_roundtrip": self.commission_pips_roundtrip,
+            "impact_pips_per_side": self.impact_pips_per_side,
+        }
 
 
-def _clamp(x: float, lo: float, hi: float) -> float:
-    return lo if x < lo else hi if x > hi else x
+# ============================================================
+# PnLTracker adapter (signature-introspected)
+# ============================================================
+
+def _tracker_init(starting_equity: float) -> PnLTracker:
+    return PnLTracker(starting_equity)
+
+def _safe_record_trade(tracker: PnLTracker, instrument: str, pnl_pips: float, ts: datetime, meta: Dict[str, Any]) -> None:
+    if not hasattr(tracker, "record_trade"):
+        return
+
+    fn = getattr(tracker, "record_trade")
+    sig = inspect.signature(fn)
+    params = [p for p in sig.parameters.values() if p.name != "self"]
+
+    # Prefer kwargs to prevent misbinding.
+    name_map: Dict[str, Any] = {}
+
+    def set_if_present(names, value):
+        for n in names:
+            if any(p.name == n for p in params):
+                name_map[n] = value
+
+    set_if_present(("instrument", "symbol", "pair"), instrument)
+    set_if_present(("pnl", "pnl_pips", "net_pnl", "net_pnl_pips", "profit", "pl"), pnl_pips)
+    set_if_present(("ts", "timestamp", "time", "dt", "datetime", "ts_utc"), ts)
+    set_if_present(("meta", "metadata", "extra", "context"), meta)
+
+    if name_map:
+        try:
+            fn(**name_map)
+            return
+        except TypeError:
+            pass
+
+    # Positional fallback (only if we can safely infer)
+    def pick_value(pname: str):
+        low = pname.lower()
+        if "instr" in low or "symbol" in low or "pair" in low:
+            return instrument
+        if "pnl" in low or "profit" in low or low in ("pl",):
+            return pnl_pips
+        if "time" in low or low == "ts" or "date" in low or "dt" in low:
+            return ts
+        if "meta" in low or "extra" in low or "context" in low:
+            return meta
+        return None
+
+    args = []
+    for p in params:
+        v = pick_value(p.name)
+        if v is None and p.default is inspect._empty:
+            raise TypeError(f"Cannot safely bind required param '{p.name}' in PnLTracker.record_trade")
+        if v is not None:
+            args.append(v)
+
+    fn(*args)
 
 
-def compute_equal_population_deciles(strength_pnl: List[Tuple[float, float]]) -> List[Dict[str, Any]]:
-    """
-    Equal-population deciles:
-      - Sort by strength
-      - Split into 10 buckets with ~equal counts
-    """
-    if not strength_pnl:
-        return []
+def _safe_get_equity_curve(tracker: PnLTracker) -> Optional[List[float]]:
+    for name in ("get_equity_curve", "equity_curve", "get_equity_path"):
+        if hasattr(tracker, name):
+            obj = getattr(tracker, name)
+            try:
+                curve = obj() if callable(obj) else obj
+                if isinstance(curve, list) and curve:
+                    return curve
+            except TypeError:
+                pass
+    return None
 
-    strength_pnl = sorted(strength_pnl, key=lambda t: t[0])
-    n = len(strength_pnl)
-    bucket = max(1, n // 10)
 
-    out: List[Dict[str, Any]] = []
-
-    for i in range(10):
-        start = i * bucket
-        end = (i + 1) * bucket if i < 9 else n
-        seg = strength_pnl[start:end]
-        if not seg:
-            continue
-
-        strengths = [s for s, _ in seg]
-        pnls = [p for _, p in seg]
-
-        trades = len(seg)
-        wins = sum(1 for p in pnls if p > 0)
-        losses = trades - wins
-
-        out.append({
-            "decile": i + 1,
-            "strength_min": round(min(strengths), 6),
-            "strength_max": round(max(strengths), 6),
-            "trades": trades,
-            "wins": wins,
-            "losses": losses,
-            "win_rate": round(wins / trades, 4) if trades else 0.0,
-            "avg_pnl_per_trade": round(mean(pnls), 8) if trades else 0.0,
-            "total_pnl": round(sum(pnls), 8),
-        })
-
-    return out
-
+# ============================================================
+# MAIN
+# ============================================================
 
 def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--csv", required=True, help="CSV path containing at least a 'price' column")
-    ap.add_argument("--instrument", default="USD_GBP", help="Instrument label used in logs")
-    ap.add_argument("--behaviour", default="C", help="Behaviour code: A/B/C/D/E (maps to StrategyProfile)")
-    ap.add_argument("--minsig", type=float, required=True, help="Minimum signal strength threshold (0..1)")
-    ap.add_argument("--pip_scale", type=float, default=DEFAULT_PIP_SCALE, help="Scale for PnL units (FX pips etc.)")
-    args = ap.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--csv", required=True)
+    parser.add_argument("--instrument", required=True)
+    parser.add_argument("--minsig", type=float, required=True)
+    parser.add_argument("--behaviour", default="C")
+    parser.add_argument("--ma-window", type=int, default=20)
+    parser.add_argument("--starting-equity", type=float, default=1000.0)
 
-    csv_path = Path(args.csv)
-    if not csv_path.exists():
-        raise SystemExit(f"CSV not found: {csv_path}")
+    # Cost shock controls (institutional stress testing)
+    parser.add_argument("--spread-mult", type=float, default=1.0)
+    parser.add_argument("--base-slip-mult", type=float, default=1.0)
+    parser.add_argument("--vol-slip-mult", type=float, default=1.0)
+    parser.add_argument("--commission-mult", type=float, default=1.0)
+    parser.add_argument("--impact-mult", type=float, default=1.0)
 
-    # Resolve profile correctly (this is your authoritative wiring)
+    args = parser.parse_args()
+
     profile = get_profile_for_behaviour(args.behaviour)
-
     engine = SignalEngine(profile)
 
-    price_window = deque(maxlen=MA_WINDOW)
-    prev_price = None
+    cost_model = InstitutionalCostModel()
+    cost_model.spread_pips_roundtrip *= args.spread_mult
+    cost_model.base_slip_pips_per_side *= args.base_slip_mult
+    cost_model.vol_slip_factor *= args.vol_slip_mult
+    cost_model.commission_pips_roundtrip *= args.commission_mult
+    cost_model.impact_pips_per_side *= args.impact_mult
 
-    # Diagnostics
+    tracker = _tracker_init(args.starting_equity)
+
+    trade_pnls: List[float] = []
+    equity_curve: List[float] = [args.starting_equity]
+    equity = args.starting_equity
+
+    window = deque(maxlen=max(2, args.ma_window))
+
     total_signals = 0
-    regime_flat_blocks = 0  # not used here, kept for compatibility shape
     threshold_blocks = 0
-    gate_blocks = 0         # not used here, kept for compatibility shape
-
     trades = 0
-    starting_equity = 1000.0
-    equity = starting_equity
+    gross_pnl_pips = 0.0
+    total_cost_pips = 0.0
 
-    # For deciles: (strength, realized_pnl)
-    strength_pnl_records: List[Tuple[float, float]] = []
-
-    with csv_path.open("r", encoding="utf-8", newline="") as f:
+    with open(args.csv, newline="") as f:
         reader = csv.DictReader(f)
-        if not reader.fieldnames or "price" not in reader.fieldnames:
-            raise SystemExit(f"CSV must include 'price' column. Found: {reader.fieldnames}")
+        prev_price = None
 
         for row in reader:
-            try:
-                price = float(row["price"])
-            except Exception:
-                continue
+            price = float(row["price"])
+            ts_str = row.get("timestamp") or ""
 
-            price_window.append(price)
+            window.append(price)
 
             if prev_price is None:
                 prev_price = price
                 continue
 
-            # Need MA window before generating signals
-            if len(price_window) < 2:
-                prev_price = price
-                continue
-
-            moving_avg = sum(price_window) / float(len(price_window))
+            moving_avg = sum(window) / len(window)
 
             signal = engine.generate(
-                instrument=str(args.instrument),
-                price_now=float(price),
-                price_prev=float(prev_price),
-                moving_avg=float(moving_avg),
+                instrument=args.instrument,
+                price_now=price,
+                price_prev=prev_price,
+                moving_avg=moving_avg
             )
 
             total_signals += 1
 
-            # Gate by minsig (alpha-layer threshold only)
-            if signal.direction == "FLAT" or signal.strength < float(args.minsig):
+            if signal.strength < args.minsig:
                 threshold_blocks += 1
                 prev_price = price
                 continue
 
-            # Simple 1-bar realized PnL for expectancy ranking test
-            direction_sign = 1.0 if signal.direction == "BUY" else -1.0
-            delta = float(price) - float(prev_price)
-            realized_pnl = delta * direction_sign * float(args.pip_scale)
+            if signal.direction not in ("BUY", "SELL"):
+                prev_price = price
+                continue
 
-            equity += realized_pnl
+            if signal.direction == "BUY":
+                gross = (price - prev_price) * cost_model.pip_scale
+            else:
+                gross = (prev_price - price) * cost_model.pip_scale
+
+            bar_range_pips = abs(price - prev_price) * cost_model.pip_scale
+            cost = cost_model.roundtrip_cost_pips(bar_range_pips)
+            net = gross - cost
+
             trades += 1
-            strength_pnl_records.append((float(signal.strength), float(realized_pnl)))
+            gross_pnl_pips += gross
+            total_cost_pips += cost
+
+            trade_pnls.append(net)
+            equity += net
+            equity_curve.append(equity)
+
+            meta = {
+                "instrument": args.instrument,
+                "csv_ts": ts_str,
+                "minsig": args.minsig,
+                "cost_mults": {
+                    "spread": args.spread_mult,
+                    "base_slip": args.base_slip_mult,
+                    "vol_slip": args.vol_slip_mult,
+                    "commission": args.commission_mult,
+                    "impact": args.impact_mult,
+                }
+            }
+            ts = datetime.now(timezone.utc)
+            _safe_record_trade(tracker, args.instrument, net, ts, meta)
 
             prev_price = price
 
-    net_pnl = equity - starting_equity
+    tracker_curve = _safe_get_equity_curve(tracker)
+    if tracker_curve and len(tracker_curve) >= len(equity_curve):
+        equity_curve = tracker_curve
 
-    deciles = compute_equal_population_deciles(strength_pnl_records)
+    net_pnl_pips = gross_pnl_pips - total_cost_pips
+    ending_equity = equity_curve[-1] if equity_curve else args.starting_equity
 
     summary: Dict[str, Any] = {
-        "bars_ma_window": MA_WINDOW,
-        "pip_scale": float(args.pip_scale),
-        "min_signal_strength": float(args.minsig),
-        "behaviour": str(args.behaviour),
+        "instrument": args.instrument,
+        "pip_scale": cost_model.pip_scale,
+        "bars_ma_window": args.ma_window,
+        "min_signal_strength": args.minsig,
+        "behaviour": args.behaviour,
         "profile_name": getattr(profile, "name", "UNKNOWN"),
-        "total_signals": int(total_signals),
-        "regime_flat_blocks": int(regime_flat_blocks),
-        "threshold_blocks": int(threshold_blocks),
-        "gate_blocks": int(gate_blocks),
-        "trades": int(trades),
-        "starting_equity": float(starting_equity),
-        "ending_equity": float(equity),
-        "net_pnl": float(net_pnl),
-        "bars": int(total_signals + 1),  # approx bars processed (signals start after first prev)
-        "instrument": str(args.instrument),
-        "decile_expectancy": deciles,
+        "total_signals": total_signals,
+        "threshold_blocks": threshold_blocks,
+        "trades": trades,
+        "starting_equity": args.starting_equity,
+        "ending_equity": ending_equity,
+        "gross_pnl_pips": gross_pnl_pips,
+        "total_cost_pips": total_cost_pips,
+        "net_pnl_pips": net_pnl_pips,
+        "trade_pnls": trade_pnls,
+        "equity_curve": equity_curve,
+        "cost_model": cost_model.as_dict(),
+        "cost_multipliers": {
+            "spread_mult": args.spread_mult,
+            "base_slip_mult": args.base_slip_mult,
+            "vol_slip_mult": args.vol_slip_mult,
+            "commission_mult": args.commission_mult,
+            "impact_mult": args.impact_mult,
+        },
         "run_utc": datetime.now(timezone.utc).isoformat(),
     }
 
-    out_dir = Path("audit_logs") / "threshold_sweep"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    safe_minsig = str(args.minsig).replace(".", "_")
-    out_path = out_dir / f"minsig_{safe_minsig}.json"
-    out_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    os.makedirs("audit_logs/threshold_sweep", exist_ok=True)
+    tag = f"minsig_{str(args.minsig).replace('.', '_')}_full"
+    shock = f"sp{args.spread_mult}_bs{args.base_slip_mult}_vs{args.vol_slip_mult}_cm{args.commission_mult}_im{args.impact_mult}"
+    out_path = f"audit_logs/threshold_sweep/{tag}_{shock}.json"
 
-    print("\n=== CSS DECILE EXPECTANCY (Equal-Population) ===")
-    for d in deciles:
-        print(d)
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2)
 
-    print("\n=== CSS CSV REPLAY SUMMARY ===")
-    print(json.dumps(summary, indent=2))
-    print(f"\nWrote: {out_path}\n")
+    print("\n=== CSS REPLAY SUMMARY (FULL PATH) ===")
+    print(json.dumps({k: summary[k] for k in (
+        "instrument","min_signal_strength","trades","starting_equity","ending_equity",
+        "gross_pnl_pips","total_cost_pips","net_pnl_pips","threshold_blocks"
+    )}, indent=2))
+    print("Wrote:", out_path)
 
 
 if __name__ == "__main__":
