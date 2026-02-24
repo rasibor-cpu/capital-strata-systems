@@ -3,7 +3,7 @@ OANDA 1-Year M5 Downloader (Paginated, Root-Safe)
 Capital Strata Systems
 
 Outputs canonical replay CSV:
-    data/history/GBP_USD_M5_1year.csv
+    data/history/EUR_USD_M5_1year.csv
 
 Format:
     timestamp,price
