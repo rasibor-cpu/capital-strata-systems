@@ -157,7 +157,7 @@ def main():
         # ---- EXECUTE APPROVED TRADES ----
         for inst, price, prev_price in approved_trades:
             equity = pnl_tracker.current_equity
-            risk_pct = 0.01
+            risk_pct = 0.008
             risk_amount = equity * risk_pct
 
             move_ratio = (price - prev_price) / (price * STOP_DISTANCE_PCT)
