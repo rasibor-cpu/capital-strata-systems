@@ -58,6 +58,55 @@ Breakout alpha is:
 - Strength-ranked
 - Tail-concentrated
 
+---
+
+### Detailed Commit Snapshot – Volatility-Gated Breakout Research Batch
+
+**Development Scope:**
+Implementation of volatility-conditioned breakout diagnostics and supporting research pipeline.
+
+**Files Added:**
+- tools/build_h1_from_m5.py  
+- tools/download_oanda_m5_multi.py  
+- tools/run_breakout_deciles_alpha.py  
+- tools/run_governance_retention_equal.py  
+- tools/run_strength_deciles_alpha.py  
+
+**Files Modified:**
+- engine/engine_loop.py  
+- tools/download_oanda_m5_1year.py  
+- tools/run_full_allow_smoke.py  
+
+**Functional Enhancements:**
+
+1. Volatility Percentile Gating
+   - Introduced vol_pct threshold (>= 0.60)
+   - Configurable rolling window (default 100)
+   - ABS_LOGRET fallback when OHLC unavailable
+
+2. Decile Diagnostics Framework
+   - Equal-population strength decile construction
+   - Expectancy and winrate per decile
+   - Monotonicity scoring (non_decreasing_steps, ratio)
+   - Structural validation via D10 > D1 check
+
+3. Data Pipeline Stabilization
+   - Multi-instrument OANDA M5 downloader
+   - Deterministic M5 → H1 builder
+   - Reproducible research flow
+
+4. Governance Diagnostics
+   - Retention analysis under ExecutionGate
+   - Full-allow smoke testing harness
+
+**Research Outcome:**
+Under elevated volatility regimes:
+- Strength ranking becomes predictive
+- Alpha concentrated in D8–D10
+- Cross-instrument monotonic decile structure observed
+
+This batch establishes the breakout alpha layer as regime-conditional and strength-ranked.
+
 Transition path defined:
 Research → Strength threshold runner → Portfolio replay → RiskGovernor integration
 
