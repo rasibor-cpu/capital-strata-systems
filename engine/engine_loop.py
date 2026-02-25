@@ -1,13 +1,17 @@
 """
 engine/engine_loop.py
 
-Replay/Simulation Engine Loop (Institutional-Safe)
---------------------------------------------------
-Fixes:
-- Threshold now instance-bound (no import-time locking)
-- Risk-consistent replay sizing (R-multiple based)
-- Signature-aware ExecutionGate invocation (ALWAYS supplies required kwargs)
-- Governance-compatible equity + peak feeding
+Replay/Simulation Engine Loop (Portfolio-Governed v5)
+-----------------------------------------------------
+Integrates:
+- PositionBook (position lifecycle)
+- PortfolioCapitalController (portfolio-level governance)
+- ExecutionGate (instrument-level governance)
+- PnLTracker (equity + drawdown)
+
+Key:
+- Exposure is measured in NOTIONAL terms (qty * price).
+- Baseline sizing proxy set to 5% (aligns with PCC default instrument cap 8%).
 """
 
 from __future__ import annotations
@@ -15,14 +19,17 @@ from __future__ import annotations
 from collections import deque
 from datetime import datetime
 from typing import Any, Dict, Optional, Deque
-import inspect
 import os
 
 from engine.execution.execution_gate import ExecutionGate
 from engine.performance.pnl_tracker import PnLTracker
 from engine.strategy.behaviour_mapper import get_profile_for_behaviour
 from engine.strategy.signal_engine import SignalEngine
-
+from engine.core.position_book import PositionBook
+from engine.portfolio.portfolio_capital_controller import (
+    PortfolioCapitalController,
+    TradeProposal,
+)
 
 MA_WINDOW = 20
 PIP_SCALE = 10000.0
@@ -48,18 +55,18 @@ class EngineLoop:
         self.profile = get_profile_for_behaviour(behaviour)
         self.signal_engine = SignalEngine(self.profile)
 
-        # Gate + PnL
         self.execution_gate = ExecutionGate()
         self.pnl_tracker = PnLTracker(starting_equity=float(starting_equity))
+        self.position_book = PositionBook()
+        self.pcc = PortfolioCapitalController()
 
         self.behaviour = behaviour
         self.prev_price: Optional[float] = None
         self.price_window: Deque[float] = deque(maxlen=MA_WINDOW)
 
-        # Threshold now instance-bound
         self.min_signal_strength = _env_float("CSS_MIN_SIGNAL_STRENGTH", 0.61)
 
-        # Equity tracking for governance
+        # Equity peak used by governance layers
         self.equity_peak: float = float(starting_equity)
 
         # Diagnostics
@@ -67,137 +74,69 @@ class EngineLoop:
         self.regime_flat_blocks = 0
         self.threshold_blocks = 0
         self.gate_blocks = 0
+        self.pcc_blocks = 0
         self.trade_count = 0
+        self.exit_count = 0
+
+        # Phase-1 asset class registry (default FX)
+        # You can override by setting: engine.asset_class_map["XAU_USD"]="COMMODITIES", etc.
+        self.asset_class_map: Dict[str, str] = {}
+
+        self.current_step = 0
 
     # ----------------------------------------------------
-    # Helpers
+    # Exposure Helpers (NOTIONAL)
     # ----------------------------------------------------
 
-    def _moving_average(self) -> Optional[float]:
-        if not self.price_window:
-            return None
-        return sum(self.price_window) / len(self.price_window)
+    def _asset_class(self, instrument: str) -> str:
+        return self.asset_class_map.get(instrument, "FX")
 
-    def _gate_ok(self, decision: Any) -> bool:
-        if not isinstance(decision, dict):
-            return False
-
-        if decision.get("ok") is True:
-            return True
-
-        if str(decision.get("final", "")).upper() == "ALLOW":
-            return True
-
-        inner = decision.get("decision")
-        if isinstance(inner, dict):
-            if inner.get("ok") is True:
-                return True
-            if str(inner.get("final", "")).upper() == "ALLOW":
-                return True
-
-        gov = decision.get("governor_response")
-        if isinstance(gov, dict):
-            if gov.get("ok") is True:
-                return True
-            if str(gov.get("status", "")).upper() in ("APPROVED", "ALLOW", "OK"):
-                return True
-
-        return False
-
-    def _gate_reason(self, decision: Any) -> str:
-        if not isinstance(decision, dict):
-            return "non_dict_decision"
-        if "reason" in decision:
-            return str(decision["reason"])
-        inner = decision.get("decision")
-        if isinstance(inner, dict) and "reason" in inner:
-            return str(inner["reason"])
-        gov = decision.get("governor_response")
-        if isinstance(gov, dict) and "reason" in gov:
-            return str(gov["reason"])
-        return "unknown"
-
-    def _extract_risk_pct(self, decision: Any, fallback: float = 0.01) -> float:
+    def _mark_price(self) -> float:
         """
-        We try to pick up risk_pct if the gate returns it inside debug blocks.
-        Otherwise fallback to a conservative default.
+        Mark price used for notional exposure valuation.
+        Uses prev_price when available, otherwise falls back to 0.
         """
-        try:
-            if isinstance(decision, dict):
-                dbg = decision.get("debug")
-                if isinstance(dbg, dict) and dbg.get("risk_pct") is not None:
-                    return float(dbg["risk_pct"])
+        return float(self.prev_price) if self.prev_price is not None else 0.0
 
-                inner = decision.get("decision")
-                if isinstance(inner, dict):
-                    dbg2 = inner.get("debug")
-                    if isinstance(dbg2, dict) and dbg2.get("risk_pct") is not None:
-                        return float(dbg2["risk_pct"])
-        except Exception:
-            pass
-        return float(fallback)
+    def _total_exposure_notional(self) -> float:
+        mp = self._mark_price()
+        if mp <= 0:
+            return 0.0
+        return sum(float(pos.size) * mp for pos in self.position_book.positions.values())
 
-    def _call_execution_gate(self, *, instrument: str, side: str, signal_strength: float, strategy_style: str) -> Any:
-        """
-        CRITICAL:
-        ExecutionGate.evaluate_trade() requires keyword-only args:
-          notional, stop_distance_pct, equity, equity_peak, regime_persistence
-        We ALWAYS supply them, then signature-filter.
-        """
-        fn = getattr(self.execution_gate, "evaluate_trade", None)
-        if fn is None:
-            return {"ok": False, "reason": "missing_evaluate_trade"}
+    def _instrument_exposure_notional(self, instrument: str) -> float:
+        mp = self._mark_price()
+        if mp <= 0:
+            return 0.0
+        pos = self.position_book.positions.get(instrument)
+        return float(pos.size) * mp if pos else 0.0
 
-        try:
-            sig = inspect.signature(fn)
-            allowed = set(sig.parameters.keys())
-        except Exception:
-            return {"ok": False, "reason": "gate_signature_error"}
+    def _asset_class_exposure_notional(self, asset_class: str) -> float:
+        mp = self._mark_price()
+        if mp <= 0:
+            return 0.0
+        total = 0.0
+        for inst, pos in self.position_book.positions.items():
+            if self._asset_class(inst) == asset_class:
+                total += float(pos.size) * mp
+        return float(total)
 
-        equity = float(self.pnl_tracker.current_equity)
-        self.equity_peak = max(self.equity_peak, equity)
-
-        # Always supply REQUIRED kwargs (prevents the crash you saw)
-        candidate: Dict[str, Any] = {
-            "instrument": str(instrument),
-            "side": str(side),
-            "notional": float(equity) * 0.10,  # safe default sizing proxy
-            "stop_distance_pct": float(DEFAULT_STOP_DISTANCE_PCT),
-            "equity": float(equity),
-            "equity_peak": float(self.equity_peak),
-            "regime_persistence": float(DEFAULT_REGIME_PERSISTENCE),
-            "policy": "core",
-            # optional context (only passed if signature accepts)
-            "signal_strength": float(signal_strength),
-            "strategy_style": str(strategy_style),
-            "timestamp": datetime.utcnow().isoformat(),
-        }
-
-        filtered = {k: v for k, v in candidate.items() if k in allowed}
-
-        try:
-            return fn(**filtered)
-        except TypeError as e:
-            # If the gate signature changed again, emit a structured error.
-            return {"ok": False, "reason": f"gate_call_typeerror: {e}", "debug": {"passed_keys": sorted(filtered.keys())}}
-        except Exception as e:
-            return {"ok": False, "reason": f"gate_call_error: {e}"}
+    def _open_positions_in_asset_class(self, asset_class: str) -> int:
+        return sum(1 for inst in self.position_book.positions if self._asset_class(inst) == asset_class)
 
     # ----------------------------------------------------
     # Main Loop
     # ----------------------------------------------------
 
     def process_bar(self, instrument: str, price: float) -> None:
+        self.current_step += 1
         self.price_window.append(float(price))
 
         if self.prev_price is None:
             self.prev_price = float(price)
             return
 
-        moving_avg = self._moving_average()
-        if moving_avg is None:
-            self.prev_price = float(price)
-            return
+        moving_avg = sum(self.price_window) / len(self.price_window)
 
         signal = self.signal_engine.generate(
             instrument=instrument,
@@ -208,57 +147,106 @@ class EngineLoop:
 
         self.total_signals += 1
 
+        # 0) Evaluate exits first (realized PnL into ledger)
+        realized_exit = self.position_book.evaluate_exit(
+            instrument=instrument,
+            current_price=float(price),
+            current_step=self.current_step,
+            incoming_signal=signal.direction,
+        )
+
+        if realized_exit != 0.0:
+            self.exit_count += 1
+            self.pnl_tracker.record_trade(
+                instrument=instrument,
+                realized_pnl=float(realized_exit),
+                unrealized_pnl=0.0,
+                timestamp=datetime.utcnow(),
+            )
+
+        # Update equity peak for governance
+        equity = float(self.pnl_tracker.current_equity)
+        self.equity_peak = max(self.equity_peak, equity)
+
+        # 1) Regime flat
         if signal.direction == "FLAT":
             self.regime_flat_blocks += 1
             self.prev_price = float(price)
             return
 
+        # 2) Threshold gate
         if float(signal.strength) < float(self.min_signal_strength):
             self.threshold_blocks += 1
             self.prev_price = float(price)
             return
 
-        decision = self._call_execution_gate(
+        # 3) No pyramiding for now
+        if self.position_book.has_position(instrument):
+            self.prev_price = float(price)
+            return
+
+        # 4) ExecutionGate (instrument-level governance + sizing)
+        # IMPORTANT: baseline sizing proxy is 5% (aligns with PCC instrument cap 8%)
+        decision = self.execution_gate.evaluate_trade(
             instrument=instrument,
             side=signal.direction,
-            signal_strength=float(signal.strength),
-            strategy_style=getattr(signal, "style", "NONE"),
+            notional=equity * 0.05,
+            stop_distance_pct=float(DEFAULT_STOP_DISTANCE_PCT),
+            equity=equity,
+            equity_peak=self.equity_peak,
+            regime_persistence=float(DEFAULT_REGIME_PERSISTENCE),
         )
 
-        if not self._gate_ok(decision):
+        if str(decision.get("decision", {}).get("final", "")).upper() != "ALLOW":
             self.gate_blocks += 1
-            print("GATE BLOCK:", {"reason": self._gate_reason(decision)})
             self.prev_price = float(price)
             return
 
-        direction_sign = 1.0 if signal.direction == "BUY" else -1.0
-
-        equity = float(self.pnl_tracker.current_equity)
-        self.equity_peak = max(self.equity_peak, equity)
-
-        risk_pct = self._extract_risk_pct(decision, fallback=0.01)
-        stop_distance_pct = float(DEFAULT_STOP_DISTANCE_PCT)
-
-        if stop_distance_pct <= 0.0 or float(price) <= 0.0:
+        debug = decision.get("debug", {}) if isinstance(decision, dict) else {}
+        scaled_notional = float(debug.get("scaled_notional", 0.0))
+        if scaled_notional <= 0.0:
+            self.gate_blocks += 1
             self.prev_price = float(price)
             return
 
-        # R-multiple style bar move
-        move_ratio = (float(price) - float(self.prev_price)) / (float(price) * stop_distance_pct)
+        # 5) PCC (portfolio-level governance)
+        asset_class = self._asset_class(instrument)
 
-        if move_ratio > MAX_R_PER_BAR:
-            move_ratio = MAX_R_PER_BAR
-        elif move_ratio < -MAX_R_PER_BAR:
-            move_ratio = -MAX_R_PER_BAR
-
-        risk_amount = equity * float(risk_pct)
-        realized_pnl = float(move_ratio) * float(risk_amount) * float(direction_sign)
-
-        self.pnl_tracker.record_trade(
+        proposal = TradeProposal(
             instrument=instrument,
-            realized_pnl=float(realized_pnl),
-            unrealized_pnl=0.0,
-            timestamp=datetime.utcnow(),
+            asset_class=asset_class,
+            requested_notional=scaled_notional,
+            equity=equity,
+            current_total_exposure=self._total_exposure_notional(),
+            current_instrument_exposure=self._instrument_exposure_notional(instrument),
+            current_asset_class_exposure=self._asset_class_exposure_notional(asset_class),
+            portfolio_dd_pct=self.pnl_tracker.current_drawdown() * 100.0,
+            open_positions_in_asset_class=self._open_positions_in_asset_class(asset_class),
+        )
+
+        pcc_decision = self.pcc.evaluate(proposal)
+
+        if pcc_decision.final != "ALLOW":
+            self.pcc_blocks += 1
+            self.prev_price = float(price)
+            return
+
+        final_notional = scaled_notional * float(pcc_decision.sizing_multiplier)
+        if final_notional <= 0.0:
+            self.pcc_blocks += 1
+            self.prev_price = float(price)
+            return
+
+        # 6) Open position (size is quantity; notional is qty * price)
+        qty = float(final_notional) / float(price)
+
+        self.position_book.open_position(
+            instrument=instrument,
+            side=signal.direction,
+            size=float(qty),
+            price=float(price),
+            step=self.current_step,
+            stop_distance_pct=float(DEFAULT_STOP_DISTANCE_PCT),
         )
 
         self.trade_count += 1
@@ -271,16 +259,17 @@ class EngineLoop:
     def summary(self) -> Dict[str, Any]:
         net_pnl = self.pnl_tracker.current_equity - self.pnl_tracker.starting_equity
         return {
-            "bars_ma_window": MA_WINDOW,
-            "pip_scale": PIP_SCALE,
-            "min_signal_strength": float(self.min_signal_strength),
             "behaviour": self.behaviour,
             "total_signals": self.total_signals,
             "regime_flat_blocks": self.regime_flat_blocks,
             "threshold_blocks": self.threshold_blocks,
             "gate_blocks": self.gate_blocks,
-            "trades": self.trade_count,
+            "pcc_blocks": self.pcc_blocks,
+            "trades_opened": self.trade_count,
+            "exits_closed": self.exit_count,
             "starting_equity": float(self.pnl_tracker.starting_equity),
             "ending_equity": float(self.pnl_tracker.current_equity),
             "net_pnl": float(net_pnl),
+            "current_drawdown_pct": float(self.pnl_tracker.current_drawdown() * 100.0),
+            "open_positions": len(self.position_book.positions),
         }
