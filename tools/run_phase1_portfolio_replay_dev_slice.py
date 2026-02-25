@@ -3,15 +3,24 @@ tools/run_phase1_portfolio_replay_dev_slice.py
 
 Phase 1 Portfolio Replay – DEV SLICE MODE
 ------------------------------------------
-Purpose:
-- Fast iteration runner
-- Supports date slicing
-- Supports instrument subset
-- Supports max timestamp cap
-- Uses ReplayTelemetry
+Goal:
+- Provide a fast iteration runner while your full-year portfolio replay is heavy.
+- Supports:
+  --start YYYY-MM-DD
+  --end   YYYY-MM-DD
+  --max_ts N
+  --instruments "EUR_USD,GBP_USD,..."
 
-This is for parameter tuning.
-Full-year production replay remains separate.
+Important:
+- This file is a thin wrapper that calls into your existing V5 convexity trim runner:
+  tools/run_phase1_portfolio_replay_v5_convexity_trim.py
+
+- It assumes that runner exposes a callable `run_replay(...)` that accepts:
+    start, end, max_timestamps, instruments, telemetry_class
+
+If your V5 runner currently does NOT expose `run_replay`, tell me what functions
+exist at the top-level (e.g., main(), run(), etc.) and I’ll send a new wrapper file
+that targets what you actually have — still with no patching.
 """
 
 from __future__ import annotations
@@ -20,6 +29,7 @@ import argparse
 import sys
 from pathlib import Path
 from datetime import datetime
+from typing import Optional, List
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -27,48 +37,59 @@ if str(REPO_ROOT) not in sys.path:
 
 from tools.replay._telemetry import ReplayTelemetry
 
-# ⚠ Replace this import with your real loader + engine entrypoint
-# These should match your existing portfolio replay structure
+# ✅ Confirmed file name from your screenshot:
 from tools.run_phase1_portfolio_replay_v5_convexity_trim import run_replay
 
 
+def _parse_date(s: Optional[str]) -> Optional[datetime]:
+    if not s:
+        return None
+    # Accept YYYY-MM-DD only (date), treat as midnight local
+    return datetime.fromisoformat(s)
+
+
+def _parse_instruments(s: Optional[str]) -> Optional[List[str]]:
+    if not s:
+        return None
+    items = [x.strip() for x in s.split(",") if x.strip()]
+    return items or None
+
+
 def parse_args():
-    parser = argparse.ArgumentParser()
+    p = argparse.ArgumentParser(
+        prog="run_phase1_portfolio_replay_dev_slice",
+        description="Phase 1 Portfolio Replay (DEV slice runner)",
+    )
 
-    parser.add_argument("--start", type=str, default=None,
-                        help="Start date YYYY-MM-DD")
-    parser.add_argument("--end", type=str, default=None,
-                        help="End date YYYY-MM-DD")
-    parser.add_argument("--max_ts", type=int, default=None,
-                        help="Maximum timestamps to process")
-    parser.add_argument("--instruments", type=str, default=None,
-                        help="Comma separated instrument list")
+    p.add_argument("--start", type=str, default=None, help="Start date YYYY-MM-DD")
+    p.add_argument("--end", type=str, default=None, help="End date YYYY-MM-DD")
+    p.add_argument("--max_ts", type=int, default=None, help="Max timestamps to process")
+    p.add_argument("--instruments", type=str, default=None, help="Comma-separated instruments")
 
-    return parser.parse_args()
+    return p.parse_args()
 
 
 def main():
     args = parse_args()
 
-    start = datetime.fromisoformat(args.start) if args.start else None
-    end = datetime.fromisoformat(args.end) if args.end else None
+    start = _parse_date(args.start)
+    end = _parse_date(args.end)
+    instruments = _parse_instruments(args.instruments)
+    max_ts = args.max_ts
 
-    instruments = None
-    if args.instruments:
-        instruments = [x.strip() for x in args.instruments.split(",")]
-
-    print("==== DEV SLICE PORTFOLIO REPLAY ====")
+    print("==== DEV SLICE PORTFOLIO REPLAY (WRAPPER) ====")
+    print(f"Runner: tools/run_phase1_portfolio_replay_v5_convexity_trim.py")
     print(f"Start: {start}")
     print(f"End: {end}")
-    print(f"Max TS: {args.max_ts}")
+    print(f"Max TS: {max_ts}")
     print(f"Instruments: {instruments}")
-    print("------------------------------------")
+    print("---------------------------------------------")
 
-    # You must adapt run_replay signature if needed
+    # Call the V5 engine with telemetry enabled
     run_replay(
         start=start,
         end=end,
-        max_timestamps=args.max_ts,
+        max_timestamps=max_ts,
         instruments=instruments,
         telemetry_class=ReplayTelemetry,
     )
