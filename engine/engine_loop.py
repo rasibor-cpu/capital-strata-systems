@@ -1,19 +1,17 @@
 """
 engine/engine_loop.py
 
-Replay/Simulation Engine Loop (Portfolio-Governed v7)
------------------------------------------------------
-Upgrades:
+Replay/Simulation Engine Loop (Portfolio-Governed v8 + Audit Spine)
+-------------------------------------------------------------------
+Includes:
 - Multi-instrument mark pricing (per-instrument last_price) for correct exposure valuation
 - Rolling returns buffers (per instrument)
-- Statistical correlation score (avg abs corr vs currently-open positions in same asset class)
-- Passes avg_correlation into PCC via TradeProposal
+- Statistical correlation score (avg abs corr vs OPEN positions in same asset class)
+- PCC exposure caps + drawdown policy enforcement
+- Governance audit logging (JSONL) for explainability
 
-Integrates:
-- ExecutionGate (instrument-level governance)
-- PortfolioCapitalController (portfolio-level governance)
-- PositionBook (position lifecycle)
-- PnLTracker (equity + drawdown)
+Notes:
+- Audit logger is fail-safe: if module missing, engine still runs.
 """
 
 from __future__ import annotations
@@ -23,6 +21,7 @@ from datetime import datetime
 from typing import Any, Dict, Optional, Deque
 import os
 import statistics
+import time
 
 from engine.execution.execution_gate import ExecutionGate
 from engine.performance.pnl_tracker import PnLTracker
@@ -33,6 +32,16 @@ from engine.portfolio.portfolio_capital_controller import (
     PortfolioCapitalController,
     TradeProposal,
 )
+
+# Optional audit spine (fail-safe import)
+try:
+    from engine.governance.governance_audit_logger import (
+        GovernanceAuditLogger,
+        GovernanceDecisionRecord,
+    )
+except Exception:  # pragma: no cover
+    GovernanceAuditLogger = None  # type: ignore
+    GovernanceDecisionRecord = None  # type: ignore
 
 MA_WINDOW = 20
 PIP_SCALE = 10000.0
@@ -82,8 +91,10 @@ class EngineLoop:
         self.return_history: Dict[str, Deque[float]] = {}
         self.correlation_window: int = int(CORR_WINDOW)
 
+        # Threshold gate (instance-bound)
         self.min_signal_strength = _env_float("CSS_MIN_SIGNAL_STRENGTH", 0.61)
 
+        # Equity peak for governance
         self.equity_peak: float = float(starting_equity)
 
         # Diagnostics
@@ -99,6 +110,14 @@ class EngineLoop:
         self.asset_class_map: Dict[str, str] = {}
 
         self.current_step = 0
+
+        # Governance audit logger (optional)
+        self.audit_logger = None
+        if GovernanceAuditLogger is not None:
+            try:
+                self.audit_logger = GovernanceAuditLogger()
+            except Exception:
+                self.audit_logger = None
 
     # ----------------------------------------------------
     # Asset class + exposure helpers (NOTIONAL, per-instrument mark)
@@ -196,13 +215,57 @@ class EngineLoop:
                     continue
                 corrs.append(abs(float(c)))
             except Exception:
-                # Covers constant series / StatisticsError etc.
                 continue
 
         if not corrs:
             return 0.0
 
         return float(sum(corrs) / len(corrs))
+
+    # ----------------------------------------------------
+    # Audit helper
+    # ----------------------------------------------------
+
+    def _audit_pcc_decision(
+        self,
+        *,
+        instrument: str,
+        asset_class: str,
+        signal_strength: float,
+        proposal: TradeProposal,
+        avg_corr: float,
+        pcc_final: str,
+        pcc_reason: str,
+        sizing_multiplier: float,
+    ) -> None:
+        """
+        Non-blocking audit log for PCC decisions (ALLOW/BLOCK).
+        """
+        if self.audit_logger is None or GovernanceDecisionRecord is None:
+            return
+
+        try:
+            effective_notional = float(proposal.requested_notional) * float(sizing_multiplier)
+            rec = GovernanceDecisionRecord(
+                timestamp=float(time.time()),
+                instrument=str(instrument),
+                asset_class=str(asset_class),
+                signal_strength=float(signal_strength),
+                requested_notional=float(proposal.requested_notional),
+                effective_notional=float(effective_notional),
+                equity=float(proposal.equity),
+                portfolio_dd_pct=float(proposal.portfolio_dd_pct),
+                total_exposure=float(proposal.current_total_exposure),
+                asset_class_exposure=float(proposal.current_asset_class_exposure),
+                correlation_score=float(avg_corr),
+                pcc_final=str(pcc_final),
+                pcc_reason=str(pcc_reason),
+                sizing_multiplier=float(sizing_multiplier),
+            )
+            self.audit_logger.record(rec)
+        except Exception:
+            # fail-silent
+            return
 
     # ----------------------------------------------------
     # Main loop
@@ -223,7 +286,6 @@ class EngineLoop:
         # If first tick for this instrument, seed prev and return
         if instrument not in self.prev_price_by_instrument:
             self.prev_price_by_instrument[instrument] = float(price)
-            # also seed returns buffer
             if instrument not in self.return_history:
                 self.return_history[instrument] = deque(maxlen=self.correlation_window)
             return
@@ -242,6 +304,7 @@ class EngineLoop:
         )
 
         self.total_signals += 1
+        signal_strength = float(getattr(signal, "strength", 0.0))
 
         # 0) Evaluate exits first
         realized_exit = self.position_book.evaluate_exit(
@@ -271,7 +334,7 @@ class EngineLoop:
             return
 
         # 2) Threshold gate
-        if float(signal.strength) < float(self.min_signal_strength):
+        if signal_strength < float(self.min_signal_strength):
             self.threshold_blocks += 1
             self.prev_price_by_instrument[instrument] = float(price)
             return
@@ -306,23 +369,41 @@ class EngineLoop:
 
         # 5) PCC (portfolio-level governance + correlation throttle input)
         asset_class = self._asset_class(instrument)
-
         avg_corr = self._avg_abs_corr_vs_open(instrument=instrument, asset_class=asset_class)
+
+        # Snapshot exposures (portfolio state) at time of decision
+        total_exposure = self._total_exposure_notional()
+        inst_exposure = self._instrument_exposure_notional(instrument)
+        ac_exposure = self._asset_class_exposure_notional(asset_class)
+        dd_pct = float(self.pnl_tracker.current_drawdown() * 100.0)
+        open_in_ac = self._open_positions_in_asset_class(asset_class)
 
         proposal = TradeProposal(
             instrument=instrument,
             asset_class=asset_class,
             requested_notional=scaled_notional,
             equity=equity,
-            current_total_exposure=self._total_exposure_notional(),
-            current_instrument_exposure=self._instrument_exposure_notional(instrument),
-            current_asset_class_exposure=self._asset_class_exposure_notional(asset_class),
-            portfolio_dd_pct=self.pnl_tracker.current_drawdown() * 100.0,
-            open_positions_in_asset_class=self._open_positions_in_asset_class(asset_class),
+            current_total_exposure=total_exposure,
+            current_instrument_exposure=inst_exposure,
+            current_asset_class_exposure=ac_exposure,
+            portfolio_dd_pct=dd_pct,
+            open_positions_in_asset_class=open_in_ac,
             avg_correlation=float(avg_corr),
         )
 
         pcc_decision = self.pcc.evaluate(proposal)
+
+        # Audit PCC decision (both allow and block)
+        self._audit_pcc_decision(
+            instrument=instrument,
+            asset_class=asset_class,
+            signal_strength=signal_strength,
+            proposal=proposal,
+            avg_corr=float(avg_corr),
+            pcc_final=str(pcc_decision.final),
+            pcc_reason=str(pcc_decision.reason),
+            sizing_multiplier=float(pcc_decision.sizing_multiplier),
+        )
 
         if pcc_decision.final != "ALLOW":
             self.pcc_blocks += 1
