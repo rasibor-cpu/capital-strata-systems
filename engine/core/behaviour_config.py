@@ -12,6 +12,10 @@ Behaviour controls:
 - Stop multiplier tolerance
 
 This is the top-level capital temperament selector.
+
+Supports behaviour codes and names:
+  A=DEFENSIVE, B=CONSERVATIVE, C=BALANCED, D=AGGRESSIVE, E=OFF
+  Or: "DEFENSIVE", "CONSERVATIVE", "BALANCED", "AGGRESSIVE", "OFF"
 """
 
 from __future__ import annotations
@@ -45,6 +49,15 @@ DEFENSIVE = BehaviourConfig(
     stop_multiplier=0.8,         # tighter stops
 )
 
+CONSERVATIVE = BehaviourConfig(
+    name="CONSERVATIVE",
+    regime_alpha=0.25,
+    base_risk_pct=0.0075,        # 0.75%
+    drawdown_intensity=1.2,
+    volatility_haircut=0.50,
+    stop_multiplier=0.9,
+)
+
 BALANCED = BehaviourConfig(
     name="BALANCED",
     regime_alpha=0.30,
@@ -63,17 +76,52 @@ AGGRESSIVE = BehaviourConfig(
     stop_multiplier=1.3,         # wider stops
 )
 
+OFF = BehaviourConfig(
+    name="OFF",
+    regime_alpha=0.30,
+    base_risk_pct=0.0,
+    drawdown_intensity=1.0,
+    volatility_haircut=1.0,
+    stop_multiplier=1.0,
+)
+
 
 # ============================================================
-# REGISTRY
+# CODE + NAME ALIASES
 # ============================================================
 
+# Single-letter behaviour codes (authoritative)
+CODE_ALIASES = {
+    "A": "DEFENSIVE",
+    "B": "CONSERVATIVE",
+    "C": "BALANCED",
+    "D": "AGGRESSIVE",
+    "E": "OFF",
+}
+
+# Registry by canonical name
 BEHAVIOUR_REGISTRY = {
     "DEFENSIVE": DEFENSIVE,
+    "CONSERVATIVE": CONSERVATIVE,
     "BALANCED": BALANCED,
     "AGGRESSIVE": AGGRESSIVE,
+    "OFF": OFF,
 }
 
 
 def get_behaviour(name: str) -> BehaviourConfig:
-    return BEHAVIOUR_REGISTRY.get(name.upper(), BALANCED)
+    """
+    Accepts:
+      - A/B/C/D/E
+      - DEFENSIVE/CONSERVATIVE/BALANCED/AGGRESSIVE/OFF
+    Defaults to BALANCED if unknown.
+    """
+    if not name:
+        return BALANCED
+
+    k = str(name).strip().upper()
+
+    # Expand letter codes to canonical names
+    k = CODE_ALIASES.get(k, k)
+
+    return BEHAVIOUR_REGISTRY.get(k, BALANCED)

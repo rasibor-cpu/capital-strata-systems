@@ -1,15 +1,17 @@
 """
-Phase 1 – Portfolio Replay V2 (Time-Synchronized + Production-Consistent Risk)
+Phase 1 – Portfolio Replay V4 (Strength Sweep)
 Capital Strata Systems
 
-Institutional-correct:
-- Batch signal evaluation per timestamp
-- Shared equity
-- Equity curve tracking
-- Max drawdown calculation
-- Trade statistics
-- risk_pct sourced from ExecutionGate/CompoundingEngine (no hardcoded risk)
-- risk_pct distribution logging (avg/min/max)
+Goal:
+- Improve expectancy per trade by raising MIN_SIGNAL_STRENGTH.
+- Compare outcomes across behaviours using the SAME replay logic.
+
+Runs:
+- behaviours: A, B, C, D (E is OFF)
+- strength thresholds: 0.61, 0.65, 0.68, 0.72
+
+Outputs:
+- Summary table printed to console.
 """
 
 from __future__ import annotations
@@ -29,17 +31,15 @@ from engine.strategy.behaviour_mapper import get_profile_for_behaviour
 from engine.strategy.signal_engine import SignalEngine
 
 STARTING_EQUITY = 100_000
-BEHAVIOUR = "C"
 MA_WINDOW = 20
 STOP_DISTANCE_PCT = 0.01
 REGIME_PERSISTENCE = 0.95
-PIP_SCALE = 10000.0
 
 DATA_DIR = REPO_ROOT / "data" / "history"
-PRICE_COLS = ["close", "price", "Close", "Price", "c"]
+PRICE_COLS = ["close", "price", "Close", "Price", "c", "CLOSE", "PRICE"]
 
 
-def detect_price_col(fields):
+def detect_price_col(fields: List[str]) -> str:
     for c in PRICE_COLS:
         if c in fields:
             return c
@@ -47,16 +47,11 @@ def detect_price_col(fields):
 
 
 def extract_risk_pct_from_decision(decision: Any, fallback: float) -> float:
-    """
-    Preferred: pull risk_pct from gate debug payload if present.
-    Fallback: caller-provided float.
-    """
     try:
         if isinstance(decision, dict):
             dbg = decision.get("debug")
             if isinstance(dbg, dict) and dbg.get("risk_pct") is not None:
                 return float(dbg["risk_pct"])
-
             inner = decision.get("decision")
             if isinstance(inner, dict):
                 dbg2 = inner.get("debug")
@@ -64,7 +59,6 @@ def extract_risk_pct_from_decision(decision: Any, fallback: float) -> float:
                     return float(dbg2["risk_pct"])
     except Exception:
         pass
-
     return float(fallback)
 
 
@@ -76,10 +70,12 @@ def load_all_data():
         instrument = file.stem.replace("_M5_1year", "").replace("_", "")
         with open(file, "r", newline="") as f:
             reader = csv.DictReader(f)
-            price_col = detect_price_col(reader.fieldnames)
+            price_col = detect_price_col(reader.fieldnames or ["price"])
             rows = []
             for row in reader:
-                ts = row["timestamp"]
+                ts = row.get("timestamp")
+                if ts is None:
+                    continue
                 price = float(row[price_col])
                 rows.append((ts, price))
                 timestamps.add(ts)
@@ -90,28 +86,25 @@ def load_all_data():
     return datasets, sorted_ts
 
 
-def main():
-    print("\n==== PHASE 1 PORTFOLIO REPLAY V2 ====\n")
-
+def run_one(behaviour: str, min_strength: float) -> Dict[str, Any]:
     datasets, sorted_ts = load_all_data()
 
-    profile = get_profile_for_behaviour(BEHAVIOUR)
+    profile = get_profile_for_behaviour(behaviour)
     signal_engines = {inst: SignalEngine(profile) for inst in datasets}
     execution_gate = ExecutionGate()
     pnl_tracker = PnLTracker(starting_equity=STARTING_EQUITY)
 
     price_windows = {inst: deque(maxlen=MA_WINDOW) for inst in datasets}
     prev_prices: Dict[str, float] = {}
-    equity_peak = STARTING_EQUITY
+    equity_peak = float(STARTING_EQUITY)
 
     total_signals = 0
     gate_blocks = 0
     trades = 0
+    total_pnl = 0.0
 
-    equity_curve: List[float] = []
     max_drawdown = 0.0
     new_highs = 0
-    total_pnl = 0.0
 
     # risk stats
     risk_pct_sum = 0.0
@@ -125,16 +118,14 @@ def main():
     }
 
     for ts in sorted_ts:
-
-        approved_trades: List[Tuple[str, float, float]] = []
-        last_decision: Dict[str, Any] = {}
+        approved_trades: List[Tuple[str, float, float, Any]] = []
 
         # ---- SCAN ALL INSTRUMENTS FOR THIS TIMESTAMP ----
         for inst, price_map in instrument_maps.items():
             if ts not in price_map:
                 continue
 
-            price = price_map[ts]
+            price = float(price_map[ts])
             price_windows[inst].append(price)
 
             if inst not in prev_prices:
@@ -160,11 +151,11 @@ def main():
                 prev_prices[inst] = price
                 continue
 
-            if signal.strength < 0.61:
+            if float(signal.strength) < float(min_strength):
                 prev_prices[inst] = price
                 continue
 
-            equity = pnl_tracker.current_equity
+            equity = float(pnl_tracker.current_equity)
             equity_peak = max(equity_peak, equity)
 
             decision = execution_gate.evaluate_trade(
@@ -178,31 +169,26 @@ def main():
                 policy="core",
             )
 
-            last_decision[inst] = decision
-
             if not decision or decision.get("decision", {}).get("final") != "ALLOW":
                 gate_blocks += 1
                 prev_prices[inst] = price
                 continue
 
-            approved_trades.append((inst, price, prev_prices[inst]))
+            approved_trades.append((inst, price, prev_prices[inst], decision))
             prev_prices[inst] = price
 
         # ---- EXECUTE APPROVED TRADES ----
-        for inst, price, prev_price in approved_trades:
-            equity = pnl_tracker.current_equity
+        for inst, price, prev_price, decision in approved_trades:
+            equity = float(pnl_tracker.current_equity)
 
-            # Production-consistent risk: compute via CompoundingEngine,
-            # then allow gate decision debug to override if it exposes risk_pct.
             fallback_risk = execution_gate.compounding.compute_dynamic_risk(
                 equity=float(equity),
                 equity_peak=float(equity_peak),
                 regime_persistence=float(REGIME_PERSISTENCE),
             )
-            decision = last_decision.get(inst)
+
             risk_pct = extract_risk_pct_from_decision(decision, fallback=float(fallback_risk))
 
-            # Track risk distribution
             risk_pct_sum += float(risk_pct)
             risk_pct_min = min(risk_pct_min, float(risk_pct))
             risk_pct_max = max(risk_pct_max, float(risk_pct))
@@ -210,57 +196,89 @@ def main():
 
             risk_amount = equity * float(risk_pct)
 
-            move_ratio = (price - prev_price) / (price * STOP_DISTANCE_PCT)
+            move_ratio = (float(price) - float(prev_price)) / (float(price) * STOP_DISTANCE_PCT)
+            if move_ratio > 3.0:
+                move_ratio = 3.0
+            elif move_ratio < -3.0:
+                move_ratio = -3.0
 
-            if move_ratio > 3:
-                move_ratio = 3
-            elif move_ratio < -3:
-                move_ratio = -3
-
-            realized_pnl = move_ratio * risk_amount
+            realized_pnl = float(move_ratio) * float(risk_amount)
             total_pnl += realized_pnl
 
             pnl_tracker.record_trade(
                 instrument=inst,
-                realized_pnl=realized_pnl,
+                realized_pnl=float(realized_pnl),
                 unrealized_pnl=0.0,
             )
 
             trades += 1
 
         # ---- EQUITY TRACKING (once per timestamp) ----
-        equity_now = pnl_tracker.current_equity
-        equity_curve.append(equity_now)
+        equity_now = float(pnl_tracker.current_equity)
 
         if equity_now > equity_peak:
             equity_peak = equity_now
             new_highs += 1
 
-        drawdown = (equity_peak - equity_now) / equity_peak if equity_peak > 0 else 0.0
-        if drawdown > max_drawdown:
-            max_drawdown = drawdown
+        dd = (equity_peak - equity_now) / equity_peak if equity_peak > 0 else 0.0
+        if dd > max_drawdown:
+            max_drawdown = dd
 
-    ending_equity = pnl_tracker.current_equity
-    net_pnl = ending_equity - STARTING_EQUITY
-    avg_trade_pnl = total_pnl / trades if trades > 0 else 0.0
+    ending_equity = float(pnl_tracker.current_equity)
+    net_pnl = ending_equity - float(STARTING_EQUITY)
+    avg_trade_pnl = (total_pnl / trades) if trades > 0 else 0.0
 
     avg_risk_pct = (risk_pct_sum / risk_samples) if risk_samples > 0 else 0.0
     min_risk_pct = (risk_pct_min if risk_samples > 0 else 0.0)
     max_risk_pct = (risk_pct_max if risk_samples > 0 else 0.0)
 
-    print("Portfolio Summary:")
-    print("total_signals:", total_signals)
-    print("gate_blocks:", gate_blocks)
-    print("trades:", trades)
-    print("starting_equity:", STARTING_EQUITY)
-    print("ending_equity:", ending_equity)
-    print("net_pnl:", net_pnl)
-    print("max_drawdown_pct:", round(max_drawdown * 100, 2))
-    print("new_equity_highs:", new_highs)
-    print("avg_trade_pnl:", round(avg_trade_pnl, 6))
-    print("avg_risk_pct:", round(avg_risk_pct, 6))
-    print("min_risk_pct:", round(min_risk_pct, 6))
-    print("max_risk_pct:", round(max_risk_pct, 6))
+    return {
+        "behaviour": behaviour,
+        "min_strength": float(min_strength),
+        "total_signals": int(total_signals),
+        "gate_blocks": int(gate_blocks),
+        "trades": int(trades),
+        "starting_equity": float(STARTING_EQUITY),
+        "ending_equity": float(ending_equity),
+        "net_pnl": float(net_pnl),
+        "max_drawdown_pct": float(max_drawdown * 100.0),
+        "new_equity_highs": int(new_highs),
+        "avg_trade_pnl": float(avg_trade_pnl),
+        "avg_risk_pct": float(avg_risk_pct),
+        "min_risk_pct": float(min_risk_pct),
+        "max_risk_pct": float(max_risk_pct),
+    }
+
+
+def main():
+    print("\n==== PHASE 1 PORTFOLIO REPLAY V4 (STRENGTH SWEEP) ====\n")
+
+    behaviours = ["A", "B", "C", "D", "E"]
+    thresholds = [0.61, 0.65, 0.68, 0.72]
+
+    results: List[Dict[str, Any]] = []
+
+    for b in behaviours:
+        if b == "E":
+            print("Skipping E (OFF) — expected 0 trades.\n")
+            continue
+        for t in thresholds:
+            print(f"Running behaviour={b} | MIN_SIGNAL_STRENGTH={t} ...")
+            r = run_one(b, t)
+            results.append(r)
+            print(
+                f"  trades={r['trades']} | net_pnl={r['net_pnl']:.2f} | "
+                f"maxDD={r['max_drawdown_pct']:.2f}% | avg_trade_pnl={r['avg_trade_pnl']:.6f}"
+            )
+
+    print("\n==== SUMMARY (copy/paste this block) ====\n")
+    for r in results:
+        print(
+            f"{r['behaviour']} | thr={r['min_strength']:.2f} | trades={r['trades']} | "
+            f"net_pnl={r['net_pnl']:.2f} | maxDD={r['max_drawdown_pct']:.2f}% | "
+            f"avg_trade_pnl={r['avg_trade_pnl']:.6f} | avg_risk={r['avg_risk_pct']:.6f}"
+        )
+
     print("\nDone.")
 
 

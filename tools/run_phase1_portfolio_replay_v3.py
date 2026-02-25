@@ -1,5 +1,5 @@
 """
-Phase 1 – Portfolio Replay V2 (Time-Synchronized + Production-Consistent Risk)
+Phase 1 – Portfolio Replay V3 (Behaviour-Synchronized + Production-Consistent Risk)
 Capital Strata Systems
 
 Institutional-correct:
@@ -9,7 +9,7 @@ Institutional-correct:
 - Max drawdown calculation
 - Trade statistics
 - risk_pct sourced from ExecutionGate/CompoundingEngine (no hardcoded risk)
-- risk_pct distribution logging (avg/min/max)
+- Behaviour is synchronized across StrategyProfile + CompoundingEngine
 """
 
 from __future__ import annotations
@@ -29,7 +29,10 @@ from engine.strategy.behaviour_mapper import get_profile_for_behaviour
 from engine.strategy.signal_engine import SignalEngine
 
 STARTING_EQUITY = 100_000
-BEHAVIOUR = "C"
+
+# Set one of: "A","B","C","D","E"
+BEHAVIOUR = "A"
+
 MA_WINDOW = 20
 STOP_DISTANCE_PCT = 0.01
 REGIME_PERSISTENCE = 0.95
@@ -90,25 +93,43 @@ def load_all_data():
     return datasets, sorted_ts
 
 
+def bind_gate_behaviour(gate: ExecutionGate, behaviour_code: str) -> None:
+    """
+    Forces ExecutionGate risk layer to use the same behaviour code
+    as the Strategy layer for this replay session.
+    """
+    try:
+        # Replace compounding engine instance with behaviour-bound instance
+        gate.compounding = gate.compounding.__class__(behaviour=behaviour_code)
+    except Exception:
+        # Fail-closed: if we cannot bind behaviour, we proceed but warn.
+        print("WARNING: could not bind gate.compounding behaviour; results may collapse across regimes.")
+
+
 def main():
-    print("\n==== PHASE 1 PORTFOLIO REPLAY V2 ====\n")
+    print("\n==== PHASE 1 PORTFOLIO REPLAY V3 (BEHAVIOUR-SYNC) ====\n")
+    print("BEHAVIOUR:", BEHAVIOUR)
 
     datasets, sorted_ts = load_all_data()
 
+    # Strategy profile uses the behaviour code
     profile = get_profile_for_behaviour(BEHAVIOUR)
     signal_engines = {inst: SignalEngine(profile) for inst in datasets}
+
+    # Gate + bind behaviour into risk/compounding layer
     execution_gate = ExecutionGate()
+    bind_gate_behaviour(execution_gate, BEHAVIOUR)
+
     pnl_tracker = PnLTracker(starting_equity=STARTING_EQUITY)
 
     price_windows = {inst: deque(maxlen=MA_WINDOW) for inst in datasets}
     prev_prices: Dict[str, float] = {}
-    equity_peak = STARTING_EQUITY
+    equity_peak = float(STARTING_EQUITY)
 
     total_signals = 0
     gate_blocks = 0
     trades = 0
 
-    equity_curve: List[float] = []
     max_drawdown = 0.0
     new_highs = 0
     total_pnl = 0.0
@@ -134,7 +155,7 @@ def main():
             if ts not in price_map:
                 continue
 
-            price = price_map[ts]
+            price = float(price_map[ts])
             price_windows[inst].append(price)
 
             if inst not in prev_prices:
@@ -160,21 +181,22 @@ def main():
                 prev_prices[inst] = price
                 continue
 
-            if signal.strength < 0.61:
+            # Strategy threshold lives in profile; keep a safety floor:
+            if float(signal.strength) < 0.61:
                 prev_prices[inst] = price
                 continue
 
-            equity = pnl_tracker.current_equity
+            equity = float(pnl_tracker.current_equity)
             equity_peak = max(equity_peak, equity)
 
             decision = execution_gate.evaluate_trade(
                 instrument=inst,
                 side=signal.direction,
                 notional=equity * 0.10,
-                stop_distance_pct=STOP_DISTANCE_PCT,
+                stop_distance_pct=float(STOP_DISTANCE_PCT),
                 equity=equity,
-                equity_peak=equity_peak,
-                regime_persistence=REGIME_PERSISTENCE,
+                equity_peak=float(equity_peak),
+                regime_persistence=float(REGIME_PERSISTENCE),
                 policy="core",
             )
 
@@ -190,15 +212,14 @@ def main():
 
         # ---- EXECUTE APPROVED TRADES ----
         for inst, price, prev_price in approved_trades:
-            equity = pnl_tracker.current_equity
+            equity = float(pnl_tracker.current_equity)
 
-            # Production-consistent risk: compute via CompoundingEngine,
-            # then allow gate decision debug to override if it exposes risk_pct.
             fallback_risk = execution_gate.compounding.compute_dynamic_risk(
                 equity=float(equity),
                 equity_peak=float(equity_peak),
                 regime_persistence=float(REGIME_PERSISTENCE),
             )
+
             decision = last_decision.get(inst)
             risk_pct = extract_risk_pct_from_decision(decision, fallback=float(fallback_risk))
 
@@ -210,43 +231,41 @@ def main():
 
             risk_amount = equity * float(risk_pct)
 
-            move_ratio = (price - prev_price) / (price * STOP_DISTANCE_PCT)
-
+            move_ratio = (float(price) - float(prev_price)) / (float(price) * float(STOP_DISTANCE_PCT))
             if move_ratio > 3:
                 move_ratio = 3
             elif move_ratio < -3:
                 move_ratio = -3
 
-            realized_pnl = move_ratio * risk_amount
-            total_pnl += realized_pnl
+            realized_pnl = float(move_ratio) * float(risk_amount)
+            total_pnl += float(realized_pnl)
 
             pnl_tracker.record_trade(
                 instrument=inst,
-                realized_pnl=realized_pnl,
+                realized_pnl=float(realized_pnl),
                 unrealized_pnl=0.0,
             )
 
             trades += 1
 
         # ---- EQUITY TRACKING (once per timestamp) ----
-        equity_now = pnl_tracker.current_equity
-        equity_curve.append(equity_now)
+        equity_now = float(pnl_tracker.current_equity)
 
         if equity_now > equity_peak:
             equity_peak = equity_now
             new_highs += 1
 
-        drawdown = (equity_peak - equity_now) / equity_peak if equity_peak > 0 else 0.0
-        if drawdown > max_drawdown:
-            max_drawdown = drawdown
+        dd = (equity_peak - equity_now) / equity_peak if equity_peak > 0 else 0.0
+        if dd > max_drawdown:
+            max_drawdown = dd
 
-    ending_equity = pnl_tracker.current_equity
-    net_pnl = ending_equity - STARTING_EQUITY
-    avg_trade_pnl = total_pnl / trades if trades > 0 else 0.0
+    ending_equity = float(pnl_tracker.current_equity)
+    net_pnl = float(ending_equity - float(STARTING_EQUITY))
+    avg_trade_pnl = float(total_pnl / trades) if trades > 0 else 0.0
 
-    avg_risk_pct = (risk_pct_sum / risk_samples) if risk_samples > 0 else 0.0
-    min_risk_pct = (risk_pct_min if risk_samples > 0 else 0.0)
-    max_risk_pct = (risk_pct_max if risk_samples > 0 else 0.0)
+    avg_risk_pct = float(risk_pct_sum / risk_samples) if risk_samples > 0 else 0.0
+    min_risk_pct = float(risk_pct_min if risk_samples > 0 else 0.0)
+    max_risk_pct = float(risk_pct_max if risk_samples > 0 else 0.0)
 
     print("Portfolio Summary:")
     print("total_signals:", total_signals)

@@ -1,15 +1,12 @@
 """
-Phase 1 – Portfolio Replay V2 (Time-Synchronized + Production-Consistent Risk)
+Phase 1 – Portfolio Replay V5 (Convexity Trim)
 Capital Strata Systems
 
-Institutional-correct:
-- Batch signal evaluation per timestamp
-- Shared equity
-- Equity curve tracking
-- Max drawdown calculation
-- Trade statistics
-- risk_pct sourced from ExecutionGate/CompoundingEngine (no hardcoded risk)
-- risk_pct distribution logging (avg/min/max)
+Changes:
+- MIN_SIGNAL_STRENGTH = 0.72
+- MAX_R_MULTIPLIER = 2.5 (was 3)
+Goal:
+- Reduce drawdown without reducing total return materially
 """
 
 from __future__ import annotations
@@ -30,10 +27,13 @@ from engine.strategy.signal_engine import SignalEngine
 
 STARTING_EQUITY = 100_000
 BEHAVIOUR = "C"
+
 MA_WINDOW = 20
 STOP_DISTANCE_PCT = 0.01
 REGIME_PERSISTENCE = 0.95
-PIP_SCALE = 10000.0
+
+MIN_SIGNAL_STRENGTH = 0.72
+MAX_R_MULTIPLIER = 2.5
 
 DATA_DIR = REPO_ROOT / "data" / "history"
 PRICE_COLS = ["close", "price", "Close", "Price", "c"]
@@ -47,16 +47,11 @@ def detect_price_col(fields):
 
 
 def extract_risk_pct_from_decision(decision: Any, fallback: float) -> float:
-    """
-    Preferred: pull risk_pct from gate debug payload if present.
-    Fallback: caller-provided float.
-    """
     try:
         if isinstance(decision, dict):
             dbg = decision.get("debug")
             if isinstance(dbg, dict) and dbg.get("risk_pct") is not None:
                 return float(dbg["risk_pct"])
-
             inner = decision.get("decision")
             if isinstance(inner, dict):
                 dbg2 = inner.get("debug")
@@ -64,7 +59,6 @@ def extract_risk_pct_from_decision(decision: Any, fallback: float) -> float:
                     return float(dbg2["risk_pct"])
     except Exception:
         pass
-
     return float(fallback)
 
 
@@ -91,7 +85,10 @@ def load_all_data():
 
 
 def main():
-    print("\n==== PHASE 1 PORTFOLIO REPLAY V2 ====\n")
+    print("\n==== PHASE 1 PORTFOLIO REPLAY V5 (CONVEXITY TRIM) ====\n")
+    print("Behaviour:", BEHAVIOUR)
+    print("Min strength:", MIN_SIGNAL_STRENGTH)
+    print("Max R multiplier:", MAX_R_MULTIPLIER)
 
     datasets, sorted_ts = load_all_data()
 
@@ -102,39 +99,24 @@ def main():
 
     price_windows = {inst: deque(maxlen=MA_WINDOW) for inst in datasets}
     prev_prices: Dict[str, float] = {}
-    equity_peak = STARTING_EQUITY
+    equity_peak = float(STARTING_EQUITY)
 
     total_signals = 0
     gate_blocks = 0
     trades = 0
-
-    equity_curve: List[float] = []
+    total_pnl = 0.0
     max_drawdown = 0.0
     new_highs = 0
-    total_pnl = 0.0
-
-    # risk stats
-    risk_pct_sum = 0.0
-    risk_pct_min = 9e9
-    risk_pct_max = 0.0
-    risk_samples = 0
-
-    instrument_maps = {
-        inst: {ts: price for ts, price in rows}
-        for inst, rows in datasets.items()
-    }
 
     for ts in sorted_ts:
+        approved_trades: List[Tuple[str, float, float, Any]] = []
 
-        approved_trades: List[Tuple[str, float, float]] = []
-        last_decision: Dict[str, Any] = {}
-
-        # ---- SCAN ALL INSTRUMENTS FOR THIS TIMESTAMP ----
-        for inst, price_map in instrument_maps.items():
+        for inst, rows in datasets.items():
+            price_map = dict(rows)
             if ts not in price_map:
                 continue
 
-            price = price_map[ts]
+            price = float(price_map[ts])
             price_windows[inst].append(price)
 
             if inst not in prev_prices:
@@ -160,11 +142,11 @@ def main():
                 prev_prices[inst] = price
                 continue
 
-            if signal.strength < 0.61:
+            if float(signal.strength) < MIN_SIGNAL_STRENGTH:
                 prev_prices[inst] = price
                 continue
 
-            equity = pnl_tracker.current_equity
+            equity = float(pnl_tracker.current_equity)
             equity_peak = max(equity_peak, equity)
 
             decision = execution_gate.evaluate_trade(
@@ -178,44 +160,32 @@ def main():
                 policy="core",
             )
 
-            last_decision[inst] = decision
-
             if not decision or decision.get("decision", {}).get("final") != "ALLOW":
                 gate_blocks += 1
                 prev_prices[inst] = price
                 continue
 
-            approved_trades.append((inst, price, prev_prices[inst]))
+            approved_trades.append((inst, price, prev_prices[inst], decision))
             prev_prices[inst] = price
 
-        # ---- EXECUTE APPROVED TRADES ----
-        for inst, price, prev_price in approved_trades:
-            equity = pnl_tracker.current_equity
+        for inst, price, prev_price, decision in approved_trades:
+            equity = float(pnl_tracker.current_equity)
 
-            # Production-consistent risk: compute via CompoundingEngine,
-            # then allow gate decision debug to override if it exposes risk_pct.
             fallback_risk = execution_gate.compounding.compute_dynamic_risk(
                 equity=float(equity),
                 equity_peak=float(equity_peak),
                 regime_persistence=float(REGIME_PERSISTENCE),
             )
-            decision = last_decision.get(inst)
+
             risk_pct = extract_risk_pct_from_decision(decision, fallback=float(fallback_risk))
-
-            # Track risk distribution
-            risk_pct_sum += float(risk_pct)
-            risk_pct_min = min(risk_pct_min, float(risk_pct))
-            risk_pct_max = max(risk_pct_max, float(risk_pct))
-            risk_samples += 1
-
             risk_amount = equity * float(risk_pct)
 
             move_ratio = (price - prev_price) / (price * STOP_DISTANCE_PCT)
 
-            if move_ratio > 3:
-                move_ratio = 3
-            elif move_ratio < -3:
-                move_ratio = -3
+            if move_ratio > MAX_R_MULTIPLIER:
+                move_ratio = MAX_R_MULTIPLIER
+            elif move_ratio < -MAX_R_MULTIPLIER:
+                move_ratio = -MAX_R_MULTIPLIER
 
             realized_pnl = move_ratio * risk_amount
             total_pnl += realized_pnl
@@ -228,39 +198,24 @@ def main():
 
             trades += 1
 
-        # ---- EQUITY TRACKING (once per timestamp) ----
-        equity_now = pnl_tracker.current_equity
-        equity_curve.append(equity_now)
+        equity_now = float(pnl_tracker.current_equity)
 
         if equity_now > equity_peak:
             equity_peak = equity_now
             new_highs += 1
 
-        drawdown = (equity_peak - equity_now) / equity_peak if equity_peak > 0 else 0.0
-        if drawdown > max_drawdown:
-            max_drawdown = drawdown
+        dd = (equity_peak - equity_now) / equity_peak if equity_peak > 0 else 0.0
+        if dd > max_drawdown:
+            max_drawdown = dd
 
-    ending_equity = pnl_tracker.current_equity
+    ending_equity = float(pnl_tracker.current_equity)
     net_pnl = ending_equity - STARTING_EQUITY
-    avg_trade_pnl = total_pnl / trades if trades > 0 else 0.0
 
-    avg_risk_pct = (risk_pct_sum / risk_samples) if risk_samples > 0 else 0.0
-    min_risk_pct = (risk_pct_min if risk_samples > 0 else 0.0)
-    max_risk_pct = (risk_pct_max if risk_samples > 0 else 0.0)
-
-    print("Portfolio Summary:")
-    print("total_signals:", total_signals)
-    print("gate_blocks:", gate_blocks)
+    print("\nPortfolio Summary:")
     print("trades:", trades)
-    print("starting_equity:", STARTING_EQUITY)
-    print("ending_equity:", ending_equity)
     print("net_pnl:", net_pnl)
     print("max_drawdown_pct:", round(max_drawdown * 100, 2))
     print("new_equity_highs:", new_highs)
-    print("avg_trade_pnl:", round(avg_trade_pnl, 6))
-    print("avg_risk_pct:", round(avg_risk_pct, 6))
-    print("min_risk_pct:", round(min_risk_pct, 6))
-    print("max_risk_pct:", round(max_risk_pct, 6))
     print("\nDone.")
 
 

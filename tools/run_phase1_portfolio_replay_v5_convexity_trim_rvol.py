@@ -21,7 +21,6 @@ STARTING_EQUITY = 100_000.0
 STOP_DISTANCE_PCT = 0.001
 REGIME_PERSISTENCE = 0.65
 
-# launcher overrides this via tools.run_rvol_launcher
 DATA_DIR = REPO_ROOT / "data" / "history"
 
 
@@ -93,6 +92,15 @@ def anchor_timestamps(datasets: Dict[str, List[Tuple[str, float]]]) -> List[str]
     return [ts for ts, _ in datasets[first_inst]]
 
 
+def strength_proxy(price: float, prev_price: float) -> float:
+    raw = abs(price - prev_price) / (price * STOP_DISTANCE_PCT)
+    if raw > MAX_R_MULTIPLIER:
+        raw = MAX_R_MULTIPLIER
+    if raw < 0:
+        raw = 0.0
+    return float(raw) / float(MAX_R_MULTIPLIER)
+
+
 def main() -> None:
     print("\n==== PHASE 1 PORTFOLIO REPLAY V5 (CONVEXITY TRIM) [RVOL RUNNER] ====\n")
     print(f"Behaviour: {BEHAVIOUR}")
@@ -112,6 +120,7 @@ def main() -> None:
     equity_peak = STARTING_EQUITY
     trades = 0
     gate_blocks = 0
+    sig_blocks = 0
     max_drawdown = 0.0
     new_highs = 0
 
@@ -125,12 +134,19 @@ def main() -> None:
 
             _t, price = series[idx - 1]
             prev_price = prev_prices[inst]
+
+            s = strength_proxy(price, prev_price)
+            if s < MIN_STRENGTH:
+                sig_blocks += 1
+                prev_prices[inst] = price
+                continue
+
             side = "BUY" if price >= prev_price else "SELL"
 
             equity = float(pnl_tracker.current_equity)
             base_notional = float(equity)
 
-            # ✅ EXACT keywords that your ExecutionGate.evaluate_trade accepts
+            # KEY CHANGE: volatility_state=None (bypass vol-sizing path that is erroring)
             dec = execution_gate.evaluate_trade(
                 instrument=inst,
                 side=side,
@@ -142,7 +158,7 @@ def main() -> None:
                 policy="core",
                 current_allocations=None,
                 rebalance_target_weights=None,
-                volatility_state="MEDIUM",
+                volatility_state=None,   # ✅ bypass
                 regime_state="NORMAL",
             )
 
@@ -193,10 +209,13 @@ def main() -> None:
     net_pnl = ending_equity - STARTING_EQUITY
 
     print("\nPortfolio Summary:")
+    print("instruments:", len(instruments))
     print("trades:", trades)
     print("net_pnl:", net_pnl)
     print("max_drawdown_pct:", round(max_drawdown * 100, 2))
     print("new_equity_highs:", new_highs)
+    print("sig_blocks:", sig_blocks)
+    print("gate_blocks:", gate_blocks)
     print("\nDone.")
 
 

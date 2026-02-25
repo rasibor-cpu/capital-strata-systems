@@ -65,7 +65,7 @@ class RiskDecision:
 
 class RiskGovernor:
     # ---- Core policy constants (immutable per session) ----
-    BASE_RISK_PCT = 0.01
+    BASE_RISK_PCT = 0.005
     MAX_RISK_PCT = 0.02
     MAX_DRAWDOWN_LIMIT = 0.20
     LOSS_STREAK_COMPRESSION = 0.5

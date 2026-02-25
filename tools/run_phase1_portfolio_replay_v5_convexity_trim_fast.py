@@ -1,15 +1,13 @@
 """
-Phase 1 – Portfolio Replay V2 (Time-Synchronized + Production-Consistent Risk)
+Phase 1 – Portfolio Replay V5 (Convexity Trim) – FAST
 Capital Strata Systems
 
-Institutional-correct:
-- Batch signal evaluation per timestamp
-- Shared equity
-- Equity curve tracking
-- Max drawdown calculation
-- Trade statistics
-- risk_pct sourced from ExecutionGate/CompoundingEngine (no hardcoded risk)
-- risk_pct distribution logging (avg/min/max)
+Fix:
+- Pre-index instrument_maps once (no dict(rows) inside loops)
+
+Policy:
+- MIN_SIGNAL_STRENGTH = 0.72
+- MAX_R_MULTIPLIER = 2.5 (was 3)
 """
 
 from __future__ import annotations
@@ -30,13 +28,16 @@ from engine.strategy.signal_engine import SignalEngine
 
 STARTING_EQUITY = 100_000
 BEHAVIOUR = "C"
+
 MA_WINDOW = 20
 STOP_DISTANCE_PCT = 0.01
 REGIME_PERSISTENCE = 0.95
-PIP_SCALE = 10000.0
+
+MIN_SIGNAL_STRENGTH = 0.72
+MAX_R_MULTIPLIER = 2.5
 
 DATA_DIR = REPO_ROOT / "data" / "history"
-PRICE_COLS = ["close", "price", "Close", "Price", "c"]
+PRICE_COLS = ["close", "price", "Close", "Price", "c", "CLOSE", "PRICE"]
 
 
 def detect_price_col(fields):
@@ -47,16 +48,11 @@ def detect_price_col(fields):
 
 
 def extract_risk_pct_from_decision(decision: Any, fallback: float) -> float:
-    """
-    Preferred: pull risk_pct from gate debug payload if present.
-    Fallback: caller-provided float.
-    """
     try:
         if isinstance(decision, dict):
             dbg = decision.get("debug")
             if isinstance(dbg, dict) and dbg.get("risk_pct") is not None:
                 return float(dbg["risk_pct"])
-
             inner = decision.get("decision")
             if isinstance(inner, dict):
                 dbg2 = inner.get("debug")
@@ -64,7 +60,6 @@ def extract_risk_pct_from_decision(decision: Any, fallback: float) -> float:
                     return float(dbg2["risk_pct"])
     except Exception:
         pass
-
     return float(fallback)
 
 
@@ -76,14 +71,15 @@ def load_all_data():
         instrument = file.stem.replace("_M5_1year", "").replace("_", "")
         with open(file, "r", newline="") as f:
             reader = csv.DictReader(f)
-            price_col = detect_price_col(reader.fieldnames)
+            price_col = detect_price_col(reader.fieldnames or ["price"])
             rows = []
             for row in reader:
-                ts = row["timestamp"]
+                ts = row.get("timestamp")
+                if ts is None:
+                    continue
                 price = float(row[price_col])
                 rows.append((ts, price))
                 timestamps.add(ts)
-
         datasets[instrument] = rows
 
     sorted_ts = sorted(timestamps)
@@ -91,50 +87,44 @@ def load_all_data():
 
 
 def main():
-    print("\n==== PHASE 1 PORTFOLIO REPLAY V2 ====\n")
+    print("\n==== PHASE 1 PORTFOLIO REPLAY V5 FAST (CONVEXITY TRIM) ====\n")
+    print(f"BEHAVIOUR={BEHAVIOUR} | MIN_SIGNAL_STRENGTH={MIN_SIGNAL_STRENGTH} | MAX_R={MAX_R_MULTIPLIER}\n")
 
     datasets, sorted_ts = load_all_data()
 
-    profile = get_profile_for_behaviour(BEHAVIOUR)
-    signal_engines = {inst: SignalEngine(profile) for inst in datasets}
-    execution_gate = ExecutionGate()
-    pnl_tracker = PnLTracker(starting_equity=STARTING_EQUITY)
-
-    price_windows = {inst: deque(maxlen=MA_WINDOW) for inst in datasets}
-    prev_prices: Dict[str, float] = {}
-    equity_peak = STARTING_EQUITY
-
-    total_signals = 0
-    gate_blocks = 0
-    trades = 0
-
-    equity_curve: List[float] = []
-    max_drawdown = 0.0
-    new_highs = 0
-    total_pnl = 0.0
-
-    # risk stats
-    risk_pct_sum = 0.0
-    risk_pct_min = 9e9
-    risk_pct_max = 0.0
-    risk_samples = 0
-
-    instrument_maps = {
+    # ✅ Pre-index once
+    instrument_maps: Dict[str, Dict[str, float]] = {
         inst: {ts: price for ts, price in rows}
         for inst, rows in datasets.items()
     }
 
-    for ts in sorted_ts:
+    profile = get_profile_for_behaviour(BEHAVIOUR)
+    signal_engines = {inst: SignalEngine(profile) for inst in instrument_maps}
+    execution_gate = ExecutionGate()
+    pnl_tracker = PnLTracker(starting_equity=STARTING_EQUITY)
 
-        approved_trades: List[Tuple[str, float, float]] = []
-        last_decision: Dict[str, Any] = {}
+    price_windows = {inst: deque(maxlen=MA_WINDOW) for inst in instrument_maps}
+    prev_prices: Dict[str, float] = {}
+    equity_peak = float(STARTING_EQUITY)
 
-        # ---- SCAN ALL INSTRUMENTS FOR THIS TIMESTAMP ----
+    total_signals = 0
+    gate_blocks = 0
+    trades = 0
+    total_pnl = 0.0
+    max_drawdown = 0.0
+    new_highs = 0
+
+    # lightweight progress ping
+    ping_every = max(1, len(sorted_ts) // 10)
+
+    for i, ts in enumerate(sorted_ts, start=1):
+        approved_trades: List[Tuple[str, float, float, Any]] = []
+
         for inst, price_map in instrument_maps.items():
             if ts not in price_map:
                 continue
 
-            price = price_map[ts]
+            price = float(price_map[ts])
             price_windows[inst].append(price)
 
             if inst not in prev_prices:
@@ -160,11 +150,11 @@ def main():
                 prev_prices[inst] = price
                 continue
 
-            if signal.strength < 0.61:
+            if float(signal.strength) < float(MIN_SIGNAL_STRENGTH):
                 prev_prices[inst] = price
                 continue
 
-            equity = pnl_tracker.current_equity
+            equity = float(pnl_tracker.current_equity)
             equity_peak = max(equity_peak, equity)
 
             decision = execution_gate.evaluate_trade(
@@ -178,77 +168,58 @@ def main():
                 policy="core",
             )
 
-            last_decision[inst] = decision
-
             if not decision or decision.get("decision", {}).get("final") != "ALLOW":
                 gate_blocks += 1
                 prev_prices[inst] = price
                 continue
 
-            approved_trades.append((inst, price, prev_prices[inst]))
+            approved_trades.append((inst, price, prev_prices[inst], decision))
             prev_prices[inst] = price
 
-        # ---- EXECUTE APPROVED TRADES ----
-        for inst, price, prev_price in approved_trades:
-            equity = pnl_tracker.current_equity
+        for inst, price, prev_price, decision in approved_trades:
+            equity = float(pnl_tracker.current_equity)
 
-            # Production-consistent risk: compute via CompoundingEngine,
-            # then allow gate decision debug to override if it exposes risk_pct.
             fallback_risk = execution_gate.compounding.compute_dynamic_risk(
                 equity=float(equity),
                 equity_peak=float(equity_peak),
                 regime_persistence=float(REGIME_PERSISTENCE),
             )
-            decision = last_decision.get(inst)
+
             risk_pct = extract_risk_pct_from_decision(decision, fallback=float(fallback_risk))
-
-            # Track risk distribution
-            risk_pct_sum += float(risk_pct)
-            risk_pct_min = min(risk_pct_min, float(risk_pct))
-            risk_pct_max = max(risk_pct_max, float(risk_pct))
-            risk_samples += 1
-
             risk_amount = equity * float(risk_pct)
 
-            move_ratio = (price - prev_price) / (price * STOP_DISTANCE_PCT)
+            move_ratio = (float(price) - float(prev_price)) / (float(price) * STOP_DISTANCE_PCT)
+            if move_ratio > MAX_R_MULTIPLIER:
+                move_ratio = MAX_R_MULTIPLIER
+            elif move_ratio < -MAX_R_MULTIPLIER:
+                move_ratio = -MAX_R_MULTIPLIER
 
-            if move_ratio > 3:
-                move_ratio = 3
-            elif move_ratio < -3:
-                move_ratio = -3
-
-            realized_pnl = move_ratio * risk_amount
+            realized_pnl = float(move_ratio) * float(risk_amount)
             total_pnl += realized_pnl
 
             pnl_tracker.record_trade(
                 instrument=inst,
-                realized_pnl=realized_pnl,
+                realized_pnl=float(realized_pnl),
                 unrealized_pnl=0.0,
             )
-
             trades += 1
 
-        # ---- EQUITY TRACKING (once per timestamp) ----
-        equity_now = pnl_tracker.current_equity
-        equity_curve.append(equity_now)
-
+        equity_now = float(pnl_tracker.current_equity)
         if equity_now > equity_peak:
             equity_peak = equity_now
             new_highs += 1
 
-        drawdown = (equity_peak - equity_now) / equity_peak if equity_peak > 0 else 0.0
-        if drawdown > max_drawdown:
-            max_drawdown = drawdown
+        dd = (equity_peak - equity_now) / equity_peak if equity_peak > 0 else 0.0
+        if dd > max_drawdown:
+            max_drawdown = dd
 
-    ending_equity = pnl_tracker.current_equity
-    net_pnl = ending_equity - STARTING_EQUITY
-    avg_trade_pnl = total_pnl / trades if trades > 0 else 0.0
+        if i % ping_every == 0:
+            print(f"...progress {i}/{len(sorted_ts)} | equity={equity_now:.2f} | maxDD={max_drawdown*100:.2f}%")
 
-    avg_risk_pct = (risk_pct_sum / risk_samples) if risk_samples > 0 else 0.0
-    min_risk_pct = (risk_pct_min if risk_samples > 0 else 0.0)
-    max_risk_pct = (risk_pct_max if risk_samples > 0 else 0.0)
+    ending_equity = float(pnl_tracker.current_equity)
+    net_pnl = ending_equity - float(STARTING_EQUITY)
 
-    print("Portfolio Summary:")
+    print("\nPortfolio Summary:")
     print("total_signals:", total_signals)
     print("gate_blocks:", gate_blocks)
     print("trades:", trades)
@@ -257,10 +228,6 @@ def main():
     print("net_pnl:", net_pnl)
     print("max_drawdown_pct:", round(max_drawdown * 100, 2))
     print("new_equity_highs:", new_highs)
-    print("avg_trade_pnl:", round(avg_trade_pnl, 6))
-    print("avg_risk_pct:", round(avg_risk_pct, 6))
-    print("min_risk_pct:", round(min_risk_pct, 6))
-    print("max_risk_pct:", round(max_risk_pct, 6))
     print("\nDone.")
 
 

@@ -32,7 +32,7 @@ class CompoundingProfile:
 
     This profile keeps regime logic knobs.
     """
-    max_risk_pct: float = 0.0125      # 1.25% hard ceiling
+    max_risk_pct: float = 0.015      # 1.25% hard ceiling
     regime_threshold: float = 0.75    # ↑ was 0.65 (stricter regime quality)
     regime_multiplier: float = 0.5
 

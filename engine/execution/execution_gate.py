@@ -32,7 +32,7 @@ class ExecutionGate:
 
     def __init__(self, risk_governor: Optional[RiskGovernor] = None) -> None:
         self.risk_governor = risk_governor or RiskGovernor()
-        self.compounding = CompoundingEngine()
+        self.compounding = CompoundingEngine(behaviour="DEFENSIVE")
         self.drawdown_scaler = DrawdownScaler()
         self.vol_sizer = VolatilityPositionSizer()
         self._rebalance_engine: Optional[WeeklyRebalanceEngine] = None

@@ -161,7 +161,7 @@ class EngineLoop:
         candidate: Dict[str, Any] = {
             "instrument": str(instrument),
             "side": str(side),
-            "notional": float(equity),  # safe default sizing proxy
+            "notional": float(equity) * 0.10,  # safe default sizing proxy
             "stop_distance_pct": float(DEFAULT_STOP_DISTANCE_PCT),
             "equity": float(equity),
             "equity_peak": float(self.equity_peak),

@@ -10,7 +10,7 @@ Micro Mode Overrides (equity <= 500):
 - max_risk_per_trade_pct: 5%
 - max_daily_drawdown_pct: 20%
 - max_trades_per_day: 10
-- max_concurrent_positions: 1
+- max_concurrent_positions: 5
 - max_concurrent_losses: 3
 - loss_streak_cooldown_trigger: 3 losses
 - cooldown_minutes: 30
