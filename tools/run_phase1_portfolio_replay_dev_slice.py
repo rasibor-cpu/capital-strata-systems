@@ -3,35 +3,23 @@ tools/run_phase1_portfolio_replay_dev_slice.py
 
 Phase 1 Portfolio Replay – DEV SLICE MODE (NO V5 PATCHING)
 ----------------------------------------------------------
-What this does:
+Fix in this version:
+- When redirecting V5, set DATA_DIR/HISTORY_DIR variables as pathlib.Path
+  (not string) so .glob() works.
+
+Behavior:
 - Reads CSV history files from: data/history/*_M5_1year.csv
-- Writes sliced copies (instrument subset + date range + optional max rows) into:
-    data/history__devslice/<RUN_ID>/
-- Attempts to run your existing V5 replay runner:
-    tools/run_phase1_portfolio_replay_v5_convexity_trim.py
-  while redirecting its history directory to the sliced folder at runtime.
+- Writes sliced copies into:     data/history__devslice/<RUN_ID>/
+- Imports and runs:              tools/run_phase1_portfolio_replay_v5_convexity_trim.py
+- Redirects its data folder by setting recognized directory variables on the module.
 
-Why:
-- Your V5 module does NOT expose run_replay().
-- You asked for NO PATCHING (so we don't modify V5).
-- This wrapper isolates a smaller dataset for fast iteration.
-
-How redirect works:
-- We import the V5 module and set any of these attributes if they exist:
-    HISTORY_DIR, HISTORY_PATH, DATA_DIR, DATA_PATH, HISTORY_FOLDER, HISTORY_ROOT
-  to the sliced directory.
-- Then we call module.main() (if present).
-
-If the V5 module ignores all of that, we print a diagnostic telling you what
-variables exist in the V5 module so we can target the right one in THIS wrapper,
-still without touching V5.
+Still no edits to V5.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
-import os
 import sys
 import shutil
 from pathlib import Path
@@ -42,24 +30,17 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-# Telemetry helper we already added
 from tools.replay._telemetry import ReplayTelemetry
-
 
 HISTORY_SRC_DIR = REPO_ROOT / "data" / "history"
 DEVSLICE_ROOT = REPO_ROOT / "data" / "history__devslice"
-
 V5_MODULE_IMPORT = "tools.run_phase1_portfolio_replay_v5_convexity_trim"
 
-
-# -----------------------------
-# helpers
-# -----------------------------
 
 def _parse_date(s: Optional[str]) -> Optional[datetime]:
     if not s:
         return None
-    return datetime.fromisoformat(s)  # expects YYYY-MM-DD
+    return datetime.fromisoformat(s)
 
 
 def _parse_instruments(s: Optional[str]) -> Optional[List[str]]:
@@ -70,12 +51,10 @@ def _parse_instruments(s: Optional[str]) -> Optional[List[str]]:
 
 
 def _detect_time_column(headers: List[str]) -> str:
-    # common variants
     candidates = ["time", "timestamp", "date", "datetime", "Date", "Datetime", "Time"]
     for c in candidates:
         if c in headers:
             return c
-    # fallback: first column if it looks like a time col name
     return headers[0]
 
 
@@ -84,13 +63,11 @@ def _parse_dt(val: str) -> Optional[datetime]:
     if not val:
         return None
 
-    # Try ISO first (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS)
     try:
         return datetime.fromisoformat(val.replace("Z", ""))
     except Exception:
         pass
 
-    # Try common formats
     fmts = [
         "%Y-%m-%d %H:%M:%S",
         "%Y-%m-%d %H:%M",
@@ -115,10 +92,6 @@ def _slice_csv(
     end: Optional[datetime],
     max_rows: Optional[int],
 ) -> Tuple[int, int]:
-    """
-    Copy rows from src -> dst where start <= t < end (if provided).
-    Returns (written_rows, scanned_rows).
-    """
     scanned = 0
     written = 0
 
@@ -165,9 +138,7 @@ def _list_history_files() -> List[Path]:
 
 
 def _instrument_from_filename(p: Path) -> str:
-    # AUD_CAD_M5_1year.csv -> AUD_CAD
-    name = p.name
-    return name.replace("_M5_1year.csv", "")
+    return p.name.replace("_M5_1year.csv", "")
 
 
 def _write_manifest(dst_dir: Path, instruments: List[str], start: Optional[datetime], end: Optional[datetime], max_rows: Optional[int]) -> None:
@@ -187,13 +158,13 @@ def _write_manifest(dst_dir: Path, instruments: List[str], start: Optional[datet
 def _try_redirect_v5(module, dev_history_dir: Path) -> List[str]:
     """
     Set likely data-dir attributes if present.
-    Returns a list of what was set.
+    IMPORTANT: set as pathlib.Path (not str) so `.glob()` works.
     """
     set_keys = []
     candidates = [
+        "DATA_DIR",
         "HISTORY_DIR",
         "HISTORY_PATH",
-        "DATA_DIR",
         "DATA_PATH",
         "HISTORY_FOLDER",
         "HISTORY_ROOT",
@@ -201,16 +172,12 @@ def _try_redirect_v5(module, dev_history_dir: Path) -> List[str]:
     for key in candidates:
         if hasattr(module, key):
             try:
-                setattr(module, key, str(dev_history_dir))
+                setattr(module, key, dev_history_dir)  # <-- Path, not string
                 set_keys.append(key)
             except Exception:
                 pass
     return set_keys
 
-
-# -----------------------------
-# main
-# -----------------------------
 
 def parse_args():
     p = argparse.ArgumentParser(description="Phase 1 DEV slice replay runner (no V5 patching)")
@@ -234,13 +201,11 @@ def main():
     if not all_files:
         raise RuntimeError(f"No history files found at {HISTORY_SRC_DIR} matching *_M5_1year.csv")
 
-    # Map instrument -> file
     file_map: Dict[str, Path] = {_instrument_from_filename(p): p for p in all_files}
 
     if instruments is None:
         instruments = sorted(file_map.keys())
 
-    # Validate instruments
     missing = [i for i in instruments if i not in file_map]
     if missing:
         raise RuntimeError(
@@ -272,7 +237,6 @@ def main():
     for idx, inst in enumerate(instruments, start=1):
         src = file_map[inst]
         dst = dev_dir / src.name
-
         w, s = _slice_csv(src, dst, start, end, args.max_rows)
         written_total += w
         tel.tick(idx)
@@ -282,7 +246,6 @@ def main():
     print(f"[DEVSLICE_COPY] Total rows written across instruments: {written_total:,}")
     print()
 
-    # Now attempt to run V5 with runtime redirection
     print("==== DEV SLICE RUNNER ====")
     print(f"Importing V5 module: {V5_MODULE_IMPORT}")
 
@@ -291,25 +254,16 @@ def main():
 
     set_keys = _try_redirect_v5(v5, dev_dir)
 
-    # Provide telemetry to V5 if it supports it via attribute
-    # (harmless if unused)
-    if hasattr(v5, "ReplayTelemetry"):
-        # some modules may reference ReplayTelemetry by name
-        pass
-    # Also expose it as a module attribute for convenience
+    # Expose telemetry symbol for V5 if it chooses to use it
     setattr(v5, "ReplayTelemetry", ReplayTelemetry)
 
     print(f"Redirect attempt: set {set_keys if set_keys else 'NO KNOWN DIR ATTRIBUTES FOUND'}")
     print("Calling V5 main() ...")
 
     if not hasattr(v5, "main"):
-        # Diagnostic listing for zero-guessing
         public = [k for k in dir(v5) if not k.startswith("_")]
-        raise RuntimeError(
-            "V5 module has no main(). Public symbols are:\n  " + "\n  ".join(public)
-        )
+        raise RuntimeError("V5 module has no main(). Public symbols:\n  " + "\n  ".join(public))
 
-    # Run
     v5.main()
 
 
