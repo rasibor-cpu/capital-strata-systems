@@ -1,107 +1,120 @@
 """
 engine/risk/volatility_position_sizer.py
 
-VolatilityPositionSizer
------------------------
-Instrument-aware notional scaler based on coarse volatility regimes.
+Realized Volatility Position Sizer (Std of Log Returns)
+-------------------------------------------------------
 
-Purpose (Phase C2/C3):
-- Sit between Allocator and DrawdownScaler
-- Reduce exposure in HIGH volatility regimes
-- Allow slightly larger exposure in LOW volatility regimes
-- Keep behavior deterministic and fail-safe
+Purpose:
+- Provide volatility-based notional scaling that compresses exposure during
+  volatility expansions (vol clustering), addressing portfolio drawdown blowups
+  under breadth (e.g., 12-instrument stacking).
 
-API (used by engine/execution/execution_gate.py):
-    VolatilityPositionSizer().size(
-        instrument=...,
-        base_notional=...,
-        volatility_state=...
-    ) -> float
+ExecutionGate integration:
+- ExecutionGate instantiates:
+      self.vol_sizer = VolatilityPositionSizer()
+- ExecutionGate calls:
+      vol_scaled_notional = self.vol_sizer.size(notional=<base>, price=<last>, debug=<dict>)
+
+Sizing rule:
+    mult = vol_target / realized_vol
+    mult clipped to [min_mult, max_mult]
+    vol_scaled_notional = notional * mult
+
+Notes:
+- Uses rolling std of log returns (no annualization needed; relative scaling only).
+- Low-overhead, dependency-free.
+- Safe warmup: returns 1.0 multiplier until enough observations exist.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
-from typing import Dict
+from collections import deque
+from typing import Deque, Optional, Dict, Any
 
 
 @dataclass(frozen=True)
 class VolatilitySizingPolicy:
-    low_mult: float = 1.10
-    medium_mult: float = 1.00
-    high_mult: float = 0.75
-    extreme_mult: float = 0.50
+    window: int = 96           # ~8 trading hours on M5
+    vol_target: float = 0.002  # target per-bar log-return stdev (tunable)
+    min_mult: float = 0.50     # compress size in high vol
+    max_mult: float = 2.00     # allow expansion in low vol
+    warmup_min_obs: int = 10   # minimum returns before enabling scaling
 
-    # Safety rails
-    min_notional: float = 100.0
-    max_mult: float = 2.00   # cap upside
-    min_mult: float = 0.10   # cap downside (but keep non-zero)
+
+class RealizedVolatilitySizer:
+    """
+    Rolling realized volatility estimator using log returns.
+    """
+    def __init__(self, policy: VolatilitySizingPolicy):
+        self.policy = policy
+        self._rets: Deque[float] = deque(maxlen=policy.window)
+        self._last_price: Optional[float] = None
+
+    def update(self, price: float) -> None:
+        if price is None:
+            return
+        if price <= 0:
+            return
+
+        if self._last_price is not None and self._last_price > 0:
+            r = math.log(price / self._last_price)
+            self._rets.append(r)
+
+        self._last_price = price
+
+    def realized_vol(self) -> Optional[float]:
+        n = len(self._rets)
+        if n < self.policy.warmup_min_obs:
+            return None
+
+        mean = sum(self._rets) / n
+        var = sum((x - mean) ** 2 for x in self._rets) / n
+        vol = math.sqrt(var)
+        return vol
+
+    def multiplier(self) -> float:
+        vol = self.realized_vol()
+        if vol is None or vol <= 0:
+            return 1.0
+
+        mult = self.policy.vol_target / vol
+        if mult < self.policy.min_mult:
+            return self.policy.min_mult
+        if mult > self.policy.max_mult:
+            return self.policy.max_mult
+        return mult
 
 
 class VolatilityPositionSizer:
     """
-    Deterministic volatility-based notional scaler.
+    ExecutionGate-facing volatility position sizer.
 
-    Notes:
-    - volatility_state is expected to be one of:
-        "LOW" | "MEDIUM" | "HIGH" | "EXTREME"
-      Any unknown value defaults to "MEDIUM".
-    - instrument overrides can be used later (e.g., JPY pairs often move differently).
+    API:
+        size(notional: float, price: float, debug: Optional[dict]) -> float
     """
-
-    def __init__(self, policy: VolatilitySizingPolicy | None = None) -> None:
+    def __init__(self, policy: Optional[VolatilitySizingPolicy] = None):
         self.policy = policy or VolatilitySizingPolicy()
+        self._sizer = RealizedVolatilitySizer(self.policy)
 
-        # Optional per-instrument multipliers (relative tweak on top of regime multiplier).
-        # Keep neutral for now; we can tune later with observed behavior.
-        self.instrument_bias: Dict[str, float] = {
-            "EUR_USD": 1.00,
-            "GBP_USD": 1.00,
-            "USD_JPY": 1.00,
-            "AUD_USD": 1.00,
-            "USD_CHF": 1.00,
-        }
-
-    def size(self, *, instrument: str, base_notional: float, volatility_state: str) -> float:
+    def size(self, notional: float, price: float, debug: Optional[Dict[str, Any]] = None) -> float:
         """
-        Returns a volatility-adjusted notional.
-
-        Fail-closed behavior:
-        - If base_notional invalid -> returns 0.0
+        Scale `notional` based on realized volatility computed from `price` stream.
         """
-        try:
-            base = float(base_notional)
-        except Exception:
-            return 0.0
+        # Update the volatility state with the latest price
+        self._sizer.update(price)
 
-        if base <= 0:
-            return 0.0
+        mult = self._sizer.multiplier()
+        scaled = float(notional) * float(mult)
 
-        state = (volatility_state or "MEDIUM").strip().upper()
+        if debug is not None:
+            # Keep keys stable and informative
+            debug["vol_window"] = self.policy.window
+            debug["vol_target"] = self.policy.vol_target
+            debug["vol_mult"] = mult
+            rv = self._sizer.realized_vol()
+            debug["realized_vol"] = rv if rv is not None else 0.0
+            debug["vol_scaled_notional"] = scaled
 
-        if state == "LOW":
-            mult = self.policy.low_mult
-        elif state == "HIGH":
-            mult = self.policy.high_mult
-        elif state == "EXTREME":
-            mult = self.policy.extreme_mult
-        else:
-            mult = self.policy.medium_mult
-
-        # Apply instrument bias (default 1.0 if unknown)
-        bias = float(self.instrument_bias.get(str(instrument), 1.0))
-        mult = mult * bias
-
-        # Clamp multiplier
-        if mult > self.policy.max_mult:
-            mult = self.policy.max_mult
-        if mult < self.policy.min_mult:
-            mult = self.policy.min_mult
-
-        sized = base * mult
-
-        # Clamp absolute notional floor
-        if sized < self.policy.min_notional:
-            sized = self.policy.min_notional
-
-        return float(sized)
+        return scaled
