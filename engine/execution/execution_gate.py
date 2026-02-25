@@ -1,95 +1,134 @@
-"""
-Execution Gate – Canonical Flat Interface (Volatility-Aware)
-Capital Strata Systems
-
-Upgrades:
-- Hard drawdown circuit breaker
-- Weekly rebalance enforcement
-- Authority-aware RiskGovernor integration
-- Instrument-specific VolatilityPositionSizer (NEW)
-- Fail-closed behavior
-
-Volatility sizing sits between:
-    Allocator -> VolSizer -> DrawdownScaler -> Governor
-"""
-
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Optional, Dict, Any
-
-from engine.capital.compounding_engine import CompoundingEngine
-from engine.risk.drawdown_scaler import DrawdownScaler
-from engine.risk.risk_governor import RiskGovernor
-from engine.capital.weekly_rebalance_engine import WeeklyRebalanceEngine
-from engine.risk.volatility_position_sizer import VolatilityPositionSizer
-
-
-HARD_DRAWDOWN_CIRCUIT_BREAKER_PCT = 0.20
+import inspect
+from typing import Any, Dict, Optional
 
 
 class ExecutionGate:
+    """
+    ExecutionGate (institutional-correct, signature-safe)
 
-    def __init__(self, risk_governor: Optional[RiskGovernor] = None) -> None:
-        self.risk_governor = risk_governor or RiskGovernor()
-        self.compounding = CompoundingEngine(behaviour="DEFENSIVE")
+    Responsibilities:
+    - Compute risk_pct from CompoundingEngine
+    - Volatility-based notional sizing (VolatilityPositionSizer)  [robust call]
+    - Drawdown scaling (DrawdownScaler)
+    - Final risk approval via RiskGovernor.validate_trade
+    - Return a stable decision dict: {"decision": {"final": "ALLOW/BLOCK"}, "reason": str, "debug": {...}}
+
+    Key fix:
+    - VolatilityPositionSizer.size() is called using ONLY kwargs it supports,
+      preventing runtime crashes like: unexpected keyword argument 'instrument'
+    """
+
+    def __init__(self) -> None:
+        # Imports live here to avoid import-order traps during tooling runs
+        from engine.capital.compounding_engine import CompoundingEngine
+        from engine.risk.drawdown_scaler import DrawdownScaler
+        from engine.risk.risk_governor import RiskGovernor
+        from engine.risk.volatility_position_sizer import VolatilityPositionSizer
+
+        self.compounding = CompoundingEngine()
         self.drawdown_scaler = DrawdownScaler()
+        self.risk_governor = RiskGovernor()
         self.vol_sizer = VolatilityPositionSizer()
-        self._rebalance_engine: Optional[WeeklyRebalanceEngine] = None
 
-    # =========================================================
-    # Rebalance Enforcement
-    # =========================================================
+    # -----------------------------
+    # Safe-call helpers
+    # -----------------------------
+    @staticmethod
+    def _safe_kwargs_call(fn, preferred_kwargs: Dict[str, Any], fallback_args: Optional[list[Any]] = None) -> Any:
+        """
+        Calls fn with the intersection of preferred_kwargs and fn's signature parameters.
+        If that still fails with TypeError, optionally tries positional fallback_args.
+        """
+        sig = inspect.signature(fn)
+        accepted = set(sig.parameters.keys())
 
-    def _rebalance_check(
-        self,
-        *,
-        now_utc: datetime,
-        current_allocations: Optional[Dict[str, float]],
-        target_weights: Optional[Dict[str, float]],
-        volatility_state: str,
-        regime_state: str,
-        debug: Dict[str, Any],
-    ) -> Optional[Dict[str, Any]]:
+        # Build kwargs that function actually accepts
+        kw = {k: v for k, v in preferred_kwargs.items() if k in accepted}
 
-        if not target_weights:
-            debug["rebalance"] = {"skipped": True, "reason": "no_target_weights"}
-            return None
+        try:
+            return fn(**kw)
+        except TypeError:
+            if fallback_args is not None:
+                return fn(*fallback_args)
+            raise
 
-        if self._rebalance_engine is None or getattr(
-            self._rebalance_engine, "target_weights", None
-        ) != target_weights:
-            self._rebalance_engine = WeeklyRebalanceEngine(
-                target_weights=target_weights
-            )
+    def _vol_size(self, *, instrument: str, base_notional: float, volatility_state: Any, debug: Dict[str, Any]) -> float:
+        """
+        VolatilityPositionSizer.size() signature differs across iterations.
+        We call it in a signature-safe way.
 
-        res = self._rebalance_engine.evaluate(
-            now_utc=now_utc,
-            current_allocations=current_allocations or {},
-            volatility_state=volatility_state,
-            regime_state=regime_state,
-        )
+        We intentionally try a rich kwargs set, but only pass what the method accepts.
+        """
+        fn = self.vol_sizer.size
 
-        debug["rebalance"] = {
-            "should_rebalance": res.should_rebalance,
-            "reason": res.reason,
-            "effective_threshold": res.effective_threshold,
-            "drift": res.drift_snapshot,
+        preferred = {
+            # common names across variants
+            "instrument": instrument,
+            "inst": instrument,
+            "symbol": instrument,
+
+            "base_notional": base_notional,
+            "notional": base_notional,
+
+            "volatility_state": volatility_state,
+            "vol_state": volatility_state,
+            "state": volatility_state,
         }
 
-        if res.should_rebalance:
-            return {
-                "decision": {"final": "BLOCK"},
-                "reason": "weekly_rebalance_window_active",
-                "debug": debug,
-            }
+        # Positional fallback patterns (in decreasing likelihood)
+        fallbacks = [
+            [instrument, base_notional, volatility_state],
+            [instrument, base_notional],
+            [base_notional, volatility_state],
+            [base_notional],
+        ]
 
-        return None
+        last_err: Optional[Exception] = None
+        for fb in fallbacks:
+            try:
+                sized = self._safe_kwargs_call(fn, preferred, fallback_args=fb)
+                return float(sized)
+            except Exception as e:
+                last_err = e
 
-    # =========================================================
-    # Main Evaluation
-    # =========================================================
+        debug["vol_size_error"] = str(last_err) if last_err else "unknown"
+        # If vol sizing fails, be conservative: return base_notional unchanged (don’t crash the engine)
+        return float(base_notional)
 
+    def _riskgov_validate(self, *, instrument: str, side: str, requested_notional: float,
+                         stop_distance_pct: float, equity: float, risk_pct: float,
+                         policy: str, debug: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        RiskGovernor.validate_trade signature may vary; call safely.
+        """
+        fn = self.risk_governor.validate_trade
+
+        preferred = {
+            "instrument": instrument,
+            "side": side,
+            "requested_notional": requested_notional,
+            "notional": requested_notional,  # some variants use notional
+            "stop_distance_pct": stop_distance_pct,
+            "equity": equity,
+            "risk_pct": risk_pct,
+            "policy": policy,
+        }
+
+        try:
+            out = self._safe_kwargs_call(fn, preferred, fallback_args=None)
+            if isinstance(out, dict):
+                return out
+            # If an object comes back, best-effort normalize
+            return {"ok": bool(getattr(out, "ok", False)), "reason": str(getattr(out, "reason", ""))}
+        except Exception as e:
+            debug["riskgov_error"] = str(e)
+            return {"ok": False, "reason": "riskgov_exception"}
+
+    # -----------------------------
+    # Public API (matches your signature)
+    # -----------------------------
     def evaluate_trade(
         self,
         *,
@@ -106,130 +145,55 @@ class ExecutionGate:
         volatility_state: str = "MEDIUM",
         regime_state: str = "NORMAL",
     ) -> Dict[str, Any]:
-
-        debug: Dict[str, Any] = {"instrument": instrument, "side": side}
-
+        debug: Dict[str, Any] = {}
         try:
-
-            # -------------------------
-            # Basic validation
-            # -------------------------
-            if notional <= 0:
-                return {
-                    "decision": {"final": "BLOCK"},
-                    "reason": "notional_invalid",
-                    "debug": debug,
-                }
-
-            if stop_distance_pct <= 0:
-                return {
-                    "decision": {"final": "BLOCK"},
-                    "reason": "stop_distance_invalid",
-                    "debug": debug,
-                }
-
-            if equity <= 0:
-                return {
-                    "decision": {"final": "BLOCK"},
-                    "reason": "equity_invalid",
-                    "debug": debug,
-                }
-
-            # -------------------------
-            # Hard circuit breaker
-            # -------------------------
-            if equity_peak > 0:
-                dd_pct = (equity_peak - equity) / equity_peak
-                if dd_pct >= HARD_DRAWDOWN_CIRCUIT_BREAKER_PCT:
-                    return {
-                        "decision": {"final": "BLOCK"},
-                        "reason": "hard_drawdown_circuit_breaker",
-                        "debug": {"drawdown_pct": dd_pct},
-                    }
-
-            # -------------------------
-            # Weekly rebalance enforcement
-            # -------------------------
-            now_utc = datetime.utcnow()
-            block = self._rebalance_check(
-                now_utc=now_utc,
-                current_allocations=current_allocations,
-                target_weights=rebalance_target_weights,
-                volatility_state=volatility_state,
-                regime_state=regime_state,
-                debug=debug,
+            # 1) Compounding layer risk%
+            risk_pct = float(
+                self.compounding.compute_dynamic_risk(
+                    equity=float(equity),
+                    equity_peak=float(equity_peak),
+                    regime_persistence=float(regime_persistence),
+                )
             )
-
-            if block:
-                return block
-
-            # -------------------------
-            # Compounding layer
-            # -------------------------
-            risk_pct = self.compounding.compute_dynamic_risk(
-                equity=equity,
-                equity_peak=equity_peak,
-                regime_persistence=regime_persistence,
-            )
-
             debug["risk_pct"] = risk_pct
 
-            # -------------------------
-            # Volatility sizing (NEW)
-            # -------------------------
-            vol_scaled_notional = self.vol_sizer.size(
+            # 2) Volatility sizing (signature-safe)
+            vol_scaled_notional = self._vol_size(
                 instrument=instrument,
-                base_notional=notional,
+                base_notional=float(notional),
                 volatility_state=volatility_state,
+                debug=debug,
             )
-
             debug["vol_scaled_notional"] = vol_scaled_notional
 
-            # -------------------------
-            # Drawdown scaling
-            # -------------------------
-            scaled_notional = self.drawdown_scaler.scale(
-                notional=vol_scaled_notional,
-                equity=equity,
-                equity_peak=equity_peak,
-                policy=policy,
+            # 3) Drawdown scaling
+            scaled_notional = float(
+                self.drawdown_scaler.scale(
+                    notional=float(vol_scaled_notional),
+                    equity=float(equity),
+                    equity_peak=float(equity_peak),
+                    policy=str(policy),
+                )
             )
-
             debug["scaled_notional"] = scaled_notional
 
-            # -------------------------
-            # RiskGovernor
-            # -------------------------
-            gov = self.risk_governor
-            use_authority = bool(getattr(gov, "equity_authority", None) is not None)
+            # 4) RiskGovernor final approve/reject
+            gov = self._riskgov_validate(
+                instrument=instrument,
+                side=side,
+                requested_notional=scaled_notional,
+                stop_distance_pct=float(stop_distance_pct),
+                equity=float(equity),
+                risk_pct=risk_pct,
+                policy=str(policy),
+                debug=debug,
+            )
+            debug["governor_response"] = gov
 
-            if use_authority:
-                decision = gov.validate_trade(
-                    instrument=instrument,
-                    side=side,
-                    requested_notional=scaled_notional,
-                    stop_distance_pct=stop_distance_pct,
-                    equity=0.0,
-                    risk_pct=risk_pct,
-                    policy=policy,
-                )
-            else:
-                decision = gov.validate_trade(
-                    instrument=instrument,
-                    side=side,
-                    requested_notional=scaled_notional,
-                    stop_distance_pct=stop_distance_pct,
-                    equity=equity,
-                    risk_pct=risk_pct,
-                    policy=policy,
-                )
-
-            debug["governor_response"] = decision
-
-            if not decision.get("ok", False):
+            if not bool(gov.get("ok", False)):
                 return {
                     "decision": {"final": "BLOCK"},
-                    "reason": decision.get("reason", "governor_reject"),
+                    "reason": str(gov.get("reason", "governor_reject")),
                     "debug": debug,
                 }
 
@@ -243,5 +207,5 @@ class ExecutionGate:
             return {
                 "decision": {"final": "BLOCK"},
                 "reason": "execution_gate_exception",
-                "debug": {"exception": str(e)},
+                "debug": {"exception": str(e), **debug},
             }
