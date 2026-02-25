@@ -57,7 +57,7 @@ class PositionBook:
         step: int,
         stop_distance_pct: float = 0.01,
         take_profit_pct: Optional[float] = 0.02,
-        max_hold_steps: int = 10,
+        max_hold_steps: int = 50,
     ) -> None:
 
         if instrument in self.positions:
