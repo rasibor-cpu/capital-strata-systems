@@ -1,12 +1,13 @@
 """
 engine/engine_loop.py
 
-Replay/Simulation Engine Loop (Portfolio-Governed v6)
+Replay/Simulation Engine Loop (Portfolio-Governed v7)
 -----------------------------------------------------
-Fixes:
-- Multi-instrument exposure valuation now uses per-instrument mark prices
-  (qty * last_price[instrument]) instead of a single shared prev_price.
-- This allows PCC asset-class/global caps to trigger correctly in portfolio runs.
+Upgrades:
+- Multi-instrument mark pricing (per-instrument last_price) for correct exposure valuation
+- Rolling returns buffers (per instrument)
+- Statistical correlation score (avg abs corr vs currently-open positions in same asset class)
+- Passes avg_correlation into PCC via TradeProposal
 
 Integrates:
 - ExecutionGate (instrument-level governance)
@@ -21,6 +22,7 @@ from collections import deque
 from datetime import datetime
 from typing import Any, Dict, Optional, Deque
 import os
+import statistics
 
 from engine.execution.execution_gate import ExecutionGate
 from engine.performance.pnl_tracker import PnLTracker
@@ -50,8 +52,11 @@ DEFAULT_STOP_DISTANCE_PCT = _env_float("CSS_STOP_DISTANCE_PCT", 0.01)
 DEFAULT_REGIME_PERSISTENCE = _env_float("CSS_GATE_REGIME_PERSISTENCE", 0.95)
 MAX_R_PER_BAR = _env_float("CSS_MAX_R_PER_BAR", 3.0)
 
-# Baseline sizing proxy (edit during stress tests)
-BASELINE_NOTIONAL_PCT = _env_float("CSS_BASELINE_NOTIONAL_PCT", 0.08)  # set 0.07 / 0.08 / 0.09 via env if you want
+# Baseline sizing proxy for stress tests (override via env, e.g. 0.07 / 0.08 / 0.09)
+BASELINE_NOTIONAL_PCT = _env_float("CSS_BASELINE_NOTIONAL_PCT", 0.08)
+
+# Correlation window (rolling returns length)
+CORR_WINDOW = int(_env_float("CSS_CORR_WINDOW", 50))
 
 
 class EngineLoop:
@@ -66,12 +71,16 @@ class EngineLoop:
 
         self.behaviour = behaviour
 
-        # Per-instrument rolling price windows (so MA is instrument-correct)
+        # Per-instrument rolling price windows (MA must be instrument-correct)
         self.price_windows: Dict[str, Deque[float]] = {}
         self.prev_price_by_instrument: Dict[str, float] = {}
 
         # Per-instrument last mark (used for exposure valuation)
         self.last_price_by_instrument: Dict[str, float] = {}
+
+        # Rolling returns storage for correlation governance
+        self.return_history: Dict[str, Deque[float]] = {}
+        self.correlation_window: int = int(CORR_WINDOW)
 
         self.min_signal_strength = _env_float("CSS_MIN_SIGNAL_STRENGTH", 0.61)
 
@@ -86,13 +95,13 @@ class EngineLoop:
         self.trade_count = 0
         self.exit_count = 0
 
-        # Phase-1 asset class registry (default FX)
+        # Asset class registry (default FX)
         self.asset_class_map: Dict[str, str] = {}
 
         self.current_step = 0
 
     # ----------------------------------------------------
-    # Exposure Helpers (NOTIONAL, per-instrument mark)
+    # Asset class + exposure helpers (NOTIONAL, per-instrument mark)
     # ----------------------------------------------------
 
     def _asset_class(self, instrument: str) -> str:
@@ -127,10 +136,76 @@ class EngineLoop:
         return float(total)
 
     def _open_positions_in_asset_class(self, asset_class: str) -> int:
-        return sum(1 for inst in self.position_book.positions.keys() if self._asset_class(inst) == asset_class)
+        return sum(
+            1 for inst in self.position_book.positions.keys()
+            if self._asset_class(inst) == asset_class
+        )
 
     # ----------------------------------------------------
-    # Main Loop
+    # Correlation governance helpers
+    # ----------------------------------------------------
+
+    def _update_returns(self, instrument: str, price: float) -> None:
+        """
+        Update rolling returns buffer for instrument.
+        Uses prev_price_by_instrument (instrument-correct).
+        """
+        if instrument not in self.return_history:
+            self.return_history[instrument] = deque(maxlen=self.correlation_window)
+
+        prev = self.prev_price_by_instrument.get(instrument)
+        if prev is None or prev <= 0:
+            return
+
+        ret = (float(price) - float(prev)) / float(prev)
+        self.return_history[instrument].append(float(ret))
+
+    def _avg_abs_corr_vs_open(self, *, instrument: str, asset_class: str) -> float:
+        """
+        Average absolute correlation of `instrument` returns vs each OPEN position
+        in the SAME asset class.
+
+        Returns 0.0 if insufficient data.
+        """
+        base = list(self.return_history.get(instrument, []))
+        if len(base) < 10:
+            return 0.0
+
+        corrs: list[float] = []
+
+        for inst in self.position_book.positions.keys():
+            if inst == instrument:
+                continue
+            if self._asset_class(inst) != asset_class:
+                continue
+
+            other = list(self.return_history.get(inst, []))
+            if len(other) < 10:
+                continue
+
+            n = min(len(base), len(other))
+            if n < 10:
+                continue
+
+            r1 = base[-n:]
+            r2 = other[-n:]
+
+            try:
+                c = statistics.correlation(r1, r2)
+                if c != c:  # NaN guard
+                    continue
+                corrs.append(abs(float(c)))
+            except Exception:
+                # Covers constant series / StatisticsError etc.
+                continue
+
+        if not corrs:
+            return 0.0
+
+        return float(sum(corrs) / len(corrs))
+
+    # ----------------------------------------------------
+    # Main loop
     # ----------------------------------------------------
 
     def process_bar(self, instrument: str, price: float) -> None:
@@ -139,16 +214,22 @@ class EngineLoop:
         # Update mark price cache (critical for PCC exposure valuation)
         self.last_price_by_instrument[instrument] = float(price)
 
-        # Ensure rolling window exists
+        # Ensure rolling MA window exists
         if instrument not in self.price_windows:
             self.price_windows[instrument] = deque(maxlen=MA_WINDOW)
 
         self.price_windows[instrument].append(float(price))
 
-        # Need a prev price per instrument for signal generation
+        # If first tick for this instrument, seed prev and return
         if instrument not in self.prev_price_by_instrument:
             self.prev_price_by_instrument[instrument] = float(price)
+            # also seed returns buffer
+            if instrument not in self.return_history:
+                self.return_history[instrument] = deque(maxlen=self.correlation_window)
             return
+
+        # Update returns before overwriting prev
+        self._update_returns(instrument, float(price))
 
         prev_price = float(self.prev_price_by_instrument[instrument])
         moving_avg = sum(self.price_windows[instrument]) / len(self.price_windows[instrument])
@@ -223,8 +304,10 @@ class EngineLoop:
             self.prev_price_by_instrument[instrument] = float(price)
             return
 
-        # 5) PCC (portfolio-level governance)
+        # 5) PCC (portfolio-level governance + correlation throttle input)
         asset_class = self._asset_class(instrument)
+
+        avg_corr = self._avg_abs_corr_vs_open(instrument=instrument, asset_class=asset_class)
 
         proposal = TradeProposal(
             instrument=instrument,
@@ -236,6 +319,7 @@ class EngineLoop:
             current_asset_class_exposure=self._asset_class_exposure_notional(asset_class),
             portfolio_dd_pct=self.pnl_tracker.current_drawdown() * 100.0,
             open_positions_in_asset_class=self._open_positions_in_asset_class(asset_class),
+            avg_correlation=float(avg_corr),
         )
 
         pcc_decision = self.pcc.evaluate(proposal)
@@ -287,4 +371,5 @@ class EngineLoop:
             "current_drawdown_pct": float(self.pnl_tracker.current_drawdown() * 100.0),
             "open_positions": len(self.position_book.positions),
             "baseline_notional_pct": float(BASELINE_NOTIONAL_PCT),
+            "corr_window": int(self.correlation_window),
         }
