@@ -1,17 +1,18 @@
 """
 engine/engine_loop.py
 
-Replay/Simulation Engine Loop (Portfolio-Governed v5)
+Replay/Simulation Engine Loop (Portfolio-Governed v6)
 -----------------------------------------------------
-Integrates:
-- PositionBook (position lifecycle)
-- PortfolioCapitalController (portfolio-level governance)
-- ExecutionGate (instrument-level governance)
-- PnLTracker (equity + drawdown)
+Fixes:
+- Multi-instrument exposure valuation now uses per-instrument mark prices
+  (qty * last_price[instrument]) instead of a single shared prev_price.
+- This allows PCC asset-class/global caps to trigger correctly in portfolio runs.
 
-Key:
-- Exposure is measured in NOTIONAL terms (qty * price).
-- Baseline sizing proxy set to 5% (aligns with PCC default instrument cap 8%).
+Integrates:
+- ExecutionGate (instrument-level governance)
+- PortfolioCapitalController (portfolio-level governance)
+- PositionBook (position lifecycle)
+- PnLTracker (equity + drawdown)
 """
 
 from __future__ import annotations
@@ -49,6 +50,9 @@ DEFAULT_STOP_DISTANCE_PCT = _env_float("CSS_STOP_DISTANCE_PCT", 0.01)
 DEFAULT_REGIME_PERSISTENCE = _env_float("CSS_GATE_REGIME_PERSISTENCE", 0.95)
 MAX_R_PER_BAR = _env_float("CSS_MAX_R_PER_BAR", 3.0)
 
+# Baseline sizing proxy (edit during stress tests)
+BASELINE_NOTIONAL_PCT = _env_float("CSS_BASELINE_NOTIONAL_PCT", 0.08)  # set 0.07 / 0.08 / 0.09 via env if you want
+
 
 class EngineLoop:
     def __init__(self, behaviour: str = "D", starting_equity: float = 1000.0):
@@ -61,12 +65,16 @@ class EngineLoop:
         self.pcc = PortfolioCapitalController()
 
         self.behaviour = behaviour
-        self.prev_price: Optional[float] = None
-        self.price_window: Deque[float] = deque(maxlen=MA_WINDOW)
+
+        # Per-instrument rolling price windows (so MA is instrument-correct)
+        self.price_windows: Dict[str, Deque[float]] = {}
+        self.prev_price_by_instrument: Dict[str, float] = {}
+
+        # Per-instrument last mark (used for exposure valuation)
+        self.last_price_by_instrument: Dict[str, float] = {}
 
         self.min_signal_strength = _env_float("CSS_MIN_SIGNAL_STRENGTH", 0.61)
 
-        # Equity peak used by governance layers
         self.equity_peak: float = float(starting_equity)
 
         # Diagnostics
@@ -79,50 +87,47 @@ class EngineLoop:
         self.exit_count = 0
 
         # Phase-1 asset class registry (default FX)
-        # You can override by setting: engine.asset_class_map["XAU_USD"]="COMMODITIES", etc.
         self.asset_class_map: Dict[str, str] = {}
 
         self.current_step = 0
 
     # ----------------------------------------------------
-    # Exposure Helpers (NOTIONAL)
+    # Exposure Helpers (NOTIONAL, per-instrument mark)
     # ----------------------------------------------------
 
     def _asset_class(self, instrument: str) -> str:
         return self.asset_class_map.get(instrument, "FX")
 
-    def _mark_price(self) -> float:
-        """
-        Mark price used for notional exposure valuation.
-        Uses prev_price when available, otherwise falls back to 0.
-        """
-        return float(self.prev_price) if self.prev_price is not None else 0.0
+    def _mark_price(self, instrument: str) -> float:
+        return float(self.last_price_by_instrument.get(instrument, 0.0))
+
+    def _position_notional(self, instrument: str) -> float:
+        pos = self.position_book.positions.get(instrument)
+        if pos is None:
+            return 0.0
+        mp = self._mark_price(instrument)
+        if mp <= 0.0:
+            return 0.0
+        return float(pos.size) * mp
 
     def _total_exposure_notional(self) -> float:
-        mp = self._mark_price()
-        if mp <= 0:
-            return 0.0
-        return sum(float(pos.size) * mp for pos in self.position_book.positions.values())
+        total = 0.0
+        for inst in self.position_book.positions.keys():
+            total += self._position_notional(inst)
+        return float(total)
 
     def _instrument_exposure_notional(self, instrument: str) -> float:
-        mp = self._mark_price()
-        if mp <= 0:
-            return 0.0
-        pos = self.position_book.positions.get(instrument)
-        return float(pos.size) * mp if pos else 0.0
+        return float(self._position_notional(instrument))
 
     def _asset_class_exposure_notional(self, asset_class: str) -> float:
-        mp = self._mark_price()
-        if mp <= 0:
-            return 0.0
         total = 0.0
-        for inst, pos in self.position_book.positions.items():
+        for inst in self.position_book.positions.keys():
             if self._asset_class(inst) == asset_class:
-                total += float(pos.size) * mp
+                total += self._position_notional(inst)
         return float(total)
 
     def _open_positions_in_asset_class(self, asset_class: str) -> int:
-        return sum(1 for inst in self.position_book.positions if self._asset_class(inst) == asset_class)
+        return sum(1 for inst in self.position_book.positions.keys() if self._asset_class(inst) == asset_class)
 
     # ----------------------------------------------------
     # Main Loop
@@ -130,24 +135,34 @@ class EngineLoop:
 
     def process_bar(self, instrument: str, price: float) -> None:
         self.current_step += 1
-        self.price_window.append(float(price))
 
-        if self.prev_price is None:
-            self.prev_price = float(price)
+        # Update mark price cache (critical for PCC exposure valuation)
+        self.last_price_by_instrument[instrument] = float(price)
+
+        # Ensure rolling window exists
+        if instrument not in self.price_windows:
+            self.price_windows[instrument] = deque(maxlen=MA_WINDOW)
+
+        self.price_windows[instrument].append(float(price))
+
+        # Need a prev price per instrument for signal generation
+        if instrument not in self.prev_price_by_instrument:
+            self.prev_price_by_instrument[instrument] = float(price)
             return
 
-        moving_avg = sum(self.price_window) / len(self.price_window)
+        prev_price = float(self.prev_price_by_instrument[instrument])
+        moving_avg = sum(self.price_windows[instrument]) / len(self.price_windows[instrument])
 
         signal = self.signal_engine.generate(
             instrument=instrument,
             price_now=float(price),
-            price_prev=float(self.prev_price),
+            price_prev=float(prev_price),
             moving_avg=float(moving_avg),
         )
 
         self.total_signals += 1
 
-        # 0) Evaluate exits first (realized PnL into ledger)
+        # 0) Evaluate exits first
         realized_exit = self.position_book.evaluate_exit(
             instrument=instrument,
             current_price=float(price),
@@ -171,26 +186,25 @@ class EngineLoop:
         # 1) Regime flat
         if signal.direction == "FLAT":
             self.regime_flat_blocks += 1
-            self.prev_price = float(price)
+            self.prev_price_by_instrument[instrument] = float(price)
             return
 
         # 2) Threshold gate
         if float(signal.strength) < float(self.min_signal_strength):
             self.threshold_blocks += 1
-            self.prev_price = float(price)
+            self.prev_price_by_instrument[instrument] = float(price)
             return
 
-        # 3) No pyramiding for now
+        # 3) No pyramiding
         if self.position_book.has_position(instrument):
-            self.prev_price = float(price)
+            self.prev_price_by_instrument[instrument] = float(price)
             return
 
         # 4) ExecutionGate (instrument-level governance + sizing)
-        # IMPORTANT: baseline sizing proxy is 5% (aligns with PCC instrument cap 8%)
         decision = self.execution_gate.evaluate_trade(
             instrument=instrument,
             side=signal.direction,
-            notional=equity * 0.05,
+            notional=equity * float(BASELINE_NOTIONAL_PCT),
             stop_distance_pct=float(DEFAULT_STOP_DISTANCE_PCT),
             equity=equity,
             equity_peak=self.equity_peak,
@@ -199,14 +213,14 @@ class EngineLoop:
 
         if str(decision.get("decision", {}).get("final", "")).upper() != "ALLOW":
             self.gate_blocks += 1
-            self.prev_price = float(price)
+            self.prev_price_by_instrument[instrument] = float(price)
             return
 
         debug = decision.get("debug", {}) if isinstance(decision, dict) else {}
         scaled_notional = float(debug.get("scaled_notional", 0.0))
         if scaled_notional <= 0.0:
             self.gate_blocks += 1
-            self.prev_price = float(price)
+            self.prev_price_by_instrument[instrument] = float(price)
             return
 
         # 5) PCC (portfolio-level governance)
@@ -228,16 +242,16 @@ class EngineLoop:
 
         if pcc_decision.final != "ALLOW":
             self.pcc_blocks += 1
-            self.prev_price = float(price)
+            self.prev_price_by_instrument[instrument] = float(price)
             return
 
         final_notional = scaled_notional * float(pcc_decision.sizing_multiplier)
         if final_notional <= 0.0:
             self.pcc_blocks += 1
-            self.prev_price = float(price)
+            self.prev_price_by_instrument[instrument] = float(price)
             return
 
-        # 6) Open position (size is quantity; notional is qty * price)
+        # 6) Open position (qty such that qty * price = notional)
         qty = float(final_notional) / float(price)
 
         self.position_book.open_position(
@@ -250,7 +264,7 @@ class EngineLoop:
         )
 
         self.trade_count += 1
-        self.prev_price = float(price)
+        self.prev_price_by_instrument[instrument] = float(price)
 
     # ----------------------------------------------------
     # Summary
@@ -272,4 +286,5 @@ class EngineLoop:
             "net_pnl": float(net_pnl),
             "current_drawdown_pct": float(self.pnl_tracker.current_drawdown() * 100.0),
             "open_positions": len(self.position_book.positions),
+            "baseline_notional_pct": float(BASELINE_NOTIONAL_PCT),
         }
