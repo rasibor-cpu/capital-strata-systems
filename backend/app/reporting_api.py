@@ -1,16 +1,11 @@
 """
-backend/app/reporting_api.py
+Global Reporting Gateway – Phase 17 Hardened
+Capital Strata Systems
 
-Global Reporting Gateway
-------------------------
-• Can be called from ANY screen
-• Authority-gated (ADMIN / SUPER_USER / FINCON_REPORTING)
-• Supports:
-    - list available reports
-    - print report with timeframe
-    - explicit sections
-    - arbitrary filter payload
-• Designed for auditor / regulator reproducibility
+Authority-gated reporting layer with:
+- Schema versioning
+- Integrity hashing
+- Auditor reproducibility
 """
 
 from __future__ import annotations
@@ -18,7 +13,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+
 from engine.reporting.report_printer import print_report, list_reports
+from engine.reporting.report_integrity import attach_integrity_metadata
 
 
 # ============================================================
@@ -57,11 +54,14 @@ class GlobalReportRequest:
 
 def list_available_reports(user_role: str) -> Dict[str, Any]:
     _check_authority(user_role)
-    return {
+
+    payload = {
         "available_reports": list_reports(),
         "role": user_role,
-        "timestamp": datetime.utcnow().isoformat(),
+        "generated_at": datetime.utcnow().isoformat(),
     }
+
+    return attach_integrity_metadata(payload)
 
 
 def generate_report(req: GlobalReportRequest) -> Dict[str, Any]:
@@ -77,9 +77,11 @@ def generate_report(req: GlobalReportRequest) -> Dict[str, Any]:
         filters=req.filters,
     )
 
-    return {
+    payload = {
         "report_name": req.report_name,
         "generated_at": datetime.utcnow().isoformat(),
         "role": req.role,
         "content": result,
     }
+
+    return attach_integrity_metadata(payload)
