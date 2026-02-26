@@ -1,5 +1,5 @@
 """
-Year-End Consolidated Financial Report – Phase 17C (Governance Hardened)
+Year-End Consolidated Financial Report – Phase 18A (FY Rollover + Governance Hardened)
 Capital Strata Systems
 
 What this does:
@@ -10,6 +10,7 @@ What this does:
 - Records YEAR_END close event (idempotent)
 - Attaches schema_version + integrity hash + deterministic report_id
 - Attaches lineage metadata from CloseRegistry
+- Auto-rolls Financial Year forward (FiscalCalendar) after YEAR_END
 
 Usage:
   python tools/run_year_end_report.py 2026 --role SUPER_USER
@@ -34,6 +35,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from engine.posting.close_registry import CloseRegistry
 from engine.reporting.report_integrity import attach_integrity_metadata
+from engine.fiscal.fiscal_calendar import FiscalCalendar
 
 
 JOURNAL_FILE = REPO_ROOT / "audit_logs" / "journal.jsonl"
@@ -91,6 +93,7 @@ def build_year_end_snapshot(year: str) -> Dict[str, Any]:
                 else:
                     is_income[acct] -= amt
             else:
+                # EXPENSE
                 if side == "DR":
                     is_expense[acct] += amt
                 else:
@@ -123,10 +126,7 @@ def build_year_end_snapshot(year: str) -> Dict[str, Any]:
         },
     }
 
-    return attach_integrity_metadata(
-        report,
-        schema_name="CSS_YEAR_END_V1",
-    )
+    return attach_integrity_metadata(report, schema_name="CSS_YEAR_END_V1")
 
 
 def main() -> int:
@@ -141,8 +141,10 @@ def main() -> int:
 
     try:
         y = int(year)
+        if y < 1900 or y > 3000:
+            raise ValueError()
     except Exception:
-        print("Invalid year format. Use YYYY.")
+        print("Invalid year format. Use YYYY (e.g., 2026)")
         return 2
 
     # Record close event (idempotent)
@@ -153,18 +155,31 @@ def main() -> int:
         actor_role=role,
         notes=args.notes,
     )
-
     status = close_result.get("status", "UNKNOWN")
 
-    # Build report
+    # Build snapshot
     snapshot = build_year_end_snapshot(year)
 
     # Attach lineage (latest close event reference)
     latest_close = CloseRegistry.latest_close()
     if latest_close:
-        snapshot["lineage"] = {
-            "latest_close_event": latest_close
-        }
+        snapshot["lineage"] = {"latest_close_event": latest_close}
+
+    # Auto-rollover FY after YEAR_END
+    if status in {"CLOSED", "ALREADY_CLOSED"}:
+        try:
+            FiscalCalendar.rollover_to_next_fy(
+                role=role,
+                notes=f"Auto rollover after YEAR_END {year}",
+            )
+            fy = FiscalCalendar.get_active_fy()
+            snapshot["fiscal_year"] = {
+                "active_fy_label": fy.fy_label,
+                "active_fy_start": fy.start_date.isoformat(),
+                "active_fy_end": fy.end_date.isoformat(),
+            }
+        except Exception as e:
+            snapshot["fiscal_rollover_warning"] = str(e)
 
     # Persist
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -177,6 +192,11 @@ def main() -> int:
     print("Schema Version:", snapshot.get("schema_version"))
     print("Report ID:", snapshot.get("report_id"))
     print("Integrity Hash:", snapshot.get("integrity", {}).get("hash"))
+    if "fiscal_year" in snapshot:
+        fy = snapshot["fiscal_year"]
+        print("Active FY:", fy["active_fy_label"], fy["active_fy_start"], "→", fy["active_fy_end"])
+    if "fiscal_rollover_warning" in snapshot:
+        print("FY Rollover Warning:", snapshot["fiscal_rollover_warning"])
 
     return 0
 
