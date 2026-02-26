@@ -34,6 +34,7 @@ from engine.reporting.report_request import ReportRequest, ReportTimeframe  # no
 
 # Import reports so they register
 import tools.analyze_governance_log  # noqa: F401,E402
+import tools.posting_reports  # noqa: F401
 
 
 def _parse_sections(s: str):

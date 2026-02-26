@@ -1,7 +1,32 @@
 # Capital Strata Systems – Changelog
 
 ---
+[Unreleased]
+Added
 
+FinCon-grade reporting architecture (ReportRequest, registry, authority gating)
+
+Deterministic governance_summary report with timeframe + explicit sections
+
+Sign-off metadata embedded in all regulator-facing outputs
+
+CLI reporting surface with role/permission simulation
+
+PCC governance decisions fully reproducible from JSONL log
+
+Security
+
+Fail-closed authority model for all registered reports
+
+Governance reports restricted to ADMIN / SUPER_USER / FINCON_REPORTING
+
+Architecture
+
+Central report registry
+
+Structured ReportRequest model (timeframe + sections + caller identity)
+
+Separation of report registration and generation logic
 ## 2026-02-23 – Volatility-Gated Breakout Alpha Milestone (H1)
 
 ### Research Breakthrough
