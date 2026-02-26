@@ -18,28 +18,15 @@ from typing import Dict, Any
 from backend.app.posting_store import approve_ticket, reject_ticket, return_ticket
 
 
-# ============================================================
-# Internal Audit Writer (Fail-Safe)
-# ============================================================
-
 def _audit_write_posting_snapshot(payload: dict) -> None:
-    """
-    Writes immutable JSONL event.
-    Must never interrupt posting approval flow.
-    """
     try:
         Path("audit_logs").mkdir(parents=True, exist_ok=True)
         out = Path("audit_logs") / "posting_snapshots.jsonl"
         with out.open("a", encoding="utf-8") as f:
             f.write(json.dumps(payload, ensure_ascii=False) + "\n")
     except Exception:
-        # Fail silent — approvals must never break due to reporting
         return
 
-
-# ============================================================
-# Checker Approval Handler
-# ============================================================
 
 def posting_approval_handler(
     payload: Dict[str, Any],
@@ -58,13 +45,9 @@ def posting_approval_handler(
     checker_id = user_id or "anonymous_checker"
 
     try:
-        # ------------------------------------------------------------
-        # APPROVE
-        # ------------------------------------------------------------
         if decision == "approve":
             t = approve_ticket(ticket_id, checker_id)
 
-            # --- REGULATOR SNAPSHOT HOOK (post-success) ---
             _audit_write_posting_snapshot(
                 {
                     "timestamp": datetime.now(timezone.utc).timestamp(),
@@ -73,44 +56,66 @@ def posting_approval_handler(
                     "ticket_id": ticket_id,
                     "checker_id": checker_id,
                     "decision": "approve",
-                    "ticket_status": getattr(t, "status", None).value
-                    if getattr(t, "status", None)
-                    else None,
+                    "ticket_status": getattr(getattr(t, "status", None), "value", None),
                 }
             )
 
             return {
+                "ok": True,
                 "decision": "approve",
                 "ticket": {"ticket_id": getattr(t, "ticket_id", ticket_id), "status": t.status.value},
                 "note": "Approved (ledger execution handled downstream).",
             }
 
-        # ------------------------------------------------------------
-        # REJECT
-        # ------------------------------------------------------------
         if decision == "reject":
             reason = payload.get("reason", "Rejected by checker")
             t = reject_ticket(ticket_id, checker_id, reason)
 
+            _audit_write_posting_snapshot(
+                {
+                    "timestamp": datetime.now(timezone.utc).timestamp(),
+                    "event": "POSTING_REJECT",
+                    "phase": "PHASE_13_6",
+                    "ticket_id": ticket_id,
+                    "checker_id": checker_id,
+                    "decision": "reject",
+                    "reason": reason,
+                    "ticket_status": getattr(getattr(t, "status", None), "value", None),
+                }
+            )
+
             return {
+                "ok": True,
                 "decision": "reject",
                 "ticket": {"ticket_id": getattr(t, "ticket_id", ticket_id), "status": t.status.value},
                 "note": reason,
             }
 
-        # ------------------------------------------------------------
-        # RETURN
-        # ------------------------------------------------------------
-        # NOTE: we keep the decision string "return" for API compatibility
         if decision == "return":
             reason = payload.get("reason", "Returned for correction")
             t = return_ticket(ticket_id, checker_id, reason)
 
+            _audit_write_posting_snapshot(
+                {
+                    "timestamp": datetime.now(timezone.utc).timestamp(),
+                    "event": "POSTING_RETURN",
+                    "phase": "PHASE_13_6",
+                    "ticket_id": ticket_id,
+                    "checker_id": checker_id,
+                    "decision": "return",
+                    "reason": reason,
+                    "ticket_status": getattr(getattr(t, "status", None), "value", None),
+                }
+            )
+
             return {
+                "ok": True,
                 "decision": "return",
                 "ticket": {"ticket_id": getattr(t, "ticket_id", ticket_id), "status": t.status.value},
                 "note": "Returned to maker (no ledger write).",
             }
+
+        return {"ok": False, "error": "Unhandled decision"}
 
     except Exception as e:
         return {"ok": False, "error": str(e)}
