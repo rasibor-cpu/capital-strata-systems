@@ -24,7 +24,12 @@ from engine.reporting.ageing_reports import (
     compute_ageing,
     format_ageing_report,
 )
+
+# Existing SCP (already registered in your prior step)
 from engine.reporting.supervisory_control_pack import generate_scp_report
+
+# NEW: Treasury instrument aggregates
+from engine.reporting.treasury_instrument_aggregate import generate_treasury_instrument_aggregate
 
 
 # ============================================================
@@ -86,11 +91,22 @@ def print_report(
     sections: Optional[List[str]] = None,
     filters: Optional[Dict[str, Any]] = None,
 ) -> str:
+    """
+    IMPORTANT GOVERNANCE FEATURE:
+    - We automatically inject the caller role into filters so handlers can enforce
+      finer-grain logic (department scoping, audit read-only, etc.)
+    - Callers may also pass filters["user_id"] for dept resolution.
+    """
 
     filters = filters or {}
     sections = sections or []
 
+    # Gate at registry-level first
     _check_role(report_name, role)
+
+    # Auto-inject caller role into handler context (do not allow spoofing)
+    # If caller already passed role inside filters, we overwrite with authoritative role.
+    filters["role"] = role
 
     handler = _REPORT_REGISTRY[report_name]["handler"]
 
@@ -195,12 +211,26 @@ def _governance_summary_handler(**kwargs) -> str:
 
 def _supervisory_control_pack_handler(**kwargs) -> str:
     """
-    Central-report wrapper.
     Supports filters:
-      - date: "YYYY-MM-DD"   (business date)
-      - supervisor_id: "checker_2" (optional)
+      - date: "YYYY-MM-DD"          (business date)
+      - supervisor_id: "checker_2"  (optional)
+      - mode: detailed | summary | exception
     """
     return generate_scp_report(**kwargs)
+
+
+# ============================================================
+# TREASURY: INSTRUMENT AGGREGATE
+# ============================================================
+
+def _treasury_instrument_aggregate_handler(**kwargs) -> str:
+    """
+    Supports filters:
+      - user_id: required for department scoping (except SUPER_USER/AUDIT_CONTROL)
+      - mode: detailed | summary | exception
+      - date OR from_date/to_date OR as_of_date
+    """
+    return generate_treasury_instrument_aggregate(**kwargs)
 
 
 # ============================================================
@@ -209,11 +239,15 @@ def _supervisory_control_pack_handler(**kwargs) -> str:
 
 COMMON_ROLES = ["ADMIN", "SUPER_USER", "FINCON_REPORTING"]
 
+# Existing common reports
 register_report("ar_ageing", _ar_ageing_handler, COMMON_ROLES)
 register_report("ap_ageing", _ap_ageing_handler, COMMON_ROLES)
 register_report("gl_ageing", _gl_ageing_handler, COMMON_ROLES)
-
 register_report("governance_summary", _governance_summary_handler, COMMON_ROLES)
 
-# NEW: Supervisory Control Pack (Daily Controls)
+# SCP (Daily Controls)
 register_report("supervisory_control_pack", _supervisory_control_pack_handler, COMMON_ROLES)
+
+# Treasury instrument aggregate (role-gated)
+TREASURY_AGG_ROLES = ["TREASURY", "TREASURY_SUPERVISOR", "SUPER_USER", "ADMIN", "AUDIT_CONTROL"]
+register_report("treasury_instrument_aggregate", _treasury_instrument_aggregate_handler, TREASURY_AGG_ROLES)
