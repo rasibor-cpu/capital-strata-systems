@@ -17,12 +17,14 @@ from __future__ import annotations
 
 from typing import Dict, Any, Callable, List, Optional
 from datetime import datetime
+import json
+from pathlib import Path
+
 from engine.reporting.ageing_reports import (
     compute_ageing,
     format_ageing_report,
 )
-import json
-from pathlib import Path
+from engine.reporting.supervisory_control_pack import generate_scp_report
 
 
 # ============================================================
@@ -188,6 +190,20 @@ def _governance_summary_handler(**kwargs) -> str:
 
 
 # ============================================================
+# SUPERVISORY CONTROL PACK (SCP)
+# ============================================================
+
+def _supervisory_control_pack_handler(**kwargs) -> str:
+    """
+    Central-report wrapper.
+    Supports filters:
+      - date: "YYYY-MM-DD"   (business date)
+      - supervisor_id: "checker_2" (optional)
+    """
+    return generate_scp_report(**kwargs)
+
+
+# ============================================================
 # REGISTER REPORTS
 # ============================================================
 
@@ -198,3 +214,6 @@ register_report("ap_ageing", _ap_ageing_handler, COMMON_ROLES)
 register_report("gl_ageing", _gl_ageing_handler, COMMON_ROLES)
 
 register_report("governance_summary", _governance_summary_handler, COMMON_ROLES)
+
+# NEW: Supervisory Control Pack (Daily Controls)
+register_report("supervisory_control_pack", _supervisory_control_pack_handler, COMMON_ROLES)
