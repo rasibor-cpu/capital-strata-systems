@@ -1,8 +1,17 @@
 # Capital Strata Systems – Changelog
 
 ---
-[Unreleased]
-Added
+# Phase 15 – Global Reporting Architecture
+
+- Introduced global reporting gateway (backend/app/reporting_api.py)
+- Added reusable report center screen (print from any screen)
+- Implemented ageing engine (AR/AP/GL) with bucket logic
+- Centralized authority-gated report registry
+- Standardized regulator sign-off block
+- Enabled timeframe + filters + explicit sections
+- CLI + backend callable report engine[Unreleased]
+
+# Added
 
 FinCon-grade reporting architecture (ReportRequest, registry, authority gating)
 
