@@ -1,12 +1,12 @@
 """
-Ledger Registry – Phase 14
+Ledger Registry – Phase 14b
 Capital Strata Systems
 
-Bridges Posting Approval → Journal → GL
+Persistent Journal + Rebuildable GL
 """
 
 from decimal import Decimal
-from typing import List
+from typing import Dict
 from .journal import JournalRegistry
 from .general_ledger import GeneralLedger
 from ..posting_contracts import PostingTicket
@@ -15,6 +15,20 @@ from ..posting_contracts import PostingTicket
 _JOURNAL = JournalRegistry()
 _GL = GeneralLedger()
 
+
+# ------------------------------------------------------------
+# Rebuild GL from persistent journal at startup
+# ------------------------------------------------------------
+
+def _rebuild_gl():
+    for entry in _JOURNAL.all():
+        _GL.apply(entry)
+
+
+_rebuild_gl()
+
+
+# ------------------------------------------------------------
 
 def post(ticket: PostingTicket):
 
@@ -40,5 +54,5 @@ def post(ticket: PostingTicket):
     }
 
 
-def trial_balance():
+def trial_balance() -> Dict[str, Decimal]:
     return _GL.trial_balance()

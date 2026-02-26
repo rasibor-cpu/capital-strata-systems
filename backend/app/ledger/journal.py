@@ -1,18 +1,23 @@
 """
-Journal Engine – Phase 14
+Persistent Journal Engine – Phase 14b
 Capital Strata Systems
 
-Append-only journal.
-No mutation.
-Institutional-grade foundation.
+Append-only JSONL journal.
+Rebuildable.
+Deterministic.
+Institutional-grade.
 """
 
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import List, Dict
+from typing import List
 import hashlib
 import json
+from pathlib import Path
+
+
+JOURNAL_FILE = Path("audit_logs") / "journal.jsonl"
 
 
 @dataclass(frozen=True)
@@ -21,7 +26,7 @@ class JournalEntry:
     ticket_id: str
     execution_date: str
     account_no: str
-    side: str   # DR / CR
+    side: str
     amount: Decimal
     currency: str
     created_at: datetime
@@ -29,17 +34,19 @@ class JournalEntry:
 
 
 class JournalRegistry:
-    """
-    In-memory journal (Phase 14a)
-    Will later move to persistent storage.
-    """
 
     def __init__(self):
+        Path("audit_logs").mkdir(parents=True, exist_ok=True)
         self._entries: List[JournalEntry] = []
+        self._load_from_disk()
 
-    def _generate_hash(self, payload: Dict) -> str:
+    # ------------------------------------------------------------
+
+    def _generate_hash(self, payload: dict) -> str:
         payload_str = json.dumps(payload, sort_keys=True)
         return hashlib.sha256(payload_str.encode()).hexdigest()
+
+    # ------------------------------------------------------------
 
     def append(
         self,
@@ -76,7 +83,45 @@ class JournalRegistry:
         )
 
         self._entries.append(entry)
+        self._write_to_disk(entry)
+
         return entry
+
+    # ------------------------------------------------------------
+
+    def _write_to_disk(self, entry: JournalEntry) -> None:
+        record = asdict(entry)
+        record["amount"] = str(record["amount"])
+        record["created_at"] = record["created_at"].isoformat()
+
+        with JOURNAL_FILE.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+
+    # ------------------------------------------------------------
+
+    def _load_from_disk(self) -> None:
+        if not JOURNAL_FILE.exists():
+            return
+
+        with JOURNAL_FILE.open("r", encoding="utf-8") as f:
+            for line in f:
+                data = json.loads(line)
+
+                entry = JournalEntry(
+                    journal_id=data["journal_id"],
+                    ticket_id=data["ticket_id"],
+                    execution_date=data["execution_date"],
+                    account_no=data["account_no"],
+                    side=data["side"],
+                    amount=Decimal(data["amount"]),
+                    currency=data["currency"],
+                    created_at=datetime.fromisoformat(data["created_at"]),
+                    entry_hash=data["entry_hash"],
+                )
+
+                self._entries.append(entry)
+
+    # ------------------------------------------------------------
 
     def all(self) -> List[JournalEntry]:
         return list(self._entries)
