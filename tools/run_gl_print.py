@@ -1,22 +1,22 @@
 """
 tools/run_gl_print.py
 
-General Ledger Print Engine
-----------------------------
-Generates GL report for:
-1) DATE RANGE: from -> to
-2) AS-OF: from -> as_of (inclusive)
+General Ledger Print Engine (Schema-Aligned)
+--------------------------------------------
+Supports:
+- RANGE mode
+- AS-OF mode
 
-Outputs:
-- audit_logs/gl_reports/gl_range_<from>_<to>.json + _PRINT.txt
-- audit_logs/gl_reports/gl_asof_<from>_<asof>.json + _PRINT.txt
-
-Features:
-- Date-range filter
-- As-of filter
-- Running balance per account
-- Auditor-ready print format
-- Timezone-aware timestamps (py3.14 safe)
+Journal schema (per line):
+{
+  journal_id,
+  ticket_id,
+  execution_date,
+  account_no,
+  side: DR | CR,
+  amount,
+  ...
+}
 """
 
 from __future__ import annotations
@@ -25,9 +25,9 @@ import sys
 import json
 from pathlib import Path
 from datetime import datetime, timezone
-from collections import defaultdict
 from decimal import Decimal
-from typing import Dict, Any, List, Optional
+from collections import defaultdict
+from typing import Dict, Any, List
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -40,24 +40,14 @@ def load_journal() -> List[Dict[str, Any]]:
         print("Journal file not found:", JOURNAL_FILE)
         sys.exit(1)
 
-    rows: List[Dict[str, Any]] = []
+    rows = []
     with JOURNAL_FILE.open("r", encoding="utf-8") as f:
         for line in f:
-            line = line.strip()
-            if not line:
-                continue
             try:
-                rows.append(json.loads(line))
+                rows.append(json.loads(line.strip()))
             except Exception:
                 continue
     return rows
-
-
-def extract_date(rec: Dict[str, Any]) -> Optional[str]:
-    for key in ("posting_date", "value_date", "effective_date", "txn_date"):
-        if key in rec and rec[key]:
-            return str(rec[key])[:10]
-    return None
 
 
 def parse_decimal(v: Any) -> Decimal:
@@ -67,194 +57,123 @@ def parse_decimal(v: Any) -> Decimal:
         return Decimal("0")
 
 
-def _collect_accounts(journal_rows: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+def collect_accounts(rows: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     accounts = defaultdict(list)
 
-    # Expecting entries structured with "entries": [{account, debit, credit}]
-    for rec in journal_rows:
-        entries = rec.get("entries") or rec.get("lines") or []
-        rec_date = extract_date(rec)
+    for r in rows:
+        account = str(r.get("account_no", "UNKNOWN"))
+        side = str(r.get("side", "")).upper()
+        amount = parse_decimal(r.get("amount", 0))
+        date = str(r.get("execution_date", ""))[:10]
 
-        # If journal format differs, we still won’t crash.
-        if not isinstance(entries, list):
-            continue
+        if side == "DR":
+            debit = amount
+            credit = Decimal("0")
+        elif side == "CR":
+            debit = Decimal("0")
+            credit = amount
+        else:
+            debit = Decimal("0")
+            credit = Decimal("0")
 
-        for e in entries:
-            if not isinstance(e, dict):
-                continue
-            account = str(e.get("account") or "UNKNOWN")
-            debit = parse_decimal(e.get("debit", 0))
-            credit = parse_decimal(e.get("credit", 0))
-            accounts[account].append({
-                "date": rec_date or "UNKNOWN_DATE",
-                "debit": debit,
-                "credit": credit,
-            })
+        accounts[account].append({
+            "date": date,
+            "debit": debit,
+            "credit": credit,
+        })
 
     return accounts
 
 
-def run_gl_range(date_from: str, date_to: str) -> None:
+def filter_rows(journal: List[Dict[str, Any]], start: str, end: str):
+    return [
+        r for r in journal
+        if start <= str(r.get("execution_date", ""))[:10] <= end
+    ]
+
+
+def generate_report(mode: str, start: str, end: str):
+
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-
     journal = load_journal()
-
-    filtered = []
-    for rec in journal:
-        d = extract_date(rec)
-        if d and date_from <= d <= date_to:
-            filtered.append(rec)
-
-    accounts = _collect_accounts(filtered)
+    filtered = filter_rows(journal, start, end)
+    accounts = collect_accounts(filtered)
 
     report = {
         "generated_on_utc": datetime.now(timezone.utc).isoformat(),
-        "mode": "RANGE",
-        "from": date_from,
-        "to": date_to,
-        "accounts": {},
+        "mode": mode,
+        "from": start,
+        "to": end,
+        "accounts": {}
     }
 
-    print_lines: List[str] = []
-    grand_count = 0
+    print_lines = []
+    total_lines = 0
 
-    for account, rows in sorted(accounts.items()):
+    for account in sorted(accounts.keys()):
         running = Decimal("0")
-        acc_lines = []
+        rows = sorted(accounts[account], key=lambda x: x["date"])
 
-        print_lines.append("\f")  # page break per account
+        print_lines.append("\f")
         print_lines.append(f"ACCOUNT: {account}")
-        print_lines.append(f"MODE: RANGE")
-        print_lines.append(f"PERIOD: {date_from} to {date_to}")
+        print_lines.append(f"MODE: {mode}")
+        print_lines.append(f"PERIOD: {start} to {end}")
         print_lines.append("-" * 60)
 
-        for r in sorted(rows, key=lambda x: x["date"]):
+        acc_output = []
+
+        for r in rows:
             running += r["debit"] - r["credit"]
-            acc_lines.append({
+
+            acc_output.append({
                 "date": r["date"],
                 "debit": str(r["debit"]),
                 "credit": str(r["credit"]),
                 "running_balance": str(running),
             })
-            print_lines.append(f"{r['date']} | DR {r['debit']} | CR {r['credit']} | BAL {running}")
-            grand_count += 1
 
-        report["accounts"][account] = acc_lines
+            print_lines.append(
+                f"{r['date']} | DR {r['debit']} | CR {r['credit']} | BAL {running}"
+            )
+
+            total_lines += 1
+
+        report["accounts"][account] = acc_output
+
         print_lines.append("-" * 60)
         print_lines.append(f"ENDING BALANCE: {running}")
 
-    report["total_lines"] = grand_count
+    report["total_lines"] = total_lines
 
-    json_out = OUT_DIR / f"gl_range_{date_from}_{date_to}.json"
+    json_out = OUT_DIR / f"gl_{mode.lower()}_{start}_{end}.json"
+    print_out = OUT_DIR / f"gl_{mode.lower()}_{start}_{end}_PRINT.txt"
+
     with json_out.open("w", encoding="utf-8") as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
 
-    print_out = OUT_DIR / f"gl_range_{date_from}_{date_to}_PRINT.txt"
     with print_out.open("w", encoding="utf-8") as f:
         for line in print_lines:
             f.write(line + "\n")
-        f.write("\nGRAND TOTAL LINES: " + str(grand_count) + "\n")
+        f.write("\nGRAND TOTAL LINES: " + str(total_lines))
 
     print("GL Report generated:")
     print(json_out)
     print(print_out)
-
-
-def run_gl_asof(date_from: str, as_of: str) -> None:
-    """
-    AS-OF mode:
-    Includes all entries from date_from up to as_of inclusive.
-    Produces a running balance that ends at the as-of cut.
-    """
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    journal = load_journal()
-
-    filtered = []
-    for rec in journal:
-        d = extract_date(rec)
-        if d and date_from <= d <= as_of:
-            filtered.append(rec)
-
-    accounts = _collect_accounts(filtered)
-
-    report = {
-        "generated_on_utc": datetime.now(timezone.utc).isoformat(),
-        "mode": "AS_OF",
-        "from": date_from,
-        "as_of": as_of,
-        "accounts": {},
-    }
-
-    print_lines: List[str] = []
-    grand_count = 0
-
-    for account, rows in sorted(accounts.items()):
-        running = Decimal("0")
-        acc_lines = []
-
-        print_lines.append("\f")  # page break per account
-        print_lines.append(f"ACCOUNT: {account}")
-        print_lines.append(f"MODE: AS-OF")
-        print_lines.append(f"FROM: {date_from}")
-        print_lines.append(f"AS OF: {as_of}")
-        print_lines.append("-" * 60)
-
-        for r in sorted(rows, key=lambda x: x["date"]):
-            running += r["debit"] - r["credit"]
-            acc_lines.append({
-                "date": r["date"],
-                "debit": str(r["debit"]),
-                "credit": str(r["credit"]),
-                "running_balance": str(running),
-            })
-            print_lines.append(f"{r['date']} | DR {r['debit']} | CR {r['credit']} | BAL {running}")
-            grand_count += 1
-
-        report["accounts"][account] = acc_lines
-        print_lines.append("-" * 60)
-        print_lines.append(f"BALANCE AS AT {as_of}: {running}")
-
-    report["total_lines"] = grand_count
-
-    json_out = OUT_DIR / f"gl_asof_{date_from}_{as_of}.json"
-    with json_out.open("w", encoding="utf-8") as f:
-        json.dump(report, f, indent=2, ensure_ascii=False)
-
-    print_out = OUT_DIR / f"gl_asof_{date_from}_{as_of}_PRINT.txt"
-    with print_out.open("w", encoding="utf-8") as f:
-        for line in print_lines:
-            f.write(line + "\n")
-        f.write("\nGRAND TOTAL LINES: " + str(grand_count) + "\n")
-
-    print("GL Report generated:")
-    print(json_out)
-    print(print_out)
-
-
-def usage() -> None:
-    print("Usage:")
-    print("  RANGE: python tools/run_gl_print.py RANGE YYYY-MM-DD YYYY-MM-DD")
-    print("  ASOF : python tools/run_gl_print.py ASOF  YYYY-MM-DD YYYY-MM-DD")
-    print("")
-    print("Examples:")
-    print("  python tools/run_gl_print.py RANGE 2026-02-01 2026-02-26")
-    print("  python tools/run_gl_print.py ASOF  2026-01-01 2026-02-20")
 
 
 if __name__ == "__main__":
     if len(sys.argv) != 4:
-        usage()
+        print("Usage:")
+        print("  python tools/run_gl_print.py RANGE YYYY-MM-DD YYYY-MM-DD")
+        print("  python tools/run_gl_print.py ASOF YYYY-MM-DD YYYY-MM-DD")
         sys.exit(1)
 
-    mode = sys.argv[1].strip().upper()
-    a = sys.argv[2].strip()
-    b = sys.argv[3].strip()
+    mode = sys.argv[1].upper()
+    start = sys.argv[2]
+    end = sys.argv[3]
 
-    if mode == "RANGE":
-        run_gl_range(a, b)
-    elif mode == "ASOF":
-        run_gl_asof(a, b)
-    else:
-        usage()
+    if mode not in ("RANGE", "ASOF"):
+        print("Mode must be RANGE or ASOF")
         sys.exit(1)
+
+    generate_report(mode, start, end)
