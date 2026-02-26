@@ -1,12 +1,11 @@
 """
 backend/app/screens/posting_approval.py
 
-Posting Approval (Checker decision) – Phase 14c.0
+Posting Approval (Checker decision) – Phase 15
 -------------------------------------------------
-- Regulator-grade immutable approval snapshot logging (JSONL)
-- Fail-safe audit write (never blocks approval)
+- Approval snapshot logging
 - Ledger posting hook on APPROVE (persistent Journal -> GL)
-- Passes maker/checker IDs into journal for EOD batch review
+- Carries dimension bundle (dims) for multi-level reconciliation/reporting
 """
 
 from __future__ import annotations
@@ -30,45 +29,44 @@ def _audit_write_posting_snapshot(payload: dict) -> None:
         return
 
 
-def posting_approval_handler(
-    payload: Dict[str, Any],
-    user_id: str | None = None,
-) -> Dict[str, Any]:
-
+def posting_approval_handler(payload: Dict[str, Any], user_id: str | None = None) -> Dict[str, Any]:
     ticket_id = str(payload.get("ticket_id", "")).strip()
     decision = str(payload.get("decision", "")).strip().lower()
 
     if not ticket_id:
         return {"ok": False, "error": "ticket_id is required"}
-
     if decision not in {"approve", "reject", "return"}:
         return {"ok": False, "error": "decision must be one of approve, reject, return"}
 
     checker_id = (user_id or "anonymous_checker").strip() or "anonymous_checker"
 
+    # Optional dimension bundle from UI
+    dims = payload.get("dims") or {}
+    if not isinstance(dims, dict):
+        return {"ok": False, "error": "dims must be an object/dict if provided"}
+
     try:
         if decision == "approve":
             t = approve_ticket(ticket_id, checker_id)
-
-            # Infer maker from ticket (created_by is present in your earlier outputs)
             maker_id = getattr(t, "created_by", None)
 
             ledger_result = ledger_post(
                 t,
                 maker_user_id=maker_id,
                 checker_user_id=checker_id,
-                unit=getattr(t, "unit", None),  # optional future field
+                dims=dims,
             )
 
             _audit_write_posting_snapshot(
                 {
                     "timestamp": datetime.now(timezone.utc).timestamp(),
                     "event": "POSTING_APPROVAL",
-                    "phase": "PHASE_14C_0",
+                    "phase": "PHASE_15",
                     "ticket_id": ticket_id,
                     "checker_id": checker_id,
                     "maker_id": maker_id,
                     "decision": "approve",
+                    "dims": dims,
                     "ticket_status": getattr(getattr(t, "status", None), "value", None),
                     "ledger": ledger_result,
                 }
@@ -82,7 +80,7 @@ def posting_approval_handler(
                     "status": getattr(getattr(t, "status", None), "value", None),
                 },
                 "ledger": ledger_result,
-                "note": "Approved. Journal appended + GL updated (real-time, persistent).",
+                "note": "Approved. Journal appended + GL updated (persistent, dimensional).",
             }
 
         if decision == "reject":
@@ -92,11 +90,12 @@ def posting_approval_handler(
                 {
                     "timestamp": datetime.now(timezone.utc).timestamp(),
                     "event": "POSTING_REJECT",
-                    "phase": "PHASE_14C_0",
+                    "phase": "PHASE_15",
                     "ticket_id": ticket_id,
                     "checker_id": checker_id,
                     "decision": "reject",
                     "reason": reason,
+                    "dims": dims,
                     "ticket_status": getattr(getattr(t, "status", None), "value", None),
                 }
             )
@@ -117,11 +116,12 @@ def posting_approval_handler(
                 {
                     "timestamp": datetime.now(timezone.utc).timestamp(),
                     "event": "POSTING_RETURN",
-                    "phase": "PHASE_14C_0",
+                    "phase": "PHASE_15",
                     "ticket_id": ticket_id,
                     "checker_id": checker_id,
                     "decision": "return",
                     "reason": reason,
+                    "dims": dims,
                     "ticket_status": getattr(getattr(t, "status", None), "value", None),
                 }
             )

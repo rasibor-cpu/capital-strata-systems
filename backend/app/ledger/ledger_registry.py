@@ -1,12 +1,12 @@
 """
-Ledger Registry – Phase 14c.0
+Ledger Registry – Phase 15 (Dimensional Ledger)
 Capital Strata Systems
 
-Persistent Journal + Rebuildable GL + user metadata.
+Persistent Journal + Rebuildable GL + dimension bundle per entry.
 """
 
 from decimal import Decimal
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 from .journal import JournalRegistry
 from .general_ledger import GeneralLedger
 from ..posting_contracts import PostingTicket
@@ -29,17 +29,19 @@ def post(
     *,
     maker_user_id: Optional[str] = None,
     checker_user_id: Optional[str] = None,
-    unit: Optional[str] = None,
+    dims: Optional[dict[str, Any]] = None,
 ):
-    """
-    Posts an APPROVED ticket into the persistent journal and updates GL in real time.
-    """
-
     if ticket.status.value != "approved":
         raise ValueError("Ticket must be approved before ledger posting.")
 
-    # Best-effort: if caller didn’t pass maker_user_id, infer from ticket
     inferred_maker = maker_user_id or getattr(ticket, "created_by", None)
+    dims = dims or {}
+
+    # Convenience mapping: allow ticket.unit/team/branch/division/country if present
+    for k in ("unit", "team", "branch", "division", "country"):
+        v = getattr(ticket, k, None)
+        if v and k not in dims:
+            dims[k] = v
 
     for line in ticket.lines:
         entry = _JOURNAL.append(
@@ -51,7 +53,7 @@ def post(
             currency=line.currency,
             maker_user_id=inferred_maker,
             checker_user_id=checker_user_id,
-            unit=unit,
+            dims=dims,
         )
         _GL.apply(entry)
 
@@ -60,7 +62,7 @@ def post(
         "gl_accounts_updated": len(ticket.lines),
         "maker_user_id": inferred_maker,
         "checker_user_id": checker_user_id,
-        "unit": unit,
+        "dims": dims,
     }
 
 

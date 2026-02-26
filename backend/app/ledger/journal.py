@@ -1,18 +1,20 @@
 """
-Persistent Journal Engine – Phase 14c.0
+Persistent Journal Engine – Phase 15 (Dimensional Ledger)
 Capital Strata Systems
 
-Append-only JSONL journal with user metadata for EOD batch review.
+Append-only JSONL journal with dimension bundle (dims):
+- maker_user_id, checker_user_id
+- unit/team/branch/division/country (optional)
+- future-proof: dims is a dict so we can extend without schema breaks
 
-Key:
-- Backward-compatible loader: older journal lines without new fields still load.
-- Append-only, immutable, deterministic.
+Backward-compatible loader:
+- handles older records without dims
 """
 
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import hashlib
 import json
 from pathlib import Path
@@ -25,17 +27,20 @@ JOURNAL_FILE = Path("audit_logs") / "journal.jsonl"
 class JournalEntry:
     journal_id: str
     ticket_id: str
-    execution_date: str  # business date for posting
+    execution_date: str
     account_no: str
-    side: str            # DR / CR
+    side: str
     amount: Decimal
     currency: str
     created_at: datetime
 
-    # --- NEW (Phase 14c.0): batch review keys ---
+    # Canonical identity
     maker_user_id: Optional[str] = None
     checker_user_id: Optional[str] = None
-    unit: Optional[str] = None        # branch/team/division/country (optional; future)
+
+    # New: dimension bundle (Phase 15)
+    dims: Optional[Dict[str, Any]] = None
+
     entry_hash: str = ""
 
 
@@ -46,8 +51,8 @@ class JournalRegistry:
         self._load_from_disk()
 
     def _generate_hash(self, payload: dict) -> str:
-        payload_str = json.dumps(payload, sort_keys=True)
-        return hashlib.sha256(payload_str.encode()).hexdigest()
+        payload_str = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+        return hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
 
     def append(
         self,
@@ -60,10 +65,11 @@ class JournalRegistry:
         currency: str,
         maker_user_id: Optional[str] = None,
         checker_user_id: Optional[str] = None,
-        unit: Optional[str] = None,
+        dims: Optional[Dict[str, Any]] = None,
     ) -> JournalEntry:
 
-        # Hash payload (deterministic)
+        dims = dims or {}
+
         payload = {
             "ticket_id": ticket_id,
             "execution_date": execution_date,
@@ -73,7 +79,7 @@ class JournalRegistry:
             "currency": currency,
             "maker_user_id": maker_user_id,
             "checker_user_id": checker_user_id,
-            "unit": unit,
+            "dims": dims,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         entry_hash = self._generate_hash(payload)
@@ -89,7 +95,7 @@ class JournalRegistry:
             created_at=datetime.now(timezone.utc),
             maker_user_id=maker_user_id,
             checker_user_id=checker_user_id,
-            unit=unit,
+            dims=dims,
             entry_hash=entry_hash,
         )
 
@@ -116,7 +122,6 @@ class JournalRegistry:
                     continue
                 data = json.loads(line)
 
-                # Backward compatibility: older lines may not have maker/checker/unit
                 entry = JournalEntry(
                     journal_id=data["journal_id"],
                     ticket_id=data["ticket_id"],
@@ -128,7 +133,10 @@ class JournalRegistry:
                     created_at=datetime.fromisoformat(data["created_at"]),
                     maker_user_id=data.get("maker_user_id"),
                     checker_user_id=data.get("checker_user_id"),
-                    unit=data.get("unit"),
+                    dims=data.get("dims") or {
+                        # Backward compatibility: if old "unit" exists, map it
+                        "unit": data.get("unit")
+                    } if data.get("unit") else (data.get("dims") or {}),
                     entry_hash=data.get("entry_hash", ""),
                 )
                 self._entries.append(entry)
