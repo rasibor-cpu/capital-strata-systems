@@ -1,17 +1,12 @@
 """
 backend/app/screens/posting_approval.py
 
-Posting Approval (Checker decision) – Phase 13.6 → Phase 14 Wiring
-------------------------------------------------------------------
-Adds:
+Posting Approval (Checker decision) – Phase 14c.0
+-------------------------------------------------
 - Regulator-grade immutable approval snapshot logging (JSONL)
 - Fail-safe audit write (never blocks approval)
-- Phase 14: Ledger posting hook on APPROVE (Journal → GL in real-time)
-
-Notes:
-- Uses backend.app.posting_store as the single source of truth for ticket store + lifecycle.
-- Ledger posting occurs ONLY after successful approval.
-- No ledger posting occurs on reject/return.
+- Ledger posting hook on APPROVE (persistent Journal -> GL)
+- Passes maker/checker IDs into journal for EOD batch review
 """
 
 from __future__ import annotations
@@ -25,41 +20,20 @@ from backend.app.posting_store import approve_ticket, reject_ticket, return_tick
 from backend.app.ledger.ledger_registry import post as ledger_post
 
 
-# ============================================================
-# Internal Audit Writer (Fail-Safe)
-# ============================================================
-
 def _audit_write_posting_snapshot(payload: dict) -> None:
-    """
-    Writes immutable JSONL event.
-    Must never interrupt posting approval flow.
-    """
     try:
         Path("audit_logs").mkdir(parents=True, exist_ok=True)
         out = Path("audit_logs") / "posting_snapshots.jsonl"
         with out.open("a", encoding="utf-8") as f:
             f.write(json.dumps(payload, ensure_ascii=False) + "\n")
     except Exception:
-        # Fail silent — approvals must never break due to reporting
         return
 
-
-# ============================================================
-# Checker Approval Handler
-# ============================================================
 
 def posting_approval_handler(
     payload: Dict[str, Any],
     user_id: str | None = None,
 ) -> Dict[str, Any]:
-    """
-    Expected payload:
-      {
-        "ticket_id": "T-0001",
-        "decision": "approve" | "reject" | "return",
-        "reason": "optional string"
-      }
-    """
 
     ticket_id = str(payload.get("ticket_id", "")).strip()
     decision = str(payload.get("decision", "")).strip().lower()
@@ -73,23 +47,27 @@ def posting_approval_handler(
     checker_id = (user_id or "anonymous_checker").strip() or "anonymous_checker"
 
     try:
-        # ------------------------------------------------------------
-        # APPROVE
-        # ------------------------------------------------------------
         if decision == "approve":
             t = approve_ticket(ticket_id, checker_id)
 
-            # Phase 14: post to ledger (Journal -> GL)
-            ledger_result = ledger_post(t)
+            # Infer maker from ticket (created_by is present in your earlier outputs)
+            maker_id = getattr(t, "created_by", None)
 
-            # --- REGULATOR SNAPSHOT HOOK (post-success) ---
+            ledger_result = ledger_post(
+                t,
+                maker_user_id=maker_id,
+                checker_user_id=checker_id,
+                unit=getattr(t, "unit", None),  # optional future field
+            )
+
             _audit_write_posting_snapshot(
                 {
                     "timestamp": datetime.now(timezone.utc).timestamp(),
                     "event": "POSTING_APPROVAL",
-                    "phase": "PHASE_14",
+                    "phase": "PHASE_14C_0",
                     "ticket_id": ticket_id,
                     "checker_id": checker_id,
+                    "maker_id": maker_id,
                     "decision": "approve",
                     "ticket_status": getattr(getattr(t, "status", None), "value", None),
                     "ledger": ledger_result,
@@ -104,21 +82,17 @@ def posting_approval_handler(
                     "status": getattr(getattr(t, "status", None), "value", None),
                 },
                 "ledger": ledger_result,
-                "note": "Approved. Journal appended + GL updated (real-time).",
+                "note": "Approved. Journal appended + GL updated (real-time, persistent).",
             }
 
-        # ------------------------------------------------------------
-        # REJECT
-        # ------------------------------------------------------------
         if decision == "reject":
             reason = str(payload.get("reason", "Rejected by checker")).strip() or "Rejected by checker"
             t = reject_ticket(ticket_id, checker_id, reason)
-
             _audit_write_posting_snapshot(
                 {
                     "timestamp": datetime.now(timezone.utc).timestamp(),
                     "event": "POSTING_REJECT",
-                    "phase": "PHASE_14",
+                    "phase": "PHASE_14C_0",
                     "ticket_id": ticket_id,
                     "checker_id": checker_id,
                     "decision": "reject",
@@ -126,7 +100,6 @@ def posting_approval_handler(
                     "ticket_status": getattr(getattr(t, "status", None), "value", None),
                 }
             )
-
             return {
                 "ok": True,
                 "decision": "reject",
@@ -137,18 +110,14 @@ def posting_approval_handler(
                 "note": reason,
             }
 
-        # ------------------------------------------------------------
-        # RETURN
-        # ------------------------------------------------------------
         if decision == "return":
             reason = str(payload.get("reason", "Returned for correction")).strip() or "Returned for correction"
             t = return_ticket(ticket_id, checker_id, reason)
-
             _audit_write_posting_snapshot(
                 {
                     "timestamp": datetime.now(timezone.utc).timestamp(),
                     "event": "POSTING_RETURN",
-                    "phase": "PHASE_14",
+                    "phase": "PHASE_14C_0",
                     "ticket_id": ticket_id,
                     "checker_id": checker_id,
                     "decision": "return",
@@ -156,7 +125,6 @@ def posting_approval_handler(
                     "ticket_status": getattr(getattr(t, "status", None), "value", None),
                 }
             )
-
             return {
                 "ok": True,
                 "decision": "return",
