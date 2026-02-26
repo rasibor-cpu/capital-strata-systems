@@ -112,7 +112,10 @@ def build_month_end_snapshot(month: str) -> Dict[str, Any]:
         "balance_sheet": {"accounts": {k: str(v) for k, v in bs_totals.items()}},
     }
 
-    return attach_integrity_metadata(snapshot)
+    return attach_integrity_metadata(
+    snapshot,
+    schema_name="CSS_MONTH_END_V1",
+)
 
 
 def main() -> int:

@@ -1,158 +1,200 @@
 """
 engine/reporting/report_printer.py
 
-CSS Report Printer (FinCon-grade + Authority + Sign-off)
---------------------------------------------------------
-- Registry of report generators
-- Deterministic output formatting
-- Authority gating (Admin / Super User / FinCon Reporting)
-- Standard ReportRequest input for timeframe + sections + scope + sign-off
+Central Report Registry (FinCon Grade)
+---------------------------------------
+• Authority gated
+• Extensible registry
+• Supports:
+    - timeframe
+    - as_of_date
+    - explicit sections
+    - arbitrary filters
+• Designed for regulator reproducibility
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Callable, Dict, Any, Optional, Iterable, Set, Tuple
-
-from engine.reporting.report_request import ReportRequest, ReportCaller
-
-
-@dataclass(frozen=True)
-class ReportResult:
-    report_id: str
-    title: str
-    payload: Dict[str, Any]
-    text: str
+from typing import Dict, Any, Callable, List, Optional
+from datetime import datetime
+from engine.reporting.ageing_reports import (
+    compute_ageing,
+    format_ageing_report,
+)
+import json
+from pathlib import Path
 
 
-@dataclass(frozen=True)
-class ReportMeta:
-    report_id: str
-    title: str
-    required_roles: Set[str]
-    required_permissions: Set[str]
-    default_sections: Set[str]
+# ============================================================
+# Registry
+# ============================================================
 
-
-_REPORTS: Dict[str, Tuple[ReportMeta, Callable[[ReportRequest], ReportResult]]] = {}
+_REPORT_REGISTRY: Dict[str, Dict[str, Any]] = {}
 
 
 def register_report(
-    report_id: str,
-    *,
-    title: str,
-    required_roles: Optional[Iterable[str]] = None,
-    required_permissions: Optional[Iterable[str]] = None,
-    default_sections: Optional[Iterable[str]] = None,
-):
-    def decorator(fn: Callable[[ReportRequest], ReportResult]):
-        meta = ReportMeta(
-            report_id=str(report_id),
-            title=str(title),
-            required_roles=set(required_roles or []),
-            required_permissions=set(required_permissions or []),
-            default_sections=set(default_sections or []),
-        )
-        _REPORTS[str(report_id)] = (meta, fn)
-        return fn
-
-    return decorator
+    name: str,
+    handler: Callable[..., str],
+    roles: List[str],
+    default_sections: Optional[List[str]] = None,
+) -> None:
+    _REPORT_REGISTRY[name] = {
+        "handler": handler,
+        "roles": roles,
+        "default_sections": default_sections or [],
+    }
 
 
-def list_reports() -> Dict[str, Dict[str, Any]]:
-    out: Dict[str, Dict[str, Any]] = {}
-    for rid, (meta, _) in _REPORTS.items():
-        out[rid] = {
-            "title": meta.title,
-            "required_roles": sorted(meta.required_roles),
-            "required_permissions": sorted(meta.required_permissions),
-            "default_sections": sorted(meta.default_sections),
+def list_reports() -> Dict[str, Any]:
+    return {
+        name: {
+            "roles": meta["roles"],
+            "default_sections": meta["default_sections"],
         }
-    return out
+        for name, meta in _REPORT_REGISTRY.items()
+    }
 
 
-def _normalize_set(v: Any) -> Set[str]:
-    if v is None:
-        return set()
-    if isinstance(v, (set, list, tuple)):
-        return {str(x) for x in v}
-    return {str(v)}
+# ============================================================
+# Authority Check
+# ============================================================
 
+def _check_role(name: str, role: str) -> None:
+    meta = _REPORT_REGISTRY.get(name)
+    if not meta:
+        raise ValueError(f"Unknown report '{name}'")
 
-def _has_authority(
-    *,
-    user_roles: Set[str],
-    user_permissions: Set[str],
-    required_roles: Set[str],
-    required_permissions: Set[str],
-) -> bool:
-    # Open report if no requirements
-    if not required_roles and not required_permissions:
-        return True
-
-    # Fail-closed if requirements exist but caller context absent
-    if not user_roles and not user_permissions:
-        return False
-
-    # Role gate (any-of)
-    if required_roles and user_roles.intersection(required_roles):
-        return True
-
-    # Permission gate (any-of)
-    if required_permissions and user_permissions.intersection(required_permissions):
-        return True
-
-    return False
-
-
-def print_report(request: ReportRequest) -> ReportResult:
-    if request.report_id not in _REPORTS:
-        known = ", ".join(sorted(_REPORTS.keys())) or "(none)"
-        raise ValueError(f"Unknown report_id='{request.report_id}'. Known: {known}")
-
-    meta, fn = _REPORTS[request.report_id]
-
-    roles = _normalize_set(request.caller.roles)
-    perms = _normalize_set(request.caller.permissions)
-
-    if not _has_authority(
-        user_roles=roles,
-        user_permissions=perms,
-        required_roles=meta.required_roles,
-        required_permissions=meta.required_permissions,
-    ):
+    if role not in meta["roles"]:
         raise PermissionError(
-            f"Insufficient authority to print '{request.report_id}'. "
-            f"Requires roles={sorted(meta.required_roles)} or permissions={sorted(meta.required_permissions)}."
+            f"Insufficient authority to print '{name}'. "
+            f"Requires one of {meta['roles']}"
         )
 
-    # If caller didn’t specify sections, apply defaults (if defined)
-    if not request.sections and meta.default_sections:
-        request = ReportRequest(
-            report_id=request.report_id,
-            caller=request.caller,
-            timeframe=request.timeframe,
-            sections=set(meta.default_sections),
-            scope_id=request.scope_id,
-            account_ref=request.account_ref,
-            currency=request.currency,
-            target_user_id=request.target_user_id,
-            params=dict(request.params),
-        )
 
-    return fn(request)
+# ============================================================
+# Report Engine
+# ============================================================
 
+def print_report(
+    report_name: str,
+    role: str,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    as_of_date: Optional[str] = None,
+    sections: Optional[List[str]] = None,
+    filters: Optional[Dict[str, Any]] = None,
+) -> str:
 
-def build_caller(
-    *,
-    user_id: str,
-    display_name: str = "",
-    roles: Optional[Iterable[str]] = None,
-    permissions: Optional[Iterable[str]] = None,
-) -> ReportCaller:
-    return ReportCaller(
-        user_id=str(user_id),
-        display_name=str(display_name or user_id),
-        roles=set(roles or []),
-        permissions=set(permissions or []),
+    filters = filters or {}
+    sections = sections or []
+
+    _check_role(report_name, role)
+
+    handler = _REPORT_REGISTRY[report_name]["handler"]
+
+    content = handler(
+        from_date=from_date,
+        to_date=to_date,
+        as_of_date=as_of_date,
+        sections=sections,
+        filters=filters,
     )
+
+    # Standardized sign-off block
+    footer = (
+        "\n\n"
+        "Sign-off:\n"
+        f"  Printed by : {role}\n"
+        f"  Generated  : {datetime.utcnow().isoformat()}Z\n"
+    )
+
+    return content + footer
+
+
+# ============================================================
+# AGEING REPORT HANDLERS
+# ============================================================
+
+def _ar_ageing_handler(**kwargs) -> str:
+    as_of = kwargs.get("as_of_date")
+    filters = kwargs.get("filters") or {}
+
+    from datetime import datetime
+    if as_of:
+        as_of_dt = datetime.strptime(as_of, "%Y-%m-%d").date()
+    else:
+        as_of_dt = datetime.utcnow().date()
+
+    data = compute_ageing(filters, as_of_dt)
+    return format_ageing_report("AR AGEING REPORT", data)
+
+
+def _ap_ageing_handler(**kwargs) -> str:
+    as_of = kwargs.get("as_of_date")
+    filters = kwargs.get("filters") or {}
+
+    from datetime import datetime
+    if as_of:
+        as_of_dt = datetime.strptime(as_of, "%Y-%m-%d").date()
+    else:
+        as_of_dt = datetime.utcnow().date()
+
+    data = compute_ageing(filters, as_of_dt)
+    return format_ageing_report("AP AGEING REPORT", data)
+
+
+def _gl_ageing_handler(**kwargs) -> str:
+    as_of = kwargs.get("as_of_date")
+    filters = kwargs.get("filters") or {}
+
+    from datetime import datetime
+    if as_of:
+        as_of_dt = datetime.strptime(as_of, "%Y-%m-%d").date()
+    else:
+        as_of_dt = datetime.utcnow().date()
+
+    data = compute_ageing(filters, as_of_dt)
+    return format_ageing_report("GL AGEING REPORT", data)
+
+
+# ============================================================
+# GOVERNANCE SUMMARY (existing logic stub retained)
+# ============================================================
+
+def _governance_summary_handler(**kwargs) -> str:
+    path = Path("audit_logs") / "governance_decisions.jsonl"
+    if not path.exists():
+        return "No governance log found."
+
+    allow = 0
+    block = 0
+
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            try:
+                obj = json.loads(line)
+                if obj.get("decision") == "ALLOW":
+                    allow += 1
+                elif obj.get("decision") == "BLOCK":
+                    block += 1
+            except Exception:
+                continue
+
+    return (
+        "=== GOVERNANCE ANALYSIS SUMMARY ===\n"
+        f"ALLOW : {allow}\n"
+        f"BLOCK : {block}\n"
+    )
+
+
+# ============================================================
+# REGISTER REPORTS
+# ============================================================
+
+COMMON_ROLES = ["ADMIN", "SUPER_USER", "FINCON_REPORTING"]
+
+register_report("ar_ageing", _ar_ageing_handler, COMMON_ROLES)
+register_report("ap_ageing", _ap_ageing_handler, COMMON_ROLES)
+register_report("gl_ageing", _gl_ageing_handler, COMMON_ROLES)
+
+register_report("governance_summary", _governance_summary_handler, COMMON_ROLES)
