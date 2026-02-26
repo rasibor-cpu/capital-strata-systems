@@ -1,5 +1,5 @@
 """
-Year-End Consolidated Financial Report – Phase 17B (Governance Hardened)
+Year-End Consolidated Financial Report – Phase 17C (Governance Hardened)
 Capital Strata Systems
 
 What this does:
@@ -7,8 +7,9 @@ What this does:
 - Builds Income Statement
 - Rolls Net Income into Retained Earnings (account 400)
 - Writes year-end snapshot JSON
-- Records YEAR_END close event (idempotent, audit-grade)
-- Attaches schema_version + integrity hash (SHA256 canonical)
+- Records YEAR_END close event (idempotent)
+- Attaches schema_version + integrity hash + deterministic report_id
+- Attaches lineage metadata from CloseRegistry
 
 Usage:
   python tools/run_year_end_report.py 2026 --role SUPER_USER
@@ -25,7 +26,7 @@ from collections import defaultdict
 from typing import Any, Dict
 
 # ------------------------------------------------------------
-# Ensure repo root is importable (so `engine.*` imports work)
+# Ensure repo root is importable
 # ------------------------------------------------------------
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -62,6 +63,7 @@ def _read_year_slice(year: str) -> list[Dict[str, Any]]:
             if not str(r.get("execution_date", "")).startswith(year):
                 continue
             rows.append(r)
+
     return rows
 
 
@@ -89,7 +91,6 @@ def build_year_end_snapshot(year: str) -> Dict[str, Any]:
                 else:
                     is_income[acct] -= amt
             else:
-                # EXPENSE
                 if side == "DR":
                     is_expense[acct] += amt
                 else:
@@ -104,11 +105,10 @@ def build_year_end_snapshot(year: str) -> Dict[str, Any]:
     total_expense = sum(is_expense.values())
     net_income = total_income - total_expense
 
-    # Roll net income into retained earnings (account 400)
+    # Roll to retained earnings
     bs["400"] += net_income
 
     report = {
-        "schema": "CSS_YEAR_END_V1",
         "year": year,
         "counts": {"journal_rows_scanned": len(year_rows)},
         "income_statement": {
@@ -118,29 +118,31 @@ def build_year_end_snapshot(year: str) -> Dict[str, Any]:
             "total_income": str(total_income),
             "total_expense": str(total_expense),
         },
-        "balance_sheet": {"accounts": {k: str(v) for k, v in bs.items()}},
+        "balance_sheet": {
+            "accounts": {k: str(v) for k, v in bs.items()}
+        },
     }
 
-    return attach_integrity_metadata(report)
+    return attach_integrity_metadata(
+        report,
+        schema_name="CSS_YEAR_END_V1",
+    )
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("year", help="YYYY (e.g., 2026)")
-    parser.add_argument("--role", default="SUPER_USER", help="ADMIN | SUPER_USER | FINCON_REPORTING")
-    parser.add_argument("--notes", default="", help="Optional close notes")
+    parser.add_argument("--role", default="SUPER_USER")
+    parser.add_argument("--notes", default="")
     args = parser.parse_args()
 
     year = args.year.strip()
     role = args.role.strip().upper()
 
-    # Validate year
     try:
         y = int(year)
-        if y < 1900 or y > 3000:
-            raise ValueError()
     except Exception:
-        print("Invalid year. Use YYYY (e.g., 2026)")
+        print("Invalid year format. Use YYYY.")
         return 2
 
     # Record close event (idempotent)
@@ -151,11 +153,20 @@ def main() -> int:
         actor_role=role,
         notes=args.notes,
     )
+
     status = close_result.get("status", "UNKNOWN")
 
-    # Build + persist snapshot
+    # Build report
     snapshot = build_year_end_snapshot(year)
 
+    # Attach lineage (latest close event reference)
+    latest_close = CloseRegistry.latest_close()
+    if latest_close:
+        snapshot["lineage"] = {
+            "latest_close_event": latest_close
+        }
+
+    # Persist
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     out = OUT_DIR / f"YEAR_END_{year}.json"
     out.write_text(json.dumps(snapshot, indent=2, sort_keys=True), encoding="utf-8")
@@ -164,6 +175,7 @@ def main() -> int:
     print("Year-End Report Written:", out)
     print("Net Income:", snapshot["income_statement"]["net_income"])
     print("Schema Version:", snapshot.get("schema_version"))
+    print("Report ID:", snapshot.get("report_id"))
     print("Integrity Hash:", snapshot.get("integrity", {}).get("hash"))
 
     return 0
