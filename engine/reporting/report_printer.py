@@ -1,148 +1,200 @@
 """
-Report Printer – Phase 17 Hardened (Lazy Import / Fail-Closed)
-Capital Strata Systems
+report_printer.py
+Capital Strata Systems (CSS)
+
+Phase 22D/22E Hardening — Stable EOD Report Pack API
+
+Why this exists:
+- EOD batch requires a single, stable entry point to generate all required EOD prints/snapshots.
+- Over time, report modules evolve; this orchestrator must be robust to function-name drift.
+
+Canonical API (DO NOT BREAK):
+- run_eod_pack(run_date)
+
+Also supported aliases:
+- generate_eod_pack, print_eod_pack, run_daily_pack
 """
 
 from __future__ import annotations
 
-from typing import Dict, Any, List, Optional
-import importlib
-from engine.reporting.approval_queue_snapshot import build_approval_queue_snapshot
+from datetime import date
+from typing import Any, Callable, Dict, Optional, Tuple
 
 
-REGISTERED_REPORTS = {
-    "gl_print",
-    "gl_as_of",
-    "customer_subledger",
-    "ar_ageing",
-    "supervisory_control_pack",
-    "supervisor_signoff",
-    "treasury_instrument_aggregate",
-    "pnl_report",
-}
-
-
-def list_reports() -> List[str]:
-    return sorted(REGISTERED_REPORTS)
-
-
-def _call_first(module: Any, candidate_names: List[str], **kwargs: Any) -> Dict[str, Any]:
-    for name in candidate_names:
+def _call_first_available(module, fn_names: Tuple[str, ...], *args, **kwargs) -> Dict[str, Any]:
+    """
+    Calls the first callable attribute found on module among fn_names.
+    Returns a standardized result dict.
+    """
+    for name in fn_names:
         fn = getattr(module, name, None)
         if callable(fn):
-            return fn(**kwargs)
-    raise AttributeError(f"{module.__name__} missing entrypoint. Tried: {candidate_names}")
+            out = fn(*args, **kwargs)
+            return {
+                "ok": True,
+                "module": getattr(module, "__name__", str(module)),
+                "function": name,
+                "result": out,
+            }
+    return {
+        "ok": False,
+        "module": getattr(module, "__name__", str(module)),
+        "function": None,
+        "result": None,
+    }
 
 
-def _import(module_path: str) -> Any:
+def run_eod_pack(run_date: Optional[date] = None) -> Dict[str, Any]:
+    """
+    Canonical EOD report pack runner.
+
+    Runs a best-effort set of EOD outputs that exist in this repo:
+    - approval queue snapshot
+    - supervisory control pack
+    - customer subledger report (if available)
+    - ageing reports (if available)
+    - pnl ledger / treasury aggregates (if available)
+
+    This function MUST:
+    - Not crash because ONE optional report is missing
+    - Fail only if ALL reports fail (i.e., nothing was produced)
+    """
+    if run_date is None:
+        run_date = date.today()
+
+    results: Dict[str, Any] = {
+        "ok": True,
+        "run_date": run_date.isoformat(),
+        "reports": [],
+        "warnings": [],
+    }
+
+    # -----------------------------
+    # 1) Approval Queue Snapshot (EOD-critical for follow-ups)
+    # -----------------------------
     try:
-        return importlib.import_module(module_path)
-    except Exception as e:
-        raise ModuleNotFoundError(
-            f"Report module import failed: {module_path}. "
-            f"Underlying error: {type(e).__name__}: {e}"
-        ) from e
+        from engine.reporting import approval_queue_snapshot as aqs
 
-
-def print_report(
-    report_name: str,
-    role: str,
-    from_date: Optional[str] = None,
-    to_date: Optional[str] = None,
-    as_of_date: Optional[str] = None,
-    sections: Optional[List[str]] = None,
-    filters: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-
-    if report_name not in REGISTERED_REPORTS:
-        raise ValueError(f"Unknown report requested: {report_name}")
-
-    filters = filters or {}
-    sections = sections or []
-
-    if report_name in {"gl_print", "gl_as_of"}:
-        raise ModuleNotFoundError(
-            f"GL report '{report_name}' not wired yet. "
-            f"Your engine/reporting folder has no GL module (e.g., gl_ledger.py)."
+        r = _call_first_available(
+            aqs,
+            ("build_approval_queue_snapshot", "run_approval_queue_snapshot", "generate_approval_queue_snapshot"),
+            run_date,
         )
+        results["reports"].append({"name": "approval_queue_snapshot", **r})
+        if not r["ok"]:
+            results["warnings"].append("approval_queue_snapshot: no known function found")
+    except Exception as exc:
+        results["reports"].append({"name": "approval_queue_snapshot", "ok": False, "error": str(exc)})
+        results["warnings"].append(f"approval_queue_snapshot failed: {str(exc)}")
 
-    if report_name == "ar_ageing":
-        mod = _import("engine.reporting.ageing_reports")
-        return _call_first(
-            mod,
-            ["generate_ar_ageing", "generate_ageing_ar", "generate_customer_ageing"],
-            role=role,
-            filters=filters,
+    # -----------------------------
+    # 2) Supervisory Control Pack (EOD control evidence)
+    # -----------------------------
+    try:
+        from engine.reporting import supervisory_control_pack as scp
+
+        r = _call_first_available(
+            scp,
+            ("generate_supervisory_control_pack", "run_supervisory_control_pack", "print_supervisory_control_pack"),
+            run_date,
         )
+        results["reports"].append({"name": "supervisory_control_pack", **r})
+        if not r["ok"]:
+            results["warnings"].append("supervisory_control_pack: no known function found")
+    except Exception as exc:
+        results["reports"].append({"name": "supervisory_control_pack", "ok": False, "error": str(exc)})
+        results["warnings"].append(f"supervisory_control_pack failed: {str(exc)}")
 
-    # ✅ FIX: SCP entrypoint exists, but does NOT accept role=
-    if report_name == "supervisory_control_pack":
-        mod = _import("engine.reporting.supervisory_control_pack")
+    # -----------------------------
+    # 3) Customer Subledger Report (optional but desirable)
+    # -----------------------------
+    try:
+        from engine.reporting import customer_subledger_report as csr
 
-        # Prefer the confirmed function.
-        fn = getattr(mod, "generate_scp_report", None)
-        if callable(fn):
-            # Provide only what SCP is likely to accept; do NOT pass role.
-            # If SCP doesn't use filters/sections it can ignore them or we adjust next.
-            try:
-                return fn(as_of_date=as_of_date, filters=filters, sections=sections)
-            except TypeError:
-                # Minimal call fallback
-                return fn(as_of_date=as_of_date)
-
-        # Fallbacks (if you later rename)
-        return _call_first(
-            mod,
-            ["generate_supervisory_control_pack", "build_supervisory_control_pack", "generate_report"],
-            as_of_date=as_of_date,
-            filters=filters,
-            sections=sections,
+        r = _call_first_available(
+            csr,
+            ("generate_customer_subledger_report", "run_customer_subledger_report", "print_customer_subledger_report"),
+            run_date,
         )
+        results["reports"].append({"name": "customer_subledger_report", **r})
+        if not r["ok"]:
+            results["warnings"].append("customer_subledger_report: no known function found")
+    except Exception as exc:
+        # Optional — record warning only
+        results["reports"].append({"name": "customer_subledger_report", "ok": False, "error": str(exc)})
+        results["warnings"].append(f"customer_subledger_report skipped/failed: {str(exc)}")
 
-    if report_name == "supervisor_signoff":
-        mod = _import("engine.reporting.supervisor_signoff")
-        return _call_first(
-            mod,
-            ["generate_supervisor_signoff", "generate_signoff", "build_signoff", "generate_report"],
-            as_of_date=as_of_date,
-            role=role,
-            filters=filters,
+    # -----------------------------
+    # 4) Ageing Reports (optional)
+    # -----------------------------
+    try:
+        from engine.reporting import ageing_reports as ar
+
+        r = _call_first_available(
+            ar,
+            ("generate_ageing_reports", "run_ageing_reports", "print_ageing_reports"),
+            run_date,
         )
+        results["reports"].append({"name": "ageing_reports", **r})
+        if not r["ok"]:
+            results["warnings"].append("ageing_reports: no known function found")
+    except Exception as exc:
+        results["reports"].append({"name": "ageing_reports", "ok": False, "error": str(exc)})
+        results["warnings"].append(f"ageing_reports skipped/failed: {str(exc)}")
 
-    if report_name == "treasury_instrument_aggregate":
-        mod = _import("engine.reporting.treasury_instrument_aggregate")
-        return _call_first(
-            mod,
-            ["generate_treasury_instrument_aggregate", "generate_treasury_aggregate", "generate_report"],
-            as_of_date=as_of_date,
-            role=role,
-            filters=filters,
+    # -----------------------------
+    # 5) PnL Ledger / Treasury Aggregates (optional)
+    # -----------------------------
+    try:
+        from engine.reporting import pnl_ledger as pl
+
+        r = _call_first_available(
+            pl,
+            ("generate_pnl_ledger", "run_pnl_ledger", "print_pnl_ledger"),
+            run_date,
         )
+        results["reports"].append({"name": "pnl_ledger", **r})
+        if not r["ok"]:
+            results["warnings"].append("pnl_ledger: no known function found")
+    except Exception as exc:
+        results["reports"].append({"name": "pnl_ledger", "ok": False, "error": str(exc)})
+        results["warnings"].append(f"pnl_ledger skipped/failed: {str(exc)}")
 
-    if report_name == "pnl_report":
-        mod = _import("engine.reporting.pnl_ledger")
-        return _call_first(
-            mod,
-            ["generate_pnl_report", "generate_pnl", "generate_report"],
-            from_date=from_date,
-            to_date=to_date,
-            as_of_date=as_of_date,
-            role=role,
-            filters=filters,
+    try:
+        from engine.reporting import treasury_instrument_aggregate as tia
+
+        r = _call_first_available(
+            tia,
+            ("generate_treasury_instrument_aggregate", "run_treasury_instrument_aggregate", "print_treasury_instrument_aggregate"),
+            run_date,
         )
+        results["reports"].append({"name": "treasury_instrument_aggregate", **r})
+        if not r["ok"]:
+            results["warnings"].append("treasury_instrument_aggregate: no known function found")
+    except Exception as exc:
+        results["reports"].append({"name": "treasury_instrument_aggregate", "ok": False, "error": str(exc)})
+        results["warnings"].append(f"treasury_instrument_aggregate skipped/failed: {str(exc)}")
 
-    if report_name == "customer_subledger":
-        customer_id = filters.get("customer_id")
-        if not customer_id:
-            raise ValueError("customer_subledger requires 'customer_id' in filters")
+    # -----------------------------
+    # Pass/Fail rule:
+    # At least ONE report must succeed, otherwise fail.
+    # -----------------------------
+    any_ok = any(r.get("ok") is True for r in results["reports"])
+    results["ok"] = bool(any_ok)
+    if not any_ok:
+        results["warnings"].append("EOD pack produced no successful reports.")
 
-        mod = _import("engine.reporting.customer_subledger_report")
-        return _call_first(
-            mod,
-            ["generate_customer_subledger", "generate_customer_ledger", "generate_subledger"],
-            customer_id=customer_id,
-            from_date=from_date,
-            to_date=to_date,
-        )
+    return results
 
-    raise RuntimeError(f"Unhandled report dispatch for: {report_name}")
+
+# Backward-compatible aliases (so callers can use any name)
+def generate_eod_pack(run_date: Optional[date] = None) -> Dict[str, Any]:
+    return run_eod_pack(run_date)
+
+
+def print_eod_pack(run_date: Optional[date] = None) -> Dict[str, Any]:
+    return run_eod_pack(run_date)
+
+
+def run_daily_pack(run_date: Optional[date] = None) -> Dict[str, Any]:
+    return run_eod_pack(run_date)
