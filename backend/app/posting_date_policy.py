@@ -1,185 +1,276 @@
 """
-posting_date_policy.py
-----------------------
-Posting Date Governance Policy (Bank-Grade Controls)
+backend/app/posting_date_policy.py
 
-Responsibilities:
-- Validate posting_date format (ISO 8601 date or datetime string)
-- Enforce allowable posting window:
-    - No future dating beyond FUTURE_DAYS_ALLOWED
-    - No backdating beyond BACKDATE_DAYS_ALLOWED unless override is logged
-- Enforce Period Close gate (closed/locked periods always reject)
-- Provide structured decision output for UI + audit
+Posting Date & Value Date Governance (CSS)
+------------------------------------------
 
-This module does NOT mutate ledgers. It is a control gate only.
+Purpose
+- Enforce posting-date integrity: valid transaction_date + controlled value_date behavior.
+- Block invalid/future dates (unless explicitly allowed).
+- Back-valued value_date (< transaction_date) requires an override by sufficient authority.
+- Override attempts and outcomes are logged immutably (append-only JSONL) for audit.
+- Designed to be called from posting_approval / posting runtime flows.
+
+Key design choices
+- Fail-closed on unknown authority bands.
+- Always log override decisions (including forced rejections due to insufficient authority).
+- Persistence-agnostic: file-backed JSONL log that can later be swapped for DB.
+
+File created/updated by governance-first workflow in Phase 16.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone, date
+from dataclasses import dataclass, asdict
+from datetime import date, datetime
+from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
-
-from backend.app.period_close import is_posting_allowed, next_open_period
-from backend.app.override_log import write_override
+import json
+import uuid
 
 
 # -----------------------------
-# Policy Parameters (tunable)
+# Utilities
 # -----------------------------
 
-BACKDATE_DAYS_ALLOWED = 0          # 0 means "no backdating" unless override
-FUTURE_DAYS_ALLOWED = 0           # 0 means "no future dating" unless override
-ALLOW_SAME_DAY_ONLY = True        # True => posting_date must be today unless override
+def utc_now_iso() -> str:
+    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+
+
+def ensure_date(value: Any, field_name: str) -> date:
+    """
+    Accepts:
+      - datetime.date
+      - datetime.datetime
+      - ISO string 'YYYY-MM-DD'
+    Returns: date
+    """
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, str):
+        try:
+            return datetime.strptime(value.strip(), "%Y-%m-%d").date()
+        except ValueError as e:
+            raise ValueError(f"{field_name} must be YYYY-MM-DD (got '{value}')") from e
+    raise TypeError(f"{field_name} must be date/datetime/ISO string (got {type(value).__name__})")
+
+
+def jsonl_append(path: Path, payload: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+
+# -----------------------------
+# Authority Model (lightweight)
+# -----------------------------
+
+# Increasing authority from left to right.
+AUTH_BANDS = ["AUTO", "L1", "L2", "ADMIN", "SUPER"]
+
+
+def band_index(band: str) -> int:
+    if band not in AUTH_BANDS:
+        # Fail-closed: unknown treated as lowest
+        return 0
+    return AUTH_BANDS.index(band)
+
+
+# -----------------------------
+# Data Structures
+# -----------------------------
+
+@dataclass(frozen=True)
+class DateOverrideRequest:
+    request_id: str
+    created_utc: str
+    requester_user_id: str
+    transaction_date: str
+    value_date: str
+    reason: str
+    context: Dict[str, Any]
 
 
 @dataclass(frozen=True)
-class PostingDateDecision:
-    allowed: bool
-    reason: str
-    posting_date_iso: Optional[str] = None
-    requires_override: bool = False
-    required_override_type: Optional[str] = None
-    next_open_period_iso: Optional[str] = None
-    override_record: Optional[Dict[str, Any]] = None
+class DateOverrideDecision:
+    decision_utc: str
+    approver_user_id: str
+    approver_band: str
+    outcome: str  # "APPROVED" | "REJECTED"
+    decision_reason: str
 
 
-def _parse_iso_date(s: str) -> Optional[date]:
-    s = (s or "").strip()
-    if not s:
-        return None
-    try:
-        # Accept "YYYY-MM-DD" OR full iso datetime; take date portion.
-        d = datetime.fromisoformat(s.replace("Z", "+00:00")).date()
+@dataclass(frozen=True)
+class DateOverrideLogEntry:
+    event_type: str  # "POSTING_DATE_OVERRIDE"
+    request: Dict[str, Any]
+    decision: Dict[str, Any]
+
+
+# -----------------------------
+# Policy + Engine
+# -----------------------------
+
+class PostingDatePolicy:
+    """
+    Small explicit policy container.
+    Policy changes should be governance-controlled.
+    """
+
+    def __init__(
+        self,
+        allow_future_transaction_dates: bool = False,
+        enforce_financial_year_bounds: bool = False,
+        min_override_band_for_back_valuation: str = "L1",
+        override_log_path: str = "audit/override_logs/posting_date_overrides.jsonl",
+    ):
+        self.allow_future_transaction_dates = bool(allow_future_transaction_dates)
+        self.enforce_financial_year_bounds = bool(enforce_financial_year_bounds)
+        self.min_override_band_for_back_valuation = min_override_band_for_back_valuation
+        self.override_log_path = Path(override_log_path)
+
+
+class PostingDateGovernor:
+    """
+    Enforces posting date + value date rules and logs overrides.
+    """
+
+    def __init__(
+        self,
+        policy: Optional[PostingDatePolicy] = None,
+        financial_year_start: Optional[Any] = None,
+        financial_year_end: Optional[Any] = None,
+    ):
+        self.policy = policy or PostingDatePolicy()
+        self.financial_year_start: Optional[date] = ensure_date(financial_year_start, "financial_year_start") if financial_year_start else None
+        self.financial_year_end: Optional[date] = ensure_date(financial_year_end, "financial_year_end") if financial_year_end else None
+
+    # ---- Financial year bounds ----
+
+    def set_financial_year(self, start: Any, end: Any) -> None:
+        s = ensure_date(start, "financial_year_start")
+        e = ensure_date(end, "financial_year_end")
+        if e < s:
+            raise ValueError("financial_year_end cannot be earlier than financial_year_start")
+        self.financial_year_start = s
+        self.financial_year_end = e
+
+    def validate_transaction_date(self, txn_date: Any) -> date:
+        d = ensure_date(txn_date, "transaction_date")
+
+        if not self.policy.allow_future_transaction_dates and d > date.today():
+            raise ValueError(f"transaction_date cannot be in the future ({d.isoformat()})")
+
+        if self.policy.enforce_financial_year_bounds and self.financial_year_start and self.financial_year_end:
+            if d < self.financial_year_start or d > self.financial_year_end:
+                raise ValueError(
+                    f"transaction_date {d.isoformat()} outside configured financial year "
+                    f"({self.financial_year_start.isoformat()} to {self.financial_year_end.isoformat()})"
+                )
+
         return d
-    except Exception:
-        return None
 
+    def requires_back_valuation_override(self, txn_date: Any, value_date: Any) -> bool:
+        t = self.validate_transaction_date(txn_date)
+        v = ensure_date(value_date, "value_date")
+        return v < t
 
-def _today_utc() -> date:
-    return datetime.now(timezone.utc).date()
-
-
-def evaluate_posting_date(
-    *,
-    posting_date: str,
-    actor_user_id: str,
-    override: Optional[Dict[str, Any]] = None,
-    scope: Optional[Dict[str, Any]] = None,
-) -> PostingDateDecision:
-    """
-    Enforces posting date policy + period close.
-
-    If override required and provided, writes immutable override record (fail-closed).
-    """
-    actor_user_id = (actor_user_id or "").strip() or "unknown_actor"
-    override = override or {}
-    scope = scope or {}
-
-    d = _parse_iso_date(posting_date)
-    if d is None:
-        return PostingDateDecision(
-            allowed=False,
-            reason="Invalid posting_date format (expected ISO date or datetime).",
-            posting_date_iso=None,
-            next_open_period_iso=None,
-        )
-
-    posting_date_iso = d.isoformat()
-
-    # Period close gate (hard gate)
-    if not is_posting_allowed(posting_date_iso):
-        return PostingDateDecision(
-            allowed=False,
-            reason="Posting date falls in a CLOSED/LOCKED period.",
-            posting_date_iso=posting_date_iso,
-            requires_override=False,  # closed/locked must NOT be overridable here
-            next_open_period_iso=next_open_period(posting_date_iso),
-        )
-
-    today = _today_utc()
-    delta_days = (d - today).days  # future positive, backdate negative
-
-    # Strict same-day if configured
-    if ALLOW_SAME_DAY_ONLY and delta_days != 0:
-        required_type = "POSTING_DATE_OUTSIDE_TODAY"
-        if not override:
-            return PostingDateDecision(
-                allowed=False,
-                reason="Posting date must be today unless an authorized override is provided.",
-                posting_date_iso=posting_date_iso,
-                requires_override=True,
-                required_override_type=required_type,
+    def validate_value_date_no_override(self, txn_date: Any, value_date: Any) -> Tuple[date, date]:
+        t = self.validate_transaction_date(txn_date)
+        v = ensure_date(value_date, "value_date")
+        if v < t:
+            raise ValueError(
+                f"value_date {v.isoformat()} cannot be earlier than transaction_date {t.isoformat()} without override"
             )
-        # override provided => log it
-        rec = write_override(
-            actor_user_id=actor_user_id,
-            override_type=required_type,
-            reason=str(override.get("reason", "")).strip() or "Override: posting date outside today",
-            scope={**scope, "posting_date": posting_date_iso, "today_utc": today.isoformat(), "delta_days": delta_days},
-            approval_level=str(override.get("approval_level", "CHECKER")).strip() or "CHECKER",
-            override_id=override.get("override_id"),
-        )
-        return PostingDateDecision(
-            allowed=True,
-            reason="Allowed with override (posting date outside today).",
-            posting_date_iso=posting_date_iso,
-            override_record=rec,
+        return t, v
+
+    # ---- Override workflow ----
+
+    def create_back_valuation_override_request(
+        self,
+        requester_user_id: str,
+        txn_date: Any,
+        value_date: Any,
+        reason: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> DateOverrideRequest:
+        if not requester_user_id:
+            raise ValueError("requester_user_id is required")
+
+        t = self.validate_transaction_date(txn_date)
+        v = ensure_date(value_date, "value_date")
+
+        if v >= t:
+            raise ValueError("Override request not required: value_date is not earlier than transaction_date")
+
+        return DateOverrideRequest(
+            request_id=str(uuid.uuid4()),
+            created_utc=utc_now_iso(),
+            requester_user_id=requester_user_id,
+            transaction_date=t.isoformat(),
+            value_date=v.isoformat(),
+            reason=(reason or "").strip(),
+            context=context or {},
         )
 
-    # If not strict same-day, enforce windows
-    if delta_days < -BACKDATE_DAYS_ALLOWED:
-        required_type = "BACKDATE"
-        if not override:
-            return PostingDateDecision(
-                allowed=False,
-                reason=f"Backdating beyond {BACKDATE_DAYS_ALLOWED} day(s) requires override.",
-                posting_date_iso=posting_date_iso,
-                requires_override=True,
-                required_override_type=required_type,
-            )
-        rec = write_override(
-            actor_user_id=actor_user_id,
-            override_type=required_type,
-            reason=str(override.get("reason", "")).strip() or "Override: backdate beyond policy window",
-            scope={**scope, "posting_date": posting_date_iso, "today_utc": today.isoformat(), "delta_days": delta_days},
-            approval_level=str(override.get("approval_level", "CHECKER")).strip() or "CHECKER",
-            override_id=override.get("override_id"),
-        )
-        return PostingDateDecision(
-            allowed=True,
-            reason="Allowed with override (backdate).",
-            posting_date_iso=posting_date_iso,
-            override_record=rec,
+    def decide_override(
+        self,
+        req: DateOverrideRequest,
+        approver_user_id: str,
+        approver_band: str,
+        outcome: str,
+        decision_reason: str,
+    ) -> DateOverrideDecision:
+        if not approver_user_id:
+            raise ValueError("approver_user_id is required")
+
+        outcome_u = (outcome or "").strip().upper()
+        if outcome_u not in ("APPROVED", "REJECTED"):
+            raise ValueError("outcome must be APPROVED or REJECTED")
+
+        min_band = self.policy.min_override_band_for_back_valuation
+        if band_index(approver_band) < band_index(min_band):
+            # Force reject, but still log the attempt.
+            outcome_u = "REJECTED"
+            decision_reason = (
+                (decision_reason or "").strip()
+                + f" | REJECTED: insufficient authority (required {min_band}, got {approver_band})"
+            ).strip()
+
+        decision = DateOverrideDecision(
+            decision_utc=utc_now_iso(),
+            approver_user_id=approver_user_id,
+            approver_band=approver_band,
+            outcome=outcome_u,
+            decision_reason=(decision_reason or "").strip(),
         )
 
-    if delta_days > FUTURE_DAYS_ALLOWED:
-        required_type = "FUTURE_DATE"
-        if not override:
-            return PostingDateDecision(
-                allowed=False,
-                reason=f"Future-dating beyond {FUTURE_DAYS_ALLOWED} day(s) requires override.",
-                posting_date_iso=posting_date_iso,
-                requires_override=True,
-                required_override_type=required_type,
-            )
-        rec = write_override(
-            actor_user_id=actor_user_id,
-            override_type=required_type,
-            reason=str(override.get("reason", "")).strip() or "Override: future-date beyond policy window",
-            scope={**scope, "posting_date": posting_date_iso, "today_utc": today.isoformat(), "delta_days": delta_days},
-            approval_level=str(override.get("approval_level", "CHECKER")).strip() or "CHECKER",
-            override_id=override.get("override_id"),
+        entry = DateOverrideLogEntry(
+            event_type="POSTING_DATE_OVERRIDE",
+            request=asdict(req),
+            decision=asdict(decision),
         )
-        return PostingDateDecision(
-            allowed=True,
-            reason="Allowed with override (future-date).",
-            posting_date_iso=posting_date_iso,
-            override_record=rec,
-        )
+        jsonl_append(self.policy.override_log_path, asdict(entry))
+        return decision
 
-    return PostingDateDecision(
-        allowed=True,
-        reason="Posting date allowed (within policy).",
-        posting_date_iso=posting_date_iso,
-    )
+    def apply_override_if_approved(
+        self,
+        txn_date: Any,
+        value_date: Any,
+        decision: Optional[DateOverrideDecision],
+    ) -> Tuple[date, date]:
+        t = self.validate_transaction_date(txn_date)
+        v = ensure_date(value_date, "value_date")
+
+        if v >= t:
+            return t, v
+
+        if not decision:
+            raise ValueError("Back-valued value_date requires an approved override decision")
+
+        if decision.outcome != "APPROVED":
+            raise ValueError("Override decision is not APPROVED; cannot apply back-valuation")
+
+        return t, v
