@@ -1,10 +1,12 @@
-
 # main.py
-# REA Capital Trading Engine – Orchestrator
-# Phase 13.6 (posting approval wired)
+# CSS / REA Capital Trading Engine – Orchestrator
+# Phase 22D (startup accrual safety check wired)
+
+from __future__ import annotations
 
 from fastapi import FastAPI
 from typing import Dict, Any
+from datetime import datetime
 
 from taxonomy import SCREEN_TAXONOMY
 
@@ -14,6 +16,46 @@ from posting_submit import handle_posting_submit
 from posting_approval import handle_posting_approval
 
 app = FastAPI(title="REA Capital Trading Engine")
+
+# -------------------------------------------------------------------
+# Startup Lifecycle Hook (Phase 22D)
+# -------------------------------------------------------------------
+
+@app.on_event("startup")
+def _startup_safety_checks() -> None:
+    """
+    Startup safety checks must be:
+    - deterministic
+    - idempotent
+    - fail-closed on critical finance integrity issues
+    """
+
+    # 1) Daily accrual safety check (idempotent; safe on restart)
+    try:
+        from engine.facility.accrual_engine import startup_accrual_check
+
+        result = startup_accrual_check()
+        print("======================================")
+        print("CSS STARTUP SAFETY CHECKS")
+        print(f"Timestamp: {datetime.utcnow().isoformat()}Z")
+        print("Daily Accrual Check: OK")
+        print(f"  Posting Date         : {result.get('posting_date')}")
+        print(f"  Facilities Processed : {result.get('facilities_processed')}")
+        print(f"  Accruals Posted      : {result.get('accruals_posted')}")
+        print(f"  Total Accrued        : {result.get('total_interest_accrued')}")
+        print("======================================\n")
+
+    except Exception as exc:
+        # Fail-closed: do not start the API if we cannot guarantee integrity.
+        print("======================================")
+        print("CSS STARTUP SAFETY CHECKS: FAILED")
+        print(f"Timestamp: {datetime.utcnow().isoformat()}Z")
+        print("Reason: Daily Accrual safety check failed.")
+        print(f"Error: {str(exc)}")
+        print("System will not start (fail-closed).")
+        print("======================================\n")
+        raise
+
 
 # -------------------------------------------------------------------
 # Screen → Handler Registry
@@ -107,5 +149,5 @@ def health_check():
     return {
         "status": "ok",
         "engine": "REA Capital Trading Engine",
-        "phase": "13.6"
+        "phase": "22D"
     }
