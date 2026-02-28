@@ -1,5 +1,5 @@
 """
-Posting Validation Rules – Phase 14 (Currency Hardened)
+Posting Validation Rules – Phase 16 (Date Governance Integrated)
 
 Pure validation logic for posting tickets.
 NO execution. NO persistence.
@@ -8,14 +8,17 @@ Enforces:
 - ISO currency selection (dropdown driven)
 - Minor unit precision control
 - Balancing control
+- PostingDateGovernor enforcement (transaction_date + value_date)
 """
 
-from typing import List, Dict, Any
+from engine.accounting.account_ids import validate_account
+from typing import List, Dict, Any, Optional
 from datetime import datetime
 from pathlib import Path
 import json
 
 from .posting_contracts import PostingTicket, PostingLine, ticket_totals
+from .posting_date_policy import PostingDateGovernor, PostingDatePolicy
 
 
 ALLOWED_SIDES = {"DR", "CR"}
@@ -37,20 +40,47 @@ def _load_currency_master() -> Dict[str, Any]:
 
 
 # -------------------------------------------------------
-# Date Validation
+# Date Validation (Governed)
 # -------------------------------------------------------
 
 def validate_dates(ticket: PostingTicket) -> List[str]:
     errors: List[str] = []
 
-    for label, value in [
-        ("execution_date", ticket.execution_date),
-        ("value_date", ticket.value_date),
-    ]:
-        try:
-            datetime.strptime(value, "%Y-%m-%d")
-        except Exception:
-            errors.append(f"{label} must be in YYYY-MM-DD format")
+    governor = PostingDateGovernor(
+        PostingDatePolicy()
+    )
+
+    # Validate execution_date format first
+    try:
+        datetime.strptime(ticket.execution_date, "%Y-%m-%d")
+    except Exception:
+        errors.append("execution_date must be in YYYY-MM-DD format")
+        return errors
+
+    try:
+        datetime.strptime(ticket.value_date, "%Y-%m-%d")
+    except Exception:
+        errors.append("value_date must be in YYYY-MM-DD format")
+        return errors
+
+    # Governed validation
+    try:
+        governor.validate_transaction_date(ticket.execution_date)
+    except Exception as e:
+        errors.append(str(e))
+        return errors
+
+    # Check back-valuation requirement
+    try:
+        if governor.requires_back_valuation_override(
+            ticket.execution_date,
+            ticket.value_date
+        ):
+            errors.append(
+                "value_date earlier than execution_date requires override approval"
+            )
+    except Exception as e:
+        errors.append(str(e))
 
     return errors
 
@@ -69,19 +99,15 @@ def validate_lines(ticket: PostingTicket) -> List[str]:
 
     for idx, ln in enumerate(ticket.lines):
 
-        # Side
         if ln.side.upper() not in ALLOWED_SIDES:
             errors.append(f"Line {idx}: side must be DR or CR")
 
-        # Amount
         if ln.amount <= 0:
             errors.append(f"Line {idx}: amount must be greater than zero")
 
-        # Account number
         if not ln.account_no:
             errors.append(f"Line {idx}: account_no is required")
 
-        # Currency (dropdown enforced)
         if not ln.currency:
             errors.append(f"Line {idx}: currency is required")
             continue
@@ -94,7 +120,6 @@ def validate_lines(ticket: PostingTicket) -> List[str]:
             )
             continue
 
-        # Enforce minor unit precision
         minor_unit = int(currency_master[cur].get("minor_unit", 2))
 
         try:
