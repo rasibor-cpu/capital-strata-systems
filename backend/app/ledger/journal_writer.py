@@ -1,6 +1,6 @@
 """
-Capital Strata Systems
-Phase 23A – Journal Writer (COA + Dormancy Enforcement)
+Capital Strata Systems (CSS)
+Phase 23B – Journal Writer (COA-Authoritative + Dormancy Governance)
 
 Guarantees:
 - Per-transaction DR = CR validation
@@ -10,15 +10,21 @@ Guarantees:
 - UTF-8 enforced
 
 Backwards compatibility:
-- Keeps legacy keys
-- Adds governance keys (transaction_id, entry_id, maker_user_id, dates, description, currency, override)
+- Keeps legacy keys: journal_id, ticket_id, execution_date, account_no, side, amount, created_at
+- Adds governance keys:
+  transaction_id, entry_id, maker_user_id, transaction_date, value_date, description, currency, override
 
-New in Phase 23A:
-- COA / account registry validation (fail-closed if account missing or inactive)
-- Dormancy rules for CUSTOMER accounts:
-    * SYSTEM entries allowed even if DORMANT
-    * CUSTOMER-origin entries into DORMANT accounts require override approval
-    * Successful CUSTOMER-origin posting auto-reactivates account (status -> ACTIVE)
+Institutional split (authoritative sources):
+- Structural COA authority: backend/app/config/chart_of_accounts.json
+- Runtime state (status/dormancy/flags): backend/app/ledger/account_registry.json
+
+Dormancy policy (your spec):
+- Applies to CUSTOMER accounts only (deposit liabilities group=DEPOSITS)
+- If DORMANT:
+    * SYSTEM entries allowed
+    * CUSTOMER-origin entries require override
+    * Successful CUSTOMER-origin posting auto-reactivates (status -> ACTIVE)
+- Any posting into dormant customer accounts must be approved by override (authority-logged)
 """
 
 from __future__ import annotations
@@ -32,6 +38,11 @@ from typing import List, Dict, Optional, Any
 
 
 JOURNAL_FILE = Path("audit_logs/journal.jsonl")
+
+# Authoritative structural COA
+COA_FILE = Path("backend/app/config/chart_of_accounts.json")
+
+# Runtime state registry (status/dormancy/flags)
 ACCOUNT_REGISTRY_FILE = Path("backend/app/ledger/account_registry.json")
 
 
@@ -49,14 +60,43 @@ def _ensure_journal_exists() -> None:
     _ensure_file_exists(JOURNAL_FILE)
 
 
-def _load_account_registry() -> Dict[str, Any]:
-    if not ACCOUNT_REGISTRY_FILE.exists():
-        raise FileNotFoundError(f"Account registry missing: {ACCOUNT_REGISTRY_FILE}")
-    with ACCOUNT_REGISTRY_FILE.open("r", encoding="utf-8") as f:
+def _load_coa() -> Dict[str, Any]:
+    """
+    Loads structural COA and returns dict keyed by account_no.
+    """
+    if not COA_FILE.exists():
+        raise FileNotFoundError(f"Chart of Accounts file missing: {COA_FILE}")
+
+    with COA_FILE.open("r", encoding="utf-8") as f:
         data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError("Account registry must be a JSON object keyed by account_no")
-    return data
+
+    accounts = data.get("accounts", [])
+    if not isinstance(accounts, list):
+        raise ValueError("chart_of_accounts.json must contain key 'accounts' as a list")
+
+    out: Dict[str, Any] = {}
+    for a in accounts:
+        if not isinstance(a, dict):
+            continue
+        acc_no = str(a.get("account_no", "")).strip()
+        if not acc_no:
+            continue
+        out[acc_no] = a
+    return out
+
+
+def _load_account_registry() -> Dict[str, Any]:
+    """
+    Loads runtime account state registry keyed by account_no.
+    If it doesn't exist yet, returns empty dict.
+    """
+    if ACCOUNT_REGISTRY_FILE.exists():
+        with ACCOUNT_REGISTRY_FILE.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            raise ValueError("account_registry.json must be a JSON object keyed by account_no")
+        return data
+    return {}
 
 
 def _save_account_registry(reg: Dict[str, Any]) -> None:
@@ -107,82 +147,115 @@ def _validate_global_balance() -> None:
 def _is_system_origin(maker_user_id: str) -> bool:
     """
     Institutional rule: SYSTEM entries are those posted by system/batch identities.
-    You can expand this list as your user model evolves.
+    Expand as user model evolves.
     """
     u = (maker_user_id or "").strip().upper()
     return u in {"SYSTEM", "BATCH", "EOD", "MONTHEND", "YEAR_END", "AUTO"}
 
 
 def _validate_override(override: Optional[Dict[str, Any]]) -> None:
+    """
+    Enforces presence of audit-grade override metadata.
+    """
     if not override or not isinstance(override, dict):
         raise PermissionError("Dormant account posting requires an override object (approved by authority).")
 
-    # Minimum required fields for auditability
     required = ["approved_by", "approved_by_role", "reason"]
     missing = [k for k in required if not override.get(k)]
     if missing:
         raise PermissionError(f"Override missing required fields: {missing}")
 
 
+def _is_customer_account_from_coa(coa_meta: Dict[str, Any]) -> bool:
+    """
+    Your current Phase 1 COA is GL-only, but customer-related accounts are represented as:
+      LIABILITIES group=DEPOSITS  (Customer Deposits – Demand, etc.)
+    """
+    acct_type = str(coa_meta.get("type", "")).upper()
+    grp = str(coa_meta.get("group", "")).upper()
+    return (acct_type == "LIABILITY") and (grp == "DEPOSITS")
+
+
+def _ensure_runtime_state_initialized(reg: Dict[str, Any], account_no: str) -> None:
+    """
+    First-touch initialization of runtime state.
+    """
+    if account_no not in reg:
+        reg[account_no] = {
+            "status": "ACTIVE",
+            "last_customer_activity_date": None,
+        }
+
+
 def _enforce_account_rules(
     *,
+    coa: Dict[str, Any],
     reg: Dict[str, Any],
     account_no: str,
     maker_user_id: str,
     override: Optional[Dict[str, Any]],
 ) -> None:
-    if account_no not in reg:
-        raise ValueError(f"Unknown account_no (not in registry): {account_no}")
+    """
+    Enforces:
+    - Structural existence in COA
+    - Runtime status blocks (CLOSED/FROZEN)
+    - Dormancy policy for customer accounts
+    """
+    # 1) Structural COA validation
+    if account_no not in coa:
+        raise ValueError(f"Account not defined in Chart of Accounts: {account_no}")
 
-    meta = reg.get(account_no, {})
-    status = str(meta.get("status", "ACTIVE")).upper()
-    category = str(meta.get("category", "GL")).upper()
+    # 2) Ensure runtime record exists
+    _ensure_runtime_state_initialized(reg, account_no)
+
+    state = reg.get(account_no, {})
+    status = str(state.get("status", "ACTIVE")).upper()
 
     if status not in {"ACTIVE", "DORMANT", "CLOSED", "FROZEN"}:
-        raise ValueError(f"Invalid account status in registry for {account_no}: {status}")
+        raise ValueError(f"Invalid runtime status for {account_no}: {status}")
 
+    # 3) Hard blocks
     if status in {"CLOSED", "FROZEN"}:
         raise PermissionError(f"Posting blocked: account {account_no} status={status}")
 
-    # Dormancy enforcement applies only to CUSTOMER accounts
-    if category == "CUSTOMER" and status == "DORMANT":
+    # 4) Dormancy
+    coa_meta = coa.get(account_no, {})
+    if _is_customer_account_from_coa(coa_meta) and status == "DORMANT":
         if _is_system_origin(maker_user_id):
-            # SYSTEM entries are allowed into dormant customer accounts
             return
-        # CUSTOMER-origin entries require override approval
         _validate_override(override)
 
 
 def _reactivate_if_customer_origin(
     *,
+    coa: Dict[str, Any],
     reg: Dict[str, Any],
     touched_accounts: List[str],
     maker_user_id: str,
     transaction_date: str,
 ) -> bool:
     """
-    If a CUSTOMER-origin transaction posts successfully and it touched any dormant CUSTOMER account,
-    auto-reactivate those accounts.
+    If CUSTOMER-origin transaction posts successfully and it touched any dormant CUSTOMER account,
+    auto-reactivate it.
     """
     if _is_system_origin(maker_user_id):
         return False
 
     changed = False
     for acc in touched_accounts:
-        meta = reg.get(acc)
-        if not isinstance(meta, dict):
+        if acc not in coa:
             continue
-        if str(meta.get("category", "GL")).upper() != "CUSTOMER":
+        if not _is_customer_account_from_coa(coa[acc]):
             continue
-        if str(meta.get("status", "ACTIVE")).upper() == "DORMANT":
-            meta["status"] = "ACTIVE"
-            meta["last_customer_activity_date"] = transaction_date
-            # optional: clear dormancy reason
-            meta.pop("dormancy", None)
-            changed = True
 
-    if changed:
-        _save_account_registry(reg)
+        state = reg.get(acc, {})
+        if str(state.get("status", "ACTIVE")).upper() == "DORMANT":
+            state["status"] = "ACTIVE"
+            state["last_customer_activity_date"] = transaction_date
+            # optional: clear dormancy metadata
+            state.pop("dormancy", None)
+            reg[acc] = state
+            changed = True
 
     return changed
 
@@ -198,7 +271,22 @@ def post_transaction(
     currency: str = "NGN",
     override: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    """
+    Post balanced transaction atomically.
 
+    Args:
+      ticket_id: posting ticket id (e.g., BASELINE-POST-1)
+      entries: list of {account_no, side, amount}
+      maker_user_id: maker id for governance & duplicate-guard logic
+      execution_date: YYYY-MM-DD (defaults to today UTC)
+      value_date: YYYY-MM-DD (defaults to execution_date)
+      description: narrative
+      currency: ISO alpha code (default NGN)
+      override: optional dict, required for dormant customer postings when origin=CUSTOMER
+
+    Returns:
+      {"transaction_id": ..., "entries_written": N, "reactivated_accounts": bool}
+    """
     _ensure_journal_exists()
 
     # Fail if journal already corrupted
@@ -210,17 +298,21 @@ def post_transaction(
     # Normalize dates
     exec_dt = execution_date or datetime.utcnow().strftime("%Y-%m-%d")
     val_dt = value_date or exec_dt
+
     created_at = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # Load registry once per transaction
+    # Load authorities once per transaction
+    coa = _load_coa()
     reg = _load_account_registry()
 
-    # Enforce COA + dormancy rules for every leg
+    # Enforce rules for every leg
     touched_accounts: List[str] = []
     for e in entries:
-        acc = str(e["account_no"])
+        acc = str(e["account_no"]).strip()
         touched_accounts.append(acc)
+
         _enforce_account_rules(
+            coa=coa,
             reg=reg,
             account_no=acc,
             maker_user_id=maker_user_id,
@@ -268,11 +360,16 @@ def post_transaction(
 
     # Auto-reactivate dormant customer accounts on successful customer-origin posting
     reactivated = _reactivate_if_customer_origin(
+        coa=coa,
         reg=reg,
         touched_accounts=touched_accounts,
         maker_user_id=maker_user_id,
         transaction_date=exec_dt,
     )
+
+    # Persist runtime state (init records + possible reactivation)
+    if reactivated or touched_accounts:
+        _save_account_registry(reg)
 
     return {
         "transaction_id": transaction_id,
