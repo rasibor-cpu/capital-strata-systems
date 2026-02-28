@@ -1,17 +1,18 @@
 """
-Runtime singletons for Posting workflow – Phase 18B+
-Capital Strata Systems
+Runtime Governance – Phase 18C
+Capital Strata Systems (CSS)
+
+Unified Runtime Enforcement:
 
 Enforces:
-- Valid ISO execution_date (reject invalid calendar dates)
+- Valid ISO execution_date
 - Active Financial Year boundary
 - Month-end hard lock
 - Year-end hard lock
-- Back-valued (backdated) posting blocked unless authorized override is provided
+- Backdated execution_date guard (execution_date < entry_date)
+- Governed value_date enforcement (value_date < execution_date requires logged override)
 
-Back-valued definition:
-- execution_date < entry_date (defaults to today UTC)
-- entry_date can be supplied explicitly for testing or for cheque workflows.
+All override decisions are logged immutably via PostingDateGovernor.
 """
 
 from __future__ import annotations
@@ -24,10 +25,17 @@ from postings.api import PostingStore
 from engine.posting.close_registry import CloseRegistry
 from engine.fiscal.fiscal_calendar import FiscalCalendar
 
+from .posting_date_policy import (
+    PostingDateGovernor,
+    PostingDatePolicy,
+    DateOverrideRequest,
+    DateOverrideDecision,
+)
 
 STORE = PostingStore()
 
-OVERRIDE_ROLES = {"ADMIN", "SUPER_USER"}
+# Execution-date override authority
+EXECUTION_OVERRIDE_ROLES = {"ADMIN", "SUPER_USER"}
 
 
 @dataclass(frozen=True)
@@ -36,13 +44,11 @@ class PostingOverride:
     reason: str
 
 
+# ---------------------------------------------------------
+# Utilities
+# ---------------------------------------------------------
+
 def _parse_iso_date(s: str, field_name: str) -> date:
-    """
-    Accepts:
-      - YYYY-MM-DD
-      - YYYY-MM-DDTHH:MM:SS
-    Rejects invalid calendar dates (e.g., 2026-02-30) with a clear message.
-    """
     try:
         return datetime.fromisoformat(s).date()
     except ValueError as e:
@@ -59,38 +65,39 @@ def _normalize_override(override: Optional[dict]) -> Optional[PostingOverride]:
     return PostingOverride(approved_by_role=role, reason=reason)
 
 
+# ---------------------------------------------------------
+# Main Governance Gate
+# ---------------------------------------------------------
+
 def assert_open_for_posting(
     execution_date: str,
+    value_date: str,
+    actor_user_id: str,
     actor_role: str,
     override: Optional[dict] = None,
     entry_date: Optional[str] = None,
 ) -> None:
     """
-    Governance enforcement:
+    Runtime governance enforcement.
 
-    1) execution_date must be valid ISO date
-    2) execution_date must be inside ACTIVE FY window
-    3) block if YEAR_END closed for execution_date.year
-    4) block if MONTH_END closed for execution_date.year-month
-    5) block back-valued (execution_date < entry_date) unless override authorized
-
-    override format:
-      {
-        "approved_by_role": "SUPER_USER",
-        "reason": "Back-valued cheque approved due to settlement alignment",
-      }
+    Blocks:
+    - execution_date outside active FY
+    - YEAR_END closed
+    - MONTH_END closed
+    - execution_date < entry_date without override
+    - value_date < execution_date without governed override (logged)
     """
 
     actor_role = str(actor_role).strip().upper()
-
     exec_date = _parse_iso_date(execution_date, "execution_date")
+    val_date = _parse_iso_date(value_date, "value_date")
     ent_date = _parse_iso_date(entry_date, "entry_date") if entry_date else datetime.utcnow().date()
 
     ov = _normalize_override(override)
 
-    # -----------------------------------
+    # -----------------------------------------------------
     # 1) Financial Year boundary (non-bypassable)
-    # -----------------------------------
+    # -----------------------------------------------------
     active_fy = FiscalCalendar.get_active_fy()
     if not (active_fy.start_date <= exec_date <= active_fy.end_date):
         raise PermissionError(
@@ -98,33 +105,74 @@ def assert_open_for_posting(
             f"{active_fy.fy_label} ({active_fy.start_date} → {active_fy.end_date})."
         )
 
-    # -----------------------------------
+    # -----------------------------------------------------
     # 2) Year-end lock
-    # -----------------------------------
+    # -----------------------------------------------------
     y = exec_date.year
     if CloseRegistry.is_closed("YEAR_END", y, None):
         raise PermissionError(f"Posting blocked: YEAR_END already closed for {y}.")
 
-    # -----------------------------------
+    # -----------------------------------------------------
     # 3) Month-end lock
-    # -----------------------------------
+    # -----------------------------------------------------
     m = exec_date.month
     if CloseRegistry.is_closed("MONTH_END", y, m):
-        raise PermissionError(f"Posting blocked: MONTH_END already closed for {y:04d}-{m:02d}.")
+        raise PermissionError(
+            f"Posting blocked: MONTH_END already closed for {y:04d}-{m:02d}."
+        )
 
-    # -----------------------------------
-    # 4) Back-valued (backdated) cheque guard
-    # -----------------------------------
+    # -----------------------------------------------------
+    # 4) Execution-date backdating guard
+    # -----------------------------------------------------
     if exec_date < ent_date:
         if ov is None:
             raise PermissionError(
-                f"Posting blocked: back-valued execution_date {exec_date} < entry_date {ent_date}. "
+                f"Posting blocked: backdated execution_date {exec_date} < entry_date {ent_date}. "
                 f"Requires override."
             )
-        if ov.approved_by_role not in OVERRIDE_ROLES:
+        if ov.approved_by_role not in EXECUTION_OVERRIDE_ROLES:
             raise PermissionError(
                 f"Posting blocked: override role '{ov.approved_by_role}' not authorized. "
-                f"Requires one of: {sorted(OVERRIDE_ROLES)}"
+                f"Requires one of: {sorted(EXECUTION_OVERRIDE_ROLES)}"
             )
         if len(ov.reason) < 10:
             raise PermissionError("Posting blocked: override reason required (min 10 chars).")
+
+    # -----------------------------------------------------
+    # 5) Value-date governance via PostingDateGovernor
+    # -----------------------------------------------------
+    governor = PostingDateGovernor(
+        PostingDatePolicy()
+    )
+
+    if governor.requires_back_valuation_override(execution_date, value_date):
+
+        if ov is None:
+            raise PermissionError(
+                f"Posting blocked: value_date {val_date} earlier than execution_date {exec_date}. "
+                f"Governed override required."
+            )
+
+        # Create override request (logged later in decision)
+        req: DateOverrideRequest = governor.create_back_valuation_override_request(
+            requester_user_id=actor_user_id,
+            txn_date=execution_date,
+            value_date=value_date,
+            reason=ov.reason,
+            context={"source": "posting_runtime"},
+        )
+
+        decision: DateOverrideDecision = governor.decide_override(
+            req=req,
+            approver_user_id=actor_user_id,
+            approver_band=actor_role,
+            outcome="APPROVED",
+            decision_reason=ov.reason,
+        )
+
+        if decision.outcome != "APPROVED":
+            raise PermissionError(
+                f"Posting blocked: value-date override not approved."
+            )
+
+    # If all checks pass → allowed to proceed
