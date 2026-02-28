@@ -1,0 +1,37 @@
+{
+  "version": "1.0",
+  "description": "Phase 1 – Standard Banking / Trading Chart of Accounts",
+  "accounts": [
+
+    { "account_no": "000-840-001", "name": "Cash on Hand", "type": "ASSET", "group": "CASH" },
+    { "account_no": "000-840-002", "name": "Central Bank Balance", "type": "ASSET", "group": "CASH" },
+    { "account_no": "000-840-010", "name": "Nostro USD", "type": "ASSET", "group": "NOSTRO" },
+    { "account_no": "000-978-010", "name": "Nostro EUR", "type": "ASSET", "group": "NOSTRO" },
+
+    { "account_no": "000-840-100", "name": "Loans & Advances – Principal", "type": "ASSET", "group": "LOANS" },
+    { "account_no": "000-840-110", "name": "Accrued Interest Receivable", "type": "ASSET", "group": "LOANS" },
+    { "account_no": "000-840-120", "name": "Loan Loss Allowance", "type": "ASSET", "group": "LOANS_CONTRA" },
+
+    { "account_no": "000-840-200", "name": "Trading Securities", "type": "ASSET", "group": "TRADING" },
+
+    { "account_no": "000-840-900", "name": "Due From Branches", "type": "ASSET", "group": "INTERBRANCH" },
+
+    { "account_no": "000-840-300", "name": "Customer Deposits – Demand", "type": "LIABILITY", "group": "DEPOSITS" },
+    { "account_no": "000-840-310", "name": "Accrued Interest Payable", "type": "LIABILITY", "group": "DEPOSITS" },
+
+    { "account_no": "000-840-400", "name": "Interbank Borrowings", "type": "LIABILITY", "group": "BORROWINGS" },
+
+    { "account_no": "000-840-901", "name": "Due To Branches", "type": "LIABILITY", "group": "INTERBRANCH" },
+
+    { "account_no": "000-840-500", "name": "Share Capital", "type": "EQUITY", "group": "EQUITY" },
+    { "account_no": "000-840-510", "name": "Retained Earnings", "type": "EQUITY", "group": "EQUITY" },
+
+    { "account_no": "000-840-600", "name": "Interest Income – Loans", "type": "INCOME", "group": "INCOME" },
+    { "account_no": "000-840-610", "name": "Trading Income", "type": "INCOME", "group": "INCOME" },
+    { "account_no": "000-840-620", "name": "Fee Income", "type": "INCOME", "group": "INCOME" },
+
+    { "account_no": "000-840-700", "name": "Interest Expense – Deposits", "type": "EXPENSE", "group": "EXPENSE" },
+    { "account_no": "000-840-710", "name": "Operating Expenses", "type": "EXPENSE", "group": "EXPENSE" }
+
+  ]
+}
