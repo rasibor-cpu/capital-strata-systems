@@ -2,13 +2,12 @@
 run_eod_batch.py
 Capital Strata Systems (CSS)
 
-Phase 22D (Revised) — EOD Lifecycle Integration (Aligned to current reporting modules)
+Phase 22D (Aligned) — EOD Lifecycle Integration
 
 EOD Execution Order:
 1) Run Daily Accrual Engine (idempotent)
-2) Generate supervisory control pack / ledger print pack via report_printer
-3) Generate Trial Balance (official)
-4) (Optional later) Ageing reports, approval-queue snapshot, etc.
+2) Generate EOD Report Pack (report_printer.run_eod_pack)
+3) Generate Trial Balance (gateway-compatible kwarg: as_of_date)
 """
 
 from __future__ import annotations
@@ -21,9 +20,11 @@ def main(run_date: Optional[date] = None) -> None:
     if run_date is None:
         run_date = date.today()
 
+    run_date_str = run_date.isoformat()
+
     print("======================================")
     print("CSS END-OF-DAY BATCH RUN")
-    print(f"Processing Date: {run_date}")
+    print(f"Processing Date: {run_date_str}")
     print("======================================\n")
 
     # ----------------------------------------------------
@@ -45,52 +46,30 @@ def main(run_date: Optional[date] = None) -> None:
     # ----------------------------------------------------
     print("Generating EOD Report Pack (Report Printer)...")
 
-    # Your existing report_printer module should own the authoritative printouts.
-    # We support either function name: run_eod_pack / generate_eod_pack / print_eod_pack.
     from engine.reporting import report_printer as rp
 
-    report_pack_ok = False
-    for fn_name in ("run_eod_pack", "generate_eod_pack", "print_eod_pack", "run_daily_pack"):
-        fn = getattr(rp, fn_name, None)
-        if callable(fn):
-            fn(run_date)  # standardize: pass date
-            report_pack_ok = True
-            print(f"EOD Report Pack: OK ({fn_name})\n")
-            break
+    pack = rp.run_eod_pack(run_date)
 
-    if not report_pack_ok:
-        raise RuntimeError(
-            "EOD Report Pack failed: no callable function found in engine.reporting.report_printer "
-            "(expected one of: run_eod_pack, generate_eod_pack, print_eod_pack, run_daily_pack)."
-        )
+    if not pack.get("ok"):
+        raise RuntimeError(f"EOD Report Pack failed: {pack}")
+
+    print("EOD Report Pack: OK (run_eod_pack)\n")
 
     # ----------------------------------------------------
     # 3) TRIAL BALANCE (OFFICIAL)
     # ----------------------------------------------------
     print("Generating Trial Balance...")
 
-    # trial_balance.py should contain the authoritative TB generator.
-    # We support common names to avoid refactor churn.
     from engine.reporting import trial_balance as tb
 
-    tb_ok = False
-    for fn_name in ("generate_trial_balance", "run_trial_balance", "print_trial_balance"):
-        fn = getattr(tb, fn_name, None)
-        if callable(fn):
-            fn(run_date)
-            tb_ok = True
-            print(f"Trial Balance: OK ({fn_name})\n")
-            break
+    # Gateway-compatible: must pass as_of_date= (keyword-only)
+    tb_result = tb.generate_trial_balance(as_of_date=run_date_str)
 
-    if not tb_ok:
-        raise RuntimeError(
-            "Trial Balance failed: no callable function found in engine.reporting.trial_balance "
-            "(expected one of: generate_trial_balance, run_trial_balance, print_trial_balance)."
-        )
+    if not tb_result.get("ok"):
+        raise RuntimeError(f"Trial Balance failed: {tb_result}")
 
-    # ----------------------------------------------------
-    # DONE
-    # ----------------------------------------------------
+    print("Trial Balance: OK (generate_trial_balance)\n")
+
     print("EOD Batch Completed Successfully.")
     print("======================================\n")
 
