@@ -1,114 +1,66 @@
-# --- Environment / secrets ---
+# ============================================================
+# CAPITAL STRATA SYSTEMS – INSTITUTIONAL .gitignore
+# ============================================================
+
+# ----------------------------
+# Python Artifacts
+# ----------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.cpython-*
+
+# ----------------------------
+# Virtual Environments
+# ----------------------------
 .env
 .env.*
-!.env.example
+venv/
+.venv/
+env/
 
-# --- Runtime outputs ---
-out/
-feeds/
-data_fx/
+# ----------------------------
+# Runtime / Audit Artifacts
+# ----------------------------
+audit/
+audit_logs/
+state/
+runtime/
+reporting_store/
+*.log
+*.jsonl
+runlog.txt
+live_tick_*.json
 
-# --- Python cache ---
-__pycache__/
-*.pyc
-# =============================
-# Local data (never commit)
-# =============================
+# ----------------------------
+# Local Data (Never Commit)
+# ----------------------------
 data/
 *.csv
-.env
 
-
-# =============================
-# Experimental / test scripts
-# =============================
-test_*.py
-run_live_*.py
-run_fx_pairs_replay_*_fxrulesless_*.py
-
-# =============================
-# Live adapters (separate branch only)
-# =============================
-live_data/
-
-# =============================
-# Scratch / temp
-# =============================
-str/
-__pycache__/
-*.pyc
-!engine/execution/execution_gate.py
-!engine/execution/
-!engine/execution/execution_gate.py
-analysis/
-*.csv
-*.log
-*.json
-__pycache__/
-*.pyc
-
-
-# --- OS ---
+# ----------------------------
+# OS Files
+# ----------------------------
 .DS_Store
 Thumbs.db
-# Runtime audit artifacts
-audit_logs/
-# --- live market adapters (TRACKED) ---
-!live_data/
-!live_data/*.py
 
-# --- ignore runtime noise ---
-live_data/__pycache__/
-live_data/**/*.log
+# ----------------------------
+# Temporary / Scratch
+# ----------------------------
+analysis/
+*_find_*.txt
+_find_*.cmd
 
+# ----------------------------
+# IDE / Editor
+# ----------------------------
+.vscode/
+.idea/
 
-
-# Local helper scripts
-_find_csv.cmd
-# junk/encoding artifacts accidentally created at repo root
-!engine/execution/execution_gate.py!test_end_to_end_dryrun.py
-!run_live_guarded.py
-# === REA Runtime / Governance Artifacts (NEVER COMMIT) ===
-audit/
-state/
-*.log
-# Runtime controls (never commit)
-runtime/
-!engine/execution_decision.py
-!engine/test_execution_decision_runner.py
-!engine/execution_decision.py
-!engine/adapters/regime_gate_adapter.py
-# --- REA Phase-1: allow tracked tests + decision envelope ---
-!engine/test_execution_decision_runner.py
-!engine/execution_decision.py# --- GOVERNANCE CRITICAL (explicitly tracked) ---
-!engine/execution_firewall.py
-!engine/execution_decision.py
-!engine/execution_router.py
-# --- GOVERNANCE CRITICAL (explicitly tracked) ---
-!engine/execution_firewall.py
-!engine/execution_router.py
-# ================================
-# GOVERNANCE CRITICAL (TRACKED)
-# ================================
-
+# ----------------------------
+# Safety: Never ignore core engine
+# ----------------------------
 !engine/
-!engine/execution/
-!engine/execution/execution_firewall.py
-# ================================
-# GOVERNANCE CRITICAL (TRACKED)
-# ================================
-!engine/execution_firewall.py
-tatus
-git diff --cached --name-only
-# Runtime reporting
-reporting_store/
-*.jsonl
-# Find/grep scratch outputs
-_find_*.txt
-# REA engine runtime state / logs (never commit)
-engine/risk/risk_state.json
-engine/risk/*.json
-live_tick_*.json
-*.log
-runlog.txt
-
+!backend/
+!tools/
