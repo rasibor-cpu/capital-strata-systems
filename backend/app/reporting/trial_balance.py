@@ -1,6 +1,6 @@
 """
 Capital Strata Systems
-Institutional Trial Balance Engine – Phase 18D (COA Driven)
+Institutional Trial Balance Engine – Phase 18D (COA Driven, CLI-Safe Imports)
 
 Features:
 - COA-driven account universe (institution-aware)
@@ -25,7 +25,14 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Dict, List
 
-from backend.app.ledger.coa_loader import COALoader
+# ---------------------------------------------------------
+# CLI-safe import wiring (repo-root -> sys.path)
+# ---------------------------------------------------------
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from backend.app.ledger.coa_loader import COALoader  # noqa: E402
 
 
 JOURNAL_FILE = Path("audit_logs/journal.jsonl")
@@ -100,7 +107,7 @@ def build_trial_balance(
             continue
 
         if account not in gross:
-            # Journal account not in COA → governance violation
+            # Journal account not in COA → governance violation (skip in TB for now)
             continue
 
         if side == "DR":
