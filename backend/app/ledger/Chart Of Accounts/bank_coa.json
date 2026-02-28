@@ -1,0 +1,72 @@
+{
+  "meta": {
+    "institution_type": "BANK",
+    "version": "2.0",
+    "range_policy": {
+      "100000-199999": "ASSETS",
+      "200000-299999": "LIABILITIES",
+      "300000-399999": "EQUITY",
+      "400000-499999": "INCOME",
+      "500000-599999": "EXPENSE"
+    }
+  },
+  "accounts": {
+
+    "100000": {"name":"Cash on Hand","type":"ASSET","normal_balance":"DR","statement":"BALANCE_SHEET"},
+    "100010": {"name":"Cash at Central Bank","type":"ASSET","normal_balance":"DR","statement":"BALANCE_SHEET"},
+    "100020": {"name":"Due from Other Banks","type":"ASSET","normal_balance":"DR","statement":"BALANCE_SHEET"},
+
+    "110000": {"name":"Loans & Advances (Gross)","type":"ASSET","normal_balance":"DR","statement":"BALANCE_SHEET"},
+    "110010": {"name":"Allowance for Loan Losses – General","type":"ASSET_CONTRA","normal_balance":"CR","statement":"BALANCE_SHEET"},
+    "110020": {"name":"Specific Provision – Substandard","type":"ASSET_CONTRA","normal_balance":"CR","statement":"BALANCE_SHEET"},
+    "110030": {"name":"Specific Provision – Doubtful","type":"ASSET_CONTRA","normal_balance":"CR","statement":"BALANCE_SHEET"},
+    "110040": {"name":"Specific Provision – Loss","type":"ASSET_CONTRA","normal_balance":"CR","statement":"BALANCE_SHEET"},
+
+    "120000": {"name":"Accrued Interest Receivable","type":"ASSET","normal_balance":"DR","statement":"BALANCE_SHEET"},
+    "130000": {"name":"Prepayments","type":"ASSET","normal_balance":"DR","statement":"BALANCE_SHEET"},
+    "140000": {"name":"Property, Plant & Equipment","type":"ASSET","normal_balance":"DR","statement":"BALANCE_SHEET"},
+    "150000": {"name":"Intangible Assets","type":"ASSET","normal_balance":"DR","statement":"BALANCE_SHEET"},
+    "160000": {"name":"Interbranch Due From (Internal)","type":"ASSET","normal_balance":"DR","statement":"BALANCE_SHEET"},
+    "170000": {"name":"Written-Off Loans (Memo / Off-Balance Sheet)","type":"ASSET","normal_balance":"DR","statement":"BALANCE_SHEET"},
+    "190000": {"name":"Suspense / Clearing Asset","type":"ASSET","normal_balance":"DR","statement":"BALANCE_SHEET"},
+
+    "200000": {"name":"Customer Deposits (Demand)","type":"LIABILITY","normal_balance":"CR","statement":"BALANCE_SHEET"},
+    "200010": {"name":"Customer Deposits (Savings)","type":"LIABILITY","normal_balance":"CR","statement":"BALANCE_SHEET"},
+    "200020": {"name":"Customer Deposits (Time)","type":"LIABILITY","normal_balance":"CR","statement":"BALANCE_SHEET"},
+    "210000": {"name":"Due to Other Banks","type":"LIABILITY","normal_balance":"CR","statement":"BALANCE_SHEET"},
+    "220000": {"name":"Accrued Interest Payable","type":"LIABILITY","normal_balance":"CR","statement":"BALANCE_SHEET"},
+    "230000": {"name":"Unearned Revenue / Deferred Income","type":"LIABILITY","normal_balance":"CR","statement":"BALANCE_SHEET"},
+    "240000": {"name":"Tax Payable","type":"LIABILITY","normal_balance":"CR","statement":"BALANCE_SHEET"},
+    "250000": {"name":"Suspense / Clearing Liability","type":"LIABILITY","normal_balance":"CR","statement":"BALANCE_SHEET"},
+    "260000": {"name":"Interbranch Due To (Internal)","type":"LIABILITY","normal_balance":"CR","statement":"BALANCE_SHEET"},
+
+    "300000": {"name":"Share Capital","type":"EQUITY","normal_balance":"CR","statement":"BALANCE_SHEET"},
+    "310000": {"name":"Share Premium","type":"EQUITY","normal_balance":"CR","statement":"BALANCE_SHEET"},
+    "320000": {"name":"Retained Earnings","type":"EQUITY","normal_balance":"CR","statement":"BALANCE_SHEET"},
+    "330000": {"name":"Statutory Reserve","type":"EQUITY","normal_balance":"CR","statement":"BALANCE_SHEET"},
+
+    "400000": {"name":"Interest Income – Loans","type":"INCOME","normal_balance":"CR","statement":"INCOME_STATEMENT"},
+    "410000": {"name":"Interest Income – Investments","type":"INCOME","normal_balance":"CR","statement":"INCOME_STATEMENT"},
+    "420000": {"name":"Fees & Commission Income","type":"INCOME","normal_balance":"CR","statement":"INCOME_STATEMENT"},
+    "421000": {"name":"Transfer Commissions","type":"INCOME","normal_balance":"CR","statement":"INCOME_STATEMENT"},
+    "422000": {"name":"LC Commissions","type":"INCOME","normal_balance":"CR","statement":"INCOME_STATEMENT"},
+    "423000": {"name":"COT / Account Maintenance Fees","type":"INCOME","normal_balance":"CR","statement":"INCOME_STATEMENT"},
+    "495000": {"name":"Recovery of Written-Off Loans","type":"INCOME","normal_balance":"CR","statement":"INCOME_STATEMENT"},
+    "490000": {"name":"Other Operating Income","type":"INCOME","normal_balance":"CR","statement":"INCOME_STATEMENT"},
+
+    "500000": {"name":"Interest Expense – Deposits","type":"EXPENSE","normal_balance":"DR","statement":"INCOME_STATEMENT"},
+    "510000": {"name":"Staff Costs","type":"EXPENSE","normal_balance":"DR","statement":"INCOME_STATEMENT"},
+    "520000": {"name":"Occupancy & Utilities","type":"EXPENSE","normal_balance":"DR","statement":"INCOME_STATEMENT"},
+    "530000": {"name":"IT & Communications","type":"EXPENSE","normal_balance":"DR","statement":"INCOME_STATEMENT"},
+    "540000": {"name":"Regulatory / Compliance Costs","type":"EXPENSE","normal_balance":"DR","statement":"INCOME_STATEMENT"},
+
+    "550000": {"name":"Loan Impairment Expense – General","type":"EXPENSE","normal_balance":"DR","statement":"INCOME_STATEMENT"},
+    "550010": {"name":"Loan Impairment Expense – Substandard","type":"EXPENSE","normal_balance":"DR","statement":"INCOME_STATEMENT"},
+    "550020": {"name":"Loan Impairment Expense – Doubtful","type":"EXPENSE","normal_balance":"DR","statement":"INCOME_STATEMENT"},
+    "550030": {"name":"Loan Impairment Expense – Loss","type":"EXPENSE","normal_balance":"DR","statement":"INCOME_STATEMENT"},
+    "550040": {"name":"Loan Write-Off Expense","type":"EXPENSE","normal_balance":"DR","statement":"INCOME_STATEMENT"},
+    "550050": {"name":"Loan Forgiveness Expense","type":"EXPENSE","normal_balance":"DR","statement":"INCOME_STATEMENT"},
+
+    "590000": {"name":"Other Operating Expense","type":"EXPENSE","normal_balance":"DR","statement":"INCOME_STATEMENT"}
+  }
+}
