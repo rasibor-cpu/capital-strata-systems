@@ -1,0 +1,48 @@
+{
+  "100": {
+    "name": "Cash",
+    "type": "ASSET",
+    "category": "GL",
+    "normal_balance": "DR",
+    "statement": "BALANCE_SHEET",
+    "status": "ACTIVE"
+  },
+  "200": {
+    "name": "Revenue",
+    "type": "INCOME",
+    "category": "GL",
+    "normal_balance": "CR",
+    "statement": "INCOME_STATEMENT",
+    "status": "ACTIVE"
+  },
+  "300": {
+    "name": "Expense",
+    "type": "EXPENSE",
+    "category": "GL",
+    "normal_balance": "DR",
+    "statement": "INCOME_STATEMENT",
+    "status": "ACTIVE"
+  },
+  "400": {
+    "name": "Equity",
+    "type": "EQUITY",
+    "category": "GL",
+    "normal_balance": "CR",
+    "statement": "BALANCE_SHEET",
+    "status": "ACTIVE"
+  },
+
+  "CUST-0001": {
+    "name": "Customer Deposits - Sample Account",
+    "type": "CUSTOMER_DEPOSIT",
+    "category": "CUSTOMER",
+    "normal_balance": "CR",
+    "statement": "BALANCE_SHEET",
+    "status": "DORMANT",
+    "last_customer_activity_date": "2025-12-31",
+    "dormancy": {
+      "flag_date": "2026-02-01",
+      "reason": "No customer activity beyond dormancy threshold"
+    }
+  }
+}
