@@ -1,0 +1,24 @@
+{
+  "assets": [
+    {
+      "asset_id": "AST-F2705B1962C449729F04AF406BB8444E",
+      "asset_name": "Test Vehicle",
+      "asset_class": "MOTOR",
+      "purchase_date": "2026-02-01",
+      "cost": "120000",
+      "residual_value": "20000",
+      "useful_life_years": 5,
+      "depreciation_method": "STRAIGHT_LINE",
+      "accumulated_depreciation": "1666.666666666666666666666667",
+      "status": "ACTIVE",
+      "location": "Head Office",
+      "admin_owner_id": "ADMIN01",
+      "insurance_policy_ref": null,
+      "vehicle_registration": null,
+      "engine_number": null,
+      "depreciation_history": [
+        "2026-02"
+      ]
+    }
+  ]
+}

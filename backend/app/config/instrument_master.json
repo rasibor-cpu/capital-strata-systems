@@ -1,0 +1,47 @@
+{
+  "LOCAL_FT": {
+    "name": "Local Funds Transfer",
+    "category": "PAYMENTS",
+    "allowed_departments": ["FIN_CTRL"]
+  },
+  "FOREIGN_FT": {
+    "name": "Foreign Funds Transfer",
+    "category": "PAYMENTS",
+    "allowed_departments": ["FIN_CTRL"]
+  },
+  "LC_ISSUANCE": {
+    "name": "Letter of Credit Issuance",
+    "category": "TRADE_FINANCE",
+    "allowed_departments": ["TREASURY"]
+  },
+  "CP_ISSUANCE": {
+    "name": "Commercial Paper Issuance",
+    "category": "MONEY_MARKET",
+    "allowed_departments": ["TREASURY"]
+  },
+  "BA_ACCEPTANCE": {
+    "name": "Bankers Acceptance",
+    "category": "MONEY_MARKET",
+    "allowed_departments": ["TREASURY"]
+  },
+  "FX_SPOT": {
+    "name": "FX Spot",
+    "category": "TREASURY",
+    "allowed_departments": ["TREASURY"]
+  },
+  "FX_FORWARD": {
+    "name": "FX Forward",
+    "category": "TREASURY",
+    "allowed_departments": ["TREASURY"]
+  },
+  "MM_PLACEMENT": {
+    "name": "Money Market Placement",
+    "category": "TREASURY",
+    "allowed_departments": ["TREASURY"]
+  },
+  "FIXED_DEPOSIT": {
+    "name": "Fixed Deposit Booking",
+    "category": "LIABILITIES",
+    "allowed_departments": ["FIN_CTRL", "TREASURY"]
+  }
+}

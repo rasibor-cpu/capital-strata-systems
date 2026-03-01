@@ -1,0 +1,35 @@
+{
+  "country": "NG",
+  "divisions": {
+    "Ops": {
+      "branches": {
+        "LAGOS_HQ": {
+          "teams": {
+            "FIN_CTRL": {
+              "department_code": "FIN_CTRL",
+              "function_group": "POSTING",
+              "supervisors": ["checker_2"],
+              "members": ["maker_9", "maker_7", "maker_3"]
+            },
+            "TREASURY": {
+              "department_code": "TREASURY",
+              "function_group": "POSTING",
+              "supervisors": ["super_1"],
+              "members": ["maker_5", "maker_6"]
+            }
+          }
+        },
+        "ABUJA": {
+          "teams": {
+            "FIN_CTRL": {
+              "department_code": "FIN_CTRL",
+              "function_group": "POSTING",
+              "supervisors": ["super_abuja_1"],
+              "members": ["maker_abuja_1", "maker_abuja_2"]
+            }
+          }
+        }
+      }
+    }
+  }
+}

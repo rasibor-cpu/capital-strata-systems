@@ -1,0 +1,42 @@
+{
+  "100000001": {
+    "name": "Cash in Vault",
+    "account_class": 1,
+    "sub_class": 0,
+    "lane": 0,
+    "ifrs_category": "Asset",
+    "risk_type": "credit",
+    "regulatory_weight_default": 0.0,
+    "is_customer_control": false
+  },
+  "201000001": {
+    "name": "Customer Control Account",
+    "account_class": 2,
+    "sub_class": 0,
+    "lane": 1,
+    "ifrs_category": "Liability",
+    "risk_type": "credit",
+    "regulatory_weight_default": 1.0,
+    "is_customer_control": true
+  },
+  "400000001": {
+    "name": "Trading Asset",
+    "account_class": 4,
+    "sub_class": 0,
+    "lane": 2,
+    "ifrs_category": "Asset",
+    "risk_type": "market",
+    "regulatory_weight_default": 1.0,
+    "is_customer_control": false
+  },
+  "000-840-999": {
+    "account_no": "000-840-999",
+    "name": "Test GL",
+    "type": "ASSET",
+    "group": "TEST",
+    "created_by": "FIN01",
+    "created_department": "FINCON",
+    "created_at": "2026-03-01T05:06:06Z",
+    "status": "ACTIVE"
+  }
+}

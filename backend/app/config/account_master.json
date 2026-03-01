@@ -1,0 +1,5 @@
+{
+  "100": { "name": "Cash", "domiciled_branch": "LAGOS_HQ" },
+  "200": { "name": "Revenue", "domiciled_branch": "LAGOS_HQ" },
+  "300": { "name": "Expense", "domiciled_branch": "ABUJA" }
+}
