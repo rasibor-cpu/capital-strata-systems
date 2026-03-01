@@ -2,21 +2,15 @@
 tools/run_eod_batch.py
 Capital Strata Systems (CSS)
 
-Phase 24 – Governed EOD Batch Controller
-
-Enhancements:
-- Prevent duplicate EOD execution per processing date
-- Register successful EOD completion
-- Fail-closed behavior
-- Institutional batch lifecycle
+Phase 24 + Phase 23.3 — Governed EOD Batch Controller + Immutable EOD Pack
 
 Order:
-1) Duplicate-run guard
-2) Accrual Engine
-3) Dormancy Scan
-4) Report Pack
-5) Trial Balance
-6) Register completion
+0) Duplicate-run guard
+1) Accrual Engine
+2) Dormancy Scan (EOD-activated)
+3) Trial Balance
+4) Immutable EOD Pack write + hash
+5) Register completion
 """
 
 from __future__ import annotations
@@ -37,6 +31,7 @@ def _utc_ymd_today() -> str:
 
 
 def _parse_run_date(argv: list[str]) -> str:
+    # supports: python -m tools.run_eod_batch 2026-03-01
     if len(argv) >= 2 and argv[1].strip():
         try:
             datetime.strptime(argv[1].strip(), "%Y-%m-%d")
@@ -47,7 +42,6 @@ def _parse_run_date(argv: list[str]) -> str:
 
 
 def main(run_date: Optional[str] = None) -> None:
-
     processing_date = run_date or _parse_run_date(sys.argv)
 
     _banner("CSS END-OF-DAY BATCH RUN")
@@ -80,9 +74,9 @@ def main(run_date: Optional[str] = None) -> None:
     print(f"  Total Accrued        : {accrual_result.get('total_interest_accrued')}")
 
     # ------------------------------------------------------------
-    # 2) Dormancy Scan
+    # 2) Dormancy Scan (EOD-activated)
     # ------------------------------------------------------------
-    print("\nRunning Dormancy Scan...")
+    print("\nRunning Dormancy Scan (EOD-activated)...")
     from backend.app.ledger.dormancy_engine import run_dormancy_scan
 
     dormancy_result = run_dormancy_scan(threshold_days=90)
@@ -93,24 +87,33 @@ def main(run_date: Optional[str] = None) -> None:
     print(f"  Threshold Days       : {dormancy_result.get('threshold_days')}")
 
     # ------------------------------------------------------------
-    # 3) Report Pack
-    # ------------------------------------------------------------
-    print("\nGenerating EOD Report Pack...")
-    from engine.reporting.report_printer import run_eod_pack
-
-    pack_result = run_eod_pack(run_date=processing_date)
-
-    print("Report Pack Status: OK")
-
-    # ------------------------------------------------------------
-    # 4) Trial Balance
+    # 3) Trial Balance
     # ------------------------------------------------------------
     print("\nGenerating Trial Balance...")
     from engine.reporting.trial_balance import generate_trial_balance
 
     tb_result = generate_trial_balance(as_of_date=processing_date)
-
     print("Trial Balance: OK")
+
+    # ------------------------------------------------------------
+    # 4) Immutable EOD Pack (audit retrieval)
+    # ------------------------------------------------------------
+    print("\nGenerating Immutable EOD Pack (snapshot + hashes)...")
+    from engine.reporting.report_printer import generate_eod_pack
+
+    pack_result = generate_eod_pack(
+        run_date=processing_date,
+        trial_balance=tb_result,
+        dormancy_summary=dormancy_result,
+        accrual_summary=accrual_result,
+    )
+
+    if not pack_result.get("ok"):
+        raise RuntimeError("EOD Pack generation failed (fail-closed).")
+
+    print("EOD Pack: OK")
+    print(f"  Files Written : {pack_result.get('files_written')}")
+    print(f"  Pack Hash     : {pack_result.get('pack_hash')}")
 
     # ------------------------------------------------------------
     # 5) REGISTER SUCCESS
