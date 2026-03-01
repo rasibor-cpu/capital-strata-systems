@@ -2,9 +2,9 @@
 backend/app/ledger/account_create.py
 Capital Strata Systems (CSS)
 
-Phase 23D+ — Account Creation Governance + System-Generated Customer Accounts (KYC-Ready)
 Phase 23D.1 — Numbering Schema Validation
 Phase 23D.2 — Account Events Audit Logging (JSONL)
+Phase 23D.3 — Customer Onboarding Profile Expansion (Account Opening Form fields)
 
 Governance (LOCKED):
 - Only Customer Service department can create NEW customer accounts.
@@ -18,9 +18,12 @@ Authoritative Sources:
 
 Customer account creation:
 - System-generated account numbers only (no manual entry)
-- Enforced mandatory KYC / identifier fields (per your spec)
-- Stored as runtime registry record with category="CUSTOMER"
-- Linked to a control GL account (e.g., Customer Deposits – Demand control GL)
+- Stores full customer_profile (typical account opening form fields)
+- Links to a control GL account (e.g., Customer Deposits – Demand control GL)
+
+Important:
+- We keep backward compatibility: existing required fields remain required.
+- New fields are optional (UI/workflows can enforce completion later).
 """
 
 from __future__ import annotations
@@ -30,7 +33,7 @@ import re
 import uuid
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any
 
 
 COA_FILE = Path("backend/app/config/chart_of_accounts.json")
@@ -72,14 +75,10 @@ def _save_json(path: Path, data) -> None:
 
 
 def _append_event(event: Dict[str, Any]) -> None:
-    """
-    Immutable-ish audit trail for account lifecycle events (JSONL).
-    """
     ACCOUNT_EVENTS_FILE.parent.mkdir(parents=True, exist_ok=True)
     record = dict(event)
     record.setdefault("event_id", f"EVT-{uuid.uuid4().hex.upper()}")
     record.setdefault("ts_utc", _utc_ts())
-
     with ACCOUNT_EVENTS_FILE.open("a", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
@@ -94,7 +93,6 @@ def _normalize_email(email: str) -> str:
     e = (email or "").strip().lower()
     if not e:
         return ""
-    # minimal validation
     if "@" not in e or "." not in e.split("@")[-1]:
         raise ValueError("Invalid email address format.")
     return e
@@ -104,10 +102,20 @@ def _normalize_phone(phone: str) -> str:
     p = (phone or "").strip()
     if not p:
         return ""
-    # allow +, digits, spaces, hyphen, parentheses
     if not re.fullmatch(r"[0-9+\-\s()]{7,25}", p):
         raise ValueError("Invalid phone number format.")
     return p
+
+
+def _parse_ymd(d: str, field_name: str) -> str:
+    s = (d or "").strip()
+    if not s:
+        return ""
+    try:
+        datetime.strptime(s, "%Y-%m-%d")
+    except Exception:
+        raise ValueError(f"{field_name} must be YYYY-MM-DD.")
+    return s
 
 
 def _parse_dob(dob_ymd: str) -> str:
@@ -157,28 +165,26 @@ def _next_seq(key: str) -> int:
 
 def _validate_gl_account_no(account_no: str) -> None:
     if not GL_ACCT_RE.fullmatch(account_no):
-        raise ValueError(f"Invalid GL account_no '{account_no}'. Expected format: 000-<CUR>-<NNN> (e.g., 000-840-300)")
+        raise ValueError(
+            f"Invalid GL account_no '{account_no}'. Expected: 000-<CUR>-<NNN> (e.g., 000-840-300)"
+        )
 
 
 def _validate_customer_account_no(account_no: str) -> None:
     if not CUST_ACCT_RE.fullmatch(account_no):
-        raise ValueError(f"Invalid CUSTOMER account_no '{account_no}'. Expected format: CUST-<CUR>-<8digits> (e.g., CUST-840-00000001)")
+        raise ValueError(
+            f"Invalid CUSTOMER account_no '{account_no}'. Expected: CUST-<CUR>-<8digits> (e.g., CUST-840-00000001)"
+        )
 
 
 def _customer_uniqueness_guard(reg: Dict[str, Any], *, email: str, phone: str, dob: str) -> None:
-    """
-    Prevent duplicate customer identities (pragmatic control):
-    - If an existing CUSTOMER record has same (dob + email) OR (dob + phone) => block.
-    This is not a full CIF solution, but it prevents obvious duplication.
-    """
     email = (email or "").strip().lower()
     phone = (phone or "").strip()
     dob = (dob or "").strip()
-
     if not dob:
         return
 
-    for acc_no, meta in reg.items():
+    for _, meta in reg.items():
         if not isinstance(meta, dict):
             continue
         if str(meta.get("category", "")).upper() != "CUSTOMER":
@@ -198,6 +204,16 @@ def _customer_uniqueness_guard(reg: Dict[str, Any], *, email: str, phone: str, d
                 raise ValueError("Duplicate customer detected: same DOB + Phone already exists.")
 
 
+def _normalize_contact_mode(mode: str) -> str:
+    m = (mode or "").strip().upper()
+    if not m:
+        return ""
+    allowed = {"EMAIL", "SMS", "PHONE_CALL", "WHATSAPP", "POSTAL_MAIL", "IN_APP"}
+    if m not in allowed:
+        raise ValueError(f"preferred_contact_mode must be one of {sorted(allowed)}")
+    return m
+
+
 # ------------------------------------------------------------
 # Public API
 # ------------------------------------------------------------
@@ -210,7 +226,7 @@ def create_customer_account(
     product: str = "DEMAND_DEPOSIT",
     control_gl_account_no: str = "000-840-300",
 
-    # ---- Mandatory identifier / KYC fields (your spec) ----
+    # ---- Core KYC fields (kept mandatory to preserve quality) ----
     title: str,
     first_name: str,
     last_name: str,
@@ -224,12 +240,49 @@ def create_customer_account(
     signature_mandate: str = "",
     signature_status: str = "",
 
-    # ---- Additional fields for segmentation / unique identification ----
-    customer_type: str = "INDIVIDUAL",  # INDIVIDUAL | BUSINESS
+    # ---- Expanded account opening fields (optional; UI can enforce) ----
+    # Contacts / preferences
+    contact_email: str = "",              # preferred / alternate email
+    home_phone: str = "",
+    work_phone: str = "",
+    preferred_contact_mode: str = "",     # EMAIL/SMS/PHONE_CALL/WHATSAPP/POSTAL_MAIL/IN_APP
+    preferred_contact_time_window: str = "",  # e.g. "9AM-5PM"
+    do_not_contact: bool = False,
+    marketing_consent: bool = False,
+
+    # Addresses
+    mailing_address: str = "",            # if different from residential
+    business_address: str = "",
+
+    # Next of kin (structured)
+    next_of_kin_name: str = "",
+    next_of_kin_relationship: str = "",
+    next_of_kin_phone: str = "",
+    next_of_kin_home_phone: str = "",
+    next_of_kin_email: str = "",
+    next_of_kin_address: str = "",
+
+    # Identity & demographics
+    nationality: str = "",
+    state_of_origin: str = "",
+    lga: str = "",
+    marital_status: str = "",
+    occupation: str = "",
+    employer_name: str = "",
+    employer_address: str = "",
+    id_type: str = "",                   # e.g. NIN/PASSPORT/DRIVERS_LICENSE
+    id_number: str = "",
+    id_issue_date: str = "",             # YYYY-MM-DD
+    id_expiry_date: str = "",            # YYYY-MM-DD
+    tax_id: str = "",                    # TIN/SSN/ITIN/etc
+    bvn: str = "",                       # Nigeria BVN if applicable
+
+    # Customer classification / segmentation
+    customer_type: str = "INDIVIDUAL",   # INDIVIDUAL | BUSINESS
     rc_number: str = "",
     business_segment: str = "",
     industry: str = "",
-    business_address: str = "",
+
 ) -> Dict[str, Any]:
     """
     Creates a NEW customer account (system-generated account number).
@@ -238,9 +291,9 @@ def create_customer_account(
       - maker_department must be CUSTOMER_SERVICE
 
     Enforces:
-      - Mandatory KYC fields
+      - Mandatory core KYC fields
       - Uniqueness guard (DOB+Email or DOB+Phone)
-      - Control GL must exist in COA and be a valid GL account_no
+      - Control GL must exist in COA
       - Account number is system-generated and validated
 
     Returns:
@@ -260,7 +313,7 @@ def create_customer_account(
     if control_gl_account_no not in coa:
         raise ValueError(f"Control GL account not found in COA: {control_gl_account_no}")
 
-    # Mandatory fields validation
+    # Mandatory fields validation (core)
     title = (title or "").strip()
     first_name = (first_name or "").strip()
     last_name = (last_name or "").strip()
@@ -276,6 +329,7 @@ def create_customer_account(
         raise ValueError("sex must be one of: M/F/MALE/FEMALE (or blank).")
 
     dob = _parse_dob(date_of_birth)
+
     residential_address = (residential_address or "").strip()
     if not residential_address:
         raise ValueError("residential_address is required.")
@@ -315,6 +369,19 @@ def create_customer_account(
         if not industry:
             raise ValueError("industry is required for BUSINESS customers.")
 
+    # Expanded validations (optional fields)
+    contact_email_n = _normalize_email(contact_email) if (contact_email or "").strip() else ""
+    home_phone_n = _normalize_phone(home_phone) if (home_phone or "").strip() else ""
+    work_phone_n = _normalize_phone(work_phone) if (work_phone or "").strip() else ""
+    pref_mode = _normalize_contact_mode(preferred_contact_mode)
+
+    nok_phone_n = _normalize_phone(next_of_kin_phone) if (next_of_kin_phone or "").strip() else ""
+    nok_home_phone_n = _normalize_phone(next_of_kin_home_phone) if (next_of_kin_home_phone or "").strip() else ""
+    nok_email_n = _normalize_email(next_of_kin_email) if (next_of_kin_email or "").strip() else ""
+
+    id_issue = _parse_ymd(id_issue_date, "id_issue_date")
+    id_exp = _parse_ymd(id_expiry_date, "id_expiry_date")
+
     reg = _load_runtime_registry()
 
     # Guard against duplicate identity
@@ -329,6 +396,7 @@ def create_customer_account(
         raise RuntimeError(f"Generated customer account already exists (unexpected): {account_no}")
 
     customer_profile = {
+        # Core identity
         "customer_type": customer_type,
         "title": title,
         "first_name": first_name,
@@ -336,18 +404,55 @@ def create_customer_account(
         "other_names": (other_names or "").strip(),
         "sex": sex,
         "date_of_birth": dob,
-        "residential_address": residential_address,
+
+        # Primary contact
         "email": email_n,
         "phone": phone_n,
-        "next_of_kin": next_of_kin,
-        "signature_mandate": signature_mandate,
-        "signature_status": signature_status,
+        "contact_email": contact_email_n,
+        "home_phone": home_phone_n,
+        "work_phone": work_phone_n,
 
-        # segmentation / identifiers
+        # Addresses
+        "residential_address": residential_address,
+        "mailing_address": (mailing_address or "").strip(),
+        "business_address": business_address,
+
+        # Preferences / consent
+        "preferred_contact_mode": pref_mode,
+        "preferred_contact_time_window": (preferred_contact_time_window or "").strip(),
+        "do_not_contact": bool(do_not_contact),
+        "marketing_consent": bool(marketing_consent),
+
+        # NOK (both a free-text legacy field + structured block)
+        "next_of_kin": next_of_kin,
+        "next_of_kin_name": (next_of_kin_name or "").strip(),
+        "next_of_kin_relationship": (next_of_kin_relationship or "").strip(),
+        "next_of_kin_phone": nok_phone_n,
+        "next_of_kin_home_phone": nok_home_phone_n,
+        "next_of_kin_email": nok_email_n,
+        "next_of_kin_address": (next_of_kin_address or "").strip(),
+
+        # Demographics / employment
+        "nationality": (nationality or "").strip(),
+        "state_of_origin": (state_of_origin or "").strip(),
+        "lga": (lga or "").strip(),
+        "marital_status": (marital_status or "").strip(),
+        "occupation": (occupation or "").strip(),
+        "employer_name": (employer_name or "").strip(),
+        "employer_address": (employer_address or "").strip(),
+
+        # IDs / compliance
+        "id_type": (id_type or "").strip().upper(),
+        "id_number": (id_number or "").strip(),
+        "id_issue_date": id_issue,
+        "id_expiry_date": id_exp,
+        "tax_id": (tax_id or "").strip(),
+        "bvn": (bvn or "").strip(),
+
+        # Segmentation
         "rc_number": rc_number,
         "business_segment": business_segment,
         "industry": industry,
-        "business_address": business_address,
     }
 
     reg[account_no] = {
@@ -377,6 +482,7 @@ def create_customer_account(
         "email": email_n,
         "phone": phone_n,
         "date_of_birth": dob,
+        "preferred_contact_mode": pref_mode,
     })
 
     return {"ok": True, "account_no": account_no, "record": reg[account_no]}
