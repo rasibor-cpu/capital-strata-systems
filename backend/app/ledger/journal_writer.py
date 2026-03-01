@@ -170,7 +170,6 @@ def post_transaction(
 
     # === CALENDAR ENGINE VALIDATION ===
     calendar_policy = default_posting_calendar_policy()
-    calendar_engine = PostingCalendarEngine(calendar_policy)
     cal_override = _normalize_override_for_calendar(override)
 
     decision = calendar_engine.validate_posting_window(
