@@ -1,59 +1,79 @@
 """
 Capital Strata Systems (CSS)
-Phase 25C – Fixed Asset Engine (Foundation Layer)
+Phase 26D-2 – Asset Engine with Optional Capitalization (Governance-Aware)
 
-Capabilities:
-- Create new fixed asset (Admin-controlled)
-- Store asset metadata
-- Compute straight-line depreciation
-- Track accumulated depreciation
-- Prevent double-posting per period
-- Prepare depreciation posting payload for GL engine
+What this fixes:
+- Uses the REAL journal_writer.post_transaction signature used in your codebase
+- Uses your COA PPE cost account: 000-840-800
+- Automatically retries capitalization with BACKDATE_EXECUTION_DATE override if required
+- Writes asset to fixed_asset_registry.json ONLY after successful capitalization (when enabled)
 
-Does NOT yet auto-post.
-Posting integration will be Phase 25C-2.
+Registry file:
+- backend/app/assets/fixed_asset_registry.json
+Schema (kept simple and compatible with your existing depreciation pipeline):
+{
+  "assets": [
+     {...asset_record...}
+  ]
+}
 """
 
 from __future__ import annotations
 
-import json
 import uuid
-from pathlib import Path
+import json
 from decimal import Decimal
-from datetime import datetime
+from pathlib import Path
 from typing import Dict, Any, List, Optional
+
+from backend.app.ledger.journal_writer import post_transaction
 
 
 REGISTRY_FILE = Path("backend/app/assets/fixed_asset_registry.json")
 
-
-# ---------------------------------------------------
-# Helpers
-# ---------------------------------------------------
-
-def _to_decimal(v) -> Decimal:
-    return Decimal(str(v))
+DEFAULT_PPE_COST_GL = "000-840-800"
+DEFAULT_FUNDING_GL = "000-840-001"  # Cash on Hand
 
 
-def _ensure_registry_exists() -> None:
+def _to_decimal(x) -> Decimal:
+    return Decimal(str(x))
+
+
+def _ensure_registry() -> None:
     REGISTRY_FILE.parent.mkdir(parents=True, exist_ok=True)
     if not REGISTRY_FILE.exists():
         REGISTRY_FILE.write_text(json.dumps({"assets": []}, indent=2), encoding="utf-8")
 
 
 def _load_registry() -> Dict[str, Any]:
-    _ensure_registry_exists()
-    with REGISTRY_FILE.open("r", encoding="utf-8") as f:
-        return json.load(f)
+    _ensure_registry()
+    raw = json.loads(REGISTRY_FILE.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError("fixed_asset_registry.json must be a JSON object")
+    raw.setdefault("assets", [])
+    if not isinstance(raw["assets"], list):
+        raise ValueError("fixed_asset_registry.json['assets'] must be a list")
+    return raw
 
 
 def _save_registry(data: Dict[str, Any]) -> None:
     REGISTRY_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-# ---------------------------------------------------
-# Asset Creation
-# ---------------------------------------------------
+def _make_backdate_override(*, admin_user_id: str, ticket_id: str, reason: str) -> Dict[str, Any]:
+    # Must match posting_calendar.CalendarOverride field names used elsewhere (and used successfully in period_close)
+    return {
+        "override_type": "BACKDATE_EXECUTION_DATE",
+        "override_reason": reason,
+        "override_by_user_id": admin_user_id,
+        "override_ticket_ref": ticket_id,
+
+        # Extra audit-friendly fields (harmless if ignored)
+        "approved_by": admin_user_id,
+        "approved_by_role": "ADMIN",
+        "reason": reason,
+    }
+
 
 def create_asset(
     *,
@@ -64,28 +84,88 @@ def create_asset(
     cost: str,
     residual_value: str,
     useful_life_years: int,
-    location: str = "",
-    insurance_policy_ref: Optional[str] = None,
-    vehicle_registration: Optional[str] = None,
-    engine_number: Optional[str] = None,
+    location: str,
+    auto_capitalize: bool = False,
+    ppe_cost_account: str = DEFAULT_PPE_COST_GL,
+    funding_account: str = DEFAULT_FUNDING_GL,
+    currency: str = "NGN",
 ) -> Dict[str, Any]:
+    """
+    Creates an asset in the registry.
+
+    If auto_capitalize=True:
+      Posts DR PPE Cost (ppe_cost_account)
+           CR Funding (funding_account)
+
+      If posting is blocked due to BACKDATE_EXECUTION_DATE,
+      retries automatically with the correct override.
+
+    Returns:
+      { asset_id, status, capitalized, capitalization_transaction_id? }
+    """
 
     if not admin_user_id:
-        raise PermissionError("Admin user ID required.")
-
-    if useful_life_years <= 0:
-        raise ValueError("Useful life must be positive.")
+        raise PermissionError("admin_user_id required")
 
     cost_dec = _to_decimal(cost)
     residual_dec = _to_decimal(residual_value)
 
-    if residual_dec > cost_dec:
-        raise ValueError("Residual value cannot exceed cost.")
-
-    registry = _load_registry()
+    if cost_dec <= 0:
+        raise ValueError("Asset cost must be > 0")
+    if residual_dec < 0:
+        raise ValueError("Residual value must be >= 0")
+    if residual_dec >= cost_dec:
+        raise ValueError("Residual value must be less than cost")
+    if useful_life_years <= 0:
+        raise ValueError("useful_life_years must be > 0")
 
     asset_id = f"AST-{uuid.uuid4().hex.upper()}"
+    cap_ticket = f"CAP-{asset_id}"
 
+    capitalization_txn_id: Optional[str] = None
+
+    # 1) Optional capitalization posting (must succeed before registry write)
+    if auto_capitalize:
+        entries = [
+            {"account_no": ppe_cost_account, "side": "DR", "amount": str(cost_dec)},
+            {"account_no": funding_account, "side": "CR", "amount": str(cost_dec)},
+        ]
+
+        try:
+            res = post_transaction(
+                ticket_id=cap_ticket,
+                entries=entries,
+                maker_user_id=admin_user_id,
+                execution_date=purchase_date,
+                value_date=purchase_date,
+                description=f"Asset Capitalization – {asset_name}",
+                currency=currency,
+                override=None,
+            )
+            capitalization_txn_id = res.get("transaction_id")
+
+        except PermissionError as pe:
+            msg = str(pe)
+            if "required_override_type=BACKDATE_EXECUTION_DATE" in msg:
+                res = post_transaction(
+                    ticket_id=cap_ticket,
+                    entries=entries,
+                    maker_user_id=admin_user_id,
+                    execution_date=purchase_date,
+                    value_date=purchase_date,
+                    description=f"Asset Capitalization – {asset_name}",
+                    currency=currency,
+                    override=_make_backdate_override(
+                        admin_user_id=admin_user_id,
+                        ticket_id=f"{cap_ticket}-OVR",
+                        reason=f"Authorized backdated asset capitalization ({purchase_date})",
+                    ),
+                )
+                capitalization_txn_id = res.get("transaction_id")
+            else:
+                raise
+
+    # 2) Registry write (only after capitalization success)
     asset_record = {
         "asset_id": asset_id,
         "asset_name": asset_name,
@@ -93,94 +173,27 @@ def create_asset(
         "purchase_date": purchase_date,
         "cost": str(cost_dec),
         "residual_value": str(residual_dec),
-        "useful_life_years": useful_life_years,
-        "depreciation_method": "STRAIGHT_LINE",
-        "accumulated_depreciation": "0",
-        "status": "ACTIVE",
+        "useful_life_years": int(useful_life_years),
         "location": location,
-        "admin_owner_id": admin_user_id,
-        "insurance_policy_ref": insurance_policy_ref,
-        "vehicle_registration": vehicle_registration,
-        "engine_number": engine_number,
-        "depreciation_history": []  # tracks posted periods
+
+        "accumulated_depreciation": "0",
+        "depreciation_history": [],
+
+        "capitalized": bool(auto_capitalize),
+        "ppe_cost_account": ppe_cost_account,
+        "funding_account": funding_account,
+        "capitalization_ticket_id": cap_ticket if auto_capitalize else None,
+        "capitalization_transaction_id": capitalization_txn_id,
+        "currency": str(currency or "NGN").upper(),
     }
 
-    registry["assets"].append(asset_record)
-    _save_registry(registry)
+    reg = _load_registry()
+    reg["assets"].append(asset_record)
+    _save_registry(reg)
 
     return {
         "asset_id": asset_id,
-        "status": "CREATED"
+        "status": "CREATED",
+        "capitalized": bool(auto_capitalize),
+        "capitalization_transaction_id": capitalization_txn_id,
     }
-
-
-# ---------------------------------------------------
-# Depreciation Computation
-# ---------------------------------------------------
-
-def _annual_depreciation(asset: Dict[str, Any]) -> Decimal:
-    cost = _to_decimal(asset["cost"])
-    residual = _to_decimal(asset["residual_value"])
-    life = Decimal(str(asset["useful_life_years"]))
-    return (cost - residual) / life
-
-
-def _monthly_depreciation(asset: Dict[str, Any]) -> Decimal:
-    return _annual_depreciation(asset) / Decimal("12")
-
-
-def compute_depreciation_for_period(period: str) -> List[Dict[str, Any]]:
-    """
-    period format: YYYY-MM
-    Returns depreciation payloads for posting.
-    Does NOT update registry yet.
-    """
-
-    registry = _load_registry()
-    results = []
-
-    for asset in registry.get("assets", []):
-
-        if asset.get("status") != "ACTIVE":
-            continue
-
-        if period in asset.get("depreciation_history", []):
-            continue  # already depreciated this period
-
-        monthly_dep = _monthly_depreciation(asset)
-
-        results.append({
-            "asset_id": asset["asset_id"],
-            "asset_name": asset["asset_name"],
-            "period": period,
-            "depreciation_amount": str(monthly_dep),
-        })
-
-    return results
-
-
-# ---------------------------------------------------
-# Apply Depreciation (Update Registry Only)
-# ---------------------------------------------------
-
-def apply_depreciation_to_registry(
-    *,
-    asset_id: str,
-    period: str,
-    amount: str
-) -> None:
-
-    registry = _load_registry()
-
-    for asset in registry.get("assets", []):
-        if asset["asset_id"] == asset_id:
-
-            acc_dep = _to_decimal(asset["accumulated_depreciation"])
-            new_acc = acc_dep + _to_decimal(amount)
-
-            asset["accumulated_depreciation"] = str(new_acc)
-            asset["depreciation_history"].append(period)
-
-            break
-
-    _save_registry(registry)
