@@ -1,120 +1,198 @@
 """
 Capital Strata Systems (CSS)
-Phase 27B – Suspense Control Integrated Balance Sheet
+Phase 28B – Institutional Balance Sheet (COA + Canonical + Suspense Safe)
 """
 
 from __future__ import annotations
-
-import json
 from decimal import Decimal
-from pathlib import Path
 from collections import defaultdict
+from pathlib import Path
+import json
 
 
 JOURNAL_FILE = Path("audit_logs/journal.jsonl")
-
-SUSPENSE_ACCOUNT = "000-840-999"
-
-
-def _dr_cr(side: str, amount: Decimal) -> Decimal:
-    if side == "DR":
-        return amount
-    return -amount
+COA_FILE = Path("backend/app/config/chart_of_accounts.json")
 
 
-def generate_balance_sheet(period: str) -> dict:
-    assets = defaultdict(Decimal)
-    contra_assets = defaultdict(Decimal)
-    liabilities = defaultdict(Decimal)
-    equity = defaultdict(Decimal)
+def _to_decimal(x) -> Decimal:
+    return Decimal(str(x))
 
-    for line in JOURNAL_FILE.open():
-        if not line.strip():
-            continue
 
-        j = json.loads(line)
+def _load_coa():
+    data = json.loads(COA_FILE.read_text(encoding="utf-8"))
+    coa = {}
+    for a in data.get("accounts", []):
+        acc = str(a.get("account_no", "")).strip()
+        if acc:
+            coa[acc] = a
+    return coa
 
-        if not j.get("transaction_date", "").startswith(period):
-            continue
 
-        account = j["account_no"]
-        amount = Decimal(j["amount"])
-        value = _dr_cr(j["side"], amount)
+def _load_balances():
+    balances = defaultdict(lambda: {"DR": Decimal("0"), "CR": Decimal("0")})
 
-        # ------------------------------
-        # Classification Rules
-        # ------------------------------
+    if not JOURNAL_FILE.exists():
+        return balances
 
-        if account.startswith("000-840-0") or account.startswith("000-840-8"):
-            assets[account] += value
+    with JOURNAL_FILE.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                j = json.loads(line)
+            except Exception:
+                continue
 
-        elif account.startswith("000-840-3050"):
-            contra_assets[account] += value
+            acc = str(j.get("account_no", "")).strip()
+            side = str(j.get("side", "")).upper()
+            amt = _to_decimal(j.get("amount", "0"))
 
-        elif account.startswith("000-840-3") or account.startswith("CUST-840-"):
-            liabilities[account] += (-value)
+            if side in {"DR", "CR"}:
+                balances[acc][side] += amt
 
-        elif account.startswith("000-840-5"):
-            equity[account] += (-value)
+    return balances
 
-    total_assets_gross = sum(assets.values())
-    total_contra = sum(contra_assets.values())
-    total_assets_net = total_assets_gross - total_contra
-    total_liabilities = sum(liabilities.values())
-    total_equity = sum(equity.values())
 
-    suspense_balance = assets.get(SUSPENSE_ACCOUNT, Decimal("0"))
+def generate_balance_sheet(period: str):
+
+    coa = _load_coa()
+    balances = _load_balances()
+
+    assets = {}
+    contra_assets = {}
+    liabilities = {}
+    equity = {}
+    suspense_accounts = {}
+
+    total_assets = Decimal("0")
+    total_contra = Decimal("0")
+    total_liabilities = Decimal("0")
+    total_equity = Decimal("0")
+    total_suspense = Decimal("0")
+
+    for acc_no, meta in coa.items():
+
+        acc_type = str(meta.get("type", "")).upper()
+        group = str(meta.get("group", "")).upper()
+
+        dr = balances[acc_no]["DR"]
+        cr = balances[acc_no]["CR"]
+
+        # ---- ASSETS ----
+        if acc_type == "ASSET":
+
+            if "CONTRA" in group:
+                value = cr - dr
+                if value != 0:
+                    contra_assets[acc_no] = value
+                    total_contra += value
+            else:
+                value = dr - cr
+                if value != 0:
+                    assets[acc_no] = value
+                    total_assets += value
+
+        # ---- LIABILITIES ----
+        elif acc_type == "LIABILITY":
+            value = cr - dr
+            if value != 0:
+                liabilities[acc_no] = value
+                total_liabilities += value
+
+        # ---- EQUITY ----
+        elif acc_type == "EQUITY":
+            value = cr - dr
+            if value != 0:
+                equity[acc_no] = value
+                total_equity += value
+
+    # ---- Dynamic Canonical Customer Liabilities Only ----
+    for acc_no, bal in balances.items():
+        if acc_no.startswith("CUST-840-"):
+            value = bal["CR"] - bal["DR"]
+            if value != 0:
+                liabilities[acc_no] = value
+                total_liabilities += value
+
+    # ---- Suspense Auto-Detection ----
+    for acc_no in balances:
+        if acc_no.endswith("-999"):
+            value = balances[acc_no]["DR"] - balances[acc_no]["CR"]
+            if value != 0:
+                suspense_accounts[acc_no] = value
+                total_suspense += value
+
+    net_assets = total_assets - total_contra
+    balanced = net_assets == (total_liabilities + total_equity)
 
     return {
-        "assets": dict(assets),
-        "contra": dict(contra_assets),
-        "liabilities": dict(liabilities),
-        "equity": dict(equity),
-        "total_assets_net": total_assets_net,
+        "period": period,
+        "assets": assets,
+        "contra_assets": contra_assets,
+        "liabilities": liabilities,
+        "equity": equity,
+        "suspense": suspense_accounts,
+        "total_assets_gross": total_assets,
+        "total_contra_assets": total_contra,
+        "total_assets_net": net_assets,
         "total_liabilities": total_liabilities,
         "total_equity": total_equity,
-        "balanced": total_assets_net == (total_liabilities + total_equity),
-        "suspense_balance": suspense_balance
+        "total_suspense": total_suspense,
+        "balanced": balanced,
     }
 
 
 def print_balance_sheet(period: str):
+
     bs = generate_balance_sheet(period)
 
-    print("=" * 70)
+    def fmt(x: Decimal) -> str:
+        return f"{x:,.2f}"
+
+    print("\n" + "=" * 60)
     print("CAPITAL STRATA SYSTEMS (CSS)")
     print("BALANCE SHEET")
     print(f"As at: {period}")
-    print("=" * 70)
+    print("=" * 60)
 
     print("\nASSETS (GROSS)")
-    print("-" * 70)
-    for k, v in bs["assets"].items():
-        print(f"{k:<20} {v:>15,.2f}")
+    print("-" * 60)
+    for acc, val in sorted(bs["assets"].items()):
+        print(f"{acc:<20} {fmt(val):>15}")
+    print(f"{'Total Assets (Gross)':<20} {fmt(bs['total_assets_gross']):>15}")
 
     print("\nLESS: CONTRA ASSETS")
-    print("-" * 70)
-    for k, v in bs["contra"].items():
-        print(f"{k:<20} {v:>15,.2f}")
+    print("-" * 60)
+    for acc, val in sorted(bs["contra_assets"].items()):
+        print(f"{acc:<20} {fmt(val):>15}")
+    print(f"{'Total Contra Assets':<20} {fmt(bs['total_contra_assets']):>15}")
+
+    print("\nTOTAL ASSETS (NET)")
+    print("-" * 60)
+    print(f"{'Total Assets (Net)':<20} {fmt(bs['total_assets_net']):>15}")
 
     print("\nLIABILITIES")
-    print("-" * 70)
-    for k, v in bs["liabilities"].items():
-        print(f"{k:<20} {v:>15,.2f}")
+    print("-" * 60)
+    for acc, val in sorted(bs["liabilities"].items()):
+        print(f"{acc:<20} {fmt(val):>15}")
+    print(f"{'Total Liabilities':<20} {fmt(bs['total_liabilities']):>15}")
 
     print("\nEQUITY")
-    print("-" * 70)
-    for k, v in bs["equity"].items():
-        print(f"{k:<20} {v:>15,.2f}")
+    print("-" * 60)
+    for acc, val in sorted(bs["equity"].items()):
+        print(f"{acc:<20} {fmt(val):>15}")
+    print(f"{'Total Equity':<20} {fmt(bs['total_equity']):>15}")
 
-    print("\n" + "=" * 70)
-    print(f"Assets (Net) = {bs['total_assets_net']:,.2f}")
-    print(f"Liabilities + Equity = {(bs['total_liabilities'] + bs['total_equity']):,.2f}")
-    print(f"Balanced ? {bs['balanced']}")
-    print("=" * 70)
+    if bs["suspense"]:
+        print("\n⚠ SUSPENSE ACCOUNTS DETECTED")
+        print("-" * 60)
+        for acc, val in sorted(bs["suspense"].items()):
+            print(f"{acc:<20} {fmt(val):>15}")
+        print(f"{'Total Suspense':<20} {fmt(bs['total_suspense']):>15}")
 
-    # Suspense Warning
-    if bs["suspense_balance"] != Decimal("0"):
-        print("\n*** WARNING: Suspense Account Not Cleared ***")
-        print(f"SUSPENSE BALANCE: {bs['suspense_balance']:,.2f}")
-        print("System Integrity Compromised Until Resolved.")
+    print("\n" + "=" * 60)
+    print("Assets (Net) =", fmt(bs["total_assets_net"]))
+    print("Liabilities + Equity =", fmt(bs["total_liabilities"] + bs["total_equity"]))
+    print("Balanced ?", bs["balanced"])
+    print("=" * 60 + "\n")
