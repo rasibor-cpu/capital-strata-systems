@@ -40,12 +40,26 @@ def _safe_float(x: Any) -> Optional[float]:
         return None
 
 
+def _safe_int(x: Any) -> Optional[int]:
+    try:
+        if isinstance(x, (int, float)):
+            return int(x)
+        s = str(x).strip()
+        if s.isdigit():
+            return int(s)
+        return None
+    except Exception:
+        return None
+
+
 def _normalize_candles(resp: Any) -> List[Dict[str, Any]]:
     """
     Normalize Coinbase candles response into list[dict] with:
       { start, low, high, open, close, volume }
 
-    We accept either dict rows or list rows. If timestamps are present we keep them.
+    Coinbase responses can be:
+      - dict rows
+      - list rows like [start, low, high, open, close, volume]
     """
     out: List[Dict[str, Any]] = []
 
@@ -76,10 +90,6 @@ def _normalize_candles(resp: Any) -> List[Dict[str, Any]]:
             for row in c:
                 if not isinstance(row, (list, tuple)):
                     continue
-
-                # We don't assume exact ordering beyond having OHLCV somewhere;
-                # but many Coinbase variants look like:
-                # [start, low, high, open, close, volume]
                 if len(row) >= 6:
                     out.append(
                         {
@@ -96,27 +106,35 @@ def _normalize_candles(resp: Any) -> List[Dict[str, Any]]:
     return out
 
 
-def _latest_candle_info(candles: List[Dict[str, Any]]) -> Tuple[Optional[float], Optional[str]]:
-    if not candles:
-        return None, None
+def _sort_candles_by_start(candles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Coinbase often returns candles newest->oldest.
+    We force ascending order by 'start' so:
+      candles[-1] is the most recent.
+    """
+    def key_fn(x: Dict[str, Any]) -> int:
+        s = _safe_int(x.get("start"))
+        return s if s is not None else -1
 
-    # assume last item is most recent; if not, still good enough for diagnostics
-    last = candles[-1]
+    # filter out rows with no usable timestamp
+    usable = [c for c in candles if _safe_int(c.get("start")) is not None]
+    usable.sort(key=key_fn)
+    return usable
+
+
+def _latest_candle_info(candles_sorted: List[Dict[str, Any]]) -> Tuple[Optional[float], Optional[str], Optional[int]]:
+    if not candles_sorted:
+        return None, None, None
+
+    last = candles_sorted[-1]
     close = _safe_float(last.get("close"))
-    start = last.get("start")
+    start_i = _safe_int(last.get("start"))
 
     ts = None
-    if start is not None:
-        try:
-            # if epoch seconds
-            if isinstance(start, (int, float)) or (isinstance(start, str) and start.isdigit()):
-                ts = datetime.fromtimestamp(int(start), tz=timezone.utc).isoformat(timespec="seconds")
-            else:
-                ts = str(start)
-        except Exception:
-            ts = str(start)
+    if start_i is not None:
+        ts = datetime.fromtimestamp(start_i, tz=timezone.utc).isoformat(timespec="seconds")
 
-    return close, ts
+    return close, ts, start_i
 
 
 def run_loop() -> None:
@@ -136,7 +154,7 @@ def run_loop() -> None:
         min_spread_bps=_as_float(_env("MAX_SPREAD_BPS", "25"), 25.0),
     )
 
-    # simple single-position guard (paper-friendly)
+    # single-position guard (paper-safe)
     position_open = False
     entry_price = None
     take_profit = None
@@ -200,15 +218,19 @@ def run_loop() -> None:
                     time.sleep(2)
                     continue
 
-            # --- candles + vwap
+            # --- candles + vwap (FIX: sort candles by timestamp ascending)
             candles_resp = executor.get_candles(product_id=product_id, granularity=granularity)
-            candles = _normalize_candles(candles_resp)
+            candles_raw = _normalize_candles(candles_resp)
+            candles = _sort_candles_by_start(candles_raw)
 
-            last_close, last_ts = _latest_candle_info(candles)
+            last_close, last_ts, last_start = _latest_candle_info(candles)
             vwap = compute_vwap_from_candles(candles, cfg.window)
 
             if vwap is None:
-                print(f"mid={mid:.2f} spread={spread_bps:.2f}bps VWAP=None last_close={last_close} last_ts={last_ts}")
+                print(
+                    f"mid={mid:.2f} spread={spread_bps:.2f}bps VWAP=None "
+                    f"candles={len(candles)} last_close={last_close} last_ts={last_ts}"
+                )
                 time.sleep(10)
                 continue
 
