@@ -1,113 +1,88 @@
-"""
-Capital Strata Systems
-Engine Startup Controller
-
-This module ensures the engine cannot start live trading
-without explicit operator confirmation.
-"""
+from __future__ import annotations
 
 import os
-import sys
+import random
+import time
+
+from backend.execution.coinbase_executor import CoinbaseExecutor, OrderIntent
+from backend.risk.trading_safety import TradingSafety
 
 
-def arm_live_trading():
-
-    print("\n====================================")
-    print(" CAPITAL STRATA SYSTEMS ENGINE ")
-    print("====================================\n")
-
-    while True:
-
-        response = input("Arm LIVE trading? (Y/N): ").strip().upper()
-
-        if response == "Y":
-
-            os.environ["LIVE_TRADING_ARMED"] = "YES"
-
-            print("\nLIVE trading is ARMED")
-
-            return True
-
-        elif response == "N":
-
-            os.environ["LIVE_TRADING_ARMED"] = "NO"
-
-            print("\nLIVE trading is DISARMED")
-
-            return False
-
-        else:
-
-            print("Please enter Y or N.")
+def generate_signal() -> str:
+    """
+    Placeholder signal generator.
+    Emits BUY randomly for plumbing tests.
+    """
+    return "BUY" if random.random() > 0.7 else "NONE"
 
 
-def select_mode():
-
-    print("\nSelect trading mode for today:\n")
-
-    print("1 - DRY RUN (no real trades)")
-    print("2 - PAPER TEST (simulated execution)")
-    print("3 - LIVE TRADING\n")
-
-    while True:
-
-        mode = input("Enter mode (1-3): ").strip()
-
-        if mode == "1":
-
-            os.environ["TRADE_MODE"] = "DRY_RUN"
-
-            return "DRY_RUN"
-
-        elif mode == "2":
-
-            os.environ["TRADE_MODE"] = "PAPER"
-
-            return "PAPER"
-
-        elif mode == "3":
-
-            if os.environ.get("LIVE_TRADING_ARMED") != "YES":
-
-                print("\nLIVE trading was not armed.")
-
-                print("Restart and arm live trading first.")
-
-                sys.exit()
-
-            os.environ["TRADE_MODE"] = "LIVE"
-
-            return "LIVE"
-
-        else:
-
-            print("Invalid choice.")
-
-
-def start_engine():
-
-    armed = arm_live_trading()
-
-    mode = select_mode()
-
-    print("\n----------------------------------")
-    print("ENGINE START SUMMARY")
-    print("----------------------------------")
-
-    print("Live Armed:", armed)
-    print("Mode:", mode)
-
-    print("\nInitializing trading executor...\n")
-
-    from backend.execution.coinbase_executor import CoinbaseExecutor
+def run_loop() -> None:
 
     executor = CoinbaseExecutor()
+    safety = TradingSafety()
 
-    print("Coinbase executor ready.")
+    product_id = os.getenv("PRODUCT_ID", "BTC-USDC").strip().upper()
+    quote_size = os.getenv("SMOKE_QUOTE_SIZE", "2").strip()
 
-    return executor
+    print("\nStrategy loop started.")
+    print("TRADE_MODE:", os.getenv("TRADE_MODE", "DRY_RUN"))
+    print("LIVE_TRADING_ARMED:", os.getenv("LIVE_TRADING_ARMED", "NO"))
+    print("PRODUCT_ID:", product_id)
+    print("SMOKE_QUOTE_SIZE:", quote_size)
+    print("KILL_SWITCH_FILE:", str(safety.cfg.kill_switch_file))
+    print("-------------------------------------------------\n")
+
+    while True:
+
+        try:
+
+            # kill switch check
+            if safety.kill_switch_active():
+                print("KILL SWITCH ACTIVE — LIVE orders blocked.")
+                time.sleep(5)
+                continue
+
+            signal = generate_signal()
+            print("Signal:", signal)
+
+            if signal == "BUY":
+
+                allowed, reason = safety.can_send_order(quote_size=quote_size)
+
+                if not allowed:
+                    safety.record_block(reason)
+                    print("BLOCKED:", reason)
+                    time.sleep(5)
+                    continue
+
+                intent = OrderIntent(
+                    product_id=product_id,
+                    side="BUY",
+                    order_type="MARKET",
+                    quote_size=quote_size
+                )
+
+                result = executor.create_order(intent)
+
+                print("Order Result:", result)
+
+                # IMPORTANT SAFETY FIX
+                # record immediately after order response
+                if not result.get("dry_run", True):
+                    safety.record_order_sent()
+
+        except Exception as e:
+
+            print("ENGINE EXCEPTION:", str(e))
+
+        time.sleep(10)
+
+
+def main():
+
+    run_loop()
 
 
 if __name__ == "__main__":
 
-    start_engine()
+    main()
