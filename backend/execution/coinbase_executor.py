@@ -5,7 +5,8 @@ import os
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
+
 
 try:
     from coinbase.rest import RESTClient  # pip: coinbase-advanced-py
@@ -60,19 +61,28 @@ def _load_keyfile(path: str) -> Dict[str, str]:
 
 
 def _utc_rfc3339(dt: datetime) -> str:
-    # Coinbase typically accepts RFC3339 / ISO-8601
-    # e.g. 2026-03-04T17:34:35Z
     return dt.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _flatten_once(x: Any) -> Any:
+    # Coinbase responses sometimes show list-of-list-of-dict
+    # This flattens one level if needed.
+    if isinstance(x, list) and len(x) == 1 and isinstance(x[0], list):
+        return x[0]
+    return x
+
+
+def _first_dict(x: Any) -> Optional[Dict[str, Any]]:
+    x = _flatten_once(x)
+    if isinstance(x, list) and x:
+        if isinstance(x[0], dict):
+            return x[0]
+    return None
 
 
 class CoinbaseExecutor:
     """
     Coinbase Advanced Trade gateway used by strategy_loop.
-
-    Provides:
-      - get_best_bid_ask(product_id, limit=1) -> {"bid":float,"ask":float} | None
-      - get_candles(product_id, granularity, start=None, end=None, limit=300) -> dict
-      - create_order(OrderIntent) -> dict (paper-safe unless LIVE + ARMED)
     """
 
     def __init__(self) -> None:
@@ -92,68 +102,73 @@ class CoinbaseExecutor:
 
     def get_best_bid_ask(self, product_id: str, limit: int = 1) -> Optional[Dict[str, float]]:
         """
-        Robust parsing across Coinbase response shapes, plus sanity checks.
-        If the parsed values look wrong, we return None (strategy will skip tick).
+        FIXED:
+        - Coinbase is returning MANY pricebooks; we must select the one matching product_id.
+        - Handle nested list shapes for pricebooks/bids/asks.
         """
         try:
             resp = self._client.get_best_bid_ask(product_id=product_id, limit=limit)
             d = _to_dict(resp)
 
-            def _extract_bid_ask(bids: Any, asks: Any) -> Optional[Dict[str, float]]:
-                if not isinstance(bids, list) or not isinstance(asks, list) or not bids or not asks:
-                    return None
-                try:
-                    bid = float(bids[0].get("price"))  # type: ignore[union-attr]
-                    ask = float(asks[0].get("price"))  # type: ignore[union-attr]
-                except Exception:
-                    return None
-
-                # sanity
-                if bid <= 0 or ask <= 0 or ask < bid:
-                    return None
-
-                mid = (bid + ask) / 2.0
-                # If mid is absurdly tiny for a crypto USD pair, treat as invalid parse
-                if mid < 1.0 and ("-USD" in product_id or "-USDC" in product_id):
-                    return None
-
-                return {"bid": bid, "ask": ask}
-
-            # Shape A: {"pricebooks":[{"bids":[{"price":..}], "asks":[{"price":..}]}]}
-            if isinstance(d.get("pricebooks"), list) and d["pricebooks"]:
-                pb = d["pricebooks"][0]
-                out = _extract_bid_ask(pb.get("bids"), pb.get("asks"))
-                if out:
-                    return out
-
-            # Shape B: {"pricebook":{"bids":[...], "asks":[...]}}
-            pb = d.get("pricebook")
-            if isinstance(pb, dict):
-                out = _extract_bid_ask(pb.get("bids"), pb.get("asks"))
-                if out:
-                    return out
-
-            # Shape C: {"bids":[...], "asks":[...]}
-            out = _extract_bid_ask(d.get("bids"), d.get("asks"))
-            if out:
-                return out
-
-            # Shape D: {"best_bid":"..","best_ask":".."}
-            if "best_bid" in d and "best_ask" in d:
-                try:
-                    bid = float(d["best_bid"])
-                    ask = float(d["best_ask"])
-                    if bid > 0 and ask > 0 and ask >= bid:
-                        mid = (bid + ask) / 2.0
-                        if not (mid < 1.0 and ("-USD" in product_id or "-USDC" in product_id)):
-                            return {"bid": bid, "ask": ask}
-                except Exception:
-                    pass
-
             if _env("DEBUG_BBA", "0") == "1":
                 print("DEBUG_BBA_RAW:", d)
 
-            return None
+            # Normalize pricebooks to a list[dict]
+            raw_pricebooks = d.get("pricebooks", [])
+            raw_pricebooks = _flatten_once(raw_pricebooks)
+
+            pricebooks: List[Dict[str, Any]] = []
+            if isinstance(raw_pricebooks, list):
+                for item in raw_pricebooks:
+                    if isinstance(item, dict):
+                        pricebooks.append(item)
+                    elif isinstance(item, list) and item and isinstance(item[0], dict):
+                        # list-of-dict wrapped
+                        pricebooks.append(item[0])
+
+            # If response is a single pricebook dict
+            if not pricebooks:
+                pb_single = d.get("pricebook")
+                if isinstance(pb_single, dict):
+                    pricebooks = [pb_single]
+
+            if not pricebooks:
+                return None
+
+            # Select the matching product_id pricebook
+            want = product_id.upper()
+            pb = None
+            for p in pricebooks:
+                pid = str(p.get("product_id", "")).upper()
+                if pid == want:
+                    pb = p
+                    break
+
+            # If still not found, we must NOT use random first book (it causes mid=0.01 nonsense)
+            if pb is None:
+                return None
+
+            bids = _flatten_once(pb.get("bids", []))
+            asks = _flatten_once(pb.get("asks", []))
+
+            b0 = _first_dict(bids)
+            a0 = _first_dict(asks)
+            if not b0 or not a0:
+                return None
+
+            bid = float(b0.get("price"))
+            ask = float(a0.get("price"))
+
+            if bid <= 0 or ask <= 0 or ask < bid:
+                return None
+
+            # sanity: reject absurdly tiny mids for USD/USDC pairs
+            mid = (bid + ask) / 2.0
+            if mid < 1.0 and ("-USD" in want or "-USDC" in want):
+                return None
+
+            return {"bid": bid, "ask": ask}
+
         except Exception as e:
             print("BBA_ERROR:", str(e))
             return None
@@ -171,21 +186,15 @@ class CoinbaseExecutor:
         limit: int = 300,
     ) -> Dict[str, Any]:
         """
-        Coinbase candles often REQUIRE start/end. We auto-generate a valid window if missing.
-
-        - end defaults to "now" UTC RFC3339
-        - start defaults to end - lookback window (based on limit & granularity)
+        Coinbase candles often REQUIRE start/end. Auto-generate if missing.
         """
-        # If caller didn't provide start/end, generate them.
         if not end:
             end_dt = datetime.now(timezone.utc)
             end = _utc_rfc3339(end_dt)
         else:
-            # try to keep; strategy may pass in already-correct ISO string
             end_dt = None
 
         if not start:
-            # conservative lookback based on granularity
             g = granularity.upper()
             minutes_per = 15
             if "ONE_MINUTE" in g:
@@ -206,14 +215,12 @@ class CoinbaseExecutor:
                 minutes_per = 1440
 
             if end_dt is None:
-                # if end was provided as string, approximate now for lookback
                 end_dt = datetime.now(timezone.utc)
 
-            lookback_minutes = max(60, min(limit * minutes_per, 60 * 24 * 20))  # cap ~20 days
+            lookback_minutes = max(60, min(limit * minutes_per, 60 * 24 * 20))
             start_dt = end_dt - timedelta(minutes=lookback_minutes)
             start = _utc_rfc3339(start_dt)
 
-        # Call SDK with start/end (primary)
         try:
             resp = self._client.get_candles(
                 product_id=product_id,
@@ -223,11 +230,9 @@ class CoinbaseExecutor:
             )
             return _to_dict(resp)
         except TypeError:
-            # Some SDK variants use positional order
             resp = self._client.get_candles(product_id, start, end, granularity)
             return _to_dict(resp)
         except Exception as e:
-            # If Coinbase rejects timestamps, print them once for diagnosis
             print("CANDLE_ERROR:", str(e))
             print("CANDLE_DEBUG:", {"product_id": product_id, "granularity": granularity, "start": start, "end": end})
             return {"candles": []}
