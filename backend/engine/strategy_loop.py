@@ -10,7 +10,6 @@ from backend.risk.trading_safety import TradingSafety
 from backend.strategy.vwap_mean_reversion import (
     VWAPConfig,
     compute_vwap_from_candles,
-    should_buy_mean_reversion,
 )
 
 
@@ -53,14 +52,6 @@ def _safe_int(x: Any) -> Optional[int]:
 
 
 def _normalize_candles(resp: Any) -> List[Dict[str, Any]]:
-    """
-    Normalize Coinbase candles response into list[dict] with:
-      { start, low, high, open, close, volume }
-
-    Coinbase responses can be:
-      - dict rows
-      - list rows like [start, low, high, open, close, volume]
-    """
     out: List[Dict[str, Any]] = []
 
     if isinstance(resp, dict) and isinstance(resp.get("candles"), list):
@@ -68,7 +59,6 @@ def _normalize_candles(resp: Any) -> List[Dict[str, Any]]:
         if not c:
             return []
 
-        # dict rows
         if isinstance(c[0], dict):
             for x in c:
                 if not isinstance(x, dict):
@@ -85,11 +75,11 @@ def _normalize_candles(resp: Any) -> List[Dict[str, Any]]:
                 )
             return out
 
-        # list/tuple rows
         if isinstance(c[0], (list, tuple)):
             for row in c:
                 if not isinstance(row, (list, tuple)):
                     continue
+                # common: [start, low, high, open, close, volume]
                 if len(row) >= 6:
                     out.append(
                         {
@@ -107,34 +97,21 @@ def _normalize_candles(resp: Any) -> List[Dict[str, Any]]:
 
 
 def _sort_candles_by_start(candles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Coinbase often returns candles newest->oldest.
-    We force ascending order by 'start' so:
-      candles[-1] is the most recent.
-    """
-    def key_fn(x: Dict[str, Any]) -> int:
-        s = _safe_int(x.get("start"))
-        return s if s is not None else -1
-
-    # filter out rows with no usable timestamp
     usable = [c for c in candles if _safe_int(c.get("start")) is not None]
-    usable.sort(key=key_fn)
+    usable.sort(key=lambda x: int(_safe_int(x.get("start")) or 0))
     return usable
 
 
-def _latest_candle_info(candles_sorted: List[Dict[str, Any]]) -> Tuple[Optional[float], Optional[str], Optional[int]]:
+def _latest_candle_info(candles_sorted: List[Dict[str, Any]]) -> Tuple[Optional[float], Optional[str]]:
     if not candles_sorted:
-        return None, None, None
-
+        return None, None
     last = candles_sorted[-1]
     close = _safe_float(last.get("close"))
     start_i = _safe_int(last.get("start"))
-
     ts = None
     if start_i is not None:
         ts = datetime.fromtimestamp(start_i, tz=timezone.utc).isoformat(timespec="seconds")
-
-    return close, ts, start_i
+    return close, ts
 
 
 def run_loop() -> None:
@@ -147,23 +124,28 @@ def run_loop() -> None:
     granularity = _env("CANDLE_GRANULARITY", "FIFTEEN_MINUTE")
     vwap_window = _as_int(_env("VWAP_WINDOW", "40"), 40)
 
+    entry_bps = _as_float(_env("VWAP_ENTRY_BPS", "12"), 12.0)  # BUY when dev <= -entry_bps
+    exit_bps = _as_float(_env("VWAP_EXIT_BPS", "4"), 4.0)      # exit when dev >= -exit_bps (mean reversion)
+
+    max_spread_bps = _as_float(_env("MAX_SPREAD_BPS", "25"), 25.0)
+
     cfg = VWAPConfig(
         window=vwap_window,
-        entry_bps=_as_float(_env("VWAP_ENTRY_BPS", "8"), 8.0),
-        exit_bps=_as_float(_env("VWAP_EXIT_BPS", "6"), 6.0),
-        min_spread_bps=_as_float(_env("MAX_SPREAD_BPS", "25"), 25.0),
+        entry_bps=entry_bps,
+        exit_bps=exit_bps,
+        min_spread_bps=max_spread_bps,
     )
 
-    # single-position guard (paper-safe)
+    # position state
     position_open = False
-    entry_price = None
-    take_profit = None
-    stop_loss = None
+    entry_price: Optional[float] = None
+    take_profit: Optional[float] = None
+    stop_loss: Optional[float] = None
 
-    tp_bps = _as_float(_env("TP_BPS", "40"), 40.0)   # 0.40%
-    sl_bps = _as_float(_env("SL_BPS", "20"), 20.0)   # 0.20%
+    tp_bps = _as_float(_env("TP_BPS", "40"), 40.0)
+    sl_bps = _as_float(_env("SL_BPS", "20"), 20.0)
 
-    print("\nStrategy loop started (VWAP Mean Reversion).")
+    print("\nStrategy loop started (VWAP Mean Reversion | Spot Safe).")
     print("UTC_NOW:", datetime.now(timezone.utc).isoformat(timespec="seconds"))
     print("TRADE_MODE:", _env("TRADE_MODE", "DRY_RUN"))
     print("LIVE_TRADING_ARMED:", _env("LIVE_TRADING_ARMED", "NO"))
@@ -171,9 +153,9 @@ def run_loop() -> None:
     print("SMOKE_QUOTE_SIZE:", quote_size)
     print("CANDLE_GRANULARITY:", granularity)
     print("VWAP_WINDOW:", cfg.window)
-    print("VWAP_ENTRY_BPS:", cfg.entry_bps)
-    print("VWAP_EXIT_BPS:", cfg.exit_bps)
-    print("MAX_SPREAD_BPS:", cfg.min_spread_bps)
+    print("ENTRY_BPS (BUY when dev <= -ENTRY):", entry_bps)
+    print("EXIT_BPS (SELL when dev >= -EXIT):", exit_bps)
+    print("MAX_SPREAD_BPS:", max_spread_bps)
     print("TP_BPS:", tp_bps, "SL_BPS:", sl_bps)
     print("KILL_SWITCH_FILE:", str(safety.cfg.kill_switch_file))
     print("-------------------------------------------------\n")
@@ -196,10 +178,29 @@ def run_loop() -> None:
             mid = (bid + ask) / 2.0
             spread_bps = ((ask - bid) / mid) * 10000.0 if mid > 0 else 9999.0
 
-            # --- manage open position (paper)
-            if position_open and entry_price and take_profit and stop_loss:
+            if spread_bps > max_spread_bps:
+                print(f"SPREAD_TOO_WIDE mid={mid:.2f} spread={spread_bps:.2f}bps > {max_spread_bps:.2f}bps")
+                time.sleep(10)
+                continue
+
+            # candles/vwap
+            candles_resp = executor.get_candles(product_id=product_id, granularity=granularity)
+            candles = _sort_candles_by_start(_normalize_candles(candles_resp))
+
+            last_close, last_ts = _latest_candle_info(candles)
+            vwap = compute_vwap_from_candles(candles, cfg.window)
+
+            if vwap is None or vwap <= 0:
+                print(f"VWAP_NONE mid={mid:.2f} last_close={last_close} last_ts={last_ts}")
+                time.sleep(10)
+                continue
+
+            dev_bps_signed = ((mid - vwap) / vwap) * 10000.0
+
+            # ---- position exits first
+            if position_open and entry_price is not None and take_profit is not None and stop_loss is not None:
                 if mid >= take_profit:
-                    print(f">>> TAKE PROFIT hit at {mid:.2f} (entry={entry_price:.2f})")
+                    print(f">>> TAKE_PROFIT mid={mid:.2f} entry={entry_price:.2f} dev={dev_bps_signed:.2f}bps")
                     executor.create_order(
                         OrderIntent(product_id=product_id, side="SELL", order_type="MARKET", base_size="0.00003")
                     )
@@ -209,7 +210,7 @@ def run_loop() -> None:
                     continue
 
                 if mid <= stop_loss:
-                    print(f">>> STOP LOSS hit at {mid:.2f} (entry={entry_price:.2f})")
+                    print(f">>> STOP_LOSS mid={mid:.2f} entry={entry_price:.2f} dev={dev_bps_signed:.2f}bps")
                     executor.create_order(
                         OrderIntent(product_id=product_id, side="SELL", order_type="MARKET", base_size="0.00003")
                     )
@@ -218,28 +219,26 @@ def run_loop() -> None:
                     time.sleep(2)
                     continue
 
-            # --- candles + vwap (FIX: sort candles by timestamp ascending)
-            candles_resp = executor.get_candles(product_id=product_id, granularity=granularity)
-            candles_raw = _normalize_candles(candles_resp)
-            candles = _sort_candles_by_start(candles_raw)
+                # mean reversion exit: price has reverted back toward VWAP
+                if dev_bps_signed >= -exit_bps:
+                    print(f">>> MEAN_REVERSION_EXIT mid={mid:.2f} vwap={vwap:.2f} dev={dev_bps_signed:.2f}bps")
+                    executor.create_order(
+                        OrderIntent(product_id=product_id, side="SELL", order_type="MARKET", base_size="0.00003")
+                    )
+                    position_open = False
+                    entry_price = take_profit = stop_loss = None
+                    time.sleep(2)
+                    continue
 
-            last_close, last_ts, last_start = _latest_candle_info(candles)
-            vwap = compute_vwap_from_candles(candles, cfg.window)
+            # ---- entry (spot-safe): BUY only when mid is BELOW vwap by threshold
+            reason = "NO_SIGNAL"
+            do_buy = dev_bps_signed <= (-entry_bps)
 
-            if vwap is None:
-                print(
-                    f"mid={mid:.2f} spread={spread_bps:.2f}bps VWAP=None "
-                    f"candles={len(candles)} last_close={last_close} last_ts={last_ts}"
-                )
-                time.sleep(10)
-                continue
-
-            dev_bps = ((mid - vwap) / vwap) * 10000.0 if vwap > 0 else 0.0
-
-            do_buy, reason = should_buy_mean_reversion(mid, vwap, spread_bps, cfg)
+            if do_buy:
+                reason = f"BUY_SIGNAL dev={dev_bps_signed:.2f}bps <= -{entry_bps:.2f}bps"
 
             print(
-                f"mid={mid:.2f} vwap={vwap:.2f} dev={dev_bps:.2f}bps "
+                f"mid={mid:.2f} vwap={vwap:.2f} dev={dev_bps_signed:.2f}bps "
                 f"spread={spread_bps:.2f}bps last_close={last_close} last_ts={last_ts} => {reason}"
             )
 
@@ -261,7 +260,7 @@ def run_loop() -> None:
                 stop_loss = mid * (1 - sl_bps / 10000.0)
                 position_open = True
 
-                print(f">>> POSITION OPENED entry={entry_price:.2f} TP={take_profit:.2f} SL={stop_loss:.2f}")
+                print(f">>> POSITION_OPEN entry={entry_price:.2f} TP={take_profit:.2f} SL={stop_loss:.2f}")
 
                 if isinstance(result, dict) and not result.get("dry_run", True):
                     safety.record_order_sent()
