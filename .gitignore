@@ -68,3 +68,8 @@ coinbase_key.json
 coinbase_private_key.pem
 .env
 keys/
+coinbase_key.json
+cdp_api_key*.json
+*.pem
+.env
+keys/
