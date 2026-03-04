@@ -1,19 +1,28 @@
 from __future__ import annotations
 
-import glob
 import json
 import os
-import uuid
+import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any, Dict, Optional
 
-from coinbase.rest import RESTClient
+# Coinbase Advanced Trade SDK (pip: coinbase-advanced-py)
+try:
+    from coinbase.rest import RESTClient  # type: ignore
+except Exception as e:  # pragma: no cover
+    RESTClient = None  # type: ignore
+    _IMPORT_ERR = e
+else:
+    _IMPORT_ERR = None
 
 
-def _utc_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+@dataclass(frozen=True)
+class OrderIntent:
+    product_id: str
+    side: str                # "BUY" / "SELL"
+    order_type: str          # "MARKET"
+    quote_size: Optional[str] = None  # for BUY market (quote currency)
+    base_size: Optional[str] = None   # for SELL market (base currency)
 
 
 def _env(name: str, default: str) -> str:
@@ -21,218 +30,206 @@ def _env(name: str, default: str) -> str:
     return default if v is None else str(v).strip()
 
 
-def _as_int(s: str, default: int) -> int:
+def _load_coinbase_keyfile(path: str) -> Dict[str, str]:
+    """
+    Coinbase CDP key file typically contains:
+      {
+        "name": "organizations/.../apiKeys/.....",
+        "privateKey": "-----BEGIN EC PRIVATE KEY-----\n...\n-----END EC PRIVATE KEY-----\n"
+      }
+    """
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Coinbase key file not found: {path}")
+
+    with open(path, "r", encoding="utf-8") as f:
+        d = json.load(f)
+
+    if not isinstance(d, dict):
+        raise ValueError("Coinbase key file is not a JSON object")
+
+    name = str(d.get("name", "")).strip()
+    pk = str(d.get("privateKey", "")).strip()
+
+    if not name or not pk:
+        raise ValueError("Coinbase key file missing 'name' and/or 'privateKey'")
+
+    return {"name": name, "privateKey": pk}
+
+
+def _to_dict(x: Any) -> Any:
+    """
+    Normalize SDK responses to dict where possible (without crashing).
+    """
+    if isinstance(x, dict):
+        return x
+    # coinbase-advanced-py often returns pydantic models
+    for attr in ("to_dict", "dict", "model_dump"):
+        if hasattr(x, attr):
+            try:
+                fn = getattr(x, attr)
+                return fn()
+            except Exception:
+                pass
+    # last resort: string
     try:
-        return int(str(s).strip())
+        return {"_raw": str(x)}
     except Exception:
-        return default
-
-
-def _pick_key_file() -> Path:
-    explicit = _env("COINBASE_KEY_JSON", "")
-    if explicit:
-        p = Path(explicit).expanduser().resolve()
-        if p.exists():
-            return p
-        raise FileNotFoundError(f"COINBASE_KEY_JSON path not found: {p}")
-
-    p1 = Path("coinbase_key.json").resolve()
-    if p1.exists():
-        return p1
-
-    matches = [Path(m).resolve() for m in glob.glob("cdp_api_key*.json")]
-    if matches:
-        matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-        return matches[0]
-
-    raise FileNotFoundError(
-        "No Coinbase key JSON found. Expected COINBASE_KEY_JSON env var OR coinbase_key.json OR cdp_api_key*.json in repo root."
-    )
-
-
-def _to_plain_dict(obj: Any) -> Dict[str, Any]:
-    if obj is None:
-        return {}
-    if isinstance(obj, dict):
-        return obj
-    if hasattr(obj, "model_dump"):
-        try:
-            return obj.model_dump()  # type: ignore
-        except Exception:
-            pass
-    if hasattr(obj, "dict"):
-        try:
-            return obj.dict()  # type: ignore
-        except Exception:
-            pass
-    if hasattr(obj, "to_dict"):
-        try:
-            return obj.to_dict()  # type: ignore
-        except Exception:
-            pass
-    if hasattr(obj, "__dict__"):
-        try:
-            return {k: v for k, v in obj.__dict__.items() if not str(k).startswith("_")}
-        except Exception:
-            pass
-    return {"_raw": str(obj)}
-
-
-def _safe_float(x: Any) -> Optional[float]:
-    try:
-        return float(x)
-    except Exception:
-        return None
-
-
-@dataclass(frozen=True)
-class OrderIntent:
-    product_id: str
-    side: str              # BUY/SELL
-    order_type: str        # MARKET/LIMIT
-    quote_size: Optional[str] = None
-    base_size: Optional[str] = None
-    limit_price: Optional[str] = None
-    client_order_id: Optional[str] = None
+        return {"_raw": "<unserializable>"}
 
 
 class CoinbaseExecutor:
     """
-    Coinbase Advanced Trade executor.
+    Order + market data gateway for Coinbase Advanced Trade.
+    Supports:
+      - get_best_bid_ask(product_id, limit=1)
+      - get_candles(product_id, granularity, start=None, end=None, limit=300)
+      - create_order(intent)
     """
 
     def __init__(self) -> None:
-        self.trade_mode = _env("TRADE_MODE", "DRY_RUN").upper()
-        self.armed = _env("LIVE_TRADING_ARMED", "NO").upper() == "YES"
-        self.key_json_path = _pick_key_file()
-        self._client = self._init_client()
-
-    def _init_client(self) -> RESTClient:
-        data = json.loads(self.key_json_path.read_text(encoding="utf-8"))
-
-        api_key = data.get("name") or data.get("apiKey") or data.get("api_key")
-        api_secret = data.get("privateKey") or data.get("private_key") or data.get("secret")
-
-        if not api_key or not api_secret:
+        if RESTClient is None:
             raise RuntimeError(
-                f"Key JSON missing fields. Expected 'name' and 'privateKey'. File: {self.key_json_path}"
+                "Coinbase SDK not available. Install 'coinbase-advanced-py'. "
+                f"Root error: {_IMPORT_ERR}"
             )
 
-        return RESTClient(api_key=api_key, api_secret=api_secret)
+        # Prefer your persisted filename in repo root
+        key_file = _env("COINBASE_KEY_FILE", "coinbase_key.json")
+        creds = _load_coinbase_keyfile(key_file)
 
-    def _new_client_order_id(self) -> str:
-        return f"CSS-{uuid.uuid4().hex[:24]}"
+        # coinbase-advanced-py RESTClient expects api_key + api_secret (private key)
+        self._client = RESTClient(api_key=creds["name"], api_secret=creds["privateKey"])
 
-    def _live_allowed(self) -> bool:
-        return self.trade_mode == "LIVE" and self.armed
-
-    # -----------------------------
+    # ----------------------------
     # Market data
-    # -----------------------------
-
+    # ----------------------------
     def get_best_bid_ask(self, product_id: str, limit: int = 1) -> Optional[Dict[str, float]]:
         """
-        Uses Advanced Trade product book endpoint (top-of-book).
-        Returns {"bid": float, "ask": float} or None.
+        Returns: {"bid": float, "ask": float} or None
         """
+        # SDK method name used in your earlier code path
+        resp = self._client.get_best_bid_ask(product_id=product_id, limit=limit)
+        d = _to_dict(resp)
+
+        # Common shapes:
+        # 1) {"pricebook":{"bids":[{"price":"..."},...], "asks":[{"price":"..."}]}}
+        # 2) {"bids":[{"price":"..."}], "asks":[{"price":"..."}]}
+        pb = d.get("pricebook", d)
+
+        bids = pb.get("bids", [])
+        asks = pb.get("asks", [])
+
+        if not bids or not asks:
+            return None
+
         try:
-            book = _to_plain_dict(self._client.get_product_book(product_id=product_id, limit=limit))  # type: ignore
-            pricebook = book.get("pricebook") or {}
-            bids = pricebook.get("bids") or []
-            asks = pricebook.get("asks") or []
-
-            if not bids or not asks:
-                return None
-
-            bid = _safe_float(bids[0].get("price") if isinstance(bids[0], dict) else None)
-            ask = _safe_float(asks[0].get("price") if isinstance(asks[0], dict) else None)
-
-            if bid is None or ask is None:
-                return None
-
-            return {"bid": float(bid), "ask": float(ask)}
-
+            bid = float(bids[0].get("price"))
+            ask = float(asks[0].get("price"))
+            return {"bid": bid, "ask": ask}
         except Exception:
             return None
 
-    def get_candles(self, product_id: str, granularity: str) -> Dict[str, Any]:
+    def get_candles(
+        self,
+        product_id: str,
+        granularity: str,
+        start: Optional[str] = None,
+        end: Optional[str] = None,
+        limit: int = 300,
+    ) -> Dict[str, Any]:
         """
-        Coinbase SDK requires start/end. We send UNIX epoch seconds which the API accepts reliably.
-
-        Env override:
-          CANDLES_LOOKBACK_HOURS (default 24)
+        FIX: Accepts start/end (ISO8601) so strategy_loop can pass them.
+        If SDK signature differs, we fall back to limit-only.
+        Returns a dict with key "candles": list[...]
         """
-        lookback_hours = _as_int(_env("CANDLES_LOOKBACK_HOURS", "24"), 24)
+        # Prefer start/end if supplied (Coinbase endpoint requires both in many cases)
+        if start and end:
+            try:
+                resp = self._client.get_candles(
+                    product_id=product_id,
+                    start=start,
+                    end=end,
+                    granularity=granularity,
+                )
+                return _to_dict(resp)
+            except TypeError:
+                # SDK variant: might want start/end positional or different names
+                try:
+                    resp = self._client.get_candles(product_id, start, end, granularity)
+                    return _to_dict(resp)
+                except Exception:
+                    pass
+            except Exception:
+                # fall through to limit-only attempt
+                pass
 
-        end_dt = datetime.now(timezone.utc)
-        start_dt = end_dt - timedelta(hours=lookback_hours)
+        # Fallback: limit-only (older/internal signature)
+        resp = self._client.get_candles(product_id=product_id, granularity=granularity, limit=limit)
+        return _to_dict(resp)
 
-        # UNIX seconds (ints)
-        start = int(start_dt.timestamp())
-        end = int(end_dt.timestamp())
-
-        resp = self._client.get_candles(  # type: ignore
-            product_id=product_id,
-            start=start,
-            end=end,
-            granularity=granularity,
-        )
-        return _to_plain_dict(resp)
-
-    # -----------------------------
+    # ----------------------------
     # Orders
-    # -----------------------------
+    # ----------------------------
+    def _mode(self) -> str:
+        return _env("TRADE_MODE", "DRY_RUN").upper()
+
+    def _armed(self) -> bool:
+        return _env("LIVE_TRADING_ARMED", "NO").upper() == "YES"
 
     def create_order(self, intent: OrderIntent) -> Dict[str, Any]:
-        client_order_id = intent.client_order_id or self._new_client_order_id()
+        """
+        DRY_RUN: no order sent, returns payload only.
+        PAPER:   send order as "paper" (we still DO NOT want live execution); returns payload only.
+        LIVE:    sends live order ONLY if LIVE_TRADING_ARMED=YES.
+        """
+        mode = self._mode()
+        armed = self._armed()
 
         payload: Dict[str, Any] = {
-            "client_order_id": client_order_id,
+            "client_order_id": f"CSS-{int(time.time()*1000)}",
             "product_id": intent.product_id,
             "side": intent.side.upper(),
+            "order_configuration": {"market_market_ioc": {}},
         }
 
-        order_type = intent.order_type.upper()
-        if order_type == "MARKET":
-            cfg: Dict[str, Any] = {"market_market_ioc": {}}
-            mm = cfg["market_market_ioc"]
-
-            if payload["side"] == "BUY":
-                if not intent.quote_size:
-                    raise ValueError("MARKET BUY requires quote_size")
-                mm["quote_size"] = str(intent.quote_size)
-            else:
-                if not intent.base_size:
-                    raise ValueError("MARKET SELL requires base_size")
-                mm["base_size"] = str(intent.base_size)
-
-            payload["order_configuration"] = cfg
-
-        elif order_type == "LIMIT":
-            if not intent.base_size or not intent.limit_price:
-                raise ValueError("LIMIT requires base_size and limit_price")
-            payload["order_configuration"] = {
-                "limit_limit_gtc": {"base_size": str(intent.base_size), "limit_price": str(intent.limit_price)}
-            }
+        if intent.side.upper() == "BUY":
+            if not intent.quote_size:
+                raise ValueError("BUY requires quote_size")
+            payload["order_configuration"]["market_market_ioc"]["quote_size"] = str(intent.quote_size)
         else:
-            raise ValueError("order_type must be MARKET or LIMIT")
+            if not intent.base_size:
+                raise ValueError("SELL requires base_size")
+            payload["order_configuration"]["market_market_ioc"]["base_size"] = str(intent.base_size)
 
-        if not self._live_allowed():
+        # Safety: DRY_RUN and PAPER never hit live broker
+        if mode in ("DRY_RUN", "PAPER"):
             return {
-                "ts_utc": _utc_iso(),
+                "ts_utc": _env("UTC_NOW", ""),
+                "mode": mode,
+                "armed": armed,
                 "dry_run": True,
-                "mode": self.trade_mode,
-                "armed": self.armed,
                 "payload": payload,
-                "key_file": str(self.key_json_path),
             }
 
-        resp = self._client.create_order(**payload)  # type: ignore
-        d = _to_plain_dict(resp)
-        d.setdefault("ts_utc", _utc_iso())
-        d.setdefault("dry_run", False)
-        d.setdefault("mode", self.trade_mode)
-        d.setdefault("armed", self.armed)
-        d.setdefault("payload", payload)
-        d.setdefault("key_file", str(self.key_json_path))
-        return d
+        # LIVE mode
+        if not armed:
+            return {
+                "ts_utc": _env("UTC_NOW", ""),
+                "mode": mode,
+                "armed": armed,
+                "dry_run": True,
+                "blocked": True,
+                "reason": "LIVE not armed",
+                "payload": payload,
+            }
+
+        # Live send
+        resp = self._client.create_order(**payload)
+        return {
+            "ts_utc": _env("UTC_NOW", ""),
+            "mode": mode,
+            "armed": armed,
+            "dry_run": False,
+            "payload": payload,
+            "success_response": _to_dict(resp),
+        }
