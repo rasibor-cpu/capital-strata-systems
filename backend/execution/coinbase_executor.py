@@ -1,232 +1,222 @@
-"""
-Coinbase Executor (LIVE-SAFE) — Capital Strata Systems (CSS)
-
-Key fix:
-- Coinbase SDK may return rich response objects (e.g., CreateOrderResponse).
-- This module now NORMALIZES all responses to plain Python dicts so callers can safely use .get()
-
-Safety gates:
-- DRY_RUN by default
-- LIVE requires:
-    TRADE_MODE=LIVE
-    LIVE_TRADING_ARMED=YES
-- Optional max notional cap for LIVE orders:
-    MAX_LIVE_QUOTE (default 5.0)
-"""
-
 from __future__ import annotations
 
+import glob
 import json
 import os
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+from coinbase.rest import RESTClient
 
 
 def _utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def _env(name: str, default: str = "") -> str:
+def _env(name: str, default: str) -> str:
     v = os.getenv(name)
     return default if v is None else str(v).strip()
 
 
-def _env_upper(name: str, default: str = "") -> str:
-    return _env(name, default).upper()
-
-
-def _as_float(s: str, default: float) -> float:
+def _as_int(s: str, default: int) -> int:
     try:
-        return float(str(s).strip())
+        return int(str(s).strip())
     except Exception:
         return default
 
 
-def _to_plain_dict(obj: Any) -> Dict[str, Any]:
-    """
-    Normalize Coinbase SDK responses to plain dict.
+def _pick_key_file() -> Path:
+    explicit = _env("COINBASE_KEY_JSON", "")
+    if explicit:
+        p = Path(explicit).expanduser().resolve()
+        if p.exists():
+            return p
+        raise FileNotFoundError(f"COINBASE_KEY_JSON path not found: {p}")
 
-    Handles:
-    - dict already
-    - pydantic/dataclass-like: model_dump(), dict(), __dict__
-    - custom SDK response objects: to_dict()
-    - JSON-serializable fallback
-    """
+    p1 = Path("coinbase_key.json").resolve()
+    if p1.exists():
+        return p1
+
+    matches = [Path(m).resolve() for m in glob.glob("cdp_api_key*.json")]
+    if matches:
+        matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        return matches[0]
+
+    raise FileNotFoundError(
+        "No Coinbase key JSON found. Expected COINBASE_KEY_JSON env var OR coinbase_key.json OR cdp_api_key*.json in repo root."
+    )
+
+
+def _to_plain_dict(obj: Any) -> Dict[str, Any]:
     if obj is None:
         return {}
-
     if isinstance(obj, dict):
         return obj
-
-    # Common in pydantic v2
     if hasattr(obj, "model_dump"):
         try:
             return obj.model_dump()  # type: ignore
         except Exception:
             pass
-
-    # Common in pydantic v1 / other libs
     if hasattr(obj, "dict"):
         try:
             return obj.dict()  # type: ignore
         except Exception:
             pass
-
-    # Some SDKs provide to_dict
     if hasattr(obj, "to_dict"):
         try:
             return obj.to_dict()  # type: ignore
         except Exception:
             pass
-
-    # Dataclass / plain object
     if hasattr(obj, "__dict__"):
         try:
-            # filter out private attrs
-            d = {k: v for k, v in obj.__dict__.items() if not str(k).startswith("_")}
-            # ensure it's JSON-safe where possible
-            return json.loads(json.dumps(d, default=str))
+            return {k: v for k, v in obj.__dict__.items() if not str(k).startswith("_")}
         except Exception:
             pass
+    return {"_raw": str(obj)}
 
-    # Last resort: attempt JSON roundtrip
+
+def _safe_float(x: Any) -> Optional[float]:
     try:
-        return json.loads(json.dumps(obj, default=str))
+        return float(x)
     except Exception:
-        return {"_raw": str(obj)}
+        return None
 
 
 @dataclass(frozen=True)
 class OrderIntent:
-    product_id: str              # e.g. "BTC-USDC"
-    side: str                    # "BUY" or "SELL"
-    order_type: str              # "MARKET" or "LIMIT"
-    quote_size: Optional[str] = None     # MARKET BUY by quote_size
-    base_size: Optional[str] = None      # MARKET SELL by base_size; LIMIT uses base_size
-    limit_price: Optional[str] = None    # required for LIMIT
+    product_id: str
+    side: str              # BUY/SELL
+    order_type: str        # MARKET/LIMIT
+    quote_size: Optional[str] = None
+    base_size: Optional[str] = None
+    limit_price: Optional[str] = None
     client_order_id: Optional[str] = None
 
 
 class CoinbaseExecutor:
     """
-    Execution layer for Coinbase Advanced Trade.
-    Always returns dict responses.
+    Coinbase Advanced Trade executor.
     """
 
     def __init__(self) -> None:
-        self.coinbase_env = _env("COINBASE_ENV", "live").lower()
-        self.trade_mode = _env_upper("TRADE_MODE", "DRY_RUN")
-        self.armed = _env_upper("LIVE_TRADING_ARMED", "NO") == "YES"
-
-        self.key_json_path = Path(_env("COINBASE_KEY_JSON", "coinbase_key.json")).resolve()
-
-        # Hard cap on LIVE order quote notional
-        self.max_live_quote = _as_float(_env("MAX_LIVE_QUOTE", "5.0"), 5.0)
-
-        if self.coinbase_env != "live":
-            raise RuntimeError("CoinbaseExecutor only supports COINBASE_ENV=live (safety).")
-
-        if not self.key_json_path.exists():
-            raise RuntimeError(f"Missing Coinbase key JSON file: {self.key_json_path}")
-
+        self.trade_mode = _env("TRADE_MODE", "DRY_RUN").upper()
+        self.armed = _env("LIVE_TRADING_ARMED", "NO").upper() == "YES"
+        self.key_json_path = _pick_key_file()
         self._client = self._init_client()
 
-    def _init_client(self):
-        try:
-            from coinbase.rest import RESTClient  # type: ignore
-        except Exception as e:
-            raise RuntimeError(
-                f"Coinbase SDK not available. Ensure 'coinbase' is installed in venv. Root error: {e}"
-            )
+    def _init_client(self) -> RESTClient:
+        data = json.loads(self.key_json_path.read_text(encoding="utf-8"))
 
-        with self.key_json_path.open("r", encoding="utf-8") as f:
-            key_data = json.load(f)
-
-        api_key = key_data.get("name") or key_data.get("apiKey") or key_data.get("api_key")
-        api_secret = key_data.get("privateKey") or key_data.get("private_key") or key_data.get("secret")
+        api_key = data.get("name") or data.get("apiKey") or data.get("api_key")
+        api_secret = data.get("privateKey") or data.get("private_key") or data.get("secret")
 
         if not api_key or not api_secret:
-            raise RuntimeError("Key JSON missing required fields. Expected 'name' and 'privateKey'.")
+            raise RuntimeError(
+                f"Key JSON missing fields. Expected 'name' and 'privateKey'. File: {self.key_json_path}"
+            )
 
         return RESTClient(api_key=api_key, api_secret=api_secret)
-
-    # -----------------------------
-    # Safety gate helpers
-    # -----------------------------
-
-    def _live_allowed(self) -> bool:
-        return self.trade_mode == "LIVE" and self.armed
-
-    def _assert_live_allowed(self) -> None:
-        if not self._live_allowed():
-            raise RuntimeError("LIVE order blocked: require TRADE_MODE=LIVE and LIVE_TRADING_ARMED=YES")
 
     def _new_client_order_id(self) -> str:
         return f"CSS-{uuid.uuid4().hex[:24]}"
 
+    def _live_allowed(self) -> bool:
+        return self.trade_mode == "LIVE" and self.armed
+
     # -----------------------------
-    # Coinbase API wrappers
+    # Market data
     # -----------------------------
 
-    def get_key_permissions(self) -> Dict[str, Any]:
-        return _to_plain_dict(self._call("GET", "/api/v3/brokerage/key_permissions", data=None))
+    def get_best_bid_ask(self, product_id: str, limit: int = 1) -> Optional[Dict[str, float]]:
+        """
+        Uses Advanced Trade product book endpoint (top-of-book).
+        Returns {"bid": float, "ask": float} or None.
+        """
+        try:
+            book = _to_plain_dict(self._client.get_product_book(product_id=product_id, limit=limit))  # type: ignore
+            pricebook = book.get("pricebook") or {}
+            bids = pricebook.get("bids") or []
+            asks = pricebook.get("asks") or []
 
-    def get_accounts(self) -> Dict[str, Any]:
-        if hasattr(self._client, "get_accounts"):
-            return _to_plain_dict(self._client.get_accounts())  # type: ignore
-        return _to_plain_dict(self._call("GET", "/api/v3/brokerage/accounts", data=None))
+            if not bids or not asks:
+                return None
+
+            bid = _safe_float(bids[0].get("price") if isinstance(bids[0], dict) else None)
+            ask = _safe_float(asks[0].get("price") if isinstance(asks[0], dict) else None)
+
+            if bid is None or ask is None:
+                return None
+
+            return {"bid": float(bid), "ask": float(ask)}
+
+        except Exception:
+            return None
+
+    def get_candles(self, product_id: str, granularity: str) -> Dict[str, Any]:
+        """
+        Coinbase SDK requires start/end. We send UNIX epoch seconds which the API accepts reliably.
+
+        Env override:
+          CANDLES_LOOKBACK_HOURS (default 24)
+        """
+        lookback_hours = _as_int(_env("CANDLES_LOOKBACK_HOURS", "24"), 24)
+
+        end_dt = datetime.now(timezone.utc)
+        start_dt = end_dt - timedelta(hours=lookback_hours)
+
+        # UNIX seconds (ints)
+        start = int(start_dt.timestamp())
+        end = int(end_dt.timestamp())
+
+        resp = self._client.get_candles(  # type: ignore
+            product_id=product_id,
+            start=start,
+            end=end,
+            granularity=granularity,
+        )
+        return _to_plain_dict(resp)
+
+    # -----------------------------
+    # Orders
+    # -----------------------------
 
     def create_order(self, intent: OrderIntent) -> Dict[str, Any]:
-        side = intent.side.strip().upper()
-        order_type = intent.order_type.strip().upper()
-        product_id = intent.product_id.strip().upper()
-
-        if side not in {"BUY", "SELL"}:
-            raise ValueError("side must be BUY or SELL")
-        if order_type not in {"MARKET", "LIMIT"}:
-            raise ValueError("order_type must be MARKET or LIMIT")
-
         client_order_id = intent.client_order_id or self._new_client_order_id()
 
         payload: Dict[str, Any] = {
             "client_order_id": client_order_id,
-            "product_id": product_id,
-            "side": side,
+            "product_id": intent.product_id,
+            "side": intent.side.upper(),
         }
 
+        order_type = intent.order_type.upper()
         if order_type == "MARKET":
             cfg: Dict[str, Any] = {"market_market_ioc": {}}
             mm = cfg["market_market_ioc"]
 
-            if side == "BUY":
+            if payload["side"] == "BUY":
                 if not intent.quote_size:
                     raise ValueError("MARKET BUY requires quote_size")
                 mm["quote_size"] = str(intent.quote_size)
-
-                # LIVE notional cap
-                if self._live_allowed():
-                    q = _as_float(str(intent.quote_size), 0.0)
-                    if q > self.max_live_quote:
-                        raise RuntimeError(f"LIVE blocked by MAX_LIVE_QUOTE cap: {q} > {self.max_live_quote}")
-
-            else:  # SELL
+            else:
                 if not intent.base_size:
                     raise ValueError("MARKET SELL requires base_size")
                 mm["base_size"] = str(intent.base_size)
 
             payload["order_configuration"] = cfg
 
-        else:  # LIMIT
+        elif order_type == "LIMIT":
             if not intent.base_size or not intent.limit_price:
                 raise ValueError("LIMIT requires base_size and limit_price")
             payload["order_configuration"] = {
                 "limit_limit_gtc": {"base_size": str(intent.base_size), "limit_price": str(intent.limit_price)}
             }
+        else:
+            raise ValueError("order_type must be MARKET or LIMIT")
 
-        # DRY_RUN / PAPER: never send
         if not self._live_allowed():
             return {
                 "ts_utc": _utc_iso(),
@@ -234,49 +224,15 @@ class CoinbaseExecutor:
                 "mode": self.trade_mode,
                 "armed": self.armed,
                 "payload": payload,
+                "key_file": str(self.key_json_path),
             }
 
-        # LIVE gate
-        self._assert_live_allowed()
-
-        # Try SDK helper if present
-        if hasattr(self._client, "create_order"):
-            resp = self._client.create_order(**payload)  # type: ignore
-            d = _to_plain_dict(resp)
-            d.setdefault("ts_utc", _utc_iso())
-            d.setdefault("dry_run", False)
-            d.setdefault("mode", self.trade_mode)
-            d.setdefault("armed", self.armed)
-            d.setdefault("payload", payload)
-            return d
-
-        # Fallback REST direct
-        resp = self._call("POST", "/api/v3/brokerage/orders", data=payload)
+        resp = self._client.create_order(**payload)  # type: ignore
         d = _to_plain_dict(resp)
         d.setdefault("ts_utc", _utc_iso())
         d.setdefault("dry_run", False)
         d.setdefault("mode", self.trade_mode)
         d.setdefault("armed", self.armed)
         d.setdefault("payload", payload)
+        d.setdefault("key_file", str(self.key_json_path))
         return d
-
-    # -----------------------------
-    # Low-level call compatibility
-    # -----------------------------
-
-    def _call(self, method: str, path: str, data: Optional[Dict[str, Any]]) -> Any:
-        client = self._client
-
-        if hasattr(client, "request"):
-            kwargs = {}
-            if data is not None:
-                kwargs["data"] = data
-            return client.request(method, path, **kwargs)  # type: ignore
-
-        m = method.upper()
-        if m == "GET" and hasattr(client, "get"):
-            return client.get(path)  # type: ignore
-        if m == "POST" and hasattr(client, "post"):
-            return client.post(path, data=data)  # type: ignore
-
-        raise RuntimeError("Unsupported Coinbase SDK client interface (no request/get/post found).")
