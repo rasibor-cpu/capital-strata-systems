@@ -73,3 +73,6 @@ cdp_api_key*.json
 *.pem
 .env
 keys/
+data_cache/
+__pycache__/
+*.pyc
