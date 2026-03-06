@@ -1,53 +1,49 @@
 """
-posting_approval.py — minimal approval rules scaffold
+posting_approval.py (repo root)
+Capital Strata Systems (CSS)
 
 Purpose:
-- Track this file in git.
-- Provide a simple, deterministic approval decision function.
+- Provide stable import target for main.py:
+    from posting_approval import handle_posting_approval
+- Delegate to the real governance engine in backend.app.posting_approval
+- Fail-closed if backend module isn't available.
 
-Safe defaults:
-- If amount <= auto_approve_limit: approved
-- Otherwise: pending approval
+This is a thin adapter only (no scope creep).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Dict, Any, Optional
+from typing import Any, Dict
 
 
-@dataclass
-class ApprovalDecision:
-    status: str  # "approved" | "pending" | "rejected"
-    reason: str
-    required_role: Optional[str] = None
-
-
-def decide_approval(
-    amount: float,
-    currency: str,
-    *,
-    auto_approve_limit: float = 2_000_000.0,
-    required_role_over_limit: str = "admin",
-) -> Dict[str, Any]:
+def handle_posting_approval(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Deterministic approval decision.
+    Approval/governance gate. Returns APPROVED/REJECTED response dict.
+
+    Expected minimal payload keys (based on your validate_posting tests):
+      - account_no
+      - side (DR/CR)
+      - amount
     """
-    if amount < 0:
-        d = ApprovalDecision(status="rejected", reason="amount cannot be negative")
-        return d.__dict__
+    if not isinstance(payload, dict):
+        return {"status": "REJECTED", "reason_code": "INVALID_PAYLOAD_TYPE", "message": "payload must be a dict"}
 
-    if not currency or not isinstance(currency, str):
-        d = ApprovalDecision(status="rejected", reason="currency is required")
-        return d.__dict__
+    # Delegate to the backend governance module
+    try:
+        from backend.app.posting_approval import validate_posting  # authoritative gate
+    except Exception as e:
+        return {
+            "status": "REJECTED",
+            "reason_code": "IMPORT_ERROR",
+            "message": f"backend.app.posting_approval.validate_posting not available: {e}",
+        }
 
-    if amount <= auto_approve_limit:
-        d = ApprovalDecision(status="approved", reason=f"amount <= {auto_approve_limit:,.2f}")
-        return d.__dict__
-
-    d = ApprovalDecision(
-        status="pending",
-        reason=f"amount exceeds auto-approve limit ({auto_approve_limit:,.2f})",
-        required_role=required_role_over_limit,
-    )
-    return d.__dict__
+    try:
+        return validate_posting(payload)
+    except Exception as e:
+        # Fail-closed: never crash main loop
+        return {
+            "status": "REJECTED",
+            "reason_code": "VALIDATION_EXCEPTION",
+            "message": str(e),
+        }

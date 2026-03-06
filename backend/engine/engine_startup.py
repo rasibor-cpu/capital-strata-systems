@@ -2,9 +2,13 @@
 Capital Strata Systems
 Engine Startup Controller
 
-This module ensures the engine cannot start live trading
-without explicit operator confirmation, then selects broker,
-ensures broker SDK is installed, and launches strategy loop.
+Flow:
+1) Arm LIVE trading? (Y/N)
+2) Select broker (Coinbase/OANDA/Alpaca)
+3) Select mode (DRY_RUN / PAPER / LIVE)
+4) Ensure broker SDK installed
+5) Initialize executor
+6) Launch strategy loop
 """
 
 from __future__ import annotations
@@ -24,19 +28,13 @@ def arm_live_trading() -> bool:
         response = input("Arm LIVE trading? (Y/N): ").strip().upper()
 
         if response == "Y":
-
             os.environ["LIVE_TRADING_ARMED"] = "YES"
-
             print("\nLIVE trading is ARMED")
-
             return True
 
         if response == "N":
-
             os.environ["LIVE_TRADING_ARMED"] = "NO"
-
             print("\nLIVE trading is DISARMED")
-
             return False
 
         print("Please enter Y or N.")
@@ -88,7 +86,6 @@ def select_mode(armed: bool) -> str:
             return "PAPER"
 
         if mode == "3":
-
             if not armed or os.environ.get("LIVE_TRADING_ARMED") != "YES":
                 print("\nLIVE trading was not armed.")
                 print("Restart and arm live trading first.")
@@ -100,13 +97,13 @@ def select_mode(armed: bool) -> str:
         print("Invalid choice.")
 
 
-def start_engine():
+def start_engine() -> int:
 
     armed = arm_live_trading()
     broker = select_broker()
     mode = select_mode(armed)
 
-    # Ensure broker SDK is installed before importing executor
+    # Ensure broker SDK is installed before importing broker executor
     from backend.broker.broker_bootstrap import bootstrap_broker
 
     bootstrap_broker(broker)
@@ -120,20 +117,22 @@ def start_engine():
 
     print("\nInitializing trading executor...\n")
 
-    # For now: Coinbase executor is our active implementation.
-    # Later: broker factory will route to the selected broker.
     if broker == "coinbase":
         from backend.execution.coinbase_executor import CoinbaseExecutor
 
-        executor = CoinbaseExecutor()
+        _ = CoinbaseExecutor()
         print("Coinbase executor ready.")
-        return executor
+
+        print("\nLaunching strategy loop...\n")
+        from backend.engine.strategy_loop import run_loop
+
+        run_loop()
+        return 0
 
     print(f"\nBroker selected '{broker}' but no executor wired yet.")
     print("For now, select Coinbase (1) until other executors are implemented.")
-    sys.exit(1)
+    return 1
 
 
 if __name__ == "__main__":
-
-    start_engine()
+    raise SystemExit(start_engine())
