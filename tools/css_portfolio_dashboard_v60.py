@@ -15,8 +15,12 @@ TRADES_FILE = PROJECT_ROOT / "audit_logs" / "trades.jsonl"
 STARTING_CAPITAL = 200.0
 REFRESH_SECONDS = 20
 CANDLE_GRANULARITY = 900
-MAX_PRODUCTS_TO_SCAN = 20
+MAX_PRODUCTS_TO_SCAN = 40
 TOP_DISPLAY_COUNT = 5
+
+MIN_PRICE_FILTER = 0.10
+MAX_SPREAD_BPS = 1500
+MIN_CANDLES_FOR_TREND = 10
 
 COINBASE_PRODUCTS_URL = "https://api.exchange.coinbase.com/products"
 COINBASE_TICKER_URL = "https://api.exchange.coinbase.com/products/{product_id}/ticker"
@@ -28,7 +32,7 @@ _session = requests.Session()
 _session.headers.update(
     {
         "Accept": "application/json",
-        "User-Agent": "CSS-Dashboard/61",
+        "User-Agent": "CSS-Dashboard/63",
     }
 )
 
@@ -63,6 +67,7 @@ def load_position() -> Optional[Dict[str, Any]]:
 
 def load_trades() -> List[Dict[str, Any]]:
     trades: List[Dict[str, Any]] = []
+
     if not TRADES_FILE.exists():
         return trades
 
@@ -192,47 +197,43 @@ def fetch_json(url: str, timeout: int = 5) -> Any:
 
 
 def discover_products() -> List[str]:
-    global _cached_products_ts, _cached_products
+    global _cached_products, _cached_products_ts
 
     now = time.time()
+
     if _cached_products and (now - _cached_products_ts) < PRODUCT_CACHE_SECONDS:
         return _cached_products
 
     payload = fetch_json(COINBASE_PRODUCTS_URL, timeout=8)
-    if not isinstance(payload, list):
-        return _cached_products
-
     products: List[str] = []
 
-    for item in payload:
-        if not isinstance(item, dict):
-            continue
+    if isinstance(payload, list):
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
 
-        product_id = str(item.get("id", "")).strip()
-        quote_currency = str(item.get("quote_currency", "")).strip().upper()
-        status = str(item.get("status", "")).strip().lower()
-        trading_disabled = bool(item.get("trading_disabled", False))
-        auction_mode = bool(item.get("auction_mode", False))
+            product_id = str(item.get("id", "")).strip()
+            status = str(item.get("status", "")).strip().lower()
+            trading_disabled = bool(item.get("trading_disabled", False))
+            auction_mode = bool(item.get("auction_mode", False))
 
-        if not product_id.endswith("-USD"):
-            continue
-        if quote_currency != "USD":
-            continue
-        if status not in {"online", "active"}:
-            continue
-        if trading_disabled or auction_mode:
-            continue
+            if not product_id.endswith("-USD"):
+                continue
+            if status not in {"online", "active"}:
+                continue
+            if trading_disabled or auction_mode:
+                continue
 
-        base = product_id.split("-")[0]
-        if base in {"USDT", "USDC", "DAI", "PYUSD", "EURC"}:
-            continue
+            base = product_id.split("-")[0]
+            if base in {"USDT", "USDC", "DAI", "PYUSD", "EURC"}:
+                continue
 
-        products.append(product_id)
+            products.append(product_id)
 
-    products = sorted(set(products))
-    _cached_products = products[:MAX_PRODUCTS_TO_SCAN]
+    products = sorted(set(products))[:MAX_PRODUCTS_TO_SCAN]
+    _cached_products = products
     _cached_products_ts = now
-    return _cached_products
+    return products
 
 
 def get_price(product_id: str) -> Optional[float]:
@@ -251,6 +252,7 @@ def get_candles(product_id: str) -> List[List[Any]]:
         ),
         timeout=5,
     )
+
     if not isinstance(payload, list):
         return []
 
@@ -258,6 +260,8 @@ def get_candles(product_id: str) -> List[List[Any]]:
     for row in payload:
         if isinstance(row, list) and len(row) >= 6:
             valid_rows.append(row)
+
+    valid_rows.sort(key=lambda row: safe_float(row[0]))
     return valid_rows
 
 
@@ -284,15 +288,67 @@ def compute_vwap(candles: List[List[Any]]) -> Optional[float]:
     return pv / vol
 
 
-def scan_opportunities() -> Tuple[List[Tuple[str, float, float, float]], int]:
+def sma(values: List[float], period: int) -> Optional[float]:
+    if len(values) < period or period <= 0:
+        return None
+    return sum(values[-period:]) / period
+
+
+def classify_trend(candles: List[List[Any]]) -> str:
+    if len(candles) < MIN_CANDLES_FOR_TREND:
+        return "NEUTRAL"
+
+    closes = [safe_float(candle[4]) for candle in candles if safe_float(candle[4]) > 0]
+    if len(closes) < MIN_CANDLES_FOR_TREND:
+        return "NEUTRAL"
+
+    last_close = closes[-1]
+    prev_close = closes[-2]
+
+    sma_5 = sma(closes, 5)
+    sma_10 = sma(closes, 10)
+
+    if sma_5 is None or sma_10 is None:
+        return "NEUTRAL"
+
+    if last_close > sma_5 > sma_10 and last_close >= prev_close:
+        return "BULLISH"
+
+    if last_close < sma_5 < sma_10 and last_close <= prev_close:
+        return "BEARISH"
+
+    return "NEUTRAL"
+
+
+def setup_allowed(spread_bps: float, trend_label: str) -> bool:
+    if spread_bps < 0:
+        return trend_label in {"BULLISH", "NEUTRAL"}
+
+    if spread_bps > 0:
+        return trend_label in {"BEARISH", "NEUTRAL"}
+
+    return False
+
+
+def setup_label(spread_bps: float) -> str:
+    return "LONG WATCH" if spread_bps < 0 else "SHORT WATCH"
+
+
+def signal_label(spread_bps: float) -> str:
+    return "OVERSOLD" if spread_bps < 0 else "OVERBOUGHT"
+
+
+def scan_opportunities() -> Tuple[List[Tuple[str, float, float, float, str, str, str]], int]:
     products = discover_products()
-    results: List[Tuple[str, float, float, float]] = []
+    results: List[Tuple[str, float, float, float, str, str, str]] = []
 
     for product_id in products:
         price = get_price(product_id)
-        candles = get_candles(product_id)
+        if price is None or price < MIN_PRICE_FILTER:
+            continue
 
-        if price is None or not candles:
+        candles = get_candles(product_id)
+        if not candles:
             continue
 
         vwap = compute_vwap(candles)
@@ -300,7 +356,17 @@ def scan_opportunities() -> Tuple[List[Tuple[str, float, float, float]], int]:
             continue
 
         spread_bps = ((price - vwap) / vwap) * 10000.0
-        results.append((product_id, price, vwap, spread_bps))
+        if abs(spread_bps) > MAX_SPREAD_BPS:
+            continue
+
+        trend = classify_trend(candles)
+        if not setup_allowed(spread_bps, trend):
+            continue
+
+        signal = signal_label(spread_bps)
+        setup = setup_label(spread_bps)
+
+        results.append((product_id, price, vwap, spread_bps, signal, trend, setup))
 
     results.sort(key=lambda item: abs(item[3]), reverse=True)
     return results, len(products)
@@ -323,16 +389,16 @@ def render_dashboard() -> None:
 
         clear()
         print()
-        print("==============================================================")
-        print(" CAPITAL STRATA SYSTEMS — MARKET DISCOVERY OPPORTUNITY BOARD ")
-        print("==============================================================")
+        print("==========================================================================")
+        print(" CAPITAL STRATA SYSTEMS — TREND-CONFIRMED OPPORTUNITY BOARD ")
+        print("==========================================================================")
         print(f" Local Time          : {now_label}")
         print(f" Scan Interval       : every {REFRESH_SECONDS} seconds")
         print(f" Candle Granularity  : {CANDLE_GRANULARITY // 60} minutes")
         print(f" Products Scanned    : {scanned_count}")
         print()
 
-        print("---------------------- ACCOUNT SUMMARY -----------------------")
+        print("------------------------- ACCOUNT SUMMARY -------------------------------")
         print(f" Starting Capital    : ${STARTING_CAPITAL:,.2f}")
         print(f" Cash Balance        : ${cash_balance:,.2f}")
         print(f" Realized PnL        : ${realized:,.2f}")
@@ -340,7 +406,7 @@ def render_dashboard() -> None:
         print(f" Total Equity        : ${total_equity:,.2f}")
         print()
 
-        print("---------------------- OPEN POSITION -------------------------")
+        print("------------------------- OPEN POSITION --------------------------------")
         if has_open_position(position):
             asset = get_position_asset(position)
             qty = get_position_qty(position)
@@ -357,23 +423,22 @@ def render_dashboard() -> None:
             print(" No open position")
         print()
 
-        print("---------------------- TOP OPPORTUNITIES ---------------------")
+        print("------------------------- TOP OPPORTUNITIES ----------------------------")
         if opportunities:
             for rank, item in enumerate(opportunities[:TOP_DISPLAY_COUNT], start=1):
-                asset, price, vwap, spread_bps = item
-                signal = "OVERSOLD" if spread_bps < 0 else "OVERBOUGHT"
+                asset, price, vwap, spread_bps, signal, trend, setup = item
                 print(
-                    f" {rank}. {asset:10}  Price ${price:>10,.2f}  "
-                    f"VWAP ${vwap:>10,.2f}  Spread {spread_bps:>8.1f} bps  {signal}"
+                    f" {rank}. {asset:10}  Price ${price:>9,.2f}  VWAP ${vwap:>9,.2f}  "
+                    f"Spread {spread_bps:>7.1f} bps  {signal:<10}  {trend:<7}  {setup}"
                 )
         else:
-            print(" No opportunities available")
+            print(" No trend-confirmed opportunities available")
         print()
 
-        print("---------------------- TRADE LOG -----------------------------")
+        print("------------------------- TRADE LOG ------------------------------------")
         print(f" Total Trades        : {len(trades)}")
         print()
-        print("==============================================================")
+        print("==========================================================================")
 
         time.sleep(REFRESH_SECONDS)
 
