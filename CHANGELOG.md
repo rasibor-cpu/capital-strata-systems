@@ -1,6 +1,159 @@
 # Capital Strata Systems – Changelog
 
 ---
+# Changelog
+
+All notable changes to Capital Strata Systems (CSS) are documented here.
+
+---
+
+## [v54] - 2026-03-07
+### Added
+- Introduced `tools/css_autonomous_loop_v54.py` as the new **Safe Fast Trend Engine**.
+- Added continuous autonomous paper-trading loop with:
+  - live Coinbase market scanning
+  - top-momentum asset ranking
+  - autonomous paper position handling
+  - trailing-stop based exit management
+- Added visible **scan progress output** for each asset during each cycle.
+- Added safer position-file cleanup logic to avoid crashes when deleting missing state files.
+- Added stable cash-state reporting in the engine output.
+- Added working dashboard integration through `tools/css_portfolio_dashboard_v51.py`.
+- Added market scanner / ranking support through `tools/css_market_intelligence_v52.py`.
+
+### Changed
+- Reworked the trading engine from earlier autonomous-loop variants into a faster, safer v54 architecture.
+- Reduced scan latency by lowering lookback depth and shortening per-asset sample delay.
+- Lowered entry threshold for testing so paper trades can trigger more easily in live observation.
+- Replaced simple fixed-profit exit logic with **trend-riding trailing-stop behavior**.
+- Improved runtime visibility by printing:
+  - current scan progress
+  - ranked momentum assets
+  - hold-state information
+  - trailing-stop level
+  - live cash balance
+  - last update timestamp
+- Aligned engine state persistence with the active dashboard workflow.
+
+### Fixed
+- Fixed repeated loop “looks frozen” behavior by adding visible scan-progress output and reducing cycle time.
+- Fixed crash risk around `POSITION_FILE.unlink()` by introducing safe file-clear handling.
+- Fixed dashboard/runtime mismatch by stabilizing the state file structure used during paper trading.
+- Fixed operational confusion caused by slow scan cycles by making engine progress explicit in terminal output.
+
+### Verified
+- Verified autonomous loop runs continuously.
+- Verified live ranking of scanned Coinbase assets.
+- Verified open BTC paper position loaded and monitored successfully.
+- Verified trailing-stop logic is active and updating.
+- Verified dashboard reads live position state correctly.
+- Verified trade summary and realized PnL display correctly.
+- Verified commit, push, and version tag completed successfully.
+
+### Repository / Version Control
+- Commit created for autonomous trend-engine milestone.
+- Remote push completed successfully.
+- Tag created:
+  - `css-engine-v54-trend`
+
+---
+
+## [v53] - 2026-03-06
+### Added
+- Introduced `tools/css_autonomous_loop_v53.py`.
+- Added first fully connected autonomous paper-trading loop using ranked momentum assets.
+- Added paper BUY/SELL logging to `audit_logs/trades.jsonl`.
+- Added state persistence for open position in `backend/state/spot_position.json`.
+
+### Changed
+- Connected scanner output to autonomous engine behavior.
+- Enabled basic automatic entry logic based on ranked momentum assets.
+
+### Notes
+- v53 served as the transition build between ranking-only logic and the working trend-engine architecture in v54.
+
+---
+
+## [v52] - 2026-03-06
+### Added
+- Introduced `tools/css_market_intelligence_v52.py`.
+- Added market intelligence layer for:
+  - Coinbase price polling
+  - simple momentum scoring
+  - top-asset ranking display
+- Added faster replacement scanner version with visible progress output.
+
+### Changed
+- Improved responsiveness of the scanner by reducing sample count per asset.
+- Improved usability by showing scan progress line by line.
+
+### Verified
+- Verified live ranking output for assets such as SOL, LINK, AVAX, MATIC, and ATOM.
+
+---
+
+## [v51] - 2026-03-06
+### Added
+- Introduced `tools/css_portfolio_dashboard_v51.py`.
+- Added terminal dashboard showing:
+  - entry price
+  - position USD
+  - open timestamp
+  - total trades
+  - realized PnL
+  - refresh cycle output
+
+### Changed
+- Updated dashboard to match real `spot_position.json` schema:
+  - `entry_price`
+  - `size_usd`
+  - `timestamp`
+
+### Fixed
+- Fixed `NoneType` crash in unrealized PnL calculation.
+- Fixed schema mismatch between dashboard expectations and actual engine state file.
+
+### Verified
+- Verified dashboard refreshes continuously.
+- Verified dashboard reads live open position correctly.
+
+---
+
+## [v49] - 2026-03-06
+### Added
+- Added `tools/css_autonomous_loop_v49.py`.
+- Added higher-version autonomous loop baseline before v53/v54 transition.
+- Added expanded research path toward:
+  - top-5 asset universe
+  - trend-aware hold logic
+  - dashboard foundation
+  - market selector integration
+
+### Repository / Version Control
+- Tag created:
+  - `css-engine-v49`
+
+---
+
+## [Development Summary]
+### Current Stable Baseline
+- **Trading engine baseline:** `tools/css_autonomous_loop_v54.py`
+- **Dashboard baseline:** `tools/css_portfolio_dashboard_v51.py`
+- **Market intelligence baseline:** `tools/css_market_intelligence_v52.py`
+
+### Current Working Architecture
+1. Market Scanner
+2. Momentum Ranking
+3. Autonomous Trend Engine
+4. Position State File
+5. Trade Log
+6. Portfolio Dashboard
+
+### Current Known Next Step
+- Build **v55 Adaptive Market Discovery**
+  - expand beyond fixed asset list
+  - filter tradable / liquid Coinbase pairs
+  - rank and select best opportunities automatically
 # Phase 15 – Global Reporting Architecture
 
 - Introduced global reporting gateway (backend/app/reporting_api.py)
