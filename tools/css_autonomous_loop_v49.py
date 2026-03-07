@@ -1,437 +1,427 @@
 """
+CSS Autonomous Loop v53
 Capital Strata Systems
-Autonomous Trading Engine v49
 
-New in v49
-----------
-• top 5 opportunities
-• ATR risk-based sizing
-• trailing stop management
-• portfolio-level risk governor
+What this version does:
+- Scans a defined Coinbase asset universe
+- Ranks assets by short momentum
+- Selects the best candidate automatically
+- Opens a PAPER position when entry conditions are met
+- Holds winning positions while momentum remains supportive
+- Exits when reversal / weakness conditions appear
+- Writes state for the dashboard:
+    - backend/state/spot_position.json
+    - backend/state/top_assets.json
+- Writes trade log:
+    - audit_logs/trades.jsonl
+
+Important:
+- This is PAPER / SIMULATION logic only
+- No live broker orders are sent
 """
 
 from __future__ import annotations
 
 import json
-import statistics
 import time
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from collections import deque
+from dataclasses import dataclass, asdict
+from datetime import datetime, UTC
 from pathlib import Path
+from typing import Deque, Dict, List, Optional
 
 import requests
 
 
-COINBASE = "https://api.exchange.coinbase.com"
+API = "https://api.exchange.coinbase.com"
 
-ACCOUNT_EQUITY = 1000.0
-RISK_PER_TRADE = 0.01
-MAX_PORTFOLIO_RISK = 0.05
-MAX_OPEN_POSITIONS = 5
+ASSETS = [
+    "BTC-USD",
+    "ETH-USD",
+    "SOL-USD",
+    "LINK-USD",
+    "AVAX-USD",
+    "MATIC-USD",
+    "ATOM-USD",
+    "DOT-USD",
+    "LTC-USD",
+]
 
-MIN_ASSET_PRICE = 0.50
-MAX_TOKEN_SIZE = 500.0
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+STATE_DIR = PROJECT_ROOT / "backend" / "state"
+AUDIT_DIR = PROJECT_ROOT / "audit_logs"
 
-TOP_MARKETS = 25
-MAX_DISCOVERED_TO_RANK = 100
+POSITION_FILE = STATE_DIR / "spot_position.json"
+TOP_ASSETS_FILE = STATE_DIR / "top_assets.json"
+TRADES_FILE = AUDIT_DIR / "trades.jsonl"
 
-GRANULARITY = 900
-LOOKBACK_DAYS = 20
-CHUNK = 200
-LOOP_INTERVAL = 900
+REQUEST_TIMEOUT = 4
+SCAN_INTERVAL_SECONDS = 15
+LOOKBACK_POINTS = 8
+TOP_N = 5
 
-STATE_DIR = Path("backend/state")
-LOG_DIR = Path("audit_logs")
-TRADE_HISTORY = LOG_DIR / "trade_history.json"
-
-STATE_DIR.mkdir(parents=True, exist_ok=True)
-LOG_DIR.mkdir(parents=True, exist_ok=True)
-
-if not TRADE_HISTORY.exists():
-    TRADE_HISTORY.write_text("[]")
+STARTING_CASH_USD = 500.00
+RISK_ALLOCATION_PCT = 0.20          # 20% of available cash per new position
+MIN_ENTRY_SCORE = 0.0010            # 0.10% short momentum threshold
+EXIT_REVERSAL_SCORE = -0.0008       # exit if score weakens below this
+TRAIL_STOP_PCT = 0.012              # 1.2% trailing stop
+TAKE_PROFIT_PCT = 0.050             # optional hard cap 5%
 
 
 @dataclass
-class Candle:
-    ts: int
-    low: float
-    high: float
-    open: float
-    close: float
-    volume: float
+class Position:
+    asset: str
+    entry_price: float
+    size_usd: float
+    units: float
+    opened_at: str
+    highest_price: float
+    last_price: float
+    score_at_entry: float
 
 
-def iso(t: datetime) -> str:
-    return t.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+class CSSAutonomousLoopV53:
+    def __init__(self) -> None:
+        self.price_history: Dict[str, Deque[float]] = {
+            asset: deque(maxlen=LOOKBACK_POINTS) for asset in ASSETS
+        }
+        self.cash_usd: float = STARTING_CASH_USD
+        self.position: Optional[Position] = self._load_position()
+        self.realized_pnl: float = 0.0
+        self.trade_count: int = 0
 
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        AUDIT_DIR.mkdir(parents=True, exist_ok=True)
 
-def ema(values: list[float], period: int) -> float:
-    k = 2 / (period + 1)
-    e = values[0]
-    for v in values[1:]:
-        e = v * k + e * (1 - k)
-    return e
-
-
-def atr(candles: list[Candle]) -> float:
-    trs: list[float] = []
-    prev = candles[0].close
-    for c in candles[1:]:
-        tr = max(
-            c.high - c.low,
-            abs(c.high - prev),
-            abs(c.low - prev),
-        )
-        trs.append(tr)
-        prev = c.close
-    return statistics.mean(trs)
-
-
-def vwap(candles: list[Candle]) -> float:
-    pv = 0.0
-    vol = 0.0
-    for c in candles:
-        typical = (c.high + c.low + c.close) / 3
-        pv += typical * c.volume
-        vol += c.volume
-    return pv / vol
-
-
-def discover_markets() -> list[str]:
-    r = requests.get(f"{COINBASE}/products", timeout=15)
-    products = r.json()
-
-    markets: list[str] = []
-    for p in products:
-        if p.get("quote_currency") != "USD":
-            continue
-        if p.get("status") != "online":
-            continue
-        pid = p.get("id")
-        if pid:
-            markets.append(pid)
-
-    return sorted(markets)[:MAX_DISCOVERED_TO_RANK]
-
-
-def rank_liquidity(markets: list[str]) -> list[str]:
-    liquidity: list[tuple[str, float]] = []
-
-    for m in markets:
-        try:
-            r = requests.get(f"{COINBASE}/products/{m}/stats", timeout=6)
-            vol = float(r.json()["volume"])
-            liquidity.append((m, vol))
-        except Exception:
-            continue
-
-    liquidity.sort(key=lambda x: x[1], reverse=True)
-    return [x[0] for x in liquidity[:TOP_MARKETS]]
-
-
-def fetch(product: str, start: datetime, end: datetime) -> list[Candle]:
-    url = f"{COINBASE}/products/{product}/candles"
-
-    candles: list[Candle] = []
-    step = GRANULARITY * CHUNK
-    cursor = start
-
-    while cursor < end:
-        chunk_end = min(cursor + timedelta(seconds=step), end)
-
-        r = requests.get(
-            url,
-            params={
-                "start": iso(cursor),
-                "end": iso(chunk_end),
-                "granularity": GRANULARITY,
-            },
-            timeout=15,
-        )
-
-        rows = r.json()
-
-        for row in rows:
-            ts, low, high, open_, close, vol = row
-            candles.append(
-                Candle(
-                    ts=int(ts),
-                    low=float(low),
-                    high=float(high),
-                    open=float(open_),
-                    close=float(close),
-                    volume=float(vol),
-                )
-            )
-
-        cursor = chunk_end
-
-    uniq = {c.ts: c for c in candles}
-    return sorted(uniq.values(), key=lambda x: x.ts)
-
-
-def get_price(asset: str) -> float | None:
-    try:
-        r = requests.get(f"{COINBASE}/products/{asset}/ticker", timeout=6)
-        return float(r.json()["price"])
-    except Exception:
-        return None
-
-
-def position_files() -> list[Path]:
-    return list(STATE_DIR.glob("pos_*.json"))
-
-
-def open_position_files() -> list[Path]:
-    files: list[Path] = []
-    for f in position_files():
-        try:
-            data = json.loads(f.read_text())
-        except Exception:
-            continue
-        if data.get("status") == "OPEN":
-            files.append(f)
-    return files
-
-
-def has_open_position(asset: str) -> bool:
-    fname = asset.replace("-", "_")
-    path = STATE_DIR / f"pos_{fname}.json"
-
-    if not path.exists():
-        return False
-
-    try:
-        data = json.loads(path.read_text())
-    except Exception:
-        return False
-
-    return data.get("status") == "OPEN"
-
-
-def save_position(asset: str, trade: dict) -> None:
-    fname = asset.replace("-", "_")
-    path = STATE_DIR / f"pos_{fname}.json"
-
-    trade["status"] = "OPEN"
-    path.write_text(json.dumps(trade, indent=2))
-
-
-def record_trade(trade: dict) -> None:
-    try:
-        hist = json.loads(TRADE_HISTORY.read_text())
-    except Exception:
-        hist = []
-
-    hist.append(trade)
-    TRADE_HISTORY.write_text(json.dumps(hist, indent=2))
-
-
-def close_position(file_path: Path, price: float) -> None:
-    data = json.loads(file_path.read_text())
-
-    pnl = (price - data["entry"]) * data["size"]
-
-    data["exit_price"] = price
-    data["exit_time"] = datetime.now(timezone.utc).isoformat()
-    data["pnl"] = pnl
-    data["status"] = "CLOSED"
-
-    file_path.write_text(json.dumps(data, indent=2))
-    record_trade(data)
-
-    print("POSITION CLOSED", data["asset"], "PnL:", round(pnl, 4))
-
-
-def open_portfolio_risk() -> float:
-    total_risk = 0.0
-
-    for f in open_position_files():
-        try:
-            data = json.loads(f.read_text())
-            entry = float(data["entry"])
-            stop = float(data["stop"])
-            size = float(data["size"])
-            trade_risk = max(0.0, (entry - stop) * size)
-            total_risk += trade_risk
-        except Exception:
-            continue
-
-    return total_risk
-
-
-def open_portfolio_risk_pct() -> float:
-    return open_portfolio_risk() / ACCOUNT_EQUITY
-
-
-def monitor_positions() -> None:
-    for f in open_position_files():
-        data = json.loads(f.read_text())
-        asset = data["asset"]
-
-        price = get_price(asset)
-        if price is None:
-            continue
-
-        end = datetime.now(timezone.utc)
-        start = end - timedelta(days=3)
-        candles = fetch(asset, start, end)
-
-        if len(candles) < 20:
-            continue
-
-        closes = [c.close for c in candles]
-        ema10 = ema(closes[-10:], 10)
-        atr_val = atr(candles[-20:])
-
-        trail = ema10 - atr_val
-        data["stop"] = max(float(data["stop"]), float(trail))
-
-        if price <= data["stop"]:
-            close_position(f, price)
+        if self.position:
+            print(f"Recovered position: {self.position.asset} @ {self.position.entry_price}")
         else:
-            f.write_text(json.dumps(data, indent=2))
+            print("No prior open position recovered.")
 
-
-def score_asset(asset: str, candles: list[Candle]) -> float:
-    closes = [c.close for c in candles]
-
-    v = vwap(candles[-30:])
-    atr_val = atr(candles[-20:])
-
-    spread = abs(closes[-1] - v) / v
-    momentum = abs(closes[-1] - closes[-20]) / closes[-20]
-    volatility = atr_val / closes[-1]
-
-    return spread + momentum + volatility
-
-
-def build_trade(asset: str, candles: list[Candle], weight: float) -> dict | None:
-    price = candles[-1].close
-    atr_val = atr(candles[-20:])
-
-    stop = price - atr_val * 2
-    stop_distance = price - stop
-
-    if stop_distance <= 0:
+    # -----------------------------
+    # Persistence
+    # -----------------------------
+    def _load_position(self) -> Optional[Position]:
+        try:
+            if POSITION_FILE.exists():
+                data = json.loads(POSITION_FILE.read_text(encoding="utf-8"))
+                if "asset" in data and "entry_price" in data and "units" in data:
+                    return Position(
+                        asset=str(data["asset"]),
+                        entry_price=float(data["entry_price"]),
+                        size_usd=float(data["size_usd"]),
+                        units=float(data["units"]),
+                        opened_at=str(data["opened_at"]),
+                        highest_price=float(data.get("highest_price", data["entry_price"])),
+                        last_price=float(data.get("last_price", data["entry_price"])),
+                        score_at_entry=float(data.get("score_at_entry", 0.0)),
+                    )
+        except Exception:
+            pass
         return None
 
-    risk_budget = ACCOUNT_EQUITY * RISK_PER_TRADE
-    size = risk_budget / stop_distance
-    size = min(size, MAX_TOKEN_SIZE)
+    def _save_position(self) -> None:
+        if self.position is None:
+            if POSITION_FILE.exists():
+                POSITION_FILE.unlink()
+            return
 
-    trade = {
-        "asset": asset,
-        "strategy": "MULTI",
-        "entry": price,
-        "stop": stop,
-        "size": size,
-        "weight": weight,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-    return trade
+        payload = asdict(self.position)
+        payload["timestamp"] = datetime.now(UTC).isoformat()
+        POSITION_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
+    def _save_top_assets(self, ranked: List[dict]) -> None:
+        payload = {
+            "timestamp": datetime.now(UTC).isoformat(),
+            "top_assets": ranked[:TOP_N],
+        }
+        TOP_ASSETS_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
-def execute_trade(asset: str, trade: dict) -> None:
-    print("TRADE SIGNAL", trade)
-    save_position(asset, trade)
+    def _append_trade_log(self, record: dict) -> None:
+        with TRADES_FILE.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
 
+    # -----------------------------
+    # Market Data
+    # -----------------------------
+    def get_price(self, asset: str) -> Optional[float]:
+        url = f"{API}/products/{asset}/ticker"
+        try:
+            response = requests.get(
+                url,
+                timeout=REQUEST_TIMEOUT,
+                headers={"User-Agent": "CSS-Autonomous-Loop/53"},
+            )
+            response.raise_for_status()
+            data = response.json()
+            price = data.get("price")
+            return float(price) if price is not None else None
+        except Exception:
+            return None
 
-def run_cycle() -> None:
-    print("\n==============================")
-    print("CSS AUTONOMOUS ENGINE v49")
-    print(datetime.now(timezone.utc))
-    print("==============================\n")
+    def update_price_history(self) -> Dict[str, float]:
+        latest: Dict[str, float] = {}
+        for asset in ASSETS:
+            price = self.get_price(asset)
+            if price is not None:
+                self.price_history[asset].append(price)
+                latest[asset] = price
+        return latest
 
-    monitor_positions()
+    @staticmethod
+    def compute_score(prices: Deque[float]) -> float:
+        if len(prices) < 3:
+            return 0.0
+        first = prices[0]
+        last = prices[-1]
+        if first == 0:
+            return 0.0
+        return (last - first) / first
 
-    open_count = len(open_position_files())
-    current_risk_pct = open_portfolio_risk_pct()
+    def rank_assets(self) -> List[dict]:
+        ranked: List[dict] = []
+        for asset, prices in self.price_history.items():
+            if not prices:
+                continue
+            score = self.compute_score(prices)
+            ranked.append(
+                {
+                    "asset": asset,
+                    "score": score,
+                    "last_price": prices[-1],
+                    "samples": len(prices),
+                }
+            )
+        ranked.sort(key=lambda x: x["score"], reverse=True)
+        return ranked
 
-    print("Open positions:", open_count)
-    print("Portfolio risk %:", round(current_risk_pct * 100, 2))
+    # -----------------------------
+    # Trading Logic
+    # -----------------------------
+    def should_enter(self, asset_info: dict) -> bool:
+        return float(asset_info["score"]) >= MIN_ENTRY_SCORE
 
-    if open_count >= MAX_OPEN_POSITIONS:
-        print("Portfolio position limit reached")
-        return
+    def should_exit(self, price: float, score: float) -> bool:
+        if self.position is None:
+            return False
 
-    if current_risk_pct >= MAX_PORTFOLIO_RISK:
-        print("Portfolio risk limit reached")
-        return
+        entry = self.position.entry_price
+        highest = max(self.position.highest_price, price)
 
-    markets = discover_markets()
-    liquid = rank_liquidity(markets)
+        if price > self.position.highest_price:
+            self.position.highest_price = price
 
-    scored: list[dict] = []
+        trail_level = highest * (1 - TRAIL_STOP_PCT)
+        pnl_pct = (price - entry) / entry
 
-    for asset in liquid:
-        if has_open_position(asset):
-            continue
+        if score <= EXIT_REVERSAL_SCORE:
+            return True
 
-        price = get_price(asset)
-        if price is None or price < MIN_ASSET_PRICE:
-            continue
+        if price <= trail_level:
+            return True
 
-        end = datetime.now(timezone.utc)
-        start = end - timedelta(days=LOOKBACK_DAYS)
-        candles = fetch(asset, start, end)
+        if pnl_pct >= TAKE_PROFIT_PCT and score < self.position.score_at_entry:
+            return True
 
-        if len(candles) < 80:
-            continue
+        return False
 
-        score = score_asset(asset, candles)
+    def open_position(self, asset: str, price: float, score: float) -> None:
+        allocation = round(self.cash_usd * RISK_ALLOCATION_PCT, 2)
+        if allocation <= 0:
+            return
 
-        scored.append(
+        units = allocation / price
+        now = datetime.now(UTC).isoformat()
+
+        self.position = Position(
+            asset=asset,
+            entry_price=price,
+            size_usd=allocation,
+            units=units,
+            opened_at=now,
+            highest_price=price,
+            last_price=price,
+            score_at_entry=score,
+        )
+        self.cash_usd -= allocation
+        self._save_position()
+
+        self._append_trade_log(
             {
+                "timestamp": now,
+                "event": "BUY",
                 "asset": asset,
-                "candles": candles,
+                "price": price,
+                "size_usd": allocation,
+                "units": units,
                 "score": score,
+                "pnl": 0.0,
+                "mode": "paper",
             }
         )
 
-    scored.sort(key=lambda x: x["score"], reverse=True)
+        print(f"BUY  {asset}  price={price:.4f}  size=${allocation:.2f}  score={score:+.6f}")
 
-    slots = MAX_OPEN_POSITIONS - open_count
-    selected = scored[:slots]
+    def close_position(self, price: float, score: float, reason: str) -> None:
+        if self.position is None:
+            return
 
-    if not selected:
-        print("No new qualified opportunities")
-        return
+        now = datetime.now(UTC).isoformat()
+        proceeds = self.position.units * price
+        pnl = proceeds - self.position.size_usd
 
-    total_score = sum(x["score"] for x in selected)
+        self.cash_usd += proceeds
+        self.realized_pnl += pnl
+        self.trade_count += 1
 
-    for s in selected:
-        weight = s["score"] / total_score if total_score > 0 else 1 / len(selected)
-        trade = build_trade(s["asset"], s["candles"], weight)
-
-        if trade is None:
-            continue
-
-        projected_risk = open_portfolio_risk() + max(
-            0.0, (trade["entry"] - trade["stop"]) * trade["size"]
+        self._append_trade_log(
+            {
+                "timestamp": now,
+                "event": "SELL",
+                "asset": self.position.asset,
+                "entry_price": self.position.entry_price,
+                "exit_price": price,
+                "size_usd": self.position.size_usd,
+                "units": self.position.units,
+                "score": score,
+                "pnl": round(pnl, 6),
+                "reason": reason,
+                "mode": "paper",
+            }
         )
-        projected_risk_pct = projected_risk / ACCOUNT_EQUITY
 
-        if projected_risk_pct > MAX_PORTFOLIO_RISK:
+        print(
+            f"SELL {self.position.asset}  exit={price:.4f}  pnl=${pnl:.2f}  "
+            f"reason={reason}  score={score:+.6f}"
+        )
+
+        self.position = None
+        self._save_position()
+
+    # -----------------------------
+    # Reporting
+    # -----------------------------
+    def print_header(self) -> None:
+        print("\n" + "=" * 78)
+        print(" CAPITAL STRATA SYSTEMS — AUTONOMOUS LOOP v53 ".center(78))
+        print("=" * 78)
+
+    def print_rankings(self, ranked: List[dict]) -> None:
+        print("\nTOP RANKED ASSETS\n")
+        for i, item in enumerate(ranked[:TOP_N], start=1):
             print(
-                "SKIP",
-                s["asset"],
-                "- projected portfolio risk too high:",
-                round(projected_risk_pct * 100, 2),
-                "%"
+                f"{i}. {item['asset']:<9} "
+                f"score={item['score']:+.6f}  "
+                f"price={item['last_price']:.4f}  "
+                f"samples={item['samples']}"
             )
-            continue
 
-        execute_trade(s["asset"], trade)
+    def print_position_status(self, ranked: List[dict]) -> None:
+        print("\nPORTFOLIO\n")
+        print(f"Cash USD      : ${self.cash_usd:.2f}")
+        print(f"Realized PnL  : ${self.realized_pnl:.2f}")
+        print(f"Closed Trades : {self.trade_count}")
+
+        if self.position is None:
+            print("Open Position : None")
+            return
+
+        current_score = 0.0
+        current_price = self.position.last_price
+
+        for item in ranked:
+            if item["asset"] == self.position.asset:
+                current_score = float(item["score"])
+                current_price = float(item["last_price"])
+                break
+
+        unrealized = (current_price - self.position.entry_price) * self.position.units
+
+        print(f"Open Position : {self.position.asset}")
+        print(f"Entry Price   : {self.position.entry_price:.4f}")
+        print(f"Current Price : {current_price:.4f}")
+        print(f"Size USD      : ${self.position.size_usd:.2f}")
+        print(f"Units         : {self.position.units:.8f}")
+        print(f"Unrealized    : ${unrealized:.2f}")
+        print(f"Score         : {current_score:+.6f}")
+
+    # -----------------------------
+    # Main Loop
+    # -----------------------------
+    def run_once(self) -> None:
+        latest = self.update_price_history()
+        ranked = self.rank_assets()
+        self._save_top_assets(ranked)
+
+        self.print_header()
+
+        if not ranked:
+            print("\nNo market data returned.")
+            print(f"\nLast Update: {datetime.now(UTC).isoformat()}")
+            print(f"\nRefreshing in {SCAN_INTERVAL_SECONDS} seconds...")
+            return
+
+        self.print_rankings(ranked)
+
+        if self.position is None:
+            best = ranked[0]
+            best_asset = str(best["asset"])
+            best_price = float(best["last_price"])
+            best_score = float(best["score"])
+
+            if self.should_enter(best):
+                self.open_position(best_asset, best_price, best_score)
+            else:
+                print(
+                    f"\nNo entry. Best asset {best_asset} score={best_score:+.6f} "
+                    f"is below threshold {MIN_ENTRY_SCORE:+.6f}"
+                )
+        else:
+            asset = self.position.asset
+            if asset in latest:
+                current_price = latest[asset]
+                self.position.last_price = current_price
+                current_score = self.compute_score(self.price_history[asset])
+
+                if self.should_exit(current_price, current_score):
+                    self.close_position(
+                        price=current_price,
+                        score=current_score,
+                        reason="reversal_or_trailing_stop",
+                    )
+                else:
+                    self._save_position()
+                    print(
+                        f"\nHOLD {asset}  price={current_price:.4f}  "
+                        f"score={current_score:+.6f}  "
+                        f"high={self.position.highest_price:.4f}"
+                    )
+            else:
+                print(f"\nNo fresh price for open position asset: {asset}")
+
+        ranked = self.rank_assets()
+        self.print_position_status(ranked)
+
+        print(f"\nLast Update: {datetime.now(UTC).isoformat()}")
+        print(f"\nRefreshing in {SCAN_INTERVAL_SECONDS} seconds...")
+
+    def run(self) -> None:
+        print("Starting CSS Autonomous Loop v53 in PAPER mode...")
+        while True:
+            try:
+                self.run_once()
+                time.sleep(SCAN_INTERVAL_SECONDS)
+            except KeyboardInterrupt:
+                print("\nStopped by user.")
+                break
+            except Exception as exc:
+                print(f"\nLoop error: {exc}")
+                time.sleep(SCAN_INTERVAL_SECONDS)
 
 
 def main() -> None:
-    print("\nCSS AUTONOMOUS ENGINE v49 STARTED\n")
-
-    while True:
-        run_cycle()
-        print("\nSleeping 15 minutes...\n")
-        time.sleep(LOOP_INTERVAL)
+    engine = CSSAutonomousLoopV53()
+    engine.run()
 
 
 if __name__ == "__main__":
