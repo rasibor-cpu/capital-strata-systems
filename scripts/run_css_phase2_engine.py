@@ -4,33 +4,39 @@ import sys
 import time
 from pathlib import Path
 
-# Ensure project root is on sys.path so "backend" imports work
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from backend.execution.trade_manager import TradeManager
+from backend.intelligence.capital_allocator import CapitalAllocator
 from backend.intelligence.market_intelligence import MarketIntelligenceEngine
 from backend.intelligence.strategy_selector import StrategySelector
-from backend.intelligence.capital_allocator import CapitalAllocator
-from backend.execution.trade_manager import TradeManager
+from backend.risk.portfolio_risk_governor import PortfolioRiskGovernor
 
 
 class CSSPhase2Engine:
     def __init__(self) -> None:
+        self.total_capital = 200.0
         self.market_engine = MarketIntelligenceEngine(max_assets=5)
         self.strategy_selector = StrategySelector()
-        self.capital_allocator = CapitalAllocator(total_capital=200)
+        self.capital_allocator = CapitalAllocator(total_capital=self.total_capital)
         self.trade_manager = TradeManager()
+        self.risk_governor = PortfolioRiskGovernor(
+            max_open_positions=5,
+            max_asset_allocation_pct=0.40,
+            max_total_deployed_pct=1.00,
+            total_capital=self.total_capital,
+        )
 
     def run_cycle(self) -> None:
         print("\n====== CSS Phase 2 Engine Cycle ======\n")
 
-        # Step 1: Market intelligence
         ranked_assets = self.market_engine.get_top_assets()
+
         print("Top Assets Selected:")
         print(ranked_assets)
 
-        # Step 2: Strategy selection
         print("\nStrategy Selection")
         strategies: dict[str, str] = {}
 
@@ -41,17 +47,35 @@ class CSSPhase2Engine:
                 f"{asset:10} Regime:{decision.regime:10} Strategy:{decision.strategy}"
             )
 
-        # Step 3: Capital allocation
         print("\nCapital Allocation")
         allocations = self.capital_allocator.allocate(ranked_assets)
 
         for alloc in allocations:
             print(f"{alloc.asset:10} Capital:${alloc.allocation_usd}")
 
-        # Step 4: Open simulated positions
+        print("\nPortfolio Risk Review")
+        proposed_batch = [(alloc.asset, alloc.allocation_usd) for alloc in allocations]
+        risk_decisions = self.risk_governor.review_batch(
+            proposed_allocations=proposed_batch,
+            open_positions=self.trade_manager.positions,
+        )
+
+        for asset, risk_decision in risk_decisions.items():
+            print(
+                f"{asset:10} Allowed:{risk_decision.allowed} "
+                f"Reason:{risk_decision.reason}"
+            )
+
         print("\nOpening Positions")
+        opened_any = False
+
         for alloc in allocations:
-            entry_price = 100.0  # placeholder
+            risk_decision = risk_decisions[alloc.asset]
+            if not risk_decision.allowed:
+                print(f"Skipped {alloc.asset}: {risk_decision.reason}")
+                continue
+
+            entry_price = 100.0
             size = alloc.allocation_usd / entry_price
 
             self.trade_manager.open_position(
@@ -59,8 +83,23 @@ class CSSPhase2Engine:
                 entry_price,
                 size,
             )
+            opened_any = True
 
-        print("\nPositions Opened")
+        if not opened_any:
+            print("No new positions opened this cycle.")
+
+        print("\nOpen Position Summary")
+        if self.trade_manager.positions:
+            for asset, pos in self.trade_manager.positions.items():
+                print(
+                    f"{asset:10} entry={pos.entry_price:.2f} "
+                    f"size={pos.size:.4f} "
+                    f"tp1={pos.tp1:.2f} "
+                    f"tp2={pos.tp2:.2f} "
+                    f"trail={pos.trailing_stop:.2f}"
+                )
+        else:
+            print("No open positions.")
 
     def run(self, scan_interval_seconds: int = 20) -> None:
         while True:
