@@ -1,118 +1,225 @@
-"""
-CSS Portfolio Dashboard v60
-Professional Portfolio Monitor
-Backward-compatible with older position schemas
-"""
-
 import json
+import os
 import time
+from datetime import datetime
 from pathlib import Path
-from datetime import datetime, UTC
+from typing import Any, Dict, List, Optional
 
-STATE_DIR = Path("backend/state")
-POSITION_FILE = STATE_DIR / "spot_position.json"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-REFRESH = 5
-DEFAULT_TRAIL_PCT = 0.01
+STATE_FILE = PROJECT_ROOT / "backend" / "state" / "spot_position.json"
+TRADES_FILE = PROJECT_ROOT / "audit_logs" / "trades.jsonl"
+
+STARTING_CAPITAL = 200.00
+REFRESH_SECONDS = 5
 
 
-def load_position():
-    if not POSITION_FILE.exists():
-        return None
+def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
-        with open(POSITION_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
-
-
-def clear():
-    print("\033[2J\033[H", end="")
-
-
-def print_header():
-    print("=" * 70)
-    print(" CAPITAL STRATA SYSTEMS — PROFESSIONAL PORTFOLIO DASHBOARD ")
-    print("=" * 70)
-
-
-def _to_float(value, default=0.0):
-    try:
+        if value is None or value == "":
+            return default
         return float(value)
-    except Exception:
-        return float(default)
-
-
-def _to_bool(value, default=False):
-    if isinstance(value, bool):
-        return value
-    if value is None:
+    except (TypeError, ValueError):
         return default
-    return bool(value)
 
 
-def print_position(pos):
-    print("\nPOSITION STATUS\n")
+def load_position() -> Optional[Dict[str, Any]]:
+    if not STATE_FILE.exists():
+        return None
 
-    asset = pos.get("asset", "UNKNOWN")
-    entry = _to_float(pos.get("entry_price"), 0.0)
+    try:
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else None
+    except Exception:
+        return None
 
-    original_units = _to_float(
-        pos.get("original_units", pos.get("units", 0.0)),
-        0.0,
+
+def load_trades() -> List[Dict[str, Any]]:
+    trades: List[Dict[str, Any]] = []
+
+    if not TRADES_FILE.exists():
+        return trades
+
+    try:
+        with open(TRADES_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    item = json.loads(line)
+                    if isinstance(item, dict):
+                        trades.append(item)
+                except json.JSONDecodeError:
+                    continue
+    except Exception:
+        return []
+
+    return trades
+
+
+def compute_realized(trades: List[Dict[str, Any]]) -> float:
+    pnl = 0.0
+    for t in trades:
+        pnl += _safe_float(t.get("realized_pnl", 0.0))
+    return pnl
+
+
+def get_position_asset(position: Optional[Dict[str, Any]]) -> str:
+    if not position:
+        return "-"
+    return str(
+        position.get("asset")
+        or position.get("symbol")
+        or position.get("product_id")
+        or position.get("pair")
+        or "-"
     )
-    remaining_units = _to_float(
-        pos.get("remaining_units", pos.get("units", 0.0)),
-        0.0,
+
+
+def get_position_qty(position: Optional[Dict[str, Any]]) -> float:
+    if not position:
+        return 0.0
+    return _safe_float(
+        position.get("size",
+        position.get("qty",
+        position.get("quantity",
+        position.get("base_size", 0.0))))
     )
 
-    realized = _to_float(pos.get("realized_profit", 0.0), 0.0)
-    highest = _to_float(pos.get("highest_price", entry), entry)
 
-    ladder1 = _to_bool(pos.get("ladder1_done", False), False)
-    ladder2 = _to_bool(pos.get("ladder2_done", False), False)
-
-    opened_at = pos.get("timestamp", "N/A")
-
-    print(f"Asset               : {asset}")
-    print(f"Entry Price         : {entry:.6f}")
-    print(f"Original Units      : {original_units:.6f}")
-    print(f"Remaining Units     : {remaining_units:.6f}")
-    print(f"Highest Price       : {highest:.6f}")
-
-    print("\nPROFIT STATUS\n")
-    print(f"Realized Profit     : {realized:.2f}")
-
-    print("\nLADDER STATUS\n")
-    print(f"Ladder 1 Executed   : {ladder1}")
-    print(f"Ladder 2 Executed   : {ladder2}")
-
-    trail = highest * (1 - DEFAULT_TRAIL_PCT)
-
-    print("\nRISK CONTROL\n")
-    print(f"Trailing Stop Level : {trail:.6f}")
-
-    print("\nTRADE OPENED\n")
-    print(opened_at)
+def get_entry_price(position: Optional[Dict[str, Any]]) -> float:
+    if not position:
+        return 0.0
+    return _safe_float(
+        position.get("entry_price",
+        position.get("entry",
+        position.get("avg_entry_price",
+        position.get("average_entry_price",
+        position.get("avg_price",
+        position.get("price", 0.0))))))
+    )
 
 
-def main():
+def get_current_price(position: Optional[Dict[str, Any]]) -> float:
+    if not position:
+        return 0.0
+    return _safe_float(
+        position.get("current_price",
+        position.get("mark_price",
+        position.get("market_price",
+        position.get("last_price",
+        position.get("price", 0.0)))))
+    )
+
+
+def has_open_position(position: Optional[Dict[str, Any]]) -> bool:
+    if not position:
+        return False
+
+    qty = get_position_qty(position)
+    status = str(position.get("status", "")).strip().lower()
+
+    if qty > 0:
+        return True
+
+    if status in {"open", "active", "filled", "live"}:
+        return True
+
+    return False
+
+
+def compute_unrealized(position: Optional[Dict[str, Any]]) -> float:
+    if not has_open_position(position):
+        return 0.0
+
+    entry = get_entry_price(position)
+    current = get_current_price(position)
+    qty = get_position_qty(position)
+
+    if qty <= 0 or entry <= 0 or current <= 0:
+        return 0.0
+
+    return (current - entry) * qty
+
+
+def compute_market_value(position: Optional[Dict[str, Any]]) -> float:
+    if not has_open_position(position):
+        return 0.0
+
+    current = get_current_price(position)
+    qty = get_position_qty(position)
+
+    if current <= 0 or qty <= 0:
+        return 0.0
+
+    return current * qty
+
+
+def clear_screen() -> None:
+    os.system("cls" if os.name == "nt" else "clear")
+
+
+def render_dashboard() -> None:
+    last_refresh_label = ""
+
     while True:
-        clear()
-        print_header()
-
         pos = load_position()
+        trades = load_trades()
 
-        if not pos:
-            print("\nNO OPEN POSITION\n")
+        realized = compute_realized(trades)
+        unrealized = compute_unrealized(pos)
+        market_value = compute_market_value(pos)
+
+        cash_balance = STARTING_CAPITAL + realized
+        total_equity = cash_balance + unrealized
+
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        last_refresh_label = timestamp
+
+        clear_screen()
+        print()
+        print("====================================================")
+        print(" CAPITAL STRATA SYSTEMS — LIVE PORTFOLIO DASHBOARD ")
+        print("====================================================")
+        print(f" Local Time        : {timestamp}")
+        print(f" Last Refresh      : {last_refresh_label}")
+        print()
+
+        print("---------------- ACCOUNT SUMMARY -------------------")
+        print(f" Starting Capital  : ${STARTING_CAPITAL:,.2f}")
+        print(f" Cash Balance      : ${cash_balance:,.2f}")
+        print(f" Realized PnL      : ${realized:,.2f}")
+        print(f" Unrealized PnL    : ${unrealized:,.2f}")
+        print(f" Total Equity      : ${total_equity:,.2f}")
+        print()
+
+        print("---------------- OPEN POSITION ---------------------")
+        if has_open_position(pos):
+            asset = get_position_asset(pos)
+            qty = get_position_qty(pos)
+            entry = get_entry_price(pos)
+            current = get_current_price(pos)
+
+            print(f" Asset             : {asset}")
+            print(f" Quantity          : {qty:,.8f}")
+            print(f" Entry Price       : ${entry:,.8f}")
+            print(f" Current Price     : ${current:,.8f}")
+            print(f" Market Value      : ${market_value:,.2f}")
+            print(f" Position PnL      : ${unrealized:,.2f}")
         else:
-            print_position(pos)
+            print(" No open position")
+        print()
 
-        print("\nLast Update:", datetime.now(UTC).isoformat())
-        print(f"\nRefreshing in {REFRESH} seconds...")
+        print("---------------- TRADE LOG -------------------------")
+        print(f" Total Trades      : {len(trades)}")
+        print()
+        print(f" Auto Refresh      : every {REFRESH_SECONDS} seconds")
+        print("====================================================")
 
-        time.sleep(REFRESH)
+        time.sleep(REFRESH_SECONDS)
 
 
 if __name__ == "__main__":
-    main()
+    render_dashboard()
