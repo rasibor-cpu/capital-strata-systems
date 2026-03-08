@@ -7,9 +7,10 @@ from pathlib import Path
 from typing import List
 
 from backend.intelligence.regime_detector import RegimeDetector
-from backend.strategies.breakout import signal as breakout_signal
 from backend.strategies.mean_reversion import signal as mean_reversion_signal
 from backend.strategies.trend_following import signal as trend_following_signal
+from backend.strategies.breakout import signal as breakout_signal
+from backend.risk.atr_risk_engine import ATRRiskEngine
 
 
 @dataclass
@@ -30,30 +31,31 @@ class Trade:
 
 
 class HistoricalBacktestEngine:
-    def __init__(
-        self,
-        starting_capital: float = 200.0,
-        take_profit_pct: float = 0.02,
-        stop_loss_pct: float = 0.015,
-    ) -> None:
+
+    def __init__(self, starting_capital: float = 200.0):
+
         self.starting_capital = starting_capital
-        self.take_profit_pct = take_profit_pct
-        self.stop_loss_pct = stop_loss_pct
         self.detector = RegimeDetector()
+        self.atr_engine = ATRRiskEngine()
+
         self.reset()
 
-    def reset(self) -> None:
+    def reset(self):
+
         self.capital = self.starting_capital
         self.position = None
         self.trades: List[Trade] = []
 
-    def load_csv(self, path: Path) -> List[Candle]:
-        candles: List[Candle] = []
+    def load_csv(self, path: Path):
+
+        candles = []
 
         with path.open("r", newline="", encoding="utf-8") as f:
+
             reader = csv.DictReader(f)
 
             for row in reader:
+
                 candles.append(
                     Candle(
                         ts=row["ts"],
@@ -67,7 +69,8 @@ class HistoricalBacktestEngine:
 
         return candles
 
-    def signal(self, candles: List[Candle], i: int) -> bool:
+    def signal(self, candles, i):
+
         regime = self.detector.detect(candles, i)
 
         if regime == "RANGE":
@@ -81,39 +84,60 @@ class HistoricalBacktestEngine:
 
         return False
 
-    def run(self, asset: str, candles: List[Candle]) -> None:
+    def run(self, asset, candles):
+
         self.reset()
+
         allocation = 40.0
 
         for i in range(len(candles)):
+
             candle = candles[i]
 
             if self.position is None:
+
                 if self.capital >= allocation and self.signal(candles, i):
+
                     entry = candle.close
                     size = allocation / entry
+
                     self.capital -= allocation
+
                     self.position = (entry, size)
+
                 continue
 
             entry, size = self.position
 
-            tp = entry * (1.0 + self.take_profit_pct)
-            sl = entry * (1.0 - self.stop_loss_pct)
+            atr = self.atr_engine.compute_atr(candles, i)
+
+            if atr is None:
+                continue
+
+            tp = self.atr_engine.take_profit(entry, atr)
+            sl = self.atr_engine.stop_loss(entry, atr)
 
             exit_price = None
 
             if candle.high >= tp:
                 exit_price = tp
+
             elif candle.low <= sl:
                 exit_price = sl
+
             elif i == len(candles) - 1:
                 exit_price = candle.close
 
             if exit_price is not None:
+
                 pnl = (exit_price - entry) * size
+
                 self.capital += size * exit_price
-                self.trades.append(Trade(entry=entry, exit=exit_price, pnl=pnl))
+
+                self.trades.append(
+                    Trade(entry=entry, exit=exit_price, pnl=pnl)
+                )
+
                 self.position = None
 
         wins = sum(1 for t in self.trades if t.pnl > 0)
@@ -133,33 +157,43 @@ class HistoricalBacktestEngine:
         else:
             print("Win Rate: 0.00%")
 
-    def summary(self) -> dict:
+    def summary(self):
+
         wins = sum(1 for t in self.trades if t.pnl > 0)
         losses = sum(1 for t in self.trades if t.pnl <= 0)
-        win_rate = round((wins / len(self.trades)) * 100.0, 2) if self.trades else 0.0
+
+        win_rate = 0
+
+        if self.trades:
+            win_rate = (wins / len(self.trades)) * 100
 
         return {
-            "starting_capital": round(self.starting_capital, 2),
+            "starting_capital": self.starting_capital,
             "ending_capital": round(self.capital, 2),
-            "total_pnl": round(self.capital - self.starting_capital, 2),
+            "pnl": round(self.capital - self.starting_capital, 2),
             "trades": len(self.trades),
             "wins": wins,
             "losses": losses,
-            "win_rate": win_rate,
+            "win_rate": round(win_rate, 2),
         }
 
 
-def main() -> None:
+def main():
+
     if len(sys.argv) < 2:
+
         print("Usage:")
         print("python historical_backtest_engine.py <csv_file>")
         return
 
     csv_file = Path("data_cache") / sys.argv[1]
+
     asset = sys.argv[1].split("_")[0]
 
     engine = HistoricalBacktestEngine()
+
     candles = engine.load_csv(csv_file)
+
     engine.run(asset, candles)
 
 
