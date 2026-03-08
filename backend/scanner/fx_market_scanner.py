@@ -10,11 +10,9 @@ from typing import Any, Dict, List, Optional
 import requests
 from dotenv import load_dotenv
 
-# Load .env from project root
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(PROJECT_ROOT / ".env")
 
-OANDA_PRACTICE_URL = "https://api-fxpractice.oanda.com/v3"
 DEFAULT_FX_UNIVERSE = [
     "EUR_USD",
     "GBP_USD",
@@ -45,6 +43,12 @@ DEFAULT_FX_UNIVERSE = [
     "CAD_CHF",
 ]
 
+DEFAULT_HEADERS = {
+    "Accept-Datetime-Format": "UNIX",
+    "Content-Type": "application/json",
+    "User-Agent": "Capital-Strata-Systems/1.0",
+}
+
 
 @dataclass
 class FXScannerConfig:
@@ -52,10 +56,12 @@ class FXScannerConfig:
     count: int = 60
     price_component: str = "M"
     top_n: int = 5
-    request_timeout_seconds: float = 12.0
+    request_timeout_seconds: float = 15.0
     instruments: Optional[List[str]] = None
-    min_avg_range_pct: float = 0.015
+    min_avg_range_pct: float = 0.0001
+    min_abs_spread_from_vwap_pct: float = 0.00001
     vwap_window: int = 20
+    debug: bool = True
 
 
 @dataclass
@@ -72,54 +78,73 @@ class FXScanResult:
 
 
 class OandaFXMarketScanner:
-    """
-    CSS FX Market Scanner v1
-
-    Scans a universe of OANDA FX pairs, computes signal-quality metrics,
-    ranks them, and returns the top opportunities.
-
-    Since centralized exchange volume is not available in spot FX the same way
-    it is in crypto, this scanner uses:
-    - distance from VWAP proxy
-    - realized volatility
-    - average candle range
-    - trend penalty
-    """
-
     def __init__(
         self,
         api_token: Optional[str] = None,
         config: Optional[FXScannerConfig] = None,
         session: Optional[requests.Session] = None,
     ) -> None:
-        self.api_token = (
-            api_token
-            or os.getenv("OANDA_API_TOKEN", "")
-            or os.getenv("OANDA_TOKEN", "")
-        ).strip()
+        self.env_mode = os.getenv("OANDA_ENV", "practice").strip().lower()
+
+        if self.env_mode == "live":
+            self.base_url = "https://api-fxtrade.oanda.com/v3"
+            env_token = os.getenv("OANDA_LIVE_TOKEN", "")
+        else:
+            self.base_url = "https://api-fxpractice.oanda.com/v3"
+            env_token = os.getenv("OANDA_PRACTICE_TOKEN", "")
+
+        self.api_token = (api_token or env_token).strip()
         self.config = config or FXScannerConfig()
         self.session = session or requests.Session()
-        self.session.headers.update(
-            {
-                "Authorization": f"Bearer {self.api_token}",
-                "Accept-Datetime-Format": "UNIX",
-                "Content-Type": "application/json",
-                "User-Agent": "Capital-Strata-Systems/1.0",
-            }
-        )
+        self.session.headers.update(DEFAULT_HEADERS)
+
+        if self.api_token:
+            self.session.headers["Authorization"] = f"Bearer {self.api_token}"
+
+    def _debug(self, message: str) -> None:
+        if self.config.debug:
+            print(message)
+
+    def validate_token(self) -> tuple[bool, str]:
+        if not self.api_token:
+            return False, f"OANDA token is missing for env={self.env_mode}."
+
+        test_instrument = "EUR_USD"
+        url = f"{self.base_url}/instruments/{test_instrument}/candles"
+        params = {
+            "count": 5,
+            "granularity": self.config.granularity,
+            "price": self.config.price_component,
+        }
+
+        try:
+            response = self.session.get(
+                url,
+                params=params,
+                timeout=self.config.request_timeout_seconds,
+            )
+            if response.status_code == 200:
+                return True, f"Token validated successfully against OANDA {self.env_mode} environment."
+            return (
+                False,
+                f"Token validation failed on {self.env_mode}: HTTP {response.status_code} | {response.text[:300]}",
+            )
+        except requests.RequestException as exc:
+            return False, f"Token validation request failed: {exc}"
 
     def get_instruments(self) -> List[str]:
         instruments = self.config.instruments or DEFAULT_FX_UNIVERSE
-        deduped: List[str] = []
+        out: List[str] = []
         seen = set()
         for instrument in instruments:
-            if instrument not in seen:
-                deduped.append(instrument)
-                seen.add(instrument)
-        return deduped
+            symbol = str(instrument).strip().upper()
+            if symbol and symbol not in seen:
+                out.append(symbol)
+                seen.add(symbol)
+        return out
 
     def get_candles(self, instrument: str) -> List[Dict[str, float]]:
-        url = f"{OANDA_PRACTICE_URL}/instruments/{instrument}/candles"
+        url = f"{self.base_url}/instruments/{instrument}/candles"
         params = {
             "count": self.config.count,
             "granularity": self.config.granularity,
@@ -171,9 +196,8 @@ class OandaFXMarketScanner:
         for c in window:
             typical = (c["high"] + c["low"] + c["close"]) / 3.0
             candle_range = max(c["high"] - c["low"], 1e-12)
-            weight = candle_range
-            weighted_sum += typical * weight
-            weight_sum += weight
+            weighted_sum += typical * candle_range
+            weight_sum += candle_range
 
         if weight_sum <= 0:
             return None
@@ -227,14 +251,17 @@ class OandaFXMarketScanner:
     def score_instrument(self, instrument: str) -> Optional[FXScanResult]:
         candles = self.get_candles(instrument)
         if len(candles) < max(20, self.config.vwap_window):
+            self._debug(f"[SKIP] {instrument}: insufficient candles ({len(candles)})")
             return None
 
         last_mid = candles[-1]["close"]
         if last_mid <= 0:
+            self._debug(f"[SKIP] {instrument}: invalid last price")
             return None
 
         vwap = self.compute_vwap_proxy(candles)
         if vwap is None or vwap <= 0:
+            self._debug(f"[SKIP] {instrument}: invalid VWAP")
             return None
 
         spread_from_vwap_pct = ((last_mid / vwap) - 1.0) * 100.0
@@ -243,6 +270,11 @@ class OandaFXMarketScanner:
         avg_range_pct = self.compute_avg_range_pct(candles)
 
         if avg_range_pct < self.config.min_avg_range_pct:
+            self._debug(f"[SKIP] {instrument}: avg_range_pct too low")
+            return None
+
+        if abs(spread_from_vwap_pct) < self.config.min_abs_spread_from_vwap_pct:
+            self._debug(f"[SKIP] {instrument}: spread_from_vwap too low")
             return None
 
         trend_penalty = abs(trend_pct) * 0.20
@@ -250,10 +282,15 @@ class OandaFXMarketScanner:
         vol_bonus = math.log1p(max(volatility_pct, 0.0))
 
         score = (
-            abs(spread_from_vwap_pct) * 0.50
-            + vol_bonus * 1.60
-            + range_bonus * 1.25
+            abs(spread_from_vwap_pct) * 0.55
+            + vol_bonus * 1.45
+            + range_bonus * 1.15
             - trend_penalty
+        )
+
+        self._debug(
+            f"[PASS] {instrument}: score={score:.6f}, spread={spread_from_vwap_pct:.6f}%, "
+            f"vol={volatility_pct:.6f}%, range={avg_range_pct:.6f}%, trend={trend_pct:.6f}%"
         )
 
         return FXScanResult(
@@ -269,10 +306,13 @@ class OandaFXMarketScanner:
         )
 
     def scan_market(self) -> List[FXScanResult]:
-        if not self.api_token:
-            raise ValueError(
-                "OANDA token is missing. Put OANDA_API_TOKEN or OANDA_TOKEN in your .env file."
-            )
+        ok, message = self.validate_token()
+        self._debug(f"[AUTH] {message}")
+        self._debug(f"[INFO] Environment: {self.env_mode}")
+        self._debug(f"[INFO] Base URL: {self.base_url}")
+
+        if not ok:
+            raise ValueError(message)
 
         results: List[FXScanResult] = []
         for instrument in self.get_instruments():
@@ -280,30 +320,16 @@ class OandaFXMarketScanner:
                 result = self.score_instrument(instrument)
                 if result is not None:
                     results.append(result)
-            except requests.RequestException:
-                continue
-            except Exception:
-                continue
+            except requests.HTTPError as exc:
+                body = exc.response.text[:300] if exc.response is not None else ""
+                self._debug(f"[HTTP ERROR] {instrument}: {exc} {body}")
+            except requests.RequestException as exc:
+                self._debug(f"[REQUEST ERROR] {instrument}: {exc}")
+            except Exception as exc:
+                self._debug(f"[ERROR] {instrument}: {exc}")
 
         results.sort(key=lambda x: x.score, reverse=True)
         return results[: self.config.top_n]
-
-    def scan_market_as_dicts(self) -> List[Dict[str, Any]]:
-        return [self.result_to_dict(r) for r in self.scan_market()]
-
-    @staticmethod
-    def result_to_dict(result: FXScanResult) -> Dict[str, Any]:
-        return {
-            "instrument": result.instrument,
-            "score": result.score,
-            "last_mid": result.last_mid,
-            "vwap": result.vwap,
-            "spread_from_vwap_pct": result.spread_from_vwap_pct,
-            "volatility_pct": result.volatility_pct,
-            "trend_pct": result.trend_pct,
-            "avg_range_pct": result.avg_range_pct,
-            "candles_used": result.candles_used,
-        }
 
 
 def print_fx_scan_results(results: List[FXScanResult]) -> None:
@@ -315,18 +341,12 @@ def print_fx_scan_results(results: List[FXScanResult]) -> None:
     for i, r in enumerate(results, start=1):
         print(
             f"{i:>2}. {r.instrument:<10} "
-            f"score={r.score:>7.4f}   "
-            f"spread={r.spread_from_vwap_pct:>8.4f}%   "
-            f"vol={r.volatility_pct:>7.4f}%   "
-            f"range={r.avg_range_pct:>7.4f}%   "
-            f"trend={r.trend_pct:>8.4f}%"
+            f"score={r.score:>8.4f}   "
+            f"spread={r.spread_from_vwap_pct:>9.6f}%   "
+            f"vol={r.volatility_pct:>8.6f}%   "
+            f"range={r.avg_range_pct:>8.6f}%   "
+            f"trend={r.trend_pct:>9.6f}%"
         )
-
-
-def get_top_fx_instruments(top_n: int = 5) -> List[str]:
-    scanner = OandaFXMarketScanner(config=FXScannerConfig(top_n=top_n))
-    results = scanner.scan_market()
-    return [r.instrument for r in results]
 
 
 if __name__ == "__main__":
@@ -335,8 +355,10 @@ if __name__ == "__main__":
             granularity="M15",
             count=60,
             top_n=5,
-            min_avg_range_pct=0.015,
+            min_avg_range_pct=0.0001,
+            min_abs_spread_from_vwap_pct=0.00001,
             vwap_window=20,
+            debug=True,
         )
     )
     scan_results = scanner.scan_market()
