@@ -6,6 +6,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List
 
+from backend.intelligence.regime_detector import RegimeDetector
+from backend.strategies.breakout import signal as breakout_signal
+from backend.strategies.mean_reversion import signal as mean_reversion_signal
+from backend.strategies.trend_following import signal as trend_following_signal
+
 
 @dataclass
 class Candle:
@@ -34,6 +39,7 @@ class HistoricalBacktestEngine:
         self.starting_capital = starting_capital
         self.take_profit_pct = take_profit_pct
         self.stop_loss_pct = stop_loss_pct
+        self.detector = RegimeDetector()
         self.reset()
 
     def reset(self) -> None:
@@ -62,16 +68,18 @@ class HistoricalBacktestEngine:
         return candles
 
     def signal(self, candles: List[Candle], i: int) -> bool:
-        if i < 3:
-            return False
+        regime = self.detector.detect(candles, i)
 
-        avg = (
-            candles[i - 1].close +
-            candles[i - 2].close +
-            candles[i - 3].close
-        ) / 3.0
+        if regime == "RANGE":
+            return mean_reversion_signal(candles, i)
 
-        return candles[i].close < avg * 0.995
+        if regime == "TREND":
+            return trend_following_signal(candles, i)
+
+        if regime == "VOLATILE":
+            return breakout_signal(candles, i)
+
+        return False
 
     def run(self, asset: str, candles: List[Candle]) -> None:
         self.reset()
@@ -105,9 +113,7 @@ class HistoricalBacktestEngine:
             if exit_price is not None:
                 pnl = (exit_price - entry) * size
                 self.capital += size * exit_price
-                self.trades.append(
-                    Trade(entry=entry, exit=exit_price, pnl=pnl)
-                )
+                self.trades.append(Trade(entry=entry, exit=exit_price, pnl=pnl))
                 self.position = None
 
         wins = sum(1 for t in self.trades if t.pnl > 0)
