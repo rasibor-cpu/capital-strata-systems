@@ -11,6 +11,7 @@ from backend.strategies.mean_reversion import signal as mean_reversion_signal
 from backend.strategies.trend_following import signal as trend_following_signal
 from backend.strategies.breakout import signal as breakout_signal
 from backend.risk.atr_risk_engine import ATRRiskEngine
+from backend.risk.position_sizing_engine import PositionSizingEngine
 
 
 @dataclass
@@ -35,8 +36,10 @@ class HistoricalBacktestEngine:
     def __init__(self, starting_capital: float = 200.0):
 
         self.starting_capital = starting_capital
+
         self.detector = RegimeDetector()
         self.atr_engine = ATRRiskEngine()
+        self.position_engine = PositionSizingEngine()
 
         self.reset()
 
@@ -88,20 +91,33 @@ class HistoricalBacktestEngine:
 
         self.reset()
 
-        allocation = 40.0
-
         for i in range(len(candles)):
 
             candle = candles[i]
 
             if self.position is None:
 
-                if self.capital >= allocation and self.signal(candles, i):
+                if self.signal(candles, i):
 
                     entry = candle.close
-                    size = allocation / entry
 
-                    self.capital -= allocation
+                    atr = self.atr_engine.compute_atr(candles, i)
+
+                    if atr is None:
+                        continue
+
+                    size = self.position_engine.size_position(
+                        self.capital,
+                        entry,
+                        atr
+                    )
+
+                    cost = size * entry
+
+                    if cost > self.capital or size <= 0:
+                        continue
+
+                    self.capital -= cost
 
                     self.position = (entry, size)
 
