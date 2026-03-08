@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import csv
+import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 
 @dataclass
@@ -17,62 +18,39 @@ class Candle:
 
 
 @dataclass
-class BacktestTrade:
-    asset: str
-    entry_price: float
-    exit_price: float
-    size: float
-    pnl_usd: float
-    reason: str
-
-
-@dataclass
-class BacktestResult:
-    asset: str
-    starting_capital: float
-    ending_capital: float
-    total_pnl: float
-    trades: int
-    wins: int
-    losses: int
-    win_rate: float
+class Trade:
+    entry: float
+    exit: float
+    pnl: float
 
 
 class HistoricalBacktestEngine:
-    """
-    Phase 3 Historical Backtest Engine
-
-    Reads candle data from CSV and runs a simple mean-reversion style
-    portfolio simulation using fixed capital slices.
-    """
-
     def __init__(
         self,
         starting_capital: float = 200.0,
-        allocation_per_trade: float = 40.0,
         take_profit_pct: float = 0.02,
         stop_loss_pct: float = 0.015,
     ) -> None:
         self.starting_capital = starting_capital
-        self.allocation_per_trade = allocation_per_trade
         self.take_profit_pct = take_profit_pct
         self.stop_loss_pct = stop_loss_pct
+        self.reset()
 
-    def load_candles_from_csv(self, csv_path: str | Path) -> List[Candle]:
-        path = Path(csv_path)
+    def reset(self) -> None:
+        self.capital = self.starting_capital
+        self.position = None
+        self.trades: List[Trade] = []
+
+    def load_csv(self, path: Path) -> List[Candle]:
         candles: List[Candle] = []
 
         with path.open("r", newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
-            required = {"ts", "open", "high", "low", "close", "volume"}
-            missing = required - set(reader.fieldnames or [])
-            if missing:
-                raise ValueError(f"CSV missing required columns: {sorted(missing)}")
 
             for row in reader:
                 candles.append(
                     Candle(
-                        ts=str(row["ts"]),
+                        ts=row["ts"],
                         open=float(row["open"]),
                         high=float(row["high"]),
                         low=float(row["low"]),
@@ -81,122 +59,103 @@ class HistoricalBacktestEngine:
                     )
                 )
 
-        if len(candles) < 5:
-            raise ValueError("Need at least 5 candles for backtest.")
-
         return candles
 
-    def _simple_signal(self, candles: List[Candle], idx: int) -> bool:
-        """
-        Entry signal:
-        Buy when current close is below average of previous 3 closes.
-        """
-        if idx < 3:
+    def signal(self, candles: List[Candle], i: int) -> bool:
+        if i < 3:
             return False
 
-        avg_prev_3 = (
-            candles[idx - 1].close +
-            candles[idx - 2].close +
-            candles[idx - 3].close
+        avg = (
+            candles[i - 1].close +
+            candles[i - 2].close +
+            candles[i - 3].close
         ) / 3.0
 
-        return candles[idx].close < avg_prev_3 * 0.995
+        return candles[i].close < avg * 0.995
 
-    def run_backtest(self, asset: str, candles: List[Candle]) -> BacktestResult:
-        capital = self.starting_capital
-        trades: List[BacktestTrade] = []
+    def run(self, asset: str, candles: List[Candle]) -> None:
+        self.reset()
+        allocation = 40.0
 
-        in_position = False
-        entry_price = 0.0
-        size = 0.0
+        for i in range(len(candles)):
+            candle = candles[i]
 
-        for idx in range(len(candles)):
-            candle = candles[idx]
-
-            if not in_position:
-                if capital >= self.allocation_per_trade and self._simple_signal(candles, idx):
-                    entry_price = candle.close
-                    size = self.allocation_per_trade / entry_price
-                    capital -= self.allocation_per_trade
-                    in_position = True
+            if self.position is None:
+                if self.capital >= allocation and self.signal(candles, i):
+                    entry = candle.close
+                    size = allocation / entry
+                    self.capital -= allocation
+                    self.position = (entry, size)
                 continue
 
-            tp_price = entry_price * (1.0 + self.take_profit_pct)
-            sl_price = entry_price * (1.0 - self.stop_loss_pct)
+            entry, size = self.position
 
-            exit_price: Optional[float] = None
-            reason = ""
+            tp = entry * (1.0 + self.take_profit_pct)
+            sl = entry * (1.0 - self.stop_loss_pct)
 
-            if candle.high >= tp_price:
-                exit_price = tp_price
-                reason = "take_profit"
-            elif candle.low <= sl_price:
-                exit_price = sl_price
-                reason = "stop_loss"
-            elif idx == len(candles) - 1:
+            exit_price = None
+
+            if candle.high >= tp:
+                exit_price = tp
+            elif candle.low <= sl:
+                exit_price = sl
+            elif i == len(candles) - 1:
                 exit_price = candle.close
-                reason = "final_bar_exit"
 
             if exit_price is not None:
-                gross_value = size * exit_price
-                pnl = gross_value - self.allocation_per_trade
-                capital += gross_value
-
-                trades.append(
-                    BacktestTrade(
-                        asset=asset,
-                        entry_price=entry_price,
-                        exit_price=exit_price,
-                        size=size,
-                        pnl_usd=round(pnl, 2),
-                        reason=reason,
-                    )
+                pnl = (exit_price - entry) * size
+                self.capital += size * exit_price
+                self.trades.append(
+                    Trade(entry=entry, exit=exit_price, pnl=pnl)
                 )
+                self.position = None
 
-                in_position = False
-                entry_price = 0.0
-                size = 0.0
+        wins = sum(1 for t in self.trades if t.pnl > 0)
+        losses = sum(1 for t in self.trades if t.pnl <= 0)
 
-        total_pnl = round(capital - self.starting_capital, 2)
-        wins = sum(1 for t in trades if t.pnl_usd > 0)
-        losses = sum(1 for t in trades if t.pnl_usd <= 0)
-        trades_count = len(trades)
-        win_rate = round((wins / trades_count) * 100.0, 2) if trades_count else 0.0
+        print("\nCSS Historical Backtest Result\n")
+        print("Asset:", asset)
+        print("Starting Capital:", f"${self.starting_capital:.2f}")
+        print("Ending Capital:", f"${self.capital:.2f}")
+        print("Total PnL:", f"${self.capital - self.starting_capital:.2f}")
+        print("Trades:", len(self.trades))
+        print("Wins:", wins)
+        print("Losses:", losses)
 
-        return BacktestResult(
-            asset=asset,
-            starting_capital=round(self.starting_capital, 2),
-            ending_capital=round(capital, 2),
-            total_pnl=total_pnl,
-            trades=trades_count,
-            wins=wins,
-            losses=losses,
-            win_rate=win_rate,
-        )
+        if self.trades:
+            print("Win Rate:", f"{wins / len(self.trades) * 100:.2f}%")
+        else:
+            print("Win Rate: 0.00%")
+
+    def summary(self) -> dict:
+        wins = sum(1 for t in self.trades if t.pnl > 0)
+        losses = sum(1 for t in self.trades if t.pnl <= 0)
+        win_rate = round((wins / len(self.trades)) * 100.0, 2) if self.trades else 0.0
+
+        return {
+            "starting_capital": round(self.starting_capital, 2),
+            "ending_capital": round(self.capital, 2),
+            "total_pnl": round(self.capital - self.starting_capital, 2),
+            "trades": len(self.trades),
+            "wins": wins,
+            "losses": losses,
+            "win_rate": win_rate,
+        }
 
 
-def demo() -> None:
-    engine = HistoricalBacktestEngine()
-
-    sample_path = Path("data_cache") / "sample_backtest_data.csv"
-    if not sample_path.exists():
-        print(f"Sample CSV not found at: {sample_path}")
-        print("Create the sample CSV first, then rerun this demo.")
+def main() -> None:
+    if len(sys.argv) < 2:
+        print("Usage:")
+        print("python historical_backtest_engine.py <csv_file>")
         return
 
-    candles = engine.load_candles_from_csv(sample_path)
-    result = engine.run_backtest(asset="SAMPLE-USD", candles=candles)
+    csv_file = Path("data_cache") / sys.argv[1]
+    asset = sys.argv[1].split("_")[0]
 
-    print("\nCSS Historical Backtest Result\n")
-    print(f"Asset:            {result.asset}")
-    print(f"Starting Capital: ${result.starting_capital:.2f}")
-    print(f"Ending Capital:   ${result.ending_capital:.2f}")
-    print(f"Total PnL:        ${result.total_pnl:.2f}")
-    print(f"Trades:           {result.trades}")
-    print(f"Wins:             {result.wins}")
-    print(f"Losses:           {result.losses}")
-    print(f"Win Rate:         {result.win_rate:.2f}%")
+    engine = HistoricalBacktestEngine()
+    candles = engine.load_csv(csv_file)
+    engine.run(asset, candles)
 
 
 if __name__ == "__main__":
-    demo()
+    main()
