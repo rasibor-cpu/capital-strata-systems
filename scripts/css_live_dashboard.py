@@ -8,8 +8,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-import requests
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 if str(PROJECT_ROOT) not in sys.path:
@@ -65,18 +63,23 @@ def _clear() -> None:
     os.system("cls" if os.name == "nt" else "clear")
 
 
-def _load_position() -> Dict[str, Any]:
+def _load_portfolio() -> Dict[str, Any]:
     if not POSITION_FILE.exists():
-        return {"in_position": False}
+        return {"positions": []}
 
     try:
-        return json.loads(POSITION_FILE.read_text())
+        payload = json.loads(POSITION_FILE.read_text())
+        if not isinstance(payload, dict):
+            return {"positions": []}
+        if "positions" not in payload or not isinstance(payload["positions"], list):
+            payload["positions"] = []
+        return payload
     except Exception:
-        return {"in_position": False}
+        return {"positions": []}
 
 
-def _save_position(position: Dict[str, Any]) -> None:
-    POSITION_FILE.write_text(json.dumps(position, indent=2))
+def _save_portfolio(portfolio: Dict[str, Any]) -> None:
+    POSITION_FILE.write_text(json.dumps(portfolio, indent=2))
 
 
 def _get_universe() -> List[str]:
@@ -131,19 +134,22 @@ def _print_header(policy_name: str, capital: float, scan_interval: int, assets: 
     print()
 
 
-def _print_position(position: Dict[str, Any]) -> None:
-    print("POSITION STATUS")
+def _print_positions(positions: List[Dict[str, Any]]) -> None:
+    print("OPEN POSITIONS")
     print("--------------------------------------------------------------------------")
 
-    if position.get("in_position"):
+    if not positions:
+        print("FLAT | No open spot positions")
+        print()
+        return
+
+    for idx, p in enumerate(positions, start=1):
         print(
-            f"OPEN | Asset: {position.get('asset')} | "
-            f"Entry: {position.get('entry')} | "
-            f"Qty: {position.get('qty')} | "
-            f"Size: {_fmt_money(float(position.get('size_usd', 0.0)))}"
+            f"{idx} | {p['asset']} | "
+            f"Entry: {p['entry']} | "
+            f"Qty: {p['qty']} | "
+            f"Size: {_fmt_money(float(p['size_usd']))}"
         )
-    else:
-        print("FLAT | No open spot position")
 
     print()
 
@@ -228,7 +234,6 @@ def main() -> None:
     policy = choose_session_policy(starting_capital)
     governor = PortfolioRiskGovernor(policy)
 
-    # FIX: restored executor does not accept paper_mode kwarg
     executor = CoinbaseExecutor()
 
     ai = AIOpportunityScorer()
@@ -239,7 +244,9 @@ def main() -> None:
 
     while True:
         try:
-            position = _load_position()
+            portfolio = _load_portfolio()
+            positions = portfolio.get("positions", [])
+
             ai_results = ai.run()
             active_assets = _select_assets(ai_results, universe, max_assets)
 
@@ -279,9 +286,14 @@ def main() -> None:
 
             latest_status = ""
 
+            open_assets = {p["asset"] for p in positions}
+
             for asset, mid, vwap, spread, signal, reason in rows:
-                if position.get("in_position"):
+                if len(positions) >= max_assets:
                     break
+
+                if asset in open_assets:
+                    continue
 
                 if not signal:
                     continue
@@ -303,8 +315,7 @@ def main() -> None:
                 qty = alloc_size / mid
                 governor.register_trade(asset, alloc_size)
 
-                position = {
-                    "in_position": True,
+                new_trade = {
                     "asset": asset,
                     "entry": mid,
                     "qty": qty,
@@ -312,13 +323,17 @@ def main() -> None:
                     "ts": _utc(),
                 }
 
-                _save_position(position)
+                positions.append(new_trade)
+                open_assets.add(asset)
+
+                portfolio["positions"] = positions
+                _save_portfolio(portfolio)
+
                 latest_status = f"TRADE ENTERED: {asset} @ {mid:.6f} size {_fmt_money(alloc_size)}"
-                break
 
             _clear()
             _print_header(policy.policy_name, starting_capital, scan_interval, universe)
-            _print_position(position)
+            _print_positions(positions)
             _print_watchlist(rows)
             _print_ai_panel(ai_results)
             _print_allocations(allocations, starting_capital)
