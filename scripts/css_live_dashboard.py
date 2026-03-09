@@ -232,7 +232,7 @@ def main() -> None:
     )
 
     policy = choose_session_policy(starting_capital)
-    governor = PortfolioRiskGovernor(policy)
+    governor = PortfolioRiskGovernor(starting_capital)
 
     executor = CoinbaseExecutor()
 

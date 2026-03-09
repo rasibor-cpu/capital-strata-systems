@@ -6,28 +6,16 @@ from typing import Dict, Tuple
 class PortfolioRiskGovernor:
     """
     CSS Portfolio Risk Governor
-
-    Enforces simple portfolio risk rules:
-    - Max per-asset exposure
-    - Max total exposure
-    - Position counting
     """
 
-    def __init__(self, policy):
+    def __init__(self, capital: float):
 
-        self.policy = policy
+        self.total_capital = float(capital)
 
-        # Capital base
-        self.total_capital = float(getattr(policy, "capital", 0.0))
-
-        # Exposure rules
-        # Increased slightly so allocator sizes (~$43 on $200) pass
+        # exposure limits
         self.max_asset_exposure = 0.25
+        self.max_portfolio_exposure = 1.0
 
-        # Total portfolio exposure allowed
-        self.max_portfolio_exposure = 1.00
-
-        # Track exposure internally
         self.asset_exposure: Dict[str, float] = {}
         self.portfolio_exposure = 0.0
 
@@ -58,6 +46,7 @@ class PortfolioRiskGovernor:
     def close_trade(self, asset: str, size_usd: float):
 
         if asset in self.asset_exposure:
+
             self.asset_exposure[asset] -= size_usd
 
             if self.asset_exposure[asset] <= 0:
@@ -66,9 +55,4 @@ class PortfolioRiskGovernor:
         self.portfolio_exposure -= size_usd
 
         if self.portfolio_exposure < 0:
-            self.portfolio_exposure = 0.0
-
-    def reset(self):
-
-        self.asset_exposure = {}
-        self.portfolio_exposure = 0.0
+            self.portfolio_exposure = 0
