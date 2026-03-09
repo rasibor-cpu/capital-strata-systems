@@ -111,4 +111,35 @@ engine/risk/*.json
 live_tick_*.json
 *.log
 runlog.txt
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.env/
+
+# Secrets
+coinbase_private_key.pem
+*.pem
+*.key
+*.secret
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Logs
+*.log
+
+# Temporary files
+2
+50
+65
+List[Dict[str
+List[str]
+Optional[List[Dict[str
+float
 
