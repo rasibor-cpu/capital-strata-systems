@@ -24,7 +24,6 @@ from backend.strategies.vwap_mean_reversion import (
     compute_vwap_from_candles,
     should_buy_mean_reversion,
 )
-
 from backend.execution.coinbase_executor import CoinbaseExecutor
 
 try:
@@ -39,6 +38,11 @@ STATE_DIR.mkdir(parents=True, exist_ok=True)
 POSITION_FILE = STATE_DIR / "spot_position.json"
 
 
+def _env(name: str, default: str) -> str:
+    v = os.getenv(name)
+    return default if v is None else str(v)
+
+
 def _env_float(name: str, default: float) -> float:
     raw = os.getenv(name)
     if raw is None or not raw.strip():
@@ -50,19 +54,18 @@ def _env_int(name: str, default: int) -> int:
     raw = os.getenv(name)
     if raw is None or not raw.strip():
         return default
-    return int(raw)
+    return int(float(raw))
 
 
 def _utc() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _clear():
+def _clear() -> None:
     os.system("cls" if os.name == "nt" else "clear")
 
 
-def _load_position():
-
+def _load_position() -> Dict[str, Any]:
     if not POSITION_FILE.exists():
         return {"in_position": False}
 
@@ -72,56 +75,146 @@ def _load_position():
         return {"in_position": False}
 
 
-def _save_position(p):
-    POSITION_FILE.write_text(json.dumps(p, indent=2))
+def _save_position(position: Dict[str, Any]) -> None:
+    POSITION_FILE.write_text(json.dumps(position, indent=2))
 
 
-def _get_universe():
-
+def _get_universe() -> List[str]:
     if get_top_universe:
-
         try:
-            return get_top_universe(200)
-
+            universe = get_top_universe(200)
+            if universe:
+                return universe
         except Exception:
             pass
 
-    return ["BTC-USD", "ETH-USD"]
+    return [x.strip() for x in _env("CSS_PRODUCTS", "BTC-USD,ETH-USD").split(",") if x.strip()]
 
 
-def _select_assets(ai_results, fallback, max_assets):
+def _select_assets(ai_results: List[Dict[str, Any]], fallback: List[str], max_assets: int) -> List[str]:
+    selected: List[str] = []
 
-    selected = []
-
-    for r in ai_results:
-
-        if r["asset_class"] != "CRYPTO":
+    for item in ai_results:
+        if item.get("asset_class") != "CRYPTO":
+            continue
+        if item.get("signal") != "BUY":
             continue
 
-        if r["signal"] != "BUY":
+        symbol = str(item.get("symbol", "")).strip()
+        if not symbol.endswith("-USD"):
             continue
 
-        if not r["symbol"].endswith("-USD"):
-            continue
-
-        selected.append(r["symbol"])
-
+        selected.append(symbol)
         if len(selected) >= max_assets:
             break
 
-    if selected:
-        return selected
-
-    return fallback[:max_assets]
+    return selected if selected else fallback[:max_assets]
 
 
-def main():
+def _fmt_money(value: float) -> str:
+    return f"${value:,.2f}"
 
+
+def _print_header(policy_name: str, capital: float, scan_interval: int, assets: List[str]) -> None:
+    print("==========================================================================")
+    print("                    CAPITAL STRATA SYSTEMS LIVE DASHBOARD")
+    print("==========================================================================")
+    print(f"Policy: {policy_name} | Capital: {_fmt_money(capital)} | Refresh: {scan_interval}s")
+    if len(assets) > 8:
+        preview = ", ".join(assets[:8]) + f" ... ({len(assets)} assets)"
+    else:
+        preview = ", ".join(assets)
+    print(f"Configured Base Assets: {preview}")
+    print("Trading Enabled: YES")
+    print(f"Timestamp (UTC): {_utc()}")
+    print("==========================================================================")
+    print()
+
+
+def _print_position(position: Dict[str, Any]) -> None:
+    print("POSITION STATUS")
+    print("--------------------------------------------------------------------------")
+
+    if position.get("in_position"):
+        print(
+            f"OPEN | Asset: {position.get('asset')} | "
+            f"Entry: {position.get('entry')} | "
+            f"Qty: {position.get('qty')} | "
+            f"Size: {_fmt_money(float(position.get('size_usd', 0.0)))}"
+        )
+    else:
+        print("FLAT | No open spot position")
+
+    print()
+
+
+def _print_watchlist(rows: List[Tuple[str, float, float, float, bool, str]]) -> None:
+    print("LIVE COINBASE EXECUTION WATCHLIST")
+    print("--------------------------------------------------------------------------")
+    print(f"{'Asset':12} {'Mid':>12} {'VWAP':>12} {'Spread(bps)':>12} {'Signal':>8} {'Reason':>16}")
+    print("-" * 82)
+
+    for asset, mid, vwap, spread, signal, reason in rows:
+        print(
+            f"{asset:<12} "
+            f"{mid:>12.6f} "
+            f"{vwap:>12.6f} "
+            f"{spread:>12.2f} "
+            f"{('BUY' if signal else 'HOLD'):>8} "
+            f"{reason[:16]:>16}"
+        )
+
+    print()
+
+
+def _print_ai_panel(ai_results: List[Dict[str, Any]]) -> None:
+    print("AI OPPORTUNITY SCANNER")
+    print("--------------------------------------------------------------------------")
+    print(f"{'Symbol':12} {'Class':8} {'Signal':8} {'Regime':16} {'AI Score':>8} {'Band':10} {'Priority':14}")
+    print("-" * 96)
+
+    for item in ai_results[:8]:
+        print(
+            f"{item['symbol']:<12} "
+            f"{item['asset_class']:<8} "
+            f"{item['signal']:<8} "
+            f"{item['regime']:<16} "
+            f"{item['opportunity_score']:>8.2f} "
+            f"{item['confidence_band']:<10} "
+            f"{item['action_priority']:<14}"
+        )
+
+    print("\nTop AI explanations:")
+    for item in ai_results[:3]:
+        print(f"- {item['explanation']}")
+    print()
+
+
+def _print_allocations(allocations: List[Dict[str, Any]], total_capital: float) -> None:
+    print("AI CAPITAL ALLOCATION PLAN")
+    print("--------------------------------------------------------------------------")
+    print(f"{'Rank':4} {'Symbol':12} {'AI Score':>10} {'Capital':>12}")
+    print("-" * 44)
+
+    total = 0.0
+    for idx, item in enumerate(allocations, start=1):
+        total += float(item["capital"])
+        print(
+            f"{idx:<4} "
+            f"{item['symbol']:<12} "
+            f"{item['ai_score']:>10.2f} "
+            f"{_fmt_money(float(item['capital'])):>12}"
+        )
+
+    print("-" * 44)
+    print(f"Allocated: {_fmt_money(total)} | Portfolio Capital Basis: {_fmt_money(total_capital)}")
+    print()
+
+
+def main() -> None:
     scan_interval = _env_int("CSS_SCAN_INTERVAL_SECONDS", 45)
-
-    starting_capital = _env_float("CSS_STARTING_CAPITAL_USD", 200)
-
-    max_assets = 5
+    starting_capital = _env_float("CSS_STARTING_CAPITAL_USD", 200.0)
+    max_assets = _env_int("CSS_DYNAMIC_TOP_N", 5)
 
     universe = _get_universe()
 
@@ -133,47 +226,34 @@ def main():
     )
 
     policy = choose_session_policy(starting_capital)
-
     governor = PortfolioRiskGovernor(policy)
 
-    executor = CoinbaseExecutor(paper_mode=True)
+    # FIX: restored executor does not accept paper_mode kwarg
+    executor = CoinbaseExecutor()
 
     ai = AIOpportunityScorer()
-
     allocator = CapitalAllocator(
         total_capital=starting_capital,
         max_positions=max_assets,
     )
 
     while True:
-
         try:
-
-            pos = _load_position()
-
+            position = _load_position()
             ai_results = ai.run()
-
             active_assets = _select_assets(ai_results, universe, max_assets)
 
-            allocations = allocator.allocate(
-                ai_results=ai_results,
-                market_rows=[],
-            )
-
-            rows = []
+            rows: List[Tuple[str, float, float, float, bool, str]] = []
 
             for asset in active_assets:
-
                 candles = executor.get_candles(asset, "FIFTEEN_MINUTE")
 
                 if len(candles) < 20:
                     continue
 
                 vwap = compute_vwap_from_candles(candles, 20)
-
                 mid = float(candles[-1]["close"])
-
-                spread = ((mid - vwap) / vwap) * 10000
+                spread = ((mid - vwap) / vwap) * 10000.0
 
                 signal, reason = should_buy_mean_reversion(
                     mid,
@@ -182,34 +262,48 @@ def main():
                     vwap_cfg,
                 )
 
-                rows.append((asset, mid, vwap, spread, signal))
+                rows.append((asset, mid, vwap, spread, signal, str(reason)))
 
-                if pos.get("in_position"):
-                    continue
+            allocations = allocator.allocate(
+                ai_results=ai_results,
+                market_rows=[
+                    {
+                        "asset": asset,
+                        "mid": mid,
+                        "vwap": vwap,
+                        "spread_bps": spread,
+                    }
+                    for asset, mid, vwap, spread, _, _ in rows
+                ],
+            )
+
+            latest_status = ""
+
+            for asset, mid, vwap, spread, signal, reason in rows:
+                if position.get("in_position"):
+                    break
 
                 if not signal:
                     continue
 
-                alloc_size = 0
-
-                for a in allocations:
-                    if a["symbol"] == asset:
-                        alloc_size = float(a["capital"])
+                alloc_size = 0.0
+                for item in allocations:
+                    if item["symbol"] == asset:
+                        alloc_size = float(item["capital"])
                         break
 
                 if alloc_size <= 0:
                     continue
 
                 approved, msg = governor.approve_trade(asset, alloc_size)
-
                 if not approved:
+                    latest_status = f"Risk block: {msg}"
                     continue
 
                 qty = alloc_size / mid
-
                 governor.register_trade(asset, alloc_size)
 
-                pos = {
+                position = {
                     "in_position": True,
                     "asset": asset,
                     "entry": mid,
@@ -218,111 +312,32 @@ def main():
                     "ts": _utc(),
                 }
 
-                _save_position(pos)
-
-                print(f"\nTRADE ENTERED: {asset} size ${alloc_size:.2f}")
+                _save_position(position)
+                latest_status = f"TRADE ENTERED: {asset} @ {mid:.6f} size {_fmt_money(alloc_size)}"
+                break
 
             _clear()
+            _print_header(policy.policy_name, starting_capital, scan_interval, universe)
+            _print_position(position)
+            _print_watchlist(rows)
+            _print_ai_panel(ai_results)
+            _print_allocations(allocations, starting_capital)
 
-            print("==========================================================")
-            print("CAPITAL STRATA SYSTEMS LIVE DASHBOARD")
-            print("==========================================================")
-            print("Policy:", policy.policy_name)
-            print("Capital:", starting_capital)
-            print("Refresh:", scan_interval, "seconds")
-            print()
+            if latest_status:
+                print("LATEST STATUS")
+                print("--------------------------------------------------------------------------")
+                print(latest_status)
+                print()
 
-            print("POSITION STATUS")
-
-            if pos.get("in_position"):
-
-                print(
-                    "OPEN",
-                    pos["asset"],
-                    "Entry",
-                    pos["entry"],
-                    "Qty",
-                    pos["qty"],
-                )
-
-            else:
-
-                print("FLAT")
-
-            print()
-
-            print("LIVE COINBASE EXECUTION WATCHLIST")
-
-            for r in rows:
-
-                asset, mid, vwap, spread, signal = r
-
-                print(
-                    asset,
-                    "mid",
-                    round(mid, 6),
-                    "vwap",
-                    round(vwap, 6),
-                    "spread",
-                    round(spread, 2),
-                    "signal",
-                    "BUY" if signal else "HOLD",
-                )
-
-            print()
-
-            print("AI OPPORTUNITY SCANNER")
-
-            for r in ai_results[:5]:
-
-                print(
-                    r["symbol"],
-                    r["signal"],
-                    r["regime"],
-                    r["opportunity_score"],
-                )
-
-            print()
-
-            print("AI CAPITAL ALLOCATION PLAN")
-
-            total = 0
-
-            for i, a in enumerate(allocations):
-
-                total += a["capital"]
-
-                print(
-                    i + 1,
-                    a["symbol"],
-                    a["ai_score"],
-                    "$" + str(round(a["capital"], 2)),
-                )
-
-            print()
-
-            print("Allocated:", round(total, 2))
-
-            print()
-
-            print(
-                "Refreshing in",
-                scan_interval,
-                "seconds... Press Ctrl+C to stop.",
-            )
-
+            print(f"Refreshing in {scan_interval} seconds... Press Ctrl+C to stop.")
             time.sleep(scan_interval)
 
         except KeyboardInterrupt:
-
             print("\nCSS stopped")
-
             break
 
-        except Exception as e:
-
-            print("Runner error:", e)
-
+        except Exception as exc:
+            print("Runner error:", exc)
             time.sleep(scan_interval)
 
 
