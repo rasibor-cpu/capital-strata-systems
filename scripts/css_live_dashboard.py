@@ -6,7 +6,9 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
+
+import requests
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -22,9 +24,11 @@ from backend.strategies.vwap_mean_reversion import (
 )
 
 try:
-    from backend.execution.coinbase_executor import CoinbaseExecutor
-except Exception:
-    CoinbaseExecutor = None
+    from backend.execution.coinbase_executor import CoinbaseExecutor as _CoinbaseExecutor
+    EXECUTOR_IMPORT_ERROR = ""
+except Exception as exc:
+    _CoinbaseExecutor = None
+    EXECUTOR_IMPORT_ERROR = str(exc)
 
 
 STATE_DIR = PROJECT_ROOT / "backend" / "state"
@@ -48,6 +52,13 @@ def _env_float(name: str, default: float) -> float:
     if raw is None or not raw.strip():
         return default
     return float(raw)
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    return int(float(raw))
 
 
 def _utc() -> str:
@@ -88,6 +99,127 @@ def _save_position(position: Dict[str, Any]) -> None:
     POSITION_FILE.write_text(json.dumps(position, indent=2))
 
 
+# ---------------- COINBASE DATA ADAPTERS ----------------
+
+class PublicCoinbaseMarketData:
+    """
+    Fallback market-data adapter using Coinbase public candles endpoint.
+    This allows the dashboard to run even when the executor module import fails.
+    """
+
+    BASE_URL = "https://api.exchange.coinbase.com"
+
+    def __init__(self) -> None:
+        self.session = requests.Session()
+        self.session.headers.update(
+            {
+                "User-Agent": "Capital-Strata-Systems/1.0",
+                "Accept": "application/json",
+            }
+        )
+
+    def get_candles(self, product_id: str, granularity_name: str) -> List[Dict[str, float]]:
+        granularity_map = {
+            "ONE_MINUTE": 60,
+            "FIVE_MINUTE": 300,
+            "FIFTEEN_MINUTE": 900,
+            "ONE_HOUR": 3600,
+            "SIX_HOUR": 21600,
+            "ONE_DAY": 86400,
+        }
+        granularity = granularity_map.get(granularity_name, 900)
+
+        url = f"{self.BASE_URL}/products/{product_id}/candles"
+        response = self.session.get(
+            url,
+            params={"granularity": granularity},
+            timeout=15,
+        )
+        response.raise_for_status()
+        payload = response.json()
+
+        candles: List[Dict[str, float]] = []
+        for row in payload:
+            if not isinstance(row, list) or len(row) < 6:
+                continue
+            ts, low, high, open_, close, volume = row[:6]
+            candles.append(
+                {
+                    "ts": float(ts),
+                    "low": float(low),
+                    "high": float(high),
+                    "open": float(open_),
+                    "close": float(close),
+                    "volume": float(volume),
+                }
+            )
+
+        candles.sort(key=lambda x: x["ts"])
+        return candles
+
+
+def _build_market_adapter() -> Tuple[Any, str, bool]:
+    """
+    Returns:
+        adapter, adapter_label, trading_enabled
+    """
+    if _CoinbaseExecutor is not None:
+        try:
+            adapter = _CoinbaseExecutor(paper_mode=True)
+            return adapter, "CoinbaseExecutor(paper_mode=True)", True
+        except Exception as exc:
+            return PublicCoinbaseMarketData(), f"PublicCoinbaseFallback(executor init failed: {exc})", False
+
+    reason = EXECUTOR_IMPORT_ERROR or "unknown import error"
+    return PublicCoinbaseMarketData(), f"PublicCoinbaseFallback(import failed: {reason})", False
+
+
+# ---------------- WATCHLIST SELECTION ----------------
+
+def _base_assets_from_env() -> List[str]:
+    return [x.strip() for x in _env("CSS_PRODUCTS", "BTC-USD,ETH-USD").split(",") if x.strip()]
+
+
+def _select_execution_assets(
+    ai_results: List[Dict[str, Any]],
+    fallback_assets: List[str],
+    max_assets: int,
+) -> Tuple[List[str], str]:
+    """
+    Build live execution watchlist from AI results first, else fall back to CSS_PRODUCTS.
+    Only keeps CRYPTO buy-oriented names because this live dashboard is Coinbase-focused.
+    """
+    selected: List[str] = []
+
+    for item in ai_results:
+        asset_class = str(item.get("asset_class", "")).upper()
+        signal = str(item.get("signal", "")).upper()
+        symbol = str(item.get("symbol", "")).strip()
+
+        if asset_class != "CRYPTO":
+            continue
+        if signal not in {"BUY", "SELL", "HOLD"}:
+            continue
+        if not symbol.endswith("-USD"):
+            continue
+
+        selected.append(symbol)
+        if len(selected) >= max_assets:
+            break
+
+    deduped: List[str] = []
+    seen = set()
+    for symbol in selected:
+        if symbol not in seen:
+            deduped.append(symbol)
+            seen.add(symbol)
+
+    if deduped:
+        return deduped, "AI_DYNAMIC"
+
+    return fallback_assets[:max_assets], "ENV_FALLBACK"
+
+
 # ---------------- DASHBOARD RENDER ----------------
 
 def _fmt_money(value: float) -> str:
@@ -103,23 +235,31 @@ def _print_header(
     starting_capital: float,
     trade_size: float,
     scan_interval: int,
-    assets: List[str],
+    configured_assets: List[str],
+    active_assets: List[str],
+    watchlist_source: str,
+    adapter_label: str,
+    trading_enabled: bool,
 ) -> None:
-    print("==============================================================")
-    print("                 CAPITAL STRATA SYSTEMS (CSS)")
-    print("==============================================================")
+    print("================================================================================")
+    print("                         CAPITAL STRATA SYSTEMS LIVE DASHBOARD")
+    print("================================================================================")
     print(
         f"Policy: {policy_name} | Capital: {_fmt_money(starting_capital)} | "
         f"Trade Size: {_fmt_money(trade_size)} | Refresh: {scan_interval}s"
     )
-    print(f"Configured Coinbase Assets: {', '.join(assets)}")
+    print(f"Configured Base Assets: {', '.join(configured_assets)}")
+    print(f"Active Execution Watchlist: {', '.join(active_assets)}")
+    print(f"Watchlist Source: {watchlist_source}")
+    print(f"Market Adapter: {adapter_label}")
+    print(f"Trading Enabled: {'YES' if trading_enabled else 'NO - DASHBOARD MODE'}")
     print(f"Timestamp (UTC): {_utc()}")
-    print("==============================================================\n")
+    print("================================================================================\n")
 
 
 def _print_position(position: Dict[str, Any]) -> None:
     print("POSITION STATUS")
-    print("--------------------------------------------------------------")
+    print("--------------------------------------------------------------------------------")
     if position.get("in_position", False):
         print(
             f"OPEN | Asset: {position.get('asset', '')} | "
@@ -134,12 +274,12 @@ def _print_position(position: Dict[str, Any]) -> None:
 
 def _print_market_scan(rows: List[Dict[str, Any]]) -> None:
     print("LIVE COINBASE EXECUTION WATCHLIST")
-    print("--------------------------------------------------------------")
+    print("--------------------------------------------------------------------------------")
     print(
         f"{'Asset':12} {'Mid':>12} {'VWAP':>12} {'Spread(bps)':>12} "
         f"{'Signal':>8} {'Reason':>14}"
     )
-    print("-" * 74)
+    print("-" * 80)
 
     if not rows:
         print("No scan rows available.")
@@ -160,12 +300,12 @@ def _print_market_scan(rows: List[Dict[str, Any]]) -> None:
 
 def _print_ai_panel(items: List[Dict[str, Any]]) -> None:
     print("AI OPPORTUNITY SCANNER")
-    print("--------------------------------------------------------------")
+    print("--------------------------------------------------------------------------------")
     print(
         f"{'Symbol':12} {'Class':8} {'Signal':8} {'Regime':16} "
         f"{'AI Score':>8} {'Band':10} {'Priority':14}"
     )
-    print("-" * 92)
+    print("-" * 96)
 
     if not items:
         print("No AI opportunities available.")
@@ -192,11 +332,12 @@ def _print_ai_panel(items: List[Dict[str, Any]]) -> None:
 # ---------------- MAIN ----------------
 
 def main() -> None:
-    scan_interval = int(_env_float("CSS_SCAN_INTERVAL_SECONDS", 20))
+    scan_interval = _env_int("CSS_SCAN_INTERVAL_SECONDS", 45)
     starting_capital = _env_float("CSS_STARTING_CAPITAL_USD", 200.0)
     trade_size = _env_float("CSS_TRADE_SIZE_USD", 20.0)
+    max_dynamic_assets = _env_int("CSS_DYNAMIC_TOP_N", 5)
 
-    assets = [x.strip() for x in _env("CSS_PRODUCTS", "BTC-USD,ETH-USD").split(",") if x.strip()]
+    configured_assets = _base_assets_from_env()
 
     vwap_cfg = VWAPConfig(
         window=20,
@@ -208,23 +349,31 @@ def main() -> None:
     policy = choose_session_policy(starting_capital)
     governor = PortfolioRiskGovernor(policy)
 
-    if CoinbaseExecutor is None:
-        print("Coinbase executor is unavailable. CSS cannot start.")
-        return
-
-    executor = CoinbaseExecutor(paper_mode=True)
+    adapter, adapter_label, trading_enabled = _build_market_adapter()
     ai_scorer = AIOpportunityScorer()
 
     last_ai_results: List[Dict[str, Any]] = []
-    last_error = ""
+    last_status = ""
 
     while True:
         try:
             position = _load_position()
             scan_rows: List[Dict[str, Any]] = []
 
-            for asset in assets:
-                candles = executor.get_candles(asset, "FIFTEEN_MINUTE")
+            try:
+                last_ai_results = ai_scorer.run()
+            except Exception as ai_exc:
+                last_status = f"AI scorer error: {ai_exc}"
+                last_ai_results = []
+
+            active_assets, watchlist_source = _select_execution_assets(
+                ai_results=last_ai_results,
+                fallback_assets=configured_assets,
+                max_assets=max_dynamic_assets,
+            )
+
+            for asset in active_assets:
+                candles = adapter.get_candles(asset, "FIFTEEN_MINUTE")
                 if len(candles) < 20:
                     scan_rows.append(
                         {
@@ -260,7 +409,10 @@ def main() -> None:
                     }
                 )
 
-                # Existing execution logic preserved
+                # Existing execution logic preserved, but only when executor is truly available
+                if not trading_enabled:
+                    continue
+
                 if position.get("in_position", False):
                     continue
 
@@ -269,7 +421,7 @@ def main() -> None:
 
                 approved, msg = governor.approve_trade(asset, trade_size)
                 if not approved:
-                    last_error = f"Risk block: {msg}"
+                    last_status = f"Risk block: {msg}"
                     continue
 
                 qty = trade_size / mid
@@ -284,12 +436,7 @@ def main() -> None:
                     "ts": _utc(),
                 }
                 _save_position(position)
-                last_error = f"TRADE ENTERED: {asset} @ {mid:.6f}"
-
-            try:
-                last_ai_results = ai_scorer.run()
-            except Exception as ai_exc:
-                last_error = f"AI scorer error: {ai_exc}"
+                last_status = f"TRADE ENTERED: {asset} @ {mid:.6f}"
 
             _clear()
             _print_header(
@@ -297,16 +444,20 @@ def main() -> None:
                 starting_capital=starting_capital,
                 trade_size=trade_size,
                 scan_interval=scan_interval,
-                assets=assets,
+                configured_assets=configured_assets,
+                active_assets=active_assets,
+                watchlist_source=watchlist_source,
+                adapter_label=adapter_label,
+                trading_enabled=trading_enabled,
             )
             _print_position(position)
             _print_market_scan(scan_rows)
             _print_ai_panel(last_ai_results)
 
-            if last_error:
+            if last_status:
                 print("LATEST STATUS")
-                print("--------------------------------------------------------------")
-                print(last_error)
+                print("--------------------------------------------------------------------------------")
+                print(last_status)
                 print()
 
             print(f"Refreshing in {scan_interval} seconds...  Press Ctrl+C to stop.")
@@ -318,7 +469,7 @@ def main() -> None:
 
         except Exception as exc:
             _clear()
-            print("CSS live runner error:", exc)
+            print("CSS live dashboard error:", exc)
             print(f"Retrying in {scan_interval} seconds...")
             time.sleep(scan_interval)
 
