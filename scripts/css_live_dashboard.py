@@ -156,7 +156,7 @@ class PublicCoinbaseMarketData:
 def _build_market_adapter() -> Tuple[Any, str, bool]:
     if _CoinbaseExecutor is not None:
         try:
-            adapter = _CoinbaseExecutor(paper_mode=True)
+            adapter = _CoinbaseExecutor()
             return adapter, "CoinbaseExecutor(paper_mode=True)", True
         except Exception as exc:
             return (
