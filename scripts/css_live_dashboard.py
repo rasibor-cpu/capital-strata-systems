@@ -15,6 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
 from backend.intelligence.capital_allocator import CapitalAllocator
+from backend.intelligence.trade_decision_engine import TradeDecisionEngine
 from backend.risk.portfolio_risk_governor import PortfolioRiskGovernor
 from backend.risk.session_policy_loader import choose_session_policy
 from backend.strategies.vwap_mean_reversion import (
@@ -241,6 +242,7 @@ def main() -> None:
         total_capital=starting_capital,
         max_positions=max_assets,
     )
+    decision_engine = TradeDecisionEngine()
 
     while True:
         try:
@@ -296,6 +298,19 @@ def main() -> None:
                     continue
 
                 if not signal:
+                    continue
+
+                candles = executor.get_candles(asset, "FIFTEEN_MINUTE")
+                if len(candles) < 20:
+                    continue
+
+                decision = decision_engine.evaluate_trade(asset, candles)
+                if not decision["execute_trade"]:
+                    latest_status = (
+                        f"Intelligence block: {asset} | "
+                        f"regime={decision['regime_reason']} | "
+                        f"confluence={decision['confluence_score']:.2f}"
+                    )
                     continue
 
                 alloc_size = 0.0
