@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import getpass
 import sys
 from pathlib import Path
 
@@ -8,60 +7,195 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(PROJECT_ROOT))
 
 from backend.security.session_manager import SessionManager
-from backend.security.user_auth import UserAuth
+from backend.security.user_auth import UserAuth, RECOVERY_QUESTIONS
 
 
-def reset_password_flow(auth: UserAuth) -> None:
+def masked_password_input(prompt: str) -> str:
+    """
+    Reads password input while showing * for each typed character.
+    Supports Backspace and blocks empty input.
+    Works on Windows console.
+    """
+    import msvcrt
+
+    while True:
+        print(prompt, end="", flush=True)
+        chars: list[str] = []
+
+        while True:
+            ch = msvcrt.getwch()
+
+            if ch in ("\r", "\n"):
+                print()
+                password = "".join(chars)
+                if password.strip() == "":
+                    print("Password cannot be blank.")
+                    break
+                return password
+
+            if ch == "\003":
+                raise KeyboardInterrupt
+
+            if ch == "\b":
+                if chars:
+                    chars.pop()
+                    print("\b \b", end="", flush=True)
+                continue
+
+            if ch in ("\x00", "\xe0"):
+                # swallow special keys
+                _ = msvcrt.getwch()
+                continue
+
+            chars.append(ch)
+            print("*", end="", flush=True)
+
+
+def first_login_setup(auth, user_id):
+
+    print()
+    print("FIRST LOGIN SETUP REQUIRED")
+    print("--------------------------")
+    print("You must change your password and configure recovery options.")
+    print()
+
+    while True:
+        print("New Password (min 6 chars): ******")
+        new_password = masked_password_input("New Password: ")
+
+        print("Confirm Password: ******")
+        confirm_password = masked_password_input("Confirm Password: ")
+
+        if new_password != confirm_password:
+            print("Passwords do not match.\n")
+            continue
+
+        if len(new_password) < 6:
+            print("Password must contain at least 6 characters.\n")
+            continue
+
+        break
+
+    print()
+    print("Select a password recovery question:\n")
+
+    for i, q in enumerate(RECOVERY_QUESTIONS, start=1):
+        print(f"{i}. {q}")
+
+    while True:
+        choice = input("\nSelect question number: ").strip()
+
+        if not choice.isdigit():
+            print("Enter a valid number.")
+            continue
+
+        choice_num = int(choice)
+
+        if 1 <= choice_num <= len(RECOVERY_QUESTIONS):
+            question = RECOVERY_QUESTIONS[choice_num - 1]
+            break
+
+        print("Invalid selection.")
+
+    while True:
+        answer = input("Recovery answer: ").strip()
+        if answer == "":
+            print("Recovery answer cannot be blank.")
+            continue
+        break
+
+    users = auth._load_users()
+    user = users[user_id]
+
+    user["password"] = auth._hash_password(new_password)
+    user["recovery_question"] = question
+    user["recovery_answer_hash"] = auth._hash_answer(answer)
+    user["must_change_password"] = False
+    user["failed_attempts"] = 0
+    user["locked"] = False
+
+    users[user_id] = user
+    auth._save_users(users)
+
+    print("\nSetup complete.\n")
+
+
+def reset_password_flow(auth):
+
     print()
     print("PASSWORD RESET")
     print("----------------")
 
     user_id = input("User ID (5 digits): ").strip()
 
-    ok, question_or_message = auth.get_recovery_question(user_id)
+    ok, question = auth.get_recovery_question(user_id)
+
     if not ok:
-        print(question_or_message)
+        print(question)
         return
 
     print()
     print("Security Question:")
-    print(question_or_message)
+    print(question)
 
     answer = input("Answer: ").strip()
-    print("New Password: ********")
-    new_password = getpass.getpass("New Password: ")
 
-    ok, message = auth.reset_password(user_id, answer, new_password)
-    print()
-    print(message)
+    while True:
+        print("New Password: ******")
+        new_password = masked_password_input("New Password: ")
+
+        print("Confirm New Password: ******")
+        confirm_password = masked_password_input("Confirm New Password: ")
+
+        if new_password != confirm_password:
+            print("Passwords do not match.\n")
+            continue
+
+        ok, message = auth.reset_password(user_id, answer, new_password)
+        print(message)
+        break
 
 
-def change_password_anytime_flow(auth: UserAuth) -> None:
+def change_password_flow(auth):
+
     print()
     print("CHANGE PASSWORD")
     print("----------------")
 
     user_id = input("User ID (5 digits): ").strip()
-    print("Current Password: ********")
-    old_password = getpass.getpass("Current Password: ")
-    print("New Password: ********")
-    new_password = getpass.getpass("New Password: ")
 
-    ok, message = auth.admin_change_password(user_id, old_password, new_password)
-    print()
-    print(message)
+    print("Current Password: ******")
+    old_password = masked_password_input("Current Password: ")
+
+    while True:
+        print("New Password: ******")
+        new_password = masked_password_input("New Password: ")
+
+        print("Confirm New Password: ******")
+        confirm_password = masked_password_input("Confirm New Password: ")
+
+        if new_password != confirm_password:
+            print("Passwords do not match.\n")
+            continue
+
+        ok, message = auth.change_password(user_id, old_password, new_password)
+        print(message)
+        break
 
 
-def main() -> None:
+def main():
+
     auth = UserAuth()
     sm = SessionManager()
 
     while True:
+
         print()
         print("====================================")
         print("   CAPITAL STRATA SYSTEMS TERMINAL")
         print("====================================")
         print()
+
         print("1  Login")
         print("2  Reset Password")
         print("3  Change Password")
@@ -77,7 +211,7 @@ def main() -> None:
             continue
 
         if choice == "3":
-            change_password_anytime_flow(auth)
+            change_password_flow(auth)
             continue
 
         if choice != "1":
@@ -85,19 +219,22 @@ def main() -> None:
             continue
 
         user_id = input("User ID (5 digits): ").strip()
-        print("Password: ********")
-        password = getpass.getpass("Password: ")
 
-        success, message, role = auth.authenticate(user_id, password)
+        print("Password: ******")
+        password = masked_password_input("Password: ")
+
+        success, message, role, must_change = auth.authenticate(user_id, password)
 
         print()
         print(message)
 
         if not success:
-            print("Forgot password? Use option 2.")
             continue
 
-        session = sm.create_session(user_id, role or "VIEWER")
+        if must_change:
+            first_login_setup(auth, user_id)
+
+        session = sm.create_session(user_id, role)
 
         print()
         print("Login successful")
@@ -106,6 +243,7 @@ def main() -> None:
         print("Session ID:", session.session_id[:12])
         print()
         print("CSS Terminal Ready")
+
         break
 
 

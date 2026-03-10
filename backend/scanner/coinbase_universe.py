@@ -47,7 +47,7 @@ def rank_pairs_by_liquidity(pairs: List[str], limit: int = 200) -> List[str]:
     return pairs[:limit]
 
 
-def get_top_universe(limit: int = 200) -> List[str]:
+def get_top_universe(limit: int = 50) -> List[str]:
     """
     Return the top N crypto USD pairs.
     """

@@ -8,7 +8,7 @@ def main() -> None:
 
     result_1 = controller.execute(
         user_id="00000",
-        role="ADMIN",
+        role="OPERATIONS",
         action="post_transaction",
         payload={
             "amount": 50000,
