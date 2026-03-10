@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -119,11 +120,11 @@ def _fmt_money(value: float) -> str:
     return f"${value:,.2f}"
 
 
-def _print_header(policy_name: str, capital: float, scan_interval: int, assets: List[str]) -> None:
+def _print_header(policy_name: str, capital: float, scan_interval: int, assets: List[str], cycle_no: int) -> None:
     print("==========================================================================")
     print("                    CAPITAL STRATA SYSTEMS LIVE DASHBOARD")
     print("==========================================================================")
-    print(f"Policy: {policy_name} | Capital: {_fmt_money(capital)} | Refresh: {scan_interval}s")
+    print(f"Cycle: {cycle_no} | Policy: {policy_name} | Capital: {_fmt_money(capital)} | Refresh: {scan_interval}s")
     if len(assets) > 8:
         preview = ", ".join(assets[:8]) + f" ... ({len(assets)} assets)"
     else:
@@ -161,6 +162,11 @@ def _print_watchlist(rows: List[Tuple[str, float, float, float, bool, str]]) -> 
     print(f"{'Asset':12} {'Mid':>12} {'VWAP':>12} {'Spread(bps)':>12} {'Signal':>8} {'Reason':>16}")
     print("-" * 82)
 
+    if not rows:
+        print("No assets processed this cycle.")
+        print()
+        return
+
     for asset, mid, vwap, spread, signal, reason in rows:
         print(
             f"{asset:<12} "
@@ -174,26 +180,34 @@ def _print_watchlist(rows: List[Tuple[str, float, float, float, bool, str]]) -> 
     print()
 
 
-def _print_ai_panel(ai_results: List[Dict[str, Any]]) -> None:
+def _print_ai_panel(ai_results: List[Dict[str, Any]], ai_status: str) -> None:
     print("AI OPPORTUNITY SCANNER")
     print("--------------------------------------------------------------------------")
+    print(f"Status: {ai_status}")
     print(f"{'Symbol':12} {'Class':8} {'Signal':8} {'Regime':16} {'AI Score':>8} {'Band':10} {'Priority':14}")
     print("-" * 96)
 
+    if not ai_results:
+        print("No AI results available this cycle.")
+        print()
+        return
+
     for item in ai_results[:8]:
         print(
-            f"{item['symbol']:<12} "
-            f"{item['asset_class']:<8} "
-            f"{item['signal']:<8} "
-            f"{item['regime']:<16} "
-            f"{item['opportunity_score']:>8.2f} "
-            f"{item['confidence_band']:<10} "
-            f"{item['action_priority']:<14}"
+            f"{item.get('symbol', ''):<12} "
+            f"{item.get('asset_class', ''):<8} "
+            f"{item.get('signal', ''):<8} "
+            f"{item.get('regime', ''):<16} "
+            f"{float(item.get('opportunity_score', 0.0)):>8.2f} "
+            f"{str(item.get('confidence_band', '')):<10} "
+            f"{str(item.get('action_priority', '')):<14}"
         )
 
     print("\nTop AI explanations:")
     for item in ai_results[:3]:
-        print(f"- {item['explanation']}")
+        explanation = str(item.get("explanation", ""))
+        if explanation:
+            print(f"- {explanation}")
     print()
 
 
@@ -203,14 +217,20 @@ def _print_allocations(allocations: List[Dict[str, Any]], total_capital: float) 
     print(f"{'Rank':4} {'Symbol':12} {'AI Score':>10} {'Capital':>12}")
     print("-" * 44)
 
+    if not allocations:
+        print("No allocations produced this cycle.")
+        print()
+        return
+
     total = 0.0
     for idx, item in enumerate(allocations, start=1):
-        total += float(item["capital"])
+        capital = float(item.get("capital", 0.0))
+        total += capital
         print(
             f"{idx:<4} "
-            f"{item['symbol']:<12} "
-            f"{item['ai_score']:>10.2f} "
-            f"{_fmt_money(float(item['capital'])):>12}"
+            f"{str(item.get('symbol', '')):<12} "
+            f"{float(item.get('ai_score', 0.0)):>10.2f} "
+            f"{_fmt_money(capital):>12}"
         )
 
     print("-" * 44)
@@ -218,10 +238,47 @@ def _print_allocations(allocations: List[Dict[str, Any]], total_capital: float) 
     print()
 
 
+def _run_with_timeout(fn, timeout_seconds: int, *args, **kwargs):
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(fn, *args, **kwargs)
+        return future.result(timeout=timeout_seconds)
+
+
+def _safe_ai_run(ai: AIOpportunityScorer, timeout_seconds: int) -> Tuple[List[Dict[str, Any]], str]:
+    try:
+        result = _run_with_timeout(ai.run, timeout_seconds)
+        if isinstance(result, list):
+            return result, f"OK (timeout {timeout_seconds}s)"
+        return [], "AI returned non-list result"
+    except FuturesTimeoutError:
+        return [], f"AI timeout after {timeout_seconds}s"
+    except Exception as exc:
+        return [], f"AI error: {exc}"
+
+
+def _safe_get_candles(
+    executor: CoinbaseExecutor,
+    asset: str,
+    granularity: str,
+    timeout_seconds: int,
+) -> Tuple[List[Dict[str, Any]], str]:
+    try:
+        result = _run_with_timeout(executor.get_candles, timeout_seconds, asset, granularity)
+        if isinstance(result, list):
+            return result, "OK"
+        return [], "Non-list candles result"
+    except FuturesTimeoutError:
+        return [], f"Timeout after {timeout_seconds}s"
+    except Exception as exc:
+        return [], f"Error: {exc}"
+
+
 def main() -> None:
     scan_interval = _env_int("CSS_SCAN_INTERVAL_SECONDS", 45)
     starting_capital = _env_float("CSS_STARTING_CAPITAL_USD", 200.0)
     max_assets = _env_int("CSS_DYNAMIC_TOP_N", 5)
+    ai_timeout_seconds = _env_int("CSS_AI_TIMEOUT_SECONDS", 20)
+    candle_timeout_seconds = _env_int("CSS_CANDLE_TIMEOUT_SECONDS", 15)
 
     universe = _get_universe()
 
@@ -244,28 +301,46 @@ def main() -> None:
     )
     decision_engine = TradeDecisionEngine()
 
+    cycle_no = 0
+
     while True:
         try:
-            print("[DEBUG] Loading portfolio...")
+            cycle_no += 1
+            latest_status = ""
+            ai_status = ""
+            candle_cache: Dict[str, List[Dict[str, Any]]] = {}
+
             portfolio = _load_portfolio()
             positions = portfolio.get("positions", [])
 
-            print("[DEBUG] Running AI scorer...")
-            ai_results = ai.run()
+            print(f"[CSS] Cycle {cycle_no} starting...", flush=True)
 
-            print("[DEBUG] Selecting assets...")
+            ai_results, ai_status = _safe_ai_run(ai, ai_timeout_seconds)
+            print(f"[CSS] AI status: {ai_status}", flush=True)
+
             active_assets = _select_assets(ai_results, universe, max_assets)
-            print(f"[DEBUG] Active assets: {active_assets}")
+            print(f"[CSS] Active assets: {active_assets}", flush=True)
 
             rows: List[Tuple[str, float, float, float, bool, str]] = []
 
             for asset in active_assets:
-                print(f"[DEBUG] Fetching candles for {asset}...")
-                candles = executor.get_candles(asset, "FIFTEEN_MINUTE")
+                print(f"[CSS] Fetching candles for {asset}...", flush=True)
+                candles, candle_status = _safe_get_candles(
+                    executor,
+                    asset,
+                    "FIFTEEN_MINUTE",
+                    candle_timeout_seconds,
+                )
+
+                if candle_status != "OK":
+                    print(f"[CSS] Candle fetch failed for {asset}: {candle_status}", flush=True)
+                    continue
 
                 if len(candles) < 20:
-                    print(f"[DEBUG] Skipping {asset}: insufficient candles")
+                    print(f"[CSS] Skipping {asset}: insufficient candles ({len(candles)})", flush=True)
                     continue
+
+                candle_cache[asset] = candles
 
                 vwap = compute_vwap_from_candles(candles, 20)
                 mid = float(candles[-1]["close"])
@@ -278,10 +353,8 @@ def main() -> None:
                     vwap_cfg,
                 )
 
-                print(f"[DEBUG] {asset}: signal={signal}, reason={reason}")
                 rows.append((asset, mid, vwap, spread, signal, str(reason)))
 
-            print("[DEBUG] Allocating capital...")
             allocations = allocator.allocate(
                 ai_results=ai_results,
                 market_rows=[
@@ -295,11 +368,11 @@ def main() -> None:
                 ],
             )
 
-            latest_status = ""
             open_assets = {p["asset"] for p in positions}
 
             for asset, mid, vwap, spread, signal, reason in rows:
                 if len(positions) >= max_assets:
+                    latest_status = f"Position cap reached ({max_assets})"
                     break
 
                 if asset in open_assets:
@@ -308,13 +381,11 @@ def main() -> None:
                 if not signal:
                     continue
 
-                print(f"[DEBUG] Running intelligence decision for {asset}...")
-                candles = executor.get_candles(asset, "FIFTEEN_MINUTE")
+                candles = candle_cache.get(asset, [])
                 if len(candles) < 20:
                     continue
 
                 decision = decision_engine.evaluate_trade(asset, candles)
-                print(f"[DEBUG] Decision for {asset}: {decision}")
 
                 if not decision["execute_trade"]:
                     latest_status = (
@@ -326,11 +397,12 @@ def main() -> None:
 
                 alloc_size = 0.0
                 for item in allocations:
-                    if item["symbol"] == asset:
-                        alloc_size = float(item["capital"])
+                    if item.get("symbol") == asset:
+                        alloc_size = float(item.get("capital", 0.0))
                         break
 
                 if alloc_size <= 0:
+                    latest_status = f"No capital allocated to {asset}"
                     continue
 
                 approved, msg = governor.approve_trade(asset, alloc_size)
@@ -358,10 +430,10 @@ def main() -> None:
                 latest_status = f"TRADE ENTERED: {asset} @ {mid:.6f} size {_fmt_money(alloc_size)}"
 
             _clear()
-            _print_header(policy.policy_name, starting_capital, scan_interval, universe)
+            _print_header(policy.policy_name, starting_capital, scan_interval, universe, cycle_no)
             _print_positions(positions)
             _print_watchlist(rows)
-            _print_ai_panel(ai_results)
+            _print_ai_panel(ai_results, ai_status)
             _print_allocations(allocations, starting_capital)
 
             if latest_status:
@@ -370,7 +442,7 @@ def main() -> None:
                 print(latest_status)
                 print()
 
-            print(f"Refreshing in {scan_interval} seconds... Press Ctrl+C to stop.")
+            print(f"Refreshing in {scan_interval} seconds... Press Ctrl+C to stop.", flush=True)
             time.sleep(scan_interval)
 
         except KeyboardInterrupt:
@@ -378,7 +450,7 @@ def main() -> None:
             break
 
         except Exception as exc:
-            print("Runner error:", exc)
+            print("Runner error:", exc, flush=True)
             time.sleep(scan_interval)
 
 
