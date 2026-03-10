@@ -246,18 +246,25 @@ def main() -> None:
 
     while True:
         try:
+            print("[DEBUG] Loading portfolio...")
             portfolio = _load_portfolio()
             positions = portfolio.get("positions", [])
 
+            print("[DEBUG] Running AI scorer...")
             ai_results = ai.run()
+
+            print("[DEBUG] Selecting assets...")
             active_assets = _select_assets(ai_results, universe, max_assets)
+            print(f"[DEBUG] Active assets: {active_assets}")
 
             rows: List[Tuple[str, float, float, float, bool, str]] = []
 
             for asset in active_assets:
+                print(f"[DEBUG] Fetching candles for {asset}...")
                 candles = executor.get_candles(asset, "FIFTEEN_MINUTE")
 
                 if len(candles) < 20:
+                    print(f"[DEBUG] Skipping {asset}: insufficient candles")
                     continue
 
                 vwap = compute_vwap_from_candles(candles, 20)
@@ -271,8 +278,10 @@ def main() -> None:
                     vwap_cfg,
                 )
 
+                print(f"[DEBUG] {asset}: signal={signal}, reason={reason}")
                 rows.append((asset, mid, vwap, spread, signal, str(reason)))
 
+            print("[DEBUG] Allocating capital...")
             allocations = allocator.allocate(
                 ai_results=ai_results,
                 market_rows=[
@@ -287,7 +296,6 @@ def main() -> None:
             )
 
             latest_status = ""
-
             open_assets = {p["asset"] for p in positions}
 
             for asset, mid, vwap, spread, signal, reason in rows:
@@ -300,11 +308,14 @@ def main() -> None:
                 if not signal:
                     continue
 
+                print(f"[DEBUG] Running intelligence decision for {asset}...")
                 candles = executor.get_candles(asset, "FIFTEEN_MINUTE")
                 if len(candles) < 20:
                     continue
 
                 decision = decision_engine.evaluate_trade(asset, candles)
+                print(f"[DEBUG] Decision for {asset}: {decision}")
+
                 if not decision["execute_trade"]:
                     latest_status = (
                         f"Intelligence block: {asset} | "
