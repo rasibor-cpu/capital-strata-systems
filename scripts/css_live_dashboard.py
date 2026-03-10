@@ -164,8 +164,6 @@ def main():
             portfolio = _load_portfolio()
             positions = portfolio.get("positions", [])
 
-            print(f"[CSS] Cycle {cycle_no} starting...", flush=True)
-
             rows: List[Tuple[str, float, float, float, bool, str]] = []
             candle_cache = {}
 
@@ -204,6 +202,7 @@ def main():
 
                 {
                     "symbol": asset,
+                    "asset": asset,
                     "asset_class": "CRYPTO",
                     "signal": "BUY" if signal else "HOLD",
                     "mid": mid,
@@ -223,6 +222,7 @@ def main():
                 market_rows=[
                     {
                         "asset": asset,
+                        "symbol": asset,
                         "mid": mid,
                         "vwap": vwap,
                         "spread_bps": spread,
