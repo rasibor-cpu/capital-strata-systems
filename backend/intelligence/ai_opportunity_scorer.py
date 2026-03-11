@@ -136,7 +136,7 @@ class AIOpportunityScorer:
     def _extract_assets(
         self,
         assets: Optional[Any] = None,
-        *args: Any = (),
+        *args: Any,
         **kwargs: Any,
     ) -> List[Dict[str, Any]]:
         if isinstance(assets, list):
