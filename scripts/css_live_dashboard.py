@@ -35,6 +35,9 @@ POSITION_FILE = STATE_DIR / "spot_position.json"
 
 MAX_SINGLE_POSITION_PCT = 0.40
 DISCOVERY_TIMEOUT_SECONDS = 8
+COOLDOWN_SECONDS = 600  # 10 minutes
+
+cooldown_registry: Dict[str, float] = {}
 
 
 def _utc() -> str:
@@ -232,6 +235,13 @@ def _build_allocations(
     return _fallback_allocate(ai_results, capital, max_assets)
 
 
+def _prune_cooldowns() -> None:
+    now = time.time()
+    expired = [asset for asset, ts in cooldown_registry.items() if now - ts >= COOLDOWN_SECONDS]
+    for asset in expired:
+        del cooldown_registry[asset]
+
+
 def main() -> None:
     print("[CSS] Starting live dashboard...", flush=True)
 
@@ -280,6 +290,7 @@ def main() -> None:
     while True:
         try:
             cycle_no += 1
+            _prune_cooldowns()
 
             portfolio = _load_portfolio()
             positions = portfolio.get("positions", [])
@@ -311,6 +322,7 @@ def main() -> None:
 
                     pnl_usd = (current_price - entry) * qty
                     governor.close_trade(asset, size_usd)
+                    cooldown_registry[asset] = time.time()
 
                     closed_messages.append(
                         f"{exit_decision['action']}: {asset} | Exit {current_price:.6f} | PnL {_fmt_money(pnl_usd)} | {exit_decision.get('reason', '')}"
@@ -407,6 +419,10 @@ def main() -> None:
 
                 if asset in open_assets:
                     continue
+
+                if asset in cooldown_registry:
+                    continue
+
                 if not signal:
                     continue
 
@@ -501,6 +517,14 @@ def main() -> None:
                 print("--------------------------------------------------------------------", flush=True)
                 for msg in closed_messages:
                     print(msg, flush=True)
+
+            if cooldown_registry:
+                print("\nCOOLDOWN LOCKS", flush=True)
+                print("--------------------------------------------------------------------", flush=True)
+                now = time.time()
+                for asset, ts in cooldown_registry.items():
+                    remaining = max(0, int(COOLDOWN_SECONDS - (now - ts)))
+                    print(f"{asset} | {remaining}s remaining", flush=True)
 
             if latest_status:
                 print("\nLATEST STATUS", flush=True)
