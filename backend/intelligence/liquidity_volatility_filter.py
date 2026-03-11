@@ -5,43 +5,48 @@ from typing import List, Dict
 
 class LiquidityVolatilityFilter:
     """
-    Filters a large asset universe down to the most tradable assets.
+    CSS Institutional Liquidity / Volatility Filter
 
-    Ranking is based on:
-    - liquidity (volume)
-    - volatility (price movement)
+    Purpose
+    -------
+    Reduce the trading universe to assets that are realistically tradable.
 
-    This dramatically reduces the workload for the AI scorer.
+    Institutional filters applied:
+        • Minimum liquidity requirement
+        • Acceptable volatility band
+        • Composite tradability score
+
+    Result:
+        Only the highest quality markets reach the AI opportunity scorer.
     """
 
     def __init__(
         self,
-        max_assets: int = 30,
-        min_volume: float = 100000,
-        min_volatility: float = 0.002,
+        max_assets: int = 20,
+        min_volume: float = 500000,
+        min_volatility: float = 0.001,
+        max_volatility: float = 0.08,
     ) -> None:
+
         self.max_assets = max_assets
         self.min_volume = min_volume
         self.min_volatility = min_volatility
+        self.max_volatility = max_volatility
 
     def filter(self, assets: List[Dict]) -> List[Dict]:
-        """
-        Filters and ranks assets.
 
-        Expected asset structure:
-        {
-            "symbol": "BTC-USD",
-            "volume": 1200000,
-            "volatility": 0.015
-        }
-        """
+        filtered: List[Dict] = []
 
-        filtered = []
+        for asset in assets:
 
-        for a in assets:
+            symbol = asset.get("symbol", "UNKNOWN")
 
-            volume = float(a.get("volume", 0))
-            volatility = float(a.get("volatility", 0))
+            volume = float(asset.get("volume", 0))
+            volatility = float(asset.get("volatility", 0))
+
+            # --------------------------------------------------
+            # HARD FILTERS
+            # --------------------------------------------------
 
             if volume < self.min_volume:
                 continue
@@ -49,10 +54,25 @@ class LiquidityVolatilityFilter:
             if volatility < self.min_volatility:
                 continue
 
-            score = (volume * volatility)
+            if volatility > self.max_volatility:
+                continue
 
-            a["lv_score"] = score
-            filtered.append(a)
+            # --------------------------------------------------
+            # TRADABILITY SCORE
+            # --------------------------------------------------
+
+            liquidity_score = volume ** 0.5
+            volatility_score = volatility * 100
+
+            score = liquidity_score * volatility_score
+
+            asset["lv_score"] = score
+
+            filtered.append(asset)
+
+        # --------------------------------------------------
+        # SORT BY TRADABILITY
+        # --------------------------------------------------
 
         filtered.sort(key=lambda x: x["lv_score"], reverse=True)
 
