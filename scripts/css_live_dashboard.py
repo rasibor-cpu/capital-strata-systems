@@ -260,7 +260,13 @@ def main():
     )
 
     policy = choose_session_policy(capital)
-    governor = PortfolioRiskGovernor(capital)
+
+    governor = PortfolioRiskGovernor(
+        capital,
+        max_asset_exposure=policy.max_asset_pct,
+        max_portfolio_exposure=policy.max_capital_deployed_pct,
+    )
+
     executor = CoinbaseExecutor()
     ai = AIOpportunityScorer()
     allocator = CapitalAllocator(
