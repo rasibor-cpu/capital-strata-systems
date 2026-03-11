@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
@@ -33,6 +34,7 @@ STATE_DIR.mkdir(parents=True, exist_ok=True)
 POSITION_FILE = STATE_DIR / "spot_position.json"
 
 MAX_SINGLE_POSITION_PCT = 0.40
+DISCOVERY_TIMEOUT_SECONDS = 8
 
 
 def _utc() -> str:
@@ -89,16 +91,29 @@ def _save_portfolio(portfolio: Dict[str, Any]) -> None:
     POSITION_FILE.write_text(json.dumps(portfolio, indent=2))
 
 
-def _get_universe() -> List[str]:
+def _run_with_timeout(fn, timeout_seconds: int, *args):
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(fn, *args)
+        return future.result(timeout=timeout_seconds)
+
+
+def _safe_discover_universe() -> List[str]:
+    fallback = ["BTC-USD", "ETH-USD", "SOL-USD", "AVAX-USD", "LINK-USD"]
+
     try:
         scanner = MarketDiscoveryEngine()
-        discovered = scanner.discover()
-        if discovered:
+        discovered = _run_with_timeout(scanner.discover, DISCOVERY_TIMEOUT_SECONDS)
+        if isinstance(discovered, list) and discovered:
             return discovered
-    except Exception:
-        pass
+    except FuturesTimeoutError:
+        print(
+            f"[CSS] Market discovery timed out after {DISCOVERY_TIMEOUT_SECONDS}s. Using fallback universe.",
+            flush=True,
+        )
+    except Exception as exc:
+        print(f"[CSS] Market discovery failed: {exc}. Using fallback universe.", flush=True)
 
-    return ["BTC-USD", "ETH-USD", "SOL-USD", "AVAX-USD", "LINK-USD"]
+    return fallback
 
 
 def _compute_candle_volume(candles: List[Dict[str, Any]]) -> float:
@@ -218,20 +233,25 @@ def _build_allocations(
 
 
 def main() -> None:
+    print("[CSS] Starting live dashboard...", flush=True)
+
     scan_interval = _env_int("CSS_SCAN_INTERVAL_SECONDS", 45)
     capital = _env_float("CSS_STARTING_CAPITAL_USD", 200.0)
     max_positions = _env_int("CSS_DYNAMIC_TOP_N", 3)
-    seed_assets = _env_int("CSS_SEED_ASSET_COUNT", 50)
+    seed_assets = _env_int("CSS_SEED_ASSET_COUNT", 30)
 
-    universe = _get_universe()
+    print("[CSS] Discovering market universe...", flush=True)
+    universe = _safe_discover_universe()
+    print(f"[CSS] Universe ready: {len(universe)} assets", flush=True)
 
     vwap_cfg = VWAPConfig(
         window=20,
         epsilon_bps=12,
-        take_profit_bps=35,
-        stop_loss_bps=45,
+        take_profit_bps=60,
+        stop_loss_bps=30,
     )
 
+    print("[CSS] Loading session policy...", flush=True)
     policy = choose_session_policy(capital)
 
     governor = PortfolioRiskGovernor(
@@ -240,6 +260,7 @@ def main() -> None:
         max_portfolio_exposure=policy.max_capital_deployed_pct,
     )
 
+    print("[CSS] Initializing execution components...", flush=True)
     executor = CoinbaseExecutor()
     ai = AIOpportunityScorer()
     allocator = CapitalAllocator(
@@ -248,8 +269,10 @@ def main() -> None:
     )
     decision_engine = TradeDecisionEngine()
     profit_engine = ProfitCaptureEngine(
-        take_profit_bps=35,
-        stop_loss_bps=45,
+        take_profit_bps=60,
+        stop_loss_bps=30,
+        trail_trigger_bps=40,
+        locked_profit_bps=15,
     )
 
     cycle_no = 0
@@ -265,7 +288,6 @@ def main() -> None:
             latest_status = ""
             closed_messages: List[str] = []
 
-            # 1. MANAGE OPEN POSITIONS FIRST
             remaining_positions: List[Dict[str, Any]] = []
 
             for trade in positions:
@@ -291,7 +313,7 @@ def main() -> None:
                     governor.close_trade(asset, size_usd)
 
                     closed_messages.append(
-                        f"{exit_decision['action']}: {asset} | Exit {current_price:.6f} | PnL {_fmt_money(pnl_usd)}"
+                        f"{exit_decision['action']}: {asset} | Exit {current_price:.6f} | PnL {_fmt_money(pnl_usd)} | {exit_decision.get('reason', '')}"
                     )
 
                     if latest_status == "":
@@ -306,7 +328,6 @@ def main() -> None:
             positions = remaining_positions
             open_assets = {p["asset"] for p in positions}
 
-            # 2. DISCOVER / SCORE NEW OPPORTUNITIES
             candidate_rows: List[Dict[str, Any]] = []
             candle_cache: Dict[str, List[Dict[str, Any]]] = {}
 
@@ -379,7 +400,6 @@ def main() -> None:
                 max_assets=max_positions,
             )
 
-            # 3. EXECUTE NEW TRADES
             for row in rows:
                 asset = row["asset"]
                 mid = float(row["mid"])
@@ -433,67 +453,69 @@ def main() -> None:
 
                 latest_status = f"TRADE ENTERED: {asset}"
 
-            # 4. DASHBOARD OUTPUT
             _clear()
 
-            print("====================================================================")
-            print("             CAPITAL STRATA SYSTEMS LIVE DASHBOARD")
-            print("====================================================================")
+            print("====================================================================", flush=True)
+            print("             CAPITAL STRATA SYSTEMS LIVE DASHBOARD", flush=True)
+            print("====================================================================", flush=True)
             print(
-                f"Cycle: {cycle_no} | Policy: {policy.policy_name} | Capital: {_fmt_money(capital)} | Refresh: {scan_interval}s"
+                f"Cycle: {cycle_no} | Policy: {policy.policy_name} | Capital: {_fmt_money(capital)} | Refresh: {scan_interval}s",
+                flush=True,
             )
-            print(f"Configured Base Assets: {', '.join(universe[:8])}")
-            print(f"Timestamp (UTC): {_utc()}")
+            print(f"Configured Base Assets: {', '.join(universe[:8])}", flush=True)
+            print(f"Timestamp (UTC): {_utc()}", flush=True)
 
-            print("\nOPEN POSITIONS")
-            print("--------------------------------------------------------------------")
+            print("\nOPEN POSITIONS", flush=True)
+            print("--------------------------------------------------------------------", flush=True)
 
             if not positions:
-                print("FLAT | No open spot positions")
+                print("FLAT | No open spot positions", flush=True)
             else:
                 for p in positions:
                     print(
-                        f"{p['asset']} | Entry {p['entry']} | Qty {p['qty']} | Size {_fmt_money(p['size_usd'])}"
+                        f"{p['asset']} | Entry {p['entry']} | Qty {p['qty']} | Size {_fmt_money(p['size_usd'])}",
+                        flush=True,
                     )
 
-            print("\nLIVE COINBASE EXECUTION WATCHLIST")
-            print("--------------------------------------------------------------------")
+            print("\nLIVE COINBASE EXECUTION WATCHLIST", flush=True)
+            print("--------------------------------------------------------------------", flush=True)
             for r in rows[:3]:
                 print(
-                    f"{r['asset']:12} {r['mid']:10.4f} {r['vwap']:10.4f} {r['spread_bps']:10.2f} {r['signal']}"
+                    f"{r['asset']:12} {r['mid']:10.4f} {r['vwap']:10.4f} {r['spread_bps']:10.2f} {r['signal']}",
+                    flush=True,
                 )
 
-            print("\nAI OPPORTUNITY SCANNER")
-            print("--------------------------------------------------------------------")
-            print("Status: OK")
+            print("\nAI OPPORTUNITY SCANNER", flush=True)
+            print("--------------------------------------------------------------------", flush=True)
+            print("Status: OK", flush=True)
             for r in ai_results[:5]:
-                print(f"{r.get('symbol')} score={r.get('opportunity_score', 0):.2f}")
+                print(f"{r.get('symbol')} score={r.get('opportunity_score', 0):.2f}", flush=True)
 
-            print("\nAI CAPITAL ALLOCATION PLAN")
-            print("--------------------------------------------------------------------")
+            print("\nAI CAPITAL ALLOCATION PLAN", flush=True)
+            print("--------------------------------------------------------------------", flush=True)
             for i, a in enumerate(allocations):
-                print(f"{i+1}. {a['symbol']}  {_fmt_money(a['capital'])}")
+                print(f"{i+1}. {a['symbol']}  {_fmt_money(a['capital'])}", flush=True)
 
             if closed_messages:
-                print("\nCLOSED TRADES THIS CYCLE")
-                print("--------------------------------------------------------------------")
+                print("\nCLOSED TRADES THIS CYCLE", flush=True)
+                print("--------------------------------------------------------------------", flush=True)
                 for msg in closed_messages:
-                    print(msg)
+                    print(msg, flush=True)
 
             if latest_status:
-                print("\nLATEST STATUS")
-                print("--------------------------------------------------------------------")
-                print(latest_status)
+                print("\nLATEST STATUS", flush=True)
+                print("--------------------------------------------------------------------", flush=True)
+                print(latest_status, flush=True)
 
-            print(f"\nRefreshing in {scan_interval} seconds...")
+            print(f"\nRefreshing in {scan_interval} seconds...", flush=True)
             time.sleep(scan_interval)
 
         except KeyboardInterrupt:
-            print("CSS stopped")
+            print("CSS stopped", flush=True)
             break
 
         except Exception as e:
-            print("Runner error:", e)
+            print("Runner error:", e, flush=True)
             time.sleep(scan_interval)
 
 
