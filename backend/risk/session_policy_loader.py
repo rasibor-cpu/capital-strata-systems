@@ -11,6 +11,7 @@ Controlled Risk Governance. Controlled Compounding.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import List
 
 from backend.risk.session_risk_policy import (
@@ -77,11 +78,6 @@ def _prompt_csv_list(prompt_text: str) -> List[str]:
         print("Enter at least one value.")
 
 
-def _set_attr_if_present(obj: object, attr_name: str, value: float) -> None:
-    if hasattr(obj, attr_name):
-        setattr(obj, attr_name, value)
-
-
 def _apply_balanced_small_account_override(
     policy: SessionRiskPolicy,
     starting_capital: float,
@@ -89,28 +85,30 @@ def _apply_balanced_small_account_override(
     """
     Small-account override for Balanced mode.
 
-    Reason:
-    With very small accounts (e.g. $200), allocator outputs of ~$60-$70 can
-    legitimately exceed conservative per-asset caps, causing the live engine
-    to block otherwise acceptable trades. For small accounts, Balanced mode
-    should allow up to 40% single-asset exposure so CSS can actually execute
-    while still remaining governed.
+    For very small accounts, allocator outputs around $60-$75 can exceed
+    conservative default single-asset caps. We create and return a new
+    replaced frozen dataclass instance with a higher per-asset cap.
 
     This override is intentionally limited to small accounts.
     """
     if starting_capital > 1000:
         return policy
 
-    # Preferred field used by custom_policy/session policy structs
-    _set_attr_if_present(policy, "max_asset_pct", 0.40)
+    replacement_fields = {}
 
-    # Backward-compatible alias if older policy objects use this name
-    _set_attr_if_present(policy, "max_asset_exposure", 0.40)
+    if hasattr(policy, "max_asset_pct"):
+        replacement_fields["max_asset_pct"] = 0.40
 
-    # Keep overall deployment sensible for small accounts
-    _set_attr_if_present(policy, "max_capital_deployed_pct", 0.90)
+    if hasattr(policy, "max_asset_exposure"):
+        replacement_fields["max_asset_exposure"] = 0.40
 
-    return policy
+    if hasattr(policy, "max_capital_deployed_pct"):
+        replacement_fields["max_capital_deployed_pct"] = 0.90
+
+    if not replacement_fields:
+        return policy
+
+    return replace(policy, **replacement_fields)
 
 
 def choose_session_policy(starting_capital: float) -> SessionRiskPolicy:
