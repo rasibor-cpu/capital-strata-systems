@@ -99,17 +99,6 @@ class CSSTradingEngine:
     # --------------------------------------------------
 
     def normalize_risk_decision(self, raw_decision: Any) -> Dict[str, Any]:
-        """
-        Make the engine tolerant to different PortfolioRiskGovernor return shapes.
-
-        Supported:
-        - dict
-        - tuple(bool, reason)
-        - tuple(str, reason)
-        - tuple(dict, ...)
-        - bool
-        """
-
         if isinstance(raw_decision, dict):
             final_decision = str(raw_decision.get("final_decision", "BLOCK")).upper()
             return {
@@ -166,6 +155,101 @@ class CSSTradingEngine:
 
     # --------------------------------------------------
 
+    def execute_candidate(
+        self,
+        best: Dict[str, Any],
+        decision: Dict[str, Any],
+    ) -> Any:
+        """
+        Adapter for different CoinbaseExecutor method names/signatures.
+        Tries common execution interfaces safely.
+        """
+
+        symbol = best["symbol"]
+        capital = best["capital"]
+        asset = best["asset"]
+
+        # Method 1: execute_trade(...)
+        if hasattr(self.executor, "execute_trade"):
+            method = getattr(self.executor, "execute_trade")
+            try:
+                return method(
+                    asset=symbol,
+                    allocation=capital,
+                    decision_envelope=decision,
+                )
+            except TypeError:
+                pass
+
+        # Method 2: execute_order(...)
+        if hasattr(self.executor, "execute_order"):
+            method = getattr(self.executor, "execute_order")
+            try:
+                return method(
+                    asset=symbol,
+                    allocation=capital,
+                    decision_envelope=decision,
+                )
+            except TypeError:
+                try:
+                    return method(symbol, capital, decision)
+                except TypeError:
+                    pass
+
+        # Method 3: submit_order(...)
+        if hasattr(self.executor, "submit_order"):
+            method = getattr(self.executor, "submit_order")
+            price = asset.get("price")
+            quantity = capital
+
+            try:
+                return method(
+                    instrument=symbol,
+                    side="BUY",
+                    quantity=quantity,
+                    order_type="MARKET",
+                    price=price,
+                    decision_envelope=decision,
+                )
+            except TypeError:
+                try:
+                    return method(
+                        symbol=symbol,
+                        side="BUY",
+                        quantity=quantity,
+                        order_type="MARKET",
+                        price=price,
+                        decision_envelope=decision,
+                    )
+                except TypeError:
+                    pass
+
+        # Method 4: execute(...)
+        if hasattr(self.executor, "execute"):
+            method = getattr(self.executor, "execute")
+            try:
+                return method(
+                    asset=symbol,
+                    allocation=capital,
+                    decision_envelope=decision,
+                )
+            except TypeError:
+                try:
+                    return method(symbol, capital, decision)
+                except TypeError:
+                    pass
+
+        available = [
+            name for name in dir(self.executor)
+            if not name.startswith("_") and callable(getattr(self.executor, name))
+        ]
+        raise AttributeError(
+            "No supported execution method found on CoinbaseExecutor. "
+            f"Available callables: {available}"
+        )
+
+    # --------------------------------------------------
+
     def run(self) -> None:
         print("\nCSS Trading Engine started\n")
 
@@ -177,7 +261,6 @@ class CSSTradingEngine:
 
                 deployable, asset_limit = self.capital_snapshot()
 
-                # STEP 1 — SCANNER
                 symbols = get_top_universe(limit=self.max_assets)
 
                 if not symbols:
@@ -185,7 +268,6 @@ class CSSTradingEngine:
                     time.sleep(self.scan_interval)
                     continue
 
-                # STEP 2 — MARKET LOADER
                 universe = load_runtime_universe(symbols)
 
                 if not universe:
@@ -193,7 +275,6 @@ class CSSTradingEngine:
                     time.sleep(self.scan_interval)
                     continue
 
-                # STEP 3 — STRATEGY ENGINE
                 opportunities = []
 
                 for asset in universe:
@@ -231,7 +312,6 @@ class CSSTradingEngine:
                     time.sleep(self.scan_interval)
                     continue
 
-                # STEP 4 — CAPITAL ALLOCATION
                 share = deployable / min(len(opportunities), 4)
                 allocations = []
 
@@ -250,7 +330,6 @@ class CSSTradingEngine:
                         f"capital={a['capital']:.2f}"
                     )
 
-                # STEP 5 — RISK GOVERNOR
                 best = allocations[0]
 
                 raw_decision = self.risk_governor.approve_trade(
@@ -266,11 +345,7 @@ class CSSTradingEngine:
                         f"reason={decision.get('reason', 'unspecified')}"
                     )
                 else:
-                    result = self.executor.execute_trade(
-                        asset=best["symbol"],
-                        allocation=best["capital"],
-                        decision_envelope=decision,
-                    )
+                    result = self.execute_candidate(best, decision)
                     print("Trade executed:", result)
 
             except Exception as e:
