@@ -4,34 +4,32 @@ import concurrent.futures
 from typing import List, Dict
 
 from backend.scanner.coinbase_universe import get_top_universe
-from backend.scanner.runtime_loader import load_runtime_asset
+from backend.data.coinbase_historical_downloader import load_runtime_asset
 
 
 class UnifiedMarketScanner:
     """
-    CSS Broker-agnostic market scanner.
+    CSS Unified Market Scanner
 
-    Capable of scanning assets from multiple broker adapters
-    in parallel.
-
-    Current adapters:
-        - Coinbase
-    Future adapters:
-        - OANDA
-        - Alpaca
-        - Questrade
+    Responsibilities
+    ----------------
+    1. Discover tradable symbols
+    2. Load runtime asset data
+    3. Run scans in parallel
     """
 
     def __init__(self, max_workers: int = 8):
 
         self.max_workers = max_workers
 
-    def scan_coinbase(self) -> List[str]:
+    def discover_symbols(self) -> List[str]:
 
         try:
-            return get_top_universe(20)
+            symbols = get_top_universe(20)
         except Exception:
-            return []
+            symbols = []
+
+        return symbols
 
     def build_assets(self, symbols: List[str]) -> List[Dict]:
 
@@ -49,9 +47,12 @@ class UnifiedMarketScanner:
             for future in concurrent.futures.as_completed(futures):
 
                 try:
-                    result = future.result()
-                    if result and result.get("price"):
-                        assets.append(result)
+
+                    asset = future.result()
+
+                    if asset and asset.get("price"):
+
+                        assets.append(asset)
 
                 except Exception:
                     pass
@@ -60,13 +61,11 @@ class UnifiedMarketScanner:
 
     def scan(self) -> List[Dict]:
 
-        all_assets: List[Dict] = []
+        symbols = self.discover_symbols()
 
-        # Coinbase
-        coinbase_symbols = self.scan_coinbase()
+        if not symbols:
+            return []
 
-        coinbase_assets = self.build_assets(coinbase_symbols)
+        assets = self.build_assets(symbols)
 
-        all_assets.extend(coinbase_assets)
-
-        return all_assets
+        return assets
