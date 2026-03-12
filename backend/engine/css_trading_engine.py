@@ -3,22 +3,20 @@ from __future__ import annotations
 import os
 import sys
 import time
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
 
-# ----------------------------------------------------------
-# FIXED PROJECT ROOT
-# ----------------------------------------------------------
+# --------------------------------------------------
+# PROJECT ROOT FIX
+# --------------------------------------------------
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-# ----------------------------------------------------------
+# --------------------------------------------------
 # IMPORTS
-# ----------------------------------------------------------
+# --------------------------------------------------
 
 from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
 from backend.intelligence.capital_allocator import CapitalAllocator
@@ -33,20 +31,18 @@ from backend.scanner.coinbase_universe import get_top_universe
 
 
 class CSSTradingEngine:
-    """
-    Capital Strata Systems Trading Engine
-    """
 
     def __init__(self):
 
         # --------------------------------------------------
-        # ENGINE CONFIG
+        # CONFIG
         # --------------------------------------------------
 
         self.scan_interval = int(os.getenv("CSS_SCAN_INTERVAL_SECONDS", "20"))
         self.max_assets = int(os.getenv("CSS_MAX_ASSETS", "4"))
 
-        self.starting_capital = float(os.getenv("CSS_STARTING_GROSS_CAPITAL", "250"))
+        self.total_capital = float(os.getenv("CSS_STARTING_GROSS_CAPITAL", "250"))
+
         self.reserve_ratio = 0.10
         self.max_asset_fraction = 0.40
 
@@ -55,17 +51,18 @@ class CSSTradingEngine:
         # --------------------------------------------------
 
         self.scorer = AIOpportunityScorer()
-        self.allocator = CapitalAllocator(self.starting_capital)
-        self.risk_governor = PortfolioRiskGovernor()
+
+        # PASS CAPITAL INTO MODULES THAT REQUIRE IT
+        self.allocator = CapitalAllocator(self.total_capital)
+        self.risk_governor = PortfolioRiskGovernor(self.total_capital)
+
         self.executor = CoinbaseExecutor()
 
-    # ----------------------------------------------------------
-    # CAPITAL STATE
-    # ----------------------------------------------------------
+    # --------------------------------------------------
 
     def capital_snapshot(self):
 
-        gross = self.starting_capital
+        gross = self.total_capital
         reserve = round(gross * self.reserve_ratio, 2)
         deployable = round(gross - reserve, 2)
         asset_limit = round(deployable * self.max_asset_fraction, 2)
@@ -79,9 +76,7 @@ class CSSTradingEngine:
 
         return deployable, asset_limit
 
-    # ----------------------------------------------------------
-    # STRATEGY ROUTER
-    # ----------------------------------------------------------
+    # --------------------------------------------------
 
     def strategy_router(self, asset):
 
@@ -92,13 +87,11 @@ class CSSTradingEngine:
 
         return should_buy_mean_reversion(asset), "TREND_VWAP"
 
-    # ----------------------------------------------------------
-    # MAIN ENGINE LOOP
-    # ----------------------------------------------------------
+    # --------------------------------------------------
 
     def run(self):
 
-        print("CSS Trading Engine started")
+        print("\nCSS Trading Engine started\n")
 
         choose_session_policy()
 
@@ -106,7 +99,6 @@ class CSSTradingEngine:
 
             try:
 
-                print()
                 print(f"Next scan in {self.scan_interval} seconds...\n")
 
                 deployable, asset_limit = self.capital_snapshot()
@@ -114,7 +106,9 @@ class CSSTradingEngine:
                 universe = get_top_universe(limit=self.max_assets)
 
                 if not universe:
-                    print("No assets returned by scanner")
+
+                    print("Scanner returned no assets\n")
+
                     time.sleep(self.scan_interval)
                     continue
 
@@ -150,18 +144,20 @@ class CSSTradingEngine:
                 print(f"{len(opportunities)} trade opportunities detected\n")
 
                 if not opportunities:
+
                     time.sleep(self.scan_interval)
                     continue
 
-                allocations = []
-
                 share = deployable / min(len(opportunities), 4)
+
+                allocations = []
 
                 for opp in opportunities[:4]:
 
                     capital = min(round(share, 2), asset_limit)
 
                     opp["capital"] = capital
+
                     allocations.append(opp)
 
                 print("Capital allocations:")
@@ -178,12 +174,13 @@ class CSSTradingEngine:
                 best = allocations[0]
 
                 decision = self.risk_governor.approve_trade(
-                    best, best["capital"]
+                    best,
+                    best["capital"],
                 )
 
                 if decision.get("final_decision") != "ALLOW":
 
-                    print("Risk Governor blocked trade")
+                    print("Risk governor blocked trade")
 
                 else:
 
