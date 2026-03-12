@@ -4,10 +4,10 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, Tuple
 
 # --------------------------------------------------
-# PROJECT ROOT FIX
+# PROJECT ROOT
 # --------------------------------------------------
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -25,16 +25,17 @@ from backend.risk.portfolio_risk_governor import PortfolioRiskGovernor
 from backend.execution.coinbase_executor import CoinbaseExecutor
 from backend.risk.session_policy_loader import choose_session_policy
 
-from backend.strategies.vwap_mean_reversion import should_buy_mean_reversion
+from backend.strategies.vwap_mean_reversion import (
+    VWAPConfig,
+    should_buy_mean_reversion,
+)
 from backend.strategies.range_mean_reversion import range_mean_reversion_signal
 
 from backend.scanner.coinbase_universe import get_top_universe
 
 
 class CSSTradingEngine:
-
-    def __init__(self):
-
+    def __init__(self) -> None:
         self.scan_interval = int(os.getenv("CSS_SCAN_INTERVAL_SECONDS", "20"))
         self.max_assets = int(os.getenv("CSS_MAX_ASSETS", "4"))
         self.total_capital = float(os.getenv("CSS_STARTING_GROSS_CAPITAL", "250"))
@@ -47,8 +48,9 @@ class CSSTradingEngine:
         self.risk_governor = PortfolioRiskGovernor(self.total_capital)
         self.executor = CoinbaseExecutor()
 
-    def capital_snapshot(self):
+        self.vwap_cfg = VWAPConfig()
 
+    def capital_snapshot(self) -> Tuple[float, float]:
         gross = self.total_capital
         reserve = round(gross * self.reserve_ratio, 2)
         deployable = round(gross - reserve, 2)
@@ -63,14 +65,7 @@ class CSSTradingEngine:
 
         return deployable, asset_limit
 
-    def normalize_asset(self, asset: Any) -> dict:
-        """
-        Convert scanner output into a dict shape the engine can use.
-        Supports:
-        - dict assets
-        - string symbols like 'BTC-USD'
-        """
-
+    def normalize_asset(self, asset: Any) -> Dict[str, Any]:
         if isinstance(asset, dict):
             return asset
 
@@ -79,6 +74,8 @@ class CSSTradingEngine:
                 "symbol": asset,
                 "product_id": asset,
                 "asset": asset,
+                "price": None,
+                "vwap": None,
                 "regime": "TREND",
                 "volatility": 0.0,
                 "trend_efficiency": 0.0,
@@ -88,30 +85,57 @@ class CSSTradingEngine:
             "symbol": "UNKNOWN",
             "product_id": "UNKNOWN",
             "asset": "UNKNOWN",
+            "price": None,
+            "vwap": None,
             "regime": "TREND",
             "volatility": 0.0,
             "trend_efficiency": 0.0,
         }
 
-    def strategy_router(self, asset):
+    def extract_price_vwap(self, asset: Dict[str, Any]) -> Tuple[float | None, float | None]:
+        price = asset.get("price")
+        vwap = asset.get("vwap")
 
+        try:
+            price = float(price) if price is not None else None
+        except Exception:
+            price = None
+
+        try:
+            vwap = float(vwap) if vwap is not None else None
+        except Exception:
+            vwap = None
+
+        return price, vwap
+
+    def strategy_router(self, asset: Dict[str, Any]) -> Tuple[bool, str]:
         regime = str(asset.get("regime", "")).upper()
 
         if regime == "RANGE":
             return range_mean_reversion_signal(asset), "RANGE_MEAN_REVERSION"
 
-        return should_buy_mean_reversion(asset), "TREND_VWAP"
+        price, vwap = self.extract_price_vwap(asset)
 
-    def run(self):
+        if price is None or vwap is None or vwap == 0:
+            return False, "TREND_VWAP"
 
+        spread_bps = ((price - vwap) / vwap) * 10000.0
+
+        allowed, _reason = should_buy_mean_reversion(
+            price,
+            vwap,
+            spread_bps,
+            self.vwap_cfg,
+        )
+        return bool(allowed), "TREND_VWAP"
+
+    def run(self) -> None:
         print("\nCSS Trading Engine started\n")
 
         choose_session_policy(self.total_capital)
 
         while True:
-
             try:
-
                 print(f"Next scan in {self.scan_interval} seconds...\n")
 
                 deployable, asset_limit = self.capital_snapshot()
@@ -126,7 +150,6 @@ class CSSTradingEngine:
                 opportunities = []
 
                 for raw_asset in universe:
-
                     asset = self.normalize_asset(raw_asset)
 
                     symbol = (
@@ -167,7 +190,6 @@ class CSSTradingEngine:
                 allocations = []
 
                 for opp in opportunities[:4]:
-
                     capital = min(round(share, 2), asset_limit)
                     opp["capital"] = capital
                     allocations.append(opp)
@@ -206,6 +228,5 @@ class CSSTradingEngine:
 
 
 if __name__ == "__main__":
-
     engine = CSSTradingEngine()
     engine.run()
