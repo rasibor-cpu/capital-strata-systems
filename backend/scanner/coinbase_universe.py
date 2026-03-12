@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import requests
-from typing import List, Dict
+from typing import List
 
 
 COINBASE_PRODUCTS = "https://api.exchange.coinbase.com/products"
@@ -9,22 +9,12 @@ COINBASE_TICKER = "https://api.exchange.coinbase.com/products/{}/ticker"
 
 
 class MarketDiscoveryEngine:
-    """
-    CSS Market Discovery Engine
-
-    Dynamically finds the best tradable assets
-    from the entire Coinbase market.
-
-    Filters by:
-    - USD pairs
-    - liquidity
-    - volatility potential
-    """
 
     def __init__(self):
 
         self.min_volume_usd = 1_000_000
         self.max_assets = 12
+        self.scan_limit = 60
 
     def fetch_products(self) -> List[str]:
 
@@ -38,7 +28,7 @@ class MarketDiscoveryEngine:
 
         for p in data:
 
-            if not p.get("quote_currency") == "USD":
+            if p.get("quote_currency") != "USD":
                 continue
 
             if p.get("trading_disabled"):
@@ -46,20 +36,21 @@ class MarketDiscoveryEngine:
 
             assets.append(p["id"])
 
-        return assets
+        # only examine first N markets to keep scanning fast
+        return assets[: self.scan_limit]
 
-    def fetch_ticker(self, product: str) -> Dict:
+    def fetch_ticker(self, product: str):
 
         try:
             r = requests.get(
                 COINBASE_TICKER.format(product),
-                timeout=10,
+                timeout=5,
             )
             return r.json()
         except Exception:
             return {}
 
-    def score_asset(self, product: str) -> float:
+    def score_asset(self, product: str):
 
         ticker = self.fetch_ticker(product)
 
@@ -77,11 +68,9 @@ class MarketDiscoveryEngine:
         if volume_usd < self.min_volume_usd:
             return 0
 
-        score = volume_usd
+        return volume_usd
 
-        return score
-
-    def get_top_universe(self) -> List[str]:
+    def get_top_universe(self):
 
         products = self.fetch_products()
 
@@ -98,12 +87,10 @@ class MarketDiscoveryEngine:
 
         scored.sort(key=lambda x: x[1], reverse=True)
 
-        top = [p for p, _ in scored[: self.max_assets]]
-
-        return top
+        return [p for p, _ in scored[: self.max_assets]]
 
 
-def get_top_universe(max_assets: int = 12) -> List[str]:
+def get_top_universe(max_assets: int = 12):
 
     engine = MarketDiscoveryEngine()
     engine.max_assets = max_assets
@@ -113,9 +100,9 @@ def get_top_universe(max_assets: int = 12) -> List[str]:
 
 if __name__ == "__main__":
 
-    universe = get_top_universe()
-
     print("\nTop CSS tradable universe:\n")
+
+    universe = get_top_universe()
 
     for a in universe:
         print(a)
