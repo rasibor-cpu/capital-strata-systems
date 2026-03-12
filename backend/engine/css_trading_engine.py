@@ -33,11 +33,17 @@ from backend.strategies.range_mean_reversion import range_mean_reversion_signal
 
 from backend.scanner.coinbase_universe import get_top_universe
 
+# NEW: runtime market loader
+from backend.data.coinbase_historical_downloader import load_runtime_universe
+
 
 class CSSTradingEngine:
-    def __init__(self) -> None:
+
+    def __init__(self):
+
         self.scan_interval = int(os.getenv("CSS_SCAN_INTERVAL_SECONDS", "20"))
         self.max_assets = int(os.getenv("CSS_MAX_ASSETS", "4"))
+
         self.total_capital = float(os.getenv("CSS_STARTING_GROSS_CAPITAL", "250"))
 
         self.reserve_ratio = 0.10
@@ -50,7 +56,10 @@ class CSSTradingEngine:
 
         self.vwap_cfg = VWAPConfig()
 
+    # --------------------------------------------------
+
     def capital_snapshot(self) -> Tuple[float, float]:
+
         gross = self.total_capital
         reserve = round(gross * self.reserve_ratio, 2)
         deployable = round(gross - reserve, 2)
@@ -65,92 +74,77 @@ class CSSTradingEngine:
 
         return deployable, asset_limit
 
-    def normalize_asset(self, asset: Any) -> Dict[str, Any]:
-        if isinstance(asset, dict):
-            return asset
+    # --------------------------------------------------
 
-        if isinstance(asset, str):
-            return {
-                "symbol": asset,
-                "product_id": asset,
-                "asset": asset,
-                "price": None,
-                "vwap": None,
-                "regime": "TREND",
-                "volatility": 0.0,
-                "trend_efficiency": 0.0,
-            }
+    def strategy_router(self, asset: Dict[str, Any]):
 
-        return {
-            "symbol": "UNKNOWN",
-            "product_id": "UNKNOWN",
-            "asset": "UNKNOWN",
-            "price": None,
-            "vwap": None,
-            "regime": "TREND",
-            "volatility": 0.0,
-            "trend_efficiency": 0.0,
-        }
-
-    def extract_price_vwap(self, asset: Dict[str, Any]) -> Tuple[float | None, float | None]:
-        price = asset.get("price")
-        vwap = asset.get("vwap")
-
-        try:
-            price = float(price) if price is not None else None
-        except Exception:
-            price = None
-
-        try:
-            vwap = float(vwap) if vwap is not None else None
-        except Exception:
-            vwap = None
-
-        return price, vwap
-
-    def strategy_router(self, asset: Dict[str, Any]) -> Tuple[bool, str]:
         regime = str(asset.get("regime", "")).upper()
 
         if regime == "RANGE":
             return range_mean_reversion_signal(asset), "RANGE_MEAN_REVERSION"
 
-        price, vwap = self.extract_price_vwap(asset)
+        price = asset.get("price")
+        vwap = asset.get("vwap")
 
         if price is None or vwap is None or vwap == 0:
             return False, "TREND_VWAP"
 
         spread_bps = ((price - vwap) / vwap) * 10000.0
 
-        allowed, _reason = should_buy_mean_reversion(
+        allowed, _ = should_buy_mean_reversion(
             price,
             vwap,
             spread_bps,
             self.vwap_cfg,
         )
+
         return bool(allowed), "TREND_VWAP"
 
-    def run(self) -> None:
+    # --------------------------------------------------
+
+    def run(self):
+
         print("\nCSS Trading Engine started\n")
 
         choose_session_policy(self.total_capital)
 
         while True:
+
             try:
+
                 print(f"Next scan in {self.scan_interval} seconds...\n")
 
                 deployable, asset_limit = self.capital_snapshot()
 
-                universe = get_top_universe(limit=self.max_assets)
+                # ------------------------------------------
+                # STEP 1: get symbol universe
+                # ------------------------------------------
 
-                if not universe:
-                    print("Scanner returned no assets\n")
+                symbols = get_top_universe(limit=self.max_assets)
+
+                if not symbols:
+                    print("Scanner returned no symbols\n")
                     time.sleep(self.scan_interval)
                     continue
 
+                # ------------------------------------------
+                # STEP 2: load market data
+                # ------------------------------------------
+
+                universe = load_runtime_universe(symbols)
+
+                if not universe:
+                    print("Market loader returned no assets\n")
+                    time.sleep(self.scan_interval)
+                    continue
+
+                # ------------------------------------------
+                # STEP 3: strategy evaluation
+                # ------------------------------------------
+
                 opportunities = []
 
-                for raw_asset in universe:
-                    asset = self.normalize_asset(raw_asset)
+                for asset in universe:
 
                     symbol = (
                         asset.get("symbol")
@@ -186,23 +180,35 @@ class CSSTradingEngine:
                     time.sleep(self.scan_interval)
                     continue
 
+                # ------------------------------------------
+                # STEP 4: capital allocation
+                # ------------------------------------------
+
                 share = deployable / min(len(opportunities), 4)
+
                 allocations = []
 
                 for opp in opportunities[:4]:
+
                     capital = min(round(share, 2), asset_limit)
+
                     opp["capital"] = capital
                     allocations.append(opp)
 
                 print("Capital allocations:")
 
                 for a in allocations:
+
                     print(
                         f"{a['symbol']} | "
                         f"strategy={a['strategy']} | "
                         f"ai_score={a['score']:.2f} | "
                         f"capital={a['capital']:.2f}"
                     )
+
+                # ------------------------------------------
+                # STEP 5: risk approval
+                # ------------------------------------------
 
                 best = allocations[0]
 
@@ -212,21 +218,27 @@ class CSSTradingEngine:
                 )
 
                 if decision.get("final_decision") != "ALLOW":
+
                     print("Risk governor blocked trade")
+
                 else:
+
                     result = self.executor.execute_trade(
                         asset=best["symbol"],
                         allocation=best["capital"],
                         decision_envelope=decision,
                     )
+
                     print("Trade executed:", result)
 
             except Exception as e:
+
                 print("ENGINE ERROR:", e)
 
             time.sleep(self.scan_interval)
 
 
 if __name__ == "__main__":
+
     engine = CSSTradingEngine()
     engine.run()
