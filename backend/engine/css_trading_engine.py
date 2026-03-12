@@ -1,294 +1,131 @@
 from __future__ import annotations
 
-import os
-import sys
 import time
-from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import List, Dict
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
+from backend.scanner.unified_market_scanner import UnifiedMarketScanner
 from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
-from backend.intelligence.capital_allocator import CapitalAllocator
-from backend.risk.portfolio_risk_governor import PortfolioRiskGovernor
-from backend.execution.coinbase_executor import CoinbaseExecutor, OrderIntent
-from backend.risk.session_policy_loader import choose_session_policy
 from backend.strategies.vwap_mean_reversion import (
-    VWAPConfig,
+    compute_vwap_from_candles,
     should_buy_mean_reversion,
 )
-from backend.strategies.range_mean_reversion import (
-    range_mean_reversion_signal,
-)
-from backend.scanner.coinbase_universe import get_top_universe
-from backend.data.coinbase_historical_downloader import load_runtime_universe
+
+SCAN_INTERVAL = 20
+
+# Institutional signal quality threshold
+MIN_SIGNAL_STRENGTH = 0.65
 
 
 class CSSTradingEngine:
-    """
-    Capital Strata Systems Trading Engine
 
-    Current live path:
-    scanner -> runtime loader -> scorer -> allocator -> risk governor -> executor
+    def __init__(self):
 
-    Notes:
-    - Coinbase is the active provider path for now.
-    - Architecture should remain easy to refactor into broker/provider adapters later.
-    """
-
-    def __init__(self) -> None:
-        self.scan_interval = int(os.getenv("CSS_SCAN_INTERVAL_SECONDS", "20"))
-        self.max_assets = int(os.getenv("CSS_MAX_ASSETS", "12"))
-        self.total_capital = float(os.getenv("CSS_STARTING_GROSS_CAPITAL", "250"))
-
-        self.reserve_ratio = float(os.getenv("CSS_RESERVE_RATIO", "0.10"))
-        self.max_asset_fraction = float(os.getenv("CSS_MAX_ASSET_FRACTION", "0.40"))
-
+        self.scanner = UnifiedMarketScanner()
         self.scorer = AIOpportunityScorer()
-        self.allocator = CapitalAllocator(self.total_capital)
-        self.risk_governor = PortfolioRiskGovernor(self.total_capital)
-        self.executor = CoinbaseExecutor()
-        self.vwap_cfg = VWAPConfig()
 
-    # --------------------------------------------------
-    # Capital
-    # --------------------------------------------------
+        self.capital = 250
+        self.reserve = 25
 
-    def capital_snapshot(self) -> Tuple[float, float]:
-        gross = self.total_capital
-        reserve = round(gross * self.reserve_ratio, 2)
-        deployable = round(gross - reserve, 2)
-        asset_limit = round(deployable * self.max_asset_fraction, 2)
+    def scan_market(self) -> List[Dict]:
 
-        print(
-            f"Capital snapshot: gross={gross:.2f} | "
-            f"reserve={reserve:.2f} | "
-            f"deployable={deployable:.2f} | "
-            f"asset_limit={asset_limit:.2f}"
-        )
+        assets = self.scanner.scan()
 
-        return deployable, asset_limit
+        opportunities = []
 
-    # --------------------------------------------------
-    # Strategy routing
-    # --------------------------------------------------
+        for asset in assets:
 
-    def strategy_router(self, asset: Dict[str, Any]) -> Tuple[bool, str]:
-        regime = str(asset.get("regime", "")).upper()
+            candles = asset.get("candles")
 
-        if regime == "RANGE":
-            allowed = range_mean_reversion_signal(asset)
-            return bool(allowed), "RANGE_MEAN_REVERSION"
+            if not candles:
+                continue
 
-        price = asset.get("price")
-        vwap = asset.get("vwap")
+            vwap = compute_vwap_from_candles(candles)
 
-        if price is None or vwap is None or vwap == 0:
-            return False, "TREND_VWAP"
+            if vwap is None:
+                continue
 
-        spread_bps = ((price - vwap) / vwap) * 10000.0
+            mid = asset["price"]
 
-        allowed, _reason = should_buy_mean_reversion(
-            price,
-            vwap,
-            spread_bps,
-            self.vwap_cfg,
-        )
-        return bool(allowed), "TREND_VWAP"
+            spread_bps = ((mid - vwap) / vwap) * 10000
 
-    # --------------------------------------------------
-    # Risk decision normalization
-    # --------------------------------------------------
-
-    def normalize_risk_decision(self, raw: Any) -> Dict[str, Any]:
-        if isinstance(raw, dict):
-            raw["final_decision"] = str(
-                raw.get("final_decision", "BLOCK")
-            ).upper()
-            return raw
-
-        if isinstance(raw, tuple):
-            if len(raw) == 0:
-                return {"final_decision": "BLOCK", "reason": "empty tuple"}
-
-            first = raw[0]
-
-            if isinstance(first, bool):
-                return {
-                    "final_decision": "ALLOW" if first else "BLOCK",
-                    "reason": raw[1] if len(raw) > 1 else "",
-                }
-
-            if isinstance(first, str):
-                text = first.strip().upper()
-                return {
-                    "final_decision": "ALLOW" if text in {"ALLOW", "APPROVE", "APPROVED", "PASS", "TRUE"} else "BLOCK",
-                    "reason": raw[1] if len(raw) > 1 else first,
-                }
-
-            if isinstance(first, dict):
-                first["final_decision"] = str(
-                    first.get("final_decision", "BLOCK")
-                ).upper()
-                if len(raw) > 1 and "reason" not in first:
-                    first["reason"] = raw[1]
-                return first
-
-        if isinstance(raw, bool):
-            return {
-                "final_decision": "ALLOW" if raw else "BLOCK",
-                "reason": "boolean risk response",
-            }
-
-        return {
-            "final_decision": "BLOCK",
-            "reason": f"unsupported risk response: {type(raw).__name__}",
-        }
-
-    # --------------------------------------------------
-    # Execution
-    # --------------------------------------------------
-
-    def execute_trade(self, best: Dict[str, Any]) -> None:
-        symbol = best["symbol"]
-        capital = best["capital"]
-
-        try:
-            intent = OrderIntent(
-                product_id=symbol,
-                side="BUY",
-                quote_size=capital,
-                order_type="MARKET",
+            buy_ok, reason = should_buy_mean_reversion(
+                mid,
+                vwap,
+                spread_bps,
+                None,
             )
 
-            order = self.executor.create_order(intent)
-            print("Trade executed:", order)
+            if not buy_ok:
+                continue
 
-        except Exception as e:
-            print("Execution error:", e)
+            opportunity = {
+                "symbol": asset["symbol"],
+                "price": mid,
+                "spread_bps": spread_bps,
+                "volatility": asset.get("volatility", 0),
+                "regime": asset.get("regime", "RANGE"),
+            }
 
-    # --------------------------------------------------
-    # Main loop
-    # --------------------------------------------------
+            score = self.scorer.score_opportunity(opportunity)
 
-    def run(self) -> None:
+            opportunity["score"] = score["score"]
+
+            opportunities.append(opportunity)
+
+        return opportunities
+
+    def filter_institutional_signals(self, opportunities):
+
+        filtered = []
+
+        for opp in opportunities:
+
+            score = float(opp.get("score", 0))
+
+            if score < MIN_SIGNAL_STRENGTH:
+                continue
+
+            filtered.append(opp)
+
+        return filtered
+
+    def run(self):
+
         print("\nCSS Trading Engine started\n")
 
-        choose_session_policy(self.total_capital)
-
         while True:
-            try:
-                print(f"Next scan in {self.scan_interval} seconds...\n")
 
-                deployable, asset_limit = self.capital_snapshot()
+            print("\nNext scan in 20 seconds...\n")
 
-                # Step 1: discover tradable universe
-                symbols = get_top_universe(self.max_assets)
+            time.sleep(SCAN_INTERVAL)
 
-                if not symbols:
-                    print("Scanner returned no symbols\n")
-                    time.sleep(self.scan_interval)
-                    continue
+            opportunities = self.scan_market()
 
-                # Step 2: enrich symbols into runtime-ready assets
-                universe = load_runtime_universe(symbols)
+            print(f"{len(opportunities)} trade opportunities detected")
 
-                if not universe:
-                    print("Market loader returned no assets\n")
-                    time.sleep(self.scan_interval)
-                    continue
+            opportunities = self.filter_institutional_signals(opportunities)
 
-                # Step 3: score and filter opportunities
-                opportunities = []
+            if not opportunities:
 
-                for asset in universe:
-                    symbol = (
-                        asset.get("symbol")
-                        or asset.get("product_id")
-                        or asset.get("asset")
-                        or "UNKNOWN"
-                    )
+                print("No institutional-grade opportunities detected")
 
-                    allowed, strategy = self.strategy_router(asset)
+                continue
 
-                    if not allowed:
-                        continue
+            deployable = self.capital - self.reserve
 
-                    try:
-                        score = float(self.scorer.score_opportunity(asset))
-                    except Exception:
-                        score = 0.0
+            capital_per_trade = deployable / len(opportunities)
 
-                    opportunities.append(
-                        {
-                            "symbol": symbol,
-                            "score": score,
-                            "strategy": strategy,
-                            "asset": asset,
-                        }
-                    )
+            print("\nCapital allocations:")
 
-                opportunities.sort(key=lambda x: x["score"], reverse=True)
+            for opp in opportunities:
 
-                print(f"{len(opportunities)} trade opportunities detected\n")
-
-                if not opportunities:
-                    time.sleep(self.scan_interval)
-                    continue
-
-                # Step 4: allocate capital across top opportunities
-                share = deployable / min(len(opportunities), 4)
-                allocations = []
-
-                for opp in opportunities[:4]:
-                    capital = min(round(share, 2), asset_limit)
-                    opp["capital"] = capital
-                    allocations.append(opp)
-
-                print("Capital allocations:")
-
-                for a in allocations:
-                    print(
-                        f"{a['symbol']} | "
-                        f"strategy={a['strategy']} | "
-                        f"ai_score={a['score']:.2f} | "
-                        f"capital={a['capital']:.2f}"
-                    )
-
-                # Step 5: risk approval on best candidate
-                best = allocations[0]
-
-                raw_decision = self.risk_governor.approve_trade(
-                    best["symbol"],
-                    best["capital"],
+                print(
+                    f"{opp['symbol']} | ai_score={opp['score']:.2f} | capital={capital_per_trade:.2f}"
                 )
-
-                decision = self.normalize_risk_decision(raw_decision)
-
-                if decision["final_decision"] != "ALLOW":
-                    print(
-                        f"Risk governor blocked trade"
-                        + (
-                            f" | reason={decision.get('reason')}"
-                            if decision.get("reason")
-                            else ""
-                        )
-                    )
-                else:
-                    self.execute_trade(best)
-
-            except KeyboardInterrupt:
-                print("\nCSS Trading Engine stopped by user.")
-                break
-            except Exception as e:
-                print("ENGINE ERROR:", e)
-
-            time.sleep(self.scan_interval)
 
 
 if __name__ == "__main__":
+
     engine = CSSTradingEngine()
+
     engine.run()
