@@ -117,8 +117,7 @@ class CSSTradingEngine:
 
             if isinstance(raw[0], bool):
                 return {
-                    "final_decision": "ALLOW" if raw[0] else "BLOCK",
-                    "reason": raw[1] if len(raw) > 1 else "",
+                    "final_decision": "ALLOW" if raw[0] else "BLOCK"
                 }
 
         if isinstance(raw, bool):
@@ -131,7 +130,7 @@ class CSSTradingEngine:
 
     # --------------------------------------------------
 
-    def execute_trade(self, best: Dict, decision: Dict):
+    def execute_trade(self, best: Dict):
 
         symbol = best["symbol"]
         capital = best["capital"]
@@ -139,10 +138,10 @@ class CSSTradingEngine:
         try:
 
             order = self.executor.create_order(
-                product_id=symbol,
-                side="BUY",
-                size=str(capital),
-                order_type="market",
+                symbol,
+                "BUY",
+                str(capital),
+                "market"
             )
 
             print("Trade executed:", order)
@@ -281,7 +280,7 @@ class CSSTradingEngine:
 
                 else:
 
-                    self.execute_trade(best, decision)
+                    self.execute_trade(best)
 
             except Exception as e:
 
