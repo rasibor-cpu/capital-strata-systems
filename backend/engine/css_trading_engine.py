@@ -93,7 +93,7 @@ class CSSTradingEngine:
 
         print("\nCSS Trading Engine started\n")
 
-        choose_session_policy()
+        choose_session_policy(self.total_capital)
 
         while True:
 
