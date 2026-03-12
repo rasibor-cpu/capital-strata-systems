@@ -4,6 +4,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 # --------------------------------------------------
 # PROJECT ROOT FIX
@@ -34,31 +35,17 @@ class CSSTradingEngine:
 
     def __init__(self):
 
-        # --------------------------------------------------
-        # CONFIG
-        # --------------------------------------------------
-
         self.scan_interval = int(os.getenv("CSS_SCAN_INTERVAL_SECONDS", "20"))
         self.max_assets = int(os.getenv("CSS_MAX_ASSETS", "4"))
-
         self.total_capital = float(os.getenv("CSS_STARTING_GROSS_CAPITAL", "250"))
 
         self.reserve_ratio = 0.10
         self.max_asset_fraction = 0.40
 
-        # --------------------------------------------------
-        # CORE MODULES
-        # --------------------------------------------------
-
         self.scorer = AIOpportunityScorer()
-
-        # PASS CAPITAL INTO MODULES THAT REQUIRE IT
         self.allocator = CapitalAllocator(self.total_capital)
         self.risk_governor = PortfolioRiskGovernor(self.total_capital)
-
         self.executor = CoinbaseExecutor()
-
-    # --------------------------------------------------
 
     def capital_snapshot(self):
 
@@ -76,7 +63,35 @@ class CSSTradingEngine:
 
         return deployable, asset_limit
 
-    # --------------------------------------------------
+    def normalize_asset(self, asset: Any) -> dict:
+        """
+        Convert scanner output into a dict shape the engine can use.
+        Supports:
+        - dict assets
+        - string symbols like 'BTC-USD'
+        """
+
+        if isinstance(asset, dict):
+            return asset
+
+        if isinstance(asset, str):
+            return {
+                "symbol": asset,
+                "product_id": asset,
+                "asset": asset,
+                "regime": "TREND",
+                "volatility": 0.0,
+                "trend_efficiency": 0.0,
+            }
+
+        return {
+            "symbol": "UNKNOWN",
+            "product_id": "UNKNOWN",
+            "asset": "UNKNOWN",
+            "regime": "TREND",
+            "volatility": 0.0,
+            "trend_efficiency": 0.0,
+        }
 
     def strategy_router(self, asset):
 
@@ -86,8 +101,6 @@ class CSSTradingEngine:
             return range_mean_reversion_signal(asset), "RANGE_MEAN_REVERSION"
 
         return should_buy_mean_reversion(asset), "TREND_VWAP"
-
-    # --------------------------------------------------
 
     def run(self):
 
@@ -106,15 +119,15 @@ class CSSTradingEngine:
                 universe = get_top_universe(limit=self.max_assets)
 
                 if not universe:
-
                     print("Scanner returned no assets\n")
-
                     time.sleep(self.scan_interval)
                     continue
 
                 opportunities = []
 
-                for asset in universe:
+                for raw_asset in universe:
+
+                    asset = self.normalize_asset(raw_asset)
 
                     symbol = (
                         asset.get("symbol")
@@ -128,7 +141,10 @@ class CSSTradingEngine:
                     if not allowed:
                         continue
 
-                    score = self.scorer.score_opportunity(asset)
+                    try:
+                        score = float(self.scorer.score_opportunity(asset))
+                    except Exception:
+                        score = 0.0
 
                     opportunities.append(
                         {
@@ -144,26 +160,21 @@ class CSSTradingEngine:
                 print(f"{len(opportunities)} trade opportunities detected\n")
 
                 if not opportunities:
-
                     time.sleep(self.scan_interval)
                     continue
 
                 share = deployable / min(len(opportunities), 4)
-
                 allocations = []
 
                 for opp in opportunities[:4]:
 
                     capital = min(round(share, 2), asset_limit)
-
                     opp["capital"] = capital
-
                     allocations.append(opp)
 
                 print("Capital allocations:")
 
                 for a in allocations:
-
                     print(
                         f"{a['symbol']} | "
                         f"strategy={a['strategy']} | "
@@ -179,21 +190,16 @@ class CSSTradingEngine:
                 )
 
                 if decision.get("final_decision") != "ALLOW":
-
                     print("Risk governor blocked trade")
-
                 else:
-
                     result = self.executor.execute_trade(
                         asset=best["symbol"],
                         allocation=best["capital"],
                         decision_envelope=decision,
                     )
-
                     print("Trade executed:", result)
 
             except Exception as e:
-
                 print("ENGINE ERROR:", e)
 
             time.sleep(self.scan_interval)
