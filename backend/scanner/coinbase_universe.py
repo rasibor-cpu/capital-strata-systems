@@ -1,58 +1,121 @@
 from __future__ import annotations
 
 import requests
-from typing import List, Dict, Any
+from typing import List, Dict
 
 
-COINBASE_PRODUCTS_URL = "https://api.exchange.coinbase.com/products"
+COINBASE_PRODUCTS = "https://api.exchange.coinbase.com/products"
+COINBASE_TICKER = "https://api.exchange.coinbase.com/products/{}/ticker"
 
 
-def fetch_all_products() -> List[Dict[str, Any]]:
+class MarketDiscoveryEngine:
     """
-    Fetch all Coinbase products.
+    CSS Market Discovery Engine
+
+    Dynamically finds the best tradable assets
+    from the entire Coinbase market.
+
+    Filters by:
+    - USD pairs
+    - liquidity
+    - volatility potential
     """
-    r = requests.get(COINBASE_PRODUCTS_URL, timeout=15)
-    r.raise_for_status()
-    return r.json()
+
+    def __init__(self):
+
+        self.min_volume_usd = 1_000_000
+        self.max_assets = 12
+
+    def fetch_products(self) -> List[str]:
+
+        try:
+            r = requests.get(COINBASE_PRODUCTS, timeout=10)
+            data = r.json()
+        except Exception:
+            return []
+
+        assets = []
+
+        for p in data:
+
+            if not p.get("quote_currency") == "USD":
+                continue
+
+            if p.get("trading_disabled"):
+                continue
+
+            assets.append(p["id"])
+
+        return assets
+
+    def fetch_ticker(self, product: str) -> Dict:
+
+        try:
+            r = requests.get(
+                COINBASE_TICKER.format(product),
+                timeout=10,
+            )
+            return r.json()
+        except Exception:
+            return {}
+
+    def score_asset(self, product: str) -> float:
+
+        ticker = self.fetch_ticker(product)
+
+        try:
+            price = float(ticker.get("price", 0))
+            volume = float(ticker.get("volume", 0))
+        except Exception:
+            return 0
+
+        if price <= 0 or volume <= 0:
+            return 0
+
+        volume_usd = price * volume
+
+        if volume_usd < self.min_volume_usd:
+            return 0
+
+        score = volume_usd
+
+        return score
+
+    def get_top_universe(self) -> List[str]:
+
+        products = self.fetch_products()
+
+        scored = []
+
+        for p in products:
+
+            score = self.score_asset(p)
+
+            if score <= 0:
+                continue
+
+            scored.append((p, score))
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+
+        top = [p for p, _ in scored[: self.max_assets]]
+
+        return top
 
 
-def filter_usd_crypto_pairs(products: List[Dict[str, Any]]) -> List[str]:
-    """
-    Keep only crypto USD pairs like BTC-USD.
-    """
-    pairs: List[str] = []
+def get_top_universe(max_assets: int = 12) -> List[str]:
 
-    for p in products:
-        pid = p.get("id", "")
-        if not isinstance(pid, str):
-            continue
+    engine = MarketDiscoveryEngine()
+    engine.max_assets = max_assets
 
-        if not pid.endswith("-USD"):
-            continue
-
-        if pid.startswith("USD-"):
-            continue
-
-        pairs.append(pid)
-
-    return pairs
+    return engine.get_top_universe()
 
 
-def rank_pairs_by_liquidity(pairs: List[str], limit: int = 200) -> List[str]:
-    """
-    Simple liquidity proxy: prefer shorter symbols first
-    (BTC, ETH, etc). Later we will improve with volume.
-    """
-    pairs = sorted(pairs)
-    return pairs[:limit]
+if __name__ == "__main__":
 
+    universe = get_top_universe()
 
-def get_top_universe(limit: int = 50) -> List[str]:
-    """
-    Return the top N crypto USD pairs.
-    """
-    products = fetch_all_products()
+    print("\nTop CSS tradable universe:\n")
 
-    usd_pairs = filter_usd_crypto_pairs(products)
-
-    return rank_pairs_by_liquidity(usd_pairs, limit)
+    for a in universe:
+        print(a)
