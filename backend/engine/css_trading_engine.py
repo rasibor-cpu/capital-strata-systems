@@ -16,7 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
 from backend.intelligence.capital_allocator import CapitalAllocator
 from backend.risk.portfolio_risk_governor import PortfolioRiskGovernor
-from backend.execution.coinbase_executor import CoinbaseExecutor
+from backend.execution.coinbase_executor import CoinbaseExecutor, OrderIntent
 from backend.risk.session_policy_loader import choose_session_policy
 
 from backend.strategies.vwap_mean_reversion import (
@@ -137,12 +137,14 @@ class CSSTradingEngine:
 
         try:
 
-            order = self.executor.create_order(
-                symbol,
-                "BUY",
-                str(capital),
-                "market"
+            intent = OrderIntent(
+                product_id=symbol,
+                side="BUY",
+                quote_size=capital,
+                order_type="MARKET"
             )
+
+            order = self.executor.create_order(intent)
 
             print("Trade executed:", order)
 
@@ -166,10 +168,6 @@ class CSSTradingEngine:
 
                 deployable, asset_limit = self.capital_snapshot()
 
-                # --------------------------------------------------
-                # SCANNER
-                # --------------------------------------------------
-
                 symbols = get_top_universe(limit=self.max_assets)
 
                 if not symbols:
@@ -178,10 +176,6 @@ class CSSTradingEngine:
                     time.sleep(self.scan_interval)
                     continue
 
-                # --------------------------------------------------
-                # MARKET LOADER
-                # --------------------------------------------------
-
                 universe = load_runtime_universe(symbols)
 
                 if not universe:
@@ -189,10 +183,6 @@ class CSSTradingEngine:
                     print("Market loader returned no assets\n")
                     time.sleep(self.scan_interval)
                     continue
-
-                # --------------------------------------------------
-                # STRATEGY ENGINE
-                # --------------------------------------------------
 
                 opportunities = []
 
@@ -234,10 +224,6 @@ class CSSTradingEngine:
                     time.sleep(self.scan_interval)
                     continue
 
-                # --------------------------------------------------
-                # CAPITAL ALLOCATION
-                # --------------------------------------------------
-
                 share = deployable / min(len(opportunities), 4)
 
                 allocations = []
@@ -260,10 +246,6 @@ class CSSTradingEngine:
                         f"ai_score={a['score']:.2f} | "
                         f"capital={a['capital']:.2f}"
                     )
-
-                # --------------------------------------------------
-                # RISK GOVERNOR
-                # --------------------------------------------------
 
                 best = allocations[0]
 
