@@ -35,10 +35,6 @@ from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
 from backend.intelligence.quant_signal_optimizer import QuantSignalOptimizer
 
 
-# ---------------------------------------------------------
-# CONFIG
-# ---------------------------------------------------------
-
 SCAN_INTERVAL_SECONDS = 20
 SEED_COUNT = 20
 MAX_OPEN_POSITIONS = 5
@@ -56,11 +52,6 @@ MIN_PRESSURE_ACCEL = 0.10
 SUMMARY_PATH = PROJECT_ROOT / "artifacts/css_extended_paper_test_summary.json"
 SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-
-# ---------------------------------------------------------
-# ENGINES
-# ---------------------------------------------------------
-
 scanner = UnifiedMarketScanner()
 
 feature_builder = FeatureBuilder()
@@ -74,21 +65,11 @@ momentum_engine = OpportunityMomentumWindowEngine()
 ai = AIOpportunityScorer()
 optimizer = QuantSignalOptimizer()
 
-
-# ---------------------------------------------------------
-# STATE
-# ---------------------------------------------------------
-
 cycle_no = 0
 open_positions: Dict[str, Dict[str, Any]] = {}
 closed_trades: List[Dict[str, Any]] = []
-
 realized_pnl = 0.0
 
-
-# ---------------------------------------------------------
-# HELPERS
-# ---------------------------------------------------------
 
 def now_utc() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -147,10 +128,6 @@ def print_status() -> None:
     print("==============================\n")
 
 
-# ---------------------------------------------------------
-# DISCOVERY
-# ---------------------------------------------------------
-
 def discover_symbols() -> List[str]:
     results = scanner.scan()
 
@@ -171,9 +148,16 @@ def discover_symbols() -> List[str]:
     return symbols[:SEED_COUNT]
 
 
-# ---------------------------------------------------------
-# FETCH
-# ---------------------------------------------------------
+def candle_to_dict(c: Candle) -> Dict[str, float]:
+    return {
+        "ts": float(c.ts),
+        "open": float(c.open),
+        "high": float(c.high),
+        "low": float(c.low),
+        "close": float(c.close),
+        "volume": float(c.volume),
+    }
+
 
 def fetch_assets(symbols: List[str]) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
@@ -181,24 +165,25 @@ def fetch_assets(symbols: List[str]) -> List[Dict[str, Any]]:
     for s in symbols:
         try:
             payload = load_runtime_asset(s)
-            candles: List[Candle] = payload.get("candles", [])
+            candles_raw: List[Candle] = payload.get("candles", [])
 
-            if len(candles) < 10:
+            if len(candles_raw) < 10:
                 continue
 
             raw_price = payload.get("price")
-
             if raw_price is None:
-                price = float(candles[-1].close)
+                price = float(candles_raw[-1].close)
             else:
                 price = float(raw_price)
 
             if price <= 0:
                 continue
 
-            vwap = compute_vwap_from_candles(candles)
+            vwap = compute_vwap_from_candles(candles_raw)
             if vwap is None or vwap <= 0:
                 continue
+
+            candles = [candle_to_dict(c) for c in candles_raw]
 
             row = dict(payload)
             row["symbol"] = s
@@ -215,10 +200,6 @@ def fetch_assets(symbols: List[str]) -> List[Dict[str, Any]]:
     return rows
 
 
-# ---------------------------------------------------------
-# SIGNAL PIPELINE
-# ---------------------------------------------------------
-
 def build_signals(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     rows = feature_builder.enrich_rows(rows, {})
     rows = regime_engine.detect(rows)
@@ -233,10 +214,6 @@ def build_signals(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
     return rows
 
-
-# ---------------------------------------------------------
-# TRADE GATE
-# ---------------------------------------------------------
 
 def allow_trade(row: Dict[str, Any]) -> bool:
     decision = row.get("decision")
@@ -258,10 +235,6 @@ def allow_trade(row: Dict[str, Any]) -> bool:
 
     return True
 
-
-# ---------------------------------------------------------
-# OPEN POSITIONS
-# ---------------------------------------------------------
 
 def open_new_positions(rows: List[Dict[str, Any]]) -> None:
     global open_positions
@@ -293,10 +266,6 @@ def open_new_positions(rows: List[Dict[str, Any]]) -> None:
         if len(open_positions) >= MAX_OPEN_POSITIONS:
             break
 
-
-# ---------------------------------------------------------
-# CLOSE POSITIONS
-# ---------------------------------------------------------
 
 def manage_positions(rows_map: Dict[str, Dict[str, Any]]) -> None:
     global realized_pnl
@@ -341,10 +310,6 @@ def manage_positions(rows_map: Dict[str, Dict[str, Any]]) -> None:
 
         print("CLOSE:", symbol, "PNL:", round(pnl, 4))
 
-
-# ---------------------------------------------------------
-# MAIN LOOP
-# ---------------------------------------------------------
 
 print("CSS EXTENDED PAPER TEST STARTED")
 
