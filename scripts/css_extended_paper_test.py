@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 import time
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
@@ -18,36 +18,38 @@ from backend.data.coinbase_historical_downloader import (
     load_runtime_asset,
     compute_vwap_from_candles,
 )
+
 from backend.scanner.unified_market_scanner import UnifiedMarketScanner
 
 from backend.intelligence.feature_builder import FeatureBuilder
 from backend.intelligence.market_regime_engine import MarketRegimeEngine
 from backend.intelligence.opportunity_pressure_engine import OpportunityPressureEngine
 from backend.intelligence.pressure_acceleration_engine import PressureAccelerationEngine
-from backend.intelligence.opportunity_pressure_map_engine import (
-    OpportunityPressureMapEngine,
-)
+from backend.intelligence.opportunity_pressure_map_engine import OpportunityPressureMapEngine
 from backend.intelligence.liquidity_sweep_detector import LiquiditySweepDetector
-from backend.intelligence.opportunity_momentum_window_engine import (
-    OpportunityMomentumWindowEngine,
-)
+from backend.intelligence.opportunity_momentum_window_engine import OpportunityMomentumWindowEngine
 from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
 from backend.intelligence.quant_signal_optimizer import QuantSignalOptimizer
 
 
-SCAN_INTERVAL_SECONDS = 20
-SEED_COUNT = 20
-MAX_OPEN_POSITIONS = 5
+# ---------------------------------------------------------
+# ACCELERATED PAPER-TEST CONFIG
+# ---------------------------------------------------------
+
+SCAN_INTERVAL_SECONDS = 12
+SEED_COUNT = 40
+MAX_OPEN_POSITIONS = 8
 
 STARTING_CAPITAL = 200.0
 
-TAKE_PROFIT_PCT = 0.012
-STOP_LOSS_PCT = 0.009
-MAX_HOLD_CYCLES = 20
+TAKE_PROFIT_PCT = 0.009
+STOP_LOSS_PCT = 0.008
+MAX_HOLD_CYCLES = 12
 
-MIN_TRADE_SCORE = 0.52
-MIN_PRESSURE_SCORE = 0.60
-MIN_PRESSURE_ACCEL = 0.10
+# Relaxed for paper-test discovery
+MIN_TRADE_SCORE = 0.24
+MIN_PRESSURE_SCORE = 0.20
+MIN_PRESSURE_ACCEL = 0.00
 
 SUMMARY_PATH = PROJECT_ROOT / "artifacts/css_extended_paper_test_summary.json"
 SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -84,7 +86,30 @@ def _safe_float(v: Any, default: float = 0.0) -> float:
         return default
 
 
-def _save_summary() -> None:
+def infer_direction(price: float, vwap: float) -> str:
+    if price < vwap:
+        return "LONG"
+    return "SHORT"
+
+
+def enforce_direction(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    for r in rows:
+        price = _safe_float(r.get("price"))
+        vwap = _safe_float(r.get("vwap"))
+
+        if price > 0 and vwap > 0:
+            d = infer_direction(price, vwap)
+        else:
+            d = str(r.get("direction", "LONG")).upper()
+
+        r["direction"] = d
+        r["side"] = d
+        r["signal_direction"] = d
+
+    return rows
+
+
+def save_summary() -> None:
     wins = sum(1 for t in closed_trades if t["pnl"] > 0)
     losses = sum(1 for t in closed_trades if t["pnl"] <= 0)
 
@@ -109,23 +134,11 @@ def _save_summary() -> None:
             "min_trade_score": MIN_TRADE_SCORE,
             "min_pressure_score": MIN_PRESSURE_SCORE,
             "min_pressure_accel": MIN_PRESSURE_ACCEL,
-            "css_min_signal_strength_env": os.getenv("CSS_MIN_SIGNAL_STRENGTH", ""),
         },
     }
 
     with SUMMARY_PATH.open("w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
-
-
-def print_status() -> None:
-    print("\n==============================")
-    print("CSS EXTENDED PAPER TEST")
-    print("==============================")
-    print("Cycle:", cycle_no)
-    print("Open positions:", len(open_positions))
-    print("Closed trades:", len(closed_trades))
-    print("PnL:", round(realized_pnl, 4))
-    print("==============================\n")
 
 
 def discover_symbols() -> List[str]:
@@ -142,8 +155,8 @@ def discover_symbols() -> List[str]:
         if not s or s in seen:
             continue
 
-        symbols.append(s)
         seen.add(s)
+        symbols.append(s)
 
     return symbols[:SEED_COUNT]
 
@@ -180,91 +193,123 @@ def fetch_assets(symbols: List[str]) -> List[Dict[str, Any]]:
                 continue
 
             vwap = compute_vwap_from_candles(candles_raw)
-            if vwap is None or vwap <= 0:
+            if not vwap or vwap <= 0:
                 continue
 
             candles = [candle_to_dict(c) for c in candles_raw]
 
             row = dict(payload)
             row["symbol"] = s
-            row["price"] = price
+            row["price"] = float(price)
             row["vwap"] = float(vwap)
             row["candles"] = candles
+
+            d = infer_direction(float(price), float(vwap))
+            row["direction"] = d
+            row["side"] = d
+            row["signal_direction"] = d
 
             rows.append(row)
 
         except Exception as e:
-            print(f"[FETCH ERROR] {s}: {e}")
-            continue
+            print("[FETCH ERROR]", s, e)
 
     return rows
 
 
 def build_signals(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    rows = feature_builder.enrich_rows(rows, {})
-    rows = regime_engine.detect(rows)
+    rows = enforce_direction(rows)
 
-    # Current OpportunityPressureEngine interface in repo uses scan_market()
+    rows = feature_builder.enrich_rows(rows, {})
+    rows = enforce_direction(rows)
+
+    rows = regime_engine.detect(rows)
+    rows = enforce_direction(rows)
+
     rows = pressure_engine.scan_market(rows)
+    rows = enforce_direction(rows)
 
     rows = accel_engine.enrich(rows)
+    rows = enforce_direction(rows)
+
     rows = pressure_map_engine.enrich(rows)
+    rows = enforce_direction(rows)
+
     rows = sweep_engine.enrich(rows)
+    rows = enforce_direction(rows)
+
     rows = momentum_engine.enrich(rows)
+    rows = enforce_direction(rows)
 
     rows = ai.rank_opportunities(rows)
-    rows = optimizer.optimize(rows)
+    rows = enforce_direction(rows)
 
+    rows = optimizer.optimize(rows)
+    rows = enforce_direction(rows)
+
+    rows.sort(key=lambda x: _safe_float(x.get("trade_score")), reverse=True)
     return rows
 
 
 def allow_trade(row: Dict[str, Any]) -> bool:
-    decision = row.get("decision")
+    decision = str(row.get("decision", "")).upper()
     trade_score = _safe_float(row.get("trade_score"))
-    pressure_score = _safe_float(row.get("pressure_score"))
-    pressure_accel = _safe_float(row.get("pressure_acceleration"))
+    pressure = _safe_float(row.get("pressure_score"))
+    accel = _safe_float(row.get("pressure_acceleration"))
 
-    if decision != "TRADE":
-        return False
+    # Primary path
+    if decision == "TRADE" and trade_score >= MIN_TRADE_SCORE:
+        return True
 
-    if trade_score < MIN_TRADE_SCORE:
-        return False
+    # Fallback path for paper-test activation
+    if trade_score >= 0.24 and pressure >= 0.20:
+        return True
 
-    if pressure_score < MIN_PRESSURE_SCORE:
-        return False
+    # Pressure-led reversal path
+    if pressure >= 0.30 and accel >= 0.00:
+        return True
 
-    if pressure_accel < MIN_PRESSURE_ACCEL:
-        return False
-
-    return True
+    return False
 
 
-def open_new_positions(rows: List[Dict[str, Any]]) -> None:
+def open_positions_if_allowed(rows: List[Dict[str, Any]]) -> None:
     global open_positions
 
     available = MAX_OPEN_POSITIONS - len(open_positions)
     if available <= 0:
         return
 
-    for row in rows:
-        if not allow_trade(row):
+    for r in rows:
+        if not allow_trade(r):
             continue
 
-        symbol = row["symbol"]
+        symbol = r["symbol"]
         if symbol in open_positions:
             continue
 
-        entry_price = float(row["price"])
-        size_usd = STARTING_CAPITAL / MAX_OPEN_POSITIONS
+        entry = float(r["price"])
+        size = STARTING_CAPITAL / MAX_OPEN_POSITIONS
 
         open_positions[symbol] = {
-            "symbol": symbol,
-            "entry_price": entry_price,
-            "size_usd": size_usd,
+            "entry": entry,
+            "size": size,
             "cycles": 0,
+            "direction": r.get("direction", "LONG"),
+            "score": _safe_float(r.get("trade_score")),
         }
 
-        print("OPEN:", symbol)
+        print(
+            "OPEN:",
+            symbol,
+            "direction=",
+            r.get("direction"),
+            "score=",
+            round(_safe_float(r.get("trade_score")), 4),
+            "pressure=",
+            round(_safe_float(r.get("pressure_score")), 4),
+            "accel=",
+            round(_safe_float(r.get("pressure_acceleration")), 4),
+        )
 
         if len(open_positions) >= MAX_OPEN_POSITIONS:
             break
@@ -273,45 +318,45 @@ def open_new_positions(rows: List[Dict[str, Any]]) -> None:
 def manage_positions(rows_map: Dict[str, Dict[str, Any]]) -> None:
     global realized_pnl
 
-    to_close = []
+    closes = []
 
-    for symbol, pos in open_positions.items():
-        row = rows_map.get(symbol)
-        if not row:
+    for s, p in open_positions.items():
+        r = rows_map.get(s)
+        if not r:
             continue
 
-        price = float(row["price"])
-        entry = pos["entry_price"]
-        pnl_pct = (price - entry) / entry
+        price = float(r["price"])
+        entry = p["entry"]
 
-        pos["cycles"] += 1
+        pnl_pct = (price - entry) / entry
+        p["cycles"] += 1
 
         if pnl_pct >= TAKE_PROFIT_PCT:
-            to_close.append((symbol, price, "TP"))
+            closes.append((s, price, "TP"))
         elif pnl_pct <= -STOP_LOSS_PCT:
-            to_close.append((symbol, price, "SL"))
-        elif pos["cycles"] >= MAX_HOLD_CYCLES:
-            to_close.append((symbol, price, "TIME"))
+            closes.append((s, price, "SL"))
+        elif p["cycles"] >= MAX_HOLD_CYCLES:
+            closes.append((s, price, "TIME"))
 
-    for symbol, exit_price, reason in to_close:
-        pos = open_positions.pop(symbol)
+    for s, price, reason in closes:
+        pos = open_positions.pop(s)
 
-        entry_price = pos["entry_price"]
-        size = pos["size_usd"]
-        qty = size / entry_price
+        entry = pos["entry"]
+        size = pos["size"]
+        qty = size / entry
 
-        pnl = (exit_price - entry_price) * qty
+        pnl = (price - entry) * qty
         realized_pnl += pnl
 
         closed_trades.append(
             {
-                "symbol": symbol,
+                "symbol": s,
                 "pnl": pnl,
                 "reason": reason,
             }
         )
 
-        print("CLOSE:", symbol, "PNL:", round(pnl, 4))
+        print("CLOSE:", s, "reason=", reason, "PNL=", round(pnl, 4))
 
 
 print("CSS EXTENDED PAPER TEST STARTED")
@@ -335,24 +380,29 @@ while True:
             for r in signals[:10]:
                 print(
                     r.get("symbol"),
-                    "decision=", r.get("decision"),
-                    "trade_score=", round(_safe_float(r.get("trade_score")), 4),
-                    "pressure=", round(_safe_float(r.get("pressure_score")), 4),
-                    "accel=", round(_safe_float(r.get("pressure_acceleration")), 4),
+                    "decision=",
+                    r.get("decision"),
+                    "direction=",
+                    r.get("direction"),
+                    "score=",
+                    round(_safe_float(r.get("trade_score")), 4),
+                    "pressure=",
+                    round(_safe_float(r.get("pressure_score")), 4),
+                    "accel=",
+                    round(_safe_float(r.get("pressure_acceleration")), 4),
                 )
             print("-------------------\n")
 
-            open_new_positions(signals)
+            open_positions_if_allowed(signals)
 
-        _save_summary()
-        print_status()
-
+        save_summary()
         time.sleep(SCAN_INTERVAL_SECONDS)
 
     except KeyboardInterrupt:
-        print("CSS extended paper test stopped.")
+        print("Stopped.")
         break
 
     except Exception as e:
         print("ENGINE ERROR:", e)
-        time.sleep(10)
+        traceback.print_exc()
+        time.sleep(5)
