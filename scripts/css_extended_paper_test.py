@@ -203,7 +203,10 @@ def fetch_assets(symbols: List[str]) -> List[Dict[str, Any]]:
 def build_signals(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     rows = feature_builder.enrich_rows(rows, {})
     rows = regime_engine.detect(rows)
-    rows = pressure_engine.enrich_rows(rows)
+
+    # Current OpportunityPressureEngine interface in repo uses scan_market()
+    rows = pressure_engine.scan_market(rows)
+
     rows = accel_engine.enrich(rows)
     rows = pressure_map_engine.enrich(rows)
     rows = sweep_engine.enrich(rows)
