@@ -15,6 +15,7 @@ from backend.data.coinbase_historical_downloader import load_runtime_asset
 from backend.scanner.unified_market_scanner import UnifiedMarketScanner
 
 from backend.intelligence.feature_builder import FeatureBuilder
+from backend.intelligence.market_regime_engine import MarketRegimeEngine
 from backend.intelligence.opportunity_pressure_engine import OpportunityPressureEngine
 from backend.intelligence.pressure_acceleration_engine import PressureAccelerationEngine
 from backend.intelligence.liquidity_sweep_detector import LiquiditySweepDetector
@@ -27,6 +28,7 @@ from backend.strategies.vwap_mean_reversion import compute_vwap_from_candles
 scanner = UnifiedMarketScanner()
 
 feature_builder = FeatureBuilder()
+regime_engine = MarketRegimeEngine()
 pressure_engine = OpportunityPressureEngine()
 accel_engine = PressureAccelerationEngine()
 sweep_engine = LiquiditySweepDetector()
@@ -57,7 +59,7 @@ def fetch_assets(symbols):
 
             candles = payload.get("candles", [])
 
-            if len(candles) < 5:
+            if len(candles) < 10:
                 continue
 
             price = float(payload.get("price", 0))
@@ -104,7 +106,6 @@ while True:
         rows = fetch_assets(symbols)
 
         if not rows:
-
             print("Waiting for valid market rows...")
             time.sleep(10)
             continue
@@ -113,7 +114,9 @@ while True:
 
         features = feature_builder.enrich_rows(rows, {})
 
-        pressure_rows = pressure_engine.enrich_rows(features)
+        regime_rows = regime_engine.detect(features)
+
+        pressure_rows = pressure_engine.enrich_rows(regime_rows)
 
         accel_rows = accel_engine.enrich(pressure_rows)
 
@@ -138,6 +141,7 @@ while True:
                         "pressure_acceleration", 0
                     ),
                     "spread_bps": p.get("spread_bps", 0),
+                    "regime": p.get("regime", "NEUTRAL"),
                 }
             )
 
@@ -160,6 +164,7 @@ while True:
 
             print(
                 f"{r['symbol']:10}"
+                f" regime={r['regime']:14}"
                 f" score={r['score']:.2f}"
                 f" pressure={r['pressure_score']:.2f}"
                 f" accel={r['pressure_acceleration']:.2f}"
