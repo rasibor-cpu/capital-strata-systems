@@ -15,6 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from backend.data.coinbase_historical_downloader import load_runtime_asset
 from backend.intelligence.feature_builder import FeatureBuilder
 from backend.intelligence.opportunity_pressure_engine import OpportunityPressureEngine
+from backend.intelligence.opportunity_pressure_trigger import OpportunityPressureTrigger
 from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
 from backend.scanner.unified_market_scanner import UnifiedMarketScanner
 from backend.strategies.vwap_mean_reversion import (
@@ -38,6 +39,7 @@ BASE_ASSETS = [
 scanner = UnifiedMarketScanner()
 feature_builder = FeatureBuilder()
 pressure_engine = OpportunityPressureEngine()
+pressure_trigger = OpportunityPressureTrigger()
 ai = AIOpportunityScorer()
 
 vwap_cfg = VWAPConfig()
@@ -64,28 +66,23 @@ def _clear():
 
 
 def _normalize_candles(candles: List[Any]) -> List[Dict[str, float]]:
-
     normalized: List[Dict[str, float]] = []
 
     for c in candles:
         try:
-
             normalized.append(
                 {
-                    "open": _to_float(getattr(c, "open", 0)),
-                    "high": _to_float(getattr(c, "high", 0)),
-                    "low": _to_float(getattr(c, "low", 0)),
-                    "close": _to_float(getattr(c, "close", 0)),
-                    "volume": _to_float(getattr(c, "volume", 0)),
+                    "open": _to_float(getattr(c, "open", 0.0)),
+                    "high": _to_float(getattr(c, "high", 0.0)),
+                    "low": _to_float(getattr(c, "low", 0.0)),
+                    "close": _to_float(getattr(c, "close", 0.0)),
+                    "volume": _to_float(getattr(c, "volume", 0.0)),
                 }
             )
-
         except Exception:
             continue
 
-    normalized = [c for c in normalized if c["close"] > 0]
-
-    return normalized
+    return [c for c in normalized if c["close"] > 0]
 
 
 def discover_coinbase_symbols() -> List[str]:
@@ -222,7 +219,8 @@ def build_candidate_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def build_allocation_plan(
-    ranked: List[Dict[str, Any]], total_capital: float
+    ranked: List[Dict[str, Any]],
+    total_capital: float
 ) -> List[Dict[str, Any]]:
 
     tradeable = [
@@ -276,14 +274,19 @@ while True:
 
         candidate_rows = build_candidate_rows(raw_rows)
 
-        enriched_rows = feature_builder.enrich_rows(
+        feature_rows = feature_builder.enrich_rows(
             candidate_rows,
             candle_cache,
         )
 
-        enriched_rows = pressure_engine.enrich_rows(enriched_rows)
+        pressure_rows = pressure_engine.enrich_rows(feature_rows)
 
-        ranked = ai.rank_opportunities(enriched_rows)
+        ranked = ai.rank_opportunities(pressure_rows)
+
+        ranked = pressure_trigger.apply(
+            ranked,
+            pressure_rows,
+        )
 
         allocation_plan = build_allocation_plan(ranked, capital)
 
@@ -332,12 +335,10 @@ while True:
 
             for row in ranked[:MAX_DISPLAY]:
 
-                pressure = row.get("pressure_score", 0)
-
                 print(
                     f"{row['symbol']:10}"
-                    f"score={row.get('score',0):.2f}"
-                    f" pressure={pressure:.2f}"
+                    f" score={row.get('score',0):.2f}"
+                    f" pressure={row.get('pressure_score',0):.2f}"
                     f" decision={row.get('decision')}"
                 )
 
