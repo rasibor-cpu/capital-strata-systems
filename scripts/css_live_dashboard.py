@@ -13,12 +13,13 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from backend.data.coinbase_historical_downloader import load_runtime_asset
+from backend.scanner.unified_market_scanner import UnifiedMarketScanner
 from backend.intelligence.feature_builder import FeatureBuilder
 from backend.intelligence.opportunity_pressure_engine import OpportunityPressureEngine
-from backend.intelligence.opportunity_pressure_trigger import OpportunityPressureTrigger
 from backend.intelligence.pressure_acceleration_engine import PressureAccelerationEngine
 from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
-from backend.scanner.unified_market_scanner import UnifiedMarketScanner
+from backend.intelligence.quant_signal_optimizer import QuantSignalOptimizer
+
 from backend.strategies.vwap_mean_reversion import (
     VWAPConfig,
     compute_vwap_from_candles,
@@ -41,10 +42,9 @@ scanner = UnifiedMarketScanner()
 
 feature_builder = FeatureBuilder()
 pressure_engine = OpportunityPressureEngine()
-pressure_trigger = OpportunityPressureTrigger()
-acceleration_engine = PressureAccelerationEngine()
-
+accel_engine = PressureAccelerationEngine()
 ai = AIOpportunityScorer()
+optimizer = QuantSignalOptimizer()
 
 vwap_cfg = VWAPConfig()
 
@@ -56,44 +56,18 @@ def now_utc():
     return datetime.now(timezone.utc).isoformat()
 
 
-def _to_float(v, default=0.0):
+def _clear():
+    os.system("cls" if os.name == "nt" else "clear")
+
+
+def _safe(v, default=0.0):
     try:
-        if v is None:
-            return default
         return float(v)
     except Exception:
         return default
 
 
-def _clear():
-    os.system("cls" if os.name == "nt" else "clear")
-
-
-def _normalize_candles(candles):
-
-    normalized = []
-
-    for c in candles:
-
-        try:
-
-            normalized.append(
-                {
-                    "open": _to_float(getattr(c, "open", 0)),
-                    "high": _to_float(getattr(c, "high", 0)),
-                    "low": _to_float(getattr(c, "low", 0)),
-                    "close": _to_float(getattr(c, "close", 0)),
-                    "volume": _to_float(getattr(c, "volume", 0)),
-                }
-            )
-
-        except Exception:
-            continue
-
-    return [c for c in normalized if c["close"] > 0]
-
-
-def discover_coinbase_symbols():
+def discover_symbols():
 
     try:
         discovered = scanner.scan()
@@ -103,13 +77,13 @@ def discover_coinbase_symbols():
     symbols = []
     seen = set()
 
-    for item in discovered:
+    for row in discovered:
 
-        if not isinstance(item, dict):
+        if not isinstance(row, dict):
             continue
 
-        venue = str(item.get("venue", "")).upper()
-        symbol = str(item.get("symbol", "")).upper()
+        venue = str(row.get("venue", "")).upper()
+        symbol = str(row.get("symbol", "")).upper()
 
         if venue != "COINBASE":
             continue
@@ -117,8 +91,8 @@ def discover_coinbase_symbols():
         if symbol in seen:
             continue
 
-        symbols.append(symbol)
         seen.add(symbol)
+        symbols.append(symbol)
 
     if not symbols:
         return BASE_ASSETS[:SEED_COUNT]
@@ -136,14 +110,25 @@ def fetch_assets(symbols):
 
             payload = load_runtime_asset(symbol)
 
-            if isinstance(payload, dict):
+            candles = payload.get("candles", [])
 
-                normalized = dict(payload)
-                normalized["candles"] = _normalize_candles(
-                    payload.get("candles", [])
+            normalized = []
+
+            for c in candles:
+
+                normalized.append(
+                    {
+                        "open": _safe(getattr(c, "open", 0)),
+                        "high": _safe(getattr(c, "high", 0)),
+                        "low": _safe(getattr(c, "low", 0)),
+                        "close": _safe(getattr(c, "close", 0)),
+                        "volume": _safe(getattr(c, "volume", 0)),
+                    }
                 )
 
-                rows.append(normalized)
+            payload["candles"] = normalized
+
+            rows.append(payload)
 
         except Exception:
             continue
@@ -151,23 +136,20 @@ def fetch_assets(symbols):
     return rows
 
 
-def build_candidate_rows(rows):
+def build_candidates(rows):
 
     candidates = []
 
     for row in rows:
 
-        symbol = str(row.get("symbol", ""))
+        symbol = str(row.get("symbol"))
 
         candles = row.get("candles", [])
 
         if len(candles) < 20:
             continue
 
-        price = _to_float(row.get("price"))
-
-        if price <= 0:
-            continue
+        price = _safe(row.get("price"))
 
         vwap = compute_vwap_from_candles(candles, 20)
 
@@ -189,7 +171,6 @@ def build_candidate_rows(rows):
             {
                 "symbol": symbol,
                 "price": price,
-                "mid": price,
                 "vwap": vwap,
                 "spread_bps": abs(spread_bps),
                 "signal": "BUY" if buy_ok else "HOLD",
@@ -210,44 +191,43 @@ while True:
 
     try:
 
-        symbols = discover_coinbase_symbols()
+        symbols = discover_symbols()
 
         raw_rows = fetch_assets(symbols)
 
-        candidate_rows = build_candidate_rows(raw_rows)
+        candidates = build_candidates(raw_rows)
 
-        feature_rows = feature_builder.enrich_rows(candidate_rows, {})
+        features = feature_builder.enrich_rows(candidates, {})
 
-        pressure_rows = pressure_engine.enrich_rows(feature_rows)
+        pressure = pressure_engine.enrich_rows(features)
 
-        pressure_rows = acceleration_engine.enrich(pressure_rows)
+        accel = accel_engine.enrich(pressure)
 
-        ranked = ai.rank_opportunities(pressure_rows)
+        ranked = ai.rank_opportunities(accel)
 
-        ranked = pressure_trigger.apply(ranked, pressure_rows)
+        optimized = optimizer.optimize(ranked)
 
         _clear()
 
         print("==========================================================")
-        print("     CAPITAL STRATA SYSTEMS LIVE DASHBOARD")
+        print("        CAPITAL STRATA SYSTEMS LIVE DASHBOARD")
         print("==========================================================")
 
         print(f"Cycle: {cycle} | Capital: ${capital:.2f}")
-
         print("Active Symbols:", ", ".join(symbols))
-
         print("Timestamp:", now_utc())
 
         print("\nAI OPPORTUNITY SCANNER")
         print("----------------------------------------------------------")
 
-        for row in ranked[:MAX_DISPLAY]:
+        for row in optimized[:MAX_DISPLAY]:
 
             print(
                 f"{row['symbol']:10}"
                 f" score={row.get('score',0):.2f}"
                 f" pressure={row.get('pressure_score',0):.2f}"
                 f" accel={row.get('pressure_acceleration',0):.2f}"
+                f" trade={row.get('trade_score',0):.2f}"
                 f" decision={row.get('decision')}"
             )
 
@@ -257,11 +237,10 @@ while True:
 
     except KeyboardInterrupt:
 
-        print("CSS stopped")
+        print("\nCSS stopped.")
         break
 
-    except Exception as exc:
+    except Exception as e:
 
-        print("[CSS ERROR]", exc)
-
+        print("[CSS ERROR]", e)
         time.sleep(SCAN_INTERVAL)
