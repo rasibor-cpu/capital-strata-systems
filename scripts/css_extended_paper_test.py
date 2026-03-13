@@ -25,39 +25,64 @@ from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
 from backend.intelligence.quant_signal_optimizer import QuantSignalOptimizer
 
 from backend.strategies.vwap_mean_reversion import compute_vwap_from_candles
-
-try:
-    from backend.execution.trade_logger import TradeLogger
-except Exception:
-    TradeLogger = None
+from backend.execution.trade_logger import TradeLogger
 
 
 # ---------------------------------------------------------
-# CONFIG (Research Mode / Calibration Mode)
+# CONFIG (Research / Calibration Mode)
 # ---------------------------------------------------------
 
-SCAN_INTERVAL_SECONDS = int(os.getenv("CSS_TEST_SCAN_INTERVAL_SECONDS", "30"))
-SEED_COUNT = int(os.getenv("CSS_TEST_SEED_COUNT", "20"))
-MAX_OPEN_POSITIONS = int(os.getenv("CSS_TEST_MAX_OPEN_POSITIONS", "5"))
-STARTING_CAPITAL = float(os.getenv("CSS_TEST_STARTING_CAPITAL", "200.0"))
+def _env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None or str(value).strip() == "":
+        return default
+    try:
+        return int(value)
+    except Exception:
+        return default
 
-TAKE_PROFIT_PCT = float(os.getenv("CSS_TEST_TP_PCT", "0.012"))   # 1.2%
-STOP_LOSS_PCT = float(os.getenv("CSS_TEST_SL_PCT", "0.009"))     # 0.9%
-MAX_HOLD_CYCLES = int(os.getenv("CSS_TEST_MAX_HOLD_CYCLES", "20"))
 
-# Trade-gate calibration
-MIN_TRADE_SCORE = float(os.getenv("CSS_TEST_MIN_TRADE_SCORE", "0.52"))
-MIN_PRESSURE_SCORE = float(os.getenv("CSS_TEST_MIN_PRESSURE_SCORE", "0.60"))
-MIN_PRESSURE_ACCEL = float(os.getenv("CSS_TEST_MIN_PRESSURE_ACCEL", "0.10"))
+def _env_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None or str(value).strip() == "":
+        return default
+    try:
+        return float(value)
+    except Exception:
+        return default
 
-ALLOWED_REGIMES = {
-    r.strip().upper()
-    for r in os.getenv("CSS_TEST_ALLOWED_REGIMES", "VOLATILE,TRENDING,REVERSAL").split(",")
-    if r.strip()
-}
+
+def _env_csv_set(name: str, default_csv: str) -> set[str]:
+    raw = os.getenv(name, default_csv)
+    return {
+        str(x).strip().upper()
+        for x in str(raw).split(",")
+        if str(x).strip()
+    }
+
+
+# Force research-friendly defaults unless explicitly overridden
+SCAN_INTERVAL_SECONDS = _env_int("CSS_TEST_SCAN_INTERVAL_SECONDS", 20)
+SEED_COUNT = _env_int("CSS_TEST_SEED_COUNT", 20)
+MAX_OPEN_POSITIONS = _env_int("CSS_TEST_MAX_OPEN_POSITIONS", 5)
+STARTING_CAPITAL = _env_float("CSS_TEST_STARTING_CAPITAL", 200.0)
+
+TAKE_PROFIT_PCT = _env_float("CSS_TEST_TP_PCT", 0.012)     # 1.2%
+STOP_LOSS_PCT = _env_float("CSS_TEST_SL_PCT", 0.009)       # 0.9%
+MAX_HOLD_CYCLES = _env_int("CSS_TEST_MAX_HOLD_CYCLES", 20)
+
+MIN_TRADE_SCORE = _env_float("CSS_TEST_MIN_TRADE_SCORE", 0.52)
+MIN_PRESSURE_SCORE = _env_float("CSS_TEST_MIN_PRESSURE_SCORE", 0.60)
+MIN_PRESSURE_ACCEL = _env_float("CSS_TEST_MIN_PRESSURE_ACCEL", 0.10)
+
+ALLOWED_REGIMES = _env_csv_set(
+    "CSS_TEST_ALLOWED_REGIMES",
+    "VOLATILE,TRENDING,REVERSAL",
+)
 
 TRADE_LOG_PATH = PROJECT_ROOT / "artifacts" / "css_extended_paper_test_trades.jsonl"
 SUMMARY_PATH = PROJECT_ROOT / "artifacts" / "css_extended_paper_test_summary.json"
+
 
 # ---------------------------------------------------------
 # ENGINES
@@ -71,7 +96,8 @@ accel_engine = PressureAccelerationEngine()
 sweep_engine = LiquiditySweepDetector()
 ai = AIOpportunityScorer()
 optimizer = QuantSignalOptimizer()
-trade_logger = TradeLogger() if TradeLogger is not None else None
+trade_logger = TradeLogger()
+
 
 # ---------------------------------------------------------
 # STATE
@@ -138,10 +164,6 @@ def _vwap_distance_pct(price: float, vwap: float) -> float:
 
 
 def _score_multiplier(trade_score: float) -> float:
-    """
-    Slightly scale position size by trade strength.
-    Keeps sizing conservative while rewarding stronger setups.
-    """
     if trade_score <= 0:
         return 0.80
 
@@ -208,11 +230,11 @@ def _save_summary() -> None:
         "wins": wins,
         "losses": losses,
         "win_rate": round(win_rate, 4),
-        "realized_pnl_usd": round(realized_pnl, 2),
-        "gross_profit_usd": round(gross_profit, 2),
-        "gross_loss_usd": round(gross_loss, 2),
+        "realized_pnl_usd": round(realized_pnl, 4),
+        "gross_profit_usd": round(gross_profit, 4),
+        "gross_loss_usd": round(gross_loss, 4),
         "starting_capital_usd": STARTING_CAPITAL,
-        "estimated_equity_usd": round(STARTING_CAPITAL + realized_pnl, 2),
+        "estimated_equity_usd": round(STARTING_CAPITAL + realized_pnl, 4),
         "config": {
             "scan_interval_seconds": SCAN_INTERVAL_SECONDS,
             "seed_count": SEED_COUNT,
@@ -358,7 +380,7 @@ def mark_to_market_and_close(current_rows: Dict[str, Dict[str, Any]]) -> None:
 
     to_close: List[str] = []
 
-    for symbol, pos in open_positions.items():
+    for symbol, pos in list(open_positions.items()):
         row = current_rows.get(symbol)
 
         if row is None:
@@ -439,18 +461,17 @@ def mark_to_market_and_close(current_rows: Dict[str, Dict[str, Any]]) -> None:
         closed_trades.append(trade)
         _write_jsonl(TRADE_LOG_PATH, trade)
 
-        if trade_logger is not None:
-            try:
-                trade_logger.log_close(
-                    symbol=symbol,
-                    entry_price=entry_price,
-                    exit_price=exit_price,
-                    quantity=qty,
-                    reason=str(pos.get("exit_reason", "UNKNOWN")),
-                    hold_minutes=hold_minutes,
-                )
-            except Exception:
-                pass
+        try:
+            trade_logger.log_close(
+                symbol=symbol,
+                entry_price=entry_price,
+                exit_price=exit_price,
+                quantity=qty,
+                reason=str(pos.get("exit_reason", "UNKNOWN")),
+                hold_minutes=hold_minutes,
+            )
+        except Exception:
+            pass
 
 
 def open_new_positions(optimized_rows: List[Dict[str, Any]]) -> None:
@@ -466,11 +487,11 @@ def open_new_positions(optimized_rows: List[Dict[str, Any]]) -> None:
             continue
 
         allowed, gate_reason = _gate_trade(row)
-        row = dict(row)
-        row["gate_reason"] = gate_reason
+        enriched = dict(row)
+        enriched["gate_reason"] = gate_reason
 
         if allowed:
-            gated.append(row)
+            gated.append(enriched)
 
     if not gated:
         return
@@ -536,21 +557,20 @@ def open_new_positions(optimized_rows: List[Dict[str, Any]]) -> None:
 
         _write_jsonl(TRADE_LOG_PATH, open_event)
 
-        if trade_logger is not None:
-            try:
-                qty = size_usd / entry_price if entry_price > 0 else 0.0
-                trade_logger.log_open(
-                    symbol=symbol,
-                    entry_price=entry_price,
-                    quantity=qty,
-                    score=_safe_float(row.get("trade_score")),
-                    signal="BUY",
-                    regime=_regime(row.get("regime", "NEUTRAL")),
-                    vwap=_safe_float(row.get("vwap")),
-                    spread_pct=_safe_float(row.get("spread_bps")) / 10000.0,
-                )
-            except Exception:
-                pass
+        try:
+            qty = size_usd / entry_price if entry_price > 0 else 0.0
+            trade_logger.log_open(
+                symbol=symbol,
+                entry_price=entry_price,
+                quantity=qty,
+                score=_safe_float(row.get("trade_score")),
+                signal="BUY",
+                regime=_regime(row.get("regime", "NEUTRAL")),
+                vwap=_safe_float(row.get("vwap")),
+                spread_pct=_safe_float(row.get("spread_bps")) / 10000.0,
+            )
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------
@@ -569,13 +589,22 @@ def print_status(optimized_rows: List[Dict[str, Any]]) -> None:
     print(f"Cycle: {cycle_no}")
     print(f"Timestamp (UTC): {now_utc()}")
     print(f"Open Positions: {len(open_positions)} | Closed Trades: {len(closed_trades)}")
-    print(f"Realized PnL: ${realized_pnl:.2f} | Win Rate: {win_rate:.2%}")
+    print(f"Realized PnL: ${realized_pnl:.4f} | Win Rate: {win_rate:.2%}")
     print(
         "Gate: "
         f"trade_score>={MIN_TRADE_SCORE:.2f}, "
         f"pressure>={MIN_PRESSURE_SCORE:.2f}, "
         f"accel>={MIN_PRESSURE_ACCEL:.2f}, "
         f"regimes={sorted(ALLOWED_REGIMES)}"
+    )
+    print(
+        "Config: "
+        f"scan={SCAN_INTERVAL_SECONDS}s, "
+        f"seed_count={SEED_COUNT}, "
+        f"max_open={MAX_OPEN_POSITIONS}, "
+        f"tp={TAKE_PROFIT_PCT:.4f}, "
+        f"sl={STOP_LOSS_PCT:.4f}, "
+        f"max_hold={MAX_HOLD_CYCLES}"
     )
     print()
     print("TOP SIGNALS")
@@ -615,8 +644,7 @@ def print_status(optimized_rows: List[Dict[str, Any]]) -> None:
 
     print()
     print(f"Trade log: {TRADE_LOG_PATH}")
-    if trade_logger is not None:
-        print("Intelligence log: artifacts/css_trade_intelligence_log.jsonl")
+    print("Intelligence log: artifacts/css_trade_intelligence_log.jsonl")
     print(f"Summary: {SUMMARY_PATH}")
     print()
     print(f"Sleeping {SCAN_INTERVAL_SECONDS}s...")
@@ -635,7 +663,7 @@ while True:
         symbols = discover_coinbase_symbols()
         rows = fetch_assets(symbols)
 
-        current_map = {str(r.get("symbol", "")): r for r in rows}
+        current_map = {str(r.get('symbol', '')): r for r in rows}
         mark_to_market_and_close(current_map)
 
         optimized_rows: List[Dict[str, Any]] = []
