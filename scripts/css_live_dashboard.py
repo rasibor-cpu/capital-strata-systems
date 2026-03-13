@@ -19,10 +19,8 @@ from backend.intelligence.pressure_acceleration_engine import PressureAccelerati
 from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
 from backend.intelligence.quant_signal_optimizer import QuantSignalOptimizer
 
-from backend.strategies.vwap_mean_reversion import (
-    VWAPConfig,
-    compute_vwap_from_candles,
-)
+from backend.strategies.vwap_mean_reversion import compute_vwap_from_candles
+
 
 scanner = UnifiedMarketScanner()
 
@@ -31,8 +29,6 @@ pressure_engine = OpportunityPressureEngine()
 accel_engine = PressureAccelerationEngine()
 ai = AIOpportunityScorer()
 optimizer = QuantSignalOptimizer()
-
-vwap_cfg = VWAPConfig()
 
 capital = 200
 cycle = 0
@@ -58,12 +54,15 @@ def fetch_assets(symbols):
 
             candles = payload.get("candles", [])
 
-            if len(candles) < 20:
+            if len(candles) < 10:
                 continue
 
             price = float(payload.get("price", 0))
 
             vwap = compute_vwap_from_candles(candles, 20)
+
+            if vwap == 0:
+                vwap = price
 
             spread = ((price - vwap) / vwap) * 10000
 
@@ -101,6 +100,11 @@ while True:
 
         rows = fetch_assets(symbols)
 
+        if not rows:
+            print("No candidate rows yet — waiting for market data...")
+            time.sleep(10)
+            continue
+
         features = feature_builder.enrich_rows(rows, {})
 
         pressure_rows = pressure_engine.enrich_rows(features)
@@ -109,7 +113,6 @@ while True:
 
         ranked = ai.rank_opportunities(accel_rows)
 
-        # merge pressure data back
         pressure_map = {r["symbol"]: r for r in accel_rows}
 
         merged = []
@@ -118,41 +121,47 @@ while True:
 
             p = pressure_map.get(r["symbol"], {})
 
-            new = dict(r)
-
-            new["pressure_score"] = p.get("pressure_score", 0)
-            new["pressure_acceleration"] = p.get(
-                "pressure_acceleration", 0
+            merged.append(
+                {
+                    "symbol": r["symbol"],
+                    "score": r.get("score", 0),
+                    "pressure_score": p.get("pressure_score", 0),
+                    "pressure_acceleration": p.get("pressure_acceleration", 0),
+                    "spread_bps": p.get("spread_bps", 0),
+                }
             )
-            new["spread_bps"] = p.get("spread_bps", 0)
-
-            merged.append(new)
 
         optimized = optimizer.optimize(merged)
 
         clear()
 
-        print("==============================================")
-        print("     CAPITAL STRATA SYSTEMS LIVE DASHBOARD")
-        print("==============================================\n")
+        print("====================================================")
+        print("      CAPITAL STRATA SYSTEMS LIVE DASHBOARD")
+        print("====================================================\n")
 
         print(f"Cycle: {cycle} | Capital: ${capital:.2f}")
         print("Active Symbols:", ", ".join(symbols))
         print("Timestamp:", now())
 
         print("\nAI OPPORTUNITY SCANNER")
-        print("----------------------------------------------")
+        print("----------------------------------------------------")
 
-        for r in optimized:
+        if not optimized:
 
-            print(
-                f"{r['symbol']:10}"
-                f" score={r['score']:.2f}"
-                f" pressure={r['pressure_score']:.2f}"
-                f" accel={r['pressure_acceleration']:.2f}"
-                f" trade={r['trade_score']:.2f}"
-                f" decision={r['decision']}"
-            )
+            print("No signals this cycle")
+
+        else:
+
+            for r in optimized:
+
+                print(
+                    f"{r['symbol']:10}"
+                    f" score={r['score']:.2f}"
+                    f" pressure={r['pressure_score']:.2f}"
+                    f" accel={r['pressure_acceleration']:.2f}"
+                    f" trade={r['trade_score']:.2f}"
+                    f" decision={r['decision']}"
+                )
 
         print("\nRefreshing in 10 seconds...\n")
 
