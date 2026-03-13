@@ -5,7 +5,6 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -23,20 +22,7 @@ from backend.intelligence.quant_signal_optimizer import QuantSignalOptimizer
 from backend.strategies.vwap_mean_reversion import (
     VWAPConfig,
     compute_vwap_from_candles,
-    should_buy_mean_reversion,
 )
-
-SCAN_INTERVAL = 10
-SEED_COUNT = 5
-MAX_DISPLAY = 5
-
-BASE_ASSETS = [
-    "BTC-USD",
-    "ETH-USD",
-    "SOL-USD",
-    "AVAX-USD",
-    "LINK-USD",
-]
 
 scanner = UnifiedMarketScanner()
 
@@ -48,87 +34,48 @@ optimizer = QuantSignalOptimizer()
 
 vwap_cfg = VWAPConfig()
 
-capital = 200.0
+capital = 200
 cycle = 0
 
 
-def now_utc():
+def now():
     return datetime.now(timezone.utc).isoformat()
 
 
-def _clear():
+def clear():
     os.system("cls" if os.name == "nt" else "clear")
-
-
-def _safe(v, default=0.0):
-    try:
-        return float(v)
-    except Exception:
-        return default
-
-
-def discover_symbols():
-
-    try:
-        discovered = scanner.scan()
-    except Exception:
-        discovered = []
-
-    symbols = []
-    seen = set()
-
-    for row in discovered:
-
-        if not isinstance(row, dict):
-            continue
-
-        venue = str(row.get("venue", "")).upper()
-        symbol = str(row.get("symbol", "")).upper()
-
-        if venue != "COINBASE":
-            continue
-
-        if symbol in seen:
-            continue
-
-        seen.add(symbol)
-        symbols.append(symbol)
-
-    if not symbols:
-        return BASE_ASSETS[:SEED_COUNT]
-
-    return symbols[:SEED_COUNT]
 
 
 def fetch_assets(symbols):
 
     rows = []
 
-    for symbol in symbols:
+    for s in symbols:
 
         try:
 
-            payload = load_runtime_asset(symbol)
+            payload = load_runtime_asset(s)
 
             candles = payload.get("candles", [])
 
-            normalized = []
+            if len(candles) < 20:
+                continue
 
-            for c in candles:
+            price = float(payload.get("price", 0))
 
-                normalized.append(
-                    {
-                        "open": _safe(getattr(c, "open", 0)),
-                        "high": _safe(getattr(c, "high", 0)),
-                        "low": _safe(getattr(c, "low", 0)),
-                        "close": _safe(getattr(c, "close", 0)),
-                        "volume": _safe(getattr(c, "volume", 0)),
-                    }
-                )
+            vwap = compute_vwap_from_candles(candles, 20)
 
-            payload["candles"] = normalized
+            spread = ((price - vwap) / vwap) * 10000
 
-            rows.append(payload)
+            rows.append(
+                {
+                    "symbol": s,
+                    "price": price,
+                    "vwap": vwap,
+                    "spread_bps": abs(spread),
+                    "candles": candles,
+                }
+            )
 
         except Exception:
             continue
@@ -136,54 +83,7 @@ def fetch_assets(symbols):
     return rows
 
 
-def build_candidates(rows):
-
-    candidates = []
-
-    for row in rows:
-
-        symbol = str(row.get("symbol"))
-
-        candles = row.get("candles", [])
-
-        if len(candles) < 20:
-            continue
-
-        price = _safe(row.get("price"))
-
-        vwap = compute_vwap_from_candles(candles, 20)
-
-        if vwap <= 0:
-            continue
-
-        spread_bps = ((price - vwap) / vwap) * 10000
-
-        buy_ok, reason = should_buy_mean_reversion(
-            price,
-            vwap,
-            spread_bps,
-            vwap_cfg,
-        )
-
-        new_row = dict(row)
-
-        new_row.update(
-            {
-                "symbol": symbol,
-                "price": price,
-                "vwap": vwap,
-                "spread_bps": abs(spread_bps),
-                "signal": "BUY" if buy_ok else "HOLD",
-                "reason": reason,
-            }
-        )
-
-        candidates.append(new_row)
-
-    return candidates
-
-
-print("[CSS] Starting live dashboard...", flush=True)
+print("[CSS] Starting live dashboard...")
 
 while True:
 
@@ -191,56 +91,79 @@ while True:
 
     try:
 
-        symbols = discover_symbols()
+        discovered = scanner.scan()
 
-        raw_rows = fetch_assets(symbols)
+        symbols = [
+            r["symbol"]
+            for r in discovered
+            if r.get("venue") == "COINBASE"
+        ][:5]
 
-        candidates = build_candidates(raw_rows)
+        rows = fetch_assets(symbols)
 
-        features = feature_builder.enrich_rows(candidates, {})
+        features = feature_builder.enrich_rows(rows, {})
 
-        pressure = pressure_engine.enrich_rows(features)
+        pressure_rows = pressure_engine.enrich_rows(features)
 
-        accel = accel_engine.enrich(pressure)
+        accel_rows = accel_engine.enrich(pressure_rows)
 
-        ranked = ai.rank_opportunities(accel)
+        ranked = ai.rank_opportunities(accel_rows)
 
-        optimized = optimizer.optimize(ranked)
+        # merge pressure data back
+        pressure_map = {r["symbol"]: r for r in accel_rows}
 
-        _clear()
+        merged = []
 
-        print("==========================================================")
-        print("        CAPITAL STRATA SYSTEMS LIVE DASHBOARD")
-        print("==========================================================")
+        for r in ranked:
+
+            p = pressure_map.get(r["symbol"], {})
+
+            new = dict(r)
+
+            new["pressure_score"] = p.get("pressure_score", 0)
+            new["pressure_acceleration"] = p.get(
+                "pressure_acceleration", 0
+            )
+            new["spread_bps"] = p.get("spread_bps", 0)
+
+            merged.append(new)
+
+        optimized = optimizer.optimize(merged)
+
+        clear()
+
+        print("==============================================")
+        print("     CAPITAL STRATA SYSTEMS LIVE DASHBOARD")
+        print("==============================================\n")
 
         print(f"Cycle: {cycle} | Capital: ${capital:.2f}")
         print("Active Symbols:", ", ".join(symbols))
-        print("Timestamp:", now_utc())
+        print("Timestamp:", now())
 
         print("\nAI OPPORTUNITY SCANNER")
-        print("----------------------------------------------------------")
+        print("----------------------------------------------")
 
-        for row in optimized[:MAX_DISPLAY]:
+        for r in optimized:
 
             print(
-                f"{row['symbol']:10}"
-                f" score={row.get('score',0):.2f}"
-                f" pressure={row.get('pressure_score',0):.2f}"
-                f" accel={row.get('pressure_acceleration',0):.2f}"
-                f" trade={row.get('trade_score',0):.2f}"
-                f" decision={row.get('decision')}"
+                f"{r['symbol']:10}"
+                f" score={r['score']:.2f}"
+                f" pressure={r['pressure_score']:.2f}"
+                f" accel={r['pressure_acceleration']:.2f}"
+                f" trade={r['trade_score']:.2f}"
+                f" decision={r['decision']}"
             )
 
-        print("\nRefreshing in 10 seconds...")
+        print("\nRefreshing in 10 seconds...\n")
 
-        time.sleep(SCAN_INTERVAL)
+        time.sleep(10)
 
     except KeyboardInterrupt:
 
-        print("\nCSS stopped.")
+        print("CSS stopped")
         break
 
     except Exception as e:
 
-        print("[CSS ERROR]", e)
-        time.sleep(SCAN_INTERVAL)
+        print("CSS ERROR:", e)
+        time.sleep(10)
