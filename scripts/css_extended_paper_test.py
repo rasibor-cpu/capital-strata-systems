@@ -13,24 +13,21 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-# Data
 from backend.data.coinbase_historical_downloader import load_runtime_asset
 from backend.scanner.unified_market_scanner import UnifiedMarketScanner
 
-# Intelligence engines
 from backend.intelligence.feature_builder import FeatureBuilder
 from backend.intelligence.market_regime_engine import MarketRegimeEngine
 from backend.intelligence.opportunity_pressure_engine import OpportunityPressureEngine
 from backend.intelligence.pressure_acceleration_engine import PressureAccelerationEngine
 from backend.intelligence.liquidity_sweep_detector import LiquiditySweepDetector
-from backend.intelligence.opportunity_momentum_window_engine import OpportunityMomentumWindowEngine
+from backend.intelligence.opportunity_momentum_window_engine import (
+    OpportunityMomentumWindowEngine,
+)
 from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
 from backend.intelligence.quant_signal_optimizer import QuantSignalOptimizer
 
-# Strategy
 from backend.strategies.vwap_mean_reversion import compute_vwap_from_candles
-
-# Logging
 from backend.execution.trade_logger import TradeLogger
 
 
@@ -38,21 +35,24 @@ from backend.execution.trade_logger import TradeLogger
 # CONFIG
 # ---------------------------------------------------------
 
-SCAN_INTERVAL_SECONDS = int(os.getenv("CSS_TEST_SCAN_INTERVAL_SECONDS", "20"))
-SEED_COUNT = int(os.getenv("CSS_TEST_SEED_COUNT", "20"))
-MAX_OPEN_POSITIONS = int(os.getenv("CSS_TEST_MAX_OPEN_POSITIONS", "5"))
-STARTING_CAPITAL = float(os.getenv("CSS_TEST_STARTING_CAPITAL", "200.0"))
+SCAN_INTERVAL_SECONDS = 20
+SEED_COUNT = 20
+MAX_OPEN_POSITIONS = 5
 
-TAKE_PROFIT_PCT = float(os.getenv("CSS_TEST_TP_PCT", "0.012"))
-STOP_LOSS_PCT = float(os.getenv("CSS_TEST_SL_PCT", "0.009"))
-MAX_HOLD_CYCLES = int(os.getenv("CSS_TEST_MAX_HOLD_CYCLES", "20"))
+STARTING_CAPITAL = 200.0
 
-MIN_TRADE_SCORE = float(os.getenv("CSS_TEST_MIN_TRADE_SCORE", "0.52"))
-MIN_PRESSURE_SCORE = float(os.getenv("CSS_TEST_MIN_PRESSURE_SCORE", "0.60"))
-MIN_PRESSURE_ACCEL = float(os.getenv("CSS_TEST_MIN_PRESSURE_ACCEL", "0.10"))
+TAKE_PROFIT_PCT = 0.012
+STOP_LOSS_PCT = 0.009
+MAX_HOLD_CYCLES = 20
 
-TRADE_LOG_PATH = PROJECT_ROOT / "artifacts" / "css_extended_paper_test_trades.jsonl"
-SUMMARY_PATH = PROJECT_ROOT / "artifacts" / "css_extended_paper_test_summary.json"
+MIN_TRADE_SCORE = 0.52
+MIN_PRESSURE_SCORE = 0.60
+MIN_PRESSURE_ACCEL = 0.10
+
+TRADE_LOG_PATH = PROJECT_ROOT / "artifacts/css_extended_paper_test_trades.jsonl"
+SUMMARY_PATH = PROJECT_ROOT / "artifacts/css_extended_paper_test_summary.json"
+
+SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 
 # ---------------------------------------------------------
@@ -78,13 +78,11 @@ trade_logger = TradeLogger()
 # STATE
 # ---------------------------------------------------------
 
+cycle_no = 0
 open_positions: Dict[str, Dict[str, Any]] = {}
 closed_trades: List[Dict[str, Any]] = []
 
-cycle_no = 0
 realized_pnl = 0.0
-
-SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 
 # ---------------------------------------------------------
@@ -95,79 +93,106 @@ def now_utc() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _safe_float(value: Any, default: float = 0.0) -> float:
+def _safe_float(v: Any, default: float = 0.0) -> float:
     try:
-        if value is None:
-            return default
-        return float(value)
+        return float(v)
     except Exception:
         return default
 
 
-def _write_jsonl(path: Path, row: Dict[str, Any]) -> None:
-    with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(row) + "\n")
+def _save_summary() -> None:
+    wins = sum(1 for t in closed_trades if t["pnl"] > 0)
+    losses = sum(1 for t in closed_trades if t["pnl"] <= 0)
+
+    summary = {
+        "timestamp_utc": now_utc(),
+        "cycle_no": cycle_no,
+        "open_positions": len(open_positions),
+        "closed_trades": len(closed_trades),
+        "wins": wins,
+        "losses": losses,
+        "win_rate": (wins / len(closed_trades)) if closed_trades else 0.0,
+        "realized_pnl_usd": realized_pnl,
+        "starting_capital_usd": STARTING_CAPITAL,
+        "estimated_equity_usd": STARTING_CAPITAL + realized_pnl,
+        "config": {
+            "scan_interval_seconds": SCAN_INTERVAL_SECONDS,
+            "seed_count": SEED_COUNT,
+            "max_open_positions": MAX_OPEN_POSITIONS,
+            "take_profit_pct": TAKE_PROFIT_PCT,
+            "stop_loss_pct": STOP_LOSS_PCT,
+            "max_hold_cycles": MAX_HOLD_CYCLES,
+            "min_trade_score": MIN_TRADE_SCORE,
+            "min_pressure_score": MIN_PRESSURE_SCORE,
+            "min_pressure_accel": MIN_PRESSURE_ACCEL,
+            "css_min_signal_strength_env": os.getenv("CSS_MIN_SIGNAL_STRENGTH", ""),
+        },
+    }
+
+    with SUMMARY_PATH.open("w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2)
+
+
+def print_status() -> None:
+    print("\n==============================")
+    print("CSS EXTENDED PAPER TEST")
+    print("==============================")
+    print("Cycle:", cycle_no)
+    print("Open positions:", len(open_positions))
+    print("Closed trades:", len(closed_trades))
+    print("PnL:", round(realized_pnl, 4))
+    print("==============================\n")
 
 
 # ---------------------------------------------------------
 # DISCOVERY
 # ---------------------------------------------------------
 
-def discover_coinbase_symbols() -> List[str]:
-
-    try:
-        discovered = scanner.scan()
-    except Exception:
-        discovered = []
+def discover_symbols() -> List[str]:
+    results = scanner.scan()
 
     symbols: List[str] = []
     seen = set()
 
-    for item in discovered:
-
-        venue = str(item.get("venue", "")).upper()
-        symbol = str(item.get("symbol", "")).upper()
-
-        if venue != "COINBASE":
+    for r in results:
+        if r.get("venue") != "COINBASE":
             continue
 
-        if symbol in seen:
+        s = r.get("symbol")
+
+        if not s or s in seen:
             continue
 
-        symbols.append(symbol)
-        seen.add(symbol)
+        symbols.append(s)
+        seen.add(s)
 
     return symbols[:SEED_COUNT]
 
 
 # ---------------------------------------------------------
-# FETCH ASSETS
+# FETCH
 # ---------------------------------------------------------
 
 def fetch_assets(symbols: List[str]) -> List[Dict[str, Any]]:
-
     rows: List[Dict[str, Any]] = []
 
-    for symbol in symbols:
-
+    for s in symbols:
         try:
-
-            payload = load_runtime_asset(symbol)
-
+            payload = load_runtime_asset(s)
             candles = payload.get("candles", [])
 
             if len(candles) < 10:
                 continue
 
             price = float(payload.get("price", 0))
+
             if price <= 0:
                 continue
 
             vwap = compute_vwap_from_candles(candles, 20)
 
             row = dict(payload)
-
-            row["symbol"] = symbol
+            row["symbol"] = s
             row["price"] = price
             row["vwap"] = vwap
             row["candles"] = candles
@@ -184,25 +209,18 @@ def fetch_assets(symbols: List[str]) -> List[Dict[str, Any]]:
 # SIGNAL PIPELINE
 # ---------------------------------------------------------
 
-def build_signal_pipeline(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def build_signals(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    rows = feature_builder.enrich_rows(rows, {})
+    rows = regime_engine.detect(rows)
+    rows = pressure_engine.enrich_rows(rows)
+    rows = accel_engine.enrich(rows)
+    rows = sweep_engine.enrich(rows)
+    rows = momentum_engine.enrich(rows)
 
-    features = feature_builder.enrich_rows(rows, {})
+    rows = ai.rank_opportunities(rows)
+    rows = optimizer.optimize(rows)
 
-    regime_rows = regime_engine.detect(features)
-
-    pressure_rows = pressure_engine.enrich_rows(regime_rows)
-
-    accel_rows = accel_engine.enrich(pressure_rows)
-
-    sweep_rows = sweep_engine.enrich(accel_rows)
-
-    momentum_rows = momentum_engine.enrich(sweep_rows)
-
-    ranked = ai.rank_opportunities(momentum_rows)
-
-    optimized = optimizer.optimize(ranked)
-
-    return optimized
+    return rows
 
 
 # ---------------------------------------------------------
@@ -210,37 +228,61 @@ def build_signal_pipeline(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 # ---------------------------------------------------------
 
 def allow_trade(row: Dict[str, Any]) -> bool:
+    symbol = row.get("symbol", "?")
+    decision = row.get("decision")
+    trade_score = _safe_float(row.get("trade_score"))
+    pressure_score = _safe_float(row.get("pressure_score"))
+    pressure_accel = _safe_float(row.get("pressure_acceleration"))
 
-    if row.get("decision") != "TRADE":
+    if decision != "TRADE":
+        print(
+            f"[BLOCK] {symbol}: decision={decision}, "
+            f"trade_score={trade_score:.4f}, "
+            f"pressure_score={pressure_score:.4f}, "
+            f"pressure_acceleration={pressure_accel:.4f}"
+        )
         return False
 
-    if _safe_float(row.get("trade_score")) < MIN_TRADE_SCORE:
+    if trade_score < MIN_TRADE_SCORE:
+        print(f"[BLOCK] {symbol}: trade_score {trade_score:.4f} < {MIN_TRADE_SCORE:.4f}")
         return False
 
-    if _safe_float(row.get("pressure_score")) < MIN_PRESSURE_SCORE:
+    if pressure_score < MIN_PRESSURE_SCORE:
+        print(
+            f"[BLOCK] {symbol}: pressure_score {pressure_score:.4f} < "
+            f"{MIN_PRESSURE_SCORE:.4f}"
+        )
         return False
 
-    if _safe_float(row.get("pressure_acceleration")) < MIN_PRESSURE_ACCEL:
+    if pressure_accel < MIN_PRESSURE_ACCEL:
+        print(
+            f"[BLOCK] {symbol}: pressure_acceleration {pressure_accel:.4f} < "
+            f"{MIN_PRESSURE_ACCEL:.4f}"
+        )
         return False
 
+    print(
+        f"[ALLOW] {symbol}: decision={decision}, "
+        f"trade_score={trade_score:.4f}, "
+        f"pressure_score={pressure_score:.4f}, "
+        f"pressure_acceleration={pressure_accel:.4f}"
+    )
     return True
 
 
 # ---------------------------------------------------------
-# POSITION OPEN
+# OPEN POSITIONS
 # ---------------------------------------------------------
 
 def open_new_positions(rows: List[Dict[str, Any]]) -> None:
-
     global open_positions
 
-    available_slots = MAX_OPEN_POSITIONS - len(open_positions)
+    available = MAX_OPEN_POSITIONS - len(open_positions)
 
-    if available_slots <= 0:
+    if available <= 0:
         return
 
     for row in rows:
-
         if not allow_trade(row):
             continue
 
@@ -250,14 +292,13 @@ def open_new_positions(rows: List[Dict[str, Any]]) -> None:
             continue
 
         entry_price = float(row["price"])
-
         size_usd = STARTING_CAPITAL / MAX_OPEN_POSITIONS
 
         open_positions[symbol] = {
             "symbol": symbol,
             "entry_price": entry_price,
             "size_usd": size_usd,
-            "cycles_held": 0,
+            "cycles": 0,
         }
 
         trade_logger.log_open(
@@ -271,62 +312,57 @@ def open_new_positions(rows: List[Dict[str, Any]]) -> None:
             spread_pct=0,
         )
 
-        print(f"OPEN TRADE: {symbol}")
+        print("OPEN:", symbol)
 
         if len(open_positions) >= MAX_OPEN_POSITIONS:
             break
 
 
 # ---------------------------------------------------------
-# POSITION CLOSE
+# CLOSE POSITIONS
 # ---------------------------------------------------------
 
-def mark_to_market_and_close(current_rows: Dict[str, Dict[str, Any]]):
-
+def manage_positions(rows_map: Dict[str, Dict[str, Any]]) -> None:
     global realized_pnl
 
     to_close = []
 
     for symbol, pos in open_positions.items():
-
-        row = current_rows.get(symbol)
+        row = rows_map.get(symbol)
 
         if not row:
             continue
 
-        price = float(row.get("price", 0))
-
+        price = float(row["price"])
         entry = pos["entry_price"]
-
         pnl_pct = (price - entry) / entry
 
-        pos["cycles_held"] += 1
+        pos["cycles"] += 1
 
         if pnl_pct >= TAKE_PROFIT_PCT:
-            reason = "TAKE_PROFIT"
-            to_close.append((symbol, price, reason))
-
+            to_close.append((symbol, price, "TP"))
         elif pnl_pct <= -STOP_LOSS_PCT:
-            reason = "STOP_LOSS"
-            to_close.append((symbol, price, reason))
-
-        elif pos["cycles_held"] >= MAX_HOLD_CYCLES:
-            reason = "MAX_HOLD_CYCLES"
-            to_close.append((symbol, price, reason))
+            to_close.append((symbol, price, "SL"))
+        elif pos["cycles"] >= MAX_HOLD_CYCLES:
+            to_close.append((symbol, price, "TIME"))
 
     for symbol, exit_price, reason in to_close:
-
         pos = open_positions.pop(symbol)
 
         entry_price = pos["entry_price"]
-
-        size_usd = pos["size_usd"]
-
-        qty = size_usd / entry_price
-
+        size = pos["size_usd"]
+        qty = size / entry_price
         pnl = (exit_price - entry_price) * qty
 
         realized_pnl += pnl
+
+        closed_trades.append(
+            {
+                "symbol": symbol,
+                "pnl": pnl,
+                "reason": reason,
+            }
+        )
 
         trade_logger.log_close(
             symbol=symbol,
@@ -334,10 +370,10 @@ def mark_to_market_and_close(current_rows: Dict[str, Dict[str, Any]]):
             exit_price=exit_price,
             quantity=qty,
             reason=reason,
-            hold_minutes=pos["cycles_held"],
+            hold_minutes=pos["cycles"],
         )
 
-        print(f"CLOSE TRADE: {symbol} reason={reason} pnl={pnl:.4f}")
+        print("CLOSE:", symbol, "PNL:", round(pnl, 4))
 
 
 # ---------------------------------------------------------
@@ -347,35 +383,28 @@ def mark_to_market_and_close(current_rows: Dict[str, Dict[str, Any]]):
 print("CSS EXTENDED PAPER TEST STARTED")
 
 while True:
-
     cycle_no += 1
 
     try:
-
-        symbols = discover_coinbase_symbols()
-
+        symbols = discover_symbols()
         rows = fetch_assets(symbols)
+        rows_map = {r["symbol"]: r for r in rows}
 
-        current_map = {r["symbol"]: r for r in rows}
-
-        mark_to_market_and_close(current_map)
+        manage_positions(rows_map)
 
         if rows:
+            signals = build_signals(rows)
+            open_new_positions(signals)
 
-            optimized_rows = build_signal_pipeline(rows)
-
-            open_new_positions(optimized_rows)
+        _save_summary()
+        print_status()
 
         time.sleep(SCAN_INTERVAL_SECONDS)
 
     except KeyboardInterrupt:
-
-        print("CSS PAPER TEST STOPPED")
-
+        print("CSS extended paper test stopped.")
         break
 
     except Exception as e:
-
-        print(f"ENGINE ERROR: {e}")
-
-        time.sleep(SCAN_INTERVAL_SECONDS)
+        print("ENGINE ERROR:", e)
+        time.sleep(10)
