@@ -20,6 +20,9 @@ from backend.intelligence.feature_builder import FeatureBuilder
 from backend.intelligence.market_regime_engine import MarketRegimeEngine
 from backend.intelligence.opportunity_pressure_engine import OpportunityPressureEngine
 from backend.intelligence.pressure_acceleration_engine import PressureAccelerationEngine
+from backend.intelligence.opportunity_pressure_map_engine import (
+    OpportunityPressureMapEngine,
+)
 from backend.intelligence.liquidity_sweep_detector import LiquiditySweepDetector
 from backend.intelligence.opportunity_momentum_window_engine import (
     OpportunityMomentumWindowEngine,
@@ -65,6 +68,7 @@ feature_builder = FeatureBuilder()
 regime_engine = MarketRegimeEngine()
 pressure_engine = OpportunityPressureEngine()
 accel_engine = PressureAccelerationEngine()
+pressure_map_engine = OpportunityPressureMapEngine()
 sweep_engine = LiquiditySweepDetector()
 momentum_engine = OpportunityMomentumWindowEngine()
 
@@ -214,6 +218,7 @@ def build_signals(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     rows = regime_engine.detect(rows)
     rows = pressure_engine.enrich_rows(rows)
     rows = accel_engine.enrich(rows)
+    rows = pressure_map_engine.enrich(rows)
     rows = sweep_engine.enrich(rows)
     rows = momentum_engine.enrich(rows)
 
@@ -233,18 +238,28 @@ def allow_trade(row: Dict[str, Any]) -> bool:
     trade_score = _safe_float(row.get("trade_score"))
     pressure_score = _safe_float(row.get("pressure_score"))
     pressure_accel = _safe_float(row.get("pressure_acceleration"))
+    pressure_rank = row.get("pressure_rank")
+    pressure_cluster = row.get("pressure_cluster")
+    pressure_relative = _safe_float(row.get("pressure_relative"))
+    market_pressure_index = _safe_float(row.get("market_pressure_index"))
 
     if decision != "TRADE":
         print(
             f"[BLOCK] {symbol}: decision={decision}, "
             f"trade_score={trade_score:.4f}, "
             f"pressure_score={pressure_score:.4f}, "
-            f"pressure_acceleration={pressure_accel:.4f}"
+            f"pressure_acceleration={pressure_accel:.4f}, "
+            f"pressure_rank={pressure_rank}, "
+            f"pressure_cluster={pressure_cluster}, "
+            f"pressure_relative={pressure_relative:.4f}, "
+            f"market_pressure_index={market_pressure_index:.4f}"
         )
         return False
 
     if trade_score < MIN_TRADE_SCORE:
-        print(f"[BLOCK] {symbol}: trade_score {trade_score:.4f} < {MIN_TRADE_SCORE:.4f}")
+        print(
+            f"[BLOCK] {symbol}: trade_score {trade_score:.4f} < {MIN_TRADE_SCORE:.4f}"
+        )
         return False
 
     if pressure_score < MIN_PRESSURE_SCORE:
@@ -265,7 +280,11 @@ def allow_trade(row: Dict[str, Any]) -> bool:
         f"[ALLOW] {symbol}: decision={decision}, "
         f"trade_score={trade_score:.4f}, "
         f"pressure_score={pressure_score:.4f}, "
-        f"pressure_acceleration={pressure_accel:.4f}"
+        f"pressure_acceleration={pressure_accel:.4f}, "
+        f"pressure_rank={pressure_rank}, "
+        f"pressure_cluster={pressure_cluster}, "
+        f"pressure_relative={pressure_relative:.4f}, "
+        f"market_pressure_index={market_pressure_index:.4f}"
     )
     return True
 
@@ -394,6 +413,24 @@ while True:
 
         if rows:
             signals = build_signals(rows)
+
+            print("\n--- TOP SIGNALS ---")
+
+            for r in signals[:10]:
+                print(
+                    r.get("symbol"),
+                    "decision=", r.get("decision"),
+                    "trade_score=", round(_safe_float(r.get("trade_score")), 4),
+                    "pressure=", round(_safe_float(r.get("pressure_score")), 4),
+                    "accel=", round(_safe_float(r.get("pressure_acceleration")), 4),
+                    "rank=", r.get("pressure_rank"),
+                    "cluster=", r.get("pressure_cluster"),
+                    "relative=", round(_safe_float(r.get("pressure_relative")), 4),
+                    "market_idx=", round(_safe_float(r.get("market_pressure_index")), 4),
+                )
+
+            print("-------------------\n")
+
             open_new_positions(signals)
 
         _save_summary()
