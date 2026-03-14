@@ -23,7 +23,6 @@ from backend.intelligence.opportunity_pressure_engine import OpportunityPressure
 from backend.intelligence.pressure_acceleration_engine import PressureAccelerationEngine
 from backend.intelligence.quant_signal_optimizer import QuantSignalOptimizer
 from backend.scanner.unified_market_scanner import UnifiedMarketScanner
-from backend.strategies.vwap_mean_reversion import compute_vwap_from_candles
 
 
 ARTIFACT_DIR = PROJECT_ROOT / "artifacts"
@@ -32,7 +31,6 @@ ARTIFACT_DIR.mkdir(exist_ok=True)
 SUMMARY_FILE = ARTIFACT_DIR / "css_extended_paper_test_summary.json"
 POSITIONS_FILE = ARTIFACT_DIR / "css_open_positions.json"
 CLOSED_TRADES_FILE = ARTIFACT_DIR / "css_closed_trades.json"
-
 
 scanner = UnifiedMarketScanner()
 
@@ -53,6 +51,7 @@ position_manager = PositionManager(
 starting_capital = 200.0
 estimated_equity = starting_capital
 cycle = 0
+_debug_payload_logged = False
 
 
 def now() -> str:
@@ -70,52 +69,144 @@ def safe_float(value: Any, default: float = 0.0) -> float:
         return float(default)
 
 
-def candle_close(candle: Any) -> float:
-    """
-    Extract close price safely from candle structures.
-    Supports dict and list formats.
-    """
+def candle_attr(candle: Any, name: str, default: float = 0.0) -> float:
+    # Candle object with attributes
+    if hasattr(candle, name):
+        return safe_float(getattr(candle, name), default)
 
+    # Dict-like candle
     if isinstance(candle, dict):
-        for k in ("close", "c", "price"):
-            if k in candle:
-                return safe_float(candle.get(k))
+        return safe_float(candle.get(name, default), default)
 
-    if isinstance(candle, (list, tuple)) and len(candle) >= 5:
-        return safe_float(candle[4])
+    # List/tuple candle fallbacks
+    if isinstance(candle, (list, tuple)):
+        idx_map = {
+            "ts": 0,
+            "open": 1,
+            "high": 2,
+            "low": 3,
+            "close": 4,
+            "volume": 5,
+        }
+        idx = idx_map.get(name)
+        if idx is not None and len(candle) > idx:
+            return safe_float(candle[idx], default)
+
+    return float(default)
+
+
+def extract_price_from_payload(payload: Dict[str, Any]) -> float:
+    for key in (
+        "price",
+        "close",
+        "last",
+        "last_price",
+        "mark_price",
+        "mid",
+        "mid_price",
+        "value",
+        "c",
+    ):
+        if key in payload:
+            v = safe_float(payload.get(key), 0.0)
+            if v > 0:
+                return v
+
+    for nested_key in ("ticker", "quote", "meta", "snapshot", "data"):
+        nested = payload.get(nested_key)
+        if isinstance(nested, dict):
+            for key in (
+                "price",
+                "close",
+                "last",
+                "last_price",
+                "mark_price",
+                "mid",
+                "mid_price",
+                "value",
+                "c",
+            ):
+                if key in nested:
+                    v = safe_float(nested.get(key), 0.0)
+                    if v > 0:
+                        return v
 
     return 0.0
 
 
+def compute_vwap_robust(candles: List[Any], lookback: int = 20) -> float:
+    if not candles:
+        return 0.0
+
+    window = candles[-lookback:] if len(candles) >= lookback else candles
+
+    pv_sum = 0.0
+    vol_sum = 0.0
+
+    for candle in window:
+        high = candle_attr(candle, "high", 0.0)
+        low = candle_attr(candle, "low", 0.0)
+        close = candle_attr(candle, "close", 0.0)
+        volume = candle_attr(candle, "volume", 0.0)
+
+        if close <= 0:
+            continue
+
+        typical_price = close
+        if high > 0 and low > 0:
+            typical_price = (high + low + close) / 3.0
+
+        if volume <= 0:
+            volume = 1.0
+
+        pv_sum += typical_price * volume
+        vol_sum += volume
+
+    if vol_sum <= 0:
+        return 0.0
+
+    return pv_sum / vol_sum
+
+
 def fetch_assets(symbols: List[str]) -> List[Dict[str, Any]]:
+    global _debug_payload_logged
+
     rows: List[Dict[str, Any]] = []
 
     for symbol in symbols:
-
         try:
             payload = load_runtime_asset(symbol)
+
+            if not isinstance(payload, dict):
+                print(f"[ROW-SKIP] {symbol}: payload is not dict")
+                continue
+
             candles = payload.get("candles", [])
+            if not isinstance(candles, list):
+                print(f"[ROW-SKIP] {symbol}: candles is not list")
+                continue
+
+            if not _debug_payload_logged:
+                print(f"[DEBUG] sample payload keys for {symbol}: {list(payload.keys())}")
+                if candles:
+                    print(f"[DEBUG] sample candle type for {symbol}: {type(candles[-1]).__name__}")
+                    print(f"[DEBUG] sample candle value for {symbol}: {candles[-1]}")
+                _debug_payload_logged = True
 
             if len(candles) < 20:
+                print(f"[ROW-SKIP] {symbol}: insufficient candles ({len(candles)})")
                 continue
 
-            # ---------------------------
-            # Determine price
-            # ---------------------------
-
-            price = safe_float(payload.get("price", 0.0))
+            price = extract_price_from_payload(payload)
 
             if price <= 0:
-                price = candle_close(candles[-1])
+                price = candle_attr(candles[-1], "close", 0.0)
 
             if price <= 0:
+                print(f"[ROW-SKIP] {symbol}: could not derive price")
                 continue
 
-            # ---------------------------
-            # VWAP
-            # ---------------------------
-
-            vwap = safe_float(compute_vwap_from_candles(candles, 20))
+            vwap = compute_vwap_robust(candles, 20)
 
             if vwap <= 0:
                 vwap = price
@@ -132,16 +223,23 @@ def fetch_assets(symbols: List[str]) -> List[Dict[str, Any]]:
                 }
             )
 
-        except Exception:
+            print(
+                f"[ROW-OK] {symbol}: "
+                f"price={price:.6f}, "
+                f"vwap={vwap:.6f}, "
+                f"spread_bps={spread:.2f}, "
+                f"candles={len(candles)}"
+            )
+
+        except Exception as exc:
+            print(f"[ROW-ERROR] {symbol}: {exc}")
             continue
 
     return rows
 
 
 def persist_state(summary: Dict[str, Any]) -> None:
-
     try:
-
         with SUMMARY_FILE.open("w", encoding="utf-8") as f:
             json.dump(summary, f, indent=2)
 
@@ -150,20 +248,16 @@ def persist_state(summary: Dict[str, Any]) -> None:
 
         with CLOSED_TRADES_FILE.open("w", encoding="utf-8") as f:
             json.dump(position_manager.get_closed_positions(), f, indent=2)
-
     except Exception as exc:
         print(f"[WARN] Could not persist artifact state: {exc}")
 
 
 print("[CSS] Starting live dashboard...")
 
-
 while True:
-
     cycle += 1
 
     try:
-
         discovered = scanner.scan()
 
         symbols = [
@@ -172,6 +266,8 @@ while True:
             if r.get("venue") == "COINBASE"
         ][:5]
 
+        print(f"[SCAN] selected Coinbase symbols: {symbols}")
+
         rows = fetch_assets(symbols)
 
         if not rows:
@@ -179,11 +275,7 @@ while True:
             time.sleep(10)
             continue
 
-        latest_prices = {r["symbol"]: r["price"] for r in rows}
-
-        # ---------------------------
-        # Intelligence Pipeline
-        # ---------------------------
+        latest_prices: Dict[str, float] = {r["symbol"]: r["price"] for r in rows}
 
         features = feature_builder.enrich_rows(rows, {})
         regime_rows = regime_engine.detect(features)
@@ -195,64 +287,53 @@ while True:
         pressure_map = {r["symbol"]: r for r in sweep_rows}
 
         merged: List[Dict[str, Any]] = []
-
         for r in ranked:
-
             p = pressure_map.get(r["symbol"], {})
-
             merged.append(
                 {
                     "symbol": r["symbol"],
-                    "score": safe_float(r.get("score")),
-                    "pressure_score": safe_float(p.get("pressure_score")),
+                    "score": safe_float(r.get("score"), 0.0),
+                    "pressure_score": safe_float(p.get("pressure_score"), 0.0),
                     "pressure_acceleration": safe_float(
-                        p.get("pressure_acceleration")
+                        p.get("pressure_acceleration"), 0.0
                     ),
-                    "spread_bps": safe_float(p.get("spread_bps")),
+                    "spread_bps": safe_float(p.get("spread_bps"), 0.0),
                     "regime": str(p.get("regime", "NEUTRAL")),
                 }
             )
 
+        print(f"[PIPELINE] merged_rows={len(merged)}")
+
         optimized = optimizer.optimize(merged)
 
-        # ---------------------------
-        # Open Positions
-        # ---------------------------
-
         for r in optimized:
-
-            symbol = r["symbol"]
-            decision = r["decision"]
-            trade_score = r["trade_score"]
-            price = latest_prices.get(symbol, 0)
+            symbol = str(r["symbol"]).upper()
+            decision = str(r["decision"]).upper()
+            trade_score = safe_float(r["trade_score"], 0.0)
+            price = safe_float(latest_prices.get(symbol, 0.0), 0.0)
 
             if decision != "TRADE":
+                continue
+
+            if price <= 0:
                 continue
 
             if position_manager.has_open_position(symbol):
                 continue
 
-            allocation = 10.0
-            quantity = allocation / price
+            qty = 10.0 / price
 
             position_manager.open_long_position(
                 symbol=symbol,
-                quantity=quantity,
+                quantity=qty,
                 entry_price=price,
                 cycle_no=cycle,
                 opened_at_utc=now(),
             )
 
             print(
-                f"[OPEN] {symbol} | "
-                f"price={price:.6f} | "
-                f"qty={quantity:.8f} | "
-                f"score={trade_score:.2f}"
+                f"[OPEN] {symbol} | price={price:.6f} | qty={qty:.8f} | score={trade_score:.2f}"
             )
-
-        # ---------------------------
-        # Close Positions
-        # ---------------------------
 
         closed_positions = position_manager.update_positions(
             latest_prices=latest_prices,
@@ -261,15 +342,10 @@ while True:
         )
 
         for trade in closed_positions:
-
-            pnl = safe_float(trade.get("realized_pnl_usd"))
-
+            pnl = safe_float(trade.get("realized_pnl_usd"), 0.0)
             estimated_equity += pnl
-
             print(
-                f"[CLOSE] {trade['symbol']} | "
-                f"reason={trade['exit_reason']} | "
-                f"pnl={pnl:.4f}"
+                f"[CLOSE] {trade['symbol']} | reason={trade['exit_reason']} | pnl={pnl:.4f}"
             )
 
         pm_summary = position_manager.summary()
@@ -297,27 +373,23 @@ while True:
         print("\nAI SIGNAL SCANNER\n")
 
         for r in optimized:
-
             print(
                 f"{r['symbol']:10}"
-                f" regime={r['regime']:10}"
-                f" score={r['score']:.2f}"
-                f" pressure={r['pressure_score']:.2f}"
-                f" accel={r['pressure_acceleration']:.2f}"
-                f" trade={r['trade_score']:.2f}"
+                f" regime={r['regime']:12}"
+                f" score={safe_float(r['score']):.2f}"
+                f" pressure={safe_float(r['pressure_score']):.2f}"
+                f" accel={safe_float(r['pressure_acceleration']):.2f}"
+                f" trade={safe_float(r['trade_score']):.2f}"
                 f" decision={r['decision']}"
             )
 
         print("\nRefreshing in 10 seconds...\n")
-
         time.sleep(10)
 
     except KeyboardInterrupt:
-
         print("CSS stopped")
         break
 
     except Exception as e:
-
         print("CSS ERROR:", e)
         time.sleep(10)
