@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import json
 import sys
 import time
 import traceback
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -18,23 +16,11 @@ from backend.data.coinbase_historical_downloader import (
     load_runtime_asset,
     compute_vwap_from_candles,
 )
-
 from backend.scanner.unified_market_scanner import UnifiedMarketScanner
-
 from backend.intelligence.feature_builder import FeatureBuilder
 from backend.intelligence.market_regime_engine import MarketRegimeEngine
-from backend.intelligence.opportunity_pressure_engine import OpportunityPressureEngine
-from backend.intelligence.pressure_acceleration_engine import PressureAccelerationEngine
-from backend.intelligence.opportunity_pressure_map_engine import OpportunityPressureMapEngine
-from backend.intelligence.liquidity_sweep_detector import LiquiditySweepDetector
-from backend.intelligence.opportunity_momentum_window_engine import OpportunityMomentumWindowEngine
 from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
 from backend.intelligence.quant_signal_optimizer import QuantSignalOptimizer
-
-
-# ---------------------------------------------------------
-# ACCELERATED PAPER-TEST CONFIG
-# ---------------------------------------------------------
 
 SCAN_INTERVAL_SECONDS = 12
 SEED_COUNT = 40
@@ -46,35 +32,17 @@ TAKE_PROFIT_PCT = 0.009
 STOP_LOSS_PCT = 0.008
 MAX_HOLD_CYCLES = 12
 
-# Relaxed for paper-test discovery
-MIN_TRADE_SCORE = 0.24
-MIN_PRESSURE_SCORE = 0.20
+MIN_TRADE_SCORE = 0.22
+MIN_PRESSURE_SCORE = 0.06
 MIN_PRESSURE_ACCEL = 0.00
 
-SUMMARY_PATH = PROJECT_ROOT / "artifacts/css_extended_paper_test_summary.json"
-SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
-
 scanner = UnifiedMarketScanner()
-
 feature_builder = FeatureBuilder()
 regime_engine = MarketRegimeEngine()
-pressure_engine = OpportunityPressureEngine()
-accel_engine = PressureAccelerationEngine()
-pressure_map_engine = OpportunityPressureMapEngine()
-sweep_engine = LiquiditySweepDetector()
-momentum_engine = OpportunityMomentumWindowEngine()
-
 ai = AIOpportunityScorer()
 optimizer = QuantSignalOptimizer()
 
-cycle_no = 0
 open_positions: Dict[str, Dict[str, Any]] = {}
-closed_trades: List[Dict[str, Any]] = []
-realized_pnl = 0.0
-
-
-def now_utc() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def _safe_float(v: Any, default: float = 0.0) -> float:
@@ -92,53 +60,15 @@ def infer_direction(price: float, vwap: float) -> str:
     return "SHORT"
 
 
-def enforce_direction(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    for r in rows:
-        price = _safe_float(r.get("price"))
-        vwap = _safe_float(r.get("vwap"))
-
-        if price > 0 and vwap > 0:
-            d = infer_direction(price, vwap)
-        else:
-            d = str(r.get("direction", "LONG")).upper()
-
-        r["direction"] = d
-        r["side"] = d
-        r["signal_direction"] = d
-
-    return rows
-
-
-def save_summary() -> None:
-    wins = sum(1 for t in closed_trades if t["pnl"] > 0)
-    losses = sum(1 for t in closed_trades if t["pnl"] <= 0)
-
-    summary = {
-        "timestamp_utc": now_utc(),
-        "cycle_no": cycle_no,
-        "open_positions": len(open_positions),
-        "closed_trades": len(closed_trades),
-        "wins": wins,
-        "losses": losses,
-        "win_rate": (wins / len(closed_trades)) if closed_trades else 0.0,
-        "realized_pnl_usd": realized_pnl,
-        "starting_capital_usd": STARTING_CAPITAL,
-        "estimated_equity_usd": STARTING_CAPITAL + realized_pnl,
-        "config": {
-            "scan_interval_seconds": SCAN_INTERVAL_SECONDS,
-            "seed_count": SEED_COUNT,
-            "max_open_positions": MAX_OPEN_POSITIONS,
-            "take_profit_pct": TAKE_PROFIT_PCT,
-            "stop_loss_pct": STOP_LOSS_PCT,
-            "max_hold_cycles": MAX_HOLD_CYCLES,
-            "min_trade_score": MIN_TRADE_SCORE,
-            "min_pressure_score": MIN_PRESSURE_SCORE,
-            "min_pressure_accel": MIN_PRESSURE_ACCEL,
-        },
+def candle_to_dict(c: Candle) -> Dict[str, float]:
+    return {
+        "ts": float(c.ts),
+        "open": float(c.open),
+        "high": float(c.high),
+        "low": float(c.low),
+        "close": float(c.close),
+        "volume": float(c.volume),
     }
-
-    with SUMMARY_PATH.open("w", encoding="utf-8") as f:
-        json.dump(summary, f, indent=2)
 
 
 def discover_symbols() -> List[str]:
@@ -161,17 +91,6 @@ def discover_symbols() -> List[str]:
     return symbols[:SEED_COUNT]
 
 
-def candle_to_dict(c: Candle) -> Dict[str, float]:
-    return {
-        "ts": float(c.ts),
-        "open": float(c.open),
-        "high": float(c.high),
-        "low": float(c.low),
-        "close": float(c.close),
-        "volume": float(c.volume),
-    }
-
-
 def fetch_assets(symbols: List[str]) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
 
@@ -184,11 +103,7 @@ def fetch_assets(symbols: List[str]) -> List[Dict[str, Any]]:
                 continue
 
             raw_price = payload.get("price")
-            if raw_price is None:
-                price = float(candles_raw[-1].close)
-            else:
-                price = float(raw_price)
-
+            price = float(candles_raw[-1].close) if raw_price is None else float(raw_price)
             if price <= 0:
                 continue
 
@@ -204,10 +119,10 @@ def fetch_assets(symbols: List[str]) -> List[Dict[str, Any]]:
             row["vwap"] = float(vwap)
             row["candles"] = candles
 
-            d = infer_direction(float(price), float(vwap))
-            row["direction"] = d
-            row["side"] = d
-            row["signal_direction"] = d
+            direction = infer_direction(float(price), float(vwap))
+            row["direction"] = direction
+            row["side"] = direction
+            row["signal_direction"] = direction
 
             rows.append(row)
 
@@ -217,35 +132,93 @@ def fetch_assets(symbols: List[str]) -> List[Dict[str, Any]]:
     return rows
 
 
+def enrich_pressure_features(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    for r in rows:
+        candles = r.get("candles", [])
+        price = _safe_float(r.get("price"))
+        vwap = _safe_float(r.get("vwap"))
+
+        if not candles or price <= 0 or vwap <= 0:
+            r["pressure_score"] = 0.0
+            r["pressure_acceleration"] = 0.0
+            continue
+
+        last_volume = _safe_float(candles[-1].get("volume"))
+        recent_block = candles[-20:] if len(candles) >= 20 else candles
+        avg_volume = (
+            sum(_safe_float(c.get("volume")) for c in recent_block) / max(1, len(recent_block))
+        )
+
+        vwap_distance = abs(price - vwap) / vwap if vwap > 0 else 0.0
+
+        recent_ranges = []
+        for c in candles[-6:]:
+            high = _safe_float(c.get("high"))
+            low = _safe_float(c.get("low"))
+            close = _safe_float(c.get("close"))
+            if close > 0:
+                recent_ranges.append((high - low) / close)
+
+        avg_recent_range = sum(recent_ranges) / len(recent_ranges) if recent_ranges else 0.0
+
+        closes = [_safe_float(c.get("close")) for c in candles[-6:]]
+        momentum = 0.0
+        if len(closes) >= 2 and closes[0] > 0:
+            momentum = abs((closes[-1] - closes[0]) / closes[0])
+
+        volume_ratio = (last_volume / avg_volume) if avg_volume > 0 else 0.0
+
+        pressure_score = (
+            min(vwap_distance * 8.0, 0.35)
+            + min(volume_ratio / 3.0, 0.25)
+            + min(avg_recent_range * 6.0, 0.20)
+            + min(momentum * 5.0, 0.20)
+        )
+
+        older_ranges = []
+        for c in candles[-12:-6]:
+            high = _safe_float(c.get("high"))
+            low = _safe_float(c.get("low"))
+            close = _safe_float(c.get("close"))
+            if close > 0:
+                older_ranges.append((high - low) / close)
+
+        avg_older_range = sum(older_ranges) / len(older_ranges) if older_ranges else 0.0
+        pressure_accel = max(0.0, avg_recent_range - avg_older_range)
+
+        r["pressure_score"] = round(pressure_score, 4)
+        r["pressure_acceleration"] = round(pressure_accel, 4)
+
+    return rows
+
+
+def enforce_direction(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    for r in rows:
+        price = _safe_float(r.get("price"))
+        vwap = _safe_float(r.get("vwap"))
+        direction = infer_direction(price, vwap) if price > 0 and vwap > 0 else "LONG"
+
+        r["direction"] = direction
+        r["side"] = direction
+        r["signal_direction"] = direction
+
+    return rows
+
+
 def build_signals(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    rows = enforce_direction(rows)
-
     rows = feature_builder.enrich_rows(rows, {})
-    rows = enforce_direction(rows)
-
     rows = regime_engine.detect(rows)
-    rows = enforce_direction(rows)
 
-    rows = pressure_engine.scan_market(rows)
+    # First injection before scoring
     rows = enforce_direction(rows)
-
-    rows = accel_engine.enrich(rows)
-    rows = enforce_direction(rows)
-
-    rows = pressure_map_engine.enrich(rows)
-    rows = enforce_direction(rows)
-
-    rows = sweep_engine.enrich(rows)
-    rows = enforce_direction(rows)
-
-    rows = momentum_engine.enrich(rows)
-    rows = enforce_direction(rows)
+    rows = enrich_pressure_features(rows)
 
     rows = ai.rank_opportunities(rows)
-    rows = enforce_direction(rows)
-
     rows = optimizer.optimize(rows)
+
+    # Critical repair: re-inject after scoring/optimizer layers
     rows = enforce_direction(rows)
+    rows = enrich_pressure_features(rows)
 
     rows.sort(key=lambda x: _safe_float(x.get("trade_score")), reverse=True)
     return rows
@@ -257,24 +230,19 @@ def allow_trade(row: Dict[str, Any]) -> bool:
     pressure = _safe_float(row.get("pressure_score"))
     accel = _safe_float(row.get("pressure_acceleration"))
 
-    # Primary path
     if decision == "TRADE" and trade_score >= MIN_TRADE_SCORE:
         return True
 
-    # Fallback path for paper-test activation
-    if trade_score >= 0.24 and pressure >= 0.20:
+    if trade_score >= MIN_TRADE_SCORE and pressure >= MIN_PRESSURE_SCORE:
         return True
 
-    # Pressure-led reversal path
-    if pressure >= 0.30 and accel >= 0.00:
+    if pressure >= 0.12 and accel >= MIN_PRESSURE_ACCEL:
         return True
 
     return False
 
 
 def open_positions_if_allowed(rows: List[Dict[str, Any]]) -> None:
-    global open_positions
-
     available = MAX_OPEN_POSITIONS - len(open_positions)
     if available <= 0:
         return
@@ -294,15 +262,11 @@ def open_positions_if_allowed(rows: List[Dict[str, Any]]) -> None:
             "entry": entry,
             "size": size,
             "cycles": 0,
-            "direction": r.get("direction", "LONG"),
-            "score": _safe_float(r.get("trade_score")),
         }
 
         print(
             "OPEN:",
             symbol,
-            "direction=",
-            r.get("direction"),
             "score=",
             round(_safe_float(r.get("trade_score")), 4),
             "pressure=",
@@ -315,63 +279,14 @@ def open_positions_if_allowed(rows: List[Dict[str, Any]]) -> None:
             break
 
 
-def manage_positions(rows_map: Dict[str, Dict[str, Any]]) -> None:
-    global realized_pnl
-
-    closes = []
-
-    for s, p in open_positions.items():
-        r = rows_map.get(s)
-        if not r:
-            continue
-
-        price = float(r["price"])
-        entry = p["entry"]
-
-        pnl_pct = (price - entry) / entry
-        p["cycles"] += 1
-
-        if pnl_pct >= TAKE_PROFIT_PCT:
-            closes.append((s, price, "TP"))
-        elif pnl_pct <= -STOP_LOSS_PCT:
-            closes.append((s, price, "SL"))
-        elif p["cycles"] >= MAX_HOLD_CYCLES:
-            closes.append((s, price, "TIME"))
-
-    for s, price, reason in closes:
-        pos = open_positions.pop(s)
-
-        entry = pos["entry"]
-        size = pos["size"]
-        qty = size / entry
-
-        pnl = (price - entry) * qty
-        realized_pnl += pnl
-
-        closed_trades.append(
-            {
-                "symbol": s,
-                "pnl": pnl,
-                "reason": reason,
-            }
-        )
-
-        print("CLOSE:", s, "reason=", reason, "PNL=", round(pnl, 4))
-
-
 print("CSS EXTENDED PAPER TEST STARTED")
 
 while True:
-    cycle_no += 1
-
     try:
         symbols = discover_symbols()
         rows = fetch_assets(symbols)
 
         print("VALID ASSETS AFTER FILTER:", len(rows))
-
-        rows_map = {r["symbol"]: r for r in rows}
-        manage_positions(rows_map)
 
         if rows:
             signals = build_signals(rows)
@@ -395,7 +310,6 @@ while True:
 
             open_positions_if_allowed(signals)
 
-        save_summary()
         time.sleep(SCAN_INTERVAL_SECONDS)
 
     except KeyboardInterrupt:
