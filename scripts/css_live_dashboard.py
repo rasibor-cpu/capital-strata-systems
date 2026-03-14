@@ -22,6 +22,7 @@ from backend.intelligence.market_regime_engine import MarketRegimeEngine
 from backend.intelligence.opportunity_pressure_engine import OpportunityPressureEngine
 from backend.intelligence.pressure_acceleration_engine import PressureAccelerationEngine
 from backend.intelligence.quant_signal_optimizer import QuantSignalOptimizer
+from backend.intelligence.signal_confluence_engine import SignalConfluenceEngine
 from backend.scanner.unified_market_scanner import UnifiedMarketScanner
 
 ARTIFACT_DIR = PROJECT_ROOT / "artifacts"
@@ -31,12 +32,43 @@ SUMMARY_FILE = ARTIFACT_DIR / "css_extended_paper_test_summary.json"
 POSITIONS_FILE = ARTIFACT_DIR / "css_open_positions.json"
 CLOSED_TRADES_FILE = ARTIFACT_DIR / "css_closed_trades.json"
 
+# ------------------------------------------------
+# LIVE OPERATING CONTROLS
+# ------------------------------------------------
+MAX_SYMBOLS_PER_CYCLE = 25
+REFRESH_SECONDS = 10
+
+# ------------------------------------------------
+# HIGH-QUALITY SELECTION GATES
+# ------------------------------------------------
+MIN_CONFLUENCE_TO_REACH_OPTIMIZER = 0.72
+MIN_PRESSURE_TO_REACH_OPTIMIZER = 0.18
+MIN_ACCEL_TO_REACH_OPTIMIZER = 0.05
+MIN_ABS_SPREAD_BPS_TO_REACH_OPTIMIZER = 12.0
+
+# ------------------------------------------------
+# FINAL EXECUTION GATES
+# ------------------------------------------------
+MIN_TRADE_SCORE_TO_EXECUTE = 0.34
+MIN_CONFLUENCE_TO_EXECUTE = 0.78
+MIN_PRESSURE_TO_EXECUTE = 0.22
+MIN_ACCEL_OR_PRESSURE_BOOST = 0.10
+
+ALLOWED_EXECUTION_REGIMES = {
+    "MEAN_REVERSION",
+    "TREND",
+    "VOLATILE",
+    "BREAKOUT",
+    "NEUTRAL",
+}
+
 scanner = UnifiedMarketScanner()
 
 feature_builder = FeatureBuilder()
 regime_engine = MarketRegimeEngine()
 pressure_engine = OpportunityPressureEngine()
 accel_engine = PressureAccelerationEngine()
+confluence_engine = SignalConfluenceEngine()
 sweep_engine = LiquiditySweepDetector()
 ai = AIOpportunityScorer()
 optimizer = QuantSignalOptimizer()
@@ -66,6 +98,14 @@ def safe_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except Exception:
         return float(default)
+
+
+def clamp01(value: float) -> float:
+    if value < 0.0:
+        return 0.0
+    if value > 1.0:
+        return 1.0
+    return value
 
 
 def candle_attr(candle: Any, name: str, default: float = 0.0) -> float:
@@ -182,10 +222,6 @@ def compute_vwap_robust(candles: List[Dict[str, float]], lookback: int = 20) -> 
 
 
 def call_rows_module(module: Any, rows: List[Dict[str, Any]], label: str) -> List[Dict[str, Any]]:
-    """
-    Compatibility adapter for modules that may expose different method names.
-    Tries enrich_rows, then enrich, then detect. Falls back to identity.
-    """
     if hasattr(module, "enrich_rows"):
         return module.enrich_rows(rows)
 
@@ -283,6 +319,90 @@ def persist_state(summary: Dict[str, Any]) -> None:
         print(f"[WARN] Could not persist artifact state: {exc}")
 
 
+def regime_alignment_score(regime: str) -> float:
+    r = str(regime).upper()
+
+    if r == "MEAN_REVERSION":
+        return 1.00
+    if r == "TREND":
+        return 0.90
+    if r == "BREAKOUT":
+        return 0.88
+    if r == "VOLATILE":
+        return 0.82
+    if r == "NEUTRAL":
+        return 0.72
+    return 0.40
+
+
+def blended_conviction_score(
+    *,
+    base_ai_score: float,
+    confluence_score: float,
+    pressure_score: float,
+    pressure_acceleration: float,
+    regime: str,
+) -> float:
+    regime_score = regime_alignment_score(regime)
+
+    score = (
+        0.20 * clamp01(base_ai_score)
+        + 0.35 * clamp01(confluence_score)
+        + 0.25 * clamp01(pressure_score)
+        + 0.20 * clamp01(pressure_acceleration)
+        + 0.20 * clamp01(regime_score)
+    )
+
+    return clamp01(score)
+
+
+def passes_optimizer_gate(row: Dict[str, Any]) -> bool:
+    confluence_score = safe_float(row.get("confluence_score"), 0.0)
+    pressure_score = safe_float(row.get("pressure_score"), 0.0)
+    pressure_acceleration = safe_float(row.get("pressure_acceleration"), 0.0)
+    spread_bps_abs = abs(safe_float(row.get("spread_bps"), 0.0))
+    regime = str(row.get("regime", "NEUTRAL")).upper()
+
+    if regime not in ALLOWED_EXECUTION_REGIMES:
+        return False
+
+    if confluence_score < MIN_CONFLUENCE_TO_REACH_OPTIMIZER:
+        return False
+
+    if spread_bps_abs < MIN_ABS_SPREAD_BPS_TO_REACH_OPTIMIZER:
+        return False
+
+    if pressure_score < MIN_PRESSURE_TO_REACH_OPTIMIZER and pressure_acceleration < MIN_ACCEL_TO_REACH_OPTIMIZER:
+        return False
+
+    return True
+
+
+def passes_execution_gate(row: Dict[str, Any]) -> bool:
+    trade_score = safe_float(row.get("trade_score"), 0.0)
+    confluence_score = safe_float(row.get("confluence_score"), 0.0)
+    pressure_score = safe_float(row.get("pressure_score"), 0.0)
+    pressure_acceleration = safe_float(row.get("pressure_acceleration"), 0.0)
+    regime = str(row.get("regime", "NEUTRAL")).upper()
+
+    if regime not in ALLOWED_EXECUTION_REGIMES:
+        return False
+
+    if trade_score < MIN_TRADE_SCORE_TO_EXECUTE:
+        return False
+
+    if confluence_score < MIN_CONFLUENCE_TO_EXECUTE:
+        return False
+
+    if pressure_score < MIN_PRESSURE_TO_EXECUTE:
+        return False
+
+    if pressure_acceleration < MIN_ACCEL_OR_PRESSURE_BOOST and pressure_score < 0.30:
+        return False
+
+    return True
+
+
 print("[CSS] Starting live dashboard...")
 
 while True:
@@ -295,15 +415,15 @@ while True:
             r["symbol"]
             for r in discovered
             if r.get("venue") == "COINBASE"
-        ][:5]
+        ][:MAX_SYMBOLS_PER_CYCLE]
 
-        print(f"[SCAN] selected Coinbase symbols: {symbols}")
+        print(f"[SCAN] selected Coinbase symbols ({len(symbols)}): {symbols}")
 
         rows = fetch_assets(symbols)
 
         if not rows:
             print("Waiting for valid market rows...")
-            time.sleep(10)
+            time.sleep(REFRESH_SECONDS)
             continue
 
         latest_prices: Dict[str, float] = {r["symbol"]: r["price"] for r in rows}
@@ -312,39 +432,92 @@ while True:
         regime_rows = regime_engine.detect(features)
         pressure_rows = call_rows_module(pressure_engine, regime_rows, "OpportunityPressureEngine")
         accel_rows = call_rows_module(accel_engine, pressure_rows, "PressureAccelerationEngine")
-        sweep_rows = call_rows_module(sweep_engine, accel_rows, "LiquiditySweepDetector")
+        confluence_rows = call_rows_module(confluence_engine, accel_rows, "SignalConfluenceEngine")
+        sweep_rows = call_rows_module(sweep_engine, confluence_rows, "LiquiditySweepDetector")
         ranked = ai.rank_opportunities(sweep_rows)
 
-        pressure_map = {r["symbol"]: r for r in sweep_rows}
+        signal_map = {str(r["symbol"]).upper(): r for r in sweep_rows}
 
         merged: List[Dict[str, Any]] = []
         for r in ranked:
-            p = pressure_map.get(r["symbol"], {})
+            symbol = str(r.get("symbol", "")).upper()
+            p = signal_map.get(symbol, {})
+            regime = str(p.get("regime", "NEUTRAL")).upper()
+
+            base_ai_score = safe_float(r.get("score"), 0.0)
+            pressure_score = safe_float(p.get("pressure_score"), 0.0)
+            pressure_acceleration = safe_float(p.get("pressure_acceleration"), 0.0)
+            confluence_score = safe_float(p.get("confluence_score"), 0.0)
+
+            fused_score = blended_conviction_score(
+                base_ai_score=base_ai_score,
+                confluence_score=confluence_score,
+                pressure_score=pressure_score,
+                pressure_acceleration=pressure_acceleration,
+                regime=regime,
+            )
+
             merged.append(
                 {
-                    "symbol": r["symbol"],
-                    "score": safe_float(r.get("score"), 0.0),
-                    "pressure_score": safe_float(p.get("pressure_score"), 0.0),
-                    "pressure_acceleration": safe_float(
-                        p.get("pressure_acceleration"), 0.0
-                    ),
+                    "symbol": symbol,
+                    "score": fused_score,
+                    "base_ai_score": base_ai_score,
+                    "pressure_score": pressure_score,
+                    "pressure_acceleration": pressure_acceleration,
+                    "confluence_score": confluence_score,
+                    "confluence_allow_trade": bool(p.get("confluence_allow_trade", False)),
                     "spread_bps": safe_float(p.get("spread_bps"), 0.0),
-                    "regime": str(p.get("regime", "NEUTRAL")),
+                    "regime": regime,
+                    "regime_alignment": regime_alignment_score(regime),
                 }
             )
 
-        print(f"[PIPELINE] merged_rows={len(merged)}")
+        optimizer_input = [
+            row for row in merged
+            if row.get("confluence_allow_trade", False) and passes_optimizer_gate(row)
+        ]
 
-        optimized = optimizer.optimize(merged)
+        if not optimizer_input:
+            optimizer_input = sorted(
+                merged,
+                key=lambda x: (
+                    safe_float(x.get("confluence_score"), 0.0),
+                    safe_float(x.get("pressure_score"), 0.0),
+                    safe_float(x.get("pressure_acceleration"), 0.0),
+                    safe_float(x.get("score"), 0.0),
+                ),
+                reverse=True,
+            )[:1]
 
-        for r in optimized:
+        print(
+            f"[PIPELINE] merged_rows={len(merged)} "
+            f"confluence_pass={sum(1 for x in merged if x.get('confluence_allow_trade', False))} "
+            f"optimizer_rows={len(optimizer_input)}"
+        )
+
+        optimized = optimizer.optimize(optimizer_input)
+
+        optimized = sorted(
+            optimized,
+            key=lambda x: (
+                safe_float(x.get("trade_score"), 0.0),
+                safe_float(x.get("confluence_score"), 0.0),
+                safe_float(x.get("pressure_score"), 0.0),
+                safe_float(x.get("pressure_acceleration"), 0.0),
+                safe_float(x.get("score"), 0.0),
+            ),
+            reverse=True,
+        )
+
+        passing_execution_gate = [
+            r for r in optimized
+            if str(r.get("decision", "")).upper() == "TRADE" and passes_execution_gate(r)
+        ]
+
+        for r in passing_execution_gate:
             symbol = str(r["symbol"]).upper()
-            decision = str(r["decision"]).upper()
-            trade_score = safe_float(r["trade_score"], 0.0)
             price = safe_float(latest_prices.get(symbol, 0.0), 0.0)
-
-            if decision != "TRADE":
-                continue
+            trade_score = safe_float(r.get("trade_score"), 0.0)
 
             if price <= 0:
                 continue
@@ -363,7 +536,11 @@ while True:
             )
 
             print(
-                f"[OPEN] {symbol} | price={price:.6f} | qty={qty:.8f} | score={trade_score:.2f}"
+                f"[OPEN] {symbol} | price={price:.6f} | qty={qty:.8f} | "
+                f"trade={trade_score:.2f} | base_ai={safe_float(r.get('base_ai_score'), 0.0):.2f} | "
+                f"confluence={safe_float(r.get('confluence_score'), 0.0):.2f} | "
+                f"pressure={safe_float(r.get('pressure_score'), 0.0):.2f} | "
+                f"accel={safe_float(r.get('pressure_acceleration'), 0.0):.2f}"
             )
 
         closed_positions = position_manager.update_positions(
@@ -386,6 +563,19 @@ while True:
             "cycle_no": cycle,
             "starting_capital_usd": starting_capital,
             "estimated_equity_usd": estimated_equity,
+            "symbols_scanned": len(symbols),
+            "signals_scanned": len(merged),
+            "signals_passed_confluence": sum(
+                1 for x in merged if x.get("confluence_allow_trade", False)
+            ),
+            "signals_passed_optimizer_gate": len(
+                [x for x in merged if x.get("confluence_allow_trade", False) and passes_optimizer_gate(x)]
+            ),
+            "signals_passed_execution_gate": len(passing_execution_gate),
+            "max_symbols_per_cycle": MAX_SYMBOLS_PER_CYCLE,
+            "min_trade_score_to_execute": MIN_TRADE_SCORE_TO_EXECUTE,
+            "min_confluence_to_execute": MIN_CONFLUENCE_TO_EXECUTE,
+            "min_pressure_to_execute": MIN_PRESSURE_TO_EXECUTE,
             **pm_summary,
         }
 
@@ -399,23 +589,33 @@ while True:
 
         print("Cycle:", cycle)
         print("Equity:", round(estimated_equity, 2))
+        print("Symbols scanned:", len(symbols), f"(cap={MAX_SYMBOLS_PER_CYCLE})")
+        print("Execution style: THRESHOLD-DRIVEN / HIGH WIN-PROBABILITY BIAS")
+        print("Trades this cycle: all signals above execution threshold")
         print("Symbols:", symbols)
 
         print("\nAI SIGNAL SCANNER\n")
 
-        for r in optimized:
-            print(
-                f"{r['symbol']:10}"
-                f" regime={r['regime']:12}"
-                f" score={safe_float(r['score']):.2f}"
-                f" pressure={safe_float(r['pressure_score']):.2f}"
-                f" accel={safe_float(r['pressure_acceleration']):.2f}"
-                f" trade={safe_float(r['trade_score']):.2f}"
-                f" decision={r['decision']}"
-            )
+        if not optimized:
+            print("No optimized rows available this cycle.")
+        else:
+            for r in optimized[:15]:
+                exec_gate = "PASS" if passes_execution_gate(r) else "HOLD"
+                print(
+                    f"{r['symbol']:10}"
+                    f" regime={str(r.get('regime', 'NEUTRAL')):12}"
+                    f" base={safe_float(r.get('base_ai_score', 0.0), 0.0):.2f}"
+                    f" score={safe_float(r.get('score'), 0.0):.2f}"
+                    f" pressure={safe_float(r.get('pressure_score'), 0.0):.2f}"
+                    f" accel={safe_float(r.get('pressure_acceleration'), 0.0):.2f}"
+                    f" confluence={safe_float(r.get('confluence_score'), 0.0):.2f}"
+                    f" trade={safe_float(r.get('trade_score'), 0.0):.2f}"
+                    f" decision={str(r.get('decision', 'WATCH'))}"
+                    f" gate={exec_gate}"
+                )
 
-        print("\nRefreshing in 10 seconds...\n")
-        time.sleep(10)
+        print(f"\nRefreshing in {REFRESH_SECONDS} seconds...\n")
+        time.sleep(REFRESH_SECONDS)
 
     except KeyboardInterrupt:
         print("CSS stopped")
@@ -423,4 +623,4 @@ while True:
 
     except Exception as e:
         print("CSS ERROR:", e)
-        time.sleep(10)
+        time.sleep(REFRESH_SECONDS)
