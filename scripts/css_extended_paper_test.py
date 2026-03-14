@@ -22,6 +22,7 @@ from backend.intelligence.market_regime_engine import MarketRegimeEngine
 from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
 from backend.intelligence.quant_signal_optimizer import QuantSignalOptimizer
 
+
 SCAN_INTERVAL_SECONDS = 12
 SEED_COUNT = 40
 MAX_OPEN_POSITIONS = 8
@@ -143,16 +144,19 @@ def enrich_pressure_features(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]
             r["pressure_acceleration"] = 0.0
             continue
 
+        recent_20 = candles[-20:] if len(candles) >= 20 else candles
+        recent_6 = candles[-6:] if len(candles) >= 6 else candles
+        older_6 = candles[-12:-6] if len(candles) >= 12 else candles[:-6]
+
         last_volume = _safe_float(candles[-1].get("volume"))
-        recent_block = candles[-20:] if len(candles) >= 20 else candles
         avg_volume = (
-            sum(_safe_float(c.get("volume")) for c in recent_block) / max(1, len(recent_block))
+            sum(_safe_float(c.get("volume")) for c in recent_20) / max(1, len(recent_20))
         )
 
         vwap_distance = abs(price - vwap) / vwap if vwap > 0 else 0.0
 
         recent_ranges = []
-        for c in candles[-6:]:
+        for c in recent_6:
             high = _safe_float(c.get("high"))
             low = _safe_float(c.get("low"))
             close = _safe_float(c.get("close"))
@@ -161,7 +165,7 @@ def enrich_pressure_features(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]
 
         avg_recent_range = sum(recent_ranges) / len(recent_ranges) if recent_ranges else 0.0
 
-        closes = [_safe_float(c.get("close")) for c in candles[-6:]]
+        closes = [_safe_float(c.get("close")) for c in recent_6]
         momentum = 0.0
         if len(closes) >= 2 and closes[0] > 0:
             momentum = abs((closes[-1] - closes[0]) / closes[0])
@@ -176,7 +180,7 @@ def enrich_pressure_features(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]
         )
 
         older_ranges = []
-        for c in candles[-12:-6]:
+        for c in older_6:
             high = _safe_float(c.get("high"))
             low = _safe_float(c.get("low"))
             close = _safe_float(c.get("close"))
@@ -184,44 +188,67 @@ def enrich_pressure_features(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]
                 older_ranges.append((high - low) / close)
 
         avg_older_range = sum(older_ranges) / len(older_ranges) if older_ranges else 0.0
-        pressure_accel = max(0.0, avg_recent_range - avg_older_range)
+        pressure_acceleration = max(0.0, avg_recent_range - avg_older_range)
 
         r["pressure_score"] = round(pressure_score, 4)
-        r["pressure_acceleration"] = round(pressure_accel, 4)
-
-    return rows
-
-
-def enforce_direction(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    for r in rows:
-        price = _safe_float(r.get("price"))
-        vwap = _safe_float(r.get("vwap"))
-        direction = infer_direction(price, vwap) if price > 0 and vwap > 0 else "LONG"
-
-        r["direction"] = direction
-        r["side"] = direction
-        r["signal_direction"] = direction
+        r["pressure_acceleration"] = round(pressure_acceleration, 4)
 
     return rows
 
 
 def build_signals(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    rows = feature_builder.enrich_rows(rows, {})
-    rows = regime_engine.detect(rows)
+    enriched_rows = feature_builder.enrich_rows(rows, {})
+    enriched_rows = regime_engine.detect(enriched_rows)
 
-    # First injection before scoring
-    rows = enforce_direction(rows)
-    rows = enrich_pressure_features(rows)
+    # Force core fields on enriched rows
+    enriched_rows = enrich_pressure_features(enriched_rows)
 
-    rows = ai.rank_opportunities(rows)
-    rows = optimizer.optimize(rows)
+    for r in enriched_rows:
+        price = _safe_float(r.get("price"))
+        vwap = _safe_float(r.get("vwap"))
+        direction = infer_direction(price, vwap) if price > 0 and vwap > 0 else "LONG"
+        r["direction"] = direction
+        r["side"] = direction
+        r["signal_direction"] = direction
 
-    # Critical repair: re-inject after scoring/optimizer layers
-    rows = enforce_direction(rows)
-    rows = enrich_pressure_features(rows)
+    # Preserve a master copy keyed by symbol
+    master_by_symbol: Dict[str, Dict[str, Any]] = {}
+    for r in enriched_rows:
+        symbol = r.get("symbol")
+        if symbol:
+            master_by_symbol[str(symbol)] = dict(r)
 
-    rows.sort(key=lambda x: _safe_float(x.get("trade_score")), reverse=True)
-    return rows
+    # Run scorer + optimizer, which may strip fields
+    scored_rows = ai.rank_opportunities(enriched_rows)
+    optimized_rows = optimizer.optimize(scored_rows)
+
+    # Merge scored/optimized output back onto full enriched rows
+    final_rows: List[Dict[str, Any]] = []
+
+    for r in optimized_rows:
+        symbol = str(r.get("symbol", ""))
+        base = dict(master_by_symbol.get(symbol, {}))
+        base.update(r)
+
+        # Final hard guarantee
+        price = _safe_float(base.get("price"))
+        vwap = _safe_float(base.get("vwap"))
+        direction = infer_direction(price, vwap) if price > 0 and vwap > 0 else "LONG"
+        base["direction"] = direction
+        base["side"] = direction
+        base["signal_direction"] = direction
+
+        if _safe_float(base.get("pressure_score")) <= 0:
+            base["pressure_score"] = _safe_float(master_by_symbol.get(symbol, {}).get("pressure_score"))
+        if _safe_float(base.get("pressure_acceleration")) <= 0:
+            base["pressure_acceleration"] = _safe_float(
+                master_by_symbol.get(symbol, {}).get("pressure_acceleration")
+            )
+
+        final_rows.append(base)
+
+    final_rows.sort(key=lambda x: _safe_float(x.get("trade_score")), reverse=True)
+    return final_rows
 
 
 def allow_trade(row: Dict[str, Any]) -> bool:
