@@ -24,7 +24,6 @@ from backend.intelligence.pressure_acceleration_engine import PressureAccelerati
 from backend.intelligence.quant_signal_optimizer import QuantSignalOptimizer
 from backend.scanner.unified_market_scanner import UnifiedMarketScanner
 
-
 ARTIFACT_DIR = PROJECT_ROOT / "artifacts"
 ARTIFACT_DIR.mkdir(exist_ok=True)
 
@@ -70,15 +69,12 @@ def safe_float(value: Any, default: float = 0.0) -> float:
 
 
 def candle_attr(candle: Any, name: str, default: float = 0.0) -> float:
-    # Candle object with attributes
     if hasattr(candle, name):
         return safe_float(getattr(candle, name), default)
 
-    # Dict-like candle
     if isinstance(candle, dict):
         return safe_float(candle.get(name, default), default)
 
-    # List/tuple candle fallbacks
     if isinstance(candle, (list, tuple)):
         idx_map = {
             "ts": 0,
@@ -95,6 +91,24 @@ def candle_attr(candle: Any, name: str, default: float = 0.0) -> float:
     return float(default)
 
 
+def normalize_candle(candle: Any) -> Dict[str, float]:
+    return {
+        "ts": candle_attr(candle, "ts", 0.0),
+        "open": candle_attr(candle, "open", 0.0),
+        "high": candle_attr(candle, "high", 0.0),
+        "low": candle_attr(candle, "low", 0.0),
+        "close": candle_attr(candle, "close", 0.0),
+        "volume": candle_attr(candle, "volume", 0.0),
+    }
+
+
+def normalize_candles(candles: List[Any]) -> List[Dict[str, float]]:
+    normalized: List[Dict[str, float]] = []
+    for candle in candles:
+        normalized.append(normalize_candle(candle))
+    return normalized
+
+
 def extract_price_from_payload(payload: Dict[str, Any]) -> float:
     for key in (
         "price",
@@ -106,6 +120,7 @@ def extract_price_from_payload(payload: Dict[str, Any]) -> float:
         "mid_price",
         "value",
         "c",
+        "current_price",
     ):
         if key in payload:
             v = safe_float(payload.get(key), 0.0)
@@ -125,6 +140,7 @@ def extract_price_from_payload(payload: Dict[str, Any]) -> float:
                 "mid_price",
                 "value",
                 "c",
+                "current_price",
             ):
                 if key in nested:
                     v = safe_float(nested.get(key), 0.0)
@@ -134,7 +150,7 @@ def extract_price_from_payload(payload: Dict[str, Any]) -> float:
     return 0.0
 
 
-def compute_vwap_robust(candles: List[Any], lookback: int = 20) -> float:
+def compute_vwap_robust(candles: List[Dict[str, float]], lookback: int = 20) -> float:
     if not candles:
         return 0.0
 
@@ -144,10 +160,10 @@ def compute_vwap_robust(candles: List[Any], lookback: int = 20) -> float:
     vol_sum = 0.0
 
     for candle in window:
-        high = candle_attr(candle, "high", 0.0)
-        low = candle_attr(candle, "low", 0.0)
-        close = candle_attr(candle, "close", 0.0)
-        volume = candle_attr(candle, "volume", 0.0)
+        high = safe_float(candle.get("high"), 0.0)
+        low = safe_float(candle.get("low"), 0.0)
+        close = safe_float(candle.get("close"), 0.0)
+        volume = safe_float(candle.get("volume"), 0.0)
 
         if close <= 0:
             continue
@@ -181,33 +197,33 @@ def fetch_assets(symbols: List[str]) -> List[Dict[str, Any]]:
                 print(f"[ROW-SKIP] {symbol}: payload is not dict")
                 continue
 
-            candles = payload.get("candles", [])
-            if not isinstance(candles, list):
+            raw_candles = payload.get("candles", [])
+            if not isinstance(raw_candles, list):
                 print(f"[ROW-SKIP] {symbol}: candles is not list")
                 continue
 
             if not _debug_payload_logged:
                 print(f"[DEBUG] sample payload keys for {symbol}: {list(payload.keys())}")
-                if candles:
-                    print(f"[DEBUG] sample candle type for {symbol}: {type(candles[-1]).__name__}")
-                    print(f"[DEBUG] sample candle value for {symbol}: {candles[-1]}")
+                if raw_candles:
+                    print(f"[DEBUG] sample candle type for {symbol}: {type(raw_candles[-1]).__name__}")
+                    print(f"[DEBUG] sample candle value for {symbol}: {raw_candles[-1]}")
                 _debug_payload_logged = True
 
-            if len(candles) < 20:
-                print(f"[ROW-SKIP] {symbol}: insufficient candles ({len(candles)})")
+            if len(raw_candles) < 20:
+                print(f"[ROW-SKIP] {symbol}: insufficient candles ({len(raw_candles)})")
                 continue
 
-            price = extract_price_from_payload(payload)
+            candles = normalize_candles(raw_candles)
 
+            price = extract_price_from_payload(payload)
             if price <= 0:
-                price = candle_attr(candles[-1], "close", 0.0)
+                price = safe_float(candles[-1].get("close"), 0.0)
 
             if price <= 0:
                 print(f"[ROW-SKIP] {symbol}: could not derive price")
                 continue
 
             vwap = compute_vwap_robust(candles, 20)
-
             if vwap <= 0:
                 vwap = price
 
