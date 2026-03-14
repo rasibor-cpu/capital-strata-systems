@@ -3,212 +3,154 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 
-def _to_float(value: Any, default: float = 0.0) -> float:
-    try:
-        if value is None:
-            return default
-        return float(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
-    return max(low, min(high, value))
-
-
 class FeatureBuilder:
     """
     CSS Feature Builder
 
-    Enriches raw market rows with institutional-style scoring inputs
-    required by AIOpportunityScorer.
+    Enriches runtime asset rows with the core derived features required by:
+    - regime engine
+    - opportunity pressure engine
+    - pressure acceleration engine
+    - AI opportunity scorer
+    - optimizer
     """
 
     def __init__(self) -> None:
         pass
 
-    def enrich_row(
-        self,
-        row: Dict[str, Any],
-        candles: List[Dict[str, Any]],
-    ) -> Dict[str, Any]:
-        enriched = dict(row)
+    def _safe_float(self, value: Any, default: float = 0.0) -> float:
+        try:
+            if value is None:
+                return default
+            return float(value)
+        except Exception:
+            return default
 
+    def _get_close(self, candle: Dict[str, Any]) -> float:
+        return self._safe_float(candle.get("close"))
+
+    def _get_high(self, candle: Dict[str, Any]) -> float:
+        return self._safe_float(candle.get("high"))
+
+    def _get_low(self, candle: Dict[str, Any]) -> float:
+        return self._safe_float(candle.get("low"))
+
+    def _get_volume(self, candle: Dict[str, Any]) -> float:
+        return self._safe_float(candle.get("volume"))
+
+    def _compute_avg_volume(self, candles: List[Dict[str, Any]], window: int = 20) -> float:
         if not candles:
-            return enriched
+            return 0.0
 
-        closes = [_to_float(c.get("close")) for c in candles if _to_float(c.get("close")) > 0]
-        highs = [_to_float(c.get("high")) for c in candles if _to_float(c.get("high")) > 0]
-        lows = [_to_float(c.get("low")) for c in candles if _to_float(c.get("low")) > 0]
-        volumes = [_to_float(c.get("volume")) for c in candles if _to_float(c.get("volume")) >= 0]
+        subset = candles[-window:] if len(candles) >= window else candles
+        vols = [self._get_volume(c) for c in subset if self._get_volume(c) > 0]
 
-        if len(closes) < 5:
-            return enriched
+        if not vols:
+            return 0.0
 
-        current_price = closes[-1]
-        recent_high = max(highs[-20:]) if highs else current_price
-        recent_low = min(lows[-20:]) if lows else current_price
+        return sum(vols) / len(vols)
 
-        # ---------------------------------------------------------
-        # MOMENTUM
-        # ---------------------------------------------------------
-        first_close = closes[0]
-        momentum = ((current_price - first_close) / first_close) if first_close > 0 else 0.0
+    def _compute_volatility(self, candles: List[Dict[str, Any]], window: int = 20) -> float:
+        if not candles:
+            return 0.0
 
-        # ---------------------------------------------------------
-        # TREND EFFICIENCY
-        # ---------------------------------------------------------
-        net_move = abs(closes[-1] - closes[0])
-        path_move = 0.0
-        for i in range(1, len(closes)):
-            path_move += abs(closes[i] - closes[i - 1])
-        trend_efficiency = (net_move / path_move) if path_move > 0 else 0.0
-        trend_efficiency = _clamp(trend_efficiency)
+        subset = candles[-window:] if len(candles) >= window else candles
+        rel_ranges: List[float] = []
 
-        # ---------------------------------------------------------
-        # VOLATILITY / AVG_VOLATILITY
-        # ---------------------------------------------------------
-        returns: List[float] = []
-        for i in range(1, len(closes)):
-            prev = closes[i - 1]
-            curr = closes[i]
-            if prev > 0:
-                returns.append(abs((curr - prev) / prev))
+        for c in subset:
+            high = self._get_high(c)
+            low = self._get_low(c)
+            close = self._get_close(c)
 
-        volatility = sum(returns[-10:]) / max(len(returns[-10:]), 1)
-        avg_volatility = sum(returns) / max(len(returns), 1)
+            if close > 0 and high >= low:
+                rel_ranges.append((high - low) / close)
 
-        # ---------------------------------------------------------
-        # VOLUME
-        # ---------------------------------------------------------
-        volume_24h = sum(volumes[-24:]) if volumes else 0.0
-        avg_volume_24h = (sum(volumes) / len(volumes)) * 24 if volumes else 0.0
+        if not rel_ranges:
+            return 0.0
 
-        # ---------------------------------------------------------
-        # ORDER FLOW PRESSURE (proxy)
-        # ---------------------------------------------------------
-        up_count = 0
-        down_count = 0
-        up_volume = 0.0
-        down_volume = 0.0
+        return sum(rel_ranges) / len(rel_ranges)
 
-        for i in range(1, len(closes)):
-            prev = closes[i - 1]
-            curr = closes[i]
-            vol = volumes[i] if i < len(volumes) else 0.0
+    def _compute_price_compression(self, candles: List[Dict[str, Any]], window: int = 20) -> float:
+        """
+        Higher value = tighter recent compression.
+        Output scaled into [0, 1].
+        """
+        if len(candles) < 5:
+            return 0.0
 
-            if curr > prev:
-                up_count += 1
-                up_volume += vol
-            elif curr < prev:
-                down_count += 1
-                down_volume += vol
+        subset = candles[-window:] if len(candles) >= window else candles
+        closes = [self._get_close(c) for c in subset if self._get_close(c) > 0]
+        highs = [self._get_high(c) for c in subset]
+        lows = [self._get_low(c) for c in subset]
 
-        total_directional = up_count + down_count
-        order_flow_delta = ((up_count - down_count) / total_directional) if total_directional > 0 else 0.0
-        buy_pressure = up_volume
-        sell_pressure = down_volume
+        if not closes or not highs or not lows:
+            return 0.0
 
-        # ---------------------------------------------------------
-        # LIQUIDITY SWEEP / REJECTION PROXY
-        # ---------------------------------------------------------
-        last_high = highs[-1] if highs else current_price
-        last_low = lows[-1] if lows else current_price
-        last_close = closes[-1]
+        price_ref = closes[-1]
+        if price_ref <= 0:
+            return 0.0
 
-        range_size = max(last_high - last_low, 1e-9)
-        upper_wick = max(last_high - last_close, 0.0)
-        lower_wick = max(last_close - last_low, 0.0)
-        wick_reversal_strength = max(upper_wick, lower_wick) / range_size
+        total_range = max(highs) - min(lows)
+        norm_range = total_range / price_ref
 
-        liquidity_sweep_flag = False
-        rejection_strength = 0.0
+        if norm_range <= 0:
+            return 1.0
 
-        if len(highs) >= 5 and len(lows) >= 5:
-            prior_high = max(highs[-6:-1])
-            prior_low = min(lows[-6:-1])
+        # tighter range => larger compression score
+        compression = 1.0 - min(norm_range / 0.08, 1.0)
+        return max(0.0, min(compression, 1.0))
 
-            if last_high > prior_high and last_close < prior_high:
-                liquidity_sweep_flag = True
-                rejection_strength = (last_high - last_close) / range_size
+    def _compute_momentum_window(self, candles: List[Dict[str, Any]], window: int = 12) -> float:
+        if len(candles) < 2:
+            return 0.0
 
-            elif last_low < prior_low and last_close > prior_low:
-                liquidity_sweep_flag = True
-                rejection_strength = (last_close - last_low) / range_size
+        subset = candles[-window:] if len(candles) >= window else candles
+        if len(subset) < 2:
+            return 0.0
 
-        # ---------------------------------------------------------
-        # TOP OF BOOK DEPTH / SLIPPAGE PROXIES
-        # ---------------------------------------------------------
-        avg_vol_per_candle = (sum(volumes) / len(volumes)) if volumes else 0.0
-        top_of_book_depth = avg_vol_per_candle * current_price * 0.05
+        first_close = self._get_close(subset[0])
+        last_close = self._get_close(subset[-1])
 
-        spread_bps = abs(_to_float(enriched.get("spread_bps"), 0.0))
-        if spread_bps <= 2:
-            slippage_bps = 1.5
-        elif spread_bps <= 5:
-            slippage_bps = 2.5
-        elif spread_bps <= 10:
-            slippage_bps = 4.0
-        elif spread_bps <= 20:
-            slippage_bps = 7.5
-        else:
-            slippage_bps = 12.0
+        if first_close <= 0:
+            return 0.0
 
-        # ---------------------------------------------------------
-        # REGIME MAPPING
-        # ---------------------------------------------------------
-        base_signal = str(enriched.get("signal", "HOLD")).upper()
-        base_regime = str(enriched.get("regime", "")).upper()
+        return (last_close - first_close) / first_close
 
-        regime = base_regime
-        if not regime or regime == "MEAN_REVERSION":
-            if trend_efficiency >= 0.55 and abs(momentum) >= 0.01:
-                regime = "TREND"
-            elif volatility > avg_volatility * 1.35:
-                regime = "BREAKOUT"
-            else:
-                regime = "RANGE"
+    def _compute_vwap_distance(self, price: float, vwap: float) -> float:
+        if price <= 0 or vwap <= 0:
+            return 0.0
+        return (price - vwap) / vwap
 
-        if base_signal == "BUY" and regime == "RANGE":
-            regime = "BREAKOUT"
-
-        enriched.update(
-            {
-                "price": current_price,
-                "current_price": current_price,
-                "recent_high": recent_high,
-                "recent_low": recent_low,
-                "momentum": round(momentum, 6),
-                "trend_efficiency": round(trend_efficiency, 6),
-                "volatility": round(volatility, 6),
-                "avg_volatility": round(max(avg_volatility, 1e-6), 6),
-                "volume_24h": round(volume_24h, 2),
-                "avg_volume_24h": round(max(avg_volume_24h, 1.0), 2),
-                "order_flow_delta": round(order_flow_delta, 6),
-                "buy_pressure": round(buy_pressure, 2),
-                "sell_pressure": round(sell_pressure, 2),
-                "liquidity_sweep_flag": liquidity_sweep_flag,
-                "rejection_strength": round(_clamp(rejection_strength), 6),
-                "wick_reversal_strength": round(_clamp(wick_reversal_strength), 6),
-                "top_of_book_depth": round(top_of_book_depth, 2),
-                "slippage_bps": round(slippage_bps, 4),
-                "spread_bps": round(abs(spread_bps), 4),
-                "regime": regime,
-            }
-        )
-
-        return enriched
-
-    def enrich_rows(
-        self,
-        rows: List[Dict[str, Any]],
-        candle_cache: Dict[str, List[Dict[str, Any]]],
-    ) -> List[Dict[str, Any]]:
-        enriched: List[Dict[str, Any]] = []
+    def enrich_rows(self, rows: List[Dict[str, Any]], config: Dict[str, Any] | None = None) -> List[Dict[str, Any]]:
+        config = config or {}
 
         for row in rows:
-            asset = str(row.get("asset", row.get("symbol", ""))).strip()
-            candles = candle_cache.get(asset, [])
-            enriched.append(self.enrich_row(row, candles))
+            candles = row.get("candles", [])
+            price = self._safe_float(row.get("price"))
+            vwap = self._safe_float(row.get("vwap"))
 
-        return enriched
+            avg_volume = self._compute_avg_volume(candles, window=20)
+            volatility = self._compute_volatility(candles, window=20)
+            price_compression = self._compute_price_compression(candles, window=20)
+            momentum_window = self._compute_momentum_window(candles, window=12)
+            vwap_distance = self._compute_vwap_distance(price, vwap)
+
+            current_volume = 0.0
+            if candles:
+                current_volume = self._get_volume(candles[-1])
+
+            # Preserve existing fields, enrich missing ones
+            row["avg_volume"] = avg_volume
+            row["avg_volume_20"] = avg_volume
+            row["volume"] = current_volume
+            row["volatility"] = volatility
+            row["volatility_20"] = volatility
+            row["price_compression"] = price_compression
+            row["momentum_window"] = momentum_window
+            row["vwap_distance"] = vwap_distance
+
+            # Optional convenience aliases for downstream compatibility
+            row["compression"] = price_compression
+            row["momentum"] = row.get("momentum", momentum_window)
+
+        return rows
