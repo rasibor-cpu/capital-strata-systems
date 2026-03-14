@@ -29,13 +29,14 @@ class UnifiedMarketScanner:
     - Gracefully degrades if OANDA credentials are missing
     - Returns a unified list of dictionaries for downstream strategy/risk logic
     - Keeps backward compatibility with current Coinbase runtime asset structure
+    - Uses broader upstream discovery so downstream CSS intelligence can be more selective
     """
 
     def __init__(
         self,
-        max_workers: int = 8,
-        coinbase_top_n: int = 20,
-        fx_top_n: int = 5,
+        max_workers: int = 12,
+        coinbase_top_n: int = 60,
+        fx_top_n: int = 10,
         enable_crypto: bool = True,
         enable_fx: bool = True,
     ) -> None:
@@ -77,23 +78,41 @@ class UnifiedMarketScanner:
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=self.max_workers
         ) as executor:
-            futures = [
-                executor.submit(load_runtime_asset, symbol)
+            future_map = {
+                executor.submit(load_runtime_asset, symbol): symbol
                 for symbol in symbols
-            ]
+            }
 
-            for future in concurrent.futures.as_completed(futures):
+            for future in concurrent.futures.as_completed(future_map):
+                symbol = future_map[future]
+
                 try:
                     asset = future.result()
 
-                    if asset and asset.get("price"):
-                        asset["market_type"] = "CRYPTO"
-                        asset["venue"] = "COINBASE"
-                        asset["scanner_source"] = "coinbase_universe"
-                        assets.append(asset)
+                    if not isinstance(asset, dict):
+                        continue
+
+                    price = asset.get("price")
+                    if not price:
+                        continue
+
+                    normalized = dict(asset)
+                    normalized["symbol"] = str(asset.get("symbol", symbol)).upper()
+                    normalized["market_type"] = "CRYPTO"
+                    normalized["venue"] = "COINBASE"
+                    normalized["scanner_source"] = "coinbase_universe"
+
+                    assets.append(normalized)
 
                 except Exception:
-                    pass
+                    continue
+
+        # Prefer higher scored assets if score exists.
+        # Fall back to simple price presence order otherwise.
+        assets.sort(
+            key=lambda x: float(x.get("score", 0.0)),
+            reverse=True,
+        )
 
         return assets
 
@@ -115,7 +134,7 @@ class UnifiedMarketScanner:
         for row in results:
             try:
                 asset = {
-                    "symbol": row.instrument,
+                    "symbol": str(row.instrument).upper(),
                     "price": row.last_mid,
                     "vwap": row.vwap,
                     "spread_pct": row.spread_from_vwap_pct,
@@ -132,6 +151,11 @@ class UnifiedMarketScanner:
             except Exception:
                 continue
 
+        assets.sort(
+            key=lambda x: float(x.get("score", 0.0)),
+            reverse=True,
+        )
+
         return assets[: self.fx_top_n]
 
     # ---------------------------------------------------------
@@ -144,7 +168,6 @@ class UnifiedMarketScanner:
 
         combined = crypto_assets + fx_assets
 
-        # Prefer scored assets first where score exists
         combined.sort(
             key=lambda x: float(x.get("score", 0.0)),
             reverse=True,
