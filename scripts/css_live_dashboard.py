@@ -103,10 +103,7 @@ def normalize_candle(candle: Any) -> Dict[str, float]:
 
 
 def normalize_candles(candles: List[Any]) -> List[Dict[str, float]]:
-    normalized: List[Dict[str, float]] = []
-    for candle in candles:
-        normalized.append(normalize_candle(candle))
-    return normalized
+    return [normalize_candle(c) for c in candles]
 
 
 def extract_price_from_payload(payload: Dict[str, Any]) -> float:
@@ -182,6 +179,24 @@ def compute_vwap_robust(candles: List[Dict[str, float]], lookback: int = 20) -> 
         return 0.0
 
     return pv_sum / vol_sum
+
+
+def call_rows_module(module: Any, rows: List[Dict[str, Any]], label: str) -> List[Dict[str, Any]]:
+    """
+    Compatibility adapter for modules that may expose different method names.
+    Tries enrich_rows, then enrich, then detect. Falls back to identity.
+    """
+    if hasattr(module, "enrich_rows"):
+        return module.enrich_rows(rows)
+
+    if hasattr(module, "enrich"):
+        return module.enrich(rows)
+
+    if hasattr(module, "detect"):
+        return module.detect(rows)
+
+    print(f"[PIPELINE-WARN] {label}: no compatible row method found, passing rows through")
+    return rows
 
 
 def fetch_assets(symbols: List[str]) -> List[Dict[str, Any]]:
@@ -295,9 +310,9 @@ while True:
 
         features = feature_builder.enrich_rows(rows, {})
         regime_rows = regime_engine.detect(features)
-        pressure_rows = pressure_engine.enrich_rows(regime_rows)
-        accel_rows = accel_engine.enrich(pressure_rows)
-        sweep_rows = sweep_engine.enrich(accel_rows)
+        pressure_rows = call_rows_module(pressure_engine, regime_rows, "OpportunityPressureEngine")
+        accel_rows = call_rows_module(accel_engine, pressure_rows, "PressureAccelerationEngine")
+        sweep_rows = call_rows_module(sweep_engine, accel_rows, "LiquiditySweepDetector")
         ranked = ai.rank_opportunities(sweep_rows)
 
         pressure_map = {r["symbol"]: r for r in sweep_rows}
