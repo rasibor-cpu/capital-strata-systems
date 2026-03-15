@@ -52,6 +52,7 @@ ENGINE_PROFILES: Dict[str, Dict[str, float]] = {
         "min_vwap_dev_abs_to_execute": 0.018,
         "min_reversion_window_score": 0.72,
         "min_elasticity_score": 0.35,
+        "min_exhaustion_score": 0.40,
     },
     "conservative": {
         "min_confluence_to_reach_optimizer": 0.84,
@@ -65,6 +66,7 @@ ENGINE_PROFILES: Dict[str, Dict[str, float]] = {
         "min_vwap_dev_abs_to_execute": 0.015,
         "min_reversion_window_score": 0.64,
         "min_elasticity_score": 0.30,
+        "min_exhaustion_score": 0.36,
     },
     "balanced": {
         "min_confluence_to_reach_optimizer": 0.78,
@@ -78,6 +80,7 @@ ENGINE_PROFILES: Dict[str, Dict[str, float]] = {
         "min_vwap_dev_abs_to_execute": 0.012,
         "min_reversion_window_score": 0.56,
         "min_elasticity_score": 0.25,
+        "min_exhaustion_score": 0.32,
     },
     "aggressive": {
         "min_confluence_to_reach_optimizer": 0.70,
@@ -91,6 +94,7 @@ ENGINE_PROFILES: Dict[str, Dict[str, float]] = {
         "min_vwap_dev_abs_to_execute": 0.010,
         "min_reversion_window_score": 0.48,
         "min_elasticity_score": 0.20,
+        "min_exhaustion_score": 0.28,
     },
     "opportunistic/expansion": {
         "min_confluence_to_reach_optimizer": 0.62,
@@ -104,6 +108,7 @@ ENGINE_PROFILES: Dict[str, Dict[str, float]] = {
         "min_vwap_dev_abs_to_execute": 0.008,
         "min_reversion_window_score": 0.42,
         "min_elasticity_score": 0.16,
+        "min_exhaustion_score": 0.24,
     },
 }
 
@@ -143,6 +148,7 @@ _debug_payload_logged = False
 class VWAPDeviationEngine:
     def enrich_rows(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         enriched: List[Dict[str, Any]] = []
+
         for row in rows:
             price = safe_float(row.get("price"), 0.0)
             vwap = safe_float(row.get("vwap"), 0.0)
@@ -152,6 +158,7 @@ class VWAPDeviationEngine:
             new_row["vwap_dev"] = dev
             new_row["vwap_dev_abs"] = abs(dev)
             enriched.append(new_row)
+
         return enriched
 
 
@@ -190,12 +197,12 @@ class VWAPReversionWindowEngine:
             regime_fit = regime_fit_map.get(regime, 0.55)
 
             reversion_window_score = clamp01(
-                0.32 * deviation_fit
+                0.30 * deviation_fit
                 + 0.16 * pressure_fit
                 + 0.08 * accel_fit
-                + 0.20 * confluence_fit
+                + 0.18 * confluence_fit
                 + 0.12 * regime_fit
-                + 0.12 * elasticity_score
+                + 0.16 * elasticity_score
             )
 
             reversion_window_pass = (
@@ -212,6 +219,35 @@ class VWAPReversionWindowEngine:
         return enriched
 
 
+class MomentumExhaustionEngine:
+    def enrich_rows(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        enriched: List[Dict[str, Any]] = []
+
+        for row in rows:
+            pressure = safe_float(row.get("pressure_score"), 0.0)
+            accel = safe_float(row.get("pressure_acceleration"), 0.0)
+            momentum = abs(safe_float(row.get("momentum"), 0.0))
+            vwap_dev_abs = safe_float(row.get("vwap_dev_abs"), 0.0)
+
+            pressure_component = clamp01((0.55 - pressure) / 0.55)
+            accel_component = clamp01((0.10 - abs(accel)) / 0.10)
+            momentum_component = clamp01(momentum / 0.08)
+            stretch_component = clamp01(vwap_dev_abs / 0.05)
+
+            exhaustion_score = clamp01(
+                0.28 * pressure_component
+                + 0.22 * accel_component
+                + 0.22 * momentum_component
+                + 0.28 * stretch_component
+            )
+
+            new_row = dict(row)
+            new_row["exhaustion_score"] = exhaustion_score
+            enriched.append(new_row)
+
+        return enriched
+
+
 class EliteSignalClassifier:
     def classify(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         classified: List[Dict[str, Any]] = []
@@ -223,19 +259,25 @@ class EliteSignalClassifier:
             trade_score = safe_float(row.get("trade_score"), 0.0)
             reversion_window_score = safe_float(row.get("reversion_window_score"), 0.0)
             elasticity_score = safe_float(row.get("elasticity_score"), 0.0)
+            exhaustion_score = safe_float(row.get("exhaustion_score"), 0.0)
 
             tier = "WATCH"
 
-            if trade_score >= 0.45 and reversion_window_score >= 0.40:
+            if (
+                trade_score >= 0.45
+                and reversion_window_score >= 0.40
+                and elasticity_score >= 0.20
+            ):
                 tier = "QUALIFIED"
 
             if (
-                confluence >= 0.88
-                and pressure >= 0.30
+                confluence >= 0.90
+                and pressure >= 0.34
                 and vwap_dev_abs >= 0.015
-                and trade_score >= 0.55
-                and reversion_window_score >= 0.62
+                and trade_score >= 0.58
+                and reversion_window_score >= 0.70
                 and elasticity_score >= 0.35
+                and exhaustion_score >= 0.30
             ):
                 tier = "ELITE"
 
@@ -248,6 +290,7 @@ class EliteSignalClassifier:
 
 vwap_engine = VWAPDeviationEngine()
 reversion_window_engine = VWAPReversionWindowEngine()
+exhaustion_engine = MomentumExhaustionEngine()
 elite_classifier = EliteSignalClassifier()
 
 
@@ -372,17 +415,19 @@ def blended_conviction_score(
     vwap_dev_abs: float,
     reversion_window_score: float,
     elasticity_score: float,
+    exhaustion_score: float,
 ) -> float:
     regime_score = regime_alignment_score(regime)
     score = (
-        0.11 * clamp01(base_ai_score)
+        0.10 * clamp01(base_ai_score)
         + 0.24 * clamp01(confluence_score)
-        + 0.17 * clamp01(pressure_score)
-        + 0.09 * clamp01(pressure_acceleration)
+        + 0.16 * clamp01(pressure_score)
+        + 0.08 * clamp01(pressure_acceleration)
         + 0.08 * clamp01(regime_score)
-        + 0.11 * clamp01(vwap_dev_abs * 25.0)
+        + 0.10 * clamp01(vwap_dev_abs * 25.0)
         + 0.12 * clamp01(reversion_window_score)
-        + 0.08 * clamp01(elasticity_score)
+        + 0.07 * clamp01(elasticity_score)
+        + 0.05 * clamp01(exhaustion_score)
     )
     return clamp01(score)
 
@@ -486,6 +531,7 @@ def passes_optimizer_gate(row: Dict[str, Any], profile: Dict[str, float]) -> boo
     reversion_window_score = safe_float(row.get("reversion_window_score"), 0.0)
     reversion_window_pass = bool(row.get("reversion_window_pass", False))
     elasticity_score = safe_float(row.get("elasticity_score"), 0.0)
+    exhaustion_score = safe_float(row.get("exhaustion_score"), 0.0)
 
     if regime not in ALLOWED_EXECUTION_REGIMES:
         return False
@@ -498,6 +544,8 @@ def passes_optimizer_gate(row: Dict[str, Any], profile: Dict[str, float]) -> boo
     if reversion_window_score < profile["min_reversion_window_score"]:
         return False
     if elasticity_score < profile["min_elasticity_score"]:
+        return False
+    if exhaustion_score < profile["min_exhaustion_score"]:
         return False
     if (
         pressure_score < profile["min_pressure_to_reach_optimizer"]
@@ -518,6 +566,7 @@ def passes_execution_gate(row: Dict[str, Any], profile: Dict[str, float]) -> boo
     reversion_window_score = safe_float(row.get("reversion_window_score"), 0.0)
     reversion_window_pass = bool(row.get("reversion_window_pass", False))
     elasticity_score = safe_float(row.get("elasticity_score"), 0.0)
+    exhaustion_score = safe_float(row.get("exhaustion_score"), 0.0)
 
     if regime not in ALLOWED_EXECUTION_REGIMES:
         return False
@@ -527,11 +576,13 @@ def passes_execution_gate(row: Dict[str, Any], profile: Dict[str, float]) -> boo
         return False
     if elasticity_score < profile["min_elasticity_score"]:
         return False
+    if exhaustion_score < profile["min_exhaustion_score"]:
+        return False
 
     if tier == "ELITE":
         return (
-            confluence_score >= max(0.88, profile["min_confluence_to_execute"])
-            and pressure_score >= max(0.30, profile["min_pressure_to_execute"])
+            confluence_score >= max(0.90, profile["min_confluence_to_execute"])
+            and pressure_score >= max(0.34, profile["min_pressure_to_execute"])
             and vwap_dev_abs >= profile["min_vwap_dev_abs_to_execute"]
         )
 
@@ -590,7 +641,8 @@ while True:
         vwap_rows = vwap_engine.enrich_rows(confluence_rows)
         elastic_rows = elasticity_engine.enrich_rows(vwap_rows)
         reversion_rows = reversion_window_engine.enrich_rows(elastic_rows)
-        sweep_rows = call_rows_module(sweep_engine, reversion_rows, "LiquiditySweepDetector")
+        exhaustion_rows = exhaustion_engine.enrich_rows(reversion_rows)
+        sweep_rows = call_rows_module(sweep_engine, exhaustion_rows, "LiquiditySweepDetector")
         ranked = ai.rank_opportunities(sweep_rows)
 
         signal_map = {str(r["symbol"]).upper(): r for r in sweep_rows}
@@ -608,6 +660,7 @@ while True:
             vwap_dev_abs = safe_float(p.get("vwap_dev_abs"), 0.0)
             reversion_window_score = safe_float(p.get("reversion_window_score"), 0.0)
             elasticity_score = safe_float(p.get("elasticity_score"), 0.0)
+            exhaustion_score = safe_float(p.get("exhaustion_score"), 0.0)
 
             fused_score = blended_conviction_score(
                 base_ai_score=base_ai_score,
@@ -618,6 +671,7 @@ while True:
                 vwap_dev_abs=vwap_dev_abs,
                 reversion_window_score=reversion_window_score,
                 elasticity_score=elasticity_score,
+                exhaustion_score=exhaustion_score,
             )
 
             merged.append(
@@ -638,6 +692,7 @@ while True:
                     "reversion_window_pass": bool(p.get("reversion_window_pass", False)),
                     "vwap_elasticity": safe_float(p.get("vwap_elasticity"), 0.0),
                     "elasticity_score": elasticity_score,
+                    "exhaustion_score": exhaustion_score,
                 }
             )
 
@@ -652,6 +707,7 @@ while True:
                 key=lambda x: (
                     safe_float(x.get("reversion_window_score"), 0.0),
                     safe_float(x.get("elasticity_score"), 0.0),
+                    safe_float(x.get("exhaustion_score"), 0.0),
                     safe_float(x.get("confluence_score"), 0.0),
                     safe_float(x.get("pressure_score"), 0.0),
                     safe_float(x.get("vwap_dev_abs"), 0.0),
@@ -682,6 +738,8 @@ while True:
                 merged_row["vwap_elasticity"] = safe_float(row.get("vwap_elasticity"), 0.0)
             if "elasticity_score" not in merged_row:
                 merged_row["elasticity_score"] = safe_float(row.get("elasticity_score"), 0.0)
+            if "exhaustion_score" not in merged_row:
+                merged_row["exhaustion_score"] = safe_float(row.get("exhaustion_score"), 0.0)
             optimized_plus.append(merged_row)
 
         classified = elite_classifier.classify(optimized_plus)
@@ -693,6 +751,7 @@ while True:
                 1 if str(x.get("signal_tier", "WATCH")).upper() == "ELITE" else 0,
                 safe_float(x.get("reversion_window_score"), 0.0),
                 safe_float(x.get("elasticity_score"), 0.0),
+                safe_float(x.get("exhaustion_score"), 0.0),
                 safe_float(x.get("confluence_score"), 0.0),
                 safe_float(x.get("pressure_score"), 0.0),
                 safe_float(x.get("vwap_dev_abs"), 0.0),
@@ -741,6 +800,7 @@ while True:
                 f"vwap_dev={safe_float(r.get('vwap_dev_abs'), 0.0):.4f} | "
                 f"rwin={safe_float(r.get('reversion_window_score'), 0.0):.2f} | "
                 f"elas={safe_float(r.get('elasticity_score'), 0.0):.2f} | "
+                f"exhaust={safe_float(r.get('exhaustion_score'), 0.0):.2f} | "
                 f"confluence={safe_float(r.get('confluence_score'), 0.0):.2f} | "
                 f"pressure={safe_float(r.get('pressure_score'), 0.0):.2f} | "
                 f"accel={safe_float(r.get('pressure_acceleration'), 0.0):.2f}"
@@ -817,6 +877,7 @@ while True:
                     f" vwap_dev={safe_float(r.get('vwap_dev_abs'), 0.0):.4f}"
                     f" rwin={safe_float(r.get('reversion_window_score'), 0.0):.2f}"
                     f" elas={safe_float(r.get('elasticity_score'), 0.0):.2f}"
+                    f" exhaust={safe_float(r.get('exhaustion_score'), 0.0):.2f}"
                     f" confluence={safe_float(r.get('confluence_score'), 0.0):.2f}"
                     f" trade={safe_float(r.get('trade_score'), 0.0):.2f}"
                     f" decision={str(r.get('decision', 'WATCH')).upper()}"
