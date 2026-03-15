@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import time
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
@@ -32,9 +33,6 @@ SUMMARY_FILE = ARTIFACT_DIR / "css_extended_paper_test_summary.json"
 POSITIONS_FILE = ARTIFACT_DIR / "css_open_positions.json"
 CLOSED_TRADES_FILE = ARTIFACT_DIR / "css_closed_trades.json"
 
-# ------------------------------------------------
-# SESSION / OPERATING CONTROLS
-# ------------------------------------------------
 MAX_SYMBOLS_PER_CYCLE = 25
 REFRESH_SECONDS = 10
 
@@ -146,6 +144,44 @@ def clamp01(value: float) -> float:
     return value
 
 
+def candle_attr(candle: Any, name: str, default: float = 0.0) -> float:
+    if hasattr(candle, name):
+        return safe_float(getattr(candle, name), default)
+
+    if isinstance(candle, dict):
+        return safe_float(candle.get(name, default), default)
+
+    if isinstance(candle, (list, tuple)):
+        idx_map = {
+            "ts": 0,
+            "open": 1,
+            "high": 2,
+            "low": 3,
+            "close": 4,
+            "volume": 5,
+        }
+        idx = idx_map.get(name)
+        if idx is not None and len(candle) > idx:
+            return safe_float(candle[idx], default)
+
+    return float(default)
+
+
+def normalize_candle(candle: Any) -> Dict[str, float]:
+    return {
+        "ts": candle_attr(candle, "ts", 0.0),
+        "open": candle_attr(candle, "open", 0.0),
+        "high": candle_attr(candle, "high", 0.0),
+        "low": candle_attr(candle, "low", 0.0),
+        "close": candle_attr(candle, "close", 0.0),
+        "volume": candle_attr(candle, "volume", 0.0),
+    }
+
+
+def normalize_candles(candles: List[Any]) -> List[Dict[str, float]]:
+    return [normalize_candle(c) for c in candles]
+
+
 def choose_engine_mode() -> str:
     print("\nSelect CSS Engine Mode for this session:\n")
     print("1. safe/test")
@@ -233,16 +269,18 @@ def fetch_assets(symbols: List[str]) -> List[Dict[str, Any]]:
                 print(f"[ROW-SKIP] {symbol}: payload is not dict")
                 continue
 
-            candles = payload.get("candles", [])
-            if not isinstance(candles, list) or len(candles) < 20:
+            raw_candles = payload.get("candles", [])
+            if not isinstance(raw_candles, list) or len(raw_candles) < 20:
                 print(f"[ROW-SKIP] {symbol}: insufficient candles")
                 continue
 
+            candles = normalize_candles(raw_candles)
+
             if not _debug_payload_logged:
                 print(f"[DEBUG] sample payload keys for {symbol}: {list(payload.keys())}")
-                if candles:
-                    print(f"[DEBUG] sample candle type for {symbol}: {type(candles[-1]).__name__}")
-                    print(f"[DEBUG] sample candle value for {symbol}: {candles[-1]}")
+                if raw_candles:
+                    print(f"[DEBUG] sample candle type for {symbol}: {type(raw_candles[-1]).__name__}")
+                    print(f"[DEBUG] sample candle value for {symbol}: {raw_candles[-1]}")
                 _debug_payload_logged = True
 
             price = safe_float(payload.get("price"), 0.0)
@@ -261,6 +299,7 @@ def fetch_assets(symbols: List[str]) -> List[Dict[str, Any]]:
             row["price"] = price
             row["vwap"] = vwap
             row["spread_bps"] = spread_bps
+            row["candles"] = candles
 
             rows.append(row)
 
@@ -289,7 +328,6 @@ def persist_state(summary: Dict[str, Any]) -> None:
 
         with CLOSED_TRADES_FILE.open("w", encoding="utf-8") as f:
             json.dump(position_manager.get_closed_positions(), f, indent=2)
-
     except Exception as exc:
         print(f"[WARN] Could not persist artifact state: {exc}")
 
@@ -580,4 +618,5 @@ while True:
 
     except Exception as e:
         print("CSS ERROR:", e)
+        traceback.print_exc()
         time.sleep(REFRESH_SECONDS)
