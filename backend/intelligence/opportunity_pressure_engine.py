@@ -3,60 +3,72 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 
-def _safe_float(value: Any, default: float = 0.0) -> float:
+def _safe_float(v: Any, default: float = 0.0) -> float:
     try:
-        if value is None:
-            return default
-        return float(value)
+        return float(v)
     except Exception:
         return default
 
 
-def _clamp01(value: float) -> float:
-    if value < 0.0:
-        return 0.0
-    if value > 1.0:
-        return 1.0
-    return value
+def _clamp01(v: float) -> float:
+    if v < 0:
+        return 0
+    if v > 1:
+        return 1
+    return v
+
+
+def _candle_attr(candle: Any, name: str, default: float = 0.0) -> float:
+    """
+    Safe candle accessor supporting:
+
+    - Candle objects
+    - dict candles
+    - tuple/list candles
+    """
+
+    if hasattr(candle, name):
+        return _safe_float(getattr(candle, name), default)
+
+    if isinstance(candle, dict):
+        return _safe_float(candle.get(name, default), default)
+
+    if isinstance(candle, (list, tuple)):
+
+        idx_map = {
+            "ts": 0,
+            "open": 1,
+            "high": 2,
+            "low": 3,
+            "close": 4,
+            "volume": 5,
+        }
+
+        idx = idx_map.get(name)
+
+        if idx is not None and len(candle) > idx:
+            return _safe_float(candle[idx], default)
+
+    return default
 
 
 class OpportunityPressureEngine:
     """
     CSS Opportunity Pressure Engine
 
-    Purpose
-    -------
-    Detect market pressure build-up before outsized moves.
-
-    Current pressure dimensions
-    ---------------------------
-    1. VWAP stretch
-    2. Volume participation
-    3. Volatility / range expansion
-    4. Compression-release potential
-    5. Directional candle-body pressure
-
-    Output
-    ------
-    Adds:
-    - pressure_score
-    - pressure_stage
-    - pressure_direction
+    Calculates market pressure leading to potential price expansion.
     """
 
-    def __init__(self) -> None:
-        self.min_pressure_score = 0.08
-
-    # ------------------------------------------------
-    # CSS STANDARD ROW PIPELINE ENTRY
-    # ------------------------------------------------
     def enrich_rows(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        enriched: List[Dict[str, Any]] = []
+
+        enriched = []
 
         for row in rows:
+
             pressure = self.compute_pressure(row)
 
             new_row = dict(row)
+
             new_row["pressure_score"] = pressure["pressure"]
             new_row["pressure_stage"] = pressure["stage"]
             new_row["pressure_direction"] = pressure["direction"]
@@ -64,7 +76,7 @@ class OpportunityPressureEngine:
             enriched.append(new_row)
 
         enriched.sort(
-            key=lambda x: float(x.get("pressure_score", 0.0)),
+            key=lambda r: float(r.get("pressure_score", 0)),
             reverse=True,
         )
 
@@ -74,66 +86,82 @@ class OpportunityPressureEngine:
         return self.enrich_rows(rows)
 
     # ------------------------------------------------
-    # CORE PRESSURE CALCULATION
-    # ------------------------------------------------
+
     def compute_pressure(self, asset: Dict[str, Any]) -> Dict[str, Any]:
-        price = _safe_float(asset.get("price"), 0.0)
-        vwap = _safe_float(asset.get("vwap"), 0.0)
 
-        volume = _safe_float(asset.get("volume"), 0.0)
-        avg_volume = _safe_float(asset.get("avg_volume"), 0.0)
-        if avg_volume <= 0.0:
-            avg_volume = _safe_float(asset.get("avg_volume_24h"), 0.0)
-
-        volatility = _safe_float(asset.get("volatility"), 0.0)
-        if volatility <= 0.0:
-            volatility = _safe_float(asset.get("avg_volatility"), 0.0)
-
-        compression = _safe_float(asset.get("price_compression"), 0.0)
+        price = _safe_float(asset.get("price"))
+        vwap = _safe_float(asset.get("vwap"))
 
         candles = asset.get("candles", [])
-        candle_pressure = self._directional_candle_pressure(candles)
-        range_expansion = self._range_expansion_score(candles)
+
+        volume = _safe_float(asset.get("volume"))
+        avg_volume = _safe_float(asset.get("avg_volume_24h"))
+
+        volatility = _safe_float(asset.get("volatility"))
+        compression = _safe_float(asset.get("price_compression"))
+
+        # --------------------------------
 
         direction = "NEUTRAL"
-        if vwap > 0 and price > vwap:
-            direction = "SHORT"
-        elif vwap > 0 and price < vwap:
-            direction = "LONG"
+
+        if vwap > 0:
+
+            if price > vwap:
+                direction = "SHORT"
+
+            elif price < vwap:
+                direction = "LONG"
 
         # --------------------------------
         # VWAP stretch
         # --------------------------------
+
         if vwap > 0:
-            vwap_stretch = abs(price - vwap) / vwap
+            stretch = abs(price - vwap) / vwap
         else:
-            vwap_stretch = 0.0
+            stretch = 0
 
-        vwap_pressure = _clamp01(vwap_stretch * 8.0)
+        vwap_pressure = _clamp01(stretch * 8)
 
         # --------------------------------
-        # Volume participation
+        # volume participation
         # --------------------------------
+
         if avg_volume > 0:
             volume_ratio = volume / avg_volume
         else:
-            volume_ratio = 0.0
+            volume_ratio = 0
 
-        volume_pressure = _clamp01(volume_ratio / 2.0)
-
-        # --------------------------------
-        # Volatility contribution
-        # --------------------------------
-        volatility_pressure = _clamp01(volatility * 4.0 if volatility < 1 else volatility)
+        volume_pressure = _clamp01(volume_ratio / 2)
 
         # --------------------------------
-        # Compression / release potential
+        # volatility
         # --------------------------------
+
+        volatility_pressure = _clamp01(volatility * 4)
+
+        # --------------------------------
+        # compression
+        # --------------------------------
+
         compression_pressure = _clamp01(compression)
 
         # --------------------------------
-        # Final pressure score
+        # candle pressure
         # --------------------------------
+
+        candle_pressure = self._directional_candle_pressure(candles)
+
+        # --------------------------------
+        # range expansion
+        # --------------------------------
+
+        range_expansion = self._range_expansion_score(candles)
+
+        # --------------------------------
+        # final score
+        # --------------------------------
+
         pressure_score = (
             vwap_pressure * 0.28
             + volume_pressure * 0.18
@@ -149,7 +177,7 @@ class OpportunityPressureEngine:
             stage = "EXTREME"
         elif pressure_score >= 0.35:
             stage = "BUILDING"
-        elif pressure_score >= self.min_pressure_score:
+        elif pressure_score >= 0.08:
             stage = "EARLY"
         else:
             stage = "NONE"
@@ -161,64 +189,75 @@ class OpportunityPressureEngine:
         }
 
     # ------------------------------------------------
-    # INTERNAL HELPERS
-    # ------------------------------------------------
-    def _directional_candle_pressure(self, candles: List[Dict[str, Any]]) -> float:
-        if not isinstance(candles, list) or len(candles) < 3:
-            return 0.0
+
+    def _directional_candle_pressure(self, candles: List[Any]) -> float:
+
+        if not candles or len(candles) < 3:
+            return 0
 
         recent = candles[-3:]
-        body_scores: List[float] = []
 
-        for candle in recent:
-            open_ = _safe_float(candle.get("open"), 0.0)
-            high = _safe_float(candle.get("high"), 0.0)
-            low = _safe_float(candle.get("low"), 0.0)
-            close = _safe_float(candle.get("close"), 0.0)
+        scores = []
 
-            candle_range = max(high - low, 1e-12)
-            candle_body = abs(close - open_)
+        for c in recent:
 
-            body_ratio = candle_body / candle_range
-            body_scores.append(_clamp01(body_ratio))
+            open_ = _candle_attr(c, "open")
+            high = _candle_attr(c, "high")
+            low = _candle_attr(c, "low")
+            close = _candle_attr(c, "close")
 
-        if not body_scores:
-            return 0.0
+            rng = max(high - low, 1e-9)
+            body = abs(close - open_)
 
-        return _clamp01(sum(body_scores) / len(body_scores))
+            ratio = body / rng
 
-    def _range_expansion_score(self, candles: List[Dict[str, Any]]) -> float:
-        if not isinstance(candles, list) or len(candles) < 8:
-            return 0.0
+            scores.append(_clamp01(ratio))
+
+        if not scores:
+            return 0
+
+        return sum(scores) / len(scores)
+
+    # ------------------------------------------------
+
+    def _range_expansion_score(self, candles: List[Any]) -> float:
+
+        if not candles or len(candles) < 8:
+            return 0
 
         recent = candles[-3:]
         prior = candles[-8:-3]
 
-        recent_ranges: List[float] = []
-        prior_ranges: List[float] = []
+        recent_ranges = []
+        prior_ranges = []
 
-        for candle in recent:
-            high = _safe_float(candle.get("high"), 0.0)
-            low = _safe_float(candle.get("low"), 0.0)
-            close = _safe_float(candle.get("close"), 0.0)
+        for c in recent:
+
+            high = _candle_attr(c, "high")
+            low = _candle_attr(c, "low")
+            close = _candle_attr(c, "close")
+
             if close > 0:
                 recent_ranges.append(abs(high - low) / close)
 
-        for candle in prior:
-            high = _safe_float(candle.get("high"), 0.0)
-            low = _safe_float(candle.get("low"), 0.0)
-            close = _safe_float(candle.get("close"), 0.0)
+        for c in prior:
+
+            high = _candle_attr(c, "high")
+            low = _candle_attr(c, "low")
+            close = _candle_attr(c, "close")
+
             if close > 0:
                 prior_ranges.append(abs(high - low) / close)
 
         if not recent_ranges or not prior_ranges:
-            return 0.0
+            return 0
 
-        recent_avg = sum(recent_ranges) / len(recent_ranges)
-        prior_avg = sum(prior_ranges) / len(prior_ranges)
+        r = sum(recent_ranges) / len(recent_ranges)
+        p = sum(prior_ranges) / len(prior_ranges)
 
-        if prior_avg <= 0:
-            return 0.0
+        if p <= 0:
+            return 0
 
-        expansion = max(0.0, (recent_avg - prior_avg) / prior_avg)
-        return _clamp01(expansion)
+        expansion = (r - p) / p
+
+        return _clamp01(max(0, expansion))
