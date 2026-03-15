@@ -12,103 +12,213 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _clamp01(value: float) -> float:
+    if value < 0.0:
+        return 0.0
+    if value > 1.0:
+        return 1.0
+    return value
+
+
 class OpportunityPressureEngine:
     """
     CSS Opportunity Pressure Engine
 
-    Detects reversal / exhaustion pressure building in an asset.
-    This enriches rows before AI scoring.
+    Purpose
+    -------
+    Detect market pressure build-up before outsized moves.
+
+    Current pressure dimensions
+    ---------------------------
+    1. VWAP stretch
+    2. Volume participation
+    3. Volatility / range expansion
+    4. Compression-release potential
+    5. Directional candle-body pressure
+
+    Output
+    ------
+    Adds:
+    - pressure_score
+    - pressure_stage
+    - pressure_direction
     """
 
     def __init__(self) -> None:
-        self.vwap_distance_weight = 0.30
-        self.range_extension_weight = 0.20
-        self.exhaustion_weight = 0.20
-        self.reversal_weight = 0.20
-        self.momentum_weight = 0.10
+        self.min_pressure_score = 0.08
 
-    def _distance_from_vwap(self, price: float, vwap: float) -> float:
-        if vwap <= 0:
-            return 0.0
-        distance = abs(price - vwap) / vwap
-        return min(1.0, distance * 10.0)
-
-    def _range_extension(self, price: float, high: float, low: float) -> float:
-        if high <= low:
-            return 0.0
-
-        mid = (high + low) / 2.0
-        half_range = (high - low) / 2.0
-
-        if half_range <= 0:
-            return 0.0
-
-        extension = abs(price - mid) / half_range
-        return min(1.0, extension)
-
-    def _exhaustion(self, trend_efficiency: float) -> float:
-        return 1.0 - min(1.0, max(0.0, trend_efficiency))
-
-    def _reversal_bias(self, wick_strength: float, rejection_strength: float) -> float:
-        value = (wick_strength + rejection_strength) / 2.0
-        return min(1.0, max(0.0, value))
-
-    def _momentum_pressure(self, momentum: float) -> float:
-        return min(1.0, abs(momentum) * 10.0)
-
-    def compute_pressure(self, row: Dict[str, Any]) -> Dict[str, Any]:
-        price = _safe_float(row.get("price"))
-        vwap = _safe_float(row.get("vwap"))
-
-        high = _safe_float(row.get("recent_high"))
-        low = _safe_float(row.get("recent_low"))
-
-        wick = _safe_float(row.get("wick_reversal_strength"))
-        rejection = _safe_float(row.get("rejection_strength"))
-
-        momentum = _safe_float(row.get("momentum"))
-        trend_eff = _safe_float(row.get("trend_efficiency"))
-
-        pressure_distance = self._distance_from_vwap(price, vwap)
-        pressure_range = self._range_extension(price, high, low)
-        pressure_exhaustion = self._exhaustion(trend_eff)
-        pressure_reversal = self._reversal_bias(wick, rejection)
-        pressure_momentum = self._momentum_pressure(momentum)
-
-        pressure_score = (
-            pressure_distance * self.vwap_distance_weight
-            + pressure_range * self.range_extension_weight
-            + pressure_exhaustion * self.exhaustion_weight
-            + pressure_reversal * self.reversal_weight
-            + pressure_momentum * self.momentum_weight
-        )
-
-        pressure_score = max(0.0, min(1.0, pressure_score))
-
-        if pressure_score >= 0.70:
-            pressure_label = "HIGH"
-        elif pressure_score >= 0.50:
-            pressure_label = "MEDIUM"
-        else:
-            pressure_label = "LOW"
-
-        return {
-            "pressure_score": round(pressure_score, 4),
-            "pressure_label": pressure_label,
-            "pressure_distance": round(pressure_distance, 4),
-            "pressure_range": round(pressure_range, 4),
-            "pressure_exhaustion": round(pressure_exhaustion, 4),
-            "pressure_reversal": round(pressure_reversal, 4),
-            "pressure_momentum": round(pressure_momentum, 4),
-        }
-
+    # ------------------------------------------------
+    # CSS STANDARD ROW PIPELINE ENTRY
+    # ------------------------------------------------
     def enrich_rows(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         enriched: List[Dict[str, Any]] = []
 
         for row in rows:
             pressure = self.compute_pressure(row)
+
             new_row = dict(row)
-            new_row.update(pressure)
+            new_row["pressure_score"] = pressure["pressure"]
+            new_row["pressure_stage"] = pressure["stage"]
+            new_row["pressure_direction"] = pressure["direction"]
+
             enriched.append(new_row)
 
+        enriched.sort(
+            key=lambda x: float(x.get("pressure_score", 0.0)),
+            reverse=True,
+        )
+
         return enriched
+
+    def enrich(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return self.enrich_rows(rows)
+
+    # ------------------------------------------------
+    # CORE PRESSURE CALCULATION
+    # ------------------------------------------------
+    def compute_pressure(self, asset: Dict[str, Any]) -> Dict[str, Any]:
+        price = _safe_float(asset.get("price"), 0.0)
+        vwap = _safe_float(asset.get("vwap"), 0.0)
+
+        volume = _safe_float(asset.get("volume"), 0.0)
+        avg_volume = _safe_float(asset.get("avg_volume"), 0.0)
+        if avg_volume <= 0.0:
+            avg_volume = _safe_float(asset.get("avg_volume_24h"), 0.0)
+
+        volatility = _safe_float(asset.get("volatility"), 0.0)
+        if volatility <= 0.0:
+            volatility = _safe_float(asset.get("avg_volatility"), 0.0)
+
+        compression = _safe_float(asset.get("price_compression"), 0.0)
+
+        candles = asset.get("candles", [])
+        candle_pressure = self._directional_candle_pressure(candles)
+        range_expansion = self._range_expansion_score(candles)
+
+        direction = "NEUTRAL"
+        if vwap > 0 and price > vwap:
+            direction = "SHORT"
+        elif vwap > 0 and price < vwap:
+            direction = "LONG"
+
+        # --------------------------------
+        # VWAP stretch
+        # --------------------------------
+        if vwap > 0:
+            vwap_stretch = abs(price - vwap) / vwap
+        else:
+            vwap_stretch = 0.0
+
+        vwap_pressure = _clamp01(vwap_stretch * 8.0)
+
+        # --------------------------------
+        # Volume participation
+        # --------------------------------
+        if avg_volume > 0:
+            volume_ratio = volume / avg_volume
+        else:
+            volume_ratio = 0.0
+
+        volume_pressure = _clamp01(volume_ratio / 2.0)
+
+        # --------------------------------
+        # Volatility contribution
+        # --------------------------------
+        volatility_pressure = _clamp01(volatility * 4.0 if volatility < 1 else volatility)
+
+        # --------------------------------
+        # Compression / release potential
+        # --------------------------------
+        compression_pressure = _clamp01(compression)
+
+        # --------------------------------
+        # Final pressure score
+        # --------------------------------
+        pressure_score = (
+            vwap_pressure * 0.28
+            + volume_pressure * 0.18
+            + volatility_pressure * 0.14
+            + compression_pressure * 0.12
+            + candle_pressure * 0.16
+            + range_expansion * 0.12
+        )
+
+        pressure_score = _clamp01(pressure_score)
+
+        if pressure_score >= 0.55:
+            stage = "EXTREME"
+        elif pressure_score >= 0.35:
+            stage = "BUILDING"
+        elif pressure_score >= self.min_pressure_score:
+            stage = "EARLY"
+        else:
+            stage = "NONE"
+
+        return {
+            "pressure": round(pressure_score, 4),
+            "stage": stage,
+            "direction": direction,
+        }
+
+    # ------------------------------------------------
+    # INTERNAL HELPERS
+    # ------------------------------------------------
+    def _directional_candle_pressure(self, candles: List[Dict[str, Any]]) -> float:
+        if not isinstance(candles, list) or len(candles) < 3:
+            return 0.0
+
+        recent = candles[-3:]
+        body_scores: List[float] = []
+
+        for candle in recent:
+            open_ = _safe_float(candle.get("open"), 0.0)
+            high = _safe_float(candle.get("high"), 0.0)
+            low = _safe_float(candle.get("low"), 0.0)
+            close = _safe_float(candle.get("close"), 0.0)
+
+            candle_range = max(high - low, 1e-12)
+            candle_body = abs(close - open_)
+
+            body_ratio = candle_body / candle_range
+            body_scores.append(_clamp01(body_ratio))
+
+        if not body_scores:
+            return 0.0
+
+        return _clamp01(sum(body_scores) / len(body_scores))
+
+    def _range_expansion_score(self, candles: List[Dict[str, Any]]) -> float:
+        if not isinstance(candles, list) or len(candles) < 8:
+            return 0.0
+
+        recent = candles[-3:]
+        prior = candles[-8:-3]
+
+        recent_ranges: List[float] = []
+        prior_ranges: List[float] = []
+
+        for candle in recent:
+            high = _safe_float(candle.get("high"), 0.0)
+            low = _safe_float(candle.get("low"), 0.0)
+            close = _safe_float(candle.get("close"), 0.0)
+            if close > 0:
+                recent_ranges.append(abs(high - low) / close)
+
+        for candle in prior:
+            high = _safe_float(candle.get("high"), 0.0)
+            low = _safe_float(candle.get("low"), 0.0)
+            close = _safe_float(candle.get("close"), 0.0)
+            if close > 0:
+                prior_ranges.append(abs(high - low) / close)
+
+        if not recent_ranges or not prior_ranges:
+            return 0.0
+
+        recent_avg = sum(recent_ranges) / len(recent_ranges)
+        prior_avg = sum(prior_ranges) / len(prior_ranges)
+
+        if prior_avg <= 0:
+            return 0.0
+
+        expansion = max(0.0, (recent_avg - prior_avg) / prior_avg)
+        return _clamp01(expansion)
