@@ -49,6 +49,7 @@ ENGINE_PROFILES: Dict[str, Dict[str, float]] = {
         "min_pressure_to_execute": 0.30,
         "min_accel_or_pressure_boost": 0.15,
         "min_vwap_dev_abs_to_execute": 0.018,
+        "min_reversion_window_score": 0.72,
     },
     "conservative": {
         "min_confluence_to_reach_optimizer": 0.84,
@@ -60,6 +61,7 @@ ENGINE_PROFILES: Dict[str, Dict[str, float]] = {
         "min_pressure_to_execute": 0.24,
         "min_accel_or_pressure_boost": 0.10,
         "min_vwap_dev_abs_to_execute": 0.015,
+        "min_reversion_window_score": 0.64,
     },
     "balanced": {
         "min_confluence_to_reach_optimizer": 0.78,
@@ -71,6 +73,7 @@ ENGINE_PROFILES: Dict[str, Dict[str, float]] = {
         "min_pressure_to_execute": 0.20,
         "min_accel_or_pressure_boost": 0.08,
         "min_vwap_dev_abs_to_execute": 0.012,
+        "min_reversion_window_score": 0.56,
     },
     "aggressive": {
         "min_confluence_to_reach_optimizer": 0.70,
@@ -82,6 +85,7 @@ ENGINE_PROFILES: Dict[str, Dict[str, float]] = {
         "min_pressure_to_execute": 0.16,
         "min_accel_or_pressure_boost": 0.06,
         "min_vwap_dev_abs_to_execute": 0.010,
+        "min_reversion_window_score": 0.48,
     },
     "opportunistic/expansion": {
         "min_confluence_to_reach_optimizer": 0.62,
@@ -93,6 +97,7 @@ ENGINE_PROFILES: Dict[str, Dict[str, float]] = {
         "min_pressure_to_execute": 0.12,
         "min_accel_or_pressure_boost": 0.04,
         "min_vwap_dev_abs_to_execute": 0.008,
+        "min_reversion_window_score": 0.42,
     },
 }
 
@@ -131,19 +136,68 @@ _debug_payload_logged = False
 class VWAPDeviationEngine:
     def enrich_rows(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         enriched: List[Dict[str, Any]] = []
-
         for row in rows:
             price = safe_float(row.get("price"), 0.0)
             vwap = safe_float(row.get("vwap"), 0.0)
 
             new_row = dict(row)
-            if vwap > 0.0:
-                dev = (price - vwap) / vwap
-            else:
-                dev = 0.0
-
+            dev = (price - vwap) / vwap if vwap > 0.0 else 0.0
             new_row["vwap_dev"] = dev
             new_row["vwap_dev_abs"] = abs(dev)
+            enriched.append(new_row)
+        return enriched
+
+
+class VWAPReversionWindowEngine:
+    def enrich_rows(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        enriched: List[Dict[str, Any]] = []
+
+        for row in rows:
+            vwap_dev_abs = safe_float(row.get("vwap_dev_abs"), 0.0)
+            pressure = safe_float(row.get("pressure_score"), 0.0)
+            accel = safe_float(row.get("pressure_acceleration"), 0.0)
+            confluence = safe_float(row.get("confluence_score"), 0.0)
+            regime = str(row.get("regime", "NEUTRAL")).upper()
+
+            deviation_fit = band_pass_score(
+                value=vwap_dev_abs,
+                lower=0.012,
+                ideal_low=0.020,
+                ideal_high=0.085,
+                upper=0.140,
+            )
+
+            pressure_fit = clamp01(pressure / 0.40)
+            accel_fit = clamp01(accel / 0.12)
+            confluence_fit = clamp01(confluence / 0.90)
+
+            regime_fit_map = {
+                "MEAN_REVERSION": 1.00,
+                "RANGE": 0.92,
+                "NEUTRAL": 0.82,
+                "VOLATILE": 0.76,
+                "TREND": 0.70,
+                "BREAKOUT": 0.64,
+            }
+            regime_fit = regime_fit_map.get(regime, 0.55)
+
+            reversion_window_score = clamp01(
+                0.38 * deviation_fit
+                + 0.18 * pressure_fit
+                + 0.10 * accel_fit
+                + 0.22 * confluence_fit
+                + 0.12 * regime_fit
+            )
+
+            reversion_window_pass = (
+                deviation_fit >= 0.45
+                and confluence_fit >= 0.60
+                and reversion_window_score >= 0.40
+            )
+
+            new_row = dict(row)
+            new_row["reversion_window_score"] = reversion_window_score
+            new_row["reversion_window_pass"] = reversion_window_pass
             enriched.append(new_row)
 
         return enriched
@@ -156,13 +210,13 @@ class EliteSignalClassifier:
         for row in rows:
             confluence = safe_float(row.get("confluence_score"), 0.0)
             pressure = safe_float(row.get("pressure_score"), 0.0)
-            accel = safe_float(row.get("pressure_acceleration"), 0.0)
             vwap_dev_abs = safe_float(row.get("vwap_dev_abs"), 0.0)
             trade_score = safe_float(row.get("trade_score"), 0.0)
+            reversion_window_score = safe_float(row.get("reversion_window_score"), 0.0)
 
             tier = "WATCH"
 
-            if trade_score >= 0.45:
+            if trade_score >= 0.45 and reversion_window_score >= 0.40:
                 tier = "QUALIFIED"
 
             if (
@@ -170,6 +224,7 @@ class EliteSignalClassifier:
                 and pressure >= 0.30
                 and vwap_dev_abs >= 0.015
                 and trade_score >= 0.55
+                and reversion_window_score >= 0.62
             ):
                 tier = "ELITE"
 
@@ -181,6 +236,7 @@ class EliteSignalClassifier:
 
 
 vwap_engine = VWAPDeviationEngine()
+reversion_window_engine = VWAPReversionWindowEngine()
 elite_classifier = EliteSignalClassifier()
 
 
@@ -207,6 +263,25 @@ def clamp01(value: float) -> float:
     return value
 
 
+def band_pass_score(
+    *,
+    value: float,
+    lower: float,
+    ideal_low: float,
+    ideal_high: float,
+    upper: float,
+) -> float:
+    if value <= lower or value >= upper:
+        return 0.0
+    if ideal_low <= value <= ideal_high:
+        return 1.0
+    if value < ideal_low:
+        span = ideal_low - lower
+        return clamp01((value - lower) / span) if span > 0 else 0.0
+    span = upper - ideal_high
+    return clamp01((upper - value) / span) if span > 0 else 0.0
+
+
 def candle_attr(candle: Any, name: str, default: float = 0.0) -> float:
     if hasattr(candle, name):
         return safe_float(getattr(candle, name), default)
@@ -215,14 +290,7 @@ def candle_attr(candle: Any, name: str, default: float = 0.0) -> float:
         return safe_float(candle.get(name, default), default)
 
     if isinstance(candle, (list, tuple)):
-        idx_map = {
-            "ts": 0,
-            "open": 1,
-            "high": 2,
-            "low": 3,
-            "close": 4,
-            "volume": 5,
-        }
+        idx_map = {"ts": 0, "open": 1, "high": 2, "low": 3, "close": 4, "volume": 5}
         idx = idx_map.get(name)
         if idx is not None and len(candle) > idx:
             return safe_float(candle[idx], default)
@@ -270,7 +338,6 @@ def choose_engine_mode() -> str:
 
 def regime_alignment_score(regime: str) -> float:
     r = str(regime).upper()
-
     if r == "MEAN_REVERSION":
         return 1.00
     if r == "TREND":
@@ -292,28 +359,26 @@ def blended_conviction_score(
     pressure_acceleration: float,
     regime: str,
     vwap_dev_abs: float,
+    reversion_window_score: float,
 ) -> float:
     regime_score = regime_alignment_score(regime)
-
     score = (
-        0.16 * clamp01(base_ai_score)
-        + 0.30 * clamp01(confluence_score)
-        + 0.22 * clamp01(pressure_score)
-        + 0.14 * clamp01(pressure_acceleration)
-        + 0.10 * clamp01(regime_score)
-        + 0.18 * clamp01(vwap_dev_abs * 25.0)
+        0.12 * clamp01(base_ai_score)
+        + 0.26 * clamp01(confluence_score)
+        + 0.18 * clamp01(pressure_score)
+        + 0.10 * clamp01(pressure_acceleration)
+        + 0.08 * clamp01(regime_score)
+        + 0.12 * clamp01(vwap_dev_abs * 25.0)
+        + 0.14 * clamp01(reversion_window_score)
     )
-
     return clamp01(score)
 
 
 def call_rows_module(module: Any, rows: List[Dict[str, Any]], label: str) -> List[Dict[str, Any]]:
     if hasattr(module, "enrich_rows"):
         return module.enrich_rows(rows)
-
     if hasattr(module, "enrich"):
         return module.enrich(rows)
-
     if hasattr(module, "detect"):
         return module.detect(rows)
 
@@ -367,7 +432,6 @@ def fetch_assets(symbols: List[str]) -> List[Dict[str, Any]]:
             row["vwap"] = vwap
             row["spread_bps"] = spread_bps
             row["candles"] = candles
-
             rows.append(row)
 
             print(
@@ -406,22 +470,24 @@ def passes_optimizer_gate(row: Dict[str, Any], profile: Dict[str, float]) -> boo
     pressure_acceleration = safe_float(row.get("pressure_acceleration"), 0.0)
     spread_bps_abs = abs(safe_float(row.get("spread_bps"), 0.0))
     regime = str(row.get("regime", "NEUTRAL")).upper()
+    reversion_window_score = safe_float(row.get("reversion_window_score"), 0.0)
+    reversion_window_pass = bool(row.get("reversion_window_pass", False))
 
     if regime not in ALLOWED_EXECUTION_REGIMES:
         return False
-
     if confluence_score < profile["min_confluence_to_reach_optimizer"]:
         return False
-
     if spread_bps_abs < profile["min_abs_spread_bps_to_reach_optimizer"]:
         return False
-
+    if not reversion_window_pass:
+        return False
+    if reversion_window_score < profile["min_reversion_window_score"]:
+        return False
     if (
         pressure_score < profile["min_pressure_to_reach_optimizer"]
         and pressure_acceleration < profile["min_accel_to_reach_optimizer"]
     ):
         return False
-
     return True
 
 
@@ -433,8 +499,14 @@ def passes_execution_gate(row: Dict[str, Any], profile: Dict[str, float]) -> boo
     vwap_dev_abs = safe_float(row.get("vwap_dev_abs"), 0.0)
     regime = str(row.get("regime", "NEUTRAL")).upper()
     tier = str(row.get("signal_tier", "WATCH")).upper()
+    reversion_window_score = safe_float(row.get("reversion_window_score"), 0.0)
+    reversion_window_pass = bool(row.get("reversion_window_pass", False))
 
     if regime not in ALLOWED_EXECUTION_REGIMES:
+        return False
+    if not reversion_window_pass:
+        return False
+    if reversion_window_score < profile["min_reversion_window_score"]:
         return False
 
     if tier == "ELITE":
@@ -447,19 +519,14 @@ def passes_execution_gate(row: Dict[str, Any], profile: Dict[str, float]) -> boo
     if tier == "QUALIFIED":
         if trade_score < profile["min_trade_score_to_execute"]:
             return False
-
         if confluence_score < profile["min_confluence_to_execute"]:
             return False
-
         if vwap_dev_abs < profile["min_vwap_dev_abs_to_execute"]:
             return False
-
         if pressure_score >= profile["min_pressure_to_execute"]:
             return True
-
         if pressure_acceleration >= profile["min_accel_or_pressure_boost"]:
             return True
-
         return False
 
     return False
@@ -502,7 +569,8 @@ while True:
         accel_rows = call_rows_module(accel_engine, pressure_rows, "PressureAccelerationEngine")
         confluence_rows = call_rows_module(confluence_engine, accel_rows, "SignalConfluenceEngine")
         vwap_rows = vwap_engine.enrich_rows(confluence_rows)
-        sweep_rows = call_rows_module(sweep_engine, vwap_rows, "LiquiditySweepDetector")
+        reversion_rows = reversion_window_engine.enrich_rows(vwap_rows)
+        sweep_rows = call_rows_module(sweep_engine, reversion_rows, "LiquiditySweepDetector")
         ranked = ai.rank_opportunities(sweep_rows)
 
         signal_map = {str(r["symbol"]).upper(): r for r in sweep_rows}
@@ -518,6 +586,7 @@ while True:
             pressure_acceleration = safe_float(p.get("pressure_acceleration"), 0.0)
             confluence_score = safe_float(p.get("confluence_score"), 0.0)
             vwap_dev_abs = safe_float(p.get("vwap_dev_abs"), 0.0)
+            reversion_window_score = safe_float(p.get("reversion_window_score"), 0.0)
 
             fused_score = blended_conviction_score(
                 base_ai_score=base_ai_score,
@@ -526,6 +595,7 @@ while True:
                 pressure_acceleration=pressure_acceleration,
                 regime=regime,
                 vwap_dev_abs=vwap_dev_abs,
+                reversion_window_score=reversion_window_score,
             )
 
             merged.append(
@@ -542,6 +612,8 @@ while True:
                     "regime_alignment": regime_alignment_score(regime),
                     "vwap_dev": safe_float(p.get("vwap_dev"), 0.0),
                     "vwap_dev_abs": vwap_dev_abs,
+                    "reversion_window_score": reversion_window_score,
+                    "reversion_window_pass": bool(p.get("reversion_window_pass", False)),
                 }
             )
 
@@ -554,6 +626,7 @@ while True:
             optimizer_input = sorted(
                 merged,
                 key=lambda x: (
+                    safe_float(x.get("reversion_window_score"), 0.0),
                     safe_float(x.get("confluence_score"), 0.0),
                     safe_float(x.get("pressure_score"), 0.0),
                     safe_float(x.get("vwap_dev_abs"), 0.0),
@@ -569,13 +642,27 @@ while True:
         )
 
         optimized = optimizer.optimize(optimizer_input)
-        classified = elite_classifier.classify(optimized)
+
+        optimized_plus: List[Dict[str, Any]] = []
+        opt_map = {str(r.get("symbol", "")).upper(): r for r in optimized}
+        for row in optimizer_input:
+            symbol = str(row.get("symbol", "")).upper()
+            merged_row = dict(row)
+            merged_row.update(opt_map.get(symbol, {}))
+            if "reversion_window_score" not in merged_row:
+                merged_row["reversion_window_score"] = safe_float(row.get("reversion_window_score"), 0.0)
+            if "reversion_window_pass" not in merged_row:
+                merged_row["reversion_window_pass"] = bool(row.get("reversion_window_pass", False))
+            optimized_plus.append(merged_row)
+
+        classified = elite_classifier.classify(optimized_plus)
 
         classified = sorted(
             classified,
             key=lambda x: (
                 safe_float(x.get("trade_score"), 0.0),
                 1 if str(x.get("signal_tier", "WATCH")).upper() == "ELITE" else 0,
+                safe_float(x.get("reversion_window_score"), 0.0),
                 safe_float(x.get("confluence_score"), 0.0),
                 safe_float(x.get("pressure_score"), 0.0),
                 safe_float(x.get("vwap_dev_abs"), 0.0),
@@ -587,9 +674,10 @@ while True:
             r for r in classified
             if str(r.get("decision", "")).upper() == "TRADE"
             and passes_execution_gate(r, ACTIVE_PROFILE)
-        ]
+        ][:MAX_TRADES_PER_CYCLE]
 
-        passing_execution_gate = passing_execution_gate[:MAX_TRADES_PER_CYCLE]
+        execution_audit: List[str] = []
+        opened_this_cycle = 0
 
         for r in passing_execution_gate:
             symbol = str(r["symbol"]).upper()
@@ -597,9 +685,11 @@ while True:
             trade_score = safe_float(r.get("trade_score"), 0.0)
 
             if price <= 0.0:
+                execution_audit.append(f"{symbol}: skipped_invalid_price")
                 continue
 
             if position_manager.has_open_position(symbol):
+                execution_audit.append(f"{symbol}: skipped_already_open")
                 continue
 
             qty = 10.0 / price
@@ -612,10 +702,14 @@ while True:
                 opened_at_utc=now(),
             )
 
+            opened_this_cycle += 1
+            execution_audit.append(f"{symbol}: OPENED")
+
             print(
                 f"[OPEN] {symbol} | price={price:.6f} | qty={qty:.8f} | "
                 f"trade={trade_score:.2f} | tier={str(r.get('signal_tier', 'WATCH')).upper()} | "
                 f"vwap_dev={safe_float(r.get('vwap_dev_abs'), 0.0):.4f} | "
+                f"rwin={safe_float(r.get('reversion_window_score'), 0.0):.2f} | "
                 f"confluence={safe_float(r.get('confluence_score'), 0.0):.2f} | "
                 f"pressure={safe_float(r.get('pressure_score'), 0.0):.2f} | "
                 f"accel={safe_float(r.get('pressure_acceleration'), 0.0):.2f}"
@@ -630,9 +724,7 @@ while True:
         for trade in closed_positions:
             pnl = safe_float(trade.get("realized_pnl_usd"), 0.0)
             estimated_equity += pnl
-            print(
-                f"[CLOSE] {trade['symbol']} | reason={trade['exit_reason']} | pnl={pnl:.4f}"
-            )
+            print(f"[CLOSE] {trade['symbol']} | reason={trade['exit_reason']} | pnl={pnl:.4f}")
 
         pm_summary = position_manager.summary()
 
@@ -649,13 +741,11 @@ while True:
                 1 for x in merged if x.get("confluence_allow_trade", False)
             ),
             "signals_passed_optimizer_gate": len(
-                [
-                    x for x in merged
-                    if x.get("confluence_allow_trade", False)
-                    and passes_optimizer_gate(x, ACTIVE_PROFILE)
-                ]
+                [x for x in merged if x.get("confluence_allow_trade", False) and passes_optimizer_gate(x, ACTIVE_PROFILE)]
             ),
             "signals_passed_execution_gate": len(passing_execution_gate),
+            "opened_this_cycle": opened_this_cycle,
+            "execution_audit": execution_audit,
             "max_symbols_per_cycle": MAX_SYMBOLS_PER_CYCLE,
             "max_trades_per_cycle": MAX_TRADES_PER_CYCLE,
             **pm_summary,
@@ -668,7 +758,6 @@ while True:
         print("======================================")
         print("   CAPITAL STRATA SYSTEMS DASHBOARD")
         print("======================================\n")
-
         print("Cycle:", cycle)
         print("Equity:", round(estimated_equity, 2))
         print("Engine mode:", ENGINE_MODE.upper())
@@ -676,10 +765,11 @@ while True:
         print("Trade cap:", MAX_TRADES_PER_CYCLE)
         print("Execution style: CONDITION-DRIVEN / SESSION-LOCKED POLICY")
         print("Trades this cycle: top condition-qualified signals only")
+        print("Signals passed final gate:", len(passing_execution_gate))
+        print("Opened this cycle:", opened_this_cycle)
         print("Symbols:", symbols)
 
         print("\nAI SIGNAL SCANNER\n")
-
         if not classified:
             print("No optimized rows available this cycle.")
         else:
@@ -694,11 +784,19 @@ while True:
                     f" pressure={safe_float(r.get('pressure_score'), 0.0):.2f}"
                     f" accel={safe_float(r.get('pressure_acceleration'), 0.0):.2f}"
                     f" vwap_dev={safe_float(r.get('vwap_dev_abs'), 0.0):.4f}"
+                    f" rwin={safe_float(r.get('reversion_window_score'), 0.0):.2f}"
                     f" confluence={safe_float(r.get('confluence_score'), 0.0):.2f}"
                     f" trade={safe_float(r.get('trade_score'), 0.0):.2f}"
                     f" decision={str(r.get('decision', 'WATCH')).upper()}"
                     f" gate={exec_gate}"
                 )
+
+        print("\nEXECUTION AUDIT\n")
+        if execution_audit:
+            for line in execution_audit:
+                print(line)
+        else:
+            print("No execution actions this cycle.")
 
         print(f"\nRefreshing in {REFRESH_SECONDS} seconds...\n")
         time.sleep(REFRESH_SECONDS)
