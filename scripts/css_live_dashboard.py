@@ -678,6 +678,80 @@ def compute_liquidity_quality_score(row: Dict[str, Any]) -> float:
     return clamp01(score)
 
 
+def fetch_assets(selected_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    global _debug_payload_logged
+
+    rows: List[Dict[str, Any]] = []
+
+    for selected in selected_rows:
+        symbol = str(selected.get("symbol", "")).upper()
+        venue = str(selected.get("venue", "UNKNOWN")).upper()
+        asset_class = str(selected.get("asset_class", "OTHER")).upper()
+
+        try:
+            payload = load_runtime_asset(symbol)
+
+            if not isinstance(payload, dict):
+                print(f"[ROW-SKIP] {symbol}: payload is not dict")
+                continue
+
+            payload = normalize_snapshot_spread(payload)
+
+            raw_candles = payload.get("candles", [])
+            if not isinstance(raw_candles, list) or len(raw_candles) < 20:
+                print(f"[ROW-SKIP] {symbol}: insufficient candles")
+                continue
+
+            candles = normalize_candles(raw_candles)
+
+            if not _debug_payload_logged:
+                print(f"[DEBUG] sample payload keys for {symbol}: {list(payload.keys())}")
+                if raw_candles:
+                    print(f"[DEBUG] sample candle type for {symbol}: {type(raw_candles[-1]).__name__}")
+                    print(f"[DEBUG] sample candle value for {symbol}: {raw_candles[-1]}")
+                _debug_payload_logged = True
+
+            price = safe_float(payload.get("price"), 0.0)
+            vwap = safe_float(payload.get("vwap"), 0.0)
+            spread_bps = safe_float(payload.get("spread_bps"), 0.0)
+            spread_source = str(payload.get("spread_source", "unknown")).lower()
+
+            if price <= 0.0:
+                print(f"[ROW-SKIP] {symbol}: invalid price")
+                continue
+
+            if vwap <= 0.0:
+                vwap = price
+
+            row = dict(payload)
+            row["symbol"] = str(payload.get("symbol", symbol)).upper()
+            row["price"] = price
+            row["vwap"] = vwap
+            row["spread_bps"] = spread_bps
+            row["spread_source"] = spread_source
+            row["venue"] = venue
+            row["asset_class"] = asset_class
+            row["candles"] = candles
+            rows.append(row)
+
+            print(
+                f"[ROW-OK] {symbol}: "
+                f"venue={venue}, "
+                f"asset={asset_class}, "
+                f"price={price:.6f}, "
+                f"vwap={vwap:.6f}, "
+                f"spread_bps={spread_bps:.2f}, "
+                f"spread_src={spread_source}, "
+                f"candles={len(candles)}"
+            )
+
+        except Exception as exc:
+            print(f"[ROW-ERROR] {symbol}: {exc}")
+            continue
+
+    return rows
+
+
 def persist_state(summary: Dict[str, Any]) -> None:
     try:
         with SUMMARY_FILE.open("w", encoding="utf-8") as f:
