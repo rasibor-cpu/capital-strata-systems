@@ -36,79 +36,105 @@ POSITIONS_FILE = ARTIFACT_DIR / "css_open_positions.json"
 CLOSED_TRADES_FILE = ARTIFACT_DIR / "css_closed_trades.json"
 
 MAX_SYMBOLS_PER_CYCLE = 25
-MAX_TRADES_PER_CYCLE = 5
+MAX_TRADES_PER_CYCLE = 3
 REFRESH_SECONDS = 10
+
+MAX_OPEN_POSITIONS_TOTAL = 5
+MAX_OPEN_POSITIONS_FX = 3
+MAX_OPEN_POSITIONS_CRYPTO = 2
+MAX_OPEN_POSITIONS_OTHER = 1
+
+GLOBAL_TAKE_PROFIT_PCT = 0.014
+GLOBAL_STOP_LOSS_PCT = 0.012
+GLOBAL_MAX_HOLD_CYCLES = 5
+
+ELITE_TAKE_PROFIT_PCT = 0.022
+QUALIFIED_TAKE_PROFIT_PCT = 0.012
+ELITE_MAX_HOLD_CYCLES = 6
+QUALIFIED_MAX_HOLD_CYCLES = 4
+
+BASE_TRADE_NOTIONAL_USD = 10.0
+ELITE_TRADE_NOTIONAL_USD = 12.0
+QUALIFIED_TRADE_NOTIONAL_USD = 10.0
+WATCHLIST_TRADE_NOTIONAL_USD = 8.0
+
+REENTRY_COOLDOWN_CYCLES = 2
 
 ENGINE_PROFILES: Dict[str, Dict[str, float]] = {
     "safe/test": {
-        "min_confluence_to_reach_optimizer": 0.90,
-        "min_pressure_to_reach_optimizer": 0.30,
-        "min_accel_to_reach_optimizer": 0.15,
-        "min_abs_spread_bps_to_reach_optimizer": 20.0,
-        "min_trade_score_to_execute": 0.66,
-        "min_confluence_to_execute": 0.90,
-        "min_pressure_to_execute": 0.30,
-        "min_accel_or_pressure_boost": 0.15,
-        "min_vwap_dev_abs_to_execute": 0.018,
-        "min_reversion_window_score": 0.72,
-        "min_elasticity_score": 0.35,
-        "min_exhaustion_score": 0.40,
+        "min_confluence_to_reach_optimizer": 0.82,
+        "min_pressure_to_reach_optimizer": 0.22,
+        "min_accel_to_reach_optimizer": 0.10,
+        "max_abs_spread_bps_to_reach_optimizer": 20.0,
+        "min_trade_score_to_execute": 0.58,
+        "min_confluence_to_execute": 0.82,
+        "min_pressure_to_execute": 0.22,
+        "min_accel_or_pressure_boost": 0.10,
+        "min_vwap_dev_abs_to_execute": 0.013,
+        "min_reversion_window_score": 0.58,
+        "min_elasticity_score": 0.24,
+        "min_directional_fit_to_execute": 0.64,
+        "min_entry_quality_to_execute": 0.66,
     },
     "conservative": {
-        "min_confluence_to_reach_optimizer": 0.84,
-        "min_pressure_to_reach_optimizer": 0.24,
-        "min_accel_to_reach_optimizer": 0.10,
-        "min_abs_spread_bps_to_reach_optimizer": 16.0,
-        "min_trade_score_to_execute": 0.60,
-        "min_confluence_to_execute": 0.84,
-        "min_pressure_to_execute": 0.24,
-        "min_accel_or_pressure_boost": 0.10,
-        "min_vwap_dev_abs_to_execute": 0.015,
-        "min_reversion_window_score": 0.64,
-        "min_elasticity_score": 0.30,
-        "min_exhaustion_score": 0.36,
+        "min_confluence_to_reach_optimizer": 0.76,
+        "min_pressure_to_reach_optimizer": 0.18,
+        "min_accel_to_reach_optimizer": 0.08,
+        "max_abs_spread_bps_to_reach_optimizer": 18.0,
+        "min_trade_score_to_execute": 0.54,
+        "min_confluence_to_execute": 0.76,
+        "min_pressure_to_execute": 0.18,
+        "min_accel_or_pressure_boost": 0.08,
+        "min_vwap_dev_abs_to_execute": 0.011,
+        "min_reversion_window_score": 0.52,
+        "min_elasticity_score": 0.20,
+        "min_directional_fit_to_execute": 0.58,
+        "min_entry_quality_to_execute": 0.60,
     },
     "balanced": {
-        "min_confluence_to_reach_optimizer": 0.78,
-        "min_pressure_to_reach_optimizer": 0.20,
-        "min_accel_to_reach_optimizer": 0.08,
-        "min_abs_spread_bps_to_reach_optimizer": 12.0,
-        "min_trade_score_to_execute": 0.55,
-        "min_confluence_to_execute": 0.78,
-        "min_pressure_to_execute": 0.20,
-        "min_accel_or_pressure_boost": 0.08,
-        "min_vwap_dev_abs_to_execute": 0.012,
-        "min_reversion_window_score": 0.56,
-        "min_elasticity_score": 0.25,
-        "min_exhaustion_score": 0.32,
-    },
-    "aggressive": {
         "min_confluence_to_reach_optimizer": 0.70,
         "min_pressure_to_reach_optimizer": 0.16,
         "min_accel_to_reach_optimizer": 0.06,
-        "min_abs_spread_bps_to_reach_optimizer": 10.0,
+        "max_abs_spread_bps_to_reach_optimizer": 16.0,
         "min_trade_score_to_execute": 0.50,
         "min_confluence_to_execute": 0.70,
         "min_pressure_to_execute": 0.16,
         "min_accel_or_pressure_boost": 0.06,
         "min_vwap_dev_abs_to_execute": 0.010,
-        "min_reversion_window_score": 0.48,
-        "min_elasticity_score": 0.20,
-        "min_exhaustion_score": 0.28,
+        "min_reversion_window_score": 0.45,
+        "min_elasticity_score": 0.18,
+        "min_directional_fit_to_execute": 0.52,
+        "min_entry_quality_to_execute": 0.55,
     },
-    "opportunistic/expansion": {
-        "min_confluence_to_reach_optimizer": 0.62,
+    "aggressive": {
+        "min_confluence_to_reach_optimizer": 0.64,
         "min_pressure_to_reach_optimizer": 0.12,
         "min_accel_to_reach_optimizer": 0.04,
-        "min_abs_spread_bps_to_reach_optimizer": 8.0,
-        "min_trade_score_to_execute": 0.44,
-        "min_confluence_to_execute": 0.62,
+        "max_abs_spread_bps_to_reach_optimizer": 14.0,
+        "min_trade_score_to_execute": 0.46,
+        "min_confluence_to_execute": 0.64,
         "min_pressure_to_execute": 0.12,
         "min_accel_or_pressure_boost": 0.04,
         "min_vwap_dev_abs_to_execute": 0.008,
-        "min_reversion_window_score": 0.42,
-        "min_elasticity_score": 0.16,
-        "min_exhaustion_score": 0.24,
+        "min_reversion_window_score": 0.40,
+        "min_elasticity_score": 0.14,
+        "min_directional_fit_to_execute": 0.46,
+        "min_entry_quality_to_execute": 0.50,
+    },
+    "opportunistic/expansion": {
+        "min_confluence_to_reach_optimizer": 0.58,
+        "min_pressure_to_reach_optimizer": 0.10,
+        "min_accel_to_reach_optimizer": 0.03,
+        "max_abs_spread_bps_to_reach_optimizer": 12.0,
+        "min_trade_score_to_execute": 0.42,
+        "min_confluence_to_execute": 0.58,
+        "min_pressure_to_execute": 0.10,
+        "min_accel_or_pressure_boost": 0.03,
+        "min_vwap_dev_abs_to_execute": 0.006,
+        "min_reversion_window_score": 0.36,
+        "min_elasticity_score": 0.12,
+        "min_directional_fit_to_execute": 0.42,
+        "min_entry_quality_to_execute": 0.46,
     },
 }
 
@@ -134,21 +160,21 @@ ai = AIOpportunityScorer()
 optimizer = QuantSignalOptimizer()
 
 position_manager = PositionManager(
-    take_profit_pct=0.025,
-    stop_loss_pct=0.012,
-    max_hold_cycles=8,
+    take_profit_pct=GLOBAL_TAKE_PROFIT_PCT,
+    stop_loss_pct=GLOBAL_STOP_LOSS_PCT,
+    max_hold_cycles=GLOBAL_MAX_HOLD_CYCLES,
 )
 
 starting_capital = 200.0
 estimated_equity = starting_capital
 cycle = 0
 _debug_payload_logged = False
+recent_exit_cycle_by_symbol: Dict[str, int] = {}
 
 
 class VWAPDeviationEngine:
     def enrich_rows(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         enriched: List[Dict[str, Any]] = []
-
         for row in rows:
             price = safe_float(row.get("price"), 0.0)
             vwap = safe_float(row.get("vwap"), 0.0)
@@ -158,7 +184,6 @@ class VWAPDeviationEngine:
             new_row["vwap_dev"] = dev
             new_row["vwap_dev_abs"] = abs(dev)
             enriched.append(new_row)
-
         return enriched
 
 
@@ -176,23 +201,23 @@ class VWAPReversionWindowEngine:
 
             deviation_fit = band_pass_score(
                 value=vwap_dev_abs,
-                lower=0.012,
-                ideal_low=0.020,
-                ideal_high=0.085,
-                upper=0.140,
+                lower=0.006,
+                ideal_low=0.012,
+                ideal_high=0.055,
+                upper=0.120,
             )
 
-            pressure_fit = clamp01(pressure / 0.40)
-            accel_fit = clamp01(accel / 0.12)
-            confluence_fit = clamp01(confluence / 0.90)
+            pressure_fit = clamp01(pressure / 0.35)
+            accel_fit = clamp01(accel / 0.10)
+            confluence_fit = clamp01(confluence / 0.85)
 
             regime_fit_map = {
                 "MEAN_REVERSION": 1.00,
                 "RANGE": 0.92,
-                "NEUTRAL": 0.82,
-                "VOLATILE": 0.76,
-                "TREND": 0.70,
-                "BREAKOUT": 0.64,
+                "NEUTRAL": 0.84,
+                "VOLATILE": 0.78,
+                "TREND": 0.74,
+                "BREAKOUT": 0.68,
             }
             regime_fit = regime_fit_map.get(regime, 0.55)
 
@@ -200,15 +225,15 @@ class VWAPReversionWindowEngine:
                 0.30 * deviation_fit
                 + 0.16 * pressure_fit
                 + 0.08 * accel_fit
-                + 0.18 * confluence_fit
+                + 0.20 * confluence_fit
                 + 0.12 * regime_fit
-                + 0.16 * elasticity_score
+                + 0.14 * elasticity_score
             )
 
             reversion_window_pass = (
-                deviation_fit >= 0.45
-                and confluence_fit >= 0.60
-                and reversion_window_score >= 0.40
+                deviation_fit >= 0.38
+                and confluence_fit >= 0.52
+                and reversion_window_score >= 0.34
             )
 
             new_row = dict(row)
@@ -219,30 +244,42 @@ class VWAPReversionWindowEngine:
         return enriched
 
 
-class MomentumExhaustionEngine:
+class MicroTrendAlignmentEngine:
     def enrich_rows(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         enriched: List[Dict[str, Any]] = []
 
         for row in rows:
-            pressure = safe_float(row.get("pressure_score"), 0.0)
-            accel = safe_float(row.get("pressure_acceleration"), 0.0)
-            momentum = abs(safe_float(row.get("momentum"), 0.0))
-            vwap_dev_abs = safe_float(row.get("vwap_dev_abs"), 0.0)
+            candles = row.get("candles", [])
+            last5 = candles[-5:] if len(candles) >= 5 else candles[-3:]
 
-            pressure_component = clamp01((0.55 - pressure) / 0.55)
-            accel_component = clamp01((0.10 - abs(accel)) / 0.10)
-            momentum_component = clamp01(momentum / 0.08)
-            stretch_component = clamp01(vwap_dev_abs / 0.05)
+            closes = [safe_float(c.get("close"), 0.0) for c in last5 if isinstance(c, dict)]
+            highs = [safe_float(c.get("high"), 0.0) for c in last5 if isinstance(c, dict)]
+            lows = [safe_float(c.get("low"), 0.0) for c in last5 if isinstance(c, dict)]
+            price = safe_float(row.get("price"), 0.0)
+            vwap = safe_float(row.get("vwap"), 0.0)
 
-            exhaustion_score = clamp01(
-                0.28 * pressure_component
-                + 0.22 * accel_component
-                + 0.22 * momentum_component
-                + 0.28 * stretch_component
-            )
+            micro_trend_score = 0.5
+            micro_bias = "NEUTRAL"
+
+            if len(closes) >= 3:
+                up_steps = sum(1 for i in range(1, len(closes)) if closes[i] > closes[i - 1])
+                down_steps = sum(1 for i in range(1, len(closes)) if closes[i] < closes[i - 1])
+
+                range_span = max(highs) - min(lows) if highs and lows else 0.0
+                move_span = abs(closes[-1] - closes[0]) if closes else 0.0
+                efficiency = clamp01(move_span / range_span) if range_span > 0 else 0.0
+
+                if price >= vwap:
+                    micro_trend_score = clamp01(0.45 + 0.12 * up_steps + 0.10 * efficiency - 0.08 * down_steps)
+                    micro_bias = "UP"
+                else:
+                    micro_trend_score = clamp01(0.45 + 0.12 * down_steps + 0.10 * efficiency - 0.08 * up_steps)
+                    micro_bias = "DOWN"
 
             new_row = dict(row)
-            new_row["exhaustion_score"] = exhaustion_score
+            new_row["micro_trend_score"] = micro_trend_score
+            new_row["micro_bias"] = micro_bias
+            new_row["micro_trend_pass"] = micro_trend_score >= 0.50
             enriched.append(new_row)
 
         return enriched
@@ -259,25 +296,31 @@ class EliteSignalClassifier:
             trade_score = safe_float(row.get("trade_score"), 0.0)
             reversion_window_score = safe_float(row.get("reversion_window_score"), 0.0)
             elasticity_score = safe_float(row.get("elasticity_score"), 0.0)
-            exhaustion_score = safe_float(row.get("exhaustion_score"), 0.0)
+            micro_trend_score = safe_float(row.get("micro_trend_score"), 0.0)
+            entry_quality_score = safe_float(row.get("entry_quality_score"), 0.0)
+            directional_long_fit = safe_float(row.get("directional_long_fit"), 0.0)
 
             tier = "WATCH"
 
             if (
-                trade_score >= 0.45
-                and reversion_window_score >= 0.40
-                and elasticity_score >= 0.20
+                trade_score >= 0.42
+                and reversion_window_score >= 0.34
+                and micro_trend_score >= 0.48
+                and directional_long_fit >= 0.40
+                and entry_quality_score >= 0.42
             ):
                 tier = "QUALIFIED"
 
             if (
-                confluence >= 0.90
-                and pressure >= 0.34
-                and vwap_dev_abs >= 0.015
-                and trade_score >= 0.58
-                and reversion_window_score >= 0.70
-                and elasticity_score >= 0.35
-                and exhaustion_score >= 0.30
+                confluence >= 0.82
+                and pressure >= 0.22
+                and vwap_dev_abs >= 0.010
+                and trade_score >= 0.50
+                and reversion_window_score >= 0.50
+                and elasticity_score >= 0.18
+                and micro_trend_score >= 0.58
+                and directional_long_fit >= 0.58
+                and entry_quality_score >= 0.58
             ):
                 tier = "ELITE"
 
@@ -290,7 +333,7 @@ class EliteSignalClassifier:
 
 vwap_engine = VWAPDeviationEngine()
 reversion_window_engine = VWAPReversionWindowEngine()
-exhaustion_engine = MomentumExhaustionEngine()
+micro_trend_engine = MicroTrendAlignmentEngine()
 elite_classifier = EliteSignalClassifier()
 
 
@@ -334,6 +377,48 @@ def band_pass_score(
         return clamp01((value - lower) / span) if span > 0 else 0.0
     span = upper - ideal_high
     return clamp01((upper - value) / span) if span > 0 else 0.0
+
+
+def regime_alignment_score(regime: str) -> float:
+    r = str(regime).upper()
+    if r == "MEAN_REVERSION":
+        return 1.00
+    if r == "TREND":
+        return 0.90
+    if r == "BREAKOUT":
+        return 0.88
+    if r == "VOLATILE":
+        return 0.82
+    if r in {"NEUTRAL", "RANGE"}:
+        return 0.72
+    return 0.40
+
+
+def blended_conviction_score(
+    *,
+    base_ai_score: float,
+    confluence_score: float,
+    pressure_score: float,
+    pressure_acceleration: float,
+    regime: str,
+    vwap_dev_abs: float,
+    reversion_window_score: float,
+    elasticity_score: float,
+    micro_trend_score: float,
+) -> float:
+    regime_score = regime_alignment_score(regime)
+    score = (
+        0.10 * clamp01(base_ai_score)
+        + 0.22 * clamp01(confluence_score)
+        + 0.16 * clamp01(pressure_score)
+        + 0.08 * clamp01(pressure_acceleration)
+        + 0.08 * clamp01(regime_score)
+        + 0.10 * clamp01(vwap_dev_abs * 30.0)
+        + 0.12 * clamp01(reversion_window_score)
+        + 0.07 * clamp01(elasticity_score)
+        + 0.07 * clamp01(micro_trend_score)
+    )
+    return clamp01(score)
 
 
 def candle_attr(candle: Any, name: str, default: float = 0.0) -> float:
@@ -390,46 +475,62 @@ def choose_engine_mode() -> str:
     return mode
 
 
-def regime_alignment_score(regime: str) -> float:
-    r = str(regime).upper()
-    if r == "MEAN_REVERSION":
-        return 1.00
-    if r == "TREND":
-        return 0.90
-    if r == "BREAKOUT":
-        return 0.88
-    if r == "VOLATILE":
-        return 0.82
-    if r in {"NEUTRAL", "RANGE"}:
-        return 0.72
-    return 0.40
+def infer_asset_class(symbol: str, venue: str) -> str:
+    s = str(symbol).upper()
+    v = str(venue).upper()
 
+    if v in {"OANDA", "FOREX", "FX", "ALPACA_FX", "QUESTRADE_FX"}:
+        return "FX"
+    if "_" in s:
+        return "FX"
 
-def blended_conviction_score(
-    *,
-    base_ai_score: float,
-    confluence_score: float,
-    pressure_score: float,
-    pressure_acceleration: float,
-    regime: str,
-    vwap_dev_abs: float,
-    reversion_window_score: float,
-    elasticity_score: float,
-    exhaustion_score: float,
-) -> float:
-    regime_score = regime_alignment_score(regime)
-    score = (
-        0.10 * clamp01(base_ai_score)
-        + 0.24 * clamp01(confluence_score)
-        + 0.16 * clamp01(pressure_score)
-        + 0.08 * clamp01(pressure_acceleration)
-        + 0.08 * clamp01(regime_score)
-        + 0.10 * clamp01(vwap_dev_abs * 25.0)
-        + 0.12 * clamp01(reversion_window_score)
-        + 0.07 * clamp01(elasticity_score)
-        + 0.05 * clamp01(exhaustion_score)
+    crypto_quote_suffixes = (
+        "-USD", "-USDC", "-USDT", "-BTC", "-ETH", "-EUR", "-GBP"
     )
-    return clamp01(score)
+    if v in {"COINBASE", "KRAKEN", "BINANCE", "CRYPTO"} or s.endswith(crypto_quote_suffixes):
+        return "CRYPTO"
+
+    return "OTHER"
+
+
+def summarize_selected_assets(selected_rows: List[Dict[str, Any]]) -> str:
+    counts = {"FX": 0, "CRYPTO": 0, "OTHER": 0}
+    for row in selected_rows:
+        cls = str(row.get("asset_class", "OTHER")).upper()
+        counts[cls] = counts.get(cls, 0) + 1
+    return f"FX={counts.get('FX',0)} CRYPTO={counts.get('CRYPTO',0)} OTHER={counts.get('OTHER',0)}"
+
+
+def count_open_positions_by_asset_class() -> Dict[str, int]:
+    counts = {"FX": 0, "CRYPTO": 0, "OTHER": 0, "TOTAL": 0}
+    try:
+        open_positions = position_manager.get_open_positions()
+    except Exception:
+        return counts
+
+    for pos in open_positions:
+        if str(pos.get("status", "OPEN")).upper() != "OPEN":
+            continue
+        asset_class = str(pos.get("asset_class", "")).upper()
+        if asset_class not in {"FX", "CRYPTO", "OTHER"}:
+            asset_class = infer_asset_class(
+                symbol=str(pos.get("symbol", "")),
+                venue=str(pos.get("venue", "")),
+            )
+        counts[asset_class] = counts.get(asset_class, 0) + 1
+        counts["TOTAL"] += 1
+    return counts
+
+
+def capacity_available_for_asset_class(asset_class: str, counts: Dict[str, int]) -> bool:
+    asset_class = str(asset_class).upper()
+    if counts.get("TOTAL", 0) >= MAX_OPEN_POSITIONS_TOTAL:
+        return False
+    if asset_class == "FX":
+        return counts.get("FX", 0) < MAX_OPEN_POSITIONS_FX
+    if asset_class == "CRYPTO":
+        return counts.get("CRYPTO", 0) < MAX_OPEN_POSITIONS_CRYPTO
+    return counts.get("OTHER", 0) < MAX_OPEN_POSITIONS_OTHER
 
 
 def call_rows_module(module: Any, rows: List[Dict[str, Any]], label: str) -> List[Dict[str, Any]]:
@@ -444,12 +545,16 @@ def call_rows_module(module: Any, rows: List[Dict[str, Any]], label: str) -> Lis
     return rows
 
 
-def fetch_assets(symbols: List[str]) -> List[Dict[str, Any]]:
+def fetch_assets(selected_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     global _debug_payload_logged
 
     rows: List[Dict[str, Any]] = []
 
-    for symbol in symbols:
+    for selected in selected_rows:
+        symbol = str(selected.get("symbol", "")).upper()
+        venue = str(selected.get("venue", "UNKNOWN")).upper()
+        asset_class = str(selected.get("asset_class", "OTHER")).upper()
+
         try:
             payload = load_runtime_asset(symbol)
 
@@ -476,6 +581,7 @@ def fetch_assets(symbols: List[str]) -> List[Dict[str, Any]]:
             price = safe_float(payload.get("price"), 0.0)
             vwap = safe_float(payload.get("vwap"), 0.0)
             spread_bps = safe_float(payload.get("spread_bps"), 0.0)
+            spread_source = str(payload.get("spread_source", "unknown")).lower()
 
             if price <= 0.0:
                 print(f"[ROW-SKIP] {symbol}: invalid price")
@@ -489,15 +595,20 @@ def fetch_assets(symbols: List[str]) -> List[Dict[str, Any]]:
             row["price"] = price
             row["vwap"] = vwap
             row["spread_bps"] = spread_bps
+            row["spread_source"] = spread_source
+            row["venue"] = venue
+            row["asset_class"] = asset_class
             row["candles"] = candles
             rows.append(row)
 
             print(
                 f"[ROW-OK] {symbol}: "
+                f"venue={venue}, "
+                f"asset={asset_class}, "
                 f"price={price:.6f}, "
                 f"vwap={vwap:.6f}, "
                 f"spread_bps={spread_bps:.2f}, "
-                f"spread_src={str(payload.get('spread_source', 'unknown'))}, "
+                f"spread_src={spread_source}, "
                 f"candles={len(candles)}"
             )
 
@@ -522,30 +633,202 @@ def persist_state(summary: Dict[str, Any]) -> None:
         print(f"[WARN] Could not persist artifact state: {exc}")
 
 
+def apply_post_open_overrides(
+    symbol: str,
+    price: float,
+    signal_tier: str,
+    asset_class: str,
+    venue: str,
+    entry_quality_score: float,
+) -> None:
+    try:
+        open_positions = position_manager.get_open_positions()
+        for pos in open_positions:
+            if str(pos.get("symbol", "")).upper() != symbol:
+                continue
+            if str(pos.get("status", "OPEN")).upper() != "OPEN":
+                continue
+
+            tier = str(signal_tier).upper()
+            if tier == "ELITE":
+                pos["take_profit_price"] = price * (1.0 + ELITE_TAKE_PROFIT_PCT)
+                pos["max_hold_cycles"] = ELITE_MAX_HOLD_CYCLES
+            else:
+                pos["take_profit_price"] = price * (1.0 + QUALIFIED_TAKE_PROFIT_PCT)
+                pos["max_hold_cycles"] = QUALIFIED_MAX_HOLD_CYCLES
+
+            pos["signal_tier"] = tier
+            pos["asset_class"] = str(asset_class).upper()
+            pos["venue"] = str(venue).upper()
+            pos["entry_quality_score"] = entry_quality_score
+            break
+    except Exception:
+        pass
+
+
+def compute_directional_long_fit(row: Dict[str, Any]) -> float:
+    regime = str(row.get("regime", "NEUTRAL")).upper()
+    vwap_dev = safe_float(row.get("vwap_dev"), 0.0)
+    vwap_dev_abs = safe_float(row.get("vwap_dev_abs"), 0.0)
+    pressure = safe_float(row.get("pressure_score"), 0.0)
+    accel = safe_float(row.get("pressure_acceleration"), 0.0)
+    micro_trend_score = safe_float(row.get("micro_trend_score"), 0.0)
+    micro_bias = str(row.get("micro_bias", "NEUTRAL")).upper()
+    elasticity_score = safe_float(row.get("elasticity_score"), 0.0)
+    liquidity_sweep_down = bool(row.get("liquidity_sweep_down", False))
+    liquidity_sweep_up = bool(row.get("liquidity_sweep_up", False))
+
+    score = 0.35
+
+    if regime in {"MEAN_REVERSION", "RANGE", "NEUTRAL"}:
+        if vwap_dev < 0:
+            score += 0.24
+        else:
+            score -= 0.12
+
+        if micro_bias == "DOWN":
+            score += 0.12
+
+        if liquidity_sweep_down:
+            score += 0.12
+
+        if 0.006 <= vwap_dev_abs <= 0.040:
+            score += 0.10
+
+        score += 0.08 * clamp01(elasticity_score)
+        score += 0.06 * clamp01(micro_trend_score)
+
+    elif regime in {"TREND", "BREAKOUT"}:
+        if vwap_dev > 0:
+            score += 0.22
+        else:
+            score -= 0.08
+
+        if micro_bias == "UP":
+            score += 0.16
+
+        if liquidity_sweep_up:
+            score += 0.08
+
+        score += 0.12 * clamp01(pressure / 0.30)
+        score += 0.10 * clamp01(accel / 0.10)
+        score += 0.08 * clamp01(micro_trend_score)
+
+    elif regime == "VOLATILE":
+        if vwap_dev < 0:
+            score += 0.12
+        if liquidity_sweep_down:
+            score += 0.10
+        score += 0.08 * clamp01(pressure / 0.30)
+        score += 0.08 * clamp01(elasticity_score)
+        score += 0.06 * clamp01(micro_trend_score)
+
+    return clamp01(score)
+
+
+def compute_pre_entry_quality(row: Dict[str, Any]) -> float:
+    base_score = safe_float(row.get("score"), 0.0)
+    directional_fit = safe_float(row.get("directional_long_fit"), 0.0)
+    reversion_window_score = safe_float(row.get("reversion_window_score"), 0.0)
+    elasticity_score = safe_float(row.get("elasticity_score"), 0.0)
+    micro_trend_score = safe_float(row.get("micro_trend_score"), 0.0)
+    spread_bps = abs(safe_float(row.get("spread_bps"), 0.0))
+    spread_source = str(row.get("spread_source", "unknown")).lower()
+
+    spread_penalty = clamp01(spread_bps / 30.0) * 0.08
+    if spread_source in {"fallback", "unknown"}:
+        spread_penalty += 0.02
+
+    score = (
+        0.34 * clamp01(base_score)
+        + 0.24 * clamp01(directional_fit)
+        + 0.18 * clamp01(reversion_window_score)
+        + 0.10 * clamp01(elasticity_score)
+        + 0.10 * clamp01(micro_trend_score)
+        + 0.04 * clamp01(row.get("confluence_score", 0.0))
+    ) - spread_penalty
+
+    return clamp01(score)
+
+
+def compute_entry_quality_score(row: Dict[str, Any]) -> float:
+    trade_score = safe_float(row.get("trade_score"), 0.0)
+    base_score = safe_float(row.get("score"), 0.0)
+    directional_fit = safe_float(row.get("directional_long_fit"), 0.0)
+    reversion_window_score = safe_float(row.get("reversion_window_score"), 0.0)
+    elasticity_score = safe_float(row.get("elasticity_score"), 0.0)
+    micro_trend_score = safe_float(row.get("micro_trend_score"), 0.0)
+    confluence_score = safe_float(row.get("confluence_score"), 0.0)
+    spread_bps = abs(safe_float(row.get("spread_bps"), 0.0))
+    spread_source = str(row.get("spread_source", "unknown")).lower()
+
+    spread_penalty = clamp01(spread_bps / 24.0) * 0.08
+    if spread_source in {"fallback", "unknown"}:
+        spread_penalty += 0.02
+
+    score = (
+        0.26 * clamp01(trade_score)
+        + 0.16 * clamp01(base_score)
+        + 0.22 * clamp01(directional_fit)
+        + 0.12 * clamp01(reversion_window_score)
+        + 0.08 * clamp01(elasticity_score)
+        + 0.08 * clamp01(micro_trend_score)
+        + 0.08 * clamp01(confluence_score)
+    ) - spread_penalty
+
+    return clamp01(score)
+
+
+def determine_trade_notional_usd(row: Dict[str, Any]) -> float:
+    tier = str(row.get("signal_tier", "WATCH")).upper()
+    entry_quality_score = safe_float(row.get("entry_quality_score"), 0.0)
+
+    if tier == "ELITE" and entry_quality_score >= 0.70:
+        return ELITE_TRADE_NOTIONAL_USD
+    if tier in {"ELITE", "QUALIFIED"} and entry_quality_score >= 0.56:
+        return QUALIFIED_TRADE_NOTIONAL_USD
+    return WATCHLIST_TRADE_NOTIONAL_USD
+
+
+def in_reentry_cooldown(symbol: str, current_cycle: int) -> bool:
+    last_exit_cycle = recent_exit_cycle_by_symbol.get(symbol)
+    if last_exit_cycle is None:
+        return False
+    return (current_cycle - last_exit_cycle) <= REENTRY_COOLDOWN_CYCLES
+
+
 def passes_optimizer_gate(row: Dict[str, Any], profile: Dict[str, float]) -> bool:
     confluence_score = safe_float(row.get("confluence_score"), 0.0)
     pressure_score = safe_float(row.get("pressure_score"), 0.0)
     pressure_acceleration = safe_float(row.get("pressure_acceleration"), 0.0)
     spread_bps_abs = abs(safe_float(row.get("spread_bps"), 0.0))
+    spread_source = str(row.get("spread_source", "unknown")).lower()
     regime = str(row.get("regime", "NEUTRAL")).upper()
     reversion_window_score = safe_float(row.get("reversion_window_score"), 0.0)
     reversion_window_pass = bool(row.get("reversion_window_pass", False))
     elasticity_score = safe_float(row.get("elasticity_score"), 0.0)
-    exhaustion_score = safe_float(row.get("exhaustion_score"), 0.0)
+    micro_trend_score = safe_float(row.get("micro_trend_score"), 0.0)
+    directional_long_fit = safe_float(row.get("directional_long_fit"), 0.0)
+    pre_entry_quality = safe_float(row.get("pre_entry_quality"), 0.0)
 
     if regime not in ALLOWED_EXECUTION_REGIMES:
         return False
     if confluence_score < profile["min_confluence_to_reach_optimizer"]:
         return False
-    if spread_bps_abs < profile["min_abs_spread_bps_to_reach_optimizer"]:
-        return False
+    if spread_source not in {"fallback", "unknown"}:
+        if spread_bps_abs > profile["max_abs_spread_bps_to_reach_optimizer"]:
+            return False
     if not reversion_window_pass:
         return False
     if reversion_window_score < profile["min_reversion_window_score"]:
         return False
     if elasticity_score < profile["min_elasticity_score"]:
         return False
-    if exhaustion_score < profile["min_exhaustion_score"]:
+    if micro_trend_score < 0.46:
+        return False
+    if directional_long_fit < max(0.36, profile["min_directional_fit_to_execute"] - 0.10):
+        return False
+    if pre_entry_quality < max(0.36, profile["min_entry_quality_to_execute"] - 0.12):
         return False
     if (
         pressure_score < profile["min_pressure_to_reach_optimizer"]
@@ -566,7 +849,9 @@ def passes_execution_gate(row: Dict[str, Any], profile: Dict[str, float]) -> boo
     reversion_window_score = safe_float(row.get("reversion_window_score"), 0.0)
     reversion_window_pass = bool(row.get("reversion_window_pass", False))
     elasticity_score = safe_float(row.get("elasticity_score"), 0.0)
-    exhaustion_score = safe_float(row.get("exhaustion_score"), 0.0)
+    micro_trend_score = safe_float(row.get("micro_trend_score"), 0.0)
+    directional_long_fit = safe_float(row.get("directional_long_fit"), 0.0)
+    entry_quality_score = safe_float(row.get("entry_quality_score"), 0.0)
 
     if regime not in ALLOWED_EXECUTION_REGIMES:
         return False
@@ -576,13 +861,17 @@ def passes_execution_gate(row: Dict[str, Any], profile: Dict[str, float]) -> boo
         return False
     if elasticity_score < profile["min_elasticity_score"]:
         return False
-    if exhaustion_score < profile["min_exhaustion_score"]:
+    if micro_trend_score < 0.50:
+        return False
+    if directional_long_fit < profile["min_directional_fit_to_execute"]:
+        return False
+    if entry_quality_score < profile["min_entry_quality_to_execute"]:
         return False
 
     if tier == "ELITE":
         return (
-            confluence_score >= max(0.90, profile["min_confluence_to_execute"])
-            and pressure_score >= max(0.34, profile["min_pressure_to_execute"])
+            confluence_score >= max(0.82, profile["min_confluence_to_execute"])
+            and pressure_score >= max(0.22, profile["min_pressure_to_execute"])
             and vwap_dev_abs >= profile["min_vwap_dev_abs_to_execute"]
         )
 
@@ -602,6 +891,17 @@ def passes_execution_gate(row: Dict[str, Any], profile: Dict[str, float]) -> boo
     return False
 
 
+def classify_execution_decision(row: Dict[str, Any], profile: Dict[str, float]) -> str:
+    tier = str(row.get("signal_tier", "WATCH")).upper()
+    if tier == "ELITE" and passes_execution_gate(row, profile):
+        return "TRADE"
+    if tier == "QUALIFIED" and passes_execution_gate(row, profile):
+        return "TRADE"
+    if tier in {"ELITE", "QUALIFIED"}:
+        return "ARMED"
+    return "WATCH"
+
+
 ENGINE_MODE = choose_engine_mode()
 ACTIVE_PROFILE = ENGINE_PROFILES[ENGINE_MODE]
 
@@ -613,15 +913,32 @@ while True:
     try:
         discovered = scanner.scan()
 
-        symbols = [
-            str(r["symbol"]).upper()
-            for r in discovered
-            if str(r.get("venue", "")).upper() == "COINBASE"
-        ][:MAX_SYMBOLS_PER_CYCLE]
+        selected_rows: List[Dict[str, Any]] = []
+        seen_symbols = set()
 
-        print(f"[SCAN] selected Coinbase symbols ({len(symbols)}): {symbols}")
+        for raw in discovered:
+            symbol = str(raw.get("symbol", "")).upper()
+            if not symbol or symbol in seen_symbols:
+                continue
+            venue = str(raw.get("venue", "UNKNOWN")).upper()
+            asset_class = infer_asset_class(symbol=symbol, venue=venue)
+            selected_rows.append(
+                {
+                    "symbol": symbol,
+                    "venue": venue,
+                    "asset_class": asset_class,
+                }
+            )
+            seen_symbols.add(symbol)
+            if len(selected_rows) >= MAX_SYMBOLS_PER_CYCLE:
+                break
 
-        rows = fetch_assets(symbols)
+        symbols = [row["symbol"] for row in selected_rows]
+
+        print(f"[SCAN] selected symbols ({len(symbols)}): {symbols}")
+        print(f"[SCAN] asset mix: {summarize_selected_assets(selected_rows)}")
+
+        rows = fetch_assets(selected_rows)
 
         if not rows:
             print("Waiting for valid market rows...")
@@ -641,8 +958,8 @@ while True:
         vwap_rows = vwap_engine.enrich_rows(confluence_rows)
         elastic_rows = elasticity_engine.enrich_rows(vwap_rows)
         reversion_rows = reversion_window_engine.enrich_rows(elastic_rows)
-        exhaustion_rows = exhaustion_engine.enrich_rows(reversion_rows)
-        sweep_rows = call_rows_module(sweep_engine, exhaustion_rows, "LiquiditySweepDetector")
+        micro_rows = micro_trend_engine.enrich_rows(reversion_rows)
+        sweep_rows = call_rows_module(sweep_engine, micro_rows, "LiquiditySweepDetector")
         ranked = ai.rank_opportunities(sweep_rows)
 
         signal_map = {str(r["symbol"]).upper(): r for r in sweep_rows}
@@ -657,10 +974,15 @@ while True:
             pressure_score = safe_float(p.get("pressure_score"), 0.0)
             pressure_acceleration = safe_float(p.get("pressure_acceleration"), 0.0)
             confluence_score = safe_float(p.get("confluence_score"), 0.0)
+            vwap_dev = safe_float(p.get("vwap_dev"), 0.0)
             vwap_dev_abs = safe_float(p.get("vwap_dev_abs"), 0.0)
             reversion_window_score = safe_float(p.get("reversion_window_score"), 0.0)
             elasticity_score = safe_float(p.get("elasticity_score"), 0.0)
-            exhaustion_score = safe_float(p.get("exhaustion_score"), 0.0)
+            micro_trend_score = safe_float(p.get("micro_trend_score"), 0.0)
+            venue = str(p.get("venue", "UNKNOWN")).upper()
+            asset_class = str(p.get("asset_class", infer_asset_class(symbol, venue))).upper()
+
+            directional_long_fit = compute_directional_long_fit(p)
 
             fused_score = blended_conviction_score(
                 base_ai_score=base_ai_score,
@@ -671,30 +993,38 @@ while True:
                 vwap_dev_abs=vwap_dev_abs,
                 reversion_window_score=reversion_window_score,
                 elasticity_score=elasticity_score,
-                exhaustion_score=exhaustion_score,
+                micro_trend_score=micro_trend_score,
             )
 
-            merged.append(
-                {
-                    "symbol": symbol,
-                    "score": fused_score,
-                    "base_ai_score": base_ai_score,
-                    "pressure_score": pressure_score,
-                    "pressure_acceleration": pressure_acceleration,
-                    "confluence_score": confluence_score,
-                    "confluence_allow_trade": bool(p.get("confluence_allow_trade", False)),
-                    "spread_bps": safe_float(p.get("spread_bps"), 0.0),
-                    "regime": regime,
-                    "regime_alignment": regime_alignment_score(regime),
-                    "vwap_dev": safe_float(p.get("vwap_dev"), 0.0),
-                    "vwap_dev_abs": vwap_dev_abs,
-                    "reversion_window_score": reversion_window_score,
-                    "reversion_window_pass": bool(p.get("reversion_window_pass", False)),
-                    "vwap_elasticity": safe_float(p.get("vwap_elasticity"), 0.0),
-                    "elasticity_score": elasticity_score,
-                    "exhaustion_score": exhaustion_score,
-                }
-            )
+            merged_row = {
+                "symbol": symbol,
+                "venue": venue,
+                "asset_class": asset_class,
+                "score": fused_score,
+                "base_ai_score": base_ai_score,
+                "pressure_score": pressure_score,
+                "pressure_acceleration": pressure_acceleration,
+                "confluence_score": confluence_score,
+                "confluence_allow_trade": bool(p.get("confluence_allow_trade", False)),
+                "spread_bps": safe_float(p.get("spread_bps"), 0.0),
+                "spread_source": str(p.get("spread_source", "unknown")).lower(),
+                "regime": regime,
+                "regime_alignment": regime_alignment_score(regime),
+                "vwap_dev": vwap_dev,
+                "vwap_dev_abs": vwap_dev_abs,
+                "reversion_window_score": reversion_window_score,
+                "reversion_window_pass": bool(p.get("reversion_window_pass", False)),
+                "vwap_elasticity": safe_float(p.get("vwap_elasticity"), 0.0),
+                "elasticity_score": elasticity_score,
+                "micro_trend_score": micro_trend_score,
+                "micro_bias": str(p.get("micro_bias", "NEUTRAL")).upper(),
+                "micro_trend_pass": bool(p.get("micro_trend_pass", False)),
+                "liquidity_sweep_up": bool(p.get("liquidity_sweep_up", False)),
+                "liquidity_sweep_down": bool(p.get("liquidity_sweep_down", False)),
+                "directional_long_fit": directional_long_fit,
+            }
+            merged_row["pre_entry_quality"] = compute_pre_entry_quality(merged_row)
+            merged.append(merged_row)
 
         optimizer_input = [
             row for row in merged
@@ -705,16 +1035,18 @@ while True:
             optimizer_input = sorted(
                 merged,
                 key=lambda x: (
+                    safe_float(x.get("pre_entry_quality"), 0.0),
+                    safe_float(x.get("directional_long_fit"), 0.0),
                     safe_float(x.get("reversion_window_score"), 0.0),
                     safe_float(x.get("elasticity_score"), 0.0),
-                    safe_float(x.get("exhaustion_score"), 0.0),
+                    safe_float(x.get("micro_trend_score"), 0.0),
                     safe_float(x.get("confluence_score"), 0.0),
                     safe_float(x.get("pressure_score"), 0.0),
                     safe_float(x.get("vwap_dev_abs"), 0.0),
                     safe_float(x.get("score"), 0.0),
                 ),
                 reverse=True,
-            )[:1]
+            )[:3]
 
         print(
             f"[PIPELINE] merged_rows={len(merged)} "
@@ -738,20 +1070,34 @@ while True:
                 merged_row["vwap_elasticity"] = safe_float(row.get("vwap_elasticity"), 0.0)
             if "elasticity_score" not in merged_row:
                 merged_row["elasticity_score"] = safe_float(row.get("elasticity_score"), 0.0)
-            if "exhaustion_score" not in merged_row:
-                merged_row["exhaustion_score"] = safe_float(row.get("exhaustion_score"), 0.0)
+            if "micro_trend_score" not in merged_row:
+                merged_row["micro_trend_score"] = safe_float(row.get("micro_trend_score"), 0.0)
+            if "micro_bias" not in merged_row:
+                merged_row["micro_bias"] = str(row.get("micro_bias", "NEUTRAL")).upper()
+            if "directional_long_fit" not in merged_row:
+                merged_row["directional_long_fit"] = safe_float(row.get("directional_long_fit"), 0.0)
+            merged_row["entry_quality_score"] = compute_entry_quality_score(merged_row)
             optimized_plus.append(merged_row)
 
         classified = elite_classifier.classify(optimized_plus)
 
+        classified_plus: List[Dict[str, Any]] = []
+        for row in classified:
+            new_row = dict(row)
+            new_row["decision"] = classify_execution_decision(new_row, ACTIVE_PROFILE)
+            classified_plus.append(new_row)
+
         classified = sorted(
-            classified,
+            classified_plus,
             key=lambda x: (
+                1 if str(x.get("decision", "WATCH")).upper() == "TRADE" else 0,
+                safe_float(x.get("entry_quality_score"), 0.0),
                 safe_float(x.get("trade_score"), 0.0),
                 1 if str(x.get("signal_tier", "WATCH")).upper() == "ELITE" else 0,
+                safe_float(x.get("directional_long_fit"), 0.0),
                 safe_float(x.get("reversion_window_score"), 0.0),
                 safe_float(x.get("elasticity_score"), 0.0),
-                safe_float(x.get("exhaustion_score"), 0.0),
+                safe_float(x.get("micro_trend_score"), 0.0),
                 safe_float(x.get("confluence_score"), 0.0),
                 safe_float(x.get("pressure_score"), 0.0),
                 safe_float(x.get("vwap_dev_abs"), 0.0),
@@ -761,17 +1107,26 @@ while True:
 
         passing_execution_gate = [
             r for r in classified
-            if str(r.get("decision", "")).upper() == "TRADE"
-            and passes_execution_gate(r, ACTIVE_PROFILE)
-        ][:MAX_TRADES_PER_CYCLE]
+            if passes_execution_gate(r, ACTIVE_PROFILE)
+        ]
+
+        open_counts = count_open_positions_by_asset_class()
 
         execution_audit: List[str] = []
         opened_this_cycle = 0
+        eligible_after_asset_caps = 0
 
         for r in passing_execution_gate:
+            if opened_this_cycle >= MAX_TRADES_PER_CYCLE:
+                break
+
             symbol = str(r["symbol"]).upper()
+            venue = str(r.get("venue", "UNKNOWN")).upper()
+            asset_class = str(r.get("asset_class", infer_asset_class(symbol, venue))).upper()
             price = safe_float(latest_prices.get(symbol, 0.0), 0.0)
             trade_score = safe_float(r.get("trade_score"), 0.0)
+            signal_tier = str(r.get("signal_tier", "QUALIFIED")).upper()
+            entry_quality_score = safe_float(r.get("entry_quality_score"), 0.0)
 
             if price <= 0.0:
                 execution_audit.append(f"{symbol}: skipped_invalid_price")
@@ -781,7 +1136,18 @@ while True:
                 execution_audit.append(f"{symbol}: skipped_already_open")
                 continue
 
-            qty = 10.0 / price
+            if in_reentry_cooldown(symbol, cycle):
+                execution_audit.append(f"{symbol}: skipped_reentry_cooldown")
+                continue
+
+            if not capacity_available_for_asset_class(asset_class, open_counts):
+                execution_audit.append(f"{symbol}: skipped_asset_cap_{asset_class}")
+                continue
+
+            eligible_after_asset_caps += 1
+
+            trade_notional_usd = determine_trade_notional_usd(r)
+            qty = trade_notional_usd / price
 
             position_manager.open_long_position(
                 symbol=symbol,
@@ -791,16 +1157,32 @@ while True:
                 opened_at_utc=now(),
             )
 
+            apply_post_open_overrides(
+                symbol=symbol,
+                price=price,
+                signal_tier=signal_tier,
+                asset_class=asset_class,
+                venue=venue,
+                entry_quality_score=entry_quality_score,
+            )
+
+            open_counts[asset_class] = open_counts.get(asset_class, 0) + 1
+            open_counts["TOTAL"] = open_counts.get("TOTAL", 0) + 1
+
             opened_this_cycle += 1
-            execution_audit.append(f"{symbol}: OPENED")
+            execution_audit.append(f"{symbol}: OPENED ({asset_class}/{venue})")
 
             print(
-                f"[OPEN] {symbol} | price={price:.6f} | qty={qty:.8f} | "
-                f"trade={trade_score:.2f} | tier={str(r.get('signal_tier', 'WATCH')).upper()} | "
+                f"[OPEN] {symbol} | venue={venue} | asset={asset_class} | "
+                f"price={price:.6f} | qty={qty:.8f} | notional={trade_notional_usd:.2f} | "
+                f"trade={trade_score:.2f} | tier={signal_tier} | "
+                f"decision={str(r.get('decision', 'WATCH')).upper()} | "
+                f"entryQ={entry_quality_score:.2f} | "
+                f"dirfit={safe_float(r.get('directional_long_fit'), 0.0):.2f} | "
+                f"micro={safe_float(r.get('micro_trend_score'), 0.0):.2f} | "
                 f"vwap_dev={safe_float(r.get('vwap_dev_abs'), 0.0):.4f} | "
                 f"rwin={safe_float(r.get('reversion_window_score'), 0.0):.2f} | "
                 f"elas={safe_float(r.get('elasticity_score'), 0.0):.2f} | "
-                f"exhaust={safe_float(r.get('exhaustion_score'), 0.0):.2f} | "
                 f"confluence={safe_float(r.get('confluence_score'), 0.0):.2f} | "
                 f"pressure={safe_float(r.get('pressure_score'), 0.0):.2f} | "
                 f"accel={safe_float(r.get('pressure_acceleration'), 0.0):.2f}"
@@ -815,8 +1197,12 @@ while True:
         for trade in closed_positions:
             pnl = safe_float(trade.get("realized_pnl_usd"), 0.0)
             estimated_equity += pnl
+            symbol = str(trade.get("symbol", "")).upper()
+            if symbol:
+                recent_exit_cycle_by_symbol[symbol] = cycle
             print(f"[CLOSE] {trade['symbol']} | reason={trade['exit_reason']} | pnl={pnl:.4f}")
 
+        open_counts = count_open_positions_by_asset_class()
         pm_summary = position_manager.summary()
 
         summary = {
@@ -834,11 +1220,29 @@ while True:
             "signals_passed_optimizer_gate": len(
                 [x for x in merged if x.get("confluence_allow_trade", False) and passes_optimizer_gate(x, ACTIVE_PROFILE)]
             ),
-            "signals_passed_execution_gate": len(passing_execution_gate),
+            "signals_passed_execution_gate": len(
+                [x for x in classified if passes_execution_gate(x, ACTIVE_PROFILE)]
+            ),
+            "signals_after_asset_caps": eligible_after_asset_caps,
             "opened_this_cycle": opened_this_cycle,
             "execution_audit": execution_audit,
             "max_symbols_per_cycle": MAX_SYMBOLS_PER_CYCLE,
             "max_trades_per_cycle": MAX_TRADES_PER_CYCLE,
+            "max_open_positions_total": MAX_OPEN_POSITIONS_TOTAL,
+            "max_open_positions_fx": MAX_OPEN_POSITIONS_FX,
+            "max_open_positions_crypto": MAX_OPEN_POSITIONS_CRYPTO,
+            "max_open_positions_other": MAX_OPEN_POSITIONS_OTHER,
+            "reentry_cooldown_cycles": REENTRY_COOLDOWN_CYCLES,
+            "base_trade_notional_usd": BASE_TRADE_NOTIONAL_USD,
+            "elite_trade_notional_usd": ELITE_TRADE_NOTIONAL_USD,
+            "qualified_trade_notional_usd": QUALIFIED_TRADE_NOTIONAL_USD,
+            "watchlist_trade_notional_usd": WATCHLIST_TRADE_NOTIONAL_USD,
+            "open_fx": open_counts.get("FX", 0),
+            "open_crypto": open_counts.get("CRYPTO", 0),
+            "open_other": open_counts.get("OTHER", 0),
+            "global_take_profit_pct": GLOBAL_TAKE_PROFIT_PCT,
+            "global_stop_loss_pct": GLOBAL_STOP_LOSS_PCT,
+            "global_max_hold_cycles": GLOBAL_MAX_HOLD_CYCLES,
             **pm_summary,
         }
 
@@ -853,10 +1257,13 @@ while True:
         print("Equity:", round(estimated_equity, 2))
         print("Engine mode:", ENGINE_MODE.upper())
         print("Symbols scanned:", len(symbols), f"(cap={MAX_SYMBOLS_PER_CYCLE})")
-        print("Trade cap:", MAX_TRADES_PER_CYCLE)
+        print("Trade cap / total cap:", MAX_TRADES_PER_CYCLE, "/", MAX_OPEN_POSITIONS_TOTAL)
+        print("Asset caps: FX=", MAX_OPEN_POSITIONS_FX, " CRYPTO=", MAX_OPEN_POSITIONS_CRYPTO, " OTHER=", MAX_OPEN_POSITIONS_OTHER, sep="")
+        print("Open now: FX=", open_counts.get("FX", 0), " CRYPTO=", open_counts.get("CRYPTO", 0), " OTHER=", open_counts.get("OTHER", 0), sep="")
+        print("TP/SL/Hold:", f"{GLOBAL_TAKE_PROFIT_PCT:.3f}", "/", f"{GLOBAL_STOP_LOSS_PCT:.3f}", "/", GLOBAL_MAX_HOLD_CYCLES)
         print("Execution style: CONDITION-DRIVEN / SESSION-LOCKED POLICY")
         print("Trades this cycle: top condition-qualified signals only")
-        print("Signals passed final gate:", len(passing_execution_gate))
+        print("Signals passed final gate:", len([x for x in classified if passes_execution_gate(x, ACTIVE_PROFILE)]))
         print("Opened this cycle:", opened_this_cycle)
         print("Symbols:", symbols)
 
@@ -868,19 +1275,24 @@ while True:
                 exec_gate = "PASS" if passes_execution_gate(r, ACTIVE_PROFILE) else "HOLD"
                 print(
                     f"{r['symbol']:10}"
+                    f" venue={str(r.get('venue', 'UNKNOWN')).upper():10}"
+                    f" asset={str(r.get('asset_class', 'OTHER')).upper():7}"
                     f" regime={str(r.get('regime', 'NEUTRAL')):12}"
                     f" tier={str(r.get('signal_tier', 'WATCH')).upper():10}"
+                    f" decision={str(r.get('decision', 'WATCH')).upper():8}"
+                    f" bias={str(r.get('micro_bias', 'NEUTRAL')).upper():7}"
                     f" base={safe_float(r.get('base_ai_score', 0.0)):.2f}"
                     f" score={safe_float(r.get('score'), 0.0):.2f}"
+                    f" entryQ={safe_float(r.get('entry_quality_score'), 0.0):.2f}"
+                    f" dirfit={safe_float(r.get('directional_long_fit'), 0.0):.2f}"
                     f" pressure={safe_float(r.get('pressure_score'), 0.0):.2f}"
                     f" accel={safe_float(r.get('pressure_acceleration'), 0.0):.2f}"
+                    f" micro={safe_float(r.get('micro_trend_score'), 0.0):.2f}"
                     f" vwap_dev={safe_float(r.get('vwap_dev_abs'), 0.0):.4f}"
                     f" rwin={safe_float(r.get('reversion_window_score'), 0.0):.2f}"
                     f" elas={safe_float(r.get('elasticity_score'), 0.0):.2f}"
-                    f" exhaust={safe_float(r.get('exhaustion_score'), 0.0):.2f}"
                     f" confluence={safe_float(r.get('confluence_score'), 0.0):.2f}"
                     f" trade={safe_float(r.get('trade_score'), 0.0):.2f}"
-                    f" decision={str(r.get('decision', 'WATCH')).upper()}"
                     f" gate={exec_gate}"
                 )
 
