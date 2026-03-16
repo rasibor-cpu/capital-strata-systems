@@ -60,6 +60,9 @@ WATCHLIST_TRADE_NOTIONAL_USD = 8.0
 
 REENTRY_COOLDOWN_CYCLES = 2
 
+LIQUIDITY_QUALITY_FLOOR = 0.34
+JUNK_PENALTY_STRICT_FLOOR = 0.24
+
 ENGINE_PROFILES: Dict[str, Dict[str, float]] = {
     "safe/test": {
         "min_confluence_to_reach_optimizer": 0.82,
@@ -75,6 +78,7 @@ ENGINE_PROFILES: Dict[str, Dict[str, float]] = {
         "min_elasticity_score": 0.24,
         "min_directional_fit_to_execute": 0.64,
         "min_entry_quality_to_execute": 0.66,
+        "min_liquidity_quality_to_execute": 0.56,
     },
     "conservative": {
         "min_confluence_to_reach_optimizer": 0.76,
@@ -90,6 +94,7 @@ ENGINE_PROFILES: Dict[str, Dict[str, float]] = {
         "min_elasticity_score": 0.20,
         "min_directional_fit_to_execute": 0.58,
         "min_entry_quality_to_execute": 0.60,
+        "min_liquidity_quality_to_execute": 0.50,
     },
     "balanced": {
         "min_confluence_to_reach_optimizer": 0.70,
@@ -105,6 +110,7 @@ ENGINE_PROFILES: Dict[str, Dict[str, float]] = {
         "min_elasticity_score": 0.18,
         "min_directional_fit_to_execute": 0.52,
         "min_entry_quality_to_execute": 0.55,
+        "min_liquidity_quality_to_execute": 0.44,
     },
     "aggressive": {
         "min_confluence_to_reach_optimizer": 0.64,
@@ -120,6 +126,7 @@ ENGINE_PROFILES: Dict[str, Dict[str, float]] = {
         "min_elasticity_score": 0.14,
         "min_directional_fit_to_execute": 0.46,
         "min_entry_quality_to_execute": 0.50,
+        "min_liquidity_quality_to_execute": 0.38,
     },
     "opportunistic/expansion": {
         "min_confluence_to_reach_optimizer": 0.58,
@@ -135,6 +142,7 @@ ENGINE_PROFILES: Dict[str, Dict[str, float]] = {
         "min_elasticity_score": 0.12,
         "min_directional_fit_to_execute": 0.42,
         "min_entry_quality_to_execute": 0.46,
+        "min_liquidity_quality_to_execute": 0.34,
     },
 }
 
@@ -145,6 +153,17 @@ ALLOWED_EXECUTION_REGIMES = {
     "BREAKOUT",
     "NEUTRAL",
     "RANGE",
+}
+
+MAJOR_CRYPTO_BASES = {
+    "BTC", "ETH", "SOL", "XRP", "ADA", "AVAX", "LINK", "DOGE", "LTC",
+    "BCH", "UNI", "AAVE", "ATOM", "DOT", "MATIC", "NEAR", "ETC",
+    "XLM", "ALGO", "HBAR", "FIL"
+}
+
+MEME_OR_THIN_KEYWORDS = {
+    "PEPE", "DOG", "FART", "TRUMP", "PENGU", "FLOKI", "BONK",
+    "SHIB", "WIF", "MOG", "BRETT", "TURBO", "MEME"
 }
 
 scanner = UnifiedMarketScanner()
@@ -299,6 +318,8 @@ class EliteSignalClassifier:
             micro_trend_score = safe_float(row.get("micro_trend_score"), 0.0)
             entry_quality_score = safe_float(row.get("entry_quality_score"), 0.0)
             directional_long_fit = safe_float(row.get("directional_long_fit"), 0.0)
+            liquidity_quality_score = safe_float(row.get("liquidity_quality_score"), 0.0)
+            junk_penalty_score = safe_float(row.get("junk_penalty_score"), 0.0)
 
             tier = "WATCH"
 
@@ -308,6 +329,8 @@ class EliteSignalClassifier:
                 and micro_trend_score >= 0.48
                 and directional_long_fit >= 0.40
                 and entry_quality_score >= 0.42
+                and liquidity_quality_score >= 0.34
+                and junk_penalty_score <= 0.60
             ):
                 tier = "QUALIFIED"
 
@@ -321,6 +344,8 @@ class EliteSignalClassifier:
                 and micro_trend_score >= 0.58
                 and directional_long_fit >= 0.58
                 and entry_quality_score >= 0.58
+                and liquidity_quality_score >= 0.50
+                and junk_penalty_score <= 0.36
             ):
                 tier = "ELITE"
 
@@ -493,6 +518,23 @@ def infer_asset_class(symbol: str, venue: str) -> str:
     return "OTHER"
 
 
+def extract_symbol_base(symbol: str) -> str:
+    s = str(symbol).upper()
+    for sep in ("-", "_", "/"):
+        if sep in s:
+            return s.split(sep)[0]
+    return s
+
+
+def is_meme_or_thin_name(symbol: str) -> bool:
+    base = extract_symbol_base(symbol)
+    return any(key in base for key in MEME_OR_THIN_KEYWORDS)
+
+
+def is_major_crypto(symbol: str) -> bool:
+    return extract_symbol_base(symbol) in MAJOR_CRYPTO_BASES
+
+
 def summarize_selected_assets(selected_rows: List[Dict[str, Any]]) -> str:
     counts = {"FX": 0, "CRYPTO": 0, "OTHER": 0}
     for row in selected_rows:
@@ -545,78 +587,95 @@ def call_rows_module(module: Any, rows: List[Dict[str, Any]], label: str) -> Lis
     return rows
 
 
-def fetch_assets(selected_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    global _debug_payload_logged
+def infer_liquidity_proxy(
+    *,
+    asset_class: str,
+    spread_bps: float,
+    spread_source: str,
+    symbol: str,
+) -> float:
+    asset_class = str(asset_class).upper()
+    spread_bps = abs(spread_bps)
+    spread_source = str(spread_source).lower()
 
-    rows: List[Dict[str, Any]] = []
+    if asset_class == "FX":
+        base = 0.82
+    elif asset_class == "CRYPTO":
+        base = 0.58 if is_major_crypto(symbol) else 0.42
+    else:
+        base = 0.36
 
-    for selected in selected_rows:
-        symbol = str(selected.get("symbol", "")).upper()
-        venue = str(selected.get("venue", "UNKNOWN")).upper()
-        asset_class = str(selected.get("asset_class", "OTHER")).upper()
+    spread_penalty = clamp01(spread_bps / 25.0) * 0.48
+    if spread_source in {"fallback", "unknown"}:
+        spread_penalty += 0.08
 
-        try:
-            payload = load_runtime_asset(symbol)
+    if is_meme_or_thin_name(symbol):
+        spread_penalty += 0.16
 
-            if not isinstance(payload, dict):
-                print(f"[ROW-SKIP] {symbol}: payload is not dict")
-                continue
+    return clamp01(base - spread_penalty)
 
-            payload = normalize_snapshot_spread(payload)
 
-            raw_candles = payload.get("candles", [])
-            if not isinstance(raw_candles, list) or len(raw_candles) < 20:
-                print(f"[ROW-SKIP] {symbol}: insufficient candles")
-                continue
+def compute_junk_penalty_score(
+    *,
+    symbol: str,
+    asset_class: str,
+    spread_bps: float,
+    spread_source: str,
+) -> float:
+    penalty = 0.0
+    asset_class = str(asset_class).upper()
+    spread_bps = abs(spread_bps)
+    spread_source = str(spread_source).lower()
 
-            candles = normalize_candles(raw_candles)
+    if asset_class == "OTHER":
+        penalty += 0.18
 
-            if not _debug_payload_logged:
-                print(f"[DEBUG] sample payload keys for {symbol}: {list(payload.keys())}")
-                if raw_candles:
-                    print(f"[DEBUG] sample candle type for {symbol}: {type(raw_candles[-1]).__name__}")
-                    print(f"[DEBUG] sample candle value for {symbol}: {raw_candles[-1]}")
-                _debug_payload_logged = True
+    if asset_class == "CRYPTO" and not is_major_crypto(symbol):
+        penalty += 0.12
 
-            price = safe_float(payload.get("price"), 0.0)
-            vwap = safe_float(payload.get("vwap"), 0.0)
-            spread_bps = safe_float(payload.get("spread_bps"), 0.0)
-            spread_source = str(payload.get("spread_source", "unknown")).lower()
+    if is_meme_or_thin_name(symbol):
+        penalty += 0.28
 
-            if price <= 0.0:
-                print(f"[ROW-SKIP] {symbol}: invalid price")
-                continue
+    penalty += clamp01(spread_bps / 20.0) * 0.34
 
-            if vwap <= 0.0:
-                vwap = price
+    if spread_source in {"fallback", "unknown"}:
+        penalty += 0.08
 
-            row = dict(payload)
-            row["symbol"] = str(payload.get("symbol", symbol)).upper()
-            row["price"] = price
-            row["vwap"] = vwap
-            row["spread_bps"] = spread_bps
-            row["spread_source"] = spread_source
-            row["venue"] = venue
-            row["asset_class"] = asset_class
-            row["candles"] = candles
-            rows.append(row)
+    return clamp01(penalty)
 
-            print(
-                f"[ROW-OK] {symbol}: "
-                f"venue={venue}, "
-                f"asset={asset_class}, "
-                f"price={price:.6f}, "
-                f"vwap={vwap:.6f}, "
-                f"spread_bps={spread_bps:.2f}, "
-                f"spread_src={spread_source}, "
-                f"candles={len(candles)}"
-            )
 
-        except Exception as exc:
-            print(f"[ROW-ERROR] {symbol}: {exc}")
-            continue
+def compute_liquidity_quality_score(row: Dict[str, Any]) -> float:
+    symbol = str(row.get("symbol", "")).upper()
+    asset_class = str(row.get("asset_class", "OTHER")).upper()
+    spread_bps = abs(safe_float(row.get("spread_bps"), 0.0))
+    spread_source = str(row.get("spread_source", "unknown")).lower()
+    confluence_score = safe_float(row.get("confluence_score"), 0.0)
+    pressure_score = safe_float(row.get("pressure_score"), 0.0)
+    elasticity_score = safe_float(row.get("elasticity_score"), 0.0)
 
-    return rows
+    liquidity_proxy = infer_liquidity_proxy(
+        asset_class=asset_class,
+        spread_bps=spread_bps,
+        spread_source=spread_source,
+        symbol=symbol,
+    )
+    junk_penalty = compute_junk_penalty_score(
+        symbol=symbol,
+        asset_class=asset_class,
+        spread_bps=spread_bps,
+        spread_source=spread_source,
+    )
+
+    score = (
+        0.58 * liquidity_proxy
+        + 0.18 * clamp01(confluence_score)
+        + 0.10 * clamp01(pressure_score)
+        + 0.08 * clamp01(elasticity_score)
+        + (0.10 if asset_class == "FX" else 0.0)
+        + (0.08 if asset_class == "CRYPTO" and is_major_crypto(symbol) else 0.0)
+    ) - 0.42 * junk_penalty
+
+    return clamp01(score)
 
 
 def persist_state(summary: Dict[str, Any]) -> None:
@@ -732,6 +791,8 @@ def compute_pre_entry_quality(row: Dict[str, Any]) -> float:
     reversion_window_score = safe_float(row.get("reversion_window_score"), 0.0)
     elasticity_score = safe_float(row.get("elasticity_score"), 0.0)
     micro_trend_score = safe_float(row.get("micro_trend_score"), 0.0)
+    liquidity_quality_score = safe_float(row.get("liquidity_quality_score"), 0.0)
+    junk_penalty_score = safe_float(row.get("junk_penalty_score"), 0.0)
     spread_bps = abs(safe_float(row.get("spread_bps"), 0.0))
     spread_source = str(row.get("spread_source", "unknown")).lower()
 
@@ -740,13 +801,14 @@ def compute_pre_entry_quality(row: Dict[str, Any]) -> float:
         spread_penalty += 0.02
 
     score = (
-        0.34 * clamp01(base_score)
-        + 0.24 * clamp01(directional_fit)
-        + 0.18 * clamp01(reversion_window_score)
-        + 0.10 * clamp01(elasticity_score)
-        + 0.10 * clamp01(micro_trend_score)
+        0.28 * clamp01(base_score)
+        + 0.22 * clamp01(directional_fit)
+        + 0.16 * clamp01(reversion_window_score)
+        + 0.08 * clamp01(elasticity_score)
+        + 0.08 * clamp01(micro_trend_score)
+        + 0.14 * clamp01(liquidity_quality_score)
         + 0.04 * clamp01(row.get("confluence_score", 0.0))
-    ) - spread_penalty
+    ) - spread_penalty - 0.10 * clamp01(junk_penalty_score)
 
     return clamp01(score)
 
@@ -759,6 +821,8 @@ def compute_entry_quality_score(row: Dict[str, Any]) -> float:
     elasticity_score = safe_float(row.get("elasticity_score"), 0.0)
     micro_trend_score = safe_float(row.get("micro_trend_score"), 0.0)
     confluence_score = safe_float(row.get("confluence_score"), 0.0)
+    liquidity_quality_score = safe_float(row.get("liquidity_quality_score"), 0.0)
+    junk_penalty_score = safe_float(row.get("junk_penalty_score"), 0.0)
     spread_bps = abs(safe_float(row.get("spread_bps"), 0.0))
     spread_source = str(row.get("spread_source", "unknown")).lower()
 
@@ -767,14 +831,15 @@ def compute_entry_quality_score(row: Dict[str, Any]) -> float:
         spread_penalty += 0.02
 
     score = (
-        0.26 * clamp01(trade_score)
-        + 0.16 * clamp01(base_score)
-        + 0.22 * clamp01(directional_fit)
+        0.23 * clamp01(trade_score)
+        + 0.14 * clamp01(base_score)
+        + 0.20 * clamp01(directional_fit)
         + 0.12 * clamp01(reversion_window_score)
-        + 0.08 * clamp01(elasticity_score)
-        + 0.08 * clamp01(micro_trend_score)
-        + 0.08 * clamp01(confluence_score)
-    ) - spread_penalty
+        + 0.07 * clamp01(elasticity_score)
+        + 0.07 * clamp01(micro_trend_score)
+        + 0.07 * clamp01(confluence_score)
+        + 0.16 * clamp01(liquidity_quality_score)
+    ) - spread_penalty - 0.12 * clamp01(junk_penalty_score)
 
     return clamp01(score)
 
@@ -782,10 +847,11 @@ def compute_entry_quality_score(row: Dict[str, Any]) -> float:
 def determine_trade_notional_usd(row: Dict[str, Any]) -> float:
     tier = str(row.get("signal_tier", "WATCH")).upper()
     entry_quality_score = safe_float(row.get("entry_quality_score"), 0.0)
+    liquidity_quality_score = safe_float(row.get("liquidity_quality_score"), 0.0)
 
-    if tier == "ELITE" and entry_quality_score >= 0.70:
+    if tier == "ELITE" and entry_quality_score >= 0.70 and liquidity_quality_score >= 0.56:
         return ELITE_TRADE_NOTIONAL_USD
-    if tier in {"ELITE", "QUALIFIED"} and entry_quality_score >= 0.56:
+    if tier in {"ELITE", "QUALIFIED"} and entry_quality_score >= 0.56 and liquidity_quality_score >= 0.44:
         return QUALIFIED_TRADE_NOTIONAL_USD
     return WATCHLIST_TRADE_NOTIONAL_USD
 
@@ -810,6 +876,8 @@ def passes_optimizer_gate(row: Dict[str, Any], profile: Dict[str, float]) -> boo
     micro_trend_score = safe_float(row.get("micro_trend_score"), 0.0)
     directional_long_fit = safe_float(row.get("directional_long_fit"), 0.0)
     pre_entry_quality = safe_float(row.get("pre_entry_quality"), 0.0)
+    liquidity_quality_score = safe_float(row.get("liquidity_quality_score"), 0.0)
+    junk_penalty_score = safe_float(row.get("junk_penalty_score"), 0.0)
 
     if regime not in ALLOWED_EXECUTION_REGIMES:
         return False
@@ -829,6 +897,10 @@ def passes_optimizer_gate(row: Dict[str, Any], profile: Dict[str, float]) -> boo
     if directional_long_fit < max(0.36, profile["min_directional_fit_to_execute"] - 0.10):
         return False
     if pre_entry_quality < max(0.36, profile["min_entry_quality_to_execute"] - 0.12):
+        return False
+    if liquidity_quality_score < LIQUIDITY_QUALITY_FLOOR:
+        return False
+    if junk_penalty_score > 0.78:
         return False
     if (
         pressure_score < profile["min_pressure_to_reach_optimizer"]
@@ -852,6 +924,8 @@ def passes_execution_gate(row: Dict[str, Any], profile: Dict[str, float]) -> boo
     micro_trend_score = safe_float(row.get("micro_trend_score"), 0.0)
     directional_long_fit = safe_float(row.get("directional_long_fit"), 0.0)
     entry_quality_score = safe_float(row.get("entry_quality_score"), 0.0)
+    liquidity_quality_score = safe_float(row.get("liquidity_quality_score"), 0.0)
+    junk_penalty_score = safe_float(row.get("junk_penalty_score"), 0.0)
 
     if regime not in ALLOWED_EXECUTION_REGIMES:
         return False
@@ -866,6 +940,12 @@ def passes_execution_gate(row: Dict[str, Any], profile: Dict[str, float]) -> boo
     if directional_long_fit < profile["min_directional_fit_to_execute"]:
         return False
     if entry_quality_score < profile["min_entry_quality_to_execute"]:
+        return False
+    if liquidity_quality_score < profile["min_liquidity_quality_to_execute"]:
+        return False
+    if junk_penalty_score > 0.62:
+        return False
+    if liquidity_quality_score < JUNK_PENALTY_STRICT_FLOOR:
         return False
 
     if tier == "ELITE":
@@ -981,6 +1061,8 @@ while True:
             micro_trend_score = safe_float(p.get("micro_trend_score"), 0.0)
             venue = str(p.get("venue", "UNKNOWN")).upper()
             asset_class = str(p.get("asset_class", infer_asset_class(symbol, venue))).upper()
+            spread_bps = safe_float(p.get("spread_bps"), 0.0)
+            spread_source = str(p.get("spread_source", "unknown")).lower()
 
             directional_long_fit = compute_directional_long_fit(p)
 
@@ -1006,8 +1088,8 @@ while True:
                 "pressure_acceleration": pressure_acceleration,
                 "confluence_score": confluence_score,
                 "confluence_allow_trade": bool(p.get("confluence_allow_trade", False)),
-                "spread_bps": safe_float(p.get("spread_bps"), 0.0),
-                "spread_source": str(p.get("spread_source", "unknown")).lower(),
+                "spread_bps": spread_bps,
+                "spread_source": spread_source,
                 "regime": regime,
                 "regime_alignment": regime_alignment_score(regime),
                 "vwap_dev": vwap_dev,
@@ -1023,6 +1105,13 @@ while True:
                 "liquidity_sweep_down": bool(p.get("liquidity_sweep_down", False)),
                 "directional_long_fit": directional_long_fit,
             }
+            merged_row["junk_penalty_score"] = compute_junk_penalty_score(
+                symbol=symbol,
+                asset_class=asset_class,
+                spread_bps=spread_bps,
+                spread_source=spread_source,
+            )
+            merged_row["liquidity_quality_score"] = compute_liquidity_quality_score(merged_row)
             merged_row["pre_entry_quality"] = compute_pre_entry_quality(merged_row)
             merged.append(merged_row)
 
@@ -1036,6 +1125,8 @@ while True:
                 merged,
                 key=lambda x: (
                     safe_float(x.get("pre_entry_quality"), 0.0),
+                    safe_float(x.get("liquidity_quality_score"), 0.0),
+                    -safe_float(x.get("junk_penalty_score"), 0.0),
                     safe_float(x.get("directional_long_fit"), 0.0),
                     safe_float(x.get("reversion_window_score"), 0.0),
                     safe_float(x.get("elasticity_score"), 0.0),
@@ -1076,6 +1167,10 @@ while True:
                 merged_row["micro_bias"] = str(row.get("micro_bias", "NEUTRAL")).upper()
             if "directional_long_fit" not in merged_row:
                 merged_row["directional_long_fit"] = safe_float(row.get("directional_long_fit"), 0.0)
+            if "liquidity_quality_score" not in merged_row:
+                merged_row["liquidity_quality_score"] = safe_float(row.get("liquidity_quality_score"), 0.0)
+            if "junk_penalty_score" not in merged_row:
+                merged_row["junk_penalty_score"] = safe_float(row.get("junk_penalty_score"), 0.0)
             merged_row["entry_quality_score"] = compute_entry_quality_score(merged_row)
             optimized_plus.append(merged_row)
 
@@ -1092,6 +1187,8 @@ while True:
             key=lambda x: (
                 1 if str(x.get("decision", "WATCH")).upper() == "TRADE" else 0,
                 safe_float(x.get("entry_quality_score"), 0.0),
+                safe_float(x.get("liquidity_quality_score"), 0.0),
+                -safe_float(x.get("junk_penalty_score"), 0.0),
                 safe_float(x.get("trade_score"), 0.0),
                 1 if str(x.get("signal_tier", "WATCH")).upper() == "ELITE" else 0,
                 safe_float(x.get("directional_long_fit"), 0.0),
@@ -1178,6 +1275,8 @@ while True:
                 f"trade={trade_score:.2f} | tier={signal_tier} | "
                 f"decision={str(r.get('decision', 'WATCH')).upper()} | "
                 f"entryQ={entry_quality_score:.2f} | "
+                f"liqQ={safe_float(r.get('liquidity_quality_score'), 0.0):.2f} | "
+                f"junk={safe_float(r.get('junk_penalty_score'), 0.0):.2f} | "
                 f"dirfit={safe_float(r.get('directional_long_fit'), 0.0):.2f} | "
                 f"micro={safe_float(r.get('micro_trend_score'), 0.0):.2f} | "
                 f"vwap_dev={safe_float(r.get('vwap_dev_abs'), 0.0):.4f} | "
@@ -1237,6 +1336,8 @@ while True:
             "elite_trade_notional_usd": ELITE_TRADE_NOTIONAL_USD,
             "qualified_trade_notional_usd": QUALIFIED_TRADE_NOTIONAL_USD,
             "watchlist_trade_notional_usd": WATCHLIST_TRADE_NOTIONAL_USD,
+            "liquidity_quality_floor": LIQUIDITY_QUALITY_FLOOR,
+            "junk_penalty_strict_floor": JUNK_PENALTY_STRICT_FLOOR,
             "open_fx": open_counts.get("FX", 0),
             "open_crypto": open_counts.get("CRYPTO", 0),
             "open_other": open_counts.get("OTHER", 0),
@@ -1284,6 +1385,8 @@ while True:
                     f" base={safe_float(r.get('base_ai_score', 0.0)):.2f}"
                     f" score={safe_float(r.get('score'), 0.0):.2f}"
                     f" entryQ={safe_float(r.get('entry_quality_score'), 0.0):.2f}"
+                    f" liqQ={safe_float(r.get('liquidity_quality_score'), 0.0):.2f}"
+                    f" junk={safe_float(r.get('junk_penalty_score'), 0.0):.2f}"
                     f" dirfit={safe_float(r.get('directional_long_fit'), 0.0):.2f}"
                     f" pressure={safe_float(r.get('pressure_score'), 0.0):.2f}"
                     f" accel={safe_float(r.get('pressure_acceleration'), 0.0):.2f}"
