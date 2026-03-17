@@ -14,7 +14,20 @@ from backend.intelligence.pressure_acceleration_engine import (
 )
 from backend.intelligence.signal_confluence_engine import SignalConfluenceEngine
 from backend.intelligence.vwap_deviation_engine import VWAPDeviationEngine
-from backend.intelligence.vwap_elasticity_engine import VWAPElasticityEngine
+
+try:
+    from backend.strategies.vwap_elasticity_engine import (
+        VWAPElasticityEngine as StrategyVWAPElasticityEngine,
+    )
+except Exception:
+    StrategyVWAPElasticityEngine = None
+
+try:
+    from backend.intelligence.vwap_elasticity_engine import (
+        VWAPElasticityEngine as LegacyVWAPElasticityEngine,
+    )
+except Exception:
+    LegacyVWAPElasticityEngine = None
 
 
 class TradeDecisionOrchestrator:
@@ -63,7 +76,7 @@ class TradeDecisionOrchestrator:
         self.momentum_engine = OpportunityMomentumWindowEngine()
 
         self.vwap_deviation_engine = VWAPDeviationEngine()
-        self.vwap_elasticity_engine = VWAPElasticityEngine()
+        self.vwap_elasticity_engine = self._build_vwap_elasticity_engine()
         self.elite_signal_classifier = EliteSignalClassifier()
 
         self.mean_reversion_threshold = 0.46
@@ -80,6 +93,21 @@ class TradeDecisionOrchestrator:
             "vwap_dev_score": 0.10,
             "elasticity_score": 0.10,
         }
+
+    def _build_vwap_elasticity_engine(self):
+        if StrategyVWAPElasticityEngine is not None:
+            try:
+                return StrategyVWAPElasticityEngine()
+            except Exception:
+                pass
+
+        if LegacyVWAPElasticityEngine is not None:
+            try:
+                return LegacyVWAPElasticityEngine()
+            except Exception:
+                pass
+
+        return None
 
     def evaluate_trade(
         self,
@@ -423,8 +451,20 @@ class TradeDecisionOrchestrator:
         asset: str,
         candles: List[Dict[str, Any]],
     ) -> float:
+        if self.vwap_elasticity_engine is None:
+            return self._fallback_vwap_elasticity(candles)
+
         try:
             if hasattr(self.vwap_elasticity_engine, "evaluate"):
+                latest_close, rolling_vwap = self._build_vwap_inputs(candles)
+                if latest_close > 0 and rolling_vwap > 0:
+                    result = self.vwap_elasticity_engine.evaluate(
+                        symbol=asset,
+                        mid_price=latest_close,
+                        vwap=rolling_vwap,
+                    )
+                    return self._extract_score(result)
+
                 result = self.vwap_elasticity_engine.evaluate(
                     asset=asset,
                     candles=candles,
@@ -437,10 +477,42 @@ class TradeDecisionOrchestrator:
                     candles=candles,
                 )
                 return self._extract_score(result)
+        except TypeError:
+            try:
+                result = self.vwap_elasticity_engine.evaluate(
+                    asset=asset,
+                    candles=candles,
+                )
+                return self._extract_score(result)
+            except Exception:
+                pass
         except Exception:
             pass
 
         return self._fallback_vwap_elasticity(candles)
+
+    def _build_vwap_inputs(self, candles: List[Dict[str, Any]]) -> tuple[float, float]:
+        closes = [self._to_float(c.get("close"), 0.0) for c in candles if c]
+        volumes = [self._to_float(c.get("volume"), 0.0) for c in candles if c]
+
+        if len(closes) < 20 or len(volumes) < 20:
+            return 0.0, 0.0
+
+        lookback_closes = closes[-20:]
+        lookback_volumes = volumes[-20:]
+
+        total_pv = 0.0
+        total_volume = 0.0
+        for close, volume in zip(lookback_closes, lookback_volumes):
+            total_pv += close * volume
+            total_volume += volume
+
+        if total_volume <= 0:
+            return 0.0, 0.0
+
+        vwap = total_pv / total_volume
+        latest_close = lookback_closes[-1]
+        return latest_close, vwap
 
     def _fallback_ai_score(self, candles: List[Dict[str, Any]]) -> float:
         closes = [self._to_float(c.get("close"), 0.0) for c in candles if c]
@@ -599,6 +671,9 @@ class TradeDecisionOrchestrator:
     def _extract_score(self, result: Any) -> float:
         if isinstance(result, (int, float)):
             return self._clamp01(result)
+
+        if hasattr(result, "elasticity_score"):
+            return self._clamp01(getattr(result, "elasticity_score", 0.0))
 
         if isinstance(result, dict):
             for key in (
