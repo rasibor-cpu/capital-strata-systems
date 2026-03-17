@@ -756,7 +756,15 @@ while True:
             estimated_equity += pnl
             print(f"[CLOSE] {trade['symbol']} | reason={trade['exit_reason']} | pnl={pnl:.4f}")
 
-        pm_summary = position_manager.summary()
+        open_positions_obj = position_manager.get_open_positions()
+        try:
+            open_positions_count = len(open_positions_obj)
+        except Exception:
+            open_positions_count = 0
+
+        pm_summary = {
+            "open_positions": open_positions_count,
+        }
 
         summary = {
             "timestamp_utc": now(),
@@ -797,6 +805,7 @@ while True:
         print("Trades this cycle: top condition-qualified signals only")
         print("Signals passed final gate:", len(passing_execution_gate))
         print("Opened this cycle:", opened_this_cycle)
+        print("Open positions:", open_positions_count)
         print("Symbols:", symbols)
 
         print("\nAI SIGNAL SCANNER\n")
