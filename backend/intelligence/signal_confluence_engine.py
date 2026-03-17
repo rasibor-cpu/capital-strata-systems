@@ -5,6 +5,23 @@ from typing import Any, Dict, List
 import statistics
 
 
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except Exception:
+        return default
+
+
+def _clamp01(value: float) -> float:
+    if value < 0.0:
+        return 0.0
+    if value > 1.0:
+        return 1.0
+    return value
+
+
 @dataclass
 class ConfluenceDecision:
     allow_trade: bool
@@ -22,25 +39,55 @@ class SignalConfluenceEngine:
     """
     CSS Signal Confluence Engine
 
-    Approves trades only when multiple conditions align.
+    Purpose:
+    - approve trades only when multiple conditions align
+    - support both candle-only evaluation and row-based pipeline enrichment
+    - combine market structure with live CSS intelligence features
 
-    Checks:
-    1. Price sufficiently deviated from MA20
-    2. Volatility not excessive
-    3. Short-term momentum slowing
-    4. Liquidity / average volume acceptable
-    5. Last candle shows reduced directional extension
+    Confluence dimensions:
+    1. Candle deviation / setup structure
+    2. Volatility suitability
+    3. Momentum moderation
+    4. Volume / liquidity floor
+    5. Last candle extension control
+    6. Pressure alignment
+    7. Pressure acceleration alignment
+    8. Regime suitability
+    9. Spread location suitability
     """
 
     def __init__(self) -> None:
         self.min_candles = 20
-        self.min_required_checks = 4
 
+        # Base candle thresholds
         self.min_deviation_from_ma = 0.0015
-        self.max_volatility = 0.03
-        self.max_momentum_5 = 0.0025
-        self.min_avg_volume_10 = 500.0
-        self.max_last_candle_extension = 0.006
+        self.max_volatility = 0.05
+        self.max_momentum_5 = 0.0045
+        self.min_avg_volume_10 = 200.0
+        self.max_last_candle_extension = 0.80
+
+        # Live row thresholds
+        self.min_pressure_score = 0.12
+        self.min_pressure_acceleration = 0.03
+        self.min_abs_spread_bps = 8.0
+
+        # Row-based required checks
+        self.min_required_checks_row = 5
+
+        # Candle-only required checks
+        self.min_required_checks_candles = 4
+
+        self.allowed_regimes = {
+            "MEAN_REVERSION",
+            "TREND",
+            "VOLATILE",
+            "NEUTRAL",
+            "BREAKOUT",
+        }
+
+    # ------------------------------------------------
+    # CANDLE-ONLY EVALUATION
+    # ------------------------------------------------
 
     def evaluate(self, candles: List[Dict[str, Any]]) -> ConfluenceDecision:
         if not candles or len(candles) < self.min_candles:
@@ -106,12 +153,13 @@ class SignalConfluenceEngine:
         passed_checks = sum(1 for passed in checks.values() if passed)
         total_checks = len(checks)
         confluence_score = round(passed_checks / total_checks, 4)
-        allow_trade = passed_checks >= self.min_required_checks
+        allow_trade = passed_checks >= self.min_required_checks_candles
 
-        if allow_trade:
-            reason = "Signal confluence confirmed"
-        else:
-            reason = "Signal confluence too weak"
+        reason = (
+            "Signal confluence confirmed"
+            if allow_trade
+            else "Signal confluence too weak"
+        )
 
         details = {
             "ma20": round(ma20, 8),
@@ -132,6 +180,107 @@ class SignalConfluenceEngine:
             reason=reason,
             details=details,
         )
+
+    # ------------------------------------------------
+    # LIVE ROW PIPELINE ENTRY
+    # ------------------------------------------------
+
+    def enrich_rows(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        enriched: List[Dict[str, Any]] = []
+
+        for row in rows:
+            new_row = dict(row)
+
+            candles = row.get("candles", [])
+            candle_decision = self.evaluate(candles) if isinstance(candles, list) else None
+
+            candle_score = (
+                _safe_float(candle_decision.confluence_score, 0.0)
+                if candle_decision is not None
+                else 0.0
+            )
+
+            pressure_score = _safe_float(row.get("pressure_score"), 0.0)
+            pressure_acceleration = _safe_float(row.get("pressure_acceleration"), 0.0)
+            spread_bps = abs(_safe_float(row.get("spread_bps"), 0.0))
+            regime = str(row.get("regime", "NEUTRAL")).upper()
+
+            row_checks = {
+                "candle_structure_ok": candle_score >= 0.60,
+                "pressure_ok": pressure_score >= self.min_pressure_score,
+                "acceleration_ok": pressure_acceleration >= self.min_pressure_acceleration,
+                "spread_ok": spread_bps >= self.min_abs_spread_bps,
+                "regime_ok": regime in self.allowed_regimes,
+                "high_conviction_setup": (
+                    pressure_score >= 0.25
+                    or pressure_acceleration >= 0.15
+                    or spread_bps >= 25.0
+                ),
+            }
+
+            passed_row_checks = sum(1 for passed in row_checks.values() if passed)
+            total_row_checks = len(row_checks)
+
+            row_confluence_score = (
+                passed_row_checks / total_row_checks if total_row_checks > 0 else 0.0
+            )
+
+            # Final blended confluence score:
+            # 60% candle structure, 40% live signal alignment
+            final_confluence_score = _clamp01(
+                candle_score * 0.60 + row_confluence_score * 0.40
+            )
+
+            allow_trade = passed_row_checks >= self.min_required_checks_row
+
+            new_row["confluence_score"] = round(final_confluence_score, 4)
+            new_row["confluence_passed_checks"] = passed_row_checks
+            new_row["confluence_total_checks"] = total_row_checks
+            new_row["confluence_allow_trade"] = allow_trade
+            new_row["confluence_reason"] = (
+                "row and candle confluence aligned"
+                if allow_trade
+                else "confluence below trading threshold"
+            )
+            new_row["confluence_details"] = {
+                "candle_score": round(candle_score, 4),
+                "pressure_score": round(pressure_score, 4),
+                "pressure_acceleration": round(pressure_acceleration, 4),
+                "spread_bps_abs": round(spread_bps, 4),
+                "regime": regime,
+                "checks": row_checks,
+            }
+
+            enriched.append(new_row)
+
+        enriched.sort(
+            key=lambda x: float(x.get("confluence_score", 0.0)),
+            reverse=True,
+        )
+
+        return enriched
+
+    # ------------------------------------------------
+    # COMPATIBILITY ALIASES
+    # ------------------------------------------------
+
+    def enrich(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return self.enrich_rows(rows)
+
+    def compute_confluence(
+        self,
+        *,
+        asset: str,
+        candles: List[Dict[str, Any]],
+        regime: str | None = None,
+    ) -> Dict[str, Any]:
+        result = self.evaluate(candles)
+        payload = result.to_dict()
+        if regime is not None:
+            payload["regime"] = str(regime).upper()
+        payload["asset"] = asset
+        payload["score"] = result.confluence_score
+        return payload
 
 
 if __name__ == "__main__":
