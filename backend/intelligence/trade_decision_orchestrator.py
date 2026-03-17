@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
+from backend.intelligence.elite_signal_classifier import EliteSignalClassifier
 from backend.intelligence.market_regime_detector import MarketRegimeDetector
 from backend.intelligence.opportunity_momentum_window_engine import (
     OpportunityMomentumWindowEngine,
@@ -12,6 +13,8 @@ from backend.intelligence.pressure_acceleration_engine import (
     PressureAccelerationEngine,
 )
 from backend.intelligence.signal_confluence_engine import SignalConfluenceEngine
+from backend.intelligence.vwap_deviation_engine import VWAPDeviationEngine
+from backend.intelligence.vwap_elasticity_engine import VWAPElasticityEngine
 
 
 class TradeDecisionOrchestrator:
@@ -20,7 +23,7 @@ class TradeDecisionOrchestrator:
 
     Purpose:
     - apply final intelligence and confluence checks before trade execution
-    - orchestrate the main signal engines already built across CSS
+    - enforce VWAP deviation + elasticity + elite classification
     - preserve backward-compatible output for the live dashboard
     - expose richer scoring for tuning, diagnostics, and auditability
 
@@ -43,32 +46,39 @@ class TradeDecisionOrchestrator:
         "acceleration_score": float,
         "momentum_score": float,
         "decision_score": float,
+        "vwap_dev_abs": float,
+        "vwap_dev_score": float,
+        "elasticity_score": float,
+        "signal_tier": str,
     }
     """
 
     def __init__(self) -> None:
         self.regime_detector = MarketRegimeDetector()
 
-        # External intelligence modules
         self.ai_scorer = AIOpportunityScorer()
         self.signal_confluence_engine = SignalConfluenceEngine()
         self.pressure_engine = OpportunityPressureEngine()
         self.acceleration_engine = PressureAccelerationEngine()
         self.momentum_engine = OpportunityMomentumWindowEngine()
 
-        # Regime-specific execution thresholds
+        self.vwap_deviation_engine = VWAPDeviationEngine()
+        self.vwap_elasticity_engine = VWAPElasticityEngine()
+        self.elite_signal_classifier = EliteSignalClassifier()
+
         self.mean_reversion_threshold = 0.46
         self.trend_threshold = 0.58
         self.breakout_threshold = 0.66
 
-        # Weighted fusion model
         self.weights = {
-            "ai_score": 0.28,
-            "confluence_score": 0.22,
-            "pressure_score": 0.20,
-            "acceleration_score": 0.12,
-            "momentum_score": 0.10,
-            "regime_confidence": 0.08,
+            "ai_score": 0.22,
+            "confluence_score": 0.18,
+            "pressure_score": 0.16,
+            "acceleration_score": 0.10,
+            "momentum_score": 0.08,
+            "regime_confidence": 0.06,
+            "vwap_dev_score": 0.10,
+            "elasticity_score": 0.10,
         }
 
     def evaluate_trade(
@@ -77,17 +87,7 @@ class TradeDecisionOrchestrator:
         candles: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         if not candles or len(candles) < 20:
-            return {
-                "execute_trade": False,
-                "regime": "UNSTABLE",
-                "regime_reason": "insufficient candle history",
-                "confluence_score": 0.0,
-                "ai_score": 0.0,
-                "pressure_score": 0.0,
-                "acceleration_score": 0.0,
-                "momentum_score": 0.0,
-                "decision_score": 0.0,
-            }
+            return self._reject_payload(reason="insufficient candle history")
 
         regime_info = self.regime_detector.detect_regime(candles)
         regime = str(regime_info.get("regime", "UNSTABLE")).upper()
@@ -105,6 +105,15 @@ class TradeDecisionOrchestrator:
         acceleration_score = self._safe_acceleration_score(asset=asset, candles=candles)
         momentum_score = self._safe_momentum_score(asset=asset, candles=candles)
 
+        vwap_dev_abs, vwap_dev_score = self._safe_vwap_deviation(
+            asset=asset,
+            candles=candles,
+        )
+        elasticity_score = self._safe_vwap_elasticity(
+            asset=asset,
+            candles=candles,
+        )
+
         decision_score = self._compute_decision_score(
             ai_score=ai_score,
             confluence_score=confluence_score,
@@ -112,12 +121,24 @@ class TradeDecisionOrchestrator:
             acceleration_score=acceleration_score,
             momentum_score=momentum_score,
             regime_confidence=regime_confidence,
+            vwap_dev_score=vwap_dev_score,
+            elasticity_score=elasticity_score,
         )
 
-        execute_trade = self._should_execute_trade(
+        signal_tier = self._classify_signal(
+            confluence_score=confluence_score,
+            pressure_score=pressure_score,
+            acceleration_score=acceleration_score,
+            vwap_dev_abs=vwap_dev_abs,
+            decision_score=decision_score,
+        )
+
+        threshold_pass = self._should_execute_trade(
             regime=regime,
             decision_score=decision_score,
         )
+
+        execute_trade = threshold_pass and signal_tier == "ELITE"
 
         return {
             "execute_trade": execute_trade,
@@ -129,6 +150,27 @@ class TradeDecisionOrchestrator:
             "acceleration_score": round(acceleration_score, 4),
             "momentum_score": round(momentum_score, 4),
             "decision_score": round(decision_score, 4),
+            "vwap_dev_abs": round(vwap_dev_abs, 6),
+            "vwap_dev_score": round(vwap_dev_score, 4),
+            "elasticity_score": round(elasticity_score, 4),
+            "signal_tier": signal_tier,
+        }
+
+    def _reject_payload(self, *, reason: str) -> Dict[str, Any]:
+        return {
+            "execute_trade": False,
+            "regime": "UNSTABLE",
+            "regime_reason": reason,
+            "confluence_score": 0.0,
+            "ai_score": 0.0,
+            "pressure_score": 0.0,
+            "acceleration_score": 0.0,
+            "momentum_score": 0.0,
+            "decision_score": 0.0,
+            "vwap_dev_abs": 0.0,
+            "vwap_dev_score": 0.0,
+            "elasticity_score": 0.0,
+            "signal_tier": "WATCH",
         }
 
     def evaluate(self, market_features: Dict[str, Any]) -> Dict[str, Any]:
@@ -180,6 +222,8 @@ class TradeDecisionOrchestrator:
         acceleration_score: float,
         momentum_score: float,
         regime_confidence: float,
+        vwap_dev_score: float,
+        elasticity_score: float,
     ) -> float:
         score = (
             self.weights["ai_score"] * ai_score
@@ -188,6 +232,8 @@ class TradeDecisionOrchestrator:
             + self.weights["acceleration_score"] * acceleration_score
             + self.weights["momentum_score"] * momentum_score
             + self.weights["regime_confidence"] * regime_confidence
+            + self.weights["vwap_dev_score"] * vwap_dev_score
+            + self.weights["elasticity_score"] * elasticity_score
         )
         return self._clamp01(score)
 
@@ -199,6 +245,34 @@ class TradeDecisionOrchestrator:
         if regime == "BREAKOUT":
             return decision_score >= self.breakout_threshold
         return False
+
+    def _classify_signal(
+        self,
+        *,
+        confluence_score: float,
+        pressure_score: float,
+        acceleration_score: float,
+        vwap_dev_abs: float,
+        decision_score: float,
+    ) -> str:
+        rows = [
+            {
+                "confluence_score": confluence_score,
+                "pressure_score": pressure_score,
+                "pressure_acceleration": acceleration_score,
+                "vwap_dev_abs": vwap_dev_abs,
+                "trade_score": decision_score,
+            }
+        ]
+
+        try:
+            classified = self.elite_signal_classifier.classify(rows)
+            if classified and isinstance(classified[0], dict):
+                return str(classified[0].get("signal_tier", "WATCH")).upper()
+        except Exception:
+            pass
+
+        return "WATCH"
 
     def _safe_ai_score(self, *, asset: str, candles: List[Dict[str, Any]]) -> float:
         try:
@@ -318,6 +392,56 @@ class TradeDecisionOrchestrator:
 
         return self._fallback_momentum_score(candles)
 
+    def _safe_vwap_deviation(
+        self,
+        *,
+        asset: str,
+        candles: List[Dict[str, Any]],
+    ) -> tuple[float, float]:
+        try:
+            if hasattr(self.vwap_deviation_engine, "evaluate"):
+                result = self.vwap_deviation_engine.evaluate(
+                    asset=asset,
+                    candles=candles,
+                )
+                return self._extract_vwap_metrics(result)
+
+            if hasattr(self.vwap_deviation_engine, "compute"):
+                result = self.vwap_deviation_engine.compute(
+                    asset=asset,
+                    candles=candles,
+                )
+                return self._extract_vwap_metrics(result)
+        except Exception:
+            pass
+
+        return self._fallback_vwap_deviation(candles)
+
+    def _safe_vwap_elasticity(
+        self,
+        *,
+        asset: str,
+        candles: List[Dict[str, Any]],
+    ) -> float:
+        try:
+            if hasattr(self.vwap_elasticity_engine, "evaluate"):
+                result = self.vwap_elasticity_engine.evaluate(
+                    asset=asset,
+                    candles=candles,
+                )
+                return self._extract_score(result)
+
+            if hasattr(self.vwap_elasticity_engine, "compute"):
+                result = self.vwap_elasticity_engine.compute(
+                    asset=asset,
+                    candles=candles,
+                )
+                return self._extract_score(result)
+        except Exception:
+            pass
+
+        return self._fallback_vwap_elasticity(candles)
+
     def _fallback_ai_score(self, candles: List[Dict[str, Any]]) -> float:
         closes = [self._to_float(c.get("close"), 0.0) for c in candles if c]
         if len(closes) < 20:
@@ -429,6 +553,49 @@ class TradeDecisionOrchestrator:
         momentum = abs(mean_5 - mean_10) / mean_10
         return self._clamp01(min(momentum * 10.0, 0.75))
 
+    def _fallback_vwap_deviation(self, candles: List[Dict[str, Any]]) -> tuple[float, float]:
+        closes = [self._to_float(c.get("close"), 0.0) for c in candles]
+        volumes = [self._to_float(c.get("volume"), 0.0) for c in candles]
+
+        if len(closes) < 20 or len(volumes) < 20:
+            return 0.0, 0.0
+
+        total_pv = 0.0
+        total_volume = 0.0
+        for close, volume in zip(closes[-20:], volumes[-20:]):
+            total_pv += close * volume
+            total_volume += volume
+
+        if total_volume <= 0:
+            return 0.0, 0.0
+
+        vwap = total_pv / total_volume
+        if vwap <= 0:
+            return 0.0, 0.0
+
+        dev_abs = abs(closes[-1] - vwap) / vwap
+        dev_score = self._clamp01(min(dev_abs * 20.0, 1.0))
+        return dev_abs, dev_score
+
+    def _fallback_vwap_elasticity(self, candles: List[Dict[str, Any]]) -> float:
+        closes = [self._to_float(c.get("close"), 0.0) for c in candles]
+        if len(closes) < 20:
+            return 0.0
+
+        mean_20 = sum(closes[-20:]) / 20.0
+        if mean_20 <= 0:
+            return 0.0
+
+        abs_moves = [
+            abs(closes[i] - closes[i - 1]) / mean_20
+            for i in range(1, len(closes[-20:]))
+        ]
+        if not abs_moves:
+            return 0.0
+
+        avg_move = sum(abs_moves) / len(abs_moves)
+        return self._clamp01(min(avg_move * 30.0, 1.0))
+
     def _extract_score(self, result: Any) -> float:
         if isinstance(result, (int, float)):
             return self._clamp01(result)
@@ -444,11 +611,29 @@ class TradeDecisionOrchestrator:
                 "momentum_score",
                 "probability",
                 "confidence",
+                "elasticity_score",
+                "vwap_dev_score",
             ):
                 if key in result:
                     return self._clamp01(result.get(key, 0.0))
 
         return 0.0
+
+    def _extract_vwap_metrics(self, result: Any) -> tuple[float, float]:
+        if isinstance(result, dict):
+            dev_abs = self._to_float(
+                result.get("vwap_dev_abs", result.get("deviation_abs", 0.0)),
+                0.0,
+            )
+            dev_score = self._clamp01(
+                result.get("vwap_dev_score", result.get("score", 0.0))
+            )
+            return dev_abs, dev_score
+
+        if isinstance(result, (int, float)):
+            return 0.0, self._clamp01(result)
+
+        return 0.0, 0.0
 
     @staticmethod
     def _clamp01(value: Any) -> float:
