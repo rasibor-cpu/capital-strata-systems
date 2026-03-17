@@ -14,15 +14,23 @@ from backend.intelligence.pressure_acceleration_engine import (
 from backend.intelligence.signal_confluence_engine import SignalConfluenceEngine
 
 
-class TradeDecisionEngine:
+class TradeDecisionOrchestrator:
     """
-    CSS Trade Decision Engine
+    Central trade decision orchestrator for Capital Strata Systems.
 
     Purpose:
     - apply final intelligence and confluence checks before trade execution
     - orchestrate the main signal engines already built across CSS
     - preserve backward-compatible output for the live dashboard
-    - expose richer scoring for tuning and diagnostics
+    - expose richer scoring for tuning, diagnostics, and auditability
+
+    The orchestrator fuses:
+    - market regime
+    - AI opportunity score
+    - signal confluence
+    - opportunity pressure
+    - pressure acceleration
+    - momentum window analysis
 
     Output contract:
     {
@@ -121,6 +129,46 @@ class TradeDecisionEngine:
             "acceleration_score": round(acceleration_score, 4),
             "momentum_score": round(momentum_score, 4),
             "decision_score": round(decision_score, 4),
+        }
+
+    def evaluate(self, market_features: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Compatibility wrapper for orchestration-style callers that pass a single feature dict.
+        Expected keys:
+        - asset or symbol
+        - candles
+        """
+        asset = str(market_features.get("asset") or market_features.get("symbol") or "UNKNOWN")
+        candles = market_features.get("candles", []) or []
+
+        result = self.evaluate_trade(asset=asset, candles=candles)
+
+        direction = "NONE"
+        regime = result.get("regime", "UNSTABLE")
+
+        if regime in ("TREND", "BREAKOUT"):
+            direction = "LONG"
+        elif regime == "MEAN_REVERSION":
+            direction = "NONE"
+
+        decision_score = float(result.get("decision_score", 0.0))
+
+        if decision_score >= 0.66:
+            signal_class = "ELITE"
+        elif decision_score >= 0.50:
+            signal_class = "STRONG"
+        elif decision_score >= 0.40:
+            signal_class = "WEAK"
+        else:
+            signal_class = "NONE"
+
+        return {
+            "signal_class": signal_class,
+            "confidence": round(decision_score, 4),
+            "direction": direction,
+            "reason": result.get("regime_reason", "multi-engine evaluation"),
+            "execute_trade": result.get("execute_trade", False),
+            "regime": regime,
         }
 
     def _compute_decision_score(
@@ -418,3 +466,6 @@ class TradeDecisionEngine:
             return float(value)
         except (TypeError, ValueError):
             return default
+
+
+TradeDecisionEngine = TradeDecisionOrchestrator
