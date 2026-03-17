@@ -334,7 +334,7 @@ while True:
         accel = accel_engine.enrich_rows(pressure)
         confluence = confluence_engine.enrich_rows(accel)
         elasticity = elasticity_engine.enrich_rows(confluence)
-        sweeps = sweep_engine.detect(elasticity)
+        sweeps = sweep_engine.enrich_rows(elasticity)
 
         ranked = ai.rank_opportunities(sweeps)
         optimized = optimizer.optimize(ranked)
