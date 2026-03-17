@@ -749,7 +749,6 @@ while True:
         closed_positions = position_manager.update_positions(
             latest_prices=latest_prices,
             cycle_no=cycle,
-            timestamp_utc=now(),
         )
 
         for trade in closed_positions:
