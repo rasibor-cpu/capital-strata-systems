@@ -138,6 +138,7 @@ starting_capital = 200.0
 estimated_equity = starting_capital
 cycle = 0
 _debug_payload_logged = False
+_last_closed_trade: Dict[str, Any] | None = None
 
 
 class VWAPDeviationEngine:
@@ -463,6 +464,20 @@ def fetch_assets(symbols: List[str]) -> List[Dict[str, Any]]:
     return rows
 
 
+def safe_get_open_positions_count() -> int:
+    try:
+        return len(position_manager.get_open_positions())
+    except Exception:
+        return 0
+
+
+def safe_get_closed_positions_count() -> int:
+    try:
+        return len(position_manager.get_closed_positions())
+    except Exception:
+        return 0
+
+
 def persist_state(summary: Dict[str, Any]) -> None:
     try:
         with SUMMARY_FILE.open("w", encoding="utf-8") as f:
@@ -751,20 +766,20 @@ while True:
             cycle_no=cycle,
         )
 
+        cycle_realized_pnl = 0.0
         for trade in closed_positions:
             pnl = safe_float(trade.get("realized_pnl_usd"), 0.0)
+            cycle_realized_pnl += pnl
             estimated_equity += pnl
-            print(f"[CLOSE] {trade['symbol']} | reason={trade['exit_reason']} | pnl={pnl:.4f}")
+            _last_closed_trade = trade
+            print(
+                f"[CLOSE] {trade.get('symbol', '?')} | "
+                f"reason={trade.get('exit_reason', 'unknown')} | "
+                f"pnl={pnl:.4f}"
+            )
 
-        open_positions_obj = position_manager.get_open_positions()
-        try:
-            open_positions_count = len(open_positions_obj)
-        except Exception:
-            open_positions_count = 0
-
-        pm_summary = {
-            "open_positions": open_positions_count,
-        }
+        open_positions_count = safe_get_open_positions_count()
+        closed_positions_count = safe_get_closed_positions_count()
 
         summary = {
             "timestamp_utc": now(),
@@ -773,6 +788,7 @@ while True:
             "engine_profile": ACTIVE_PROFILE,
             "starting_capital_usd": starting_capital,
             "estimated_equity_usd": estimated_equity,
+            "cycle_realized_pnl_usd": cycle_realized_pnl,
             "symbols_scanned": len(symbols),
             "signals_scanned": len(merged),
             "signals_passed_confluence": sum(
@@ -783,10 +799,11 @@ while True:
             ),
             "signals_passed_execution_gate": len(passing_execution_gate),
             "opened_this_cycle": opened_this_cycle,
+            "open_positions": open_positions_count,
+            "closed_positions": closed_positions_count,
             "execution_audit": execution_audit,
             "max_symbols_per_cycle": MAX_SYMBOLS_PER_CYCLE,
             "max_trades_per_cycle": MAX_TRADES_PER_CYCLE,
-            **pm_summary,
         }
 
         persist_state(summary)
@@ -806,7 +823,17 @@ while True:
         print("Signals passed final gate:", len(passing_execution_gate))
         print("Opened this cycle:", opened_this_cycle)
         print("Open positions:", open_positions_count)
+        print("Closed positions:", closed_positions_count)
+        print("Cycle realized PnL:", round(cycle_realized_pnl, 4))
         print("Symbols:", symbols)
+
+        if _last_closed_trade:
+            print(
+                "\nLAST CLOSE → "
+                f"{_last_closed_trade.get('symbol', '?')} | "
+                f"pnl={safe_float(_last_closed_trade.get('realized_pnl_usd'), 0.0):.4f} | "
+                f"reason={_last_closed_trade.get('exit_reason', 'unknown')}"
+            )
 
         print("\nAI SIGNAL SCANNER\n")
         if not classified:
