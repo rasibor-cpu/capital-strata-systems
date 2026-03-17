@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Dict, Any, List
 
 from backend.intelligence.scanner_coordinator import ScannerCoordinator
-from backend.intelligence.trade_decision_engine import TradeDecisionEngine
+from backend.intelligence.trade_decision_orchestrator import TradeDecisionEngine
 from backend.intelligence.adaptive_exit_engine import AdaptiveExitEngine
 
 
