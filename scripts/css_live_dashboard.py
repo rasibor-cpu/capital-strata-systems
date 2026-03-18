@@ -536,11 +536,14 @@ def passes_execution_gate(row: Dict[str, Any], profile: Dict[str, float]) -> boo
 
     if regime not in ALLOWED_EXECUTION_REGIMES:
         return False
+
     if not reversion_window_pass:
         return False
+
     if reversion_window_score < profile["min_reversion_window_score"]:
         return False
-    if elasticity_score < profile["min_elasticity_score"]:
+
+    if elasticity_score < max(profile["min_elasticity_score"], 0.30):
         return False
 
     if tier == "ELITE":
@@ -551,17 +554,18 @@ def passes_execution_gate(row: Dict[str, Any], profile: Dict[str, float]) -> boo
         )
 
     if tier == "QUALIFIED":
-        if trade_score < profile["min_trade_score_to_execute"]:
+        if trade_score < max(profile["min_trade_score_to_execute"], 0.58):
             return False
-        if confluence_score < profile["min_confluence_to_execute"]:
+        if confluence_score < max(profile["min_confluence_to_execute"], 0.82):
             return False
-        if vwap_dev_abs < profile["min_vwap_dev_abs_to_execute"]:
+        if vwap_dev_abs < max(profile["min_vwap_dev_abs_to_execute"], 0.015):
             return False
-        if pressure_score >= profile["min_pressure_to_execute"]:
-            return True
-        if pressure_acceleration >= profile["min_accel_or_pressure_boost"]:
-            return True
-        return False
+        if not (
+            pressure_score >= max(profile["min_pressure_to_execute"], 0.24)
+            or pressure_acceleration >= max(profile["min_accel_or_pressure_boost"], 0.10)
+        ):
+            return False
+        return True
 
     return False
 
