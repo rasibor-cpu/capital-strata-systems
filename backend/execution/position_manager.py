@@ -3,15 +3,16 @@ from __future__ import annotations
 from typing import Dict, List, Any
 
 
+def _safe(v, default=0.0):
+    try:
+        return float(v)
+    except Exception:
+        return default
+
+
 class PositionManager:
     """
-    CSS Position Manager (stable + compatible)
-
-    Features:
-    - supports multiple call signatures
-    - enforces max open positions
-    - handles TP / SL exits
-    - tracks PnL
+    Enhanced Position Manager with Dynamic Exit Intelligence
     """
 
     def __init__(
@@ -20,36 +21,31 @@ class PositionManager:
         stop_loss_pct: float = 0.010,
         max_hold_cycles: int = 5,
     ):
+        self.open_positions: Dict[str, Dict[str, Any]] = {}
+        self.closed_positions: List[Dict[str, Any]] = []
 
         self.take_profit_pct = take_profit_pct
         self.stop_loss_pct = stop_loss_pct
         self.max_hold_cycles = max_hold_cycles
 
-        # 🔥 FIXED (no comma, no syntax error)
-        self.max_open_positions = 4
+    def has_open_position(self, symbol: str) -> bool:
+        return symbol in self.open_positions
 
-        self.positions: Dict[str, Dict[str, Any]] = {}
+    def get_open_positions(self) -> Dict[str, Dict[str, Any]]:
+        return self.open_positions
 
-    # ---------------------------------------------------------
-    # OPEN POSITION
-    # ---------------------------------------------------------
+    def get_closed_positions(self) -> List[Dict[str, Any]]:
+        return self.closed_positions
 
     def open_long_position(
         self,
         symbol: str,
         quantity: float,
         entry_price: float,
-        cycle_no: int | None = None,
-        opened_at_utc: str | None = None,
-    ) -> None:
-
-        if symbol in self.positions:
-            return
-
-        if len(self.positions) >= self.max_open_positions:
-            return
-
-        self.positions[symbol] = {
+        cycle_no: int,
+        opened_at_utc: str,
+    ):
+        self.open_positions[symbol] = {
             "symbol": symbol,
             "quantity": quantity,
             "entry_price": entry_price,
@@ -58,82 +54,77 @@ class PositionManager:
             "cycles_held": 0,
         }
 
-    # compatibility alias
-    def open_position(self, symbol: str, quantity: float, entry_price: float, **kwargs):
-        self.open_long_position(symbol, quantity, entry_price, **kwargs)
-
-    # ---------------------------------------------------------
-    # UPDATE POSITIONS
-    # ---------------------------------------------------------
-
     def update_positions(
         self,
-        latest_prices: Dict[str, float] | None = None,
-        cycle_no: int | None = None,
-        now: str | None = None,
+        latest_prices: Dict[str, float],
+        cycle_no: int,
+        now: str,
     ) -> List[Dict[str, Any]]:
+        closed: List[Dict[str, Any]] = []
 
-        closed_positions: List[Dict[str, Any]] = []
+        for symbol in list(self.open_positions.keys()):
+            pos = self.open_positions[symbol]
 
-        if latest_prices is None:
-            latest_prices = {}
+            price = _safe(latest_prices.get(symbol), 0.0)
+            entry = _safe(pos.get("entry_price"), 0.0)
+            qty = _safe(pos.get("quantity"), 0.0)
 
-        for symbol in list(self.positions.keys()):
-
-            pos = self.positions[symbol]
-
-            price = latest_prices.get(symbol)
-
-            if price is None or price <= 0:
+            if price <= 0 or entry <= 0:
                 continue
 
-            entry = pos["entry_price"]
-            qty = pos["quantity"]
-
             pnl_pct = (price - entry) / entry
+            pnl_usd = (price - entry) * qty
 
             pos["cycles_held"] += 1
 
-            exit_reason = None
-
-            # ---- TAKE PROFIT ----
+            # === HARD EXITS (unchanged core safety) ===
             if pnl_pct >= self.take_profit_pct:
-                exit_reason = "TP"
-
-            # ---- STOP LOSS ----
+                reason = "TP"
             elif pnl_pct <= -self.stop_loss_pct:
-                exit_reason = "SL"
+                reason = "SL"
 
-            # ---- TIME EXIT ----
-            elif pos["cycles_held"] >= self.max_hold_cycles:
-                exit_reason = "TIME"
+            else:
+                # === DYNAMIC EXIT INTELLIGENCE ===
 
-            if exit_reason:
+                cycles = pos["cycles_held"]
 
-                realized_pnl = (price - entry) * qty
+                # 🔥 1. EARLY PROFIT LOCK
+                if pnl_pct > 0.004:  # ~0.4% profit
+                    # If profit exists but not growing fast enough → lock it
+                    if cycles >= 2:
+                        reason = "EARLY_TP"
+                    else:
+                        reason = None
 
-                closed_positions.append(
-                    {
-                        "symbol": symbol,
-                        "exit_price": price,
-                        "entry_price": entry,
-                        "quantity": qty,
-                        "realized_pnl_usd": realized_pnl,
-                        "exit_reason": exit_reason,
-                        "closed_at": now,
-                    }
-                )
+                # 🔥 2. SIGNAL DECAY (weak trades)
+                elif pnl_pct < -0.002:  # small loss threshold
+                    if cycles >= 2:
+                        reason = "SIGNAL_DECAY"
+                    else:
+                        reason = None
 
-                del self.positions[symbol]
+                else:
+                    reason = None
 
-        return closed_positions
+                # 🔥 3. MAX HOLD FALLBACK (only if no decision yet)
+                if reason is None and cycles >= self.max_hold_cycles:
+                    reason = "TIME"
 
-    # ---------------------------------------------------------
-    # UTILITIES
-    # ---------------------------------------------------------
+            if reason:
+                trade = {
+                    "symbol": symbol,
+                    "exit_price": price,
+                    "entry_price": entry,
+                    "quantity": qty,
+                    "realized_pnl_usd": pnl_usd,
+                    "exit_reason": reason,
+                    "closed_at": now,
+                    "cycle_closed": cycle_no,
+                    "cycles_held": pos["cycles_held"],
+                }
 
-    def get_open_positions(self) -> Dict[str, Dict[str, Any]]:
-        return self.positions
+                closed.append(trade)
+                self.closed_positions.append(trade)
+                del self.open_positions[symbol]
 
-    def has_open_position(self, symbol: str) -> bool:
-        return symbol in self.positions
+        return closed
