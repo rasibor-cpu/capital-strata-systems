@@ -129,9 +129,9 @@ ai = AIOpportunityScorer()
 optimizer = QuantSignalOptimizer()
 
 position_manager = PositionManager(
-    take_profit_pct=0.025,
-    stop_loss_pct=0.012,
-    max_hold_cycles=8,
+    take_profit_pct=0.018,
+    stop_loss_pct=0.010,
+    max_hold_cycles=5,
 )
 
 starting_capital = 200.0
@@ -226,9 +226,11 @@ class EliteSignalClassifier:
             elasticity_score = safe_float(row.get("elasticity_score"), 0.0)
 
             tier = "WATCH"
+            decision = "WATCH"
 
             if trade_score >= 0.45 and reversion_window_score >= 0.40:
                 tier = "QUALIFIED"
+                decision = "TRADE"
 
             if (
                 confluence >= 0.88
@@ -239,9 +241,11 @@ class EliteSignalClassifier:
                 and elasticity_score >= 0.35
             ):
                 tier = "ELITE"
+                decision = "TRADE"
 
             new_row = dict(row)
             new_row["signal_tier"] = tier
+            new_row["decision"] = decision
             classified.append(new_row)
 
         return classified
@@ -536,13 +540,10 @@ def passes_execution_gate(row: Dict[str, Any], profile: Dict[str, float]) -> boo
 
     if regime not in ALLOWED_EXECUTION_REGIMES:
         return False
-
     if not reversion_window_pass:
         return False
-
     if reversion_window_score < profile["min_reversion_window_score"]:
         return False
-
     if elasticity_score < profile["min_elasticity_score"]:
         return False
 
@@ -767,6 +768,7 @@ while True:
         closed_positions = position_manager.update_positions(
             latest_prices=latest_prices,
             cycle_no=cycle,
+            now=now(),
         )
 
         cycle_realized_pnl = 0.0
