@@ -13,7 +13,8 @@ from backend.intelligence.pressure_acceleration_engine import (
 )
 from backend.intelligence.signal_confluence_engine import SignalConfluenceEngine
 
-# NEW (SAFE IMPORTS)
+
+# Safe optional imports across current mixed project structure
 try:
     from backend.execution.cost_aware_gate import CostAwareGate
 except Exception:
@@ -22,10 +23,23 @@ except Exception:
 try:
     from backend.execution.execution_cost_engine import ExecutionCostEngine
 except Exception:
-    ExecutionCostEngine = None
+    try:
+        from engine.execution.execution_cost_engine import ExecutionCostEngine
+    except Exception:
+        ExecutionCostEngine = None
 
 
 class TradeDecisionOrchestrator:
+    """
+    Trade decision orchestrator for Capital Strata Systems.
+
+    Responsibilities:
+    - detect market regime
+    - aggregate intelligence scores
+    - compute final decision score
+    - apply execution threshold by regime
+    - apply cost-aware governance gate
+    """
 
     def __init__(self) -> None:
         self.regime_detector = MarketRegimeDetector()
@@ -35,6 +49,8 @@ class TradeDecisionOrchestrator:
         self.pressure_engine = OpportunityPressureEngine()
         self.acceleration_engine = PressureAccelerationEngine()
         self.momentum_engine = OpportunityMomentumWindowEngine()
+
+        self.cost_engine = ExecutionCostEngine() if ExecutionCostEngine else None
 
         self.mean_reversion_threshold = 0.46
         self.trend_threshold = 0.58
@@ -49,8 +65,10 @@ class TradeDecisionOrchestrator:
             "regime_confidence": 0.08,
         }
 
-    def evaluate_trade(self, asset: str, candles: List[Dict[str, Any]]) -> Dict[str, Any]:
+        self.EDGE_MULTIPLIER = 0.01
+        self.COST_NOTIONAL = 1000.0
 
+    def evaluate_trade(self, asset: str, candles: List[Dict[str, Any]]) -> Dict[str, Any]:
         if not candles or len(candles) < 20:
             return self._reject(asset, "INSUFFICIENT_DATA")
 
@@ -79,9 +97,6 @@ class TradeDecisionOrchestrator:
             regime_confidence=regime_confidence,
         )
 
-        # ===============================
-        # NEW: EDGE + COST LAYER
-        # ===============================
         expected_edge_bps = self._estimate_edge(decision_score)
         execution_cost_bps = self._estimate_cost(asset)
 
@@ -97,12 +112,30 @@ class TradeDecisionOrchestrator:
             decision_score=decision_score,
         )
 
-        # FINAL GOVERNANCE: cost gate overrides execution
+        cost_blocked = False
         if cost_decision.get("decision") != "APPROVE":
             execute_trade = False
+            cost_blocked = True
+
+        expected_edge_value = 0.0
+        cost_adjusted_edge_value = 0.0
+
+        try:
+            last_close = self._extract_last_close(candles)
+            if last_close > 0 and self.cost_engine and hasattr(self.cost_engine, "apply_costs"):
+                expected_edge_value = decision_score * last_close * self.EDGE_MULTIPLIER
+                cost_adjusted_edge_value = self.cost_engine.apply_costs(
+                    instrument=asset,
+                    notional=self.COST_NOTIONAL,
+                    raw_pnl=expected_edge_value,
+                )
+        except Exception:
+            pass
 
         return {
+            "asset": asset,
             "execute_trade": execute_trade,
+            "cost_blocked": cost_blocked,
             "regime": regime,
             "regime_reason": regime_reason,
             "confluence_score": round(confluence_score, 4),
@@ -111,11 +144,12 @@ class TradeDecisionOrchestrator:
             "acceleration_score": round(acceleration_score, 4),
             "momentum_score": round(momentum_score, 4),
             "decision_score": round(decision_score, 4),
-            # NEW OUTPUTS (NON-BREAKING ADDITION)
-            "expected_edge_bps": expected_edge_bps,
-            "execution_cost_bps": execution_cost_bps,
+            "expected_edge_bps": round(expected_edge_bps, 4),
+            "execution_cost_bps": round(execution_cost_bps, 4),
             "cost_decision": cost_decision.get("decision"),
-            "net_edge_bps": cost_decision.get("net_edge_bps", 0.0),
+            "net_edge_bps": round(float(cost_decision.get("net_edge_bps", 0.0)), 4),
+            "expected_edge_value": round(expected_edge_value, 6),
+            "cost_adjusted_edge_value": round(cost_adjusted_edge_value, 6),
         }
 
     # ===============================
@@ -123,19 +157,34 @@ class TradeDecisionOrchestrator:
     # ===============================
     def _estimate_edge(self, decision_score: float) -> float:
         base = max(0.0, decision_score - 0.5)
-        return round(base * 200, 4)
+        return round(base * 200.0, 4)
 
     # ===============================
     # COST MODEL
     # ===============================
     def _estimate_cost(self, asset: str) -> float:
-        if ExecutionCostEngine:
-            try:
-                result = ExecutionCostEngine.estimate(asset)
-                return float(result.get("total_cost_bps", 10.0))
-            except Exception:
-                pass
-        return 10.0
+        if self.cost_engine is None:
+            return 10.0
+
+        try:
+            notional = self.COST_NOTIONAL
+            spread_cost = 0.0
+            slippage_cost = 0.0
+            commission_cost = 0.0
+
+            if hasattr(self.cost_engine, "_compute_spread_cost"):
+                spread_cost = float(self.cost_engine._compute_spread_cost(asset, notional))
+
+            if hasattr(self.cost_engine, "_compute_slippage_cost"):
+                slippage_cost = float(self.cost_engine._compute_slippage_cost(notional))
+
+            if hasattr(self.cost_engine, "commission_per_trade"):
+                commission_cost = float(self.cost_engine.commission_per_trade)
+
+            total_cost = spread_cost + slippage_cost + commission_cost
+            return (total_cost / notional) * 10000.0
+        except Exception:
+            return 10.0
 
     # ===============================
     # COST GATE
@@ -147,24 +196,35 @@ class TradeDecisionOrchestrator:
         asset: str,
         decision_score: float,
     ) -> Dict[str, Any]:
+        net_edge_bps = expected_edge_bps - execution_cost_bps
 
         if CostAwareGate:
-            return CostAwareGate.evaluate(
-                expected_edge_bps,
-                execution_cost_bps,
-                metadata={"asset": asset, "score": decision_score},
-            )
+            try:
+                return CostAwareGate.evaluate(
+                    expected_edge_bps,
+                    execution_cost_bps,
+                    metadata={"asset": asset, "score": decision_score},
+                )
+            except Exception:
+                pass
+
+        if net_edge_bps > 0:
+            return {
+                "decision": "APPROVE",
+                "reason": "FALLBACK_NET_EDGE_POSITIVE",
+                "net_edge_bps": net_edge_bps,
+            }
 
         return {
             "decision": "REJECT",
-            "reason": "COST_GATE_UNAVAILABLE",
-            "net_edge_bps": expected_edge_bps - execution_cost_bps,
+            "reason": "FALLBACK_NET_EDGE_NEGATIVE",
+            "net_edge_bps": net_edge_bps,
         }
 
     # ===============================
-    # ORIGINAL METHODS (UNCHANGED)
+    # ORIGINAL METHODS
     # ===============================
-    def _compute_decision_score(self, **kwargs) -> float:
+    def _compute_decision_score(self, **kwargs: float) -> float:
         score = (
             self.weights["ai_score"] * kwargs["ai_score"]
             + self.weights["confluence_score"] * kwargs["confluence_score"]
@@ -184,7 +244,7 @@ class TradeDecisionOrchestrator:
             return decision_score >= self.breakout_threshold
         return False
 
-    def _safe_ai_score(self, **kwargs) -> float:
+    def _safe_ai_score(self, **kwargs: Any) -> float:
         try:
             if hasattr(self.ai_scorer, "score_opportunity"):
                 return self._extract_score(self.ai_scorer.score_opportunity(**kwargs))
@@ -192,25 +252,29 @@ class TradeDecisionOrchestrator:
             pass
         return 0.0
 
-    def _safe_confluence_score(self, **kwargs) -> float:
+    def _safe_confluence_score(self, **kwargs: Any) -> float:
         try:
-            return self._extract_score(self.signal_confluence_engine.compute_confluence(**kwargs))
+            return self._extract_score(
+                self.signal_confluence_engine.compute_confluence(**kwargs)
+            )
         except Exception:
             return 0.0
 
-    def _safe_pressure_score(self, **kwargs) -> float:
+    def _safe_pressure_score(self, **kwargs: Any) -> float:
         try:
             return self._extract_score(self.pressure_engine.compute_pressure(**kwargs))
         except Exception:
             return 0.0
 
-    def _safe_acceleration_score(self, **kwargs) -> float:
+    def _safe_acceleration_score(self, **kwargs: Any) -> float:
         try:
-            return self._extract_score(self.acceleration_engine.compute_acceleration(**kwargs))
+            return self._extract_score(
+                self.acceleration_engine.compute_acceleration(**kwargs)
+            )
         except Exception:
             return 0.0
 
-    def _safe_momentum_score(self, **kwargs) -> float:
+    def _safe_momentum_score(self, **kwargs: Any) -> float:
         try:
             return self._extract_score(self.momentum_engine.compute_momentum_window(**kwargs))
         except Exception:
@@ -220,10 +284,18 @@ class TradeDecisionOrchestrator:
         if isinstance(result, (int, float)):
             return self._clamp01(result)
         if isinstance(result, dict):
-            for k in ("score", "confidence"):
-                if k in result:
-                    return self._clamp01(result[k])
+            for key in ("score", "confidence", "final_score", "decision_score"):
+                if key in result:
+                    return self._clamp01(result[key])
         return 0.0
+
+    def _extract_last_close(self, candles: List[Dict[str, Any]]) -> float:
+        if not candles:
+            return 0.0
+        last = candles[-1]
+        if isinstance(last, dict):
+            return self._to_float(last.get("close"), 0.0)
+        return self._to_float(getattr(last, "close", 0.0), 0.0)
 
     @staticmethod
     def _clamp01(value: Any) -> float:
@@ -232,11 +304,34 @@ class TradeDecisionOrchestrator:
         except Exception:
             return 0.0
 
+    @staticmethod
+    def _to_float(value: Any, default: float = 0.0) -> float:
+        try:
+            if value is None:
+                return default
+            return float(value)
+        except Exception:
+            return default
+
     def _reject(self, asset: str, reason: str) -> Dict[str, Any]:
         return {
+            "asset": asset,
             "execute_trade": False,
+            "cost_blocked": False,
             "regime": "UNSTABLE",
             "regime_reason": reason,
+            "confluence_score": 0.0,
+            "ai_score": 0.0,
+            "pressure_score": 0.0,
+            "acceleration_score": 0.0,
+            "momentum_score": 0.0,
+            "decision_score": 0.0,
+            "expected_edge_bps": 0.0,
+            "execution_cost_bps": 0.0,
+            "cost_decision": "REJECT",
+            "net_edge_bps": 0.0,
+            "expected_edge_value": 0.0,
+            "cost_adjusted_edge_value": 0.0,
         }
 
 
