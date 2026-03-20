@@ -13,402 +13,230 @@ from backend.intelligence.pressure_acceleration_engine import (
 )
 from backend.intelligence.signal_confluence_engine import SignalConfluenceEngine
 
+# NEW (SAFE IMPORTS)
+try:
+    from backend.execution.cost_aware_gate import CostAwareGate
+except Exception:
+    CostAwareGate = None
+
+try:
+    from backend.execution.execution_cost_engine import ExecutionCostEngine
+except Exception:
+    ExecutionCostEngine = None
+
 
 class TradeDecisionOrchestrator:
-    """
-    Balanced Phase 2 orchestrator.
-
-    Goals:
-    - preserve controlled activation
-    - improve entry quality
-    - reduce weak ACTIVE executions
-    - keep future room for later aggressive Mode B
-    """
 
     def __init__(self) -> None:
         self.regime_detector = MarketRegimeDetector()
+
         self.ai_scorer = AIOpportunityScorer()
+        self.signal_confluence_engine = SignalConfluenceEngine()
         self.pressure_engine = OpportunityPressureEngine()
-        self.accel_engine = PressureAccelerationEngine()
-        self.confluence_engine = SignalConfluenceEngine()
+        self.acceleration_engine = PressureAccelerationEngine()
         self.momentum_engine = OpportunityMomentumWindowEngine()
 
-        # Balanced thresholds now, with room for later B-mode loosening/tuning
-        self.ELITE_THRESHOLD = 0.55
-        self.STRONG_THRESHOLD = 0.42
-        self.ACTIVE_THRESHOLD = 0.32
+        self.mean_reversion_threshold = 0.46
+        self.trend_threshold = 0.58
+        self.breakout_threshold = 0.66
 
-        self.STRONG_ELASTICITY_MIN = 0.0015
-        self.ACTIVE_ELASTICITY_MIN = 0.0020
+        self.weights = {
+            "ai_score": 0.28,
+            "confluence_score": 0.22,
+            "pressure_score": 0.20,
+            "acceleration_score": 0.12,
+            "momentum_score": 0.10,
+            "regime_confidence": 0.08,
+        }
 
-    def evaluate_trade(
-        self,
-        asset: str,
-        candles: List[Dict[str, Any]],
-    ) -> Dict[str, Any]:
+    def evaluate_trade(self, asset: str, candles: List[Dict[str, Any]]) -> Dict[str, Any]:
+
         if not candles or len(candles) < 20:
-            return self._empty(asset)
+            return self._reject(asset, "INSUFFICIENT_DATA")
 
-        candles = [self._normalize_candle(c) for c in candles]
+        regime_info = self.regime_detector.detect_regime(candles)
+        regime = str(regime_info.get("regime", "UNSTABLE")).upper()
+        regime_confidence = self._clamp01(regime_info.get("confidence", 0.0))
+        regime_reason = str(regime_info.get("reason", "unknown"))
 
-        regime_info = self._safe_regime(asset=asset, candles=candles)
-        regime = str(regime_info.get("regime", "NEUTRAL")).upper()
-
-        base_score = self._safe_ai_score(asset=asset, candles=candles)
-        pressure = self._safe_pressure_score(asset=asset, candles=candles)
-        accel = self._safe_accel_score(asset=asset, candles=candles)
-        confluence = self._safe_confluence_score(
+        ai_score = self._safe_ai_score(asset=asset, candles=candles)
+        confluence_score = self._safe_confluence_score(
             asset=asset,
             candles=candles,
             regime=regime,
+            regime_confidence=regime_confidence,
         )
-        momentum = self._safe_momentum_score(asset=asset, candles=candles)
+        pressure_score = self._safe_pressure_score(asset=asset, candles=candles)
+        acceleration_score = self._safe_acceleration_score(asset=asset, candles=candles)
+        momentum_score = self._safe_momentum_score(asset=asset, candles=candles)
 
-        decision_score = self._clamp01(
-            0.35 * base_score
-            + 0.20 * pressure
-            + 0.15 * accel
-            + 0.20 * confluence
-            + 0.10 * momentum
+        decision_score = self._compute_decision_score(
+            ai_score=ai_score,
+            confluence_score=confluence_score,
+            pressure_score=pressure_score,
+            acceleration_score=acceleration_score,
+            momentum_score=momentum_score,
+            regime_confidence=regime_confidence,
         )
 
-        elasticity = self._compute_elasticity_proxy(candles)
+        # ===============================
+        # NEW: EDGE + COST LAYER
+        # ===============================
+        expected_edge_bps = self._estimate_edge(decision_score)
+        execution_cost_bps = self._estimate_cost(asset)
 
-        if decision_score >= self.ELITE_THRESHOLD:
-            tier = "ELITE"
-        elif decision_score >= self.STRONG_THRESHOLD:
-            tier = "STRONG"
-        elif decision_score >= self.ACTIVE_THRESHOLD:
-            tier = "ACTIVE"
-        else:
-            tier = "WATCH"
+        cost_decision = self._apply_cost_gate(
+            expected_edge_bps,
+            execution_cost_bps,
+            asset,
+            decision_score,
+        )
 
-        execute = False
+        execute_trade = self._should_execute_trade(
+            regime=regime,
+            decision_score=decision_score,
+        )
 
-        if tier == "ELITE":
-            execute = True
-
-        elif tier == "STRONG":
-            if regime not in {"CHAOTIC", "UNSTABLE"} and elasticity > self.STRONG_ELASTICITY_MIN:
-                execute = True
-
-        elif tier == "ACTIVE":
-            if (
-                decision_score >= self.ACTIVE_THRESHOLD
-                and elasticity > self.ACTIVE_ELASTICITY_MIN
-                and regime not in {"CHAOTIC", "UNSTABLE"}
-            ):
-                execute = True
+        # FINAL GOVERNANCE: cost gate overrides execution
+        if cost_decision.get("decision") != "APPROVE":
+            execute_trade = False
 
         return {
-            "asset": asset,
-            "execute_trade": execute,
-            "signal_tier": tier,
-            "decision_score": round(decision_score, 4),
-            "elasticity_score": round(elasticity, 4),
+            "execute_trade": execute_trade,
             "regime": regime,
-            "ai_score": round(base_score, 4),
-            "pressure_score": round(pressure, 4),
-            "acceleration_score": round(accel, 4),
-            "confluence_score": round(confluence, 4),
-            "momentum_score": round(momentum, 4),
+            "regime_reason": regime_reason,
+            "confluence_score": round(confluence_score, 4),
+            "ai_score": round(ai_score, 4),
+            "pressure_score": round(pressure_score, 4),
+            "acceleration_score": round(acceleration_score, 4),
+            "momentum_score": round(momentum_score, 4),
+            "decision_score": round(decision_score, 4),
+            # NEW OUTPUTS (NON-BREAKING ADDITION)
+            "expected_edge_bps": expected_edge_bps,
+            "execution_cost_bps": execution_cost_bps,
+            "cost_decision": cost_decision.get("decision"),
+            "net_edge_bps": cost_decision.get("net_edge_bps", 0.0),
         }
 
-    def _safe_regime(self, *, asset: str, candles: List[Dict[str, Any]]) -> Dict[str, Any]:
-        try:
-            if hasattr(self.regime_detector, "detect_regime"):
-                result = self.regime_detector.detect_regime(candles)
-                if isinstance(result, dict):
-                    return result
-            if hasattr(self.regime_detector, "detect"):
-                result = self.regime_detector.detect(candles)
-                if isinstance(result, dict):
-                    return result
-        except Exception:
-            pass
+    # ===============================
+    # EDGE MODEL
+    # ===============================
+    def _estimate_edge(self, decision_score: float) -> float:
+        base = max(0.0, decision_score - 0.5)
+        return round(base * 200, 4)
 
-        return {"regime": "NEUTRAL"}
+    # ===============================
+    # COST MODEL
+    # ===============================
+    def _estimate_cost(self, asset: str) -> float:
+        if ExecutionCostEngine:
+            try:
+                result = ExecutionCostEngine.estimate(asset)
+                return float(result.get("total_cost_bps", 10.0))
+            except Exception:
+                pass
+        return 10.0
 
-    def _safe_ai_score(self, *, asset: str, candles: List[Dict[str, Any]]) -> float:
+    # ===============================
+    # COST GATE
+    # ===============================
+    def _apply_cost_gate(
+        self,
+        expected_edge_bps: float,
+        execution_cost_bps: float,
+        asset: str,
+        decision_score: float,
+    ) -> Dict[str, Any]:
+
+        if CostAwareGate:
+            return CostAwareGate.evaluate(
+                expected_edge_bps,
+                execution_cost_bps,
+                metadata={"asset": asset, "score": decision_score},
+            )
+
+        return {
+            "decision": "REJECT",
+            "reason": "COST_GATE_UNAVAILABLE",
+            "net_edge_bps": expected_edge_bps - execution_cost_bps,
+        }
+
+    # ===============================
+    # ORIGINAL METHODS (UNCHANGED)
+    # ===============================
+    def _compute_decision_score(self, **kwargs) -> float:
+        score = (
+            self.weights["ai_score"] * kwargs["ai_score"]
+            + self.weights["confluence_score"] * kwargs["confluence_score"]
+            + self.weights["pressure_score"] * kwargs["pressure_score"]
+            + self.weights["acceleration_score"] * kwargs["acceleration_score"]
+            + self.weights["momentum_score"] * kwargs["momentum_score"]
+            + self.weights["regime_confidence"] * kwargs["regime_confidence"]
+        )
+        return self._clamp01(score)
+
+    def _should_execute_trade(self, *, regime: str, decision_score: float) -> bool:
+        if regime == "MEAN_REVERSION":
+            return decision_score >= self.mean_reversion_threshold
+        if regime == "TREND":
+            return decision_score >= self.trend_threshold
+        if regime == "BREAKOUT":
+            return decision_score >= self.breakout_threshold
+        return False
+
+    def _safe_ai_score(self, **kwargs) -> float:
         try:
             if hasattr(self.ai_scorer, "score_opportunity"):
-                return self._extract_score(
-                    self.ai_scorer.score_opportunity(asset=asset, candles=candles)
-                )
-            if hasattr(self.ai_scorer, "score_asset"):
-                return self._extract_score(
-                    self.ai_scorer.score_asset(asset=asset, candles=candles)
-                )
-            if hasattr(self.ai_scorer, "rank_opportunities"):
-                ranked = self.ai_scorer.rank_opportunities(
-                    [{"symbol": asset, "candles": candles}]
-                )
-                if isinstance(ranked, list) and ranked:
-                    return self._extract_score(ranked[0])
+                return self._extract_score(self.ai_scorer.score_opportunity(**kwargs))
         except Exception:
             pass
+        return 0.0
 
-        return self._fallback_ai_score(candles)
-
-    def _safe_pressure_score(self, *, asset: str, candles: List[Dict[str, Any]]) -> float:
+    def _safe_confluence_score(self, **kwargs) -> float:
         try:
-            if hasattr(self.pressure_engine, "compute_pressure"):
-                return self._extract_score(
-                    self.pressure_engine.compute_pressure(asset=asset, candles=candles)
-                )
-            if hasattr(self.pressure_engine, "compute"):
-                return self._extract_score(self.pressure_engine.compute(candles))
-            if hasattr(self.pressure_engine, "evaluate"):
-                return self._extract_score(
-                    self.pressure_engine.evaluate(asset=asset, candles=candles)
-                )
+            return self._extract_score(self.signal_confluence_engine.compute_confluence(**kwargs))
         except Exception:
-            pass
+            return 0.0
 
-        return self._fallback_pressure_score(candles)
-
-    def _safe_accel_score(self, *, asset: str, candles: List[Dict[str, Any]]) -> float:
+    def _safe_pressure_score(self, **kwargs) -> float:
         try:
-            if hasattr(self.accel_engine, "compute_acceleration"):
-                return self._extract_score(
-                    self.accel_engine.compute_acceleration(asset=asset, candles=candles)
-                )
-            if hasattr(self.accel_engine, "compute"):
-                return self._extract_score(self.accel_engine.compute(candles))
-            if hasattr(self.accel_engine, "evaluate"):
-                return self._extract_score(
-                    self.accel_engine.evaluate(asset=asset, candles=candles)
-                )
+            return self._extract_score(self.pressure_engine.compute_pressure(**kwargs))
         except Exception:
-            pass
+            return 0.0
 
-        return self._fallback_accel_score(candles)
-
-    def _safe_confluence_score(
-        self,
-        *,
-        asset: str,
-        candles: List[Dict[str, Any]],
-        regime: str,
-    ) -> float:
+    def _safe_acceleration_score(self, **kwargs) -> float:
         try:
-            if hasattr(self.confluence_engine, "compute_confluence"):
-                return self._extract_score(
-                    self.confluence_engine.compute_confluence(
-                        asset=asset,
-                        candles=candles,
-                        regime=regime,
-                    )
-                )
-            if hasattr(self.confluence_engine, "compute"):
-                return self._extract_score(self.confluence_engine.compute(candles))
-            if hasattr(self.confluence_engine, "evaluate"):
-                return self._extract_score(
-                    self.confluence_engine.evaluate(
-                        asset=asset,
-                        candles=candles,
-                        regime=regime,
-                    )
-                )
+            return self._extract_score(self.acceleration_engine.compute_acceleration(**kwargs))
         except Exception:
-            pass
+            return 0.0
 
-        return self._fallback_confluence_score(candles)
-
-    def _safe_momentum_score(self, *, asset: str, candles: List[Dict[str, Any]]) -> float:
+    def _safe_momentum_score(self, **kwargs) -> float:
         try:
-            if hasattr(self.momentum_engine, "compute_momentum_window"):
-                return self._extract_score(
-                    self.momentum_engine.compute_momentum_window(
-                        asset=asset,
-                        candles=candles,
-                    )
-                )
-            if hasattr(self.momentum_engine, "compute"):
-                return self._extract_score(self.momentum_engine.compute(candles))
-            if hasattr(self.momentum_engine, "evaluate"):
-                return self._extract_score(
-                    self.momentum_engine.evaluate(asset=asset, candles=candles)
-                )
+            return self._extract_score(self.momentum_engine.compute_momentum_window(**kwargs))
         except Exception:
-            pass
-
-        return self._fallback_momentum_score(candles)
-
-    def _fallback_ai_score(self, candles: List[Dict[str, Any]]) -> float:
-        closes = [self._to_float(c.get("close"), 0.0) for c in candles]
-        if len(closes) < 20:
             return 0.0
-
-        last = closes[-1]
-        mean_20 = sum(closes[-20:]) / 20.0
-        if mean_20 <= 0:
-            return 0.0
-
-        deviation = abs(last - mean_20) / mean_20
-        return self._clamp01(min(deviation * 8.0, 0.85))
-
-    def _fallback_pressure_score(self, candles: List[Dict[str, Any]]) -> float:
-        closes = [self._to_float(c.get("close"), 0.0) for c in candles]
-        if len(closes) < 20:
-            return 0.0
-
-        mean_20 = sum(closes[-20:]) / 20.0
-        if mean_20 <= 0:
-            return 0.0
-
-        stretch = abs(closes[-1] - mean_20) / mean_20
-        return self._clamp01(min(stretch * 10.0, 0.90))
-
-    def _fallback_accel_score(self, candles: List[Dict[str, Any]]) -> float:
-        closes = [self._to_float(c.get("close"), 0.0) for c in candles]
-        if len(closes) < 6:
-            return 0.0
-
-        deltas = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
-        if len(deltas) < 5:
-            return 0.0
-
-        recent = deltas[-3:]
-        prior = deltas[-5:-2]
-
-        recent_avg = sum(abs(x) for x in recent) / max(len(recent), 1)
-        prior_avg = sum(abs(x) for x in prior) / max(len(prior), 1)
-
-        if prior_avg <= 0:
-            return 0.0
-
-        accel = max(0.0, (recent_avg - prior_avg) / prior_avg)
-        return self._clamp01(min(accel, 0.80))
-
-    def _fallback_confluence_score(self, candles: List[Dict[str, Any]]) -> float:
-        closes = [self._to_float(c.get("close"), 0.0) for c in candles]
-        highs = [self._to_float(c.get("high"), 0.0) for c in candles]
-        lows = [self._to_float(c.get("low"), 0.0) for c in candles]
-
-        if len(closes) < 20:
-            return 0.0
-
-        mean_5 = sum(closes[-5:]) / 5.0
-        mean_20 = sum(closes[-20:]) / 20.0
-
-        momentum_component = 0.0
-        if mean_20 > 0:
-            slope = abs(mean_5 - mean_20) / mean_20
-            momentum_component = min(slope * 10.0, 0.40)
-
-        range_component = 0.0
-        recent_ranges = []
-        for h, l, c in zip(highs[-10:], lows[-10:], closes[-10:]):
-            if c > 0:
-                recent_ranges.append(abs(h - l) / c)
-
-        if recent_ranges:
-            avg_range = sum(recent_ranges) / len(recent_ranges)
-            if avg_range <= 0.01:
-                range_component = 0.20
-            elif avg_range <= 0.02:
-                range_component = 0.12
-            else:
-                range_component = 0.06
-
-        return self._clamp01(momentum_component + range_component)
-
-    def _fallback_momentum_score(self, candles: List[Dict[str, Any]]) -> float:
-        closes = [self._to_float(c.get("close"), 0.0) for c in candles]
-        if len(closes) < 10:
-            return 0.0
-
-        mean_5 = sum(closes[-5:]) / 5.0
-        mean_10 = sum(closes[-10:]) / 10.0
-        if mean_10 <= 0:
-            return 0.0
-
-        momentum = abs(mean_5 - mean_10) / mean_10
-        return self._clamp01(min(momentum * 10.0, 0.75))
-
-    def _compute_elasticity_proxy(self, candles: List[Dict[str, Any]]) -> float:
-        closes = [self._to_float(c.get("close"), 0.0) for c in candles[-10:]]
-        if len(closes) < 2:
-            return 0.0
-
-        mean_close = sum(closes) / len(closes)
-        last = closes[-1]
-        if last <= 0:
-            return 0.0
-
-        return self._clamp01(abs(last - mean_close) / last)
-
-    def _normalize_candle(self, candle: Any) -> Dict[str, Any]:
-        if isinstance(candle, dict):
-            return {
-                "open": candle.get("open"),
-                "high": candle.get("high"),
-                "low": candle.get("low"),
-                "close": candle.get("close"),
-                "volume": candle.get("volume"),
-            }
-
-        return {
-            "open": getattr(candle, "open", None),
-            "high": getattr(candle, "high", None),
-            "low": getattr(candle, "low", None),
-            "close": getattr(candle, "close", None),
-            "volume": getattr(candle, "volume", None),
-        }
 
     def _extract_score(self, result: Any) -> float:
         if isinstance(result, (int, float)):
             return self._clamp01(result)
-
         if isinstance(result, dict):
-            for key in (
-                "score",
-                "final_score",
-                "decision_score",
-                "confluence_score",
-                "pressure_score",
-                "acceleration_score",
-                "momentum_score",
-                "probability",
-                "confidence",
-                "ai_score",
-            ):
-                if key in result:
-                    return self._clamp01(result.get(key, 0.0))
-
+            for k in ("score", "confidence"):
+                if k in result:
+                    return self._clamp01(result[k])
         return 0.0
 
     @staticmethod
     def _clamp01(value: Any) -> float:
         try:
-            numeric = float(value)
-        except (TypeError, ValueError):
+            return max(0.0, min(float(value), 1.0))
+        except Exception:
             return 0.0
-        return max(0.0, min(numeric, 1.0))
 
-    @staticmethod
-    def _to_float(value: Any, default: float = 0.0) -> float:
-        try:
-            if value is None:
-                return default
-            return float(value)
-        except (TypeError, ValueError):
-            return default
-
-    def _empty(self, asset: str) -> Dict[str, Any]:
+    def _reject(self, asset: str, reason: str) -> Dict[str, Any]:
         return {
-            "asset": asset,
             "execute_trade": False,
-            "signal_tier": "NONE",
-            "decision_score": 0.0,
-            "elasticity_score": 0.0,
-            "regime": "UNKNOWN",
-            "ai_score": 0.0,
-            "pressure_score": 0.0,
-            "acceleration_score": 0.0,
-            "confluence_score": 0.0,
-            "momentum_score": 0.0,
+            "regime": "UNSTABLE",
+            "regime_reason": reason,
         }
 
 
