@@ -53,7 +53,7 @@ class SignalConfluenceEngine:
     6. Pressure alignment
     7. Pressure acceleration alignment
     8. Regime suitability
-    9. Spread location suitability
+    9. Spread suitability
     """
 
     def __init__(self) -> None:
@@ -69,7 +69,8 @@ class SignalConfluenceEngine:
         # Live row thresholds
         self.min_pressure_score = 0.12
         self.min_pressure_acceleration = 0.03
-        self.min_abs_spread_bps = 8.0
+        self.max_spread_bps = 25.0
+        self.good_spread_bps = 12.0
 
         # Row-based required checks
         self.min_required_checks_row = 3
@@ -201,22 +202,22 @@ class SignalConfluenceEngine:
             )
 
             pressure_score = _safe_float(row.get("pressure_score"), 0.0)
-            pressure_acceleration = _safe_float(row.get("pressure_acceleration"), 0.0)
+            pressure_acceleration = _safe_float(
+                row.get("pressure_acceleration", row.get("acceleration_score")),
+                0.0,
+            )
             spread_bps = abs(_safe_float(row.get("spread_bps"), 0.0))
             regime = str(row.get("regime", "NEUTRAL")).upper()
+            regime_confidence = _safe_float(row.get("regime_confidence"), 0.0)
 
-            row_checks = {
-                "candle_structure_ok": candle_score >= 0.60,
-                "pressure_ok": pressure_score >= self.min_pressure_score,
-                "acceleration_ok": pressure_acceleration >= self.min_pressure_acceleration,
-                "spread_ok": spread_bps >= self.min_abs_spread_bps,
-                "regime_ok": regime in self.allowed_regimes,
-                "high_conviction_setup": (
-                    pressure_score >= 0.25
-                    or pressure_acceleration >= 0.15
-                    or spread_bps >= 25.0
-                ),
-            }
+            row_checks = self._build_live_checks(
+                candle_score=candle_score,
+                pressure_score=pressure_score,
+                pressure_acceleration=pressure_acceleration,
+                spread_bps=spread_bps,
+                regime=regime,
+                regime_confidence=regime_confidence,
+            )
 
             passed_row_checks = sum(1 for passed in row_checks.values() if passed)
             total_row_checks = len(row_checks)
@@ -225,10 +226,10 @@ class SignalConfluenceEngine:
                 passed_row_checks / total_row_checks if total_row_checks > 0 else 0.0
             )
 
-            # Final blended confluence score:
-            # 60% candle structure, 40% live signal alignment
+            # Activation-calibrated blend:
+            # 45% candle structure, 55% live signal alignment
             final_confluence_score = _clamp01(
-                candle_score * 0.60 + row_confluence_score * 0.40
+                candle_score * 0.45 + row_confluence_score * 0.55
             )
 
             allow_trade = passed_row_checks >= self.min_required_checks_row
@@ -248,6 +249,7 @@ class SignalConfluenceEngine:
                 "pressure_acceleration": round(pressure_acceleration, 4),
                 "spread_bps_abs": round(spread_bps, 4),
                 "regime": regime,
+                "regime_confidence": round(regime_confidence, 4),
                 "checks": row_checks,
             }
 
@@ -273,14 +275,103 @@ class SignalConfluenceEngine:
         asset: str,
         candles: List[Dict[str, Any]],
         regime: str | None = None,
+        regime_confidence: float | None = None,
+        pressure_score: float | None = None,
+        pressure_acceleration: float | None = None,
+        acceleration_score: float | None = None,
+        spread_bps: float | None = None,
+        **kwargs: Any,
     ) -> Dict[str, Any]:
-        result = self.evaluate(candles)
-        payload = result.to_dict()
-        if regime is not None:
-            payload["regime"] = str(regime).upper()
+        candle_result = self.evaluate(candles)
+        candle_score = _safe_float(candle_result.confluence_score, 0.0)
+
+        live_pressure = _safe_float(
+            pressure_score if pressure_score is not None else kwargs.get("pressure_score"),
+            0.0,
+        )
+        live_acceleration = _safe_float(
+            pressure_acceleration
+            if pressure_acceleration is not None
+            else acceleration_score
+            if acceleration_score is not None
+            else kwargs.get("pressure_acceleration", kwargs.get("acceleration_score")),
+            0.0,
+        )
+        live_spread_bps = abs(_safe_float(
+            spread_bps if spread_bps is not None else kwargs.get("spread_bps"),
+            0.0,
+        ))
+        live_regime = str(regime or kwargs.get("regime", "NEUTRAL")).upper()
+        live_regime_conf = _safe_float(
+            regime_confidence if regime_confidence is not None else kwargs.get("regime_confidence"),
+            0.0,
+        )
+
+        live_checks = self._build_live_checks(
+            candle_score=candle_score,
+            pressure_score=live_pressure,
+            pressure_acceleration=live_acceleration,
+            spread_bps=live_spread_bps,
+            regime=live_regime,
+            regime_confidence=live_regime_conf,
+        )
+
+        passed_live_checks = sum(1 for passed in live_checks.values() if passed)
+        total_live_checks = len(live_checks)
+        live_score = passed_live_checks / total_live_checks if total_live_checks > 0 else 0.0
+
+        final_score = _clamp01(candle_score * 0.45 + live_score * 0.55)
+        allow_trade = passed_live_checks >= self.min_required_checks_row
+
+        payload = candle_result.to_dict()
         payload["asset"] = asset
-        payload["score"] = result.confluence_score
+        payload["regime"] = live_regime
+        payload["regime_confidence"] = round(live_regime_conf, 4)
+        payload["pressure_score"] = round(live_pressure, 4)
+        payload["pressure_acceleration"] = round(live_acceleration, 4)
+        payload["spread_bps_abs"] = round(live_spread_bps, 4)
+        payload["live_checks"] = live_checks
+        payload["live_passed_checks"] = passed_live_checks
+        payload["live_total_checks"] = total_live_checks
+        payload["live_score"] = round(live_score, 4)
+        payload["allow_trade"] = allow_trade
+        payload["score"] = round(final_score, 4)
+        payload["confluence_score"] = round(final_score, 4)
+        payload["reason"] = (
+            "orchestrator and candle confluence aligned"
+            if allow_trade
+            else "orchestrator confluence below threshold"
+        )
         return payload
+
+    # ------------------------------------------------
+    # INTERNAL HELPERS
+    # ------------------------------------------------
+
+    def _build_live_checks(
+        self,
+        *,
+        candle_score: float,
+        pressure_score: float,
+        pressure_acceleration: float,
+        spread_bps: float,
+        regime: str,
+        regime_confidence: float,
+    ) -> Dict[str, bool]:
+        return {
+            "candle_structure_ok": candle_score >= 0.60,
+            "pressure_ok": pressure_score >= self.min_pressure_score,
+            "acceleration_ok": pressure_acceleration >= self.min_pressure_acceleration,
+            "spread_ok": spread_bps <= self.max_spread_bps,
+            "tight_spread_bonus": spread_bps <= self.good_spread_bps,
+            "regime_ok": regime in self.allowed_regimes,
+            "regime_confidence_ok": regime_confidence >= 0.20,
+            "high_conviction_setup": (
+                pressure_score >= 0.25
+                or pressure_acceleration >= 0.15
+                or (candle_score >= 0.80 and spread_bps <= self.good_spread_bps)
+            ),
+        }
 
 
 if __name__ == "__main__":
