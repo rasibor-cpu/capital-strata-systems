@@ -72,7 +72,7 @@ class SignalConfluenceEngine:
         self.min_abs_spread_bps = 8.0
 
         # Row-based required checks
-        self.min_required_checks_row = 5
+        self.min_required_checks_row = 3
 
         # Candle-only required checks
         self.min_required_checks_candles = 4
