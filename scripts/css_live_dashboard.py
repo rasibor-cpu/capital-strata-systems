@@ -4,518 +4,265 @@ import json
 import os
 import sys
 import time
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
-
-import requests
+from typing import Any, Dict, List
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from backend.data.coinbase_historical_downloader import load_runtime_asset
+from backend.execution.position_manager import PositionManager
 from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
-from backend.intelligence.capital_allocator import CapitalAllocator
-from backend.risk.portfolio_risk_governor import PortfolioRiskGovernor
-from backend.risk.session_policy_loader import choose_session_policy
-from backend.strategies.vwap_mean_reversion import (
-    VWAPConfig,
-    compute_vwap_from_candles,
-    should_buy_mean_reversion,
+from backend.intelligence.feature_builder import FeatureBuilder
+from backend.intelligence.liquidity_sweep_detector import LiquiditySweepDetector
+from backend.intelligence.market_regime_engine import MarketRegimeEngine
+from backend.intelligence.opportunity_pressure_engine import OpportunityPressureEngine
+from backend.intelligence.pressure_acceleration_engine import PressureAccelerationEngine
+from backend.intelligence.quant_signal_optimizer import QuantSignalOptimizer
+from backend.intelligence.signal_confluence_engine import SignalConfluenceEngine
+from backend.intelligence.trade_decision_orchestrator import TradeDecisionOrchestrator
+from backend.intelligence.vwap_elasticity_engine import VWAPElasticityEngine
+from backend.scanner.spread_normalizer import normalize_snapshot_spread
+from backend.scanner.unified_market_scanner import UnifiedMarketScanner
+
+# ---------------- CONFIG ----------------
+
+MAX_SYMBOLS_PER_CYCLE = 25
+REFRESH_SECONDS = 10
+MAX_TRADES_PER_CYCLE = 3
+
+GLOBAL_TAKE_PROFIT_PCT = 0.014
+GLOBAL_STOP_LOSS_PCT = 0.012
+GLOBAL_MAX_HOLD_CYCLES = 5
+
+BASE_TRADE_NOTIONAL_USD = 10.0
+
+ARTIFACT_DIR = PROJECT_ROOT / "artifacts"
+ARTIFACT_DIR.mkdir(exist_ok=True)
+
+SUMMARY_FILE = ARTIFACT_DIR / "css_extended_paper_test_summary.json"
+
+# ---------------- ENGINES ----------------
+
+scanner = UnifiedMarketScanner()
+feature_builder = FeatureBuilder()
+regime_engine = MarketRegimeEngine()
+pressure_engine = OpportunityPressureEngine()
+accel_engine = PressureAccelerationEngine()
+confluence_engine = SignalConfluenceEngine()
+elasticity_engine = VWAPElasticityEngine()
+sweep_engine = LiquiditySweepDetector()
+ai = AIOpportunityScorer()
+optimizer = QuantSignalOptimizer()
+orchestrator = TradeDecisionOrchestrator()
+
+position_manager = PositionManager(
+    take_profit_pct=GLOBAL_TAKE_PROFIT_PCT,
+    stop_loss_pct=GLOBAL_STOP_LOSS_PCT,
+    max_hold_cycles=GLOBAL_MAX_HOLD_CYCLES,
 )
 
-try:
-    from backend.scanner.coinbase_universe import get_top_universe
-except Exception:
-    get_top_universe = None
+# ---------------- HELPERS ----------------
 
-try:
-    from backend.execution.coinbase_executor import CoinbaseExecutor as _CoinbaseExecutor
-    EXECUTOR_IMPORT_ERROR = ""
-except Exception as exc:
-    _CoinbaseExecutor = None
-    EXECUTOR_IMPORT_ERROR = str(exc)
-
-
-STATE_DIR = PROJECT_ROOT / "backend" / "state"
-AUDIT_DIR = PROJECT_ROOT / "audit_logs"
-
-STATE_DIR.mkdir(parents=True, exist_ok=True)
-AUDIT_DIR.mkdir(parents=True, exist_ok=True)
-
-POSITION_FILE = STATE_DIR / "spot_position.json"
-
-
-def _env(name: str, default: str) -> str:
-    v = os.getenv(name)
-    return default if v is None else str(v)
-
-
-def _env_float(name: str, default: float) -> float:
-    raw = os.getenv(name)
-    if raw is None or not raw.strip():
-        return default
-    return float(raw)
-
-
-def _env_int(name: str, default: int) -> int:
-    raw = os.getenv(name)
-    if raw is None or not raw.strip():
-        return default
-    return int(float(raw))
-
-
-def _utc() -> str:
+def now():
     return datetime.now(timezone.utc).isoformat()
 
-
-def _clear() -> None:
+def clear():
     os.system("cls" if os.name == "nt" else "clear")
 
+def safe_float(v, d=0.0):
+    try:
+        return float(v)
+    except:
+        return d
 
-def _default_position() -> Dict[str, Any]:
-    return {
-        "in_position": False,
-        "asset": "",
-        "entry": 0.0,
-        "qty": 0.0,
-        "size_usd": 0.0,
-        "ts": "",
-    }
+def normalize_candles(candles):
+    out = []
+    for c in candles:
+        try:
+            if isinstance(c, dict):
+                out.append(c)
+            else:
+                out.append({
+                    "open": getattr(c, "open", None),
+                    "high": getattr(c, "high", None),
+                    "low": getattr(c, "low", None),
+                    "close": getattr(c, "close", None),
+                    "volume": getattr(c, "volume", None),
+                })
+        except:
+            out.append({})
+    return out
 
+# ---------------- MAIN ----------------
 
-def _load_position() -> Dict[str, Any]:
-    if not POSITION_FILE.exists():
-        return _default_position()
+cycle = 0
+equity = 200
+
+print("[CSS] dashboard starting...")
+
+while True:
+
+    cycle += 1
 
     try:
-        payload = json.loads(POSITION_FILE.read_text())
-        if not isinstance(payload, dict):
-            return _default_position()
-        return payload
-    except Exception:
-        return _default_position()
 
+        discovered = scanner.scan()
 
-def _save_position(position: Dict[str, Any]) -> None:
-    POSITION_FILE.write_text(json.dumps(position, indent=2))
+        selected = []
+        seen = set()
 
-
-class PublicCoinbaseMarketData:
-    BASE_URL = "https://api.exchange.coinbase.com"
-
-    def __init__(self) -> None:
-        self.session = requests.Session()
-        self.session.headers.update(
-            {
-                "User-Agent": "Capital-Strata-Systems/1.0",
-                "Accept": "application/json",
-            }
-        )
-
-    def get_candles(self, product_id: str, granularity_name: str) -> List[Dict[str, float]]:
-        granularity_map = {
-            "ONE_MINUTE": 60,
-            "FIVE_MINUTE": 300,
-            "FIFTEEN_MINUTE": 900,
-            "ONE_HOUR": 3600,
-            "SIX_HOUR": 21600,
-            "ONE_DAY": 86400,
-        }
-        granularity = granularity_map.get(granularity_name, 900)
-
-        url = f"{self.BASE_URL}/products/{product_id}/candles"
-        response = self.session.get(
-            url,
-            params={"granularity": granularity},
-            timeout=15,
-        )
-        response.raise_for_status()
-        payload = response.json()
-
-        candles: List[Dict[str, float]] = []
-        for row in payload:
-            if not isinstance(row, list) or len(row) < 6:
+        for raw in discovered:
+            sym = str(raw.get("symbol", "")).upper()
+            if not sym or sym in seen:
                 continue
-            ts, low, high, open_, close, volume = row[:6]
-            candles.append(
-                {
-                    "ts": float(ts),
-                    "low": float(low),
-                    "high": float(high),
-                    "open": float(open_),
-                    "close": float(close),
-                    "volume": float(volume),
-                }
-            )
+            selected.append({
+                "symbol": sym,
+                "venue": raw.get("venue", "UNKNOWN"),
+            })
+            seen.add(sym)
 
-        candles.sort(key=lambda x: x["ts"])
-        return candles
+        selected = selected[:MAX_SYMBOLS_PER_CYCLE]
 
+        rows = []
 
-def _build_market_adapter() -> Tuple[Any, str, bool]:
-    if _CoinbaseExecutor is not None:
-        try:
-            adapter = _CoinbaseExecutor(paper_mode=True)
-            return adapter, "CoinbaseExecutor(paper_mode=True)", True
-        except Exception as exc:
-            return (
-                PublicCoinbaseMarketData(),
-                f"PublicCoinbaseFallback(executor init failed: {exc})",
-                False,
-            )
-
-    reason = EXECUTOR_IMPORT_ERROR or "unknown import error"
-    return (
-        PublicCoinbaseMarketData(),
-        f"PublicCoinbaseFallback(import failed: {reason})",
-        False,
-    )
-
-
-def _base_assets_from_universe() -> List[str]:
-    if get_top_universe is not None:
-        try:
-            universe = get_top_universe(200)
-            if universe:
-                return universe
-        except Exception:
-            pass
-
-    return [x.strip() for x in _env("CSS_PRODUCTS", "BTC-USD,ETH-USD").split(",") if x.strip()]
-
-
-def _select_execution_assets(
-    ai_results: List[Dict[str, Any]],
-    fallback_assets: List[str],
-    max_assets: int,
-) -> Tuple[List[str], str]:
-    selected: List[str] = []
-
-    for item in ai_results:
-        asset_class = str(item.get("asset_class", "")).upper()
-        signal = str(item.get("signal", "")).upper()
-        symbol = str(item.get("symbol", "")).strip()
-
-        if asset_class != "CRYPTO":
-            continue
-        if signal != "BUY":
-            continue
-        if not symbol.endswith("-USD"):
-            continue
-
-        selected.append(symbol)
-        if len(selected) >= max_assets:
-            break
-
-    deduped: List[str] = []
-    seen = set()
-    for symbol in selected:
-        if symbol not in seen:
-            deduped.append(symbol)
-            seen.add(symbol)
-
-    if deduped:
-        return deduped, "AI_DYNAMIC"
-
-    return fallback_assets[:max_assets], "UNIVERSE_FALLBACK"
-
-
-def _fmt_money(value: float) -> str:
-    return f"${value:,.2f}"
-
-
-def _fmt_num(value: float, decimals: int = 4) -> str:
-    return f"{value:.{decimals}f}"
-
-
-def _print_header(
-    policy_name: str,
-    starting_capital: float,
-    trade_size: float,
-    scan_interval: int,
-    configured_assets: List[str],
-    active_assets: List[str],
-    watchlist_source: str,
-    adapter_label: str,
-    trading_enabled: bool,
-) -> None:
-    print("================================================================================")
-    print("                         CAPITAL STRATA SYSTEMS LIVE DASHBOARD")
-    print("================================================================================")
-    print(
-        f"Policy: {policy_name} | Capital: {_fmt_money(starting_capital)} | "
-        f"Trade Size: {_fmt_money(trade_size)} | Refresh: {scan_interval}s"
-    )
-    if len(configured_assets) > 8:
-        preview = ", ".join(configured_assets[:8]) + f" ... ({len(configured_assets)} assets)"
-    else:
-        preview = ", ".join(configured_assets)
-
-    print(f"Configured Base Assets: {preview}")
-    print(f"Active Execution Watchlist: {', '.join(active_assets)}")
-    print(f"Watchlist Source: {watchlist_source}")
-    print(f"Market Adapter: {adapter_label}")
-    print(f"Trading Enabled: {'YES' if trading_enabled else 'NO - DASHBOARD MODE'}")
-    print(f"Timestamp (UTC): {_utc()}")
-    print("================================================================================\n")
-
-
-def _print_position(position: Dict[str, Any]) -> None:
-    print("POSITION STATUS")
-    print("--------------------------------------------------------------------------------")
-    if position.get("in_position", False):
-        print(
-            f"OPEN | Asset: {position.get('asset', '')} | "
-            f"Entry: {_fmt_num(float(position.get('entry', 0.0)), 6)} | "
-            f"Qty: {_fmt_num(float(position.get('qty', 0.0)), 6)} | "
-            f"Size: {_fmt_money(float(position.get('size_usd', 0.0)))}"
-        )
-    else:
-        print("FLAT | No open spot position")
-    print()
-
-
-def _print_market_scan(rows: List[Dict[str, Any]]) -> None:
-    print("LIVE COINBASE EXECUTION WATCHLIST")
-    print("--------------------------------------------------------------------------------")
-    print(
-        f"{'Asset':12} {'Mid':>12} {'VWAP':>12} {'Spread(bps)':>12} "
-        f"{'Signal':>8} {'Reason':>16}"
-    )
-    print("-" * 82)
-
-    if not rows:
-        print("No scan rows available.\n")
-        return
-
-    for row in rows:
-        print(
-            f"{row['asset']:<12} "
-            f"{row['mid']:>12.6f} "
-            f"{row['vwap']:>12.6f} "
-            f"{row['spread_bps']:>12.2f} "
-            f"{row['signal_text']:>8} "
-            f"{row['reason_short']:>16}"
-        )
-    print()
-
-
-def _print_ai_panel(items: List[Dict[str, Any]]) -> None:
-    print("AI OPPORTUNITY SCANNER")
-    print("--------------------------------------------------------------------------------")
-    print(
-        f"{'Symbol':12} {'Class':8} {'Signal':8} {'Regime':16} "
-        f"{'AI Score':>8} {'Band':10} {'Priority':14}"
-    )
-    print("-" * 96)
-
-    if not items:
-        print("No AI opportunities available.\n")
-        return
-
-    for item in items[:8]:
-        print(
-            f"{item['symbol']:<12} "
-            f"{item['asset_class']:<8} "
-            f"{item['signal']:<8} "
-            f"{item['regime']:<16} "
-            f"{item['opportunity_score']:>8.2f} "
-            f"{item['confidence_band']:<10} "
-            f"{item['action_priority']:<14}"
-        )
-
-    print("\nTop AI explanations:")
-    for item in items[:3]:
-        print(f"- {item['explanation']}")
-    print()
-
-
-def _print_capital_plan(allocations: List[Dict[str, Any]], total_capital: float) -> None:
-    print("AI CAPITAL ALLOCATION PLAN")
-    print("--------------------------------------------------------------------------------")
-    print(f"{'Rank':4} {'Symbol':12} {'AI Score':>10} {'Capital':>12}")
-    print("-" * 44)
-
-    if not allocations:
-        print("No capital allocations available.\n")
-        return
-
-    allocated_total = 0.0
-    for idx, item in enumerate(allocations, start=1):
-        allocated_total += float(item["capital"])
-        print(
-            f"{idx:<4} "
-            f"{item['symbol']:<12} "
-            f"{item['ai_score']:>10.2f} "
-            f"{_fmt_money(float(item['capital'])):>12}"
-        )
-
-    print("-" * 44)
-    print(
-        f"Allocated: {_fmt_money(allocated_total)} | "
-        f"Portfolio Capital Basis: {_fmt_money(total_capital)}"
-    )
-    print()
-
-
-def main() -> None:
-    scan_interval = _env_int("CSS_SCAN_INTERVAL_SECONDS", 45)
-    starting_capital = _env_float("CSS_STARTING_CAPITAL_USD", 200.0)
-    trade_size = _env_float("CSS_TRADE_SIZE_USD", 20.0)
-    max_dynamic_assets = _env_int("CSS_DYNAMIC_TOP_N", 5)
-
-    configured_assets = _base_assets_from_universe()
-
-    vwap_cfg = VWAPConfig(
-        window=20,
-        epsilon_bps=12,
-        take_profit_bps=35,
-        stop_loss_bps=45,
-    )
-
-    policy = choose_session_policy(starting_capital)
-    governor = PortfolioRiskGovernor(policy)
-
-    adapter, adapter_label, trading_enabled = _build_market_adapter()
-    ai_scorer = AIOpportunityScorer()
-    allocator = CapitalAllocator(
-        total_capital=starting_capital,
-        max_positions=max_dynamic_assets,
-    )
-
-    last_ai_results: List[Dict[str, Any]] = []
-    last_allocations: List[Dict[str, Any]] = []
-    last_status = ""
-
-    while True:
-        try:
-            position = _load_position()
-            scan_rows: List[Dict[str, Any]] = []
-
+        for s in selected:
             try:
-                last_ai_results = ai_scorer.run()
-            except Exception as ai_exc:
-                last_status = f"AI scorer error: {ai_exc}"
-                last_ai_results = []
+                payload = load_runtime_asset(s["symbol"])
+                payload = normalize_snapshot_spread(payload)
 
-            active_assets, watchlist_source = _select_execution_assets(
-                ai_results=last_ai_results,
-                fallback_assets=configured_assets,
-                max_assets=max_dynamic_assets,
-            )
-
-            for asset in active_assets:
-                candles = adapter.get_candles(asset, "FIFTEEN_MINUTE")
+                candles = normalize_candles(payload.get("candles", []))
 
                 if len(candles) < 20:
-                    scan_rows.append(
-                        {
-                            "asset": asset,
-                            "mid": 0.0,
-                            "vwap": 0.0,
-                            "spread_bps": 0.0,
-                            "signal_text": "N/A",
-                            "reason_short": "few_candles",
-                        }
-                    )
                     continue
 
-                vwap = compute_vwap_from_candles(candles, 20)
-                mid = float(candles[-1]["close"])
-                spread_bps = ((mid - vwap) / vwap) * 10000.0
+                rows.append({
+                    "symbol": s["symbol"],
+                    "price": safe_float(payload.get("price")),
+                    "vwap": safe_float(payload.get("vwap")),
+                    "candles": candles
+                })
 
-                signal, reason = should_buy_mean_reversion(
-                    mid,
-                    vwap,
-                    spread_bps,
-                    vwap_cfg,
-                )
+            except Exception as e:
+                print("[FETCH ERROR]", s["symbol"], e)
 
-                scan_rows.append(
-                    {
-                        "asset": asset,
-                        "mid": mid,
-                        "vwap": vwap,
-                        "spread_bps": spread_bps,
-                        "signal_text": "BUY" if signal else "HOLD",
-                        "reason_short": str(reason)[:16],
-                    }
-                )
+        if not rows:
+            time.sleep(REFRESH_SECONDS)
+            continue
 
-                if not trading_enabled:
-                    continue
+        # -------- PIPELINE --------
 
-                if position.get("in_position", False):
-                    continue
+        features = feature_builder.enrich_rows(rows, {})
+        regimes = regime_engine.detect(features)
+        pressure = pressure_engine.enrich_rows(regimes)
+        accel = accel_engine.enrich_rows(pressure)
+        confluence = confluence_engine.enrich_rows(accel)
+        elasticity = elasticity_engine.enrich_rows(confluence)
+        sweeps = sweep_engine.enrich_rows(elasticity)
 
-                if not signal:
-                    continue
+        ranked = ai.rank_opportunities(sweeps)
+        optimized = optimizer.optimize(ranked)
 
-                approved, msg = governor.approve_trade(asset, trade_size)
-                if not approved:
-                    last_status = f"Risk block: {msg}"
-                    continue
+        # -------- ORCHESTRATOR --------
 
-                qty = trade_size / mid
-                governor.register_trade(asset, trade_size)
+        decisions = {}
+        elite = 0
+        passes = 0
 
-                position = {
-                    "in_position": True,
-                    "asset": asset,
-                    "entry": mid,
-                    "qty": qty,
-                    "size_usd": trade_size,
-                    "ts": _utc(),
-                }
-                _save_position(position)
-                last_status = f"TRADE ENTERED: {asset} @ {mid:.6f}"
+        for r in optimized:
+            symbol = r["symbol"]
+            candles = next((x["candles"] for x in rows if x["symbol"] == symbol), [])
 
-            try:
-                last_allocations = allocator.allocate(
-                    ai_results=last_ai_results,
-                    market_rows=scan_rows,
-                )
-            except Exception as alloc_exc:
-                last_status = f"Allocator error: {alloc_exc}"
-                last_allocations = []
-
-            _clear()
-            _print_header(
-                policy_name=policy.policy_name,
-                starting_capital=starting_capital,
-                trade_size=trade_size,
-                scan_interval=scan_interval,
-                configured_assets=configured_assets,
-                active_assets=active_assets,
-                watchlist_source=watchlist_source,
-                adapter_label=adapter_label,
-                trading_enabled=trading_enabled,
+            decision = orchestrator.evaluate_trade(
+                asset=symbol,
+                candles=candles
             )
-            _print_position(position)
-            _print_market_scan(scan_rows)
-            _print_ai_panel(last_ai_results)
-            _print_capital_plan(last_allocations, starting_capital)
 
-            if last_status:
-                print("LATEST STATUS")
-                print("--------------------------------------------------------------------------------")
-                print(last_status)
-                print()
+            decisions[symbol] = decision
 
-            print(f"Refreshing in {scan_interval} seconds...  Press Ctrl+C to stop.")
-            time.sleep(scan_interval)
+            if decision.get("execute_trade"):
+                passes += 1
 
-        except KeyboardInterrupt:
-            print("\nCSS stopped")
-            break
+            if decision.get("signal_tier") == "ELITE":
+                elite += 1
 
-        except Exception as exc:
-            _clear()
-            print("CSS live dashboard error:", exc)
-            print(f"Retrying in {scan_interval} seconds...")
-            time.sleep(scan_interval)
+        # -------- EXECUTION --------
 
+        opened = 0
 
-if __name__ == "__main__":
-    main()
+        for r in optimized:
+
+            if opened >= MAX_TRADES_PER_CYCLE:
+                break
+
+            symbol = r["symbol"]
+            price = next((x["price"] for x in rows if x["symbol"] == symbol), 0)
+
+            if price <= 0:
+                continue
+
+            if not decisions.get(symbol, {}).get("execute_trade"):
+                continue
+
+            qty = BASE_TRADE_NOTIONAL_USD / price
+
+            position_manager.open_long_position(
+                symbol=symbol,
+                quantity=qty,
+                entry_price=price,
+                cycle_no=cycle,
+                opened_at_utc=now()
+            )
+
+            print("[OPEN]", symbol, price)
+            opened += 1
+
+        closed = position_manager.update_positions(
+            {r["symbol"]: r["price"] for r in rows},
+            cycle,
+            now()
+        )
+
+        for c in closed:
+            pnl = safe_float(c.get("realized_pnl_usd"))
+            equity += pnl
+            print("[CLOSE]", c["symbol"], pnl)
+
+        # -------- DISPLAY --------
+
+        clear()
+
+        print("===== CSS DASHBOARD =====\n")
+        print("Cycle:", cycle)
+        print("Equity:", round(equity, 2))
+        print("Elite signals:", elite)
+        print("Orchestrator passes:", passes)
+        print("Opened:", opened)
+
+        print("\nTop candidates:")
+
+        for r in optimized[:10]:
+            d = decisions.get(r["symbol"], {})
+            print(
+                r["symbol"],
+                "score", round(safe_float(r.get("score", 0)), 3),
+                "exec", d.get("execute_trade"),
+                "tier", d.get("signal_tier"),
+                "decision", round(safe_float(d.get("decision_score")), 3),
+                "elasticity", round(safe_float(d.get("elasticity_score")), 3)
+            )
+
+        time.sleep(REFRESH_SECONDS)
+
+    except KeyboardInterrupt:
+        print("Stopped")
+        break
+
+    except Exception as e:
+        print("ERROR:", e)
+        traceback.print_exc()
+        time.sleep(REFRESH_SECONDS)
