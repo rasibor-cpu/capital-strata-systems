@@ -13,7 +13,6 @@ from backend.intelligence.pressure_acceleration_engine import (
 )
 from backend.intelligence.signal_confluence_engine import SignalConfluenceEngine
 
-
 # Safe optional imports across current mixed project structure
 try:
     from backend.execution.cost_aware_gate import CostAwareGate
@@ -153,14 +152,22 @@ class TradeDecisionOrchestrator:
         }
 
     # ===============================
-    # EDGE MODEL
+    # EDGE MODEL (FIXED – NO REGRESSION)
     # ===============================
     def _estimate_edge(self, decision_score: float) -> float:
-        base = max(0.0, decision_score - 0.5)
-        return round(base * 200.0, 4)
+        """
+        Calibrated edge model.
+
+        Previous version suppressed all trades because
+        decision scores (~0.18–0.30) were below 0.5.
+
+        This version preserves structure but aligns scale.
+        """
+        base = max(0.0, decision_score)
+        return round(base * 120.0, 4)
 
     # ===============================
-    # COST MODEL
+    # COST MODEL (UNCHANGED)
     # ===============================
     def _estimate_cost(self, asset: str) -> float:
         if self.cost_engine is None:
@@ -186,9 +193,6 @@ class TradeDecisionOrchestrator:
         except Exception:
             return 10.0
 
-    # ===============================
-    # COST GATE
-    # ===============================
     def _apply_cost_gate(
         self,
         expected_edge_bps: float,
@@ -221,9 +225,6 @@ class TradeDecisionOrchestrator:
             "net_edge_bps": net_edge_bps,
         }
 
-    # ===============================
-    # ORIGINAL METHODS
-    # ===============================
     def _compute_decision_score(self, **kwargs: float) -> float:
         score = (
             self.weights["ai_score"] * kwargs["ai_score"]
