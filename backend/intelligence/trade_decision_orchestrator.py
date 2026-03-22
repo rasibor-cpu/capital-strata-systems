@@ -13,7 +13,6 @@ from backend.intelligence.pressure_acceleration_engine import (
 )
 from backend.intelligence.signal_confluence_engine import SignalConfluenceEngine
 
-# Safe optional imports across current mixed project structure
 try:
     from backend.execution.cost_aware_gate import CostAwareGate
 except Exception:
@@ -29,15 +28,6 @@ except Exception:
 
 
 class TradeDecisionOrchestrator:
-    """
-    Trade decision orchestrator for Capital Strata Systems.
-
-    Tuned Version (Activation-Calibrated):
-    - Fixes over-constrained system
-    - Preserves all architecture
-    - Enables controlled trade flow
-    """
-
     def __init__(self) -> None:
         self.regime_detector = MarketRegimeDetector()
 
@@ -49,7 +39,7 @@ class TradeDecisionOrchestrator:
 
         self.cost_engine = ExecutionCostEngine() if ExecutionCostEngine else None
 
-        # 🔥 CALIBRATED THRESHOLDS (aligned to real score distribution)
+        # 🔥 Activation-calibrated thresholds
         self.mean_reversion_threshold = 0.22
         self.trend_threshold = 0.26
         self.breakout_threshold = 0.32
@@ -63,7 +53,6 @@ class TradeDecisionOrchestrator:
             "regime_confidence": 0.08,
         }
 
-        # 🔥 INCREASED EDGE SENSITIVITY
         self.EDGE_MULTIPLIER = 0.025
         self.COST_NOTIONAL = 1000.0
 
@@ -113,28 +102,11 @@ class TradeDecisionOrchestrator:
 
         cost_blocked = False
 
-        # 🔥 SOFT COST GATE (CRITICAL FIX)
+        # 🔥 Soft cost gate
         if cost_decision.get("decision") != "APPROVE":
             cost_blocked = True
-
-            # Only block weak trades — allow strong signals through
             if decision_score < 0.28:
                 execute_trade = False
-
-        expected_edge_value = 0.0
-        cost_adjusted_edge_value = 0.0
-
-        try:
-            last_close = self._extract_last_close(candles)
-            if last_close > 0 and self.cost_engine and hasattr(self.cost_engine, "apply_costs"):
-                expected_edge_value = decision_score * last_close * self.EDGE_MULTIPLIER
-                cost_adjusted_edge_value = self.cost_engine.apply_costs(
-                    instrument=asset,
-                    notional=self.COST_NOTIONAL,
-                    raw_pnl=expected_edge_value,
-                )
-        except Exception:
-            pass
 
         return {
             "asset": asset,
@@ -152,83 +124,56 @@ class TradeDecisionOrchestrator:
             "execution_cost_bps": round(execution_cost_bps, 4),
             "cost_decision": cost_decision.get("decision"),
             "net_edge_bps": round(float(cost_decision.get("net_edge_bps", 0.0)), 4),
-            "expected_edge_value": round(expected_edge_value, 6),
-            "cost_adjusted_edge_value": round(cost_adjusted_edge_value, 6),
         }
 
     # ===============================
-    # EDGE MODEL (UNCHANGED STRUCTURE)
+    # 🔥 FIXED: ADAPTIVE SCORE NORMALIZATION
     # ===============================
+    def _compute_decision_score(self, **kwargs: float) -> float:
+        components = [
+            ("ai_score", kwargs["ai_score"]),
+            ("confluence_score", kwargs["confluence_score"]),
+            ("pressure_score", kwargs["pressure_score"]),
+            ("acceleration_score", kwargs["acceleration_score"]),
+            ("momentum_score", kwargs["momentum_score"]),
+            ("regime_confidence", kwargs["regime_confidence"]),
+        ]
+
+        active = [(name, val) for name, val in components if val > 0.01]
+
+        if not active:
+            return 0.0
+
+        total_weight = sum(self.weights[name] for name, _ in active)
+
+        score = 0.0
+        for name, val in active:
+            normalized_weight = self.weights[name] / total_weight
+            score += normalized_weight * val
+
+        return self._clamp01(score)
+
     def _estimate_edge(self, decision_score: float) -> float:
-        base = max(0.0, decision_score)
-        return round(base * 120.0, 4)
+        return round(max(0.0, decision_score) * 120.0, 4)
 
     def _estimate_cost(self, asset: str) -> float:
         if self.cost_engine is None:
             return 10.0
-
         try:
             notional = self.COST_NOTIONAL
-            spread_cost = 0.0
-            slippage_cost = 0.0
-            commission_cost = 0.0
-
-            if hasattr(self.cost_engine, "_compute_spread_cost"):
-                spread_cost = float(self.cost_engine._compute_spread_cost(asset, notional))
-
-            if hasattr(self.cost_engine, "_compute_slippage_cost"):
-                slippage_cost = float(self.cost_engine._compute_slippage_cost(notional))
-
-            if hasattr(self.cost_engine, "commission_per_trade"):
-                commission_cost = float(self.cost_engine.commission_per_trade)
-
+            spread_cost = float(self.cost_engine._compute_spread_cost(asset, notional))
+            slippage_cost = float(self.cost_engine._compute_slippage_cost(notional))
+            commission_cost = float(getattr(self.cost_engine, "commission_per_trade", 0))
             total_cost = spread_cost + slippage_cost + commission_cost
             return (total_cost / notional) * 10000.0
         except Exception:
             return 10.0
 
-    def _apply_cost_gate(
-        self,
-        expected_edge_bps: float,
-        execution_cost_bps: float,
-        asset: str,
-        decision_score: float,
-    ) -> Dict[str, Any]:
+    def _apply_cost_gate(self, expected_edge_bps, execution_cost_bps, asset, decision_score):
         net_edge_bps = expected_edge_bps - execution_cost_bps
-
-        if CostAwareGate:
-            try:
-                return CostAwareGate.evaluate(
-                    expected_edge_bps,
-                    execution_cost_bps,
-                    metadata={"asset": asset, "score": decision_score},
-                )
-            except Exception:
-                pass
-
         if net_edge_bps > 0:
-            return {
-                "decision": "APPROVE",
-                "reason": "FALLBACK_NET_EDGE_POSITIVE",
-                "net_edge_bps": net_edge_bps,
-            }
-
-        return {
-            "decision": "REJECT",
-            "reason": "FALLBACK_NET_EDGE_NEGATIVE",
-            "net_edge_bps": net_edge_bps,
-        }
-
-    def _compute_decision_score(self, **kwargs: float) -> float:
-        score = (
-            self.weights["ai_score"] * kwargs["ai_score"]
-            + self.weights["confluence_score"] * kwargs["confluence_score"]
-            + self.weights["pressure_score"] * kwargs["pressure_score"]
-            + self.weights["acceleration_score"] * kwargs["acceleration_score"]
-            + self.weights["momentum_score"] * kwargs["momentum_score"]
-            + self.weights["regime_confidence"] * kwargs["regime_confidence"]
-        )
-        return self._clamp01(score)
+            return {"decision": "APPROVE", "net_edge_bps": net_edge_bps}
+        return {"decision": "REJECT", "net_edge_bps": net_edge_bps}
 
     def _should_execute_trade(self, *, regime: str, decision_score: float) -> bool:
         if regime == "MEAN_REVERSION":
@@ -241,72 +186,33 @@ class TradeDecisionOrchestrator:
 
     def _safe_ai_score(self, **kwargs: Any) -> float:
         try:
-            if hasattr(self.ai_scorer, "score_opportunity"):
-                return self._extract_score(self.ai_scorer.score_opportunity(**kwargs))
+            return float(self.ai_scorer.score_opportunity(**kwargs))
         except Exception:
-            pass
-        return 0.0
+            return 0.0
 
     def _safe_confluence_score(self, **kwargs: Any) -> float:
         try:
-            return self._extract_score(
-                self.signal_confluence_engine.compute_confluence(**kwargs)
-            )
+            return float(self.signal_confluence_engine.compute_confluence(**kwargs))
         except Exception:
             return 0.0
 
     def _safe_pressure_score(self, **kwargs: Any) -> float:
         try:
-            return self._extract_score(self.pressure_engine.compute_pressure(**kwargs))
+            return float(self.pressure_engine.compute_pressure(**kwargs))
         except Exception:
             return 0.0
 
     def _safe_acceleration_score(self, **kwargs: Any) -> float:
         try:
-            return self._extract_score(
-                self.acceleration_engine.compute_acceleration(**kwargs)
-            )
+            return float(self.acceleration_engine.compute_acceleration(**kwargs))
         except Exception:
             return 0.0
 
     def _safe_momentum_score(self, **kwargs: Any) -> float:
         try:
-            return self._extract_score(self.momentum_engine.compute_momentum_window(**kwargs))
+            return float(self.momentum_engine.compute_momentum_window(**kwargs))
         except Exception:
             return 0.0
-
-    def _extract_score(self, result: Any) -> float:
-        if isinstance(result, (int, float)):
-            return self._clamp01(result)
-        if isinstance(result, dict):
-            for key in ("score", "confidence", "final_score", "decision_score"):
-                if key in result:
-                    return self._clamp01(result[key])
-        return 0.0
-
-    def _extract_last_close(self, candles: List[Dict[str, Any]]) -> float:
-        if not candles:
-            return 0.0
-        last = candles[-1]
-        if isinstance(last, dict):
-            return self._to_float(last.get("close"), 0.0)
-        return self._to_float(getattr(last, "close", 0.0), 0.0)
-
-    @staticmethod
-    def _clamp01(value: Any) -> float:
-        try:
-            return max(0.0, min(float(value), 1.0))
-        except Exception:
-            return 0.0
-
-    @staticmethod
-    def _to_float(value: Any, default: float = 0.0) -> float:
-        try:
-            if value is None:
-                return default
-            return float(value)
-        except Exception:
-            return default
 
     def _reject(self, asset: str, reason: str) -> Dict[str, Any]:
         return {
@@ -315,19 +221,15 @@ class TradeDecisionOrchestrator:
             "cost_blocked": False,
             "regime": "UNSTABLE",
             "regime_reason": reason,
-            "confluence_score": 0.0,
-            "ai_score": 0.0,
-            "pressure_score": 0.0,
-            "acceleration_score": 0.0,
-            "momentum_score": 0.0,
             "decision_score": 0.0,
-            "expected_edge_bps": 0.0,
-            "execution_cost_bps": 0.0,
-            "cost_decision": "REJECT",
-            "net_edge_bps": 0.0,
-            "expected_edge_value": 0.0,
-            "cost_adjusted_edge_value": 0.0,
         }
+
+    @staticmethod
+    def _clamp01(value: Any) -> float:
+        try:
+            return max(0.0, min(float(value), 1.0))
+        except Exception:
+            return 0.0
 
 
 TradeDecisionEngine = TradeDecisionOrchestrator
