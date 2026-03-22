@@ -30,6 +30,7 @@ class PressureAccelerationEngine:
 
     Design goals:
     - row-pipeline compatible
+    - orchestrator compatible
     - stable across live cycles
     - normalized output for optimizer consumption
     """
@@ -49,6 +50,65 @@ class PressureAccelerationEngine:
         return self._process_rows(rows)
 
     # ------------------------------------------------
+    # ORCHESTRATOR INTERFACE
+    # ------------------------------------------------
+
+    def compute_acceleration(
+        self,
+        asset: str | None = None,
+        candles: List[Dict[str, Any]] | None = None,
+        pressure_score: float | None = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """
+        Orchestrator-facing interface.
+
+        Supports:
+        - direct pressure_score input
+        - asset/symbol identity
+        - optional candles fallback
+        """
+
+        symbol = str(
+            asset
+            or kwargs.get("symbol")
+            or kwargs.get("asset")
+            or "UNKNOWN"
+        ).upper()
+
+        current_pressure = 0.0
+
+        if pressure_score is not None:
+            current_pressure = _safe_float(pressure_score, 0.0)
+        else:
+            current_pressure = self._infer_pressure_from_inputs(
+                candles=candles or [],
+                **kwargs,
+            )
+
+        history = self.pressure_history.setdefault(
+            symbol,
+            deque(maxlen=self.max_history),
+        )
+        history.append(current_pressure)
+
+        acceleration_score = self._compute_acceleration_score(list(history))
+
+        stage = (
+            "SURGING" if acceleration_score >= 0.65 else
+            "BUILDING" if acceleration_score >= 0.35 else
+            "EARLY" if acceleration_score >= 0.12 else
+            "NONE"
+        )
+
+        return {
+            "score": round(acceleration_score, 4),
+            "acceleration_score": round(acceleration_score, 4),
+            "stage": stage,
+            "pressure_score": round(current_pressure, 4),
+        }
+
+    # ------------------------------------------------
     # CORE PROCESSOR
     # ------------------------------------------------
 
@@ -56,7 +116,12 @@ class PressureAccelerationEngine:
         enriched: List[Dict[str, Any]] = []
 
         for row in rows:
-            symbol = str(row.get("symbol", "")).upper()
+            symbol = str(
+                row.get("symbol")
+                or row.get("asset")
+                or ""
+            ).upper()
+
             current_pressure = _safe_float(row.get("pressure_score"), 0.0)
 
             history = self.pressure_history.setdefault(
@@ -69,6 +134,16 @@ class PressureAccelerationEngine:
 
             new_row = dict(row)
             new_row["pressure_acceleration"] = round(acceleration_score, 4)
+            new_row["acceleration_score"] = round(acceleration_score, 4)
+
+            if acceleration_score >= 0.65:
+                new_row["acceleration_stage"] = "SURGING"
+            elif acceleration_score >= 0.35:
+                new_row["acceleration_stage"] = "BUILDING"
+            elif acceleration_score >= 0.12:
+                new_row["acceleration_stage"] = "EARLY"
+            else:
+                new_row["acceleration_stage"] = "NONE"
 
             enriched.append(new_row)
 
@@ -103,7 +178,6 @@ class PressureAccelerationEngine:
         prev_velocity = prev - prev2
         acceleration = velocity - prev_velocity
 
-        # Positive-only bias for entry timing
         velocity_component = max(0.0, velocity) * 3.0
         acceleration_component = max(0.0, acceleration) * 4.0
         pressure_context_component = latest * 0.20
@@ -115,3 +189,80 @@ class PressureAccelerationEngine:
         )
 
         return _clamp01(raw_score)
+
+    # ------------------------------------------------
+    # SAFE FALLBACK INFERENCE
+    # ------------------------------------------------
+
+    def _infer_pressure_from_inputs(
+        self,
+        candles: List[Dict[str, Any]] | List[Any],
+        **kwargs: Any,
+    ) -> float:
+        """
+        Fallback path when orchestrator calls this engine without
+        providing an explicit pressure_score.
+
+        Priority:
+        1. direct pressure-like fields from kwargs
+        2. simple candle-derived proxy
+        """
+
+        for key in (
+            "pressure_score",
+            "pressure",
+            "current_pressure",
+            "opportunity_pressure",
+        ):
+            if key in kwargs:
+                return _clamp01(_safe_float(kwargs.get(key), 0.0))
+
+        if not candles or len(candles) < 2:
+            return 0.0
+
+        try:
+            last = candles[-1]
+            prev = candles[-2]
+
+            last_close = self._extract_close(last)
+            prev_close = self._extract_close(prev)
+            last_high = self._extract_high(last)
+            last_low = self._extract_low(last)
+
+            if last_close <= 0 or prev_close <= 0:
+                return 0.0
+
+            move = abs(last_close - prev_close) / prev_close
+            intrabar_range = abs(last_high - last_low) / last_close if last_close > 0 else 0.0
+
+            proxy_pressure = (move * 8.0) + (intrabar_range * 6.0)
+            return _clamp01(proxy_pressure)
+        except Exception:
+            return 0.0
+
+    def _extract_close(self, candle: Any) -> float:
+        if isinstance(candle, dict):
+            return _safe_float(candle.get("close"), 0.0)
+        if hasattr(candle, "close"):
+            return _safe_float(getattr(candle, "close"), 0.0)
+        if isinstance(candle, (list, tuple)) and len(candle) > 4:
+            return _safe_float(candle[4], 0.0)
+        return 0.0
+
+    def _extract_high(self, candle: Any) -> float:
+        if isinstance(candle, dict):
+            return _safe_float(candle.get("high"), 0.0)
+        if hasattr(candle, "high"):
+            return _safe_float(getattr(candle, "high"), 0.0)
+        if isinstance(candle, (list, tuple)) and len(candle) > 2:
+            return _safe_float(candle[2], 0.0)
+        return 0.0
+
+    def _extract_low(self, candle: Any) -> float:
+        if isinstance(candle, dict):
+            return _safe_float(candle.get("low"), 0.0)
+        if hasattr(candle, "low"):
+            return _safe_float(getattr(candle, "low"), 0.0)
+        if isinstance(candle, (list, tuple)) and len(candle) > 3:
+            return _safe_float(candle[3], 0.0)
+        return 0.0
