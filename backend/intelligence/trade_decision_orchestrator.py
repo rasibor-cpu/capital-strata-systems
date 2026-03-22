@@ -13,7 +13,6 @@ from backend.intelligence.pressure_acceleration_engine import (
 )
 from backend.intelligence.signal_confluence_engine import SignalConfluenceEngine
 
-# Safe optional imports across current mixed project structure
 try:
     from backend.execution.cost_aware_gate import CostAwareGate
 except Exception:
@@ -29,14 +28,6 @@ except Exception:
 
 
 class TradeDecisionOrchestrator:
-    """
-    Trade decision orchestrator for Capital Strata Systems.
-
-    Tuned Version (Activation-Calibrated):
-    - Fixes over-constrained system
-    - Preserves all architecture
-    - Enables controlled trade flow
-    """
 
     def __init__(self) -> None:
         self.regime_detector = MarketRegimeDetector()
@@ -49,7 +40,6 @@ class TradeDecisionOrchestrator:
 
         self.cost_engine = ExecutionCostEngine() if ExecutionCostEngine else None
 
-        # 🔥 CALIBRATED THRESHOLDS (aligned to real score distribution)
         self.mean_reversion_threshold = 0.22
         self.trend_threshold = 0.26
         self.breakout_threshold = 0.32
@@ -63,7 +53,6 @@ class TradeDecisionOrchestrator:
             "regime_confidence": 0.08,
         }
 
-        # 🔥 INCREASED EDGE SENSITIVITY
         self.EDGE_MULTIPLIER = 0.025
         self.COST_NOTIONAL = 1000.0
 
@@ -97,7 +86,14 @@ class TradeDecisionOrchestrator:
         )
 
         expected_edge_bps = self._estimate_edge(decision_score)
-        execution_cost_bps = self._estimate_cost(asset)
+
+        cost_components = self._estimate_cost_components(asset)
+
+        execution_cost_bps = (
+            (cost_components["total_cost_usd"] / self.COST_NOTIONAL) * 10000.0
+            if self.COST_NOTIONAL > 0
+            else 0.0
+        )
 
         cost_decision = self._apply_cost_gate(
             expected_edge_bps,
@@ -113,11 +109,8 @@ class TradeDecisionOrchestrator:
 
         cost_blocked = False
 
-        # 🔥 SOFT COST GATE (CRITICAL FIX)
         if cost_decision.get("decision") != "APPROVE":
             cost_blocked = True
-
-            # Only block weak trades — allow strong signals through
             if decision_score < 0.28:
                 execute_trade = False
 
@@ -138,54 +131,90 @@ class TradeDecisionOrchestrator:
 
         return {
             "asset": asset,
+            "asset_class": self._classify_asset(asset),
+
             "execute_trade": execute_trade,
             "cost_blocked": cost_blocked,
+
             "regime": regime,
             "regime_reason": regime_reason,
+
             "confluence_score": round(confluence_score, 4),
             "ai_score": round(ai_score, 4),
             "pressure_score": round(pressure_score, 4),
             "acceleration_score": round(acceleration_score, 4),
             "momentum_score": round(momentum_score, 4),
+
             "decision_score": round(decision_score, 4),
+
             "expected_edge_bps": round(expected_edge_bps, 4),
             "execution_cost_bps": round(execution_cost_bps, 4),
+
             "cost_decision": cost_decision.get("decision"),
             "net_edge_bps": round(float(cost_decision.get("net_edge_bps", 0.0)), 4),
+
             "expected_edge_value": round(expected_edge_value, 6),
             "cost_adjusted_edge_value": round(cost_adjusted_edge_value, 6),
+
+            # 🔥 CRITICAL OUTPUT
+            "entry_costs": cost_components,
         }
 
-    # ===============================
-    # EDGE MODEL (UNCHANGED STRUCTURE)
-    # ===============================
     def _estimate_edge(self, decision_score: float) -> float:
         base = max(0.0, decision_score)
         return round(base * 120.0, 4)
 
-    def _estimate_cost(self, asset: str) -> float:
+    def _estimate_cost_components(self, asset: str) -> Dict[str, float]:
         if self.cost_engine is None:
-            return 10.0
+            return {
+                "spread_cost_usd": 0.0,
+                "slippage_cost_usd": 0.0,
+                "fee_cost_usd": 0.0,
+                "total_cost_usd": 0.0,
+            }
 
         try:
             notional = self.COST_NOTIONAL
-            spread_cost = 0.0
-            slippage_cost = 0.0
-            commission_cost = 0.0
 
-            if hasattr(self.cost_engine, "_compute_spread_cost"):
-                spread_cost = float(self.cost_engine._compute_spread_cost(asset, notional))
+            spread_cost = float(self.cost_engine._compute_spread_cost(asset, notional)) \
+                if hasattr(self.cost_engine, "_compute_spread_cost") else 0.0
 
-            if hasattr(self.cost_engine, "_compute_slippage_cost"):
-                slippage_cost = float(self.cost_engine._compute_slippage_cost(notional))
+            slippage_cost = float(self.cost_engine._compute_slippage_cost(notional)) \
+                if hasattr(self.cost_engine, "_compute_slippage_cost") else 0.0
 
-            if hasattr(self.cost_engine, "commission_per_trade"):
-                commission_cost = float(self.cost_engine.commission_per_trade)
+            fee_cost = float(self.cost_engine.commission_per_trade) \
+                if hasattr(self.cost_engine, "commission_per_trade") else 0.0
 
-            total_cost = spread_cost + slippage_cost + commission_cost
-            return (total_cost / notional) * 10000.0
+            total = spread_cost + slippage_cost + fee_cost
+
+            return {
+                "spread_cost_usd": spread_cost,
+                "slippage_cost_usd": slippage_cost,
+                "fee_cost_usd": fee_cost,
+                "total_cost_usd": total,
+            }
+
         except Exception:
-            return 10.0
+            return {
+                "spread_cost_usd": 0.0,
+                "slippage_cost_usd": 0.0,
+                "fee_cost_usd": 0.0,
+                "total_cost_usd": 0.0,
+            }
+
+    def _classify_asset(self, asset: str) -> str:
+        asset = asset.upper()
+
+        if "-" in asset or "BTC" in asset or "ETH" in asset:
+            return "CRYPTO"
+
+        if any(x in asset for x in ["EUR", "GBP", "JPY", "CHF", "AUD", "CAD"]):
+            return "FX"
+
+        if any(x in asset for x in ["ES", "NQ", "CL", "GC", "ZN"]):
+            return "FUTURES"
+
+        return "UNKNOWN"
 
     def _apply_cost_gate(
         self,
@@ -194,6 +223,7 @@ class TradeDecisionOrchestrator:
         asset: str,
         decision_score: float,
     ) -> Dict[str, Any]:
+
         net_edge_bps = expected_edge_bps - execution_cost_bps
 
         if CostAwareGate:
@@ -271,7 +301,9 @@ class TradeDecisionOrchestrator:
 
     def _safe_momentum_score(self, **kwargs: Any) -> float:
         try:
-            return self._extract_score(self.momentum_engine.compute_momentum_window(**kwargs))
+            return self._extract_score(
+                self.momentum_engine.compute_momentum_window(**kwargs)
+            )
         except Exception:
             return 0.0
 
@@ -311,6 +343,7 @@ class TradeDecisionOrchestrator:
     def _reject(self, asset: str, reason: str) -> Dict[str, Any]:
         return {
             "asset": asset,
+            "asset_class": "UNKNOWN",
             "execute_trade": False,
             "cost_blocked": False,
             "regime": "UNSTABLE",
@@ -327,6 +360,12 @@ class TradeDecisionOrchestrator:
             "net_edge_bps": 0.0,
             "expected_edge_value": 0.0,
             "cost_adjusted_edge_value": 0.0,
+            "entry_costs": {
+                "spread_cost_usd": 0.0,
+                "slippage_cost_usd": 0.0,
+                "fee_cost_usd": 0.0,
+                "total_cost_usd": 0.0,
+            },
         }
 
 
