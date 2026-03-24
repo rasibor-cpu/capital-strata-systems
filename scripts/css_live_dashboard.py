@@ -15,7 +15,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from backend.data.coinbase_historical_downloader import load_runtime_asset
 from backend.execution.position_manager import PositionManager
-from backend.execution.trade_logger import TradeLogger
 from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
 from backend.intelligence.feature_builder import FeatureBuilder
 from backend.intelligence.liquidity_sweep_detector import LiquiditySweepDetector
@@ -65,7 +64,6 @@ sweep_engine = LiquiditySweepDetector()
 ai = AIOpportunityScorer()
 optimizer = QuantSignalOptimizer()
 orchestrator = TradeDecisionOrchestrator()
-trade_logger = TradeLogger()
 
 position_manager = PositionManager(
     take_profit_pct=GLOBAL_TAKE_PROFIT_PCT,
@@ -151,13 +149,6 @@ def classify_asset(symbol: str) -> str:
     return "OTHER"
 
 
-def resolve_asset_class(symbol: str, decision: Dict[str, Any]) -> str:
-    asset_class = str(decision.get("asset_class", "")).upper().strip()
-    if asset_class in {"FX", "CRYPTO", "FUTURES", "OTHER"}:
-        return asset_class
-    return classify_asset(symbol)
-
-
 def get_open_position_counts() -> Dict[str, int]:
     counts = {
         "FX": 0,
@@ -165,26 +156,24 @@ def get_open_position_counts() -> Dict[str, int]:
         "FUTURES": 0,
         "OTHER": 0,
     }
-    for symbol, pos in position_manager.get_open_positions().items():
-        asset_class = str(pos.get("asset_class", "")).upper().strip()
-        if asset_class not in counts:
-            asset_class = classify_asset(symbol)
+    for symbol in position_manager.get_open_positions().keys():
+        asset_class = classify_asset(symbol)
         counts[asset_class] = counts.get(asset_class, 0) + 1
     return counts
 
 
-def can_open_new_position(symbol: str, asset_class: str | None = None) -> bool:
+def can_open_new_position(symbol: str) -> bool:
     if position_manager.has_open_position(symbol):
         return False
 
-    resolved_asset_class = (asset_class or classify_asset(symbol)).upper().strip()
+    asset_class = classify_asset(symbol)
     counts = get_open_position_counts()
 
-    if resolved_asset_class == "FX":
+    if asset_class == "FX":
         return counts.get("FX", 0) < MAX_OPEN_FX
-    if resolved_asset_class == "CRYPTO":
+    if asset_class == "CRYPTO":
         return counts.get("CRYPTO", 0) < MAX_OPEN_CRYPTO
-    if resolved_asset_class == "FUTURES":
+    if asset_class == "FUTURES":
         return counts.get("FUTURES", 0) < MAX_OPEN_FUTURES
 
     # For uncategorized symbols, block by default to avoid accidental governance drift
@@ -197,39 +186,6 @@ def allowed_trade_slots_remaining() -> int:
     crypto_remaining = max(0, MAX_OPEN_CRYPTO - counts.get("CRYPTO", 0))
     futures_remaining = max(0, MAX_OPEN_FUTURES - counts.get("FUTURES", 0))
     return fx_remaining + crypto_remaining + futures_remaining
-
-
-def build_exit_costs_by_symbol(
-    rows: List[Dict[str, Any]],
-    decisions: Dict[str, Dict[str, Any]],
-) -> Dict[str, Dict[str, Any]]:
-    """
-    Build estimated exit costs for currently open symbols using the latest
-    decision-layer cost model available in this cycle.
-
-    We reuse current cycle orchestrator cost estimates as the best available
-    live approximation for exit costs.
-    """
-    exit_costs_by_symbol: Dict[str, Dict[str, Any]] = {}
-    open_symbols = set(position_manager.get_open_positions().keys())
-
-    for row in rows:
-        symbol = str(row.get("symbol", "")).upper()
-        if symbol not in open_symbols:
-            continue
-
-        decision = decisions.get(symbol, {})
-        entry_costs = decision.get("entry_costs", {})
-
-        if isinstance(entry_costs, dict):
-            exit_costs_by_symbol[symbol] = {
-                "spread_cost_usd": safe_float(entry_costs.get("spread_cost_usd"), 0.0),
-                "slippage_cost_usd": safe_float(entry_costs.get("slippage_cost_usd"), 0.0),
-                "fee_cost_usd": safe_float(entry_costs.get("fee_cost_usd"), 0.0),
-                "total_cost_usd": safe_float(entry_costs.get("total_cost_usd"), 0.0),
-            }
-
-    return exit_costs_by_symbol
 
 
 # ---------------- MAIN ----------------
@@ -348,89 +304,38 @@ while True:
 
             symbol = r["symbol"]
             price = next((x["price"] for x in rows if x["symbol"] == symbol), 0.0)
-            decision = decisions.get(symbol, {})
 
             if price <= 0:
                 continue
 
-            if not decision.get("execute_trade"):
+            if not decisions.get(symbol, {}).get("execute_trade"):
                 continue
 
-            asset_class = resolve_asset_class(symbol, decision)
-
-            if not can_open_new_position(symbol, asset_class):
+            if not can_open_new_position(symbol):
                 continue
 
             qty = BASE_TRADE_NOTIONAL_USD / price
-            entry_costs = decision.get("entry_costs", {})
-
-            opened_at = now()
 
             position_manager.open_long_position(
                 symbol=symbol,
                 quantity=qty,
                 entry_price=price,
                 cycle_no=cycle,
-                opened_at_utc=opened_at,
-                asset_class=asset_class,
-                entry_costs=entry_costs,
+                opened_at_utc=now(),
             )
 
-            trade_logger.log_open(
-                symbol=symbol,
-                entry_price=price,
-                quantity=qty,
-                score=safe_float(decision.get("decision_score", r.get("score", 0.0))),
-                signal=str(decision.get("regime", r.get("strategy", "UNKNOWN"))),
-                regime=str(decision.get("regime", "UNKNOWN")),
-                vwap=safe_float(next((x["vwap"] for x in rows if x["symbol"] == symbol), price), price),
-                spread_pct=safe_float(next((x["spread_bps"] for x in rows if x["symbol"] == symbol), 0.0)) / 10000.0,
-                asset_class=asset_class,
-                entry_costs=entry_costs,
-            )
-
-            print("[OPEN]", symbol, price, asset_class)
+            print("[OPEN]", symbol, price, classify_asset(symbol))
             opened += 1
 
-        exit_costs_by_symbol = build_exit_costs_by_symbol(rows, decisions)
-
         closed = position_manager.update_positions(
-            latest_prices={r["symbol"]: r["price"] for r in rows},
-            cycle_no=cycle,
-            now=now(),
-            exit_costs_by_symbol=exit_costs_by_symbol,
+            {r["symbol"]: r["price"] for r in rows},
+            cycle,
+            now(),
         )
 
         for c in closed:
             pnl = safe_float(c.get("realized_pnl_usd"))
             equity += pnl
-
-            hold_minutes = (
-                safe_float(c.get("cycles_held"), 0.0) * safe_float(REFRESH_SECONDS, 0.0) / 60.0
-            )
-
-            trade_logger.log_close(
-                symbol=str(c.get("symbol", "UNKNOWN")),
-                entry_price=safe_float(c.get("entry_price"), 0.0),
-                exit_price=safe_float(c.get("exit_price"), 0.0),
-                quantity=safe_float(c.get("quantity"), 0.0),
-                reason=str(c.get("exit_reason", "UNKNOWN")),
-                hold_minutes=hold_minutes,
-                asset_class=str(c.get("asset_class", "UNKNOWN")),
-                entry_costs={
-                    "spread_cost_usd": safe_float(c.get("entry_spread_cost_usd"), 0.0),
-                    "slippage_cost_usd": safe_float(c.get("entry_slippage_cost_usd"), 0.0),
-                    "fee_cost_usd": safe_float(c.get("entry_fee_cost_usd"), 0.0),
-                    "total_cost_usd": safe_float(c.get("entry_total_cost_usd"), 0.0),
-                },
-                exit_costs={
-                    "spread_cost_usd": safe_float(c.get("exit_spread_cost_usd"), 0.0),
-                    "slippage_cost_usd": safe_float(c.get("exit_slippage_cost_usd"), 0.0),
-                    "fee_cost_usd": safe_float(c.get("exit_fee_cost_usd"), 0.0),
-                    "total_cost_usd": safe_float(c.get("exit_total_cost_usd"), 0.0),
-                },
-            )
-
             print("[CLOSE]", c["symbol"], pnl)
 
         # -------- DISPLAY --------
@@ -460,7 +365,7 @@ while True:
             d = decisions.get(symbol, {})
             print(
                 symbol,
-                "class", resolve_asset_class(symbol, d),
+                "class", classify_asset(symbol),
                 "score", round(safe_float(r.get("score", 0.0)), 3),
                 "exec", d.get("execute_trade"),
                 "decision", round(safe_float(d.get("decision_score", 0.0)), 3),
@@ -468,8 +373,6 @@ while True:
                 "accel", round(safe_float(d.get("acceleration_score", 0.0)), 3),
                 "confluence", round(safe_float(d.get("confluence_score", 0.0)), 3),
                 "elasticity", round(safe_float(r.get("elasticity_score", 0.0)), 3),
-                "net_edge_bps", round(safe_float(d.get("net_edge_bps", 0.0)), 3),
-                "cost_blocked", d.get("cost_blocked"),
             )
 
         time.sleep(REFRESH_SECONDS)
