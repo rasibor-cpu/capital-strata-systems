@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List
 
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ARTIFACT_DIR = PROJECT_ROOT / "artifacts"
 
@@ -36,15 +37,6 @@ def load_json_file(path: Path, default: Any) -> Any:
         return default
 
 
-def pnl_bucket(trade: Dict[str, Any]) -> str:
-    pnl = safe_float(trade.get("realized_pnl_usd"), 0.0)
-    if pnl > 0:
-        return "WIN"
-    if pnl < 0:
-        return "LOSS"
-    return "FLAT"
-
-
 def format_money(value: float) -> str:
     return f"${value:,.4f}"
 
@@ -53,10 +45,36 @@ def format_pct(value: float) -> str:
     return f"{value:.2f}%"
 
 
+def get_net_pnl(trade: Dict[str, Any]) -> float:
+    return safe_float(trade.get("realized_pnl_usd", trade.get("net_realized_pnl_usd", 0.0)), 0.0)
+
+
+def get_gross_pnl(trade: Dict[str, Any]) -> float:
+    net = get_net_pnl(trade)
+    return safe_float(trade.get("gross_realized_pnl_usd"), net)
+
+
+def get_cost(trade: Dict[str, Any]) -> float:
+    return safe_float(trade.get("total_round_trip_cost_usd"), 0.0)
+
+
+def pnl_bucket(trade: Dict[str, Any]) -> str:
+    pnl = get_net_pnl(trade)
+    if pnl > 0:
+        return "WIN"
+    if pnl < 0:
+        return "LOSS"
+    return "FLAT"
+
+
+def classify_asset(trade: Dict[str, Any]) -> str:
+    return str(trade.get("asset_class", "UNKNOWN")).upper()
+
+
 def print_header(title: str) -> None:
-    print("\n" + "=" * 54)
-    print(f"{title}")
-    print("=" * 54)
+    print("\n" + "=" * 58)
+    print(title)
+    print("=" * 58)
 
 
 def analyze() -> None:
@@ -74,135 +92,95 @@ def analyze() -> None:
     closed_count = len(closed_trades)
     open_count = len(open_positions)
 
-    total_realized_pnl = sum(
-        safe_float(t.get("realized_pnl_usd"), 0.0) for t in closed_trades
-    )
+    total_net = sum(get_net_pnl(t) for t in closed_trades)
+    total_gross = sum(get_gross_pnl(t) for t in closed_trades)
+    total_cost = sum(get_cost(t) for t in closed_trades)
 
-    wins = [t for t in closed_trades if safe_float(t.get("realized_pnl_usd"), 0.0) > 0]
-    losses = [t for t in closed_trades if safe_float(t.get("realized_pnl_usd"), 0.0) < 0]
-    flats = [t for t in closed_trades if safe_float(t.get("realized_pnl_usd"), 0.0) == 0]
+    wins = [t for t in closed_trades if get_net_pnl(t) > 0]
+    losses = [t for t in closed_trades if get_net_pnl(t) < 0]
+    flats = [t for t in closed_trades if get_net_pnl(t) == 0]
 
     win_rate = (len(wins) / closed_count * 100.0) if closed_count else 0.0
     loss_rate = (len(losses) / closed_count * 100.0) if closed_count else 0.0
 
-    sl_count = sum(
-        1 for t in closed_trades
-        if str(t.get("exit_reason", "")).upper() == "SL"
-    )
-    tp_count = sum(
-        1 for t in closed_trades
-        if str(t.get("exit_reason", "")).upper() == "TP"
-    )
-    time_count = sum(
-        1 for t in closed_trades
-        if str(t.get("exit_reason", "")).upper() not in {"SL", "TP"}
-    )
-
     avg_hold_cycles = (
         sum(safe_int(t.get("cycles_held"), 0) for t in closed_trades) / closed_count
-        if closed_count
-        else 0.0
+        if closed_count else 0.0
     )
 
-    open_notional = 0.0
-    for symbol, position in open_positions.items():
-        if not isinstance(position, dict):
-            continue
-        qty = safe_float(position.get("quantity"), 0.0)
-        entry = safe_float(position.get("entry_price"), 0.0)
-        open_notional += qty * entry
+    # Asset breakdown
+    asset_stats: Dict[str, Dict[str, float]] = {}
 
-    best_trade = None
-    worst_trade = None
-    if closed_trades:
-        best_trade = max(closed_trades, key=lambda t: safe_float(t.get("realized_pnl_usd"), 0.0))
-        worst_trade = min(closed_trades, key=lambda t: safe_float(t.get("realized_pnl_usd"), 0.0))
+    for t in closed_trades:
+        asset = classify_asset(t)
+        if asset not in asset_stats:
+            asset_stats[asset] = {
+                "count": 0,
+                "net": 0.0,
+                "gross": 0.0,
+                "cost": 0.0,
+            }
+
+        asset_stats[asset]["count"] += 1
+        asset_stats[asset]["net"] += get_net_pnl(t)
+        asset_stats[asset]["gross"] += get_gross_pnl(t)
+        asset_stats[asset]["cost"] += get_cost(t)
+
+    best_trade = max(closed_trades, key=get_net_pnl) if closed_trades else None
+    worst_trade = min(closed_trades, key=get_net_pnl) if closed_trades else None
 
     print_header("CAPITAL STRATA SYSTEMS - SESSION ANALYZER")
 
-    print(f"Timestamp UTC:         {summary.get('timestamp_utc', 'n/a')}")
     print(f"Cycle No:              {summary.get('cycle_no', 'n/a')}")
-    print(f"Engine Mode:           {summary.get('engine_mode', 'n/a')}")
     print(f"Estimated Equity:      {format_money(safe_float(summary.get('estimated_equity_usd'), 0.0))}")
-    print(f"Starting Capital:      {format_money(safe_float(summary.get('starting_capital_usd'), 0.0))}")
-    print(f"Cycle Realized PnL:    {format_money(safe_float(summary.get('cycle_realized_pnl_usd'), 0.0))}")
+
+    print_header("FINANCIAL PERFORMANCE")
+
+    print(f"Gross Realized PnL:    {format_money(total_gross)}")
+    print(f"Execution Cost Drag:   {format_money(total_cost)}")
+    print(f"Net Realized PnL:      {format_money(total_net)}")
+
+    if total_gross != 0:
+        print(f"Cost Drag %:           {format_pct((total_cost / abs(total_gross)) * 100.0)}")
 
     print_header("TRADE OUTCOME SUMMARY")
 
     print(f"Closed Trades:         {closed_count}")
     print(f"Open Positions:        {open_count}")
-    print(f"Total Realized PnL:    {format_money(total_realized_pnl)}")
     print(f"Win Rate:              {format_pct(win_rate)}")
     print(f"Loss Rate:             {format_pct(loss_rate)}")
-    print(f"Flat Rate:             {format_pct((len(flats) / closed_count * 100.0) if closed_count else 0.0)}")
+    print(f"Flat Rate:             {format_pct((len(flats)/closed_count*100) if closed_count else 0.0)}")
     print(f"Average Hold Cycles:   {avg_hold_cycles:.2f}")
-    print(f"Open Notional @ Entry: {format_money(open_notional)}")
 
-    print_header("EXIT REASON BREAKDOWN")
+    print_header("ASSET CLASS PERFORMANCE")
 
-    print(f"TP Count:              {tp_count}")
-    print(f"SL Count:              {sl_count}")
-    print(f"Other Exit Count:      {time_count}")
+    for asset, stats in asset_stats.items():
+        print(
+            f"{asset:10} trades={stats['count']} "
+            f"gross={format_money(stats['gross'])} "
+            f"cost={format_money(stats['cost'])} "
+            f"net={format_money(stats['net'])}"
+        )
 
-    print_header("BEST / WORST CLOSED TRADE")
+    print_header("BEST / WORST TRADE")
 
     if best_trade:
-        print(
-            f"Best Trade:            {best_trade.get('symbol', 'n/a')} | "
-            f"{format_money(safe_float(best_trade.get('realized_pnl_usd'), 0.0))} | "
-            f"reason={best_trade.get('exit_reason', 'n/a')} | "
-            f"held={safe_int(best_trade.get('cycles_held'), 0)}"
-        )
-    else:
-        print("Best Trade:            n/a")
-
+        print(f"Best:  {best_trade.get('symbol')} {format_money(get_net_pnl(best_trade))}")
     if worst_trade:
-        print(
-            f"Worst Trade:           {worst_trade.get('symbol', 'n/a')} | "
-            f"{format_money(safe_float(worst_trade.get('realized_pnl_usd'), 0.0))} | "
-            f"reason={worst_trade.get('exit_reason', 'n/a')} | "
-            f"held={safe_int(worst_trade.get('cycles_held'), 0)}"
-        )
-    else:
-        print("Worst Trade:           n/a")
-
-    print_header("OPEN POSITIONS")
-
-    if not open_positions:
-        print("No open positions.")
-    else:
-        for symbol, position in open_positions.items():
-            if not isinstance(position, dict):
-                continue
-            qty = safe_float(position.get("quantity"), 0.0)
-            entry = safe_float(position.get("entry_price"), 0.0)
-            cycles_held = safe_int(position.get("cycles_held"), 0)
-            opened_at = position.get("opened_at", "n/a")
-            print(
-                f"{symbol:12} qty={qty:.8f} "
-                f"entry={entry:.8f} "
-                f"held={cycles_held} "
-                f"opened_at={opened_at}"
-            )
+        print(f"Worst: {worst_trade.get('symbol')} {format_money(get_net_pnl(worst_trade))}")
 
     print_header("RECENT CLOSED TRADES")
 
-    if not closed_trades:
-        print("No closed trades yet.")
-    else:
-        recent = closed_trades[-10:]
-        for trade in recent:
-            symbol = trade.get("symbol", "n/a")
-            pnl = safe_float(trade.get("realized_pnl_usd"), 0.0)
-            exit_reason = trade.get("exit_reason", "n/a")
-            held = safe_int(trade.get("cycles_held"), 0)
-            bucket = pnl_bucket(trade)
-            print(
-                f"{symbol:12} {bucket:5} "
-                f"pnl={format_money(pnl):>12} "
-                f"reason={exit_reason:>4} "
-                f"held={held}"
-            )
+    for t in closed_trades[-10:]:
+        print(
+            f"{t.get('symbol'):12} "
+            f"{pnl_bucket(t):5} "
+            f"gross={format_money(get_gross_pnl(t))} "
+            f"cost={format_money(get_cost(t))} "
+            f"net={format_money(get_net_pnl(t))} "
+            f"reason={t.get('exit_reason')} "
+            f"held={safe_int(t.get('cycles_held'), 0)}"
+        )
 
 
 if __name__ == "__main__":
