@@ -5,12 +5,14 @@ from typing import Dict
 
 class ProfitCaptureEngine:
     """
-    CSS Profit Capture Engine
+    CSS Profit Capture Engine (Upgraded)
 
-    Exit logic:
-    - stop loss
-    - take profit
-    - simple profit lock once trade moves sufficiently in favor
+    Features:
+    - Hard stop loss
+    - Hard take profit (safety cap only)
+    - Dynamic trailing logic
+    - Profit lock after favorable move
+    - Lets winners run
     """
 
     def __init__(
@@ -25,12 +27,22 @@ class ProfitCaptureEngine:
         self.trail_trigger = trail_trigger_bps / 10000.0
         self.locked_profit = locked_profit_bps / 10000.0
 
-    def evaluate(self, entry_price: float, current_price: float) -> Dict:
+    def evaluate(
+        self,
+        entry_price: float,
+        current_price: float,
+        peak_price: float,
+    ) -> Dict:
+
         if entry_price <= 0:
             return {"action": "HOLD", "pnl_pct": 0.0, "reason": "invalid entry"}
 
         change = (current_price - entry_price) / entry_price
+        peak_change = (peak_price - entry_price) / entry_price
 
+        # -------------------------
+        # HARD STOP LOSS
+        # -------------------------
         if change <= -self.stop_loss:
             return {
                 "action": "STOP_LOSS",
@@ -38,23 +50,43 @@ class ProfitCaptureEngine:
                 "reason": "hard stop loss hit",
             }
 
+        # -------------------------
+        # HARD TAKE PROFIT (RARE)
+        # -------------------------
         if change >= self.take_profit:
             return {
                 "action": "TAKE_PROFIT",
                 "pnl_pct": change,
-                "reason": "full take profit hit",
+                "reason": "hard take profit cap",
             }
 
-        if change >= self.trail_trigger:
-            if change <= self.locked_profit:
+        # -------------------------
+        # TRAILING LOGIC
+        # -------------------------
+        if peak_change >= self.trail_trigger:
+
+            lock_level = entry_price * (1 + self.locked_profit)
+
+            # if price falls below locked level → exit
+            if current_price < lock_level:
                 return {
-                    "action": "TAKE_PROFIT",
+                    "action": "EXIT_LOCK_PROFIT",
                     "pnl_pct": change,
-                    "reason": "profit lock triggered",
+                    "reason": "trailing profit lock triggered",
                 }
 
+            # still trending → hold
+            return {
+                "action": "HOLD",
+                "pnl_pct": change,
+                "reason": "winner running with trailing protection",
+            }
+
+        # -------------------------
+        # DEFAULT HOLD
+        # -------------------------
         return {
             "action": "HOLD",
             "pnl_pct": change,
-            "reason": "position within active range",
+            "reason": "within normal range",
         }
