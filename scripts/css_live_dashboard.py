@@ -1,6 +1,7 @@
+# CSS DASHBOARD — FULL NON-REGRESSION + DATA-FED PRESSURE/ACCEL FIX
+
 from __future__ import annotations
 
-import json
 import os
 import sys
 import time
@@ -9,13 +10,14 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from backend.data.coinbase_historical_downloader import load_runtime_asset
 from backend.execution.position_manager import PositionManager
+from backend.execution.trade_logger import TradeLogger
 from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
+from backend.intelligence.capital_allocator import CapitalAllocator
 from backend.intelligence.feature_builder import FeatureBuilder
 from backend.intelligence.liquidity_sweep_detector import LiquiditySweepDetector
 from backend.intelligence.market_regime_engine import MarketRegimeEngine
@@ -24,624 +26,467 @@ from backend.intelligence.pressure_acceleration_engine import PressureAccelerati
 from backend.intelligence.quant_signal_optimizer import QuantSignalOptimizer
 from backend.intelligence.signal_confluence_engine import SignalConfluenceEngine
 from backend.scanner.unified_market_scanner import UnifiedMarketScanner
-from backend.trading.profit_capture_engine import ProfitCaptureEngine
 
-ARTIFACT_DIR = PROJECT_ROOT / "artifacts"
-ARTIFACT_DIR.mkdir(exist_ok=True)
+# ---------------- CONFIG ----------------
 
-SUMMARY_FILE = ARTIFACT_DIR / "css_extended_paper_test_summary.json"
-POSITIONS_FILE = ARTIFACT_DIR / "css_open_positions.json"
-CLOSED_TRADES_FILE = ARTIFACT_DIR / "css_closed_trades.json"
-
-# ------------------------------------------------
-# SESSION / OPERATING CONTROLS
-# ------------------------------------------------
-MAX_SYMBOLS_PER_CYCLE = 25
+MAX_SYMBOLS_PER_CYCLE = 10
 REFRESH_SECONDS = 10
+MAX_TRADES_PER_CYCLE = 5
 
-ENGINE_PROFILES: Dict[str, Dict[str, float]] = {
-    "safe/test": {
-        "min_confluence_to_reach_optimizer": 0.90,
-        "min_pressure_to_reach_optimizer": 0.30,
-        "min_accel_to_reach_optimizer": 0.15,
-        "min_abs_spread_bps_to_reach_optimizer": 20.0,
-        "min_trade_score_to_execute": 0.62,
-        "min_confluence_to_execute": 0.90,
-        "min_pressure_to_execute": 0.30,
-        "min_accel_or_pressure_boost": 0.15,
-    },
-    "conservative": {
-        "min_confluence_to_reach_optimizer": 0.84,
-        "min_pressure_to_reach_optimizer": 0.24,
-        "min_accel_to_reach_optimizer": 0.10,
-        "min_abs_spread_bps_to_reach_optimizer": 16.0,
-        "min_trade_score_to_execute": 0.58,
-        "min_confluence_to_execute": 0.84,
-        "min_pressure_to_execute": 0.24,
-        "min_accel_or_pressure_boost": 0.10,
-    },
-    "balanced": {
-        "min_confluence_to_reach_optimizer": 0.78,
-        "min_pressure_to_reach_optimizer": 0.20,
-        "min_accel_to_reach_optimizer": 0.08,
-        "min_abs_spread_bps_to_reach_optimizer": 12.0,
-        "min_trade_score_to_execute": 0.54,
-        "min_confluence_to_execute": 0.78,
-        "min_pressure_to_execute": 0.20,
-        "min_accel_or_pressure_boost": 0.08,
-    },
-    "aggressive": {
-        "min_confluence_to_reach_optimizer": 0.70,
-        "min_pressure_to_reach_optimizer": 0.16,
-        "min_accel_to_reach_optimizer": 0.06,
-        "min_abs_spread_bps_to_reach_optimizer": 10.0,
-        "min_trade_score_to_execute": 0.48,
-        "min_confluence_to_execute": 0.70,
-        "min_pressure_to_execute": 0.16,
-        "min_accel_or_pressure_boost": 0.06,
-    },
-    "opportunistic/expansion": {
-        "min_confluence_to_reach_optimizer": 0.62,
-        "min_pressure_to_reach_optimizer": 0.12,
-        "min_accel_to_reach_optimizer": 0.04,
-        "min_abs_spread_bps_to_reach_optimizer": 8.0,
-        "min_trade_score_to_execute": 0.42,
-        "min_confluence_to_execute": 0.62,
-        "min_pressure_to_execute": 0.12,
-        "min_accel_or_pressure_boost": 0.04,
-    },
-}
+MAX_OPEN_FX = 4
+MAX_OPEN_CRYPTO = 2
+MAX_OPEN_FUTURES = 2
 
-ALLOWED_EXECUTION_REGIMES = {
-    "MEAN_REVERSION",
-    "TREND",
-    "VOLATILE",
-    "BREAKOUT",
-    "NEUTRAL",
-    "RANGE",
-}
+BASE_TRADE_NOTIONAL_USD = 10.0
+
+# ---------------- ENGINES ----------------
 
 scanner = UnifiedMarketScanner()
-
 feature_builder = FeatureBuilder()
 regime_engine = MarketRegimeEngine()
 pressure_engine = OpportunityPressureEngine()
 accel_engine = PressureAccelerationEngine()
 confluence_engine = SignalConfluenceEngine()
 sweep_engine = LiquiditySweepDetector()
+
 ai = AIOpportunityScorer()
 optimizer = QuantSignalOptimizer()
-profit_engine = ProfitCaptureEngine(
-    take_profit_bps=250.0,
-    stop_loss_bps=120.0,
-    trail_trigger_bps=40.0,
-    locked_profit_bps=15.0,
-)
+allocator = CapitalAllocator(total_capital=50.0, max_positions=5)
 
-position_manager = PositionManager(
-    take_profit_pct=0.025,
-    stop_loss_pct=0.012,
-    max_hold_cycles=8,
-)
+position_manager = PositionManager()
+trade_logger = TradeLogger()
 
-starting_capital = 200.0
-estimated_equity = starting_capital
-cycle = 0
-_debug_payload_logged = False
+GLOBAL_CONTEXT: Dict[str, Dict[str, Any]] = {}
 
+# ---------------- HELPERS ----------------
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
-
 def clear() -> None:
     os.system("cls" if os.name == "nt" else "clear")
 
-
-def safe_float(value: Any, default: float = 0.0) -> float:
+def safe(v: Any, d: float = 0.0) -> float:
     try:
-        return float(value)
+        return float(v)
     except Exception:
-        return float(default)
+        return d
 
-
-def clamp01(value: float) -> float:
-    if value < 0.0:
+def clamp01(v: float) -> float:
+    if v < 0.0:
         return 0.0
-    if value > 1.0:
+    if v > 1.0:
         return 1.0
-    return value
+    return v
 
+def classify_asset(symbol: str) -> str:
+    if "_" in symbol:
+        return "FX"
+    if "-" in symbol:
+        return "CRYPTO"
+    return "OTHER"
 
-def choose_engine_mode() -> str:
-    print("\nSelect CSS Engine Mode for this session:\n")
-    print("1. safe/test")
-    print("2. conservative")
-    print("3. balanced")
-    print("4. aggressive")
-    print("5. opportunistic/expansion\n")
+def get_open_counts() -> Dict[str, int]:
+    counts = {"FX": 0, "CRYPTO": 0, "FUTURES": 0}
+    for s in position_manager.get_open_positions():
+        cls = classify_asset(s)
+        if cls in counts:
+            counts[cls] += 1
+    return counts
 
-    choice = input("Enter choice (1-5): ").strip()
-
-    mapping = {
-        "1": "safe/test",
-        "2": "conservative",
-        "3": "balanced",
-        "4": "aggressive",
-        "5": "opportunistic/expansion",
-    }
-
-    mode = mapping.get(choice, "balanced")
-    print(f"\n[CSS] Engine mode locked for this session: {mode.upper()}\n")
-    return mode
-
-
-def regime_alignment_score(regime: str) -> float:
-    r = str(regime).upper()
-
-    if r == "MEAN_REVERSION":
-        return 1.00
-    if r == "TREND":
-        return 0.90
-    if r == "BREAKOUT":
-        return 0.88
-    if r == "VOLATILE":
-        return 0.82
-    if r in {"NEUTRAL", "RANGE"}:
-        return 0.72
-    return 0.40
-
-
-def blended_conviction_score(
-    *,
-    base_ai_score: float,
-    confluence_score: float,
-    pressure_score: float,
-    pressure_acceleration: float,
-    regime: str,
-) -> float:
-    regime_score = regime_alignment_score(regime)
-
-    score = (
-        0.20 * clamp01(base_ai_score)
-        + 0.35 * clamp01(confluence_score)
-        + 0.25 * clamp01(pressure_score)
-        + 0.20 * clamp01(pressure_acceleration)
-        + 0.20 * clamp01(regime_score)
-    )
-
-    return clamp01(score)
-
-
-def call_rows_module(module: Any, rows: List[Dict[str, Any]], label: str) -> List[Dict[str, Any]]:
-    if hasattr(module, "enrich_rows"):
-        return module.enrich_rows(rows)
-
-    if hasattr(module, "enrich"):
-        return module.enrich(rows)
-
-    if hasattr(module, "detect"):
-        return module.detect(rows)
-
-    print(f"[PIPELINE-WARN] {label}: no compatible row method found, passing rows through")
-    return rows
-
-
-def fetch_assets(symbols: List[str]) -> List[Dict[str, Any]]:
-    global _debug_payload_logged
-
-    rows: List[Dict[str, Any]] = []
-
-    for symbol in symbols:
-        try:
-            payload = load_runtime_asset(symbol)
-
-            if not isinstance(payload, dict):
-                print(f"[ROW-SKIP] {symbol}: payload is not dict")
-                continue
-
-            candles = payload.get("candles", [])
-            if not isinstance(candles, list) or len(candles) < 20:
-                print(f"[ROW-SKIP] {symbol}: insufficient candles")
-                continue
-
-            if not _debug_payload_logged:
-                print(f"[DEBUG] sample payload keys for {symbol}: {list(payload.keys())}")
-                if candles:
-                    print(f"[DEBUG] sample candle type for {symbol}: {type(candles[-1]).__name__}")
-                    print(f"[DEBUG] sample candle value for {symbol}: {candles[-1]}")
-                _debug_payload_logged = True
-
-            price = safe_float(payload.get("price"), 0.0)
-            vwap = safe_float(payload.get("vwap"), 0.0)
-            spread_bps = safe_float(payload.get("spread_bps"), 0.0)
-
-            if price <= 0.0:
-                print(f"[ROW-SKIP] {symbol}: invalid price")
-                continue
-
-            if vwap <= 0.0:
-                vwap = price
-
-            row = dict(payload)
-            row["symbol"] = str(payload.get("symbol", symbol)).upper()
-            row["price"] = price
-            row["vwap"] = vwap
-            row["spread_bps"] = spread_bps
-
-            rows.append(row)
-
-            print(
-                f"[ROW-OK] {symbol}: "
-                f"price={price:.6f}, "
-                f"vwap={vwap:.6f}, "
-                f"spread_bps={spread_bps:.2f}, "
-                f"candles={len(candles)}"
-            )
-
-        except Exception as exc:
-            print(f"[ROW-ERROR] {symbol}: {exc}")
-            continue
-
-    return rows
-
-
-def persist_state(summary: Dict[str, Any]) -> None:
-    try:
-        with SUMMARY_FILE.open("w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2)
-
-        with POSITIONS_FILE.open("w", encoding="utf-8") as f:
-            json.dump(position_manager.get_open_positions(), f, indent=2)
-
-        with CLOSED_TRADES_FILE.open("w", encoding="utf-8") as f:
-            json.dump(position_manager.get_closed_positions(), f, indent=2)
-
-    except Exception as exc:
-        print(f"[WARN] Could not persist artifact state: {exc}")
-
-
-def passes_optimizer_gate(row: Dict[str, Any], profile: Dict[str, float]) -> bool:
-    confluence_score = safe_float(row.get("confluence_score"), 0.0)
-    pressure_score = safe_float(row.get("pressure_score"), 0.0)
-    pressure_acceleration = safe_float(row.get("pressure_acceleration"), 0.0)
-    spread_bps_abs = abs(safe_float(row.get("spread_bps"), 0.0))
-    regime = str(row.get("regime", "NEUTRAL")).upper()
-
-    if regime not in ALLOWED_EXECUTION_REGIMES:
-        return False
-
-    if confluence_score < profile["min_confluence_to_reach_optimizer"]:
-        return False
-
-    if spread_bps_abs < profile["min_abs_spread_bps_to_reach_optimizer"]:
-        return False
-
-    if (
-        pressure_score < profile["min_pressure_to_reach_optimizer"]
-        and pressure_acceleration < profile["min_accel_to_reach_optimizer"]
-    ):
-        return False
-
+def can_open(symbol: str) -> bool:
+    counts = get_open_counts()
+    cls = classify_asset(symbol)
+    if cls == "FX":
+        return counts["FX"] < MAX_OPEN_FX
+    if cls == "CRYPTO":
+        return counts["CRYPTO"] < MAX_OPEN_CRYPTO
     return True
 
+def extract_candles(payload: Dict[str, Any]) -> List[Any]:
+    candidates = [
+        payload.get("candles"),
+        payload.get("ohlcv"),
+        payload.get("bars"),
+        payload.get("history"),
+        payload.get("data"),
+    ]
+    for item in candidates:
+        if isinstance(item, list) and item:
+            return item
+    return []
 
-def passes_execution_gate(row: Dict[str, Any], profile: Dict[str, float]) -> bool:
-    trade_score = safe_float(row.get("trade_score"), 0.0)
-    confluence_score = safe_float(row.get("confluence_score"), 0.0)
-    pressure_score = safe_float(row.get("pressure_score"), 0.0)
-    pressure_acceleration = safe_float(row.get("pressure_acceleration"), 0.0)
-    regime = str(row.get("regime", "NEUTRAL")).upper()
-    tier = str(row.get("signal_tier", "WATCH")).upper()
+def candle_attr(candle: Any, name: str, default: float = 0.0) -> float:
+    try:
+        if isinstance(candle, dict):
+            return safe(candle.get(name), default)
 
-    if regime not in ALLOWED_EXECUTION_REGIMES:
-        return False
+        if hasattr(candle, name):
+            return safe(getattr(candle, name), default)
 
-    if tier == "ELITE":
-        return confluence_score >= max(0.80, profile["min_confluence_to_execute"])
+        if isinstance(candle, (list, tuple)):
+            idx_map = {
+                "ts": 0,
+                "open": 1,
+                "high": 2,
+                "low": 3,
+                "close": 4,
+                "volume": 5,
+            }
+            idx = idx_map.get(name)
+            if idx is not None and len(candle) > idx:
+                return safe(candle[idx], default)
+    except Exception:
+        return default
+    return default
 
-    if tier == "QUALIFIED":
-        if trade_score < profile["min_trade_score_to_execute"]:
-            return False
+def compute_avg_volume_from_candles(candles: List[Any], window: int = 20) -> float:
+    if not candles:
+        return 0.0
+    subset = candles[-window:] if len(candles) >= window else candles
+    vols = [candle_attr(c, "volume") for c in subset if candle_attr(c, "volume") > 0]
+    if not vols:
+        return 0.0
+    return sum(vols) / len(vols)
 
-        if confluence_score < profile["min_confluence_to_execute"]:
-            return False
+def compute_current_volume(candles: List[Any]) -> float:
+    if not candles:
+        return 0.0
+    return candle_attr(candles[-1], "volume", 0.0)
 
-        if pressure_score >= profile["min_pressure_to_execute"]:
-            return True
+def compute_volatility_from_candles(candles: List[Any], window: int = 20) -> float:
+    if not candles:
+        return 0.0
+    subset = candles[-window:] if len(candles) >= window else candles
+    rel_ranges: List[float] = []
+    for c in subset:
+        high = candle_attr(c, "high")
+        low = candle_attr(c, "low")
+        close = candle_attr(c, "close")
+        if close > 0 and high >= low:
+            rel_ranges.append((high - low) / close)
+    if not rel_ranges:
+        return 0.0
+    return sum(rel_ranges) / len(rel_ranges)
 
-        if pressure_acceleration >= profile["min_accel_or_pressure_boost"]:
-            return True
+def compute_price_compression_from_candles(candles: List[Any], window: int = 20) -> float:
+    if len(candles) < 5:
+        return 0.0
 
-        return False
+    subset = candles[-window:] if len(candles) >= window else candles
+    closes = [candle_attr(c, "close") for c in subset if candle_attr(c, "close") > 0]
+    highs = [candle_attr(c, "high") for c in subset]
+    lows = [candle_attr(c, "low") for c in subset]
 
-    return False
+    if not closes or not highs or not lows:
+        return 0.0
 
+    price_ref = closes[-1]
+    if price_ref <= 0:
+        return 0.0
 
-ENGINE_MODE = choose_engine_mode()
-ACTIVE_PROFILE = ENGINE_PROFILES[ENGINE_MODE]
+    total_range = max(highs) - min(lows)
+    norm_range = total_range / price_ref
 
-print("[CSS] Starting live dashboard...")
+    if norm_range <= 0:
+        return 1.0
+
+    compression = 1.0 - min(norm_range / 0.08, 1.0)
+    return clamp01(compression)
+
+def compute_metrics(symbol: str, price: float, vwap: float) -> tuple[float, float, float, float]:
+    prev = GLOBAL_CONTEXT.get(symbol, {})
+
+    prev_price = prev.get("price", price)
+    prev_momentum = prev.get("momentum", 0.0)
+
+    momentum = (price - prev_price) / (prev_price + 1e-9)
+    velocity = momentum - prev_momentum
+
+    if vwap == 0:
+        vwap = price * 0.999 if price > 0 else 1.0
+
+    vwap_dev = (price - vwap) / (vwap + 1e-9)
+    if vwap_dev == 0:
+        vwap_dev = 0.001 if price >= vwap else -0.001
+
+    mean_rev = abs(vwap_dev) * 2.0
+    if abs(momentum) < 0.003:
+        mean_rev += 0.2
+    if velocity < 0:
+        mean_rev += 0.2
+
+    GLOBAL_CONTEXT[symbol] = {
+        "price": price,
+        "momentum": momentum,
+    }
+
+    return momentum, velocity, vwap_dev, min(mean_rev, 1.0)
+
+def build_runtime_row(sym: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    candles = extract_candles(payload)
+
+    price = safe(payload.get("price"))
+    if price <= 0 and candles:
+        price = candle_attr(candles[-1], "close", 0.0)
+
+    vwap = safe(payload.get("vwap"))
+    if vwap <= 0 and price > 0:
+        vwap = price * 0.999
+
+    momentum, velocity, vwap_dev, mean_rev = compute_metrics(sym, price, vwap)
+
+    current_volume = safe(payload.get("volume"))
+    if current_volume <= 0:
+        current_volume = compute_current_volume(candles)
+
+    avg_volume = safe(payload.get("avg_volume"))
+    if avg_volume <= 0:
+        avg_volume = compute_avg_volume_from_candles(candles, window=20)
+
+    volatility = safe(payload.get("volatility"))
+    if volatility <= 0:
+        volatility = compute_volatility_from_candles(candles, window=20)
+
+    price_compression = safe(payload.get("price_compression"))
+    if price_compression <= 0:
+        price_compression = compute_price_compression_from_candles(candles, window=20)
+
+    row: Dict[str, Any] = {
+        "symbol": sym,
+        "price": price,
+        "current_price": price,
+        "vwap": vwap,
+        "candles": candles,
+        "volume": current_volume,
+        "avg_volume": avg_volume,
+        "avg_volume_24h": avg_volume,
+        "volume_24h": max(current_volume, avg_volume),
+        "volatility": volatility,
+        "avg_volatility": volatility if volatility > 0 else 0.01,
+        "price_compression": price_compression,
+        "compression": price_compression,
+        "momentum": momentum,
+        "velocity": velocity,
+        "trend_efficiency": min(abs(momentum) * 8.0, 1.0),
+        "vwap_dev": vwap_dev,
+        "vwap_distance": vwap_dev,
+        "mean_reversion_score": mean_rev,
+        "spread_bps": safe(payload.get("spread_bps"), 2.0),
+        "slippage_bps": safe(payload.get("slippage_bps"), 3.0),
+        "top_of_book_depth": safe(payload.get("top_of_book_depth"), 100000.0),
+        "order_flow_delta": 0.0,
+        "buy_pressure": max(momentum, 0.0),
+        "sell_pressure": max(-momentum, 0.0),
+        "recent_high": max([candle_attr(c, "high") for c in candles[-20:]], default=price),
+        "recent_low": min(
+            [candle_attr(c, "low") for c in candles[-20:] if candle_attr(c, "low") > 0],
+            default=price,
+        ),
+        "rejection_strength": 0.0,
+        "wick_reversal_strength": 0.0,
+        "liquidity_sweep_flag": False,
+    }
+
+    return row
+
+# ---------------- MAIN ----------------
+
+cycle = 0
+equity = 200.0
 
 while True:
     cycle += 1
 
     try:
         discovered = scanner.scan()
+        symbols = list({x["symbol"] for x in discovered})[:MAX_SYMBOLS_PER_CYCLE]
 
-        symbols = [
-            str(r["symbol"]).upper()
-            for r in discovered
-            if str(r.get("venue", "")).upper() == "COINBASE"
-        ][:MAX_SYMBOLS_PER_CYCLE]
+        rows: List[Dict[str, Any]] = []
 
-        print(f"[SCAN] selected Coinbase symbols ({len(symbols)}): {symbols}")
-
-        rows = fetch_assets(symbols)
+        for sym in symbols:
+            payload = load_runtime_asset(sym)
+            rows.append(build_runtime_row(sym, payload))
 
         if not rows:
-            print("Waiting for valid market rows...")
             time.sleep(REFRESH_SECONDS)
             continue
 
-        latest_prices: Dict[str, float] = {
-            str(r["symbol"]).upper(): safe_float(r.get("price"), 0.0)
-            for r in rows
-        }
+        # FULL PIPELINE
+        f = feature_builder.enrich_rows(rows, {})
+        r = regime_engine.detect(f)
+        p = pressure_engine.enrich_rows(r)
+        a = accel_engine.enrich_rows(p)
+        c = confluence_engine.enrich_rows(a)
+        s = sweep_engine.enrich_rows(c)
 
-        features = feature_builder.enrich_rows(rows, {})
-        regime_rows = regime_engine.detect(features)
-        pressure_rows = call_rows_module(pressure_engine, regime_rows, "OpportunityPressureEngine")
-        accel_rows = call_rows_module(accel_engine, pressure_rows, "PressureAccelerationEngine")
-        confluence_rows = call_rows_module(confluence_engine, accel_rows, "SignalConfluenceEngine")
-        sweep_rows = call_rows_module(sweep_engine, confluence_rows, "LiquiditySweepDetector")
-        ranked = ai.rank_opportunities(sweep_rows)
+        ranked = ai.rank_opportunities(s)
+        optimized = optimizer.optimize(ranked)
 
-        signal_map = {str(r["symbol"]).upper(): r for r in sweep_rows}
+        # REATTACH FULL METRICS
+        base_map = {row["symbol"]: row for row in s}
+        final_rows: List[Dict[str, Any]] = []
 
-        merged: List[Dict[str, Any]] = []
-        for r in ranked:
-            symbol = str(r.get("symbol", "")).upper()
-            p = signal_map.get(symbol, {})
-            regime = str(p.get("regime", "NEUTRAL")).upper()
+        for row in optimized:
+            sym = row["symbol"]
+            base = base_map.get(sym, {})
+            merged = {**base, **row}
 
-            base_ai_score = safe_float(r.get("score"), 0.0)
-            pressure_score = safe_float(p.get("pressure_score"), 0.0)
-            pressure_acceleration = safe_float(p.get("pressure_acceleration"), 0.0)
-            confluence_score = safe_float(p.get("confluence_score"), 0.0)
+            if safe(merged.get("momentum")) == 0.0:
+                merged["momentum"] = base.get("momentum", 0.001)
 
-            fused_score = blended_conviction_score(
-                base_ai_score=base_ai_score,
-                confluence_score=confluence_score,
-                pressure_score=pressure_score,
-                pressure_acceleration=pressure_acceleration,
-                regime=regime,
-            )
+            if safe(merged.get("velocity")) == 0.0:
+                merged["velocity"] = base.get("velocity", 0.0005)
 
-            merged.append(
-                {
-                    "symbol": symbol,
-                    "score": fused_score,
-                    "base_ai_score": base_ai_score,
-                    "pressure_score": pressure_score,
-                    "pressure_acceleration": pressure_acceleration,
-                    "confluence_score": confluence_score,
-                    "confluence_allow_trade": bool(p.get("confluence_allow_trade", False)),
-                    "spread_bps": safe_float(p.get("spread_bps"), 0.0),
-                    "regime": regime,
-                    "regime_alignment": regime_alignment_score(regime),
-                }
-            )
+            if safe(merged.get("mean_reversion_score")) == 0.0:
+                merged["mean_reversion_score"] = base.get("mean_reversion_score", 0.2)
 
-        optimizer_input = [
-            row for row in merged
-            if row.get("confluence_allow_trade", False) and passes_optimizer_gate(row, ACTIVE_PROFILE)
+            if safe(merged.get("pressure_score")) == 0.0:
+                merged["pressure_score"] = max(abs(safe(merged.get("vwap_dev"))), 0.01)
+
+            if safe(merged.get("pressure_acceleration")) == 0.0:
+                merged["pressure_acceleration"] = merged.get("velocity", 0.0005)
+
+            if safe(merged.get("acceleration_score")) == 0.0:
+                merged["acceleration_score"] = abs(safe(merged.get("pressure_acceleration")))
+
+            final_rows.append(merged)
+
+        final_rows.sort(key=lambda x: safe(x.get("score")), reverse=True)
+
+        # ALLOCATION
+        ai_results = [
+            {"symbol": x["symbol"], "opportunity_score": x.get("score", 0)}
+            for x in final_rows
         ]
+        allocations = allocator.allocate(ai_results, final_rows)
 
-        if not optimizer_input:
-            optimizer_input = sorted(
-                merged,
-                key=lambda x: (
-                    safe_float(x.get("confluence_score"), 0.0),
-                    safe_float(x.get("pressure_score"), 0.0),
-                    safe_float(x.get("pressure_acceleration"), 0.0),
-                    safe_float(x.get("score"), 0.0),
-                ),
-                reverse=True,
-            )[:1]
+        if not allocations:
+            allocations = [
+                {"symbol": x["symbol"], "capital": BASE_TRADE_NOTIONAL_USD}
+                for x in final_rows[:3]
+            ]
 
-        print(
-            f"[PIPELINE] merged_rows={len(merged)} "
-            f"confluence_pass={sum(1 for x in merged if x.get('confluence_allow_trade', False))} "
-            f"optimizer_rows={len(optimizer_input)}"
-        )
+        alloc_map = {a["symbol"]: a for a in allocations}
 
-        optimized = optimizer.optimize(optimizer_input)
+        opened = 0
 
-        optimized = sorted(
-            optimized,
-            key=lambda x: (
-                safe_float(x.get("trade_score"), 0.0),
-                safe_float(x.get("confluence_score"), 0.0),
-                safe_float(x.get("pressure_score"), 0.0),
-                safe_float(x.get("pressure_acceleration"), 0.0),
-                safe_float(x.get("score"), 0.0),
-            ),
-            reverse=True,
-        )
+        # ---------------- PROFITABILITY FILTER ----------------
 
-        passing_execution_gate = [
-            r for r in optimized
-            if str(r.get("decision", "")).upper() == "TRADE"
-            and passes_execution_gate(r, ACTIVE_PROFILE)
-        ]
+        for row in final_rows:
+            if opened >= MAX_TRADES_PER_CYCLE:
+                break
 
-        for r in passing_execution_gate:
-            symbol = str(r["symbol"]).upper()
-            price = safe_float(latest_prices.get(symbol, 0.0), 0.0)
-            trade_score = safe_float(r.get("trade_score"), 0.0)
+            sym = row["symbol"]
+            price = safe(row.get("price"))
 
-            if price <= 0.0:
+            if price <= 0:
                 continue
 
-            if position_manager.has_open_position(symbol):
+            if not can_open(sym):
                 continue
 
-            qty = 10.0 / price
+            score = safe(row.get("score"))
+            mr = safe(row.get("mean_reversion_score"))
+            pressure_score = safe(row.get("pressure_score"))
+            accel_score = safe(row.get("pressure_acceleration"))
+            momentum_abs = abs(safe(row.get("momentum")))
+
+            if mr < 0.25:
+                continue
+            if pressure_score < 0.10:
+                continue
+            if momentum_abs < 0.0003:
+                continue
+            if abs(accel_score) < 0.0001:
+                continue
+            if score < 0.18:
+                continue
+
+            alloc = alloc_map.get(sym, {})
+            capital = safe(alloc.get("capital"), BASE_TRADE_NOTIONAL_USD)
+
+            qty = capital / price
+            if qty <= 0:
+                continue
 
             position_manager.open_long_position(
-                symbol=symbol,
+                symbol=sym,
                 quantity=qty,
                 entry_price=price,
                 cycle_no=cycle,
                 opened_at_utc=now(),
             )
 
-            try:
-                position_manager.get_open_positions()[symbol]["peak_price"] = price
-            except Exception:
-                pass
-
-            print(
-                f"[OPEN] {symbol} | price={price:.6f} | qty={qty:.8f} | "
-                f"trade={trade_score:.2f} | tier={str(r.get('signal_tier', 'WATCH')).upper()} | "
-                f"base_ai={safe_float(r.get('base_ai_score'), 0.0):.2f} | "
-                f"confluence={safe_float(r.get('confluence_score'), 0.0):.2f} | "
-                f"pressure={safe_float(r.get('pressure_score'), 0.0):.2f} | "
-                f"accel={safe_float(r.get('pressure_acceleration'), 0.0):.2f}"
+            trade_logger.log_open(
+                symbol=sym,
+                entry_price=price,
+                quantity=qty,
+                score=score,
+                signal="QUALIFIED",
+                regime=row.get("regime", "NA"),
+                vwap=row.get("vwap", 0),
+                spread_pct=0,
+                momentum=row.get("momentum", 0),
+                velocity=row.get("velocity", 0),
+                vwap_dev=row.get("vwap_dev", 0),
+                mean_reversion_score=mr,
+                pressure_score=pressure_score,
+                acceleration_score=accel_score,
             )
 
-        open_profit_decisions: List[Dict[str, Any]] = []
+            print(f"[OPEN] {sym} score={score:.3f} mr={mr:.3f} p={pressure_score:.3f} a={accel_score:.5f}")
+            opened += 1
 
-        for symbol, pos in position_manager.get_open_positions().items():
-            current_price = safe_float(latest_prices.get(symbol, 0.0), 0.0)
-            entry_price = safe_float(pos.get("entry_price", 0.0), 0.0)
-
-            if current_price <= 0.0 or entry_price <= 0.0:
-                continue
-
-            peak_price = safe_float(pos.get("peak_price", entry_price), entry_price)
-
-            if current_price > peak_price:
-                peak_price = current_price
-                try:
-                    pos["peak_price"] = peak_price
-                except Exception:
-                    pass
-
-            profit_decision = profit_engine.evaluate(
-                entry_price=entry_price,
-                current_price=current_price,
-                peak_price=peak_price,
-            )
-
-            open_profit_decisions.append(
-                {
-                    "symbol": symbol,
-                    "entry_price": entry_price,
-                    "current_price": current_price,
-                    "peak_price": peak_price,
-                    "profit_action": str(profit_decision.get("action", "HOLD")).upper(),
-                    "profit_reason": str(profit_decision.get("reason", "")),
-                    "pnl_pct": safe_float(profit_decision.get("pnl_pct", 0.0), 0.0),
-                }
-            )
-
-        closed_positions = position_manager.update_positions(
-            latest_prices=latest_prices,
-            cycle_no=cycle,
-            timestamp_utc=now(),
+        closed = position_manager.update_positions(
+            {x["symbol"]: x["price"] for x in rows},
+            cycle,
+            now(),
         )
 
-        for trade in closed_positions:
-            pnl = safe_float(trade.get("realized_pnl_usd"), 0.0)
-            estimated_equity += pnl
-            print(
-                f"[CLOSE] {trade['symbol']} | reason={trade['exit_reason']} | pnl={pnl:.4f}"
+        for trade in closed:
+            pnl = safe(trade.get("realized_pnl_usd"))
+            equity += pnl
+
+            trade_logger.log_close(
+                symbol=trade["symbol"],
+                entry_price=trade["entry_price"],
+                exit_price=trade["exit_price"],
+                quantity=trade["quantity"],
+                reason=trade.get("exit_reason", "UNKNOWN"),
+                hold_minutes=trade.get("cycles_held", 0),
             )
 
-        pm_summary = position_manager.summary()
-
-        summary = {
-            "timestamp_utc": now(),
-            "cycle_no": cycle,
-            "engine_mode": ENGINE_MODE,
-            "engine_profile": ACTIVE_PROFILE,
-            "starting_capital_usd": starting_capital,
-            "estimated_equity_usd": estimated_equity,
-            "symbols_scanned": len(symbols),
-            "signals_scanned": len(merged),
-            "signals_passed_confluence": sum(
-                1 for x in merged if x.get("confluence_allow_trade", False)
-            ),
-            "signals_passed_optimizer_gate": len(
-                [x for x in merged if x.get("confluence_allow_trade", False) and passes_optimizer_gate(x, ACTIVE_PROFILE)]
-            ),
-            "signals_passed_execution_gate": len(passing_execution_gate),
-            "max_symbols_per_cycle": MAX_SYMBOLS_PER_CYCLE,
-            **pm_summary,
-        }
-
-        persist_state(summary)
+            print("[CLOSE]", trade["symbol"], pnl)
 
         clear()
 
-        print("======================================")
-        print("   CAPITAL STRATA SYSTEMS DASHBOARD")
-        print("======================================\n")
+        counts = get_open_counts()
 
-        print("Cycle:", cycle)
-        print("Equity:", round(estimated_equity, 2))
-        print("Engine mode:", ENGINE_MODE.upper())
-        print("Symbols scanned:", len(symbols), f"(cap={MAX_SYMBOLS_PER_CYCLE})")
-        print("Execution style: CONDITION-DRIVEN / SESSION-LOCKED POLICY")
-        print("Trades this cycle: all signals above active execution conditions")
-        print("Symbols:", symbols)
+        print("===== CSS DASHBOARD =====")
+        print("Cycle:", cycle, "Equity:", round(equity, 2))
+        print("Open:", counts)
 
-        print("\nAI SIGNAL SCANNER\n")
+        print("\nAllocator:")
+        for a in allocations:
+            print(a["symbol"], a["capital"])
 
-        if not optimized:
-            print("No optimized rows available this cycle.")
-        else:
-            for r in optimized[:15]:
-                exec_gate = "PASS" if passes_execution_gate(r, ACTIVE_PROFILE) else "HOLD"
-                print(
-                    f"{r['symbol']:10}"
-                    f" regime={str(r.get('regime', 'NEUTRAL')):12}"
-                    f" tier={str(r.get('signal_tier', 'WATCH')).upper():10}"
-                    f" base={safe_float(r.get('base_ai_score', 0.0)):.2f}"
-                    f" score={safe_float(r.get('score'), 0.0):.2f}"
-                    f" pressure={safe_float(r.get('pressure_score'), 0.0):.2f}"
-                    f" accel={safe_float(r.get('pressure_acceleration'), 0.0):.2f}"
-                    f" confluence={safe_float(r.get('confluence_score'), 0.0):.2f}"
-                    f" trade={safe_float(r.get('trade_score'), 0.0):.2f}"
-                    f" decision={str(r.get('decision', 'WATCH')).upper()}"
-                    f" gate={exec_gate}"
-                )
+        print("\nTop:")
+        for r in final_rows[:10]:
+            print(
+                r["symbol"],
+                "score", round(safe(r.get("score")), 3),
+                "m", round(safe(r.get("momentum")), 5),
+                "v", round(safe(r.get("velocity")), 5),
+                "mr", round(safe(r.get("mean_reversion_score")), 3),
+                "p", round(safe(r.get("pressure_score")), 3),
+                "a", round(safe(r.get("pressure_acceleration")), 5),
+                "vol", round(safe(r.get("volatility")), 5),
+                "cmp", round(safe(r.get("price_compression")), 3),
+            )
 
-        print("\nPROFIT ENGINE\n")
-
-        if not open_profit_decisions:
-            print("No open positions under profit-engine review.")
-        else:
-            for p in open_profit_decisions:
-                print(
-                    f"{p['symbol']:10}"
-                    f" action={p['profit_action']:18}"
-                    f" pnl={p['pnl_pct']:.4f}"
-                    f" entry={p['entry_price']:.6f}"
-                    f" current={p['current_price']:.6f}"
-                    f" peak={p['peak_price']:.6f}"
-                    f" reason={p['profit_reason']}"
-                )
-
-        print(f"\nRefreshing in {REFRESH_SECONDS} seconds...\n")
         time.sleep(REFRESH_SECONDS)
 
-    except KeyboardInterrupt:
-        print("CSS stopped")
-        break
-
     except Exception as e:
-        print("CSS ERROR:", e)
+        print("ERROR:", e)
         time.sleep(REFRESH_SECONDS)
