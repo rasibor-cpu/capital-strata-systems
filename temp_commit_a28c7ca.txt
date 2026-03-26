@@ -1,0 +1,7 @@
+commit a28c7ca9ed88715f6464ea1297091f68637c12ed
+Author: Robert Asibor <rasibor@gmail.com>
+Date:   Wed Feb 18 21:47:47 2026 -0600
+
+    v3.4 - Dynamic Volatility & Regime Aware Weekly Rebalance Engine
+
+engine/capital/weekly_rebalance_engine.py

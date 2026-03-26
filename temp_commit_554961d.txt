@@ -1,0 +1,7 @@
+commit 554961d35c119437ef3b626f553e99bc95839676
+Author: Robert Asibor <rasibor@gmail.com>
+Date:   Wed Feb 18 22:05:54 2026 -0600
+
+    CSS Phase - Add weekly risk-adjusted AssetAllocator (50% intensity)
+
+engine/allocation/asset_allocator.py

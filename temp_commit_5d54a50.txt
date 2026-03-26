@@ -1,0 +1,7 @@
+commit 5d54a506f823f14db2201ab5832e6b2b2e2cd1f2
+Author: Robert Asibor <rasibor@gmail.com>
+Date:   Mon Feb 16 14:00:00 2026 -0500
+
+    AdaptiveCapitalEngine: dynamic multiplier based on drawdown, loss streak, regime and volatility
+
+engine/capital/adaptive_capital.py

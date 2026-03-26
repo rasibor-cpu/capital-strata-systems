@@ -1,18 +1,21 @@
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, Optional
 
 
 class ProfitCaptureEngine:
     """
-    CSS Profit Capture Engine (Upgraded)
+    CSS Profit Capture Engine (VWAP + Momentum Aware Upgrade)
 
-    Features:
-    - Hard stop loss
-    - Hard take profit (safety cap only)
-    - Dynamic trailing logic
-    - Profit lock after favorable move
-    - Lets winners run
+    Backward compatible:
+    - Works with old calls (price only)
+    - Accepts optional intelligence inputs
+
+    New capabilities:
+    - VWAP-aware exits
+    - Momentum + velocity-based decisions
+    - Runner mode (let winners run intelligently)
+    - Adaptive profit lock
     """
 
     def __init__(
@@ -32,6 +35,11 @@ class ProfitCaptureEngine:
         entry_price: float,
         current_price: float,
         peak_price: float,
+        vwap: Optional[float] = None,
+        momentum: float = 0.0,
+        velocity: float = 0.0,
+        mean_reversion_score: float = 0.0,
+        regime: str = "NEUTRAL",
     ) -> Dict:
 
         if entry_price <= 0:
@@ -51,7 +59,7 @@ class ProfitCaptureEngine:
             }
 
         # -------------------------
-        # HARD TAKE PROFIT (RARE)
+        # HARD TAKE PROFIT (SAFETY CAP)
         # -------------------------
         if change >= self.take_profit:
             return {
@@ -61,13 +69,65 @@ class ProfitCaptureEngine:
             }
 
         # -------------------------
-        # TRAILING LOGIC
+        # VWAP CONTEXT
+        # -------------------------
+        vwap_dev = 0.0
+        if vwap and vwap > 0:
+            vwap_dev = (current_price - vwap) / vwap
+
+        # -------------------------
+        # RUNNER MODE (STRONG TREND)
+        # -------------------------
+        runner_mode = False
+
+        if regime in ["TREND", "BREAKOUT"]:
+            if abs(momentum) > 0.002 and velocity >= 0:
+                runner_mode = True
+
+        # -------------------------
+        # VWAP REVERSION EXIT
+        # -------------------------
+        if vwap and abs(vwap_dev) < 0.0015:
+            if mean_reversion_score > 0.5:
+                return {
+                    "action": "EXIT_LOCK_PROFIT",
+                    "pnl_pct": change,
+                    "reason": "vwap reversion completed",
+                }
+
+        # -------------------------
+        # MOMENTUM DECAY EXIT
+        # -------------------------
+        if change > 0:
+            if momentum < 0.001 and velocity < 0:
+                return {
+                    "action": "EXIT_LOCK_PROFIT",
+                    "pnl_pct": change,
+                    "reason": "momentum collapse",
+                }
+
+        # -------------------------
+        # VELOCITY REVERSAL EXIT
+        # -------------------------
+        if change > 0:
+            if velocity < -0.001:
+                return {
+                    "action": "EXIT_LOCK_PROFIT",
+                    "pnl_pct": change,
+                    "reason": "velocity reversal",
+                }
+
+        # -------------------------
+        # TRAILING LOGIC (ENHANCED)
         # -------------------------
         if peak_change >= self.trail_trigger:
 
             lock_level = entry_price * (1 + self.locked_profit)
 
-            # if price falls below locked level → exit
+            # adaptive tightening if momentum weakens
+            if momentum < 0:
+                lock_level = entry_price * (1 + self.locked_profit * 0.7)
+
             if current_price < lock_level:
                 return {
                     "action": "EXIT_LOCK_PROFIT",
@@ -75,11 +135,18 @@ class ProfitCaptureEngine:
                     "reason": "trailing profit lock triggered",
                 }
 
-            # still trending → hold
+            # if strong runner → extend
+            if runner_mode:
+                return {
+                    "action": "HOLD",
+                    "pnl_pct": change,
+                    "reason": "runner mode active",
+                }
+
             return {
                 "action": "HOLD",
                 "pnl_pct": change,
-                "reason": "winner running with trailing protection",
+                "reason": "trailing active",
             }
 
         # -------------------------

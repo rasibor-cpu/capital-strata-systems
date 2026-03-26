@@ -21,6 +21,8 @@ class PositionManager:
     - Original dynamic exit framework preserved
     - Profit engine integration (peak + trailing logic)
     - Regime / momentum / tier-aware exit modulation
+    - VWAP + momentum + velocity aware exits
+    - Rich close payloads for logger integration
     """
 
     def __init__(
@@ -107,6 +109,10 @@ class PositionManager:
         pressure_score: float = 0.0,
         acceleration_score: float = 0.0,
         signal_tier: str = "WATCH",
+        vwap: Optional[float] = None,
+        momentum: float = 0.0,
+        velocity: float = 0.0,
+        mean_reversion_score: float = 0.0,
     ):
         normalized_entry_costs = self._normalize_cost_payload(entry_costs)
 
@@ -123,6 +129,10 @@ class PositionManager:
             "pressure_score": _safe(pressure_score, 0.0),
             "acceleration_score": _safe(acceleration_score, 0.0),
             "signal_tier": str(signal_tier).upper(),
+            "vwap": vwap,
+            "momentum": _safe(momentum, 0.0),
+            "velocity": _safe(velocity, 0.0),
+            "mean_reversion_score": _safe(mean_reversion_score, 0.0),
             "entry_spread_cost_usd": normalized_entry_costs["spread_cost_usd"],
             "entry_slippage_cost_usd": normalized_entry_costs["slippage_cost_usd"],
             "entry_fee_cost_usd": normalized_entry_costs["fee_cost_usd"],
@@ -141,6 +151,7 @@ class PositionManager:
         cycle_no: int,
         now: Optional[str] = None,
         timestamp_utc: Optional[str] = None,
+        intelligence_by_symbol: Optional[Dict[str, Dict[str, Any]]] = None,
         exit_costs_by_symbol: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> List[Dict[str, Any]]:
         """
@@ -152,6 +163,7 @@ class PositionManager:
             now = timestamp_utc or ""
 
         closed: List[Dict[str, Any]] = []
+        intelligence_by_symbol = intelligence_by_symbol or {}
         exit_costs_by_symbol = exit_costs_by_symbol or {}
 
         for symbol in list(self.open_positions.keys()):
@@ -168,6 +180,17 @@ class PositionManager:
             if price > peak_price:
                 peak_price = price
                 pos["peak_price"] = peak_price
+
+            intel = intelligence_by_symbol.get(symbol, {})
+            vwap = intel.get("vwap", pos.get("vwap"))
+            momentum = _safe(intel.get("momentum", pos.get("momentum", 0.0)))
+            velocity = _safe(intel.get("velocity", pos.get("velocity", 0.0)))
+            mean_rev = _safe(intel.get("mean_reversion_score", pos.get("mean_reversion_score", 0.0)))
+
+            pos["vwap"] = vwap
+            pos["momentum"] = momentum
+            pos["velocity"] = velocity
+            pos["mean_reversion_score"] = mean_rev
 
             entry_total_cost_usd = _safe(pos.get("entry_total_cost_usd"), 0.0)
 
@@ -204,6 +227,11 @@ class PositionManager:
                 entry_price=entry,
                 current_price=price,
                 peak_price=peak_price,
+                vwap=vwap,
+                momentum=momentum,
+                velocity=velocity,
+                mean_reversion_score=mean_rev,
+                regime=regime,
             )
             action = profit_decision.get("action")
 
@@ -307,6 +335,10 @@ class PositionManager:
                     "pressure_score": pressure,
                     "acceleration_score": accel,
                     "signal_tier": tier,
+                    "vwap": vwap,
+                    "momentum": momentum,
+                    "velocity": velocity,
+                    "mean_reversion_score": mean_rev,
                 }
 
                 closed.append(trade)
