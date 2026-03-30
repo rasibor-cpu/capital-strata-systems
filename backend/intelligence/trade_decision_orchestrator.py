@@ -50,6 +50,7 @@ class TradeDecisionOrchestrator:
         self.vwap_engine = VWAPDeviationEngine() if VWAPDeviationEngine else None
         self.elasticity_engine = VWAPElasticityEngine() if VWAPElasticityEngine else None
 
+        self.cost_gate = CostAwareGate() if CostAwareGate else None
         self.cost_engine = ExecutionCostEngine() if ExecutionCostEngine else None
 
         self.mean_reversion_threshold = 0.20
@@ -73,7 +74,7 @@ class TradeDecisionOrchestrator:
         if not candles or len(candles) < 20:
             return self._reject(asset, "INSUFFICIENT_DATA")
 
-        regime_info = self.regime_detector.detect_regime(candles)
+        regime_info = self._safe_detect_regime(candles)
         regime = str(regime_info.get("regime", "UNSTABLE")).upper()
         regime_confidence = self._clamp01(regime_info.get("confidence", 0.0))
         regime_reason = str(regime_info.get("reason", "unknown"))
@@ -117,7 +118,9 @@ class TradeDecisionOrchestrator:
                     [{"vwap_dev_abs": vwap_dev, "momentum": momentum_score}]
                 )
                 if enriched:
-                    elasticity_score = self._clamp01(enriched[0].get("elasticity_score", 0.0))
+                    elasticity_score = self._clamp01(
+                        self._safe_get(enriched[0], "elasticity_score", 0.0)
+                    )
             except Exception:
                 pass
 
@@ -155,7 +158,6 @@ class TradeDecisionOrchestrator:
             decision_score=decision_score,
         )
 
-        # 🔥 FINAL EXECUTION UNLOCK
         if decision_score >= 0.38:
             execute_trade = True
 
@@ -170,11 +172,15 @@ class TradeDecisionOrchestrator:
             last_close = self._extract_last_close(candles)
             if last_close > 0 and self.cost_engine:
                 expected_edge_value = decision_score * last_close * self.EDGE_MULTIPLIER
-                cost_adjusted_edge_value = self.cost_engine.apply_costs(
-                    instrument=asset,
-                    notional=self.COST_NOTIONAL,
-                    raw_pnl=expected_edge_value,
-                )
+
+                if hasattr(self.cost_engine, "apply_costs"):
+                    cost_adjusted_edge_value = self.cost_engine.apply_costs(
+                        instrument=asset,
+                        notional=self.COST_NOTIONAL,
+                        raw_pnl=expected_edge_value,
+                    )
+                else:
+                    cost_adjusted_edge_value = expected_edge_value
         except Exception:
             pass
 
@@ -216,8 +222,24 @@ class TradeDecisionOrchestrator:
         asset: str,
         decision_score: float,
     ) -> Dict[str, Any]:
-
         net_edge_bps = expected_edge_bps - execution_cost_bps
+
+        if self.cost_gate and hasattr(self.cost_gate, "evaluate"):
+            try:
+                result = self.cost_gate.evaluate(
+                    instrument=asset,
+                    expected_edge_bps=expected_edge_bps,
+                    execution_cost_bps=execution_cost_bps,
+                    decision_score=decision_score,
+                )
+                if isinstance(result, dict):
+                    return {
+                        "decision": result.get("decision", "APPROVE"),
+                        "reason": result.get("reason", "COST_GATE"),
+                        "net_edge_bps": float(result.get("net_edge_bps", net_edge_bps)),
+                    }
+            except Exception:
+                pass
 
         if decision_score >= 0.35:
             return {
@@ -239,4 +261,437 @@ class TradeDecisionOrchestrator:
             "net_edge_bps": net_edge_bps,
         }
 
-    # === REST UNCHANGED ===
+    def _safe_detect_regime(self, candles: List[Dict[str, Any]]) -> Dict[str, Any]:
+        try:
+            if hasattr(self.regime_detector, "detect_regime"):
+                result = self.regime_detector.detect_regime(candles)
+                if isinstance(result, dict):
+                    return result
+        except Exception:
+            pass
+
+        return {
+            "regime": "UNSTABLE",
+            "confidence": 0.0,
+            "reason": "fallback",
+        }
+
+    def _safe_ai_score(self, asset: str, candles: List[Dict[str, Any]]) -> float:
+        row = self._build_row_from_candles(asset, candles)
+
+        try:
+            if hasattr(self.ai_scorer, "score_opportunity"):
+                result = self.ai_scorer.score_opportunity(row)
+                if isinstance(result, dict):
+                    return self._clamp01(
+                        result.get("opportunity_score", result.get("score", 0.0))
+                    )
+                return self._clamp01(result)
+
+            if hasattr(self.ai_scorer, "score"):
+                result = self.ai_scorer.score(row)
+                if isinstance(result, dict):
+                    return self._clamp01(
+                        result.get("opportunity_score", result.get("score", 0.0))
+                    )
+                return self._clamp01(result)
+
+            if hasattr(self.ai_scorer, "rank_opportunities"):
+                ranked = self.ai_scorer.rank_opportunities([row])
+                if ranked and isinstance(ranked, list):
+                    top = ranked[0]
+                    return self._clamp01(
+                        self._safe_get(top, "opportunity_score", self._safe_get(top, "score", 0.0))
+                    )
+        except Exception:
+            pass
+
+        return 0.0
+
+    def _safe_confluence_score(
+        self,
+        asset: str,
+        candles: List[Dict[str, Any]],
+        regime: str,
+        regime_confidence: float,
+    ) -> float:
+        row = self._build_row_from_candles(asset, candles)
+        row["regime"] = regime
+        row["regime_confidence"] = regime_confidence
+
+        try:
+            if hasattr(self.signal_confluence_engine, "enrich_rows"):
+                enriched = self.signal_confluence_engine.enrich_rows([row])
+                if enriched:
+                    return self._clamp01(
+                        self._safe_get(
+                            enriched[0],
+                            "confluence_score",
+                            self._safe_get(enriched[0], "score", 0.0),
+                        )
+                    )
+
+            if hasattr(self.signal_confluence_engine, "compute"):
+                result = self.signal_confluence_engine.compute(row)
+                if isinstance(result, dict):
+                    return self._clamp01(
+                        result.get("confluence_score", result.get("score", 0.0))
+                    )
+                return self._clamp01(result)
+        except Exception:
+            pass
+
+        return 0.0
+
+    def _safe_pressure_score(self, asset: str, candles: List[Dict[str, Any]]) -> float:
+        row = self._build_row_from_candles(asset, candles)
+
+        try:
+            if hasattr(self.pressure_engine, "enrich_rows"):
+                enriched = self.pressure_engine.enrich_rows([row])
+                if enriched:
+                    return self._clamp01(
+                        self._safe_get(
+                            enriched[0],
+                            "pressure_score",
+                            self._safe_get(enriched[0], "buy_pressure", 0.0),
+                        )
+                    )
+
+            if hasattr(self.pressure_engine, "compute"):
+                result = self.pressure_engine.compute(row)
+                if isinstance(result, dict):
+                    return self._clamp01(
+                        result.get("pressure_score", result.get("buy_pressure", 0.0))
+                    )
+                return self._clamp01(result)
+        except Exception:
+            pass
+
+        return 0.0
+
+    def _safe_acceleration_score(self, asset: str, candles: List[Dict[str, Any]]) -> float:
+        row = self._build_row_from_candles(asset, candles)
+
+        try:
+            if hasattr(self.acceleration_engine, "enrich_rows"):
+                enriched = self.acceleration_engine.enrich_rows([row])
+                if enriched:
+                    raw = self._safe_get(
+                        enriched[0],
+                        "acceleration_score",
+                        self._safe_get(enriched[0], "pressure_acceleration", 0.0),
+                    )
+                    return self._clamp01(abs(float(raw)))
+
+            if hasattr(self.acceleration_engine, "compute"):
+                result = self.acceleration_engine.compute(row)
+                if isinstance(result, dict):
+                    raw = result.get(
+                        "acceleration_score",
+                        result.get("pressure_acceleration", 0.0),
+                    )
+                    return self._clamp01(abs(float(raw)))
+                return self._clamp01(abs(float(result)))
+        except Exception:
+            pass
+
+        return 0.0
+
+    def _safe_momentum_score(self, asset: str, candles: List[Dict[str, Any]]) -> float:
+        row = self._build_row_from_candles(asset, candles)
+
+        try:
+            if hasattr(self.momentum_engine, "enrich_rows"):
+                enriched = self.momentum_engine.enrich_rows([row])
+                if enriched:
+                    return self._clamp01(
+                        self._safe_get(
+                            enriched[0],
+                            "momentum_score",
+                            self._safe_get(enriched[0], "trend_efficiency", 0.0),
+                        )
+                    )
+
+            if hasattr(self.momentum_engine, "compute"):
+                result = self.momentum_engine.compute(row)
+                if isinstance(result, dict):
+                    return self._clamp01(
+                        result.get("momentum_score", result.get("trend_efficiency", 0.0))
+                    )
+                return self._clamp01(result)
+        except Exception:
+            pass
+
+        closes = [self._candle_close(c) for c in candles[-5:]]
+        closes = [c for c in closes if c > 0]
+        if len(closes) < 2:
+            return 0.0
+
+        move = (closes[-1] - closes[0]) / (closes[0] + 1e-9)
+        return self._clamp01(abs(move) * 50.0)
+
+    def _estimate_cost_components(self, asset: str) -> Dict[str, float]:
+        if self.cost_engine:
+            try:
+                if hasattr(self.cost_engine, "estimate_total_cost"):
+                    result = self.cost_engine.estimate_total_cost(
+                        instrument=asset,
+                        notional=self.COST_NOTIONAL,
+                    )
+                    if isinstance(result, dict):
+                        total = float(result.get("total_cost_usd", 0.0))
+                        spread = float(result.get("spread_cost_usd", 0.0))
+                        slippage = float(result.get("slippage_cost_usd", 0.0))
+                        fees = float(result.get("fees_usd", 0.0))
+                        return {
+                            "spread_cost_usd": spread,
+                            "slippage_cost_usd": slippage,
+                            "fees_usd": fees,
+                            "total_cost_usd": total if total > 0 else (spread + slippage + fees),
+                        }
+
+                if hasattr(self.cost_engine, "estimate_costs"):
+                    result = self.cost_engine.estimate_costs(
+                        instrument=asset,
+                        notional=self.COST_NOTIONAL,
+                    )
+                    if isinstance(result, dict):
+                        total = float(result.get("total_cost_usd", result.get("total", 0.0)))
+                        spread = float(result.get("spread_cost_usd", result.get("spread", 0.0)))
+                        slippage = float(
+                            result.get("slippage_cost_usd", result.get("slippage", 0.0))
+                        )
+                        fees = float(result.get("fees_usd", result.get("fees", 0.0)))
+                        if total <= 0:
+                            total = spread + slippage + fees
+                        return {
+                            "spread_cost_usd": spread,
+                            "slippage_cost_usd": slippage,
+                            "fees_usd": fees,
+                            "total_cost_usd": total,
+                        }
+            except Exception:
+                pass
+
+        asset_class = self._classify_asset(asset)
+        if asset_class == "FX":
+            spread = 0.60
+            slippage = 0.35
+            fees = 0.00
+        elif asset_class == "CRYPTO":
+            spread = 1.20
+            slippage = 0.65
+            fees = 0.40
+        elif asset_class == "FUTURES":
+            spread = 0.90
+            slippage = 0.50
+            fees = 0.60
+        else:
+            spread = 1.00
+            slippage = 0.50
+            fees = 0.25
+
+        total = spread + slippage + fees
+        return {
+            "spread_cost_usd": spread,
+            "slippage_cost_usd": slippage,
+            "fees_usd": fees,
+            "total_cost_usd": total,
+        }
+
+    def _should_execute_trade(self, regime: str, decision_score: float) -> bool:
+        regime = str(regime).upper()
+
+        if regime == "MEAN_REVERSION":
+            return decision_score >= self.mean_reversion_threshold
+
+        if regime == "TREND":
+            return decision_score >= self.trend_threshold
+
+        if regime == "BREAKOUT":
+            return decision_score >= self.breakout_threshold
+
+        if regime in {"VOLATILE", "RANGE", "NEUTRAL"}:
+            return decision_score >= 0.26
+
+        return decision_score >= 0.30
+
+    def _build_row_from_candles(
+        self,
+        asset: str,
+        candles: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        closes = [self._candle_close(c) for c in candles if self._candle_close(c) > 0]
+        highs = [self._candle_high(c) for c in candles if self._candle_high(c) > 0]
+        lows = [self._candle_low(c) for c in candles if self._candle_low(c) > 0]
+        volumes = [self._candle_volume(c) for c in candles if self._candle_volume(c) >= 0]
+
+        last_close = closes[-1] if closes else 0.0
+        prev_close = closes[-2] if len(closes) >= 2 else last_close
+
+        momentum = 0.0
+        if prev_close > 0:
+            momentum = (last_close - prev_close) / (prev_close + 1e-9)
+
+        recent_high = max(highs[-20:], default=last_close)
+        recent_low = min(lows[-20:], default=last_close)
+
+        total_range = max(highs[-20:], default=last_close) - min(lows[-20:], default=last_close)
+        price_compression = 0.0
+        if last_close > 0:
+            norm_range = total_range / (last_close + 1e-9)
+            price_compression = self._clamp01(1.0 - min(norm_range / 0.08, 1.0))
+
+        volume = volumes[-1] if volumes else 0.0
+        avg_volume = sum(volumes[-20:]) / max(len(volumes[-20:]), 1)
+
+        vwap = self._estimate_vwap(candles, last_close)
+        vwap_dev = 0.0
+        if vwap > 0:
+            vwap_dev = (last_close - vwap) / (vwap + 1e-9)
+
+        return {
+            "symbol": asset,
+            "asset": asset,
+            "candles": candles,
+            "price": last_close,
+            "current_price": last_close,
+            "vwap": vwap,
+            "vwap_dev": vwap_dev,
+            "vwap_distance": vwap_dev,
+            "volume": volume,
+            "avg_volume": avg_volume,
+            "avg_volume_24h": avg_volume,
+            "volume_24h": max(volume, avg_volume),
+            "momentum": momentum,
+            "velocity": momentum,
+            "buy_pressure": max(momentum, 0.0),
+            "sell_pressure": max(-momentum, 0.0),
+            "recent_high": recent_high,
+            "recent_low": recent_low,
+            "price_compression": price_compression,
+            "compression": price_compression,
+            "trend_efficiency": self._clamp01(abs(momentum) * 20.0),
+            "mean_reversion_score": self._clamp01(abs(vwap_dev) * 20.0),
+            "spread_bps": 2.0,
+            "slippage_bps": 3.0,
+            "top_of_book_depth": 100000.0,
+            "order_flow_delta": 0.0,
+            "rejection_strength": 0.0,
+            "wick_reversal_strength": 0.0,
+            "liquidity_sweep_flag": False,
+        }
+
+    def _estimate_vwap(self, candles: List[Dict[str, Any]], fallback_price: float) -> float:
+        total_pv = 0.0
+        total_vol = 0.0
+
+        for candle in candles[-50:]:
+            high = self._candle_high(candle)
+            low = self._candle_low(candle)
+            close = self._candle_close(candle)
+            volume = self._candle_volume(candle)
+
+            typical = close
+            if high > 0 and low > 0 and close > 0:
+                typical = (high + low + close) / 3.0
+
+            if volume > 0 and typical > 0:
+                total_pv += typical * volume
+                total_vol += volume
+
+        if total_vol > 0:
+            return total_pv / total_vol
+
+        return fallback_price
+
+    def _extract_last_close(self, candles: List[Dict[str, Any]]) -> float:
+        if not candles:
+            return 0.0
+        return self._candle_close(candles[-1])
+
+    def _classify_asset(self, asset: str) -> str:
+        symbol = str(asset).upper()
+
+        if "_" in symbol:
+            return "FX"
+        if "-" in symbol:
+            return "CRYPTO"
+        if any(x in symbol for x in ["ES", "NQ", "CL", "GC", "ZN", "YM", "RTY"]):
+            return "FUTURES"
+        return "OTHER"
+
+    def _candle_open(self, candle: Dict[str, Any]) -> float:
+        return self._to_float(self._safe_get(candle, "open", 0.0))
+
+    def _candle_high(self, candle: Dict[str, Any]) -> float:
+        return self._to_float(self._safe_get(candle, "high", 0.0))
+
+    def _candle_low(self, candle: Dict[str, Any]) -> float:
+        return self._to_float(self._safe_get(candle, "low", 0.0))
+
+    def _candle_close(self, candle: Dict[str, Any]) -> float:
+        return self._to_float(self._safe_get(candle, "close", 0.0))
+
+    def _candle_volume(self, candle: Dict[str, Any]) -> float:
+        return self._to_float(self._safe_get(candle, "volume", 0.0))
+
+    def _safe_get(self, obj: Any, key: str, default: Any = None) -> Any:
+        try:
+            if isinstance(obj, dict):
+                return obj.get(key, default)
+            return getattr(obj, key, default)
+        except Exception:
+            return default
+
+    def _to_float(self, v: Any, default: float = 0.0) -> float:
+        try:
+            return float(v)
+        except Exception:
+            return default
+
+    def _clamp01(self, v: float) -> float:
+        try:
+            v = float(v)
+        except Exception:
+            return 0.0
+
+        if v < 0.0:
+            return 0.0
+        if v > 1.0:
+            return 1.0
+        return v
+
+    def _reject(self, asset: str, reason: str) -> Dict[str, Any]:
+        return {
+            "asset": asset,
+            "asset_class": self._classify_asset(asset),
+            "execute_trade": False,
+            "execute_flag": False,
+            "cost_blocked": True,
+            "regime": "UNSTABLE",
+            "regime_reason": reason,
+            "confluence_score": 0.0,
+            "ai_score": 0.0,
+            "pressure_score": 0.0,
+            "acceleration_score": 0.0,
+            "momentum_score": 0.0,
+            "pressure_fusion": 0.0,
+            "vwap_score": 0.0,
+            "vwap_dev_abs": 0.0,
+            "elasticity_score": 0.0,
+            "decision_score": 0.0,
+            "expected_edge_bps": 0.0,
+            "execution_cost_bps": 0.0,
+            "cost_decision": reason,
+            "net_edge_bps": 0.0,
+            "expected_edge_value": 0.0,
+            "cost_adjusted_edge_value": 0.0,
+            "entry_costs": {
+                "spread_cost_usd": 0.0,
+                "slippage_cost_usd": 0.0,
+                "fees_usd": 0.0,
+                "total_cost_usd": 0.0,
+            },
+        }

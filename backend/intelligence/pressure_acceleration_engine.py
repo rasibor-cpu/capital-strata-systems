@@ -1,72 +1,97 @@
 from __future__ import annotations
 
-from typing import List, Dict
-
-
-def clamp01(v: float) -> float:
-    if v < 0.0:
-        return 0.0
-    if v > 1.0:
-        return 1.0
-    return v
+from typing import Any, Dict, List
 
 
 class PressureAccelerationEngine:
     """
-    Computes:
-    - pressure (market push strength)
-    - acceleration (rate of change of pressure)
+    Computes pressure acceleration safely from row-based market data.
 
-    Designed to NEVER return zero unless truly flat market.
-    Fully backward compatible (no dependency breaking).
+    Expected input row keys may include:
+    - pressure_score
+    - buy_pressure
+    - sell_pressure
+    - momentum
+    - velocity
+    - price
+    - current_price
+    - vwap
+
+    Outputs added per row:
+    - pressure_acceleration
+    - acceleration_score
     """
 
-    def enrich_rows(self, rows: List[Dict]) -> List[Dict]:
+    def __init__(self) -> None:
+        self._prev_pressure_by_symbol: Dict[str, float] = {}
 
-        enriched: List[Dict] = []
+    def _safe_float(self, value: Any, default: float = 0.0) -> float:
+        if value is None:
+            return default
+        try:
+            return float(value)
+        except Exception:
+            return default
 
-        prev_pressure = 0.0
+    def _clamp01(self, value: float) -> float:
+        if value < 0.0:
+            return 0.0
+        if value > 1.0:
+            return 1.0
+        return value
 
-        for r in rows:
+    def _derive_pressure(self, row: Dict[str, Any]) -> float:
+        explicit_pressure = row.get("pressure_score")
+        if explicit_pressure is not None:
+            return self._safe_float(explicit_pressure, 0.0)
 
-            # --- SAFE EXTRACTION ---
-            price = float(r.get("price", 0.0))
-            vwap = float(r.get("vwap", 0.0))
-            momentum = float(r.get("momentum", 0.0))
+        buy_pressure = self._safe_float(row.get("buy_pressure"), 0.0)
+        sell_pressure = self._safe_float(row.get("sell_pressure"), 0.0)
+        momentum = self._safe_float(row.get("momentum"), 0.0)
+        velocity = self._safe_float(row.get("velocity"), 0.0)
 
-            # --- FALLBACKS ---
-            if price == 0.0:
-                price = float(r.get("close", 0.0))
+        price = self._safe_float(row.get("price"), 0.0)
+        current_price = self._safe_float(row.get("current_price"), price)
+        vwap = self._safe_float(row.get("vwap"), current_price)
 
-            if vwap == 0.0:
-                vwap = price  # fallback prevents division issues
+        vwap_dev = 0.0
+        if vwap > 0:
+            vwap_dev = abs((current_price - vwap) / (vwap + 1e-9))
 
-            # --- VWAP DEVIATION ---
-            vwap_dev = price - vwap
-            vwap_dev_abs = abs(vwap_dev)
+        derived = (
+            abs(buy_pressure - sell_pressure) * 0.35
+            + abs(momentum) * 18.0 * 0.30
+            + abs(velocity) * 18.0 * 0.20
+            + vwap_dev * 25.0 * 0.15
+        )
 
-            # --- PRESSURE CALCULATION ---
-            # combines deviation + momentum strength
-            raw_pressure = vwap_dev_abs * (abs(momentum) + 0.0001)
+        return self._clamp01(derived)
 
-            # normalize to stable range
-            pressure = clamp01(raw_pressure * 5.0)
+    def enrich_rows(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        enriched: List[Dict[str, Any]] = []
 
-            # --- ACCELERATION ---
-            acceleration = pressure - prev_pressure
+        for row in rows or []:
+            if not isinstance(row, dict):
+                continue
 
-            # normalize acceleration
-            acceleration_score = clamp01(abs(acceleration) * 5.0)
+            out = dict(row)
 
-            prev_pressure = pressure
+            symbol = str(out.get("symbol") or out.get("asset") or "")
+            current_pressure = self._derive_pressure(out)
 
-            # --- WRITE BACK (CRITICAL FIX) ---
-            r["pressure"] = pressure
-            r["pressure_score"] = pressure
-            r["pressure_acceleration"] = acceleration
-            r["acceleration"] = acceleration_score
-            r["acceleration_score"] = acceleration_score
+            previous_pressure = self._prev_pressure_by_symbol.get(symbol, current_pressure)
+            pressure_acceleration = current_pressure - previous_pressure
 
-            enriched.append(r)
+            out["pressure_score"] = current_pressure
+            out["pressure_acceleration"] = pressure_acceleration
+
+            # Normalize acceleration magnitude into 0..1 score
+            acceleration_score = self._clamp01(abs(pressure_acceleration) * 8.0)
+            out["acceleration_score"] = acceleration_score
+
+            if symbol:
+                self._prev_pressure_by_symbol[symbol] = current_pressure
+
+            enriched.append(out)
 
         return enriched

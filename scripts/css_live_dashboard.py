@@ -1,10 +1,18 @@
-# CSS DASHBOARD — FULL NON-REGRESSION + DATA-FED PRESSURE/ACCEL FIX
+# =========================
+# CSS DASHBOARD
+# Stable merged version:
+# - preserves signal fields after optimizer
+# - restores candle normalization for orchestrator
+# - keeps mode selector
+# - keeps allocator
+# - integrates position updates / closes
+# =========================
 
 from __future__ import annotations
 
-import os
 import sys
 import time
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
@@ -25,21 +33,55 @@ from backend.intelligence.opportunity_pressure_engine import OpportunityPressure
 from backend.intelligence.pressure_acceleration_engine import PressureAccelerationEngine
 from backend.intelligence.quant_signal_optimizer import QuantSignalOptimizer
 from backend.intelligence.signal_confluence_engine import SignalConfluenceEngine
+from backend.intelligence.trade_decision_orchestrator import TradeDecisionOrchestrator
 from backend.scanner.unified_market_scanner import UnifiedMarketScanner
 
-# ---------------- CONFIG ----------------
+# =========================
+# MODE CONTROL
+# =========================
 
-MAX_SYMBOLS_PER_CYCLE = 10
-REFRESH_SECONDS = 10
-MAX_TRADES_PER_CYCLE = 5
+def choose_engine_mode() -> str:
+    print("\n=== SELECT ENGINE MODE ===")
+    print("1 SAFE")
+    print("2 CONSERVATIVE")
+    print("3 BALANCED")
+    print("4 AGGRESSIVE")
+    print("5 EXPANSION")
 
-MAX_OPEN_FX = 4
-MAX_OPEN_CRYPTO = 2
-MAX_OPEN_FUTURES = 2
+    try:
+        choice = input("Select: ").strip()
+    except Exception:
+        choice = "3"
 
-BASE_TRADE_NOTIONAL_USD = 10.0
+    return {
+        "1": "SAFE",
+        "2": "CONSERVATIVE",
+        "3": "BALANCED",
+        "4": "AGGRESSIVE",
+        "5": "EXPANSION",
+    }.get(choice, "BALANCED")
 
-# ---------------- ENGINES ----------------
+
+ENGINE_MODE = choose_engine_mode()
+
+MODE = {
+    "SAFE": dict(symbols=5, refresh=15, trades=2, score=0.30, capital=5.0, fx=2, crypto=1),
+    "CONSERVATIVE": dict(symbols=7, refresh=12, trades=3, score=0.24, capital=7.0, fx=3, crypto=1),
+    "BALANCED": dict(symbols=10, refresh=10, trades=5, score=0.18, capital=10.0, fx=4, crypto=2),
+    "AGGRESSIVE": dict(symbols=12, refresh=8, trades=6, score=0.15, capital=12.0, fx=5, crypto=3),
+    "EXPANSION": dict(symbols=15, refresh=6, trades=8, score=0.12, capital=15.0, fx=6, crypto=4),
+}[ENGINE_MODE]
+
+MAX_SYMBOLS_PER_CYCLE = int(MODE["symbols"])
+REFRESH_SECONDS = int(MODE["refresh"])
+MAX_TRADES_PER_CYCLE = int(MODE["trades"])
+BASE_TRADE_NOTIONAL_USD = float(MODE["capital"])
+MAX_OPEN_FX = int(MODE["fx"])
+MAX_OPEN_CRYPTO = int(MODE["crypto"])
+
+# =========================
+# ENGINES
+# =========================
 
 scanner = UnifiedMarketScanner()
 feature_builder = FeatureBuilder()
@@ -52,32 +94,27 @@ sweep_engine = LiquiditySweepDetector()
 ai = AIOpportunityScorer()
 optimizer = QuantSignalOptimizer()
 allocator = CapitalAllocator(total_capital=50.0, max_positions=5)
+orchestrator = TradeDecisionOrchestrator()
 
 position_manager = PositionManager()
 trade_logger = TradeLogger()
 
-GLOBAL_CONTEXT: Dict[str, Dict[str, Any]] = {}
+# =========================
+# HELPERS
+# =========================
 
-# ---------------- HELPERS ----------------
+def safe(v: Any, default: float = 0.0) -> float:
+    try:
+        if v is None:
+            return default
+        return float(v)
+    except Exception:
+        return default
+
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
-def clear() -> None:
-    os.system("cls" if os.name == "nt" else "clear")
-
-def safe(v: Any, d: float = 0.0) -> float:
-    try:
-        return float(v)
-    except Exception:
-        return d
-
-def clamp01(v: float) -> float:
-    if v < 0.0:
-        return 0.0
-    if v > 1.0:
-        return 1.0
-    return v
 
 def classify_asset(symbol: str) -> str:
     if "_" in symbol:
@@ -86,13 +123,19 @@ def classify_asset(symbol: str) -> str:
         return "CRYPTO"
     return "OTHER"
 
+
 def get_open_counts() -> Dict[str, int]:
-    counts = {"FX": 0, "CRYPTO": 0, "FUTURES": 0}
-    for s in position_manager.get_open_positions():
-        cls = classify_asset(s)
-        if cls in counts:
-            counts[cls] += 1
+    counts = {"FX": 0, "CRYPTO": 0}
+    try:
+        open_positions = position_manager.get_open_positions()
+        for s in open_positions:
+            cls = classify_asset(str(s))
+            if cls in counts:
+                counts[cls] += 1
+    except Exception:
+        pass
     return counts
+
 
 def can_open(symbol: str) -> bool:
     counts = get_open_counts()
@@ -103,194 +146,107 @@ def can_open(symbol: str) -> bool:
         return counts["CRYPTO"] < MAX_OPEN_CRYPTO
     return True
 
-def extract_candles(payload: Dict[str, Any]) -> List[Any]:
-    candidates = [
-        payload.get("candles"),
-        payload.get("ohlcv"),
-        payload.get("bars"),
-        payload.get("history"),
-        payload.get("data"),
-    ]
-    for item in candidates:
-        if isinstance(item, list) and item:
-            return item
-    return []
 
-def candle_attr(candle: Any, name: str, default: float = 0.0) -> float:
+def candle_value(candle: Any, field: str, default: float = 0.0) -> float:
     try:
         if isinstance(candle, dict):
-            return safe(candle.get(name), default)
-
-        if hasattr(candle, name):
-            return safe(getattr(candle, name), default)
-
-        if isinstance(candle, (list, tuple)):
-            idx_map = {
-                "ts": 0,
-                "open": 1,
-                "high": 2,
-                "low": 3,
-                "close": 4,
-                "volume": 5,
-            }
-            idx = idx_map.get(name)
-            if idx is not None and len(candle) > idx:
-                return safe(candle[idx], default)
+            return safe(candle.get(field), default)
+        return safe(getattr(candle, field, default), default)
     except Exception:
         return default
-    return default
 
-def compute_avg_volume_from_candles(candles: List[Any], window: int = 20) -> float:
-    if not candles:
-        return 0.0
-    subset = candles[-window:] if len(candles) >= window else candles
-    vols = [candle_attr(c, "volume") for c in subset if candle_attr(c, "volume") > 0]
-    if not vols:
-        return 0.0
-    return sum(vols) / len(vols)
 
-def compute_current_volume(candles: List[Any]) -> float:
-    if not candles:
-        return 0.0
-    return candle_attr(candles[-1], "volume", 0.0)
+def normalize_candles(candles: List[Any]) -> List[Dict[str, float]]:
+    normalized: List[Dict[str, float]] = []
+    for candle in candles or []:
+        normalized.append(
+            {
+                "open": candle_value(candle, "open"),
+                "high": candle_value(candle, "high"),
+                "low": candle_value(candle, "low"),
+                "close": candle_value(candle, "close"),
+                "volume": candle_value(candle, "volume"),
+            }
+        )
+    return normalized
 
-def compute_volatility_from_candles(candles: List[Any], window: int = 20) -> float:
-    if not candles:
-        return 0.0
-    subset = candles[-window:] if len(candles) >= window else candles
-    rel_ranges: List[float] = []
-    for c in subset:
-        high = candle_attr(c, "high")
-        low = candle_attr(c, "low")
-        close = candle_attr(c, "close")
-        if close > 0 and high >= low:
-            rel_ranges.append((high - low) / close)
-    if not rel_ranges:
-        return 0.0
-    return sum(rel_ranges) / len(rel_ranges)
 
-def compute_price_compression_from_candles(candles: List[Any], window: int = 20) -> float:
-    if len(candles) < 5:
-        return 0.0
+def compute_vwap_from_candles(candles: List[Any], fallback_price: float) -> float:
+    total_pv = 0.0
+    total_vol = 0.0
 
-    subset = candles[-window:] if len(candles) >= window else candles
-    closes = [candle_attr(c, "close") for c in subset if candle_attr(c, "close") > 0]
-    highs = [candle_attr(c, "high") for c in subset]
-    lows = [candle_attr(c, "low") for c in subset]
+    for candle in candles[-50:]:
+        high = candle_value(candle, "high")
+        low = candle_value(candle, "low")
+        close = candle_value(candle, "close")
+        volume = candle_value(candle, "volume")
 
-    if not closes or not highs or not lows:
-        return 0.0
+        typical = close
+        if high > 0 and low > 0 and close > 0:
+            typical = (high + low + close) / 3.0
 
-    price_ref = closes[-1]
-    if price_ref <= 0:
-        return 0.0
+        if typical > 0 and volume > 0:
+            total_pv += typical * volume
+            total_vol += volume
 
-    total_range = max(highs) - min(lows)
-    norm_range = total_range / price_ref
+    if total_vol > 0:
+        return total_pv / total_vol
+    return fallback_price
 
-    if norm_range <= 0:
-        return 1.0
 
-    compression = 1.0 - min(norm_range / 0.08, 1.0)
-    return clamp01(compression)
-
-def compute_metrics(symbol: str, price: float, vwap: float) -> tuple[float, float, float, float]:
-    prev = GLOBAL_CONTEXT.get(symbol, {})
-
-    prev_price = prev.get("price", price)
-    prev_momentum = prev.get("momentum", 0.0)
-
-    momentum = (price - prev_price) / (prev_price + 1e-9)
-    velocity = momentum - prev_momentum
-
-    if vwap == 0:
-        vwap = price * 0.999 if price > 0 else 1.0
-
-    vwap_dev = (price - vwap) / (vwap + 1e-9)
-    if vwap_dev == 0:
-        vwap_dev = 0.001 if price >= vwap else -0.001
-
-    mean_rev = abs(vwap_dev) * 2.0
-    if abs(momentum) < 0.003:
-        mean_rev += 0.2
-    if velocity < 0:
-        mean_rev += 0.2
-
-    GLOBAL_CONTEXT[symbol] = {
-        "price": price,
-        "momentum": momentum,
-    }
-
-    return momentum, velocity, vwap_dev, min(mean_rev, 1.0)
-
-def build_runtime_row(sym: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    candles = extract_candles(payload)
+def build_base_row(symbol: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    payload = payload or {}
+    candles = payload.get("candles") or []
 
     price = safe(payload.get("price"))
     if price <= 0 and candles:
-        price = candle_attr(candles[-1], "close", 0.0)
+        price = candle_value(candles[-1], "close", 0.0)
+
+    prev_close = price
+    if len(candles) >= 2:
+        prev_close = candle_value(candles[-2], "close", price)
+
+    momentum = 0.0
+    if prev_close > 0:
+        momentum = (price - prev_close) / (prev_close + 1e-9)
 
     vwap = safe(payload.get("vwap"))
-    if vwap <= 0 and price > 0:
-        vwap = price * 0.999
-
-    momentum, velocity, vwap_dev, mean_rev = compute_metrics(sym, price, vwap)
+    if vwap <= 0:
+        vwap = compute_vwap_from_candles(candles, price)
 
     current_volume = safe(payload.get("volume"))
-    if current_volume <= 0:
-        current_volume = compute_current_volume(candles)
+    if current_volume <= 0 and candles:
+        current_volume = candle_value(candles[-1], "volume", 0.0)
 
     avg_volume = safe(payload.get("avg_volume"))
-    if avg_volume <= 0:
-        avg_volume = compute_avg_volume_from_candles(candles, window=20)
+    if avg_volume <= 0 and candles:
+        vols = [candle_value(c, "volume") for c in candles[-20:] if candle_value(c, "volume") > 0]
+        if vols:
+            avg_volume = sum(vols) / len(vols)
 
-    volatility = safe(payload.get("volatility"))
-    if volatility <= 0:
-        volatility = compute_volatility_from_candles(candles, window=20)
-
-    price_compression = safe(payload.get("price_compression"))
-    if price_compression <= 0:
-        price_compression = compute_price_compression_from_candles(candles, window=20)
-
-    row: Dict[str, Any] = {
-        "symbol": sym,
+    return {
+        **payload,
+        "symbol": symbol,
+        "asset": payload.get("asset") or symbol,
         "price": price,
-        "current_price": price,
+        "current_price": safe(payload.get("current_price"), price),
         "vwap": vwap,
-        "candles": candles,
+        "momentum": momentum,
+        "velocity": momentum,
         "volume": current_volume,
         "avg_volume": avg_volume,
-        "avg_volume_24h": avg_volume,
-        "volume_24h": max(current_volume, avg_volume),
-        "volatility": volatility,
-        "avg_volatility": volatility if volatility > 0 else 0.01,
-        "price_compression": price_compression,
-        "compression": price_compression,
-        "momentum": momentum,
-        "velocity": velocity,
-        "trend_efficiency": min(abs(momentum) * 8.0, 1.0),
-        "vwap_dev": vwap_dev,
-        "vwap_distance": vwap_dev,
-        "mean_reversion_score": mean_rev,
-        "spread_bps": safe(payload.get("spread_bps"), 2.0),
-        "slippage_bps": safe(payload.get("slippage_bps"), 3.0),
-        "top_of_book_depth": safe(payload.get("top_of_book_depth"), 100000.0),
-        "order_flow_delta": 0.0,
-        "buy_pressure": max(momentum, 0.0),
-        "sell_pressure": max(-momentum, 0.0),
-        "recent_high": max([candle_attr(c, "high") for c in candles[-20:]], default=price),
-        "recent_low": min(
-            [candle_attr(c, "low") for c in candles[-20:] if candle_attr(c, "low") > 0],
-            default=price,
-        ),
-        "rejection_strength": 0.0,
-        "wick_reversal_strength": 0.0,
-        "liquidity_sweep_flag": False,
+        "avg_volume_24h": safe(payload.get("avg_volume_24h"), avg_volume),
+        "volume_24h": safe(payload.get("volume_24h"), current_volume),
+        "volatility": safe(payload.get("volatility")),
+        "price_compression": safe(payload.get("price_compression")),
+        "compression": safe(payload.get("compression"), safe(payload.get("price_compression"))),
+        "candles": candles,
     }
 
-    return row
 
-# ---------------- MAIN ----------------
+# =========================
+# MAIN LOOP
+# =========================
 
 cycle = 0
 equity = 200.0
@@ -299,20 +255,21 @@ while True:
     cycle += 1
 
     try:
-        discovered = scanner.scan()
-        symbols = list({x["symbol"] for x in discovered})[:MAX_SYMBOLS_PER_CYCLE]
+        discovered = scanner.scan() or []
+        symbols = list(
+            {x["symbol"] for x in discovered if isinstance(x, dict) and x.get("symbol")}
+        )[:MAX_SYMBOLS_PER_CYCLE]
 
         rows: List[Dict[str, Any]] = []
-
-        for sym in symbols:
-            payload = load_runtime_asset(sym)
-            rows.append(build_runtime_row(sym, payload))
+        for symbol in symbols:
+            raw = load_runtime_asset(symbol) or {}
+            rows.append(build_base_row(symbol, raw))
 
         if not rows:
             time.sleep(REFRESH_SECONDS)
             continue
 
-        # FULL PIPELINE
+        # Full pipeline
         f = feature_builder.enrich_rows(rows, {})
         r = regime_engine.detect(f)
         p = pressure_engine.enrich_rows(r)
@@ -323,92 +280,87 @@ while True:
         ranked = ai.rank_opportunities(s)
         optimized = optimizer.optimize(ranked)
 
-        # REATTACH FULL METRICS
-        base_map = {row["symbol"]: row for row in s}
+        # Preserve enriched fields after optimizer
+        full_map: Dict[str, Dict[str, Any]] = {}
+        for row in s:
+            sym = row.get("symbol")
+            if sym:
+                full_map[sym] = dict(row)
+
         final_rows: List[Dict[str, Any]] = []
-
         for row in optimized:
-            sym = row["symbol"]
-            base = base_map.get(sym, {})
-            merged = {**base, **row}
+            sym = row.get("symbol")
+            if not sym:
+                continue
 
-            if safe(merged.get("momentum")) == 0.0:
-                merged["momentum"] = base.get("momentum", 0.001)
+            merged = {**full_map.get(sym, {}), **row}
 
-            if safe(merged.get("velocity")) == 0.0:
-                merged["velocity"] = base.get("velocity", 0.0005)
+            normalized_candles = normalize_candles(merged.get("candles") or [])
 
-            if safe(merged.get("mean_reversion_score")) == 0.0:
-                merged["mean_reversion_score"] = base.get("mean_reversion_score", 0.2)
+            try:
+                orch = orchestrator.evaluate_trade(sym, normalized_candles)
+            except Exception:
+                orch = {
+                    "decision_score": 0.0,
+                    "execute_trade": False,
+                    "cost_decision": "ORCH_ERROR",
+                    "net_edge_bps": 0.0,
+                }
 
-            if safe(merged.get("pressure_score")) == 0.0:
-                merged["pressure_score"] = max(abs(safe(merged.get("vwap_dev"))), 0.01)
-
-            if safe(merged.get("pressure_acceleration")) == 0.0:
-                merged["pressure_acceleration"] = merged.get("velocity", 0.0005)
-
-            if safe(merged.get("acceleration_score")) == 0.0:
-                merged["acceleration_score"] = abs(safe(merged.get("pressure_acceleration")))
+            merged["orchestrator_score"] = safe(orch.get("decision_score"))
+            merged["execute_trade"] = bool(orch.get("execute_trade"))
+            merged["cost_decision"] = orch.get("cost_decision", "NA")
+            merged["net_edge_bps"] = safe(orch.get("net_edge_bps"))
 
             final_rows.append(merged)
 
-        final_rows.sort(key=lambda x: safe(x.get("score")), reverse=True)
+        print("\n--- SIGNAL SNAPSHOT ---")
+        for row in final_rows[:5]:
+            print(
+                row["symbol"],
+                "pressure=", round(safe(row.get("pressure_score")), 3),
+                "accel=", round(safe(row.get("pressure_acceleration")), 3),
+                "conf=", round(safe(row.get("confluence_score")), 3),
+                "orch=", round(safe(row.get("orchestrator_score")), 3),
+            )
 
-        # ALLOCATION
+        # Allocator
         ai_results = [
-            {"symbol": x["symbol"], "opportunity_score": x.get("score", 0)}
-            for x in final_rows
+            {"symbol": row["symbol"], "opportunity_score": safe(row.get("score"))}
+            for row in final_rows
         ]
         allocations = allocator.allocate(ai_results, final_rows)
+        alloc_map = {a["symbol"]: a for a in allocations} if allocations else {}
 
-        if not allocations:
-            allocations = [
-                {"symbol": x["symbol"], "capital": BASE_TRADE_NOTIONAL_USD}
-                for x in final_rows[:3]
-            ]
-
-        alloc_map = {a["symbol"]: a for a in allocations}
-
+        # Open trades
         opened = 0
-
-        # ---------------- PROFITABILITY FILTER ----------------
-
         for row in final_rows:
             if opened >= MAX_TRADES_PER_CYCLE:
                 break
 
             sym = row["symbol"]
             price = safe(row.get("price"))
+            orch_score = safe(row.get("orchestrator_score"))
 
             if price <= 0:
                 continue
-
             if not can_open(sym):
                 continue
 
-            score = safe(row.get("score"))
-            mr = safe(row.get("mean_reversion_score"))
-            pressure_score = safe(row.get("pressure_score"))
-            accel_score = safe(row.get("pressure_acceleration"))
-            momentum_abs = abs(safe(row.get("momentum")))
-
-            if mr < 0.25:
-                continue
-            if pressure_score < 0.10:
-                continue
-            if momentum_abs < 0.0003:
-                continue
-            if abs(accel_score) < 0.0001:
-                continue
-            if score < 0.18:
+            if not (row.get("execute_trade") or orch_score >= MODE["score"]):
                 continue
 
-            alloc = alloc_map.get(sym, {})
-            capital = safe(alloc.get("capital"), BASE_TRADE_NOTIONAL_USD)
-
+            capital = safe(alloc_map.get(sym, {}).get("capital"), BASE_TRADE_NOTIONAL_USD)
             qty = capital / price
             if qty <= 0:
                 continue
+
+            # avoid duplicate opens
+            try:
+                if position_manager.has_open_position(sym):
+                    continue
+            except Exception:
+                pass
 
             position_manager.open_long_position(
                 symbol=sym,
@@ -416,77 +368,82 @@ while True:
                 entry_price=price,
                 cycle_no=cycle,
                 opened_at_utc=now(),
+                asset_class=classify_asset(sym),
+                regime=str(row.get("regime", "NEUTRAL")).upper(),
+                pressure_score=safe(row.get("pressure_score")),
+                acceleration_score=safe(row.get("pressure_acceleration")),
+                signal_tier=str(row.get("signal_tier", "QUALIFIED")).upper(),
+                vwap=row.get("vwap"),
+                momentum=safe(row.get("momentum")),
+                velocity=safe(row.get("velocity")),
+                mean_reversion_score=safe(row.get("mean_reversion_score")),
             )
 
-            trade_logger.log_open(
-                symbol=sym,
-                entry_price=price,
-                quantity=qty,
-                score=score,
-                signal="QUALIFIED",
-                regime=row.get("regime", "NA"),
-                vwap=row.get("vwap", 0),
-                spread_pct=0,
-                momentum=row.get("momentum", 0),
-                velocity=row.get("velocity", 0),
-                vwap_dev=row.get("vwap_dev", 0),
-                mean_reversion_score=mr,
-                pressure_score=pressure_score,
-                acceleration_score=accel_score,
-            )
+            try:
+                trade_logger.log_open(
+                    symbol=sym,
+                    entry_price=price,
+                    quantity=qty,
+                    score=safe(row.get("score")),
+                    signal=f"MODE_{ENGINE_MODE}",
+                    regime=row.get("regime", "NA"),
+                    vwap=row.get("vwap", 0),
+                    spread_pct=0,
+                    momentum=row.get("momentum", 0),
+                    velocity=row.get("velocity", 0),
+                    vwap_dev=row.get("vwap_dev", 0),
+                    mean_reversion_score=row.get("mean_reversion_score", 0),
+                    pressure_score=row.get("pressure_score", 0),
+                    acceleration_score=row.get("pressure_acceleration", 0),
+                )
+            except Exception:
+                pass
 
-            print(f"[OPEN] {sym} score={score:.3f} mr={mr:.3f} p={pressure_score:.3f} a={accel_score:.5f}")
+            print(f"[OPEN] {sym} score={orch_score:.3f} mode={ENGINE_MODE}")
             opened += 1
 
-        closed = position_manager.update_positions(
-            {x["symbol"]: x["price"] for x in rows},
-            cycle,
-            now(),
+        # Position update / profit engine activation
+        latest_prices: Dict[str, float] = {}
+        intel_map: Dict[str, Dict[str, Any]] = {}
+
+        for row in final_rows:
+            sym = row["symbol"]
+            latest_prices[sym] = safe(row.get("price"))
+            intel_map[sym] = {
+                "vwap": row.get("vwap"),
+                "momentum": row.get("momentum"),
+                "velocity": row.get("velocity"),
+                "mean_reversion_score": row.get("mean_reversion_score"),
+            }
+
+        closed_trades = position_manager.update_positions(
+            latest_prices=latest_prices,
+            cycle_no=cycle,
+            now=now(),
+            intelligence_by_symbol=intel_map,
         )
 
-        for trade in closed:
-            pnl = safe(trade.get("realized_pnl_usd"))
-            equity += pnl
-
-            trade_logger.log_close(
-                symbol=trade["symbol"],
-                entry_price=trade["entry_price"],
-                exit_price=trade["exit_price"],
-                quantity=trade["quantity"],
-                reason=trade.get("exit_reason", "UNKNOWN"),
-                hold_minutes=trade.get("cycles_held", 0),
+        for trade in closed_trades:
+            print(
+                f"[CLOSE] {trade['symbol']} "
+                f"reason={trade['exit_reason']} "
+                f"pnl={round(safe(trade.get('net_realized_pnl_pct')) * 100, 2)}%"
             )
 
-            print("[CLOSE]", trade["symbol"], pnl)
-
-        clear()
-
-        counts = get_open_counts()
+        summary = position_manager.summary()
+        equity = 200.0 + safe(summary.get("net_realized_pnl_usd"))
 
         print("===== CSS DASHBOARD =====")
-        print("Cycle:", cycle, "Equity:", round(equity, 2))
-        print("Open:", counts)
-
-        print("\nAllocator:")
-        for a in allocations:
-            print(a["symbol"], a["capital"])
-
-        print("\nTop:")
-        for r in final_rows[:10]:
-            print(
-                r["symbol"],
-                "score", round(safe(r.get("score")), 3),
-                "m", round(safe(r.get("momentum")), 5),
-                "v", round(safe(r.get("velocity")), 5),
-                "mr", round(safe(r.get("mean_reversion_score")), 3),
-                "p", round(safe(r.get("pressure_score")), 3),
-                "a", round(safe(r.get("pressure_acceleration")), 5),
-                "vol", round(safe(r.get("volatility")), 5),
-                "cmp", round(safe(r.get("price_compression")), 3),
-            )
+        print(
+            "Cycle:", cycle,
+            "| Equity:", round(equity, 2),
+            "| Open:", summary.get("open_positions_count", 0),
+            "| Closed:", summary.get("closed_positions_count", 0),
+            "| Mode:", ENGINE_MODE,
+        )
 
         time.sleep(REFRESH_SECONDS)
 
-    except Exception as e:
-        print("ERROR:", e)
-        time.sleep(REFRESH_SECONDS)
+    except Exception:
+        traceback.print_exc()
+        time.sleep(5)
