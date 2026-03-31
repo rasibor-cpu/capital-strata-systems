@@ -10,6 +10,7 @@
 # - adds PROCESS-based fail-soft scanner timeout and fallback universe
 # - adds Windows-safe multiprocessing entrypoint
 # - fixes signal field normalization
+# - fixes optimizer alias mapping (pressure/confluence/accel)
 # =========================
 
 from __future__ import annotations
@@ -41,6 +42,7 @@ from backend.intelligence.quant_signal_optimizer import QuantSignalOptimizer
 from backend.intelligence.signal_confluence_engine import SignalConfluenceEngine
 from backend.intelligence.trade_decision_orchestrator import TradeDecisionOrchestrator
 from backend.scanner.unified_market_scanner import UnifiedMarketScanner
+
 
 # =========================
 # MODE CONTROL
@@ -191,26 +193,38 @@ def build_base_row(symbol: str, payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def normalize_signal_fields(row: Dict[str, Any]) -> Dict[str, Any]:
-    # pressure
+    # Preserve canonical dashboard fields
     if "pressure_score" not in row:
         if "pressure" in row:
             row["pressure_score"] = row["pressure"]
         elif "opportunity_pressure" in row:
             row["pressure_score"] = row["opportunity_pressure"]
 
-    # confluence
     if "confluence_score" not in row:
         if "confluence" in row:
             row["confluence_score"] = row["confluence"]
         elif "signal_confluence" in row:
             row["confluence_score"] = row["signal_confluence"]
 
-    # acceleration
     if "pressure_acceleration" not in row:
         if "accel" in row:
             row["pressure_acceleration"] = row["accel"]
         elif "acceleration" in row:
             row["pressure_acceleration"] = row["acceleration"]
+        elif "acceleration_score" in row:
+            row["pressure_acceleration"] = row["acceleration_score"]
+
+    # Optimizer aliases: these are what the optimizer appears to read
+    if "pressure" not in row:
+        row["pressure"] = safe(row.get("pressure_score"))
+
+    if "confluence" not in row:
+        row["confluence"] = safe(row.get("confluence_score"))
+
+    if "accel" not in row:
+        row["accel"] = safe(
+            row.get("pressure_acceleration", row.get("acceleration_score", 0.0))
+        )
 
     return row
 
@@ -256,7 +270,11 @@ def timed_scan(timeout_seconds: int) -> List[Dict[str, Any]]:
     return []
 
 
-def resolve_symbols_from_discovery(discovered: List[Dict[str, Any]], limit: int, fallback_symbols: List[str]) -> List[str]:
+def resolve_symbols_from_discovery(
+    discovered: List[Dict[str, Any]],
+    limit: int,
+    fallback_symbols: List[str],
+) -> List[str]:
     symbols = list(
         {x["symbol"] for x in discovered if isinstance(x, dict) and x.get("symbol")}
     )[:limit]
@@ -290,7 +308,6 @@ def main() -> None:
     BASE_TRADE_NOTIONAL_USD = float(MODE["capital"])
     MAX_OPEN_FX = int(MODE["fx"])
     MAX_OPEN_CRYPTO = int(MODE["crypto"])
-
     SCAN_TIMEOUT_SECONDS = 20
 
     FALLBACK_SYMBOLS = [
@@ -306,7 +323,6 @@ def main() -> None:
         "BCH-USD",
     ]
 
-    scanner = UnifiedMarketScanner()
     feature_builder = FeatureBuilder()
     regime_engine = MarketRegimeEngine()
     pressure_engine = OpportunityPressureEngine()
@@ -359,7 +375,11 @@ def main() -> None:
             print(f"\n[CYCLE] {cycle} starting")
 
             discovered = timed_scan(SCAN_TIMEOUT_SECONDS)
-            symbols = resolve_symbols_from_discovery(discovered, MAX_SYMBOLS_PER_CYCLE, FALLBACK_SYMBOLS)
+            symbols = resolve_symbols_from_discovery(
+                discovered,
+                MAX_SYMBOLS_PER_CYCLE,
+                FALLBACK_SYMBOLS,
+            )
 
             rows: List[Dict[str, Any]] = []
             for symbol in symbols:
@@ -400,7 +420,7 @@ def main() -> None:
             print("[PIPELINE] sweep_engine.enrich_rows")
             s = sweep_engine.enrich_rows(c)
 
-            # normalize fields before ranking
+            # Normalize and add aliases BEFORE AI/optimizer
             s = [normalize_signal_fields(dict(row)) for row in s]
 
             print("[PIPELINE] ai.rank_opportunities")
@@ -409,7 +429,7 @@ def main() -> None:
             print("[PIPELINE] optimizer.optimize")
             optimized = optimizer.optimize(ranked)
 
-            # preserve enriched fields after optimizer
+            # Preserve enriched fields after optimizer
             full_map: Dict[str, Dict[str, Any]] = {}
             for row in s:
                 sym = row.get("symbol")
@@ -480,7 +500,10 @@ def main() -> None:
                 if not (row.get("execute_trade") or orch_score >= MODE["score"]):
                     continue
 
-                capital = safe(alloc_map.get(sym, {}).get("capital"), BASE_TRADE_NOTIONAL_USD)
+                capital = safe(
+                    alloc_map.get(sym, {}).get("capital"),
+                    BASE_TRADE_NOTIONAL_USD,
+                )
                 qty = capital / price
                 if qty <= 0:
                     continue
