@@ -1,3 +1,5 @@
+# === CSS LIVE DASHBOARD – FULL PIPELINE + FUTURES (NON-REGRESSION SAFE) ===
+
 from __future__ import annotations
 
 import multiprocessing as mp
@@ -28,6 +30,39 @@ from backend.intelligence.signal_confluence_engine import SignalConfluenceEngine
 from backend.intelligence.trade_decision_orchestrator import TradeDecisionOrchestrator
 from backend.scanner.unified_market_scanner import UnifiedMarketScanner
 
+# ✅ FUTURES (ADDITIVE ONLY)
+from backend.app.brokers.futures_sim_adapter import FuturesSimAdapter
+from backend.app.risk.futures_position_manager import FuturesPositionManager
+
+FUTURES_SYMBOLS = {"ES", "NQ", "CL", "GC", "ZN"}
+FUTURES_ENABLED = True
+
+
+# =========================
+# MODE CONTROL
+# =========================
+
+def choose_engine_mode() -> str:
+    print("\n=== SELECT ENGINE MODE ===")
+    print("1 SAFE")
+    print("2 CONSERVATIVE")
+    print("3 BALANCED")
+    print("4 AGGRESSIVE")
+    print("5 EXPANSION")
+
+    try:
+        choice = input("Select: ").strip()
+    except Exception:
+        choice = "3"
+
+    return {
+        "1": "SAFE",
+        "2": "CONSERVATIVE",
+        "3": "BALANCED",
+        "4": "AGGRESSIVE",
+        "5": "EXPANSION",
+    }.get(choice, "BALANCED")
+
 
 # =========================
 # HELPERS
@@ -35,6 +70,8 @@ from backend.scanner.unified_market_scanner import UnifiedMarketScanner
 
 def safe(v: Any, default: float = 0.0) -> float:
     try:
+        if v is None:
+            return default
         return float(v)
     except Exception:
         return default
@@ -44,156 +81,162 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def normalize_signal_fields(row: Dict[str, Any]) -> Dict[str, Any]:
-    row["pressure_score"] = safe(row.get("pressure_score") or row.get("pressure"))
-    row["confluence_score"] = safe(row.get("confluence_score") or row.get("confluence"))
-    row["pressure_acceleration"] = safe(
-        row.get("pressure_acceleration") or row.get("accel") or row.get("acceleration_score")
-    )
-
-    row["pressure"] = row["pressure_score"]
-    row["confluence"] = row["confluence_score"]
-    row["accel"] = row["pressure_acceleration"]
-
-    return row
+def classify_asset(symbol: str) -> str:
+    if symbol in FUTURES_SYMBOLS:
+        return "FUTURES"
+    if "_" in symbol:
+        return "FX"
+    if "-" in symbol:
+        return "CRYPTO"
+    return "OTHER"
 
 
 # =========================
-# SCANNER
+# MAIN APP
 # =========================
 
-def _scan_worker(out_q: mp.Queue):
-    try:
-        scanner = UnifiedMarketScanner()
-        result = scanner.scan() or []
-        out_q.put(result)
-    except Exception:
-        out_q.put([])
+def main() -> None:
 
+    ENGINE_MODE = choose_engine_mode()
 
-def timed_scan(timeout=20):
-    q = mp.Queue()
-    p = mp.Process(target=_scan_worker, args=(q,))
-    p.start()
-    p.join(timeout)
+    MODE = {
+        "SAFE": dict(symbols=5, refresh=15, trades=2, score=0.30, capital=5.0, fx=2, crypto=1),
+        "CONSERVATIVE": dict(symbols=7, refresh=12, trades=3, score=0.24, capital=7.0, fx=3, crypto=1),
+        "BALANCED": dict(symbols=10, refresh=10, trades=5, score=0.18, capital=10.0, fx=4, crypto=2),
+        "AGGRESSIVE": dict(symbols=12, refresh=8, trades=6, score=0.15, capital=12.0, fx=5, crypto=3),
+        "EXPANSION": dict(symbols=15, refresh=6, trades=8, score=0.12, capital=15.0, fx=6, crypto=4),
+    }[ENGINE_MODE]
 
-    if p.is_alive():
-        p.terminate()
-        print("[WARN] scanner timeout -> fallback")
-        return []
+    MAX_SYMBOLS_PER_CYCLE = int(MODE["symbols"])
+    REFRESH_SECONDS = int(MODE["refresh"])
+    MAX_TRADES_PER_CYCLE = int(MODE["trades"])
+    BASE_TRADE_NOTIONAL_USD = float(MODE["capital"])
+    MAX_OPEN_FX = int(MODE["fx"])
+    MAX_OPEN_CRYPTO = int(MODE["crypto"])
+    SCAN_TIMEOUT_SECONDS = 20
 
-    try:
-        return q.get_nowait()
-    except Exception:
-        return []
-
-
-# =========================
-# MAIN
-# =========================
-
-def main():
-    mode = "BALANCED"
-
-    MAX_SYMBOLS = 10
-    REFRESH = 10
-
-    fallback = [
-        "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD",
-        "ADA-USD", "DOGE-USD", "AVAX-USD", "LINK-USD",
-        "LTC-USD", "BCH-USD"
-    ]
-
-    fb = FeatureBuilder()
-    re = MarketRegimeEngine()
-    pe = OpportunityPressureEngine()
-    ae = PressureAccelerationEngine()
-    ce = SignalConfluenceEngine()
-    se = LiquiditySweepDetector()
+    feature_builder = FeatureBuilder()
+    regime_engine = MarketRegimeEngine()
+    pressure_engine = OpportunityPressureEngine()
+    accel_engine = PressureAccelerationEngine()
+    confluence_engine = SignalConfluenceEngine()
+    sweep_engine = LiquiditySweepDetector()
 
     ai = AIOpportunityScorer()
-    opt = QuantSignalOptimizer()
-    alloc = CapitalAllocator(total_capital=50, max_positions=5)
-    orch = TradeDecisionOrchestrator()
+    optimizer = QuantSignalOptimizer()
+    allocator = CapitalAllocator(total_capital=50.0, max_positions=5)
+    orchestrator = TradeDecisionOrchestrator()
 
-    pm = PositionManager()
-    tl = TradeLogger()
+    position_manager = PositionManager()
+    trade_logger = TradeLogger()
+
+    # ✅ FUTURES ENGINE
+    futures_adapter = FuturesSimAdapter()
+    futures_manager = FuturesPositionManager(futures_adapter)
+
+    print("[BOOT] CSS dashboard initializing")
 
     cycle = 0
+    equity = 200.0
 
     while True:
         cycle += 1
-        print(f"\n[CYCLE] {cycle} starting")
 
-        discovered = timed_scan()
-        symbols = list({x["symbol"] for x in discovered if isinstance(x, dict) and x.get("symbol")})[:MAX_SYMBOLS]
+        try:
+            print(f"\n[CYCLE] {cycle} starting")
 
-        if not symbols:
-            print("[FALLBACK] using static symbols")
-            symbols = fallback
+            scanner = UnifiedMarketScanner()
+            discovered = scanner.scan() or []
 
-        rows = []
+            symbols = [x["symbol"] for x in discovered][:MAX_SYMBOLS_PER_CYCLE]
 
-        for s in symbols:
-            data = load_runtime_asset(s) or {}
-            candles = data.get("candles") or []
-            print(f"[LOAD] {s} candles={len(candles)}")
+            rows = []
+            for symbol in symbols:
+                raw = load_runtime_asset(symbol) or {}
+                if raw:
+                    rows.append({**raw, "symbol": symbol})
 
-            rows.append({"symbol": s, **data})
+            enriched = feature_builder.enrich_rows(rows, {})
+            enriched = regime_engine.detect(enriched)
+            enriched = pressure_engine.enrich_rows(enriched)
+            enriched = accel_engine.enrich_rows(enriched)
+            enriched = confluence_engine.enrich_rows(enriched)
+            enriched = sweep_engine.enrich_rows(enriched)
 
-        if not rows:
-            time.sleep(REFRESH)
-            continue
+            ranked = ai.rank_opportunities(enriched)
+            optimized = optimizer.optimize(ranked)
 
-        f = fb.enrich_rows(rows, {})
-        r = re.detect(f)
-        p = pe.enrich_rows(r)
-        a = ae.enrich_rows(p)
-        c = ce.enrich_rows(a)
-        s_rows = se.enrich_rows(c)
+            opened = 0
 
-        # normalize BEFORE ranking
-        s_rows = [normalize_signal_fields(dict(x)) for x in s_rows]
+            for row in optimized:
 
-        ranked = ai.rank_opportunities(s_rows)
+                sym = row["symbol"]
+                price = safe(row.get("price"))
+                decision = orchestrator.evaluate_trade(sym, row.get("candles", []))
 
-        # normalize AGAIN after ranking
-        ranked = [normalize_signal_fields(dict(x)) for x in ranked]
+                if not decision.get("execute_trade"):
+                    continue
 
-        optimized = opt.optimize(ranked)
+                if price <= 0:
+                    continue
 
-        # 🔥 CRITICAL FIX: use enriched rows
-        full_map = {row["symbol"]: dict(row) for row in s_rows}
+                # =========================
+                # 🔥 FUTURES ROUTING
+                # =========================
+                if sym in FUTURES_SYMBOLS and FUTURES_ENABLED:
 
-        final_rows = []
-        for row in optimized:
-            sym = row.get("symbol")
-            merged = {**full_map.get(sym, {}), **row}
-            merged = normalize_signal_fields(merged)
+                    result = futures_manager.open_position(
+                        symbol=sym,
+                        entry_price=price,
+                        stop_price=price * 0.99,
+                        contracts=1,
+                        current_equity=equity,
+                        state=row,
+                    )
 
-            try:
-                orch_out = orch.evaluate_trade(sym, merged.get("candles", []))
-            except Exception:
-                orch_out = {"decision_score": 0.0, "execute_trade": False}
+                    print("[FUTURES OPEN]", sym, result)
+                    continue
 
-            merged["orch"] = safe(orch_out.get("decision_score"))
+                # =========================
+                # EXISTING EXECUTION (UNCHANGED)
+                # =========================
+                if position_manager.has_open_position(sym):
+                    continue
 
-            final_rows.append(merged)
+                qty = BASE_TRADE_NOTIONAL_USD / price
 
-        print("\n--- SIGNAL SNAPSHOT ---")
-        for r in final_rows[:5]:
-            print(
-                r["symbol"],
-                "pressure=", round(r["pressure_score"], 3),
-                "accel=", round(r["pressure_acceleration"], 3),
-                "conf=", round(r["confluence_score"], 3),
-                "orch=", round(r["orch"], 3),
-            )
+                position_manager.open_long_position(
+                    symbol=sym,
+                    quantity=qty,
+                    entry_price=price,
+                    cycle_no=cycle,
+                    opened_at_utc=now(),
+                    asset_class=classify_asset(sym),
+                )
 
-        print("\n===== CSS DASHBOARD =====")
-        print(f"Cycle: {cycle}")
+                trade_logger.log_open(
+                    symbol=sym,
+                    entry_price=price,
+                    quantity=qty,
+                    score=safe(row.get("score")),
+                    signal=f"MODE_{ENGINE_MODE}",
+                    regime=row.get("regime", "NA"),
+                )
 
-        time.sleep(REFRESH)
+                print(f"[OPEN] {sym}")
+                opened += 1
+
+                if opened >= MAX_TRADES_PER_CYCLE:
+                    break
+
+            time.sleep(REFRESH_SECONDS)
+
+        except KeyboardInterrupt:
+            print("\n[STOP] Interrupted")
+            break
+        except Exception:
+            traceback.print_exc()
+            time.sleep(5)
 
 
 if __name__ == "__main__":

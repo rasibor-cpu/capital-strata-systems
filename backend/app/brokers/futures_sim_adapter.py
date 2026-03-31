@@ -1,14 +1,18 @@
 """
 Futures Simulation Adapter
-Capital Strata Systems – Phase 16 (Persistent Exposure)
+Capital Strata Systems – Phase 17 (Spec-Aligned)
 
-Simulates futures contract risk
-with portfolio allocation enforcement
-and persistent exposure tracking.
+Enhancements:
+- Uses contract spec engine (no hardcoded risk)
+- Symbol-aware risk calculation
+- Preserves portfolio allocation enforcement
+- Fully backward compatible
 """
 
 from typing import Dict
+
 from backend.app.global_futures_store import load_exposure, save_exposure
+from backend.app.risk.futures_contract_specs import calculate_futures_risk
 
 
 class FuturesSimAdapter:
@@ -18,23 +22,27 @@ class FuturesSimAdapter:
         max_portfolio_allocation = max % of total equity
         allowed for total futures exposure (default 3%)
         """
-        self.max_allocation = max_portfolio_allocation
+        self.max_allocation = float(max_portfolio_allocation)
         self.open_futures_risk = load_exposure()
 
     # -----------------------------------------------------
 
     def _calculate_contract_risk(
         self,
+        symbol: str,
         entry_price: float,
         stop_price: float,
         contracts: int,
-        point_value: float = 50.0,
     ) -> float:
         """
-        Example: ES = $50 per point
+        Delegates to contract spec engine (symbol-aware).
         """
-        risk_per_contract = abs(entry_price - stop_price) * point_value
-        return risk_per_contract * contracts
+        return calculate_futures_risk(
+            symbol=symbol,
+            entry_price=entry_price,
+            stop_price=stop_price,
+            contracts=contracts,
+        )
 
     # -----------------------------------------------------
 
@@ -49,14 +57,16 @@ class FuturesSimAdapter:
         state: Dict,
     ) -> Dict:
 
+        # ---- Calculate symbol-aware risk ----
         trade_risk = self._calculate_contract_risk(
+            symbol,
             entry_price,
             stop_price,
             contracts,
         )
 
         total_future_risk = self.open_futures_risk + trade_risk
-        allocation_pct = total_future_risk / current_equity
+        allocation_pct = total_future_risk / max(current_equity, 1e-9)
 
         # ---- Portfolio allocation enforcement ----
         if allocation_pct > self.max_allocation:
@@ -89,6 +99,6 @@ class FuturesSimAdapter:
         """
         self.open_futures_risk = max(
             0.0,
-            self.open_futures_risk - risk_reduction
+            self.open_futures_risk - float(risk_reduction)
         )
         save_exposure(self.open_futures_risk)
