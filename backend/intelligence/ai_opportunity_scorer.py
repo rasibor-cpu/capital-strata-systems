@@ -36,6 +36,7 @@ class AIOpportunityScorer:
     Engine contract:
     - score_opportunity(opportunity) -> float
     - explain_opportunity(opportunity) -> detailed dict
+    - rank_opportunities(opportunities) -> preserves original row + attaches score fields
     """
 
     def __init__(
@@ -62,16 +63,10 @@ class AIOpportunityScorer:
     # --------------------------------------------------
 
     def score_opportunity(self, opportunity: Dict[str, Any]) -> float:
-        """
-        Return ONLY the numeric score for engine compatibility.
-        """
         breakdown = self._build_breakdown(opportunity)
         return breakdown.final_score
 
     def explain_opportunity(self, opportunity: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Return full explanation payload for debugging / analytics.
-        """
         symbol = str(opportunity.get("symbol", "UNKNOWN"))
         breakdown = self._build_breakdown(opportunity)
 
@@ -83,13 +78,30 @@ class AIOpportunityScorer:
         }
 
     def rank_opportunities(self, opportunities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Preserve original opportunity rows while attaching scoring metadata.
+
+        Critical fix:
+        - avoids dropping upstream fields such as pressure_score,
+          confluence_score, pressure_acceleration, candles, vwap, momentum, etc.
+        """
         scored: List[Dict[str, Any]] = []
 
         for opportunity in opportunities:
             explanation = self.explain_opportunity(opportunity)
-            scored.append(explanation)
 
-        return sorted(scored, key=lambda item: item["score"], reverse=True)
+            enriched = dict(opportunity)
+            enriched["symbol"] = str(opportunity.get("symbol", "UNKNOWN"))
+            enriched["score"] = explanation["score"]
+            enriched["decision"] = explanation["decision"]
+            enriched["breakdown"] = explanation["breakdown"]
+
+            if "base_ai_score" not in enriched:
+                enriched["base_ai_score"] = 0.0
+
+            scored.append(enriched)
+
+        return sorted(scored, key=lambda item: item.get("score", 0.0), reverse=True)
 
     # --------------------------------------------------
     # INTERNAL BUILD
@@ -396,3 +408,4 @@ if __name__ == "__main__":
 
     print("Numeric score:", scorer.score_opportunity(sample_opportunity))
     print("Detailed explanation:", scorer.explain_opportunity(sample_opportunity))
+    print("Ranked sample:", scorer.rank_opportunities([sample_opportunity]))
