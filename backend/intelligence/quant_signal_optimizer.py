@@ -5,25 +5,16 @@ from typing import Any, Dict, List
 
 class QuantSignalOptimizer:
     """
-    CSS Quant Signal Optimizer
+    CSS Quant Signal Optimizer (Robust Version)
 
-    Converts upstream intelligence output into execution decisions.
-
-    Decision tiers:
-    - ELITE       -> maps to TRADE
-    - QUALIFIED   -> maps to TRADE
-    - WATCH
-    - IGNORE
-
-    Purpose
-    -------
-    - produce a more realistic ranking separation
-    - avoid over-labeling broad clusters of similar signals as equal
-    - support CSS high-win-probability execution logic
+    FIXES:
+    - Preserves signal fields even if ranking drops them
+    - Reads from ALL possible field aliases
+    - Injects missing values safely
+    - No regression to scoring logic
     """
 
     def __init__(self) -> None:
-        # New post-fusion thresholds
         self.elite_threshold = 0.52
         self.trade_threshold = 0.44
         self.watch_threshold = 0.28
@@ -40,6 +31,28 @@ class QuantSignalOptimizer:
         if value > 1.0:
             return 1.0
         return value
+
+    # 🔥 NEW: robust field extraction
+    def _get_pressure(self, row: Dict[str, Any]) -> float:
+        return self._safe(
+            row.get("pressure_score")
+            or row.get("pressure")
+            or row.get("opportunity_pressure")
+        )
+
+    def _get_confluence(self, row: Dict[str, Any]) -> float:
+        return self._safe(
+            row.get("confluence_score")
+            or row.get("confluence")
+            or row.get("signal_confluence")
+        )
+
+    def _get_accel(self, row: Dict[str, Any]) -> float:
+        return self._safe(
+            row.get("pressure_acceleration")
+            or row.get("accel")
+            or row.get("acceleration_score")
+        )
 
     def _regime_bonus(self, regime: str) -> float:
         r = str(regime).upper()
@@ -99,15 +112,19 @@ class QuantSignalOptimizer:
 
         for row in rows:
             symbol = str(row.get("symbol", "")).upper()
+
             score = self._safe(row.get("score", 0.0))
             base_ai_score = self._safe(row.get("base_ai_score", 0.0))
-            pressure = self._safe(row.get("pressure_score", 0.0))
-            accel = self._safe(row.get("pressure_acceleration", 0.0))
-            confluence = self._safe(row.get("confluence_score", 0.0))
+
+            # 🔥 FIX: robust extraction
+            pressure = self._get_pressure(row)
+            accel = self._get_accel(row)
+            confluence = self._get_confluence(row)
+
             spread = abs(self._safe(row.get("spread_bps", 0.0)))
             regime = str(row.get("regime", "NEUTRAL")).upper()
 
-            # Main blended optimizer score
+            # 🔥 CORE SCORING (UNCHANGED)
             trade_score = (
                 score * 0.42
                 + confluence * 0.23
@@ -136,6 +153,12 @@ class QuantSignalOptimizer:
                 decision = "IGNORE"
 
             enriched = dict(row)
+
+            # 🔥 IMPORTANT: re-inject values so downstream sees them
+            enriched["pressure_score"] = pressure
+            enriched["confluence_score"] = confluence
+            enriched["pressure_acceleration"] = accel
+
             enriched["symbol"] = symbol
             enriched["trade_score"] = trade_score
             enriched["signal_tier"] = tier
