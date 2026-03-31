@@ -6,6 +6,9 @@
 # - keeps mode selector
 # - keeps allocator
 # - integrates position updates / closes
+# - adds startup diagnostics
+# - adds fail-soft scanner timeout and fallback universe
+# - adds fail-soft runtime asset loading
 # =========================
 
 from __future__ import annotations
@@ -13,6 +16,7 @@ from __future__ import annotations
 import sys
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
@@ -78,6 +82,24 @@ MAX_TRADES_PER_CYCLE = int(MODE["trades"])
 BASE_TRADE_NOTIONAL_USD = float(MODE["capital"])
 MAX_OPEN_FX = int(MODE["fx"])
 MAX_OPEN_CRYPTO = int(MODE["crypto"])
+
+SCAN_TIMEOUT_SECONDS = 20
+LOAD_TIMEOUT_SECONDS = 20
+
+FALLBACK_SYMBOLS = [
+    "BTC-USD",
+    "ETH-USD",
+    "SOL-USD",
+    "XRP-USD",
+    "ADA-USD",
+    "DOGE-USD",
+    "AVAX-USD",
+    "LINK-USD",
+    "LTC-USD",
+    "BCH-USD",
+    "DOT-USD",
+    "UNI-USD",
+]
 
 # =========================
 # ENGINES
@@ -244,9 +266,60 @@ def build_base_row(symbol: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def timed_scan(timeout_seconds: int = SCAN_TIMEOUT_SECONDS) -> List[Dict[str, Any]]:
+    print(f"[STARTUP] scanner.scan() timeout={timeout_seconds}s")
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(scanner.scan)
+            result = future.result(timeout=timeout_seconds)
+        result = result or []
+        print(f"[STARTUP] scanner.scan() completed -> discovered={len(result)}")
+        return result
+    except FuturesTimeoutError:
+        print("[WARN] scanner.scan() timed out; switching to fallback universe")
+        return []
+    except Exception as e:
+        print(f"[WARN] scanner.scan() failed: {e}; switching to fallback universe")
+        return []
+
+
+def timed_load_runtime_asset(symbol: str, timeout_seconds: int = LOAD_TIMEOUT_SECONDS) -> Dict[str, Any]:
+    print(f"[LOAD] {symbol} timeout={timeout_seconds}s")
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(load_runtime_asset, symbol)
+            result = future.result(timeout=timeout_seconds)
+        result = result or {}
+        candles = result.get("candles") or []
+        print(f"[LOAD-OK] {symbol} candles={len(candles)}")
+        return result
+    except FuturesTimeoutError:
+        print(f"[LOAD-TIMEOUT] {symbol}")
+        return {}
+    except Exception as e:
+        print(f"[LOAD-FAIL] {symbol} error={e}")
+        return {}
+
+
+def resolve_symbols_from_discovery(discovered: List[Dict[str, Any]], limit: int) -> List[str]:
+    symbols = list(
+        {x["symbol"] for x in discovered if isinstance(x, dict) and x.get("symbol")}
+    )[:limit]
+
+    if symbols:
+        return symbols
+
+    fallback = FALLBACK_SYMBOLS[:limit]
+    print(f"[FALLBACK] using static universe -> {fallback}")
+    return fallback
+
+
 # =========================
 # MAIN LOOP
 # =========================
+
+print("[BOOT] CSS dashboard initializing")
+print(f"[BOOT] Mode={ENGINE_MODE} symbols={MAX_SYMBOLS_PER_CYCLE} refresh={REFRESH_SECONDS}s trades={MAX_TRADES_PER_CYCLE}")
 
 cycle = 0
 equity = 200.0
@@ -255,29 +328,46 @@ while True:
     cycle += 1
 
     try:
-        discovered = scanner.scan() or []
-        symbols = list(
-            {x["symbol"] for x in discovered if isinstance(x, dict) and x.get("symbol")}
-        )[:MAX_SYMBOLS_PER_CYCLE]
+        print(f"\n[CYCLE] {cycle} starting")
+
+        discovered = timed_scan()
+        symbols = resolve_symbols_from_discovery(discovered, MAX_SYMBOLS_PER_CYCLE)
 
         rows: List[Dict[str, Any]] = []
         for symbol in symbols:
-            raw = load_runtime_asset(symbol) or {}
+            raw = timed_load_runtime_asset(symbol)
+            if not raw:
+                continue
             rows.append(build_base_row(symbol, raw))
 
+        print(f"[CYCLE] rows built={len(rows)}")
         if not rows:
+            print("[CYCLE] no rows available; sleeping")
             time.sleep(REFRESH_SECONDS)
             continue
 
-        # Full pipeline
+        print("[PIPELINE] feature_builder.enrich_rows")
         f = feature_builder.enrich_rows(rows, {})
+
+        print("[PIPELINE] regime_engine.detect")
         r = regime_engine.detect(f)
+
+        print("[PIPELINE] pressure_engine.enrich_rows")
         p = pressure_engine.enrich_rows(r)
+
+        print("[PIPELINE] accel_engine.enrich_rows")
         a = accel_engine.enrich_rows(p)
+
+        print("[PIPELINE] confluence_engine.enrich_rows")
         c = confluence_engine.enrich_rows(a)
+
+        print("[PIPELINE] sweep_engine.enrich_rows")
         s = sweep_engine.enrich_rows(c)
 
+        print("[PIPELINE] ai.rank_opportunities")
         ranked = ai.rank_opportunities(s)
+
+        print("[PIPELINE] optimizer.optimize")
         optimized = optimizer.optimize(ranked)
 
         # Preserve enriched fields after optimizer
@@ -313,6 +403,8 @@ while True:
             merged["net_edge_bps"] = safe(orch.get("net_edge_bps"))
 
             final_rows.append(merged)
+
+        print(f"[PIPELINE] final_rows={len(final_rows)}")
 
         print("\n--- SIGNAL SNAPSHOT ---")
         for row in final_rows[:5]:
