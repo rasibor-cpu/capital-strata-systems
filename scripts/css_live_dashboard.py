@@ -10,7 +10,7 @@
 # - adds PROCESS-based fail-soft scanner timeout and fallback universe
 # - adds Windows-safe multiprocessing entrypoint
 # - fixes signal field normalization
-# - fixes optimizer alias mapping (pressure/confluence/accel)
+# - fixes optimizer alias mapping before and after ranking
 # =========================
 
 from __future__ import annotations
@@ -193,7 +193,7 @@ def build_base_row(symbol: str, payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def normalize_signal_fields(row: Dict[str, Any]) -> Dict[str, Any]:
-    # Preserve canonical dashboard fields
+    # Canonical dashboard fields
     if "pressure_score" not in row:
         if "pressure" in row:
             row["pressure_score"] = row["pressure"]
@@ -214,17 +214,10 @@ def normalize_signal_fields(row: Dict[str, Any]) -> Dict[str, Any]:
         elif "acceleration_score" in row:
             row["pressure_acceleration"] = row["acceleration_score"]
 
-    # Optimizer aliases: these are what the optimizer appears to read
-    if "pressure" not in row:
-        row["pressure"] = safe(row.get("pressure_score"))
-
-    if "confluence" not in row:
-        row["confluence"] = safe(row.get("confluence_score"))
-
-    if "accel" not in row:
-        row["accel"] = safe(
-            row.get("pressure_acceleration", row.get("acceleration_score", 0.0))
-        )
+    # Optimizer aliases
+    row["pressure"] = safe(row.get("pressure_score"))
+    row["confluence"] = safe(row.get("confluence_score"))
+    row["accel"] = safe(row.get("pressure_acceleration", row.get("acceleration_score")))
 
     return row
 
@@ -426,12 +419,19 @@ def main() -> None:
             print("[PIPELINE] ai.rank_opportunities")
             ranked = ai.rank_opportunities(s)
 
+            # Re-apply aliases AFTER ranking so optimizer cannot lose them
+            normalized_ranked: List[Dict[str, Any]] = []
+            for row in ranked:
+                rr = normalize_signal_fields(dict(row))
+                normalized_ranked.append(rr)
+            ranked = normalized_ranked
+
             print("[PIPELINE] optimizer.optimize")
             optimized = optimizer.optimize(ranked)
 
             # Preserve enriched fields after optimizer
             full_map: Dict[str, Dict[str, Any]] = {}
-            for row in s:
+            for row in ranked:
                 sym = row.get("symbol")
                 if sym:
                     full_map[sym] = dict(row)
