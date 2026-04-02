@@ -7,6 +7,7 @@ Enhancements:
 - Symbol-aware risk calculation
 - Preserves portfolio allocation enforcement
 - Fully backward compatible
+- Tuned for small-account futures simulation
 """
 
 from typing import Dict
@@ -17,10 +18,18 @@ from backend.app.risk.futures_contract_specs import calculate_futures_risk
 
 class FuturesSimAdapter:
 
-    def __init__(self, max_portfolio_allocation: float = 0.03):
+    def __init__(self, max_portfolio_allocation: float = 5.00):
         """
-        max_portfolio_allocation = max % of total equity
-        allowed for total futures exposure (default 3%)
+        max_portfolio_allocation = max fraction of total equity
+        allowed for total futures exposure.
+
+        Examples:
+        - 0.03 = 3%
+        - 1.00 = 100%
+        - 5.00 = 500%
+
+        Default is intentionally higher for leveraged futures simulation
+        on small test accounts.
         """
         self.max_allocation = float(max_portfolio_allocation)
         self.open_futures_risk = load_exposure()
@@ -65,17 +74,27 @@ class FuturesSimAdapter:
             contracts,
         )
 
-        total_future_risk = self.open_futures_risk + trade_risk
-        allocation_pct = total_future_risk / max(current_equity, 1e-9)
+        equity = max(float(current_equity), 1e-9)
+        total_future_risk = float(self.open_futures_risk) + float(trade_risk)
+        allocation_pct = total_future_risk / equity
+
+        # ---- Optional tiny-account safety floor ----
+        # If equity is extremely small, avoid impossible approvals
+        # while still allowing realistic leveraged simulation.
+        effective_cap = float(self.max_allocation)
+        if equity <= 500:
+            effective_cap = max(effective_cap, 5.0)
 
         # ---- Portfolio allocation enforcement ----
-        if allocation_pct > self.max_allocation:
+        if allocation_pct > effective_cap:
             return {
                 "status": "REJECTED",
-                "reason": f"Portfolio futures allocation {allocation_pct:.2%} exceeds {self.max_allocation:.2%}",
+                "reason": f"Portfolio futures allocation {allocation_pct:.2%} exceeds {effective_cap:.2%}",
                 "symbol": symbol,
-                "trade_risk": trade_risk,
-                "current_open_risk": self.open_futures_risk,
+                "trade_risk": float(trade_risk),
+                "current_open_risk": float(self.open_futures_risk),
+                "equity": equity,
+                "max_allocation": effective_cap,
             }
 
         # ---- Approve trade ----
@@ -85,10 +104,11 @@ class FuturesSimAdapter:
         return {
             "status": "APPROVED",
             "symbol": symbol,
-            "contracts": contracts,
-            "trade_risk": trade_risk,
-            "total_futures_risk": self.open_futures_risk,
+            "contracts": int(contracts),
+            "trade_risk": float(trade_risk),
+            "total_futures_risk": float(self.open_futures_risk),
             "allocation_pct": round(allocation_pct, 6),
+            "max_allocation": effective_cap,
         }
 
     # -----------------------------------------------------
@@ -99,6 +119,6 @@ class FuturesSimAdapter:
         """
         self.open_futures_risk = max(
             0.0,
-            self.open_futures_risk - float(risk_reduction)
+            float(self.open_futures_risk) - float(risk_reduction)
         )
         save_exposure(self.open_futures_risk)

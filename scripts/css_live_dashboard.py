@@ -46,7 +46,7 @@ def choose_engine_mode() -> str:
     print("2 CONSERVATIVE")
     print("3 BALANCED")
     print("4 AGGRESSIVE")
-    print("5 EXPANSION")
+    print("5 TEST")
 
     try:
         choice = input("Select: ").strip()
@@ -58,7 +58,7 @@ def choose_engine_mode() -> str:
         "2": "CONSERVATIVE",
         "3": "BALANCED",
         "4": "AGGRESSIVE",
-        "5": "EXPANSION",
+        "5": "TEST",
     }.get(choice, "BALANCED")
 
 
@@ -306,7 +306,15 @@ def main() -> None:
         "CONSERVATIVE": dict(symbols=7, refresh=12, trades=3, score=0.24, capital=7.0, fx=3, crypto=1, futures=1),
         "BALANCED": dict(symbols=10, refresh=10, trades=5, score=0.18, capital=10.0, fx=4, crypto=2, futures=1),
         "AGGRESSIVE": dict(symbols=12, refresh=8, trades=6, score=0.15, capital=12.0, fx=5, crypto=3, futures=2),
-        "EXPANSION": dict(symbols=15, refresh=6, trades=8, score=0.12, capital=15.0, fx=6, crypto=4, futures=2),
+        "TEST": dict(symbols=15, refresh=6, trades=8, score=0.12, capital=15.0, fx=6, crypto=4, futures=2),
+    }[ENGINE_MODE]
+
+    FUTURES_MODE = {
+        "SAFE": dict(risk=0.00020, max_contracts=1),
+        "CONSERVATIVE": dict(risk=0.00030, max_contracts=1),
+        "BALANCED": dict(risk=0.00040, max_contracts=1),
+        "AGGRESSIVE": dict(risk=0.00060, max_contracts=2),
+        "TEST": dict(risk=0.00080, max_contracts=2),
     }[ENGINE_MODE]
 
     MAX_SYMBOLS_PER_CYCLE = int(MODE["symbols"])
@@ -534,20 +542,48 @@ def main() -> None:
                     continue
 
                 if classify_asset(sym) == "FUTURES" and FUTURES_ENABLED:
+                    stop_distance = price * 0.005
+                    risk_budget = max(equity * FUTURES_MODE["risk"], 0.01)
+
+                    point_value = {
+                        "ES": 5.0,
+                        "NQ": 2.0,
+                        "CL": 100.0,
+                        "GC": 10.0,
+                        "ZN": 100.0,
+                    }.get(sym, 5.0)
+
+                    risk_per_contract = max(stop_distance * point_value, 0.01)
+                    raw_contracts = max(1, int(risk_budget / risk_per_contract))
+                    contracts = min(raw_contracts, FUTURES_MODE["max_contracts"])
+
                     futures_result = futures_manager.open_position(
                         symbol=sym,
                         entry_price=price,
-                        stop_price=price * 0.99,
-                        contracts=1,
+                        stop_price=price * 0.995,
+                        contracts=contracts,
                         current_equity=equity,
-                        state=row,
+                        state={
+                            **row,
+                            "micro_simulated": True,
+                            "effective_point_value": point_value,
+                            "risk_budget": risk_budget,
+                            "risk_per_contract": risk_per_contract,
+                        },
                     )
 
                     if futures_result.get("status") in {"OPENED", "APPROVED"}:
-                        print(f"[FUTURES OPEN] {sym} score={orch_score:.3f} mode={ENGINE_MODE}")
+                        print(
+                            f"[FUTURES OPEN] {sym} score={orch_score:.3f} "
+                            f"mode={ENGINE_MODE} contracts={contracts} "
+                            f"risk_budget={risk_budget:.4f} rpc={risk_per_contract:.4f}"
+                        )
                         opened += 1
                     else:
-                        print(f"[FUTURES SKIP] {sym} -> {futures_result}")
+                        print(
+                            f"[FUTURES SKIP] {sym} contracts={contracts} "
+                            f"risk_budget={risk_budget:.4f} rpc={risk_per_contract:.4f} -> {futures_result}"
+                        )
                     continue
 
                 try:
