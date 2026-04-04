@@ -1,23 +1,49 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 class QuantSignalOptimizer:
     """
-    CSS Quant Signal Optimizer (Robust Version)
+    CSS Quant Signal Optimizer
+    Mode-aware, backward-compatible, scaled for the current live dashboard.
 
-    FIXES:
-    - Preserves signal fields even if ranking drops them
-    - Reads from ALL possible field aliases
-    - Injects missing values safely
-    - No regression to scoring logic
+    Goals:
+    - produce non-zero trade_score
+    - align thresholds with current score ranges
+    - preserve optimize(rows) compatibility
+    - support classify(row) for dashboard use
     """
 
-    def __init__(self) -> None:
-        self.elite_threshold = 0.52
-        self.trade_threshold = 0.44
-        self.watch_threshold = 0.28
+    DEFAULT_PROFILE = {
+        "elite": 0.22,
+        "qualified": 0.14,
+        "watch": 0.09,
+        "min_confluence_elite": 0.10,
+        "min_pressure_elite": 0.05,
+        "min_confluence_qualified": 0.05,
+    }
+
+    def __init__(self, profile: Optional[Dict[str, float]] = None) -> None:
+        merged = dict(self.DEFAULT_PROFILE)
+        if isinstance(profile, dict):
+            merged.update(profile)
+
+        # Preserve dashboard mode thresholds only if they are realistic.
+        # If mode thresholds are very high for the current score scale, cap them.
+        elite = float(merged.get("elite", 0.22))
+        qualified = float(merged.get("qualified", 0.14))
+        watch = float(merged.get("watch", 0.09))
+
+        self.elite_threshold = min(elite, 0.22)
+        self.trade_threshold = min(qualified, 0.14)
+        self.watch_threshold = min(watch, 0.09)
+
+        self.min_confluence_elite = float(merged.get("min_confluence_elite", 0.10))
+        self.min_pressure_elite = float(merged.get("min_pressure_elite", 0.05))
+        self.min_confluence_qualified = float(merged.get("min_confluence_qualified", 0.05))
+
+        self.profile = merged
 
     def _safe(self, value: Any) -> float:
         try:
@@ -32,7 +58,6 @@ class QuantSignalOptimizer:
             return 1.0
         return value
 
-    # 🔥 NEW: robust field extraction
     def _get_pressure(self, row: Dict[str, Any]) -> float:
         return self._safe(
             row.get("pressure_score")
@@ -50,55 +75,84 @@ class QuantSignalOptimizer:
     def _get_accel(self, row: Dict[str, Any]) -> float:
         return self._safe(
             row.get("pressure_acceleration")
-            or row.get("accel")
             or row.get("acceleration_score")
+            or row.get("accel")
         )
+
+    def _get_score(self, row: Dict[str, Any]) -> float:
+        return self._safe(
+            row.get("score")
+            or row.get("ai_score")
+            or row.get("opportunity_score")
+            or row.get("decision_score")
+        )
+
+    def _get_vwap_dev(self, row: Dict[str, Any]) -> float:
+        return abs(
+            self._safe(
+                row.get("vwap_dev")
+                or row.get("vwap_distance")
+                or row.get("vwap_deviation")
+            )
+        )
+
+    def _normalize_spread(self, spread_bps: float) -> float:
+        spread = abs(self._safe(spread_bps))
+        if spread >= 900:
+            return 10.0
+        return spread
 
     def _regime_bonus(self, regime: str) -> float:
         r = str(regime).upper()
 
         if "MEAN" in r:
-            return 0.03
+            return 0.020
         if "RANGE" in r:
-            return 0.025
+            return 0.015
         if "TREND" in r:
-            return 0.02
+            return 0.012
         if "BREAKOUT" in r:
-            return 0.02
+            return 0.010
         if "VOLATILE" in r:
-            return 0.01
-        if "NEUTRAL" in r:
-            return 0.01
-        if "DEFENSIVE" in r or "PANIC" in r:
-            return -0.05
+            return 0.008
+        if "CRYPTO" in r:
+            return 0.006
+        if "FX" in r:
+            return 0.005
+        if "FUTURES" in r:
+            return 0.005
         return 0.0
 
-    def _spread_bonus(self, spread_bps: float) -> float:
-        spread = abs(spread_bps)
+    def _spread_penalty(self, spread_bps: float) -> float:
+        spread = self._normalize_spread(spread_bps)
 
-        if spread >= 60:
-            return 0.08
-        if spread >= 40:
-            return 0.06
-        if spread >= 25:
-            return 0.04
+        if spread >= 20:
+            return 0.050
         if spread >= 15:
-            return 0.025
-        if spread >= 8:
-            return 0.01
-        return 0.0
+            return 0.035
+        if spread >= 10:
+            return 0.020
+        if spread >= 6:
+            return 0.010
+        return 0.003
 
-    def _tier(self, trade_score: float, pressure: float, accel: float, confluence: float) -> str:
+    def _tier(
+        self,
+        trade_score: float,
+        pressure: float,
+        accel: float,
+        confluence: float,
+    ) -> str:
         if (
             trade_score >= self.elite_threshold
-            and confluence >= 0.80
-            and pressure >= 0.24
+            and confluence >= self.min_confluence_elite
+            and pressure >= self.min_pressure_elite
         ):
             return "ELITE"
 
         if (
             trade_score >= self.trade_threshold
-            and confluence >= 0.78
+            and confluence >= self.min_confluence_qualified
         ):
             return "QUALIFIED"
 
@@ -107,73 +161,82 @@ class QuantSignalOptimizer:
 
         return "IGNORE"
 
+    def enrich_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        enriched = dict(row)
+
+        score = self._get_score(row)
+        pressure = self._get_pressure(row)
+        confluence = self._get_confluence(row)
+        accel = self._get_accel(row)
+        vwap_dev = self._get_vwap_dev(row)
+        spread = self._normalize_spread(row.get("spread_bps", 0.0))
+        regime = str(row.get("regime", "NEUTRAL")).upper()
+
+        # Current environment has low-to-mid raw scores, so use a lighter fusion model.
+        trade_score = (
+            score * 0.65
+            + confluence * 0.12
+            + pressure * 0.10
+            + accel * 0.05
+            + min(vwap_dev * 6.0, 0.08)
+        )
+
+        trade_score += self._regime_bonus(regime)
+        trade_score -= self._spread_penalty(spread)
+        trade_score = self._clamp01(trade_score)
+
+        signal_tier = self._tier(
+            trade_score=trade_score,
+            pressure=pressure,
+            accel=accel,
+            confluence=confluence,
+        )
+
+        if signal_tier in {"ELITE", "QUALIFIED"}:
+            decision = "TRADE"
+        elif signal_tier == "WATCH":
+            decision = "WATCH"
+        else:
+            decision = "IGNORE"
+
+        enriched["score"] = score
+        enriched["pressure_score"] = pressure
+        enriched["confluence_score"] = confluence
+        enriched["pressure_acceleration"] = accel
+        enriched["trade_score"] = round(trade_score, 6)
+        enriched["signal_tier"] = signal_tier
+        enriched["decision"] = decision
+        enriched["spread_bps"] = spread
+        enriched["regime"] = regime
+
+        return enriched
+
+    def classify(self, row: Dict[str, Any]) -> str:
+        enriched = self.enrich_row(row)
+
+        # Mutate input row too, so the dashboard can print trade_score immediately.
+        try:
+            row.update(enriched)
+        except Exception:
+            pass
+
+        return str(enriched.get("signal_tier", "IGNORE"))
+
     def optimize(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         optimized: List[Dict[str, Any]] = []
 
         for row in rows:
-            symbol = str(row.get("symbol", "")).upper()
-
-            score = self._safe(row.get("score", 0.0))
-            base_ai_score = self._safe(row.get("base_ai_score", 0.0))
-
-            # 🔥 FIX: robust extraction
-            pressure = self._get_pressure(row)
-            accel = self._get_accel(row)
-            confluence = self._get_confluence(row)
-
-            spread = abs(self._safe(row.get("spread_bps", 0.0)))
-            regime = str(row.get("regime", "NEUTRAL")).upper()
-
-            # 🔥 CORE SCORING (UNCHANGED)
-            trade_score = (
-                score * 0.42
-                + confluence * 0.23
-                + pressure * 0.20
-                + accel * 0.10
-                + base_ai_score * 0.05
-            )
-
-            trade_score += self._spread_bonus(spread)
-            trade_score += self._regime_bonus(regime)
-
-            trade_score = self._clamp01(trade_score)
-
-            tier = self._tier(
-                trade_score=trade_score,
-                pressure=pressure,
-                accel=accel,
-                confluence=confluence,
-            )
-
-            if tier in {"ELITE", "QUALIFIED"}:
-                decision = "TRADE"
-            elif tier == "WATCH":
-                decision = "WATCH"
-            else:
-                decision = "IGNORE"
-
-            enriched = dict(row)
-
-            # 🔥 IMPORTANT: re-inject values so downstream sees them
-            enriched["pressure_score"] = pressure
-            enriched["confluence_score"] = confluence
-            enriched["pressure_acceleration"] = accel
-
-            enriched["symbol"] = symbol
-            enriched["trade_score"] = trade_score
-            enriched["signal_tier"] = tier
-            enriched["decision"] = decision
+            enriched = self.enrich_row(row)
 
             print(
-                f"[{tier}] {symbol}: "
-                f"base={base_ai_score:.6f}, "
-                f"score={score:.6f}, "
-                f"confluence={confluence:.6f}, "
-                f"pressure={pressure:.6f}, "
-                f"accel={accel:.6f}, "
-                f"spread={spread:.6f}, "
-                f"trade_score={trade_score:.6f}, "
-                f"regime={regime}"
+                f"[{enriched['signal_tier']}] {enriched.get('symbol', 'UNKNOWN')}: "
+                f"score={float(enriched.get('score', 0.0)):.6f}, "
+                f"confluence={float(enriched.get('confluence_score', 0.0)):.6f}, "
+                f"pressure={float(enriched.get('pressure_score', 0.0)):.6f}, "
+                f"accel={float(enriched.get('pressure_acceleration', 0.0)):.6f}, "
+                f"spread={float(enriched.get('spread_bps', 0.0)):.6f}, "
+                f"trade_score={float(enriched.get('trade_score', 0.0)):.6f}, "
+                f"regime={enriched.get('regime', 'NEUTRAL')}"
             )
 
             optimized.append(enriched)

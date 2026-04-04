@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Any, Dict, List
 
 
 def clamp01(v: float) -> float:
@@ -11,33 +11,120 @@ def clamp01(v: float) -> float:
     return v
 
 
+def _safe_float(v: Any, default: float = 0.0) -> float:
+    try:
+        if v is None:
+            return default
+        return float(v)
+    except Exception:
+        return default
+
+
 class VWAPElasticityEngine:
     """
-    Measures how stretched price is relative to VWAP momentum.
+    CSS VWAP Elasticity Engine
 
-    elasticity = vwap deviation / momentum
+    Measures how strongly price is reverting toward VWAP.
 
-    Higher elasticity = greater probability of mean reversion.
+    Supports:
+    - compute(row) for dashboard/orchestrator use
+    - enrich_row(row)
+    - enrich_rows(rows)
+
+    Outputs:
+    - vwap_elasticity (raw)
+    - elasticity_score (0 to 1 normalized)
     """
 
-    def enrich_rows(self, rows: List[Dict]) -> List[Dict]:
+    def _extract_close(self, candle: Any) -> float:
+        if isinstance(candle, dict):
+            return _safe_float(candle.get("close", candle.get("c", 0.0)), 0.0)
 
-        enriched: List[Dict] = []
+        if isinstance(candle, (list, tuple)) and len(candle) >= 5:
+            return _safe_float(candle[4], 0.0)
 
-        for r in rows:
+        if hasattr(candle, "close"):
+            return _safe_float(getattr(candle, "close"), 0.0)
 
-            vwap_dev_abs = abs(float(r.get("vwap_dev_abs", 0.0)))
-            momentum = abs(float(r.get("momentum", 0.0))) + 1e-6
+        return _safe_float(candle, 0.0)
 
-            elasticity = vwap_dev_abs / momentum
+    def _compute_from_candles(self, row: Dict[str, Any]) -> Dict[str, float]:
+        candles: List[Any] = row.get("candles", []) or []
+        vwap = _safe_float(row.get("vwap", 0.0), 0.0)
 
-            elasticity_score = clamp01(elasticity * 0.6)
+        if len(candles) < 5 or vwap <= 0:
+            return {"vwap_elasticity": 0.0, "elasticity_score": 0.0}
 
-            row = dict(r)
+        closes = [self._extract_close(c) for c in candles[-5:]]
+        if len(closes) < 5 or any(c <= 0 for c in closes):
+            return {"vwap_elasticity": 0.0, "elasticity_score": 0.0}
 
-            row["vwap_elasticity"] = elasticity
-            row["elasticity_score"] = elasticity_score
+        distances = [c - vwap for c in closes]
 
-            enriched.append(row)
+        contraction = 0.0
+        observations = 0
 
+        for i in range(1, len(distances)):
+            prev = abs(distances[i - 1])
+            curr = abs(distances[i])
+
+            if prev > 0:
+                contraction += max(0.0, (prev - curr) / prev)
+                observations += 1
+
+        if observations == 0:
+            return {"vwap_elasticity": 0.0, "elasticity_score": 0.0}
+
+        contraction /= observations
+        elasticity = contraction
+        elasticity_score = clamp01(elasticity * 2.5)
+
+        return {
+            "vwap_elasticity": round(elasticity, 6),
+            "elasticity_score": round(elasticity_score, 6),
+        }
+
+    def _compute_from_fields(self, row: Dict[str, Any]) -> Dict[str, float]:
+        vwap_dev_abs = abs(
+            _safe_float(
+                row.get("vwap_dev_abs", row.get("vwap_dev", row.get("vwap_distance", 0.0))),
+                0.0,
+            )
+        )
+        momentum = abs(
+            _safe_float(
+                row.get("momentum", row.get("momentum_window", 0.0)),
+                0.0,
+            )
+        ) + 1e-6
+
+        elasticity = vwap_dev_abs / momentum
+        elasticity_score = clamp01(elasticity * 0.6)
+
+        return {
+            "vwap_elasticity": round(elasticity, 6),
+            "elasticity_score": round(elasticity_score, 6),
+        }
+
+    def compute(self, row: Dict[str, Any]) -> float:
+        if row.get("candles"):
+            result = self._compute_from_candles(row)
+        else:
+            result = self._compute_from_fields(row)
+
+        return float(result.get("elasticity_score", 0.0))
+
+    def enrich_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        enriched = dict(row)
+
+        if row.get("candles"):
+            result = self._compute_from_candles(row)
+        else:
+            result = self._compute_from_fields(row)
+
+        enriched["vwap_elasticity"] = result["vwap_elasticity"]
+        enriched["elasticity_score"] = result["elasticity_score"]
         return enriched
+
+    def enrich_rows(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return [self.enrich_row(r) for r in rows]
