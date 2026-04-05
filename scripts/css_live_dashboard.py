@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import json
 import sys
 import time
 import traceback
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List
 
 import requests
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+AUDIT_DIR = PROJECT_ROOT / "audit_logs"
+AUDIT_DIR.mkdir(exist_ok=True)
+TRADE_LOG = AUDIT_DIR / "trades.jsonl"
+
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -16,8 +21,20 @@ from backend.data.coinbase_historical_downloader import load_runtime_universe
 from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
 
 
+# ================= ACCOUNT =================
+START_CAPITAL = 1000.0
+equity = START_CAPITAL
+
+stats = {
+    "trades": 0,
+    "wins": 0,
+    "losses": 0,
+    "pnl": 0.0,
+}
+
+
 # ================= CONFIG =================
-TOTAL_CAPITAL = 1000
+TOTAL_CAPITAL = 1000.0
 
 CLASS_WEIGHTS = {
     "crypto": 0.40,
@@ -33,24 +50,29 @@ CLASS_LIMITS = {
     "options": 2,
 }
 
-CLASS_MIN_TRADE_SCORE = {
-    "crypto": 0.10,
-    "fx": 0.03,
-    "futures": 0.50,
-    "options": 0.20,
+MAX_OPEN_POSITIONS = 10
+MAX_CYCLES = 6
+
+BASE_FEE_BPS = {
+    "crypto": 12.0,
+    "fx": 4.0,
+    "futures": 5.0,
+    "options": 10.0,
 }
 
-MAX_OPEN_POSITIONS = 10
+DEFAULT_SPREAD_BPS = {
+    "crypto": 8.0,
+    "fx": 2.0,
+    "futures": 3.0,
+    "options": 8.0,
+}
 
-TP1, TP2, TP3 = 0.001, 0.002, 0.0035
-SL = -0.0025
-MAX_CYCLES = 5
-
+SAFETY_MARGIN_BPS = 2.0
 
 PRODUCTS_BY_CLASS = {
-    "crypto": ["BTC-USD","ETH-USD","SOL-USD","XRP-USD","ADA-USD","DOGE-USD","AVAX-USD","LINK-USD"],
-    "fx": ["EUR_USD","GBP_USD","USD_JPY","AUD_USD","USD_CAD"],
-    "futures": ["ES","NQ","CL","GC","ZN"],
+    "crypto": ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD", "DOGE-USD", "AVAX-USD", "LINK-USD"],
+    "fx": ["EUR_USD", "GBP_USD", "USD_JPY", "AUD_USD", "USD_CAD"],
+    "futures": ["ES", "NQ", "CL", "GC", "ZN"],
     "options": [],
 }
 
@@ -61,60 +83,98 @@ last_prices: Dict[str, float] = {}
 
 
 # ================= HELPERS =================
-def safe_float(v, d=0.0):
+def safe_float(v, d: float = 0.0) -> float:
     try:
+        if v is None:
+            return d
         return float(v)
-    except:
+    except Exception:
         return d
 
 
-def symbol_asset_class(symbol):
+def symbol_asset_class(symbol: str) -> str:
     for k, v in PRODUCTS_BY_CLASS.items():
         if symbol in v:
             return k
     return "unknown"
 
 
-def ensure_vwap_dev(r):
-    p = safe_float(r["price"])
-    v = safe_float(r["vwap"], p)
-    r["vwap_dev"] = (p - v) / v if v else 0
+def count_open_positions_by_class() -> Dict[str, int]:
+    counts = {k: 0 for k in CLASS_LIMITS}
+    for s in open_positions:
+        cls = symbol_asset_class(s)
+        if cls in counts:
+            counts[cls] += 1
+    return counts
+
+
+def log_trade(data: Dict) -> None:
+    with open(TRADE_LOG, "a", encoding="utf-8") as f:
+        f.write(json.dumps(data) + "\n")
+
+
+def print_performance() -> None:
+    win_rate = (stats["wins"] / stats["trades"] * 100.0) if stats["trades"] else 0.0
+    print("\n===== PERFORMANCE =====")
+    print(f"Equity: ${equity:.2f}")
+    print(f"PnL: {stats['pnl']:+.2f}")
+    print(
+        f"Trades: {stats['trades']} | Wins: {stats['wins']} | "
+        f"Losses: {stats['losses']} | Win Rate: {win_rate:.1f}%"
+    )
+    print("======================\n")
+
+
+def ensure_vwap_dev(r: Dict) -> Dict:
+    price = safe_float(r.get("price"), 0.0)
+    vwap = safe_float(r.get("vwap"), price)
+
+    if price <= 0:
+        r["vwap_dev"] = 0.0
+        return r
+
+    if vwap <= 0:
+        r["vwap_dev"] = 0.0
+        return r
+
+    r["vwap_dev"] = (price - vwap) / vwap
     return r
 
 
-def compute_elasticity(r):
-    return min(abs(r["vwap_dev"]) / max(abs(r["momentum"]), 0.001), 50)
+def compute_elasticity(r: Dict) -> float:
+    vwap_dev = abs(safe_float(r.get("vwap_dev"), 0.0))
+    momentum = abs(safe_float(r.get("momentum"), 0.0))
+    return min(vwap_dev / max(momentum, 0.001), 50.0)
 
 
-def trade_score(r):
-    return (
-        r["score"] * 0.5 +
-        min(abs(r["vwap_dev"]) * 1500, 2) * 0.3 +
-        min(r["elasticity_score"] / 8, 1) * 0.2
-    )
+def trade_score(r: Dict) -> float:
+    score = safe_float(r.get("score"), 0.0)
+    vwap_dev = abs(safe_float(r.get("vwap_dev"), 0.0))
+    elasticity = safe_float(r.get("elasticity_score"), 0.0)
+    return score * 0.5 + min(vwap_dev * 1500.0, 2.0) * 0.3 + min(elasticity / 8.0, 1.0) * 0.2
 
 
-def allocate_capital(candidates):
-    allocations = {}
-    grouped = {}
+def allocate_capital(candidates: List[Dict]) -> Dict[str, float]:
+    allocations: Dict[str, float] = {}
+    grouped: Dict[str, List[Dict]] = {}
 
     for r in candidates:
         grouped.setdefault(r["asset_class"], []).append(r)
 
     for cls, rows in grouped.items():
-        class_cap = TOTAL_CAPITAL * CLASS_WEIGHTS[cls]
-        total_score = sum(max(r["trade_score"], 0.0001) for r in rows)
+        class_cap = TOTAL_CAPITAL * CLASS_WEIGHTS.get(cls, 0.0)
+        total_score = sum(max(safe_float(r.get("trade_score"), 0.0), 0.0001) for r in rows)
 
         for r in rows:
-            weight = r["trade_score"] / total_score if total_score else 0
-            allocations[r["symbol"]] = max(class_cap * weight, 50)
+            weight = safe_float(r.get("trade_score"), 0.0) / total_score if total_score else 0.0
+            allocations[r["symbol"]] = max(class_cap * weight, 50.0)
 
     return allocations
 
 
-# ================= FIXED CRYPTO ENGINE =================
-def load_crypto(symbols):
-    results = []
+# ================= DATA LOADERS =================
+def load_crypto(symbols: List[str]) -> List[Dict]:
+    results: List[Dict] = []
     headers = {"User-Agent": "Mozilla/5.0"}
 
     for s in symbols:
@@ -127,58 +187,99 @@ def load_crypto(symbols):
                 print(f"[CRYPTO MISS] {s}")
                 continue
 
-            closes = chart[0]["indicators"]["quote"][0]["close"]
+            quote = chart[0].get("indicators", {}).get("quote", [{}])[0]
+            closes = quote.get("close", [])
             closes = [c for c in closes if c is not None]
 
             if len(closes) < 10:
                 print(f"[CRYPTO MISS] {s}")
                 continue
 
-            price = closes[-1]
+            price = safe_float(closes[-1], 0.0)
+            if price <= 0:
+                print(f"[CRYPTO MISS] {s}")
+                continue
+
             vwap = sum(closes[-20:]) / min(len(closes), 20)
-            momentum = (closes[-1] - closes[-5]) / closes[-5]
+            base_5 = safe_float(closes[-5], 0.0)
+            momentum = ((price - base_5) / base_5) if base_5 > 0 else 0.0
 
-            results.append({
-                "symbol": s,
-                "price": price,
-                "vwap": vwap,
-                "momentum": momentum,
-                "spread_bps": 8,
-            })
+            results.append(
+                {
+                    "symbol": s,
+                    "price": price,
+                    "closes": closes[-5:],
+                    "vwap": vwap,
+                    "momentum": momentum,
+                    "spread_bps": DEFAULT_SPREAD_BPS["crypto"],
+                }
+            )
 
-            print(f"[CRYPTO OK] {s} | p={price:.2f} | mom={momentum:.4f}")
+            print(f"[CRYPTO OK] {s} | p={price:.2f}")
 
-        except:
+        except Exception:
             print(f"[CRYPTO MISS] {s}")
+            continue
 
     return results
 
 
-def fallback_price(symbol, row, prev, cycles):
-    price = safe_float(row.get("price"), prev)
+# ================= PRICE MODEL =================
+def micro_price(row: Dict, pos: Dict) -> float:
+    closes = row.get("closes")
 
-    if abs(price - prev) > 1e-8:
-        return price
+    if not closes or len(closes) < 3:
+        return safe_float(row.get("price"), pos["entry"])
 
-    drift = max(abs(row.get("vwap_dev", 0)), 0.0003)
+    c1 = safe_float(closes[-1], 0.0)
+    c2 = safe_float(closes[-2], 0.0)
+    c3 = safe_float(closes[-3], 0.0)
 
-    cls = symbol_asset_class(symbol)
+    if c1 <= 0 or c2 <= 0 or c3 <= 0:
+        return safe_float(row.get("price"), pos["entry"])
 
-    if cls == "crypto":
-        drift = max(drift, 0.0015)
-    elif cls == "fx":
-        drift = max(drift, 0.0005)
-    elif cls == "futures":
-        drift = max(drift, 0.0008)
+    delta1 = c1 - c2
+    delta2 = c2 - c3
+    slope = (delta1 + delta2) / 2.0
 
-    direction = 1 if cycles % 2 == 0 else -1
-    return prev * (1 + drift * direction)
+    base = c1
+    pct_move = slope / base
+    decay = max(0.2, 1.0 - safe_float(pos.get("cycles"), 0) * 0.15)
+
+    return base * (1.0 + pct_move * decay)
+
+
+# ================= COST / EDGE =================
+def dynamic_cost_bps(r: Dict) -> float:
+    cls = r["asset_class"]
+    spread = safe_float(r.get("spread_bps"), DEFAULT_SPREAD_BPS.get(cls, 5.0))
+    slippage = abs(safe_float(r.get("vwap_dev"), 0.0)) * 10000.0 * 0.25
+    fee = BASE_FEE_BPS.get(cls, 8.0)
+    return spread + slippage + fee
+
+
+def expected_move_bps(r: Dict) -> float:
+    vwap_component = abs(safe_float(r.get("vwap_dev"), 0.0)) * 10000.0 * 0.6
+    momentum_component = abs(safe_float(r.get("momentum"), 0.0)) * 10000.0 * 0.25
+    elasticity_component = min(safe_float(r.get("elasticity_score"), 0.0), 10.0) * 1.5
+    return vwap_component + momentum_component + elasticity_component
+
+
+def passes_profitability_gate(r: Dict) -> bool:
+    expected = expected_move_bps(r)
+    cost = dynamic_cost_bps(r) + SAFETY_MARGIN_BPS
+
+    if expected <= cost:
+        print(f"[FILTERED] {r['symbol']} -> EDGE {expected:.1f}bps < COST {cost:.1f}bps")
+        return False
+    return True
 
 
 # ================= ENGINE =================
-def run():
-    print("\n=== CSS FINAL ENGINE (CRYPTO FIX + CAPITAL ACTIVE) ===\n")
+def run() -> None:
+    global equity
 
+    print("\n=== CSS WITH PERFORMANCE DASHBOARD ===\n")
     scorer = AIOpportunityScorer()
 
     while True:
@@ -188,97 +289,167 @@ def run():
             rows = load_runtime_universe(PRODUCTS_NO_CRYPTO, days=3)
             rows.extend(load_crypto(PRODUCTS_BY_CLASS["crypto"]))
 
-            candidates = []
-
+            clean_rows: List[Dict] = []
             for r in rows:
-                r = ensure_vwap_dev(r)
-                r["asset_class"] = symbol_asset_class(r["symbol"])
-                r["elasticity_score"] = compute_elasticity(r)
-                r["score"] = safe_float(scorer.score(r))
-                r["trade_score"] = trade_score(r)
+                symbol = r.get("symbol")
+                if not symbol:
+                    continue
 
+                price = safe_float(r.get("price"), 0.0)
+                if price <= 0:
+                    continue
+
+                r["asset_class"] = symbol_asset_class(symbol)
+                r = ensure_vwap_dev(r)
+                r["elasticity_score"] = compute_elasticity(r)
+                r["score"] = safe_float(scorer.score(r), 0.0)
+                r["trade_score"] = trade_score(r)
+                clean_rows.append(r)
+
+            row_map = {r["symbol"]: r for r in clean_rows}
+
+            candidates: List[Dict] = []
+
+            for r in clean_rows:
                 print(f"[SCAN] {r['symbol']} | {r['asset_class']} | tscore={r['trade_score']:.4f}")
 
-                if r["trade_score"] >= CLASS_MIN_TRADE_SCORE.get(r["asset_class"], 999):
+                strong = False
+
+                if r["asset_class"] == "futures":
+                    strong = r["trade_score"] >= 0.60 and abs(r["vwap_dev"]) >= 0.0012
+                elif r["asset_class"] == "crypto":
+                    strong = r["trade_score"] >= 0.30 and abs(r["vwap_dev"]) >= 0.0015
+                else:
+                    strong = False
+
+                if not strong:
+                    print(f"[REJECTED] {r['symbol']} -> weak structure")
+                    continue
+
+                if passes_profitability_gate(r):
                     candidates.append(r)
 
-            candidates.sort(key=lambda x: x["trade_score"], reverse=True)
-
             allocations = allocate_capital(candidates)
+            class_open = count_open_positions_by_class()
 
-            class_open = {k: 0 for k in CLASS_LIMITS}
-            for s in open_positions:
-                class_open[symbol_asset_class(s)] += 1
-
-            for r in candidates:
-                if len(open_positions) >= MAX_OPEN_POSITIONS:
-                    break
-
+            # ===== ENTRIES =====
+            for r in sorted(candidates, key=lambda x: x["trade_score"], reverse=True):
                 sym = r["symbol"]
                 cls = r["asset_class"]
 
                 if sym in open_positions:
                     continue
-                if class_open[cls] >= CLASS_LIMITS[cls]:
+
+                if len(open_positions) >= MAX_OPEN_POSITIONS:
+                    break
+
+                if class_open.get(cls, 0) >= CLASS_LIMITS.get(cls, 0):
                     continue
 
-                price = safe_float(r["price"])
-                capital = allocations.get(sym, 0)
+                price = safe_float(r.get("price"), 0.0)
+                if price <= 0:
+                    continue
+
+                capital = allocations.get(sym, 50.0)
+
+                if cls == "crypto":
+                    tp = 0.0100
+                    sl = -0.0040
+                else:
+                    tp = 0.0080
+                    sl = -0.0035
 
                 open_positions[sym] = {
                     "entry": price,
                     "capital": capital,
+                    "tp": tp,
+                    "sl": sl,
                     "cycles": 0,
-                    "tp1": False,
-                    "tp2": False,
                 }
 
                 last_prices[sym] = price
-                class_open[cls] += 1
+                class_open[cls] = class_open.get(cls, 0) + 1
 
                 print(f"[ENTRY] {sym} @ {price:.2f} | {cls} | capital={capital:.2f}")
 
+                log_trade(
+                    {
+                        "type": "ENTRY",
+                        "symbol": sym,
+                        "asset_class": cls,
+                        "price": price,
+                        "capital": capital,
+                        "timestamp": time.time(),
+                    }
+                )
+
+            # ===== POSITION MANAGEMENT =====
             for sym, pos in list(open_positions.items()):
-                row = next((r for r in rows if r["symbol"] == sym), None)
+                row = row_map.get(sym)
                 if not row:
+                    print(f"[SKIP] {sym} -> no fresh row")
                     continue
 
-                prev = last_prices.get(sym, pos["entry"])
-                price = fallback_price(sym, row, prev, pos["cycles"])
-                last_prices[sym] = price
+                price = micro_price(row, pos)
+                if price <= 0:
+                    continue
 
-                pct = (price - pos["entry"]) / pos["entry"]
-                dollar = pct * pos["capital"]
+                last_prices[sym] = price
+                entry = safe_float(pos.get("entry"), 0.0)
+                capital = safe_float(pos.get("capital"), 0.0)
+
+                if entry <= 0:
+                    continue
+
+                pnl_pct = (price - entry) / entry
+                pnl_value = pnl_pct * capital
 
                 pos["cycles"] += 1
 
-                if pct >= TP1 and not pos["tp1"]:
-                    pos["tp1"] = True
-                    print(f"[TP1] {sym} {pct:.4f} | ${dollar:.2f}")
+                should_exit = (
+                    pnl_pct >= safe_float(pos.get("tp"), 0.0)
+                    or pnl_pct <= safe_float(pos.get("sl"), 0.0)
+                    or safe_float(pos.get("cycles"), 0) >= MAX_CYCLES
+                )
 
-                elif pct >= TP2 and not pos["tp2"]:
-                    pos["tp2"] = True
-                    print(f"[TP2] {sym} {pct:.4f} | ${dollar:.2f}")
+                if should_exit:
+                    equity += pnl_value
+                    stats["pnl"] += pnl_value
+                    stats["trades"] += 1
 
-                elif pct >= TP3:
-                    print(f"[TP3 EXIT] {sym} ${dollar:.2f}")
-                    del open_positions[sym]
+                    if pnl_value > 0:
+                        stats["wins"] += 1
+                    else:
+                        stats["losses"] += 1
 
-                elif pct <= SL:
-                    print(f"[SL EXIT] {sym} ${dollar:.2f}")
-                    del open_positions[sym]
+                    print(f"[EXIT] {sym} PnL: {pnl_value:+.2f}")
 
-                elif pos["cycles"] >= MAX_CYCLES:
-                    print(f"[TIME EXIT] {sym}")
+                    log_trade(
+                        {
+                            "type": "EXIT",
+                            "symbol": sym,
+                            "entry": entry,
+                            "exit": price,
+                            "pnl": pnl_value,
+                            "pnl_pct": pnl_pct,
+                            "cycles": pos["cycles"],
+                            "timestamp": time.time(),
+                        }
+                    )
+
                     del open_positions[sym]
 
             print(f"Open Positions: {len(open_positions)}")
+            print_performance()
 
             time.sleep(5)
 
+        except KeyboardInterrupt:
+            raise
         except Exception as e:
             print("ERROR:", e)
             traceback.print_exc()
+            time.sleep(5)
 
 
 if __name__ == "__main__":
