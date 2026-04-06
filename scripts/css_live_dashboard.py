@@ -32,6 +32,8 @@ stats = {
     "pnl": 0.0,
 }
 
+cycle_count = 0
+
 
 # ================= CONFIG =================
 TOTAL_CAPITAL = 1000.0
@@ -51,7 +53,7 @@ CLASS_LIMITS = {
 }
 
 MAX_OPEN_POSITIONS = 10
-MAX_CYCLES = 6
+MAX_CYCLES = 10
 
 BASE_FEE_BPS = {
     "crypto": 12.0,
@@ -269,22 +271,23 @@ def passes_profitability_gate(r: Dict) -> bool:
     expected = expected_move_bps(r)
     cost = dynamic_cost_bps(r) + SAFETY_MARGIN_BPS
 
-    if expected <= cost:
-        print(f"[FILTERED] {r['symbol']} -> EDGE {expected:.1f}bps < COST {cost:.1f}bps")
+    if expected <= cost * 1.25:
+        print(f"[FILTERED] {r['symbol']} -> EDGE {expected:.1f}bps < COST {(cost * 1.25):.1f}bps")
         return False
     return True
 
 
 # ================= ENGINE =================
 def run() -> None:
-    global equity
+    global equity, cycle_count
 
-    print("\n=== CSS WITH PERFORMANCE DASHBOARD ===\n")
+    print("\n=== CSS WITH PERFORMANCE DASHBOARD (PROFITABILITY FIX) ===\n")
     scorer = AIOpportunityScorer()
 
     while True:
         try:
-            print("\n--- NEW CYCLE ---")
+            cycle_count += 1
+            print(f"\n--- NEW CYCLE #{cycle_count} ---")
 
             rows = load_runtime_universe(PRODUCTS_NO_CRYPTO, days=3)
             rows.extend(load_crypto(PRODUCTS_BY_CLASS["crypto"]))
@@ -316,9 +319,9 @@ def run() -> None:
                 strong = False
 
                 if r["asset_class"] == "futures":
-                    strong = r["trade_score"] >= 0.60 and abs(r["vwap_dev"]) >= 0.0012
+                    strong = r["trade_score"] >= 0.65 and abs(r["vwap_dev"]) >= 0.0015
                 elif r["asset_class"] == "crypto":
-                    strong = r["trade_score"] >= 0.30 and abs(r["vwap_dev"]) >= 0.0015
+                    strong = r["trade_score"] >= 0.42 and abs(r["vwap_dev"]) >= 0.0020
                 else:
                     strong = False
 
@@ -353,11 +356,11 @@ def run() -> None:
                 capital = allocations.get(sym, 50.0)
 
                 if cls == "crypto":
-                    tp = 0.0100
-                    sl = -0.0040
+                    tp = 0.0180
+                    sl = -0.0070
                 else:
-                    tp = 0.0080
-                    sl = -0.0035
+                    tp = 0.0140
+                    sl = -0.0060
 
                 open_positions[sym] = {
                     "entry": price,
@@ -379,6 +382,7 @@ def run() -> None:
                         "asset_class": cls,
                         "price": price,
                         "capital": capital,
+                        "cycle": cycle_count,
                         "timestamp": time.time(),
                     }
                 )
@@ -433,6 +437,7 @@ def run() -> None:
                             "pnl": pnl_value,
                             "pnl_pct": pnl_pct,
                             "cycles": pos["cycles"],
+                            "cycle": cycle_count,
                             "timestamp": time.time(),
                         }
                     )
