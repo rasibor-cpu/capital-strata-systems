@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Dict, List
+from datetime import datetime
 
 
 class PositionManager:
@@ -10,118 +11,121 @@ class PositionManager:
         self.closed_log: List[Dict] = []
 
     # =========================
-    # OPEN
+    # CORE OPEN (NEW ENGINE)
     # =========================
 
-    def open_long_position(
+    def open_position(
         self,
         *,
         symbol: str,
-        quantity: float,
         entry_price: float,
-        cycle_no: int,
-        opened_at_utc: str,
-        asset_class: str,
-        **kwargs,
-    ):
+        size: float,
+        take_profit: float,
+        stop_loss: float,
+        side: str = "LONG",
+        confidence: float = 0.0,
+        regime: str = "UNKNOWN",
+    ) -> None:
+
+        if symbol in self.positions:
+            return
+
         self.positions[symbol] = {
             "symbol": symbol,
-            "quantity": quantity,
             "entry_price": entry_price,
-            "status": "OPEN",
-            "peak_price": entry_price,
+            "size": abs(size),
+            "side": side,
+            "take_profit": take_profit,
+            "stop_loss": stop_loss,
+            "confidence": confidence,
+            "regime": regime,
+            "opened_at": datetime.utcnow(),
         }
 
     # =========================
-
-    def has_open_position(self, symbol: str) -> bool:
-        return symbol in self.positions and self.positions[symbol]["status"] == "OPEN"
-
-    # =========================
-    # EXIT ENGINE
+    # BACKWARD COMPATIBILITY
     # =========================
 
-    def update_positions(
-        self,
-        *,
-        latest_prices: Dict[str, float],
-        cycle_no: int,
-        now: str,
-        intelligence_by_symbol: Dict[str, Dict],
-    ) -> List[Dict]:
+    def open_long_position(self, **kwargs):
+        self.open_position(side="LONG", **kwargs)
 
-        closed = []
+    def open_short_position(self, **kwargs):
+        self.open_position(side="SHORT", **kwargs)
 
-        for sym, pos in list(self.positions.items()):
+    # =========================
+    # UPDATE
+    # =========================
 
-            if pos["status"] != "OPEN":
+    def update_positions(self, market_prices: Dict[str, float]) -> None:
+
+        to_close = []
+
+        for symbol, pos in self.positions.items():
+
+            if symbol not in market_prices:
                 continue
 
-            price = latest_prices.get(sym)
-            if not price:
-                continue
+            price = float(market_prices[symbol])
+            side = pos["side"]
 
-            entry = pos["entry_price"]
-            pnl = (price - entry) / entry
+            if side == "LONG":
+                if price >= pos["take_profit"]:
+                    to_close.append((symbol, price, "TP"))
+                elif price <= pos["stop_loss"]:
+                    to_close.append((symbol, price, "SL"))
 
-            # track peak
-            if price > pos["peak_price"]:
-                pos["peak_price"] = price
+            elif side == "SHORT":
+                if price <= pos["take_profit"]:
+                    to_close.append((symbol, price, "TP"))
+                elif price >= pos["stop_loss"]:
+                    to_close.append((symbol, price, "SL"))
 
-            peak = pos["peak_price"]
-            drawdown = (price - peak) / peak if peak else 0
-
-            intel = intelligence_by_symbol.get(sym, {})
-            pressure = float(intel.get("pressure_score", 0))
-            accel = float(intel.get("pressure_acceleration", 0))
-
-            reason = None
-
-            # 🔴 STOP LOSS
-            if pnl <= -0.012:
-                reason = "STOP_LOSS"
-
-            # 🟢 TRAILING LOCK (tightened slightly)
-            elif pnl > 0.008 and drawdown < -0.003:
-                reason = "TRAIL_LOCK"
-
-            # ⚠️ PRESSURE FADE
-            elif pnl > 0 and pressure < 0.18:
-                reason = "PRESSURE_FADE"
-
-            # ⚠️ MOMENTUM REVERSAL
-            elif pnl > 0 and accel < -0.08:
-                reason = "ACCEL_REVERSAL"
-
-            # 💰 TAKE PROFIT
-            elif pnl > 0.02:
-                reason = "TAKE_PROFIT"
-
-            if reason:
-                pos["status"] = "CLOSED"
-                pos["exit_price"] = price
-                pos["pnl"] = pnl
-
-                record = {
-                    "symbol": sym,
-                    "exit_reason": reason,
-                    "net_realized_pnl_pct": pnl,
-                }
-
-                closed.append(record)
-                self.closed_log.append(record)
-
-                print(f"[CLOSE] {sym} reason={reason} pnl={round(pnl*100,2)}%")
-
-                del self.positions[sym]
-
-        return closed
+        for symbol, exit_price, reason in to_close:
+            self.close_position(symbol, exit_price, reason)
 
     # =========================
+    # CLOSE
+    # =========================
 
-    def summary(self):
-        return {
-            "open_positions_count": len(self.positions),
-            "closed_positions_count": len(self.closed_log),
-            "net_realized_pnl_usd": 0.0,
-        }
+    def close_position(self, symbol: str, exit_price: float, reason: str):
+
+        if symbol not in self.positions:
+            return
+
+        pos = self.positions.pop(symbol)
+
+        entry = pos["entry_price"]
+        size = pos["size"]
+        side = pos["side"]
+
+        if side == "LONG":
+            pnl = (exit_price - entry) * size
+        else:
+            pnl = (entry - exit_price) * size
+
+        self.closed_log.append({
+            "symbol": symbol,
+            "entry_price": entry,
+            "exit_price": exit_price,
+            "size": size,
+            "side": side,
+            "pnl": pnl,
+            "reason": reason,
+            "confidence": pos["confidence"],
+            "regime": pos["regime"],
+            "opened_at": pos["opened_at"],
+            "closed_at": datetime.utcnow(),
+        })
+
+    # =========================
+    # GETTERS
+    # =========================
+
+    def get_open_positions(self) -> List[Dict]:
+        return list(self.positions.values())
+
+    def get_closed_positions(self) -> List[Dict]:
+        return self.closed_log
+
+    def get_total_pnl(self) -> float:
+        return sum(t["pnl"] for t in self.closed_log)

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import sys
 import time
-from collections import defaultdict
 from pathlib import Path
+from datetime import datetime, UTC
 from typing import Any, Dict, List
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -11,243 +11,230 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from backend.scanner.unified_market_scanner import UnifiedMarketScanner
-from backend.intelligence.feature_builder import FeatureBuilder
-from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
-from backend.intelligence.opportunity_pressure_engine import OpportunityPressureEngine
-from backend.intelligence.quant_signal_optimizer import QuantSignalOptimizer
+from backend.scanner.options_chain_adapter import OptionsChainAdapter
 from backend.execution.position_manager import PositionManager
+from backend.intelligence.feature_builder import FeatureBuilder
+from backend.intelligence.market_regime_engine import MarketRegimeEngine
+from backend.intelligence.opportunity_pressure_engine import OpportunityPressureEngine
+from backend.intelligence.pressure_acceleration_engine import PressureAccelerationEngine
+from backend.intelligence.signal_confluence_engine import SignalConfluenceEngine
+from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
 
 
-cycle = 0
-equity = 1000.0
-pnl_total = 0.0
-wins = 0
-losses = 0
-trades = 0
+# =========================
+# CONFIG
+# =========================
+CYCLE_SLEEP = 5
+
+MIN_AI_SCORE = 0.32
+MAX_SPREAD_BPS = 35
+
+MIN_LONG_DEV = -0.003
+MIN_SHORT_DEV = 0.003
+
+MAX_OPEN_POSITIONS = 6
+
+# NEW — CAPITAL BASE
+ACCOUNT_EQUITY = 10000  # simulate $10k account
+RISK_PER_TRADE = 0.01   # 1% risk per trade
 
 
-def _safe_float(v: Any, default: float = 0.0) -> float:
+# =========================
+# INIT
+# =========================
+scanner = UnifiedMarketScanner()
+options_adapter = OptionsChainAdapter()
+position_manager = PositionManager()
+
+feature_builder = FeatureBuilder()
+regime_engine = MarketRegimeEngine()
+pressure_engine = OpportunityPressureEngine()
+acceleration_engine = PressureAccelerationEngine()
+confluence_engine = SignalConfluenceEngine()
+ai_scorer = AIOpportunityScorer()
+
+
+def _safe_float(v, d=0.0):
     try:
         return float(v)
-    except Exception:
-        return default
+    except:
+        return d
 
 
-def _extract_close_rows(obj: Any) -> List[Dict[str, Any]]:
-    if obj is None:
-        return []
-    if isinstance(obj, dict):
-        return [obj]
-    if isinstance(obj, list):
-        return [x for x in obj if isinstance(x, dict)]
-    return []
+def _call(obj, names, rows):
+    for n in names:
+        fn = getattr(obj, n, None)
+        if callable(fn):
+            try:
+                out = fn(rows)
+                if isinstance(out, list):
+                    return out
+            except:
+                return rows
+    return rows
 
 
-def _close_probe(pm: PositionManager) -> List[Dict[str, Any]]:
-    if hasattr(pm, "check_closes"):
+def compute_vwap(row):
+    candles = row.get("candles")
+    if not candles:
+        return 0.0
+
+    pv, vol = 0.0, 0.0
+
+    for c in candles[-20:]:
         try:
-            return _extract_close_rows(pm.check_closes())
-        except Exception as exc:
-            print(f"[CLOSE-PROBE-ERROR] check_closes -> {type(exc).__name__}: {exc}")
-            return []
-    return []
+            price = float(c.get("close", 0))
+            v = float(c.get("volume", 1))
+        except:
+            continue
+
+        pv += price * v
+        vol += v
+
+    return pv / vol if vol else 0.0
 
 
-def _rejection_reason(row: Dict[str, Any]) -> str:
-    reason = str(row.get("optimizer_reason", "")).lower()
-    tier = str(row.get("optimizer_tier", "")).upper()
+def enrich(rows):
+    rows = _call(feature_builder, ["enrich_rows"], rows)
+    rows = _call(regime_engine, ["enrich_rows", "process_rows"], rows)
+    rows = _call(pressure_engine, ["enrich_rows"], rows)
+    rows = _call(acceleration_engine, ["enrich_rows"], rows)
+    rows = _call(confluence_engine, ["enrich_rows"], rows)
 
-    if "low_pressure_quality" in reason:
-        return "low pressure quality"
-    if "exhaustion" in reason:
-        return "exhaustion zone"
-    if tier == "WATCH":
-        return "watchlist"
-    if tier == "IGNORE":
-        return "below threshold"
-    return "filtered"
+    out = []
+
+    for r in rows:
+        r = dict(r)
+
+        if "price" not in r:
+            r["price"] = _safe_float(r.get("close", 0))
+
+        r["ai_score"] = _safe_float(ai_scorer.score(r))
+        r["tradable"] = r.get("tradable", True)
+
+        out.append(r)
+
+    return out
 
 
-def print_perf() -> None:
-    win_rate = (wins / trades * 100.0) if trades else 0.0
-    print("\n===== PERFORMANCE =====")
-    print(f"Equity: ${equity:.2f}")
-    print(f"PnL: {pnl_total:+.2f}")
-    print(f"Trades: {trades} | Wins: {wins} | Losses: {losses} | Win Rate: {win_rate:.1f}%")
-    print("=======================\n")
+# =========================
+# REAL POSITION SIZING
+# =========================
+def compute_position_size(price, sl):
+
+    risk_amount = ACCOUNT_EQUITY * RISK_PER_TRADE
+
+    stop_distance = abs(price - sl)
+
+    if stop_distance <= 0:
+        return 0
+
+    size = risk_amount / stop_distance
+
+    return size
 
 
-def run() -> None:
-    global cycle, equity, pnl_total, wins, losses, trades
+# =========================
+# MAIN LOOP
+# =========================
+def run():
 
-    scanner = UnifiedMarketScanner()
-    builder = FeatureBuilder()
-    scorer = AIOpportunityScorer()
-    pressure_engine = OpportunityPressureEngine()
-    optimizer = QuantSignalOptimizer()
-    pm = PositionManager()
+    cycle = 0
 
     while True:
         cycle += 1
-        print(f"\n--- NEW CYCLE #{cycle} ---")
 
-        try:
-            rows = scanner.scan()
-            rows = builder.enrich_rows(rows)
+        print("\n" + "=" * 70)
+        print(f"Cycle {cycle} | {datetime.now(UTC)}")
+        print("=" * 70)
 
-            clean_rows: List[Dict[str, Any]] = []
-            dropped = 0
+        rows = scanner.scan()
+        rows += options_adapter.fetch_option_rows(rows)
 
-            for r in rows:
-                if not isinstance(r, dict):
-                    dropped += 1
-                    continue
+        rows = enrich(rows)
 
-                try:
-                    s = scorer.score(r)
-                    enriched = dict(r)
-                    enriched["score"] = s
-                    enriched["ai_score"] = s
-                    enriched["tscore"] = s
-                    clean_rows.append(enriched)
-                except Exception as exc:
-                    dropped += 1
-                    print(f"[SCORE-SKIP] {r.get('symbol', 'UNKNOWN')} -> {type(exc).__name__}: {exc}")
+        open_positions = position_manager.get_open_positions()
 
-            if dropped:
-                print(f"[SCORE] dropped rows: {dropped}")
+        for r in rows:
 
-            if not clean_rows:
-                print("[WARN] No valid rows after scoring")
-                print_perf()
-                time.sleep(5)
+            if len(open_positions) >= MAX_OPEN_POSITIONS:
+                break
+
+            if not r.get("tradable", True):
                 continue
 
-            # 🔥 PRESSURE INTEGRATION
-            pressured_rows = pressure_engine.enrich_rows(clean_rows)
+            ai = r.get("ai_score", 0)
+            spread = abs(_safe_float(r.get("spread_bps", 10)))
 
-            # 🔥 OPTIMIZER
-            decisions = optimizer.optimize(pressured_rows)
+            if ai < MIN_AI_SCORE or spread > MAX_SPREAD_BPS:
+                continue
 
-            accepted: List[Dict[str, Any]] = []
-            rejected: List[Dict[str, Any]] = []
-            reasons = defaultdict(int)
+            price = _safe_float(r["price"])
+            vwap = r.get("vwap") or compute_vwap(r)
 
-            for d in decisions:
-                sym = d.get("symbol", "UNKNOWN")
-                asset = d.get("asset_class", "unknown")
+            if not vwap or vwap <= 0:
+                continue
 
-                tscore = _safe_float(d.get("tscore", 0.0))
-                pressure_score = _safe_float(d.get("pressure_score", 0.0))
-                confluence = _safe_float(d.get("confluence_score", 0.0))
+            deviation = (price - vwap) / vwap
 
-                pressure_type = str(d.get("pressure_type", "NA"))
-                pressure_quality = str(d.get("pressure_trade_quality", "NA"))
+            symbol = r["symbol"]
 
-                tier = str(d.get("optimizer_tier", "IGNORE")).upper()
-                opt_score = _safe_float(d.get("optimizer_score", 0.0))
-                opt_reason = d.get("optimizer_reason", "")
+            if symbol in {p["symbol"] for p in open_positions}:
+                continue
 
-                print(
-                    f"[SCAN] {sym} | {asset} | "
-                    f"tscore={tscore:.4f} | "
-                    f"pressure={pressure_score:.4f} | "
-                    f"confluence={confluence:.4f} | "
-                    f"type={pressure_type} | "
-                    f"quality={pressure_quality} | "
-                    f"tier={tier} | "
-                    f"opt_score={opt_score:.4f} | "
-                    f"reason={opt_reason}"
+            # =========================
+            # LONG
+            # =========================
+            if deviation <= MIN_LONG_DEV:
+
+                sl = price * 0.995
+                tp = price + abs(vwap - price)
+
+                size = compute_position_size(price, sl)
+
+                position_manager.open_long_position(
+                    symbol=symbol,
+                    entry_price=price,
+                    size=size,
+                    take_profit=tp,
+                    stop_loss=sl,
+                    confidence=ai,
+                    regime="LONG"
                 )
 
-                if tier in ("ELITE", "QUALIFIED"):
-                    accepted.append(d)
-                    print(f"[ACCEPTED] {sym} -> TRADE ({tier})")
-                else:
-                    rejected.append(d)
-                    reason = _rejection_reason(d)
-                    reasons[reason] += 1
-                    print(f"[REJECTED] {sym} -> {reason}")
+            # =========================
+            # SHORT
+            # =========================
+            elif deviation >= MIN_SHORT_DEV:
 
-            opens = 0
-            closes = 0
+                sl = price * 1.005
+                tp = price - abs(price - vwap)
 
-            for d in accepted:
-                sym = d.get("symbol")
-                if not sym:
-                    continue
+                size = compute_position_size(price, sl)
 
-                already_open = False
-                if hasattr(pm, "is_open"):
-                    try:
-                        already_open = bool(pm.is_open(sym))
-                    except Exception:
-                        already_open = False
-
-                if not already_open:
-                    try:
-                        pm.open_position(d)
-                        opens += 1
-                    except TypeError:
-                        try:
-                            pm.open_position(sym)
-                            opens += 1
-                        except Exception as exc:
-                            print(f"[OPEN-ERROR] {sym} -> {type(exc).__name__}: {exc}")
-                    except Exception as exc:
-                        print(f"[OPEN-ERROR] {sym} -> {type(exc).__name__}: {exc}")
-
-            closed = _close_probe(pm)
-
-            for c in closed:
-                closes += 1
-                trades += 1
-
-                pnl = _safe_float(
-                    c.get("pnl", c.get("realized_pnl", c.get("profit", c.get("net_pnl", 0.0))))
+                position_manager.open_short_position(
+                    symbol=symbol,
+                    entry_price=price,
+                    size=size,
+                    take_profit=tp,
+                    stop_loss=sl,
+                    confidence=ai,
+                    regime="SHORT"
                 )
-                pnl_total += pnl
-                equity += pnl
 
-                if pnl > 0:
-                    wins += 1
-                else:
-                    losses += 1
+        latest = {r["symbol"]: r.get("price", 0) for r in rows}
+        position_manager.update_positions(latest)
 
-            open_count = "unknown"
-            if hasattr(pm, "positions"):
-                try:
-                    if isinstance(pm.positions, dict):
-                        open_count = len(pm.positions)
-                    elif isinstance(pm.positions, list):
-                        open_count = len(pm.positions)
-                except Exception:
-                    open_count = "unknown"
+        pnl = position_manager.get_total_pnl()
 
-            print("\n===== CYCLE SUMMARY =====")
-            print(f"Accepted: {len(accepted)}")
-            print(f"Rejected: {len(rejected)}")
-            print(f"New Opens: {opens}")
-            print(f"New Closes: {closes}")
-            print(f"Open Positions: {open_count}")
+        closed = position_manager.get_closed_positions()
+        wins = sum(1 for t in closed if t["pnl"] > 0)
+        total = len(closed)
 
-            if reasons:
-                print("\nTop Rejection Reasons:")
-                for reason, count in sorted(reasons.items(), key=lambda x: x[1], reverse=True):
-                    print(f"  {reason}: {count}")
+        print(f"\nPnL: {round(pnl,2)}")
+        print(f"Trades: {total} | Wins: {wins} | Win Rate: {(wins/total*100 if total else 0):.1f}%")
 
-            if not hasattr(pm, "check_closes"):
-                print("\n[INFO] PositionManager has no check_closes(); close telemetry is temporarily disabled.")
-
-            print("=========================\n")
-            print_perf()
-
-        except KeyboardInterrupt:
-            raise
-        except Exception as exc:
-            print(f"[CYCLE-ERROR] {type(exc).__name__}: {exc}")
-
-        time.sleep(5)
+        time.sleep(CYCLE_SLEEP)
 
 
 if __name__ == "__main__":
