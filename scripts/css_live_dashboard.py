@@ -271,8 +271,8 @@ def passes_profitability_gate(r: Dict) -> bool:
     expected = expected_move_bps(r)
     cost = dynamic_cost_bps(r) + SAFETY_MARGIN_BPS
 
-    if expected <= cost * 1.25:
-        print(f"[FILTERED] {r['symbol']} -> EDGE {expected:.1f}bps < COST {(cost * 1.25):.1f}bps")
+    if expected <= cost * 1.3:
+        print(f"[FILTERED] {r['symbol']} -> EDGE {expected:.1f}bps < COST {(cost * 1.3):.1f}bps")
         return False
     return True
 
@@ -281,7 +281,7 @@ def passes_profitability_gate(r: Dict) -> bool:
 def run() -> None:
     global equity, cycle_count
 
-    print("\n=== CSS WITH PERFORMANCE DASHBOARD (PROFITABILITY FIX) ===\n")
+    print("\n=== CSS WITH PERFORMANCE DASHBOARD (SAFE FULL-FILE UPDATE) ===\n")
     scorer = AIOpportunityScorer()
 
     while True:
@@ -335,10 +335,15 @@ def run() -> None:
             allocations = allocate_capital(candidates)
             class_open = count_open_positions_by_class()
 
+            trades_this_cycle = 0
+
             # ===== ENTRIES =====
             for r in sorted(candidates, key=lambda x: x["trade_score"], reverse=True):
                 sym = r["symbol"]
                 cls = r["asset_class"]
+
+                if trades_this_cycle >= MAX_OPEN_POSITIONS:
+                    break
 
                 if sym in open_positions:
                     continue
@@ -372,6 +377,7 @@ def run() -> None:
 
                 last_prices[sym] = price
                 class_open[cls] = class_open.get(cls, 0) + 1
+                trades_this_cycle += 1
 
                 print(f"[ENTRY] {sym} @ {price:.2f} | {cls} | capital={capital:.2f}")
 
