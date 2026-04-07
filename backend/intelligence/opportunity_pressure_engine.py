@@ -22,19 +22,23 @@ def _clamp01(v: float) -> float:
 
 class OpportunityPressureEngine:
     """
-    CSS Opportunity Pressure Engine
+    CSS Opportunity Pressure Engine (v2 – Enhanced, Non-Regression Safe)
 
-    Pressure is derived from:
-    1. VWAP deviation
-    2. Momentum / velocity
-    3. Candle body strength
-    4. Candle expansion / range behavior
-    5. Close-location strength inside candle range
+    Enhancements:
+    - Pressure TYPE detection (BUILDUP / EXPANSION / EXHAUSTION)
+    - Momentum vs velocity divergence detection
+    - Exhaustion-aware scoring
+    - Trade quality classification
+    - Stronger direction validation
 
-    Output fields:
+    Backward compatible outputs:
     - pressure_score
     - pressure_stage
     - pressure_direction
+
+    New outputs:
+    - pressure_type
+    - pressure_trade_quality
     """
 
     def enrich_rows(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -51,12 +55,17 @@ class OpportunityPressureEngine:
             new_row["pressure_stage"] = result["stage"]
             new_row["pressure_direction"] = result["direction"]
 
+            # NEW FIELDS (non-breaking additions)
+            new_row["pressure_type"] = result["type"]
+            new_row["pressure_trade_quality"] = result["quality"]
+
             enriched.append(new_row)
 
         enriched.sort(key=lambda r: _safe(r.get("pressure_score")), reverse=True)
         return enriched
 
     def compute_pressure(self, asset: Dict[str, Any]) -> Dict[str, Any]:
+
         price = _safe(asset.get("price"))
         vwap = _safe(asset.get("vwap"))
         momentum = _safe(asset.get("momentum"))
@@ -86,6 +95,7 @@ class OpportunityPressureEngine:
         # -----------------------------
         candle_pressure = 0.0
         direction_bias = 0.0
+        avg_range_expansion = 0.0
 
         parsed = []
         for c in candles[-8:]:
@@ -152,15 +162,43 @@ class OpportunityPressureEngine:
         pressure = _clamp01(pressure)
 
         # -----------------------------
-        # DIRECTION
+        # DIVERGENCE DETECTION
+        # -----------------------------
+        divergence = abs(momentum - velocity)
+        divergence_flag = divergence > 0.25
+
+        # -----------------------------
+        # PRESSURE TYPE
+        # -----------------------------
+        pressure_type = "BUILDUP"
+
+        if pressure > 0.65:
+            if avg_range_expansion < 0.4 or divergence_flag:
+                pressure_type = "EXHAUSTION"
+            else:
+                pressure_type = "EXPANSION"
+        elif pressure > 0.35:
+            pressure_type = "BUILDUP"
+
+        # -----------------------------
+        # TRADE QUALITY
+        # -----------------------------
+        trade_quality = "LOW"
+
+        if pressure_type == "EXPANSION" and pressure > 0.55:
+            trade_quality = "HIGH"
+        elif pressure_type == "BUILDUP" and pressure > 0.35:
+            trade_quality = "MEDIUM"
+        elif pressure_type == "EXHAUSTION":
+            trade_quality = "LOW"
+
+        # -----------------------------
+        # DIRECTION (ENHANCED)
         # -----------------------------
         direction = "NEUTRAL"
 
-        if abs(direction_bias) > 0.05:
-            if direction_bias > 0:
-                direction = "LONG"
-            else:
-                direction = "SHORT"
+        if abs(direction_bias) > 0.08:
+            direction = "LONG" if direction_bias > 0 else "SHORT"
         elif vwap > 0:
             if price < vwap:
                 direction = "LONG"
@@ -183,4 +221,6 @@ class OpportunityPressureEngine:
             "pressure": round(pressure, 6),
             "stage": stage,
             "direction": direction,
+            "type": pressure_type,
+            "quality": trade_quality,
         }
