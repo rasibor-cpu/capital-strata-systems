@@ -1,249 +1,119 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
+
+
+def _safe(v: Any, d: float = 0.0) -> float:
+    try:
+        return float(v)
+    except Exception:
+        return d
 
 
 class QuantSignalOptimizer:
     """
     CSS Quant Signal Optimizer
-    Mode-aware, backward-compatible, scaled for the current live dashboard.
+    v2.5 - Controlled Activation (Build-up Promotion)
 
-    Goals:
-    - produce non-zero trade_score
-    - align thresholds with current score ranges
-    - preserve optimize(rows) compatibility
-    - support classify(row) for dashboard use
+    Purpose:
+    - keep exhaustion blocked
+    - allow stronger BUILDUP states to promote from WATCH to QUALIFIED
+    - preserve backward compatibility
     """
 
-    DEFAULT_PROFILE = {
-        "elite": 0.22,
-        "qualified": 0.14,
-        "watch": 0.09,
-        "min_confluence_elite": 0.10,
-        "min_pressure_elite": 0.05,
-        "min_confluence_qualified": 0.05,
-    }
+    def optimize(self, payload: Any) -> Any:
+        if isinstance(payload, list):
+            optimized_rows: List[Dict[str, Any]] = []
+            for row in payload:
+                if not isinstance(row, dict):
+                    continue
 
-    def __init__(self, profile: Optional[Dict[str, float]] = None) -> None:
-        merged = dict(self.DEFAULT_PROFILE)
-        if isinstance(profile, dict):
-            merged.update(profile)
+                decision = self._run_logic(row)
 
-        # Preserve dashboard mode thresholds only if they are realistic.
-        # If mode thresholds are very high for the current score scale, cap them.
-        elite = float(merged.get("elite", 0.22))
-        qualified = float(merged.get("qualified", 0.14))
-        watch = float(merged.get("watch", 0.09))
+                new_row = dict(row)
+                new_row["optimizer_tier"] = decision["tier"]
+                new_row["optimizer_score"] = decision["score"]
+                new_row["optimizer_reason"] = decision["reason"]
 
-        self.elite_threshold = min(elite, 0.22)
-        self.trade_threshold = min(qualified, 0.14)
-        self.watch_threshold = min(watch, 0.09)
+                optimized_rows.append(new_row)
 
-        self.min_confluence_elite = float(merged.get("min_confluence_elite", 0.10))
-        self.min_pressure_elite = float(merged.get("min_pressure_elite", 0.05))
-        self.min_confluence_qualified = float(merged.get("min_confluence_qualified", 0.05))
-
-        self.profile = merged
-
-    def _safe(self, value: Any) -> float:
-        try:
-            return float(value)
-        except Exception:
-            return 0.0
-
-    def _clamp01(self, value: float) -> float:
-        if value < 0.0:
-            return 0.0
-        if value > 1.0:
-            return 1.0
-        return value
-
-    def _get_pressure(self, row: Dict[str, Any]) -> float:
-        return self._safe(
-            row.get("pressure_score")
-            or row.get("pressure")
-            or row.get("opportunity_pressure")
-        )
-
-    def _get_confluence(self, row: Dict[str, Any]) -> float:
-        return self._safe(
-            row.get("confluence_score")
-            or row.get("confluence")
-            or row.get("signal_confluence")
-        )
-
-    def _get_accel(self, row: Dict[str, Any]) -> float:
-        return self._safe(
-            row.get("pressure_acceleration")
-            or row.get("acceleration_score")
-            or row.get("accel")
-        )
-
-    def _get_score(self, row: Dict[str, Any]) -> float:
-        return self._safe(
-            row.get("score")
-            or row.get("ai_score")
-            or row.get("opportunity_score")
-            or row.get("decision_score")
-        )
-
-    def _get_vwap_dev(self, row: Dict[str, Any]) -> float:
-        return abs(
-            self._safe(
-                row.get("vwap_dev")
-                or row.get("vwap_distance")
-                or row.get("vwap_deviation")
+            optimized_rows.sort(
+                key=lambda r: _safe(r.get("optimizer_score", 0.0)), reverse=True
             )
-        )
+            return optimized_rows
 
-    def _normalize_spread(self, spread_bps: float) -> float:
-        spread = abs(self._safe(spread_bps))
-        if spread >= 900:
-            return 10.0
-        return spread
+        if isinstance(payload, dict):
+            return self._run_logic(payload)
 
-    def _regime_bonus(self, regime: str) -> float:
-        r = str(regime).upper()
+        return []
 
-        if "MEAN" in r:
-            return 0.020
-        if "RANGE" in r:
-            return 0.015
-        if "TREND" in r:
-            return 0.012
-        if "BREAKOUT" in r:
-            return 0.010
-        if "VOLATILE" in r:
-            return 0.008
-        if "CRYPTO" in r:
-            return 0.006
-        if "FX" in r:
-            return 0.005
-        if "FUTURES" in r:
-            return 0.005
-        return 0.0
+    def evaluate(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        return self._run_logic(row)
 
-    def _spread_penalty(self, spread_bps: float) -> float:
-        spread = self._normalize_spread(spread_bps)
+    def _run_logic(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        ai_score = _safe(row.get("ai_score"))
+        confluence = _safe(row.get("confluence_score"))
+        pressure = _safe(row.get("pressure_score"))
 
-        if spread >= 20:
-            return 0.050
-        if spread >= 15:
-            return 0.035
-        if spread >= 10:
-            return 0.020
-        if spread >= 6:
-            return 0.010
-        return 0.003
+        pressure_type = str(row.get("pressure_type", "BUILDUP") or "BUILDUP").upper()
+        pressure_quality = str(
+            row.get("pressure_trade_quality", "LOW") or "LOW"
+        ).upper()
 
-    def _tier(
-        self,
-        trade_score: float,
-        pressure: float,
-        accel: float,
-        confluence: float,
-    ) -> str:
+        pressure_boost = 1.0 + (pressure * 0.80)
+        adjusted_score = ai_score * pressure_boost
+
+        if pressure_type == "EXHAUSTION":
+            return self._decision("IGNORE", adjusted_score, "exhaustion_zone")
+
+        effective_quality = pressure_quality
         if (
-            trade_score >= self.elite_threshold
-            and confluence >= self.min_confluence_elite
-            and pressure >= self.min_pressure_elite
+            effective_quality == "LOW"
+            and pressure_type == "BUILDUP"
+            and pressure >= 0.17
+            and ai_score >= 0.09
         ):
-            return "ELITE"
+            effective_quality = "MEDIUM"
 
+        # ELITE
         if (
-            trade_score >= self.trade_threshold
-            and confluence >= self.min_confluence_qualified
+            adjusted_score >= 0.125
+            and pressure >= 0.21
+            and confluence >= 0.16
+            and effective_quality in ("HIGH", "MEDIUM")
         ):
-            return "QUALIFIED"
+            return self._decision("ELITE", adjusted_score, "high_quality_buildup")
 
-        if trade_score >= self.watch_threshold:
-            return "WATCH"
+        # QUALIFIED
+        if (
+            adjusted_score >= 0.10
+            and pressure >= 0.17
+            and confluence >= 0.12
+            and effective_quality in ("HIGH", "MEDIUM")
+        ):
+            return self._decision("QUALIFIED", adjusted_score, "valid_buildup_signal")
 
-        return "IGNORE"
+        # fallback qualified for strong build-up even when confluence is only modest
+        if (
+            adjusted_score >= 0.108
+            and pressure >= 0.20
+            and pressure_type == "BUILDUP"
+            and effective_quality == "MEDIUM"
+        ):
+            return self._decision("QUALIFIED", adjusted_score, "strong_buildup_override")
 
-    def enrich_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
-        enriched = dict(row)
+        # WATCH
+        if adjusted_score >= 0.08 and pressure >= 0.15:
+            return self._decision("WATCH", adjusted_score, "developing_signal")
 
-        score = self._get_score(row)
-        pressure = self._get_pressure(row)
-        confluence = self._get_confluence(row)
-        accel = self._get_accel(row)
-        vwap_dev = self._get_vwap_dev(row)
-        spread = self._normalize_spread(row.get("spread_bps", 0.0))
-        regime = str(row.get("regime", "NEUTRAL")).upper()
+        if effective_quality == "LOW":
+            return self._decision("IGNORE", adjusted_score, "low_pressure_quality")
 
-        # Current environment has low-to-mid raw scores, so use a lighter fusion model.
-        trade_score = (
-            score * 0.65
-            + confluence * 0.12
-            + pressure * 0.10
-            + accel * 0.05
-            + min(vwap_dev * 6.0, 0.08)
-        )
+        return self._decision("IGNORE", adjusted_score, "below_threshold")
 
-        trade_score += self._regime_bonus(regime)
-        trade_score -= self._spread_penalty(spread)
-        trade_score = self._clamp01(trade_score)
-
-        signal_tier = self._tier(
-            trade_score=trade_score,
-            pressure=pressure,
-            accel=accel,
-            confluence=confluence,
-        )
-
-        if signal_tier in {"ELITE", "QUALIFIED"}:
-            decision = "TRADE"
-        elif signal_tier == "WATCH":
-            decision = "WATCH"
-        else:
-            decision = "IGNORE"
-
-        enriched["score"] = score
-        enriched["pressure_score"] = pressure
-        enriched["confluence_score"] = confluence
-        enriched["pressure_acceleration"] = accel
-        enriched["trade_score"] = round(trade_score, 6)
-        enriched["signal_tier"] = signal_tier
-        enriched["decision"] = decision
-        enriched["spread_bps"] = spread
-        enriched["regime"] = regime
-
-        return enriched
-
-    def classify(self, row: Dict[str, Any]) -> str:
-        enriched = self.enrich_row(row)
-
-        # Mutate input row too, so the dashboard can print trade_score immediately.
-        try:
-            row.update(enriched)
-        except Exception:
-            pass
-
-        return str(enriched.get("signal_tier", "IGNORE"))
-
-    def optimize(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        optimized: List[Dict[str, Any]] = []
-
-        for row in rows:
-            enriched = self.enrich_row(row)
-
-            print(
-                f"[{enriched['signal_tier']}] {enriched.get('symbol', 'UNKNOWN')}: "
-                f"score={float(enriched.get('score', 0.0)):.6f}, "
-                f"confluence={float(enriched.get('confluence_score', 0.0)):.6f}, "
-                f"pressure={float(enriched.get('pressure_score', 0.0)):.6f}, "
-                f"accel={float(enriched.get('pressure_acceleration', 0.0)):.6f}, "
-                f"spread={float(enriched.get('spread_bps', 0.0)):.6f}, "
-                f"trade_score={float(enriched.get('trade_score', 0.0)):.6f}, "
-                f"regime={enriched.get('regime', 'NEUTRAL')}"
-            )
-
-            optimized.append(enriched)
-
-        optimized.sort(
-            key=lambda x: float(x.get("trade_score", 0.0)),
-            reverse=True,
-        )
-
-        return optimized
+    def _decision(self, tier: str, score: float, reason: str) -> Dict[str, Any]:
+        return {
+            "tier": tier,
+            "score": round(score, 6),
+            "reason": reason,
+        }
