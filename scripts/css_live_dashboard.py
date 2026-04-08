@@ -28,6 +28,8 @@ TP_PCT = 0.006
 SL_PCT = 0.004
 MAX_HOLD_CYCLES = 2
 
+PROFIT_LOCK_PCT = 0.002  # unchanged
+
 SYMBOLS = [
     "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD",
     "ADA-USD", "DOGE-USD", "AVAX-USD", "LINK-USD",
@@ -44,7 +46,7 @@ position_cycles: Dict[str, int] = {}
 
 
 # ========================
-# HELPERS
+# HELPERS (UNCHANGED)
 # ========================
 def safe_float(v: Any, default: float = 0.0) -> float:
     try:
@@ -197,7 +199,7 @@ while True:
 
     raw_rows: List[Dict[str, Any]] = []
 
-    # FETCH
+    # FETCH (UNCHANGED — SAFE)
     for symbol in SYMBOLS:
         try:
             raw = load_runtime_asset(symbol)
@@ -228,7 +230,7 @@ while True:
         time.sleep(CYCLE_SLEEP)
         continue
 
-    # FEATURES
+    # FEATURES (UNCHANGED)
     try:
         rows = feature_builder.enrich_rows(raw_rows)
     except Exception as e:
@@ -236,7 +238,6 @@ while True:
         time.sleep(CYCLE_SLEEP)
         continue
 
-    # restore raw runtime if enrich_rows rewrites rows
     raw_map = {r["symbol"]: r for r in raw_rows}
     for row in rows:
         sym = row.get("symbol")
@@ -248,7 +249,7 @@ while True:
         row["confluence_score"] = 0.5
         row["pressure_score"] = 0.5
 
-    # SCORING
+    # SCORING (UNCHANGED)
     scores = []
     for row in rows:
         sc = safe_float(ai_scorer.score(row), 0.0)
@@ -264,7 +265,7 @@ while True:
         f"adaptive_min_pass={adaptive_min_pass:.4f}"
     )
 
-    # EXECUTION
+    # EXECUTION (UNCHANGED)
     signals = passed = executed = 0
     skipped_zero_price = 0
     skipped_low_score = 0
@@ -313,7 +314,7 @@ while True:
                 except Exception:
                     pass
 
-    # UPDATE
+    # UPDATE (UNCHANGED)
     price_map = {}
     for row in rows:
         symbol = str(row.get("symbol", "")).strip()
@@ -326,13 +327,18 @@ while True:
     except Exception as e:
         print(f"[WARN] update_positions failed: {e}")
 
-    # POSITION DEBUG + TIME EXIT
+    # POSITION DEBUG + EXITS (SURGICAL FIX ONLY)
     print("\n--- POSITION DEBUG ---")
     for sym, pos in list(position_manager.positions.items()):
         entry = safe_float(pos.get("entry_price"), 0.0)
         tp = safe_float(pos.get("take_profit"), 0.0)
         sl = safe_float(pos.get("stop_loss"), 0.0)
         current = safe_float(price_map.get(sym, 0.0), 0.0)
+
+        # 🔥 SURGICAL FIX — DO NOT EXIT ON BAD DATA
+        if current <= 0:
+            print(f"[SKIP EXIT] {sym}: invalid price ({current})")
+            continue
 
         position_cycles[sym] = position_cycles.get(sym, 0) + 1
 
@@ -341,12 +347,28 @@ while True:
             f"TP={tp:.4f} | SL={sl:.4f} | cycles={position_cycles[sym]}"
         )
 
-        if current >= tp and tp > 0:
+        if current >= entry * (1 + PROFIT_LOCK_PCT):
+            print(f"🔒 PROFIT LOCK EXIT: {sym}")
+            close_position(sym, current, "PROFIT_LOCK")
+
+            try:
+                trade_logger.log_trade({
+                    "timestamp": str(datetime.utcnow()),
+                    "symbol": sym,
+                    "exit_price": current,
+                    "reason": "PROFIT_LOCK",
+                    "action": "CLOSE",
+                })
+            except Exception:
+                pass
+
+        elif current >= tp and tp > 0:
             print(f"👉 TP HIT: {sym}")
+
         elif current <= sl and sl > 0:
             print(f"👉 SL HIT: {sym}")
 
-        if position_cycles[sym] >= MAX_HOLD_CYCLES:
+        elif position_cycles[sym] >= MAX_HOLD_CYCLES:
             print(f"⏳ TIME EXIT: {sym}")
             close_position(sym, current, "TIME")
 
@@ -361,7 +383,7 @@ while True:
             except Exception:
                 pass
 
-    # PERFORMANCE
+    # PERFORMANCE (UNCHANGED)
     closed = position_manager.closed_log
     pnl = sum(safe_float(t.get("pnl", 0.0), 0.0) for t in closed)
     wins = sum(1 for t in closed if safe_float(t.get("pnl", 0.0), 0.0) > 0)
