@@ -20,13 +20,13 @@ from backend.intelligence.feature_builder import FeatureBuilder
 # ========================
 # CONFIG
 # ========================
-MAX_TRADES_PER_CYCLE = 10
+MAX_TRADES_PER_CYCLE = 5
 BASE_THRESHOLD = 0.15
 CYCLE_SLEEP = 3
 
 TP_PCT = 0.006
 SL_PCT = 0.004
-MAX_HOLD_CYCLES = 3
+MAX_HOLD_CYCLES = 2
 
 SYMBOLS = [
     "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD",
@@ -257,8 +257,6 @@ while True:
 
     avg = sum(scores) / len(scores) if scores else 0.0
     threshold = max(BASE_THRESHOLD, avg * 0.8)
-
-    # adaptive pass band
     adaptive_min_pass = max(0.12, threshold)
 
     print(
