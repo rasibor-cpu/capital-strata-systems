@@ -32,6 +32,9 @@ PROFIT_LOCK_PCT = 0.002
 STRONG_PROFIT_PCT = 0.004
 WEAK_MOVE_PCT = 0.001
 
+# minimal regime limiter
+TREND_THRESHOLD = 0.008
+
 SYMBOLS = [
     "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD",
     "ADA-USD", "DOGE-USD", "AVAX-USD", "LINK-USD",
@@ -46,8 +49,9 @@ trade_logger = TradeLogger()
 
 position_cycles: Dict[str, int] = {}
 
+
 # ========================
-# HELPERS (UNCHANGED)
+# HELPERS (UNCHANGED BASELINE)
 # ========================
 def safe_float(v: Any, default: float = 0.0) -> float:
     try:
@@ -104,6 +108,27 @@ def get_effective_price(row: Dict[str, Any]) -> float:
 
 def build_tp_sl(price: float):
     return price * (1 + TP_PCT), price * (1 - SL_PCT)
+
+
+def get_close(c: Any) -> float:
+    if isinstance(c, (list, tuple)) and len(c) > 4:
+        return safe_float(c[4], 0.0)
+    if isinstance(c, dict):
+        return safe_float(c.get("close"), 0.0)
+    return 0.0
+
+
+def compute_trend_strength(candles: List[Any]) -> float:
+    if len(candles) < 10:
+        return 0.0
+
+    first = get_close(candles[-10])
+    last = get_close(candles[-1])
+
+    if first <= 0:
+        return 0.0
+
+    return abs(last - first) / first
 
 
 def open_position(symbol: str, price: float, score: float) -> bool:
@@ -170,6 +195,7 @@ while True:
                 "candles": candles,
                 "price": runtime_price,
                 "raw_runtime": raw,
+                "trend_strength": compute_trend_strength(candles),
             })
 
         except Exception:
@@ -190,6 +216,7 @@ while True:
         sym = row.get("symbol")
         if sym in raw_map:
             row["raw_runtime"] = raw_map[sym].get("raw_runtime")
+            row["trend_strength"] = raw_map[sym].get("trend_strength", 0.0)
             if safe_float(row.get("price", 0.0), 0.0) <= 0:
                 row["price"] = raw_map[sym].get("price", 0.0)
 
@@ -222,7 +249,9 @@ while True:
         signals += 1
         passed += 1
 
-        if executed >= MAX_TRADES_PER_CYCLE:
+        # minimal 2-line regime limiter
+        max_trades_allowed = 2 if safe_float(row.get("trend_strength", 0.0), 0.0) > TREND_THRESHOLD else MAX_TRADES_PER_CYCLE
+        if executed >= max_trades_allowed:
             continue
 
         symbol = str(row.get("symbol", "")).strip()
@@ -259,19 +288,15 @@ while True:
 
         print(f"{sym} | pnl={pnl_pct:.4%} | cycles={position_cycles[sym]}")
 
-        # STRONG PROFIT
         if pnl_pct >= STRONG_PROFIT_PCT:
             close_position(sym, current, "STRONG_PROFIT")
 
-        # NORMAL PROFIT LOCK
         elif pnl_pct >= PROFIT_LOCK_PCT:
             close_position(sym, current, "PROFIT_LOCK")
 
-        # WEAK EXIT
         elif position_cycles[sym] >= MAX_HOLD_CYCLES and pnl_pct < WEAK_MOVE_PCT:
             close_position(sym, current, "WEAK_EXIT")
 
-        # TIME EXIT
         elif position_cycles[sym] >= MAX_HOLD_CYCLES:
             close_position(sym, current, "TIME")
 
@@ -284,5 +309,6 @@ while True:
     print(f"Open Positions: {len(position_manager.positions)}")
     print(f"Closed Trades: {len(closed)}")
     print(f"Wins: {wins}")
+    print(f"Signals: {signals} | Passed: {passed} | Executed: {executed}")
 
     time.sleep(CYCLE_SLEEP)
