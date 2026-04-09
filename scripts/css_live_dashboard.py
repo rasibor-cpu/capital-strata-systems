@@ -32,7 +32,6 @@ PROFIT_LOCK_PCT = 0.002
 STRONG_PROFIT_PCT = 0.004
 WEAK_MOVE_PCT = 0.001
 
-# minimal regime limiter
 TREND_THRESHOLD = 0.008
 
 SYMBOLS = [
@@ -51,7 +50,7 @@ position_cycles: Dict[str, int] = {}
 
 
 # ========================
-# HELPERS (UNCHANGED BASELINE)
+# HELPERS
 # ========================
 def safe_float(v: Any, default: float = 0.0) -> float:
     try:
@@ -69,45 +68,6 @@ def extract_candles(data: Any) -> List[Any]:
     if isinstance(data, list):
         return data
     return []
-
-
-def extract_price_from_runtime(raw: Any, candles: List[Any]) -> float:
-    if isinstance(raw, dict):
-        for key in ("price", "last_price", "close", "current_price", "spot_price", "last"):
-            if key in raw:
-                px = safe_float(raw.get(key), 0.0)
-                if px > 0:
-                    return px
-
-    if candles:
-        last = candles[-1]
-        if isinstance(last, (list, tuple)) and len(last) > 4:
-            px = safe_float(last[4], 0.0)
-            if px > 0:
-                return px
-
-    return 0.0
-
-
-def get_effective_price(row: Dict[str, Any]) -> float:
-    for key in ("price", "close", "last_price", "current_price"):
-        if key in row:
-            px = safe_float(row.get(key), 0.0)
-            if px > 0:
-                return px
-
-    raw = row.get("raw_runtime")
-    candles = row.get("candles", [])
-    if isinstance(candles, list):
-        px = extract_price_from_runtime(raw, candles)
-        if px > 0:
-            return px
-
-    return 0.0
-
-
-def build_tp_sl(price: float):
-    return price * (1 + TP_PCT), price * (1 - SL_PCT)
 
 
 def get_close(c: Any) -> float:
@@ -131,6 +91,34 @@ def compute_trend_strength(candles: List[Any]) -> float:
     return abs(last - first) / first
 
 
+def extract_price_from_runtime(raw: Any, candles: List[Any]) -> float:
+    if isinstance(raw, dict):
+        for key in ("price", "last_price", "close", "current_price", "spot_price", "last"):
+            px = safe_float(raw.get(key), 0.0)
+            if px > 0:
+                return px
+
+    if candles:
+        return get_close(candles[-1])
+
+    return 0.0
+
+
+def get_effective_price(row: Dict[str, Any]) -> float:
+    px = safe_float(row.get("price", 0.0))
+    if px > 0:
+        return px
+
+    return extract_price_from_runtime(
+        row.get("raw_runtime"),
+        row.get("candles", [])
+    )
+
+
+def build_tp_sl(price: float):
+    return price * (1 + TP_PCT), price * (1 - SL_PCT)
+
+
 def open_position(symbol: str, price: float, score: float) -> bool:
     tp, sl = build_tp_sl(price)
 
@@ -148,7 +136,7 @@ def open_position(symbol: str, price: float, score: float) -> bool:
 
         if symbol in position_manager.positions:
             position_cycles[symbol] = 0
-            print(f"[OPEN] {symbol} @ {price:.4f} | TP={tp:.4f} | SL={sl:.4f} | score={score:.4f}")
+            print(f"[OPEN] {symbol} @ {price:.4f} | score={score:.4f}")
             return True
 
         return False
@@ -162,7 +150,7 @@ def close_position(symbol: str, price: float, reason: str):
     try:
         position_manager.close_position(symbol, price, reason)
         position_cycles.pop(symbol, None)
-        print(f"[CLOSE] {symbol} @ {price:.4f} | reason={reason}")
+        print(f"[CLOSE] {symbol} @ {price:.4f} | {reason}")
     except Exception as e:
         print(f"[WARN] close failed for {symbol}: {e}")
 
@@ -207,7 +195,8 @@ while True:
 
     try:
         rows = feature_builder.enrich_rows(raw_rows)
-    except Exception:
+    except Exception as e:
+        print(f"[FATAL] feature_builder failed: {e}")
         time.sleep(CYCLE_SLEEP)
         continue
 
@@ -240,28 +229,57 @@ while True:
 
     signals = passed = executed = 0
 
+    qualified_rows: List[Dict[str, Any]] = []
     for row in rows:
         score = safe_float(row.get("ai_score", 0.0), 0.0)
-
         if score < threshold or score < adaptive_min_pass:
             continue
 
         signals += 1
         passed += 1
+        qualified_rows.append(row)
 
-        # minimal 2-line regime limiter
-        max_trades_allowed = 2 if safe_float(row.get("trend_strength", 0.0), 0.0) > TREND_THRESHOLD else MAX_TRADES_PER_CYCLE
+    # Entry-quality upgrade:
+    # Prefer higher score first, then lower trend-strength first.
+    qualified_rows.sort(
+        key=lambda r: (
+            -safe_float(r.get("ai_score", 0.0), 0.0),
+            safe_float(r.get("trend_strength", 0.0), 0.0),
+            str(r.get("symbol", "")),
+        )
+    )
+
+    for row in qualified_rows:
+        # minimal regime limiter, preserving engine activity
+        max_trades_allowed = (
+            2 if safe_float(row.get("trend_strength", 0.0), 0.0) > TREND_THRESHOLD
+            else MAX_TRADES_PER_CYCLE
+        )
         if executed >= max_trades_allowed:
             continue
 
         symbol = str(row.get("symbol", "")).strip()
         price = get_effective_price(row)
+        score = safe_float(row.get("ai_score", 0.0), 0.0)
 
         if price <= 0 or symbol in position_manager.positions:
             continue
 
         if open_position(symbol, price, score):
             executed += 1
+
+            try:
+                trade_logger.log_trade({
+                    "timestamp": str(datetime.utcnow()),
+                    "symbol": symbol,
+                    "entry_price": price,
+                    "take_profit": price * (1 + TP_PCT),
+                    "stop_loss": price * (1 - SL_PCT),
+                    "score": score,
+                    "action": "OPEN",
+                })
+            except Exception:
+                pass
 
     price_map = {}
     for row in rows:
@@ -272,8 +290,8 @@ while True:
 
     try:
         position_manager.update_positions(price_map)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[WARN] update_positions failed: {e}")
 
     print("\n--- POSITION DEBUG ---")
     for sym, pos in list(position_manager.positions.items()):
@@ -286,19 +304,72 @@ while True:
         position_cycles[sym] = position_cycles.get(sym, 0) + 1
         pnl_pct = (current - entry) / entry
 
-        print(f"{sym} | pnl={pnl_pct:.4%} | cycles={position_cycles[sym]}")
+        score = safe_float(pos.get("confidence", 0.15), 0.15)
 
-        if pnl_pct >= STRONG_PROFIT_PCT:
+        # Current soft edge-weighting retained
+        is_strong = score >= 0.20
+        is_weak = score < 0.15
+
+        strong_profit = STRONG_PROFIT_PCT * (1.2 if is_strong else 1.0)
+        profit_lock = PROFIT_LOCK_PCT * (1.05 if is_strong else 1.0)
+        weak_cut = WEAK_MOVE_PCT * (0.8 if is_weak else 1.0)
+
+        print(
+            f"{sym} | pnl={pnl_pct:.4%} | cycles={position_cycles[sym]} | "
+            f"score={score:.3f}"
+        )
+
+        if pnl_pct >= strong_profit:
             close_position(sym, current, "STRONG_PROFIT")
+            try:
+                trade_logger.log_trade({
+                    "timestamp": str(datetime.utcnow()),
+                    "symbol": sym,
+                    "exit_price": current,
+                    "reason": "STRONG_PROFIT",
+                    "action": "CLOSE",
+                })
+            except Exception:
+                pass
 
-        elif pnl_pct >= PROFIT_LOCK_PCT:
+        elif pnl_pct >= profit_lock:
             close_position(sym, current, "PROFIT_LOCK")
+            try:
+                trade_logger.log_trade({
+                    "timestamp": str(datetime.utcnow()),
+                    "symbol": sym,
+                    "exit_price": current,
+                    "reason": "PROFIT_LOCK",
+                    "action": "CLOSE",
+                })
+            except Exception:
+                pass
 
-        elif position_cycles[sym] >= MAX_HOLD_CYCLES and pnl_pct < WEAK_MOVE_PCT:
-            close_position(sym, current, "WEAK_EXIT")
+        elif position_cycles[sym] >= MAX_HOLD_CYCLES and pnl_pct < weak_cut:
+            close_position(sym, current, "WEAK_EXIT_FAST")
+            try:
+                trade_logger.log_trade({
+                    "timestamp": str(datetime.utcnow()),
+                    "symbol": sym,
+                    "exit_price": current,
+                    "reason": "WEAK_EXIT_FAST",
+                    "action": "CLOSE",
+                })
+            except Exception:
+                pass
 
-        elif position_cycles[sym] >= MAX_HOLD_CYCLES:
+        elif position_cycles[sym] >= MAX_HOLD_CYCLES + (1 if is_strong else 0):
             close_position(sym, current, "TIME")
+            try:
+                trade_logger.log_trade({
+                    "timestamp": str(datetime.utcnow()),
+                    "symbol": sym,
+                    "exit_price": current,
+                    "reason": "TIME",
+                    "action": "CLOSE",
+                })
+            except Exception:
+                pass
 
     closed = position_manager.closed_log
     pnl = sum(safe_float(t.get("pnl", 0.0), 0.0) for t in closed)
