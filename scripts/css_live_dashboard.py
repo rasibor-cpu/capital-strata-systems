@@ -153,6 +153,20 @@ def print_recent_closed_trades(limit: int = 5) -> None:
         )
 
 
+def force_close_crypto_position(symbol: str, current_price: float, reason: str) -> None:
+    """
+    Hard-close wrapper:
+    1. Calls the existing PositionManager close logic
+    2. Force-removes the position from the open-position store
+    """
+    try:
+        pm.close_position(symbol, current_price, reason)
+    except Exception as e:
+        print(f"[CLOSE ERROR] {symbol}: {e}")
+    finally:
+        pm.positions.pop(symbol, None)
+
+
 # ========================
 # MAIN LOOP
 # ========================
@@ -219,17 +233,17 @@ while True:
 
         if pnl_pct >= TP_PCT:
             print(f"[TP] {sym}")
-            pm.close_position(sym, cur, "TP")
+            force_close_crypto_position(sym, cur, "TP")
             pos_cycles.pop(sym, None)
 
         elif pnl_pct <= -SL_PCT:
             print(f"[SL] {sym}")
-            pm.close_position(sym, cur, "SL")
+            force_close_crypto_position(sym, cur, "SL")
             pos_cycles.pop(sym, None)
 
         elif pos_cycles[sym] >= MAX_HOLD:
             print(f"[TIME EXIT] {sym}")
-            pm.close_position(sym, cur, "TIME")
+            force_close_crypto_position(sym, cur, "TIME")
             pos_cycles.pop(sym, None)
 
     # =====================
@@ -317,7 +331,7 @@ while True:
             print(f"[FUTURES ERROR] {f}: {e}")
 
     # =====================
-    # OPTIONS SCAN (FIXED)
+    # OPTIONS SCAN
     # =====================
     option_rows: List[Dict[str, Any]] = []
     try:
