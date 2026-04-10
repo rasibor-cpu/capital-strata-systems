@@ -18,11 +18,8 @@ from backend.scanner.options_chain_adapter import OptionsChainAdapter
 
 # ========================
 # LEGACY ENGINE MODES
-# Restored as interactive startup selector.
-# We are restoring the previously agreed 5-mode structure:
-# SAFE / CONSERVATIVE / BALANCED / AGGRESSIVE / EXPANSION
+# Restored as interactive selector
 # ========================
-
 ENGINE_MODES = {
     "1": "SAFE",
     "2": "CONSERVATIVE",
@@ -31,8 +28,8 @@ ENGINE_MODES = {
     "5": "EXPANSION",
 }
 
-# These values are the runtime bindings for this current dashboard layer.
-# Philosophy is not being redefined here; only reconnected.
+# Runtime bindings for the current dashboard layer.
+# This restores the mode system into the existing dashboard.
 ENGINE_PROFILES: Dict[str, Dict[str, float]] = {
     "SAFE": {
         "MAX_CRYPTO": 2,
@@ -198,13 +195,38 @@ def score(symbol: str, price: float, candles: List[Any]) -> float:
     return (move * 0.7 + vol * 0.3) * 10000.0
 
 
+def classify_signal(score_value: float) -> str:
+    if score_value >= 10.0:
+        return "ELITE"
+    if score_value >= 7.0:
+        return "QUALIFIED"
+    return "WATCH"
+
+
 def required_move_threshold() -> float:
     return max(MIN_EXPECTED_MOVE, ESTIMATED_COST * PROFIT_BUFFER)
 
 
-def is_trade_profitable(score_value: float) -> bool:
+def tier_adjusted_threshold(base_required: float, tier: str) -> float:
+    if tier == "ELITE":
+        return base_required
+    if tier == "QUALIFIED":
+        return base_required * 0.90
+    return base_required
+
+
+def is_trade_profitable(score_value: float, tier: str) -> bool:
     expected_move = score_value / 10000.0
-    return expected_move >= required_move_threshold()
+    adjusted_required = tier_adjusted_threshold(required_move_threshold(), tier)
+    return expected_move >= adjusted_required
+
+
+def tier_position_size(tier: str) -> float:
+    if tier == "ELITE":
+        return 1.0
+    if tier == "QUALIFIED":
+        return 0.5
+    return 0.0
 
 
 def build_tp_sl(price: float):
@@ -246,9 +268,10 @@ def print_recent_closed_trades(limit: int = 5) -> None:
         exit_price = safe(t.get("exit_price", 0.0))
         pnl = safe(t.get("pnl", 0.0))
         reason = t.get("reason", "N/A")
+        size = safe(t.get("size", 1.0), 1.0)
         print(
             f"{symbol} | entry={entry:.4f} | exit={exit_price:.4f} | "
-            f"pnl={pnl:.4f} | reason={reason}"
+            f"size={size:.2f} | pnl={pnl:.4f} | reason={reason}"
         )
 
 
@@ -272,9 +295,8 @@ def print_engine_header() -> None:
         f"EstimatedCost={ESTIMATED_COST:.6f} | ProfitBuffer={PROFIT_BUFFER:.2f} | "
         f"RequiredMove={required_move_threshold():.6f}"
     )
-    print(
-        f"TP={TP_PCT:.4%} | SL={SL_PCT:.4%} | MaxHold={MAX_HOLD}"
-    )
+    print(f"TP={TP_PCT:.4%} | SL={SL_PCT:.4%} | MaxHold={MAX_HOLD}")
+    print("Signal Tiers: ELITE>=10.00 | QUALIFIED>=7.00 | WATCH<7.00")
 
 
 print_engine_header()
@@ -318,10 +340,12 @@ while True:
 
     print("\n--- CRYPTO ---")
     for r in rows[:5]:
-        flag = "Y" if is_trade_profitable(r["score"]) else "N"
+        tier = classify_signal(r["score"])
+        profitable = is_trade_profitable(r["score"], tier) if tier != "WATCH" else False
+        flag = "Y" if profitable else "N"
         print(
             f"{r['symbol']} | score={r['score']:.2f} | "
-            f"profitable={flag}"
+            f"tier={tier} | profitable={flag}"
         )
 
     # ===== UPDATE POSITIONS =====
@@ -340,7 +364,10 @@ while True:
         pnl = (cur - entry) / entry
         pos_cycles[sym] = pos_cycles.get(sym, 0) + 1
 
-        print(f"{sym} | pnl={pnl:.4%} | cycles={pos_cycles[sym]}")
+        print(
+            f"{sym} | size={safe(pos.get('size', 1.0), 1.0):.2f} | "
+            f"pnl={pnl:.4%} | cycles={pos_cycles[sym]}"
+        )
 
         if pnl >= TP_PCT:
             print(f"[TP] {sym}")
@@ -372,12 +399,23 @@ while True:
         if r["score"] < MIN_SCORE:
             continue
 
-        if not is_trade_profitable(r["score"]):
+        tier = classify_signal(r["score"])
+        if tier == "WATCH":
+            continue
+
+        expected_move = r["score"] / 10000.0
+        adjusted_required = tier_adjusted_threshold(required_move_threshold(), tier)
+
+        if not is_trade_profitable(r["score"], tier):
             print(
-                f"[FILTERED] {r['symbol']} insufficient expected move "
-                f"(need>={required_move_threshold():.6f}, got={r['score'] / 10000.0:.6f})"
+                f"[FILTERED] {r['symbol']} {tier} insufficient expected move "
+                f"(need>={adjusted_required:.6f}, got={expected_move:.6f})"
             )
             filtered_crypto += 1
+            continue
+
+        size = tier_position_size(tier)
+        if size <= 0:
             continue
 
         tp, sl = build_tp_sl(r["price"])
@@ -386,13 +424,13 @@ while True:
             pm.open_position(
                 symbol=r["symbol"],
                 entry_price=r["price"],
-                size=1,
+                size=size,
                 take_profit=tp,
                 stop_loss=sl,
                 side="LONG",
                 confidence=r["score"],
             )
-            print(f"[CRYPTO OPEN] {r['symbol']} @ {r['price']:.4f}")
+            print(f"[CRYPTO OPEN] {r['symbol']} ({tier}) size={size:.2f} @ {r['price']:.4f}")
             open_crypto += 1
             executed_crypto += 1
         except Exception as e:
@@ -419,10 +457,18 @@ while True:
             print(f"[FUTURES SKIP] {f} weak score")
             continue
 
-        if not is_trade_profitable(sc):
+        tier = classify_signal(sc)
+        if tier == "WATCH":
+            print(f"[FUTURES SKIP] {f} watch-tier signal")
+            continue
+
+        expected_move = sc / 10000.0
+        adjusted_required = tier_adjusted_threshold(required_move_threshold(), tier)
+
+        if not is_trade_profitable(sc, tier):
             print(
-                f"[FUTURES FILTERED] {f} low expected move "
-                f"(need>={required_move_threshold():.6f}, got={sc / 10000.0:.6f})"
+                f"[FUTURES FILTERED] {f} {tier} low expected move "
+                f"(need>={adjusted_required:.6f}, got={expected_move:.6f})"
             )
             filtered_futures += 1
             continue
@@ -446,7 +492,7 @@ while True:
             )
 
             if res.get("status") == "OPENED":
-                print(f"[FUTURES OPEN] {f}")
+                print(f"[FUTURES OPEN] {f} ({tier})")
                 futures_open += 1
                 executed_futures += 1
             else:
