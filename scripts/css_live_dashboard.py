@@ -10,9 +10,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-# ========================
-# IMPORTS
-# ========================
 from backend.data.coinbase_historical_downloader import load_runtime_asset
 from backend.execution.position_manager import PositionManager
 
@@ -21,9 +18,6 @@ from backend.app.risk.futures_position_manager import FuturesPositionManager
 
 from backend.scanner.options_chain_adapter import OptionsChainAdapter
 
-# ========================
-# CONFIG
-# ========================
 CYCLE_SLEEP = 3
 
 MAX_CRYPTO = 3
@@ -43,9 +37,6 @@ SYMBOLS = [
 
 FUTURES_SYMBOLS = ["ES", "NQ"]
 
-# ========================
-# INIT
-# ========================
 pm = PositionManager()
 
 futures_adapter = FuturesSimAdapter(max_portfolio_allocation=5.0)
@@ -56,9 +47,7 @@ options_adapter = OptionsChainAdapter()
 prev_prices: Dict[str, float] = {}
 pos_cycles: Dict[str, int] = {}
 
-# ========================
-# HELPERS
-# ========================
+
 def safe(v: Any, default: float = 0.0) -> float:
     try:
         return float(v)
@@ -154,11 +143,6 @@ def print_recent_closed_trades(limit: int = 5) -> None:
 
 
 def force_close_crypto_position(symbol: str, current_price: float, reason: str) -> None:
-    """
-    Hard-close wrapper:
-    1. Calls the existing PositionManager close logic
-    2. Force-removes the position from the open-position store
-    """
     try:
         pm.close_position(symbol, current_price, reason)
     except Exception as e:
@@ -167,9 +151,6 @@ def force_close_crypto_position(symbol: str, current_price: float, reason: str) 
         pm.positions.pop(symbol, None)
 
 
-# ========================
-# MAIN LOOP
-# ========================
 cycle = 0
 
 while True:
@@ -179,9 +160,6 @@ while True:
     rows: List[Dict[str, Any]] = []
     price_map: Dict[str, float] = {}
 
-    # =====================
-    # CRYPTO DATA
-    # =====================
     for s in SYMBOLS:
         try:
             raw = load_runtime_asset(s)
@@ -211,9 +189,6 @@ while True:
     for r in rows[:5]:
         print(f"{r['symbol']} | score={r['score']:.2f}")
 
-    # =====================
-    # UPDATE + EXIT (CRYPTO)
-    # =====================
     try:
         pm.update_positions(price_map)
     except Exception as e:
@@ -246,9 +221,6 @@ while True:
             force_close_crypto_position(sym, cur, "TIME")
             pos_cycles.pop(sym, None)
 
-    # =====================
-    # ENTRY (CRYPTO)
-    # =====================
     open_crypto = len(pm.positions)
     executed_crypto = 0
 
@@ -280,9 +252,6 @@ while True:
         except Exception as e:
             print(f"[CRYPTO ERROR] {r['symbol']}: {e}")
 
-    # =====================
-    # ENTRY (FUTURES)
-    # =====================
     futures_open = len(futures_pm.get_open_positions())
     executed_futures = 0
 
@@ -330,9 +299,6 @@ while True:
         except Exception as e:
             print(f"[FUTURES ERROR] {f}: {e}")
 
-    # =====================
-    # OPTIONS SCAN
-    # =====================
     option_rows: List[Dict[str, Any]] = []
     try:
         option_inputs = [
@@ -353,9 +319,6 @@ while True:
     except Exception as e:
         print("[OPTIONS ERROR]", e)
 
-    # =====================
-    # PROFIT DASHBOARD
-    # =====================
     realized = get_closed_crypto_realized()
     unrealized = get_open_crypto_unrealized(price_map)
     wins = get_closed_crypto_wins()
@@ -374,17 +337,11 @@ while True:
     print("\n--- RECENT CLOSED CRYPTO TRADES ---")
     print_recent_closed_trades(limit=5)
 
-    # =====================
-    # STATUS
-    # =====================
     print("\n--- STATUS ---")
     print(f"Crypto Open: {len(pm.positions)}")
     print(f"Futures Open: {len(futures_pm.get_open_positions())}")
     print(f"Options Visible: {len(option_rows)}")
 
-    # =====================
-    # STORE
-    # =====================
     for r in rows:
         if r["price"] > 0:
             prev_prices[r["symbol"]] = r["price"]
