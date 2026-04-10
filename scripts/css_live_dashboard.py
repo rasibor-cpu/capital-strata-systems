@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import sys
-import time
+import sys, time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
@@ -10,150 +9,100 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+# ========================
+# IMPORTS
+# ========================
 from backend.data.coinbase_historical_downloader import load_runtime_asset
 from backend.execution.position_manager import PositionManager
-from backend.execution.trade_logger import TradeLogger
 
-from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
-from backend.intelligence.feature_builder import FeatureBuilder
+from backend.app.brokers.futures_sim_adapter import FuturesSimAdapter
+from backend.app.risk.futures_position_manager import FuturesPositionManager
+
+from backend.scanner.options_chain_adapter import OptionsChainAdapter
 
 # ========================
 # CONFIG
 # ========================
-MAX_TRADES_PER_CYCLE = 5
-BASE_THRESHOLD = 0.15
 CYCLE_SLEEP = 3
 
+# Crypto
+MAX_CRYPTO = 3
+
+# Futures
+MAX_FUTURES = 2
+
+# Risk
 TP_PCT = 0.006
 SL_PCT = 0.004
-MAX_HOLD_CYCLES = 2
+MAX_HOLD_CYCLES = 3
 
-PROFIT_LOCK_PCT = 0.002
-STRONG_PROFIT_PCT = 0.004
-WEAK_MOVE_PCT = 0.001
-
-TREND_THRESHOLD = 0.008
+MIN_SCORE = 0.08
 
 SYMBOLS = [
-    "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD",
-    "ADA-USD", "DOGE-USD", "AVAX-USD", "LINK-USD",
-    "LTC-USD", "BCH-USD",
+    "BTC-USD","ETH-USD","SOL-USD","XRP-USD",
+    "ADA-USD","DOGE-USD","AVAX-USD","LINK-USD",
+    "LTC-USD","BCH-USD",
 ]
 
-feature_builder = FeatureBuilder()
-ai_scorer = AIOpportunityScorer()
+# Futures symbols (mapped manually for now)
+FUTURES_SYMBOLS = ["ES","NQ"]
 
-position_manager = PositionManager()
-trade_logger = TradeLogger()
+# ========================
+# INIT
+# ========================
+pm = PositionManager()
 
+futures_adapter = FuturesSimAdapter(max_portfolio_allocation=5.0)
+futures_pm = FuturesPositionManager(futures_adapter)
+
+options_adapter = OptionsChainAdapter()
+
+previous_prices: Dict[str, float] = {}
 position_cycles: Dict[str, int] = {}
-
 
 # ========================
 # HELPERS
 # ========================
-def safe_float(v: Any, default: float = 0.0) -> float:
-    try:
-        if v is None:
-            return default
-        return float(v)
-    except Exception:
-        return default
+def safe_float(v, default=0.0):
+    try: return float(v)
+    except: return default
 
+def extract_candles(data):
+    return data.get("candles", []) if isinstance(data, dict) else data or []
 
-def extract_candles(data: Any) -> List[Any]:
-    if isinstance(data, dict):
-        candles = data.get("candles", [])
-        return candles if isinstance(candles, list) else []
-    if isinstance(data, list):
-        return data
-    return []
-
-
-def get_close(c: Any) -> float:
-    if isinstance(c, (list, tuple)) and len(c) > 4:
-        return safe_float(c[4], 0.0)
-    if isinstance(c, dict):
-        return safe_float(c.get("close"), 0.0)
+def get_close(c):
+    if isinstance(c, dict): return safe_float(c.get("close"))
+    if isinstance(c,(list,tuple)) and len(c)>4: return safe_float(c[4])
     return 0.0
 
-
-def compute_trend_strength(candles: List[Any]) -> float:
-    if len(candles) < 10:
-        return 0.0
-
-    first = get_close(candles[-10])
-    last = get_close(candles[-1])
-
-    if first <= 0:
-        return 0.0
-
-    return abs(last - first) / first
-
-
-def extract_price_from_runtime(raw: Any, candles: List[Any]) -> float:
+def extract_price(raw, candles):
     if isinstance(raw, dict):
-        for key in ("price", "last_price", "close", "current_price", "spot_price", "last"):
-            px = safe_float(raw.get(key), 0.0)
-            if px > 0:
-                return px
+        for k in ("price","last_price","close"):
+            p = safe_float(raw.get(k))
+            if p > 0: return p
+    return get_close(candles[-1]) if candles else 0
 
-    if candles:
-        return get_close(candles[-1])
+def build_tp_sl(p):
+    return p*(1+TP_PCT), p*(1-SL_PCT)
 
-    return 0.0
+# ========================
+# SCORING (STABLE)
+# ========================
+def score(symbol, price, candles):
+    prev = previous_prices.get(symbol, 0)
 
+    cycle_move = abs((price-prev)/prev) if prev > 0 else 0
 
-def get_effective_price(row: Dict[str, Any]) -> float:
-    px = safe_float(row.get("price", 0.0))
-    if px > 0:
-        return px
+    closes = [get_close(c) for c in candles[-6:] if get_close(c)>0]
 
-    return extract_price_from_runtime(
-        row.get("raw_runtime"),
-        row.get("candles", [])
-    )
+    vol = 0
+    if len(closes) > 1:
+        vol = sum(abs((closes[i]-closes[i-1])/closes[i-1])
+                  for i in range(1,len(closes))) / (len(closes)-1)
 
+    raw = (cycle_move*0.7) + (vol*0.3)
 
-def build_tp_sl(price: float):
-    return price * (1 + TP_PCT), price * (1 - SL_PCT)
-
-
-def open_position(symbol: str, price: float, score: float) -> bool:
-    tp, sl = build_tp_sl(price)
-
-    try:
-        position_manager.open_position(
-            symbol=symbol,
-            entry_price=price,
-            size=1.0,
-            take_profit=tp,
-            stop_loss=sl,
-            side="LONG",
-            confidence=score,
-            regime="RECOVERY",
-        )
-
-        if symbol in position_manager.positions:
-            position_cycles[symbol] = 0
-            print(f"[OPEN] {symbol} @ {price:.4f} | score={score:.4f}")
-            return True
-
-        return False
-
-    except Exception as e:
-        print(f"[WARN] open failed for {symbol}: {e}")
-        return False
-
-
-def close_position(symbol: str, price: float, reason: str):
-    try:
-        position_manager.close_position(symbol, price, reason)
-        position_cycles.pop(symbol, None)
-        print(f"[CLOSE] {symbol} @ {price:.4f} | {reason}")
-    except Exception as e:
-        print(f"[WARN] close failed for {symbol}: {e}")
-
+    return raw * 10000
 
 # ========================
 # MAIN LOOP
@@ -162,224 +111,160 @@ cycle = 0
 
 while True:
     cycle += 1
-    print("\n" + "=" * 70)
-    print(f"Cycle {cycle} | {datetime.now(timezone.utc)}")
-    print("=" * 70)
+    print(f"\n=== Cycle {cycle} ===")
 
-    raw_rows: List[Dict[str, Any]] = []
+    rows = []
+    price_map = {}
 
-    for symbol in SYMBOLS:
+    # =====================
+    # CRYPTO DATA
+    # =====================
+    for s in SYMBOLS:
         try:
-            raw = load_runtime_asset(symbol)
+            raw = load_runtime_asset(s)
             candles = extract_candles(raw)
+            if not candles: continue
 
-            if not candles:
-                continue
+            price = extract_price(raw, candles)
+            sc = score(s, price, candles)
 
-            runtime_price = extract_price_from_runtime(raw, candles)
-
-            raw_rows.append({
-                "symbol": symbol,
+            rows.append({
+                "symbol": s,
+                "price": price,
                 "candles": candles,
-                "price": runtime_price,
-                "raw_runtime": raw,
-                "trend_strength": compute_trend_strength(candles),
+                "score": sc
             })
 
-        except Exception:
+            price_map[s] = price
+
+            print(f"Fetched {len(candles)} candles for {s}")
+        except:
             continue
 
-    if not raw_rows:
-        time.sleep(CYCLE_SLEEP)
-        continue
+    rows.sort(key=lambda x: -x["score"])
 
+    print("\n--- CRYPTO RANKED ---")
+    for r in rows[:5]:
+        print(f"{r['symbol']} | score={r['score']:.4f}")
+
+    # =====================
+    # UPDATE POSITIONS
+    # =====================
     try:
-        rows = feature_builder.enrich_rows(raw_rows)
+        pm.update_positions(price_map)
     except Exception as e:
-        print(f"[FATAL] feature_builder failed: {e}")
-        time.sleep(CYCLE_SLEEP)
-        continue
+        print("Update error:", e)
 
-    raw_map = {r["symbol"]: r for r in raw_rows}
-    for row in rows:
-        sym = row.get("symbol")
-        if sym in raw_map:
-            row["raw_runtime"] = raw_map[sym].get("raw_runtime")
-            row["trend_strength"] = raw_map[sym].get("trend_strength", 0.0)
-            if safe_float(row.get("price", 0.0), 0.0) <= 0:
-                row["price"] = raw_map[sym].get("price", 0.0)
-
-        row["confluence_score"] = 0.5
-        row["pressure_score"] = 0.5
-
-    scores = []
-    for row in rows:
-        sc = safe_float(ai_scorer.score(row), 0.0)
-        row["ai_score"] = sc
-        scores.append(sc)
-
-    avg = sum(scores) / len(scores) if scores else 0.0
-    threshold = max(BASE_THRESHOLD, avg * 0.8)
-    adaptive_min_pass = max(0.12, threshold)
-
-    print(
-        f"\nAI avg={avg:.4f} threshold={threshold:.4f} "
-        f"adaptive_min_pass={adaptive_min_pass:.4f}"
-    )
-
-    signals = passed = executed = 0
-
-    qualified_rows: List[Dict[str, Any]] = []
-    for row in rows:
-        score = safe_float(row.get("ai_score", 0.0), 0.0)
-        if score < threshold or score < adaptive_min_pass:
-            continue
-
-        signals += 1
-        passed += 1
-        qualified_rows.append(row)
-
-    # Entry-quality upgrade:
-    # Prefer higher score first, then lower trend-strength first.
-    qualified_rows.sort(
-        key=lambda r: (
-            -safe_float(r.get("ai_score", 0.0), 0.0),
-            safe_float(r.get("trend_strength", 0.0), 0.0),
-            str(r.get("symbol", "")),
-        )
-    )
-
-    for row in qualified_rows:
-        # minimal regime limiter, preserving engine activity
-        max_trades_allowed = (
-            2 if safe_float(row.get("trend_strength", 0.0), 0.0) > TREND_THRESHOLD
-            else MAX_TRADES_PER_CYCLE
-        )
-        if executed >= max_trades_allowed:
-            continue
-
-        symbol = str(row.get("symbol", "")).strip()
-        price = get_effective_price(row)
-        score = safe_float(row.get("ai_score", 0.0), 0.0)
-
-        if price <= 0 or symbol in position_manager.positions:
-            continue
-
-        if open_position(symbol, price, score):
-            executed += 1
-
-            try:
-                trade_logger.log_trade({
-                    "timestamp": str(datetime.utcnow()),
-                    "symbol": symbol,
-                    "entry_price": price,
-                    "take_profit": price * (1 + TP_PCT),
-                    "stop_loss": price * (1 - SL_PCT),
-                    "score": score,
-                    "action": "OPEN",
-                })
-            except Exception:
-                pass
-
-    price_map = {}
-    for row in rows:
-        symbol = str(row.get("symbol", "")).strip()
-        price = get_effective_price(row)
-        if symbol and price > 0:
-            price_map[symbol] = price
-
-    try:
-        position_manager.update_positions(price_map)
-    except Exception as e:
-        print(f"[WARN] update_positions failed: {e}")
-
+    # =====================
+    # EXIT LOGIC
+    # =====================
     print("\n--- POSITION DEBUG ---")
-    for sym, pos in list(position_manager.positions.items()):
-        entry = safe_float(pos.get("entry_price"), 0.0)
-        current = safe_float(price_map.get(sym, 0.0), 0.0)
 
-        if current <= 0:
+    for sym, pos in list(pm.positions.items()):
+        entry = safe_float(pos.get("entry_price"))
+        current = safe_float(price_map.get(sym))
+
+        if entry <= 0 or current <= 0:
             continue
 
+        pnl = (current - entry) / entry
         position_cycles[sym] = position_cycles.get(sym, 0) + 1
-        pnl_pct = (current - entry) / entry
 
-        score = safe_float(pos.get("confidence", 0.15), 0.15)
+        print(f"{sym} | pnl={pnl:.4%} | cycles={position_cycles[sym]}")
 
-        # Current soft edge-weighting retained
-        is_strong = score >= 0.20
-        is_weak = score < 0.15
+        if pnl >= TP_PCT:
+            pm.close_position(sym, current, "TP")
+            position_cycles.pop(sym, None)
 
-        strong_profit = STRONG_PROFIT_PCT * (1.2 if is_strong else 1.0)
-        profit_lock = PROFIT_LOCK_PCT * (1.05 if is_strong else 1.0)
-        weak_cut = WEAK_MOVE_PCT * (0.8 if is_weak else 1.0)
+        elif pnl <= -SL_PCT:
+            pm.close_position(sym, current, "SL")
+            position_cycles.pop(sym, None)
 
-        print(
-            f"{sym} | pnl={pnl_pct:.4%} | cycles={position_cycles[sym]} | "
-            f"score={score:.3f}"
-        )
+        elif position_cycles[sym] >= MAX_HOLD_CYCLES:
+            pm.close_position(sym, current, "TIME")
+            position_cycles.pop(sym, None)
 
-        if pnl_pct >= strong_profit:
-            close_position(sym, current, "STRONG_PROFIT")
-            try:
-                trade_logger.log_trade({
-                    "timestamp": str(datetime.utcnow()),
-                    "symbol": sym,
-                    "exit_price": current,
-                    "reason": "STRONG_PROFIT",
-                    "action": "CLOSE",
-                })
-            except Exception:
-                pass
+    # =====================
+    # CRYPTO ENTRY
+    # =====================
+    crypto_open = len(pm.positions)
 
-        elif pnl_pct >= profit_lock:
-            close_position(sym, current, "PROFIT_LOCK")
-            try:
-                trade_logger.log_trade({
-                    "timestamp": str(datetime.utcnow()),
-                    "symbol": sym,
-                    "exit_price": current,
-                    "reason": "PROFIT_LOCK",
-                    "action": "CLOSE",
-                })
-            except Exception:
-                pass
+    for r in rows:
+        if crypto_open >= MAX_CRYPTO:
+            break
 
-        elif position_cycles[sym] >= MAX_HOLD_CYCLES and pnl_pct < weak_cut:
-            close_position(sym, current, "WEAK_EXIT_FAST")
-            try:
-                trade_logger.log_trade({
-                    "timestamp": str(datetime.utcnow()),
-                    "symbol": sym,
-                    "exit_price": current,
-                    "reason": "WEAK_EXIT_FAST",
-                    "action": "CLOSE",
-                })
-            except Exception:
-                pass
+        if r["symbol"] in pm.positions:
+            continue
 
-        elif position_cycles[sym] >= MAX_HOLD_CYCLES + (1 if is_strong else 0):
-            close_position(sym, current, "TIME")
-            try:
-                trade_logger.log_trade({
-                    "timestamp": str(datetime.utcnow()),
-                    "symbol": sym,
-                    "exit_price": current,
-                    "reason": "TIME",
-                    "action": "CLOSE",
-                })
-            except Exception:
-                pass
+        if r["score"] < MIN_SCORE:
+            continue
 
-    closed = position_manager.closed_log
-    pnl = sum(safe_float(t.get("pnl", 0.0), 0.0) for t in closed)
-    wins = sum(1 for t in closed if safe_float(t.get("pnl", 0.0), 0.0) > 0)
+        tp, sl = build_tp_sl(r["price"])
 
-    print("\n--- PERFORMANCE ---")
-    print(f"PnL: {pnl:.4f}")
-    print(f"Open Positions: {len(position_manager.positions)}")
-    print(f"Closed Trades: {len(closed)}")
-    print(f"Wins: {wins}")
-    print(f"Signals: {signals} | Passed: {passed} | Executed: {executed}")
+        try:
+            pm.open_position(
+                symbol=r["symbol"],
+                entry_price=r["price"],
+                size=1,
+                take_profit=tp,
+                stop_loss=sl,
+                side="LONG",
+                confidence=r["score"]
+            )
+
+            print(f"[CRYPTO OPEN] {r['symbol']} @ {r['price']:.2f}")
+            crypto_open += 1
+
+        except Exception as e:
+            print(e)
+
+    # =====================
+    # FUTURES ENTRY
+    # =====================
+    futures_open = len(futures_pm.get_open_positions())
+
+    for f in FUTURES_SYMBOLS:
+        if futures_open >= MAX_FUTURES:
+            break
+
+        try:
+            result = futures_pm.open_position(
+                symbol=f,
+                entry_price=100,
+                stop_price=99,
+                contracts=1,
+                current_equity=10000,
+                state={}
+            )
+
+            if result.get("status") == "OPENED":
+                print(f"[FUTURES OPEN] {f}")
+                futures_open += 1
+
+        except Exception as e:
+            print(f"Futures error: {e}")
+
+    # =====================
+    # OPTIONS SCAN
+    # =====================
+    try:
+        option_rows = options_adapter.fetch_option_rows(rows)
+        print(f"\n--- OPTIONS SCAN --- {len(option_rows)} contracts visible")
+    except Exception as e:
+        print("Options error:", e)
+
+    # =====================
+    # STATUS
+    # =====================
+    print("\n--- STATUS ---")
+    print(f"Crypto Open: {len(pm.positions)}")
+    print(f"Futures Open: {len(futures_pm.get_open_positions())}")
+
+    # =====================
+    # STORE PRICES
+    # =====================
+    for r in rows:
+        if r["price"] > 0:
+            previous_prices[r["symbol"]] = r["price"]
 
     time.sleep(CYCLE_SLEEP)

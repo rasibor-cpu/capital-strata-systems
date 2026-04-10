@@ -1,5 +1,3 @@
-# === FULL SAFE UPGRADE: TRADE DECISION ORCHESTRATOR ===
-
 from __future__ import annotations
 
 from typing import Any, Dict, List
@@ -19,14 +17,12 @@ from backend.intelligence.signal_confluence_engine import SignalConfluenceEngine
 class TradeDecisionOrchestrator:
     def __init__(self) -> None:
         self.regime_detector = MarketRegimeDetector()
-
         self.ai_scorer = AIOpportunityScorer()
         self.signal_confluence_engine = SignalConfluenceEngine()
         self.pressure_engine = OpportunityPressureEngine()
         self.acceleration_engine = PressureAccelerationEngine()
         self.momentum_engine = OpportunityMomentumWindowEngine()
 
-        # ORIGINAL THRESHOLDS PRESERVED
         self.mean_reversion_threshold = 0.20
         self.trend_threshold = 0.24
         self.breakout_threshold = 0.28
@@ -39,12 +35,7 @@ class TradeDecisionOrchestrator:
             "regime_confidence": 0.10,
         }
 
-    # =========================
-    # MAIN EVALUATION
-    # =========================
-
     def evaluate_trade(self, asset: str, candles: List[Dict[str, Any]]) -> Dict[str, Any]:
-
         if not candles or len(candles) < 20:
             return self._reject(asset, "INSUFFICIENT_DATA")
 
@@ -52,9 +43,8 @@ class TradeDecisionOrchestrator:
         regime = str(regime_info.get("regime", "NEUTRAL")).upper()
         regime_conf = float(regime_info.get("confidence", 0.0))
 
-        row = {"symbol": asset, "candles": candles}
+        row: Dict[str, Any] = {"symbol": asset, "candles": candles}
 
-        # --- SIGNAL ENRICHMENT ---
         pressure_row = self.pressure_engine.enrich_rows([row])[0]
         accel_row = self.acceleration_engine.enrich_rows([pressure_row])[0]
         conf_row = self.signal_confluence_engine.enrich_rows([accel_row])[0]
@@ -62,13 +52,9 @@ class TradeDecisionOrchestrator:
         pressure = float(conf_row.get("pressure_score", 0.0))
         accel = float(conf_row.get("pressure_acceleration", 0.0))
         confluence = float(conf_row.get("confluence_score", 0.0))
-
         momentum = self._estimate_momentum(candles)
 
-        # --- AI SCORE ---
-        ai_score = self.ai_scorer.score_opportunity(conf_row)
-
-        # --- FUSED SCORE ---
+        ai_score = self._score_ai(conf_row)
         pressure_fusion = (pressure * 0.6) + (abs(accel) * 0.4)
 
         decision_score = (
@@ -78,26 +64,21 @@ class TradeDecisionOrchestrator:
             + momentum * self.weights["momentum_score"]
             + regime_conf * self.weights["regime_confidence"]
         )
-
         decision_score = self._clamp01(decision_score)
 
-        # =========================
-        # 🔥 EXECUTION LOGIC (UPGRADED)
-        # =========================
-
-        # Base rule (original)
         execute_trade = self._should_execute_trade(regime, decision_score)
 
-        # --- NEW SMART EXECUTION ---
-        pressure_ok = pressure >= 0.24
-        confluence_ok = confluence >= 0.13
-        momentum_ok = (accel > 0) or (pressure > 0.30)
+        pressure_ok = pressure >= 0.18
+        confluence_ok = confluence >= 0.10
+        momentum_ok = (accel > -0.02) or (pressure > 0.22)
 
         if pressure_ok and confluence_ok and momentum_ok:
             execute_trade = True
 
-        # High conviction override
-        if decision_score >= 0.32:
+        if decision_score >= 0.26:
+            execute_trade = True
+
+        if decision_score >= 0.22 and pressure >= 0.15:
             execute_trade = True
 
         return {
@@ -112,9 +93,12 @@ class TradeDecisionOrchestrator:
             "decision_score": round(decision_score, 4),
         }
 
-    # =========================
-    # HELPERS
-    # =========================
+    def _score_ai(self, row: Dict[str, Any]) -> float:
+        if hasattr(self.ai_scorer, "score_opportunity"):
+            return float(self.ai_scorer.score_opportunity(row))
+        if hasattr(self.ai_scorer, "score"):
+            return float(self.ai_scorer.score(row))
+        return 0.0
 
     def _should_execute_trade(self, regime: str, score: float) -> bool:
         if regime == "MEAN_REVERSION":
@@ -125,16 +109,16 @@ class TradeDecisionOrchestrator:
             return score >= self.breakout_threshold
         return score >= 0.26
 
-    def _estimate_momentum(self, candles):
-        closes = [c.get("close", 0) for c in candles[-5:]]
-        if len(closes) < 2:
+    def _estimate_momentum(self, candles: List[Dict[str, Any]]) -> float:
+        closes = [float(c.get("close", 0.0)) for c in candles[-5:] if isinstance(c, dict)]
+        if len(closes) < 2 or closes[0] == 0:
             return 0.0
         return self._clamp01(abs((closes[-1] - closes[0]) / (closes[0] + 1e-9)) * 50)
 
-    def _clamp01(self, v):
+    def _clamp01(self, v: float) -> float:
         return max(0.0, min(1.0, float(v)))
 
-    def _reject(self, asset, reason):
+    def _reject(self, asset: str, reason: str) -> Dict[str, Any]:
         return {
             "asset": asset,
             "execute_trade": False,
