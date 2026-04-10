@@ -16,6 +16,7 @@ from backend.app.brokers.futures_sim_adapter import FuturesSimAdapter
 from backend.app.risk.futures_position_manager import FuturesPositionManager
 from backend.scanner.options_chain_adapter import OptionsChainAdapter
 from backend.options.options_position_manager import OptionsPositionManager
+from backend.options.options_intelligence_engine import OptionsIntelligenceEngine
 
 # ========================
 # ENGINE MODES
@@ -29,11 +30,11 @@ ENGINE_MODES = {
 }
 
 ENGINE_PROFILES = {
-    "SAFE": {"MAX_CRYPTO": 2, "MIN_SCORE": 0.12, "MIN_EXPECTED_MOVE": 0.0008, "PROFIT_BUFFER": 1.2},
-    "CONSERVATIVE": {"MAX_CRYPTO": 2, "MIN_SCORE": 0.10, "MIN_EXPECTED_MOVE": 0.0007, "PROFIT_BUFFER": 1.12},
-    "BALANCED": {"MAX_CRYPTO": 3, "MIN_SCORE": 0.08, "MIN_EXPECTED_MOVE": 0.0005, "PROFIT_BUFFER": 1.05},
-    "AGGRESSIVE": {"MAX_CRYPTO": 4, "MIN_SCORE": 0.06, "MIN_EXPECTED_MOVE": 0.0004, "PROFIT_BUFFER": 1.0},
-    "EXPANSION": {"MAX_CRYPTO": 5, "MIN_SCORE": 0.05, "MIN_EXPECTED_MOVE": 0.0003, "PROFIT_BUFFER": 0.95},
+    "SAFE": {"MAX_CRYPTO": 2, "MAX_OPTIONS": 1},
+    "CONSERVATIVE": {"MAX_CRYPTO": 2, "MAX_OPTIONS": 1},
+    "BALANCED": {"MAX_CRYPTO": 3, "MAX_OPTIONS": 2},
+    "AGGRESSIVE": {"MAX_CRYPTO": 4, "MAX_OPTIONS": 3},
+    "EXPANSION": {"MAX_CRYPTO": 5, "MAX_OPTIONS": 4},
 }
 
 def select_engine_mode():
@@ -51,17 +52,27 @@ PROFILE = ENGINE_PROFILES[ENGINE_MODE]
 # ========================
 CYCLE_SLEEP = 3
 MAX_CRYPTO = PROFILE["MAX_CRYPTO"]
-MIN_SCORE = PROFILE["MIN_SCORE"]
-MIN_EXPECTED_MOVE = PROFILE["MIN_EXPECTED_MOVE"]
-PROFIT_BUFFER = PROFILE["PROFIT_BUFFER"]
-ESTIMATED_COST = 0.0006
+MAX_OPTIONS = PROFILE["MAX_OPTIONS"]
 
+MIN_SCORE = 0.08
 TP_PCT = 0.006
 SL_PCT = 0.004
 MAX_HOLD = 3
 
-SYMBOLS = ["BTC-USD","ETH-USD","SOL-USD","XRP-USD","ADA-USD","DOGE-USD","AVAX-USD","LINK-USD","LTC-USD","BCH-USD"]
-FUTURES_SYMBOLS = ["ES","NQ"]
+# OPTIONS CONTROL
+OPTION_TP_PCT = 0.18
+OPTION_SL_PCT = 0.12
+OPTION_MAX_HOLD = 2
+
+OPTION_MIN_PREMIUM = 0.001
+OPTION_MAX_PREMIUM = 50.0
+OPTION_PREMIUM_TO_UNDERLYING_MAX = 0.40
+
+SYMBOLS = [
+    "BTC-USD","ETH-USD","SOL-USD","XRP-USD",
+    "ADA-USD","DOGE-USD","AVAX-USD","LINK-USD",
+    "LTC-USD","BCH-USD"
+]
 
 # ========================
 # INIT
@@ -69,8 +80,10 @@ FUTURES_SYMBOLS = ["ES","NQ"]
 pm = PositionManager()
 futures_adapter = FuturesSimAdapter(max_portfolio_allocation=5.0)
 futures_pm = FuturesPositionManager(futures_adapter)
+
 options_adapter = OptionsChainAdapter()
 options_pm = OptionsPositionManager()
+options_intel = OptionsIntelligenceEngine()
 
 prev_prices: Dict[str,float] = {}
 pos_cycles: Dict[str,int] = {}
@@ -87,18 +100,45 @@ def classify_signal(score):
     if score >= 7: return "QUALIFIED"
     return "WATCH"
 
-def required_move():
-    return max(MIN_EXPECTED_MOVE, ESTIMATED_COST * PROFIT_BUFFER)
-
-def is_profitable(score, tier):
-    return (score/10000.0) >= required_move()
-
 def size_for(tier):
     return 1.0 if tier=="ELITE" else 0.5 if tier=="QUALIFIED" else 0.0
 
 def score(symbol, price, prev):
     if prev<=0: return 0.0
     return abs((price-prev)/prev)*10000
+
+def option_symbol(underlying, best):
+    strike = safe(best.get("strike"))
+    expiry = str(best.get("expiry") or "NA")
+    return f"{underlying}_CALL_{strike:.2f}_{expiry}"
+
+# ✅ FINAL EDGE ENGINE
+def option_has_sufficient_edge(score_value, premium, underlying_price, tier):
+    if underlying_price <= 0:
+        return False
+
+    expected_move = score_value / 10000.0
+    premium_cost = premium / underlying_price
+
+    if premium_cost <= 0:
+        return False
+
+    if tier == "ELITE":
+        factor = 0.6
+    elif tier == "QUALIFIED":
+        factor = 0.8
+    else:
+        return False
+
+    return expected_move >= (premium_cost * factor)
+
+def option_has_reasonable_premium(premium, underlying_price):
+    if premium < OPTION_MIN_PREMIUM: return False
+    if premium > OPTION_MAX_PREMIUM: return False
+    if underlying_price <= 0: return False
+    if (premium / underlying_price) > OPTION_PREMIUM_TO_UNDERLYING_MAX:
+        return False
+    return True
 
 # ========================
 # LOOP
@@ -112,6 +152,7 @@ while True:
     rows=[]
     price_map={}
 
+    # ===== DATA =====
     for s in SYMBOLS:
         try:
             raw = load_runtime_asset(s)
@@ -127,7 +168,7 @@ while True:
     print("\n--- CRYPTO ---")
     for r in rows[:5]:
         tier = classify_signal(r["score"])
-        print(f"{r['symbol']} | score={r['score']:.2f} | tier={tier} | profitable={'Y' if is_profitable(r['score'],tier) else 'N'}")
+        print(f"{r['symbol']} | score={r['score']:.2f} | tier={tier}")
 
     # ===== UPDATE CRYPTO =====
     pm.update_positions(price_map)
@@ -144,7 +185,7 @@ while True:
             pm.close_position(sym,cur,"TIME")
             pos_cycles.pop(sym,None)
 
-    # ===== ENTRY =====
+    # ===== CRYPTO ENTRY =====
     open_crypto=len(pm.positions)
 
     for r in rows:
@@ -154,24 +195,21 @@ while True:
 
         tier = classify_signal(r["score"])
         if tier=="WATCH": continue
-        if not is_profitable(r["score"],tier): continue
 
         size = size_for(tier)
         if size<=0: continue
 
-        try:
-            pm.open_position(
-                symbol=r["symbol"],
-                entry_price=r["price"],
-                size=size,
-                take_profit=r["price"]*(1+TP_PCT),
-                stop_loss=r["price"]*(1-SL_PCT),
-                side="LONG"
-            )
-            print(f"[CRYPTO OPEN] {r['symbol']} ({tier}) size={size}")
-            open_crypto+=1
-        except Exception as e:
-            print(e)
+        pm.open_position(
+            symbol=r["symbol"],
+            entry_price=r["price"],
+            size=size,
+            take_profit=r["price"]*(1+TP_PCT),
+            stop_loss=r["price"]*(1-SL_PCT),
+            side="LONG"
+        )
+
+        print(f"[CRYPTO OPEN] {r['symbol']} ({tier}) size={size}")
+        open_crypto+=1
 
     # ===== OPTIONS =====
     option_rows=[]
@@ -181,40 +219,71 @@ while True:
         opts = options_adapter.fetch_option_rows(
             [{"symbol":r["symbol"],"price":r["price"]} for r in rows[:3]]
         )
+
         option_rows=opts
         print(f"\nOptions Visible: {len(opts)}")
 
-        for opt in opts[:5]:
-            underlying = opt.get("symbol")
-            premium = safe(opt.get("price"),0.01)
-            score_val = next((r["score"] for r in rows if r["symbol"]==underlying),0)
+        open_options=len(options_pm.get_open_positions())
 
-            tier = classify_signal(score_val)
-            if tier=="WATCH": continue
-            if not is_profitable(score_val,tier): continue
+        for r in rows[:3]:
+            if open_options>=MAX_OPTIONS:
+                break
+
+            underlying=r["symbol"]
+            tier = classify_signal(r["score"])
+
+            if tier=="WATCH":
+                continue
+
+            best = options_intel.select_best_option(
+                options=[o for o in opts if o.get("symbol")==underlying],
+                underlying_price=r["price"],
+                score=r["score"],
+                tier=tier
+            )
+
+            if not best:
+                continue
+
+            premium = safe(best.get("price"),0.0)
+
+            if not option_has_reasonable_premium(premium, r["price"]):
+                print(f"[OPTIONS FILTERED] {underlying} bad premium")
+                continue
+
+            if not option_has_sufficient_edge(r["score"], premium, r["price"], tier):
+                print(f"[OPTIONS FILTERED] {underlying} weak edge")
+                continue
+
+            sym = option_symbol(underlying, best)
+
+            if sym in options_pm.positions:
+                continue
 
             res = options_pm.open_long_option(
-                option_symbol=f"{underlying}_OPT",
+                option_symbol=sym,
                 underlying_symbol=underlying,
                 option_type="CALL",
-                strike=0,
-                expiry="NA",
+                strike=safe(best.get("strike")),
+                expiry=str(best.get("expiry")),
                 entry_price=premium,
+                contracts=1,
                 current_cycle=cycle,
-                confidence=score_val,
+                confidence=r["score"],
                 tier=tier
             )
 
             if res.get("status")=="OPENED":
-                print(f"[OPTIONS OPEN] {underlying} ({tier})")
+                print(f"[OPTIONS OPEN] {sym} ({tier}) premium={premium:.4f}")
                 executed_options+=1
+                open_options+=1
 
     except Exception as e:
-        print(e)
+        print(f"[OPTIONS ERROR] {e}")
 
     # ===== OPTIONS UPDATE =====
     option_price_map = {
-        f"{o.get('symbol')}_OPT": safe(o.get("price"),0.01)
+        option_symbol(o.get("symbol"),o): safe(o.get("price"),0.0)
         for o in option_rows
     }
 
@@ -228,7 +297,7 @@ while True:
     print(f"Engine Mode: {ENGINE_MODE}")
     print(f"Crypto Open: {len(pm.positions)}")
     print(f"Options Open: {len(options_pm.get_open_positions())}")
+    print(f"Executed Options This Cycle: {executed_options}")
 
     prev_prices.update(price_map)
-
     time.sleep(CYCLE_SLEEP)
