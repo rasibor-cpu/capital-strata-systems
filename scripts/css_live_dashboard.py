@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import sys, time
-from datetime import datetime, timezone
+import sys
+import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -25,27 +26,22 @@ from backend.scanner.options_chain_adapter import OptionsChainAdapter
 # ========================
 CYCLE_SLEEP = 3
 
-# Crypto
 MAX_CRYPTO = 3
-
-# Futures
 MAX_FUTURES = 2
 
-# Risk
 TP_PCT = 0.006
 SL_PCT = 0.004
-MAX_HOLD_CYCLES = 3
+MAX_HOLD = 3
 
 MIN_SCORE = 0.08
 
 SYMBOLS = [
-    "BTC-USD","ETH-USD","SOL-USD","XRP-USD",
-    "ADA-USD","DOGE-USD","AVAX-USD","LINK-USD",
-    "LTC-USD","BCH-USD",
+    "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD",
+    "ADA-USD", "DOGE-USD", "AVAX-USD", "LINK-USD",
+    "LTC-USD", "BCH-USD",
 ]
 
-# Futures symbols (mapped manually for now)
-FUTURES_SYMBOLS = ["ES","NQ"]
+FUTURES_SYMBOLS = ["ES", "NQ"]
 
 # ========================
 # INIT
@@ -57,52 +53,105 @@ futures_pm = FuturesPositionManager(futures_adapter)
 
 options_adapter = OptionsChainAdapter()
 
-previous_prices: Dict[str, float] = {}
-position_cycles: Dict[str, int] = {}
+prev_prices: Dict[str, float] = {}
+pos_cycles: Dict[str, int] = {}
 
 # ========================
 # HELPERS
 # ========================
-def safe_float(v, default=0.0):
-    try: return float(v)
-    except: return default
+def safe(v: Any, default: float = 0.0) -> float:
+    try:
+        return float(v)
+    except Exception:
+        return default
 
-def extract_candles(data):
-    return data.get("candles", []) if isinstance(data, dict) else data or []
 
-def get_close(c):
-    if isinstance(c, dict): return safe_float(c.get("close"))
-    if isinstance(c,(list,tuple)) and len(c)>4: return safe_float(c[4])
+def candles_of(x: Any) -> List[Any]:
+    if isinstance(x, dict):
+        candles = x.get("candles", [])
+        return candles if isinstance(candles, list) else []
+    if isinstance(x, list):
+        return x
+    return []
+
+
+def close_of(c: Any) -> float:
+    if isinstance(c, dict):
+        return safe(c.get("close"))
+    if isinstance(c, (list, tuple)) and len(c) > 4:
+        return safe(c[4])
     return 0.0
 
-def extract_price(raw, candles):
+
+def price_of(raw: Any, candles: List[Any]) -> float:
     if isinstance(raw, dict):
-        for k in ("price","last_price","close"):
-            p = safe_float(raw.get(k))
-            if p > 0: return p
-    return get_close(candles[-1]) if candles else 0
+        for k in ("price", "last_price", "close", "current_price", "spot_price", "last"):
+            p = safe(raw.get(k))
+            if p > 0:
+                return p
+    return close_of(candles[-1]) if candles else 0.0
 
-def build_tp_sl(p):
-    return p*(1+TP_PCT), p*(1-SL_PCT)
 
-# ========================
-# SCORING (STABLE)
-# ========================
-def score(symbol, price, candles):
-    prev = previous_prices.get(symbol, 0)
+def score(symbol: str, price: float, candles: List[Any]) -> float:
+    prev = prev_prices.get(symbol, 0.0)
+    move = abs((price - prev) / prev) if prev > 0 else 0.0
 
-    cycle_move = abs((price-prev)/prev) if prev > 0 else 0
-
-    closes = [get_close(c) for c in candles[-6:] if get_close(c)>0]
-
-    vol = 0
+    closes = [close_of(c) for c in candles[-6:] if close_of(c) > 0]
+    vol = 0.0
     if len(closes) > 1:
-        vol = sum(abs((closes[i]-closes[i-1])/closes[i-1])
-                  for i in range(1,len(closes))) / (len(closes)-1)
+        vol = sum(
+            abs((closes[i] - closes[i - 1]) / closes[i - 1])
+            for i in range(1, len(closes))
+            if closes[i - 1] > 0
+        ) / (len(closes) - 1)
 
-    raw = (cycle_move*0.7) + (vol*0.3)
+    return (move * 0.7 + vol * 0.3) * 10000.0
 
-    return raw * 10000
+
+def build_tp_sl(price: float):
+    return price * (1 + TP_PCT), price * (1 - SL_PCT)
+
+
+def get_open_crypto_unrealized(price_map: Dict[str, float]) -> float:
+    total = 0.0
+    for sym, pos in pm.positions.items():
+        entry = safe(pos.get("entry_price"))
+        cur = safe(price_map.get(sym))
+        size = safe(pos.get("size", 1.0), 1.0)
+        if entry > 0 and cur > 0:
+            total += (cur - entry) * size
+    return total
+
+
+def get_closed_crypto_realized() -> float:
+    return sum(safe(t.get("pnl", 0.0)) for t in pm.closed_log)
+
+
+def get_closed_crypto_wins() -> int:
+    return sum(1 for t in pm.closed_log if safe(t.get("pnl", 0.0)) > 0)
+
+
+def get_closed_crypto_losses() -> int:
+    return sum(1 for t in pm.closed_log if safe(t.get("pnl", 0.0)) < 0)
+
+
+def print_recent_closed_trades(limit: int = 5) -> None:
+    recent = pm.closed_log[-limit:]
+    if not recent:
+        print("No closed crypto trades yet.")
+        return
+
+    for t in reversed(recent):
+        symbol = t.get("symbol", "?")
+        entry = safe(t.get("entry_price", 0.0))
+        exit_price = safe(t.get("exit_price", 0.0))
+        pnl = safe(t.get("pnl", 0.0))
+        reason = t.get("reason", "N/A")
+        print(
+            f"{symbol} | entry={entry:.4f} | exit={exit_price:.4f} | "
+            f"pnl={pnl:.4f} | reason={reason}"
+        )
+
 
 # ========================
 # MAIN LOOP
@@ -111,10 +160,10 @@ cycle = 0
 
 while True:
     cycle += 1
-    print(f"\n=== Cycle {cycle} ===")
+    print(f"\n=== Cycle {cycle} | {datetime.now()} ===")
 
-    rows = []
-    price_map = {}
+    rows: List[Dict[str, Any]] = []
+    price_map: Dict[str, float] = {}
 
     # =====================
     # CRYPTO DATA
@@ -122,75 +171,75 @@ while True:
     for s in SYMBOLS:
         try:
             raw = load_runtime_asset(s)
-            candles = extract_candles(raw)
-            if not candles: continue
+            cds = candles_of(raw)
+            if not cds:
+                continue
 
-            price = extract_price(raw, candles)
-            sc = score(s, price, candles)
+            px = price_of(raw, cds)
+            sc = score(s, px, cds)
 
-            rows.append({
+            row = {
                 "symbol": s,
-                "price": price,
-                "candles": candles,
-                "score": sc
-            })
+                "price": px,
+                "score": sc,
+                "candles": cds,
+            }
+            rows.append(row)
+            price_map[s] = px
 
-            price_map[s] = price
-
-            print(f"Fetched {len(candles)} candles for {s}")
-        except:
-            continue
+            print(f"Fetched {len(cds)} candles for {s}")
+        except Exception as e:
+            print(f"[DATA ERROR] {s}: {e}")
 
     rows.sort(key=lambda x: -x["score"])
 
-    print("\n--- CRYPTO RANKED ---")
+    print("\n--- CRYPTO ---")
     for r in rows[:5]:
-        print(f"{r['symbol']} | score={r['score']:.4f}")
+        print(f"{r['symbol']} | score={r['score']:.2f}")
 
     # =====================
-    # UPDATE POSITIONS
+    # UPDATE + EXIT (CRYPTO)
     # =====================
     try:
         pm.update_positions(price_map)
     except Exception as e:
-        print("Update error:", e)
+        print("[UPDATE ERROR]", e)
 
-    # =====================
-    # EXIT LOGIC
-    # =====================
     print("\n--- POSITION DEBUG ---")
-
     for sym, pos in list(pm.positions.items()):
-        entry = safe_float(pos.get("entry_price"))
-        current = safe_float(price_map.get(sym))
-
-        if entry <= 0 or current <= 0:
+        entry = safe(pos.get("entry_price"))
+        cur = safe(price_map.get(sym))
+        if entry <= 0 or cur <= 0:
             continue
 
-        pnl = (current - entry) / entry
-        position_cycles[sym] = position_cycles.get(sym, 0) + 1
+        pnl_pct = (cur - entry) / entry
+        pos_cycles[sym] = pos_cycles.get(sym, 0) + 1
 
-        print(f"{sym} | pnl={pnl:.4%} | cycles={position_cycles[sym]}")
+        print(f"{sym} | pnl={pnl_pct:.4%} | cycles={pos_cycles[sym]}")
 
-        if pnl >= TP_PCT:
-            pm.close_position(sym, current, "TP")
-            position_cycles.pop(sym, None)
+        if pnl_pct >= TP_PCT:
+            print(f"[TP] {sym}")
+            pm.close_position(sym, cur, "TP")
+            pos_cycles.pop(sym, None)
 
-        elif pnl <= -SL_PCT:
-            pm.close_position(sym, current, "SL")
-            position_cycles.pop(sym, None)
+        elif pnl_pct <= -SL_PCT:
+            print(f"[SL] {sym}")
+            pm.close_position(sym, cur, "SL")
+            pos_cycles.pop(sym, None)
 
-        elif position_cycles[sym] >= MAX_HOLD_CYCLES:
-            pm.close_position(sym, current, "TIME")
-            position_cycles.pop(sym, None)
+        elif pos_cycles[sym] >= MAX_HOLD:
+            print(f"[TIME EXIT] {sym}")
+            pm.close_position(sym, cur, "TIME")
+            pos_cycles.pop(sym, None)
 
     # =====================
-    # CRYPTO ENTRY
+    # ENTRY (CRYPTO)
     # =====================
-    crypto_open = len(pm.positions)
+    open_crypto = len(pm.positions)
+    executed_crypto = 0
 
     for r in rows:
-        if crypto_open >= MAX_CRYPTO:
+        if open_crypto >= MAX_CRYPTO:
             break
 
         if r["symbol"] in pm.positions:
@@ -209,49 +258,107 @@ while True:
                 take_profit=tp,
                 stop_loss=sl,
                 side="LONG",
-                confidence=r["score"]
+                confidence=r["score"],
             )
-
-            print(f"[CRYPTO OPEN] {r['symbol']} @ {r['price']:.2f}")
-            crypto_open += 1
-
+            print(f"[CRYPTO OPEN] {r['symbol']} @ {r['price']:.4f}")
+            open_crypto += 1
+            executed_crypto += 1
         except Exception as e:
-            print(e)
+            print(f"[CRYPTO ERROR] {r['symbol']}: {e}")
 
     # =====================
-    # FUTURES ENTRY
+    # ENTRY (FUTURES)
     # =====================
     futures_open = len(futures_pm.get_open_positions())
+    executed_futures = 0
 
     for f in FUTURES_SYMBOLS:
         if futures_open >= MAX_FUTURES:
             break
 
+        proxy_symbol = "BTC-USD" if f == "ES" else "ETH-USD"
+
+        px = price_map.get(proxy_symbol, 0.0)
+        sc = next((r["score"] for r in rows if r["symbol"] == proxy_symbol), 0.0)
+
+        if px <= 0:
+            print(f"[FUTURES SKIP] {f} no price")
+            continue
+
+        if sc < MIN_SCORE:
+            print(f"[FUTURES SKIP] {f} weak score")
+            continue
+
+        already_open_same = any(
+            p.get("symbol") == f and p.get("status") == "OPEN"
+            for p in futures_pm.get_open_positions()
+        )
+        if already_open_same:
+            print(f"[FUTURES SKIP] {f} already open")
+            continue
+
         try:
-            result = futures_pm.open_position(
+            res = futures_pm.open_position(
                 symbol=f,
-                entry_price=100,
-                stop_price=99,
+                entry_price=px,
+                stop_price=px * (1 - SL_PCT),
                 contracts=1,
                 current_equity=10000,
-                state={}
+                state={},
             )
 
-            if result.get("status") == "OPENED":
+            if res.get("status") == "OPENED":
                 print(f"[FUTURES OPEN] {f}")
                 futures_open += 1
-
+                executed_futures += 1
+            else:
+                print(f"[FUTURES BLOCKED] {f} {res}")
         except Exception as e:
-            print(f"Futures error: {e}")
+            print(f"[FUTURES ERROR] {f}: {e}")
 
     # =====================
-    # OPTIONS SCAN
+    # OPTIONS SCAN (FIXED)
     # =====================
+    option_rows: List[Dict[str, Any]] = []
     try:
-        option_rows = options_adapter.fetch_option_rows(rows)
-        print(f"\n--- OPTIONS SCAN --- {len(option_rows)} contracts visible")
+        option_inputs = [
+            {"symbol": r["symbol"], "price": r["price"]}
+            for r in rows[:3]
+            if r["price"] > 0
+        ]
+        option_rows = options_adapter.fetch_option_rows(option_inputs)
+
+        print("\n--- OPTIONS ---")
+        print(f"Visible option contracts: {len(option_rows)}")
+        for opt in option_rows[:5]:
+            print(
+                f"{opt.get('symbol')} {opt.get('option_type')} "
+                f"strike={safe(opt.get('strike')):.4f} "
+                f"price={safe(opt.get('price')):.4f}"
+            )
     except Exception as e:
-        print("Options error:", e)
+        print("[OPTIONS ERROR]", e)
+
+    # =====================
+    # PROFIT DASHBOARD
+    # =====================
+    realized = get_closed_crypto_realized()
+    unrealized = get_open_crypto_unrealized(price_map)
+    wins = get_closed_crypto_wins()
+    losses = get_closed_crypto_losses()
+    closed = len(pm.closed_log)
+    win_rate = (wins / closed * 100.0) if closed > 0 else 0.0
+
+    print("\n--- PROFIT DASHBOARD ---")
+    print(f"Executed Crypto This Cycle: {executed_crypto}")
+    print(f"Executed Futures This Cycle: {executed_futures}")
+    print(f"Closed Crypto Trades: {closed}")
+    print(f"Wins: {wins} | Losses: {losses} | Win Rate: {win_rate:.2f}%")
+    print(f"Realized Crypto PnL: {realized:.4f}")
+    print(f"Unrealized Crypto PnL: {unrealized:.4f}")
+
+    print("\n--- RECENT CLOSED CRYPTO TRADES ---")
+    print_recent_closed_trades(limit=5)
 
     # =====================
     # STATUS
@@ -259,12 +366,13 @@ while True:
     print("\n--- STATUS ---")
     print(f"Crypto Open: {len(pm.positions)}")
     print(f"Futures Open: {len(futures_pm.get_open_positions())}")
+    print(f"Options Visible: {len(option_rows)}")
 
     # =====================
-    # STORE PRICES
+    # STORE
     # =====================
     for r in rows:
         if r["price"] > 0:
-            previous_prices[r["symbol"]] = r["price"]
+            prev_prices[r["symbol"]] = r["price"]
 
     time.sleep(CYCLE_SLEEP)
