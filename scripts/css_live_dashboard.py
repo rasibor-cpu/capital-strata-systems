@@ -12,22 +12,121 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from backend.data.coinbase_historical_downloader import load_runtime_asset
 from backend.execution.position_manager import PositionManager
-
 from backend.app.brokers.futures_sim_adapter import FuturesSimAdapter
 from backend.app.risk.futures_position_manager import FuturesPositionManager
-
 from backend.scanner.options_chain_adapter import OptionsChainAdapter
 
+# ========================
+# LEGACY ENGINE MODES
+# Restored as interactive startup selector.
+# We are restoring the previously agreed 5-mode structure:
+# SAFE / CONSERVATIVE / BALANCED / AGGRESSIVE / EXPANSION
+# ========================
+
+ENGINE_MODES = {
+    "1": "SAFE",
+    "2": "CONSERVATIVE",
+    "3": "BALANCED",
+    "4": "AGGRESSIVE",
+    "5": "EXPANSION",
+}
+
+# These values are the runtime bindings for this current dashboard layer.
+# Philosophy is not being redefined here; only reconnected.
+ENGINE_PROFILES: Dict[str, Dict[str, float]] = {
+    "SAFE": {
+        "MAX_CRYPTO": 2,
+        "MAX_FUTURES": 1,
+        "TP_PCT": 0.0070,
+        "SL_PCT": 0.0035,
+        "MAX_HOLD": 2,
+        "MIN_SCORE": 0.12,
+        "MIN_EXPECTED_MOVE": 0.0008,
+        "ESTIMATED_COST": 0.0006,
+        "PROFIT_BUFFER": 1.20,
+    },
+    "CONSERVATIVE": {
+        "MAX_CRYPTO": 2,
+        "MAX_FUTURES": 1,
+        "TP_PCT": 0.0065,
+        "SL_PCT": 0.0038,
+        "MAX_HOLD": 3,
+        "MIN_SCORE": 0.10,
+        "MIN_EXPECTED_MOVE": 0.0007,
+        "ESTIMATED_COST": 0.0006,
+        "PROFIT_BUFFER": 1.12,
+    },
+    "BALANCED": {
+        "MAX_CRYPTO": 3,
+        "MAX_FUTURES": 2,
+        "TP_PCT": 0.0060,
+        "SL_PCT": 0.0040,
+        "MAX_HOLD": 3,
+        "MIN_SCORE": 0.08,
+        "MIN_EXPECTED_MOVE": 0.0005,
+        "ESTIMATED_COST": 0.0006,
+        "PROFIT_BUFFER": 1.05,
+    },
+    "AGGRESSIVE": {
+        "MAX_CRYPTO": 4,
+        "MAX_FUTURES": 2,
+        "TP_PCT": 0.0055,
+        "SL_PCT": 0.0045,
+        "MAX_HOLD": 4,
+        "MIN_SCORE": 0.06,
+        "MIN_EXPECTED_MOVE": 0.0004,
+        "ESTIMATED_COST": 0.0006,
+        "PROFIT_BUFFER": 1.00,
+    },
+    "EXPANSION": {
+        "MAX_CRYPTO": 5,
+        "MAX_FUTURES": 2,
+        "TP_PCT": 0.0050,
+        "SL_PCT": 0.0050,
+        "MAX_HOLD": 5,
+        "MIN_SCORE": 0.05,
+        "MIN_EXPECTED_MOVE": 0.0003,
+        "ESTIMATED_COST": 0.0006,
+        "PROFIT_BUFFER": 0.95,
+    },
+}
+
+
+def select_engine_mode() -> str:
+    print("\n=== CSS ENGINE MODE SELECTOR ===")
+    print("1. SAFE")
+    print("2. CONSERVATIVE")
+    print("3. BALANCED")
+    print("4. AGGRESSIVE")
+    print("5. EXPANSION")
+    try:
+        choice = input("Enter choice (1-5) [default=3]: ").strip()
+    except EOFError:
+        choice = "3"
+    return ENGINE_MODES.get(choice, "BALANCED")
+
+
+ENGINE_MODE = select_engine_mode()
+PROFILE = ENGINE_PROFILES[ENGINE_MODE]
+
+# ========================
+# CONFIG
+# ========================
 CYCLE_SLEEP = 3
 
-MAX_CRYPTO = 3
-MAX_FUTURES = 2
+MAX_CRYPTO = int(PROFILE["MAX_CRYPTO"])
+MAX_FUTURES = int(PROFILE["MAX_FUTURES"])
 
-TP_PCT = 0.006
-SL_PCT = 0.004
-MAX_HOLD = 3
+TP_PCT = float(PROFILE["TP_PCT"])
+SL_PCT = float(PROFILE["SL_PCT"])
+MAX_HOLD = int(PROFILE["MAX_HOLD"])
 
-MIN_SCORE = 0.08
+MIN_SCORE = float(PROFILE["MIN_SCORE"])
+
+# === PROFITABILITY (MODE-BOUND) ===
+MIN_EXPECTED_MOVE = float(PROFILE["MIN_EXPECTED_MOVE"])
+ESTIMATED_COST = float(PROFILE["ESTIMATED_COST"])
+PROFIT_BUFFER = float(PROFILE["PROFIT_BUFFER"])
 
 SYMBOLS = [
     "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD",
@@ -37,17 +136,20 @@ SYMBOLS = [
 
 FUTURES_SYMBOLS = ["ES", "NQ"]
 
+# ========================
+# INIT
+# ========================
 pm = PositionManager()
-
 futures_adapter = FuturesSimAdapter(max_portfolio_allocation=5.0)
 futures_pm = FuturesPositionManager(futures_adapter)
-
 options_adapter = OptionsChainAdapter()
 
 prev_prices: Dict[str, float] = {}
 pos_cycles: Dict[str, int] = {}
 
-
+# ========================
+# HELPERS
+# ========================
 def safe(v: Any, default: float = 0.0) -> float:
     try:
         return float(v)
@@ -57,8 +159,7 @@ def safe(v: Any, default: float = 0.0) -> float:
 
 def candles_of(x: Any) -> List[Any]:
     if isinstance(x, dict):
-        candles = x.get("candles", [])
-        return candles if isinstance(candles, list) else []
+        return x.get("candles", []) or []
     if isinstance(x, list):
         return x
     return []
@@ -95,6 +196,15 @@ def score(symbol: str, price: float, candles: List[Any]) -> float:
         ) / (len(closes) - 1)
 
     return (move * 0.7 + vol * 0.3) * 10000.0
+
+
+def required_move_threshold() -> float:
+    return max(MIN_EXPECTED_MOVE, ESTIMATED_COST * PROFIT_BUFFER)
+
+
+def is_trade_profitable(score_value: float) -> bool:
+    expected_move = score_value / 10000.0
+    return expected_move >= required_move_threshold()
 
 
 def build_tp_sl(price: float):
@@ -151,6 +261,27 @@ def force_close_crypto_position(symbol: str, current_price: float, reason: str) 
         pm.positions.pop(symbol, None)
 
 
+def print_engine_header() -> None:
+    print("\n=== CSS ENGINE PROFILE ACTIVE ===")
+    print(f"Mode: {ENGINE_MODE}")
+    print(
+        f"CryptoCap={MAX_CRYPTO} | FuturesCap={MAX_FUTURES} | "
+        f"MinScore={MIN_SCORE:.4f} | MinExpectedMove={MIN_EXPECTED_MOVE:.6f}"
+    )
+    print(
+        f"EstimatedCost={ESTIMATED_COST:.6f} | ProfitBuffer={PROFIT_BUFFER:.2f} | "
+        f"RequiredMove={required_move_threshold():.6f}"
+    )
+    print(
+        f"TP={TP_PCT:.4%} | SL={SL_PCT:.4%} | MaxHold={MAX_HOLD}"
+    )
+
+
+print_engine_header()
+
+# ========================
+# MAIN LOOP
+# ========================
 cycle = 0
 
 while True:
@@ -160,6 +291,7 @@ while True:
     rows: List[Dict[str, Any]] = []
     price_map: Dict[str, float] = {}
 
+    # ===== FETCH DATA =====
     for s in SYMBOLS:
         try:
             raw = load_runtime_asset(s)
@@ -170,13 +302,12 @@ while True:
             px = price_of(raw, cds)
             sc = score(s, px, cds)
 
-            row = {
+            rows.append({
                 "symbol": s,
                 "price": px,
                 "score": sc,
                 "candles": cds,
-            }
-            rows.append(row)
+            })
             price_map[s] = px
 
             print(f"Fetched {len(cds)} candles for {s}")
@@ -187,8 +318,13 @@ while True:
 
     print("\n--- CRYPTO ---")
     for r in rows[:5]:
-        print(f"{r['symbol']} | score={r['score']:.2f}")
+        flag = "Y" if is_trade_profitable(r["score"]) else "N"
+        print(
+            f"{r['symbol']} | score={r['score']:.2f} | "
+            f"profitable={flag}"
+        )
 
+    # ===== UPDATE POSITIONS =====
     try:
         pm.update_positions(price_map)
     except Exception as e:
@@ -201,17 +337,17 @@ while True:
         if entry <= 0 or cur <= 0:
             continue
 
-        pnl_pct = (cur - entry) / entry
+        pnl = (cur - entry) / entry
         pos_cycles[sym] = pos_cycles.get(sym, 0) + 1
 
-        print(f"{sym} | pnl={pnl_pct:.4%} | cycles={pos_cycles[sym]}")
+        print(f"{sym} | pnl={pnl:.4%} | cycles={pos_cycles[sym]}")
 
-        if pnl_pct >= TP_PCT:
+        if pnl >= TP_PCT:
             print(f"[TP] {sym}")
             force_close_crypto_position(sym, cur, "TP")
             pos_cycles.pop(sym, None)
 
-        elif pnl_pct <= -SL_PCT:
+        elif pnl <= -SL_PCT:
             print(f"[SL] {sym}")
             force_close_crypto_position(sym, cur, "SL")
             pos_cycles.pop(sym, None)
@@ -221,8 +357,10 @@ while True:
             force_close_crypto_position(sym, cur, "TIME")
             pos_cycles.pop(sym, None)
 
+    # ===== CRYPTO ENTRY =====
     open_crypto = len(pm.positions)
     executed_crypto = 0
+    filtered_crypto = 0
 
     for r in rows:
         if open_crypto >= MAX_CRYPTO:
@@ -232,6 +370,14 @@ while True:
             continue
 
         if r["score"] < MIN_SCORE:
+            continue
+
+        if not is_trade_profitable(r["score"]):
+            print(
+                f"[FILTERED] {r['symbol']} insufficient expected move "
+                f"(need>={required_move_threshold():.6f}, got={r['score'] / 10000.0:.6f})"
+            )
+            filtered_crypto += 1
             continue
 
         tp, sl = build_tp_sl(r["price"])
@@ -252,17 +398,18 @@ while True:
         except Exception as e:
             print(f"[CRYPTO ERROR] {r['symbol']}: {e}")
 
+    # ===== FUTURES =====
     futures_open = len(futures_pm.get_open_positions())
     executed_futures = 0
+    filtered_futures = 0
 
     for f in FUTURES_SYMBOLS:
         if futures_open >= MAX_FUTURES:
             break
 
-        proxy_symbol = "BTC-USD" if f == "ES" else "ETH-USD"
-
-        px = price_map.get(proxy_symbol, 0.0)
-        sc = next((r["score"] for r in rows if r["symbol"] == proxy_symbol), 0.0)
+        proxy = "BTC-USD" if f == "ES" else "ETH-USD"
+        px = price_map.get(proxy, 0.0)
+        sc = next((r["score"] for r in rows if r["symbol"] == proxy), 0.0)
 
         if px <= 0:
             print(f"[FUTURES SKIP] {f} no price")
@@ -270,6 +417,14 @@ while True:
 
         if sc < MIN_SCORE:
             print(f"[FUTURES SKIP] {f} weak score")
+            continue
+
+        if not is_trade_profitable(sc):
+            print(
+                f"[FUTURES FILTERED] {f} low expected move "
+                f"(need>={required_move_threshold():.6f}, got={sc / 10000.0:.6f})"
+            )
+            filtered_futures += 1
             continue
 
         already_open_same = any(
@@ -299,26 +454,20 @@ while True:
         except Exception as e:
             print(f"[FUTURES ERROR] {f}: {e}")
 
+    # ===== OPTIONS =====
     option_rows: List[Dict[str, Any]] = []
     try:
-        option_inputs = [
+        opts = options_adapter.fetch_option_rows([
             {"symbol": r["symbol"], "price": r["price"]}
             for r in rows[:3]
             if r["price"] > 0
-        ]
-        option_rows = options_adapter.fetch_option_rows(option_inputs)
-
-        print("\n--- OPTIONS ---")
-        print(f"Visible option contracts: {len(option_rows)}")
-        for opt in option_rows[:5]:
-            print(
-                f"{opt.get('symbol')} {opt.get('option_type')} "
-                f"strike={safe(opt.get('strike')):.4f} "
-                f"price={safe(opt.get('price')):.4f}"
-            )
+        ])
+        option_rows = opts
+        print(f"\nOptions Visible: {len(opts)}")
     except Exception as e:
-        print("[OPTIONS ERROR]", e)
+        print(f"[OPTIONS ERROR] {e}")
 
+    # ===== PROFIT DASHBOARD =====
     realized = get_closed_crypto_realized()
     unrealized = get_open_crypto_unrealized(price_map)
     wins = get_closed_crypto_wins()
@@ -327,8 +476,11 @@ while True:
     win_rate = (wins / closed * 100.0) if closed > 0 else 0.0
 
     print("\n--- PROFIT DASHBOARD ---")
+    print(f"Engine Mode: {ENGINE_MODE}")
     print(f"Executed Crypto This Cycle: {executed_crypto}")
     print(f"Executed Futures This Cycle: {executed_futures}")
+    print(f"Filtered Crypto This Cycle: {filtered_crypto}")
+    print(f"Filtered Futures This Cycle: {filtered_futures}")
     print(f"Closed Crypto Trades: {closed}")
     print(f"Wins: {wins} | Losses: {losses} | Win Rate: {win_rate:.2f}%")
     print(f"Realized Crypto PnL: {realized:.4f}")
