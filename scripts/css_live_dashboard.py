@@ -59,7 +59,6 @@ TP_PCT = 0.006
 SL_PCT = 0.004
 MAX_HOLD = 3
 
-# OPTIONS CONTROL
 OPTION_TP_PCT = 0.18
 OPTION_SL_PCT = 0.12
 OPTION_MAX_HOLD = 2
@@ -92,27 +91,39 @@ pos_cycles: Dict[str,int] = {}
 # HELPERS
 # ========================
 def safe(v, d=0.0):
-    try: return float(v)
-    except: return d
+    try:
+        return float(v)
+    except:
+        return d
 
+
+# =========================================================
+# ONLY CHANGE: SAFE WATCH PROMOTION
+# =========================================================
 def classify_signal(score):
-    if score >= 10: return "ELITE"
-    if score >= 7: return "QUALIFIED"
+    if score >= 10:
+        return "ELITE"
+    if score >= 4.5:
+        return "QUALIFIED"
     return "WATCH"
+
 
 def size_for(tier):
     return 1.0 if tier=="ELITE" else 0.5 if tier=="QUALIFIED" else 0.0
 
+
 def score(symbol, price, prev):
-    if prev<=0: return 0.0
+    if prev<=0:
+        return 0.0
     return abs((price-prev)/prev)*10000
+
 
 def option_symbol(underlying, best):
     strike = safe(best.get("strike"))
     expiry = str(best.get("expiry") or "NA")
     return f"{underlying}_CALL_{strike:.2f}_{expiry}"
 
-# ✅ FINAL EDGE ENGINE
+
 def option_has_sufficient_edge(score_value, premium, underlying_price, tier):
     if underlying_price <= 0:
         return False
@@ -124,21 +135,26 @@ def option_has_sufficient_edge(score_value, premium, underlying_price, tier):
         return False
 
     if tier == "ELITE":
-        factor = 0.6
+        factor = 0.5
     elif tier == "QUALIFIED":
-        factor = 0.8
+        factor = 0.65
     else:
         return False
 
     return expected_move >= (premium_cost * factor)
 
+
 def option_has_reasonable_premium(premium, underlying_price):
-    if premium < OPTION_MIN_PREMIUM: return False
-    if premium > OPTION_MAX_PREMIUM: return False
-    if underlying_price <= 0: return False
+    if premium < OPTION_MIN_PREMIUM:
+        return False
+    if premium > OPTION_MAX_PREMIUM:
+        return False
+    if underlying_price <= 0:
+        return False
     if (premium / underlying_price) > OPTION_PREMIUM_TO_UNDERLYING_MAX:
         return False
     return True
+
 
 # ========================
 # LOOP
@@ -149,8 +165,8 @@ while True:
     cycle += 1
     print(f"\n=== Cycle {cycle} | {datetime.now()} ===")
 
-    rows=[]
-    price_map={}
+    rows = []
+    price_map = {}
 
     # ===== DATA =====
     for s in SYMBOLS:
@@ -189,15 +205,20 @@ while True:
     open_crypto=len(pm.positions)
 
     for r in rows:
-        if open_crypto>=MAX_CRYPTO: break
-        if r["symbol"] in pm.positions: continue
-        if r["score"]<MIN_SCORE: continue
+        if open_crypto>=MAX_CRYPTO:
+            break
+        if r["symbol"] in pm.positions:
+            continue
+        if r["score"]<MIN_SCORE:
+            continue
 
         tier = classify_signal(r["score"])
-        if tier=="WATCH": continue
+        if tier=="WATCH":
+            continue
 
         size = size_for(tier)
-        if size<=0: continue
+        if size<=0:
+            continue
 
         pm.open_position(
             symbol=r["symbol"],
