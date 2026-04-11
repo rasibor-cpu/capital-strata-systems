@@ -122,7 +122,7 @@ def option_symbol(underlying, best):
 
 
 # =========================================================
-# SAFE OPTIONS EDGE FILTER — MODESTLY LOOSENED ONLY
+# SAFE OPTIONS EDGE FILTER — SECOND MODEST RELAXATION
 # =========================================================
 def option_has_sufficient_edge(score_value, premium, underlying_price, tier):
     if underlying_price <= 0:
@@ -135,9 +135,9 @@ def option_has_sufficient_edge(score_value, premium, underlying_price, tier):
         return False
 
     if tier == "ELITE":
-        factor = 0.45
+        factor = 0.35
     elif tier == "QUALIFIED":
-        factor = 0.55
+        factor = 0.45
     else:
         return False
 
