@@ -4,7 +4,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Dict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -58,10 +58,6 @@ MIN_SCORE = 0.08
 TP_PCT = 0.006
 SL_PCT = 0.004
 MAX_HOLD = 3
-
-OPTION_TP_PCT = 0.18
-OPTION_SL_PCT = 0.12
-OPTION_MAX_HOLD = 2
 
 OPTION_MIN_PREMIUM = 0.001
 OPTION_MAX_PREMIUM = 50.0
@@ -122,38 +118,54 @@ def option_symbol(underlying, best):
 
 
 # =========================================================
-# THIRD SAFE EDGE RELAXATION
+# DIAGNOSTIC EDGE MODEL
 # =========================================================
 def option_has_sufficient_edge(score_value, premium, underlying_price, tier):
     if underlying_price <= 0:
-        return False
+        return False, "bad underlying"
 
-    expected_move = score_value / 10000.0
+    expected_move = (score_value / 10000.0) * 1.8
     premium_cost = premium / underlying_price
 
     if premium_cost <= 0:
-        return False
+        return False, "bad premium cost"
 
     if tier == "ELITE":
         factor = 0.35
     elif tier == "QUALIFIED":
         factor = 0.45
     else:
-        return False
+        return False, "watch tier"
 
-    return expected_move >= (premium_cost * factor)
+    hurdle = premium_cost * factor
+    passed = expected_move >= hurdle
+
+    print(
+        f"[OPTION DIAG] "
+        f"score={score_value:.2f} "
+        f"exp_move={expected_move:.6f} "
+        f"premium={premium:.6f} "
+        f"ratio={premium_cost:.6f} "
+        f"hurdle={hurdle:.6f} "
+        f"tier={tier}"
+    )
+
+    if not passed:
+        return False, "weak edge"
+
+    return True, "pass"
 
 
 def option_has_reasonable_premium(premium, underlying_price):
     if premium < OPTION_MIN_PREMIUM:
-        return False
+        return False, "premium too low"
     if premium > OPTION_MAX_PREMIUM:
-        return False
+        return False, "premium too high"
     if underlying_price <= 0:
-        return False
+        return False, "bad underlying"
     if (premium / underlying_price) > OPTION_PREMIUM_TO_UNDERLYING_MAX:
-        return False
-    return True
+        return False, "premium ratio too high"
+    return True, "pass"
 
 
 # ========================
@@ -168,7 +180,6 @@ while True:
     rows = []
     price_map = {}
 
-    # ===== DATA =====
     for s in SYMBOLS:
         try:
             raw = load_runtime_asset(s)
@@ -186,7 +197,6 @@ while True:
         tier = classify_signal(r["score"])
         print(f"{r['symbol']} | score={r['score']:.2f} | tier={tier}")
 
-    # ===== UPDATE CRYPTO =====
     pm.update_positions(price_map)
 
     for sym, pos in list(pm.positions.items()):
@@ -208,8 +218,6 @@ while True:
         if open_crypto >= MAX_CRYPTO:
             break
         if r["symbol"] in pm.positions:
-            continue
-        if r["score"] < MIN_SCORE:
             continue
 
         tier = classify_signal(r["score"])
@@ -264,16 +272,23 @@ while True:
             )
 
             if not best:
+                print(f"[OPTIONS FILTERED] {underlying} no contract")
                 continue
 
             premium = safe(best.get("price"), 0.0)
 
-            if not option_has_reasonable_premium(premium, r["price"]):
-                print(f"[OPTIONS FILTERED] {underlying} bad premium")
+            ok_premium, reason = option_has_reasonable_premium(
+                premium, r["price"]
+            )
+            if not ok_premium:
+                print(f"[OPTIONS FILTERED] {underlying} {reason}")
                 continue
 
-            if not option_has_sufficient_edge(r["score"], premium, r["price"], tier):
-                print(f"[OPTIONS FILTERED] {underlying} weak edge")
+            ok_edge, edge_reason = option_has_sufficient_edge(
+                r["score"], premium, r["price"], tier
+            )
+            if not ok_edge:
+                print(f"[OPTIONS FILTERED] {underlying} {edge_reason}")
                 continue
 
             sym = option_symbol(underlying, best)
@@ -302,18 +317,6 @@ while True:
     except Exception as e:
         print(f"[OPTIONS ERROR] {e}")
 
-    # ===== OPTIONS UPDATE =====
-    option_price_map = {
-        option_symbol(o.get("symbol"), o): safe(o.get("price"), 0.0)
-        for o in option_rows
-    }
-
-    events = options_pm.update_positions(option_price_map, current_cycle=cycle)
-
-    for e in events:
-        print(f"[OPTIONS CLOSED] {e.get('option_symbol')} pnl={e.get('pnl')}")
-
-    # ===== DASHBOARD =====
     print("\n--- PROFIT DASHBOARD ---")
     print(f"Engine Mode: {ENGINE_MODE}")
     print(f"Crypto Open: {len(pm.positions)}")
