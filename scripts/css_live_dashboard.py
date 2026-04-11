@@ -84,8 +84,8 @@ options_adapter = OptionsChainAdapter()
 options_pm = OptionsPositionManager()
 options_intel = OptionsIntelligenceEngine()
 
-prev_prices: Dict[str,float] = {}
-pos_cycles: Dict[str,int] = {}
+prev_prices: Dict[str, float] = {}
+pos_cycles: Dict[str, int] = {}
 
 # ========================
 # HELPERS
@@ -93,13 +93,10 @@ pos_cycles: Dict[str,int] = {}
 def safe(v, d=0.0):
     try:
         return float(v)
-    except:
+    except Exception:
         return d
 
 
-# =========================================================
-# ONLY CHANGE: SAFE WATCH PROMOTION
-# =========================================================
 def classify_signal(score):
     if score >= 10:
         return "ELITE"
@@ -109,13 +106,13 @@ def classify_signal(score):
 
 
 def size_for(tier):
-    return 1.0 if tier=="ELITE" else 0.5 if tier=="QUALIFIED" else 0.0
+    return 1.0 if tier == "ELITE" else 0.5 if tier == "QUALIFIED" else 0.0
 
 
 def score(symbol, price, prev):
-    if prev<=0:
+    if prev <= 0:
         return 0.0
-    return abs((price-prev)/prev)*10000
+    return abs((price - prev) / prev) * 10000
 
 
 def option_symbol(underlying, best):
@@ -124,6 +121,9 @@ def option_symbol(underlying, best):
     return f"{underlying}_CALL_{strike:.2f}_{expiry}"
 
 
+# =========================================================
+# SAFE OPTIONS EDGE FILTER — MODESTLY LOOSENED ONLY
+# =========================================================
 def option_has_sufficient_edge(score_value, premium, underlying_price, tier):
     if underlying_price <= 0:
         return False
@@ -135,9 +135,9 @@ def option_has_sufficient_edge(score_value, premium, underlying_price, tier):
         return False
 
     if tier == "ELITE":
-        factor = 0.5
+        factor = 0.45
     elif tier == "QUALIFIED":
-        factor = 0.65
+        factor = 0.55
     else:
         return False
 
@@ -173,13 +173,13 @@ while True:
         try:
             raw = load_runtime_asset(s)
             price = safe(raw.get("price") or raw.get("close"))
-            sc = score(s, price, prev_prices.get(s,0))
-            rows.append({"symbol":s,"price":price,"score":sc})
-            price_map[s]=price
+            sc = score(s, price, prev_prices.get(s, 0))
+            rows.append({"symbol": s, "price": price, "score": sc})
+            price_map[s] = price
         except Exception as e:
             print(f"[DATA ERROR] {s}: {e}")
 
-    rows.sort(key=lambda x:-x["score"])
+    rows.sort(key=lambda x: -x["score"])
 
     print("\n--- CRYPTO ---")
     for r in rows[:5]:
@@ -189,75 +189,75 @@ while True:
     # ===== UPDATE CRYPTO =====
     pm.update_positions(price_map)
 
-    for sym,pos in list(pm.positions.items()):
+    for sym, pos in list(pm.positions.items()):
         entry = safe(pos.get("entry_price"))
         cur = safe(price_map.get(sym))
-        pnl = (cur-entry)/entry if entry>0 else 0
-        pos_cycles[sym] = pos_cycles.get(sym,0)+1
+        pnl = (cur - entry) / entry if entry > 0 else 0
+        pos_cycles[sym] = pos_cycles.get(sym, 0) + 1
 
         print(f"{sym} | size={pos.get('size')} | pnl={pnl:.4%}")
 
-        if pnl>=TP_PCT or pnl<=-SL_PCT or pos_cycles[sym]>=MAX_HOLD:
-            pm.close_position(sym,cur,"TIME")
-            pos_cycles.pop(sym,None)
+        if pnl >= TP_PCT or pnl <= -SL_PCT or pos_cycles[sym] >= MAX_HOLD:
+            pm.close_position(sym, cur, "TIME")
+            pos_cycles.pop(sym, None)
 
     # ===== CRYPTO ENTRY =====
-    open_crypto=len(pm.positions)
+    open_crypto = len(pm.positions)
 
     for r in rows:
-        if open_crypto>=MAX_CRYPTO:
+        if open_crypto >= MAX_CRYPTO:
             break
         if r["symbol"] in pm.positions:
             continue
-        if r["score"]<MIN_SCORE:
+        if r["score"] < MIN_SCORE:
             continue
 
         tier = classify_signal(r["score"])
-        if tier=="WATCH":
+        if tier == "WATCH":
             continue
 
         size = size_for(tier)
-        if size<=0:
+        if size <= 0:
             continue
 
         pm.open_position(
             symbol=r["symbol"],
             entry_price=r["price"],
             size=size,
-            take_profit=r["price"]*(1+TP_PCT),
-            stop_loss=r["price"]*(1-SL_PCT),
+            take_profit=r["price"] * (1 + TP_PCT),
+            stop_loss=r["price"] * (1 - SL_PCT),
             side="LONG"
         )
 
         print(f"[CRYPTO OPEN] {r['symbol']} ({tier}) size={size}")
-        open_crypto+=1
+        open_crypto += 1
 
     # ===== OPTIONS =====
-    option_rows=[]
-    executed_options=0
+    option_rows = []
+    executed_options = 0
 
     try:
         opts = options_adapter.fetch_option_rows(
-            [{"symbol":r["symbol"],"price":r["price"]} for r in rows[:3]]
+            [{"symbol": r["symbol"], "price": r["price"]} for r in rows[:3]]
         )
 
-        option_rows=opts
+        option_rows = opts
         print(f"\nOptions Visible: {len(opts)}")
 
-        open_options=len(options_pm.get_open_positions())
+        open_options = len(options_pm.get_open_positions())
 
         for r in rows[:3]:
-            if open_options>=MAX_OPTIONS:
+            if open_options >= MAX_OPTIONS:
                 break
 
-            underlying=r["symbol"]
+            underlying = r["symbol"]
             tier = classify_signal(r["score"])
 
-            if tier=="WATCH":
+            if tier == "WATCH":
                 continue
 
             best = options_intel.select_best_option(
-                options=[o for o in opts if o.get("symbol")==underlying],
+                options=[o for o in opts if o.get("symbol") == underlying],
                 underlying_price=r["price"],
                 score=r["score"],
                 tier=tier
@@ -266,7 +266,7 @@ while True:
             if not best:
                 continue
 
-            premium = safe(best.get("price"),0.0)
+            premium = safe(best.get("price"), 0.0)
 
             if not option_has_reasonable_premium(premium, r["price"]):
                 print(f"[OPTIONS FILTERED] {underlying} bad premium")
@@ -294,21 +294,21 @@ while True:
                 tier=tier
             )
 
-            if res.get("status")=="OPENED":
+            if res.get("status") == "OPENED":
                 print(f"[OPTIONS OPEN] {sym} ({tier}) premium={premium:.4f}")
-                executed_options+=1
-                open_options+=1
+                executed_options += 1
+                open_options += 1
 
     except Exception as e:
         print(f"[OPTIONS ERROR] {e}")
 
     # ===== OPTIONS UPDATE =====
     option_price_map = {
-        option_symbol(o.get("symbol"),o): safe(o.get("price"),0.0)
+        option_symbol(o.get("symbol"), o): safe(o.get("price"), 0.0)
         for o in option_rows
     }
 
-    events = options_pm.update_positions(option_price_map,current_cycle=cycle)
+    events = options_pm.update_positions(option_price_map, current_cycle=cycle)
 
     for e in events:
         print(f"[OPTIONS CLOSED] {e.get('option_symbol')} pnl={e.get('pnl')}")
