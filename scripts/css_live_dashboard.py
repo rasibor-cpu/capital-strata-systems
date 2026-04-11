@@ -122,7 +122,7 @@ def option_symbol(underlying, best):
 
 
 # =========================================================
-# SAFE OPTIONS EDGE FILTER — SECOND MODEST RELAXATION
+# THIRD SAFE EDGE RELAXATION
 # =========================================================
 def option_has_sufficient_edge(score_value, premium, underlying_price, tier):
     if underlying_price <= 0:
