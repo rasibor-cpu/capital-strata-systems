@@ -1,11 +1,12 @@
 """
 Futures Contract Specifications
-Capital Strata Systems – Phase 15
+Capital Strata Systems – Phase 15+
 
 Defines tick size, tick value, and multiplier
 for normalized risk calculation.
 
 All risk must resolve to dollar terms.
+Expanded to support FX pair simulation routing.
 """
 
 from typing import Dict
@@ -13,7 +14,9 @@ from typing import Dict
 
 FUTURES_SPECS: Dict[str, Dict[str, float]] = {
 
+    # =====================================
     # Equity Index Futures
+    # =====================================
     "ES": {   # S&P 500 E-mini
         "tick_size": 0.25,
         "tick_value": 12.50,
@@ -26,14 +29,18 @@ FUTURES_SPECS: Dict[str, Dict[str, float]] = {
         "multiplier": 20,
     },
 
+    # =====================================
     # Treasury Futures
+    # =====================================
     "ZN": {   # 10-Year Note
         "tick_size": 0.015625,
         "tick_value": 15.625,
         "multiplier": 1000,
     },
 
+    # =====================================
     # Commodities
+    # =====================================
     "GC": {   # Gold
         "tick_size": 0.10,
         "tick_value": 10.0,
@@ -44,6 +51,47 @@ FUTURES_SPECS: Dict[str, Dict[str, float]] = {
         "tick_size": 0.01,
         "tick_value": 10.0,
         "multiplier": 1000,
+    },
+
+    # =====================================
+    # FX Pair Simulation Specs
+    # These are normalized for CSS paper-risk
+    # approval, not broker-native contract specs.
+    # =====================================
+    "EUR_USD": {
+        "tick_size": 0.0001,
+        "tick_value": 10.0,
+        "multiplier": 100000,
+    },
+    "GBP_USD": {
+        "tick_size": 0.0001,
+        "tick_value": 10.0,
+        "multiplier": 100000,
+    },
+    "AUD_USD": {
+        "tick_size": 0.0001,
+        "tick_value": 10.0,
+        "multiplier": 100000,
+    },
+    "NZD_USD": {
+        "tick_size": 0.0001,
+        "tick_value": 10.0,
+        "multiplier": 100000,
+    },
+    "USD_CAD": {
+        "tick_size": 0.0001,
+        "tick_value": 10.0,
+        "multiplier": 100000,
+    },
+    "USD_CHF": {
+        "tick_size": 0.0001,
+        "tick_value": 10.0,
+        "multiplier": 100000,
+    },
+    "USD_JPY": {
+        "tick_size": 0.01,
+        "tick_value": 9.0,
+        "multiplier": 100000,
     },
 }
 

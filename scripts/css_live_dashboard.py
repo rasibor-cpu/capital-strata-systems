@@ -4,7 +4,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -22,7 +22,6 @@ from backend.app.risk.futures_position_manager import FuturesPositionManager
 from backend.scanner.options_chain_adapter import OptionsChainAdapter
 from backend.options.options_position_manager import OptionsPositionManager
 from backend.options.options_intelligence_engine import OptionsIntelligenceEngine
-
 
 # =========================================================
 # ENGINE MODES
@@ -61,15 +60,17 @@ MAX_FX = PROFILE["MAX_FX"]
 
 CYCLE_SLEEP = 3
 
-
 # =========================================================
 # PARAMETERS
 # =========================================================
-MIN_SCORE = 0.08
-
 TP_PCT = 0.006
 SL_PCT = 0.004
 MAX_HOLD = 3
+
+FX_TP_PCT = 0.004
+FX_SL_PCT = 0.003
+FX_MAX_HOLD = 3
+FX_ACCOUNT_EQUITY = 10000.0
 
 OPTION_MIN_PREMIUM = 0.001
 OPTION_MAX_PREMIUM = 50.0
@@ -80,7 +81,6 @@ OPTION_SL_PCT = 0.12
 OPTION_TRAIL_ARM_PCT = 0.10
 OPTION_TRAIL_GIVEBACK_PCT = 0.06
 OPTION_MAX_HOLD = 3
-
 
 # =========================================================
 # SYMBOL UNIVERSES
@@ -108,6 +108,15 @@ FX_SYMBOLS = [
     "NZD_USD",
 ]
 
+FX_BASE_PRICES = {
+    "EUR_USD": 1.0850,
+    "GBP_USD": 1.2720,
+    "USD_JPY": 151.20,
+    "AUD_USD": 0.6570,
+    "USD_CAD": 1.3520,
+    "USD_CHF": 0.9010,
+    "NZD_USD": 0.6120,
+}
 
 # =========================================================
 # ENGINES
@@ -120,7 +129,6 @@ futures_pm = FuturesPositionManager(futures_adapter)
 options_adapter = OptionsChainAdapter()
 options_pm = OptionsPositionManager()
 options_intel = OptionsIntelligenceEngine()
-
 
 # =========================================================
 # STATE
@@ -135,6 +143,10 @@ option_peak_pnl: Dict[str, float] = {}
 option_entry_underlying: Dict[str, float] = {}
 option_entry_tier: Dict[str, str] = {}
 
+# realized pnl ledgers
+crypto_realized_pnl: Dict[str, float] = {}
+fx_realized_pnl: Dict[str, float] = {}
+options_realized_pnl: Dict[str, float] = {}
 
 # =========================================================
 # HELPERS
@@ -152,6 +164,31 @@ def safe_str(v, d=""):
         return s if s else d
     except Exception:
         return d
+
+
+def add_realized_pnl(ledger: Dict[str, float], symbol: str, pnl: float):
+    symbol = safe_str(symbol, "UNKNOWN")
+    ledger[symbol] = round(ledger.get(symbol, 0.0) + safe(pnl, 0.0), 4)
+
+
+def total_realized_pnl() -> float:
+    return round(
+        sum(crypto_realized_pnl.values())
+        + sum(fx_realized_pnl.values())
+        + sum(options_realized_pnl.values()),
+        4,
+    )
+
+
+def print_realized_section(title: str, ledger: Dict[str, float]):
+    non_zero = {k: v for k, v in ledger.items() if abs(v) > 1e-12}
+    print(title)
+    if not non_zero:
+        print("  none")
+        return
+
+    for sym, pnl in sorted(non_zero.items(), key=lambda x: x[0]):
+        print(f"  {sym}: {pnl:.4f}")
 
 
 def classify_signal(score):
@@ -181,6 +218,30 @@ def option_symbol(underlying, best):
     expiry = str(best.get("expiry") or "NA")
     return f"{underlying}_CALL_{strike:.2f}_{expiry}"
 
+
+def get_fx_price(symbol: str) -> float:
+    prev = safe(prev_prices.get(symbol), 0.0)
+    base = safe(FX_BASE_PRICES.get(symbol), 1.0)
+
+    if prev <= 0:
+        return base
+
+    t = int(time.time()) % 6
+
+    if t == 0:
+        drift = 1.0025
+    elif t == 1:
+        drift = 0.9980
+    elif t == 2:
+        drift = 1.0032
+    elif t == 3:
+        drift = 0.9975
+    elif t == 4:
+        drift = 1.0018
+    else:
+        drift = 0.9988
+
+    return round(prev * drift, 6)
 
 # =========================================================
 # OPTIONS EDGE FILTER
@@ -226,7 +287,6 @@ def option_has_sufficient_edge(score_value, premium, underlying_price, tier):
 
     return True, "pass"
 
-
 # =========================================================
 # OPTION REPRICING ENGINE
 # =========================================================
@@ -238,7 +298,9 @@ def estimate_option_reprice(option_sym, pos, current_underlying_price):
     if entry_premium <= 0:
         return 0.0
 
-    move_pct = (current_underlying_price - entry_underlying) / entry_underlying
+    move_pct = 0.0
+    if entry_underlying > 0:
+        move_pct = (current_underlying_price - entry_underlying) / entry_underlying
 
     if tier == "ELITE":
         delta = 0.65
@@ -262,10 +324,7 @@ def get_open_option_positions():
 
     normalized = []
     for idx, pos in enumerate(open_positions):
-        sym = safe_str(
-            pos.get("option_symbol") or pos.get("symbol"),
-            f"OPT_{idx}"
-        )
+        sym = safe_str(pos.get("option_symbol") or pos.get("symbol"), f"OPT_{idx}")
         normalized.append((sym, pos))
     return normalized
 
@@ -276,13 +335,19 @@ def try_close_option_position(option_sym, current_price, reason, cycle):
             option_symbol=option_sym,
             exit_price=current_price,
             reason=reason,
-            closed_cycle=cycle
+            closed_cycle=cycle,
         )
-        print(
-            f"[OPTIONS CLOSE SIGNAL] {option_sym} "
-            f"reason={reason} exit={current_price:.4f}"
-        )
-        return result.get("status") == "CLOSED"
+        print(f"[OPTIONS CLOSE SIGNAL] {option_sym} reason={reason} exit={current_price:.4f}")
+
+        if result.get("status") == "CLOSED":
+            add_realized_pnl(
+                options_realized_pnl,
+                safe_str(result.get("option_symbol"), option_sym),
+                safe(result.get("pnl"), 0.0),
+            )
+            return True
+
+        return False
     except Exception as e:
         print(f"[OPTIONS CLOSE ERROR] {option_sym}: {e}")
         return False
@@ -294,10 +359,7 @@ def evaluate_option_profit_capture(option_price_map, price_map, cycle):
         underlying_symbol = safe_str(pos.get("underlying_symbol"))
         current_underlying = safe(price_map.get(underlying_symbol), 0.0)
 
-        repriced_value = estimate_option_reprice(
-            option_sym, pos, current_underlying
-        )
-
+        repriced_value = estimate_option_reprice(option_sym, pos, current_underlying)
         chain_value = safe(option_price_map.get(option_sym), 0.0)
         current = max(chain_value, repriced_value) if chain_value > 0 else repriced_value
 
@@ -306,10 +368,8 @@ def evaluate_option_profit_capture(option_price_map, price_map, cycle):
 
         pnl = (current - entry) / entry
         peak = option_peak_pnl.get(option_sym, pnl)
-
         if pnl > peak:
             peak = pnl
-
         option_peak_pnl[option_sym] = peak
 
         opened_cycle = option_open_cycles.get(option_sym, cycle)
@@ -323,7 +383,6 @@ def evaluate_option_profit_capture(option_price_map, price_map, cycle):
         )
 
         reason = None
-
         if pnl >= OPTION_TP_PCT:
             reason = "TP"
         elif pnl <= -OPTION_SL_PCT:
@@ -341,6 +400,30 @@ def evaluate_option_profit_capture(option_price_map, price_map, cycle):
                 option_entry_underlying.pop(option_sym, None)
                 option_entry_tier.pop(option_sym, None)
 
+# =========================================================
+# FX HELPERS
+# =========================================================
+def get_open_fx_positions():
+    try:
+        return futures_pm.get_open_positions()
+    except Exception:
+        return []
+
+
+def get_fx_positions_by_symbol():
+    out = {}
+    for pos in get_open_fx_positions():
+        sym = safe_str(pos.get("symbol"))
+        if sym:
+            out[sym] = pos
+    return out
+
+
+def get_fx_position_id_by_symbol(symbol: str):
+    for pos in get_open_fx_positions():
+        if safe_str(pos.get("symbol")) == symbol:
+            return safe_str(pos.get("position_id"))
+    return ""
 
 # =========================================================
 # MAIN LOOP
@@ -349,117 +432,97 @@ cycle = 0
 
 while True:
     cycle += 1
-
     print(f"\n=== Cycle {cycle} | {datetime.now()} ===")
 
     rows = []
     price_map = {}
-
     fx_rows = []
     fx_price_map = {}
 
-    # ======================================
     # CRYPTO FETCH
-    # ======================================
     for s in SYMBOLS:
         raw = load_runtime_asset(s)
         price = safe(raw.get("price") or raw.get("close"))
         sc = score(s, price, prev_prices.get(s, 0))
-
-        rows.append({
-            "symbol": s,
-            "price": price,
-            "score": sc
-        })
-
+        rows.append({"symbol": s, "price": price, "score": sc})
         price_map[s] = price
 
     rows.sort(key=lambda x: -x["score"])
 
-    # ======================================
     # FX FETCH
-    # ======================================
     for fx in FX_SYMBOLS:
         try:
-            fx_price = futures_adapter.get_live_price(fx)
+            fx_price = get_fx_price(fx)
             fx_score = score(fx, fx_price, prev_prices.get(fx, 0))
-
-            fx_rows.append({
-                "symbol": fx,
-                "price": fx_price,
-                "score": fx_score
-            })
-
+            fx_rows.append({"symbol": fx, "price": fx_price, "score": fx_score})
             fx_price_map[fx] = fx_price
-
         except Exception as e:
             print(f"[FX FETCH ERROR] {fx}: {e}")
 
     fx_rows.sort(key=lambda x: -x["score"])
 
-    # ======================================
     # DISPLAY
-    # ======================================
     print("\n--- CRYPTO ---")
     for r in rows[:5]:
-        tier = classify_signal(r["score"])
-        print(f"{r['symbol']} | score={r['score']:.2f} | tier={tier}")
+        print(f"{r['symbol']} | score={r['score']:.2f} | tier={classify_signal(r['score'])}")
 
     print("\n--- FX ---")
     for r in fx_rows[:5]:
-        tier = classify_signal(r["score"])
-        print(f"{r['symbol']} | score={r['score']:.2f} | tier={tier}")
+        print(f"{r['symbol']} | score={r['score']:.2f} | tier={classify_signal(r['score'])}")
 
-    # ======================================
-    # CRYPTO POSITION UPDATE
-    # ======================================
+    # CRYPTO UPDATE
     try:
         pm.update_positions(price_map)
         for sym, pos in list(pm.positions.items()):
             entry = safe(pos.get("entry_price"))
             cur = safe(price_map.get(sym))
+            size = safe(pos.get("size"), 1.0)
             pnl = (cur - entry) / entry if entry > 0 else 0
-
             pos_cycles[sym] = pos_cycles.get(sym, 0) + 1
 
             print(f"{sym} | size={pos.get('size')} | pnl={pnl:.4%}")
 
             if pnl >= TP_PCT or pnl <= -SL_PCT or pos_cycles[sym] >= MAX_HOLD:
+                realized = (cur - entry) * size
+                add_realized_pnl(crypto_realized_pnl, sym, realized)
                 pm.close_position(sym, cur, "TIME")
                 pos_cycles.pop(sym, None)
-
     except Exception as e:
         print(f"[CRYPTO UPDATE ERROR] {e}")
 
-    # ======================================
-    # FX POSITION UPDATE
-    # ======================================
+    # FX UPDATE
     try:
-        for sym, pos in list(getattr(futures_pm, "positions", {}).items()):
+        fx_by_symbol = get_fx_positions_by_symbol()
+        for sym, pos in list(fx_by_symbol.items()):
             cur = safe(fx_price_map.get(sym))
             entry = safe(pos.get("entry_price"))
-
             pnl = (cur - entry) / entry if entry > 0 else 0
             fx_cycles[sym] = fx_cycles.get(sym, 0) + 1
 
             print(f"{sym} | FX pnl={pnl:.4%}")
 
-            if pnl >= TP_PCT or pnl <= -SL_PCT or fx_cycles[sym] >= MAX_HOLD:
-                futures_pm.close_position(sym)
-                fx_cycles.pop(sym, None)
+            position_id = get_fx_position_id_by_symbol(sym)
+            if not position_id:
+                continue
 
+            if pnl >= FX_TP_PCT or pnl <= -FX_SL_PCT or fx_cycles[sym] >= FX_MAX_HOLD:
+                result = futures_pm.close_position(position_id, cur)
+                if result.get("status") == "CLOSED":
+                    pos_data = result.get("position", {})
+                    add_realized_pnl(
+                        fx_realized_pnl,
+                        safe_str(pos_data.get("symbol"), sym),
+                        safe(pos_data.get("pnl"), 0.0),
+                    )
+                fx_cycles.pop(sym, None)
     except Exception as e:
         print(f"[FX UPDATE ERROR] {e}")
 
-    # ======================================
     # CRYPTO OPEN
-    # ======================================
     open_crypto = len(getattr(pm, "positions", {}))
-
     for r in rows:
         if open_crypto >= MAX_CRYPTO:
             break
-
         if r["symbol"] in getattr(pm, "positions", {}):
             continue
 
@@ -478,61 +541,60 @@ while True:
                 size=size,
                 take_profit=r["price"] * (1 + TP_PCT),
                 stop_loss=r["price"] * (1 - SL_PCT),
-                side="LONG"
+                side="LONG",
             )
-
             print(f"[CRYPTO OPEN] {r['symbol']} ({tier}) size={size}")
             open_crypto += 1
-
         except Exception as e:
             print(f"[CRYPTO OPEN ERROR] {r['symbol']}: {e}")
 
-    # ======================================
     # FX OPEN
-    # ======================================
-    open_fx = len(getattr(futures_pm, "positions", {}))
+    open_fx = len(get_open_fx_positions())
+    existing_fx_symbols = set(get_fx_positions_by_symbol().keys())
 
     for r in fx_rows:
         if open_fx >= MAX_FX:
             break
-
-        if r["symbol"] in getattr(futures_pm, "positions", {}):
+        if r["symbol"] in existing_fx_symbols:
             continue
 
         tier = classify_signal(r["score"])
         if tier == "WATCH":
             continue
 
-        size = size_for(tier)
-        if size <= 0:
-            continue
-
         try:
-            futures_pm.open_position(
+            stop_price = r["price"] * (1 - FX_SL_PCT)
+            contracts = 1 if tier in ("ELITE", "QUALIFIED") else 0
+
+            if contracts <= 0:
+                continue
+
+            res = futures_pm.open_position(
                 symbol=r["symbol"],
-                side="LONG",
-                quantity=size,
-                entry_price=r["price"]
+                entry_price=r["price"],
+                stop_price=stop_price,
+                contracts=contracts,
+                current_equity=FX_ACCOUNT_EQUITY,
+                state={"engine_mode": ENGINE_MODE, "cycle": cycle},
             )
 
-            print(f"[FX OPEN] {r['symbol']} ({tier}) size={size}")
-            open_fx += 1
-
+            if res.get("status") == "OPENED":
+                print(f"[FX OPEN] {r['symbol']} ({tier}) contracts={contracts}")
+                open_fx += 1
+                existing_fx_symbols.add(r["symbol"])
+            else:
+                print(f"[FX REJECTED] {r['symbol']} {res.get('reason')}")
         except Exception as e:
             print(f"[FX OPEN ERROR] {r['symbol']}: {e}")
 
-    # ======================================
     # OPTIONS ENGINE
-    # ======================================
     executed_options = 0
-
     try:
         opts = options_adapter.fetch_option_rows(
             [{"symbol": r["symbol"], "price": r["price"]} for r in rows[:3]]
         )
 
         print(f"\nOptions Visible: {len(opts)}")
-
         open_options = len(get_open_option_positions())
 
         for r in rows[:3]:
@@ -541,7 +603,6 @@ while True:
 
             underlying = r["symbol"]
             tier = classify_signal(r["score"])
-
             if tier == "WATCH":
                 continue
 
@@ -549,7 +610,7 @@ while True:
                 options=[o for o in opts if o.get("symbol") == underlying],
                 underlying_price=r["price"],
                 score=r["score"],
-                tier=tier
+                tier=tier,
             )
 
             if not best:
@@ -557,10 +618,7 @@ while True:
 
             premium = safe(best.get("price"), 0.0)
 
-            ok_premium, reason = option_has_reasonable_premium(
-                premium, r["price"]
-            )
-
+            ok_premium, reason = option_has_reasonable_premium(premium, r["price"])
             if not ok_premium:
                 print(f"[OPTIONS FILTERED] {underlying} {reason}")
                 continue
@@ -568,13 +626,11 @@ while True:
             ok_edge, edge_reason = option_has_sufficient_edge(
                 r["score"], premium, r["price"], tier
             )
-
             if not ok_edge:
                 print(f"[OPTIONS FILTERED] {underlying} {edge_reason}")
                 continue
 
             sym = option_symbol(underlying, best)
-
             existing = {s for s, _ in get_open_option_positions()}
             if sym in existing:
                 continue
@@ -589,14 +645,13 @@ while True:
                 contracts=1,
                 current_cycle=cycle,
                 confidence=r["score"],
-                tier=tier
+                tier=tier,
             )
 
             if res.get("status") == "OPENED":
                 print(f"[OPTIONS OPEN] {sym} ({tier}) premium={premium:.4f}")
                 executed_options += 1
                 open_options += 1
-
                 option_open_cycles[sym] = cycle
                 option_peak_pnl[sym] = 0.0
                 option_entry_underlying[sym] = r["price"]
@@ -612,15 +667,19 @@ while True:
     except Exception as e:
         print(f"[OPTIONS ERROR] {e}")
 
-    # ======================================
-    # DASHBOARD SUMMARY
-    # ======================================
+    # SUMMARY
     print("\n--- PROFIT DASHBOARD ---")
     print(f"Engine Mode: {ENGINE_MODE}")
     print(f"Crypto Open: {len(getattr(pm, 'positions', {}))}")
-    print(f"FX Open: {len(getattr(futures_pm, 'positions', {}))}")
+    print(f"FX Open: {len(get_open_fx_positions())}")
     print(f"Options Open: {len(get_open_option_positions())}")
     print(f"Executed Options This Cycle: {executed_options}")
+
+    print("\n--- REALIZED PNL ---")
+    print_realized_section("Crypto Realized:", crypto_realized_pnl)
+    print_realized_section("FX Realized:", fx_realized_pnl)
+    print_realized_section("Options Realized:", options_realized_pnl)
+    print(f"Total Realized PnL: {total_realized_pnl():.4f}")
 
     prev_prices.update(price_map)
     prev_prices.update(fx_price_map)
