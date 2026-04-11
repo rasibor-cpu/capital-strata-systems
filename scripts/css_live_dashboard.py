@@ -4,7 +4,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List, Tuple, Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -37,12 +37,14 @@ ENGINE_PROFILES = {
     "EXPANSION": {"MAX_CRYPTO": 5, "MAX_OPTIONS": 4},
 }
 
+
 def select_engine_mode():
     print("\n=== CSS ENGINE MODE SELECTOR ===")
     for k, v in ENGINE_MODES.items():
         print(f"{k}. {v}")
     choice = input("Enter choice (1-5) [default=3]: ").strip()
     return ENGINE_MODES.get(choice, "BALANCED")
+
 
 ENGINE_MODE = select_engine_mode()
 PROFILE = ENGINE_PROFILES[ENGINE_MODE]
@@ -63,10 +65,17 @@ OPTION_MIN_PREMIUM = 0.001
 OPTION_MAX_PREMIUM = 50.0
 OPTION_PREMIUM_TO_UNDERLYING_MAX = 0.40
 
+# OPTIONS PROFIT CAPTURE
+OPTION_TP_PCT = 0.18
+OPTION_SL_PCT = 0.12
+OPTION_TRAIL_ARM_PCT = 0.10
+OPTION_TRAIL_GIVEBACK_PCT = 0.06
+OPTION_MAX_HOLD = 3
+
 SYMBOLS = [
-    "BTC-USD","ETH-USD","SOL-USD","XRP-USD",
-    "ADA-USD","DOGE-USD","AVAX-USD","LINK-USD",
-    "LTC-USD","BCH-USD"
+    "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD",
+    "ADA-USD", "DOGE-USD", "AVAX-USD", "LINK-USD",
+    "LTC-USD", "BCH-USD"
 ]
 
 # ========================
@@ -83,12 +92,24 @@ options_intel = OptionsIntelligenceEngine()
 prev_prices: Dict[str, float] = {}
 pos_cycles: Dict[str, int] = {}
 
+# option trackers
+option_open_cycles: Dict[str, int] = {}
+option_peak_pnl: Dict[str, float] = {}
+
 # ========================
 # HELPERS
 # ========================
 def safe(v, d=0.0):
     try:
         return float(v)
+    except Exception:
+        return d
+
+
+def safe_str(v, d=""):
+    try:
+        s = str(v).strip()
+        return s if s else d
     except Exception:
         return d
 
@@ -118,7 +139,7 @@ def option_symbol(underlying, best):
 
 
 # =========================================================
-# DIAGNOSTIC EDGE MODEL
+# CALIBRATED EDGE MODEL
 # =========================================================
 def option_has_sufficient_edge(score_value, premium, underlying_price, tier):
     if underlying_price <= 0:
@@ -166,6 +187,122 @@ def option_has_reasonable_premium(premium, underlying_price):
     if (premium / underlying_price) > OPTION_PREMIUM_TO_UNDERLYING_MAX:
         return False, "premium ratio too high"
     return True, "pass"
+
+
+# =========================================================
+# OPTIONS PROFIT CAPTURE HELPERS
+# =========================================================
+def get_open_option_positions() -> List[Tuple[str, Dict[str, Any]]]:
+    try:
+        open_positions = options_pm.get_open_positions()
+    except Exception:
+        return []
+
+    if isinstance(open_positions, dict):
+        return list(open_positions.items())
+
+    if isinstance(open_positions, list):
+        normalized = []
+        for idx, pos in enumerate(open_positions):
+            if isinstance(pos, dict):
+                sym = safe_str(
+                    pos.get("option_symbol")
+                    or pos.get("symbol")
+                    or pos.get("position_id"),
+                    f"OPT_{idx}"
+                )
+                normalized.append((sym, pos))
+        return normalized
+
+    return []
+
+
+def try_close_option_position(option_sym: str, current_price: float, reason: str, cycle: int) -> bool:
+    close_methods = [
+        "close_option_position",
+        "close_position",
+        "close_long_option",
+        "close_option",
+    ]
+
+    for method_name in close_methods:
+        method = getattr(options_pm, method_name, None)
+        if not callable(method):
+            continue
+
+        try:
+            result = method(
+                option_symbol=option_sym,
+                exit_price=current_price,
+                reason=reason,
+                current_cycle=cycle,
+            )
+            print(f"[OPTIONS CLOSE SIGNAL] {option_sym} reason={reason} exit={current_price:.4f}")
+            return True
+        except TypeError:
+            try:
+                result = method(option_sym, current_price, reason, cycle)
+                print(f"[OPTIONS CLOSE SIGNAL] {option_sym} reason={reason} exit={current_price:.4f}")
+                return True
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+        try:
+            result = method(option_sym, current_price)
+            print(f"[OPTIONS CLOSE SIGNAL] {option_sym} reason={reason} exit={current_price:.4f}")
+            return True
+        except Exception:
+            pass
+
+    print(f"[OPTIONS HOLD] {option_sym} close-method unavailable for reason={reason}")
+    return False
+
+
+def evaluate_option_profit_capture(option_price_map: Dict[str, float], cycle: int):
+    for option_sym, pos in get_open_option_positions():
+        entry = safe(
+            pos.get("entry_price")
+            or pos.get("avg_price")
+            or pos.get("price"),
+            0.0,
+        )
+        current = safe(option_price_map.get(option_sym), 0.0)
+
+        if entry <= 0 or current <= 0:
+            continue
+
+        pnl = (current - entry) / entry
+        peak = option_peak_pnl.get(option_sym, pnl)
+        if pnl > peak:
+            peak = pnl
+        option_peak_pnl[option_sym] = peak
+
+        opened_cycle = option_open_cycles.get(option_sym, cycle)
+        hold_cycles = max(0, cycle - opened_cycle)
+
+        print(
+            f"[OPTION PNL] {option_sym} "
+            f"entry={entry:.4f} current={current:.4f} "
+            f"pnl={pnl:.2%} peak={peak:.2%} hold={hold_cycles}"
+        )
+
+        reason = None
+        if pnl >= OPTION_TP_PCT:
+            reason = "TP"
+        elif pnl <= -OPTION_SL_PCT:
+            reason = "SL"
+        elif peak >= OPTION_TRAIL_ARM_PCT and pnl <= (peak - OPTION_TRAIL_GIVEBACK_PCT):
+            reason = "TRAIL"
+        elif hold_cycles >= OPTION_MAX_HOLD:
+            reason = "TIME"
+
+        if reason:
+            closed = try_close_option_position(option_sym, current, reason, cycle)
+            if closed:
+                option_open_cycles.pop(option_sym, None)
+                option_peak_pnl.pop(option_sym, None)
 
 
 # ========================
@@ -240,7 +377,7 @@ while True:
         print(f"[CRYPTO OPEN] {r['symbol']} ({tier}) size={size}")
         open_crypto += 1
 
-    # ===== OPTIONS =====
+    # ===== OPTIONS ENTRY =====
     option_rows = []
     executed_options = 0
 
@@ -252,7 +389,7 @@ while True:
         option_rows = opts
         print(f"\nOptions Visible: {len(opts)}")
 
-        open_options = len(options_pm.get_open_positions())
+        open_options = len(get_open_option_positions())
 
         for r in rows[:3]:
             if open_options >= MAX_OPTIONS:
@@ -293,7 +430,8 @@ while True:
 
             sym = option_symbol(underlying, best)
 
-            if sym in options_pm.positions:
+            existing_symbols = {s for s, _ in get_open_option_positions()}
+            if sym in existing_symbols:
                 continue
 
             res = options_pm.open_long_option(
@@ -313,14 +451,38 @@ while True:
                 print(f"[OPTIONS OPEN] {sym} ({tier}) premium={premium:.4f}")
                 executed_options += 1
                 open_options += 1
+                option_open_cycles[sym] = cycle
+                option_peak_pnl[sym] = 0.0
 
     except Exception as e:
         print(f"[OPTIONS ERROR] {e}")
 
+    # ===== OPTIONS UPDATE / PROFIT CAPTURE =====
+    option_price_map = {
+        option_symbol(o.get("symbol"), o): safe(o.get("price"), 0.0)
+        for o in option_rows
+    }
+
+    evaluate_option_profit_capture(option_price_map, cycle)
+
+    try:
+        events = options_pm.update_positions(option_price_map, current_cycle=cycle)
+    except Exception as e:
+        events = []
+        print(f"[OPTIONS UPDATE ERROR] {e}")
+
+    for e in events:
+        print(f"[OPTIONS CLOSED] {e.get('option_symbol')} pnl={e.get('pnl')}")
+        closed_sym = safe_str(e.get("option_symbol"))
+        if closed_sym:
+            option_open_cycles.pop(closed_sym, None)
+            option_peak_pnl.pop(closed_sym, None)
+
+    # ===== DASHBOARD =====
     print("\n--- PROFIT DASHBOARD ---")
     print(f"Engine Mode: {ENGINE_MODE}")
     print(f"Crypto Open: {len(pm.positions)}")
-    print(f"Options Open: {len(options_pm.get_open_positions())}")
+    print(f"Options Open: {len(get_open_option_positions())}")
     print(f"Executed Options This Cycle: {executed_options}")
 
     prev_prices.update(price_map)
