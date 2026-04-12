@@ -65,14 +65,23 @@ FX_ARB_MAX_HOLD = 3
 
 SIMULATED_EQUITY = 100000.0
 
-FUTURES_MAX_HOLD = 5
+FUTURES_MAX_HOLD = 6
 FUTURES_SIGNAL_THRESHOLD = 9.5
 FUTURES_CONFIRM_THRESHOLD = 4.0
 FUTURES_STOP_PCT = 0.0025
-FUTURES_PROFIT_TARGET = 3.0
-FUTURES_TRAIL_ARM = 2.0
-FUTURES_TRAIL_GIVEBACK = 1.0
-FUTURES_MAX_LOSS = -4.0
+
+BASE_FUTURES_PROFIT_TARGET = 3.0
+BASE_TRAIL_ARM = 2.0
+BASE_TRAIL_GIVEBACK = 1.0
+
+DEFAULT_MAX_LOSS = -4.0
+
+SYMBOL_MAX_LOSS = {
+    "ES": -5.0,
+    "NQ": -3.5,
+    "CL": -3.0,
+    "GC": -3.5,
+}
 
 # =========================================================
 # SYMBOLS
@@ -128,7 +137,6 @@ fx_arb_realized_pnl: Dict[str, float] = {}
 fx_arb_positions: Dict[str, Dict] = {}
 
 futures_signal_memory: Dict[str, float] = {}
-
 
 # =========================================================
 # HELPERS
@@ -232,7 +240,10 @@ while True:
         fut_score = score(fut, current_price, prev_price)
         prior_score = safe(futures_signal_memory.get(fut), 0.0)
 
-        score_confirmed = fut_score >= FUTURES_SIGNAL_THRESHOLD and prior_score >= FUTURES_CONFIRM_THRESHOLD
+        score_confirmed = (
+            fut_score >= FUTURES_SIGNAL_THRESHOLD
+            and prior_score >= FUTURES_CONFIRM_THRESHOLD
+        )
         upward_momentum = current_price > prev_price
 
         if (
@@ -259,6 +270,7 @@ while True:
                     entry_cycle=cycle,
                     signal_score=fut_score,
                 )
+
                 live_pos = futures_pm.get_open_position_for_symbol(fut)
                 if live_pos is not None:
                     live_pos["peak_unrealized"] = 0.0
@@ -287,14 +299,58 @@ while True:
         )
 
         unrealized = current_price - entry_price
-        peak_unrealized = max(float(pos.get("peak_unrealized", 0.0)), unrealized)
+
+        peak_unrealized = max(
+            float(pos.get("peak_unrealized", 0.0)),
+            unrealized
+        )
         pos["peak_unrealized"] = peak_unrealized
 
-        hit_profit_target = unrealized >= FUTURES_PROFIT_TARGET
-        hit_max_loss = unrealized <= FUTURES_MAX_LOSS
+        signal_score = float(pos.get("signal_score", 0.0))
+
+        dynamic_profit_target = BASE_FUTURES_PROFIT_TARGET
+        if signal_score >= 15:
+            dynamic_profit_target = 6.0
+        elif signal_score >= 12:
+            dynamic_profit_target = 4.5
+        elif signal_score >= 10:
+            dynamic_profit_target = 3.5
+
+        recent_move = abs(unrealized)
+
+        dynamic_trail_arm = BASE_TRAIL_ARM
+        dynamic_trail_giveback = BASE_TRAIL_GIVEBACK
+
+        if recent_move >= 8:
+            dynamic_trail_arm = 4.0
+            dynamic_trail_giveback = 2.0
+        elif recent_move >= 5:
+            dynamic_trail_arm = 3.0
+            dynamic_trail_giveback = 1.5
+
+        if peak_unrealized >= dynamic_profit_target:
+            if unrealized > peak_unrealized * 0.85:
+                hit_profit_target = False
+            else:
+                hit_profit_target = True
+        else:
+            hit_profit_target = False
+
+        symbol_max_loss = SYMBOL_MAX_LOSS.get(symbol, DEFAULT_MAX_LOSS)
+
+        early_abort = (
+            hold <= 2
+            and unrealized <= (symbol_max_loss * 0.75)
+        )
+
+        hit_max_loss = unrealized <= symbol_max_loss or early_abort
         hit_time_exit = hold >= FUTURES_MAX_HOLD
-        trail_armed = peak_unrealized >= FUTURES_TRAIL_ARM
-        trail_exit = trail_armed and unrealized <= (peak_unrealized - FUTURES_TRAIL_GIVEBACK)
+
+        trail_armed = peak_unrealized >= dynamic_trail_arm
+        trail_exit = (
+            trail_armed
+            and unrealized <= (peak_unrealized - dynamic_trail_giveback)
+        )
 
         if hit_profit_target or hit_max_loss or hit_time_exit or trail_exit:
             close_result = futures_pm.close_position(
@@ -313,14 +369,19 @@ while True:
                 if hit_profit_target:
                     exit_reason = "TP"
                 elif hit_max_loss:
-                    exit_reason = "SL"
+                    if early_abort:
+                        exit_reason = "EARLY_ABORT"
+                    else:
+                        exit_reason = "SL"
                 elif trail_exit:
                     exit_reason = "TRAIL"
 
                 print(
                     f"[FUTURES CLOSE] {symbol} "
                     f"exit={current_price:.4f} pnl={pnl:.4f} "
-                    f"hold={hold} reason={exit_reason} peak={peak_unrealized:.4f}"
+                    f"hold={hold} reason={exit_reason} "
+                    f"peak={peak_unrealized:.4f} "
+                    f"target={dynamic_profit_target:.2f}"
                 )
 
     # =====================================================
