@@ -16,7 +16,7 @@ Design Principles:
 
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 import uuid
 import time
 
@@ -35,6 +35,7 @@ class FuturesPositionManager:
     ) -> None:
         self.adapter = adapter
         self.open_positions: Dict[str, Dict] = {}
+        self.closed_positions: List[Dict] = []
 
     # -----------------------------------------------------
 
@@ -64,7 +65,6 @@ class FuturesPositionManager:
         if result.get("status") != "APPROVED":
             return result
 
-        # ---- Create position record ----
         position_id = str(uuid.uuid4())
 
         risk = calculate_futures_risk(
@@ -119,21 +119,20 @@ class FuturesPositionManager:
                 "position_id": position_id,
             }
 
-        # ---- Calculate PnL ----
-        entry_price = position["entry_price"]
-        contracts = position["contracts"]
+        entry_price = float(position["entry_price"])
+        contracts = int(position["contracts"])
 
-        # NOTE: multiplier approximation handled via risk engine scaling
-        pnl = (exit_price - entry_price) * contracts
+        pnl = (float(exit_price) - entry_price) * contracts
 
-        # ---- Reduce risk exposure ----
-        self.adapter.close_trade(position["risk"])
+        self.adapter.close_trade(float(position["risk"]))
 
-        # ---- Update position ----
         position["exit_price"] = float(exit_price)
         position["pnl"] = float(pnl)
         position["status"] = "CLOSED"
         position["closed_timestamp"] = time.time()
+
+        closed_copy = dict(position)
+        self.closed_positions.append(closed_copy)
 
         return {
             "status": "CLOSED",
@@ -142,11 +141,126 @@ class FuturesPositionManager:
 
     # -----------------------------------------------------
 
+    def has_open_position_for_symbol(self, symbol: str) -> bool:
+        for position in self.open_positions.values():
+            if position.get("status") == "OPEN" and position.get("symbol") == symbol:
+                return True
+        return False
+
+    # -----------------------------------------------------
+
+    def get_open_position_for_symbol(self, symbol: str) -> Optional[Dict]:
+        for position in self.open_positions.values():
+            if position.get("status") == "OPEN" and position.get("symbol") == symbol:
+                return position
+        return None
+
+    # -----------------------------------------------------
+
+    def open_position_if_allowed(
+        self,
+        *,
+        symbol: str,
+        entry_price: float,
+        stop_price: float,
+        contracts: int,
+        current_equity: float,
+        state: Dict,
+    ) -> Dict:
+        """
+        Opens only if no existing open position for the symbol.
+        """
+
+        if self.has_open_position_for_symbol(symbol):
+            return {
+                "status": "SKIPPED",
+                "reason": f"Open position already exists for {symbol}",
+                "symbol": symbol,
+            }
+
+        return self.open_position(
+            symbol=symbol,
+            entry_price=entry_price,
+            stop_price=stop_price,
+            contracts=contracts,
+            current_equity=current_equity,
+            state=state,
+        )
+
+    # -----------------------------------------------------
+
+    def close_position_by_symbol(
+        self,
+        *,
+        symbol: str,
+        exit_price: float,
+    ) -> Dict:
+        """
+        Closes first matching open position for a symbol.
+        """
+
+        position = self.get_open_position_for_symbol(symbol)
+        if not position:
+            return {
+                "status": "ERROR",
+                "reason": f"No open position found for {symbol}",
+                "symbol": symbol,
+            }
+
+        return self.close_position(
+            position_id=position["position_id"],
+            exit_price=exit_price,
+        )
+
+    # -----------------------------------------------------
+
+    def get_position_hold_cycles(
+        self,
+        *,
+        position: Dict,
+        current_cycle: int,
+    ) -> int:
+        """
+        Computes hold cycles if cycle metadata is present.
+        """
+
+        try:
+            entry_cycle = int(position.get("entry_cycle", current_cycle))
+            return max(0, int(current_cycle) - entry_cycle)
+        except Exception:
+            return 0
+
+    # -----------------------------------------------------
+
+    def mark_position_cycle_metadata(
+        self,
+        *,
+        position_id: str,
+        entry_cycle: int,
+        signal_score: float = 0.0,
+    ) -> None:
+        """
+        Optional metadata enrichment for dashboard/orchestrator usage.
+        """
+
+        if position_id not in self.open_positions:
+            return
+
+        self.open_positions[position_id]["entry_cycle"] = int(entry_cycle)
+        self.open_positions[position_id]["signal_score"] = float(signal_score)
+
+    # -----------------------------------------------------
+
     def get_open_positions(self) -> List[Dict]:
         return [
             p for p in self.open_positions.values()
             if p["status"] == "OPEN"
         ]
+
+    # -----------------------------------------------------
+
+    def get_closed_positions(self) -> List[Dict]:
+        return list(self.closed_positions)
 
     # -----------------------------------------------------
 

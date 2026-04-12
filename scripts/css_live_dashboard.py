@@ -32,11 +32,11 @@ ENGINE_MODES = {
 }
 
 ENGINE_PROFILES = {
-    "SAFE": {"MAX_CRYPTO": 2, "MAX_OPTIONS": 1, "MAX_FX": 1},
-    "CONSERVATIVE": {"MAX_CRYPTO": 2, "MAX_OPTIONS": 1, "MAX_FX": 2},
-    "BALANCED": {"MAX_CRYPTO": 3, "MAX_OPTIONS": 2, "MAX_FX": 3},
-    "AGGRESSIVE": {"MAX_CRYPTO": 4, "MAX_OPTIONS": 3, "MAX_FX": 4},
-    "EXPANSION": {"MAX_CRYPTO": 5, "MAX_OPTIONS": 4, "MAX_FX": 5},
+    "SAFE": {"MAX_CRYPTO": 2, "MAX_OPTIONS": 1, "MAX_FX": 1, "MAX_FUTURES": 1},
+    "CONSERVATIVE": {"MAX_CRYPTO": 2, "MAX_OPTIONS": 1, "MAX_FX": 2, "MAX_FUTURES": 2},
+    "BALANCED": {"MAX_CRYPTO": 3, "MAX_OPTIONS": 2, "MAX_FX": 3, "MAX_FUTURES": 3},
+    "AGGRESSIVE": {"MAX_CRYPTO": 4, "MAX_OPTIONS": 3, "MAX_FX": 4, "MAX_FUTURES": 4},
+    "EXPANSION": {"MAX_CRYPTO": 5, "MAX_OPTIONS": 4, "MAX_FX": 5, "MAX_FUTURES": 5},
 }
 
 
@@ -54,26 +54,37 @@ PROFILE = ENGINE_PROFILES[ENGINE_MODE]
 MAX_CRYPTO = PROFILE["MAX_CRYPTO"]
 MAX_OPTIONS = PROFILE["MAX_OPTIONS"]
 MAX_FX = PROFILE["MAX_FX"]
+MAX_FUTURES = PROFILE["MAX_FUTURES"]
 
 # =========================================================
 # PARAMETERS
 # =========================================================
 CYCLE_SLEEP = 3
-
 FX_ARB_THRESHOLD = 0.00025
 FX_ARB_MAX_HOLD = 3
+
+SIMULATED_EQUITY = 100000.0
+
+FUTURES_MAX_HOLD = 5
+FUTURES_SIGNAL_THRESHOLD = 9.5
+FUTURES_CONFIRM_THRESHOLD = 4.0
+FUTURES_STOP_PCT = 0.0025
+FUTURES_PROFIT_TARGET = 3.0
+FUTURES_TRAIL_ARM = 2.0
+FUTURES_TRAIL_GIVEBACK = 1.0
+FUTURES_MAX_LOSS = -4.0
 
 # =========================================================
 # SYMBOLS
 # =========================================================
 SYMBOLS = [
-    "BTC-USD","ETH-USD","SOL-USD","XRP-USD","ADA-USD",
-    "DOGE-USD","AVAX-USD","LINK-USD","LTC-USD","BCH-USD"
+    "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD",
+    "DOGE-USD", "AVAX-USD", "LINK-USD", "LTC-USD", "BCH-USD"
 ]
 
 FX_SYMBOLS = [
-    "EUR_USD","GBP_USD","USD_JPY",
-    "AUD_USD","USD_CAD","USD_CHF","NZD_USD"
+    "EUR_USD", "GBP_USD", "USD_JPY",
+    "AUD_USD", "USD_CAD", "USD_CHF", "NZD_USD"
 ]
 
 FX_BASE_PRICES = {
@@ -84,6 +95,14 @@ FX_BASE_PRICES = {
     "USD_CAD": 1.3520,
     "USD_CHF": 0.9010,
     "NZD_USD": 0.6120
+}
+
+FUTURES_SYMBOLS = ["ES", "NQ", "CL", "GC"]
+FUTURES_BASE_PRICES = {
+    "ES": 5200.0,
+    "NQ": 18250.0,
+    "CL": 78.50,
+    "GC": 2185.0,
 }
 
 # =========================================================
@@ -103,9 +122,12 @@ options_intel = OptionsIntelligenceEngine()
 prev_prices: Dict[str, float] = {}
 crypto_realized_pnl: Dict[str, float] = {}
 fx_realized_pnl: Dict[str, float] = {}
+futures_realized_pnl: Dict[str, float] = {}
 options_realized_pnl: Dict[str, float] = {}
 fx_arb_realized_pnl: Dict[str, float] = {}
 fx_arb_positions: Dict[str, Dict] = {}
+
+futures_signal_memory: Dict[str, float] = {}
 
 
 # =========================================================
@@ -114,16 +136,8 @@ fx_arb_positions: Dict[str, Dict] = {}
 def safe(v, d=0.0):
     try:
         return float(v)
-    except:
+    except Exception:
         return d
-
-
-def classify_signal(score):
-    if score >= 10:
-        return "ELITE"
-    if score >= 4.5:
-        return "QUALIFIED"
-    return "WATCH"
 
 
 def score(symbol, price, prev):
@@ -136,6 +150,7 @@ def total_realized_pnl():
     return round(
         sum(crypto_realized_pnl.values())
         + sum(fx_realized_pnl.values())
+        + sum(futures_realized_pnl.values())
         + sum(options_realized_pnl.values())
         + sum(fx_arb_realized_pnl.values()),
         4,
@@ -151,10 +166,26 @@ def get_fx_price(symbol):
     return round(prev * drift, 6)
 
 
+def get_futures_price(symbol):
+    prev = safe(prev_prices.get(symbol), 0.0)
+    base = safe(FUTURES_BASE_PRICES.get(symbol), 100.0)
+    if prev <= 0:
+        return base
+    drift = random.uniform(0.9985, 1.0015)
+    return round(prev * drift, 4)
+
+
 def eur_gbp_synth(eurusd, gbpusd):
     if gbpusd == 0:
         return 0.0
     return eurusd / gbpusd
+
+
+def get_open_futures_count() -> int:
+    try:
+        return len(futures_pm.get_open_positions())
+    except Exception:
+        return 0
 
 
 # =========================================================
@@ -168,6 +199,7 @@ while True:
 
     price_map = {}
     fx_price_map = {}
+    futures_price_map = {}
 
     # -----------------------------------------------------
     # CRYPTO FETCH
@@ -184,6 +216,113 @@ while True:
     for fx in FX_SYMBOLS:
         fx_price_map[fx] = get_fx_price(fx)
 
+    # -----------------------------------------------------
+    # FUTURES FETCH
+    # -----------------------------------------------------
+    for fut in FUTURES_SYMBOLS:
+        futures_price_map[fut] = get_futures_price(fut)
+
+    # =====================================================
+    # FUTURES SIGNAL + ENTRY
+    # =====================================================
+    for fut in FUTURES_SYMBOLS:
+        current_price = futures_price_map[fut]
+        prev_price = safe(prev_prices.get(fut), current_price)
+
+        fut_score = score(fut, current_price, prev_price)
+        prior_score = safe(futures_signal_memory.get(fut), 0.0)
+
+        score_confirmed = fut_score >= FUTURES_SIGNAL_THRESHOLD and prior_score >= FUTURES_CONFIRM_THRESHOLD
+        upward_momentum = current_price > prev_price
+
+        if (
+            score_confirmed
+            and upward_momentum
+            and not futures_pm.has_open_position_for_symbol(fut)
+            and get_open_futures_count() < MAX_FUTURES
+        ):
+            stop_price = current_price * (1.0 - FUTURES_STOP_PCT)
+
+            result = futures_pm.open_position_if_allowed(
+                symbol=fut,
+                entry_price=current_price,
+                stop_price=stop_price,
+                contracts=1,
+                current_equity=SIMULATED_EQUITY,
+                state={}
+            )
+
+            if result.get("status") == "OPENED":
+                pos = result["position"]
+                futures_pm.mark_position_cycle_metadata(
+                    position_id=pos["position_id"],
+                    entry_cycle=cycle,
+                    signal_score=fut_score,
+                )
+                live_pos = futures_pm.get_open_position_for_symbol(fut)
+                if live_pos is not None:
+                    live_pos["peak_unrealized"] = 0.0
+
+                print(
+                    f"[FUTURES OPEN] {fut} "
+                    f"entry={current_price:.4f} "
+                    f"score={fut_score:.2f} "
+                    f"prior={prior_score:.2f}"
+                )
+
+        futures_signal_memory[fut] = fut_score
+
+    # =====================================================
+    # FUTURES EXIT LOGIC
+    # =====================================================
+    open_futures = futures_pm.get_open_positions()
+
+    for pos in open_futures:
+        symbol = pos["symbol"]
+        current_price = futures_price_map.get(symbol, pos["entry_price"])
+        entry_price = float(pos["entry_price"])
+        hold = futures_pm.get_position_hold_cycles(
+            position=pos,
+            current_cycle=cycle,
+        )
+
+        unrealized = current_price - entry_price
+        peak_unrealized = max(float(pos.get("peak_unrealized", 0.0)), unrealized)
+        pos["peak_unrealized"] = peak_unrealized
+
+        hit_profit_target = unrealized >= FUTURES_PROFIT_TARGET
+        hit_max_loss = unrealized <= FUTURES_MAX_LOSS
+        hit_time_exit = hold >= FUTURES_MAX_HOLD
+        trail_armed = peak_unrealized >= FUTURES_TRAIL_ARM
+        trail_exit = trail_armed and unrealized <= (peak_unrealized - FUTURES_TRAIL_GIVEBACK)
+
+        if hit_profit_target or hit_max_loss or hit_time_exit or trail_exit:
+            close_result = futures_pm.close_position(
+                position_id=pos["position_id"],
+                exit_price=current_price,
+            )
+
+            if close_result.get("status") == "CLOSED":
+                pnl = float(close_result["position"]["pnl"])
+                futures_realized_pnl[symbol] = round(
+                    futures_realized_pnl.get(symbol, 0.0) + pnl,
+                    4,
+                )
+
+                exit_reason = "TIME"
+                if hit_profit_target:
+                    exit_reason = "TP"
+                elif hit_max_loss:
+                    exit_reason = "SL"
+                elif trail_exit:
+                    exit_reason = "TRAIL"
+
+                print(
+                    f"[FUTURES CLOSE] {symbol} "
+                    f"exit={current_price:.4f} pnl={pnl:.4f} "
+                    f"hold={hold} reason={exit_reason} peak={peak_unrealized:.4f}"
+                )
+
     # =====================================================
     # FX TRIANGULAR ARBITRAGE
     # =====================================================
@@ -192,7 +331,6 @@ while True:
         gbpusd = fx_price_map["GBP_USD"]
 
         synth = eur_gbp_synth(eurusd, gbpusd)
-
         live = synth * random.uniform(0.9994, 1.0006)
         spread = round(live - synth, 6)
 
@@ -236,18 +374,21 @@ while True:
     print("\n--- PROFIT DASHBOARD ---")
     print(f"Engine Mode: {ENGINE_MODE}")
     print(f"Crypto Open: {len(pm.positions)}")
-    print(f"FX Open: {len(futures_pm.get_open_positions())}")
+    print(f"FX Open: {len(fx_realized_pnl)}")
+    print(f"Futures Open: {len(futures_pm.get_open_positions())}")
     print(f"FX Arbitrage Open: {len(fx_arb_positions)}")
     print(f"Options Open: {len(options_pm.get_open_positions())}")
 
     print("\n--- REALIZED PNL ---")
     print("Crypto:", crypto_realized_pnl if crypto_realized_pnl else "{}")
     print("FX:", fx_realized_pnl if fx_realized_pnl else "{}")
+    print("Futures:", futures_realized_pnl if futures_realized_pnl else "{}")
     print("Options:", options_realized_pnl if options_realized_pnl else "{}")
     print("FX Arb:", fx_arb_realized_pnl if fx_arb_realized_pnl else "{}")
     print("TOTAL:", total_realized_pnl())
 
     prev_prices.update(price_map)
     prev_prices.update(fx_price_map)
+    prev_prices.update(futures_price_map)
 
     time.sleep(CYCLE_SLEEP)
