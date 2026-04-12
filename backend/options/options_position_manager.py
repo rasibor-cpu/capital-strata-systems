@@ -48,16 +48,6 @@ class OptionsPosition:
 
 
 class OptionsPositionManager:
-    """
-    CSS Options Position Manager
-
-    Purpose:
-    - Manage paper options positions safely
-    - Support long calls and long puts only
-    - Enforce premium-based TP / SL / time exits
-    - Keep closed trade log for dashboard/reporting use
-    """
-
     def __init__(self) -> None:
         self.positions: Dict[str, Dict[str, Any]] = {}
         self.closed_log: List[Dict[str, Any]] = []
@@ -165,33 +155,36 @@ class OptionsPositionManager:
             )
 
             if current_price >= _safe_float(pos.get("take_profit_price")):
-                result = self.close_position(
-                    option_symbol,
-                    exit_price=current_price,
-                    reason="TP",
-                    closed_cycle=current_cycle,
+                events.append(
+                    self.close_position(
+                        option_symbol,
+                        exit_price=current_price,
+                        reason="TP",
+                        closed_cycle=current_cycle,
+                    )
                 )
-                events.append(result)
                 continue
 
             if current_price <= _safe_float(pos.get("stop_loss_price")):
-                result = self.close_position(
-                    option_symbol,
-                    exit_price=current_price,
-                    reason="SL",
-                    closed_cycle=current_cycle,
+                events.append(
+                    self.close_position(
+                        option_symbol,
+                        exit_price=current_price,
+                        reason="SL",
+                        closed_cycle=current_cycle,
+                    )
                 )
-                events.append(result)
                 continue
 
             if held_cycles >= _safe_int(pos.get("max_hold_cycles"), 3):
-                result = self.close_position(
-                    option_symbol,
-                    exit_price=current_price,
-                    reason="TIME",
-                    closed_cycle=current_cycle,
+                events.append(
+                    self.close_position(
+                        option_symbol,
+                        exit_price=current_price,
+                        reason="TIME",
+                        closed_cycle=current_cycle,
+                    )
                 )
-                events.append(result)
                 continue
 
         return events
