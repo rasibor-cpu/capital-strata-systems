@@ -49,6 +49,13 @@ CAPITAL_MULTIPLIERS = {
 
 REGIMES = ["TREND","MEAN_REVERSION","MOMENTUM","NEUTRAL"]
 
+VOL_STATES = {
+    "HIGH_VOL_EXPANDING":1.30,
+    "LOW_VOL_COMPRESSED":0.70,
+    "NORMAL_VOL":1.00,
+    "BREAKOUT_EXPANSION":1.40
+}
+
 ENGINE_MODES = {
     "1":"SAFE",
     "2":"CONSERVATIVE",
@@ -213,6 +220,15 @@ def compute_vwap_state(symbol):
     }
 
 
+def compute_volatility_state(symbol):
+    state = random.choice(list(VOL_STATES.keys()))
+    mult = VOL_STATES[state]
+    return {
+        "state":state,
+        "mult":mult
+    }
+
+
 while True:
     cycle += 1
     print(f"\n=== Cycle {cycle} | {datetime.now()} ===")
@@ -223,48 +239,57 @@ while True:
     capital_board = []
     vwap_board = []
     effective_board = []
+    volatility_board = []
 
     for s in SYMBOLS:
         safe_load_runtime_asset(s)
         reg = detect_regime(s,"CRYPTO")
         vw = compute_vwap_state(s)
-        eff = reg["capital_mult"] * vw["mult"]
+        vol = compute_volatility_state(s)
+        eff = reg["capital_mult"] * vw["mult"] * vol["mult"]
 
         regime_board.append((s,"CRYPTO",reg))
         capital_board.append((s,reg["priority"],reg["capital_mult"]))
         vwap_board.append((s,vw))
-        effective_board.append((s,reg["priority"],vw["state"],eff))
+        volatility_board.append((s,vol))
+        effective_board.append((s,reg["priority"],vw["state"],vol["state"],eff))
 
     for s in FX_SYMBOLS:
         reg = detect_regime(s,"FX")
         vw = compute_vwap_state(s)
-        eff = reg["capital_mult"] * vw["mult"]
+        vol = compute_volatility_state(s)
+        eff = reg["capital_mult"] * vw["mult"] * vol["mult"]
 
         regime_board.append((s,"FX",reg))
         capital_board.append((s,reg["priority"],reg["capital_mult"]))
         vwap_board.append((s,vw))
-        effective_board.append((s,reg["priority"],vw["state"],eff))
+        volatility_board.append((s,vol))
+        effective_board.append((s,reg["priority"],vw["state"],vol["state"],eff))
 
     for s in OPTION_SYMBOLS:
         reg = detect_regime(s,"OPTIONS")
         vw = compute_vwap_state(s)
-        eff = reg["capital_mult"] * vw["mult"]
+        vol = compute_volatility_state(s)
+        eff = reg["capital_mult"] * vw["mult"] * vol["mult"]
 
         regime_board.append((s,"OPTIONS",reg))
         capital_board.append((s,reg["priority"],reg["capital_mult"]))
         vwap_board.append((s,vw))
-        effective_board.append((s,reg["priority"],vw["state"],eff))
+        volatility_board.append((s,vol))
+        effective_board.append((s,reg["priority"],vw["state"],vol["state"],eff))
 
     if random.random() < 0.35:
         symbol = random.choice(FUTURES_SYMBOLS)
         reg = detect_regime(symbol,"FUTURES")
         vw = compute_vwap_state(symbol)
-        eff = reg["capital_mult"] * vw["mult"]
+        vol = compute_volatility_state(symbol)
+        eff = reg["capital_mult"] * vw["mult"] * vol["mult"]
 
         regime_board.append((symbol,"FUTURES",reg))
         capital_board.append((symbol,reg["priority"],reg["capital_mult"]))
         vwap_board.append((symbol,vw))
-        effective_board.append((symbol,reg["priority"],vw["state"],eff))
+        volatility_board.append((symbol,vol))
+        effective_board.append((symbol,reg["priority"],vw["state"],vol["state"],eff))
 
         if reg["priority"] != "BLOCK":
             bias = futures_symbol_bias.get(symbol,BIAS_NEUTRAL)
@@ -273,6 +298,7 @@ while True:
             score = weighted_score(raw_score,symbol)
             score *= reg["risk_mult"]
             score *= vw["mult"]
+            score *= vol["mult"]
             score = round(score,2)
 
             base_contracts = 2 if bias >= 1.45 else 1
@@ -281,7 +307,8 @@ while True:
             print(
                 f"[FUTURES OPEN] {symbol} contracts={contracts} "
                 f"score={score} bias={bias:.2f} "
-                f"regime={reg['state']} vwap={vw['state']} eff={eff:.2f}x"
+                f"regime={reg['state']} vwap={vw['state']} "
+                f"vol={vol['state']} eff={eff:.2f}x"
             )
 
             if score >= 10:
@@ -290,6 +317,7 @@ while True:
                 pnl *= reg["risk_mult"]
                 pnl *= reg["capital_mult"]
                 pnl *= vw["mult"]
+                pnl *= vol["mult"]
                 pnl = round(pnl,4)
 
                 futures_realized_pnl[symbol] = round(
@@ -320,6 +348,10 @@ while True:
     print("\n--- VWAP BOARD ---")
     for sym,vw in vwap_board[:12]:
         print(f"{sym} | {vw['distance_pct']:+.2f}% | {vw['state']}")
+
+    print("\n--- VOLATILITY BOARD ---")
+    for sym,vol in volatility_board[:12]:
+        print(f"{sym} | {vol['state']} | {vol['mult']:.2f}x")
 
     print("\n--- FUTURES PERFORMANCE MATRIX ---")
     ranked = sorted(
@@ -354,9 +386,12 @@ while True:
     for sym, priority, mult in capital_board[:12]:
         print(f"{sym} | {priority} | {mult:.2f}x")
 
-    print("\n--- UNIVERSAL VWAP EFFECTIVE BOARD ---")
-    for sym, priority, vwstate, eff in effective_board[:12]:
-        print(f"{sym} | {priority} | {vwstate} | Eff {eff:.2f}x")
+    print("\n--- UNIVERSAL EFFECTIVE BOARD ---")
+    for sym, priority, vwstate, volstate, eff in effective_board[:12]:
+        print(
+            f"{sym} | {priority} | {vwstate} | "
+            f"{volstate} | Eff {eff:.2f}x"
+        )
 
     print("\n--- FUTURES SYMBOL BIAS ---")
     print(futures_symbol_bias)
