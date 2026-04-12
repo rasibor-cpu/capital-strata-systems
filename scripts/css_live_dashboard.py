@@ -22,7 +22,7 @@ from backend.options.options_intelligence_engine import OptionsIntelligenceEngin
 
 
 # =========================================================
-# F10/F11 PERSISTENCE FILES
+# F10/F11/F12 PERSISTENCE FILES
 # =========================================================
 STATE_DIR = PROJECT_ROOT / "artifacts"
 STATE_DIR.mkdir(exist_ok=True)
@@ -91,8 +91,14 @@ MAX_FX = PROFILE["MAX_FX"]
 # PARAMETERS
 # =========================================================
 CYCLE_SLEEP = 3
-FX_ARB_THRESHOLD = 0.00025
-FX_ARB_MAX_HOLD = 3
+BIAS_NEUTRAL = 1.0
+BIAS_MIN = 0.35
+BIAS_MAX = 2.25
+BIAS_DECAY_RATE = 0.06
+BIAS_REWARD_MULT = 1.10
+BIAS_LOSS_PENALTY_1 = 0.88
+BIAS_LOSS_PENALTY_2 = 0.78
+BIAS_LOSS_PENALTY_3 = 0.68
 
 SYMBOLS = [
     "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD",
@@ -100,16 +106,6 @@ SYMBOLS = [
 ]
 
 FUTURES_SYMBOLS = ["ES", "NQ", "CL", "GC"]
-
-# F11 decay controls
-BIAS_NEUTRAL = 1.0
-BIAS_MIN = 0.35
-BIAS_MAX = 2.25
-BIAS_DECAY_RATE = 0.06      # per cycle drift toward neutral
-BIAS_REWARD_MULT = 1.10     # positive reinforcement
-BIAS_LOSS_PENALTY_1 = 0.88  # first loss
-BIAS_LOSS_PENALTY_2 = 0.78  # second consecutive loss
-BIAS_LOSS_PENALTY_3 = 0.68  # third+ consecutive loss
 
 
 # =========================================================
@@ -122,6 +118,7 @@ futures_pm = FuturesPositionManager(futures_adapter)
 options_adapter = OptionsChainAdapter()
 options_pm = OptionsPositionManager()
 options_intel = OptionsIntelligenceEngine()
+
 
 # =========================================================
 # PERSISTENT LEARNING STATE
@@ -139,16 +136,21 @@ futures_loss_streak = load_json_state(
 print("[F11 LOADED FUTURES BIAS]", futures_symbol_bias)
 print("[F11 LOADED LOSS STREAK]", futures_loss_streak)
 
+
 # =========================================================
 # STATE
 # =========================================================
-prev_prices: Dict[str, float] = {}
-crypto_realized_pnl: Dict[str, float] = {}
-fx_realized_pnl: Dict[str, float] = {}
-options_realized_pnl: Dict[str, float] = {}
-fx_arb_realized_pnl: Dict[str, float] = {}
-fx_arb_positions: Dict[str, Dict] = {}
-futures_realized_pnl: Dict[str, float] = {}
+crypto_realized_pnl = {}
+fx_realized_pnl = {}
+options_realized_pnl = {}
+fx_arb_realized_pnl = {}
+fx_arb_positions = {}
+futures_realized_pnl = {}
+
+# F12 new performance trackers
+futures_trade_count = {s: 0 for s in FUTURES_SYMBOLS}
+futures_win_count = {s: 0 for s in FUTURES_SYMBOLS}
+futures_lifetime_total = 0.0
 
 cycle = 0
 
@@ -161,15 +163,11 @@ def clamp_bias(v: float) -> float:
 
 
 def apply_bias_decay():
-    """
-    Pull all biases gently back toward neutral each cycle.
-    This prevents runaway overweighting and permanent suppression.
-    """
     for symbol, current in list(futures_symbol_bias.items()):
         if current > BIAS_NEUTRAL:
-            current = current - ((current - BIAS_NEUTRAL) * BIAS_DECAY_RATE)
+            current -= ((current - BIAS_NEUTRAL) * BIAS_DECAY_RATE)
         elif current < BIAS_NEUTRAL:
-            current = current + ((BIAS_NEUTRAL - current) * BIAS_DECAY_RATE)
+            current += ((BIAS_NEUTRAL - current) * BIAS_DECAY_RATE)
         futures_symbol_bias[symbol] = clamp_bias(current)
 
 
@@ -197,6 +195,13 @@ def weighted_score(raw_score: float, symbol: str) -> float:
     return raw_score * futures_symbol_bias.get(symbol, BIAS_NEUTRAL)
 
 
+def get_best_performer():
+    active = {k: v for k, v in futures_realized_pnl.items() if v != 0}
+    if not active:
+        return "NONE"
+    return max(active, key=active.get)
+
+
 # =========================================================
 # MAIN LOOP
 # =========================================================
@@ -204,21 +209,14 @@ while True:
     cycle += 1
     print(f"\n=== Cycle {cycle} | {datetime.now()} ===")
 
-    # -----------------------------------------------------
-    # F11 decay pass
-    # -----------------------------------------------------
     apply_bias_decay()
 
-    # -----------------------------------------------------
     # CRYPTO FETCH
-    # -----------------------------------------------------
     for s in SYMBOLS:
         _ = load_runtime_asset(s)
         print(f"Fetched 288 candles for {s}")
 
-    # -----------------------------------------------------
-    # FUTURES DEMO ENGINE
-    # -----------------------------------------------------
+    # FUTURES ENGINE
     if random.random() < 0.35:
         symbol = random.choice(FUTURES_SYMBOLS)
         bias = futures_symbol_bias.get(symbol, BIAS_NEUTRAL)
@@ -227,9 +225,7 @@ while True:
         score = round(weighted_score(raw_score, symbol), 2)
         entry = round(random.uniform(75, 22050), 4)
 
-        contracts = 1
-        if bias >= 1.45:
-            contracts = 2
+        contracts = 2 if bias >= 1.45 else 1
 
         print(
             f"[FUTURES OPEN] {symbol} entry={entry} "
@@ -245,6 +241,12 @@ while True:
                 4
             )
 
+            futures_trade_count[symbol] += 1
+            futures_lifetime_total += pnl
+
+            if pnl > 0:
+                futures_win_count[symbol] += 1
+
             update_reinforcement(symbol, pnl)
 
             print(
@@ -253,21 +255,18 @@ while True:
                 f"loss_streak={futures_loss_streak[symbol]}"
             )
 
-    # -----------------------------------------------------
-    # SAVE LEARNING STATE EACH CYCLE
-    # -----------------------------------------------------
+    # SAVE STATE
     save_json_state(FUTURES_BIAS_FILE, futures_symbol_bias)
     save_json_state(FUTURES_LOSS_FILE, futures_loss_streak)
 
-    # -----------------------------------------------------
-    # DASHBOARD
-    # -----------------------------------------------------
+    # DASHBOARD TOTAL
     total = round(
         sum(futures_realized_pnl.values()) +
         sum(fx_arb_realized_pnl.values()),
         4
     )
 
+    # DASHBOARD
     print("\n--- PROFIT DASHBOARD ---")
     print(f"Engine Mode: {ENGINE_MODE}")
     print(f"Crypto Open: {len(pm.positions)}")
@@ -283,6 +282,28 @@ while True:
     print("Options:", options_realized_pnl if options_realized_pnl else "{}")
     print("FX Arb:", fx_arb_realized_pnl if fx_arb_realized_pnl else "{}")
     print("TOTAL:", total)
+
+    print("\n--- FUTURES PERFORMANCE MATRIX ---")
+    ranked = sorted(
+        FUTURES_SYMBOLS,
+        key=lambda x: futures_realized_pnl.get(x, 0),
+        reverse=True
+    )
+
+    for sym in ranked:
+        trades = futures_trade_count[sym]
+        wins = futures_win_count[sym]
+        total_sym = futures_realized_pnl.get(sym, 0.0)
+        win_rate = (wins / trades * 100) if trades > 0 else 0.0
+        avg_pnl = (total_sym / trades) if trades > 0 else 0.0
+
+        print(
+            f"{sym}: Trades {trades} | Wins {wins} | "
+            f"WinRate {win_rate:.0f}% | Avg {avg_pnl:+.2f} | Total {total_sym:+.4f}"
+        )
+
+    print(f"\nBEST PERFORMER: {get_best_performer()}")
+    print(f"LIFETIME FUTURES PNL: {futures_lifetime_total:+.4f}")
 
     print("\n--- FUTURES SYMBOL BIAS ---")
     print(futures_symbol_bias)
