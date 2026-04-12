@@ -133,9 +133,8 @@ crypto_realized_pnl: Dict[str, float] = {}
 fx_realized_pnl: Dict[str, float] = {}
 futures_realized_pnl: Dict[str, float] = {}
 options_realized_pnl: Dict[str, float] = {}
-fx_arb_realized_pnl: Dict[str, float] = {}
+fx_arb_realized_pnl: Dict[str, Dict] = {}
 fx_arb_positions: Dict[str, Dict] = {}
-
 futures_signal_memory: Dict[str, float] = {}
 
 # =========================================================
@@ -196,6 +195,47 @@ def get_open_futures_count() -> int:
         return 0
 
 
+def determine_contract_size(
+    symbol: str,
+    signal_score: float,
+    prior_score: float,
+) -> int:
+    """
+    Adaptive risk-weighted sizing governor.
+    Prevent oversized scaling in volatile instruments.
+    """
+
+    # -------------------------------
+    # Base size from signal strength
+    # -------------------------------
+    if signal_score >= 14.0:
+        base_size = 3
+    elif signal_score >= 11.0:
+        base_size = 2
+    else:
+        base_size = 1
+
+    # -------------------------------
+    # Prior confirmation gate
+    # -------------------------------
+    if prior_score < 8.0:
+        base_size = min(base_size, 1)
+    elif prior_score < 10.0:
+        base_size = min(base_size, 2)
+
+    # -------------------------------
+    # Symbol volatility control
+    # -------------------------------
+    if symbol == "NQ":
+        base_size = min(base_size, 1)
+    elif symbol == "CL":
+        base_size = min(base_size, 1)
+    elif symbol == "GC":
+        base_size = min(base_size, 2)
+
+    return max(1, base_size)
+
+
 # =========================================================
 # MAIN LOOP
 # =========================================================
@@ -254,11 +294,17 @@ while True:
         ):
             stop_price = current_price * (1.0 - FUTURES_STOP_PCT)
 
+            contracts = determine_contract_size(
+                fut,
+                fut_score,
+                prior_score
+            )
+
             result = futures_pm.open_position_if_allowed(
                 symbol=fut,
                 entry_price=current_price,
                 stop_price=stop_price,
-                contracts=1,
+                contracts=contracts,
                 current_equity=SIMULATED_EQUITY,
                 state={}
             )
@@ -278,6 +324,7 @@ while True:
                 print(
                     f"[FUTURES OPEN] {fut} "
                     f"entry={current_price:.4f} "
+                    f"contracts={contracts} "
                     f"score={fut_score:.2f} "
                     f"prior={prior_score:.2f}"
                 )
@@ -298,7 +345,8 @@ while True:
             current_cycle=cycle,
         )
 
-        unrealized = current_price - entry_price
+        contracts = int(pos.get("contracts", 1))
+        unrealized = (current_price - entry_price) * contracts
 
         peak_unrealized = max(
             float(pos.get("peak_unrealized", 0.0)),
@@ -316,17 +364,16 @@ while True:
         elif signal_score >= 10:
             dynamic_profit_target = 3.5
 
+        dynamic_profit_target *= contracts
+
         recent_move = abs(unrealized)
 
-        dynamic_trail_arm = BASE_TRAIL_ARM
-        dynamic_trail_giveback = BASE_TRAIL_GIVEBACK
+        dynamic_trail_arm = BASE_TRAIL_ARM * contracts
+        dynamic_trail_giveback = BASE_TRAIL_GIVEBACK * contracts
 
         if recent_move >= 8:
-            dynamic_trail_arm = 4.0
-            dynamic_trail_giveback = 2.0
-        elif recent_move >= 5:
-            dynamic_trail_arm = 3.0
-            dynamic_trail_giveback = 1.5
+            dynamic_trail_arm *= 1.5
+            dynamic_trail_giveback *= 1.5
 
         if peak_unrealized >= dynamic_profit_target:
             if unrealized > peak_unrealized * 0.85:
@@ -337,6 +384,7 @@ while True:
             hit_profit_target = False
 
         symbol_max_loss = SYMBOL_MAX_LOSS.get(symbol, DEFAULT_MAX_LOSS)
+        symbol_max_loss *= contracts
 
         early_abort = (
             hold <= 2
@@ -381,6 +429,7 @@ while True:
                     f"exit={current_price:.4f} pnl={pnl:.4f} "
                     f"hold={hold} reason={exit_reason} "
                     f"peak={peak_unrealized:.4f} "
+                    f"contracts={contracts} "
                     f"target={dynamic_profit_target:.2f}"
                 )
 
