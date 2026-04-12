@@ -71,9 +71,6 @@ FUTURES_CONFIRM_THRESHOLD = 4.0
 FUTURES_STOP_PCT = 0.0025
 
 BASE_FUTURES_PROFIT_TARGET = 3.0
-BASE_TRAIL_ARM = 2.0
-BASE_TRAIL_GIVEBACK = 1.0
-
 DEFAULT_MAX_LOSS = -4.0
 
 SYMBOL_MAX_LOSS = {
@@ -133,9 +130,24 @@ crypto_realized_pnl: Dict[str, float] = {}
 fx_realized_pnl: Dict[str, float] = {}
 futures_realized_pnl: Dict[str, float] = {}
 options_realized_pnl: Dict[str, float] = {}
-fx_arb_realized_pnl: Dict[str, Dict] = {}
+fx_arb_realized_pnl: Dict[str, float] = {}
 fx_arb_positions: Dict[str, Dict] = {}
 futures_signal_memory: Dict[str, float] = {}
+
+# F9 accelerated learning state
+futures_symbol_bias: Dict[str, float] = {
+    "ES": 1.0,
+    "NQ": 1.0,
+    "CL": 1.0,
+    "GC": 1.0,
+}
+
+futures_loss_streak: Dict[str, int] = {
+    "ES": 0,
+    "NQ": 0,
+    "CL": 0,
+    "GC": 0,
+}
 
 # =========================================================
 # HELPERS
@@ -195,45 +207,63 @@ def get_open_futures_count() -> int:
         return 0
 
 
-def determine_contract_size(
-    symbol: str,
-    signal_score: float,
-    prior_score: float,
-) -> int:
-    """
-    Adaptive risk-weighted sizing governor.
-    Prevent oversized scaling in volatile instruments.
-    """
-
-    # -------------------------------
-    # Base size from signal strength
-    # -------------------------------
-    if signal_score >= 14.0:
-        base_size = 3
-    elif signal_score >= 11.0:
-        base_size = 2
+# =========================================================
+# F7 CONTRACT GOVERNOR
+# =========================================================
+def determine_contract_size(symbol, signal_score, prior_score):
+    if signal_score >= 14:
+        base = 3
+    elif signal_score >= 11:
+        base = 2
     else:
-        base_size = 1
+        base = 1
 
-    # -------------------------------
-    # Prior confirmation gate
-    # -------------------------------
-    if prior_score < 8.0:
-        base_size = min(base_size, 1)
-    elif prior_score < 10.0:
-        base_size = min(base_size, 2)
+    if prior_score < 8:
+        base = min(base, 1)
+    elif prior_score < 10:
+        base = min(base, 2)
 
-    # -------------------------------
-    # Symbol volatility control
-    # -------------------------------
     if symbol == "NQ":
-        base_size = min(base_size, 1)
+        base = min(base, 1)
     elif symbol == "CL":
-        base_size = min(base_size, 1)
+        base = min(base, 1)
     elif symbol == "GC":
-        base_size = min(base_size, 2)
+        base = min(base, 2)
 
-    return max(1, base_size)
+    return max(1, base)
+
+
+# =========================================================
+# F9 ACCELERATED REINFORCEMENT ENGINE
+# =========================================================
+def get_symbol_bias(symbol):
+    return futures_symbol_bias.get(symbol, 1.0)
+
+
+def adjust_symbol_bias(symbol, pnl):
+    current = futures_symbol_bias.get(symbol, 1.0)
+
+    if pnl > 0:
+        futures_loss_streak[symbol] = 0
+        current *= 1.20
+    else:
+        futures_loss_streak[symbol] += 1
+        streak = futures_loss_streak[symbol]
+
+        if streak >= 3:
+            current *= 0.65
+        elif streak == 2:
+            current *= 0.75
+        else:
+            current *= 0.85
+
+    current = max(0.25, min(2.25, current))
+    futures_symbol_bias[symbol] = current
+
+
+def allocation_weighted_score(symbol, raw_score):
+    bias = get_symbol_bias(symbol)
+    return raw_score * bias
 
 
 # =========================================================
@@ -271,13 +301,14 @@ while True:
         futures_price_map[fut] = get_futures_price(fut)
 
     # =====================================================
-    # FUTURES SIGNAL + ENTRY
+    # FUTURES ENTRY ENGINE
     # =====================================================
     for fut in FUTURES_SYMBOLS:
         current_price = futures_price_map[fut]
         prev_price = safe(prev_prices.get(fut), current_price)
 
-        fut_score = score(fut, current_price, prev_price)
+        raw_score = score(fut, current_price, prev_price)
+        fut_score = allocation_weighted_score(fut, raw_score)
         prior_score = safe(futures_signal_memory.get(fut), 0.0)
 
         score_confirmed = (
@@ -317,22 +348,18 @@ while True:
                     signal_score=fut_score,
                 )
 
-                live_pos = futures_pm.get_open_position_for_symbol(fut)
-                if live_pos is not None:
-                    live_pos["peak_unrealized"] = 0.0
-
                 print(
                     f"[FUTURES OPEN] {fut} "
                     f"entry={current_price:.4f} "
                     f"contracts={contracts} "
                     f"score={fut_score:.2f} "
-                    f"prior={prior_score:.2f}"
+                    f"bias={get_symbol_bias(fut):.2f}"
                 )
 
         futures_signal_memory[fut] = fut_score
 
     # =====================================================
-    # FUTURES EXIT LOGIC
+    # FUTURES EXIT ENGINE
     # =====================================================
     open_futures = futures_pm.get_open_positions()
 
@@ -340,19 +367,15 @@ while True:
         symbol = pos["symbol"]
         current_price = futures_price_map.get(symbol, pos["entry_price"])
         entry_price = float(pos["entry_price"])
+
+        # FIXED keyword-only call
         hold = futures_pm.get_position_hold_cycles(
             position=pos,
-            current_cycle=cycle,
+            current_cycle=cycle
         )
 
         contracts = int(pos.get("contracts", 1))
         unrealized = (current_price - entry_price) * contracts
-
-        peak_unrealized = max(
-            float(pos.get("peak_unrealized", 0.0)),
-            unrealized
-        )
-        pos["peak_unrealized"] = peak_unrealized
 
         signal_score = float(pos.get("signal_score", 0.0))
 
@@ -366,41 +389,14 @@ while True:
 
         dynamic_profit_target *= contracts
 
-        recent_move = abs(unrealized)
-
-        dynamic_trail_arm = BASE_TRAIL_ARM * contracts
-        dynamic_trail_giveback = BASE_TRAIL_GIVEBACK * contracts
-
-        if recent_move >= 8:
-            dynamic_trail_arm *= 1.5
-            dynamic_trail_giveback *= 1.5
-
-        if peak_unrealized >= dynamic_profit_target:
-            if unrealized > peak_unrealized * 0.85:
-                hit_profit_target = False
-            else:
-                hit_profit_target = True
-        else:
-            hit_profit_target = False
-
         symbol_max_loss = SYMBOL_MAX_LOSS.get(symbol, DEFAULT_MAX_LOSS)
         symbol_max_loss *= contracts
 
-        early_abort = (
-            hold <= 2
-            and unrealized <= (symbol_max_loss * 0.75)
-        )
-
-        hit_max_loss = unrealized <= symbol_max_loss or early_abort
+        hit_profit_target = unrealized >= dynamic_profit_target
+        hit_max_loss = unrealized <= symbol_max_loss
         hit_time_exit = hold >= FUTURES_MAX_HOLD
 
-        trail_armed = peak_unrealized >= dynamic_trail_arm
-        trail_exit = (
-            trail_armed
-            and unrealized <= (peak_unrealized - dynamic_trail_giveback)
-        )
-
-        if hit_profit_target or hit_max_loss or hit_time_exit or trail_exit:
+        if hit_profit_target or hit_max_loss or hit_time_exit:
             close_result = futures_pm.close_position(
                 position_id=pos["position_id"],
                 exit_price=current_price,
@@ -408,33 +404,30 @@ while True:
 
             if close_result.get("status") == "CLOSED":
                 pnl = float(close_result["position"]["pnl"])
+
                 futures_realized_pnl[symbol] = round(
                     futures_realized_pnl.get(symbol, 0.0) + pnl,
                     4,
                 )
 
+                adjust_symbol_bias(symbol, pnl)
+
                 exit_reason = "TIME"
                 if hit_profit_target:
                     exit_reason = "TP"
                 elif hit_max_loss:
-                    if early_abort:
-                        exit_reason = "EARLY_ABORT"
-                    else:
-                        exit_reason = "SL"
-                elif trail_exit:
-                    exit_reason = "TRAIL"
+                    exit_reason = "SL"
 
                 print(
                     f"[FUTURES CLOSE] {symbol} "
                     f"exit={current_price:.4f} pnl={pnl:.4f} "
                     f"hold={hold} reason={exit_reason} "
-                    f"peak={peak_unrealized:.4f} "
-                    f"contracts={contracts} "
-                    f"target={dynamic_profit_target:.2f}"
+                    f"new_bias={get_symbol_bias(symbol):.2f} "
+                    f"loss_streak={futures_loss_streak[symbol]}"
                 )
 
     # =====================================================
-    # FX TRIANGULAR ARBITRAGE
+    # FX ARBITRAGE
     # =====================================================
     if "EUR_USD" in fx_price_map and "GBP_USD" in fx_price_map:
         eurusd = fx_price_map["EUR_USD"]
@@ -496,6 +489,12 @@ while True:
     print("Options:", options_realized_pnl if options_realized_pnl else "{}")
     print("FX Arb:", fx_arb_realized_pnl if fx_arb_realized_pnl else "{}")
     print("TOTAL:", total_realized_pnl())
+
+    print("\n--- FUTURES SYMBOL BIAS ---")
+    print(futures_symbol_bias)
+
+    print("\n--- FUTURES LOSS STREAK ---")
+    print(futures_loss_streak)
 
     prev_prices.update(price_map)
     prev_prices.update(fx_price_map)
