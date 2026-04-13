@@ -2,7 +2,7 @@ from __future__ import annotations
 import sys, time, random, json
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -79,7 +79,6 @@ ENGINE_MODES = {
     "5": "EXPANSION",
 }
 
-# Cross-asset bleed governor
 BLEED_GOVERNOR_ENABLED = True
 BLEED_GOVERNOR_RATIO = 0.25
 
@@ -128,6 +127,104 @@ def weighted_score(raw_score, symbol):
     return raw_score * futures_symbol_bias.get(symbol, BIAS_NEUTRAL)
 
 
+def normalize_option_type(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+
+    raw = str(value).strip().upper()
+
+    if raw in {"CALL", "C"}:
+        return "CALL"
+    if raw in {"PUT", "P"}:
+        return "PUT"
+    if raw.startswith("CALL"):
+        return "CALL"
+    if raw.startswith("PUT"):
+        return "PUT"
+    if raw.startswith("C"):
+        return "CALL"
+    if raw.startswith("P"):
+        return "PUT"
+
+    return None
+
+
+def get_selected_option_type(selected: Dict) -> Optional[str]:
+    candidates = [
+        selected.get("option_type"),
+        selected.get("type"),
+        selected.get("right"),
+        selected.get("call_put"),
+        selected.get("contract_type"),
+    ]
+
+    for candidate in candidates:
+        normalized = normalize_option_type(candidate)
+        if normalized:
+            return normalized
+
+    symbol_like = selected.get("symbol") or selected.get("option_symbol") or selected.get("contract_symbol")
+    if symbol_like:
+        raw = str(symbol_like).upper()
+        if "-C-" in raw or raw.endswith("-C") or raw.endswith("C"):
+            return "CALL"
+        if "-P-" in raw or raw.endswith("-P") or raw.endswith("P"):
+            return "PUT"
+
+    return None
+
+
+def get_selected_strike(selected: Dict) -> Optional[float]:
+    candidates = [
+        selected.get("strike"),
+        selected.get("strike_price"),
+        selected.get("k"),
+    ]
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        try:
+            return float(candidate)
+        except Exception:
+            continue
+    return None
+
+
+def get_selected_expiry(selected: Dict) -> Optional[str]:
+    candidates = [
+        selected.get("expiry"),
+        selected.get("expiration"),
+        selected.get("expiration_date"),
+        selected.get("expiry_date"),
+        selected.get("exp_date"),
+    ]
+    for candidate in candidates:
+        if candidate:
+            return str(candidate)
+    return None
+
+
+def get_selected_entry_price(selected: Dict) -> Optional[float]:
+    candidates = [
+        selected.get("price"),
+        selected.get("premium"),
+        selected.get("mid"),
+        selected.get("mark"),
+        selected.get("last"),
+        selected.get("last_price"),
+        selected.get("ask"),
+        selected.get("bid"),
+    ]
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        try:
+            return float(candidate)
+        except Exception:
+            continue
+    return None
+
+
 class PreTradeProbabilityEngine:
     """
     Predictive probability engine:
@@ -162,7 +259,6 @@ class PreTradeProbabilityEngine:
         prob_negative = 1.0 - prob_positive
 
         expected_value = (prob_positive * raw_score) - (prob_negative * 8.0)
-
         execute = prob_positive >= 0.58 and expected_value > 0
 
         return (
@@ -379,13 +475,6 @@ def get_asset_class_pnls() -> Dict[str, float]:
 
 
 def get_bleed_governor_state(asset_class: str) -> Tuple[bool, float, float, float]:
-    """
-    Freeze an asset when its absolute loss exceeds
-    BLEED_GOVERNOR_RATIO * positive PnL of all other assets combined.
-
-    Returns:
-        (is_frozen, asset_loss_abs, freeze_limit, other_positive_total)
-    """
     pnl_map = get_asset_class_pnls()
     asset_pnl = float(pnl_map.get(asset_class, 0.0))
 
@@ -488,40 +577,63 @@ def execute_intelligent_option_trade(
     if not selected:
         return
 
+    option_type = get_selected_option_type(selected)
+    if option_type is None:
+        print(f"[OPTIONS SKIPPED] {underlying_symbol} missing option_type schema")
+        return
+
+    strike = get_selected_strike(selected)
+    if strike is None:
+        print(f"[OPTIONS SKIPPED] {underlying_symbol} missing strike schema")
+        return
+
+    expiry = get_selected_expiry(selected)
+    if expiry is None:
+        print(f"[OPTIONS SKIPPED] {underlying_symbol} missing expiry schema")
+        return
+
+    entry_price = get_selected_entry_price(selected)
+    if entry_price is None:
+        print(f"[OPTIONS SKIPPED] {underlying_symbol} missing price schema")
+        return
+
     option_symbol = (
         f"{underlying_symbol}-"
-        f"{selected['option_type'][0]}-"
-        f"{int(selected['strike'])}"
+        f"{option_type[0]}-"
+        f"{int(strike)}"
     )
 
     open_result = options_pm.open_long_option(
         option_symbol=option_symbol,
         underlying_symbol=underlying_symbol,
-        option_type=selected["option_type"],
-        strike=selected["strike"],
-        expiry=selected["expiry"],
-        entry_price=selected["price"],
+        option_type=option_type,
+        strike=strike,
+        expiry=expiry,
+        entry_price=entry_price,
         contracts=1,
         current_cycle=cycle,
         confidence=prob_pos,
-        tier=selected.get("selection_tier", "WATCH"),
-        note=f"PTPOP={prob_pos:.2%}"
+        tier="ELITE" if signal_score > 16 else "QUALIFIED",
+        note=f"PTPOP={prob_pos:.2%} EV={ev:+.2f}"
     )
 
-    if open_result["status"] == "OPENED":
+    if open_result.get("status") == "OPENED":
         pnl_seed = round(random.uniform(-8, 15) * eff, 4)
-
         options_pnl[option_symbol_stub] += pnl_seed
         options_trades[option_symbol_stub] += 1
-
         if pnl_seed > 0:
             options_wins[option_symbol_stub] += 1
 
-        last_trade = option_symbol
+        last_trade = f"{option_symbol} [{option_type}]"
 
         print(
             f"[OPTIONS EXECUTED] {option_symbol} "
-            f"{direction} P+={prob_pos:.2%} EV={ev:+.2f}"
+            f"P+={prob_pos:.2%} EV={ev:+.2f}"
+        )
+    else:
+        print(
+            f"[OPTIONS NOT OPENED] {underlying_symbol} "
+            f"status={open_result.get('status', 'UNKNOWN')}"
         )
 
 
@@ -552,7 +664,6 @@ while True:
     sweep_board = []
     effective_board = []
 
-    # CRYPTO
     for s in SYMBOLS:
         safe_load_runtime_asset(s)
 
@@ -601,7 +712,6 @@ while True:
 
         execute_trade("CRYPTO", s, round(signal_score, 2), eff)
 
-    # FX
     for s in FX_SYMBOLS:
         reg = detect_regime(s, "FX")
         vw = compute_vwap_state(s)
@@ -648,7 +758,6 @@ while True:
 
         execute_trade("FX", s, round(signal_score, 2), eff)
 
-    # OPTIONS
     for s in OPTION_SYMBOLS:
         reg = detect_regime(s, "OPTIONS")
         vw = compute_vwap_state(s)
@@ -669,7 +778,6 @@ while True:
             s, reg, vw, vol, sw, cycle, eff
         )
 
-    # FUTURES
     if random.random() < 0.35:
         symbol = random.choice(FUTURES_SYMBOLS)
 
