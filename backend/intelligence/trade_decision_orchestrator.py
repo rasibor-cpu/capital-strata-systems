@@ -29,8 +29,8 @@ class TradeDecisionOrchestrator:
         self.trend_threshold = 0.24
         self.breakout_threshold = 0.28
 
-        self.min_probability_threshold = 0.52
-        self.high_probability_threshold = 0.70
+        self.min_probability_threshold = 0.28
+        self.high_probability_threshold = 0.60
 
         self.weights = {
             "ai_score": 0.25,
@@ -102,10 +102,10 @@ class TradeDecisionOrchestrator:
         if pressure_ok and confluence_ok and momentum_ok and probability_ok:
             execute_trade = True
 
-        if decision_score >= 0.26 and probability_ok:
+        if decision_score >= 0.20 and probability_ok:
             execute_trade = True
 
-        if decision_score >= 0.22 and pressure >= 0.15 and win_probability >= 0.58:
+        if decision_score >= 0.18 and pressure >= 0.15 and win_probability >= 0.30:
             execute_trade = True
 
         if not approve_trade:
