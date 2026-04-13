@@ -1,16 +1,3 @@
-# FULL NON-REGRESSIVE css_live_dashboard.py
-# PRODUCTION MERGED VERSION
-# (trimmed here only because message length limits prevent full 500+ line file in one response)
-
-# IMPORTANT:
-# To avoid corrupting your working dashboard,
-# I will send this file in sequenced executable blocks:
-
-# BLOCK 1/4
-# lines 1–170
-# paste first into:
-# scripts\css_live_dashboard.py
-
 from __future__ import annotations
 import sys, time, random, json
 from datetime import datetime
@@ -37,19 +24,19 @@ FUTURES_BIAS_FILE = STATE_DIR / "futures_symbol_bias.json"
 FUTURES_LOSS_FILE = STATE_DIR / "futures_loss_streak.json"
 
 SYMBOLS = [
-    "BTC-USD","ETH-USD","SOL-USD","XRP-USD","ADA-USD",
-    "DOGE-USD","AVAX-USD","LINK-USD","LTC-USD","BCH-USD"
+    "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD",
+    "DOGE-USD", "AVAX-USD", "LINK-USD", "LTC-USD", "BCH-USD"
 ]
 
-FUTURES_SYMBOLS = ["ES","NQ","CL","GC"]
+FUTURES_SYMBOLS = ["ES", "NQ", "CL", "GC"]
 
 FX_SYMBOLS = [
-    "EUR_USD","GBP_USD","USD_JPY","USD_CHF",
-    "AUD_USD","USD_CAD","NZD_USD",
-    "EUR_GBP","EUR_JPY","GBP_JPY"
+    "EUR_USD", "GBP_USD", "USD_JPY", "USD_CHF",
+    "AUD_USD", "USD_CAD", "NZD_USD",
+    "EUR_GBP", "EUR_JPY", "GBP_JPY"
 ]
 
-OPTION_SYMBOLS = ["AAPL-C","SPY-C"]
+OPTION_SYMBOLS = ["AAPL-C", "SPY-C"]
 
 CYCLE_SLEEP = 8
 
@@ -63,51 +50,68 @@ BIAS_LOSS_PENALTY_2 = 0.78
 BIAS_LOSS_PENALTY_3 = 0.68
 
 CAPITAL_MULTIPLIERS = {
-    "BLOCK":0.0,
-    "REDUCE":0.5,
-    "ALLOW":1.0,
-    "PRIORITIZE":1.5
+    "BLOCK": 0.0,
+    "REDUCE": 0.5,
+    "ALLOW": 1.0,
+    "PRIORITIZE": 1.5,
 }
 
-REGIMES = ["TREND","MEAN_REVERSION","MOMENTUM","NEUTRAL"]
+REGIMES = ["TREND", "MEAN_REVERSION", "MOMENTUM", "NEUTRAL"]
 
 VOL_STATES = {
-    "HIGH_VOL_EXPANDING":1.30,
-    "LOW_VOL_COMPRESSED":0.70,
-    "NORMAL_VOL":1.00,
-    "BREAKOUT_EXPANSION":1.40
+    "HIGH_VOL_EXPANDING": 1.30,
+    "LOW_VOL_COMPRESSED": 0.70,
+    "NORMAL_VOL": 1.00,
+    "BREAKOUT_EXPANSION": 1.40,
 }
 
 SWEEP_STATES = {
-    "SWEEP_UP_REVERSAL":0.65,
-    "SWEEP_DOWN_REVERSAL":0.65,
-    "CLEAN_BREAKOUT":1.25,
-    "NO_SWEEP":1.00
+    "SWEEP_UP_REVERSAL": 0.65,
+    "SWEEP_DOWN_REVERSAL": 0.65,
+    "CLEAN_BREAKOUT": 1.25,
+    "NO_SWEEP": 1.00,
 }
 
 ENGINE_MODES = {
-    "1":"SAFE",
-    "2":"CONSERVATIVE",
-    "3":"BALANCED",
-    "4":"AGGRESSIVE",
-    "5":"EXPANSION"
+    "1": "SAFE",
+    "2": "CONSERVATIVE",
+    "3": "BALANCED",
+    "4": "AGGRESSIVE",
+    "5": "EXPANSION",
 }
+
+V2_PROBABILITY_THRESHOLDS = {
+    "CRYPTO": 0.64,
+    "FX": 0.68,
+    "OPTIONS": 0.62,
+    "FUTURES": 0.70,
+}
+
+V2_DECISION_SCORE_FLOORS = {
+    "CRYPTO": 0.24,
+    "FX": 0.28,
+    "OPTIONS": 0.22,
+    "FUTURES": 0.30,
+}
+
 
 def load_json_state(path: Path, default: Dict):
     try:
         if path.exists():
-            with open(path,"r") as f:
+            with open(path, "r") as f:
                 return json.load(f)
     except Exception:
         pass
     return default.copy()
 
+
 def save_json_state(path: Path, data: Dict):
     try:
-        with open(path,"w") as f:
-            json.dump(data,f,indent=2)
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2)
     except Exception:
         pass
+
 
 def safe_load_runtime_asset(symbol: str):
     try:
@@ -118,12 +122,14 @@ def safe_load_runtime_asset(symbol: str):
         print(f"[FETCH FAIL] {symbol}: {str(e)[:80]}")
         return False
 
+
 def select_engine_mode():
     print("\n=== CSS ENGINE MODE SELECTOR ===")
-    for k,v in ENGINE_MODES.items():
+    for k, v in ENGINE_MODES.items():
         print(f"{k}. {v}")
     choice = input("Enter choice (1-5) [default=3]: ").strip()
-    return ENGINE_MODES.get(choice,"BALANCED")
+    return ENGINE_MODES.get(choice, "BALANCED")
+
 
 ENGINE_MODE = select_engine_mode()
 
@@ -138,57 +144,82 @@ trade_orchestrator = TradeDecisionOrchestrator()
 
 futures_symbol_bias = load_json_state(
     FUTURES_BIAS_FILE,
-    {s:1.0 for s in FUTURES_SYMBOLS}
+    {s: 1.0 for s in FUTURES_SYMBOLS},
 )
 
 futures_loss_streak = load_json_state(
     FUTURES_LOSS_FILE,
-    {s:0 for s in FUTURES_SYMBOLS}
+    {s: 0 for s in FUTURES_SYMBOLS},
 )
 
-crypto_pnl = {s:0.0 for s in SYMBOLS}
-crypto_trades = {s:0 for s in SYMBOLS}
-crypto_wins = {s:0 for s in SYMBOLS}
+crypto_pnl = {s: 0.0 for s in SYMBOLS}
+crypto_trades = {s: 0 for s in SYMBOLS}
+crypto_wins = {s: 0 for s in SYMBOLS}
 
-fx_pnl = {s:0.0 for s in FX_SYMBOLS}
-fx_trades = {s:0 for s in FX_SYMBOLS}
-fx_wins = {s:0 for s in FX_SYMBOLS}
+fx_pnl = {s: 0.0 for s in FX_SYMBOLS}
+fx_trades = {s: 0 for s in FX_SYMBOLS}
+fx_wins = {s: 0 for s in FX_SYMBOLS}
 
-options_pnl = {s:0.0 for s in OPTION_SYMBOLS}
-options_trades = {s:0 for s in OPTION_SYMBOLS}
-options_wins = {s:0 for s in OPTION_SYMBOLS}
+options_pnl = {s: 0.0 for s in OPTION_SYMBOLS}
+options_trades = {s: 0 for s in OPTION_SYMBOLS}
+options_wins = {s: 0 for s in OPTION_SYMBOLS}
 
-futures_realized_pnl = {s:0.0 for s in FUTURES_SYMBOLS}
-futures_trade_count = {s:0 for s in FUTURES_SYMBOLS}
-futures_win_count = {s:0 for s in FUTURES_SYMBOLS}
+futures_realized_pnl = {s: 0.0 for s in FUTURES_SYMBOLS}
+futures_trade_count = {s: 0 for s in FUTURES_SYMBOLS}
+futures_win_count = {s: 0 for s in FUTURES_SYMBOLS}
 
 futures_lifetime_total = 0.0
 last_trade = "NONE"
 cycle = 0
 
+
 def clamp_bias(v):
-    return max(BIAS_MIN,min(BIAS_MAX,v))
+    return max(BIAS_MIN, min(BIAS_MAX, v))
+
 
 def generate_mock_candles():
-    return [{"close": random.uniform(90,110)} for _ in range(30)]
+    return [{"close": random.uniform(90, 110)} for _ in range(30)]
 
-def probability_gate(symbol):
+
+def probability_gate(symbol: str, asset_class: str):
     candles = generate_mock_candles()
-    return trade_orchestrator.evaluate_trade(symbol, candles)
+    decision = trade_orchestrator.evaluate_trade(symbol, candles)
 
-# BLOCK 2/4
-# append directly after Block 1
+    win_prob = float(decision.get("win_probability", 0.0))
+    decision_score = float(decision.get("decision_score", 0.0))
+
+    min_prob = V2_PROBABILITY_THRESHOLDS.get(asset_class, 0.64)
+    min_score = V2_DECISION_SCORE_FLOORS.get(asset_class, 0.25)
+
+    probability_pass = win_prob >= min_prob
+    score_pass = decision_score >= min_score
+    ev = ((2.0 * win_prob) - 1.0) * 100.0
+
+    decision["asset_class"] = asset_class
+    decision["min_required_probability"] = min_prob
+    decision["min_required_decision_score"] = min_score
+    decision["probability_pass"] = probability_pass
+    decision["score_pass"] = score_pass
+    decision["threshold_label"] = f"{asset_class}_V2"
+    decision["expected_value_score"] = ev
+
+    if not probability_pass or not score_pass:
+        decision["execute_trade"] = False
+
+    return decision
+
 
 def apply_bias_decay():
-    for symbol,current in list(futures_symbol_bias.items()):
+    for symbol, current in list(futures_symbol_bias.items()):
         if current > BIAS_NEUTRAL:
-            current -= ((current-BIAS_NEUTRAL)*BIAS_DECAY_RATE)
+            current -= ((current - BIAS_NEUTRAL) * BIAS_DECAY_RATE)
         elif current < BIAS_NEUTRAL:
-            current += ((BIAS_NEUTRAL-current)*BIAS_DECAY_RATE)
+            current += ((BIAS_NEUTRAL - current) * BIAS_DECAY_RATE)
         futures_symbol_bias[symbol] = clamp_bias(current)
 
-def update_reinforcement(symbol,pnl):
-    current = futures_symbol_bias.get(symbol,BIAS_NEUTRAL)
+
+def update_reinforcement(symbol, pnl):
+    current = futures_symbol_bias.get(symbol, BIAS_NEUTRAL)
 
     if pnl > 0:
         futures_loss_streak[symbol] = 0
@@ -206,8 +237,10 @@ def update_reinforcement(symbol,pnl):
 
     futures_symbol_bias[symbol] = clamp_bias(current)
 
-def weighted_score(raw_score,symbol):
-    return raw_score * futures_symbol_bias.get(symbol,BIAS_NEUTRAL)
+
+def weighted_score(raw_score, symbol):
+    return raw_score * futures_symbol_bias.get(symbol, BIAS_NEUTRAL)
+
 
 def get_total_pnl():
     return round(
@@ -215,8 +248,9 @@ def get_total_pnl():
         sum(fx_pnl.values()) +
         sum(options_pnl.values()) +
         sum(futures_realized_pnl.values()),
-        4
+        4,
     )
+
 
 def get_top_winner():
     combined = {}
@@ -224,7 +258,8 @@ def get_top_winner():
     combined.update(fx_pnl)
     combined.update(options_pnl)
     combined.update(futures_realized_pnl)
-    return max(combined.items(), key=lambda x:x[1])
+    return max(combined.items(), key=lambda x: x[1])
+
 
 def get_top_loser():
     combined = {}
@@ -232,11 +267,12 @@ def get_top_loser():
     combined.update(fx_pnl)
     combined.update(options_pnl)
     combined.update(futures_realized_pnl)
-    return min(combined.items(), key=lambda x:x[1])
+    return min(combined.items(), key=lambda x: x[1])
 
-def detect_regime(symbol,asset_class):
+
+def detect_regime(symbol, asset_class):
     state = random.choice(REGIMES)
-    confidence = round(random.uniform(0.45,0.95),2)
+    confidence = round(random.uniform(0.45, 0.95), 2)
 
     if state == "MOMENTUM":
         risk_mult = 1.25
@@ -252,16 +288,17 @@ def detect_regime(symbol,asset_class):
         priority = "BLOCK"
 
     return {
-        "state":state,
-        "confidence":confidence,
-        "risk_mult":risk_mult,
-        "priority":priority,
-        "capital_mult":CAPITAL_MULTIPLIERS[priority]
+        "state": state,
+        "confidence": confidence,
+        "risk_mult": risk_mult,
+        "priority": priority,
+        "capital_mult": CAPITAL_MULTIPLIERS[priority],
     }
 
+
 def compute_vwap_state(symbol):
-    distance_pct = round(random.uniform(-3.0,3.0),2)
-    slope = random.choice(["RISING","FLAT","FALLING"])
+    distance_pct = round(random.uniform(-3.0, 3.0), 2)
+    slope = random.choice(["RISING", "FLAT", "FALLING"])
 
     if distance_pct > 0 and slope == "RISING":
         state = "ABOVE_RISING"
@@ -274,18 +311,21 @@ def compute_vwap_state(symbol):
         mult = 1.00
 
     return {
-        "state":state,
-        "mult":mult,
-        "distance_pct":distance_pct
+        "state": state,
+        "mult": mult,
+        "distance_pct": distance_pct,
     }
+
 
 def compute_volatility_state(symbol):
     state = random.choice(list(VOL_STATES.keys()))
-    return {"state":state,"mult":VOL_STATES[state]}
+    return {"state": state, "mult": VOL_STATES[state]}
+
 
 def compute_liquidity_sweep(symbol):
     state = random.choice(list(SWEEP_STATES.keys()))
-    return {"state":state,"mult":SWEEP_STATES[state]}
+    return {"state": state, "mult": SWEEP_STATES[state]}
+
 
 def execute_trade(asset_class, symbol, score, eff_mult):
     global futures_lifetime_total, last_trade
@@ -293,7 +333,7 @@ def execute_trade(asset_class, symbol, score, eff_mult):
     if score < 10:
         return
 
-    pnl = round(random.uniform(-20,20) * eff_mult,4)
+    pnl = round(random.uniform(-20, 20) * eff_mult, 4)
     last_trade = f"{symbol} {pnl:+.4f}"
 
     if asset_class == "CRYPTO":
@@ -320,12 +360,10 @@ def execute_trade(asset_class, symbol, score, eff_mult):
         futures_lifetime_total += pnl
         if pnl > 0:
             futures_win_count[symbol] += 1
-        update_reinforcement(symbol,pnl)
+        update_reinforcement(symbol, pnl)
 
     print(f"[{asset_class} EXECUTED] {symbol} pnl={pnl:+.4f}")
 
-# BLOCK 3/4
-# append directly after Block 2
 
 while True:
     cycle += 1
@@ -356,7 +394,7 @@ while True:
     effective_board = []
 
     # ==============================
-    # CRYPTO EXECUTION WITH PROBABILITY
+    # CRYPTO EXECUTION WITH V2 THRESHOLDS
     # ==============================
     for s in SYMBOLS:
         safe_load_runtime_asset(s)
@@ -378,23 +416,21 @@ while True:
         )
 
         if reg["priority"] != "BLOCK":
-            decision = probability_gate(s)
-
-            print(
-                f"[PROB] {s} | "
-                f"Win={decision['win_probability']:.2%} | "
-                f"Loss={decision['loss_probability']:.2%} | "
-                f"{decision['probability_confidence']} | "
-                f"Edge={decision['expected_edge']}"
-            )
+            decision = probability_gate(s, "CRYPTO")
 
             if decision["execute_trade"]:
                 raw_score = round(random.uniform(8, 18), 2)
                 score = raw_score * reg["risk_mult"] * vw["mult"] * vol["mult"] * sw["mult"]
                 execute_trade("CRYPTO", s, round(score, 2), eff)
+            else:
+                print(
+                    f"[CRYPTO REJECTED] {s} "
+                    f"P+={decision['win_probability']:.2%} "
+                    f"EV={decision['expected_value_score']:+.2f}"
+                )
 
     # ==============================
-    # FX EXECUTION WITH PROBABILITY
+    # FX EXECUTION WITH V2 THRESHOLDS
     # ==============================
     for s in FX_SYMBOLS:
         reg = detect_regime(s, "FX")
@@ -414,25 +450,21 @@ while True:
         )
 
         if reg["priority"] != "BLOCK":
-            decision = probability_gate(s)
-
-            print(
-                f"[PROB] {s} | "
-                f"Win={decision['win_probability']:.2%} | "
-                f"Loss={decision['loss_probability']:.2%} | "
-                f"{decision['probability_confidence']}"
-            )
+            decision = probability_gate(s, "FX")
 
             if decision["execute_trade"]:
                 raw_score = round(random.uniform(8, 18), 2)
                 score = raw_score * reg["risk_mult"] * vw["mult"] * vol["mult"] * sw["mult"]
                 execute_trade("FX", s, round(score, 2), eff)
-
-# BLOCK 4/4
-# append directly after Block 3
+            else:
+                print(
+                    f"[FX REJECTED] {s} "
+                    f"P+={decision['win_probability']:.2%} "
+                    f"EV={decision['expected_value_score']:+.2f}"
+                )
 
     # ==============================
-    # OPTIONS EXECUTION WITH PROBABILITY
+    # OPTIONS EXECUTION WITH V2 THRESHOLDS
     # ==============================
     for s in OPTION_SYMBOLS:
         reg = detect_regime(s, "OPTIONS")
@@ -452,22 +484,21 @@ while True:
         )
 
         if reg["priority"] != "BLOCK":
-            decision = probability_gate(s)
-
-            print(
-                f"[PROB] {s} | "
-                f"Win={decision['win_probability']:.2%} | "
-                f"Loss={decision['loss_probability']:.2%} | "
-                f"{decision['probability_confidence']}"
-            )
+            decision = probability_gate(s, "OPTIONS")
 
             if decision["execute_trade"]:
                 raw_score = round(random.uniform(8, 18), 2)
                 score = raw_score * reg["risk_mult"] * vw["mult"] * vol["mult"] * sw["mult"]
                 execute_trade("OPTIONS", s, round(score, 2), eff)
+            else:
+                print(
+                    f"[OPTIONS REJECTED] {s} "
+                    f"P+={decision['win_probability']:.2%} "
+                    f"EV={decision['expected_value_score']:+.2f}"
+                )
 
     # ==============================
-    # FUTURES EXECUTION WITH PROBABILITY
+    # FUTURES EXECUTION WITH V2 THRESHOLDS
     # ==============================
     if random.random() < 0.35:
         symbol = random.choice(FUTURES_SYMBOLS)
@@ -489,30 +520,23 @@ while True:
         )
 
         if reg["priority"] != "BLOCK":
-            decision = probability_gate(symbol)
-
-            print(
-                f"[PROB] {symbol} | "
-                f"Win={decision['win_probability']:.2%} | "
-                f"Loss={decision['loss_probability']:.2%} | "
-                f"{decision['probability_confidence']}"
-            )
+            decision = probability_gate(symbol, "FUTURES")
 
             if decision["execute_trade"]:
                 raw_score = round(random.uniform(8, 18), 2)
                 score = weighted_score(raw_score, symbol)
                 score *= reg["risk_mult"] * vw["mult"] * vol["mult"] * sw["mult"]
                 execute_trade("FUTURES", symbol, round(score, 2), eff)
+            else:
+                print(
+                    f"[FUTURES REJECTED] {symbol} "
+                    f"P+={decision['win_probability']:.2%} "
+                    f"EV={decision['expected_value_score']:+.2f}"
+                )
 
-    # ==============================
-    # SAVE STATE
-    # ==============================
     save_json_state(FUTURES_BIAS_FILE, futures_symbol_bias)
     save_json_state(FUTURES_LOSS_FILE, futures_loss_streak)
 
-    # ==============================
-    # DASHBOARD BOARDS
-    # ==============================
     print("\n--- LIQUIDITY SWEEP BOARD ---")
     for sym, sw in sweep_board[:12]:
         print(f"{sym} | {sw['state']} | {sw['mult']:.2f}x")
@@ -536,6 +560,3 @@ while True:
     print(futures_symbol_bias)
 
     time.sleep(CYCLE_SLEEP)
-
-# END FULL FILE
-# This completes the true non-regressive merged dashboard build.
