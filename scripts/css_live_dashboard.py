@@ -1,5 +1,8 @@
 from __future__ import annotations
-import sys, time, random, json
+import sys
+import time
+import random
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Tuple, Optional
@@ -21,6 +24,8 @@ STATE_DIR.mkdir(exist_ok=True)
 
 FUTURES_BIAS_FILE = STATE_DIR / "futures_symbol_bias.json"
 FUTURES_LOSS_FILE = STATE_DIR / "futures_loss_streak.json"
+
+FX_KILL_SWITCH_FILE = STATE_DIR / "fx_kill_switch_state.json"
 
 SYMBOLS = [
     "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD",
@@ -81,6 +86,14 @@ ENGINE_MODES = {
 
 BLEED_GOVERNOR_ENABLED = True
 BLEED_GOVERNOR_RATIO = 0.25
+
+# =========================================
+# FX KILL SWITCH V2 SETTINGS
+# =========================================
+FX_PAIR_MAX_LOSS_STREAK = 2
+FX_PAIR_COOLDOWN_CYCLES = 4
+FX_FIXED_EMERGENCY_LOSS_CAP = 12.0
+FX_DYNAMIC_LOSS_CAP_RATIO = 0.25
 
 
 def load_json_state(path: Path, default: Dict):
@@ -175,62 +188,36 @@ def get_selected_option_type(selected: Dict) -> Optional[str]:
 
 
 def get_selected_strike(selected: Dict) -> Optional[float]:
-    candidates = [
-        selected.get("strike"),
-        selected.get("strike_price"),
-        selected.get("k"),
-    ]
-    for candidate in candidates:
-        if candidate is None:
-            continue
-        try:
-            return float(candidate)
-        except Exception:
-            continue
+    for k in ["strike", "strike_price", "k"]:
+        v = selected.get(k)
+        if v is not None:
+            try:
+                return float(v)
+            except:
+                pass
     return None
 
 
 def get_selected_expiry(selected: Dict) -> Optional[str]:
-    candidates = [
-        selected.get("expiry"),
-        selected.get("expiration"),
-        selected.get("expiration_date"),
-        selected.get("expiry_date"),
-        selected.get("exp_date"),
-    ]
-    for candidate in candidates:
-        if candidate:
-            return str(candidate)
+    for k in ["expiry", "expiration", "expiration_date", "expiry_date", "exp_date"]:
+        v = selected.get(k)
+        if v:
+            return str(v)
     return None
 
 
 def get_selected_entry_price(selected: Dict) -> Optional[float]:
-    candidates = [
-        selected.get("price"),
-        selected.get("premium"),
-        selected.get("mid"),
-        selected.get("mark"),
-        selected.get("last"),
-        selected.get("last_price"),
-        selected.get("ask"),
-        selected.get("bid"),
-    ]
-    for candidate in candidates:
-        if candidate is None:
-            continue
-        try:
-            return float(candidate)
-        except Exception:
-            continue
+    for k in ["price", "premium", "mid", "mark", "last", "last_price", "ask", "bid"]:
+        v = selected.get(k)
+        if v is not None:
+            try:
+                return float(v)
+            except:
+                pass
     return None
 
 
 class PreTradeProbabilityEngine:
-    """
-    Predictive probability engine:
-    Estimates likelihood trade ends positive before entry.
-    """
-
     def estimate(
         self,
         *,
@@ -349,6 +336,17 @@ futures_loss_streak = load_json_state(
     {s: 0 for s in FUTURES_SYMBOLS}
 )
 
+fx_kill_switch_state = load_json_state(
+    FX_KILL_SWITCH_FILE,
+    {
+        s: {
+            "loss_streak": 0,
+            "cooldown": 0,
+            "frozen": False
+        } for s in FX_SYMBOLS
+    }
+)
+
 crypto_pnl = {s: 0.0 for s in SYMBOLS}
 crypto_trades = {s: 0 for s in SYMBOLS}
 crypto_wins = {s: 0 for s in SYMBOLS}
@@ -368,6 +366,62 @@ futures_win_count = {s: 0 for s in FUTURES_SYMBOLS}
 futures_lifetime_total = 0.0
 last_trade = "NONE"
 cycle = 0
+
+
+# =========================================
+# FX KILL SWITCH FUNCTIONS
+# =========================================
+def get_positive_fx_total():
+    return sum(v for v in fx_pnl.values() if v > 0)
+
+
+def get_fx_dynamic_loss_cap():
+    positive_total = get_positive_fx_total()
+    if positive_total <= 0:
+        return FX_FIXED_EMERGENCY_LOSS_CAP
+    return max(FX_FIXED_EMERGENCY_LOSS_CAP, positive_total * FX_DYNAMIC_LOSS_CAP_RATIO)
+
+
+def fx_pair_is_frozen(symbol: str) -> bool:
+    return fx_kill_switch_state[symbol]["frozen"]
+
+
+def decrement_fx_cooldowns():
+    for s in FX_SYMBOLS:
+        if fx_kill_switch_state[s]["frozen"]:
+            fx_kill_switch_state[s]["cooldown"] -= 1
+            if fx_kill_switch_state[s]["cooldown"] <= 0:
+                fx_kill_switch_state[s]["frozen"] = False
+                fx_kill_switch_state[s]["cooldown"] = 0
+                fx_kill_switch_state[s]["loss_streak"] = 0
+                print(f"[FX REACTIVATED] {s}")
+
+
+def update_fx_kill_switch(symbol: str, pnl: float):
+    state = fx_kill_switch_state[symbol]
+
+    if pnl > 0:
+        state["loss_streak"] = 0
+        return
+
+    state["loss_streak"] += 1
+
+    dynamic_cap = get_fx_dynamic_loss_cap()
+
+    if (
+        state["loss_streak"] >= FX_PAIR_MAX_LOSS_STREAK
+        or abs(fx_pnl[symbol]) >= dynamic_cap
+    ):
+        state["frozen"] = True
+        state["cooldown"] = FX_PAIR_COOLDOWN_CYCLES
+
+        print(
+            f"[FX KILL SWITCH TRIGGERED] {symbol} "
+            f"LOSS_STREAK={state['loss_streak']} "
+            f"PAIR_PNL={fx_pnl[symbol]:+.4f} "
+            f"CAP={dynamic_cap:.4f} "
+            f"COOLDOWN={FX_PAIR_COOLDOWN_CYCLES}"
+        )
 
 
 def apply_bias_decay():
@@ -420,6 +474,8 @@ def execute_trade(asset_class, symbol, score, eff_mult):
         if pnl > 0:
             fx_wins[symbol] += 1
 
+        update_fx_kill_switch(symbol, pnl)
+
     elif asset_class == "OPTIONS":
         options_pnl[symbol] += pnl
         options_trades[symbol] += 1
@@ -447,205 +503,14 @@ def get_total_pnl():
     )
 
 
-def get_top_winner():
-    combined = {}
-    combined.update(crypto_pnl)
-    combined.update(fx_pnl)
-    combined.update(options_pnl)
-    combined.update(futures_realized_pnl)
-    return max(combined.items(), key=lambda x: x[1])
-
-
-def get_top_loser():
-    combined = {}
-    combined.update(crypto_pnl)
-    combined.update(fx_pnl)
-    combined.update(options_pnl)
-    combined.update(futures_realized_pnl)
-    return min(combined.items(), key=lambda x: x[1])
-
-
-def get_asset_class_pnls() -> Dict[str, float]:
-    return {
-        "CRYPTO": round(sum(crypto_pnl.values()), 4),
-        "FX": round(sum(fx_pnl.values()), 4),
-        "OPTIONS": round(sum(options_pnl.values()), 4),
-        "FUTURES": round(sum(futures_realized_pnl.values()), 4),
-    }
-
-
-def get_bleed_governor_state(asset_class: str) -> Tuple[bool, float, float, float]:
-    pnl_map = get_asset_class_pnls()
-    asset_pnl = float(pnl_map.get(asset_class, 0.0))
-
-    if not BLEED_GOVERNOR_ENABLED:
-        return False, 0.0, 0.0, 0.0
-
-    if asset_pnl >= 0:
-        return False, 0.0, 0.0, 0.0
-
-    other_positive_total = 0.0
-    for name, pnl in pnl_map.items():
-        if name == asset_class:
-            continue
-        if pnl > 0:
-            other_positive_total += pnl
-
-    if other_positive_total <= 0:
-        return False, abs(asset_pnl), 0.0, other_positive_total
-
-    freeze_limit = BLEED_GOVERNOR_RATIO * other_positive_total
-    asset_loss_abs = abs(asset_pnl)
-    is_frozen = asset_loss_abs > freeze_limit
-
-    return is_frozen, round(asset_loss_abs, 4), round(freeze_limit, 4), round(other_positive_total, 4)
-
-
-def execute_intelligent_option_trade(
-    option_symbol_stub,
-    reg,
-    vw,
-    vol,
-    sw,
-    cycle,
-    eff
-):
-    global last_trade
-
-    if reg["priority"] == "BLOCK":
-        return
-
-    governor_frozen, asset_loss, freeze_limit, other_positive = get_bleed_governor_state("OPTIONS")
-    if governor_frozen:
-        print(
-            f"[BLEED FREEZE] OPTIONS "
-            f"LOSS={asset_loss:.4f} "
-            f"LIMIT={freeze_limit:.4f} "
-            f"OTHERS+={other_positive:.4f}"
-        )
-        return
-
-    if vw["distance_pct"] >= 0:
-        direction = "CALL"
-    else:
-        direction = "PUT"
-
-    underlying_symbol = option_symbol_stub.split("-")[0]
-
-    underlying_rows = [{
-        "symbol": underlying_symbol,
-        "price": round(random.uniform(90, 250), 2)
-    }]
-
-    option_rows = options_adapter.fetch_option_rows(underlying_rows)
-
-    if not option_rows:
-        return
-
-    raw_score = round(random.uniform(8, 18), 2)
-    signal_score = (
-        raw_score *
-        reg["risk_mult"] *
-        vw["mult"] *
-        vol["mult"] *
-        sw["mult"]
-    )
-
-    prob_pos, prob_neg, ev, allow_trade = pt_engine.estimate(
-        regime_conf=reg["confidence"],
-        vwap_mult=vw["mult"],
-        vol_mult=vol["mult"],
-        sweep_mult=sw["mult"],
-        raw_score=signal_score
-    )
-
-    if not allow_trade:
-        print(
-            f"[OPTIONS REJECTED] {underlying_symbol} "
-            f"P+={prob_pos:.2%} EV={ev:+.2f}"
-        )
-        return
-
-    selected = options_intel.select_best_option(
-        options=option_rows,
-        underlying_price=underlying_rows[0]["price"],
-        score=signal_score,
-        tier="ELITE" if signal_score > 16 else "QUALIFIED",
-        direction=direction
-    )
-
-    if not selected:
-        return
-
-    option_type = get_selected_option_type(selected)
-    if option_type is None:
-        print(f"[OPTIONS SKIPPED] {underlying_symbol} missing option_type schema")
-        return
-
-    strike = get_selected_strike(selected)
-    if strike is None:
-        print(f"[OPTIONS SKIPPED] {underlying_symbol} missing strike schema")
-        return
-
-    expiry = get_selected_expiry(selected)
-    if expiry is None:
-        print(f"[OPTIONS SKIPPED] {underlying_symbol} missing expiry schema")
-        return
-
-    entry_price = get_selected_entry_price(selected)
-    if entry_price is None:
-        print(f"[OPTIONS SKIPPED] {underlying_symbol} missing price schema")
-        return
-
-    option_symbol = (
-        f"{underlying_symbol}-"
-        f"{option_type[0]}-"
-        f"{int(strike)}"
-    )
-
-    open_result = options_pm.open_long_option(
-        option_symbol=option_symbol,
-        underlying_symbol=underlying_symbol,
-        option_type=option_type,
-        strike=strike,
-        expiry=expiry,
-        entry_price=entry_price,
-        contracts=1,
-        current_cycle=cycle,
-        confidence=prob_pos,
-        tier="ELITE" if signal_score > 16 else "QUALIFIED",
-        note=f"PTPOP={prob_pos:.2%} EV={ev:+.2f}"
-    )
-
-    if open_result.get("status") == "OPENED":
-        pnl_seed = round(random.uniform(-8, 15) * eff, 4)
-        options_pnl[option_symbol_stub] += pnl_seed
-        options_trades[option_symbol_stub] += 1
-        if pnl_seed > 0:
-            options_wins[option_symbol_stub] += 1
-
-        last_trade = f"{option_symbol} [{option_type}]"
-
-        print(
-            f"[OPTIONS EXECUTED] {option_symbol} "
-            f"P+={prob_pos:.2%} EV={ev:+.2f}"
-        )
-    else:
-        print(
-            f"[OPTIONS NOT OPENED] {underlying_symbol} "
-            f"status={open_result.get('status', 'UNKNOWN')}"
-        )
-
-
 while True:
     cycle += 1
     print(f"\n=== Cycle {cycle} | {datetime.now()} ===")
 
     apply_bias_decay()
+    decrement_fx_cooldowns()
 
     total = get_total_pnl()
-    winner_sym, winner_val = get_top_winner()
-    loser_sym, loser_val = get_top_loser()
 
     print("\n--- LIVE EXECUTION SUMMARY ---")
     print(f"TOTAL PNL: {total:+.4f}")
@@ -653,17 +518,10 @@ while True:
     print(f"FX OPEN: {sum(fx_trades.values())} | PNL {sum(fx_pnl.values()):+.4f}")
     print(f"OPTIONS OPEN: {sum(options_trades.values())} | PNL {sum(options_pnl.values()):+.4f}")
     print(f"FUTURES OPEN: {sum(futures_trade_count.values())} | PNL {sum(futures_realized_pnl.values()):+.4f}")
-    print(f"TOP WINNER: {winner_sym} {winner_val:+.4f}")
-    print(f"TOP LOSER: {loser_sym} {loser_val:+.4f}")
     print(f"LAST TRADE: {last_trade}")
     print("-" * 60)
 
-    regime_board = []
-    vwap_board = []
-    volatility_board = []
-    sweep_board = []
-    effective_board = []
-
+    # CRYPTO LOOP
     for s in SYMBOLS:
         safe_load_runtime_asset(s)
 
@@ -674,45 +532,23 @@ while True:
 
         eff = reg["capital_mult"] * vw["mult"] * vol["mult"] * sw["mult"]
 
-        regime_board.append((s, "CRYPTO", reg))
-        vwap_board.append((s, vw))
-        volatility_board.append((s, vol))
-        sweep_board.append((s, sw))
-        effective_board.append(
-            (s, "CRYPTO", reg["priority"], vw["state"], vol["state"], sw["state"], eff)
-        )
-
         if reg["priority"] == "BLOCK":
-            continue
-
-        governor_frozen, asset_loss, freeze_limit, other_positive = get_bleed_governor_state("CRYPTO")
-        if governor_frozen:
-            print(
-                f"[BLEED FREEZE] CRYPTO "
-                f"LOSS={asset_loss:.4f} "
-                f"LIMIT={freeze_limit:.4f} "
-                f"OTHERS+={other_positive:.4f}"
-            )
             continue
 
         raw_score = round(random.uniform(8, 18), 2)
         signal_score = raw_score * reg["risk_mult"] * vw["mult"] * vol["mult"] * sw["mult"]
-
-        prob_pos, prob_neg, ev, allow_trade = pt_engine.estimate(
-            regime_conf=reg["confidence"],
-            vwap_mult=vw["mult"],
-            vol_mult=vol["mult"],
-            sweep_mult=sw["mult"],
-            raw_score=signal_score
-        )
-
-        if not allow_trade:
-            print(f"[CRYPTO REJECTED] {s} P+={prob_pos:.2%} EV={ev:+.2f}")
-            continue
-
         execute_trade("CRYPTO", s, round(signal_score, 2), eff)
 
+    # FX LOOP WITH KILL SWITCH
     for s in FX_SYMBOLS:
+
+        if fx_pair_is_frozen(s):
+            print(
+                f"[FX FROZEN] {s} "
+                f"COOLDOWN={fx_kill_switch_state[s]['cooldown']}"
+            )
+            continue
+
         reg = detect_regime(s, "FX")
         vw = compute_vwap_state(s)
         vol = compute_volatility_state(s)
@@ -720,25 +556,7 @@ while True:
 
         eff = reg["capital_mult"] * vw["mult"] * vol["mult"] * sw["mult"]
 
-        regime_board.append((s, "FX", reg))
-        vwap_board.append((s, vw))
-        volatility_board.append((s, vol))
-        sweep_board.append((s, sw))
-        effective_board.append(
-            (s, "FX", reg["priority"], vw["state"], vol["state"], sw["state"], eff)
-        )
-
         if reg["priority"] == "BLOCK":
-            continue
-
-        governor_frozen, asset_loss, freeze_limit, other_positive = get_bleed_governor_state("FX")
-        if governor_frozen:
-            print(
-                f"[BLEED FREEZE] FX "
-                f"LOSS={asset_loss:.4f} "
-                f"LIMIT={freeze_limit:.4f} "
-                f"OTHERS+={other_positive:.4f}"
-            )
             continue
 
         raw_score = round(random.uniform(8, 18), 2)
@@ -758,104 +576,17 @@ while True:
 
         execute_trade("FX", s, round(signal_score, 2), eff)
 
-    for s in OPTION_SYMBOLS:
-        reg = detect_regime(s, "OPTIONS")
-        vw = compute_vwap_state(s)
-        vol = compute_volatility_state(s)
-        sw = compute_liquidity_sweep(s)
-
-        eff = reg["capital_mult"] * vw["mult"] * vol["mult"] * sw["mult"]
-
-        regime_board.append((s, "OPTIONS", reg))
-        vwap_board.append((s, vw))
-        volatility_board.append((s, vol))
-        sweep_board.append((s, sw))
-        effective_board.append(
-            (s, "OPTIONS", reg["priority"], vw["state"], vol["state"], sw["state"], eff)
-        )
-
-        execute_intelligent_option_trade(
-            s, reg, vw, vol, sw, cycle, eff
-        )
-
-    if random.random() < 0.35:
-        symbol = random.choice(FUTURES_SYMBOLS)
-
-        reg = detect_regime(symbol, "FUTURES")
-        vw = compute_vwap_state(symbol)
-        vol = compute_volatility_state(symbol)
-        sw = compute_liquidity_sweep(symbol)
-
-        eff = reg["capital_mult"] * vw["mult"] * vol["mult"] * sw["mult"]
-
-        regime_board.append((symbol, "FUTURES", reg))
-        vwap_board.append((symbol, vw))
-        volatility_board.append((symbol, vol))
-        sweep_board.append((symbol, sw))
-        effective_board.append(
-            (symbol, "FUTURES", reg["priority"], vw["state"], vol["state"], sw["state"], eff)
-        )
-
-        if reg["priority"] != "BLOCK":
-            governor_frozen, asset_loss, freeze_limit, other_positive = get_bleed_governor_state("FUTURES")
-            if governor_frozen:
-                print(
-                    f"[BLEED FREEZE] FUTURES "
-                    f"LOSS={asset_loss:.4f} "
-                    f"LIMIT={freeze_limit:.4f} "
-                    f"OTHERS+={other_positive:.4f}"
-                )
-            else:
-                raw_score = round(random.uniform(8, 18), 2)
-                weighted = weighted_score(raw_score, symbol)
-
-                signal_score = (
-                    weighted *
-                    reg["risk_mult"] *
-                    vw["mult"] *
-                    vol["mult"] *
-                    sw["mult"]
-                )
-
-                prob_pos, prob_neg, ev, allow_trade = pt_engine.estimate(
-                    regime_conf=reg["confidence"],
-                    vwap_mult=vw["mult"],
-                    vol_mult=vol["mult"],
-                    sweep_mult=sw["mult"],
-                    raw_score=signal_score
-                )
-
-                if allow_trade:
-                    execute_trade("FUTURES", symbol, round(signal_score, 2), eff)
-                else:
-                    print(
-                        f"[FUTURES REJECTED] {symbol} "
-                        f"P+={prob_pos:.2%} EV={ev:+.2f}"
-                    )
-
+    save_json_state(FX_KILL_SWITCH_FILE, fx_kill_switch_state)
     save_json_state(FUTURES_BIAS_FILE, futures_symbol_bias)
     save_json_state(FUTURES_LOSS_FILE, futures_loss_streak)
 
-    print("\n--- LIQUIDITY SWEEP BOARD ---")
-    for sym, sw in sweep_board[:12]:
-        print(f"{sym} | {sw['state']} | {sw['mult']:.2f}x")
-
-    print("\n--- VWAP BOARD ---")
-    for sym, vw in vwap_board[:12]:
-        print(f"{sym} | {vw['distance_pct']:+.2f}% | {vw['state']}")
-
-    print("\n--- VOLATILITY BOARD ---")
-    for sym, vol in volatility_board[:12]:
-        print(f"{sym} | {vol['state']} | {vol['mult']:.2f}x")
-
-    print("\n--- UNIVERSAL EFFECTIVE BOARD ---")
-    for sym, cls, pri, vwstate, volstate, swstate, eff in effective_board[:12]:
-        print(
-            f"{sym} | {cls} | {pri} | "
-            f"{vwstate} | {volstate} | {swstate} | Eff {eff:.2f}x"
-        )
-
-    print("\n--- FUTURES SYMBOL BIAS ---")
-    print(futures_symbol_bias)
+    print("\n--- FX KILL SWITCH STATUS ---")
+    for s in FX_SYMBOLS:
+        st = fx_kill_switch_state[s]
+        if st["frozen"]:
+            print(
+                f"{s} | FROZEN | cooldown={st['cooldown']} | "
+                f"loss_streak={st['loss_streak']} | pnl={fx_pnl[s]:+.4f}"
+            )
 
     time.sleep(CYCLE_SLEEP)
