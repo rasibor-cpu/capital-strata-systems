@@ -156,6 +156,8 @@ def get_selected_option_type(selected: Dict) -> Optional[str]:
         selected.get("right"),
         selected.get("call_put"),
         selected.get("contract_type"),
+        selected.get("side"),
+        selected.get("direction"),
     ]
 
     for candidate in candidates:
@@ -163,7 +165,13 @@ def get_selected_option_type(selected: Dict) -> Optional[str]:
         if normalized:
             return normalized
 
-    symbol_like = selected.get("symbol") or selected.get("option_symbol") or selected.get("contract_symbol")
+    symbol_like = (
+        selected.get("symbol")
+        or selected.get("option_symbol")
+        or selected.get("contract_symbol")
+        or selected.get("contract")
+        or selected.get("ticker")
+    )
     if symbol_like:
         raw = str(symbol_like).upper()
         if "-C-" in raw or raw.endswith("-C") or raw.endswith("C"):
@@ -226,11 +234,6 @@ def get_selected_entry_price(selected: Dict) -> Optional[float]:
 
 
 class PreTradeProbabilityEngine:
-    """
-    Predictive probability engine:
-    Estimates likelihood trade ends positive before entry.
-    """
-
     def estimate(
         self,
         *,
@@ -513,6 +516,7 @@ def execute_intelligent_option_trade(
     global last_trade
 
     if reg["priority"] == "BLOCK":
+        print(f"[OPTIONS SKIPPED] {option_symbol_stub} blocked by regime")
         return
 
     governor_frozen, asset_loss, freeze_limit, other_positive = get_bleed_governor_state("OPTIONS")
@@ -525,11 +529,7 @@ def execute_intelligent_option_trade(
         )
         return
 
-    if vw["distance_pct"] >= 0:
-        direction = "CALL"
-    else:
-        direction = "PUT"
-
+    direction = "CALL" if vw["distance_pct"] >= 0 else "PUT"
     underlying_symbol = option_symbol_stub.split("-")[0]
 
     underlying_rows = [{
@@ -540,6 +540,7 @@ def execute_intelligent_option_trade(
     option_rows = options_adapter.fetch_option_rows(underlying_rows)
 
     if not option_rows:
+        print(f"[OPTIONS SKIPPED] {underlying_symbol} no option rows returned")
         return
 
     raw_score = round(random.uniform(8, 18), 2)
@@ -575,27 +576,32 @@ def execute_intelligent_option_trade(
     )
 
     if not selected:
-        return
+        selected = option_rows[0]
+        print(f"[OPTIONS FALLBACK] {underlying_symbol} using first available contract")
 
     option_type = get_selected_option_type(selected)
     if option_type is None:
-        print(f"[OPTIONS SKIPPED] {underlying_symbol} missing option_type schema")
-        return
+        option_type = direction
+        print(f"[OPTIONS FALLBACK] {underlying_symbol} using direction as option_type={option_type}")
 
     strike = get_selected_strike(selected)
     if strike is None:
-        print(f"[OPTIONS SKIPPED] {underlying_symbol} missing strike schema")
-        return
+        try:
+            strike = float(round(underlying_rows[0]["price"]))
+            print(f"[OPTIONS FALLBACK] {underlying_symbol} using synthetic strike={strike}")
+        except Exception:
+            print(f"[OPTIONS SKIPPED] {underlying_symbol} missing strike schema")
+            return
 
     expiry = get_selected_expiry(selected)
     if expiry is None:
-        print(f"[OPTIONS SKIPPED] {underlying_symbol} missing expiry schema")
-        return
+        expiry = "SIM-EXPIRY"
+        print(f"[OPTIONS FALLBACK] {underlying_symbol} using synthetic expiry={expiry}")
 
     entry_price = get_selected_entry_price(selected)
     if entry_price is None:
-        print(f"[OPTIONS SKIPPED] {underlying_symbol} missing price schema")
-        return
+        entry_price = round(random.uniform(1.0, 8.0), 2)
+        print(f"[OPTIONS FALLBACK] {underlying_symbol} using synthetic price={entry_price}")
 
     option_symbol = (
         f"{underlying_symbol}-"
@@ -778,9 +784,7 @@ while True:
             s, reg, vw, vol, sw, cycle, eff
         )
 
-    if random.random() < 0.35:
-        symbol = random.choice(FUTURES_SYMBOLS)
-
+    for symbol in FUTURES_SYMBOLS:
         reg = detect_regime(symbol, "FUTURES")
         vw = compute_vwap_state(symbol)
         vol = compute_volatility_state(symbol)
@@ -796,42 +800,45 @@ while True:
             (symbol, "FUTURES", reg["priority"], vw["state"], vol["state"], sw["state"], eff)
         )
 
-        if reg["priority"] != "BLOCK":
-            governor_frozen, asset_loss, freeze_limit, other_positive = get_bleed_governor_state("FUTURES")
-            if governor_frozen:
-                print(
-                    f"[BLEED FREEZE] FUTURES "
-                    f"LOSS={asset_loss:.4f} "
-                    f"LIMIT={freeze_limit:.4f} "
-                    f"OTHERS+={other_positive:.4f}"
-                )
-            else:
-                raw_score = round(random.uniform(8, 18), 2)
-                weighted = weighted_score(raw_score, symbol)
+        if reg["priority"] == "BLOCK":
+            continue
 
-                signal_score = (
-                    weighted *
-                    reg["risk_mult"] *
-                    vw["mult"] *
-                    vol["mult"] *
-                    sw["mult"]
-                )
+        governor_frozen, asset_loss, freeze_limit, other_positive = get_bleed_governor_state("FUTURES")
+        if governor_frozen:
+            print(
+                f"[BLEED FREEZE] FUTURES "
+                f"LOSS={asset_loss:.4f} "
+                f"LIMIT={freeze_limit:.4f} "
+                f"OTHERS+={other_positive:.4f}"
+            )
+            continue
 
-                prob_pos, prob_neg, ev, allow_trade = pt_engine.estimate(
-                    regime_conf=reg["confidence"],
-                    vwap_mult=vw["mult"],
-                    vol_mult=vol["mult"],
-                    sweep_mult=sw["mult"],
-                    raw_score=signal_score
-                )
+        raw_score = round(random.uniform(8, 18), 2)
+        weighted = weighted_score(raw_score, symbol)
 
-                if allow_trade:
-                    execute_trade("FUTURES", symbol, round(signal_score, 2), eff)
-                else:
-                    print(
-                        f"[FUTURES REJECTED] {symbol} "
-                        f"P+={prob_pos:.2%} EV={ev:+.2f}"
-                    )
+        signal_score = (
+            weighted *
+            reg["risk_mult"] *
+            vw["mult"] *
+            vol["mult"] *
+            sw["mult"]
+        )
+
+        prob_pos, prob_neg, ev, allow_trade = pt_engine.estimate(
+            regime_conf=reg["confidence"],
+            vwap_mult=vw["mult"],
+            vol_mult=vol["mult"],
+            sweep_mult=sw["mult"],
+            raw_score=signal_score
+        )
+
+        if allow_trade:
+            execute_trade("FUTURES", symbol, round(signal_score, 2), eff)
+        else:
+            print(
+                f"[FUTURES REJECTED] {symbol} "
+                f"P+={prob_pos:.2%} EV={ev:+.2f}"
+            )
 
     save_json_state(FUTURES_BIAS_FILE, futures_symbol_bias)
     save_json_state(FUTURES_LOSS_FILE, futures_loss_streak)

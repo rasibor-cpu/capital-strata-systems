@@ -1,12 +1,13 @@
 """
 Futures Contract Specifications
-Capital Strata Systems – Phase 15+
+Capital Strata Systems – Phase 15+ / MES-MNQ Phase A
 
 Defines tick size, tick value, and multiplier
 for normalized risk calculation.
 
 All risk must resolve to dollar terms.
-Expanded to support FX pair simulation routing.
+Expanded to support FX pair simulation routing
+while preserving futures contract coverage.
 """
 
 from typing import Dict
@@ -27,6 +28,18 @@ FUTURES_SPECS: Dict[str, Dict[str, float]] = {
         "tick_size": 0.25,
         "tick_value": 5.00,
         "multiplier": 20,
+    },
+
+    "MES": {   # Micro E-mini S&P 500
+        "tick_size": 0.25,
+        "tick_value": 1.25,
+        "multiplier": 5,
+    },
+
+    "MNQ": {   # Micro E-mini Nasdaq-100
+        "tick_size": 0.25,
+        "tick_value": 0.50,
+        "multiplier": 2,
     },
 
     # =====================================
