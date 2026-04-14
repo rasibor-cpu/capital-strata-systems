@@ -15,3 +15,21 @@ Top Loser: EUR_GBP +309.7792
 Status:
 All four asset classes profitable simultaneously.
 Candidate Gold Baseline Achieved.
+
+CSS GOLD BASELINE RUN
+Date: 2026-04-14
+Cycle: 84
+
+Total PnL: +16317.0113
+
+Crypto PnL: +5831.0716
+FX PnL: +5292.7616
+Options PnL: +1448.0155
+Futures PnL: +3745.1626
+
+Top Winner: GC +1196.2464
+Top Loser: EUR_GBP +309.7792
+
+Status:
+All four asset classes profitable simultaneously.
+Candidate Gold Baseline Achieved.
