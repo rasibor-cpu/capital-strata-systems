@@ -15,6 +15,7 @@ from backend.app.risk.futures_position_manager import FuturesPositionManager
 from backend.scanner.options_chain_adapter import OptionsChainAdapter
 from backend.options.options_position_manager import OptionsPositionManager
 from backend.options.options_intelligence_engine import OptionsIntelligenceEngine
+from backend.options.option_pricing_calibration_engine import OptionPricingCalibrationEngine
 
 STATE_DIR = PROJECT_ROOT / "artifacts"
 STATE_DIR.mkdir(exist_ok=True)
@@ -347,6 +348,7 @@ futures_pm = FuturesPositionManager(futures_adapter)
 options_adapter = OptionsChainAdapter()
 options_pm = OptionsPositionManager()
 options_intel = OptionsIntelligenceEngine()
+options_pricing_engine = OptionPricingCalibrationEngine()
 
 futures_symbol_bias = load_json_state(
     FUTURES_BIAS_FILE,
