@@ -82,6 +82,12 @@ ENGINE_MODES = {
 BLEED_GOVERNOR_ENABLED = True
 BLEED_GOVERNOR_RATIO = 0.25
 
+OPTION_FALLBACK_MAX_PRICE = 6.50
+OPTION_MIN_PROBABILITY = 0.60
+OPTION_MIN_EXPECTED_VALUE = 1.50
+OPTION_MIN_SIGNAL_SCORE = 11.25
+OPTION_FORCE_FALLBACK_ONLY_IF_STRONG = True
+
 
 def load_json_state(path: Path, default: Dict):
     try:
@@ -560,10 +566,15 @@ def execute_intelligent_option_trade(
         raw_score=signal_score
     )
 
-    if not allow_trade:
+    if (
+        not allow_trade
+        or prob_pos < OPTION_MIN_PROBABILITY
+        or ev < OPTION_MIN_EXPECTED_VALUE
+        or signal_score < OPTION_MIN_SIGNAL_SCORE
+    ):
         print(
             f"[OPTIONS REJECTED] {underlying_symbol} "
-            f"P+={prob_pos:.2%} EV={ev:+.2f}"
+            f"P+={prob_pos:.2%} EV={ev:+.2f} SCORE={signal_score:.2f}"
         )
         return
 
@@ -575,8 +586,16 @@ def execute_intelligent_option_trade(
         direction=direction
     )
 
+    used_fallback_contract = False
     if not selected:
+        if OPTION_FORCE_FALLBACK_ONLY_IF_STRONG and (prob_pos < 0.66 or ev < 2.25):
+            print(
+                f"[OPTIONS SKIPPED] {underlying_symbol} no contract selected "
+                f"and fallback quality not strong enough"
+            )
+            return
         selected = option_rows[0]
+        used_fallback_contract = True
         print(f"[OPTIONS FALLBACK] {underlying_symbol} using first available contract")
 
     option_type = get_selected_option_type(selected)
@@ -600,8 +619,15 @@ def execute_intelligent_option_trade(
 
     entry_price = get_selected_entry_price(selected)
     if entry_price is None:
-        entry_price = round(random.uniform(1.0, 8.0), 2)
+        entry_price = round(random.uniform(1.0, OPTION_FALLBACK_MAX_PRICE), 2)
         print(f"[OPTIONS FALLBACK] {underlying_symbol} using synthetic price={entry_price}")
+
+    if used_fallback_contract and entry_price > OPTION_FALLBACK_MAX_PRICE:
+        print(
+            f"[OPTIONS SKIPPED] {underlying_symbol} fallback contract too expensive "
+            f"price={entry_price:.2f}"
+        )
+        return
 
     option_symbol = (
         f"{underlying_symbol}-"
@@ -634,7 +660,7 @@ def execute_intelligent_option_trade(
 
         print(
             f"[OPTIONS EXECUTED] {option_symbol} "
-            f"P+={prob_pos:.2%} EV={ev:+.2f}"
+            f"P+={prob_pos:.2%} EV={ev:+.2f} SCORE={signal_score:.2f}"
         )
     else:
         print(
