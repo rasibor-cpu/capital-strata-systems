@@ -16,6 +16,7 @@ from backend.scanner.options_chain_adapter import OptionsChainAdapter
 from backend.options.options_position_manager import OptionsPositionManager
 from backend.options.options_intelligence_engine import OptionsIntelligenceEngine
 from backend.options.option_pricing_calibration_engine import OptionPricingCalibrationEngine
+from backend.options.option_expiry_parser_engine import OptionExpiryParserEngine
 
 STATE_DIR = PROJECT_ROOT / "artifacts"
 STATE_DIR.mkdir(exist_ok=True)
@@ -349,6 +350,7 @@ options_adapter = OptionsChainAdapter()
 options_pm = OptionsPositionManager()
 options_intel = OptionsIntelligenceEngine()
 options_pricing_engine = OptionPricingCalibrationEngine()
+options_expiry_engine = OptionExpiryParserEngine()
 
 futures_symbol_bias = load_json_state(
     FUTURES_BIAS_FILE,
@@ -621,8 +623,26 @@ def execute_intelligent_option_trade(
 
     entry_price = get_selected_entry_price(selected)
     if entry_price is None:
-        entry_price = round(random.uniform(1.0, OPTION_FALLBACK_MAX_PRICE), 2)
-        print(f"[OPTIONS FALLBACK] {underlying_symbol} using synthetic price={entry_price}")
+        expiry_result = options_expiry_engine.build_expiry_result(
+            selected,
+            fallback_days=14
+        )
+        pricing_result = options_pricing_engine.estimate_premium(
+            underlying_price=float(underlying_rows[0]["price"]),
+            strike=float(strike),
+            option_type=option_type,
+            volatility_multiplier=float(vol["mult"]),
+            days_to_expiry=int(expiry_result["days_to_expiry"])
+        )
+        entry_price = round(pricing_result.premium, 2)
+        print(
+            f"[OPTIONS FALLBACK] {underlying_symbol} calibrated price={entry_price} "
+            f"intrinsic={pricing_result.intrinsic_value:.2f} "
+            f"time={pricing_result.time_value:.2f} "
+            f"decay={pricing_result.decay_factor:.2f} "
+            f"dte={expiry_result['days_to_expiry']} "
+            f"expiry={expiry_result['expiry_string']}"
+        )
 
     if used_fallback_contract and entry_price > OPTION_FALLBACK_MAX_PRICE:
         print(
