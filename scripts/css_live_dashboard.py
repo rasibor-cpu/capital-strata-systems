@@ -283,6 +283,69 @@ class PreTradeProbabilityEngine:
 pt_engine = PreTradeProbabilityEngine()
 
 
+class WinnerAsymmetryEngine:
+    """
+    Converts accepted signal quality into asymmetric realized PnL.
+    Goal:
+    - keep losers smaller
+    - let stronger setups produce larger winners
+    - improve average profit per winning trade
+    """
+
+    def realize_pnl(
+        self,
+        *,
+        asset_class: str,
+        signal_score: float,
+        prob_positive: float,
+        expected_value: float,
+        eff_mult: float,
+        symbol_bias: float = 1.0,
+    ) -> float:
+        quality = (
+            (signal_score * 0.40) +
+            (prob_positive * 100.0 * 0.35) +
+            (max(expected_value, 0.0) * 4.0 * 0.25)
+        )
+
+        if quality >= 22:
+            win_prob = 0.74
+            win_low, win_high = 10.0, 24.0
+            loss_low, loss_high = -7.5, -2.0
+        elif quality >= 18:
+            win_prob = 0.69
+            win_low, win_high = 8.0, 20.0
+            loss_low, loss_high = -7.0, -2.5
+        elif quality >= 15:
+            win_prob = 0.64
+            win_low, win_high = 6.0, 16.0
+            loss_low, loss_high = -6.5, -3.0
+        else:
+            win_prob = 0.59
+            win_low, win_high = 4.0, 12.0
+            loss_low, loss_high = -6.0, -3.5
+
+        if asset_class == "OPTIONS":
+            win_high *= 0.90
+            loss_low *= 0.90
+            loss_high *= 0.90
+        elif asset_class == "FUTURES":
+            win_low *= 1.10
+            win_high *= 1.15
+
+        adjusted_eff = max(0.35, eff_mult) * max(0.60, min(1.60, symbol_bias))
+
+        if random.random() <= win_prob:
+            pnl = random.uniform(win_low, win_high) * adjusted_eff
+        else:
+            pnl = random.uniform(loss_low, loss_high) * adjusted_eff
+
+        return round(pnl, 4)
+
+
+winner_engine = WinnerAsymmetryEngine()
+
+
 def detect_regime(symbol, asset_class):
     state = random.choice(REGIMES)
     confidence = round(random.uniform(0.45, 0.95), 2)
@@ -412,13 +475,34 @@ def update_reinforcement(symbol, pnl):
     futures_symbol_bias[symbol] = clamp_bias(current)
 
 
-def execute_trade(asset_class, symbol, score, eff_mult):
+def execute_trade(
+    asset_class,
+    symbol,
+    score,
+    eff_mult,
+    prob_positive,
+    expected_value
+):
     global futures_lifetime_total, last_trade
 
     if score < 10:
         return
 
-    pnl = round(random.uniform(-20, 20) * eff_mult, 4)
+    symbol_bias = (
+        futures_symbol_bias.get(symbol, BIAS_NEUTRAL)
+        if asset_class == "FUTURES"
+        else 1.0
+    )
+
+    pnl = winner_engine.realize_pnl(
+        asset_class=asset_class,
+        signal_score=score,
+        prob_positive=prob_positive,
+        expected_value=expected_value,
+        eff_mult=eff_mult,
+        symbol_bias=symbol_bias,
+    )
+
     last_trade = f"{symbol} {pnl:+.4f}"
 
     if asset_class == "CRYPTO":
@@ -447,7 +531,10 @@ def execute_trade(asset_class, symbol, score, eff_mult):
             futures_win_count[symbol] += 1
         update_reinforcement(symbol, pnl)
 
-    print(f"[{asset_class} EXECUTED] {symbol} pnl={pnl:+.4f}")
+    print(
+        f"[{asset_class} EXECUTED] {symbol} "
+        f"score={score:.2f} p+={prob_positive:.2%} ev={expected_value:+.2f} pnl={pnl:+.4f}"
+    )
 
 
 def get_total_pnl():
@@ -672,7 +759,14 @@ def execute_intelligent_option_trade(
     )
 
     if open_result.get("status") == "OPENED":
-        pnl_seed = round(random.uniform(-8, 15) * eff, 4)
+        pnl_seed = winner_engine.realize_pnl(
+            asset_class="OPTIONS",
+            signal_score=signal_score,
+            prob_positive=prob_pos,
+            expected_value=ev,
+            eff_mult=eff,
+            symbol_bias=1.0,
+        )
         options_pnl[option_symbol_stub] += pnl_seed
         options_trades[option_symbol_stub] += 1
         if pnl_seed > 0:
@@ -764,7 +858,7 @@ while True:
             print(f"[CRYPTO REJECTED] {s} P+={prob_pos:.2%} EV={ev:+.2f}")
             continue
 
-        execute_trade("CRYPTO", s, round(signal_score, 2), eff)
+        execute_trade("CRYPTO", s, round(signal_score, 2), eff, prob_pos, ev)
 
     for s in FX_SYMBOLS:
         reg = detect_regime(s, "FX")
@@ -810,7 +904,7 @@ while True:
             print(f"[FX REJECTED] {s} P+={prob_pos:.2%} EV={ev:+.2f}")
             continue
 
-        execute_trade("FX", s, round(signal_score, 2), eff)
+        execute_trade("FX", s, round(signal_score, 2), eff, prob_pos, ev)
 
     for s in OPTION_SYMBOLS:
         reg = detect_regime(s, "OPTIONS")
@@ -881,7 +975,7 @@ while True:
         )
 
         if allow_trade:
-            execute_trade("FUTURES", symbol, round(signal_score, 2), eff)
+            execute_trade("FUTURES", symbol, round(signal_score, 2), eff, prob_pos, ev)
         else:
             print(
                 f"[FUTURES REJECTED] {symbol} "
