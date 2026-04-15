@@ -2,6 +2,7 @@ from __future__ import annotations
 import sys
 import time
 import random
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
@@ -74,6 +75,7 @@ class LockedProfitLedger:
         self.accelerated_locks = 0
         self.decay_protections = 0
         self.priority_exits = 0
+        self.recycled_slots = 0
 
     def record_partial(self, amount: float):
         if amount > 0:
@@ -93,6 +95,9 @@ class LockedProfitLedger:
     def record_priority_exit(self):
         self.priority_exits += 1
 
+    def record_recycled_slot(self):
+        self.recycled_slots += 1
+
     def snapshot(self):
         return {
             "partial_profit_banked": round(self.partial_profit_banked, 4),
@@ -102,16 +107,72 @@ class LockedProfitLedger:
             "accelerated_locks": self.accelerated_locks,
             "decay_protections": self.decay_protections,
             "priority_exits": self.priority_exits,
+            "recycled_slots": self.recycled_slots,
         }
 
 
 locked_profit_ledger = LockedProfitLedger()
 
 
+class CapitalSlotRecyclingEngine:
+    """
+    PQR-6 Capital Slot Recycling Engine
+    Reassigns freed slots toward strongest asset classes and symbols.
+    """
+
+    def __init__(self):
+        self.asset_strength = defaultdict(float)
+        self.symbol_strength = defaultdict(float)
+
+    def record_win(self, asset_class: str, symbol: str, pnl: float):
+        if pnl > 0:
+            self.asset_strength[asset_class] += pnl
+            self.symbol_strength[symbol] += pnl
+
+    def top_asset_classes(self):
+        ranked = sorted(
+            self.asset_strength.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+        return [x[0] for x in ranked]
+
+    def top_symbols(self):
+        ranked = sorted(
+            self.symbol_strength.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+        return [x[0] for x in ranked[:10]]
+
+    def select_replacement_target(self):
+        top_assets = self.top_asset_classes()
+        top_syms = self.top_symbols()
+
+        if not top_assets or not top_syms:
+            return None, None
+
+        best_asset = top_assets[0]
+
+        for sym in top_syms:
+            if best_asset == "CRYPTO" and sym in SYMBOLS:
+                return best_asset, sym
+            elif best_asset == "FX" and sym in FX_SYMBOLS:
+                return best_asset, sym
+            elif best_asset == "OPTIONS" and sym in OPTION_SYMBOLS:
+                return best_asset, sym
+            elif best_asset == "FUTURES" and sym in FUTURES_SYMBOLS:
+                return best_asset, sym
+
+        return None, None
+
+
+slot_recycler = CapitalSlotRecyclingEngine()
+
+
 class ExitPriorityEngine:
     """
     PQR-5 Smart Exit Prioritization Engine
-    Ranks breached positions and ejects weakest first.
     """
 
     def __init__(self):
@@ -134,7 +195,6 @@ class ExitPriorityEngine:
             decay_ratio = max(0.0, (peak - floating) / peak)
 
         fragility = self.asset_fragility_weight.get(asset_class, 1.0)
-
         signal_deterioration = max(0.0, (15.0 - signal_score) / 15.0)
 
         weakness_score = (
@@ -147,8 +207,6 @@ class ExitPriorityEngine:
 
 
 exit_priority_engine = ExitPriorityEngine()
-
-
 class PartialProfitTrailEngine:
     def __init__(self):
         self.state = {}
@@ -178,6 +236,7 @@ class PartialProfitTrailEngine:
                 "last_peak_snapshot": 0.0,
                 "decay_guard_active": False,
             }
+
     def _get_profile(self, asset_class):
         return self.asset_floor_profiles.get(
             asset_class,
@@ -298,10 +357,6 @@ ppt_engine = PartialProfitTrailEngine()
 
 
 class SmartDriftEngine:
-    """
-    PQR-4 Smart Drift Engine
-    """
-
     def __init__(self):
         self.asset_volatility = {
             "CRYPTO": (0.8, 3.4),
@@ -393,6 +448,29 @@ class MarkToMarketEngine:
             "priority_score": 0.0,
         })
 
+    def recycle_freed_slots(self, count: int):
+        for _ in range(count):
+            asset_class, symbol = slot_recycler.select_replacement_target()
+            if not asset_class or not symbol:
+                continue
+
+            signal_map = {
+                "CRYPTO": (12.4, 0.69),
+                "FX": (11.7, 0.67),
+                "OPTIONS": (14.2, 0.72),
+                "FUTURES": (13.2, 0.70),
+            }
+            signal_score, prob_positive = signal_map.get(asset_class, (12.0, 0.68))
+
+            self.register_position(
+                asset_class=asset_class,
+                symbol=symbol,
+                realized_pnl=0.0,
+                signal_score=signal_score,
+                prob_positive=prob_positive
+            )
+            locked_profit_ledger.record_recycled_slot()
+
     def reprice_all_positions(self):
         by_asset = {
             "CRYPTO": 0.0,
@@ -402,6 +480,7 @@ class MarkToMarketEngine:
         }
 
         breached_candidates = []
+        freed_slots = 0
 
         for pos in self.positions:
             if pos["forced_exit"] or pos["remaining_size"] <= 0:
@@ -428,10 +507,6 @@ class MarkToMarketEngine:
                 pos["priority_score"] = exit_priority_engine.compute_priority_score(pos)
                 breached_candidates.append(pos)
 
-        # ---------------------------------
-        # PQR-5 selective priority exits
-        # Exit only the weakest breached names first
-        # ---------------------------------
         if breached_candidates:
             breached_candidates.sort(
                 key=lambda p: p["priority_score"],
@@ -445,6 +520,10 @@ class MarkToMarketEngine:
                 pos["floating"] = pos["locked_floor"]
                 locked_profit_ledger.record_forced_exit(pos["locked_floor"])
                 locked_profit_ledger.record_priority_exit()
+                freed_slots += 1
+
+        if freed_slots > 0:
+            self.recycle_freed_slots(freed_slots)
 
         for pos in self.positions:
             if pos["forced_exit"] or pos["remaining_size"] <= 0:
@@ -552,6 +631,7 @@ while True:
     print(f"ACCELERATED LOCKS: {ledger['accelerated_locks']}")
     print(f"DECAY PROTECTIONS: {ledger['decay_protections']}")
     print(f"PRIORITY EXITS: {ledger['priority_exits']}")
+    print(f"RECYCLED SLOTS: {ledger['recycled_slots']}")
     print(f"LAST TRADE: {last_trade}")
     print("-" * 60)
 
@@ -560,6 +640,7 @@ while True:
         safe_load_runtime_asset(s)
         pnl = round(random.uniform(-4, 18), 4)
         crypto_pnl[s] += pnl
+        slot_recycler.record_win("CRYPTO", s, pnl)
         mtm_engine.register_position(
             asset_class="CRYPTO",
             symbol=s,
@@ -574,6 +655,7 @@ while True:
     for s in FX_SYMBOLS:
         pnl = round(random.uniform(-3, 15), 4)
         fx_pnl[s] += pnl
+        slot_recycler.record_win("FX", s, pnl)
         mtm_engine.register_position(
             asset_class="FX",
             symbol=s,
@@ -588,6 +670,7 @@ while True:
     for s in OPTION_SYMBOLS:
         pnl = round(random.uniform(-6, 28), 4)
         options_pnl[s] += pnl
+        slot_recycler.record_win("OPTIONS", s, pnl)
         mtm_engine.register_position(
             asset_class="OPTIONS",
             symbol=s,
@@ -602,6 +685,7 @@ while True:
     for s in FUTURES_SYMBOLS:
         pnl = round(random.uniform(-5, 24), 4)
         futures_pnl[s] += pnl
+        slot_recycler.record_win("FUTURES", s, pnl)
         mtm_engine.register_position(
             asset_class="FUTURES",
             symbol=s,
