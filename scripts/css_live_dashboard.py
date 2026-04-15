@@ -24,18 +24,18 @@ STATE_DIR = PROJECT_ROOT / "artifacts"
 STATE_DIR.mkdir(exist_ok=True)
 
 SYMBOLS = [
-    "BTC-USD","ETH-USD","SOL-USD","XRP-USD","ADA-USD",
-    "DOGE-USD","AVAX-USD","LINK-USD","LTC-USD","BCH-USD"
+    "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD",
+    "DOGE-USD", "AVAX-USD", "LINK-USD", "LTC-USD", "BCH-USD"
 ]
 
 FX_SYMBOLS = [
-    "EUR_USD","GBP_USD","USD_JPY","USD_CHF",
-    "AUD_USD","USD_CAD","NZD_USD",
-    "EUR_GBP","EUR_JPY","GBP_JPY"
+    "EUR_USD", "GBP_USD", "USD_JPY", "USD_CHF",
+    "AUD_USD", "USD_CAD", "NZD_USD",
+    "EUR_GBP", "EUR_JPY", "GBP_JPY"
 ]
 
-OPTION_SYMBOLS = ["AAPL-C","SPY-C","QQQ-C"]
-FUTURES_SYMBOLS = ["ES","NQ","CL","GC"]
+OPTION_SYMBOLS = ["AAPL-C", "SPY-C", "QQQ-C"]
+FUTURES_SYMBOLS = ["ES", "NQ", "CL", "GC"]
 
 CYCLE_SLEEP = 8
 
@@ -148,13 +148,16 @@ class CapitalSlotRecyclingEngine:
     def select_replacement_target(self):
         top_assets = self.top_asset_classes()
         top_syms = self.top_symbols()
+        boosted = cluster_amplifier.boosted_symbols()
 
-        if not top_assets or not top_syms:
+        ranked_candidates = boosted + [s for s in top_syms if s not in boosted]
+
+        if not top_assets or not ranked_candidates:
             return None, None
 
         best_asset = top_assets[0]
 
-        for sym in top_syms:
+        for sym in ranked_candidates:
             if best_asset == "CRYPTO" and sym in SYMBOLS:
                 return best_asset, sym
             elif best_asset == "FX" and sym in FX_SYMBOLS:
@@ -168,6 +171,53 @@ class CapitalSlotRecyclingEngine:
 
 
 slot_recycler = CapitalSlotRecyclingEngine()
+
+
+class MomentumClusterAmplifier:
+    """
+    PQR-7 Momentum Cluster Amplifier
+    Detects dominant winning symbol clusters and amplifies slot recycling bias.
+    """
+
+    def __init__(self):
+        self.cluster_map = {
+            "CRYPTO_CORE": ["BTC-USD", "ETH-USD", "SOL-USD"],
+            "CRYPTO_ALT": ["XRP-USD", "ADA-USD", "DOGE-USD"],
+            "FX_MAJOR": ["EUR_USD", "GBP_USD", "EUR_GBP"],
+            "FX_YEN": ["USD_JPY", "EUR_JPY", "GBP_JPY"],
+            "OPTIONS_INDEX": ["SPY-C", "QQQ-C", "AAPL-C"],
+            "FUTURES_INDEX": ["ES", "NQ", "CL"],
+        }
+        self.cluster_strength = defaultdict(float)
+
+    def record_cluster_win(self, symbol: str, pnl: float):
+        if pnl <= 0:
+            return
+
+        for cluster_name, members in self.cluster_map.items():
+            if symbol in members:
+                self.cluster_strength[cluster_name] += pnl
+
+    def top_cluster(self):
+        if not self.cluster_strength:
+            return None
+
+        ranked = sorted(
+            self.cluster_strength.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+        return ranked[0][0]
+
+    def boosted_symbols(self):
+        cluster = self.top_cluster()
+        if not cluster:
+            return []
+
+        return self.cluster_map.get(cluster, [])
+
+
+cluster_amplifier = MomentumClusterAmplifier()
 
 
 class ExitPriorityEngine:
@@ -207,6 +257,8 @@ class ExitPriorityEngine:
 
 
 exit_priority_engine = ExitPriorityEngine()
+
+
 class PartialProfitTrailEngine:
     def __init__(self):
         self.state = {}
@@ -236,7 +288,6 @@ class PartialProfitTrailEngine:
                 "last_peak_snapshot": 0.0,
                 "decay_guard_active": False,
             }
-
     def _get_profile(self, asset_class):
         return self.asset_floor_profiles.get(
             asset_class,
@@ -603,6 +654,11 @@ def get_total_pnl():
     )
 
 
+def get_top_cluster_label():
+    top_cluster = cluster_amplifier.top_cluster()
+    return top_cluster if top_cluster else "NONE"
+
+
 while True:
     cycle += 1
     print(f"\n=== Cycle {cycle} | {datetime.now()} ===")
@@ -632,6 +688,7 @@ while True:
     print(f"DECAY PROTECTIONS: {ledger['decay_protections']}")
     print(f"PRIORITY EXITS: {ledger['priority_exits']}")
     print(f"RECYCLED SLOTS: {ledger['recycled_slots']}")
+    print(f"TOP CLUSTER: {get_top_cluster_label()}")
     print(f"LAST TRADE: {last_trade}")
     print("-" * 60)
 
@@ -641,6 +698,7 @@ while True:
         pnl = round(random.uniform(-4, 18), 4)
         crypto_pnl[s] += pnl
         slot_recycler.record_win("CRYPTO", s, pnl)
+        cluster_amplifier.record_cluster_win(s, pnl)
         mtm_engine.register_position(
             asset_class="CRYPTO",
             symbol=s,
@@ -656,6 +714,7 @@ while True:
         pnl = round(random.uniform(-3, 15), 4)
         fx_pnl[s] += pnl
         slot_recycler.record_win("FX", s, pnl)
+        cluster_amplifier.record_cluster_win(s, pnl)
         mtm_engine.register_position(
             asset_class="FX",
             symbol=s,
@@ -671,6 +730,7 @@ while True:
         pnl = round(random.uniform(-6, 28), 4)
         options_pnl[s] += pnl
         slot_recycler.record_win("OPTIONS", s, pnl)
+        cluster_amplifier.record_cluster_win(s, pnl)
         mtm_engine.register_position(
             asset_class="OPTIONS",
             symbol=s,
@@ -686,6 +746,7 @@ while True:
         pnl = round(random.uniform(-5, 24), 4)
         futures_pnl[s] += pnl
         slot_recycler.record_win("FUTURES", s, pnl)
+        cluster_amplifier.record_cluster_win(s, pnl)
         mtm_engine.register_position(
             asset_class="FUTURES",
             symbol=s,
