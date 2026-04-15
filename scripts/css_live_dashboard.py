@@ -1,5 +1,8 @@
 from __future__ import annotations
-import sys, time, random, json
+import sys
+import time
+import random
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Tuple, Optional
@@ -27,19 +30,19 @@ ASSET_EDGE_FILE = STATE_DIR / "asset_class_edge.json"
 SYMBOL_STREAK_FILE = STATE_DIR / "symbol_hot_streak.json"
 
 SYMBOLS = [
-    "BTC-USD","ETH-USD","SOL-USD","XRP-USD","ADA-USD",
-    "DOGE-USD","AVAX-USD","LINK-USD","LTC-USD","BCH-USD"
+    "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD",
+    "DOGE-USD", "AVAX-USD", "LINK-USD", "LTC-USD", "BCH-USD",
 ]
 
-FUTURES_SYMBOLS = ["ES","NQ","CL","GC"]
+FUTURES_SYMBOLS = ["ES", "NQ", "CL", "GC"]
 
 FX_SYMBOLS = [
-    "EUR_USD","GBP_USD","USD_JPY","USD_CHF",
-    "AUD_USD","USD_CAD","NZD_USD",
-    "EUR_GBP","EUR_JPY","GBP_JPY"
+    "EUR_USD", "GBP_USD", "USD_JPY", "USD_CHF",
+    "AUD_USD", "USD_CAD", "NZD_USD",
+    "EUR_GBP", "EUR_JPY", "GBP_JPY",
 ]
 
-OPTION_SYMBOLS = ["AAPL-C","SPY-C","QQQ-C"]
+OPTION_SYMBOLS = ["AAPL-C", "SPY-C", "QQQ-C"]
 
 CYCLE_SLEEP = 8
 
@@ -61,42 +64,42 @@ ASSET_EDGE_PENALTY = 0.02
 HOT_STREAK_MIN = -6
 HOT_STREAK_MAX = 12
 
-CAPITAL_MULTIPLIERS = {
-    "BLOCK":0.0,
-    "REDUCE":0.5,
-    "ALLOW":1.0,
-    "PRIORITIZE":1.5,
-}
-
-REGIMES = ["TREND","MEAN_REVERSION","MOMENTUM","NEUTRAL"]
+REGIMES = ["TREND", "MEAN_REVERSION", "MOMENTUM", "NEUTRAL"]
 
 VOL_STATES = {
-    "HIGH_VOL_EXPANDING":1.30,
-    "LOW_VOL_COMPRESSED":0.70,
-    "NORMAL_VOL":1.00,
-    "BREAKOUT_EXPANSION":1.40,
+    "HIGH_VOL_EXPANDING": 1.30,
+    "LOW_VOL_COMPRESSED": 0.70,
+    "NORMAL_VOL": 1.00,
+    "BREAKOUT_EXPANSION": 1.40,
 }
 
 SWEEP_STATES = {
-    "SWEEP_UP_REVERSAL":0.65,
-    "SWEEP_DOWN_REVERSAL":0.65,
-    "CLEAN_BREAKOUT":1.25,
-    "NO_SWEEP":1.00,
+    "SWEEP_UP_REVERSAL": 0.65,
+    "SWEEP_DOWN_REVERSAL": 0.65,
+    "CLEAN_BREAKOUT": 1.25,
+    "NO_SWEEP": 1.00,
+}
+
+CAPITAL_MULTIPLIERS = {
+    "BLOCK": 0.0,
+    "REDUCE": 0.5,
+    "ALLOW": 1.0,
+    "PRIORITIZE": 1.5,
 }
 
 ENGINE_MODES = {
-    "1":"SAFE",
-    "2":"CONSERVATIVE",
-    "3":"BALANCED",
-    "4":"AGGRESSIVE",
-    "5":"EXPANSION",
+    "1": "SAFE",
+    "2": "CONSERVATIVE",
+    "3": "BALANCED",
+    "4": "AGGRESSIVE",
+    "5": "EXPANSION",
 }
 
 
 def load_json_state(path: Path, default: Dict):
     try:
         if path.exists():
-            with open(path,"r") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
     except Exception:
         pass
@@ -105,26 +108,44 @@ def load_json_state(path: Path, default: Dict):
 
 def save_json_state(path: Path, data: Dict):
     try:
-        with open(path,"w") as f:
-            json.dump(data,f,indent=2)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
     except Exception:
         pass
 
 
-def clamp_bias(v):
+def clamp_bias(v: float) -> float:
     return max(BIAS_MIN, min(BIAS_MAX, v))
 
 
-def clamp_asset_edge(v):
+def clamp_asset_edge(v: float) -> float:
     return max(ASSET_EDGE_MIN, min(ASSET_EDGE_MAX, v))
 
 
-def clamp_hot_streak(v):
+def clamp_hot_streak(v: int) -> int:
     return max(HOT_STREAK_MIN, min(HOT_STREAK_MAX, v))
 
 
+def safe_load_runtime_asset(symbol: str):
+    try:
+        load_runtime_asset(symbol)
+        print(f"Fetched 288 candles for {symbol}")
+        return True
+    except Exception as e:
+        print(f"[FETCH FAIL] {symbol}: {str(e)[:80]}")
+        return False
+
+
+def select_engine_mode():
+    print("\n=== CSS ENGINE MODE SELECTOR ===")
+    for k, v in ENGINE_MODES.items():
+        print(f"{k}. {v}")
+    choice = input("Enter choice (1-5) [default=3]: ").strip()
+    return ENGINE_MODES.get(choice, "BALANCED")
+
+
 class ExecutionCostEngine:
-    def passes_cost_gate(self, asset_class, gross_edge, signal_score):
+    def passes_cost_gate(self, asset_class: str, gross_edge: float, signal_score: float) -> Tuple[bool, float, float]:
         base_cost = {
             "CRYPTO": random.uniform(0.08, 1.10),
             "FX": random.uniform(0.05, 0.80),
@@ -138,7 +159,7 @@ class ExecutionCostEngine:
         net_edge = gross_edge - execution_cost
         passed = net_edge > 0.0
 
-        return passed, round(net_edge,4), execution_cost
+        return passed, round(net_edge, 4), execution_cost
 
 
 cost_engine = ExecutionCostEngine()
@@ -148,17 +169,17 @@ class ProfitPerWinnerEngine:
     def get_multiplier(
         self,
         *,
-        asset_class,
-        signal_score,
-        prob_positive,
-        expected_value,
-        hot_streak
-    ):
+        asset_class: str,
+        signal_score: float,
+        prob_positive: float,
+        expected_value: float,
+        hot_streak: int,
+    ) -> Tuple[str, float]:
         quality = (
-            signal_score * 0.35 +
-            prob_positive * 100 * 0.35 +
-            max(expected_value,0.0) * 4 * 0.20 +
-            hot_streak * 0.10
+            signal_score * 0.35
+            + prob_positive * 100 * 0.35
+            + max(expected_value, 0.0) * 4 * 0.20
+            + hot_streak * 0.10
         )
 
         if quality >= 24:
@@ -172,16 +193,18 @@ class ProfitPerWinnerEngine:
 
 
 ppw_engine = ProfitPerWinnerEngine()
+
+
 class PreTradeProbabilityEngine:
     def estimate(
         self,
         *,
-        regime_conf,
-        vwap_mult,
-        vol_mult,
-        sweep_mult,
-        raw_score
-    ):
+        regime_conf: float,
+        vwap_mult: float,
+        vol_mult: float,
+        sweep_mult: float,
+        raw_score: float,
+    ) -> Tuple[float, float, float, bool]:
         regime_component = regime_conf * 0.30
         vwap_component = min(vwap_mult / 1.5, 1.0) * 0.20
         vol_component = min(vol_mult / 1.4, 1.0) * 0.15
@@ -202,10 +225,10 @@ class PreTradeProbabilityEngine:
         execute = prob_positive >= 0.58 and expected_value > 0
 
         return (
-            round(prob_positive,4),
-            round(prob_negative,4),
-            round(expected_value,4),
-            execute
+            round(prob_positive, 4),
+            round(prob_negative, 4),
+            round(expected_value, 4),
+            execute,
         )
 
 
@@ -216,21 +239,21 @@ class WinnerAsymmetryEngine:
     def realize_pnl(
         self,
         *,
-        asset_class,
-        signal_score,
-        prob_positive,
-        expected_value,
-        eff_mult,
-        symbol_bias=1.0,
-        asset_edge=1.0,
-        hot_streak=0,
-        execution_cost=0.0
-    ):
+        asset_class: str,
+        signal_score: float,
+        prob_positive: float,
+        expected_value: float,
+        eff_mult: float,
+        symbol_bias: float = 1.0,
+        asset_edge: float = 1.0,
+        hot_streak: int = 0,
+        execution_cost: float = 0.0,
+    ) -> float:
         quality = (
-            signal_score * 0.38 +
-            prob_positive * 100.0 * 0.34 +
-            max(expected_value,0.0) * 4.0 * 0.20 +
-            asset_edge * 5.0 * 0.08
+            signal_score * 0.38
+            + prob_positive * 100.0 * 0.34
+            + max(expected_value, 0.0) * 4.0 * 0.20
+            + asset_edge * 5.0 * 0.08
         )
 
         if quality >= 22:
@@ -256,11 +279,11 @@ class WinnerAsymmetryEngine:
         adjusted_eff *= max(0.88, min(1.12, 1.0 + hot_streak * 0.04))
 
         won_trade = random.random() <= win_prob
-
-        if won_trade:
-            gross_pnl = random.uniform(win_low, win_high) * adjusted_eff
-        else:
-            gross_pnl = random.uniform(loss_low, loss_high) * adjusted_eff
+        gross_pnl = (
+            random.uniform(win_low, win_high) * adjusted_eff
+            if won_trade
+            else random.uniform(loss_low, loss_high) * adjusted_eff
+        )
 
         net_pnl = gross_pnl - execution_cost
 
@@ -270,16 +293,14 @@ class WinnerAsymmetryEngine:
                 signal_score=signal_score,
                 prob_positive=prob_positive,
                 expected_value=expected_value,
-                hot_streak=hot_streak
+                hot_streak=hot_streak,
             )
             net_pnl *= mult
 
-        return round(net_pnl,4)
+        return round(net_pnl, 4)
 
 
 winner_engine = WinnerAsymmetryEngine()
-
-
 class MarkToMarketEngine:
     def __init__(self):
         self.positions = []
@@ -287,12 +308,12 @@ class MarkToMarketEngine:
     def register_position(
         self,
         *,
-        asset_class,
-        symbol,
-        entry_pnl,
-        signal_score,
-        prob_positive,
-        realized_pnl
+        asset_class: str,
+        symbol: str,
+        entry_pnl: float,
+        signal_score: float,
+        prob_positive: float,
+        realized_pnl: float,
     ):
         self.positions.append({
             "asset_class": asset_class,
@@ -301,55 +322,197 @@ class MarkToMarketEngine:
             "signal_score": signal_score,
             "prob_positive": prob_positive,
             "realized_pnl": realized_pnl,
-            "floating": 0.0
+            "floating": 0.0,
+            "peak_unrealized": 0.0,
+            "remaining_size": 1.0,
+            "locked_floor": 0.0,
+            "partials_taken": 0.0,
+            "tier1_done": False,
+            "tier2_done": False,
+            "tier3_done": False,
+            "tier4_done": False,
+            "tier5_done": False,
+            "trailing_active": False,
+            "forced_exit": False,
         })
 
     def reprice_all_positions(self):
         by_asset = {
-            "CRYPTO":0.0,
-            "FX":0.0,
-            "OPTIONS":0.0,
-            "FUTURES":0.0
+            "CRYPTO": 0.0,
+            "FX": 0.0,
+            "OPTIONS": 0.0,
+            "FUTURES": 0.0,
         }
 
         for pos in self.positions:
+            if pos["forced_exit"] or pos["remaining_size"] <= 0:
+                continue
+
             drift = random.uniform(-1.5, 3.0)
             pos["floating"] += drift
-            by_asset[pos["asset_class"]] += pos["floating"]
+
+            if pos["floating"] > pos["peak_unrealized"]:
+                pos["peak_unrealized"] = pos["floating"]
+
+            trail_result = ppt_engine.process_position(
+                asset_class=pos["asset_class"],
+                symbol=pos["symbol"],
+                current_unrealized=pos["floating"],
+            )
+
+            pos["remaining_size"] = trail_result["remaining_size"]
+            pos["locked_floor"] = trail_result["locked_floor"]
+            pos["trailing_active"] = trail_result["trailing_active"]
+            pos["partials_taken"] = trail_result["partials_taken"]
+            pos["peak_unrealized"] = max(pos["peak_unrealized"], trail_result["peak_unrealized"])
+
+            if trail_result["force_exit"]:
+                pos["forced_exit"] = True
+                pos["floating"] = pos["locked_floor"]
+
+            by_asset[pos["asset_class"]] += pos["floating"] * pos["remaining_size"]
 
         for k in by_asset:
-            by_asset[k] = round(by_asset[k],4)
+            by_asset[k] = round(by_asset[k], 4)
 
         return by_asset
 
     def total_unrealized(self):
-        return round(
-            sum(p["floating"] for p in self.positions),
-            4
-        )
+        total = 0.0
+        for p in self.positions:
+            if p["forced_exit"] or p["remaining_size"] <= 0:
+                continue
+            total += p["floating"] * p["remaining_size"]
+        return round(total, 4)
 
     def count_open_positions(self):
-        return len(self.positions)
+        return sum(
+            1 for p in self.positions
+            if not p["forced_exit"] and p["remaining_size"] > 0
+        )
+
+    def total_partials_taken(self):
+        return round(sum(p["partials_taken"] for p in self.positions), 4)
+
+    def total_trailing_active(self):
+        return sum(1 for p in self.positions if p["trailing_active"] and not p["forced_exit"])
 
 
 mtm_engine = MarkToMarketEngine()
 
 
-def weighted_score(raw_score, symbol):
+class PartialProfitTrailEngine:
+    """
+    Tier 1 @ +1.0R -> close 25%, lock breakeven
+    Tier 2 @ +2.0R -> close 25%, lock +0.8R
+    Tier 3 @ +3.5R -> close 20%, lock +1.8R
+    Tier 4 @ +5.0R -> close 15%, trail 35% giveback
+    Tier 5 @ +7.0R -> dynamic lock at 50% peak
+    """
+
+    def __init__(self):
+        self.state = {}
+
+    def _init_position(self, key: str):
+        if key not in self.state:
+            self.state[key] = {
+                "remaining_size": 1.0,
+                "peak_unrealized": 0.0,
+                "locked_floor": 0.0,
+                "tier1_done": False,
+                "tier2_done": False,
+                "tier3_done": False,
+                "tier4_done": False,
+                "tier5_done": False,
+                "trailing_active": False,
+                "partials_taken": 0.0,
+            }
+
+    def process_position(
+        self,
+        *,
+        asset_class: str,
+        symbol: str,
+        current_unrealized: float,
+    ) -> Dict[str, float]:
+        key = f"{asset_class}::{symbol}"
+        self._init_position(key)
+        st = self.state[key]
+
+        if current_unrealized > st["peak_unrealized"]:
+            st["peak_unrealized"] = current_unrealized
+
+        peak = st["peak_unrealized"]
+
+        if current_unrealized >= 1.0 and not st["tier1_done"]:
+            close_pct = 0.25
+            st["remaining_size"] -= close_pct
+            st["partials_taken"] += close_pct
+            st["locked_floor"] = max(st["locked_floor"], 0.0)
+            st["tier1_done"] = True
+
+        if current_unrealized >= 2.0 and not st["tier2_done"]:
+            close_pct = 0.25
+            st["remaining_size"] -= close_pct
+            st["partials_taken"] += close_pct
+            st["locked_floor"] = max(st["locked_floor"], 0.8)
+            st["tier2_done"] = True
+
+        if current_unrealized >= 3.5 and not st["tier3_done"]:
+            close_pct = 0.20
+            st["remaining_size"] -= close_pct
+            st["partials_taken"] += close_pct
+            st["locked_floor"] = max(st["locked_floor"], 1.8)
+            st["tier3_done"] = True
+
+        if current_unrealized >= 5.0 and not st["tier4_done"]:
+            close_pct = 0.15
+            st["remaining_size"] -= close_pct
+            st["partials_taken"] += close_pct
+            st["trailing_active"] = True
+            st["locked_floor"] = max(st["locked_floor"], peak * 0.65)
+            st["tier4_done"] = True
+
+        if current_unrealized >= 7.0:
+            st["trailing_active"] = True
+            st["tier5_done"] = True
+            dynamic_floor = peak * 0.50
+            st["locked_floor"] = max(st["locked_floor"], dynamic_floor)
+
+        if st["trailing_active"]:
+            trail_floor = peak * 0.65
+            st["locked_floor"] = max(st["locked_floor"], trail_floor)
+
+        force_exit = current_unrealized < st["locked_floor"]
+
+        return {
+            "remaining_size": round(st["remaining_size"], 4),
+            "peak_unrealized": round(st["peak_unrealized"], 4),
+            "locked_floor": round(st["locked_floor"], 4),
+            "partials_taken": round(st["partials_taken"], 4),
+            "trailing_active": st["trailing_active"],
+            "force_exit": force_exit,
+        }
+
+
+ppt_engine = PartialProfitTrailEngine()
+
+
+def weighted_score(raw_score: float, symbol: str) -> float:
     return raw_score * futures_symbol_bias.get(symbol, BIAS_NEUTRAL)
 
 
-def get_hot_key(asset_class, symbol):
+def get_hot_key(asset_class: str, symbol: str) -> str:
     return f"{asset_class}::{symbol}"
 
 
-def get_symbol_hot_streak(asset_class, symbol):
-    return int(symbol_hot_streak.get(get_hot_key(asset_class,symbol),0))
+def get_symbol_hot_streak(asset_class: str, symbol: str) -> int:
+    return int(symbol_hot_streak.get(get_hot_key(asset_class, symbol), 0))
 
 
-def update_symbol_hot_streak(asset_class, symbol, pnl):
-    key = get_hot_key(asset_class,symbol)
-    current = int(symbol_hot_streak.get(key,0))
+def update_symbol_hot_streak(asset_class: str, symbol: str, pnl: float):
+    key = get_hot_key(asset_class, symbol)
+    current = int(symbol_hot_streak.get(key, 0))
 
     if pnl > 0:
         current = current + 1 if current >= 0 else 1
@@ -366,17 +529,13 @@ def decay_asset_edges():
         elif current < 1.0:
             current += ((1.0 - current) * ASSET_EDGE_DECAY)
 
-        asset_class_edge[asset_class] = round(
-            clamp_asset_edge(current),6
-        )
+        asset_class_edge[asset_class] = round(clamp_asset_edge(current), 6)
 
 
-def update_asset_edge(asset_class, pnl):
-    current = float(asset_class_edge.get(asset_class,1.0))
+def update_asset_edge(asset_class: str, pnl: float):
+    current = float(asset_class_edge.get(asset_class, 1.0))
     current += ASSET_EDGE_REWARD if pnl > 0 else -ASSET_EDGE_PENALTY
-    asset_class_edge[asset_class] = round(
-        clamp_asset_edge(current),6
-    )
+    asset_class_edge[asset_class] = round(clamp_asset_edge(current), 6)
 def apply_bias_decay():
     for symbol, current in list(futures_symbol_bias.items()):
         if current > BIAS_NEUTRAL:
@@ -387,8 +546,8 @@ def apply_bias_decay():
         futures_symbol_bias[symbol] = clamp_bias(current)
 
 
-def update_reinforcement(symbol, pnl):
-    current = futures_symbol_bias.get(symbol,BIAS_NEUTRAL)
+def update_reinforcement(symbol: str, pnl: float):
+    current = futures_symbol_bias.get(symbol, BIAS_NEUTRAL)
 
     if pnl > 0:
         futures_loss_streak[symbol] = 0
@@ -407,25 +566,28 @@ def update_reinforcement(symbol, pnl):
     futures_symbol_bias[symbol] = clamp_bias(current)
 
 
-def safe_load_runtime_asset(symbol: str):
-    try:
-        load_runtime_asset(symbol)
-        print(f"Fetched 288 candles for {symbol}")
-        return True
-    except Exception as e:
-        print(f"[FETCH FAIL] {symbol}: {str(e)[:80]}")
-        return False
+def compute_vwap_state(symbol: str):
+    distance_pct = round(random.uniform(-3.0, 3.0), 2)
+    slope = random.choice(["RISING", "FLAT", "FALLING"])
+
+    if distance_pct > 0 and slope == "RISING":
+        state = "ABOVE_RISING"
+        mult = 1.25
+    elif distance_pct < 0 and slope == "FALLING":
+        state = "BELOW_FALLING"
+        mult = 0.75
+    else:
+        state = "NEUTRAL"
+        mult = 1.00
+
+    return {
+        "state": state,
+        "mult": mult,
+        "distance_pct": distance_pct,
+    }
 
 
-def select_engine_mode():
-    print("\n=== CSS ENGINE MODE SELECTOR ===")
-    for k, v in ENGINE_MODES.items():
-        print(f"{k}. {v}")
-    choice = input("Enter choice (1-5) [default=3]: ").strip()
-    return ENGINE_MODES.get(choice, "BALANCED")
-
-
-def detect_regime(symbol, asset_class):
+def detect_regime(symbol: str, asset_class: str):
     state = random.choice(REGIMES)
     confidence = round(random.uniform(0.45, 0.95), 2)
 
@@ -447,25 +609,8 @@ def detect_regime(symbol, asset_class):
         "confidence": confidence,
         "risk_mult": risk_mult,
         "priority": priority,
-        "capital_mult": CAPITAL_MULTIPLIERS[priority]
+        "capital_mult": CAPITAL_MULTIPLIERS[priority],
     }
-
-
-def compute_vwap_state(symbol):
-    distance_pct = round(random.uniform(-3.0, 3.0), 2)
-    slope = random.choice(["RISING", "FLAT", "FALLING"])
-
-    if distance_pct > 0 and slope == "RISING":
-        state = "ABOVE_RISING"
-        mult = 1.25
-    elif distance_pct < 0 and slope == "FALLING":
-        state = "BELOW_FALLING"
-        mult = 0.75
-    else:
-        state = "NEUTRAL"
-        mult = 1.00
-
-    return {"state": state, "mult": mult, "distance_pct": distance_pct}
 
 
 ENGINE_MODE = select_engine_mode()
@@ -482,22 +627,22 @@ options_expiry_engine = OptionExpiryParserEngine()
 
 futures_symbol_bias = load_json_state(
     FUTURES_BIAS_FILE,
-    {s:1.0 for s in FUTURES_SYMBOLS}
+    {s: 1.0 for s in FUTURES_SYMBOLS},
 )
 
 futures_loss_streak = load_json_state(
     FUTURES_LOSS_FILE,
-    {s:0 for s in FUTURES_SYMBOLS}
+    {s: 0 for s in FUTURES_SYMBOLS},
 )
 
 asset_class_edge = load_json_state(
     ASSET_EDGE_FILE,
     {
-        "CRYPTO":1.0,
-        "FX":1.0,
-        "OPTIONS":1.0,
-        "FUTURES":1.0
-    }
+        "CRYPTO": 1.0,
+        "FX": 1.0,
+        "OPTIONS": 1.0,
+        "FUTURES": 1.0,
+    },
 )
 
 all_hot_keys = (
@@ -509,20 +654,19 @@ all_hot_keys = (
 
 symbol_hot_streak = load_json_state(
     SYMBOL_STREAK_FILE,
-    {k:0 for k in all_hot_keys}
+    {k: 0 for k in all_hot_keys},
 )
 
-crypto_pnl = {s:0.0 for s in SYMBOLS}
-fx_pnl = {s:0.0 for s in FX_SYMBOLS}
-options_pnl = {s:0.0 for s in OPTION_SYMBOLS}
-futures_realized_pnl = {s:0.0 for s in FUTURES_SYMBOLS}
+crypto_pnl = {s: 0.0 for s in SYMBOLS}
+fx_pnl = {s: 0.0 for s in FX_SYMBOLS}
+options_pnl = {s: 0.0 for s in OPTION_SYMBOLS}
+futures_realized_pnl = {s: 0.0 for s in FUTURES_SYMBOLS}
 
-crypto_trades = {s:0 for s in SYMBOLS}
-fx_trades = {s:0 for s in FX_SYMBOLS}
-options_trades = {s:0 for s in OPTION_SYMBOLS}
-futures_trade_count = {s:0 for s in FUTURES_SYMBOLS}
+crypto_trades = {s: 0 for s in SYMBOLS}
+fx_trades = {s: 0 for s in FX_SYMBOLS}
+options_trades = {s: 0 for s in OPTION_SYMBOLS}
+futures_trade_count = {s: 0 for s in FUTURES_SYMBOLS}
 
-futures_lifetime_total = 0.0
 last_trade = "NONE"
 cycle = 0
 
@@ -533,33 +677,26 @@ def get_total_pnl():
         sum(fx_pnl.values()) +
         sum(options_pnl.values()) +
         sum(futures_realized_pnl.values()),
-        4
+        4,
     )
 
 
 def get_asset_class_pnls():
     return {
-        "CRYPTO":round(sum(crypto_pnl.values()),4),
-        "FX":round(sum(fx_pnl.values()),4),
-        "OPTIONS":round(sum(options_pnl.values()),4),
-        "FUTURES":round(sum(futures_realized_pnl.values()),4),
+        "CRYPTO": round(sum(crypto_pnl.values()), 4),
+        "FX": round(sum(fx_pnl.values()), 4),
+        "OPTIONS": round(sum(options_pnl.values()), 4),
+        "FUTURES": round(sum(futures_realized_pnl.values()), 4),
     }
 
 
-def execute_trade(
-    asset_class,
-    symbol,
-    score,
-    eff_mult,
-    prob_positive,
-    expected_value
-):
-    global futures_lifetime_total, last_trade
+def execute_trade(asset_class, symbol, score, eff_mult, prob_positive, expected_value):
+    global last_trade
 
     passed, net_edge, execution_cost = cost_engine.passes_cost_gate(
         asset_class=asset_class,
         gross_edge=expected_value,
-        signal_score=score
+        signal_score=score,
     )
 
     if not passed:
@@ -578,11 +715,11 @@ def execute_trade(
         signal_score=score,
         prob_positive=prob_positive,
         expected_value=net_edge,
-        hot_streak=hot_streak
+        hot_streak=hot_streak,
     )
 
     symbol_bias = (
-        futures_symbol_bias.get(symbol,BIAS_NEUTRAL)
+        futures_symbol_bias.get(symbol, BIAS_NEUTRAL)
         if asset_class == "FUTURES"
         else 1.0
     )
@@ -594,9 +731,9 @@ def execute_trade(
         expected_value=net_edge,
         eff_mult=eff_mult,
         symbol_bias=symbol_bias,
-        asset_edge=asset_class_edge.get(asset_class,1.0),
+        asset_edge=asset_class_edge.get(asset_class, 1.0),
         hot_streak=hot_streak,
-        execution_cost=execution_cost
+        execution_cost=execution_cost,
     )
 
     last_trade = f"{symbol} {pnl:+.4f}"
@@ -604,19 +741,15 @@ def execute_trade(
     if asset_class == "CRYPTO":
         crypto_pnl[symbol] += pnl
         crypto_trades[symbol] += 1
-
     elif asset_class == "FX":
         fx_pnl[symbol] += pnl
         fx_trades[symbol] += 1
-
     elif asset_class == "OPTIONS":
         options_pnl[symbol] += pnl
         options_trades[symbol] += 1
-
     elif asset_class == "FUTURES":
         futures_realized_pnl[symbol] += pnl
         futures_trade_count[symbol] += 1
-        futures_lifetime_total += pnl
         update_reinforcement(symbol, pnl)
 
     update_asset_edge(asset_class, pnl)
@@ -628,113 +761,11 @@ def execute_trade(
         entry_pnl=0.0,
         signal_score=score,
         prob_positive=prob_positive,
-        realized_pnl=pnl
+        realized_pnl=pnl,
     )
 
     print(
         f"[{asset_class} EXECUTED] {symbol} "
-        f"netEV={net_edge:+.2f} "
-        f"cost={execution_cost:.4f} "
-        f"ppw={tier}:{mult:.2f} "
-        f"pnl={pnl:+.4f}"
-    )
-
-
-def execute_intelligent_option_trade(
-    option_symbol_stub,
-    reg,
-    vw,
-    vol,
-    sw,
-    cycle,
-    eff
-):
-    global last_trade
-
-    if reg["priority"] == "BLOCK":
-        return
-
-    direction = "CALL" if vw["distance_pct"] >= 0 else "PUT"
-    underlying_symbol = option_symbol_stub.split("-")[0]
-
-    raw_score = round(random.uniform(8,18),2)
-    signal_score = (
-        raw_score *
-        reg["risk_mult"] *
-        vw["mult"] *
-        vol *
-        sw["mult"]
-    )
-
-    prob_pos, _, ev, allow_trade = pt_engine.estimate(
-        regime_conf=reg["confidence"],
-        vwap_mult=vw["mult"],
-        vol_mult=1.0,
-        sweep_mult=sw["mult"],
-        raw_score=signal_score
-    )
-
-    if not allow_trade:
-        return
-
-    passed, net_edge, execution_cost = cost_engine.passes_cost_gate(
-        asset_class="OPTIONS",
-        gross_edge=ev,
-        signal_score=signal_score
-    )
-
-    if not passed:
-        print(
-            f"[OPTIONS COST BLOCKED] {underlying_symbol} "
-            f"grossEV={ev:+.2f} "
-            f"netEV={net_edge:+.2f} "
-            f"cost={execution_cost:.4f}"
-        )
-        return
-
-    option_symbol = f"{underlying_symbol}-{direction[0]}-{int(random.uniform(100,250))}"
-
-    hot_streak = get_symbol_hot_streak("OPTIONS", option_symbol_stub)
-
-    tier, mult = ppw_engine.get_multiplier(
-        asset_class="OPTIONS",
-        signal_score=signal_score,
-        prob_positive=prob_pos,
-        expected_value=net_edge,
-        hot_streak=hot_streak
-    )
-
-    pnl = winner_engine.realize_pnl(
-        asset_class="OPTIONS",
-        signal_score=signal_score,
-        prob_positive=prob_pos,
-        expected_value=net_edge,
-        eff_mult=eff,
-        symbol_bias=1.0,
-        asset_edge=asset_class_edge.get("OPTIONS",1.0),
-        hot_streak=hot_streak,
-        execution_cost=execution_cost
-    )
-
-    options_pnl[option_symbol_stub] += pnl
-    options_trades[option_symbol_stub] += 1
-
-    update_asset_edge("OPTIONS", pnl)
-    update_symbol_hot_streak("OPTIONS", option_symbol_stub, pnl)
-
-    mtm_engine.register_position(
-        asset_class="OPTIONS",
-        symbol=option_symbol,
-        entry_pnl=0.0,
-        signal_score=signal_score,
-        prob_positive=prob_pos,
-        realized_pnl=pnl
-    )
-
-    last_trade = f"{option_symbol} {pnl:+.4f}"
-
-    print(
-        f"[OPTIONS EXECUTED] {option_symbol} "
         f"netEV={net_edge:+.2f} "
         f"cost={execution_cost:.4f} "
         f"ppw={tier}:{mult:.2f} "
@@ -751,7 +782,6 @@ while True:
 
     floating_by_asset = mtm_engine.reprice_all_positions()
     total_unrealized = mtm_engine.total_unrealized()
-
     total_realized = get_total_pnl()
     asset_pnls = get_asset_class_pnls()
 
@@ -759,116 +789,75 @@ while True:
     print(f"REALIZED PNL: {total_realized:+.4f}")
     print(f"UNREALIZED PNL: {total_unrealized:+.4f}")
     print(f"TOTAL EQUITY PNL: {total_realized + total_unrealized:+.4f}")
-    print(
-        f"CRYPTO REALIZED: {asset_pnls['CRYPTO']:+.4f} | "
-        f"FLOATING: {floating_by_asset['CRYPTO']:+.4f}"
-    )
-    print(
-        f"FX REALIZED: {asset_pnls['FX']:+.4f} | "
-        f"FLOATING: {floating_by_asset['FX']:+.4f}"
-    )
-    print(
-        f"OPTIONS REALIZED: {asset_pnls['OPTIONS']:+.4f} | "
-        f"FLOATING: {floating_by_asset['OPTIONS']:+.4f}"
-    )
-    print(
-        f"FUTURES REALIZED: {asset_pnls['FUTURES']:+.4f} | "
-        f"FLOATING: {floating_by_asset['FUTURES']:+.4f}"
-    )
+    print(f"CRYPTO REALIZED: {asset_pnls['CRYPTO']:+.4f} | FLOATING: {floating_by_asset['CRYPTO']:+.4f}")
+    print(f"FX REALIZED: {asset_pnls['FX']:+.4f} | FLOATING: {floating_by_asset['FX']:+.4f}")
+    print(f"OPTIONS REALIZED: {asset_pnls['OPTIONS']:+.4f} | FLOATING: {floating_by_asset['OPTIONS']:+.4f}")
+    print(f"FUTURES REALIZED: {asset_pnls['FUTURES']:+.4f} | FLOATING: {floating_by_asset['FUTURES']:+.4f}")
     print(f"OPEN POSITIONS: {mtm_engine.count_open_positions()}")
+    print(f"PARTIALS TAKEN: {mtm_engine.total_partials_taken():+.4f}")
+    print(f"TRAILING ACTIVE: {mtm_engine.total_trailing_active()}")
     print(f"LAST TRADE: {last_trade}")
     print("-" * 60)
 
-    for s in SYMBOLS:
-        safe_load_runtime_asset(s)
-        reg = detect_regime(s, "CRYPTO")
-        vw = compute_vwap_state(s)
-        vol = random.choice(list(VOL_STATES.values()))
-        sw = compute_vwap_state(s)
+    all_assets = [
+        ("CRYPTO", SYMBOLS),
+        ("FX", FX_SYMBOLS),
+        ("OPTIONS", OPTION_SYMBOLS),
+        ("FUTURES", FUTURES_SYMBOLS),
+    ]
 
-        if reg["priority"] == "BLOCK":
-            continue
+    for asset_class, asset_list in all_assets:
+        for s in asset_list:
+            if asset_class == "CRYPTO":
+                safe_load_runtime_asset(s)
 
-        raw_score = round(random.uniform(8,18),2)
-        signal_score = raw_score * reg["risk_mult"] * vw["mult"] * vol * sw["mult"]
+            reg = detect_regime(s, asset_class)
+            vw = compute_vwap_state(s)
+            vol = random.choice(list(VOL_STATES.values()))
+            sw = random.choice(list(SWEEP_STATES.values()))
 
-        prob_pos, _, ev, allow_trade = pt_engine.estimate(
-            regime_conf=reg["confidence"],
-            vwap_mult=vw["mult"],
-            vol_mult=vol,
-            sweep_mult=sw["mult"],
-            raw_score=signal_score
-        )
+            if reg["priority"] == "BLOCK":
+                continue
 
-        if allow_trade:
-            eff = reg["capital_mult"] * vw["mult"] * vol * sw["mult"]
-            execute_trade("CRYPTO", s, signal_score, eff, prob_pos, ev)
+            raw_score = round(random.uniform(8, 18), 2)
 
-    for s in FX_SYMBOLS:
-        reg = detect_regime(s, "FX")
-        vw = compute_vwap_state(s)
-        vol = random.choice(list(VOL_STATES.values()))
-        sw = compute_vwap_state(s)
+            if asset_class == "FUTURES":
+                raw_score = weighted_score(raw_score, s)
 
-        if reg["priority"] == "BLOCK":
-            continue
+            signal_score = (
+                raw_score *
+                reg["risk_mult"] *
+                vw["mult"] *
+                vol *
+                sw
+            )
 
-        raw_score = round(random.uniform(8,18),2)
-        signal_score = raw_score * reg["risk_mult"] * vw["mult"] * vol * sw["mult"]
+            prob_pos, _, ev, allow_trade = pt_engine.estimate(
+                regime_conf=reg["confidence"],
+                vwap_mult=vw["mult"],
+                vol_mult=vol,
+                sweep_mult=sw,
+                raw_score=signal_score,
+            )
 
-        prob_pos, _, ev, allow_trade = pt_engine.estimate(
-            regime_conf=reg["confidence"],
-            vwap_mult=vw["mult"],
-            vol_mult=vol,
-            sweep_mult=sw["mult"],
-            raw_score=signal_score
-        )
+            if not allow_trade:
+                continue
 
-        if allow_trade:
-            eff = reg["capital_mult"] * vw["mult"] * vol * sw["mult"]
-            execute_trade("FX", s, signal_score, eff, prob_pos, ev)
+            eff = (
+                reg["capital_mult"] *
+                vw["mult"] *
+                vol *
+                sw
+            )
 
-    for s in OPTION_SYMBOLS:
-        reg = detect_regime(s, "OPTIONS")
-        vw = compute_vwap_state(s)
-        vol = random.choice(list(VOL_STATES.values()))
-        sw = compute_vwap_state(s)
-
-        eff = reg["capital_mult"] * vw["mult"] * vol * sw["mult"]
-
-        execute_intelligent_option_trade(
-            s,
-            reg,
-            vw,
-            vol,
-            sw,
-            cycle,
-            eff
-        )
-
-    for s in FUTURES_SYMBOLS:
-        reg = detect_regime(s, "FUTURES")
-        vw = compute_vwap_state(s)
-        vol = random.choice(list(VOL_STATES.values()))
-        sw = compute_vwap_state(s)
-
-        if reg["priority"] == "BLOCK":
-            continue
-
-        raw_score = weighted_score(round(random.uniform(8,18),2), s)
-        signal_score = raw_score * reg["risk_mult"] * vw["mult"] * vol * sw["mult"]
-
-        prob_pos, _, ev, allow_trade = pt_engine.estimate(
-            regime_conf=reg["confidence"],
-            vwap_mult=vw["mult"],
-            vol_mult=vol,
-            sweep_mult=sw["mult"],
-            raw_score=signal_score
-        )
-
-        if allow_trade:
-            eff = reg["capital_mult"] * vw["mult"] * vol * sw["mult"]
-            execute_trade("FUTURES", s, signal_score, eff, prob_pos, ev)
+            execute_trade(
+                asset_class,
+                s,
+                signal_score,
+                eff,
+                prob_pos,
+                ev,
+            )
 
     save_json_state(FUTURES_BIAS_FILE, futures_symbol_bias)
     save_json_state(FUTURES_LOSS_FILE, futures_loss_streak)
