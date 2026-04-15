@@ -114,6 +114,99 @@ class LockedProfitLedger:
 locked_profit_ledger = LockedProfitLedger()
 
 
+class MomentumClusterAmplifier:
+    """
+    PQR-7 Momentum Cluster Amplifier
+    Detects dominant winning symbol clusters and amplifies slot recycling bias.
+    """
+
+    def __init__(self):
+        self.cluster_map = {
+            "CRYPTO_CORE": ["BTC-USD", "ETH-USD", "SOL-USD"],
+            "CRYPTO_ALT": ["XRP-USD", "ADA-USD", "DOGE-USD"],
+            "FX_MAJOR": ["EUR_USD", "GBP_USD", "EUR_GBP"],
+            "FX_YEN": ["USD_JPY", "EUR_JPY", "GBP_JPY"],
+            "OPTIONS_INDEX": ["SPY-C", "QQQ-C", "AAPL-C"],
+            "FUTURES_INDEX": ["ES", "NQ", "CL"],
+        }
+        self.cluster_strength = defaultdict(float)
+
+    def record_cluster_win(self, symbol: str, pnl: float):
+        if pnl <= 0:
+            return
+        for cluster_name, members in self.cluster_map.items():
+            if symbol in members:
+                self.cluster_strength[cluster_name] += pnl
+
+    def top_cluster(self):
+        if not self.cluster_strength:
+            return None
+        ranked = sorted(
+            self.cluster_strength.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+        return ranked[0][0]
+
+    def boosted_symbols(self):
+        cluster = self.top_cluster()
+        if not cluster:
+            return []
+        return self.cluster_map.get(cluster, [])
+
+
+cluster_amplifier = MomentumClusterAmplifier()
+
+
+class ClusterSaturationRiskGovernor:
+    """
+    PQR-8 Cluster Saturation Risk Governor
+    Prevents overconcentration in the dominant cluster.
+    """
+
+    def __init__(self):
+        self.cluster_slot_counts = defaultdict(int)
+        self.max_cluster_share = 0.35
+
+    def record_cluster_slot(self, cluster_name: str | None):
+        if cluster_name:
+            self.cluster_slot_counts[cluster_name] += 1
+
+    def total_cluster_slots(self):
+        return sum(self.cluster_slot_counts.values())
+
+    def cluster_share(self, cluster_name: str):
+        total = self.total_cluster_slots()
+        if total == 0:
+            return 0.0
+        return self.cluster_slot_counts[cluster_name] / total
+
+    def is_saturated(self, cluster_name: str):
+        return self.cluster_share(cluster_name) >= self.max_cluster_share
+
+    def get_secondary_cluster(self):
+        ranked = sorted(
+            cluster_amplifier.cluster_strength.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+        if len(ranked) < 2:
+            return None
+        return ranked[1][0]
+
+    def diversified_cluster_choice(self):
+        top_cluster = cluster_amplifier.top_cluster()
+        if not top_cluster:
+            return None
+        if self.is_saturated(top_cluster):
+            secondary = self.get_secondary_cluster()
+            return secondary if secondary else top_cluster
+        return top_cluster
+
+
+cluster_risk_governor = ClusterSaturationRiskGovernor()
+
+
 class CapitalSlotRecyclingEngine:
     """
     PQR-6 Capital Slot Recycling Engine
@@ -148,7 +241,12 @@ class CapitalSlotRecyclingEngine:
     def select_replacement_target(self):
         top_assets = self.top_asset_classes()
         top_syms = self.top_symbols()
-        boosted = cluster_amplifier.boosted_symbols()
+
+        chosen_cluster = cluster_risk_governor.diversified_cluster_choice()
+        if chosen_cluster:
+            boosted = cluster_amplifier.cluster_map.get(chosen_cluster, [])
+        else:
+            boosted = cluster_amplifier.boosted_symbols()
 
         ranked_candidates = boosted + [s for s in top_syms if s not in boosted]
 
@@ -171,53 +269,6 @@ class CapitalSlotRecyclingEngine:
 
 
 slot_recycler = CapitalSlotRecyclingEngine()
-
-
-class MomentumClusterAmplifier:
-    """
-    PQR-7 Momentum Cluster Amplifier
-    Detects dominant winning symbol clusters and amplifies slot recycling bias.
-    """
-
-    def __init__(self):
-        self.cluster_map = {
-            "CRYPTO_CORE": ["BTC-USD", "ETH-USD", "SOL-USD"],
-            "CRYPTO_ALT": ["XRP-USD", "ADA-USD", "DOGE-USD"],
-            "FX_MAJOR": ["EUR_USD", "GBP_USD", "EUR_GBP"],
-            "FX_YEN": ["USD_JPY", "EUR_JPY", "GBP_JPY"],
-            "OPTIONS_INDEX": ["SPY-C", "QQQ-C", "AAPL-C"],
-            "FUTURES_INDEX": ["ES", "NQ", "CL"],
-        }
-        self.cluster_strength = defaultdict(float)
-
-    def record_cluster_win(self, symbol: str, pnl: float):
-        if pnl <= 0:
-            return
-
-        for cluster_name, members in self.cluster_map.items():
-            if symbol in members:
-                self.cluster_strength[cluster_name] += pnl
-
-    def top_cluster(self):
-        if not self.cluster_strength:
-            return None
-
-        ranked = sorted(
-            self.cluster_strength.items(),
-            key=lambda x: x[1],
-            reverse=True
-        )
-        return ranked[0][0]
-
-    def boosted_symbols(self):
-        cluster = self.top_cluster()
-        if not cluster:
-            return []
-
-        return self.cluster_map.get(cluster, [])
-
-
-cluster_amplifier = MomentumClusterAmplifier()
 
 
 class ExitPriorityEngine:
@@ -252,13 +303,10 @@ class ExitPriorityEngine:
             + signal_deterioration * 2.0
             + fragility
         )
-
         return round(weakness_score, 4)
 
 
 exit_priority_engine = ExitPriorityEngine()
-
-
 class PartialProfitTrailEngine:
     def __init__(self):
         self.state = {}
@@ -285,9 +333,9 @@ class PartialProfitTrailEngine:
                 "partials_taken": 0.0,
                 "force_exit_warning_count": 0,
                 "last_floor_breach": False,
-                "last_peak_snapshot": 0.0,
                 "decay_guard_active": False,
             }
+
     def _get_profile(self, asset_class):
         return self.asset_floor_profiles.get(
             asset_class,
@@ -306,47 +354,37 @@ class PartialProfitTrailEngine:
         peak = st["peak_unrealized"]
 
         if current_unrealized >= 1.0 and not st["tier1_done"]:
-            close_pct = 0.25
-            st["remaining_size"] -= close_pct
-            st["partials_taken"] += close_pct
+            st["remaining_size"] -= 0.25
+            st["partials_taken"] += 0.25
             locked_profit_ledger.record_partial(0.25)
             st["tier1_done"] = True
 
         if current_unrealized >= 2.0 and not st["tier2_done"]:
-            close_pct = 0.25
-            st["remaining_size"] -= close_pct
-            st["partials_taken"] += close_pct
+            st["remaining_size"] -= 0.25
+            st["partials_taken"] += 0.25
             st["locked_floor"] = max(st["locked_floor"], 0.8)
             locked_profit_ledger.record_partial(0.25)
             st["tier2_done"] = True
 
         if current_unrealized >= 3.5 and not st["tier3_done"]:
-            close_pct = 0.20
-            st["remaining_size"] -= close_pct
-            st["partials_taken"] += close_pct
+            st["remaining_size"] -= 0.20
+            st["partials_taken"] += 0.20
             st["locked_floor"] = max(st["locked_floor"], 1.8)
             locked_profit_ledger.record_partial(0.20)
             st["tier3_done"] = True
 
         if current_unrealized >= 5.0 and not st["tier4_done"]:
-            close_pct = 0.15
-            st["remaining_size"] -= close_pct
-            st["partials_taken"] += close_pct
+            st["remaining_size"] -= 0.15
+            st["partials_taken"] += 0.15
             st["trailing_active"] = True
-            st["locked_floor"] = max(
-                st["locked_floor"],
-                peak * profile["tier4_lock"]
-            )
+            st["locked_floor"] = max(st["locked_floor"], peak * profile["tier4_lock"])
             locked_profit_ledger.record_partial(0.15)
             st["tier4_done"] = True
 
         if current_unrealized >= 7.0:
             st["trailing_active"] = True
             st["tier5_done"] = True
-            st["locked_floor"] = max(
-                st["locked_floor"],
-                peak * profile["tier5_lock"]
-            )
+            st["locked_floor"] = max(st["locked_floor"], peak * profile["tier5_lock"])
 
         if peak >= 9.0:
             accel_floor = peak * 0.72
@@ -448,12 +486,7 @@ class SmartDriftEngine:
 
         raw_random = random.uniform(-low, high)
 
-        drift = (
-            raw_random
-            + base_positive_bias
-            + momentum_bonus
-            + loser_penalty
-        )
+        drift = raw_random + base_positive_bias + momentum_bonus + loser_penalty
 
         if asset_class == "OPTIONS":
             drift *= 1.25
@@ -513,6 +546,14 @@ class MarkToMarketEngine:
             }
             signal_score, prob_positive = signal_map.get(asset_class, (12.0, 0.68))
 
+            assigned_cluster = None
+            for cname, members in cluster_amplifier.cluster_map.items():
+                if symbol in members:
+                    assigned_cluster = cname
+                    break
+
+            cluster_risk_governor.record_cluster_slot(assigned_cluster)
+
             self.register_position(
                 asset_class=asset_class,
                 symbol=symbol,
@@ -520,16 +561,11 @@ class MarkToMarketEngine:
                 signal_score=signal_score,
                 prob_positive=prob_positive
             )
+
             locked_profit_ledger.record_recycled_slot()
 
     def reprice_all_positions(self):
-        by_asset = {
-            "CRYPTO": 0.0,
-            "FX": 0.0,
-            "OPTIONS": 0.0,
-            "FUTURES": 0.0,
-        }
-
+        by_asset = {"CRYPTO": 0.0, "FX": 0.0, "OPTIONS": 0.0, "FUTURES": 0.0}
         breached_candidates = []
         freed_slots = 0
 
@@ -579,10 +615,7 @@ class MarkToMarketEngine:
         for pos in self.positions:
             if pos["forced_exit"] or pos["remaining_size"] <= 0:
                 continue
-
-            by_asset[pos["asset_class"]] += (
-                pos["floating"] * pos["remaining_size"]
-            )
+            by_asset[pos["asset_class"]] += pos["floating"] * pos["remaining_size"]
 
         for k in by_asset:
             by_asset[k] = round(by_asset[k], 4)
@@ -604,10 +637,7 @@ class MarkToMarketEngine:
         )
 
     def total_partials_taken(self):
-        return round(
-            sum(p["partials_taken"] for p in self.positions),
-            4
-        )
+        return round(sum(p["partials_taken"] for p in self.positions), 4)
 
     def total_trailing_active(self):
         return sum(
@@ -659,6 +689,14 @@ def get_top_cluster_label():
     return top_cluster if top_cluster else "NONE"
 
 
+def get_cluster_saturation_label():
+    top_cluster = cluster_amplifier.top_cluster()
+    if not top_cluster:
+        return "NONE"
+    share = cluster_risk_governor.cluster_share(top_cluster) * 100
+    return f"{top_cluster} {share:.1f}%"
+
+
 while True:
     cycle += 1
     print(f"\n=== Cycle {cycle} | {datetime.now()} ===")
@@ -688,11 +726,11 @@ while True:
     print(f"DECAY PROTECTIONS: {ledger['decay_protections']}")
     print(f"PRIORITY EXITS: {ledger['priority_exits']}")
     print(f"RECYCLED SLOTS: {ledger['recycled_slots']}")
+    print(f"CLUSTER SATURATION: {get_cluster_saturation_label()}")
     print(f"TOP CLUSTER: {get_top_cluster_label()}")
     print(f"LAST TRADE: {last_trade}")
     print("-" * 60)
 
-    # CRYPTO
     for s in SYMBOLS:
         safe_load_runtime_asset(s)
         pnl = round(random.uniform(-4, 18), 4)
@@ -709,7 +747,6 @@ while True:
         last_trade = f"{s} {pnl:+.4f}"
         print(f"[CRYPTO EXECUTED] {s} pnl={pnl:+.4f}")
 
-    # FX
     for s in FX_SYMBOLS:
         pnl = round(random.uniform(-3, 15), 4)
         fx_pnl[s] += pnl
@@ -725,7 +762,6 @@ while True:
         last_trade = f"{s} {pnl:+.4f}"
         print(f"[FX EXECUTED] {s} pnl={pnl:+.4f}")
 
-    # OPTIONS
     for s in OPTION_SYMBOLS:
         pnl = round(random.uniform(-6, 28), 4)
         options_pnl[s] += pnl
@@ -741,7 +777,6 @@ while True:
         last_trade = f"{s} {pnl:+.4f}"
         print(f"[OPTIONS EXECUTED] {s} pnl={pnl:+.4f}")
 
-    # FUTURES
     for s in FUTURES_SYMBOLS:
         pnl = round(random.uniform(-5, 24), 4)
         futures_pnl[s] += pnl
