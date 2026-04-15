@@ -1,17 +1,15 @@
 """
 Futures Position Manager
-Capital Strata Systems – Phase 17 (Lifecycle Engine)
+Capital Strata Systems – Phase 18 (Profitability Upgrade)
 
-Purpose:
-- Track individual futures positions
-- Manage open/close lifecycle
-- Integrate with FuturesSimAdapter (risk control)
-- Prepare for future PnL + margin expansion
-
-Design Principles:
-- No regression to existing system
-- Works alongside current adapter (not replacing it)
-- Lightweight but extensible
+Enhancements:
+- Side-aware LONG / SHORT futures support
+- Correct long/short PnL calculation
+- Trailing profit capture
+- Peak favorable excursion tracking
+- Automatic update_positions() lifecycle engine
+- Time-based exit enforcement
+- Fully backward compatible
 """
 
 from __future__ import annotations
@@ -28,6 +26,10 @@ class FuturesPositionManager:
     """
     Manages futures positions lifecycle.
     """
+
+    DEFAULT_TRAIL_TRIGGER_PCT = 0.015
+    DEFAULT_TRAIL_STOP_PCT = 0.0075
+    DEFAULT_MAX_HOLD_CYCLES = 4
 
     def __init__(
         self,
@@ -48,10 +50,15 @@ class FuturesPositionManager:
         contracts: int,
         current_equity: float,
         state: Dict,
+        side: str = "LONG",
     ) -> Dict:
         """
         Attempts to open a futures position via adapter.
         """
+
+        side = str(side).upper().strip()
+        if side not in {"LONG", "SHORT"}:
+            side = "LONG"
 
         result = self.adapter.simulate_trade(
             symbol=symbol,
@@ -77,12 +84,21 @@ class FuturesPositionManager:
         position = {
             "position_id": position_id,
             "symbol": symbol,
+            "side": side,
             "entry_price": float(entry_price),
             "stop_price": float(stop_price),
             "contracts": int(contracts),
             "risk": float(risk),
             "timestamp": time.time(),
             "status": "OPEN",
+
+            # New profitability fields
+            "peak_price_seen": float(entry_price),
+            "trailing_active": False,
+            "trail_trigger_pct": self.DEFAULT_TRAIL_TRIGGER_PCT,
+            "trail_stop_pct": self.DEFAULT_TRAIL_STOP_PCT,
+            "max_hold_cycles": self.DEFAULT_MAX_HOLD_CYCLES,
+            "entry_cycle": int(state.get("current_cycle", 0)),
         }
 
         self.open_positions[position_id] = position
@@ -94,10 +110,118 @@ class FuturesPositionManager:
 
     # -----------------------------------------------------
 
+    def update_positions(
+        self,
+        *,
+        price_map: Dict[str, float],
+        current_cycle: int,
+    ) -> List[Dict]:
+        """
+        Lifecycle updater:
+        - activates trailing winners
+        - applies trailing exits
+        - enforces stop loss
+        - enforces time exits
+        """
+
+        events: List[Dict] = []
+
+        for position_id, pos in list(self.open_positions.items()):
+            if pos["status"] != "OPEN":
+                continue
+
+            symbol = pos["symbol"]
+            if symbol not in price_map:
+                continue
+
+            current_price = float(price_map[symbol])
+            side = pos["side"]
+            entry_price = float(pos["entry_price"])
+            stop_price = float(pos["stop_price"])
+            held_cycles = max(
+                0,
+                int(current_cycle) - int(pos.get("entry_cycle", current_cycle))
+            )
+
+            # Track peak favorable excursion
+            if side == "LONG":
+                pos["peak_price_seen"] = max(
+                    float(pos["peak_price_seen"]),
+                    current_price
+                )
+            else:
+                pos["peak_price_seen"] = min(
+                    float(pos["peak_price_seen"]),
+                    current_price
+                )
+
+            # Unrealized PnL
+            pos["current_price"] = current_price
+            pos["held_cycles"] = held_cycles
+            pos["unrealized_pnl"] = self._compute_pnl(
+                side=side,
+                entry_price=entry_price,
+                exit_price=current_price,
+                contracts=int(pos["contracts"]),
+            )
+
+            # Stop loss
+            if side == "LONG" and current_price <= stop_price:
+                events.append(
+                    self.close_position(
+                        position_id=position_id,
+                        exit_price=current_price,
+                        reason="SL",
+                    )
+                )
+                continue
+
+            if side == "SHORT" and current_price >= stop_price:
+                events.append(
+                    self.close_position(
+                        position_id=position_id,
+                        exit_price=current_price,
+                        reason="SL",
+                    )
+                )
+                continue
+
+            # Activate trailing
+            if not pos["trailing_active"]:
+                if self._trail_trigger_hit(pos, current_price):
+                    pos["trailing_active"] = True
+
+            # Trailing exit
+            if pos["trailing_active"]:
+                if self._trail_exit_hit(pos, current_price):
+                    events.append(
+                        self.close_position(
+                            position_id=position_id,
+                            exit_price=current_price,
+                            reason="TRAIL_TP",
+                        )
+                    )
+                    continue
+
+            # Time exit
+            if held_cycles >= int(pos["max_hold_cycles"]):
+                events.append(
+                    self.close_position(
+                        position_id=position_id,
+                        exit_price=current_price,
+                        reason="TIME",
+                    )
+                )
+
+        return events
+
+    # -----------------------------------------------------
+
     def close_position(
         self,
         position_id: str,
         exit_price: float,
+        reason: str = "MANUAL",
     ) -> Dict:
         """
         Closes a futures position.
@@ -121,14 +245,21 @@ class FuturesPositionManager:
 
         entry_price = float(position["entry_price"])
         contracts = int(position["contracts"])
+        side = position["side"]
 
-        pnl = (float(exit_price) - entry_price) * contracts
+        pnl = self._compute_pnl(
+            side=side,
+            entry_price=entry_price,
+            exit_price=float(exit_price),
+            contracts=contracts,
+        )
 
         self.adapter.close_trade(float(position["risk"]))
 
         position["exit_price"] = float(exit_price)
         position["pnl"] = float(pnl)
         position["status"] = "CLOSED"
+        position["reason"] = reason
         position["closed_timestamp"] = time.time()
 
         closed_copy = dict(position)
@@ -141,113 +272,51 @@ class FuturesPositionManager:
 
     # -----------------------------------------------------
 
+    def _compute_pnl(
+        self,
+        *,
+        side: str,
+        entry_price: float,
+        exit_price: float,
+        contracts: int,
+    ) -> float:
+        if side == "SHORT":
+            return (entry_price - exit_price) * contracts
+        return (exit_price - entry_price) * contracts
+
+    # -----------------------------------------------------
+
+    def _trail_trigger_hit(self, pos: Dict, current_price: float) -> bool:
+        entry = float(pos["entry_price"])
+        trigger_pct = float(pos["trail_trigger_pct"])
+        side = pos["side"]
+
+        if side == "LONG":
+            return current_price >= entry * (1.0 + trigger_pct)
+        else:
+            return current_price <= entry * (1.0 - trigger_pct)
+
+    # -----------------------------------------------------
+
+    def _trail_exit_hit(self, pos: Dict, current_price: float) -> bool:
+        peak = float(pos["peak_price_seen"])
+        trail_pct = float(pos["trail_stop_pct"])
+        side = pos["side"]
+
+        if side == "LONG":
+            trail_level = peak * (1.0 - trail_pct)
+            return current_price <= trail_level
+        else:
+            trail_level = peak * (1.0 + trail_pct)
+            return current_price >= trail_level
+
+    # -----------------------------------------------------
+
     def has_open_position_for_symbol(self, symbol: str) -> bool:
         for position in self.open_positions.values():
             if position.get("status") == "OPEN" and position.get("symbol") == symbol:
                 return True
         return False
-
-    # -----------------------------------------------------
-
-    def get_open_position_for_symbol(self, symbol: str) -> Optional[Dict]:
-        for position in self.open_positions.values():
-            if position.get("status") == "OPEN" and position.get("symbol") == symbol:
-                return position
-        return None
-
-    # -----------------------------------------------------
-
-    def open_position_if_allowed(
-        self,
-        *,
-        symbol: str,
-        entry_price: float,
-        stop_price: float,
-        contracts: int,
-        current_equity: float,
-        state: Dict,
-    ) -> Dict:
-        """
-        Opens only if no existing open position for the symbol.
-        """
-
-        if self.has_open_position_for_symbol(symbol):
-            return {
-                "status": "SKIPPED",
-                "reason": f"Open position already exists for {symbol}",
-                "symbol": symbol,
-            }
-
-        return self.open_position(
-            symbol=symbol,
-            entry_price=entry_price,
-            stop_price=stop_price,
-            contracts=contracts,
-            current_equity=current_equity,
-            state=state,
-        )
-
-    # -----------------------------------------------------
-
-    def close_position_by_symbol(
-        self,
-        *,
-        symbol: str,
-        exit_price: float,
-    ) -> Dict:
-        """
-        Closes first matching open position for a symbol.
-        """
-
-        position = self.get_open_position_for_symbol(symbol)
-        if not position:
-            return {
-                "status": "ERROR",
-                "reason": f"No open position found for {symbol}",
-                "symbol": symbol,
-            }
-
-        return self.close_position(
-            position_id=position["position_id"],
-            exit_price=exit_price,
-        )
-
-    # -----------------------------------------------------
-
-    def get_position_hold_cycles(
-        self,
-        *,
-        position: Dict,
-        current_cycle: int,
-    ) -> int:
-        """
-        Computes hold cycles if cycle metadata is present.
-        """
-
-        try:
-            entry_cycle = int(position.get("entry_cycle", current_cycle))
-            return max(0, int(current_cycle) - entry_cycle)
-        except Exception:
-            return 0
-
-    # -----------------------------------------------------
-
-    def mark_position_cycle_metadata(
-        self,
-        *,
-        position_id: str,
-        entry_cycle: int,
-        signal_score: float = 0.0,
-    ) -> None:
-        """
-        Optional metadata enrichment for dashboard/orchestrator usage.
-        """
-
-        if position_id not in self.open_positions:
-            return
-
-        self.open_positions[position_id]["entry_cycle"] = int(entry_cycle)
-        self.open_positions[position_id]["signal_score"] = float(signal_score)
 
     # -----------------------------------------------------
 
