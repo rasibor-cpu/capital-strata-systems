@@ -6,6 +6,9 @@ from datetime import datetime
 
 class PositionManager:
 
+    DEFAULT_TRAIL_TRIGGER_PCT = 0.015
+    DEFAULT_TRAIL_STOP_PCT = 0.0075
+
     def __init__(self):
         self.positions: Dict[str, Dict] = {}
         self.closed_log: List[Dict] = []
@@ -30,16 +33,30 @@ class PositionManager:
         if symbol in self.positions:
             return
 
+        side = str(side).upper().strip()
+        if side not in {"LONG", "SHORT"}:
+            side = "LONG"
+
         self.positions[symbol] = {
             "symbol": symbol,
-            "entry_price": entry_price,
-            "size": abs(size),
+            "entry_price": float(entry_price),
+            "size": abs(float(size)),
             "side": side,
-            "take_profit": take_profit,
-            "stop_loss": stop_loss,
-            "confidence": confidence,
+            "take_profit": float(take_profit),
+            "stop_loss": float(stop_loss),
+            "confidence": float(confidence),
             "regime": regime,
             "opened_at": datetime.utcnow(),
+
+            # trailing engine fields
+            "peak_price_seen": float(entry_price),
+            "trailing_active": False,
+            "trail_trigger_pct": self.DEFAULT_TRAIL_TRIGGER_PCT,
+            "trail_stop_pct": self.DEFAULT_TRAIL_STOP_PCT,
+
+            # runtime tracking
+            "current_price": float(entry_price),
+            "unrealized_pnl": 0.0,
         }
 
     # =========================
@@ -67,18 +84,68 @@ class PositionManager:
 
             price = float(market_prices[symbol])
             side = pos["side"]
+            entry_price = float(pos["entry_price"])
 
+            pos["current_price"] = price
+            pos["unrealized_pnl"] = self._compute_pnl(
+                side=side,
+                entry=entry_price,
+                exit_price=price,
+                size=float(pos["size"]),
+            )
+
+            # ---------------------------
+            # Peak favorable excursion
+            # ---------------------------
             if side == "LONG":
-                if price >= pos["take_profit"]:
-                    to_close.append((symbol, price, "TP"))
-                elif price <= pos["stop_loss"]:
+                pos["peak_price_seen"] = max(
+                    float(pos["peak_price_seen"]),
+                    price
+                )
+            else:
+                pos["peak_price_seen"] = min(
+                    float(pos["peak_price_seen"]),
+                    price
+                )
+
+            # ---------------------------
+            # Stop loss always active
+            # ---------------------------
+            if side == "LONG":
+                if price <= pos["stop_loss"]:
                     to_close.append((symbol, price, "SL"))
+                    continue
 
             elif side == "SHORT":
-                if price <= pos["take_profit"]:
-                    to_close.append((symbol, price, "TP"))
-                elif price >= pos["stop_loss"]:
+                if price >= pos["stop_loss"]:
                     to_close.append((symbol, price, "SL"))
+                    continue
+
+            # ---------------------------
+            # Activate trailing
+            # ---------------------------
+            if not pos["trailing_active"]:
+                if self._trail_trigger_hit(pos, price):
+                    pos["trailing_active"] = True
+
+            # ---------------------------
+            # Trailing exit
+            # ---------------------------
+            if pos["trailing_active"]:
+                if self._trail_exit_hit(pos, price):
+                    to_close.append((symbol, price, "TRAIL_TP"))
+                    continue
+
+            # ---------------------------
+            # Legacy TP fallback
+            # ---------------------------
+            if not pos["trailing_active"]:
+                if side == "LONG":
+                    if price >= pos["take_profit"]:
+                        pos["trailing_active"] = True
+                elif side == "SHORT":
+                    if price <= pos["take_profit"]:
+                        pos["trailing_active"] = True
 
         for symbol, exit_price, reason in to_close:
             self.close_position(symbol, exit_price, reason)
@@ -94,19 +161,21 @@ class PositionManager:
 
         pos = self.positions.pop(symbol)
 
-        entry = pos["entry_price"]
-        size = pos["size"]
+        entry = float(pos["entry_price"])
+        size = float(pos["size"])
         side = pos["side"]
 
-        if side == "LONG":
-            pnl = (exit_price - entry) * size
-        else:
-            pnl = (entry - exit_price) * size
+        pnl = self._compute_pnl(
+            side=side,
+            entry=entry,
+            exit_price=float(exit_price),
+            size=size,
+        )
 
         self.closed_log.append({
             "symbol": symbol,
             "entry_price": entry,
-            "exit_price": exit_price,
+            "exit_price": float(exit_price),
             "size": size,
             "side": side,
             "pnl": pnl,
@@ -116,6 +185,44 @@ class PositionManager:
             "opened_at": pos["opened_at"],
             "closed_at": datetime.utcnow(),
         })
+
+    # =========================
+    # HELPERS
+    # =========================
+
+    def _compute_pnl(
+        self,
+        *,
+        side: str,
+        entry: float,
+        exit_price: float,
+        size: float,
+    ) -> float:
+        if side == "SHORT":
+            return (entry - exit_price) * size
+        return (exit_price - entry) * size
+
+    def _trail_trigger_hit(self, pos: Dict, price: float) -> bool:
+        entry = float(pos["entry_price"])
+        trigger_pct = float(pos["trail_trigger_pct"])
+        side = pos["side"]
+
+        if side == "LONG":
+            return price >= entry * (1.0 + trigger_pct)
+        else:
+            return price <= entry * (1.0 - trigger_pct)
+
+    def _trail_exit_hit(self, pos: Dict, price: float) -> bool:
+        peak = float(pos["peak_price_seen"])
+        trail_pct = float(pos["trail_stop_pct"])
+        side = pos["side"]
+
+        if side == "LONG":
+            trail_level = peak * (1.0 - trail_pct)
+            return price <= trail_level
+        else:
+            trail_level = peak * (1.0 + trail_pct)
+            return price >= trail_level
 
     # =========================
     # GETTERS
