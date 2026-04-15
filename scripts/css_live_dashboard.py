@@ -73,6 +73,7 @@ class LockedProfitLedger:
         self.partial_events = 0
         self.accelerated_locks = 0
         self.decay_protections = 0
+        self.priority_exits = 0
 
     def record_partial(self, amount: float):
         if amount > 0:
@@ -89,6 +90,9 @@ class LockedProfitLedger:
     def record_decay_protection(self):
         self.decay_protections += 1
 
+    def record_priority_exit(self):
+        self.priority_exits += 1
+
     def snapshot(self):
         return {
             "partial_profit_banked": round(self.partial_profit_banked, 4),
@@ -97,10 +101,52 @@ class LockedProfitLedger:
             "partial_events": self.partial_events,
             "accelerated_locks": self.accelerated_locks,
             "decay_protections": self.decay_protections,
+            "priority_exits": self.priority_exits,
         }
 
 
 locked_profit_ledger = LockedProfitLedger()
+
+
+class ExitPriorityEngine:
+    """
+    PQR-5 Smart Exit Prioritization Engine
+    Ranks breached positions and ejects weakest first.
+    """
+
+    def __init__(self):
+        self.asset_fragility_weight = {
+            "OPTIONS": 1.35,
+            "FUTURES": 1.15,
+            "CRYPTO": 1.00,
+            "FX": 0.85,
+        }
+
+    def compute_priority_score(self, pos: dict):
+        peak = pos.get("peak_unrealized", 0.0)
+        floating = pos.get("floating", 0.0)
+        signal_score = pos.get("signal_score", 10.0)
+        asset_class = pos.get("asset_class", "CRYPTO")
+
+        if peak <= 0:
+            decay_ratio = 1.0
+        else:
+            decay_ratio = max(0.0, (peak - floating) / peak)
+
+        fragility = self.asset_fragility_weight.get(asset_class, 1.0)
+
+        signal_deterioration = max(0.0, (15.0 - signal_score) / 15.0)
+
+        weakness_score = (
+            decay_ratio * 4.0
+            + signal_deterioration * 2.0
+            + fragility
+        )
+
+        return round(weakness_score, 4)
+
+
+exit_priority_engine = ExitPriorityEngine()
 
 
 class PartialProfitTrailEngine:
@@ -132,7 +178,6 @@ class PartialProfitTrailEngine:
                 "last_peak_snapshot": 0.0,
                 "decay_guard_active": False,
             }
-
     def _get_profile(self, asset_class):
         return self.asset_floor_profiles.get(
             asset_class,
@@ -222,18 +267,20 @@ class PartialProfitTrailEngine:
             st["locked_floor"] = max(st["locked_floor"], 1.25)
 
         grace_floor = st["locked_floor"] - dynamic_grace
+
+        breach = False
         force_exit = False
 
         if current_unrealized < grace_floor:
             st["force_exit_warning_count"] += 1
             st["last_floor_breach"] = True
+            breach = True
         else:
             st["force_exit_warning_count"] = 0
             st["last_floor_breach"] = False
 
         if st["force_exit_warning_count"] >= 2:
             force_exit = True
-            locked_profit_ledger.record_forced_exit(st["locked_floor"])
 
         return {
             "remaining_size": round(st["remaining_size"], 4),
@@ -243,18 +290,16 @@ class PartialProfitTrailEngine:
             "trailing_active": st["trailing_active"],
             "force_exit": force_exit,
             "decay_guard_active": st["decay_guard_active"],
+            "breach": breach,
         }
 
 
 ppt_engine = PartialProfitTrailEngine()
+
+
 class SmartDriftEngine:
     """
     PQR-4 Smart Drift Engine
-    Replaces primitive random drift with:
-    - signal-weighted directional bias
-    - asset volatility shaping
-    - winner persistence momentum
-    - loser fade compression
     """
 
     def __init__(self):
@@ -273,17 +318,10 @@ class SmartDriftEngine:
 
         low, high = self.asset_volatility.get(asset_class, (0.5, 2.0))
 
-        # ---------------------------------
-        # Base directional bias from signal quality
-        # ---------------------------------
         signal_bias = ((signal_score / 15.0) * 1.8)
         prob_bias = ((prob_positive - 0.5) * 3.2)
-
         base_positive_bias = signal_bias + prob_bias
 
-        # ---------------------------------
-        # Winner persistence momentum
-        # ---------------------------------
         momentum_bonus = 0.0
         if floating > 0:
             if floating >= 6.0:
@@ -293,9 +331,6 @@ class SmartDriftEngine:
             elif floating >= 1.0:
                 momentum_bonus = 0.45
 
-        # ---------------------------------
-        # Loser fade compression
-        # ---------------------------------
         loser_penalty = 0.0
         if floating < 0:
             if floating <= -5.0:
@@ -305,9 +340,6 @@ class SmartDriftEngine:
             else:
                 loser_penalty = -0.3
 
-        # ---------------------------------
-        # Randomized shaped drift
-        # ---------------------------------
         raw_random = random.uniform(-low, high)
 
         drift = (
@@ -317,9 +349,6 @@ class SmartDriftEngine:
             + loser_penalty
         )
 
-        # ---------------------------------
-        # Asset-specific shaping
-        # ---------------------------------
         if asset_class == "OPTIONS":
             drift *= 1.25
         elif asset_class == "FX":
@@ -333,8 +362,6 @@ class SmartDriftEngine:
 
 
 smart_drift_engine = SmartDriftEngine()
-
-
 class MarkToMarketEngine:
     def __init__(self):
         self.positions = []
@@ -361,6 +388,9 @@ class MarkToMarketEngine:
             "partials_taken": 0.0,
             "trailing_active": False,
             "decay_guard_active": False,
+            "peak_unrealized": 0.0,
+            "breach": False,
+            "priority_score": 0.0,
         })
 
     def reprice_all_positions(self):
@@ -371,13 +401,12 @@ class MarkToMarketEngine:
             "FUTURES": 0.0,
         }
 
+        breached_candidates = []
+
         for pos in self.positions:
             if pos["forced_exit"] or pos["remaining_size"] <= 0:
                 continue
 
-            # ------------------------------
-            # PQR-4 smart drift injection
-            # ------------------------------
             drift = smart_drift_engine.generate_drift(pos)
             pos["floating"] += drift
 
@@ -392,10 +421,34 @@ class MarkToMarketEngine:
             pos["partials_taken"] = trail_result["partials_taken"]
             pos["trailing_active"] = trail_result["trailing_active"]
             pos["decay_guard_active"] = trail_result["decay_guard_active"]
+            pos["breach"] = trail_result["breach"]
+            pos["peak_unrealized"] = trail_result["peak_unrealized"]
 
             if trail_result["force_exit"]:
+                pos["priority_score"] = exit_priority_engine.compute_priority_score(pos)
+                breached_candidates.append(pos)
+
+        # ---------------------------------
+        # PQR-5 selective priority exits
+        # Exit only the weakest breached names first
+        # ---------------------------------
+        if breached_candidates:
+            breached_candidates.sort(
+                key=lambda p: p["priority_score"],
+                reverse=True
+            )
+
+            exit_limit = max(1, int(len(breached_candidates) * 0.50))
+
+            for pos in breached_candidates[:exit_limit]:
                 pos["forced_exit"] = True
                 pos["floating"] = pos["locked_floor"]
+                locked_profit_ledger.record_forced_exit(pos["locked_floor"])
+                locked_profit_ledger.record_priority_exit()
+
+        for pos in self.positions:
+            if pos["forced_exit"] or pos["remaining_size"] <= 0:
+                continue
 
             by_asset[pos["asset_class"]] += (
                 pos["floating"] * pos["remaining_size"]
@@ -405,6 +458,7 @@ class MarkToMarketEngine:
             by_asset[k] = round(by_asset[k], 4)
 
         return by_asset
+
     def total_unrealized(self):
         total = 0.0
         for p in self.positions:
@@ -497,6 +551,7 @@ while True:
     print(f"PARTIAL EVENTS: {ledger['partial_events']}")
     print(f"ACCELERATED LOCKS: {ledger['accelerated_locks']}")
     print(f"DECAY PROTECTIONS: {ledger['decay_protections']}")
+    print(f"PRIORITY EXITS: {ledger['priority_exits']}")
     print(f"LAST TRADE: {last_trade}")
     print("-" * 60)
 
