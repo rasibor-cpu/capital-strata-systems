@@ -2,10 +2,8 @@ from __future__ import annotations
 import sys
 import time
 import random
-import json
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Tuple
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -23,11 +21,6 @@ from backend.options.option_expiry_parser_engine import OptionExpiryParserEngine
 
 STATE_DIR = PROJECT_ROOT / "artifacts"
 STATE_DIR.mkdir(exist_ok=True)
-
-FUTURES_BIAS_FILE = STATE_DIR / "futures_symbol_bias.json"
-FUTURES_LOSS_FILE = STATE_DIR / "futures_loss_streak.json"
-ASSET_EDGE_FILE = STATE_DIR / "asset_class_edge.json"
-SYMBOL_STREAK_FILE = STATE_DIR / "symbol_hot_streak.json"
 
 SYMBOLS = [
     "BTC-USD","ETH-USD","SOL-USD","XRP-USD","ADA-USD",
@@ -194,6 +187,7 @@ class PartialProfitTrailEngine:
 
         # ---------------------------
         # Dynamic trailing floor update
+        # RESTORED PQR-2 OPTIMAL MODEL
         # ---------------------------
 
         if st["trailing_active"]:
@@ -201,7 +195,7 @@ class PartialProfitTrailEngine:
             st["locked_floor"] = max(st["locked_floor"], adaptive_floor)
 
         # ---------------------------
-        # PQR-2 Grace Band Protection
+        # Grace Band Protection
         # ---------------------------
 
         grace_floor = st["locked_floor"] - profile["grace_band"]
@@ -215,7 +209,6 @@ class PartialProfitTrailEngine:
             st["force_exit_warning_count"] = 0
             st["last_floor_breach"] = False
 
-        # Require 2 consecutive breaches before forced exit
         if st["force_exit_warning_count"] >= 2:
             force_exit = True
             locked_profit_ledger.record_forced_exit(st["locked_floor"])
@@ -265,7 +258,7 @@ class MarkToMarketEngine:
             "CRYPTO": 0.0,
             "FX": 0.0,
             "OPTIONS": 0.0,
-            "FUTURES": 0.0
+            "FUTURES": 0.0,
         }
 
         for pos in self.positions:
