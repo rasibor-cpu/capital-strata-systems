@@ -17,6 +17,8 @@ class OptionStrategyEngine:
     - CASH_SECURED_PUT
     """
 
+    MIN_DEBIT_RR_THRESHOLD = 1.20
+
     def __init__(self):
         pass
 
@@ -72,11 +74,13 @@ class OptionStrategyEngine:
 
         best = min(puts, key=lambda x: abs(x["strike"] - underlying))
 
+        max_profit = max(0.01, best["strike"] - best["price"])
+
         return {
             "strategy": "LONG_PUT",
             "legs": [best],
             "max_loss": best["price"],
-            "max_profit": best["strike"],
+            "max_profit": max_profit,
             "breakeven": best["strike"] - best["price"]
         }
 
@@ -103,11 +107,16 @@ class OptionStrategyEngine:
         debit = long_leg["price"] - short_leg["price"]
         width = short_leg["strike"] - long_leg["strike"]
 
+        if not self._valid_debit_structure(debit, width):
+            return self._build_long_call(chain, underlying)
+
+        max_profit = width - debit
+
         return {
             "strategy": "CALL_DEBIT_SPREAD",
             "legs": [long_leg, short_leg],
             "max_loss": debit,
-            "max_profit": width - debit,
+            "max_profit": max_profit,
             "breakeven": long_leg["strike"] + debit
         }
 
@@ -135,10 +144,38 @@ class OptionStrategyEngine:
         debit = long_leg["price"] - short_leg["price"]
         width = long_leg["strike"] - short_leg["strike"]
 
+        if not self._valid_debit_structure(debit, width):
+            return self._build_long_put(chain, underlying)
+
+        max_profit = width - debit
+
         return {
             "strategy": "PUT_DEBIT_SPREAD",
             "legs": [long_leg, short_leg],
             "max_loss": debit,
-            "max_profit": width - debit,
+            "max_profit": max_profit,
             "breakeven": long_leg["strike"] - debit
         }
+
+    # ---------------------------------------------------
+    # VALIDATION HELPERS
+    # ---------------------------------------------------
+    def _valid_debit_structure(self, debit: float, width: float) -> bool:
+        debit = float(debit)
+        width = float(width)
+
+        if debit <= 0:
+            return False
+
+        if width <= 0:
+            return False
+
+        max_profit = width - debit
+        if max_profit <= 0:
+            return False
+
+        rr_ratio = max_profit / debit
+        if rr_ratio < self.MIN_DEBIT_RR_THRESHOLD:
+            return False
+
+        return True
