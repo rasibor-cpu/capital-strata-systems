@@ -9,12 +9,45 @@ class PositionManager:
     DEFAULT_TRAIL_TRIGGER_PCT = 0.015
     DEFAULT_TRAIL_STOP_PCT = 0.0075
 
+    ASSET_CLASS_PROFILES = {
+        "crypto": {
+            "trigger_pct": 0.018,
+            "stop_pct": 0.009,
+            "tier2_stop": 0.007,
+            "tier3_stop": 0.0055,
+        },
+        "fx": {
+            "trigger_pct": 0.010,
+            "stop_pct": 0.005,
+            "tier2_stop": 0.004,
+            "tier3_stop": 0.003,
+        },
+        "options": {
+            "trigger_pct": 0.022,
+            "stop_pct": 0.011,
+            "tier2_stop": 0.008,
+            "tier3_stop": 0.006,
+        },
+        "futures": {
+            "trigger_pct": 0.015,
+            "stop_pct": 0.007,
+            "tier2_stop": 0.0055,
+            "tier3_stop": 0.004,
+        },
+        "default": {
+            "trigger_pct": 0.015,
+            "stop_pct": 0.0075,
+            "tier2_stop": 0.006,
+            "tier3_stop": 0.0045,
+        },
+    }
+
     def __init__(self):
         self.positions: Dict[str, Dict] = {}
         self.closed_log: List[Dict] = []
 
     # =========================
-    # CORE OPEN (NEW ENGINE)
+    # CORE OPEN (PQR-1 UPGRADE)
     # =========================
 
     def open_position(
@@ -37,8 +70,15 @@ class PositionManager:
         if side not in {"LONG", "SHORT"}:
             side = "LONG"
 
+        asset_class = self._classify_asset(symbol)
+        profile = self.ASSET_CLASS_PROFILES.get(
+            asset_class,
+            self.ASSET_CLASS_PROFILES["default"]
+        )
+
         self.positions[symbol] = {
             "symbol": symbol,
+            "asset_class": asset_class,
             "entry_price": float(entry_price),
             "size": abs(float(size)),
             "side": side,
@@ -51,8 +91,13 @@ class PositionManager:
             # trailing engine fields
             "peak_price_seen": float(entry_price),
             "trailing_active": False,
-            "trail_trigger_pct": self.DEFAULT_TRAIL_TRIGGER_PCT,
-            "trail_stop_pct": self.DEFAULT_TRAIL_STOP_PCT,
+            "trail_trigger_pct": profile["trigger_pct"],
+            "trail_stop_pct": profile["stop_pct"],
+
+            # adaptive ladder tiers
+            "tier_level": 1,
+            "tier2_stop_pct": profile["tier2_stop"],
+            "tier3_stop_pct": profile["tier3_stop"],
 
             # runtime tracking
             "current_price": float(entry_price),
@@ -69,6 +114,37 @@ class PositionManager:
     def open_short_position(self, **kwargs):
         self.open_position(side="SHORT", **kwargs)
 
+    # =========================
+    # ASSET CLASSIFIER
+    # =========================
+
+    def _classify_asset(self, symbol: str) -> str:
+        s = str(symbol).upper()
+
+        # Options
+        if "-C" in s or "-P" in s:
+            return "options"
+
+        # Crypto
+        crypto_markers = [
+            "BTC", "ETH", "SOL", "XRP", "ADA",
+            "DOGE", "AVAX", "LINK", "LTC", "BCH"
+        ]
+        if any(x in s for x in crypto_markers):
+            return "crypto"
+
+        # FX
+        if "_" in s and len(s) >= 7:
+            return "fx"
+
+        # Futures
+        futures_symbols = [
+            "ES", "NQ", "CL", "GC", "ZN", "YM", "RTY"
+        ]
+        if s in futures_symbols:
+            return "futures"
+
+        return "default"
     # =========================
     # UPDATE
     # =========================
@@ -107,6 +183,11 @@ class PositionManager:
                     float(pos["peak_price_seen"]),
                     price
                 )
+
+            # ---------------------------
+            # Profit ladder escalation
+            # ---------------------------
+            self._apply_profit_ladder(pos)
 
             # ---------------------------
             # Stop loss always active
@@ -151,6 +232,23 @@ class PositionManager:
             self.close_position(symbol, exit_price, reason)
 
     # =========================
+    # PROFIT LADDER ENGINE
+    # =========================
+
+    def _apply_profit_ladder(self, pos: Dict) -> None:
+        pnl = float(pos["unrealized_pnl"])
+        tier = int(pos["tier_level"])
+
+        # Tier thresholds by absolute unrealized pnl
+        if pnl >= 25 and tier < 3:
+            pos["tier_level"] = 3
+            pos["trail_stop_pct"] = float(pos["tier3_stop_pct"])
+
+        elif pnl >= 10 and tier < 2:
+            pos["tier_level"] = 2
+            pos["trail_stop_pct"] = float(pos["tier2_stop_pct"])
+
+    # =========================
     # CLOSE
     # =========================
 
@@ -174,6 +272,7 @@ class PositionManager:
 
         self.closed_log.append({
             "symbol": symbol,
+            "asset_class": pos.get("asset_class", "default"),
             "entry_price": entry,
             "exit_price": float(exit_price),
             "size": size,
@@ -182,10 +281,10 @@ class PositionManager:
             "reason": reason,
             "confidence": pos["confidence"],
             "regime": pos["regime"],
+            "tier_level": pos.get("tier_level", 1),
             "opened_at": pos["opened_at"],
             "closed_at": datetime.utcnow(),
         })
-
     # =========================
     # HELPERS
     # =========================

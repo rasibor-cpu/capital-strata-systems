@@ -45,22 +45,6 @@ FUTURES_SYMBOLS = ["ES","NQ","CL","GC"]
 
 CYCLE_SLEEP = 8
 
-REGIMES = ["TREND","MEAN_REVERSION","MOMENTUM","NEUTRAL"]
-
-VOL_STATES = {
-    "HIGH_VOL_EXPANDING":1.30,
-    "LOW_VOL_COMPRESSED":0.70,
-    "NORMAL_VOL":1.00,
-    "BREAKOUT_EXPANSION":1.40,
-}
-
-SWEEP_STATES = {
-    "SWEEP_UP_REVERSAL":0.65,
-    "SWEEP_DOWN_REVERSAL":0.65,
-    "CLEAN_BREAKOUT":1.25,
-    "NO_SWEEP":1.00,
-}
-
 ENGINE_MODES = {
     "1":"SAFE",
     "2":"CONSERVATIVE",
@@ -68,24 +52,6 @@ ENGINE_MODES = {
     "4":"AGGRESSIVE",
     "5":"EXPANSION",
 }
-
-
-def load_json_state(path: Path, default: Dict):
-    try:
-        if path.exists():
-            with open(path,"r",encoding="utf-8") as f:
-                return json.load(f)
-    except Exception:
-        pass
-    return default.copy()
-
-
-def save_json_state(path: Path, data: Dict):
-    try:
-        with open(path,"w",encoding="utf-8") as f:
-            json.dump(data,f,indent=2)
-    except Exception:
-        pass
 
 
 def safe_load_runtime_asset(symbol: str):
@@ -100,10 +66,10 @@ def safe_load_runtime_asset(symbol: str):
 
 def select_engine_mode():
     print("\n=== CSS ENGINE MODE SELECTOR ===")
-    for k,v in ENGINE_MODES.items():
+    for k, v in ENGINE_MODES.items():
         print(f"{k}. {v}")
-    choice=input("Enter choice (1-5) [default=3]: ").strip()
-    return ENGINE_MODES.get(choice,"BALANCED")
+    choice = input("Enter choice (1-5) [default=3]: ").strip()
+    return ENGINE_MODES.get(choice, "BALANCED")
 
 
 class LockedProfitLedger:
@@ -124,98 +90,64 @@ class LockedProfitLedger:
 
     def snapshot(self):
         return {
-            "partial_profit_banked": round(self.partial_profit_banked,4),
-            "forced_exit_profit_banked": round(self.forced_exit_profit_banked,4),
+            "partial_profit_banked": round(self.partial_profit_banked, 4),
+            "forced_exit_profit_banked": round(self.forced_exit_profit_banked, 4),
             "trail_stops_hit": self.trail_stops_hit,
             "partial_events": self.partial_events,
         }
 
 
 locked_profit_ledger = LockedProfitLedger()
-class ExecutionCostEngine:
-    def passes_cost_gate(self, asset_class, gross_edge, signal_score):
-        base_cost = {
-            "CRYPTO": random.uniform(0.08,1.10),
-            "FX": random.uniform(0.05,0.80),
-            "OPTIONS": random.uniform(0.07,0.95),
-            "FUTURES": random.uniform(0.06,0.90),
-        }.get(asset_class,0.25)
-
-        score_factor = max(0.65,min(1.25,signal_score/12.0))
-        execution_cost = round(base_cost*score_factor,4)
-
-        net_edge = gross_edge - execution_cost
-        passed = net_edge > 0.0
-        return passed, round(net_edge,4), execution_cost
-
-
-cost_engine = ExecutionCostEngine()
-
-
-class ProfitPerWinnerEngine:
-    def get_multiplier(
-        self,
-        *,
-        asset_class,
-        signal_score,
-        prob_positive,
-        expected_value,
-        hot_streak
-    ):
-        quality = (
-            signal_score*0.35 +
-            prob_positive*100*0.35 +
-            max(expected_value,0.0)*4*0.20 +
-            hot_streak*0.10
-        )
-
-        if quality >= 24:
-            return "elite",1.60
-        elif quality >= 19:
-            return "strong",1.40
-        elif quality >= 15:
-            return "qualified",1.22
-        else:
-            return "base",1.00
-
-
-ppw_engine = ProfitPerWinnerEngine()
 
 
 class PartialProfitTrailEngine:
     def __init__(self):
         self.state = {}
 
+        self.asset_floor_profiles = {
+            "CRYPTO": {"tier4_lock": 0.55, "tier5_lock": 0.45, "grace_band": 0.35},
+            "FX": {"tier4_lock": 0.72, "tier5_lock": 0.60, "grace_band": 0.20},
+            "OPTIONS": {"tier4_lock": 0.50, "tier5_lock": 0.40, "grace_band": 0.45},
+            "FUTURES": {"tier4_lock": 0.60, "tier5_lock": 0.50, "grace_band": 0.30},
+            "DEFAULT": {"tier4_lock": 0.60, "tier5_lock": 0.50, "grace_band": 0.25},
+        }
+
     def _init_position(self, key):
         if key not in self.state:
             self.state[key] = {
-                "remaining_size":1.0,
-                "peak_unrealized":0.0,
-                "locked_floor":0.0,
-                "tier1_done":False,
-                "tier2_done":False,
-                "tier3_done":False,
-                "tier4_done":False,
-                "tier5_done":False,
-                "trailing_active":False,
-                "partials_taken":0.0,
+                "remaining_size": 1.0,
+                "peak_unrealized": 0.0,
+                "locked_floor": 0.0,
+                "tier1_done": False,
+                "tier2_done": False,
+                "tier3_done": False,
+                "tier4_done": False,
+                "tier5_done": False,
+                "trailing_active": False,
+                "partials_taken": 0.0,
+                "force_exit_warning_count": 0,
+                "last_floor_breach": False,
             }
 
-    def process_position(
-        self,
-        *,
-        asset_class,
-        symbol,
-        current_unrealized
-    ):
+    def _get_profile(self, asset_class):
+        return self.asset_floor_profiles.get(
+            asset_class,
+            self.asset_floor_profiles["DEFAULT"]
+        )
+
+    def process_position(self, *, asset_class, symbol, current_unrealized):
         key = f"{asset_class}::{symbol}"
         self._init_position(key)
         st = self.state[key]
+        profile = self._get_profile(asset_class)
 
         if current_unrealized > st["peak_unrealized"]:
             st["peak_unrealized"] = current_unrealized
 
         peak = st["peak_unrealized"]
+        # ---------------------------
+        # Partial profit ladder
+        # ---------------------------
 
         if current_unrealized >= 1.0 and not st["tier1_done"]:
             close_pct = 0.25
@@ -228,7 +160,7 @@ class PartialProfitTrailEngine:
             close_pct = 0.25
             st["remaining_size"] -= close_pct
             st["partials_taken"] += close_pct
-            st["locked_floor"] = max(st["locked_floor"],0.8)
+            st["locked_floor"] = max(st["locked_floor"], 0.8)
             locked_profit_ledger.record_partial(0.25)
             st["tier2_done"] = True
 
@@ -236,7 +168,7 @@ class PartialProfitTrailEngine:
             close_pct = 0.20
             st["remaining_size"] -= close_pct
             st["partials_taken"] += close_pct
-            st["locked_floor"] = max(st["locked_floor"],1.8)
+            st["locked_floor"] = max(st["locked_floor"], 1.8)
             locked_profit_ledger.record_partial(0.20)
             st["tier3_done"] = True
 
@@ -245,28 +177,54 @@ class PartialProfitTrailEngine:
             st["remaining_size"] -= close_pct
             st["partials_taken"] += close_pct
             st["trailing_active"] = True
-            st["locked_floor"] = max(st["locked_floor"],peak*0.65)
+            st["locked_floor"] = max(
+                st["locked_floor"],
+                peak * profile["tier4_lock"]
+            )
             locked_profit_ledger.record_partial(0.15)
             st["tier4_done"] = True
 
         if current_unrealized >= 7.0:
             st["trailing_active"] = True
             st["tier5_done"] = True
-            st["locked_floor"] = max(st["locked_floor"],peak*0.50)
+            st["locked_floor"] = max(
+                st["locked_floor"],
+                peak * profile["tier5_lock"]
+            )
+
+        # ---------------------------
+        # Dynamic trailing floor update
+        # ---------------------------
 
         if st["trailing_active"]:
-            st["locked_floor"] = max(st["locked_floor"],peak*0.65)
+            adaptive_floor = peak * profile["tier4_lock"]
+            st["locked_floor"] = max(st["locked_floor"], adaptive_floor)
+
+        # ---------------------------
+        # PQR-2 Grace Band Protection
+        # ---------------------------
+
+        grace_floor = st["locked_floor"] - profile["grace_band"]
 
         force_exit = False
-        if current_unrealized < st["locked_floor"]:
+
+        if current_unrealized < grace_floor:
+            st["force_exit_warning_count"] += 1
+            st["last_floor_breach"] = True
+        else:
+            st["force_exit_warning_count"] = 0
+            st["last_floor_breach"] = False
+
+        # Require 2 consecutive breaches before forced exit
+        if st["force_exit_warning_count"] >= 2:
             force_exit = True
             locked_profit_ledger.record_forced_exit(st["locked_floor"])
 
         return {
-            "remaining_size": round(st["remaining_size"],4),
-            "peak_unrealized": round(st["peak_unrealized"],4),
-            "locked_floor": round(st["locked_floor"],4),
-            "partials_taken": round(st["partials_taken"],4),
+            "remaining_size": round(st["remaining_size"], 4),
+            "peak_unrealized": round(st["peak_unrealized"], 4),
+            "locked_floor": round(st["locked_floor"], 4),
+            "partials_taken": round(st["partials_taken"], 4),
             "trailing_active": st["trailing_active"],
             "force_exit": force_exit,
         }
@@ -304,17 +262,17 @@ class MarkToMarketEngine:
 
     def reprice_all_positions(self):
         by_asset = {
-            "CRYPTO":0.0,
-            "FX":0.0,
-            "OPTIONS":0.0,
-            "FUTURES":0.0
+            "CRYPTO": 0.0,
+            "FX": 0.0,
+            "OPTIONS": 0.0,
+            "FUTURES": 0.0
         }
 
         for pos in self.positions:
             if pos["forced_exit"] or pos["remaining_size"] <= 0:
                 continue
 
-            drift = random.uniform(-1.5,3.0)
+            drift = random.uniform(-1.5, 3.0)
             pos["floating"] += drift
 
             trail_result = ppt_engine.process_position(
@@ -337,17 +295,16 @@ class MarkToMarketEngine:
             )
 
         for k in by_asset:
-            by_asset[k] = round(by_asset[k],4)
+            by_asset[k] = round(by_asset[k], 4)
 
         return by_asset
-
     def total_unrealized(self):
         total = 0.0
         for p in self.positions:
             if p["forced_exit"] or p["remaining_size"] <= 0:
                 continue
             total += p["floating"] * p["remaining_size"]
-        return round(total,4)
+        return round(total, 4)
 
     def count_open_positions(self):
         return sum(
@@ -381,10 +338,10 @@ options_intel = OptionsIntelligenceEngine()
 options_pricing_engine = OptionPricingCalibrationEngine()
 options_expiry_engine = OptionExpiryParserEngine()
 
-crypto_pnl = {s:0.0 for s in SYMBOLS}
-fx_pnl = {s:0.0 for s in FX_SYMBOLS}
-options_pnl = {s:0.0 for s in OPTION_SYMBOLS}
-futures_pnl = {s:0.0 for s in FUTURES_SYMBOLS}
+crypto_pnl = {s: 0.0 for s in SYMBOLS}
+fx_pnl = {s: 0.0 for s in FX_SYMBOLS}
+options_pnl = {s: 0.0 for s in OPTION_SYMBOLS}
+futures_pnl = {s: 0.0 for s in FUTURES_SYMBOLS}
 
 last_trade = "NONE"
 cycle = 0
@@ -430,7 +387,7 @@ while True:
     # CRYPTO
     for s in SYMBOLS:
         safe_load_runtime_asset(s)
-        pnl = round(random.uniform(-4,18),4)
+        pnl = round(random.uniform(-4, 18), 4)
         crypto_pnl[s] += pnl
         mtm_engine.register_position(
             asset_class="CRYPTO",
@@ -444,7 +401,7 @@ while True:
 
     # FX
     for s in FX_SYMBOLS:
-        pnl = round(random.uniform(-3,15),4)
+        pnl = round(random.uniform(-3, 15), 4)
         fx_pnl[s] += pnl
         mtm_engine.register_position(
             asset_class="FX",
@@ -458,7 +415,7 @@ while True:
 
     # OPTIONS
     for s in OPTION_SYMBOLS:
-        pnl = round(random.uniform(-6,28),4)
+        pnl = round(random.uniform(-6, 28), 4)
         options_pnl[s] += pnl
         mtm_engine.register_position(
             asset_class="OPTIONS",
@@ -472,7 +429,7 @@ while True:
 
     # FUTURES
     for s in FUTURES_SYMBOLS:
-        pnl = round(random.uniform(-5,24),4)
+        pnl = round(random.uniform(-5, 24), 4)
         futures_pnl[s] += pnl
         mtm_engine.register_position(
             asset_class="FUTURES",
