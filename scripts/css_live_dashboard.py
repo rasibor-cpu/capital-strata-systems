@@ -39,12 +39,13 @@ FUTURES_SYMBOLS = ["ES","NQ","CL","GC"]
 CYCLE_SLEEP = 8
 
 ENGINE_MODES = {
-    "1":"SAFE",
-    "2":"CONSERVATIVE",
-    "3":"BALANCED",
-    "4":"AGGRESSIVE",
-    "5":"EXPANSION",
+    "1": "SAFE",
+    "2": "CONSERVATIVE",
+    "3": "BALANCED",
+    "4": "AGGRESSIVE",
+    "5": "EXPANSION",
 }
+
 
 def safe_load_runtime_asset(symbol: str):
     try:
@@ -54,6 +55,7 @@ def safe_load_runtime_asset(symbol: str):
     except Exception as e:
         print(f"[FETCH FAIL] {symbol}: {str(e)[:80]}")
         return False
+
 
 def select_engine_mode():
     print("\n=== CSS ENGINE MODE SELECTOR ===")
@@ -104,7 +106,6 @@ locked_profit_ledger = LockedProfitLedger()
 class PartialProfitTrailEngine:
     def __init__(self):
         self.state = {}
-
         self.asset_floor_profiles = {
             "CRYPTO": {"tier4_lock": 0.55, "tier5_lock": 0.45, "grace_band": 0.35},
             "FX": {"tier4_lock": 0.72, "tier5_lock": 0.60, "grace_band": 0.20},
@@ -131,6 +132,7 @@ class PartialProfitTrailEngine:
                 "last_peak_snapshot": 0.0,
                 "decay_guard_active": False,
             }
+
     def _get_profile(self, asset_class):
         return self.asset_floor_profiles.get(
             asset_class,
@@ -148,9 +150,6 @@ class PartialProfitTrailEngine:
 
         peak = st["peak_unrealized"]
 
-        # ---------------------------
-        # Partial profit ladder
-        # ---------------------------
         if current_unrealized >= 1.0 and not st["tier1_done"]:
             close_pct = 0.25
             st["remaining_size"] -= close_pct
@@ -194,31 +193,21 @@ class PartialProfitTrailEngine:
                 peak * profile["tier5_lock"]
             )
 
-        # ---------------------------
-        # PQR-3 acceleration logic
-        # ---------------------------
         if peak >= 9.0:
             accel_floor = peak * 0.72
             if accel_floor > st["locked_floor"]:
                 st["locked_floor"] = accel_floor
                 locked_profit_ledger.record_acceleration()
-
         elif peak >= 6.5:
             accel_floor = peak * 0.64
             if accel_floor > st["locked_floor"]:
                 st["locked_floor"] = accel_floor
                 locked_profit_ledger.record_acceleration()
 
-        # ---------------------------
-        # Dynamic trailing floor update
-        # ---------------------------
         if st["trailing_active"]:
             adaptive_floor = peak * profile["tier4_lock"]
             st["locked_floor"] = max(st["locked_floor"], adaptive_floor)
 
-        # ---------------------------
-        # Winner decay compression
-        # ---------------------------
         peak_drop = peak - current_unrealized
         dynamic_grace = profile["grace_band"]
 
@@ -229,9 +218,6 @@ class PartialProfitTrailEngine:
         else:
             st["decay_guard_active"] = False
 
-        # ---------------------------
-        # Early winner preservation
-        # ---------------------------
         if peak >= 3.0 and current_unrealized < 1.5:
             st["locked_floor"] = max(st["locked_floor"], 1.25)
 
@@ -261,6 +247,94 @@ class PartialProfitTrailEngine:
 
 
 ppt_engine = PartialProfitTrailEngine()
+class SmartDriftEngine:
+    """
+    PQR-4 Smart Drift Engine
+    Replaces primitive random drift with:
+    - signal-weighted directional bias
+    - asset volatility shaping
+    - winner persistence momentum
+    - loser fade compression
+    """
+
+    def __init__(self):
+        self.asset_volatility = {
+            "CRYPTO": (0.8, 3.4),
+            "FX": (0.3, 1.6),
+            "OPTIONS": (1.2, 5.8),
+            "FUTURES": (0.7, 4.2),
+        }
+
+    def generate_drift(self, pos: dict):
+        asset_class = pos["asset_class"]
+        signal_score = pos["signal_score"]
+        prob_positive = pos["prob_positive"]
+        floating = pos["floating"]
+
+        low, high = self.asset_volatility.get(asset_class, (0.5, 2.0))
+
+        # ---------------------------------
+        # Base directional bias from signal quality
+        # ---------------------------------
+        signal_bias = ((signal_score / 15.0) * 1.8)
+        prob_bias = ((prob_positive - 0.5) * 3.2)
+
+        base_positive_bias = signal_bias + prob_bias
+
+        # ---------------------------------
+        # Winner persistence momentum
+        # ---------------------------------
+        momentum_bonus = 0.0
+        if floating > 0:
+            if floating >= 6.0:
+                momentum_bonus = 1.8
+            elif floating >= 3.0:
+                momentum_bonus = 1.0
+            elif floating >= 1.0:
+                momentum_bonus = 0.45
+
+        # ---------------------------------
+        # Loser fade compression
+        # ---------------------------------
+        loser_penalty = 0.0
+        if floating < 0:
+            if floating <= -5.0:
+                loser_penalty = -1.5
+            elif floating <= -2.0:
+                loser_penalty = -0.8
+            else:
+                loser_penalty = -0.3
+
+        # ---------------------------------
+        # Randomized shaped drift
+        # ---------------------------------
+        raw_random = random.uniform(-low, high)
+
+        drift = (
+            raw_random
+            + base_positive_bias
+            + momentum_bonus
+            + loser_penalty
+        )
+
+        # ---------------------------------
+        # Asset-specific shaping
+        # ---------------------------------
+        if asset_class == "OPTIONS":
+            drift *= 1.25
+        elif asset_class == "FX":
+            drift *= 0.72
+        elif asset_class == "FUTURES":
+            drift *= 1.08
+        elif asset_class == "CRYPTO":
+            drift *= 1.12
+
+        return round(drift, 4)
+
+
+smart_drift_engine = SmartDriftEngine()
+
+
 class MarkToMarketEngine:
     def __init__(self):
         self.positions = []
@@ -301,7 +375,10 @@ class MarkToMarketEngine:
             if pos["forced_exit"] or pos["remaining_size"] <= 0:
                 continue
 
-            drift = random.uniform(-1.5, 3.0)
+            # ------------------------------
+            # PQR-4 smart drift injection
+            # ------------------------------
+            drift = smart_drift_engine.generate_drift(pos)
             pos["floating"] += drift
 
             trail_result = ppt_engine.process_position(
@@ -328,7 +405,6 @@ class MarkToMarketEngine:
             by_asset[k] = round(by_asset[k], 4)
 
         return by_asset
-
     def total_unrealized(self):
         total = 0.0
         for p in self.positions:
