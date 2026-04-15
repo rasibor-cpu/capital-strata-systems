@@ -46,7 +46,6 @@ ENGINE_MODES = {
     "5":"EXPANSION",
 }
 
-
 def safe_load_runtime_asset(symbol: str):
     try:
         load_runtime_asset(symbol)
@@ -55,7 +54,6 @@ def safe_load_runtime_asset(symbol: str):
     except Exception as e:
         print(f"[FETCH FAIL] {symbol}: {str(e)[:80]}")
         return False
-
 
 def select_engine_mode():
     print("\n=== CSS ENGINE MODE SELECTOR ===")
@@ -71,6 +69,8 @@ class LockedProfitLedger:
         self.forced_exit_profit_banked = 0.0
         self.trail_stops_hit = 0
         self.partial_events = 0
+        self.accelerated_locks = 0
+        self.decay_protections = 0
 
     def record_partial(self, amount: float):
         if amount > 0:
@@ -81,12 +81,20 @@ class LockedProfitLedger:
         self.forced_exit_profit_banked += amount
         self.trail_stops_hit += 1
 
+    def record_acceleration(self):
+        self.accelerated_locks += 1
+
+    def record_decay_protection(self):
+        self.decay_protections += 1
+
     def snapshot(self):
         return {
             "partial_profit_banked": round(self.partial_profit_banked, 4),
             "forced_exit_profit_banked": round(self.forced_exit_profit_banked, 4),
             "trail_stops_hit": self.trail_stops_hit,
             "partial_events": self.partial_events,
+            "accelerated_locks": self.accelerated_locks,
+            "decay_protections": self.decay_protections,
         }
 
 
@@ -120,8 +128,9 @@ class PartialProfitTrailEngine:
                 "partials_taken": 0.0,
                 "force_exit_warning_count": 0,
                 "last_floor_breach": False,
+                "last_peak_snapshot": 0.0,
+                "decay_guard_active": False,
             }
-
     def _get_profile(self, asset_class):
         return self.asset_floor_profiles.get(
             asset_class,
@@ -138,10 +147,10 @@ class PartialProfitTrailEngine:
             st["peak_unrealized"] = current_unrealized
 
         peak = st["peak_unrealized"]
+
         # ---------------------------
         # Partial profit ladder
         # ---------------------------
-
         if current_unrealized >= 1.0 and not st["tier1_done"]:
             close_pct = 0.25
             st["remaining_size"] -= close_pct
@@ -186,20 +195,47 @@ class PartialProfitTrailEngine:
             )
 
         # ---------------------------
-        # Dynamic trailing floor update
-        # RESTORED PQR-2 OPTIMAL MODEL
+        # PQR-3 acceleration logic
         # ---------------------------
+        if peak >= 9.0:
+            accel_floor = peak * 0.72
+            if accel_floor > st["locked_floor"]:
+                st["locked_floor"] = accel_floor
+                locked_profit_ledger.record_acceleration()
 
+        elif peak >= 6.5:
+            accel_floor = peak * 0.64
+            if accel_floor > st["locked_floor"]:
+                st["locked_floor"] = accel_floor
+                locked_profit_ledger.record_acceleration()
+
+        # ---------------------------
+        # Dynamic trailing floor update
+        # ---------------------------
         if st["trailing_active"]:
             adaptive_floor = peak * profile["tier4_lock"]
             st["locked_floor"] = max(st["locked_floor"], adaptive_floor)
 
         # ---------------------------
-        # Grace Band Protection
+        # Winner decay compression
         # ---------------------------
+        peak_drop = peak - current_unrealized
+        dynamic_grace = profile["grace_band"]
 
-        grace_floor = st["locked_floor"] - profile["grace_band"]
+        if peak >= 5.0 and peak_drop >= (peak * 0.28):
+            dynamic_grace *= 0.55
+            st["decay_guard_active"] = True
+            locked_profit_ledger.record_decay_protection()
+        else:
+            st["decay_guard_active"] = False
 
+        # ---------------------------
+        # Early winner preservation
+        # ---------------------------
+        if peak >= 3.0 and current_unrealized < 1.5:
+            st["locked_floor"] = max(st["locked_floor"], 1.25)
+
+        grace_floor = st["locked_floor"] - dynamic_grace
         force_exit = False
 
         if current_unrealized < grace_floor:
@@ -220,12 +256,11 @@ class PartialProfitTrailEngine:
             "partials_taken": round(st["partials_taken"], 4),
             "trailing_active": st["trailing_active"],
             "force_exit": force_exit,
+            "decay_guard_active": st["decay_guard_active"],
         }
 
 
 ppt_engine = PartialProfitTrailEngine()
-
-
 class MarkToMarketEngine:
     def __init__(self):
         self.positions = []
@@ -251,6 +286,7 @@ class MarkToMarketEngine:
             "locked_floor": 0.0,
             "partials_taken": 0.0,
             "trailing_active": False,
+            "decay_guard_active": False,
         })
 
     def reprice_all_positions(self):
@@ -278,6 +314,7 @@ class MarkToMarketEngine:
             pos["locked_floor"] = trail_result["locked_floor"]
             pos["partials_taken"] = trail_result["partials_taken"]
             pos["trailing_active"] = trail_result["trailing_active"]
+            pos["decay_guard_active"] = trail_result["decay_guard_active"]
 
             if trail_result["force_exit"]:
                 pos["forced_exit"] = True
@@ -291,6 +328,7 @@ class MarkToMarketEngine:
             by_asset[k] = round(by_asset[k], 4)
 
         return by_asset
+
     def total_unrealized(self):
         total = 0.0
         for p in self.positions:
@@ -315,6 +353,12 @@ class MarkToMarketEngine:
         return sum(
             1 for p in self.positions
             if p["trailing_active"] and not p["forced_exit"]
+        )
+
+    def total_decay_guard_active(self):
+        return sum(
+            1 for p in self.positions
+            if p["decay_guard_active"] and not p["forced_exit"]
         )
 
 
@@ -370,10 +414,13 @@ while True:
     print(f"OPEN POSITIONS: {mtm_engine.count_open_positions()}")
     print(f"PARTIALS TAKEN: {mtm_engine.total_partials_taken():+.4f}")
     print(f"TRAILING ACTIVE: {mtm_engine.total_trailing_active()}")
+    print(f"DECAY GUARD ACTIVE: {mtm_engine.total_decay_guard_active()}")
     print(f"LOCKED PROFITS BANKED: {ledger['partial_profit_banked']:+.4f}")
     print(f"FORCED EXIT PROFITS: {ledger['forced_exit_profit_banked']:+.4f}")
     print(f"TRAIL STOPS HIT: {ledger['trail_stops_hit']}")
     print(f"PARTIAL EVENTS: {ledger['partial_events']}")
+    print(f"ACCELERATED LOCKS: {ledger['accelerated_locks']}")
+    print(f"DECAY PROTECTIONS: {ledger['decay_protections']}")
     print(f"LAST TRADE: {last_trade}")
     print("-" * 60)
 
