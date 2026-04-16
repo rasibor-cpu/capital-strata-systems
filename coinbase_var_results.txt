@@ -1,0 +1,5 @@
+.env:39:COINBASE_CDP_KEY_NAME=YOUR_API_KEY_NAME_HERE
+.env:40:COINBASE_CDP_PRIVATE_KEY_PATH=coinbase_private_key.pembackend\broker\coinbase_adapter.py:54:        self.api_key_name = api_key_name or os.getenv("COINBASE_KEY_NAME", "")
+backend\broker\coinbase_adapter.py:55:        self.api_private_key = api_private_key or os.getenv("COINBASE_PRIVATE_KEY", "")
+scripts\coinbase_live_auth_test.py:11:key_name = os.getenv("COINBASE_KEY_NAME", "")
+scripts\coinbase_live_auth_test.py:12:private_key = os.getenv("COINBASE_PRIVATE_KEY", "")

@@ -67,6 +67,11 @@ def select_engine_mode():
 
 
 class LockedProfitLedger:
+    """
+    PQR-9A:
+    Forced exit profits are booked once per unique position_id.
+    """
+
     def __init__(self):
         self.partial_profit_banked = 0.0
         self.forced_exit_profit_banked = 0.0
@@ -76,14 +81,21 @@ class LockedProfitLedger:
         self.decay_protections = 0
         self.priority_exits = 0
         self.recycled_slots = 0
+        self._forced_exit_booked_ids = set()
 
     def record_partial(self, amount: float):
         if amount > 0:
             self.partial_profit_banked += amount
             self.partial_events += 1
 
-    def record_forced_exit(self, amount: float):
-        self.forced_exit_profit_banked += amount
+    def record_forced_exit(self, position_id: str, amount: float):
+        if position_id in self._forced_exit_booked_ids:
+            return
+
+        self._forced_exit_booked_ids.add(position_id)
+
+        normalized_amount = max(min(amount, 5000.0), -5000.0)
+        self.forced_exit_profit_banked += normalized_amount
         self.trail_stops_hit += 1
 
     def record_acceleration(self):
@@ -115,11 +127,6 @@ locked_profit_ledger = LockedProfitLedger()
 
 
 class MomentumClusterAmplifier:
-    """
-    PQR-7 Momentum Cluster Amplifier
-    Detects dominant winning symbol clusters and amplifies slot recycling bias.
-    """
-
     def __init__(self):
         self.cluster_map = {
             "CRYPTO_CORE": ["BTC-USD", "ETH-USD", "SOL-USD"],
@@ -159,11 +166,6 @@ cluster_amplifier = MomentumClusterAmplifier()
 
 
 class ClusterSaturationRiskGovernor:
-    """
-    PQR-8 Cluster Saturation Risk Governor
-    Prevents overconcentration in the dominant cluster.
-    """
-
     def __init__(self):
         self.cluster_slot_counts = defaultdict(int)
         self.max_cluster_share = 0.35
@@ -208,11 +210,6 @@ cluster_risk_governor = ClusterSaturationRiskGovernor()
 
 
 class CapitalSlotRecyclingEngine:
-    """
-    PQR-6 Capital Slot Recycling Engine
-    Reassigns freed slots toward strongest asset classes and symbols.
-    """
-
     def __init__(self):
         self.asset_strength = defaultdict(float)
         self.symbol_strength = defaultdict(float)
@@ -272,10 +269,6 @@ slot_recycler = CapitalSlotRecyclingEngine()
 
 
 class ExitPriorityEngine:
-    """
-    PQR-5 Smart Exit Prioritization Engine
-    """
-
     def __init__(self):
         self.asset_fragility_weight = {
             "OPTIONS": 1.35,
@@ -307,142 +300,6 @@ class ExitPriorityEngine:
 
 
 exit_priority_engine = ExitPriorityEngine()
-class PartialProfitTrailEngine:
-    def __init__(self):
-        self.state = {}
-        self.asset_floor_profiles = {
-            "CRYPTO": {"tier4_lock": 0.55, "tier5_lock": 0.45, "grace_band": 0.35},
-            "FX": {"tier4_lock": 0.72, "tier5_lock": 0.60, "grace_band": 0.20},
-            "OPTIONS": {"tier4_lock": 0.50, "tier5_lock": 0.40, "grace_band": 0.45},
-            "FUTURES": {"tier4_lock": 0.60, "tier5_lock": 0.50, "grace_band": 0.30},
-            "DEFAULT": {"tier4_lock": 0.60, "tier5_lock": 0.50, "grace_band": 0.25},
-        }
-
-    def _init_position(self, key):
-        if key not in self.state:
-            self.state[key] = {
-                "remaining_size": 1.0,
-                "peak_unrealized": 0.0,
-                "locked_floor": 0.0,
-                "tier1_done": False,
-                "tier2_done": False,
-                "tier3_done": False,
-                "tier4_done": False,
-                "tier5_done": False,
-                "trailing_active": False,
-                "partials_taken": 0.0,
-                "force_exit_warning_count": 0,
-                "last_floor_breach": False,
-                "decay_guard_active": False,
-            }
-
-    def _get_profile(self, asset_class):
-        return self.asset_floor_profiles.get(
-            asset_class,
-            self.asset_floor_profiles["DEFAULT"]
-        )
-
-    def process_position(self, *, asset_class, symbol, current_unrealized):
-        key = f"{asset_class}::{symbol}"
-        self._init_position(key)
-        st = self.state[key]
-        profile = self._get_profile(asset_class)
-
-        if current_unrealized > st["peak_unrealized"]:
-            st["peak_unrealized"] = current_unrealized
-
-        peak = st["peak_unrealized"]
-
-        if current_unrealized >= 1.0 and not st["tier1_done"]:
-            st["remaining_size"] -= 0.25
-            st["partials_taken"] += 0.25
-            locked_profit_ledger.record_partial(0.25)
-            st["tier1_done"] = True
-
-        if current_unrealized >= 2.0 and not st["tier2_done"]:
-            st["remaining_size"] -= 0.25
-            st["partials_taken"] += 0.25
-            st["locked_floor"] = max(st["locked_floor"], 0.8)
-            locked_profit_ledger.record_partial(0.25)
-            st["tier2_done"] = True
-
-        if current_unrealized >= 3.5 and not st["tier3_done"]:
-            st["remaining_size"] -= 0.20
-            st["partials_taken"] += 0.20
-            st["locked_floor"] = max(st["locked_floor"], 1.8)
-            locked_profit_ledger.record_partial(0.20)
-            st["tier3_done"] = True
-
-        if current_unrealized >= 5.0 and not st["tier4_done"]:
-            st["remaining_size"] -= 0.15
-            st["partials_taken"] += 0.15
-            st["trailing_active"] = True
-            st["locked_floor"] = max(st["locked_floor"], peak * profile["tier4_lock"])
-            locked_profit_ledger.record_partial(0.15)
-            st["tier4_done"] = True
-
-        if current_unrealized >= 7.0:
-            st["trailing_active"] = True
-            st["tier5_done"] = True
-            st["locked_floor"] = max(st["locked_floor"], peak * profile["tier5_lock"])
-
-        if peak >= 9.0:
-            accel_floor = peak * 0.72
-            if accel_floor > st["locked_floor"]:
-                st["locked_floor"] = accel_floor
-                locked_profit_ledger.record_acceleration()
-        elif peak >= 6.5:
-            accel_floor = peak * 0.64
-            if accel_floor > st["locked_floor"]:
-                st["locked_floor"] = accel_floor
-                locked_profit_ledger.record_acceleration()
-
-        if st["trailing_active"]:
-            adaptive_floor = peak * profile["tier4_lock"]
-            st["locked_floor"] = max(st["locked_floor"], adaptive_floor)
-
-        peak_drop = peak - current_unrealized
-        dynamic_grace = profile["grace_band"]
-
-        if peak >= 5.0 and peak_drop >= (peak * 0.28):
-            dynamic_grace *= 0.55
-            st["decay_guard_active"] = True
-            locked_profit_ledger.record_decay_protection()
-        else:
-            st["decay_guard_active"] = False
-
-        if peak >= 3.0 and current_unrealized < 1.5:
-            st["locked_floor"] = max(st["locked_floor"], 1.25)
-
-        grace_floor = st["locked_floor"] - dynamic_grace
-
-        breach = False
-        force_exit = False
-
-        if current_unrealized < grace_floor:
-            st["force_exit_warning_count"] += 1
-            st["last_floor_breach"] = True
-            breach = True
-        else:
-            st["force_exit_warning_count"] = 0
-            st["last_floor_breach"] = False
-
-        if st["force_exit_warning_count"] >= 2:
-            force_exit = True
-
-        return {
-            "remaining_size": round(st["remaining_size"], 4),
-            "peak_unrealized": round(st["peak_unrealized"], 4),
-            "locked_floor": round(st["locked_floor"], 4),
-            "partials_taken": round(st["partials_taken"], 4),
-            "trailing_active": st["trailing_active"],
-            "force_exit": force_exit,
-            "decay_guard_active": st["decay_guard_active"],
-            "breach": breach,
-        }
-
-
-ppt_engine = PartialProfitTrailEngine()
 
 
 class SmartDriftEngine:
@@ -485,7 +342,6 @@ class SmartDriftEngine:
                 loser_penalty = -0.3
 
         raw_random = random.uniform(-low, high)
-
         drift = raw_random + base_positive_bias + momentum_bonus + loser_penalty
 
         if asset_class == "OPTIONS":
@@ -504,6 +360,7 @@ smart_drift_engine = SmartDriftEngine()
 class MarkToMarketEngine:
     def __init__(self):
         self.positions = []
+        self.position_counter = 0
 
     def register_position(
         self,
@@ -514,7 +371,11 @@ class MarkToMarketEngine:
         signal_score,
         prob_positive
     ):
+        self.position_counter += 1
+        position_id = f"POS-{self.position_counter}"
+
         self.positions.append({
+            "position_id": position_id,
             "asset_class": asset_class,
             "symbol": symbol,
             "realized_pnl": realized_pnl,
@@ -523,12 +384,6 @@ class MarkToMarketEngine:
             "floating": 0.0,
             "forced_exit": False,
             "remaining_size": 1.0,
-            "locked_floor": 0.0,
-            "partials_taken": 0.0,
-            "trailing_active": False,
-            "decay_guard_active": False,
-            "peak_unrealized": 0.0,
-            "breach": False,
             "priority_score": 0.0,
         })
 
@@ -565,32 +420,24 @@ class MarkToMarketEngine:
             locked_profit_ledger.record_recycled_slot()
 
     def reprice_all_positions(self):
-        by_asset = {"CRYPTO": 0.0, "FX": 0.0, "OPTIONS": 0.0, "FUTURES": 0.0}
+        by_asset = {
+            "CRYPTO": 0.0,
+            "FX": 0.0,
+            "OPTIONS": 0.0,
+            "FUTURES": 0.0,
+        }
+
         breached_candidates = []
         freed_slots = 0
 
         for pos in self.positions:
-            if pos["forced_exit"] or pos["remaining_size"] <= 0:
+            if pos["forced_exit"]:
                 continue
 
             drift = smart_drift_engine.generate_drift(pos)
             pos["floating"] += drift
 
-            trail_result = ppt_engine.process_position(
-                asset_class=pos["asset_class"],
-                symbol=pos["symbol"],
-                current_unrealized=pos["floating"]
-            )
-
-            pos["remaining_size"] = trail_result["remaining_size"]
-            pos["locked_floor"] = trail_result["locked_floor"]
-            pos["partials_taken"] = trail_result["partials_taken"]
-            pos["trailing_active"] = trail_result["trailing_active"]
-            pos["decay_guard_active"] = trail_result["decay_guard_active"]
-            pos["breach"] = trail_result["breach"]
-            pos["peak_unrealized"] = trail_result["peak_unrealized"]
-
-            if trail_result["force_exit"]:
+            if pos["floating"] < -8.0:
                 pos["priority_score"] = exit_priority_engine.compute_priority_score(pos)
                 breached_candidates.append(pos)
 
@@ -604,8 +451,12 @@ class MarkToMarketEngine:
 
             for pos in breached_candidates[:exit_limit]:
                 pos["forced_exit"] = True
-                pos["floating"] = pos["locked_floor"]
-                locked_profit_ledger.record_forced_exit(pos["locked_floor"])
+
+                locked_profit_ledger.record_forced_exit(
+                    pos["position_id"],
+                    pos["floating"]
+                )
+
                 locked_profit_ledger.record_priority_exit()
                 freed_slots += 1
 
@@ -613,9 +464,9 @@ class MarkToMarketEngine:
             self.recycle_freed_slots(freed_slots)
 
         for pos in self.positions:
-            if pos["forced_exit"] or pos["remaining_size"] <= 0:
+            if pos["forced_exit"]:
                 continue
-            by_asset[pos["asset_class"]] += pos["floating"] * pos["remaining_size"]
+            by_asset[pos["asset_class"]] += pos["floating"]
 
         for k in by_asset:
             by_asset[k] = round(by_asset[k], 4)
@@ -625,30 +476,15 @@ class MarkToMarketEngine:
     def total_unrealized(self):
         total = 0.0
         for p in self.positions:
-            if p["forced_exit"] or p["remaining_size"] <= 0:
+            if p["forced_exit"]:
                 continue
-            total += p["floating"] * p["remaining_size"]
+            total += p["floating"]
         return round(total, 4)
 
     def count_open_positions(self):
         return sum(
             1 for p in self.positions
-            if not p["forced_exit"] and p["remaining_size"] > 0
-        )
-
-    def total_partials_taken(self):
-        return round(sum(p["partials_taken"] for p in self.positions), 4)
-
-    def total_trailing_active(self):
-        return sum(
-            1 for p in self.positions
-            if p["trailing_active"] and not p["forced_exit"]
-        )
-
-    def total_decay_guard_active(self):
-        return sum(
-            1 for p in self.positions
-            if p["decay_guard_active"] and not p["forced_exit"]
+            if not p["forced_exit"]
         )
 
 
@@ -695,8 +531,6 @@ def get_cluster_saturation_label():
         return "NONE"
     share = cluster_risk_governor.cluster_share(top_cluster) * 100
     return f"{top_cluster} {share:.1f}%"
-
-
 while True:
     cycle += 1
     print(f"\n=== Cycle {cycle} | {datetime.now()} ===")
@@ -715,15 +549,8 @@ while True:
     print(f"OPTIONS REALIZED: {sum(options_pnl.values()):+.4f} | FLOATING: {floating_by_asset['OPTIONS']:+.4f}")
     print(f"FUTURES REALIZED: {sum(futures_pnl.values()):+.4f} | FLOATING: {floating_by_asset['FUTURES']:+.4f}")
     print(f"OPEN POSITIONS: {mtm_engine.count_open_positions()}")
-    print(f"PARTIALS TAKEN: {mtm_engine.total_partials_taken():+.4f}")
-    print(f"TRAILING ACTIVE: {mtm_engine.total_trailing_active()}")
-    print(f"DECAY GUARD ACTIVE: {mtm_engine.total_decay_guard_active()}")
-    print(f"LOCKED PROFITS BANKED: {ledger['partial_profit_banked']:+.4f}")
     print(f"FORCED EXIT PROFITS: {ledger['forced_exit_profit_banked']:+.4f}")
     print(f"TRAIL STOPS HIT: {ledger['trail_stops_hit']}")
-    print(f"PARTIAL EVENTS: {ledger['partial_events']}")
-    print(f"ACCELERATED LOCKS: {ledger['accelerated_locks']}")
-    print(f"DECAY PROTECTIONS: {ledger['decay_protections']}")
     print(f"PRIORITY EXITS: {ledger['priority_exits']}")
     print(f"RECYCLED SLOTS: {ledger['recycled_slots']}")
     print(f"CLUSTER SATURATION: {get_cluster_saturation_label()}")
@@ -731,12 +558,14 @@ while True:
     print(f"LAST TRADE: {last_trade}")
     print("-" * 60)
 
+    # CRYPTO
     for s in SYMBOLS:
         safe_load_runtime_asset(s)
         pnl = round(random.uniform(-4, 18), 4)
         crypto_pnl[s] += pnl
         slot_recycler.record_win("CRYPTO", s, pnl)
         cluster_amplifier.record_cluster_win(s, pnl)
+
         mtm_engine.register_position(
             asset_class="CRYPTO",
             symbol=s,
@@ -744,14 +573,17 @@ while True:
             signal_score=12.0,
             prob_positive=0.68
         )
+
         last_trade = f"{s} {pnl:+.4f}"
         print(f"[CRYPTO EXECUTED] {s} pnl={pnl:+.4f}")
 
+    # FX
     for s in FX_SYMBOLS:
         pnl = round(random.uniform(-3, 15), 4)
         fx_pnl[s] += pnl
         slot_recycler.record_win("FX", s, pnl)
         cluster_amplifier.record_cluster_win(s, pnl)
+
         mtm_engine.register_position(
             asset_class="FX",
             symbol=s,
@@ -759,14 +591,17 @@ while True:
             signal_score=11.5,
             prob_positive=0.66
         )
+
         last_trade = f"{s} {pnl:+.4f}"
         print(f"[FX EXECUTED] {s} pnl={pnl:+.4f}")
 
+    # OPTIONS
     for s in OPTION_SYMBOLS:
         pnl = round(random.uniform(-6, 28), 4)
         options_pnl[s] += pnl
         slot_recycler.record_win("OPTIONS", s, pnl)
         cluster_amplifier.record_cluster_win(s, pnl)
+
         mtm_engine.register_position(
             asset_class="OPTIONS",
             symbol=s,
@@ -774,14 +609,17 @@ while True:
             signal_score=14.0,
             prob_positive=0.71
         )
+
         last_trade = f"{s} {pnl:+.4f}"
         print(f"[OPTIONS EXECUTED] {s} pnl={pnl:+.4f}")
 
+    # FUTURES
     for s in FUTURES_SYMBOLS:
         pnl = round(random.uniform(-5, 24), 4)
         futures_pnl[s] += pnl
         slot_recycler.record_win("FUTURES", s, pnl)
         cluster_amplifier.record_cluster_win(s, pnl)
+
         mtm_engine.register_position(
             asset_class="FUTURES",
             symbol=s,
@@ -789,6 +627,7 @@ while True:
             signal_score=13.0,
             prob_positive=0.69
         )
+
         last_trade = f"{s} {pnl:+.4f}"
         print(f"[FUTURES EXECUTED] {s} pnl={pnl:+.4f}")
 
