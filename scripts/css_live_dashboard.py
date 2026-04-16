@@ -1,6 +1,7 @@
 from __future__ import annotations
 import sys
 import time
+import json
 import random
 from collections import defaultdict
 from datetime import datetime
@@ -11,6 +12,9 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from backend.data.coinbase_historical_downloader import load_runtime_asset
+
+ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
+ARTIFACTS_DIR.mkdir(exist_ok=True)
 
 SYMBOLS = [
     "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD",
@@ -62,11 +66,11 @@ class AdaptiveConcurrencyEnvelopeController:
         self,
         open_positions: int,
         cluster_pct: float,
-        unrealized_pnl: float
+        unrealized_pnl: float,
     ) -> int:
         if (
             cluster_pct < 20.0
-            and unrealized_pnl > 0
+            and unrealized_pnl > 0.0
             and open_positions < self.current_limit * 0.75
         ):
             self.current_limit = min(self.current_limit + 50, self.max_limit)
@@ -76,7 +80,6 @@ class AdaptiveConcurrencyEnvelopeController:
             or open_positions > self.current_limit * 0.95
         ):
             self.current_limit = max(self.current_limit - 75, self.min_limit)
-
         return self.current_limit
 
     def can_add_position(self, open_positions: int) -> bool:
@@ -89,7 +92,6 @@ concurrency_controller = AdaptiveConcurrencyEnvelopeController()
 class CapitalDeploymentGovernor:
     """
     PQR-11 Capital Deployment Governor
-    Separates paper positions from live funded positions.
     """
 
     def __init__(self) -> None:
@@ -138,8 +140,54 @@ class CapitalDeploymentGovernor:
 
 
 capital_governor = CapitalDeploymentGovernor()
-# Uncomment next line to test live funding mode immediately.
+# Uncomment to simulate live funding:
 # capital_governor.set_live_mode()
+
+
+class SessionRecoveryEngine:
+    """
+    PQR-12 Production Hardening Layer
+    """
+
+    def __init__(self) -> None:
+        self.state_file = ARTIFACTS_DIR / "css_session_recovery.json"
+
+    def save_state(
+        self,
+        *,
+        cycle: int,
+        crypto_pnl: dict,
+        fx_pnl: dict,
+        options_pnl: dict,
+        futures_pnl: dict,
+        positions: list[dict],
+        last_trade: str,
+        position_counter: int,
+    ) -> None:
+        payload = {
+            "cycle": cycle,
+            "crypto_pnl": crypto_pnl,
+            "fx_pnl": fx_pnl,
+            "options_pnl": options_pnl,
+            "futures_pnl": futures_pnl,
+            "positions": positions,
+            "last_trade": last_trade,
+            "position_counter": position_counter,
+        }
+        with open(self.state_file, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+
+    def load_state(self):
+        if not self.state_file.exists():
+            return None
+        try:
+            with open(self.state_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return None
+
+
+session_recovery = SessionRecoveryEngine()
 
 
 class LockedProfitLedger:
@@ -165,8 +213,6 @@ class LockedProfitLedger:
 
 
 locked_profit_ledger = LockedProfitLedger()
-
-
 class MomentumClusterAmplifier:
     def __init__(self) -> None:
         self.cluster_map = {
@@ -198,6 +244,8 @@ class MomentumClusterAmplifier:
 
 
 cluster_amplifier = MomentumClusterAmplifier()
+
+
 class ClusterSaturationRiskGovernor:
     def __init__(self) -> None:
         self.cluster_slot_counts: dict[str, int] = defaultdict(int)
@@ -243,7 +291,7 @@ class MarkToMarketEngine:
         asset_class: str,
         symbol: str,
         signal_score: float,
-        prob_positive: float
+        prob_positive: float,
     ) -> None:
         self.position_counter += 1
         pid = f"POS-{self.position_counter}"
@@ -255,7 +303,6 @@ class MarkToMarketEngine:
                 break
 
         cluster_risk_governor.record_cluster_slot(cluster_name)
-
         funded_live = capital_governor.allocate_trade(pid)
 
         self.positions.append({
@@ -275,6 +322,7 @@ class MarkToMarketEngine:
 
 
 mtm_engine = MarkToMarketEngine()
+
 ENGINE_MODE = select_engine_mode()
 
 crypto_pnl = {s: 0.0 for s in SYMBOLS}
@@ -284,6 +332,27 @@ futures_pnl = {s: 0.0 for s in FUTURES_SYMBOLS}
 
 last_trade = "NONE"
 cycle = 0
+
+
+saved_state = session_recovery.load_state()
+if saved_state:
+    cycle = saved_state.get("cycle", 0)
+    crypto_pnl.update(saved_state.get("crypto_pnl", {}))
+    fx_pnl.update(saved_state.get("fx_pnl", {}))
+    options_pnl.update(saved_state.get("options_pnl", {}))
+    futures_pnl.update(saved_state.get("futures_pnl", {}))
+    last_trade = saved_state.get("last_trade", "NONE")
+
+    mtm_engine.positions = saved_state.get("positions", [])
+    mtm_engine.position_counter = saved_state.get(
+        "position_counter",
+        len(mtm_engine.positions)
+    )
+
+    print(
+        f"[RECOVERY] Restored prior session: "
+        f"{len(mtm_engine.positions)} positions recovered."
+    )
 
 
 def total_realized_pnl() -> float:
@@ -395,6 +464,10 @@ while True:
         f"CLUSTER SATURATION: "
         f"{top_cluster if top_cluster else 'NONE'} {cluster_pct:.1f}%"
     )
+    print(
+        f"SESSION RECOVERY: "
+        f"{'ACTIVE' if session_recovery.state_file.exists() else 'NEW SESSION'}"
+    )
     print(f"LAST TRADE: {last_trade}")
     print("-" * 60)
 
@@ -428,5 +501,17 @@ while True:
 
             last_trade = f"{s} {pnl:+.4f}"
             print(f"[{asset_class} EXECUTED] {s} pnl={pnl:+.4f}")
+
+    # Save recovery snapshot every cycle
+    session_recovery.save_state(
+        cycle=cycle,
+        crypto_pnl=crypto_pnl,
+        fx_pnl=fx_pnl,
+        options_pnl=options_pnl,
+        futures_pnl=futures_pnl,
+        positions=mtm_engine.positions,
+        last_trade=last_trade,
+        position_counter=mtm_engine.position_counter,
+    )
 
     time.sleep(CYCLE_SLEEP)
