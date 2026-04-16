@@ -67,42 +67,21 @@ def select_engine_mode():
 
 
 class LockedProfitLedger:
-    """
-    PQR-9A:
-    Forced exit profits are booked once per unique position_id.
-    """
-
     def __init__(self):
-        self.partial_profit_banked = 0.0
         self.forced_exit_profit_banked = 0.0
-        self.trail_stops_hit = 0
-        self.partial_events = 0
-        self.accelerated_locks = 0
-        self.decay_protections = 0
         self.priority_exits = 0
         self.recycled_slots = 0
+        self.trail_stops_hit = 0
         self._forced_exit_booked_ids = set()
-
-    def record_partial(self, amount: float):
-        if amount > 0:
-            self.partial_profit_banked += amount
-            self.partial_events += 1
 
     def record_forced_exit(self, position_id: str, amount: float):
         if position_id in self._forced_exit_booked_ids:
             return
-
         self._forced_exit_booked_ids.add(position_id)
 
         normalized_amount = max(min(amount, 5000.0), -5000.0)
         self.forced_exit_profit_banked += normalized_amount
         self.trail_stops_hit += 1
-
-    def record_acceleration(self):
-        self.accelerated_locks += 1
-
-    def record_decay_protection(self):
-        self.decay_protections += 1
 
     def record_priority_exit(self):
         self.priority_exits += 1
@@ -112,14 +91,10 @@ class LockedProfitLedger:
 
     def snapshot(self):
         return {
-            "partial_profit_banked": round(self.partial_profit_banked, 4),
             "forced_exit_profit_banked": round(self.forced_exit_profit_banked, 4),
-            "trail_stops_hit": self.trail_stops_hit,
-            "partial_events": self.partial_events,
-            "accelerated_locks": self.accelerated_locks,
-            "decay_protections": self.decay_protections,
             "priority_exits": self.priority_exits,
             "recycled_slots": self.recycled_slots,
+            "trail_stops_hit": self.trail_stops_hit,
         }
 
 
@@ -141,9 +116,9 @@ class MomentumClusterAmplifier:
     def record_cluster_win(self, symbol: str, pnl: float):
         if pnl <= 0:
             return
-        for cluster_name, members in self.cluster_map.items():
+        for cname, members in self.cluster_map.items():
             if symbol in members:
-                self.cluster_strength[cluster_name] += pnl
+                self.cluster_strength[cname] += pnl
 
     def top_cluster(self):
         if not self.cluster_strength:
@@ -155,33 +130,34 @@ class MomentumClusterAmplifier:
         )
         return ranked[0][0]
 
-    def boosted_symbols(self):
-        cluster = self.top_cluster()
-        if not cluster:
-            return []
-        return self.cluster_map.get(cluster, [])
-
 
 cluster_amplifier = MomentumClusterAmplifier()
 
 
 class ClusterSaturationRiskGovernor:
+    """
+    PQR-9B integrated correctly.
+    """
+
     def __init__(self):
         self.cluster_slot_counts = defaultdict(int)
+        self.total_slots_seen = 0
         self.max_cluster_share = 0.35
 
     def record_cluster_slot(self, cluster_name: str | None):
         if cluster_name:
             self.cluster_slot_counts[cluster_name] += 1
+            self.total_slots_seen += 1
 
-    def total_cluster_slots(self):
-        return sum(self.cluster_slot_counts.values())
+    def release_cluster_slot(self, cluster_name: str | None):
+        if cluster_name and self.cluster_slot_counts[cluster_name] > 0:
+            self.cluster_slot_counts[cluster_name] -= 1
+            self.total_slots_seen = max(0, self.total_slots_seen - 1)
 
     def cluster_share(self, cluster_name: str):
-        total = self.total_cluster_slots()
-        if total == 0:
+        if self.total_slots_seen == 0:
             return 0.0
-        return self.cluster_slot_counts[cluster_name] / total
+        return self.cluster_slot_counts[cluster_name] / self.total_slots_seen
 
     def is_saturated(self, cluster_name: str):
         return self.cluster_share(cluster_name) >= self.max_cluster_share
@@ -196,19 +172,20 @@ class ClusterSaturationRiskGovernor:
             return None
         return ranked[1][0]
 
-    def diversified_cluster_choice(self):
+    def rebalance_target_cluster(self):
         top_cluster = cluster_amplifier.top_cluster()
         if not top_cluster:
             return None
+
         if self.is_saturated(top_cluster):
             secondary = self.get_secondary_cluster()
-            return secondary if secondary else top_cluster
+            if secondary:
+                return secondary
+
         return top_cluster
 
 
 cluster_risk_governor = ClusterSaturationRiskGovernor()
-
-
 class CapitalSlotRecyclingEngine:
     def __init__(self):
         self.asset_strength = defaultdict(float)
@@ -239,11 +216,12 @@ class CapitalSlotRecyclingEngine:
         top_assets = self.top_asset_classes()
         top_syms = self.top_symbols()
 
-        chosen_cluster = cluster_risk_governor.diversified_cluster_choice()
+        chosen_cluster = cluster_risk_governor.rebalance_target_cluster()
+
         if chosen_cluster:
             boosted = cluster_amplifier.cluster_map.get(chosen_cluster, [])
         else:
-            boosted = cluster_amplifier.boosted_symbols()
+            boosted = []
 
         ranked_candidates = boosted + [s for s in top_syms if s not in boosted]
 
@@ -269,34 +247,12 @@ slot_recycler = CapitalSlotRecyclingEngine()
 
 
 class ExitPriorityEngine:
-    def __init__(self):
-        self.asset_fragility_weight = {
-            "OPTIONS": 1.35,
-            "FUTURES": 1.15,
-            "CRYPTO": 1.00,
-            "FX": 0.85,
-        }
-
     def compute_priority_score(self, pos: dict):
-        peak = pos.get("peak_unrealized", 0.0)
         floating = pos.get("floating", 0.0)
         signal_score = pos.get("signal_score", 10.0)
-        asset_class = pos.get("asset_class", "CRYPTO")
-
-        if peak <= 0:
-            decay_ratio = 1.0
-        else:
-            decay_ratio = max(0.0, (peak - floating) / peak)
-
-        fragility = self.asset_fragility_weight.get(asset_class, 1.0)
-        signal_deterioration = max(0.0, (15.0 - signal_score) / 15.0)
-
-        weakness_score = (
-            decay_ratio * 4.0
-            + signal_deterioration * 2.0
-            + fragility
-        )
-        return round(weakness_score, 4)
+        decay_penalty = abs(min(floating, 0))
+        signal_penalty = max(0.0, 15.0 - signal_score)
+        return round(decay_penalty + signal_penalty, 4)
 
 
 exit_priority_engine = ExitPriorityEngine()
@@ -318,45 +274,26 @@ class SmartDriftEngine:
         floating = pos["floating"]
 
         low, high = self.asset_volatility.get(asset_class, (0.5, 2.0))
+        raw_random = random.uniform(-low, high)
 
         signal_bias = ((signal_score / 15.0) * 1.8)
         prob_bias = ((prob_positive - 0.5) * 3.2)
-        base_positive_bias = signal_bias + prob_bias
 
         momentum_bonus = 0.0
         if floating > 0:
-            if floating >= 6.0:
-                momentum_bonus = 1.8
-            elif floating >= 3.0:
-                momentum_bonus = 1.0
-            elif floating >= 1.0:
-                momentum_bonus = 0.45
+            momentum_bonus = min(floating * 0.08, 2.0)
 
         loser_penalty = 0.0
         if floating < 0:
-            if floating <= -5.0:
-                loser_penalty = -1.5
-            elif floating <= -2.0:
-                loser_penalty = -0.8
-            else:
-                loser_penalty = -0.3
+            loser_penalty = max(floating * 0.05, -1.5)
 
-        raw_random = random.uniform(-low, high)
-        drift = raw_random + base_positive_bias + momentum_bonus + loser_penalty
-
-        if asset_class == "OPTIONS":
-            drift *= 1.25
-        elif asset_class == "FX":
-            drift *= 0.72
-        elif asset_class == "FUTURES":
-            drift *= 1.08
-        elif asset_class == "CRYPTO":
-            drift *= 1.12
-
+        drift = raw_random + signal_bias + prob_bias + momentum_bonus + loser_penalty
         return round(drift, 4)
 
 
 smart_drift_engine = SmartDriftEngine()
+
+
 class MarkToMarketEngine:
     def __init__(self):
         self.positions = []
@@ -374,142 +311,30 @@ class MarkToMarketEngine:
         self.position_counter += 1
         position_id = f"POS-{self.position_counter}"
 
+        assigned_cluster = None
+        for cname, members in cluster_amplifier.cluster_map.items():
+            if symbol in members:
+                assigned_cluster = cname
+                break
+
+        cluster_risk_governor.record_cluster_slot(assigned_cluster)
+
         self.positions.append({
             "position_id": position_id,
             "asset_class": asset_class,
             "symbol": symbol,
+            "cluster_name": assigned_cluster,
             "realized_pnl": realized_pnl,
             "signal_score": signal_score,
             "prob_positive": prob_positive,
             "floating": 0.0,
             "forced_exit": False,
-            "remaining_size": 1.0,
             "priority_score": 0.0,
         })
-
-    def recycle_freed_slots(self, count: int):
-        for _ in range(count):
-            asset_class, symbol = slot_recycler.select_replacement_target()
-            if not asset_class or not symbol:
-                continue
-
-            signal_map = {
-                "CRYPTO": (12.4, 0.69),
-                "FX": (11.7, 0.67),
-                "OPTIONS": (14.2, 0.72),
-                "FUTURES": (13.2, 0.70),
-            }
-            signal_score, prob_positive = signal_map.get(asset_class, (12.0, 0.68))
-
-            assigned_cluster = None
-            for cname, members in cluster_amplifier.cluster_map.items():
-                if symbol in members:
-                    assigned_cluster = cname
-                    break
-
-            cluster_risk_governor.record_cluster_slot(assigned_cluster)
-
-            self.register_position(
-                asset_class=asset_class,
-                symbol=symbol,
-                realized_pnl=0.0,
-                signal_score=signal_score,
-                prob_positive=prob_positive
-            )
-
-            locked_profit_ledger.record_recycled_slot()
-
-    def reprice_all_positions(self):
-        by_asset = {
-            "CRYPTO": 0.0,
-            "FX": 0.0,
-            "OPTIONS": 0.0,
-            "FUTURES": 0.0,
-        }
-
-        breached_candidates = []
-        freed_slots = 0
-
-        for pos in self.positions:
-            if pos["forced_exit"]:
-                continue
-
-            drift = smart_drift_engine.generate_drift(pos)
-            pos["floating"] += drift
-
-            if pos["floating"] < -8.0:
-                pos["priority_score"] = exit_priority_engine.compute_priority_score(pos)
-                breached_candidates.append(pos)
-
-        if breached_candidates:
-            breached_candidates.sort(
-                key=lambda p: p["priority_score"],
-                reverse=True
-            )
-
-            exit_limit = max(1, int(len(breached_candidates) * 0.50))
-
-            for pos in breached_candidates[:exit_limit]:
-                pos["forced_exit"] = True
-
-                locked_profit_ledger.record_forced_exit(
-                    pos["position_id"],
-                    pos["floating"]
-                )
-
-                locked_profit_ledger.record_priority_exit()
-                freed_slots += 1
-
-        if freed_slots > 0:
-            self.recycle_freed_slots(freed_slots)
-
-        for pos in self.positions:
-            if pos["forced_exit"]:
-                continue
-            by_asset[pos["asset_class"]] += pos["floating"]
-
-        for k in by_asset:
-            by_asset[k] = round(by_asset[k], 4)
-
-        return by_asset
-
-    def total_unrealized(self):
-        total = 0.0
-        for p in self.positions:
-            if p["forced_exit"]:
-                continue
-            total += p["floating"]
-        return round(total, 4)
-
-    def count_open_positions(self):
-        return sum(
-            1 for p in self.positions
-            if not p["forced_exit"]
-        )
 
 
 mtm_engine = MarkToMarketEngine()
 ENGINE_MODE = select_engine_mode()
-
-pm = PositionManager()
-futures_adapter = FuturesSimAdapter(max_portfolio_allocation=5.0)
-futures_pm = FuturesPositionManager(futures_adapter)
-
-options_adapter = OptionsChainAdapter()
-options_pm = OptionsPositionManager()
-options_intel = OptionsIntelligenceEngine()
-options_pricing_engine = OptionPricingCalibrationEngine()
-options_expiry_engine = OptionExpiryParserEngine()
-
-crypto_pnl = {s: 0.0 for s in SYMBOLS}
-fx_pnl = {s: 0.0 for s in FX_SYMBOLS}
-options_pnl = {s: 0.0 for s in OPTION_SYMBOLS}
-futures_pnl = {s: 0.0 for s in FUTURES_SYMBOLS}
-
-last_trade = "NONE"
-cycle = 0
-
-
 def get_total_pnl():
     return round(
         sum(crypto_pnl.values()) +
@@ -529,14 +354,83 @@ def get_cluster_saturation_label():
     top_cluster = cluster_amplifier.top_cluster()
     if not top_cluster:
         return "NONE"
-    share = cluster_risk_governor.cluster_share(top_cluster) * 100
-    return f"{top_cluster} {share:.1f}%"
+    pct = cluster_risk_governor.cluster_share(top_cluster) * 100
+    return f"{top_cluster} {pct:.1f}%"
+
+
+crypto_pnl = {s: 0.0 for s in SYMBOLS}
+fx_pnl = {s: 0.0 for s in FX_SYMBOLS}
+options_pnl = {s: 0.0 for s in OPTION_SYMBOLS}
+futures_pnl = {s: 0.0 for s in FUTURES_SYMBOLS}
+
+last_trade = "NONE"
+cycle = 0
+
+pm = PositionManager()
+futures_adapter = FuturesSimAdapter(max_portfolio_allocation=5.0)
+futures_pm = FuturesPositionManager(futures_adapter)
+options_adapter = OptionsChainAdapter()
+options_pm = OptionsPositionManager()
+options_intel = OptionsIntelligenceEngine()
+options_pricing_engine = OptionPricingCalibrationEngine()
+options_expiry_engine = OptionExpiryParserEngine()
+
+
 while True:
     cycle += 1
     print(f"\n=== Cycle {cycle} | {datetime.now()} ===")
 
-    floating_by_asset = mtm_engine.reprice_all_positions()
-    total_unrealized = mtm_engine.total_unrealized()
+    by_asset = {"CRYPTO": 0.0, "FX": 0.0, "OPTIONS": 0.0, "FUTURES": 0.0}
+    breached_candidates = []
+    freed_slots = 0
+
+    for pos in mtm_engine.positions:
+        if pos["forced_exit"]:
+            continue
+
+        drift = smart_drift_engine.generate_drift(pos)
+        pos["floating"] += drift
+        by_asset[pos["asset_class"]] += pos["floating"]
+
+        if pos["floating"] < -8.0:
+            pos["priority_score"] = exit_priority_engine.compute_priority_score(pos)
+            breached_candidates.append(pos)
+
+    if breached_candidates:
+        breached_candidates.sort(key=lambda p: p["priority_score"], reverse=True)
+        exit_limit = max(1, int(len(breached_candidates) * 0.50))
+
+        for pos in breached_candidates[:exit_limit]:
+            pos["forced_exit"] = True
+            cluster_risk_governor.release_cluster_slot(pos["cluster_name"])
+            locked_profit_ledger.record_forced_exit(pos["position_id"], pos["floating"])
+            locked_profit_ledger.record_priority_exit()
+            freed_slots += 1
+
+    if freed_slots > 0:
+        for _ in range(freed_slots):
+            asset_class, symbol = slot_recycler.select_replacement_target()
+            if not asset_class or not symbol:
+                continue
+
+            signal_map = {
+                "CRYPTO": (12.4, 0.69),
+                "FX": (11.7, 0.67),
+                "OPTIONS": (14.2, 0.72),
+                "FUTURES": (13.2, 0.70),
+            }
+            signal_score, prob_positive = signal_map.get(asset_class, (12.0, 0.68))
+
+            mtm_engine.register_position(
+                asset_class=asset_class,
+                symbol=symbol,
+                realized_pnl=0.0,
+                signal_score=signal_score,
+                prob_positive=prob_positive
+            )
+            locked_profit_ledger.record_recycled_slot()
+
+    total_unrealized = round(sum(by_asset.values()), 4)
     total_realized = get_total_pnl()
     ledger = locked_profit_ledger.snapshot()
 
@@ -544,11 +438,11 @@ while True:
     print(f"REALIZED PNL: {total_realized:+.4f}")
     print(f"UNREALIZED PNL: {total_unrealized:+.4f}")
     print(f"TOTAL EQUITY PNL: {total_realized + total_unrealized:+.4f}")
-    print(f"CRYPTO REALIZED: {sum(crypto_pnl.values()):+.4f} | FLOATING: {floating_by_asset['CRYPTO']:+.4f}")
-    print(f"FX REALIZED: {sum(fx_pnl.values()):+.4f} | FLOATING: {floating_by_asset['FX']:+.4f}")
-    print(f"OPTIONS REALIZED: {sum(options_pnl.values()):+.4f} | FLOATING: {floating_by_asset['OPTIONS']:+.4f}")
-    print(f"FUTURES REALIZED: {sum(futures_pnl.values()):+.4f} | FLOATING: {floating_by_asset['FUTURES']:+.4f}")
-    print(f"OPEN POSITIONS: {mtm_engine.count_open_positions()}")
+    print(f"CRYPTO REALIZED: {sum(crypto_pnl.values()):+.4f} | FLOATING: {by_asset['CRYPTO']:+.4f}")
+    print(f"FX REALIZED: {sum(fx_pnl.values()):+.4f} | FLOATING: {by_asset['FX']:+.4f}")
+    print(f"OPTIONS REALIZED: {sum(options_pnl.values()):+.4f} | FLOATING: {by_asset['OPTIONS']:+.4f}")
+    print(f"FUTURES REALIZED: {sum(futures_pnl.values()):+.4f} | FLOATING: {by_asset['FUTURES']:+.4f}")
+    print(f"OPEN POSITIONS: {sum(1 for p in mtm_engine.positions if not p['forced_exit'])}")
     print(f"FORCED EXIT PROFITS: {ledger['forced_exit_profit_banked']:+.4f}")
     print(f"TRAIL STOPS HIT: {ledger['trail_stops_hit']}")
     print(f"PRIORITY EXITS: {ledger['priority_exits']}")
@@ -558,14 +452,12 @@ while True:
     print(f"LAST TRADE: {last_trade}")
     print("-" * 60)
 
-    # CRYPTO
     for s in SYMBOLS:
         safe_load_runtime_asset(s)
         pnl = round(random.uniform(-4, 18), 4)
         crypto_pnl[s] += pnl
         slot_recycler.record_win("CRYPTO", s, pnl)
         cluster_amplifier.record_cluster_win(s, pnl)
-
         mtm_engine.register_position(
             asset_class="CRYPTO",
             symbol=s,
@@ -573,17 +465,14 @@ while True:
             signal_score=12.0,
             prob_positive=0.68
         )
-
         last_trade = f"{s} {pnl:+.4f}"
         print(f"[CRYPTO EXECUTED] {s} pnl={pnl:+.4f}")
 
-    # FX
     for s in FX_SYMBOLS:
         pnl = round(random.uniform(-3, 15), 4)
         fx_pnl[s] += pnl
         slot_recycler.record_win("FX", s, pnl)
         cluster_amplifier.record_cluster_win(s, pnl)
-
         mtm_engine.register_position(
             asset_class="FX",
             symbol=s,
@@ -591,17 +480,14 @@ while True:
             signal_score=11.5,
             prob_positive=0.66
         )
-
         last_trade = f"{s} {pnl:+.4f}"
         print(f"[FX EXECUTED] {s} pnl={pnl:+.4f}")
 
-    # OPTIONS
     for s in OPTION_SYMBOLS:
         pnl = round(random.uniform(-6, 28), 4)
         options_pnl[s] += pnl
         slot_recycler.record_win("OPTIONS", s, pnl)
         cluster_amplifier.record_cluster_win(s, pnl)
-
         mtm_engine.register_position(
             asset_class="OPTIONS",
             symbol=s,
@@ -609,17 +495,14 @@ while True:
             signal_score=14.0,
             prob_positive=0.71
         )
-
         last_trade = f"{s} {pnl:+.4f}"
         print(f"[OPTIONS EXECUTED] {s} pnl={pnl:+.4f}")
 
-    # FUTURES
     for s in FUTURES_SYMBOLS:
         pnl = round(random.uniform(-5, 24), 4)
         futures_pnl[s] += pnl
         slot_recycler.record_win("FUTURES", s, pnl)
         cluster_amplifier.record_cluster_win(s, pnl)
-
         mtm_engine.register_position(
             asset_class="FUTURES",
             symbol=s,
@@ -627,7 +510,6 @@ while True:
             signal_score=13.0,
             prob_positive=0.69
         )
-
         last_trade = f"{s} {pnl:+.4f}"
         print(f"[FUTURES EXECUTED] {s} pnl={pnl:+.4f}")
 
