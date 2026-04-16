@@ -1,0 +1,10 @@
+C:\rasib\source\capital-strata-systems\broker_oanda.py
+C:\rasib\source\capital-strata-systems\backend\app\oanda_trade_smoketest.py
+C:\rasib\source\capital-strata-systems\backend\app\brokers\oanda_adapter.py
+C:\rasib\source\capital-strata-systems\data\tools\download_oanda_history.py
+C:\rasib\source\capital-strata-systems\engine\brokers\oanda_paper_broker.py
+C:\rasib\source\capital-strata-systems\live_data\oanda_adapter.py
+C:\rasib\source\capital-strata-systems\tools\download_oanda_m5_1year.py
+C:\rasib\source\capital-strata-systems\tools\download_oanda_m5_multi.py
+C:\rasib\source\capital-strata-systems\tools\normalize_oanda_raw_to_replay.py
+C:\rasib\source\capital-strata-systems\venv\Lib\site-packages\oandapyV20\oandapyV20.py

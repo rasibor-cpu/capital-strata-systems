@@ -1,0 +1,5 @@
+C:\rasib\source\capital-strata-systems\backend\broker\coinbase_adapter.py
+C:\rasib\source\capital-strata-systems\backend\data\coinbase_historical_downloader.py
+C:\rasib\source\capital-strata-systems\backend\execution\coinbase_executor.py
+C:\rasib\source\capital-strata-systems\backend\scanner\coinbase_universe.py
+C:\rasib\source\capital-strata-systems\scripts\coinbase_live_auth_test.py
