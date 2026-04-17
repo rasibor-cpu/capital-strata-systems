@@ -23,6 +23,7 @@ load_dotenv(PROJECT_ROOT / ".env")
 from backend.data.coinbase_historical_downloader import load_runtime_asset
 from backend.app.brokers.oanda_adapter import OandaAdapter
 from backend.app.brokers.broker_bootstrap import initialize_broker
+from backend.app.brokers.coinbase_live_order_gate import CoinbaseLiveOrderGate
 
 
 ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
@@ -56,6 +57,7 @@ FUTURES_SYMBOLS = ["ES", "NQ", "CL", "GC"]
 CYCLE_SLEEP = 8
 FX_LIVE_UNITS = 1
 COINBASE_TEST_ORDER_USD = float(os.getenv("COINBASE_TEST_ORDER_USD", "1.00") or 1.00)
+COINBASE_MAX_LIVE_ORDER_USD = float(os.getenv("COINBASE_MAX_LIVE_ORDER_USD", "1.00") or 1.00)
 
 MAX_PAPER_OPEN_POSITIONS = 40
 MAX_OPEN_PER_CYCLE = 4
@@ -100,6 +102,7 @@ def select_broker_execution_config() -> tuple[bool, str, str]:
     - Broker selection is explicit.
     - Coinbase is selectable.
     - Coinbase live order placement requires COINBASE_ENABLE_LIVE_ORDERS=true.
+    - Coinbase live orders also pass through CoinbaseLiveOrderGate.
     """
     print("\n=== CSS BROKER EXECUTION ARMING ===")
     print("1. DISABLED / PAPER ONLY")
@@ -217,7 +220,7 @@ class CapitalDeploymentGovernor:
     """
     Controlled test allocation governor.
 
-    The values here are internal CSS test allocations. They are not real broker
+    These values are internal CSS test allocations. They are not real broker
     balances unless a broker order is separately allowed and executed.
     """
 
@@ -294,6 +297,12 @@ map_oanda_env()
 oanda = OandaAdapter()
 
 coinbase: Optional[Any] = None
+
+coinbase_live_gate = CoinbaseLiveOrderGate(
+    approved_symbols=SYMBOLS,
+    max_order_usd=COINBASE_MAX_LIVE_ORDER_USD,
+    require_manual_phrase=False,
+)
 
 
 def initialize_selected_coinbase() -> None:
@@ -395,10 +404,7 @@ def coinbase_live_orders_enabled() -> bool:
 
 def _coinbase_response_ok(response: Any) -> tuple[bool, str]:
     """
-    Normalize responses from the existing backend.broker.coinbase_adapter.
-
-    The existing adapter exposes place_market_buy/place_market_sell rather than
-    a CSS-style place_order method.
+    Normalize responses from backend.broker.coinbase_adapter.
     """
     if not isinstance(response, dict):
         return False, "NON_DICT_RESPONSE"
@@ -428,6 +434,33 @@ def _coinbase_response_ok(response: Any) -> tuple[bool, str]:
     return False, str(err)[:60]
 
 
+def evaluate_coinbase_live_gate(symbol: str, size_usd: float):
+    """
+    Centralized Coinbase live-order readiness gate.
+
+    For paper mode:
+    - This returns a passing paper note because paper mode never places real orders.
+
+    For live mode:
+    - This calls CoinbaseLiveOrderGate and fails closed unless every live-order
+      condition is satisfied.
+    """
+    if SELECTED_BROKER_MODE != "live":
+        return True, "COINBASE_PAPER_MODE_GATE_BYPASS"
+
+    result = coinbase_live_gate.evaluate(
+        broker_execution_armed=BROKER_EXECUTION_ARMED,
+        selected_broker=SELECTED_BROKER,
+        broker_mode=SELECTED_BROKER_MODE,
+        engine_mode=ENGINE_MODE,
+        symbol=symbol,
+        size_usd=float(size_usd),
+        coinbase_adapter=coinbase,
+    )
+
+    return result.allowed, result.reason
+
+
 def attempt_coinbase_crypto_execution(symbol: str) -> tuple[bool, str]:
     """
     Unified broker-gated Coinbase crypto execution:
@@ -436,8 +469,7 @@ def attempt_coinbase_crypto_execution(symbol: str) -> tuple[bool, str]:
     - crypto only
     - no execution in SAFE mode
     - paper Coinbase mode uses adapter paper order path
-    - live Coinbase mode requires COINBASE_ENABLE_LIVE_ORDERS=true
-    - order size is capped by COINBASE_TEST_ORDER_USD
+    - live Coinbase mode must pass CoinbaseLiveOrderGate
     """
 
     if not BROKER_EXECUTION_ARMED:
@@ -455,8 +487,13 @@ def attempt_coinbase_crypto_execution(symbol: str) -> tuple[bool, str]:
     if coinbase is None:
         return False, "COINBASE_NOT_INITIALIZED"
 
-    if SELECTED_BROKER_MODE == "live" and not coinbase_live_orders_enabled():
-        return False, "COINBASE_LIVE_ORDER_FLAG_OFF"
+    gate_ok, gate_reason = evaluate_coinbase_live_gate(
+        symbol=symbol,
+        size_usd=float(COINBASE_TEST_ORDER_USD),
+    )
+
+    if not gate_ok:
+        return False, f"COINBASE_LIVE_GATE_BLOCKED_{gate_reason}"
 
     if not hasattr(coinbase, "place_market_buy"):
         return False, "COINBASE_ADAPTER_MISSING_PLACE_MARKET_BUY"
@@ -663,7 +700,7 @@ class MarkToMarketEngine:
             "signal_score": signal_score,
             "prob_positive": prob_positive,
             "broker_tested": broker_tested,
-            "live_funded": broker_tested,  # compatibility alias for older logic
+            "live_funded": broker_tested,
             "broker_order_ok": False,
             "broker_note": "NO_BROKER_ORDER",
         }
@@ -850,6 +887,7 @@ def print_coinbase_broker_status() -> None:
     print(f"COINBASE KEY PRESENT: {'YES' if key_present else 'NO'}")
     print(f"COINBASE PRIVATE KEY PRESENT: {'YES' if private_key_present else 'NO'}")
     print(f"COINBASE LIVE ORDER FLAG: {'ON' if coinbase_live_orders_enabled() else 'OFF'}")
+    print(f"COINBASE MAX LIVE ORDER USD: ${COINBASE_MAX_LIVE_ORDER_USD:.2f}")
 
     if SELECTED_BROKER != "COINBASE":
         print("COINBASE CONNECTED: NOT SELECTED")
@@ -900,7 +938,7 @@ def active_execution_scope_label() -> str:
 
     if SELECTED_BROKER == "COINBASE":
         if SELECTED_BROKER_MODE == "live" and coinbase_live_orders_enabled():
-            return "COINBASE LIVE CRYPTO ENABLED"
+            return "COINBASE LIVE CRYPTO GATED"
         if SELECTED_BROKER_MODE == "live":
             return "COINBASE LIVE AUTH ONLY / ORDERS BLOCKED"
         return "COINBASE PAPER CRYPTO"
