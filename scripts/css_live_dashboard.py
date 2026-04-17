@@ -24,6 +24,7 @@ from backend.data.coinbase_historical_downloader import load_runtime_asset
 from backend.app.brokers.oanda_adapter import OandaAdapter
 from backend.app.brokers.broker_bootstrap import initialize_broker
 from backend.app.brokers.coinbase_live_order_gate import CoinbaseLiveOrderGate
+from backend.app.brokers.broker_gate_audit import BrokerGateAuditLogger
 
 
 ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
@@ -103,6 +104,7 @@ def select_broker_execution_config() -> tuple[bool, str, str]:
     - Coinbase is selectable.
     - Coinbase live order placement requires COINBASE_ENABLE_LIVE_ORDERS=true.
     - Coinbase live orders also pass through CoinbaseLiveOrderGate.
+    - Gate decisions are logged through BrokerGateAuditLogger.
     """
     print("\n=== CSS BROKER EXECUTION ARMING ===")
     print("1. DISABLED / PAPER ONLY")
@@ -304,6 +306,8 @@ coinbase_live_gate = CoinbaseLiveOrderGate(
     require_manual_phrase=False,
 )
 
+broker_gate_audit = BrokerGateAuditLogger()
+
 
 def initialize_selected_coinbase() -> None:
     global coinbase
@@ -439,13 +443,30 @@ def evaluate_coinbase_live_gate(symbol: str, size_usd: float):
     Centralized Coinbase live-order readiness gate.
 
     For paper mode:
-    - This returns a passing paper note because paper mode never places real orders.
+    - returns a passing paper note because paper mode never places real orders.
 
     For live mode:
-    - This calls CoinbaseLiveOrderGate and fails closed unless every live-order
-      condition is satisfied.
+    - calls CoinbaseLiveOrderGate and logs every gate decision through the
+      neutral BrokerGateAuditLogger.
     """
     if SELECTED_BROKER_MODE != "live":
+        broker_gate_audit.log_decision(
+            broker="COINBASE",
+            gate_name="coinbase_live_order_gate",
+            allowed=True,
+            reason="COINBASE_PAPER_MODE_GATE_BYPASS",
+            symbol=symbol,
+            instrument=symbol,
+            asset_class="CRYPTO",
+            size=float(size_usd),
+            size_unit="USD",
+            selected_broker=SELECTED_BROKER,
+            broker_mode=SELECTED_BROKER_MODE,
+            engine_mode=ENGINE_MODE,
+            execution_armed=BROKER_EXECUTION_ARMED,
+            live_orders_flag=coinbase_live_orders_enabled(),
+            extra={"note": "paper mode bypass"},
+        )
         return True, "COINBASE_PAPER_MODE_GATE_BYPASS"
 
     result = coinbase_live_gate.evaluate(
@@ -456,6 +477,27 @@ def evaluate_coinbase_live_gate(symbol: str, size_usd: float):
         symbol=symbol,
         size_usd=float(size_usd),
         coinbase_adapter=coinbase,
+    )
+
+    broker_gate_audit.log_decision(
+        broker="COINBASE",
+        gate_name="coinbase_live_order_gate",
+        allowed=result.allowed,
+        reason=result.reason,
+        symbol=symbol,
+        instrument=symbol,
+        asset_class="CRYPTO",
+        size=float(size_usd),
+        size_unit="USD",
+        selected_broker=SELECTED_BROKER,
+        broker_mode=SELECTED_BROKER_MODE,
+        engine_mode=ENGINE_MODE,
+        execution_armed=BROKER_EXECUTION_ARMED,
+        live_orders_flag=coinbase_live_orders_enabled(),
+        extra={
+            "max_live_order_usd": COINBASE_MAX_LIVE_ORDER_USD,
+            "account_count_hint": 9 if SELECTED_BROKER == "COINBASE" and SELECTED_BROKER_MODE == "live" else None,
+        },
     )
 
     return result.allowed, result.reason
@@ -983,8 +1025,6 @@ while True:
             book_position_exit(pos, "TIME_EXIT")
 
     display_by_asset = mtm_engine.floating_by_asset(funded_only=False)
-    broker_test_by_asset = mtm_engine.floating_by_asset(funded_only=True)
-
     broker_test_positions = mtm_engine.count_open_broker_test_positions()
     total_unrealized = round(sum(display_by_asset.values()), 4)
     open_positions = mtm_engine.count_open_positions()
