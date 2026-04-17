@@ -359,24 +359,55 @@ def attempt_oanda_fx_execution(symbol: str) -> tuple[bool, str]:
     - 1 unit
     - no execution in SAFE mode
     - no execution if OANDA already has open trade
+
+    All gate decisions are logged through BrokerGateAuditLogger.
     """
 
+    def _audit(allowed: bool, reason: str) -> None:
+        broker_gate_audit.log_decision(
+            broker="OANDA",
+            gate_name="oanda_fx_order_gate",
+            allowed=allowed,
+            reason=reason,
+            symbol=symbol,
+            instrument=symbol,
+            asset_class="FX",
+            size=float(FX_LIVE_UNITS),
+            size_unit="UNITS",
+            selected_broker=SELECTED_BROKER,
+            broker_mode="paper",
+            engine_mode=ENGINE_MODE,
+            execution_armed=BROKER_EXECUTION_ARMED,
+            live_orders_flag=False,
+            extra={
+                "practice_mode": is_oanda_practice_mode(),
+                "open_trade_count": get_oanda_open_trade_count(),
+            },
+        )
+
     if not BROKER_EXECUTION_ARMED:
+        _audit(False, "BROKER_DISABLED_BY_GLOBAL_SWITCH")
         return False, "BROKER_DISABLED_BY_GLOBAL_SWITCH"
 
     if SELECTED_BROKER != "OANDA":
-        return False, f"BROKER_NOT_SELECTED_FOR_OANDA_{SELECTED_BROKER}"
+        reason = f"BROKER_NOT_SELECTED_FOR_OANDA_{SELECTED_BROKER}"
+        _audit(False, reason)
+        return False, reason
 
     if ENGINE_MODE == "SAFE":
+        _audit(False, "OANDA_BLOCKED_SAFE_MODE")
         return False, "OANDA_BLOCKED_SAFE_MODE"
 
     if not is_oanda_practice_mode():
+        _audit(False, "OANDA_BLOCKED_NOT_PRACTICE")
         return False, "OANDA_BLOCKED_NOT_PRACTICE"
 
     if symbol not in FX_SYMBOLS:
+        _audit(False, "OANDA_BLOCKED_NOT_FX")
         return False, "OANDA_BLOCKED_NOT_FX"
 
     if oanda_has_open_trade():
+        _audit(False, "OANDA_BLOCKED_OPEN_TRADE")
         return False, "OANDA_BLOCKED_OPEN_TRADE"
 
     try:
@@ -388,12 +419,17 @@ def attempt_oanda_fx_execution(symbol: str) -> tuple[bool, str]:
         )
 
         if response.get("ok"):
+            _audit(True, "OANDA_ORDER_OK")
             return True, "OANDA_ORDER_OK"
 
-        return False, f"OANDA_ORDER_FAIL_{response.get('status', 'NA')}"
+        reason = f"OANDA_ORDER_FAIL_{response.get('status', 'NA')}"
+        _audit(False, reason)
+        return False, reason
 
     except Exception as e:
-        return False, f"OANDA_ERROR_{str(e)[:40]}"
+        reason = f"OANDA_ERROR_{str(e)[:40]}"
+        _audit(False, reason)
+        return False, reason
 
 
 def coinbase_live_orders_enabled() -> bool:
@@ -1155,10 +1191,10 @@ while True:
                 if ok:
                     position["broker_order_ok"] = True
                     position["broker_note"] = broker_msg
-                    last_trade = f"{symbol} BROKER_TESTED {broker_msg}"
+                    last_trade = f"{symbol} BROKER_EXECUTED {broker_msg}"
                     print(
-                        f"[{asset_class} EXECUTED] {symbol} opened | "
-                        f"BROKER_TESTED | {broker_msg}"
+                        f"[{asset_class} BROKER EXECUTED] {symbol} opened | "
+                        f"{broker_msg}"
                     )
                 else:
                     capital_governor.release_trade(position["position_id"])
@@ -1166,15 +1202,15 @@ while True:
                     position["live_funded"] = False
                     position["broker_order_ok"] = False
                     position["broker_note"] = broker_msg
-                    last_trade = f"{symbol} BROKER_BLOCKED {broker_msg}"
+                    last_trade = f"{symbol} PAPER_OPENED BROKER_BLOCKED {broker_msg}"
                     print(
-                        f"[{asset_class} EXECUTED] {symbol} opened | "
+                        f"[{asset_class} PAPER OPENED] {symbol} opened | "
                         f"BROKER_BLOCKED | {broker_msg}"
                     )
 
             else:
-                last_trade = f"{symbol} OPENED"
-                print(f"[{asset_class} EXECUTED] {symbol} opened")
+                last_trade = f"{symbol} PAPER_OPENED"
+                print(f"[{asset_class} PAPER OPENED] {symbol}")
     else:
         print("[SIGNAL GENERATION PAUSED] paper open-position cap reached")
 
