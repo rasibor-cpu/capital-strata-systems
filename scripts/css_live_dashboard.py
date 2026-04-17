@@ -215,30 +215,29 @@ concurrency_controller = AdaptiveConcurrencyEnvelopeController()
 
 class CapitalDeploymentGovernor:
     """
-    Controlled test mode:
-    - Internal funding is possible only when broker execution path requests it.
-    - Broker execution is governed by BROKER_EXECUTION_ARMED + SELECTED_BROKER.
-    - Coinbase live orders require an extra environment flag:
-        COINBASE_ENABLE_LIVE_ORDERS=true
+    Controlled test allocation governor.
+
+    The values here are internal CSS test allocations. They are not real broker
+    balances unless a broker order is separately allowed and executed.
     """
 
     def __init__(self) -> None:
         self.paper_mode = False
-        self.live_capital_pool = 200.00
+        self.simulated_capital_pool = 200.00
         self.max_capital_per_trade = 25.00
-        self.max_live_positions = 5
-        self.active_live_allocations: dict[str, float] = {}
+        self.max_broker_test_positions = 5
+        self.active_test_allocations: dict[str, float] = {}
 
     def available_capital(self) -> float:
-        allocated = sum(self.active_live_allocations.values())
-        return round(self.live_capital_pool - allocated, 4)
+        allocated = sum(self.active_test_allocations.values())
+        return round(self.simulated_capital_pool - allocated, 4)
 
     def can_fund_trade(self, position_id: str) -> bool:
         if self.paper_mode:
             return False
-        if position_id in self.active_live_allocations:
+        if position_id in self.active_test_allocations:
             return False
-        if len(self.active_live_allocations) >= self.max_live_positions:
+        if len(self.active_test_allocations) >= self.max_broker_test_positions:
             return False
         if self.available_capital() < self.max_capital_per_trade:
             return False
@@ -247,18 +246,18 @@ class CapitalDeploymentGovernor:
     def allocate_trade(self, position_id: str) -> bool:
         if not self.can_fund_trade(position_id):
             return False
-        self.active_live_allocations[position_id] = self.max_capital_per_trade
+        self.active_test_allocations[position_id] = self.max_capital_per_trade
         return True
 
     def release_trade(self, position_id: str) -> None:
-        if position_id in self.active_live_allocations:
-            del self.active_live_allocations[position_id]
+        if position_id in self.active_test_allocations:
+            del self.active_test_allocations[position_id]
 
     def live_positions_count(self) -> int:
-        return len(self.active_live_allocations)
+        return len(self.active_test_allocations)
 
     def funded_amount(self) -> float:
-        return round(sum(self.active_live_allocations.values()), 4)
+        return round(sum(self.active_test_allocations.values()), 4)
 
     def set_live_mode(self) -> None:
         self.paper_mode = False
@@ -399,9 +398,7 @@ def _coinbase_response_ok(response: Any) -> tuple[bool, str]:
     Normalize responses from the existing backend.broker.coinbase_adapter.
 
     The existing adapter exposes place_market_buy/place_market_sell rather than
-    a CSS-style place_order method. Paper responses may return:
-        {"status": "paper_filled", ...}
-    Live responses may return Coinbase's native JSON payload.
+    a CSS-style place_order method.
     """
     if not isinstance(response, dict):
         return False, "NON_DICT_RESPONSE"
@@ -441,10 +438,6 @@ def attempt_coinbase_crypto_execution(symbol: str) -> tuple[bool, str]:
     - paper Coinbase mode uses adapter paper order path
     - live Coinbase mode requires COINBASE_ENABLE_LIVE_ORDERS=true
     - order size is capped by COINBASE_TEST_ORDER_USD
-
-    Important:
-    The existing Coinbase adapter does not have place_order().
-    It has place_market_buy(product_id=..., size_usd=...).
     """
 
     if not BROKER_EXECUTION_ARMED:
@@ -654,9 +647,9 @@ class MarkToMarketEngine:
 
         cluster_risk_governor.record_cluster_slot(cluster_name)
 
-        funded_live = False
+        broker_tested = False
         if allow_live_funding:
-            funded_live = capital_governor.allocate_trade(pid)
+            broker_tested = capital_governor.allocate_trade(pid)
 
         position = {
             "position_id": pid,
@@ -669,7 +662,8 @@ class MarkToMarketEngine:
             "age_cycles": 0,
             "signal_score": signal_score,
             "prob_positive": prob_positive,
-            "live_funded": funded_live,
+            "broker_tested": broker_tested,
+            "live_funded": broker_tested,  # compatibility alias for older logic
             "broker_order_ok": False,
             "broker_note": "NO_BROKER_ORDER",
         }
@@ -680,12 +674,15 @@ class MarkToMarketEngine:
     def count_open_positions(self) -> int:
         return sum(1 for p in self.positions if not p["forced_exit"])
 
-    def count_open_funded_positions(self) -> int:
+    def count_open_broker_test_positions(self) -> int:
         return sum(
             1
             for p in self.positions
-            if not p["forced_exit"] and p.get("live_funded", False)
+            if not p["forced_exit"] and p.get("broker_tested", False)
         )
+
+    def count_open_funded_positions(self) -> int:
+        return self.count_open_broker_test_positions()
 
     def floating_by_asset(self, funded_only: bool = False) -> dict[str, float]:
         by_asset = {
@@ -699,7 +696,7 @@ class MarkToMarketEngine:
             if pos["forced_exit"]:
                 continue
 
-            if funded_only and not pos.get("live_funded", False):
+            if funded_only and not pos.get("broker_tested", False):
                 continue
 
             by_asset[pos["asset_class"]] += pos["floating"]
@@ -772,7 +769,7 @@ def book_position_exit(pos: dict, reason: str) -> None:
 
     cluster_risk_governor.release_cluster_slot(pos["cluster_name"])
 
-    if pos.get("live_funded", False):
+    if pos.get("broker_tested", False):
         capital_governor.release_trade(pos["position_id"])
 
     target_pnl = pnl_dict_for_asset(pos["asset_class"])
@@ -927,9 +924,6 @@ while True:
     cycle += 1
     print(f"\n=== Cycle {cycle} | {datetime.now()} ===")
 
-    # ============================
-    # MARK-TO-MARKET + EXIT BOOKING
-    # ============================
     exit_profile = MODE_EXIT_PROFILE.get(
         ENGINE_MODE,
         MODE_EXIT_PROFILE["BALANCED"],
@@ -950,19 +944,13 @@ while True:
         elif pos["age_cycles"] >= exit_profile["max_age"]:
             book_position_exit(pos, "TIME_EXIT")
 
-    # ============================
-    # PnL SUMMARY
-    # ============================
     display_by_asset = mtm_engine.floating_by_asset(funded_only=False)
-    funded_by_asset = mtm_engine.floating_by_asset(funded_only=True)
+    broker_test_by_asset = mtm_engine.floating_by_asset(funded_only=True)
 
-    funded_open_positions = mtm_engine.count_open_funded_positions()
+    broker_test_positions = mtm_engine.count_open_broker_test_positions()
     total_unrealized = round(sum(display_by_asset.values()), 4)
     open_positions = mtm_engine.count_open_positions()
 
-    # ============================
-    # LIMIT + CLUSTER CONTROL
-    # ============================
     top_cluster = cluster_amplifier.top_cluster()
     cluster_pct = (
         cluster_risk_governor.cluster_share(top_cluster) * 100
@@ -978,9 +966,6 @@ while True:
 
     total_realized = total_realized_pnl()
 
-    # ============================
-    # OUTPUT
-    # ============================
     print_oanda_broker_status()
     print_coinbase_broker_status()
 
@@ -1014,14 +999,14 @@ while True:
 
     print(f"OPEN POSITIONS: {open_positions}")
     print(f"ADAPTIVE POSITION LIMIT: {dynamic_limit}")
-    print(f"LIVE FUNDED POSITIONS: {funded_open_positions}")
+    print(f"BROKER TEST POSITIONS: {broker_test_positions}")
 
     print(
-        f"FUNDED CAPITAL DEPLOYED: "
+        f"SIMULATED CAPITAL DEPLOYED: "
         f"${capital_governor.funded_amount():.2f}"
     )
     print(
-        f"AVAILABLE LIVE CAPITAL: "
+        f"SIMULATED CAPITAL AVAILABLE: "
         f"${capital_governor.available_capital():.2f}"
     )
 
@@ -1037,9 +1022,6 @@ while True:
     print(f"LAST TRADE: {last_trade}")
     print("-" * 60)
 
-    # ============================
-    # SIGNAL GENERATION
-    # ============================
     live_fx_funded_this_cycle = 0
     live_crypto_funded_this_cycle = 0
 
@@ -1056,31 +1038,31 @@ while True:
             if asset_class == "CRYPTO":
                 safe_load_runtime_asset(symbol)
 
-            allow_live_funding = False
+            allow_broker_test = False
 
             if (
                 asset_class == "FX"
                 and SELECTED_BROKER == "OANDA"
                 and live_fx_funded_this_cycle < 1
             ):
-                allow_live_funding = True
+                allow_broker_test = True
 
             if (
                 asset_class == "CRYPTO"
                 and SELECTED_BROKER == "COINBASE"
                 and live_crypto_funded_this_cycle < 1
             ):
-                allow_live_funding = True
+                allow_broker_test = True
 
             position = mtm_engine.register_position(
                 asset_class,
                 symbol,
                 sig,
                 prob,
-                allow_live_funding=allow_live_funding,
+                allow_live_funding=allow_broker_test,
             )
 
-            if position.get("live_funded"):
+            if position.get("broker_tested"):
                 if asset_class == "FX" and SELECTED_BROKER == "OANDA":
                     live_fx_funded_this_cycle += 1
                     ok, broker_msg = attempt_oanda_fx_execution(symbol)
@@ -1095,13 +1077,14 @@ while True:
                 if ok:
                     position["broker_order_ok"] = True
                     position["broker_note"] = broker_msg
-                    last_trade = f"{symbol} BROKER_FUNDED {broker_msg}"
+                    last_trade = f"{symbol} BROKER_TESTED {broker_msg}"
                     print(
                         f"[{asset_class} EXECUTED] {symbol} opened | "
-                        f"BROKER_FUNDED | {broker_msg}"
+                        f"BROKER_TESTED | {broker_msg}"
                     )
                 else:
                     capital_governor.release_trade(position["position_id"])
+                    position["broker_tested"] = False
                     position["live_funded"] = False
                     position["broker_order_ok"] = False
                     position["broker_note"] = broker_msg
@@ -1117,9 +1100,6 @@ while True:
     else:
         print("[SIGNAL GENERATION PAUSED] paper open-position cap reached")
 
-    # ============================
-    # SAVE STATE
-    # ============================
     session_recovery.save_state(
         cycle=cycle,
         crypto_pnl=crypto_pnl,
