@@ -143,3 +143,6 @@ List[str]
 Optional[List[Dict[str
 float
 *_before_*.py
+.env
+coinbase_private_key.pem
+keys/
