@@ -107,8 +107,8 @@ print(f"[ENGINE MODE SELECTED] {ENGINE_MODE}")
 class AdaptiveConcurrencyEnvelopeController:
     def __init__(self) -> None:
         self.current_limit = 300
-        self.max_limit = 1200
-        self.min_limit = 100
+        self.max_limit = 600
+        self.min_limit = 250
 
     def evaluate_limit(
         self,
@@ -127,7 +127,7 @@ class AdaptiveConcurrencyEnvelopeController:
             or unrealized_pnl < -50.0
             or open_positions > self.current_limit * 0.95
         ):
-            self.current_limit = max(self.current_limit - 75, self.min_limit)
+            self.current_limit = max(self.current_limit - 25, self.min_limit)
 
         return self.current_limit
 
