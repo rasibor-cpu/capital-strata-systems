@@ -140,12 +140,14 @@ concurrency_controller = AdaptiveConcurrencyEnvelopeController()
 
 class CapitalDeploymentGovernor:
     """
-    Original dashboard-compatible capital governor.
-    paper_mode stays True for safety.
+    Controlled test mode:
+    - FX may be internally live-funded.
+    - Crypto/options/futures remain paper-only.
+    - This does not place a broker order by itself.
     """
 
     def __init__(self) -> None:
-        self.paper_mode = True
+        self.paper_mode = False
         self.live_capital_pool = 200.00
         self.max_capital_per_trade = 25.00
         self.max_live_positions = 5
@@ -377,7 +379,8 @@ class MarkToMarketEngine:
         symbol: str,
         signal_score: float,
         prob_positive: float,
-    ) -> None:
+        allow_live_funding: bool = False,
+    ) -> bool:
         self.position_counter += 1
         pid = f"POS-{self.position_counter}"
 
@@ -388,7 +391,10 @@ class MarkToMarketEngine:
                 break
 
         cluster_risk_governor.record_cluster_slot(cluster_name)
-        funded_live = capital_governor.allocate_trade(pid)
+
+        funded_live = False
+        if allow_live_funding:
+            funded_live = capital_governor.allocate_trade(pid)
 
         self.positions.append(
             {
@@ -405,6 +411,8 @@ class MarkToMarketEngine:
                 "live_funded": funded_live,
             }
         )
+
+        return funded_live
 
     def count_open_positions(self) -> int:
         return sum(1 for p in self.positions if not p["forced_exit"])
@@ -607,14 +615,11 @@ while True:
 
     # ============================
     # PnL SUMMARY
-    # Paper mode: display all floating PnL so dashboard updates.
-    # Live mode: display funded floating PnL only.
+    # Internal FX live-funding mode:
+    # - dashboard unrealized PnL shows all paper/live floating so testing remains visible
+    # - live funded positions/capital show FX-only internal funding
     # ============================
-    if capital_governor.paper_mode:
-        display_by_asset = mtm_engine.floating_by_asset(funded_only=False)
-    else:
-        display_by_asset = mtm_engine.floating_by_asset(funded_only=True)
-
+    display_by_asset = mtm_engine.floating_by_asset(funded_only=False)
     funded_by_asset = mtm_engine.floating_by_asset(funded_only=True)
 
     funded_open_positions = mtm_engine.count_open_funded_positions()
@@ -704,7 +709,10 @@ while True:
     # - exactly 4 candidates per cycle
     # - opens positions only
     # - no immediate pnl booking
+    # - only 1 FX candidate per cycle may be internally live-funded
     # ============================
+    live_fx_funded_this_cycle = 0
+
     if mtm_engine.count_open_positions() < MAX_PAPER_OPEN_POSITIONS:
         for asset_class, symbol, sig, prob in select_four_candidates():
             if not concurrency_controller.can_add_position(
@@ -718,15 +726,26 @@ while True:
             if asset_class == "CRYPTO":
                 safe_load_runtime_asset(symbol)
 
-            mtm_engine.register_position(
+            allow_live_funding = (
+                asset_class == "FX"
+                and live_fx_funded_this_cycle < 1
+            )
+
+            funded_live = mtm_engine.register_position(
                 asset_class,
                 symbol,
                 sig,
                 prob,
+                allow_live_funding=allow_live_funding,
             )
 
-            last_trade = f"{symbol} OPENED"
-            print(f"[{asset_class} EXECUTED] {symbol} opened")
+            if funded_live:
+                live_fx_funded_this_cycle += 1
+                last_trade = f"{symbol} FX FUNDED"
+                print(f"[{asset_class} EXECUTED] {symbol} opened | FX_FUNDED")
+            else:
+                last_trade = f"{symbol} OPENED"
+                print(f"[{asset_class} EXECUTED] {symbol} opened")
     else:
         print("[SIGNAL GENERATION PAUSED] paper open-position cap reached")
 
