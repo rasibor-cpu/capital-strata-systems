@@ -264,16 +264,21 @@ def is_oanda_practice_mode() -> bool:
     return "api-fxpractice.oanda.com" in base_url
 
 
-def oanda_has_open_trade() -> bool:
+def get_oanda_open_trade_count() -> int | str:
     try:
         result = oanda.get_open_trades()
-        if not result.get("ok", False):
-            return False
-
-        trades = result.get("data", {}).get("trades", [])
-        return len(trades) > 0
+        if result.get("ok", False):
+            return len(result.get("data", {}).get("trades", []))
+        return "ERR"
     except Exception:
-        return False
+        return "ERR"
+
+
+def oanda_has_open_trade() -> bool:
+    count = get_oanda_open_trade_count()
+    if isinstance(count, int):
+        return count > 0
+    return False
 
 
 def attempt_oanda_fx_execution(symbol: str) -> tuple[bool, str]:
@@ -644,6 +649,7 @@ def print_oanda_broker_status() -> None:
         print(f"OANDA KEY PRESENT: {'YES' if resolved_key else 'NO'}")
         print(f"OANDA ACCOUNT PRESENT: {'YES' if resolved_account else 'NO'}")
         print(f"OANDA BASE URL: {resolved_base or 'NOT SET'}")
+        print("OANDA OPEN TRADES: N/A")
         return
 
     try:
@@ -656,18 +662,22 @@ def print_oanda_broker_status() -> None:
                 f"error={summary.get('error')}"
             )
             print(f"OANDA BASE URL: {resolved_base or 'NOT SET'}")
+            print("OANDA OPEN TRADES: ERR")
             return
 
         nav = oanda.extract_balance_nav(summary)
+        open_trade_count = get_oanda_open_trade_count()
 
         print("OANDA CONNECTED: YES")
         print(f"BALANCE: {nav['balance']}")
         print(f"NAV: {nav['nav']}")
+        print(f"OANDA OPEN TRADES: {open_trade_count}")
         print(f"OANDA BASE URL: {resolved_base}")
 
     except Exception as e:
         print(f"OANDA ERROR: {str(e)[:60]}")
         print(f"OANDA BASE URL: {resolved_base or 'NOT SET'}")
+        print("OANDA OPEN TRADES: ERR")
 
 
 def broker_execution_status_label() -> str:
