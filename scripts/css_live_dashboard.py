@@ -522,6 +522,8 @@ class MarkToMarketEngine:
         return position
 
     def count_open_positions(self) -> int:
+        return
+    def count_open_positions(self) -> int:
         return sum(1 for p in self.positions if not p["forced_exit"])
 
     def count_open_funded_positions(self) -> int:
@@ -576,6 +578,8 @@ if saved_state:
         "[RECOVERY] Realized PnL restored, stale open positions not reloaded. "
         "Cycle counter reset."
     )
+
+
 def total_realized_pnl() -> float:
     return round(
         sum(crypto_pnl.values())
@@ -871,8 +875,8 @@ while True:
                     position["live_funded"] = False
                     position["broker_order_ok"] = False
                     position["broker_note"] = broker_msg
-                    last_trade = f"{symbol} FX_FUNDING_RELEASED {broker_msg}"
-                    print(f"[{asset_class} EXECUTED] {symbol} opened | FX_RELEASED | {broker_msg}")
+                    last_trade = f"{symbol} BROKER_BLOCKED {broker_msg}"
+                    print(f"[{asset_class} EXECUTED] {symbol} opened | BROKER_BLOCKED | {broker_msg}")
 
             else:
                 last_trade = f"{symbol} OPENED"
