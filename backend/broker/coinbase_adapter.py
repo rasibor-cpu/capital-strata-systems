@@ -4,7 +4,7 @@ Coinbase Broker Adapter
 
 Scope:
 - Public candles endpoint
-- Coinbase Advanced Trade JWT auth
+- Coinbase Advanced Trade JWT auth using coinbase.jwt_generator
 - Live account retrieval
 - Live product lookup
 - Live market buy/sell order submission
@@ -17,25 +17,35 @@ Credential support:
 
 2) Optional inline format:
    COINBASE_KEY_NAME=...
-   COINBASE_PRIVATE_KEY="-----BEGIN EC PRIVATE KEY-----\n...\n-----END EC PRIVATE KEY-----"
+   COINBASE_PRIVATE_KEY="-----BEGIN EC PRIVATE KEY-----\\n...\\n-----END EC PRIVATE KEY-----"
+
+Safety:
+- Paper mode never places live Coinbase orders.
+- Dashboard live orders should remain blocked unless COINBASE_ENABLE_LIVE_ORDERS=true.
 """
 
 from __future__ import annotations
 
 import os
-import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
-import jwt
 import requests
 from dotenv import load_dotenv
+
+try:
+    from coinbase.jwt_generator import build_rest_jwt, format_jwt_uri
+except Exception:
+    build_rest_jwt = None  # type: ignore
+    format_jwt_uri = None  # type: ignore
 
 
 load_dotenv()
 
-COINBASE_API_BASE = "https://api.coinbase.com/api/v3/brokerage"
+COINBASE_API_HOST = "https://api.coinbase.com"
+COINBASE_API_BASE_PATH = "/api/v3/brokerage"
+COINBASE_API_BASE = f"{COINBASE_API_HOST}{COINBASE_API_BASE_PATH}"
 COINBASE_CANDLES_URL = "https://api.exchange.coinbase.com/products/{product_id}/candles"
 
 GRANULARITY_MAP = {
@@ -49,6 +59,8 @@ GRANULARITY_MAP = {
 
 
 class CoinbaseAdapter:
+    name = "coinbase"
+
     def __init__(
         self,
         *,
@@ -96,40 +108,48 @@ class CoinbaseAdapter:
 
         return path_obj.read_text(encoding="utf-8").strip()
 
+    def is_configured(self) -> bool:
+        if self.paper_mode:
+            return True
+        return bool(self.api_key_name and self.api_private_key)
+
     def _validate_live_credentials(self) -> None:
         if not self.api_key_name or not self.api_private_key:
             raise ValueError("Missing Coinbase API credentials")
+
+        if build_rest_jwt is None or format_jwt_uri is None:
+            raise RuntimeError(
+                "coinbase.jwt_generator is unavailable. "
+                "Install/verify coinbase-advanced-py."
+            )
 
     # =========================================================
     # JWT AUTH
     # =========================================================
 
-    def _build_jwt(self) -> str:
+    def _build_rest_jwt(self, method: str, path: str) -> str:
         """
-        Build Coinbase CDP JWT Bearer token.
+        Build Coinbase REST JWT using the official installed helper.
 
-        Note:
-        This implementation is designed for the user's current CSS setup.
-        If Coinbase changes JWT claim requirements, auth may need a small update.
+        The helper expects a JWT URI formatted from:
+            METHOD + Coinbase base URL + REST path
+
+        Example path:
+            /api/v3/brokerage/accounts
         """
         self._validate_live_credentials()
 
-        now = int(time.time())
-        payload = {
-            "sub": self.api_key_name,
-            "iss": "cdp",
-            "nbf": now,
-            "exp": now + 120,
-        }
+        method_upper = method.upper().strip()
+        path_clean = "/" + path.lstrip("/")
 
-        token = jwt.encode(
-            payload,
+        if not path_clean.startswith(COINBASE_API_BASE_PATH):
+            path_clean = f"{COINBASE_API_BASE_PATH}{path_clean}"
+
+        uri = format_jwt_uri(method_upper, path_clean)
+        token = build_rest_jwt(
+            uri,
+            self.api_key_name,
             self.api_private_key,
-            algorithm="ES256",
-            headers={
-                "kid": self.api_key_name,
-                "nonce": str(uuid.uuid4()),
-            },
         )
 
         if isinstance(token, bytes):
@@ -137,11 +157,46 @@ class CoinbaseAdapter:
 
         return token
 
-    def _headers(self) -> Dict[str, str]:
+    def _headers(self, method: str, path: str) -> Dict[str, str]:
         return {
-            "Authorization": f"Bearer {self._build_jwt()}",
+            "Authorization": f"Bearer {self._build_rest_jwt(method, path)}",
             "Content-Type": "application/json",
         }
+
+    def _request_json(
+        self,
+        method: str,
+        path: str,
+        payload: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        """
+        Authenticated Coinbase request.
+
+        Returns the raw Coinbase JSON payload on success.
+        Raises requests HTTP errors on failure so diagnostics remain visible.
+        """
+        if self.paper_mode:
+            return {
+                "mode": "paper",
+                "path": path,
+                "payload": payload,
+            }
+
+        path_clean = "/" + path.lstrip("/")
+        if not path_clean.startswith(COINBASE_API_BASE_PATH):
+            path_clean = f"{COINBASE_API_BASE_PATH}{path_clean}"
+
+        url = f"{COINBASE_API_HOST}{path_clean}"
+
+        resp = requests.request(
+            method=method.upper(),
+            url=url,
+            headers=self._headers(method, path_clean),
+            json=payload,
+            timeout=self.timeout_seconds,
+        )
+        resp.raise_for_status()
+        return resp.json()
 
     # =========================================================
     # MARKET DATA
@@ -192,20 +247,14 @@ class CoinbaseAdapter:
                 "accounts": [],
             }
 
-        url = f"{COINBASE_API_BASE}/accounts"
-        resp = requests.get(
-            url,
-            headers=self._headers(),
-            timeout=self.timeout_seconds,
-        )
-        resp.raise_for_status()
-        return resp.json()
+        return self._request_json("GET", "accounts")
 
     def get_account(self) -> Dict[str, Any]:
         if self.paper_mode:
             return {
                 "mode": "paper",
                 "balance_usd": 0.0,
+                "balances": [],
             }
 
         data = self.list_accounts()
@@ -249,14 +298,7 @@ class CoinbaseAdapter:
                 "status": "paper_valid",
             }
 
-        url = f"{COINBASE_API_BASE}/products/{product_id}"
-        resp = requests.get(
-            url,
-            headers=self._headers(),
-            timeout=self.timeout_seconds,
-        )
-        resp.raise_for_status()
-        return resp.json()
+        return self._request_json("GET", f"products/{product_id}")
 
     # =========================================================
     # ORDERS
@@ -278,7 +320,6 @@ class CoinbaseAdapter:
                 "size_usd": size_usd,
             }
 
-        url = f"{COINBASE_API_BASE}/orders"
         payload = {
             "client_order_id": str(uuid.uuid4()),
             "product_id": product_id,
@@ -290,14 +331,7 @@ class CoinbaseAdapter:
             },
         }
 
-        resp = requests.post(
-            url,
-            headers=self._headers(),
-            json=payload,
-            timeout=self.timeout_seconds,
-        )
-        resp.raise_for_status()
-        return resp.json()
+        return self._request_json("POST", "orders", payload)
 
     def place_market_sell(
         self,
@@ -315,7 +349,6 @@ class CoinbaseAdapter:
                 "size_asset": size_asset,
             }
 
-        url = f"{COINBASE_API_BASE}/orders"
         payload = {
             "client_order_id": str(uuid.uuid4()),
             "product_id": product_id,
@@ -327,14 +360,8 @@ class CoinbaseAdapter:
             },
         }
 
-        resp = requests.post(
-            url,
-            headers=self._headers(),
-            json=payload,
-            timeout=self.timeout_seconds,
-        )
-        resp.raise_for_status()
-        return resp.json()
+        return self._request_json("POST", "orders", payload)
+
     def get_order_status(self, order_id: str) -> Dict[str, Any]:
         if not order_id:
             raise ValueError("order_id is required")
@@ -345,14 +372,7 @@ class CoinbaseAdapter:
                 "status": "paper_filled",
             }
 
-        url = f"{COINBASE_API_BASE}/orders/historical/{order_id}"
-        resp = requests.get(
-            url,
-            headers=self._headers(),
-            timeout=self.timeout_seconds,
-        )
-        resp.raise_for_status()
-        return resp.json()
+        return self._request_json("GET", f"orders/historical/{order_id}")
 
     def ping_live_auth(self) -> Dict[str, Any]:
         """
