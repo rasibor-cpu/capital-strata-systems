@@ -36,6 +36,7 @@ if RESET_SESSION_ON_BOOT and STATE_FILE.exists():
     except Exception as e:
         print(f"[RESET WARNING] Could not delete recovery state: {e}")
 
+
 SYMBOLS = [
     "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD",
     "DOGE-USD", "AVAX-USD", "LINK-USD", "LTC-USD", "BCH-USD",
@@ -51,9 +52,16 @@ FUTURES_SYMBOLS = ["ES", "NQ", "CL", "GC"]
 
 CYCLE_SLEEP = 8
 FX_LIVE_UNITS = 1
-ENABLE_OANDA_BROKER_EXECUTION = False
 MAX_PAPER_OPEN_POSITIONS = 40
 MAX_OPEN_PER_CYCLE = 4
+
+SUPPORTED_BROKERS = {
+    "1": "NONE",
+    "2": "OANDA",
+    "3": "COINBASE",
+    "4": "ALPACA",
+    "5": "FUTURES_RESERVED",
+}
 
 ENGINE_MODES = {
     "1": "SAFE",
@@ -79,6 +87,39 @@ ASSET_DRIFT_PROFILE = {
 }
 
 
+def select_broker_execution_config() -> tuple[bool, str]:
+    print("\n=== CSS BROKER EXECUTION ARMING ===")
+    print("1. DISABLED / PAPER ONLY")
+    print("2. ARMED / BROKER EXECUTION ALLOWED")
+
+    armed_choice = input("Enter choice (1-2) [default=1]: ").strip() or "1"
+
+    if armed_choice != "2":
+        print("[BROKER EXECUTION DISABLED] Paper/dashboard mode only")
+        return False, "NONE"
+
+    print("\n=== CSS BROKER SELECTION ===")
+    print("1. NONE / ARMED BUT NO BROKER")
+    print("2. OANDA - FX practice only")
+    print("3. COINBASE - reserved, blocked for now")
+    print("4. ALPACA - reserved, blocked for now")
+    print("5. FUTURES BROKER - reserved, blocked for now")
+
+    broker_choice = input("Enter broker choice (1-5) [default=1]: ").strip() or "1"
+    selected = SUPPORTED_BROKERS.get(broker_choice, "NONE")
+
+    if selected == "OANDA":
+        print("[BROKER EXECUTION ARMED] Selected broker: OANDA / FX practice only")
+        return True, selected
+
+    if selected == "NONE":
+        print("[BROKER EXECUTION ARMED] No execution broker selected")
+        return True, selected
+
+    print(f"[BROKER RESERVED] {selected} is not executable yet; broker calls will be blocked")
+    return True, selected
+
+
 def select_engine_mode() -> str:
     print("\n=== CSS ENGINE MODE SELECTOR ===")
     for k, v in ENGINE_MODES.items():
@@ -98,6 +139,8 @@ def safe_load_runtime_asset(symbol: str) -> bool:
         print(f"[FETCH FAIL] {symbol}: {str(e)[:80]}")
         return False
 
+
+BROKER_EXECUTION_ARMED, SELECTED_BROKER = select_broker_execution_config()
 
 ENGINE_MODE = select_engine_mode()
 print(f"[ENGINE MODE SELECTED] {ENGINE_MODE}")
@@ -140,9 +183,9 @@ concurrency_controller = AdaptiveConcurrencyEnvelopeController()
 class CapitalDeploymentGovernor:
     """
     Controlled test mode:
-    - FX may be internally live-funded.
+    - Internal funding is possible only when broker execution path requests it.
     - Crypto/options/futures remain paper-only.
-    - Broker order is allowed only after internal FX funding passes.
+    - Broker execution is governed by BROKER_EXECUTION_ARMED + SELECTED_BROKER.
     """
 
     def __init__(self) -> None:
@@ -235,18 +278,24 @@ def oanda_has_open_trade() -> bool:
 
 def attempt_oanda_fx_execution(symbol: str) -> tuple[bool, str]:
     """
-    Controlled OANDA practice execution:
+    Unified broker-gated OANDA execution:
+    - global broker arm/disarm switch applies first
+    - selected broker must be OANDA
     - practice only
     - FX only
     - 1 unit
     - no execution in SAFE mode
-    - no execution if broker already has open trade
+    - no execution if OANDA already has open trade
     """
+
+    if not BROKER_EXECUTION_ARMED:
+        return False, "BROKER_DISABLED_BY_GLOBAL_SWITCH"
+
+    if SELECTED_BROKER != "OANDA":
+        return False, f"BROKER_NOT_SELECTED_FOR_OANDA_{SELECTED_BROKER}"
 
     if ENGINE_MODE == "SAFE":
         return False, "OANDA_BLOCKED_SAFE_MODE"
-    if not ENABLE_OANDA_BROKER_EXECUTION:
-        return False, "OANDA_DISABLED_BY_SWITCH"
 
     if not is_oanda_practice_mode():
         return False, "OANDA_BLOCKED_NOT_PRACTICE"
@@ -552,7 +601,6 @@ def book_position_exit(pos: dict, reason: str) -> None:
         return
 
     if pos.get("broker_order_ok"):
-        # Do not internally close a broker-linked position until broker-close logic exists.
         last_trade = f"{pos['symbol']} BROKER_OPEN_MANUAL_REVIEW"
         return
 
@@ -620,6 +668,30 @@ def print_oanda_broker_status() -> None:
     except Exception as e:
         print(f"OANDA ERROR: {str(e)[:60]}")
         print(f"OANDA BASE URL: {resolved_base or 'NOT SET'}")
+
+
+def broker_execution_status_label() -> str:
+    if not BROKER_EXECUTION_ARMED:
+        return "DISABLED"
+
+    return "ARMED"
+
+
+def selected_broker_status_label() -> str:
+    return SELECTED_BROKER
+
+
+def active_execution_scope_label() -> str:
+    if not BROKER_EXECUTION_ARMED:
+        return "PAPER ONLY"
+
+    if SELECTED_BROKER == "OANDA":
+        return "OANDA FX PRACTICE ONLY"
+
+    if SELECTED_BROKER == "NONE":
+        return "NO BROKER SELECTED"
+
+    return f"{SELECTED_BROKER} RESERVED / BLOCKED"
 
 
 def select_four_candidates() -> list[tuple[str, str, float, float]]:
@@ -690,6 +762,11 @@ while True:
     # OUTPUT
     # ============================
     print_oanda_broker_status()
+
+    print("\n--- BROKER EXECUTION CONTROL ---")
+    print(f"BROKER EXECUTION: {broker_execution_status_label()}")
+    print(f"SELECTED BROKER: {selected_broker_status_label()}")
+    print(f"EXECUTION SCOPE: {active_execution_scope_label()}")
 
     print("\n--- LIVE EXECUTION SUMMARY ---")
     print(f"REALIZED PNL: {total_realized:+.4f}")
