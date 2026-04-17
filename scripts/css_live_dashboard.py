@@ -27,8 +27,6 @@ ARTIFACTS_DIR.mkdir(exist_ok=True)
 
 STATE_FILE = ARTIFACTS_DIR / "css_session_recovery.json"
 
-# Force clean testing baseline.
-# Set to False later only when we deliberately want session recovery again.
 RESET_SESSION_ON_BOOT = True
 
 if RESET_SESSION_ON_BOOT and STATE_FILE.exists():
@@ -52,6 +50,10 @@ OPTION_SYMBOLS = ["AAPL-C", "SPY-C", "QQQ-C"]
 FUTURES_SYMBOLS = ["ES", "NQ", "CL", "GC"]
 
 CYCLE_SLEEP = 8
+FX_LIVE_UNITS = 1
+ENABLE_OANDA_BROKER_EXECUTION = False
+MAX_PAPER_OPEN_POSITIONS = 40
+MAX_OPEN_PER_CYCLE = 4
 
 ENGINE_MODES = {
     "1": "SAFE",
@@ -75,9 +77,6 @@ ASSET_DRIFT_PROFILE = {
     "OPTIONS": (-0.22, 0.34),
     "FUTURES": (-0.25, 0.38),
 }
-
-MAX_PAPER_OPEN_POSITIONS = 40
-MAX_OPEN_PER_CYCLE = 4
 
 
 def select_engine_mode() -> str:
@@ -143,7 +142,7 @@ class CapitalDeploymentGovernor:
     Controlled test mode:
     - FX may be internally live-funded.
     - Crypto/options/futures remain paper-only.
-    - This does not place a broker order by itself.
+    - Broker order is allowed only after internal FX funding passes.
     """
 
     def __init__(self) -> None:
@@ -217,12 +216,65 @@ def map_oanda_env() -> None:
 
 map_oanda_env()
 oanda = OandaAdapter()
-class SessionRecoveryEngine:
+def is_oanda_practice_mode() -> bool:
+    base_url = os.getenv("OANDA_BASE_URL", "")
+    return "api-fxpractice.oanda.com" in base_url
+
+
+def oanda_has_open_trade() -> bool:
+    try:
+        result = oanda.get_open_trades()
+        if not result.get("ok", False):
+            return False
+
+        trades = result.get("data", {}).get("trades", [])
+        return len(trades) > 0
+    except Exception:
+        return False
+
+
+def attempt_oanda_fx_execution(symbol: str) -> tuple[bool, str]:
     """
-    Saves realized PnL and counters only.
-    Open positions are deliberately not reloaded to prevent stale inflation.
+    Controlled OANDA practice execution:
+    - practice only
+    - FX only
+    - 1 unit
+    - no execution in SAFE mode
+    - no execution if broker already has open trade
     """
 
+    if ENGINE_MODE == "SAFE":
+        return False, "OANDA_BLOCKED_SAFE_MODE"
+    if not ENABLE_OANDA_BROKER_EXECUTION:
+        return False, "OANDA_DISABLED_BY_SWITCH"
+
+    if not is_oanda_practice_mode():
+        return False, "OANDA_BLOCKED_NOT_PRACTICE"
+
+    if symbol not in FX_SYMBOLS:
+        return False, "OANDA_BLOCKED_NOT_FX"
+
+    if oanda_has_open_trade():
+        return False, "OANDA_BLOCKED_OPEN_TRADE"
+
+    try:
+        response = oanda.place_order(
+            symbol=symbol,
+            side="BUY",
+            units=FX_LIVE_UNITS,
+            order_type="MARKET",
+        )
+
+        if response.get("ok"):
+            return True, "OANDA_ORDER_OK"
+
+        return False, f"OANDA_ORDER_FAIL_{response.get('status', 'NA')}"
+
+    except Exception as e:
+        return False, f"OANDA_ERROR_{str(e)[:40]}"
+
+
+class SessionRecoveryEngine:
     def __init__(self) -> None:
         self.state_file = STATE_FILE
 
@@ -380,7 +432,7 @@ class MarkToMarketEngine:
         signal_score: float,
         prob_positive: float,
         allow_live_funding: bool = False,
-    ) -> bool:
+    ) -> dict:
         self.position_counter += 1
         pid = f"POS-{self.position_counter}"
 
@@ -396,23 +448,24 @@ class MarkToMarketEngine:
         if allow_live_funding:
             funded_live = capital_governor.allocate_trade(pid)
 
-        self.positions.append(
-            {
-                "position_id": pid,
-                "asset_class": asset_class,
-                "symbol": symbol,
-                "cluster_name": cluster_name,
-                "floating": 0.0,
-                "forced_exit": False,
-                "exit_reason": None,
-                "age_cycles": 0,
-                "signal_score": signal_score,
-                "prob_positive": prob_positive,
-                "live_funded": funded_live,
-            }
-        )
+        position = {
+            "position_id": pid,
+            "asset_class": asset_class,
+            "symbol": symbol,
+            "cluster_name": cluster_name,
+            "floating": 0.0,
+            "forced_exit": False,
+            "exit_reason": None,
+            "age_cycles": 0,
+            "signal_score": signal_score,
+            "prob_positive": prob_positive,
+            "live_funded": funded_live,
+            "broker_order_ok": False,
+            "broker_note": "NO_BROKER_ORDER",
+        }
 
-        return funded_live
+        self.positions.append(position)
+        return position
 
     def count_open_positions(self) -> int:
         return sum(1 for p in self.positions if not p["forced_exit"])
@@ -458,22 +511,17 @@ cycle = 0
 saved_state = session_recovery.load_state()
 if saved_state:
     cycle = 0
-
     crypto_pnl.update(saved_state.get("crypto_pnl", {}))
     fx_pnl.update(saved_state.get("fx_pnl", {}))
     options_pnl.update(saved_state.get("options_pnl", {}))
     futures_pnl.update(saved_state.get("futures_pnl", {}))
-
     last_trade = saved_state.get("last_trade", "NONE")
-
     mtm_engine.position_counter = saved_state.get("position_counter", 0)
 
     print(
         "[RECOVERY] Realized PnL restored, stale open positions not reloaded. "
         "Cycle counter reset."
     )
-
-
 def total_realized_pnl() -> float:
     return round(
         sum(crypto_pnl.values())
@@ -487,13 +535,10 @@ def total_realized_pnl() -> float:
 def pnl_dict_for_asset(asset_class: str) -> dict:
     if asset_class == "CRYPTO":
         return crypto_pnl
-
     if asset_class == "FX":
         return fx_pnl
-
     if asset_class == "OPTIONS":
         return options_pnl
-
     if asset_class == "FUTURES":
         return futures_pnl
 
@@ -504,6 +549,11 @@ def book_position_exit(pos: dict, reason: str) -> None:
     global last_trade
 
     if pos["forced_exit"]:
+        return
+
+    if pos.get("broker_order_ok"):
+        # Do not internally close a broker-linked position until broker-close logic exists.
+        last_trade = f"{pos['symbol']} BROKER_OPEN_MANUAL_REVIEW"
         return
 
     realized = round(pos["floating"], 4)
@@ -532,6 +582,8 @@ def book_position_exit(pos: dict, reason: str) -> None:
     locked_profit_ledger.record_recycled_slot()
 
     last_trade = f"{pos['symbol']} EXIT {reason} {realized:+.4f}"
+
+
 def print_oanda_broker_status() -> None:
     print("\n--- OANDA BROKER STATUS ---")
 
@@ -571,11 +623,6 @@ def print_oanda_broker_status() -> None:
 
 
 def select_four_candidates() -> list[tuple[str, str, float, float]]:
-    """
-    Exactly 4 candidates per cycle:
-    1 crypto, 1 FX, 1 option, 1 futures.
-    """
-
     return [
         ("CRYPTO", random.choice(SYMBOLS), 12.0, 0.68),
         ("FX", random.choice(FX_SYMBOLS), 11.5, 0.66),
@@ -606,18 +653,13 @@ while True:
 
         if pos["floating"] <= exit_profile["stop_loss"]:
             book_position_exit(pos, "STOP")
-
         elif pos["floating"] >= exit_profile["take_profit"]:
             book_position_exit(pos, "TAKE_PROFIT")
-
         elif pos["age_cycles"] >= exit_profile["max_age"]:
             book_position_exit(pos, "TIME_EXIT")
 
     # ============================
     # PnL SUMMARY
-    # Internal FX live-funding mode:
-    # - dashboard unrealized PnL shows all paper/live floating so testing remains visible
-    # - live funded positions/capital show FX-only internal funding
     # ============================
     display_by_asset = mtm_engine.floating_by_asset(funded_only=False)
     funded_by_asset = mtm_engine.floating_by_asset(funded_only=True)
@@ -658,17 +700,14 @@ while True:
         f"CRYPTO REALIZED: {sum(crypto_pnl.values()):+.4f} | "
         f"FLOATING: {display_by_asset['CRYPTO']:+.4f}"
     )
-
     print(
         f"FX REALIZED: {sum(fx_pnl.values()):+.4f} | "
         f"FLOATING: {display_by_asset['FX']:+.4f}"
     )
-
     print(
         f"OPTIONS REALIZED: {sum(options_pnl.values()):+.4f} | "
         f"FLOATING: {display_by_asset['OPTIONS']:+.4f}"
     )
-
     print(
         f"FUTURES REALIZED: {sum(futures_pnl.values()):+.4f} | "
         f"FLOATING: {display_by_asset['FUTURES']:+.4f}"
@@ -682,34 +721,25 @@ while True:
         f"FUNDED CAPITAL DEPLOYED: "
         f"${capital_governor.funded_amount():.2f}"
     )
-
     print(
         f"AVAILABLE LIVE CAPITAL: "
         f"${capital_governor.available_capital():.2f}"
     )
 
     print(f"ENGINE MODE: {ENGINE_MODE}")
-
     print(
         f"FORCED EXIT PROFITS: "
         f"{locked_profit_ledger.forced_exit_profit_banked:+.4f}"
     )
-
     print(
         f"CLUSTER SATURATION: "
         f"{top_cluster if top_cluster else 'NONE'} {cluster_pct:.1f}%"
     )
-
     print(f"LAST TRADE: {last_trade}")
     print("-" * 60)
 
     # ============================
     # SIGNAL GENERATION
-    # Corrected:
-    # - exactly 4 candidates per cycle
-    # - opens positions only
-    # - no immediate pnl booking
-    # - only 1 FX candidate per cycle may be internally live-funded
     # ============================
     live_fx_funded_this_cycle = 0
 
@@ -731,7 +761,7 @@ while True:
                 and live_fx_funded_this_cycle < 1
             )
 
-            funded_live = mtm_engine.register_position(
+            position = mtm_engine.register_position(
                 asset_class,
                 symbol,
                 sig,
@@ -739,10 +769,24 @@ while True:
                 allow_live_funding=allow_live_funding,
             )
 
-            if funded_live:
+            if position.get("live_funded"):
                 live_fx_funded_this_cycle += 1
-                last_trade = f"{symbol} FX FUNDED"
-                print(f"[{asset_class} EXECUTED] {symbol} opened | FX_FUNDED")
+
+                ok, broker_msg = attempt_oanda_fx_execution(symbol)
+
+                if ok:
+                    position["broker_order_ok"] = True
+                    position["broker_note"] = broker_msg
+                    last_trade = f"{symbol} FX_FUNDED {broker_msg}"
+                    print(f"[{asset_class} EXECUTED] {symbol} opened | FX_FUNDED | {broker_msg}")
+                else:
+                    capital_governor.release_trade(position["position_id"])
+                    position["live_funded"] = False
+                    position["broker_order_ok"] = False
+                    position["broker_note"] = broker_msg
+                    last_trade = f"{symbol} FX_FUNDING_RELEASED {broker_msg}"
+                    print(f"[{asset_class} EXECUTED] {symbol} opened | FX_RELEASED | {broker_msg}")
+
             else:
                 last_trade = f"{symbol} OPENED"
                 print(f"[{asset_class} EXECUTED] {symbol} opened")
