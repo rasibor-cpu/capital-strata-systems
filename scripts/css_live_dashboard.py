@@ -10,6 +10,7 @@ import time
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Optional
 
 from dotenv import load_dotenv
 
@@ -21,6 +22,8 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 from backend.data.coinbase_historical_downloader import load_runtime_asset
 from backend.app.brokers.oanda_adapter import OandaAdapter
+from backend.app.brokers.broker_bootstrap import initialize_broker
+
 
 ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
 ARTIFACTS_DIR.mkdir(exist_ok=True)
@@ -52,6 +55,8 @@ FUTURES_SYMBOLS = ["ES", "NQ", "CL", "GC"]
 
 CYCLE_SLEEP = 8
 FX_LIVE_UNITS = 1
+COINBASE_TEST_ORDER_USD = float(os.getenv("COINBASE_TEST_ORDER_USD", "1.00") or 1.00)
+
 MAX_PAPER_OPEN_POSITIONS = 40
 MAX_OPEN_PER_CYCLE = 4
 
@@ -87,7 +92,15 @@ ASSET_DRIFT_PROFILE = {
 }
 
 
-def select_broker_execution_config() -> tuple[bool, str]:
+def select_broker_execution_config() -> tuple[bool, str, str]:
+    """
+    Global broker execution arming.
+
+    - Arm/disarm applies to every broker.
+    - Broker selection is explicit.
+    - Coinbase is selectable.
+    - Coinbase live order placement requires COINBASE_ENABLE_LIVE_ORDERS=true.
+    """
     print("\n=== CSS BROKER EXECUTION ARMING ===")
     print("1. DISABLED / PAPER ONLY")
     print("2. ARMED / BROKER EXECUTION ALLOWED")
@@ -96,13 +109,13 @@ def select_broker_execution_config() -> tuple[bool, str]:
 
     if armed_choice != "2":
         print("[BROKER EXECUTION DISABLED] Paper/dashboard mode only")
-        return False, "NONE"
+        return False, "NONE", "paper"
 
     print("\n=== CSS BROKER SELECTION ===")
     print("1. NONE / ARMED BUT NO BROKER")
-    print("2. OANDA - FX practice only")
-    print("3. COINBASE - reserved, blocked for now")
-    print("4. ALPACA - reserved, blocked for now")
+    print("2. OANDA - FX practice execution")
+    print("3. COINBASE - crypto spot broker")
+    print("4. ALPACA - registered, adapter not active yet")
     print("5. FUTURES BROKER - reserved, blocked for now")
 
     broker_choice = input("Enter broker choice (1-5) [default=1]: ").strip() or "1"
@@ -110,14 +123,34 @@ def select_broker_execution_config() -> tuple[bool, str]:
 
     if selected == "OANDA":
         print("[BROKER EXECUTION ARMED] Selected broker: OANDA / FX practice only")
-        return True, selected
+        return True, selected, "paper"
+
+    if selected == "COINBASE":
+        print("\n=== COINBASE MODE ===")
+        print("1. PAPER / AUTH TEST / SIMULATED ORDER PATH")
+        print("2. LIVE / REAL COINBASE ACCOUNT CONNECTION")
+
+        mode_choice = input("Enter Coinbase mode (1-2) [default=1]: ").strip() or "1"
+        broker_mode = "live" if mode_choice == "2" else "paper"
+
+        if broker_mode == "live":
+            confirm = input(
+                "Type LIVE to allow Coinbase live-mode initialization "
+                "(orders still require COINBASE_ENABLE_LIVE_ORDERS=true): "
+            ).strip()
+            if confirm != "LIVE":
+                print("[COINBASE LIVE CANCELLED] Falling back to Coinbase paper mode")
+                broker_mode = "paper"
+
+        print(f"[BROKER EXECUTION ARMED] Selected broker: COINBASE / mode={broker_mode}")
+        return True, selected, broker_mode
 
     if selected == "NONE":
         print("[BROKER EXECUTION ARMED] No execution broker selected")
-        return True, selected
+        return True, selected, "paper"
 
     print(f"[BROKER RESERVED] {selected} is not executable yet; broker calls will be blocked")
-    return True, selected
+    return True, selected, "paper"
 
 
 def select_engine_mode() -> str:
@@ -140,7 +173,7 @@ def safe_load_runtime_asset(symbol: str) -> bool:
         return False
 
 
-BROKER_EXECUTION_ARMED, SELECTED_BROKER = select_broker_execution_config()
+BROKER_EXECUTION_ARMED, SELECTED_BROKER, SELECTED_BROKER_MODE = select_broker_execution_config()
 
 ENGINE_MODE = select_engine_mode()
 print(f"[ENGINE MODE SELECTED] {ENGINE_MODE}")
@@ -184,8 +217,9 @@ class CapitalDeploymentGovernor:
     """
     Controlled test mode:
     - Internal funding is possible only when broker execution path requests it.
-    - Crypto/options/futures remain paper-only.
     - Broker execution is governed by BROKER_EXECUTION_ARMED + SELECTED_BROKER.
+    - Coinbase live orders require an extra environment flag:
+        COINBASE_ENABLE_LIVE_ORDERS=true
     """
 
     def __init__(self) -> None:
@@ -259,6 +293,30 @@ def map_oanda_env() -> None:
 
 map_oanda_env()
 oanda = OandaAdapter()
+
+coinbase: Optional[Any] = None
+
+
+def initialize_selected_coinbase() -> None:
+    global coinbase
+
+    if not BROKER_EXECUTION_ARMED:
+        return
+
+    if SELECTED_BROKER != "COINBASE":
+        return
+
+    try:
+        coinbase = initialize_broker("coinbase", SELECTED_BROKER_MODE)
+        print(f"[COINBASE BOOTSTRAP] Coinbase initialized in {SELECTED_BROKER_MODE} mode")
+    except Exception as e:
+        coinbase = None
+        print(f"[COINBASE BOOTSTRAP ERROR] {str(e)[:100]}")
+
+
+initialize_selected_coinbase()
+
+
 def is_oanda_practice_mode() -> bool:
     base_url = os.getenv("OANDA_BASE_URL", "")
     return "api-fxpractice.oanda.com" in base_url
@@ -279,8 +337,6 @@ def oanda_has_open_trade() -> bool:
     if isinstance(count, int):
         return count > 0
     return False
-
-
 def attempt_oanda_fx_execution(symbol: str) -> tuple[bool, str]:
     """
     Unified broker-gated OANDA execution:
@@ -326,6 +382,106 @@ def attempt_oanda_fx_execution(symbol: str) -> tuple[bool, str]:
 
     except Exception as e:
         return False, f"OANDA_ERROR_{str(e)[:40]}"
+
+
+def coinbase_live_orders_enabled() -> bool:
+    return (os.getenv("COINBASE_ENABLE_LIVE_ORDERS") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "y",
+        "on",
+    }
+
+
+def _coinbase_response_ok(response: Any) -> tuple[bool, str]:
+    """
+    Normalize responses from the existing backend.broker.coinbase_adapter.
+
+    The existing adapter exposes place_market_buy/place_market_sell rather than
+    a CSS-style place_order method. Paper responses may return:
+        {"status": "paper_filled", ...}
+    Live responses may return Coinbase's native JSON payload.
+    """
+    if not isinstance(response, dict):
+        return False, "NON_DICT_RESPONSE"
+
+    status = str(response.get("status") or response.get("order_status") or "").lower()
+
+    if status in {"paper_filled", "filled", "done", "success"}:
+        return True, status.upper()
+
+    if response.get("ok") is True or response.get("success") is True:
+        return True, "OK_TRUE"
+
+    success_response = response.get("success_response")
+    if isinstance(success_response, dict):
+        return True, "SUCCESS_RESPONSE"
+
+    error_response = response.get("error_response")
+    if isinstance(error_response, dict):
+        msg = (
+            error_response.get("message")
+            or error_response.get("error")
+            or str(error_response)[:60]
+        )
+        return False, str(msg)[:60]
+
+    err = response.get("error") or response.get("message") or status or "UNKNOWN_RESPONSE"
+    return False, str(err)[:60]
+
+
+def attempt_coinbase_crypto_execution(symbol: str) -> tuple[bool, str]:
+    """
+    Unified broker-gated Coinbase crypto execution:
+    - global broker arm/disarm switch applies first
+    - selected broker must be COINBASE
+    - crypto only
+    - no execution in SAFE mode
+    - paper Coinbase mode uses adapter paper order path
+    - live Coinbase mode requires COINBASE_ENABLE_LIVE_ORDERS=true
+    - order size is capped by COINBASE_TEST_ORDER_USD
+
+    Important:
+    The existing Coinbase adapter does not have place_order().
+    It has place_market_buy(product_id=..., size_usd=...).
+    """
+
+    if not BROKER_EXECUTION_ARMED:
+        return False, "BROKER_DISABLED_BY_GLOBAL_SWITCH"
+
+    if SELECTED_BROKER != "COINBASE":
+        return False, f"BROKER_NOT_SELECTED_FOR_COINBASE_{SELECTED_BROKER}"
+
+    if ENGINE_MODE == "SAFE":
+        return False, "COINBASE_BLOCKED_SAFE_MODE"
+
+    if symbol not in SYMBOLS:
+        return False, "COINBASE_BLOCKED_NOT_CRYPTO"
+
+    if coinbase is None:
+        return False, "COINBASE_NOT_INITIALIZED"
+
+    if SELECTED_BROKER_MODE == "live" and not coinbase_live_orders_enabled():
+        return False, "COINBASE_LIVE_ORDER_FLAG_OFF"
+
+    if not hasattr(coinbase, "place_market_buy"):
+        return False, "COINBASE_ADAPTER_MISSING_PLACE_MARKET_BUY"
+
+    try:
+        response = coinbase.place_market_buy(
+            product_id=symbol,
+            size_usd=float(COINBASE_TEST_ORDER_USD),
+        )
+
+        ok, note = _coinbase_response_ok(response)
+        if ok:
+            return True, f"COINBASE_ORDER_OK_{SELECTED_BROKER_MODE.upper()}_{note}"
+
+        return False, f"COINBASE_ORDER_FAIL_{note}"
+
+    except Exception as e:
+        return False, f"COINBASE_ERROR_{str(e)[:40]}"
 
 
 class SessionRecoveryEngine:
@@ -522,8 +678,6 @@ class MarkToMarketEngine:
         return position
 
     def count_open_positions(self) -> int:
-        return
-    def count_open_positions(self) -> int:
         return sum(1 for p in self.positions if not p["forced_exit"])
 
     def count_open_funded_positions(self) -> int:
@@ -578,8 +732,6 @@ if saved_state:
         "[RECOVERY] Realized PnL restored, stale open positions not reloaded. "
         "Cycle counter reset."
     )
-
-
 def total_realized_pnl() -> float:
     return round(
         sum(crypto_pnl.values())
@@ -684,6 +836,53 @@ def print_oanda_broker_status() -> None:
         print("OANDA OPEN TRADES: ERR")
 
 
+def print_coinbase_broker_status() -> None:
+    print("\n--- COINBASE BROKER STATUS ---")
+
+    key_present = bool(
+        os.getenv("COINBASE_CDP_KEY_NAME")
+        or os.getenv("COINBASE_KEY_NAME")
+    )
+    private_key_present = bool(
+        os.getenv("COINBASE_CDP_PRIVATE_KEY_PATH")
+        or os.getenv("COINBASE_PRIVATE_KEY")
+    )
+
+    print(f"COINBASE SELECTED: {'YES' if SELECTED_BROKER == 'COINBASE' else 'NO'}")
+    print(f"COINBASE MODE: {SELECTED_BROKER_MODE if SELECTED_BROKER == 'COINBASE' else 'N/A'}")
+    print(f"COINBASE KEY PRESENT: {'YES' if key_present else 'NO'}")
+    print(f"COINBASE PRIVATE KEY PRESENT: {'YES' if private_key_present else 'NO'}")
+    print(f"COINBASE LIVE ORDER FLAG: {'ON' if coinbase_live_orders_enabled() else 'OFF'}")
+
+    if SELECTED_BROKER != "COINBASE":
+        print("COINBASE CONNECTED: NOT SELECTED")
+        return
+
+    if coinbase is None:
+        print("COINBASE CONNECTED: NO")
+        return
+
+    try:
+        if hasattr(coinbase, "ping_live_auth"):
+            ping = coinbase.ping_live_auth()
+            ok = bool(ping.get("ok")) if isinstance(ping, dict) else False
+            mode = ping.get("mode", SELECTED_BROKER_MODE) if isinstance(ping, dict) else SELECTED_BROKER_MODE
+
+            print(f"COINBASE CONNECTED: {'YES' if ok else 'ERROR'}")
+            print(f"COINBASE AUTH MODE: {mode}")
+
+            if isinstance(ping, dict) and "account_count" in ping:
+                print(f"COINBASE ACCOUNT COUNT: {ping.get('account_count')}")
+
+            return
+
+        configured = bool(coinbase.is_configured()) if hasattr(coinbase, "is_configured") else True
+        print(f"COINBASE CONNECTED: {'YES' if configured else 'NO'}")
+
+    except Exception as e:
+        print(f"COINBASE ERROR: {str(e)[:80]}")
+
+
 def broker_execution_status_label() -> str:
     if not BROKER_EXECUTION_ARMED:
         return "DISABLED"
@@ -701,6 +900,13 @@ def active_execution_scope_label() -> str:
 
     if SELECTED_BROKER == "OANDA":
         return "OANDA FX PRACTICE ONLY"
+
+    if SELECTED_BROKER == "COINBASE":
+        if SELECTED_BROKER_MODE == "live" and coinbase_live_orders_enabled():
+            return "COINBASE LIVE CRYPTO ENABLED"
+        if SELECTED_BROKER_MODE == "live":
+            return "COINBASE LIVE AUTH ONLY / ORDERS BLOCKED"
+        return "COINBASE PAPER CRYPTO"
 
     if SELECTED_BROKER == "NONE":
         return "NO BROKER SELECTED"
@@ -776,10 +982,12 @@ while True:
     # OUTPUT
     # ============================
     print_oanda_broker_status()
+    print_coinbase_broker_status()
 
     print("\n--- BROKER EXECUTION CONTROL ---")
     print(f"BROKER EXECUTION: {broker_execution_status_label()}")
     print(f"SELECTED BROKER: {selected_broker_status_label()}")
+    print(f"BROKER MODE: {SELECTED_BROKER_MODE}")
     print(f"EXECUTION SCOPE: {active_execution_scope_label()}")
 
     print("\n--- LIVE EXECUTION SUMMARY ---")
@@ -833,6 +1041,7 @@ while True:
     # SIGNAL GENERATION
     # ============================
     live_fx_funded_this_cycle = 0
+    live_crypto_funded_this_cycle = 0
 
     if mtm_engine.count_open_positions() < MAX_PAPER_OPEN_POSITIONS:
         for asset_class, symbol, sig, prob in select_four_candidates():
@@ -847,10 +1056,21 @@ while True:
             if asset_class == "CRYPTO":
                 safe_load_runtime_asset(symbol)
 
-            allow_live_funding = (
+            allow_live_funding = False
+
+            if (
                 asset_class == "FX"
+                and SELECTED_BROKER == "OANDA"
                 and live_fx_funded_this_cycle < 1
-            )
+            ):
+                allow_live_funding = True
+
+            if (
+                asset_class == "CRYPTO"
+                and SELECTED_BROKER == "COINBASE"
+                and live_crypto_funded_this_cycle < 1
+            ):
+                allow_live_funding = True
 
             position = mtm_engine.register_position(
                 asset_class,
@@ -861,22 +1081,35 @@ while True:
             )
 
             if position.get("live_funded"):
-                live_fx_funded_this_cycle += 1
+                if asset_class == "FX" and SELECTED_BROKER == "OANDA":
+                    live_fx_funded_this_cycle += 1
+                    ok, broker_msg = attempt_oanda_fx_execution(symbol)
 
-                ok, broker_msg = attempt_oanda_fx_execution(symbol)
+                elif asset_class == "CRYPTO" and SELECTED_BROKER == "COINBASE":
+                    live_crypto_funded_this_cycle += 1
+                    ok, broker_msg = attempt_coinbase_crypto_execution(symbol)
+
+                else:
+                    ok, broker_msg = False, "BROKER_ASSET_MISMATCH"
 
                 if ok:
                     position["broker_order_ok"] = True
                     position["broker_note"] = broker_msg
-                    last_trade = f"{symbol} FX_FUNDED {broker_msg}"
-                    print(f"[{asset_class} EXECUTED] {symbol} opened | FX_FUNDED | {broker_msg}")
+                    last_trade = f"{symbol} BROKER_FUNDED {broker_msg}"
+                    print(
+                        f"[{asset_class} EXECUTED] {symbol} opened | "
+                        f"BROKER_FUNDED | {broker_msg}"
+                    )
                 else:
                     capital_governor.release_trade(position["position_id"])
                     position["live_funded"] = False
                     position["broker_order_ok"] = False
                     position["broker_note"] = broker_msg
                     last_trade = f"{symbol} BROKER_BLOCKED {broker_msg}"
-                    print(f"[{asset_class} EXECUTED] {symbol} opened | BROKER_BLOCKED | {broker_msg}")
+                    print(
+                        f"[{asset_class} EXECUTED] {symbol} opened | "
+                        f"BROKER_BLOCKED | {broker_msg}"
+                    )
 
             else:
                 last_trade = f"{symbol} OPENED"
