@@ -1,9 +1,12 @@
 from __future__ import annotations
+
+import contextlib
+import io
+import json
+import os
+import random
 import sys
 import time
-import json
-import random
-import os
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -24,14 +27,27 @@ ARTIFACTS_DIR.mkdir(exist_ok=True)
 
 STATE_FILE = ARTIFACTS_DIR / "css_session_recovery.json"
 
+# Force clean testing baseline.
+# Set to False later only when we deliberately want session recovery again.
+RESET_SESSION_ON_BOOT = True
+
+if RESET_SESSION_ON_BOOT and STATE_FILE.exists():
+    try:
+        STATE_FILE.unlink()
+        print("[RESET] Previous CSS recovery state deleted on boot.")
+    except Exception as e:
+        print(f"[RESET WARNING] Could not delete recovery state: {e}")
+
 SYMBOLS = [
     "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD",
-    "DOGE-USD", "AVAX-USD", "LINK-USD", "LTC-USD", "BCH-USD"
+    "DOGE-USD", "AVAX-USD", "LINK-USD", "LTC-USD", "BCH-USD",
 ]
+
 FX_SYMBOLS = [
     "EUR_USD", "GBP_USD", "USD_JPY", "USD_CHF", "AUD_USD",
-    "USD_CAD", "NZD_USD", "EUR_GBP", "EUR_JPY", "GBP_JPY"
+    "USD_CAD", "NZD_USD", "EUR_GBP", "EUR_JPY", "GBP_JPY",
 ]
+
 OPTION_SYMBOLS = ["AAPL-C", "SPY-C", "QQQ-C"]
 FUTURES_SYMBOLS = ["ES", "NQ", "CL", "GC"]
 
@@ -45,19 +61,39 @@ ENGINE_MODES = {
     "5": "EXPANSION",
 }
 
+MODE_EXIT_PROFILE = {
+    "SAFE": {"take_profit": 1.75, "stop_loss": -1.25, "max_age": 3},
+    "CONSERVATIVE": {"take_profit": 2.25, "stop_loss": -1.75, "max_age": 4},
+    "BALANCED": {"take_profit": 3.00, "stop_loss": -2.25, "max_age": 4},
+    "AGGRESSIVE": {"take_profit": 4.00, "stop_loss": -3.00, "max_age": 5},
+    "EXPANSION": {"take_profit": 5.00, "stop_loss": -3.75, "max_age": 6},
+}
+
+ASSET_DRIFT_PROFILE = {
+    "CRYPTO": (-0.08, 0.16),
+    "FX": (-0.03, 0.06),
+    "OPTIONS": (-0.22, 0.34),
+    "FUTURES": (-0.25, 0.38),
+}
+
+MAX_PAPER_OPEN_POSITIONS = 40
+MAX_OPEN_PER_CYCLE = 4
+
 
 def select_engine_mode() -> str:
     print("\n=== CSS ENGINE MODE SELECTOR ===")
     for k, v in ENGINE_MODES.items():
         print(f"{k}. {v}")
+
     choice = input("Enter choice (1-5) [default=3]: ").strip()
     return ENGINE_MODES.get(choice, "BALANCED")
 
 
 def safe_load_runtime_asset(symbol: str) -> bool:
     try:
-        load_runtime_asset(symbol)
-        print(f"Fetched 288 candles for {symbol}")
+        with contextlib.redirect_stdout(io.StringIO()):
+            load_runtime_asset(symbol)
+        print(f"Fetched candles for {symbol}")
         return True
     except Exception as e:
         print(f"[FETCH FAIL] {symbol}: {str(e)[:80]}")
@@ -88,10 +124,11 @@ class AdaptiveConcurrencyEnvelopeController:
             self.current_limit = min(self.current_limit + 50, self.max_limit)
         elif (
             cluster_pct > 35.0
-            or unrealized_pnl < -500.0
+            or unrealized_pnl < -50.0
             or open_positions > self.current_limit * 0.95
         ):
             self.current_limit = max(self.current_limit - 75, self.min_limit)
+
         return self.current_limit
 
     def can_add_position(self, open_positions: int) -> bool:
@@ -103,8 +140,8 @@ concurrency_controller = AdaptiveConcurrencyEnvelopeController()
 
 class CapitalDeploymentGovernor:
     """
-    Restored from original structure.
-    Kept paper_mode default for safety.
+    Original dashboard-compatible capital governor.
+    paper_mode stays True for safety.
     """
 
     def __init__(self) -> None:
@@ -178,12 +215,10 @@ def map_oanda_env() -> None:
 
 map_oanda_env()
 oanda = OandaAdapter()
-
-
 class SessionRecoveryEngine:
     """
-    Restored from original structure.
-    Fix applied: we will restore PnL and counters, but not stale open positions.
+    Saves realized PnL and counters only.
+    Open positions are deliberately not reloaded to prevent stale inflation.
     """
 
     def __init__(self) -> None:
@@ -209,12 +244,17 @@ class SessionRecoveryEngine:
             "last_trade": last_trade,
             "position_counter": position_counter,
         }
+
         with open(self.state_file, "w", encoding="utf-8") as f:
             json.dump(payload, f)
 
     def load_state(self):
+        if RESET_SESSION_ON_BOOT:
+            return None
+
         if not self.state_file.exists():
             return None
+
         try:
             with open(self.state_file, "r", encoding="utf-8") as f:
                 return json.load(f)
@@ -236,8 +276,9 @@ class LockedProfitLedger:
     def record_forced_exit(self, pid: str, amount: float) -> None:
         if pid in self._booked:
             return
+
         self._booked.add(pid)
-        self.forced_exit_profit_banked += max(min(amount, 5000.0), -5000.0)
+        self.forced_exit_profit_banked += round(amount, 4)
         self.trail_stops_hit += 1
 
     def record_priority_exit(self) -> None:
@@ -248,6 +289,8 @@ class LockedProfitLedger:
 
 
 locked_profit_ledger = LockedProfitLedger()
+
+
 class MomentumClusterAmplifier:
     def __init__(self) -> None:
         self.cluster_map = {
@@ -258,11 +301,13 @@ class MomentumClusterAmplifier:
             "OPTIONS_INDEX": ["SPY-C", "QQQ-C", "AAPL-C"],
             "FUTURES_INDEX": ["ES", "NQ", "CL"],
         }
+
         self.cluster_strength: dict[str, float] = defaultdict(float)
 
     def record_cluster_win(self, symbol: str, pnl: float) -> None:
         if pnl <= 0:
             return
+
         for cname, members in self.cluster_map.items():
             if symbol in members:
                 self.cluster_strength[cname] += pnl
@@ -270,10 +315,11 @@ class MomentumClusterAmplifier:
     def top_cluster(self) -> str | None:
         if not self.cluster_strength:
             return None
+
         ranked = sorted(
             self.cluster_strength.items(),
             key=lambda x: x[1],
-            reverse=True
+            reverse=True,
         )
         return ranked[0][0]
 
@@ -299,6 +345,7 @@ class ClusterSaturationRiskGovernor:
     def cluster_share(self, cluster_name: str | None) -> float:
         if not cluster_name or self.total_slots_seen == 0:
             return 0.0
+
         return self.cluster_slot_counts[cluster_name] / self.total_slots_seen
 
 
@@ -307,10 +354,13 @@ cluster_risk_governor = ClusterSaturationRiskGovernor()
 
 class SmartDriftEngine:
     def generate_drift(self, pos: dict) -> float:
-        base = random.uniform(-2.5, 4.5)
-        bias = ((pos["signal_score"] / 15.0) * 1.8)
-        prob = ((pos["prob_positive"] - 0.5) * 3.0)
-        return round(base + bias + prob, 4)
+        lo, hi = ASSET_DRIFT_PROFILE.get(pos["asset_class"], (-0.05, 0.10))
+        base = random.uniform(lo, hi)
+
+        signal_bias = ((pos["signal_score"] - 10.0) / 10.0) * 0.04
+        prob_bias = (pos["prob_positive"] - 0.5) * 0.08
+
+        return round(base + signal_bias + prob_bias, 4)
 
 
 smart_drift_engine = SmartDriftEngine()
@@ -340,17 +390,21 @@ class MarkToMarketEngine:
         cluster_risk_governor.record_cluster_slot(cluster_name)
         funded_live = capital_governor.allocate_trade(pid)
 
-        self.positions.append({
-            "position_id": pid,
-            "asset_class": asset_class,
-            "symbol": symbol,
-            "cluster_name": cluster_name,
-            "floating": 0.0,
-            "forced_exit": False,
-            "signal_score": signal_score,
-            "prob_positive": prob_positive,
-            "live_funded": funded_live,
-        })
+        self.positions.append(
+            {
+                "position_id": pid,
+                "asset_class": asset_class,
+                "symbol": symbol,
+                "cluster_name": cluster_name,
+                "floating": 0.0,
+                "forced_exit": False,
+                "exit_reason": None,
+                "age_cycles": 0,
+                "signal_score": signal_score,
+                "prob_positive": prob_positive,
+                "live_funded": funded_live,
+            }
+        )
 
     def count_open_positions(self) -> int:
         return sum(1 for p in self.positions if not p["forced_exit"])
@@ -362,7 +416,7 @@ class MarkToMarketEngine:
             if not p["forced_exit"] and p.get("live_funded", False)
         )
 
-    def funded_floating_by_asset(self) -> dict[str, float]:
+    def floating_by_asset(self, funded_only: bool = False) -> dict[str, float]:
         by_asset = {
             "CRYPTO": 0.0,
             "FX": 0.0,
@@ -373,8 +427,10 @@ class MarkToMarketEngine:
         for pos in self.positions:
             if pos["forced_exit"]:
                 continue
-            if not pos.get("live_funded", False):
+
+            if funded_only and not pos.get("live_funded", False):
                 continue
+
             by_asset[pos["asset_class"]] += pos["floating"]
 
         return by_asset
@@ -394,33 +450,80 @@ cycle = 0
 saved_state = session_recovery.load_state()
 if saved_state:
     cycle = 0
+
     crypto_pnl.update(saved_state.get("crypto_pnl", {}))
     fx_pnl.update(saved_state.get("fx_pnl", {}))
     options_pnl.update(saved_state.get("options_pnl", {}))
     futures_pnl.update(saved_state.get("futures_pnl", {}))
+
     last_trade = saved_state.get("last_trade", "NONE")
 
-    mtm_engine.position_counter = saved_state.get(
-        "position_counter",
-        0
-    )
+    mtm_engine.position_counter = saved_state.get("position_counter", 0)
 
     print(
-        "[RECOVERY] PnL restored, stale open positions not reloaded. "
+        "[RECOVERY] Realized PnL restored, stale open positions not reloaded. "
         "Cycle counter reset."
     )
 
 
 def total_realized_pnl() -> float:
     return round(
-        sum(crypto_pnl.values()) +
-        sum(fx_pnl.values()) +
-        sum(options_pnl.values()) +
-        sum(futures_pnl.values()),
-        4
+        sum(crypto_pnl.values())
+        + sum(fx_pnl.values())
+        + sum(options_pnl.values())
+        + sum(futures_pnl.values()),
+        4,
     )
 
 
+def pnl_dict_for_asset(asset_class: str) -> dict:
+    if asset_class == "CRYPTO":
+        return crypto_pnl
+
+    if asset_class == "FX":
+        return fx_pnl
+
+    if asset_class == "OPTIONS":
+        return options_pnl
+
+    if asset_class == "FUTURES":
+        return futures_pnl
+
+    raise ValueError(f"Unsupported asset class: {asset_class}")
+
+
+def book_position_exit(pos: dict, reason: str) -> None:
+    global last_trade
+
+    if pos["forced_exit"]:
+        return
+
+    realized = round(pos["floating"], 4)
+
+    pos["forced_exit"] = True
+    pos["exit_reason"] = reason
+
+    cluster_risk_governor.release_cluster_slot(pos["cluster_name"])
+
+    if pos.get("live_funded", False):
+        capital_governor.release_trade(pos["position_id"])
+
+    target_pnl = pnl_dict_for_asset(pos["asset_class"])
+    target_pnl[pos["symbol"]] = round(
+        target_pnl.get(pos["symbol"], 0.0) + realized,
+        4,
+    )
+
+    cluster_amplifier.record_cluster_win(pos["symbol"], realized)
+
+    if reason == "STOP":
+        locked_profit_ledger.record_forced_exit(pos["position_id"], realized)
+    elif reason == "TAKE_PROFIT":
+        locked_profit_ledger.record_priority_exit()
+
+    locked_profit_ledger.record_recycled_slot()
+
+    last_trade = f"{pos['symbol']} EXIT {reason} {realized:+.4f}"
 def print_oanda_broker_status() -> None:
     print("\n--- OANDA BROKER STATUS ---")
 
@@ -453,55 +556,69 @@ def print_oanda_broker_status() -> None:
         print(f"BALANCE: {nav['balance']}")
         print(f"NAV: {nav['nav']}")
         print(f"OANDA BASE URL: {resolved_base}")
+
     except Exception as e:
         print(f"OANDA ERROR: {str(e)[:60]}")
         print(f"OANDA BASE URL: {resolved_base or 'NOT SET'}")
+
+
+def select_four_candidates() -> list[tuple[str, str, float, float]]:
+    """
+    Exactly 4 candidates per cycle:
+    1 crypto, 1 FX, 1 option, 1 futures.
+    """
+
+    return [
+        ("CRYPTO", random.choice(SYMBOLS), 12.0, 0.68),
+        ("FX", random.choice(FX_SYMBOLS), 11.5, 0.66),
+        ("OPTIONS", random.choice(OPTION_SYMBOLS), 14.0, 0.71),
+        ("FUTURES", random.choice(FUTURES_SYMBOLS), 13.0, 0.69),
+    ]
+
+
 while True:
     cycle += 1
     print(f"\n=== Cycle {cycle} | {datetime.now()} ===")
 
-    breached = []
+    # ============================
+    # MARK-TO-MARKET + EXIT BOOKING
+    # ============================
+    exit_profile = MODE_EXIT_PROFILE.get(
+        ENGINE_MODE,
+        MODE_EXIT_PROFILE["BALANCED"],
+    )
 
-    # ============================
-    # MARK-TO-MARKET
-    # ============================
     for pos in mtm_engine.positions:
         if pos["forced_exit"]:
             continue
 
         drift = smart_drift_engine.generate_drift(pos)
-        pos["floating"] += drift
+        pos["floating"] = round(pos["floating"] + drift, 4)
+        pos["age_cycles"] += 1
 
-        if pos["floating"] < -8.0:
-            breached.append(pos)
+        if pos["floating"] <= exit_profile["stop_loss"]:
+            book_position_exit(pos, "STOP")
 
-    # ============================
-    # FORCED EXITS
-    # ============================
-    for pos in breached:
-        pos["forced_exit"] = True
-        cluster_risk_governor.release_cluster_slot(pos["cluster_name"])
-        capital_governor.release_trade(pos["position_id"])
-        locked_profit_ledger.record_forced_exit(
-            pos["position_id"],
-            pos["floating"]
-        )
+        elif pos["floating"] >= exit_profile["take_profit"]:
+            book_position_exit(pos, "TAKE_PROFIT")
+
+        elif pos["age_cycles"] >= exit_profile["max_age"]:
+            book_position_exit(pos, "TIME_EXIT")
 
     # ============================
-    # CORRECTED PnL (FUNDED ONLY)
+    # PnL SUMMARY
+    # Paper mode: display all floating PnL so dashboard updates.
+    # Live mode: display funded floating PnL only.
     # ============================
-    funded_by_asset = mtm_engine.funded_floating_by_asset()
+    if capital_governor.paper_mode:
+        display_by_asset = mtm_engine.floating_by_asset(funded_only=False)
+    else:
+        display_by_asset = mtm_engine.floating_by_asset(funded_only=True)
+
+    funded_by_asset = mtm_engine.floating_by_asset(funded_only=True)
+
     funded_open_positions = mtm_engine.count_open_funded_positions()
-
-    if funded_open_positions == 0:
-        funded_by_asset = {
-            "CRYPTO": 0.0,
-            "FX": 0.0,
-            "OPTIONS": 0.0,
-            "FUTURES": 0.0,
-        }
-
-    total_unrealized = round(sum(funded_by_asset.values()), 4)
+    total_unrealized = round(sum(display_by_asset.values()), 4)
     open_positions = mtm_engine.count_open_positions()
 
     # ============================
@@ -510,13 +627,14 @@ while True:
     top_cluster = cluster_amplifier.top_cluster()
     cluster_pct = (
         cluster_risk_governor.cluster_share(top_cluster) * 100
-        if top_cluster else 0.0
+        if top_cluster
+        else 0.0
     )
 
     dynamic_limit = concurrency_controller.evaluate_limit(
         open_positions,
         cluster_pct,
-        total_unrealized
+        total_unrealized,
     )
 
     total_realized = total_realized_pnl()
@@ -533,81 +651,87 @@ while True:
 
     print(
         f"CRYPTO REALIZED: {sum(crypto_pnl.values()):+.4f} | "
-        f"FLOATING: {funded_by_asset['CRYPTO']:+.4f}"
+        f"FLOATING: {display_by_asset['CRYPTO']:+.4f}"
     )
+
     print(
         f"FX REALIZED: {sum(fx_pnl.values()):+.4f} | "
-        f"FLOATING: {funded_by_asset['FX']:+.4f}"
+        f"FLOATING: {display_by_asset['FX']:+.4f}"
     )
+
     print(
         f"OPTIONS REALIZED: {sum(options_pnl.values()):+.4f} | "
-        f"FLOATING: {funded_by_asset['OPTIONS']:+.4f}"
+        f"FLOATING: {display_by_asset['OPTIONS']:+.4f}"
     )
+
     print(
         f"FUTURES REALIZED: {sum(futures_pnl.values()):+.4f} | "
-        f"FLOATING: {funded_by_asset['FUTURES']:+.4f}"
+        f"FLOATING: {display_by_asset['FUTURES']:+.4f}"
     )
 
     print(f"OPEN POSITIONS: {open_positions}")
     print(f"ADAPTIVE POSITION LIMIT: {dynamic_limit}")
     print(f"LIVE FUNDED POSITIONS: {funded_open_positions}")
+
     print(
         f"FUNDED CAPITAL DEPLOYED: "
         f"${capital_governor.funded_amount():.2f}"
     )
+
     print(
         f"AVAILABLE LIVE CAPITAL: "
         f"${capital_governor.available_capital():.2f}"
     )
+
     print(f"ENGINE MODE: {ENGINE_MODE}")
 
     print(
         f"FORCED EXIT PROFITS: "
         f"{locked_profit_ledger.forced_exit_profit_banked:+.4f}"
     )
+
     print(
         f"CLUSTER SATURATION: "
         f"{top_cluster if top_cluster else 'NONE'} {cluster_pct:.1f}%"
     )
+
     print(f"LAST TRADE: {last_trade}")
     print("-" * 60)
 
     # ============================
-    # SIGNAL GENERATION (RESTORED)
+    # SIGNAL GENERATION
+    # Corrected:
+    # - exactly 4 candidates per cycle
+    # - opens positions only
+    # - no immediate pnl booking
     # ============================
-    ALL_ASSETS = [
-        ("CRYPTO", SYMBOLS, crypto_pnl, 12.0, 0.68, (-4, 18)),
-        ("FX", FX_SYMBOLS, fx_pnl, 11.5, 0.66, (-3, 15)),
-        ("OPTIONS", OPTION_SYMBOLS, options_pnl, 14.0, 0.71, (-6, 28)),
-        ("FUTURES", FUTURES_SYMBOLS, futures_pnl, 13.0, 0.69, (-5, 24)),
-    ]
-
-    for asset_class, symbols, pnl_dict, sig, prob, rng in ALL_ASSETS:
-        for s in symbols:
+    if mtm_engine.count_open_positions() < MAX_PAPER_OPEN_POSITIONS:
+        for asset_class, symbol, sig, prob in select_four_candidates():
             if not concurrency_controller.can_add_position(
                 mtm_engine.count_open_positions()
             ):
                 break
 
-            if asset_class == "CRYPTO":
-                safe_load_runtime_asset(s)
+            if mtm_engine.count_open_positions() >= MAX_PAPER_OPEN_POSITIONS:
+                break
 
-            pnl = round(random.uniform(*rng), 4)
-            pnl_dict[s] += pnl
-            cluster_amplifier.record_cluster_win(s, pnl)
+            if asset_class == "CRYPTO":
+                safe_load_runtime_asset(symbol)
 
             mtm_engine.register_position(
                 asset_class,
-                s,
+                symbol,
                 sig,
-                prob
+                prob,
             )
 
-            last_trade = f"{s} {pnl:+.4f}"
-            print(f"[{asset_class} EXECUTED] {s} pnl={pnl:+.4f}")
+            last_trade = f"{symbol} OPENED"
+            print(f"[{asset_class} EXECUTED] {symbol} opened")
+    else:
+        print("[SIGNAL GENERATION PAUSED] paper open-position cap reached")
 
     # ============================
-    # SAVE STATE (NO POSITIONS)
+    # SAVE STATE
     # ============================
     session_recovery.save_state(
         cycle=cycle,
