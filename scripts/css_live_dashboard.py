@@ -21,6 +21,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 load_dotenv(PROJECT_ROOT / ".env")
 
+from backend.core.session_state import get_session_lock_state, is_session_locked, lock_session
 from backend.data.coinbase_historical_downloader import load_runtime_asset
 from backend.app.brokers.oanda_adapter import OandaAdapter
 from backend.app.brokers.broker_bootstrap import initialize_broker
@@ -70,6 +71,7 @@ SESSION_MAX_SECONDS = int(os.getenv("CSS_SESSION_MAX_SECONDS", "28800") or 28800
 
 MAX_PAPER_OPEN_POSITIONS = 40
 MAX_OPEN_PER_CYCLE = 4
+DEFENSIVE_REDUCTION_PER_CYCLE = 2
 
 SUPPORTED_BROKERS = {
     "1": "NONE",
@@ -309,38 +311,43 @@ def touch_active_session() -> dict[str, Any]:
     return sync_session_status()
 
 
+def activate_defensive_expiry_mode(reason: str, cycle: int, last_trade: str) -> dict[str, Any]:
+    lock_session(reason)
+
+    lock_state = get_session_lock_state()
+    audit_ledger.record(
+        "session_locked_defensive_mode",
+        str(SESSION_USER_CTX.get("user_id")),
+        {
+            "session_id": SESSION_USER_CTX.get("session_id"),
+            "display_name": SESSION_USER_CTX.get("display_name"),
+            "role": SESSION_USER_CTX.get("role"),
+            "reason": reason,
+            "cycle": cycle,
+            "last_trade": last_trade,
+            "lock_time": lock_state.get("lock_time"),
+            "computer_name": SESSION_USER_CTX.get("computer_name"),
+            "host_name": SESSION_USER_CTX.get("host_name"),
+            "process_id": SESSION_USER_CTX.get("process_id"),
+            "script_name": SESSION_USER_CTX.get("script_name"),
+        },
+    )
+
+    print(f"[DEFENSIVE EXPIRY MODE] reason={reason} | new trades blocked, position management continues")
+
+    return {
+        "active": False,
+        "end_reason": reason,
+        "defensive_mode_active": True,
+    }
+
+
 def enforce_active_session(cycle: int, last_trade: str) -> dict[str, Any]:
     status = sync_session_status()
 
     if not status.get("active", False):
         reason = str(status.get("end_reason") or "session_expired")
-        audit_ledger.record(
-            "session_expired",
-            str(SESSION_USER_CTX.get("user_id")),
-            {
-                "session_id": SESSION_USER_CTX.get("session_id"),
-                "display_name": SESSION_USER_CTX.get("display_name"),
-                "role": SESSION_USER_CTX.get("role"),
-                "reason": reason,
-                "cycle": cycle,
-                "last_trade": last_trade,
-                "computer_name": SESSION_USER_CTX.get("computer_name"),
-                "host_name": SESSION_USER_CTX.get("host_name"),
-                "process_id": SESSION_USER_CTX.get("process_id"),
-                "script_name": SESSION_USER_CTX.get("script_name"),
-            },
-        )
-        print(f"[SESSION EXPIRED] reason={reason}. Fresh login required.")
-        close_active_session(
-            reason,
-            extra={
-                "cycle": cycle,
-                "last_trade": last_trade,
-                "open_positions": mtm_engine.count_open_positions() if "mtm_engine" in globals() else 0,
-                "realized_pnl": total_realized_pnl() if "total_realized_pnl" in globals() else 0.0,
-            },
-        )
-        raise SystemExit(1)
+        return activate_defensive_expiry_mode(reason, cycle, last_trade)
 
     return status
 
@@ -761,8 +768,6 @@ def map_oanda_env() -> None:
             os.environ["OANDA_BASE_URL"] = "https://api-fxtrade.oanda.com"
         else:
             os.environ["OANDA_BASE_URL"] = "https://api-fxpractice.oanda.com"
-
-
 map_oanda_env()
 oanda = OandaAdapter()
 
@@ -844,8 +849,13 @@ def attempt_oanda_fx_execution(symbol: str) -> tuple[bool, str]:
                 "session_user_id": SESSION_USER_CTX.get("user_id"),
                 "session_role": SESSION_USER_CTX.get("role"),
                 "session_id": SESSION_USER_CTX.get("session_id"),
+                "defensive_mode_active": is_session_locked(),
             },
         )
+
+    if is_session_locked():
+        _audit(False, "SESSION_LOCKED_DEFENSIVE_MODE")
+        return False, "SESSION_LOCKED_DEFENSIVE_MODE"
 
     if not BROKER_EXECUTION_ARMED:
         _audit(False, "BROKER_DISABLED_BY_GLOBAL_SWITCH")
@@ -863,10 +873,6 @@ def attempt_oanda_fx_execution(symbol: str) -> tuple[bool, str]:
     if ENGINE_MODE == "SAFE":
         _audit(False, "OANDA_BLOCKED_SAFE_MODE")
         return False, "OANDA_BLOCKED_SAFE_MODE"
-
-    if not is_oanda_practice_mode():
-        _audit(False, "OANDA_BLOCKED_NOT_PRACTICE")
-        return False, "OANDA_BLOCKED_NOT_PRACTICE"
 
     if symbol not in FX_SYMBOLS:
         _audit(False, "OANDA_BLOCKED_NOT_FX")
@@ -935,17 +941,33 @@ def _coinbase_response_ok(response: Any) -> tuple[bool, str]:
 
     err = response.get("error") or response.get("message") or status or "UNKNOWN_RESPONSE"
     return False, str(err)[:60]
+
+
 def evaluate_coinbase_live_gate(symbol: str, size_usd: float):
-    """
-    Centralized Coinbase live-order readiness gate.
+    if is_session_locked():
+        broker_gate_audit.log_decision(
+            broker="COINBASE",
+            gate_name="coinbase_live_order_gate",
+            allowed=False,
+            reason="SESSION_LOCKED_DEFENSIVE_MODE",
+            symbol=symbol,
+            instrument=symbol,
+            asset_class="CRYPTO",
+            size=float(size_usd),
+            size_unit="USD",
+            selected_broker=SELECTED_BROKER,
+            broker_mode=SELECTED_BROKER_MODE,
+            engine_mode=ENGINE_MODE,
+            execution_armed=BROKER_EXECUTION_ARMED,
+            live_orders_flag=coinbase_live_orders_enabled(),
+            extra={
+                "session_user_id": SESSION_USER_CTX.get("user_id"),
+                "session_role": SESSION_USER_CTX.get("role"),
+                "session_id": SESSION_USER_CTX.get("session_id"),
+            },
+        )
+        return False, "SESSION_LOCKED_DEFENSIVE_MODE"
 
-    For paper mode:
-    - returns a passing paper note because paper mode never places real orders.
-
-    For live mode:
-    - calls CoinbaseLiveOrderGate and logs every gate decision through the
-      neutral BrokerGateAuditLogger.
-    """
     if SELECTED_BROKER_MODE != "live":
         broker_gate_audit.log_decision(
             broker="COINBASE",
@@ -1012,6 +1034,9 @@ def evaluate_coinbase_live_gate(symbol: str, size_usd: float):
 
 def attempt_coinbase_crypto_execution(symbol: str) -> tuple[bool, str]:
     role_profile = SESSION_USER_CTX.get("role_profile", {})
+
+    if is_session_locked():
+        return False, "SESSION_LOCKED_DEFENSIVE_MODE"
 
     if not BROKER_EXECUTION_ARMED:
         return False, "BROKER_DISABLED_BY_GLOBAL_SWITCH"
@@ -1088,6 +1113,7 @@ class SessionRecoveryEngine:
             "selected_broker": SELECTED_BROKER,
             "selected_broker_mode": SELECTED_BROKER_MODE,
             "engine_mode": ENGINE_MODE,
+            "session_lock_state": get_session_lock_state(),
         }
 
         with open(self.state_file, "w", encoding="utf-8") as f:
@@ -1116,6 +1142,7 @@ class LockedProfitLedger:
         self.priority_exits = 0
         self.recycled_slots = 0
         self.trail_stops_hit = 0
+        self.defensive_reduction_exits = 0
         self._booked: set[str] = set()
 
     def record_forced_exit(self, pid: str, amount: float) -> None:
@@ -1131,6 +1158,9 @@ class LockedProfitLedger:
 
     def record_recycled_slot(self) -> None:
         self.recycled_slots += 1
+
+    def record_defensive_reduction_exit(self) -> None:
+        self.defensive_reduction_exits += 1
 
 
 locked_profit_ledger = LockedProfitLedger()
@@ -1293,8 +1323,6 @@ class MarkToMarketEngine:
             by_asset[pos["asset_class"]] += pos["floating"]
 
         return by_asset
-
-
 mtm_engine = MarkToMarketEngine()
 
 crypto_pnl = {s: 0.0 for s in SYMBOLS}
@@ -1377,10 +1405,42 @@ def book_position_exit(pos: dict, reason: str) -> None:
         locked_profit_ledger.record_forced_exit(pos["position_id"], realized)
     elif reason == "TAKE_PROFIT":
         locked_profit_ledger.record_priority_exit()
+    elif reason == "DEFENSIVE_REDUCTION":
+        locked_profit_ledger.record_defensive_reduction_exit()
 
     locked_profit_ledger.record_recycled_slot()
 
     last_trade = f"{pos['symbol']} EXIT {reason} {realized:+.4f}"
+
+
+def apply_defensive_exposure_reduction() -> int:
+    if not is_session_locked():
+        return 0
+
+    open_positions_list = [
+        p for p in mtm_engine.positions if not p["forced_exit"]
+    ]
+
+    if not open_positions_list:
+        return 0
+
+    open_positions_list.sort(
+        key=lambda x: (float(x.get("floating", 0.0)), -int(x.get("age_cycles", 0)))
+    )
+
+    reductions = 0
+
+    for pos in open_positions_list:
+        if reductions >= DEFENSIVE_REDUCTION_PER_CYCLE:
+            break
+
+        if pos.get("broker_order_ok"):
+            continue
+
+        book_position_exit(pos, "DEFENSIVE_REDUCTION")
+        reductions += 1
+
+    return reductions
 
 
 def print_oanda_broker_status() -> None:
@@ -1475,6 +1535,8 @@ def print_coinbase_broker_status() -> None:
 
 
 def broker_execution_status_label() -> str:
+    if is_session_locked():
+        return "LOCKED_DEFENSIVE_MODE"
     if not BROKER_EXECUTION_ARMED:
         return "DISABLED"
     return "ARMED"
@@ -1485,6 +1547,9 @@ def selected_broker_status_label() -> str:
 
 
 def active_execution_scope_label() -> str:
+    if is_session_locked():
+        return "DEFENSIVE MODE / POSITION MANAGEMENT ONLY"
+
     if not BROKER_EXECUTION_ARMED:
         return "PAPER ONLY"
 
@@ -1517,7 +1582,15 @@ try:
     while True:
         cycle += 1
         current_status = enforce_active_session(cycle, last_trade)
-        current_status = touch_active_session()
+
+        if not is_session_locked():
+            current_status = touch_active_session()
+        else:
+            current_status = {
+                **current_status,
+                "active": False,
+                "defensive_mode_active": True,
+            }
 
         print(f"\n=== Cycle {cycle} | {datetime.now()} ===")
 
@@ -1540,6 +1613,8 @@ try:
                 book_position_exit(pos, "TAKE_PROFIT")
             elif pos["age_cycles"] >= exit_profile["max_age"]:
                 book_position_exit(pos, "TIME_EXIT")
+
+        defensive_reductions = apply_defensive_exposure_reduction()
 
         display_by_asset = mtm_engine.floating_by_asset(funded_only=False)
         broker_test_positions = mtm_engine.count_open_broker_test_positions()
@@ -1566,6 +1641,7 @@ try:
         idle_age_seconds = max(0, int(now_epoch - float(current_status.get("last_activity", now_epoch))))
         idle_remaining = max(0, int(current_status.get("idle_timeout_seconds", SESSION_IDLE_TIMEOUT_SECONDS)) - idle_age_seconds)
         max_remaining = max(0, int(current_status.get("max_session_seconds", SESSION_MAX_SECONDS)) - session_age_seconds)
+        lock_state = get_session_lock_state()
 
         print("\n--- SESSION CONTEXT ---")
         print(f"USER ID: {SESSION_USER_CTX.get('user_id')}")
@@ -1577,6 +1653,8 @@ try:
         print(f"COMPUTER NAME: {SESSION_USER_CTX.get('computer_name')}")
         print(f"LOGIN CHANNEL: {SESSION_USER_CTX.get('login_channel')}")
         print(f"SESSION ACTIVE: {'YES' if current_status.get('active') else 'NO'}")
+        print(f"DEFENSIVE MODE ACTIVE: {'YES' if is_session_locked() else 'NO'}")
+        print(f"SESSION LOCK REASON: {lock_state.get('reason') or 'NONE'}")
         print(f"SESSION AGE SEC: {session_age_seconds}")
         print(f"IDLE TIMEOUT SEC: {current_status.get('idle_timeout_seconds', SESSION_IDLE_TIMEOUT_SECONDS)}")
         print(f"MAX SESSION SEC: {current_status.get('max_session_seconds', SESSION_MAX_SECONDS)}")
@@ -1622,6 +1700,8 @@ try:
         print(f"OPEN POSITIONS: {open_positions}")
         print(f"ADAPTIVE POSITION LIMIT: {dynamic_limit}")
         print(f"BROKER TEST POSITIONS: {broker_test_positions}")
+        print(f"DEFENSIVE REDUCTIONS THIS CYCLE: {defensive_reductions}")
+        print(f"TOTAL DEFENSIVE REDUCTION EXITS: {locked_profit_ledger.defensive_reduction_exits}")
 
         print(
             f"SIMULATED CAPITAL DEPLOYED: "
@@ -1647,7 +1727,15 @@ try:
         live_fx_funded_this_cycle = 0
         live_crypto_funded_this_cycle = 0
 
-        if mtm_engine.count_open_positions() < MAX_PAPER_OPEN_POSITIONS:
+        if is_session_locked():
+            if defensive_reductions > 0:
+                print(
+                    f"[DEFENSIVE MODE] New trade creation blocked. "
+                    f"Reduced exposure by {defensive_reductions} positions this cycle."
+                )
+            else:
+                print("[DEFENSIVE MODE] New trade creation blocked. Managing existing positions only.")
+        elif mtm_engine.count_open_positions() < MAX_PAPER_OPEN_POSITIONS:
             if not role_profile.get("can_execute_paper_trading", False):
                 print("[RBAC] New position generation blocked for current role.")
             else:
@@ -1746,6 +1834,7 @@ except KeyboardInterrupt:
             "last_trade": last_trade,
             "open_positions": mtm_engine.count_open_positions(),
             "realized_pnl": total_realized_pnl(),
+            "defensive_mode_active": is_session_locked(),
         },
     )
 
@@ -1762,6 +1851,7 @@ except Exception as e:
             "open_positions": mtm_engine.count_open_positions(),
             "realized_pnl": total_realized_pnl(),
             "error": str(e)[:200],
+            "defensive_mode_active": is_session_locked(),
         },
     )
     raise
@@ -1774,5 +1864,6 @@ finally:
             "last_trade": last_trade,
             "open_positions": mtm_engine.count_open_positions(),
             "realized_pnl": total_realized_pnl(),
+            "defensive_mode_active": is_session_locked(),
         },
     )
