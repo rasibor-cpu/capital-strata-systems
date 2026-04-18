@@ -5,6 +5,7 @@ import io
 import json
 import os
 import random
+import socket
 import sys
 import time
 from collections import defaultdict
@@ -26,6 +27,8 @@ from backend.app.brokers.broker_bootstrap import initialize_broker
 from backend.app.brokers.coinbase_live_order_gate import CoinbaseLiveOrderGate
 from backend.app.brokers.broker_gate_audit import BrokerGateAuditLogger
 from backend.app.security.auth_gate import await_login_ready_state
+from backend.security.audit_ledger import AuditLedger
+from backend.security.session_manager import SessionManager
 
 
 ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
@@ -94,6 +97,22 @@ ASSET_DRIFT_PROFILE = {
     "OPTIONS": (-0.22, 0.34),
     "FUTURES": (-0.25, 0.38),
 }
+
+audit_ledger = AuditLedger()
+session_manager = SessionManager()
+SESSION_CLOSED = False
+
+
+def runtime_origin_context() -> dict[str, Any]:
+    computer_name = os.getenv("COMPUTERNAME") or socket.gethostname()
+    return {
+        "computer_name": computer_name,
+        "host_name": socket.gethostname(),
+        "process_id": os.getpid(),
+        "cwd": str(PROJECT_ROOT),
+        "script_name": "scripts/css_live_dashboard.py",
+        "login_channel": "CLI",
+    }
 
 
 def select_broker_execution_config() -> tuple[bool, str, str]:
@@ -182,18 +201,126 @@ def safe_load_runtime_asset(symbol: str) -> bool:
 def authenticate_startup_user() -> dict[str, Any]:
     try:
         user_ctx = await_login_ready_state()
+        session = session_manager.create_session(
+            username=str(user_ctx.get("user_id")),
+            role=str(user_ctx.get("role")),
+        )
+        origin = runtime_origin_context()
+
+        user_ctx["session_id"] = session.session_id
+        user_ctx["session_created"] = session.created
+        user_ctx["computer_name"] = origin["computer_name"]
+        user_ctx["host_name"] = origin["host_name"]
+        user_ctx["process_id"] = origin["process_id"]
+        user_ctx["login_channel"] = origin["login_channel"]
+        user_ctx["script_name"] = origin["script_name"]
+
+        audit_ledger.record(
+            "login_success",
+            str(user_ctx.get("user_id")),
+            {
+                "session_id": session.session_id,
+                "display_name": user_ctx.get("display_name"),
+                "role": user_ctx.get("role"),
+                "unit_code": user_ctx.get("unit_code"),
+                "home_branch": user_ctx.get("home_branch"),
+                **origin,
+            },
+        )
+
         print(
             f"[AUTH OK] user_id={user_ctx.get('user_id')} "
             f"role={user_ctx.get('role')} "
-            f"unit={user_ctx.get('unit_code')}"
+            f"unit={user_ctx.get('unit_code')} "
+            f"session_id={session.session_id}"
         )
         return user_ctx
+
     except KeyboardInterrupt:
+        origin = runtime_origin_context()
+        audit_ledger.record(
+            "login_cancelled",
+            "UNKNOWN",
+            {
+                "reason": "keyboard_interrupt",
+                **origin,
+            },
+        )
         print("\n[AUTH CANCELLED] Startup aborted by user.")
         raise SystemExit(1)
+
     except Exception as e:
+        origin = runtime_origin_context()
+        audit_ledger.record(
+            "login_failed",
+            "UNKNOWN",
+            {
+                "reason": str(e),
+                **origin,
+            },
+        )
         print(f"[AUTH FAILED] {e}")
         raise SystemExit(1)
+
+
+def record_startup_configuration(
+    *,
+    user_ctx: dict[str, Any],
+    broker_execution_armed: bool,
+    selected_broker: str,
+    selected_broker_mode: str,
+    engine_mode: str,
+) -> None:
+    audit_ledger.record(
+        "session_startup_config",
+        str(user_ctx.get("user_id")),
+        {
+            "session_id": user_ctx.get("session_id"),
+            "display_name": user_ctx.get("display_name"),
+            "role": user_ctx.get("role"),
+            "broker_execution_armed": broker_execution_armed,
+            "selected_broker": selected_broker,
+            "selected_broker_mode": selected_broker_mode,
+            "engine_mode": engine_mode,
+            "computer_name": user_ctx.get("computer_name"),
+            "host_name": user_ctx.get("host_name"),
+            "process_id": user_ctx.get("process_id"),
+            "script_name": user_ctx.get("script_name"),
+        },
+    )
+
+
+def close_active_session(reason: str, extra: Optional[dict[str, Any]] = None) -> None:
+    global SESSION_CLOSED
+
+    if SESSION_CLOSED:
+        return
+
+    payload = {
+        "session_id": SESSION_USER_CTX.get("session_id"),
+        "display_name": SESSION_USER_CTX.get("display_name"),
+        "role": SESSION_USER_CTX.get("role"),
+        "reason": reason,
+        "computer_name": SESSION_USER_CTX.get("computer_name"),
+        "host_name": SESSION_USER_CTX.get("host_name"),
+        "process_id": SESSION_USER_CTX.get("process_id"),
+        "script_name": SESSION_USER_CTX.get("script_name"),
+    }
+
+    if extra:
+        payload.update(extra)
+
+    audit_ledger.record(
+        "session_end",
+        str(SESSION_USER_CTX.get("user_id")),
+        payload,
+    )
+
+    session_id = SESSION_USER_CTX.get("session_id")
+    if session_id:
+        session_manager.destroy_session(session_id)
+
+    SESSION_CLOSED = True
 
 
 SESSION_USER_CTX = authenticate_startup_user()
@@ -202,6 +329,14 @@ BROKER_EXECUTION_ARMED, SELECTED_BROKER, SELECTED_BROKER_MODE = select_broker_ex
 
 ENGINE_MODE = select_engine_mode()
 print(f"[ENGINE MODE SELECTED] {ENGINE_MODE}")
+
+record_startup_configuration(
+    user_ctx=SESSION_USER_CTX,
+    broker_execution_armed=BROKER_EXECUTION_ARMED,
+    selected_broker=SELECTED_BROKER,
+    selected_broker_mode=SELECTED_BROKER_MODE,
+    engine_mode=ENGINE_MODE,
+)
 
 
 class AdaptiveConcurrencyEnvelopeController:
@@ -404,6 +539,7 @@ def attempt_oanda_fx_execution(symbol: str) -> tuple[bool, str]:
                 "open_trade_count": get_oanda_open_trade_count(),
                 "session_user_id": SESSION_USER_CTX.get("user_id"),
                 "session_role": SESSION_USER_CTX.get("role"),
+                "session_id": SESSION_USER_CTX.get("session_id"),
             },
         )
 
@@ -527,6 +663,7 @@ def evaluate_coinbase_live_gate(symbol: str, size_usd: float):
                 "note": "paper mode bypass",
                 "session_user_id": SESSION_USER_CTX.get("user_id"),
                 "session_role": SESSION_USER_CTX.get("role"),
+                "session_id": SESSION_USER_CTX.get("session_id"),
             },
         )
         return True, "COINBASE_PAPER_MODE_GATE_BYPASS"
@@ -558,9 +695,12 @@ def evaluate_coinbase_live_gate(symbol: str, size_usd: float):
         live_orders_flag=coinbase_live_orders_enabled(),
         extra={
             "max_live_order_usd": COINBASE_MAX_LIVE_ORDER_USD,
-            "account_count_hint": 9 if SELECTED_BROKER == "COINBASE" and SELECTED_BROKER_MODE == "live" else None,
+            "account_count_hint": 9
+            if SELECTED_BROKER == "COINBASE" and SELECTED_BROKER_MODE == "live"
+            else None,
             "session_user_id": SESSION_USER_CTX.get("user_id"),
             "session_role": SESSION_USER_CTX.get("role"),
+            "session_id": SESSION_USER_CTX.get("session_id"),
         },
     )
 
@@ -815,6 +955,7 @@ class MarkToMarketEngine:
             "broker_note": "NO_BROKER_ORDER",
             "session_user_id": SESSION_USER_CTX.get("user_id"),
             "session_role": SESSION_USER_CTX.get("role"),
+            "session_id": SESSION_USER_CTX.get("session_id"),
         }
 
         self.positions.append(position)
@@ -1070,199 +1211,240 @@ def select_four_candidates() -> list[tuple[str, str, float, float]]:
     ]
 
 
-while True:
-    cycle += 1
-    print(f"\n=== Cycle {cycle} | {datetime.now()} ===")
+try:
+    while True:
+        cycle += 1
+        print(f"\n=== Cycle {cycle} | {datetime.now()} ===")
 
-    exit_profile = MODE_EXIT_PROFILE.get(
-        ENGINE_MODE,
-        MODE_EXIT_PROFILE["BALANCED"],
-    )
+        exit_profile = MODE_EXIT_PROFILE.get(
+            ENGINE_MODE,
+            MODE_EXIT_PROFILE["BALANCED"],
+        )
 
-    for pos in mtm_engine.positions:
-        if pos["forced_exit"]:
-            continue
+        for pos in mtm_engine.positions:
+            if pos["forced_exit"]:
+                continue
 
-        drift = smart_drift_engine.generate_drift(pos)
-        pos["floating"] = round(pos["floating"] + drift, 4)
-        pos["age_cycles"] += 1
+            drift = smart_drift_engine.generate_drift(pos)
+            pos["floating"] = round(pos["floating"] + drift, 4)
+            pos["age_cycles"] += 1
 
-        if pos["floating"] <= exit_profile["stop_loss"]:
-            book_position_exit(pos, "STOP")
-        elif pos["floating"] >= exit_profile["take_profit"]:
-            book_position_exit(pos, "TAKE_PROFIT")
-        elif pos["age_cycles"] >= exit_profile["max_age"]:
-            book_position_exit(pos, "TIME_EXIT")
+            if pos["floating"] <= exit_profile["stop_loss"]:
+                book_position_exit(pos, "STOP")
+            elif pos["floating"] >= exit_profile["take_profit"]:
+                book_position_exit(pos, "TAKE_PROFIT")
+            elif pos["age_cycles"] >= exit_profile["max_age"]:
+                book_position_exit(pos, "TIME_EXIT")
 
-    display_by_asset = mtm_engine.floating_by_asset(funded_only=False)
-    broker_test_positions = mtm_engine.count_open_broker_test_positions()
-    total_unrealized = round(sum(display_by_asset.values()), 4)
-    open_positions = mtm_engine.count_open_positions()
+        display_by_asset = mtm_engine.floating_by_asset(funded_only=False)
+        broker_test_positions = mtm_engine.count_open_broker_test_positions()
+        total_unrealized = round(sum(display_by_asset.values()), 4)
+        open_positions = mtm_engine.count_open_positions()
 
-    top_cluster = cluster_amplifier.top_cluster()
-    cluster_pct = (
-        cluster_risk_governor.cluster_share(top_cluster) * 100
-        if top_cluster
-        else 0.0
-    )
+        top_cluster = cluster_amplifier.top_cluster()
+        cluster_pct = (
+            cluster_risk_governor.cluster_share(top_cluster) * 100
+            if top_cluster
+            else 0.0
+        )
 
-    dynamic_limit = concurrency_controller.evaluate_limit(
-        open_positions,
-        cluster_pct,
-        total_unrealized,
-    )
+        dynamic_limit = concurrency_controller.evaluate_limit(
+            open_positions,
+            cluster_pct,
+            total_unrealized,
+        )
 
-    total_realized = total_realized_pnl()
+        total_realized = total_realized_pnl()
 
-    print("\n--- SESSION CONTEXT ---")
-    print(f"USER ID: {SESSION_USER_CTX.get('user_id')}")
-    print(f"DISPLAY NAME: {SESSION_USER_CTX.get('display_name')}")
-    print(f"ROLE: {SESSION_USER_CTX.get('role')}")
-    print(f"UNIT: {SESSION_USER_CTX.get('unit_code')}")
-    print(f"HOME BRANCH: {SESSION_USER_CTX.get('home_branch')}")
+        print("\n--- SESSION CONTEXT ---")
+        print(f"USER ID: {SESSION_USER_CTX.get('user_id')}")
+        print(f"DISPLAY NAME: {SESSION_USER_CTX.get('display_name')}")
+        print(f"ROLE: {SESSION_USER_CTX.get('role')}")
+        print(f"UNIT: {SESSION_USER_CTX.get('unit_code')}")
+        print(f"HOME BRANCH: {SESSION_USER_CTX.get('home_branch')}")
+        print(f"SESSION ID: {SESSION_USER_CTX.get('session_id')}")
+        print(f"COMPUTER NAME: {SESSION_USER_CTX.get('computer_name')}")
+        print(f"LOGIN CHANNEL: {SESSION_USER_CTX.get('login_channel')}")
 
-    print_oanda_broker_status()
-    print_coinbase_broker_status()
+        print_oanda_broker_status()
+        print_coinbase_broker_status()
 
-    print("\n--- BROKER EXECUTION CONTROL ---")
-    print(f"BROKER EXECUTION: {broker_execution_status_label()}")
-    print(f"SELECTED BROKER: {selected_broker_status_label()}")
-    print(f"BROKER MODE: {SELECTED_BROKER_MODE}")
-    print(f"EXECUTION SCOPE: {active_execution_scope_label()}")
+        print("\n--- BROKER EXECUTION CONTROL ---")
+        print(f"BROKER EXECUTION: {broker_execution_status_label()}")
+        print(f"SELECTED BROKER: {selected_broker_status_label()}")
+        print(f"BROKER MODE: {SELECTED_BROKER_MODE}")
+        print(f"EXECUTION SCOPE: {active_execution_scope_label()}")
 
-    print("\n--- LIVE EXECUTION SUMMARY ---")
-    print(f"REALIZED PNL: {total_realized:+.4f}")
-    print(f"UNREALIZED PNL: {total_unrealized:+.4f}")
-    print(f"TOTAL EQUITY PNL: {total_realized + total_unrealized:+.4f}")
+        print("\n--- LIVE EXECUTION SUMMARY ---")
+        print(f"REALIZED PNL: {total_realized:+.4f}")
+        print(f"UNREALIZED PNL: {total_unrealized:+.4f}")
+        print(f"TOTAL EQUITY PNL: {total_realized + total_unrealized:+.4f}")
 
-    print(
-        f"CRYPTO REALIZED: {sum(crypto_pnl.values()):+.4f} | "
-        f"FLOATING: {display_by_asset['CRYPTO']:+.4f}"
-    )
-    print(
-        f"FX REALIZED: {sum(fx_pnl.values()):+.4f} | "
-        f"FLOATING: {display_by_asset['FX']:+.4f}"
-    )
-    print(
-        f"OPTIONS REALIZED: {sum(options_pnl.values()):+.4f} | "
-        f"FLOATING: {display_by_asset['OPTIONS']:+.4f}"
-    )
-    print(
-        f"FUTURES REALIZED: {sum(futures_pnl.values()):+.4f} | "
-        f"FLOATING: {display_by_asset['FUTURES']:+.4f}"
-    )
+        print(
+            f"CRYPTO REALIZED: {sum(crypto_pnl.values()):+.4f} | "
+            f"FLOATING: {display_by_asset['CRYPTO']:+.4f}"
+        )
+        print(
+            f"FX REALIZED: {sum(fx_pnl.values()):+.4f} | "
+            f"FLOATING: {display_by_asset['FX']:+.4f}"
+        )
+        print(
+            f"OPTIONS REALIZED: {sum(options_pnl.values()):+.4f} | "
+            f"FLOATING: {display_by_asset['OPTIONS']:+.4f}"
+        )
+        print(
+            f"FUTURES REALIZED: {sum(futures_pnl.values()):+.4f} | "
+            f"FLOATING: {display_by_asset['FUTURES']:+.4f}"
+        )
 
-    print(f"OPEN POSITIONS: {open_positions}")
-    print(f"ADAPTIVE POSITION LIMIT: {dynamic_limit}")
-    print(f"BROKER TEST POSITIONS: {broker_test_positions}")
+        print(f"OPEN POSITIONS: {open_positions}")
+        print(f"ADAPTIVE POSITION LIMIT: {dynamic_limit}")
+        print(f"BROKER TEST POSITIONS: {broker_test_positions}")
 
-    print(
-        f"SIMULATED CAPITAL DEPLOYED: "
-        f"${capital_governor.funded_amount():.2f}"
-    )
-    print(
-        f"SIMULATED CAPITAL AVAILABLE: "
-        f"${capital_governor.available_capital():.2f}"
-    )
+        print(
+            f"SIMULATED CAPITAL DEPLOYED: "
+            f"${capital_governor.funded_amount():.2f}"
+        )
+        print(
+            f"SIMULATED CAPITAL AVAILABLE: "
+            f"${capital_governor.available_capital():.2f}"
+        )
 
-    print(f"ENGINE MODE: {ENGINE_MODE}")
-    print(
-        f"FORCED EXIT PROFITS: "
-        f"{locked_profit_ledger.forced_exit_profit_banked:+.4f}"
-    )
-    print(
-        f"CLUSTER SATURATION: "
-        f"{top_cluster if top_cluster else 'NONE'} {cluster_pct:.1f}%"
-    )
-    print(f"LAST TRADE: {last_trade}")
-    print("-" * 60)
+        print(f"ENGINE MODE: {ENGINE_MODE}")
+        print(
+            f"FORCED EXIT PROFITS: "
+            f"{locked_profit_ledger.forced_exit_profit_banked:+.4f}"
+        )
+        print(
+            f"CLUSTER SATURATION: "
+            f"{top_cluster if top_cluster else 'NONE'} {cluster_pct:.1f}%"
+        )
+        print(f"LAST TRADE: {last_trade}")
+        print("-" * 60)
 
-    live_fx_funded_this_cycle = 0
-    live_crypto_funded_this_cycle = 0
+        live_fx_funded_this_cycle = 0
+        live_crypto_funded_this_cycle = 0
 
-    if mtm_engine.count_open_positions() < MAX_PAPER_OPEN_POSITIONS:
-        for asset_class, symbol, sig, prob in select_four_candidates():
-            if not concurrency_controller.can_add_position(
-                mtm_engine.count_open_positions()
-            ):
-                break
+        if mtm_engine.count_open_positions() < MAX_PAPER_OPEN_POSITIONS:
+            for asset_class, symbol, sig, prob in select_four_candidates():
+                if not concurrency_controller.can_add_position(
+                    mtm_engine.count_open_positions()
+                ):
+                    break
 
-            if mtm_engine.count_open_positions() >= MAX_PAPER_OPEN_POSITIONS:
-                break
+                if mtm_engine.count_open_positions() >= MAX_PAPER_OPEN_POSITIONS:
+                    break
 
-            if asset_class == "CRYPTO":
-                safe_load_runtime_asset(symbol)
+                if asset_class == "CRYPTO":
+                    safe_load_runtime_asset(symbol)
 
-            allow_broker_test = False
+                allow_broker_test = False
 
-            if (
-                asset_class == "FX"
-                and SELECTED_BROKER == "OANDA"
-                and live_fx_funded_this_cycle < 1
-            ):
-                allow_broker_test = True
+                if (
+                    asset_class == "FX"
+                    and SELECTED_BROKER == "OANDA"
+                    and live_fx_funded_this_cycle < 1
+                ):
+                    allow_broker_test = True
 
-            if (
-                asset_class == "CRYPTO"
-                and SELECTED_BROKER == "COINBASE"
-                and live_crypto_funded_this_cycle < 1
-            ):
-                allow_broker_test = True
+                if (
+                    asset_class == "CRYPTO"
+                    and SELECTED_BROKER == "COINBASE"
+                    and live_crypto_funded_this_cycle < 1
+                ):
+                    allow_broker_test = True
 
-            position = mtm_engine.register_position(
-                asset_class,
-                symbol,
-                sig,
-                prob,
-                allow_live_funding=allow_broker_test,
-            )
+                position = mtm_engine.register_position(
+                    asset_class,
+                    symbol,
+                    sig,
+                    prob,
+                    allow_live_funding=allow_broker_test,
+                )
 
-            if position.get("broker_tested"):
-                if asset_class == "FX" and SELECTED_BROKER == "OANDA":
-                    live_fx_funded_this_cycle += 1
-                    ok, broker_msg = attempt_oanda_fx_execution(symbol)
+                if position.get("broker_tested"):
+                    if asset_class == "FX" and SELECTED_BROKER == "OANDA":
+                        live_fx_funded_this_cycle += 1
+                        ok, broker_msg = attempt_oanda_fx_execution(symbol)
 
-                elif asset_class == "CRYPTO" and SELECTED_BROKER == "COINBASE":
-                    live_crypto_funded_this_cycle += 1
-                    ok, broker_msg = attempt_coinbase_crypto_execution(symbol)
+                    elif asset_class == "CRYPTO" and SELECTED_BROKER == "COINBASE":
+                        live_crypto_funded_this_cycle += 1
+                        ok, broker_msg = attempt_coinbase_crypto_execution(symbol)
+
+                    else:
+                        ok, broker_msg = False, "BROKER_ASSET_MISMATCH"
+
+                    if ok:
+                        position["broker_order_ok"] = True
+                        position["broker_note"] = broker_msg
+                        last_trade = f"{symbol} BROKER_EXECUTED {broker_msg}"
+                        print(
+                            f"[{asset_class} BROKER EXECUTED] {symbol} opened | "
+                            f"{broker_msg}"
+                        )
+                    else:
+                        capital_governor.release_trade(position["position_id"])
+                        position["broker_tested"] = False
+                        position["live_funded"] = False
+                        position["broker_order_ok"] = False
+                        position["broker_note"] = broker_msg
+                        last_trade = f"{symbol} PAPER_OPENED BROKER_BLOCKED {broker_msg}"
+                        print(
+                            f"[{asset_class} PAPER OPENED] {symbol} opened | "
+                            f"BROKER_BLOCKED | {broker_msg}"
+                        )
 
                 else:
-                    ok, broker_msg = False, "BROKER_ASSET_MISMATCH"
+                    last_trade = f"{symbol} PAPER_OPENED"
+                    print(f"[{asset_class} PAPER OPENED] {symbol}")
+        else:
+            print("[SIGNAL GENERATION PAUSED] paper open-position cap reached")
 
-                if ok:
-                    position["broker_order_ok"] = True
-                    position["broker_note"] = broker_msg
-                    last_trade = f"{symbol} BROKER_EXECUTED {broker_msg}"
-                    print(
-                        f"[{asset_class} BROKER EXECUTED] {symbol} opened | "
-                        f"{broker_msg}"
-                    )
-                else:
-                    capital_governor.release_trade(position["position_id"])
-                    position["broker_tested"] = False
-                    position["live_funded"] = False
-                    position["broker_order_ok"] = False
-                    position["broker_note"] = broker_msg
-                    last_trade = f"{symbol} PAPER_OPENED BROKER_BLOCKED {broker_msg}"
-                    print(
-                        f"[{asset_class} PAPER OPENED] {symbol} opened | "
-                        f"BROKER_BLOCKED | {broker_msg}"
-                    )
+        session_recovery.save_state(
+            cycle=cycle,
+            crypto_pnl=crypto_pnl,
+            fx_pnl=fx_pnl,
+            options_pnl=options_pnl,
+            futures_pnl=futures_pnl,
+            last_trade=last_trade,
+            position_counter=mtm_engine.position_counter,
+        )
 
-            else:
-                last_trade = f"{symbol} PAPER_OPENED"
-                print(f"[{asset_class} PAPER OPENED] {symbol}")
-    else:
-        print("[SIGNAL GENERATION PAUSED] paper open-position cap reached")
+        time.sleep(CYCLE_SLEEP)
 
-    session_recovery.save_state(
-        cycle=cycle,
-        crypto_pnl=crypto_pnl,
-        fx_pnl=fx_pnl,
-        options_pnl=options_pnl,
-        futures_pnl=futures_pnl,
-        last_trade=last_trade,
-        position_counter=mtm_engine.position_counter,
+except KeyboardInterrupt:
+    print("\n[SESSION STOPPED] Keyboard interrupt received.")
+    close_active_session(
+        "keyboard_interrupt",
+        extra={
+            "cycle": cycle,
+            "last_trade": last_trade,
+            "open_positions": mtm_engine.count_open_positions(),
+            "realized_pnl": total_realized_pnl(),
+        },
     )
 
-    time.sleep(CYCLE_SLEEP)
+except Exception as e:
+    print(f"[FATAL ERROR] {str(e)[:200]}")
+    close_active_session(
+        "runtime_error",
+        extra={
+            "cycle": cycle,
+            "last_trade": last_trade,
+            "open_positions": mtm_engine.count_open_positions(),
+            "realized_pnl": total_realized_pnl(),
+            "error": str(e)[:200],
+        },
+    )
+    raise
+
+finally:
+    close_active_session(
+        "normal_shutdown",
+        extra={
+            "cycle": cycle,
+            "last_trade": last_trade,
+            "open_positions": mtm_engine.count_open_positions(),
+            "realized_pnl": total_realized_pnl(),
+        },
+    )
