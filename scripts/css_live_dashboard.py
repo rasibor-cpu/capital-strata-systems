@@ -25,6 +25,7 @@ from backend.app.brokers.oanda_adapter import OandaAdapter
 from backend.app.brokers.broker_bootstrap import initialize_broker
 from backend.app.brokers.coinbase_live_order_gate import CoinbaseLiveOrderGate
 from backend.app.brokers.broker_gate_audit import BrokerGateAuditLogger
+from backend.app.security.auth_gate import await_login_ready_state
 
 
 ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
@@ -178,6 +179,25 @@ def safe_load_runtime_asset(symbol: str) -> bool:
         return False
 
 
+def authenticate_startup_user() -> dict[str, Any]:
+    try:
+        user_ctx = await_login_ready_state()
+        print(
+            f"[AUTH OK] user_id={user_ctx.get('user_id')} "
+            f"role={user_ctx.get('role')} "
+            f"unit={user_ctx.get('unit_code')}"
+        )
+        return user_ctx
+    except KeyboardInterrupt:
+        print("\n[AUTH CANCELLED] Startup aborted by user.")
+        raise SystemExit(1)
+    except Exception as e:
+        print(f"[AUTH FAILED] {e}")
+        raise SystemExit(1)
+
+
+SESSION_USER_CTX = authenticate_startup_user()
+
 BROKER_EXECUTION_ARMED, SELECTED_BROKER, SELECTED_BROKER_MODE = select_broker_execution_config()
 
 ENGINE_MODE = select_engine_mode()
@@ -327,8 +347,6 @@ def initialize_selected_coinbase() -> None:
 
 
 initialize_selected_coinbase()
-
-
 def is_oanda_practice_mode() -> bool:
     base_url = os.getenv("OANDA_BASE_URL", "")
     return "api-fxpractice.oanda.com" in base_url
@@ -349,6 +367,8 @@ def oanda_has_open_trade() -> bool:
     if isinstance(count, int):
         return count > 0
     return False
+
+
 def attempt_oanda_fx_execution(symbol: str) -> tuple[bool, str]:
     """
     Unified broker-gated OANDA execution:
@@ -382,6 +402,8 @@ def attempt_oanda_fx_execution(symbol: str) -> tuple[bool, str]:
             extra={
                 "practice_mode": is_oanda_practice_mode(),
                 "open_trade_count": get_oanda_open_trade_count(),
+                "session_user_id": SESSION_USER_CTX.get("user_id"),
+                "session_role": SESSION_USER_CTX.get("role"),
             },
         )
 
@@ -501,7 +523,11 @@ def evaluate_coinbase_live_gate(symbol: str, size_usd: float):
             engine_mode=ENGINE_MODE,
             execution_armed=BROKER_EXECUTION_ARMED,
             live_orders_flag=coinbase_live_orders_enabled(),
-            extra={"note": "paper mode bypass"},
+            extra={
+                "note": "paper mode bypass",
+                "session_user_id": SESSION_USER_CTX.get("user_id"),
+                "session_role": SESSION_USER_CTX.get("role"),
+            },
         )
         return True, "COINBASE_PAPER_MODE_GATE_BYPASS"
 
@@ -533,6 +559,8 @@ def evaluate_coinbase_live_gate(symbol: str, size_usd: float):
         extra={
             "max_live_order_usd": COINBASE_MAX_LIVE_ORDER_USD,
             "account_count_hint": 9 if SELECTED_BROKER == "COINBASE" and SELECTED_BROKER_MODE == "live" else None,
+            "session_user_id": SESSION_USER_CTX.get("user_id"),
+            "session_role": SESSION_USER_CTX.get("role"),
         },
     )
 
@@ -615,6 +643,10 @@ class SessionRecoveryEngine:
             "futures_pnl": futures_pnl,
             "last_trade": last_trade,
             "position_counter": position_counter,
+            "session_user_ctx": SESSION_USER_CTX,
+            "selected_broker": SELECTED_BROKER,
+            "selected_broker_mode": SELECTED_BROKER_MODE,
+            "engine_mode": ENGINE_MODE,
         }
 
         with open(self.state_file, "w", encoding="utf-8") as f:
@@ -781,6 +813,8 @@ class MarkToMarketEngine:
             "live_funded": broker_tested,
             "broker_order_ok": False,
             "broker_note": "NO_BROKER_ORDER",
+            "session_user_id": SESSION_USER_CTX.get("user_id"),
+            "session_role": SESSION_USER_CTX.get("role"),
         }
 
         self.positions.append(position)
@@ -844,6 +878,8 @@ if saved_state:
         "[RECOVERY] Realized PnL restored, stale open positions not reloaded. "
         "Cycle counter reset."
     )
+
+
 def total_realized_pnl() -> float:
     return round(
         sum(crypto_pnl.values())
@@ -903,8 +939,6 @@ def book_position_exit(pos: dict, reason: str) -> None:
     locked_profit_ledger.record_recycled_slot()
 
     last_trade = f"{pos['symbol']} EXIT {reason} {realized:+.4f}"
-
-
 def print_oanda_broker_status() -> None:
     print("\n--- OANDA BROKER STATUS ---")
 
@@ -1079,6 +1113,13 @@ while True:
     )
 
     total_realized = total_realized_pnl()
+
+    print("\n--- SESSION CONTEXT ---")
+    print(f"USER ID: {SESSION_USER_CTX.get('user_id')}")
+    print(f"DISPLAY NAME: {SESSION_USER_CTX.get('display_name')}")
+    print(f"ROLE: {SESSION_USER_CTX.get('role')}")
+    print(f"UNIT: {SESSION_USER_CTX.get('unit_code')}")
+    print(f"HOME BRANCH: {SESSION_USER_CTX.get('home_branch')}")
 
     print_oanda_broker_status()
     print_coinbase_broker_status()
