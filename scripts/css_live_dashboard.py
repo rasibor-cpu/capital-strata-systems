@@ -27,6 +27,7 @@ from backend.app.brokers.broker_bootstrap import initialize_broker
 from backend.app.brokers.coinbase_live_order_gate import CoinbaseLiveOrderGate
 from backend.app.brokers.broker_gate_audit import BrokerGateAuditLogger
 from backend.app.security.auth_gate import await_login_ready_state
+from backend.security.access_control import AccessControl
 from backend.security.audit_ledger import AuditLedger
 from backend.security.session_manager import SessionManager
 
@@ -100,6 +101,7 @@ ASSET_DRIFT_PROFILE = {
 
 audit_ledger = AuditLedger()
 session_manager = SessionManager()
+access_control = AccessControl()
 SESSION_CLOSED = False
 
 
@@ -115,87 +117,96 @@ def runtime_origin_context() -> dict[str, Any]:
     }
 
 
-def select_broker_execution_config() -> tuple[bool, str, str]:
-    """
-    Global broker execution arming.
+def build_role_profile(role: str) -> dict[str, Any]:
+    role = str(role).strip().upper()
 
-    - Arm/disarm applies to every broker.
-    - Broker selection is explicit.
-    - Coinbase is selectable.
-    - Coinbase live order placement requires COINBASE_ENABLE_LIVE_ORDERS=true.
-    - Coinbase live orders also pass through CoinbaseLiveOrderGate.
-    - Gate decisions are logged through BrokerGateAuditLogger.
-    """
-    print("\n=== CSS BROKER EXECUTION ARMING ===")
-    print("1. DISABLED / PAPER ONLY")
-    print("2. ARMED / BROKER EXECUTION ALLOWED")
+    allowed_engine_modes = [
+        mode
+        for mode in ENGINE_MODES.values()
+        if access_control.can_select_engine_mode(role, mode).allowed
+    ]
 
-    armed_choice = input("Enter choice (1-2) [default=1]: ").strip() or "1"
-
-    if armed_choice != "2":
-        print("[BROKER EXECUTION DISABLED] Paper/dashboard mode only")
-        return False, "NONE", "paper"
-
-    print("\n=== CSS BROKER SELECTION ===")
-    print("1. NONE / ARMED BUT NO BROKER")
-    print("2. OANDA - FX practice execution")
-    print("3. COINBASE - crypto spot broker")
-    print("4. ALPACA - registered, adapter not active yet")
-    print("5. FUTURES BROKER - reserved, blocked for now")
-
-    broker_choice = input("Enter broker choice (1-5) [default=1]: ").strip() or "1"
-    selected = SUPPORTED_BROKERS.get(broker_choice, "NONE")
-
-    if selected == "OANDA":
-        print("[BROKER EXECUTION ARMED] Selected broker: OANDA / FX practice only")
-        return True, selected, "paper"
-
-    if selected == "COINBASE":
-        print("\n=== COINBASE MODE ===")
-        print("1. PAPER / AUTH TEST / SIMULATED ORDER PATH")
-        print("2. LIVE / REAL COINBASE ACCOUNT CONNECTION")
-
-        mode_choice = input("Enter Coinbase mode (1-2) [default=1]: ").strip() or "1"
-        broker_mode = "live" if mode_choice == "2" else "paper"
-
-        if broker_mode == "live":
-            confirm = input(
-                "Type LIVE to allow Coinbase live-mode initialization "
-                "(orders still require COINBASE_ENABLE_LIVE_ORDERS=true): "
-            ).strip()
-            if confirm != "LIVE":
-                print("[COINBASE LIVE CANCELLED] Falling back to Coinbase paper mode")
-                broker_mode = "paper"
-
-        print(f"[BROKER EXECUTION ARMED] Selected broker: COINBASE / mode={broker_mode}")
-        return True, selected, broker_mode
-
-    if selected == "NONE":
-        print("[BROKER EXECUTION ARMED] No execution broker selected")
-        return True, selected, "paper"
-
-    print(f"[BROKER RESERVED] {selected} is not executable yet; broker calls will be blocked")
-    return True, selected, "paper"
+    return {
+        "can_login": access_control.can_login(role).allowed,
+        "can_view_dashboard": access_control.can_view_dashboard(role).allowed,
+        "can_run_dashboard": access_control.can_run_dashboard(role).allowed,
+        "can_arm_broker": access_control.can_arm_broker(role).allowed,
+        "can_select_broker": access_control.can_select_broker(role).allowed,
+        "can_use_paper_broker_mode": access_control.can_use_paper_broker_mode(role).allowed,
+        "can_use_live_broker_mode": access_control.can_use_live_broker_mode(role).allowed,
+        "can_execute_paper_trading": access_control.can_execute_paper_trading(role).allowed,
+        "can_execute_live_trading": access_control.can_execute_live_trading(role).allowed,
+        "allowed_engine_modes": allowed_engine_modes,
+    }
 
 
-def select_engine_mode() -> str:
-    print("\n=== CSS ENGINE MODE SELECTOR ===")
-    for k, v in ENGINE_MODES.items():
-        print(f"{k}. {v}")
+def record_rbac_event(
+    event_type: str,
+    user_ctx: dict[str, Any],
+    details: dict[str, Any],
+) -> None:
+    audit_ledger.record(
+        event_type,
+        str(user_ctx.get("user_id", "UNKNOWN")),
+        {
+            "session_id": user_ctx.get("session_id"),
+            "display_name": user_ctx.get("display_name"),
+            "role": user_ctx.get("role"),
+            **details,
+        },
+    )
 
-    choice = input("Enter choice (1-5) [default=3]: ").strip()
-    return ENGINE_MODES.get(choice, "BALANCED")
 
+def enforce_dashboard_startup_access(user_ctx: dict[str, Any]) -> dict[str, Any]:
+    role = str(user_ctx.get("role", "VIEWER")).strip().upper()
+    role_profile = build_role_profile(role)
 
-def safe_load_runtime_asset(symbol: str) -> bool:
-    try:
-        with contextlib.redirect_stdout(io.StringIO()):
-            load_runtime_asset(symbol)
-        print(f"Fetched candles for {symbol}")
-        return True
-    except Exception as e:
-        print(f"[FETCH FAIL] {symbol}: {str(e)[:80]}")
-        return False
+    user_ctx["role_profile"] = role_profile
+
+    if not role_profile["can_login"]:
+        record_rbac_event(
+            "startup_access_denied",
+            user_ctx,
+            {
+                "resource": "auth",
+                "action": "login",
+                "reason": "role_cannot_login",
+            },
+        )
+        raise SystemExit(1)
+
+    if not role_profile["can_view_dashboard"]:
+        record_rbac_event(
+            "startup_access_denied",
+            user_ctx,
+            {
+                "resource": "dashboard",
+                "action": "view",
+                "reason": "role_cannot_view_dashboard",
+            },
+        )
+        raise SystemExit(1)
+
+    if not role_profile["can_run_dashboard"]:
+        record_rbac_event(
+            "startup_access_denied",
+            user_ctx,
+            {
+                "resource": "dashboard",
+                "action": "run",
+                "reason": "role_cannot_run_dashboard",
+            },
+        )
+        raise SystemExit(1)
+
+    record_rbac_event(
+        "startup_rbac_profile",
+        user_ctx,
+        {
+            "role_profile": role_profile,
+        },
+    )
+    return user_ctx
 
 
 def authenticate_startup_user() -> dict[str, Any]:
@@ -228,6 +239,8 @@ def authenticate_startup_user() -> dict[str, Any]:
             },
         )
 
+        user_ctx = enforce_dashboard_startup_access(user_ctx)
+
         print(
             f"[AUTH OK] user_id={user_ctx.get('user_id')} "
             f"role={user_ctx.get('role')} "
@@ -249,6 +262,9 @@ def authenticate_startup_user() -> dict[str, Any]:
         print("\n[AUTH CANCELLED] Startup aborted by user.")
         raise SystemExit(1)
 
+    except SystemExit:
+        raise
+
     except Exception as e:
         origin = runtime_origin_context()
         audit_ledger.record(
@@ -261,6 +277,234 @@ def authenticate_startup_user() -> dict[str, Any]:
         )
         print(f"[AUTH FAILED] {e}")
         raise SystemExit(1)
+
+
+def select_broker_execution_config() -> tuple[bool, str, str]:
+    role = str(SESSION_USER_CTX.get("role", "VIEWER")).strip().upper()
+    role_profile = SESSION_USER_CTX.get("role_profile", {})
+
+    if not role_profile.get("can_arm_broker", False):
+        print(f"[RBAC] Broker arming denied for role {role}. Forced paper/view mode.")
+        record_rbac_event(
+            "broker_arm_denied",
+            SESSION_USER_CTX,
+            {
+                "resource": "broker",
+                "action": "arm",
+                "reason": "role_cannot_arm_broker",
+            },
+        )
+        return False, "NONE", "paper"
+
+    print("\n=== CSS BROKER EXECUTION ARMING ===")
+    print("1. DISABLED / PAPER ONLY")
+    print("2. ARMED / BROKER EXECUTION ALLOWED")
+
+    armed_choice = input("Enter choice (1-2) [default=1]: ").strip() or "1"
+
+    if armed_choice != "2":
+        print("[BROKER EXECUTION DISABLED] Paper/dashboard mode only")
+        record_rbac_event(
+            "broker_execution_disarmed",
+            SESSION_USER_CTX,
+            {
+                "resource": "broker",
+                "action": "disarm",
+                "reason": "operator_choice",
+            },
+        )
+        return False, "NONE", "paper"
+
+    if not role_profile.get("can_select_broker", False):
+        print(f"[RBAC] Broker selection denied for role {role}.")
+        record_rbac_event(
+            "broker_selection_denied",
+            SESSION_USER_CTX,
+            {
+                "resource": "broker",
+                "action": "select",
+                "reason": "role_cannot_select_broker",
+            },
+        )
+        return False, "NONE", "paper"
+
+    print("\n=== CSS BROKER SELECTION ===")
+    print("1. NONE / ARMED BUT NO BROKER")
+    print("2. OANDA - FX practice execution")
+    print("3. COINBASE - crypto spot broker")
+    print("4. ALPACA - registered, adapter not active yet")
+    print("5. FUTURES BROKER - reserved, blocked for now")
+
+    broker_choice = input("Enter broker choice (1-5) [default=1]: ").strip() or "1"
+    selected = SUPPORTED_BROKERS.get(broker_choice, "NONE")
+
+    if selected == "NONE":
+        record_rbac_event(
+            "broker_selected",
+            SESSION_USER_CTX,
+            {
+                "selected_broker": "NONE",
+                "selected_broker_mode": "paper",
+            },
+        )
+        print("[BROKER EXECUTION ARMED] No execution broker selected")
+        return True, "NONE", "paper"
+
+    if selected == "OANDA":
+        if not role_profile.get("can_use_paper_broker_mode", False):
+            print(f"[RBAC] OANDA practice mode denied for role {role}.")
+            record_rbac_event(
+                "broker_mode_denied",
+                SESSION_USER_CTX,
+                {
+                    "selected_broker": "OANDA",
+                    "selected_broker_mode": "paper",
+                    "reason": "role_cannot_use_paper_broker_mode",
+                },
+            )
+            return False, "NONE", "paper"
+
+        record_rbac_event(
+            "broker_selected",
+            SESSION_USER_CTX,
+            {
+                "selected_broker": "OANDA",
+                "selected_broker_mode": "paper",
+            },
+        )
+        print("[BROKER EXECUTION ARMED] Selected broker: OANDA / FX practice only")
+        return True, "OANDA", "paper"
+
+    if selected == "COINBASE":
+        print("\n=== COINBASE MODE ===")
+        print("1. PAPER / AUTH TEST / SIMULATED ORDER PATH")
+        print("2. LIVE / REAL COINBASE ACCOUNT CONNECTION")
+
+        mode_choice = input("Enter Coinbase mode (1-2) [default=1]: ").strip() or "1"
+        broker_mode = "live" if mode_choice == "2" else "paper"
+
+        if broker_mode == "live" and not role_profile.get("can_use_live_broker_mode", False):
+            print(f"[RBAC] Coinbase live mode denied for role {role}. Falling back safely.")
+            record_rbac_event(
+                "broker_mode_denied",
+                SESSION_USER_CTX,
+                {
+                    "selected_broker": "COINBASE",
+                    "selected_broker_mode": "live",
+                    "reason": "role_cannot_use_live_broker_mode",
+                },
+            )
+            if role_profile.get("can_use_paper_broker_mode", False):
+                broker_mode = "paper"
+            else:
+                return False, "NONE", "paper"
+
+        if broker_mode == "paper" and not role_profile.get("can_use_paper_broker_mode", False):
+            print(f"[RBAC] Coinbase paper mode denied for role {role}.")
+            record_rbac_event(
+                "broker_mode_denied",
+                SESSION_USER_CTX,
+                {
+                    "selected_broker": "COINBASE",
+                    "selected_broker_mode": "paper",
+                    "reason": "role_cannot_use_paper_broker_mode",
+                },
+            )
+            return False, "NONE", "paper"
+
+        if broker_mode == "live":
+            confirm = input(
+                "Type LIVE to allow Coinbase live-mode initialization "
+                "(orders still require COINBASE_ENABLE_LIVE_ORDERS=true): "
+            ).strip()
+            if confirm != "LIVE":
+                print("[COINBASE LIVE CANCELLED] Falling back to Coinbase paper mode")
+                broker_mode = "paper"
+
+        record_rbac_event(
+            "broker_selected",
+            SESSION_USER_CTX,
+            {
+                "selected_broker": "COINBASE",
+                "selected_broker_mode": broker_mode,
+            },
+        )
+        print(f"[BROKER EXECUTION ARMED] Selected broker: COINBASE / mode={broker_mode}")
+        return True, "COINBASE", broker_mode
+
+    print(f"[BROKER RESERVED] {selected} is not executable yet; broker calls will be blocked")
+    record_rbac_event(
+        "broker_selected",
+        SESSION_USER_CTX,
+        {
+            "selected_broker": selected,
+            "selected_broker_mode": "paper",
+        },
+    )
+    return True, selected, "paper"
+def select_engine_mode() -> str:
+    role = str(SESSION_USER_CTX.get("role", "VIEWER")).strip().upper()
+    role_profile = SESSION_USER_CTX.get("role_profile", {})
+    allowed_modes = list(role_profile.get("allowed_engine_modes", []))
+
+    if not allowed_modes:
+        print(f"[RBAC] No engine modes permitted for role {role}. Forcing SAFE.")
+        record_rbac_event(
+            "engine_mode_forced",
+            SESSION_USER_CTX,
+            {
+                "requested_mode": None,
+                "selected_mode": "SAFE",
+                "reason": "no_allowed_engine_modes",
+            },
+        )
+        return "SAFE"
+
+    print("\n=== CSS ENGINE MODE SELECTOR ===")
+    for key, value in ENGINE_MODES.items():
+        marker = "" if value in allowed_modes else " [BLOCKED]"
+        print(f"{key}. {value}{marker}")
+
+    choice = input("Enter choice (1-5) [default=3]: ").strip() or "3"
+    requested_mode = ENGINE_MODES.get(choice, "BALANCED")
+
+    if requested_mode not in allowed_modes:
+        fallback_mode = "SAFE" if "SAFE" in allowed_modes else allowed_modes[0]
+        print(
+            f"[RBAC] Engine mode {requested_mode} denied for role {role}. "
+            f"Falling back to {fallback_mode}."
+        )
+        record_rbac_event(
+            "engine_mode_denied",
+            SESSION_USER_CTX,
+            {
+                "requested_mode": requested_mode,
+                "selected_mode": fallback_mode,
+                "reason": "role_cannot_select_requested_engine_mode",
+            },
+        )
+        return fallback_mode
+
+    record_rbac_event(
+        "engine_mode_selected",
+        SESSION_USER_CTX,
+        {
+            "requested_mode": requested_mode,
+            "selected_mode": requested_mode,
+        },
+    )
+    return requested_mode
+
+
+def safe_load_runtime_asset(symbol: str) -> bool:
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            load_runtime_asset(symbol)
+        print(f"Fetched candles for {symbol}")
+        return True
+    except Exception as e:
+        print(f"[FETCH FAIL] {symbol}: {str(e)[:80]}")
+        return False
 
 
 def record_startup_configuration(
@@ -282,6 +526,7 @@ def record_startup_configuration(
             "selected_broker": selected_broker,
             "selected_broker_mode": selected_broker_mode,
             "engine_mode": engine_mode,
+            "role_profile": user_ctx.get("role_profile"),
             "computer_name": user_ctx.get("computer_name"),
             "host_name": user_ctx.get("host_name"),
             "process_id": user_ctx.get("process_id"),
@@ -482,6 +727,8 @@ def initialize_selected_coinbase() -> None:
 
 
 initialize_selected_coinbase()
+
+
 def is_oanda_practice_mode() -> bool:
     base_url = os.getenv("OANDA_BASE_URL", "")
     return "api-fxpractice.oanda.com" in base_url
@@ -505,18 +752,7 @@ def oanda_has_open_trade() -> bool:
 
 
 def attempt_oanda_fx_execution(symbol: str) -> tuple[bool, str]:
-    """
-    Unified broker-gated OANDA execution:
-    - global broker arm/disarm switch applies first
-    - selected broker must be OANDA
-    - practice only
-    - FX only
-    - 1 unit
-    - no execution in SAFE mode
-    - no execution if OANDA already has open trade
-
-    All gate decisions are logged through BrokerGateAuditLogger.
-    """
+    role_profile = SESSION_USER_CTX.get("role_profile", {})
 
     def _audit(allowed: bool, reason: str) -> None:
         broker_gate_audit.log_decision(
@@ -546,6 +782,10 @@ def attempt_oanda_fx_execution(symbol: str) -> tuple[bool, str]:
     if not BROKER_EXECUTION_ARMED:
         _audit(False, "BROKER_DISABLED_BY_GLOBAL_SWITCH")
         return False, "BROKER_DISABLED_BY_GLOBAL_SWITCH"
+
+    if not role_profile.get("can_execute_paper_trading", False):
+        _audit(False, "RBAC_BLOCKED_PAPER_EXECUTION")
+        return False, "RBAC_BLOCKED_PAPER_EXECUTION"
 
     if SELECTED_BROKER != "OANDA":
         reason = f"BROKER_NOT_SELECTED_FOR_OANDA_{SELECTED_BROKER}"
@@ -601,9 +841,6 @@ def coinbase_live_orders_enabled() -> bool:
 
 
 def _coinbase_response_ok(response: Any) -> tuple[bool, str]:
-    """
-    Normalize responses from backend.broker.coinbase_adapter.
-    """
     if not isinstance(response, dict):
         return False, "NON_DICT_RESPONSE"
 
@@ -630,8 +867,6 @@ def _coinbase_response_ok(response: Any) -> tuple[bool, str]:
 
     err = response.get("error") or response.get("message") or status or "UNKNOWN_RESPONSE"
     return False, str(err)[:60]
-
-
 def evaluate_coinbase_live_gate(symbol: str, size_usd: float):
     """
     Centralized Coinbase live-order readiness gate.
@@ -708,15 +943,7 @@ def evaluate_coinbase_live_gate(symbol: str, size_usd: float):
 
 
 def attempt_coinbase_crypto_execution(symbol: str) -> tuple[bool, str]:
-    """
-    Unified broker-gated Coinbase crypto execution:
-    - global broker arm/disarm switch applies first
-    - selected broker must be COINBASE
-    - crypto only
-    - no execution in SAFE mode
-    - paper Coinbase mode uses adapter paper order path
-    - live Coinbase mode must pass CoinbaseLiveOrderGate
-    """
+    role_profile = SESSION_USER_CTX.get("role_profile", {})
 
     if not BROKER_EXECUTION_ARMED:
         return False, "BROKER_DISABLED_BY_GLOBAL_SWITCH"
@@ -732,6 +959,12 @@ def attempt_coinbase_crypto_execution(symbol: str) -> tuple[bool, str]:
 
     if coinbase is None:
         return False, "COINBASE_NOT_INITIALIZED"
+
+    if SELECTED_BROKER_MODE == "live" and not role_profile.get("can_execute_live_trading", False):
+        return False, "RBAC_BLOCKED_LIVE_EXECUTION"
+
+    if SELECTED_BROKER_MODE != "live" and not role_profile.get("can_execute_paper_trading", False):
+        return False, "RBAC_BLOCKED_PAPER_EXECUTION"
 
     gate_ok, gate_reason = evaluate_coinbase_live_gate(
         symbol=symbol,
@@ -1080,6 +1313,8 @@ def book_position_exit(pos: dict, reason: str) -> None:
     locked_profit_ledger.record_recycled_slot()
 
     last_trade = f"{pos['symbol']} EXIT {reason} {realized:+.4f}"
+
+
 def print_oanda_broker_status() -> None:
     print("\n--- OANDA BROKER STATUS ---")
 
@@ -1174,7 +1409,6 @@ def print_coinbase_broker_status() -> None:
 def broker_execution_status_label() -> str:
     if not BROKER_EXECUTION_ARMED:
         return "DISABLED"
-
     return "ARMED"
 
 
@@ -1255,6 +1489,7 @@ try:
         )
 
         total_realized = total_realized_pnl()
+        role_profile = SESSION_USER_CTX.get("role_profile", {})
 
         print("\n--- SESSION CONTEXT ---")
         print(f"USER ID: {SESSION_USER_CTX.get('user_id')}")
@@ -1265,6 +1500,11 @@ try:
         print(f"SESSION ID: {SESSION_USER_CTX.get('session_id')}")
         print(f"COMPUTER NAME: {SESSION_USER_CTX.get('computer_name')}")
         print(f"LOGIN CHANNEL: {SESSION_USER_CTX.get('login_channel')}")
+        print(f"CAN ARM BROKER: {'YES' if role_profile.get('can_arm_broker') else 'NO'}")
+        print(f"CAN LIVE MODE: {'YES' if role_profile.get('can_use_live_broker_mode') else 'NO'}")
+        print(f"CAN PAPER EXECUTE: {'YES' if role_profile.get('can_execute_paper_trading') else 'NO'}")
+        print(f"CAN LIVE EXECUTE: {'YES' if role_profile.get('can_execute_live_trading') else 'NO'}")
+        print(f"ALLOWED ENGINE MODES: {', '.join(role_profile.get('allowed_engine_modes', [])) or 'NONE'}")
 
         print_oanda_broker_status()
         print_coinbase_broker_status()
@@ -1326,77 +1566,80 @@ try:
         live_crypto_funded_this_cycle = 0
 
         if mtm_engine.count_open_positions() < MAX_PAPER_OPEN_POSITIONS:
-            for asset_class, symbol, sig, prob in select_four_candidates():
-                if not concurrency_controller.can_add_position(
-                    mtm_engine.count_open_positions()
-                ):
-                    break
+            if not role_profile.get("can_execute_paper_trading", False):
+                print("[RBAC] New position generation blocked for current role.")
+            else:
+                for asset_class, symbol, sig, prob in select_four_candidates():
+                    if not concurrency_controller.can_add_position(
+                        mtm_engine.count_open_positions()
+                    ):
+                        break
 
-                if mtm_engine.count_open_positions() >= MAX_PAPER_OPEN_POSITIONS:
-                    break
+                    if mtm_engine.count_open_positions() >= MAX_PAPER_OPEN_POSITIONS:
+                        break
 
-                if asset_class == "CRYPTO":
-                    safe_load_runtime_asset(symbol)
+                    if asset_class == "CRYPTO":
+                        safe_load_runtime_asset(symbol)
 
-                allow_broker_test = False
+                    allow_broker_test = False
 
-                if (
-                    asset_class == "FX"
-                    and SELECTED_BROKER == "OANDA"
-                    and live_fx_funded_this_cycle < 1
-                ):
-                    allow_broker_test = True
+                    if (
+                        asset_class == "FX"
+                        and SELECTED_BROKER == "OANDA"
+                        and live_fx_funded_this_cycle < 1
+                    ):
+                        allow_broker_test = True
 
-                if (
-                    asset_class == "CRYPTO"
-                    and SELECTED_BROKER == "COINBASE"
-                    and live_crypto_funded_this_cycle < 1
-                ):
-                    allow_broker_test = True
+                    if (
+                        asset_class == "CRYPTO"
+                        and SELECTED_BROKER == "COINBASE"
+                        and live_crypto_funded_this_cycle < 1
+                    ):
+                        allow_broker_test = True
 
-                position = mtm_engine.register_position(
-                    asset_class,
-                    symbol,
-                    sig,
-                    prob,
-                    allow_live_funding=allow_broker_test,
-                )
+                    position = mtm_engine.register_position(
+                        asset_class,
+                        symbol,
+                        sig,
+                        prob,
+                        allow_live_funding=allow_broker_test,
+                    )
 
-                if position.get("broker_tested"):
-                    if asset_class == "FX" and SELECTED_BROKER == "OANDA":
-                        live_fx_funded_this_cycle += 1
-                        ok, broker_msg = attempt_oanda_fx_execution(symbol)
+                    if position.get("broker_tested"):
+                        if asset_class == "FX" and SELECTED_BROKER == "OANDA":
+                            live_fx_funded_this_cycle += 1
+                            ok, broker_msg = attempt_oanda_fx_execution(symbol)
 
-                    elif asset_class == "CRYPTO" and SELECTED_BROKER == "COINBASE":
-                        live_crypto_funded_this_cycle += 1
-                        ok, broker_msg = attempt_coinbase_crypto_execution(symbol)
+                        elif asset_class == "CRYPTO" and SELECTED_BROKER == "COINBASE":
+                            live_crypto_funded_this_cycle += 1
+                            ok, broker_msg = attempt_coinbase_crypto_execution(symbol)
+
+                        else:
+                            ok, broker_msg = False, "BROKER_ASSET_MISMATCH"
+
+                        if ok:
+                            position["broker_order_ok"] = True
+                            position["broker_note"] = broker_msg
+                            last_trade = f"{symbol} BROKER_EXECUTED {broker_msg}"
+                            print(
+                                f"[{asset_class} BROKER EXECUTED] {symbol} opened | "
+                                f"{broker_msg}"
+                            )
+                        else:
+                            capital_governor.release_trade(position["position_id"])
+                            position["broker_tested"] = False
+                            position["live_funded"] = False
+                            position["broker_order_ok"] = False
+                            position["broker_note"] = broker_msg
+                            last_trade = f"{symbol} PAPER_OPENED BROKER_BLOCKED {broker_msg}"
+                            print(
+                                f"[{asset_class} PAPER OPENED] {symbol} opened | "
+                                f"BROKER_BLOCKED | {broker_msg}"
+                            )
 
                     else:
-                        ok, broker_msg = False, "BROKER_ASSET_MISMATCH"
-
-                    if ok:
-                        position["broker_order_ok"] = True
-                        position["broker_note"] = broker_msg
-                        last_trade = f"{symbol} BROKER_EXECUTED {broker_msg}"
-                        print(
-                            f"[{asset_class} BROKER EXECUTED] {symbol} opened | "
-                            f"{broker_msg}"
-                        )
-                    else:
-                        capital_governor.release_trade(position["position_id"])
-                        position["broker_tested"] = False
-                        position["live_funded"] = False
-                        position["broker_order_ok"] = False
-                        position["broker_note"] = broker_msg
-                        last_trade = f"{symbol} PAPER_OPENED BROKER_BLOCKED {broker_msg}"
-                        print(
-                            f"[{asset_class} PAPER OPENED] {symbol} opened | "
-                            f"BROKER_BLOCKED | {broker_msg}"
-                        )
-
-                else:
-                    last_trade = f"{symbol} PAPER_OPENED"
-                    print(f"[{asset_class} PAPER OPENED] {symbol}")
+                        last_trade = f"{symbol} PAPER_OPENED"
+                        print(f"[{asset_class} PAPER OPENED] {symbol}")
         else:
             print("[SIGNAL GENERATION PAUSED] paper open-position cap reached")
 
