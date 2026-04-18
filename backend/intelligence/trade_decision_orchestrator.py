@@ -3,8 +3,11 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from backend.core.session_state import get_session_lock_state, is_session_locked
+<<<<<<< HEAD
 from backend.governance.css_unified_trade_gate import CSSUnifiedTradeGate
 
+=======
+>>>>>>> cb7396a (CSS: Defensive Mode + Forced Exposure Reduction (stable baseline))
 from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
 from backend.intelligence.market_regime_detector import MarketRegimeDetector
 from backend.intelligence.opportunity_momentum_window_engine import (
@@ -17,6 +20,7 @@ from backend.intelligence.pressure_acceleration_engine import (
 from backend.intelligence.probability_prediction_engine import ProbabilityPredictionEngine
 from backend.intelligence.signal_confluence_engine import SignalConfluenceEngine
 
+<<<<<<< HEAD
 
 class TradeDecisionOrchestrator:
     """
@@ -28,6 +32,12 @@ class TradeDecisionOrchestrator:
     - Allocation Policy Enhancements
     """
 
+=======
+from backend.governance.css_unified_trade_gate import CSSUnifiedTradeGate
+
+
+class TradeDecisionOrchestrator:
+>>>>>>> cb7396a (CSS: Defensive Mode + Forced Exposure Reduction (stable baseline))
     def __init__(self) -> None:
         self.regime_detector = MarketRegimeDetector()
         self.ai_scorer = AIOpportunityScorer()
@@ -37,7 +47,10 @@ class TradeDecisionOrchestrator:
         self.momentum_engine = OpportunityMomentumWindowEngine()
         self.probability_engine = ProbabilityPredictionEngine()
 
+<<<<<<< HEAD
         # SINGLE SOURCE OF TRUTH (no duplication)
+=======
+>>>>>>> cb7396a (CSS: Defensive Mode + Forced Exposure Reduction (stable baseline))
         self.trade_gate = CSSUnifiedTradeGate()
 
         self.mean_reversion_threshold = 0.20
@@ -146,6 +159,7 @@ class TradeDecisionOrchestrator:
 
         adjusted_score = self._clamp01(decision_score * asset_weight)
 
+<<<<<<< HEAD
         threshold_ok = decision_score >= asset_threshold
 
         execute_trade = (
@@ -153,6 +167,12 @@ class TradeDecisionOrchestrator:
             and win_probability >= self.min_probability_threshold
             and threshold_ok
         )
+=======
+        execute_trade = self._should_execute_trade(regime, decision_score)
+
+        if not approve_trade or win_probability < self.min_probability_threshold:
+            execute_trade = False
+>>>>>>> cb7396a (CSS: Defensive Mode + Forced Exposure Reduction (stable baseline))
 
         # -------------------------------
         # GOVERNANCE GATE
@@ -176,7 +196,11 @@ class TradeDecisionOrchestrator:
             execute_trade = False
 
         # -------------------------------
+<<<<<<< HEAD
         # DEFENSIVE MODE (FINAL AUTHORITY)
+=======
+        # DEFENSIVE MODE (FINAL OVERRIDE)
+>>>>>>> cb7396a (CSS: Defensive Mode + Forced Exposure Reduction (stable baseline))
         # -------------------------------
         session_locked = is_session_locked()
         lock_state = get_session_lock_state()
@@ -203,6 +227,7 @@ class TradeDecisionOrchestrator:
             "session_lock_reason": str(lock_state.get("reason", "")),
             "session_lock_time": lock_state.get("lock_time"),
             "defensive_mode_active": session_locked,
+<<<<<<< HEAD
         }
 
     def _score_ai(self, row: Dict[str, Any]) -> float:
@@ -230,6 +255,57 @@ class TradeDecisionOrchestrator:
         return max(0.0, min(1.0, float(v)))
 
     def _reject(self, asset, reason):
+=======
+            "execution_block_reason": "SESSION_LOCKED_DEFENSIVE_MODE" if session_locked else "",
+        }
+
+    # ---------- helpers unchanged ----------
+
+    def _score_ai(self, row: Dict[str, Any]) -> float:
+        return float(self.ai_scorer.score_opportunity(row)) if hasattr(self.ai_scorer, "score_opportunity") else 0.0
+
+    def _should_execute_trade(self, regime: str, score: float) -> bool:
+        if regime == "MEAN_REVERSION":
+            return score >= self.mean_reversion_threshold
+        if regime == "TREND":
+            return score >= self.trend_threshold
+        if regime == "BREAKOUT":
+            return score >= self.breakout_threshold
+        return score >= 0.26
+
+    def _classify_asset(self, asset: str) -> str:
+        symbol = str(asset or "").upper()
+        if "-USD" in symbol:
+            return "CRYPTO"
+        if "_" in symbol:
+            return "FX"
+        if symbol.startswith(("ES", "NQ", "CL", "GC")):
+            return "FUTURES"
+        return "OPTIONS"
+
+    def _estimate_momentum(self, candles: List[Dict[str, Any]]) -> float:
+        closes = [float(c.get("close", 0.0)) for c in candles[-5:]]
+        if len(closes) < 2:
+            return 0.0
+        return self._clamp01(abs((closes[-1] - closes[0]) / (closes[0] + 1e-9)) * 50)
+
+    def _estimate_elasticity(self, candles: List[Dict[str, Any]]) -> float:
+        return 0.5
+
+    def _estimate_liquidity_sweep(self, row: Dict[str, Any]) -> float:
+        return 0.5
+
+    def _tier_history_score(self, regime: str, ai_score: float) -> float:
+        return 0.6
+
+    def _infer_side(self, accel: float, momentum: float, regime: str) -> str:
+        return "CALL" if accel >= 0 else "PUT"
+
+    def _clamp01(self, v: float) -> float:
+        return max(0.0, min(1.0, float(v)))
+
+    def _reject(self, asset: str, reason: str) -> Dict[str, Any]:
+>>>>>>> cb7396a (CSS: Defensive Mode + Forced Exposure Reduction (stable baseline))
         return {
             "asset": asset,
             "execute_trade": False,
