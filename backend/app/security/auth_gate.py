@@ -6,12 +6,12 @@ Design goals:
 - Work with user_registry even if its function names change
 - Enforce "password length at most 6"
 - Allow deterministic initial password: 123456
+- Preserve zero-padded 5-digit user IDs (e.g. 00000 stays 00000)
 - Return a user_ctx dict on success
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from getpass import getpass
 import importlib
 from typing import Any, Dict, Optional
@@ -19,6 +19,7 @@ from typing import Any, Dict, Optional
 
 INITIAL_PASSWORD = "123456"
 MAX_PASSWORD_LEN = 6
+USER_ID_LEN = 5
 
 
 def _safe_import_user_registry():
@@ -32,6 +33,22 @@ def _safe_import_user_registry():
         return None
 
 
+def _normalize_user_id(raw: Any) -> str:
+    """
+    Preserve user IDs as zero-padded 5-digit strings.
+    Accepts numeric-like input only.
+    """
+    user_id = str(raw).strip()
+
+    if not user_id.isdigit():
+        raise RuntimeError("INVALID_USER_ID")
+
+    if len(user_id) > USER_ID_LEN:
+        raise RuntimeError("INVALID_USER_ID")
+
+    return user_id.zfill(USER_ID_LEN)
+
+
 def _coerce_user_record(raw: Any) -> Optional[Dict[str, Any]]:
     """
     Normalize whatever user_registry returns into a dict-like record.
@@ -41,21 +58,19 @@ def _coerce_user_record(raw: Any) -> Optional[Dict[str, Any]]:
         return None
     if isinstance(raw, dict):
         return raw
-    # dataclass / object fallback
     d = getattr(raw, "__dict__", None)
     if isinstance(d, dict):
         return d
     return None
 
 
-def _get_user_any(ur_mod, user_id: int) -> Optional[Dict[str, Any]]:
+def _get_user_any(ur_mod, user_id: str) -> Optional[Dict[str, Any]]:
     """
     Try multiple APIs to fetch a user record.
     """
     if ur_mod is None:
         return None
 
-    # 1) get_user(user_id)
     fn = getattr(ur_mod, "get_user", None)
     if callable(fn):
         try:
@@ -63,7 +78,6 @@ def _get_user_any(ur_mod, user_id: int) -> Optional[Dict[str, Any]]:
         except Exception:
             return None
 
-    # 2) find_user(user_id)
     fn = getattr(ur_mod, "find_user", None)
     if callable(fn):
         try:
@@ -71,25 +85,25 @@ def _get_user_any(ur_mod, user_id: int) -> Optional[Dict[str, Any]]:
         except Exception:
             return None
 
-    # 3) load_users() -> dict or list
     fn = getattr(ur_mod, "load_users", None)
     if callable(fn):
         try:
             users = fn()
             if isinstance(users, dict):
-                # could be keyed by str/int
-                return _coerce_user_record(users.get(user_id) or users.get(str(user_id)))
+                return _coerce_user_record(
+                    users.get(user_id)
+                    or users.get(str(user_id))
+                    or users.get(int(user_id))
+                )
             if isinstance(users, list):
                 for u in users:
                     ud = _coerce_user_record(u)
-                    if ud and str(ud.get("user_id")) == str(user_id):
+                    if ud and _normalize_user_id(ud.get("user_id")) == user_id:
                         return ud
         except Exception:
             return None
 
     return None
-
-
 def _verify_password_any(ur_mod, user: Dict[str, Any], password: str) -> bool:
     """
     Try multiple APIs to verify password.
@@ -98,16 +112,14 @@ def _verify_password_any(ur_mod, user: Dict[str, Any], password: str) -> bool:
     if ur_mod is None:
         return False
 
-    # 1) authenticate(user_id, password) -> bool
     fn = getattr(ur_mod, "authenticate", None)
     if callable(fn):
         try:
-            out = fn(int(user.get("user_id")), password)
+            out = fn(_normalize_user_id(user.get("user_id")), password)
             return bool(out is True)
         except Exception:
             return False
 
-    # 2) verify_password(user, password) -> bool
     fn = getattr(ur_mod, "verify_password", None)
     if callable(fn):
         try:
@@ -116,8 +128,6 @@ def _verify_password_any(ur_mod, user: Dict[str, Any], password: str) -> bool:
         except Exception:
             return False
 
-    # 3) ultra-fallback (only if registry stores plaintext fields)
-    #    We keep this LAST and conservative.
     stored = user.get("password") or user.get("temp_password")
     if isinstance(stored, str) and stored == password:
         return True
@@ -125,7 +135,7 @@ def _verify_password_any(ur_mod, user: Dict[str, Any], password: str) -> bool:
     return False
 
 
-def _change_password_any(ur_mod, user_id: int, new_pw: str) -> bool:
+def _change_password_any(ur_mod, user_id: str, new_pw: str) -> bool:
     """
     Best-effort password change, branch-scoped per registry rules.
     """
@@ -183,10 +193,7 @@ def await_login_ready_state() -> Dict[str, Any]:
         raise RuntimeError("AUTH_REGISTRY_IMPORT_FAILED")
 
     raw = input("REA LOGIN | user_id (numeric): ").strip()
-    try:
-        user_id = int(raw)
-    except Exception:
-        raise RuntimeError("INVALID_USER_ID")
+    user_id = _normalize_user_id(raw)
 
     user = _get_user_any(ur, user_id)
     if not user:
@@ -194,20 +201,16 @@ def await_login_ready_state() -> Dict[str, Any]:
 
     pw = getpass("REA LOGIN | password: ").strip()
 
-    # Enforce <= 6
     if len(pw) > MAX_PASSWORD_LEN:
         raise RuntimeError("AUTH_FAILED")
 
-    # Deterministic initial password (first access)
     if pw == INITIAL_PASSWORD:
-        # Require change on first use (always)
         print("FIRST_LOGIN_PASSWORD_CHANGE_REQUIRED")
         new_pw = _prompt_new_password()
         changed = _change_password_any(ur, user_id, new_pw)
         if changed is not True:
             raise RuntimeError("PASSWORD_CHANGE_FAILED")
 
-        # reload user (in case registry updates flags/fields)
         user = _get_user_any(ur, user_id) or user
 
     else:
@@ -215,7 +218,6 @@ def await_login_ready_state() -> Dict[str, Any]:
         if ok is not True:
             raise RuntimeError("AUTH_FAILED")
 
-        # If registry marks first login required, enforce change if field exists
         must_change = user.get("must_change_password") or user.get("first_login_change_required")
         if must_change:
             print("FIRST_LOGIN_PASSWORD_CHANGE_REQUIRED")
@@ -224,10 +226,12 @@ def await_login_ready_state() -> Dict[str, Any]:
             if changed is not True:
                 raise RuntimeError("PASSWORD_CHANGE_FAILED")
             user = _get_user_any(ur, user_id) or user
+            user = _get_user_any(ur, user_id) or user
 
-    # Build user context (keys your engine expects)
+    normalized_user_id = _normalize_user_id(user.get("user_id", user_id))
+
     return {
-        "user_id": int(user.get("user_id", user_id)),
+        "user_id": normalized_user_id,
         "display_name": str(user.get("display_name", "Unknown")),
         "role": str(user.get("role", "operator")),
         "unit_code": str(user.get("unit_code", "CORE")),
