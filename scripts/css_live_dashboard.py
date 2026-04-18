@@ -65,6 +65,9 @@ FX_LIVE_UNITS = 1
 COINBASE_TEST_ORDER_USD = float(os.getenv("COINBASE_TEST_ORDER_USD", "1.00") or 1.00)
 COINBASE_MAX_LIVE_ORDER_USD = float(os.getenv("COINBASE_MAX_LIVE_ORDER_USD", "1.00") or 1.00)
 
+SESSION_IDLE_TIMEOUT_SECONDS = int(os.getenv("CSS_SESSION_IDLE_TIMEOUT_SECONDS", "3600") or 3600)
+SESSION_MAX_SECONDS = int(os.getenv("CSS_SESSION_MAX_SECONDS", "28800") or 28800)
+
 MAX_PAPER_OPEN_POSITIONS = 40
 MAX_OPEN_PER_CYCLE = 4
 
@@ -100,7 +103,10 @@ ASSET_DRIFT_PROFILE = {
 }
 
 audit_ledger = AuditLedger()
-session_manager = SessionManager()
+session_manager = SessionManager(
+    idle_timeout_seconds=SESSION_IDLE_TIMEOUT_SECONDS,
+    max_session_seconds=SESSION_MAX_SECONDS,
+)
 access_control = AccessControl()
 SESSION_CLOSED = False
 
@@ -114,6 +120,13 @@ def runtime_origin_context() -> dict[str, Any]:
         "cwd": str(PROJECT_ROOT),
         "script_name": "scripts/css_live_dashboard.py",
         "login_channel": "CLI",
+    }
+
+
+def session_policy_context() -> dict[str, Any]:
+    return {
+        "idle_timeout_seconds": SESSION_IDLE_TIMEOUT_SECONDS,
+        "max_session_seconds": SESSION_MAX_SECONDS,
     }
 
 
@@ -215,6 +228,8 @@ def authenticate_startup_user() -> dict[str, Any]:
         session = session_manager.create_session(
             username=str(user_ctx.get("user_id")),
             role=str(user_ctx.get("role")),
+            idle_timeout_seconds=SESSION_IDLE_TIMEOUT_SECONDS,
+            max_session_seconds=SESSION_MAX_SECONDS,
         )
         origin = runtime_origin_context()
 
@@ -225,6 +240,7 @@ def authenticate_startup_user() -> dict[str, Any]:
         user_ctx["process_id"] = origin["process_id"]
         user_ctx["login_channel"] = origin["login_channel"]
         user_ctx["script_name"] = origin["script_name"]
+        user_ctx["session_status"] = session_manager.get_session_status(session.session_id)
 
         audit_ledger.record(
             "login_success",
@@ -236,6 +252,7 @@ def authenticate_startup_user() -> dict[str, Any]:
                 "unit_code": user_ctx.get("unit_code"),
                 "home_branch": user_ctx.get("home_branch"),
                 **origin,
+                **session_policy_context(),
             },
         )
 
@@ -277,6 +294,55 @@ def authenticate_startup_user() -> dict[str, Any]:
         )
         print(f"[AUTH FAILED] {e}")
         raise SystemExit(1)
+
+
+def sync_session_status() -> dict[str, Any]:
+    session_id = str(SESSION_USER_CTX.get("session_id", ""))
+    status = session_manager.get_session_status(session_id)
+    SESSION_USER_CTX["session_status"] = status
+    return status
+
+
+def touch_active_session() -> dict[str, Any]:
+    session_id = str(SESSION_USER_CTX.get("session_id", ""))
+    session_manager.touch_session(session_id)
+    return sync_session_status()
+
+
+def enforce_active_session(cycle: int, last_trade: str) -> dict[str, Any]:
+    status = sync_session_status()
+
+    if not status.get("active", False):
+        reason = str(status.get("end_reason") or "session_expired")
+        audit_ledger.record(
+            "session_expired",
+            str(SESSION_USER_CTX.get("user_id")),
+            {
+                "session_id": SESSION_USER_CTX.get("session_id"),
+                "display_name": SESSION_USER_CTX.get("display_name"),
+                "role": SESSION_USER_CTX.get("role"),
+                "reason": reason,
+                "cycle": cycle,
+                "last_trade": last_trade,
+                "computer_name": SESSION_USER_CTX.get("computer_name"),
+                "host_name": SESSION_USER_CTX.get("host_name"),
+                "process_id": SESSION_USER_CTX.get("process_id"),
+                "script_name": SESSION_USER_CTX.get("script_name"),
+            },
+        )
+        print(f"[SESSION EXPIRED] reason={reason}. Fresh login required.")
+        close_active_session(
+            reason,
+            extra={
+                "cycle": cycle,
+                "last_trade": last_trade,
+                "open_positions": mtm_engine.count_open_positions() if "mtm_engine" in globals() else 0,
+                "realized_pnl": total_realized_pnl() if "total_realized_pnl" in globals() else 0.0,
+            },
+        )
+        raise SystemExit(1)
+
+    return status
 
 
 def select_broker_execution_config() -> tuple[bool, str, str]:
@@ -379,7 +445,6 @@ def select_broker_execution_config() -> tuple[bool, str, str]:
         print("\n=== COINBASE MODE ===")
         print("1. PAPER / AUTH TEST / SIMULATED ORDER PATH")
         print("2. LIVE / REAL COINBASE ACCOUNT CONNECTION")
-
         mode_choice = input("Enter Coinbase mode (1-2) [default=1]: ").strip() or "1"
         broker_mode = "live" if mode_choice == "2" else "paper"
 
@@ -442,6 +507,8 @@ def select_broker_execution_config() -> tuple[bool, str, str]:
         },
     )
     return True, selected, "paper"
+
+
 def select_engine_mode() -> str:
     role = str(SESSION_USER_CTX.get("role", "VIEWER")).strip().upper()
     role_profile = SESSION_USER_CTX.get("role_profile", {})
@@ -531,6 +598,7 @@ def record_startup_configuration(
             "host_name": user_ctx.get("host_name"),
             "process_id": user_ctx.get("process_id"),
             "script_name": user_ctx.get("script_name"),
+            **session_policy_context(),
         },
     )
 
@@ -563,7 +631,7 @@ def close_active_session(reason: str, extra: Optional[dict[str, Any]] = None) ->
 
     session_id = SESSION_USER_CTX.get("session_id")
     if session_id:
-        session_manager.destroy_session(session_id)
+        session_manager.destroy_session(str(session_id), reason=reason)
 
     SESSION_CLOSED = True
 
@@ -1448,6 +1516,9 @@ def select_four_candidates() -> list[tuple[str, str, float, float]]:
 try:
     while True:
         cycle += 1
+        current_status = enforce_active_session(cycle, last_trade)
+        current_status = touch_active_session()
+
         print(f"\n=== Cycle {cycle} | {datetime.now()} ===")
 
         exit_profile = MODE_EXIT_PROFILE.get(
@@ -1490,6 +1561,11 @@ try:
 
         total_realized = total_realized_pnl()
         role_profile = SESSION_USER_CTX.get("role_profile", {})
+        now_epoch = time.time()
+        session_age_seconds = max(0, int(now_epoch - float(current_status.get("created", now_epoch))))
+        idle_age_seconds = max(0, int(now_epoch - float(current_status.get("last_activity", now_epoch))))
+        idle_remaining = max(0, int(current_status.get("idle_timeout_seconds", SESSION_IDLE_TIMEOUT_SECONDS)) - idle_age_seconds)
+        max_remaining = max(0, int(current_status.get("max_session_seconds", SESSION_MAX_SECONDS)) - session_age_seconds)
 
         print("\n--- SESSION CONTEXT ---")
         print(f"USER ID: {SESSION_USER_CTX.get('user_id')}")
@@ -1500,6 +1576,12 @@ try:
         print(f"SESSION ID: {SESSION_USER_CTX.get('session_id')}")
         print(f"COMPUTER NAME: {SESSION_USER_CTX.get('computer_name')}")
         print(f"LOGIN CHANNEL: {SESSION_USER_CTX.get('login_channel')}")
+        print(f"SESSION ACTIVE: {'YES' if current_status.get('active') else 'NO'}")
+        print(f"SESSION AGE SEC: {session_age_seconds}")
+        print(f"IDLE TIMEOUT SEC: {current_status.get('idle_timeout_seconds', SESSION_IDLE_TIMEOUT_SECONDS)}")
+        print(f"MAX SESSION SEC: {current_status.get('max_session_seconds', SESSION_MAX_SECONDS)}")
+        print(f"IDLE REMAINING SEC: {idle_remaining}")
+        print(f"MAX REMAINING SEC: {max_remaining}")
         print(f"CAN ARM BROKER: {'YES' if role_profile.get('can_arm_broker') else 'NO'}")
         print(f"CAN LIVE MODE: {'YES' if role_profile.get('can_use_live_broker_mode') else 'NO'}")
         print(f"CAN PAPER EXECUTE: {'YES' if role_profile.get('can_execute_paper_trading') else 'NO'}")
@@ -1666,6 +1748,9 @@ except KeyboardInterrupt:
             "realized_pnl": total_realized_pnl(),
         },
     )
+
+except SystemExit:
+    raise
 
 except Exception as e:
     print(f"[FATAL ERROR] {str(e)[:200]}")
