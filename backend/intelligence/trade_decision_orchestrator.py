@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from backend.core.session_state import get_session_lock_state, is_session_locked
 from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
 from backend.intelligence.market_regime_detector import MarketRegimeDetector
 from backend.intelligence.opportunity_momentum_window_engine import (
@@ -114,6 +115,12 @@ class TradeDecisionOrchestrator:
         if win_probability < self.min_probability_threshold:
             execute_trade = False
 
+        session_locked = is_session_locked()
+        lock_state = get_session_lock_state()
+
+        if session_locked:
+            execute_trade = False
+
         return {
             "asset": asset,
             "symbol": asset,
@@ -132,6 +139,11 @@ class TradeDecisionOrchestrator:
             "probability_approved": approve_trade,
             "high_probability_setup": win_probability >= self.high_probability_threshold,
             "trade_side": self._infer_side(accel, momentum, regime),
+            "session_locked": session_locked,
+            "session_lock_reason": str(lock_state.get("reason", "")),
+            "session_lock_time": lock_state.get("lock_time"),
+            "defensive_mode_active": session_locked,
+            "execution_block_reason": "SESSION_LOCKED_DEFENSIVE_MODE" if session_locked else "",
         }
 
     def _score_ai(self, row: Dict[str, Any]) -> float:
@@ -237,4 +249,9 @@ class TradeDecisionOrchestrator:
             "probability_approved": False,
             "high_probability_setup": False,
             "trade_side": "CALL",
+            "session_locked": False,
+            "session_lock_reason": "",
+            "session_lock_time": None,
+            "defensive_mode_active": False,
+            "execution_block_reason": "",
         }
