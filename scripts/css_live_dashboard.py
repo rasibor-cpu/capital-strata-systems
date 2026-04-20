@@ -712,7 +712,8 @@ class CapitalDeploymentGovernor:
 
     def available_capital(self) -> float:
         allocated = sum(self.active_test_allocations.values())
-        return round(self.simulated_capital_pool - allocated, 4)
+        base_capital = float(getattr(pnl_observer, "current_balance", self.simulated_capital_pool))
+        return round(base_capital - allocated, 4)
 
     def can_fund_trade(self, position_id: str) -> bool:
         if self.paper_mode:
@@ -1586,6 +1587,25 @@ def select_four_candidates() -> list[tuple[str, str, float, float]]:
     ]
 
 
+def pnl_divergence_warning(
+    mtm_realized: float,
+    mtm_unrealized: float,
+    observer_realized: float,
+    observer_unrealized: float,
+    threshold: float = 0.001,
+) -> str | None:
+    realized_gap = abs(float(mtm_realized) - float(observer_realized))
+    unrealized_gap = abs(float(mtm_unrealized) - float(observer_unrealized))
+
+    if realized_gap > threshold or unrealized_gap > threshold:
+        return (
+            f"[PNL DIVERGENCE WARNING] "
+            f"realized_gap={realized_gap:.6f} "
+            f"unrealized_gap={unrealized_gap:.6f}"
+        )
+    return None
+
+
 try:
     while True:
         cycle += 1
@@ -1633,12 +1653,26 @@ try:
 
         display_by_asset = mtm_engine.floating_by_asset(funded_only=False)
         broker_test_positions = mtm_engine.count_open_broker_test_positions()
-        total_unrealized = round(sum(display_by_asset.values()), 4)
+        mtm_unrealized = round(sum(display_by_asset.values()), 4)
         open_positions = mtm_engine.count_open_positions()
+
+        mtm_realized = total_realized_pnl()
 
         observer_unrealized = pnl_observer.compute_unrealized_pnl()
         observer_realized = pnl_observer.realized_pnl
         observer_equity = pnl_observer.equity()
+        observer_balance = pnl_observer.current_balance
+
+        total_realized = observer_realized
+        total_unrealized = observer_unrealized
+        total_equity = observer_equity - pnl_observer.starting_balance
+
+        divergence_msg = pnl_divergence_warning(
+            mtm_realized=mtm_realized,
+            mtm_unrealized=mtm_unrealized,
+            observer_realized=observer_realized,
+            observer_unrealized=observer_unrealized,
+        )
 
         top_cluster = cluster_amplifier.top_cluster()
         cluster_pct = (
@@ -1653,7 +1687,6 @@ try:
             total_unrealized,
         )
 
-        total_realized = total_realized_pnl()
         role_profile = SESSION_USER_CTX.get("role_profile", {})
         now_epoch = time.time()
         session_age_seconds = max(0, int(now_epoch - float(current_status.get("created", now_epoch))))
@@ -1697,13 +1730,18 @@ try:
         print("\n--- LIVE EXECUTION SUMMARY ---")
         print(f"REALIZED PNL: {total_realized:+.4f}")
         print(f"UNREALIZED PNL: {total_unrealized:+.4f}")
-        print(f"TOTAL EQUITY PNL: {total_realized + total_unrealized:+.4f}")
+        print(f"TOTAL EQUITY PNL: {total_equity:+.4f}")
+        print(f"BALANCE: {observer_balance:+.4f}")
 
-        print("\n--- PHASE 1 PNL OBSERVER ---")
+        print("\n--- PNL RECONCILIATION ---")
         print(f"OBSERVER REALIZED PNL: {observer_realized:+.4f}")
         print(f"OBSERVER UNREALIZED PNL: {observer_unrealized:+.4f}")
         print(f"OBSERVER EQUITY: {observer_equity:+.4f}")
-        print(f"OBSERVER BALANCE: {pnl_observer.current_balance:+.4f}")
+        print(f"OBSERVER BALANCE: {observer_balance:+.4f}")
+        print(f"MTM REALIZED PNL: {mtm_realized:+.4f}")
+        print(f"MTM UNREALIZED PNL: {mtm_unrealized:+.4f}")
+        if divergence_msg:
+            print(divergence_msg)
 
         print(
             f"CRYPTO REALIZED: {sum(crypto_pnl.values()):+.4f} | "
