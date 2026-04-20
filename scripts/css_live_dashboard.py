@@ -21,6 +21,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 load_dotenv(PROJECT_ROOT / ".env")
 
+from backend.app.pnl.pnl_engine import Portfolio, Position
+
 from backend.core.session_state import get_session_lock_state, is_session_locked, lock_session
 from backend.data.coinbase_historical_downloader import load_runtime_asset
 from backend.app.brokers.oanda_adapter import OandaAdapter
@@ -747,6 +749,12 @@ class CapitalDeploymentGovernor:
 
 
 capital_governor = CapitalDeploymentGovernor()
+
+# Phase 1 PnL observer only
+pnl_observer = Portfolio(
+    starting_balance=capital_governor.simulated_capital_pool,
+    current_balance=capital_governor.simulated_capital_pool,
+)
 
 
 def map_oanda_env() -> None:
@@ -1607,12 +1615,19 @@ try:
             pos["floating"] = round(pos["floating"] + drift, 4)
             pos["age_cycles"] += 1
 
+            observer_symbol = f"{pos['position_id']}::{pos['symbol']}"
+            observer_price = 100.0 + float(pos["floating"])
+            pnl_observer.update_market_price(observer_symbol, observer_price)
+
             if pos["floating"] <= exit_profile["stop_loss"]:
                 book_position_exit(pos, "STOP")
+                pnl_observer.close_position(observer_symbol, observer_price)
             elif pos["floating"] >= exit_profile["take_profit"]:
                 book_position_exit(pos, "TAKE_PROFIT")
+                pnl_observer.close_position(observer_symbol, observer_price)
             elif pos["age_cycles"] >= exit_profile["max_age"]:
                 book_position_exit(pos, "TIME_EXIT")
+                pnl_observer.close_position(observer_symbol, observer_price)
 
         defensive_reductions = apply_defensive_exposure_reduction()
 
@@ -1620,6 +1635,10 @@ try:
         broker_test_positions = mtm_engine.count_open_broker_test_positions()
         total_unrealized = round(sum(display_by_asset.values()), 4)
         open_positions = mtm_engine.count_open_positions()
+
+        observer_unrealized = pnl_observer.compute_unrealized_pnl()
+        observer_realized = pnl_observer.realized_pnl
+        observer_equity = pnl_observer.equity()
 
         top_cluster = cluster_amplifier.top_cluster()
         cluster_pct = (
@@ -1679,6 +1698,12 @@ try:
         print(f"REALIZED PNL: {total_realized:+.4f}")
         print(f"UNREALIZED PNL: {total_unrealized:+.4f}")
         print(f"TOTAL EQUITY PNL: {total_realized + total_unrealized:+.4f}")
+
+        print("\n--- PHASE 1 PNL OBSERVER ---")
+        print(f"OBSERVER REALIZED PNL: {observer_realized:+.4f}")
+        print(f"OBSERVER UNREALIZED PNL: {observer_unrealized:+.4f}")
+        print(f"OBSERVER EQUITY: {observer_equity:+.4f}")
+        print(f"OBSERVER BALANCE: {pnl_observer.current_balance:+.4f}")
 
         print(
             f"CRYPTO REALIZED: {sum(crypto_pnl.values()):+.4f} | "
@@ -1774,6 +1799,16 @@ try:
                         prob,
                         allow_live_funding=allow_broker_test,
                     )
+
+                    observer_position = Position(
+                        symbol=f"{position['position_id']}::{symbol}",
+                        asset_class=asset_class,
+                        side="LONG",
+                        quantity=1.0,
+                        entry_price=100.0,
+                        current_price=100.0,
+                    )
+                    pnl_observer.add_position(observer_position)
 
                     if position.get("broker_tested"):
                         if asset_class == "FX" and SELECTED_BROKER == "OANDA":
