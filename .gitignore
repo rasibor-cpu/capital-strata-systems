@@ -25,7 +25,7 @@ data/
 test_*.py
 run_live_*.py
 run_fx_pairs_replay_*_fxrulesless_*.py
-
+artifacts/
 # =============================
 # Live adapters (separate branch only)
 # =============================
