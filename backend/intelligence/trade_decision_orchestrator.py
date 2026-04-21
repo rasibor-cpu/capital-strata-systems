@@ -29,9 +29,16 @@ class TradeDecisionOrchestrator:
         self.mean_reversion_threshold = 0.20
         self.trend_threshold = 0.24
         self.breakout_threshold = 0.28
+        self.neutral_threshold = 0.23
 
         self.min_probability_threshold = 0.28
         self.high_probability_threshold = 0.60
+
+        # New profitability / quality controls
+        self.min_quality_threshold = 0.26
+        self.strong_quality_threshold = 0.36
+        self.min_confluence_floor = 0.08
+        self.min_pressure_floor = 0.12
 
         self.weights = {
             "ai_score": 0.25,
@@ -41,6 +48,44 @@ class TradeDecisionOrchestrator:
             "regime_confidence": 0.10,
             "probability_score": 0.15,
         }
+
+    # ---------------------------------------------------------
+    # Regime scaling is applied to sizing only
+    # ---------------------------------------------------------
+    def regime_scale(self, regime: str) -> float:
+        regime = str(regime or "").upper()
+
+        if regime in {"TREND", "BREAKOUT", "STRONG"}:
+            return 1.0
+        if regime in {"MEAN_REVERSION", "NEUTRAL", "RANGE"}:
+            return 0.75
+        return 0.0
+
+    # ---------------------------------------------------------
+    # Quality multiplier: concentrates more size into better setups
+    # ---------------------------------------------------------
+    def quality_multiplier(
+        self,
+        regime: str,
+        decision_score: float,
+        win_probability: float,
+        confluence: float,
+        pressure: float,
+    ) -> float:
+        quality = self._quality_score(
+            decision_score=decision_score,
+            win_probability=win_probability,
+            confluence=confluence,
+            pressure=pressure,
+        )
+
+        multiplier = 0.55 + (quality * 0.90)
+
+        regime = str(regime or "").upper()
+        if regime in {"TREND", "BREAKOUT", "STRONG"} and quality >= self.strong_quality_threshold:
+            multiplier *= 1.15
+
+        return self._clamp(multiplier, 0.0, 1.50)
 
     def evaluate_trade(self, asset: str, candles: List[Dict[str, Any]]) -> Dict[str, Any]:
         if not candles or len(candles) < 20:
@@ -60,6 +105,9 @@ class TradeDecisionOrchestrator:
         accel = float(conf_row.get("pressure_acceleration", 0.0))
         confluence = float(conf_row.get("confluence_score", 0.0))
         momentum = self._estimate_momentum(candles)
+        elasticity = self._estimate_elasticity(candles)
+        liquidity_sweep = self._estimate_liquidity_sweep(conf_row)
+        trade_side = self._infer_side(accel, momentum, regime)
 
         ai_score = self._score_ai(conf_row)
         pressure_fusion = (pressure * 0.6) + (abs(accel) * 0.4)
@@ -69,12 +117,12 @@ class TradeDecisionOrchestrator:
             confluence=confluence,
             pressure=pressure,
             momentum=momentum,
-            elasticity=self._estimate_elasticity(candles),
+            elasticity=elasticity,
             regime_confidence=regime_conf,
-            liquidity_sweep=self._estimate_liquidity_sweep(conf_row),
+            liquidity_sweep=liquidity_sweep,
             tier_history=self._tier_history_score(regime, ai_score),
             symbol=asset,
-            side=self._infer_side(accel, momentum, regime),
+            side=trade_side,
         )
 
         win_probability = float(probability_result.get("win_probability", 0.0))
@@ -109,6 +157,45 @@ class TradeDecisionOrchestrator:
         if decision_score >= 0.18 and pressure >= 0.15 and win_probability >= 0.30:
             execute_trade = True
 
+        # ---------------------------------------------------------
+        # NEW: profitability / setup quality gate
+        # ---------------------------------------------------------
+        opportunity_quality = self._quality_score(
+            decision_score=decision_score,
+            win_probability=win_probability,
+            confluence=confluence,
+            pressure=pressure,
+        )
+
+        quality_ok = opportunity_quality >= self.min_quality_threshold
+        structure_ok = (
+            confluence >= self.min_confluence_floor
+            and pressure >= self.min_pressure_floor
+        )
+
+        # Strong regimes may pass with slightly softer quality if probability is strong
+        strong_regime_override = (
+            regime in {"TREND", "BREAKOUT", "STRONG"}
+            and decision_score >= 0.24
+            and win_probability >= 0.34
+            and pressure >= 0.14
+        )
+
+        # Neutral/mean reversion can still trade, but must show better structure
+        neutral_regime_ok = (
+            regime in {"MEAN_REVERSION", "NEUTRAL", "RANGE"}
+            and decision_score >= 0.19
+            and win_probability >= self.min_probability_threshold
+            and confluence >= 0.10
+            and pressure >= 0.15
+        )
+
+        if not quality_ok and not strong_regime_override:
+            execute_trade = False
+
+        if not structure_ok and not neutral_regime_ok and not strong_regime_override:
+            execute_trade = False
+
         if not approve_trade:
             execute_trade = False
 
@@ -121,10 +208,46 @@ class TradeDecisionOrchestrator:
         if session_locked:
             execute_trade = False
 
+        # ---------------------------------------------------------
+        # NEW: allocation logic
+        # - regime scale controls broad participation
+        # - quality multiplier concentrates more into stronger setups
+        # ---------------------------------------------------------
+        regime_scale = self.regime_scale(regime)
+        quality_mult = self.quality_multiplier(
+            regime=regime,
+            decision_score=decision_score,
+            win_probability=win_probability,
+            confluence=confluence,
+            pressure=pressure,
+        )
+
+        base_allocation = ai_score
+        allocation = self._clamp01(base_allocation * regime_scale * quality_mult)
+
+        # If trade did not pass, allocation should not remain live
+        if not execute_trade:
+            allocation = 0.0
+
+        priority_score = self._clamp01(
+            (decision_score * 0.45)
+            + (win_probability * 0.30)
+            + (confluence * 0.15)
+            + (pressure * 0.10)
+        )
+
         return {
             "asset": asset,
             "symbol": asset,
             "execute_trade": execute_trade,
+            "allocation": round(allocation, 4),
+            "regime_scale": round(regime_scale, 4),
+            "quality_multiplier": round(quality_mult, 4),
+            "opportunity_quality": round(opportunity_quality, 4),
+            "priority_score": round(priority_score, 4),
+            "profitability_gate_passed": bool(
+                (quality_ok and structure_ok) or strong_regime_override or neutral_regime_ok
+            ),
             "regime": regime,
             "pressure_score": round(pressure, 4),
             "acceleration_score": round(accel, 4),
@@ -138,7 +261,7 @@ class TradeDecisionOrchestrator:
             "expected_edge": expected_edge,
             "probability_approved": approve_trade,
             "high_probability_setup": win_probability >= self.high_probability_threshold,
-            "trade_side": self._infer_side(accel, momentum, regime),
+            "trade_side": trade_side,
             "session_locked": session_locked,
             "session_lock_reason": str(lock_state.get("reason", "")),
             "session_lock_time": lock_state.get("lock_time"),
@@ -154,13 +277,32 @@ class TradeDecisionOrchestrator:
         return 0.0
 
     def _should_execute_trade(self, regime: str, score: float) -> bool:
+        regime = str(regime or "").upper()
+
         if regime == "MEAN_REVERSION":
             return score >= self.mean_reversion_threshold
         if regime == "TREND":
             return score >= self.trend_threshold
         if regime == "BREAKOUT":
             return score >= self.breakout_threshold
+        if regime in {"NEUTRAL", "RANGE"}:
+            return score >= self.neutral_threshold
         return score >= 0.26
+
+    def _quality_score(
+        self,
+        decision_score: float,
+        win_probability: float,
+        confluence: float,
+        pressure: float,
+    ) -> float:
+        quality = (
+            (decision_score * 0.40)
+            + (win_probability * 0.30)
+            + (confluence * 0.15)
+            + (pressure * 0.15)
+        )
+        return self._clamp01(quality)
 
     def _estimate_momentum(self, candles: List[Dict[str, Any]]) -> float:
         closes = [float(c.get("close", 0.0)) for c in candles[-5:] if isinstance(c, dict)]
@@ -235,11 +377,20 @@ class TradeDecisionOrchestrator:
     def _clamp01(self, v: float) -> float:
         return max(0.0, min(1.0, float(v)))
 
+    def _clamp(self, v: float, low: float, high: float) -> float:
+        return max(low, min(high, float(v)))
+
     def _reject(self, asset: str, reason: str) -> Dict[str, Any]:
         return {
             "asset": asset,
             "symbol": asset,
             "execute_trade": False,
+            "allocation": 0.0,
+            "regime_scale": 0.0,
+            "quality_multiplier": 0.0,
+            "opportunity_quality": 0.0,
+            "priority_score": 0.0,
+            "profitability_gate_passed": False,
             "reason": reason,
             "decision_score": 0.0,
             "win_probability": 0.0,

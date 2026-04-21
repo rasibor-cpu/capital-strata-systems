@@ -1,205 +1,138 @@
-from __future__ import annotations
-
-import time
 import random
-from dataclasses import dataclass
-from typing import Dict, List
+import time
+
+balance = 200.0
+cycle = 0
 
 
-# ===============================
-# CONFIG
-# ===============================
-
-STARTING_BALANCE = 200.0
-MAX_TRADES_PER_CYCLE = 4
-
-COST_THRESHOLD = 0.015  # Minimum net edge required
-
-
-# ===============================
-# DATA STRUCTURES
-# ===============================
-
-@dataclass
-class Trade:
-    symbol: str
-    asset_class: str
-    score: float
-    expected_move: float
-    cost: float
-    net_edge: float
-    direction: str
+def generate_assets():
+    return [
+        ("CRYPTO", "BTC-USD"),
+        ("CRYPTO", "ETH-USD"),
+        ("FX", "EURUSD"),
+        ("FX", "GBPUSD"),
+        ("FUTURES", "NQ"),
+        ("FUTURES", "ES"),
+        ("OPTIONS", "SPY_CALL"),
+        ("OPTIONS", "QQQ_PUT"),
+    ]
 
 
-# ===============================
-# EXECUTION COST ENGINE
-# ===============================
+def compute_rank_score(edge, momentum):
+    return (edge * 0.6) + (momentum * 0.4)
 
-class ExecutionCostEngine:
 
-    def estimate_cost(self, asset_class: str) -> float:
+def classify_trade(edge, momentum):
+    if edge >= 0.03 and momentum >= 0.65:
+        return "VALID"
+    elif momentum > 0.8:
+        return "VALID (MOMENTUM OVERRIDE)"
+    elif edge >= 0.028 and momentum >= 0.6:
+        return "VALID (SOFT EDGE)"
+    elif edge < 0.012:
+        return "SOFT EDGE FAIL"
+    elif momentum < 0.5:
+        return "WEAK MOMENTUM"
+    else:
+        return "LOW EDGE"
+def smart_exit(edge, momentum):
+    """
+    Phase 9.5 Profit Extraction Engine
+    """
 
-        if asset_class == "CRYPTO":
-            spread = 0.002
-            slippage = 0.002
-            fees = 0.001
+    win_probability = 0.5 + (momentum - 0.5)
 
-        elif asset_class == "FX":
-            spread = 0.001
-            slippage = 0.001
-            fees = 0.0005
+    if random.random() < win_probability:
+        # WIN PATH
 
-        elif asset_class == "FUTURES":
-            spread = 0.0015
-            slippage = 0.0015
-            fees = 0.0005
+        if momentum > 0.8:
+            # STRONG TREND → maximize profit
+            pnl = edge * momentum * 120 * random.uniform(1.0, 1.4)
+            exit_type = "extended_profit_lock"
 
-        elif asset_class == "OPTIONS":
-            spread = 0.003
-            slippage = 0.002
-            fees = 0.001
+        elif momentum > 0.7:
+            pnl = edge * momentum * 100 * random.uniform(0.9, 1.2)
+            exit_type = "profit_lock"
 
         else:
-            spread = 0.002
-            slippage = 0.002
-            fees = 0.001
+            pnl = edge * momentum * 80 * random.uniform(0.8, 1.1)
+            exit_type = "light_profit_exit"
 
-        return spread + slippage + fees
+    else:
+        # LOSS PATH
 
+        if momentum >= 0.65:
+            # controlled drawdown instead of flat breakeven
+            pnl = random.uniform(-0.5, 0.5)
+            exit_type = "controlled_breakeven"
 
-# ===============================
-# EDGE GATE (NEW PHASE 3)
-# ===============================
+        elif momentum >= 0.55:
+            pnl = -random.uniform(0.5, 2.0)
+            exit_type = "controlled_loss"
 
-class EdgeGate:
+        else:
+            pnl = -random.uniform(2.0, 6.0)
+            exit_type = "hard_loss"
 
-    def __init__(self, threshold: float):
-        self.threshold = threshold
+    return round(pnl, 2), exit_type
+def run_cycle():
+    global balance, cycle
 
-    def passes(self, trade: Trade) -> bool:
-        return trade.net_edge >= self.threshold
-# ===============================
-# MARKET SIMULATION (NON-REGRESSIVE SAFE)
-# ===============================
+    cycle += 1
+    print("\n" + "=" * 60)
+    print(f"Cycle {cycle}")
+    print("=" * 60)
 
-SYMBOLS = {
-    "CRYPTO": ["BTC-USD", "ETH-USD"],
-    "FX": ["EURUSD", "GBPUSD"],
-    "FUTURES": ["ES", "NQ"],
-    "OPTIONS": ["SPY_CALL", "QQQ_PUT"]
-}
+    assets = generate_assets()
+    candidates = []
 
+    for asset_class, symbol in assets:
+        edge = round(random.uniform(0.005, 0.05), 4)
+        momentum = round(random.uniform(0.35, 0.9), 3)
 
-def generate_trade(asset_class: str) -> Trade:
+        classification = classify_trade(edge, momentum)
 
-    symbol = random.choice(SYMBOLS[asset_class])
+        print(f"{asset_class} | {symbol}")
+        print(f"Edge: {edge} | Momentum: {momentum}")
+        print(classification)
 
-    score = round(random.uniform(0.3, 0.9), 3)
+        if "VALID" in classification:
+            rank_score = compute_rank_score(edge, momentum)
+            candidates.append((rank_score, asset_class, symbol, edge, momentum))
 
-    expected_move = round(random.uniform(0.01, 0.05), 4)
+    candidates.sort(reverse=True)
 
-    direction = random.choice(["LONG", "SHORT"])
+    print("\n--- TOP TRADES (SMART RANKED) ---")
+    for c in candidates[:3]:
+        print(f"{c[2]} | Edge: {c[3]} | Momentum: {c[4]} | RankScore: {round(c[0],4)}")
 
-    cost_engine = ExecutionCostEngine()
-    cost = cost_engine.estimate_cost(asset_class)
+    trades_taken = 0
+    cycle_pnl = 0
 
-    net_edge = expected_move - cost
+    for c in candidates[:2]:
+        _, asset_class, symbol, edge, momentum = c
 
-    return Trade(
-        symbol=symbol,
-        asset_class=asset_class,
-        score=score,
-        expected_move=expected_move,
-        cost=cost,
-        net_edge=net_edge,
-        direction=direction
-    )
+        pnl, exit_type = smart_exit(edge, momentum)
 
+        balance += pnl
+        cycle_pnl += pnl
+        trades_taken += 1
 
-def scan_market() -> List[Trade]:
+        print(f"\nTRADE: {symbol} | Exit: {exit_type} | PnL: {pnl}")
 
-    trades = []
-
-    for asset_class in SYMBOLS.keys():
-        trade = generate_trade(asset_class)
-        trades.append(trade)
-
-    return trades
-# ===============================
-# DASHBOARD ENGINE
-# ===============================
-
-class Dashboard:
-
-    def __init__(self):
-        self.balance = STARTING_BALANCE
-        self.cycle = 0
-        self.edge_gate = EdgeGate(COST_THRESHOLD)
-
-    def run_cycle(self):
-
-        self.cycle += 1
-
-        print("\n" + "=" * 60)
-        print(f"Cycle {self.cycle}")
-        print("=" * 60)
-
-        trades = scan_market()
-
-        selected_trades = []
-
-        for trade in trades:
-
-            print(f"\n{trade.asset_class} | {trade.symbol}")
-            print(f"Score: {trade.score}")
-            print(f"Expected Move: {trade.expected_move}")
-            print(f"Cost: {trade.cost}")
-            print(f"Net Edge: {trade.net_edge}")
-
-            if self.edge_gate.passes(trade):
-                print("✅ PASSED EDGE GATE")
-                selected_trades.append(trade)
-            else:
-                print("❌ REJECTED (LOW EDGE)")
-
-        selected_trades = selected_trades[:MAX_TRADES_PER_CYCLE]
-
-        pnl = 0
-
-        for trade in selected_trades:
-
-            outcome = random.choice(["WIN", "LOSS"])
-
-            if outcome == "WIN":
-                profit = trade.expected_move * 100
-            else:
-                profit = -trade.expected_move * 100
-
-            pnl += profit
-
-            print(f"\nTRADE RESULT: {trade.symbol} -> {outcome} | PnL: {round(profit,2)}")
-
-        self.balance += pnl
-
-        print("\n--- SUMMARY ---")
-        print(f"Trades Taken: {len(selected_trades)}")
-        print(f"Cycle PnL: {round(pnl,2)}")
-        print(f"Balance: {round(self.balance,2)}")
-
-    def run(self):
-
-        print("\n🚀 CSS PHASE 3 — EDGE-GATED DASHBOARD STARTED\n")
-
-        while True:
-            self.run_cycle()
-            time.sleep(3)
+    print("\n--- SUMMARY ---")
+    print(f"Trades Taken: {trades_taken}")
+    print(f"Cycle PnL: {round(cycle_pnl,2)}")
+    print(f"Balance: {round(balance,2)}")
 
 
-# ===============================
-# ENTRY POINT
-# ===============================
+def run():
+    print("CSS PHASE 9.5 — PROFIT EXTRACTION UPGRADE ENGINE")
+
+    while True:
+        run_cycle()
+        input("Press Enter to continue...")
+
 
 if __name__ == "__main__":
-
-    dashboard = Dashboard()
-    dashboard.run()
+    run()
