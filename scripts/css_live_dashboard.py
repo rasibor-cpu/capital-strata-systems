@@ -21,6 +21,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 load_dotenv(PROJECT_ROOT / ".env")
 
+from backend.app.pnl.pnl_engine import Portfolio, Position
+
 from backend.core.session_state import get_session_lock_state, is_session_locked, lock_session
 from backend.data.coinbase_historical_downloader import load_runtime_asset
 from backend.app.brokers.oanda_adapter import OandaAdapter
@@ -710,7 +712,8 @@ class CapitalDeploymentGovernor:
 
     def available_capital(self) -> float:
         allocated = sum(self.active_test_allocations.values())
-        return round(self.simulated_capital_pool - allocated, 4)
+        base_capital = float(getattr(pnl_observer, "current_balance", self.simulated_capital_pool))
+        return round(base_capital - allocated, 4)
 
     def can_fund_trade(self, position_id: str) -> bool:
         if self.paper_mode:
@@ -747,6 +750,12 @@ class CapitalDeploymentGovernor:
 
 
 capital_governor = CapitalDeploymentGovernor()
+
+# Phase 1 PnL observer only
+pnl_observer = Portfolio(
+    starting_balance=capital_governor.simulated_capital_pool,
+    current_balance=capital_governor.simulated_capital_pool,
+)
 
 
 def map_oanda_env() -> None:
@@ -1578,6 +1587,25 @@ def select_four_candidates() -> list[tuple[str, str, float, float]]:
     ]
 
 
+def pnl_divergence_warning(
+    mtm_realized: float,
+    mtm_unrealized: float,
+    observer_realized: float,
+    observer_unrealized: float,
+    threshold: float = 0.001,
+) -> str | None:
+    realized_gap = abs(float(mtm_realized) - float(observer_realized))
+    unrealized_gap = abs(float(mtm_unrealized) - float(observer_unrealized))
+
+    if realized_gap > threshold or unrealized_gap > threshold:
+        return (
+            f"[PNL DIVERGENCE WARNING] "
+            f"realized_gap={realized_gap:.6f} "
+            f"unrealized_gap={unrealized_gap:.6f}"
+        )
+    return None
+
+
 try:
     while True:
         cycle += 1
@@ -1607,19 +1635,44 @@ try:
             pos["floating"] = round(pos["floating"] + drift, 4)
             pos["age_cycles"] += 1
 
+            observer_symbol = f"{pos['position_id']}::{pos['symbol']}"
+            observer_price = 100.0 + float(pos["floating"])
+            pnl_observer.update_market_price(observer_symbol, observer_price)
+
             if pos["floating"] <= exit_profile["stop_loss"]:
                 book_position_exit(pos, "STOP")
+                pnl_observer.close_position(observer_symbol, observer_price)
             elif pos["floating"] >= exit_profile["take_profit"]:
                 book_position_exit(pos, "TAKE_PROFIT")
+                pnl_observer.close_position(observer_symbol, observer_price)
             elif pos["age_cycles"] >= exit_profile["max_age"]:
                 book_position_exit(pos, "TIME_EXIT")
+                pnl_observer.close_position(observer_symbol, observer_price)
 
         defensive_reductions = apply_defensive_exposure_reduction()
 
         display_by_asset = mtm_engine.floating_by_asset(funded_only=False)
         broker_test_positions = mtm_engine.count_open_broker_test_positions()
-        total_unrealized = round(sum(display_by_asset.values()), 4)
+        mtm_unrealized = round(sum(display_by_asset.values()), 4)
         open_positions = mtm_engine.count_open_positions()
+
+        mtm_realized = total_realized_pnl()
+
+        observer_unrealized = pnl_observer.compute_unrealized_pnl()
+        observer_realized = pnl_observer.realized_pnl
+        observer_equity = pnl_observer.equity()
+        observer_balance = pnl_observer.current_balance
+
+        total_realized = observer_realized
+        total_unrealized = observer_unrealized
+        total_equity = observer_equity - pnl_observer.starting_balance
+
+        divergence_msg = pnl_divergence_warning(
+            mtm_realized=mtm_realized,
+            mtm_unrealized=mtm_unrealized,
+            observer_realized=observer_realized,
+            observer_unrealized=observer_unrealized,
+        )
 
         top_cluster = cluster_amplifier.top_cluster()
         cluster_pct = (
@@ -1634,7 +1687,6 @@ try:
             total_unrealized,
         )
 
-        total_realized = total_realized_pnl()
         role_profile = SESSION_USER_CTX.get("role_profile", {})
         now_epoch = time.time()
         session_age_seconds = max(0, int(now_epoch - float(current_status.get("created", now_epoch))))
@@ -1678,7 +1730,18 @@ try:
         print("\n--- LIVE EXECUTION SUMMARY ---")
         print(f"REALIZED PNL: {total_realized:+.4f}")
         print(f"UNREALIZED PNL: {total_unrealized:+.4f}")
-        print(f"TOTAL EQUITY PNL: {total_realized + total_unrealized:+.4f}")
+        print(f"TOTAL EQUITY PNL: {total_equity:+.4f}")
+        print(f"BALANCE: {observer_balance:+.4f}")
+
+        print("\n--- PNL RECONCILIATION ---")
+        print(f"OBSERVER REALIZED PNL: {observer_realized:+.4f}")
+        print(f"OBSERVER UNREALIZED PNL: {observer_unrealized:+.4f}")
+        print(f"OBSERVER EQUITY: {observer_equity:+.4f}")
+        print(f"OBSERVER BALANCE: {observer_balance:+.4f}")
+        print(f"MTM REALIZED PNL: {mtm_realized:+.4f}")
+        print(f"MTM UNREALIZED PNL: {mtm_unrealized:+.4f}")
+        if divergence_msg:
+            print(divergence_msg)
 
         print(
             f"CRYPTO REALIZED: {sum(crypto_pnl.values()):+.4f} | "
@@ -1774,6 +1837,16 @@ try:
                         prob,
                         allow_live_funding=allow_broker_test,
                     )
+
+                    observer_position = Position(
+                        symbol=f"{position['position_id']}::{symbol}",
+                        asset_class=asset_class,
+                        side="LONG",
+                        quantity=1.0,
+                        entry_price=100.0,
+                        current_price=100.0,
+                    )
+                    pnl_observer.add_position(observer_position)
 
                     if position.get("broker_tested"):
                         if asset_class == "FX" and SELECTED_BROKER == "OANDA":
