@@ -1,8 +1,24 @@
 import random
-import time
 
 balance = 200.0
 cycle = 0
+
+# --- STATE TRACKING ---
+last_cycle_pnl = 0.0
+equity_peak = 200.0
+drawdown = 0.0
+consecutive_wins = 0
+consecutive_losses = 0
+
+# --- OFFENSIVE SCALING CONFIG ---
+ELITE_MOMENTUM = 0.80
+STRONG_MOMENTUM = 0.72
+ELITE_EDGE = 0.040
+STRONG_EDGE = 0.032
+
+NORMAL_SIZE = 1.00
+STRONG_SIZE = 1.20
+ELITE_SIZE = 1.40
 
 
 def generate_assets():
@@ -35,54 +51,82 @@ def classify_trade(edge, momentum):
         return "WEAK MOMENTUM"
     else:
         return "LOW EDGE"
-def smart_exit(edge, momentum):
+def compute_risk_modifier():
+    global last_cycle_pnl, consecutive_wins, consecutive_losses, drawdown
+
+    modifier = 1.0
+
+    if last_cycle_pnl > 5:
+        modifier *= 0.75
+
+    if last_cycle_pnl < 0:
+        modifier *= 0.7
+
+    if consecutive_wins >= 3:
+        modifier *= 0.8
+
+    if consecutive_losses >= 2:
+        modifier *= 0.6
+
+    if drawdown > 10:
+        modifier *= 0.5
+
+    return round(modifier, 4)
+
+
+def compute_offensive_size(edge, momentum):
     """
-    Phase 9.5 Profit Extraction Engine
+    Phase 9.7:
+    increase size only for high-quality conditions
+    and only when the system is healthy.
+    """
+    global drawdown, consecutive_losses
+
+    if drawdown >= 5 or consecutive_losses > 0:
+        return NORMAL_SIZE, "DEFENSIVE"
+
+    if edge >= ELITE_EDGE and momentum >= ELITE_MOMENTUM:
+        return ELITE_SIZE, "ELITE"
+
+    if edge >= STRONG_EDGE and momentum >= STRONG_MOMENTUM:
+        return STRONG_SIZE, "STRONG"
+
+    return NORMAL_SIZE, "NORMAL"
+
+
+def smart_exit(edge, momentum, risk_modifier, size_multiplier):
+    """
+    Phase 9.7 exit engine with controlled offensive scaling.
     """
 
+    effective_scale = risk_modifier * size_multiplier
     win_probability = 0.5 + (momentum - 0.5)
 
     if random.random() < win_probability:
-        # WIN PATH
-
         if momentum > 0.8:
-            # STRONG TREND → maximize profit
-            pnl = edge * momentum * 120 * random.uniform(1.0, 1.4)
+            pnl = edge * momentum * 120 * effective_scale
             exit_type = "extended_profit_lock"
-
         elif momentum > 0.7:
-            pnl = edge * momentum * 100 * random.uniform(0.9, 1.2)
+            pnl = edge * momentum * 100 * effective_scale
             exit_type = "profit_lock"
-
         else:
-            pnl = edge * momentum * 80 * random.uniform(0.8, 1.1)
+            pnl = edge * momentum * 80 * effective_scale
             exit_type = "light_profit_exit"
-
     else:
-        # LOSS PATH
-
         if momentum >= 0.65:
-            # controlled drawdown instead of flat breakeven
-            pnl = random.uniform(-0.5, 0.5)
+            pnl = random.uniform(-0.5, 0.5) * effective_scale
             exit_type = "controlled_breakeven"
-
         elif momentum >= 0.55:
-            pnl = -random.uniform(0.5, 2.0)
+            pnl = -random.uniform(0.5, 2.0) * effective_scale
             exit_type = "controlled_loss"
-
         else:
-            pnl = -random.uniform(2.0, 6.0)
+            pnl = -random.uniform(2.0, 6.0) * effective_scale
             exit_type = "hard_loss"
 
     return round(pnl, 2), exit_type
-def run_cycle():
-    global balance, cycle
 
-    cycle += 1
-    print("\n" + "=" * 60)
-    print(f"Cycle {cycle}")
-    print("=" * 60)
 
+def select_candidates():
     assets = generate_assets()
     candidates = []
 
@@ -98,36 +142,75 @@ def run_cycle():
 
         if "VALID" in classification:
             rank_score = compute_rank_score(edge, momentum)
-            candidates.append((rank_score, asset_class, symbol, edge, momentum))
+            candidates.append((rank_score, asset_class, symbol, edge, momentum, classification))
 
     candidates.sort(reverse=True)
+    return candidates
+def run_cycle():
+    global balance, cycle
+    global last_cycle_pnl, equity_peak, drawdown
+    global consecutive_wins, consecutive_losses
+
+    cycle += 1
+    print("\n" + "=" * 60)
+    print(f"Cycle {cycle}")
+    print("=" * 60)
+
+    candidates = select_candidates()
 
     print("\n--- TOP TRADES (SMART RANKED) ---")
     for c in candidates[:3]:
-        print(f"{c[2]} | Edge: {c[3]} | Momentum: {c[4]} | RankScore: {round(c[0],4)}")
+        print(
+            f"{c[2]} | Edge: {c[3]} | Momentum: {c[4]} | "
+            f"RankScore: {round(c[0],4)} | Tag: {c[5]}"
+        )
+
+    risk_modifier = compute_risk_modifier()
+    print(f"\nRisk Modifier Applied: {round(risk_modifier, 2)}")
 
     trades_taken = 0
-    cycle_pnl = 0
+    cycle_pnl = 0.0
 
     for c in candidates[:2]:
-        _, asset_class, symbol, edge, momentum = c
+        _, asset_class, symbol, edge, momentum, classification = c
 
-        pnl, exit_type = smart_exit(edge, momentum)
+        size_multiplier, mode = compute_offensive_size(edge, momentum)
+
+        pnl, exit_type = smart_exit(edge, momentum, risk_modifier, size_multiplier)
 
         balance += pnl
         cycle_pnl += pnl
         trades_taken += 1
 
-        print(f"\nTRADE: {symbol} | Exit: {exit_type} | PnL: {pnl}")
+        print(
+            f"\nTRADE: {symbol} | Mode: {mode} | "
+            f"Size: {round(size_multiplier,2)} | Exit: {exit_type} | PnL: {pnl}"
+        )
+
+        if pnl > 0:
+            consecutive_wins += 1
+            consecutive_losses = 0
+        elif pnl < 0:
+            consecutive_losses += 1
+            consecutive_wins = 0
+
+    if balance > equity_peak:
+        equity_peak = balance
+
+    drawdown = equity_peak - balance
+    last_cycle_pnl = cycle_pnl
 
     print("\n--- SUMMARY ---")
     print(f"Trades Taken: {trades_taken}")
     print(f"Cycle PnL: {round(cycle_pnl,2)}")
     print(f"Balance: {round(balance,2)}")
+    print(f"Equity Peak: {round(equity_peak,2)}")
+    print(f"Drawdown: {round(drawdown,2)}")
+    print(f"Win Streak: {consecutive_wins} | Loss Streak: {consecutive_losses}")
 
 
 def run():
-    print("CSS PHASE 9.5 — PROFIT EXTRACTION UPGRADE ENGINE")
+    print("CSS PHASE 9.7 — OFFENSIVE SCALING ENGINE")
 
     while True:
         run_cycle()
