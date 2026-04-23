@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import secrets
 import time
+import json
 from dataclasses import dataclass
-from typing import Optional
+from pathlib import Path
+
+
+SESSION_FILE = Path("artifacts/session_state.json")
 
 
 @dataclass
@@ -12,48 +16,23 @@ class Session:
     username: str
     role: str
     created: float
-    last_activity: float
-    idle_timeout_seconds: int
-    max_session_seconds: int
-    hard_expiry_epoch: float
-    is_active: bool = True
-    ended: float | None = None
-    end_reason: str | None = None
+    last_active: float
 
 
 class SessionManager:
-    """
-    CSS Session Manager (Upgraded)
 
-    - Idle timeout enforcement
-    - Max session lifetime enforcement
-    - Activity tracking
-    """
-
-    def __init__(
-        self,
-        idle_timeout_seconds: int = 3600,
-        max_session_seconds: int = 28800,
-    ):
+    def __init__(self, idle_timeout_seconds=3600, max_session_seconds=28800):
         self.sessions = {}
-        self.default_idle_timeout = idle_timeout_seconds
-        self.default_max_session = max_session_seconds
+        self.idle_timeout_seconds = idle_timeout_seconds
+        self.max_session_seconds = max_session_seconds
 
-    def _now(self) -> float:
-        return time.time()
+    def create_session(self, username, role, idle_timeout_seconds=None, max_session_seconds=None):
+        now = time.time()
 
-    def create_session(
-        self,
-        username: str,
-        role: str,
-        idle_timeout_seconds: Optional[int] = None,
-        max_session_seconds: Optional[int] = None,
-    ) -> Session:
-
-        now = self._now()
-
-        idle = idle_timeout_seconds or self.default_idle_timeout
-        max_s = max_session_seconds or self.default_max_session
+        if idle_timeout_seconds is not None:
+            self.idle_timeout_seconds = idle_timeout_seconds
+        if max_session_seconds is not None:
+            self.max_session_seconds = max_session_seconds
 
         session_id = secrets.token_hex(16)
 
@@ -62,79 +41,133 @@ class SessionManager:
             username=username,
             role=role,
             created=now,
-            last_activity=now,
-            idle_timeout_seconds=idle,
-            max_session_seconds=max_s,
-            hard_expiry_epoch=now + max_s,
+            last_active=now,
         )
 
         self.sessions[session_id] = session
+        self.save_session(session)
         return session
 
-    def _expiry_decision(self, session: Session):
-        now = self._now()
+    def save_session(self, session):
+        try:
+            data = {
+                "session_id": session.session_id,
+                "username": session.username,
+                "role": session.role,
+                "created": session.created,
+                "last_active": session.last_active,
+                "idle_timeout_seconds": self.idle_timeout_seconds,
+                "max_session_seconds": self.max_session_seconds,
+            }
 
-        if not session.is_active:
-            return True, session.end_reason or "inactive"
+            SESSION_FILE.parent.mkdir(exist_ok=True)
 
-        if now - session.last_activity > session.idle_timeout_seconds:
-            return True, "idle_timeout"
+            with open(SESSION_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f)
 
-        if now > session.hard_expiry_epoch:
-            return True, "max_session_lifetime"
+        except Exception:
+            pass
 
-        return False, None
+    def restore_session(self):
+        try:
+            if not SESSION_FILE.exists():
+                return None
 
-    def _mark_expired(self, session: Session, reason: str):
-        if session.is_active:
-            session.is_active = False
-            session.ended = self._now()
-            session.end_reason = reason
-        return session
+            with open(SESSION_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
 
-    def get_session(self, session_id: str) -> Optional[Session]:
-        session = self.sessions.get(str(session_id))
-        if session is None:
+            now = time.time()
+
+            saved_idle = int(data.get("idle_timeout_seconds", self.idle_timeout_seconds))
+            saved_max = int(data.get("max_session_seconds", self.max_session_seconds))
+
+            self.idle_timeout_seconds = saved_idle
+            self.max_session_seconds = saved_max
+
+            if now - float(data["last_active"]) > self.idle_timeout_seconds:
+                return None
+
+            if now - float(data["created"]) > self.max_session_seconds:
+                return None
+
+            session = Session(
+                session_id=data["session_id"],
+                username=data["username"],
+                role=data["role"],
+                created=float(data["created"]),
+                last_active=float(data["last_active"]),
+            )
+
+            self.sessions[session.session_id] = session
+            return session
+
+        except Exception:
             return None
 
-        expired, reason = self._expiry_decision(session)
-        if expired:
-            return self._mark_expired(session, reason)
+    def touch_session(self, session_id):
+        session = self.sessions.get(session_id)
+        if not session:
+            return
 
-        return session
+        session.last_active = time.time()
+        self.save_session(session)
 
-    def touch_session(self, session_id: str):
-        session = self.sessions.get(str(session_id))
-        if session is None:
-            return None
+    def get_session(self, session_id):
+        return self.sessions.get(session_id)
 
-        expired, reason = self._expiry_decision(session)
-        if expired:
-            return self._mark_expired(session, reason)
+    def get_session_status(self, session_id):
+        session = self.sessions.get(session_id)
 
-        session.last_activity = self._now()
-        return session
+        if not session:
+            return {
+                "active": False,
+                "end_reason": "not_found",
+                "created": None,
+                "last_activity": None,
+                "idle_timeout_seconds": self.idle_timeout_seconds,
+                "max_session_seconds": self.max_session_seconds,
+            }
 
-    def get_session_status(self, session_id: str):
-        session = self.sessions.get(str(session_id))
-        if session is None:
-            return {"active": False}
+        now = time.time()
 
-        expired, reason = self._expiry_decision(session)
-        if expired:
-            self._mark_expired(session, reason)
+        if now - session.last_active > self.idle_timeout_seconds:
+            return {
+                "active": False,
+                "end_reason": "idle_timeout",
+                "created": session.created,
+                "last_activity": session.last_active,
+                "idle_timeout_seconds": self.idle_timeout_seconds,
+                "max_session_seconds": self.max_session_seconds,
+            }
+
+        if now - session.created > self.max_session_seconds:
+            return {
+                "active": False,
+                "end_reason": "max_duration_exceeded",
+                "created": session.created,
+                "last_activity": session.last_active,
+                "idle_timeout_seconds": self.idle_timeout_seconds,
+                "max_session_seconds": self.max_session_seconds,
+            }
 
         return {
-            "active": session.is_active,
+            "active": True,
+            "end_reason": None,
             "created": session.created,
-            "last_activity": session.last_activity,
-            "idle_timeout_seconds": session.idle_timeout_seconds,
-            "max_session_seconds": session.max_session_seconds,
-            "end_reason": session.end_reason,
+            "last_activity": session.last_active,
+            "idle_timeout_seconds": self.idle_timeout_seconds,
+            "max_session_seconds": self.max_session_seconds,
         }
 
-    def destroy_session(self, session_id: str, reason: str = "destroyed"):
-        session = self.sessions.get(str(session_id))
-        if session:
-            self._mark_expired(session, reason)
-            del self.sessions[str(session_id)]
+    def destroy_session(self, session_id, reason="manual"):
+        if session_id in self.sessions:
+            del self.sessions[session_id]
+
+        try:
+            if SESSION_FILE.exists():
+                SESSION_FILE.unlink()
+        except Exception:
+            pass
+
+    def list_sessions(self):
+        return list(self.sessions.values())

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from getpass import getpass
 import importlib
+import sys
 from typing import Any, Dict, Optional
 
 
@@ -161,12 +162,68 @@ def _change_password_any(ur_mod, user_id: str, new_pw: str) -> bool:
     return False
 
 
+def _prompt_masked_password(prompt: str, max_len: int) -> str:
+    """
+    Prompt for password while displaying one '#' per typed character.
+    Supports backspace on Windows consoles.
+    Falls back safely to getpass on unsupported environments.
+    """
+    try:
+        import msvcrt
+
+        sys.stdout.write(prompt)
+        sys.stdout.flush()
+
+        chars: list[str] = []
+
+        while True:
+            ch = msvcrt.getwch()
+
+            if ch in ("\r", "\n"):
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+                return "".join(chars)
+
+            if ch == "\003":
+                raise KeyboardInterrupt
+
+            if ch in ("\b", "\x7f"):
+                if chars:
+                    chars.pop()
+                    sys.stdout.write("\b \b")
+                    sys.stdout.flush()
+                continue
+
+            if ch in ("\x00", "\xe0"):
+                _ = msvcrt.getwch()
+                continue
+
+            if not ch.isprintable():
+                continue
+
+            if len(chars) >= max_len:
+                continue
+
+            chars.append(ch)
+            sys.stdout.write("#")
+            sys.stdout.flush()
+
+    except KeyboardInterrupt:
+        raise
+    except Exception:
+        pw = getpass(prompt).strip()
+        return pw[:max_len]
+
+
 def _prompt_new_password() -> str:
     """
     Enforce <= 6 characters. (User requirement: 'at most 6')
     """
     while True:
-        new_pw = getpass(f"NEW PASSWORD (max {MAX_PASSWORD_LEN} chars): ").strip()
+        new_pw = _prompt_masked_password(
+            f"NEW PASSWORD (max {MAX_PASSWORD_LEN} chars): ",
+            MAX_PASSWORD_LEN,
+        ).strip()
         if not new_pw:
             print("Password cannot be empty.")
             continue
@@ -174,13 +231,14 @@ def _prompt_new_password() -> str:
             print(f"Password too long. Max is {MAX_PASSWORD_LEN}.")
             continue
 
-        confirm = getpass("CONFIRM NEW PASSWORD: ").strip()
+        confirm = _prompt_masked_password(
+            "CONFIRM NEW PASSWORD: ",
+            MAX_PASSWORD_LEN,
+        ).strip()
         if new_pw != confirm:
             print("Passwords do not match.")
             continue
         return new_pw
-
-
 def await_login_ready_state() -> Dict[str, Any]:
     """
     Blocking login gate.
@@ -199,7 +257,7 @@ def await_login_ready_state() -> Dict[str, Any]:
     if not user:
         raise RuntimeError("AUTH_FAILED")
 
-    pw = getpass("REA LOGIN | password: ").strip()
+    pw = _prompt_masked_password("REA LOGIN | password: ", MAX_PASSWORD_LEN).strip()
 
     if len(pw) > MAX_PASSWORD_LEN:
         raise RuntimeError("AUTH_FAILED")

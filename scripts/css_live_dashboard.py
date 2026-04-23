@@ -1890,6 +1890,22 @@ try:
                 print("[RBAC] New position generation blocked for current role.")
             else:
                 for asset_class, symbol, sig, prob in select_cycle_candidates():
+                    # =========================
+                    # MODE-AWARE ENTRY FILTER
+                    # =========================
+                    mode_filter = {
+                        "SAFE": (13.0, 0.70),
+                        "CONSERVATIVE": (12.5, 0.68),
+                        "BALANCED": (11.5, 0.65),
+                        "AGGRESSIVE": (10.5, 0.60),
+                        "EXPANSION": (10.0, 0.55),
+                    }
+
+                    min_sig, min_prob = mode_filter.get(ENGINE_MODE, (11.5, 0.65))
+
+                    if sig < min_sig or prob < min_prob:
+                        continue
+
                     current_open_counts = mtm_engine.count_open_positions_by_asset()
 
                     if not concurrency_controller.can_add_position(
