@@ -21,6 +21,14 @@ MIN_EV_BY_MODE = {
     "EXPANSION": -0.005,
 }
 
+MIN_ELASTICITY_BY_MODE = {
+    "SAFE": 0.35,
+    "CONSERVATIVE": 0.30,
+    "BALANCED": 0.22,
+    "AGGRESSIVE": 0.15,
+    "EXPANSION": 0.10,
+}
+
 MAX_POSITIONS_BY_ASSET = {
     "crypto": 3,
     "fx": 3,
@@ -68,6 +76,7 @@ class CSSUnifiedTradeGate:
             return self._reject("invalid engine mode", engine_mode, now)
 
         min_ev = MIN_EV_BY_MODE.get(engine_mode, 0.01)
+        min_elasticity = MIN_ELASTICITY_BY_MODE.get(engine_mode, 0.22)
 
         total_positions = int(portfolio_state.get("open_positions_total", 0))
         if total_positions >= MAX_TOTAL_POSITIONS:
@@ -78,15 +87,20 @@ class CSSUnifiedTradeGate:
             return self._reject("position limit reached", engine_mode, now)
 
         probability = float(candidate.get("probability", 0.0))
+        expected_value = float(candidate.get("expected_value", 0.0))
+        cost = float(candidate.get("cost", 0.0))
+        elasticity = float(candidate.get("vwap_elasticity", candidate.get("elasticity_score", 0.0)))
+
         if probability < threshold:
             return self._reject(
                 f"probability too low ({probability:.4f} < {threshold:.4f})",
                 engine_mode,
                 now,
                 probability=probability,
+                expected_value=expected_value,
+                cost=cost,
             )
 
-        expected_value = float(candidate.get("expected_value", 0.0))
         if expected_value <= min_ev:
             return self._reject(
                 f"expected value too low ({expected_value:.4f} <= {min_ev:.4f})",
@@ -94,12 +108,22 @@ class CSSUnifiedTradeGate:
                 now,
                 probability=probability,
                 expected_value=expected_value,
+                cost=cost,
             )
 
-        cost = float(candidate.get("cost", 0.0))
         if cost >= expected_value:
             return self._reject(
                 "cost exceeds edge",
+                engine_mode,
+                now,
+                probability=probability,
+                expected_value=expected_value,
+                cost=cost,
+            )
+
+        if elasticity < min_elasticity:
+            return self._reject(
+                f"vwap elasticity too low ({elasticity:.4f} < {min_elasticity:.4f})",
                 engine_mode,
                 now,
                 probability=probability,
@@ -130,6 +154,8 @@ class CSSUnifiedTradeGate:
                 "symbol": candidate.get("symbol"),
                 "threshold": threshold,
                 "min_ev": min_ev,
+                "vwap_elasticity": elasticity,
+                "min_elasticity": min_elasticity,
                 "portfolio_state": portfolio_state,
             },
         )
