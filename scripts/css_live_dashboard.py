@@ -107,11 +107,13 @@ ENGINE_MODES = {
 }
 
 MODE_EXIT_PROFILE = {
-    "SAFE": {"take_profit": 1.75, "stop_loss": -1.25, "max_age": 3},
-    "CONSERVATIVE": {"take_profit": 2.25, "stop_loss": -1.75, "max_age": 4},
-    "BALANCED": {"take_profit": 3.00, "stop_loss": -2.25, "max_age": 4},
-    "AGGRESSIVE": {"take_profit": 4.00, "stop_loss": -3.00, "max_age": 5},
-    "EXPANSION": {"take_profit": 5.00, "stop_loss": -3.75, "max_age": 6},
+    # Profit-dominance lifecycle tuning:
+    # minimum max_age is now 6 cycles so strong trades have room to develop.
+    "SAFE": {"take_profit": 1.75, "stop_loss": -1.25, "max_age": 6},
+    "CONSERVATIVE": {"take_profit": 2.25, "stop_loss": -1.75, "max_age": 6},
+    "BALANCED": {"take_profit": 3.00, "stop_loss": -2.25, "max_age": 6},
+    "AGGRESSIVE": {"take_profit": 4.00, "stop_loss": -3.00, "max_age": 7},
+    "EXPANSION": {"take_profit": 5.00, "stop_loss": -3.75, "max_age": 8},
 }
 
 ASSET_DRIFT_PROFILE = {
@@ -1473,7 +1475,7 @@ def book_position_exit(pos: dict, reason: str) -> None:
 
     cluster_amplifier.record_cluster_win(pos["symbol"], realized)
 
-    if reason == "STOP":
+    if reason in {"STOP", "FAST_STOP"}:
         locked_profit_ledger.record_forced_exit(pos["position_id"], realized)
     elif reason == "TAKE_PROFIT":
         locked_profit_ledger.record_priority_exit()
@@ -1708,15 +1710,36 @@ try:
             observer_price = 100.0 + float(pos["floating"])
             pnl_observer.update_market_price(observer_symbol, observer_price)
 
-            if pos["floating"] <= exit_profile["stop_loss"]:
+            # =========================
+            # PROFIT DOMINANCE EXIT ENGINE
+            # =========================
+            # Cut weak losers earlier than the standard stop.
+            if pos["floating"] <= exit_profile["stop_loss"] * 0.8:
+                book_position_exit(pos, "FAST_STOP")
+                pnl_observer.close_position(observer_symbol, observer_price)
+
+            # Normal stop for losses that exceed the formal stop threshold.
+            elif pos["floating"] <= exit_profile["stop_loss"]:
                 book_position_exit(pos, "STOP")
                 pnl_observer.close_position(observer_symbol, observer_price)
+
+            # Let strong winners run instead of clipping them too early.
             elif pos["floating"] >= exit_profile["take_profit"]:
-                book_position_exit(pos, "TAKE_PROFIT")
-                pnl_observer.close_position(observer_symbol, observer_price)
+                if pos["signal_score"] >= 13.0 and pos["prob_positive"] >= 0.70:
+                    pos["age_cycles"] = max(0, pos["age_cycles"] - 3)
+                elif pos["signal_score"] >= 12.0 and pos["prob_positive"] >= 0.66:
+                    pos["age_cycles"] = max(0, pos["age_cycles"] - 2)
+                else:
+                    book_position_exit(pos, "TAKE_PROFIT")
+                    pnl_observer.close_position(observer_symbol, observer_price)
+
+            # Time-exit only weak trades; strong trades get more runway.
             elif pos["age_cycles"] >= exit_profile["max_age"]:
-                book_position_exit(pos, "TIME_EXIT")
-                pnl_observer.close_position(observer_symbol, observer_price)
+                if pos["signal_score"] >= 11.5 and pos["prob_positive"] >= 0.64:
+                    pos["age_cycles"] = max(0, pos["age_cycles"] - 2)
+                else:
+                    book_position_exit(pos, "TIME_EXIT")
+                    pnl_observer.close_position(observer_symbol, observer_price)
 
         defensive_reductions = apply_defensive_exposure_reduction()
 
