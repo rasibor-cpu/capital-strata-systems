@@ -2,15 +2,23 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Dict, Any, Tuple
+from typing import Any, Dict, Tuple
 
 
 MODE_THRESHOLDS = {
-    "SAFE": 0.65,
-    "CONSERVATIVE": 0.62,
-    "BALANCED": 0.58,
-    "AGGRESSIVE": 0.55,
-    "EXPANSION": 0.52,
+    "SAFE": 0.68,
+    "CONSERVATIVE": 0.64,
+    "BALANCED": 0.56,
+    "AGGRESSIVE": 0.51,
+    "EXPANSION": 0.48,
+}
+
+MIN_EV_BY_MODE = {
+    "SAFE": 0.035,
+    "CONSERVATIVE": 0.025,
+    "BALANCED": 0.010,
+    "AGGRESSIVE": 0.000,
+    "EXPANSION": -0.005,
 }
 
 MAX_POSITIONS_BY_ASSET = {
@@ -22,7 +30,6 @@ MAX_POSITIONS_BY_ASSET = {
 
 MAX_TOTAL_POSITIONS = 10
 BLEED_RATIO_THRESHOLD = 0.25
-
 SESSION_TIMEOUT_SECONDS = 3600
 
 
@@ -39,7 +46,6 @@ class GateDecision:
 
 
 class CSSUnifiedTradeGate:
-
     def approve_trade(
         self,
         candidate: Dict[str, Any],
@@ -47,98 +53,70 @@ class CSSUnifiedTradeGate:
         engine_mode: str,
         portfolio_state: Dict[str, Any],
     ) -> GateDecision:
-
         now = time.time()
+        engine_mode = str(engine_mode or "BALANCED").upper()
 
-        # ------------------------------
-        # 1. SESSION VALIDATION
-        # ------------------------------
         valid, reason = self._validate_session(session, now)
         if not valid:
             return self._reject(reason, engine_mode, now)
 
-        # ------------------------------
-        # 2. ROLE VALIDATION
-        # ------------------------------
         if not self._validate_role(session):
             return self._reject("unauthorized role", engine_mode, now)
 
-        # ------------------------------
-        # 3. ENGINE MODE
-        # ------------------------------
         threshold = MODE_THRESHOLDS.get(engine_mode)
         if threshold is None:
             return self._reject("invalid engine mode", engine_mode, now)
 
-        # ------------------------------
-        # 4. TOTAL EXPOSURE LIMIT
-        # ------------------------------
-        total_positions = portfolio_state.get("open_positions_total", 0)
+        min_ev = MIN_EV_BY_MODE.get(engine_mode, 0.01)
+
+        total_positions = int(portfolio_state.get("open_positions_total", 0))
         if total_positions >= MAX_TOTAL_POSITIONS:
             return self._reject("total exposure limit reached", engine_mode, now)
 
-        # ------------------------------
-        # 5. ASSET POSITION LIMIT
-        # ------------------------------
-        asset_class = candidate.get("asset_class", "unknown")
+        asset_class = str(candidate.get("asset_class", "unknown")).lower()
         if not self._check_position_limits(asset_class, portfolio_state):
             return self._reject("position limit reached", engine_mode, now)
 
-        # ------------------------------
-        # 6. PROBABILITY
-        # ------------------------------
         probability = float(candidate.get("probability", 0.0))
         if probability < threshold:
             return self._reject(
-                "probability too low",
+                f"probability too low ({probability:.4f} < {threshold:.4f})",
                 engine_mode,
                 now,
-                probability,
+                probability=probability,
             )
 
-        # ------------------------------
-        # 7. EXPECTED VALUE
-        # ------------------------------
         expected_value = float(candidate.get("expected_value", 0.0))
-        if expected_value <= 0:
+        if expected_value <= min_ev:
             return self._reject(
-                "negative expected value",
+                f"expected value too low ({expected_value:.4f} <= {min_ev:.4f})",
                 engine_mode,
                 now,
-                probability,
-                expected_value,
+                probability=probability,
+                expected_value=expected_value,
             )
 
-        # ------------------------------
-        # 8. COST CHECK
-        # ------------------------------
         cost = float(candidate.get("cost", 0.0))
         if cost >= expected_value:
             return self._reject(
                 "cost exceeds edge",
                 engine_mode,
                 now,
-                probability,
-                expected_value,
-                cost,
+                probability=probability,
+                expected_value=expected_value,
+                cost=cost,
             )
 
-        # ------------------------------
-        # 9. BLEED PROTECTION
-        # ------------------------------
         if self._bleed_detected(asset_class, portfolio_state):
             return self._reject(
                 "bleed protection triggered",
                 engine_mode,
                 now,
-                probability,
-                expected_value,
-                cost,
+                probability=probability,
+                expected_value=expected_value,
+                cost=cost,
             )
 
-        # ------------------------------
-        # APPROVED
-        # ------------------------------
         return GateDecision(
             approved=True,
             reason="approved",
@@ -151,26 +129,10 @@ class CSSUnifiedTradeGate:
                 "asset_class": asset_class,
                 "symbol": candidate.get("symbol"),
                 "threshold": threshold,
+                "min_ev": min_ev,
                 "portfolio_state": portfolio_state,
             },
         )
-
-    # ==============================
-
-    def _bleed_detected(self, asset_class: str, state: Dict[str, Any]) -> bool:
-        pnl = state.get("pnl_by_asset", {})
-        asset_pnl = float(pnl.get(asset_class, 0.0))
-
-        if asset_pnl >= 0:
-            return False
-
-        positive_total = sum(v for v in pnl.values() if v > 0)
-
-        if positive_total <= 0:
-            return False
-
-        loss_ratio = abs(asset_pnl) / positive_total
-        return loss_ratio > BLEED_RATIO_THRESHOLD
 
     def _validate_session(self, session: Dict[str, Any], now: float) -> Tuple[bool, str]:
         if not session:
@@ -180,18 +142,37 @@ class CSSUnifiedTradeGate:
         if created is None:
             return False, "invalid session"
 
-        if now - created > SESSION_TIMEOUT_SECONDS:
+        if now - float(created) > SESSION_TIMEOUT_SECONDS:
             return False, "session expired"
 
         return True, "ok"
 
     def _validate_role(self, session: Dict[str, Any]) -> bool:
-        return session.get("role") in {"ADMIN", "SUPER_USER", "TRADER"}
+        role = str(session.get("role", "")).upper()
+        return role in {"ADMIN", "SUPER_USER", "TRADER"}
 
     def _check_position_limits(self, asset_class: str, portfolio_state: Dict[str, Any]) -> bool:
-        limit = MAX_POSITIONS_BY_ASSET.get(asset_class, 0)
-        current = portfolio_state.get(f"{asset_class}_open", 0)
+        limit = int(MAX_POSITIONS_BY_ASSET.get(asset_class, 0))
+        current = int(portfolio_state.get(f"{asset_class}_open", 0))
         return current < limit
+
+    def _bleed_detected(self, asset_class: str, state: Dict[str, Any]) -> bool:
+        pnl = state.get("pnl_by_asset", {})
+        if not isinstance(pnl, dict):
+            return False
+
+        asset_pnl = float(pnl.get(asset_class, 0.0))
+
+        if asset_pnl >= 0:
+            return False
+
+        positive_total = sum(float(v) for v in pnl.values() if float(v) > 0)
+
+        if positive_total <= 0:
+            return False
+
+        loss_ratio = abs(asset_pnl) / positive_total
+        return loss_ratio > BLEED_RATIO_THRESHOLD
 
     def _reject(
         self,
