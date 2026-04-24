@@ -5,10 +5,6 @@ from dataclasses import dataclass
 from typing import Dict, Any, Tuple
 
 
-# ==============================
-# CONFIGURATION
-# ==============================
-
 MODE_THRESHOLDS = {
     "SAFE": 0.65,
     "CONSERVATIVE": 0.62,
@@ -24,12 +20,11 @@ MAX_POSITIONS_BY_ASSET = {
     "options": 2,
 }
 
-SESSION_TIMEOUT_SECONDS = 3600  # 1 hour
+MAX_TOTAL_POSITIONS = 10
+BLEED_RATIO_THRESHOLD = 0.25
 
+SESSION_TIMEOUT_SECONDS = 3600
 
-# ==============================
-# DATA STRUCTURES
-# ==============================
 
 @dataclass
 class GateDecision:
@@ -43,31 +38,7 @@ class GateDecision:
     details: Dict[str, Any]
 
 
-# ==============================
-# MAIN GATE CLASS
-# ==============================
-
 class CSSUnifiedTradeGate:
-    """
-    Central Governance Gate for all trade approvals in CSS.
-
-    This enforces:
-    - Session validity
-    - Role authorization
-    - Engine mode thresholds
-    - Probability gating
-    - Expected value gating
-    - Cost control
-    - Position limits
-    - Audit payload generation
-    """
-
-    def __init__(self):
-        pass
-
-    # ==============================
-    # PUBLIC ENTRY POINT
-    # ==============================
 
     def approve_trade(
         self,
@@ -93,58 +64,76 @@ class CSSUnifiedTradeGate:
             return self._reject("unauthorized role", engine_mode, now)
 
         # ------------------------------
-        # 3. ENGINE MODE VALIDATION
+        # 3. ENGINE MODE
         # ------------------------------
         threshold = MODE_THRESHOLDS.get(engine_mode)
         if threshold is None:
             return self._reject("invalid engine mode", engine_mode, now)
 
         # ------------------------------
-        # 4. POSITION LIMIT CHECK
+        # 4. TOTAL EXPOSURE LIMIT
+        # ------------------------------
+        total_positions = portfolio_state.get("open_positions_total", 0)
+        if total_positions >= MAX_TOTAL_POSITIONS:
+            return self._reject("total exposure limit reached", engine_mode, now)
+
+        # ------------------------------
+        # 5. ASSET POSITION LIMIT
         # ------------------------------
         asset_class = candidate.get("asset_class", "unknown")
         if not self._check_position_limits(asset_class, portfolio_state):
             return self._reject("position limit reached", engine_mode, now)
 
         # ------------------------------
-        # 5. PROBABILITY CHECK
+        # 6. PROBABILITY
         # ------------------------------
         probability = float(candidate.get("probability", 0.0))
         if probability < threshold:
             return self._reject(
-                f"probability too low ({probability:.2f} < {threshold:.2f})",
+                "probability too low",
                 engine_mode,
                 now,
-                probability=probability,
+                probability,
             )
 
         # ------------------------------
-        # 6. EXPECTED VALUE CHECK
+        # 7. EXPECTED VALUE
         # ------------------------------
         expected_value = float(candidate.get("expected_value", 0.0))
         if expected_value <= 0:
             return self._reject(
-                "negative or zero expected value",
+                "negative expected value",
                 engine_mode,
                 now,
-                probability=probability,
-                expected_value=expected_value,
+                probability,
+                expected_value,
             )
 
         # ------------------------------
-        # 7. COST CHECK
+        # 8. COST CHECK
         # ------------------------------
         cost = float(candidate.get("cost", 0.0))
-        edge = expected_value
-
-        if cost >= edge:
+        if cost >= expected_value:
             return self._reject(
                 "cost exceeds edge",
                 engine_mode,
                 now,
-                probability=probability,
-                expected_value=expected_value,
-                cost=cost,
+                probability,
+                expected_value,
+                cost,
+            )
+
+        # ------------------------------
+        # 9. BLEED PROTECTION
+        # ------------------------------
+        if self._bleed_detected(asset_class, portfolio_state):
+            return self._reject(
+                "bleed protection triggered",
+                engine_mode,
+                now,
+                probability,
+                expected_value,
+                cost,
             )
 
         # ------------------------------
@@ -162,12 +151,26 @@ class CSSUnifiedTradeGate:
                 "asset_class": asset_class,
                 "symbol": candidate.get("symbol"),
                 "threshold": threshold,
+                "portfolio_state": portfolio_state,
             },
         )
 
     # ==============================
-    # INTERNAL METHODS
-    # ==============================
+
+    def _bleed_detected(self, asset_class: str, state: Dict[str, Any]) -> bool:
+        pnl = state.get("pnl_by_asset", {})
+        asset_pnl = float(pnl.get(asset_class, 0.0))
+
+        if asset_pnl >= 0:
+            return False
+
+        positive_total = sum(v for v in pnl.values() if v > 0)
+
+        if positive_total <= 0:
+            return False
+
+        loss_ratio = abs(asset_pnl) / positive_total
+        return loss_ratio > BLEED_RATIO_THRESHOLD
 
     def _validate_session(self, session: Dict[str, Any], now: float) -> Tuple[bool, str]:
         if not session:
@@ -183,13 +186,12 @@ class CSSUnifiedTradeGate:
         return True, "ok"
 
     def _validate_role(self, session: Dict[str, Any]) -> bool:
-        role = session.get("role")
-        return role in {"ADMIN", "SUPER_USER", "TRADER"}
+        return session.get("role") in {"ADMIN", "SUPER_USER", "TRADER"}
 
     def _check_position_limits(self, asset_class: str, portfolio_state: Dict[str, Any]) -> bool:
-        limits = MAX_POSITIONS_BY_ASSET.get(asset_class, 0)
-        current = portfolio_state.get(asset_class, 0)
-        return current < limits
+        limit = MAX_POSITIONS_BY_ASSET.get(asset_class, 0)
+        current = portfolio_state.get(f"{asset_class}_open", 0)
+        return current < limit
 
     def _reject(
         self,
