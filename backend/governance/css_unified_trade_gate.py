@@ -6,27 +6,35 @@ from typing import Any, Dict, Tuple
 
 
 MODE_THRESHOLDS = {
-    "SAFE": 0.68,
-    "CONSERVATIVE": 0.64,
-    "BALANCED": 0.56,
-    "AGGRESSIVE": 0.51,
-    "EXPANSION": 0.48,
+    "SAFE": 0.70,
+    "CONSERVATIVE": 0.66,
+    "BALANCED": 0.60,
+    "AGGRESSIVE": 0.54,
+    "EXPANSION": 0.50,
 }
 
 MIN_EV_BY_MODE = {
-    "SAFE": 0.035,
-    "CONSERVATIVE": 0.025,
-    "BALANCED": 0.010,
-    "AGGRESSIVE": 0.000,
-    "EXPANSION": -0.005,
+    "SAFE": 0.040,
+    "CONSERVATIVE": 0.030,
+    "BALANCED": 0.015,
+    "AGGRESSIVE": 0.005,
+    "EXPANSION": 0.000,
 }
 
 MIN_ELASTICITY_BY_MODE = {
-    "SAFE": 0.35,
-    "CONSERVATIVE": 0.30,
-    "BALANCED": 0.22,
-    "AGGRESSIVE": 0.15,
-    "EXPANSION": 0.10,
+    "SAFE": 0.40,
+    "CONSERVATIVE": 0.34,
+    "BALANCED": 0.26,
+    "AGGRESSIVE": 0.18,
+    "EXPANSION": 0.12,
+}
+
+MIN_OPPORTUNITY_BY_MODE = {
+    "SAFE": 0.50,
+    "CONSERVATIVE": 0.42,
+    "BALANCED": 0.34,
+    "AGGRESSIVE": 0.26,
+    "EXPANSION": 0.18,
 }
 
 MAX_POSITIONS_BY_ASSET = {
@@ -75,8 +83,9 @@ class CSSUnifiedTradeGate:
         if threshold is None:
             return self._reject("invalid engine mode", engine_mode, now)
 
-        min_ev = MIN_EV_BY_MODE.get(engine_mode, 0.01)
-        min_elasticity = MIN_ELASTICITY_BY_MODE.get(engine_mode, 0.22)
+        min_ev = MIN_EV_BY_MODE.get(engine_mode, 0.015)
+        min_elasticity = MIN_ELASTICITY_BY_MODE.get(engine_mode, 0.26)
+        min_opportunity = MIN_OPPORTUNITY_BY_MODE.get(engine_mode, 0.34)
 
         total_positions = int(portfolio_state.get("open_positions_total", 0))
         if total_positions >= MAX_TOTAL_POSITIONS:
@@ -90,6 +99,7 @@ class CSSUnifiedTradeGate:
         expected_value = float(candidate.get("expected_value", 0.0))
         cost = float(candidate.get("cost", 0.0))
         elasticity = float(candidate.get("vwap_elasticity", candidate.get("elasticity_score", 0.0)))
+        opportunity_score = float(candidate.get("opportunity_score", 0.0))
 
         if probability < threshold:
             return self._reject(
@@ -131,6 +141,16 @@ class CSSUnifiedTradeGate:
                 cost=cost,
             )
 
+        if opportunity_score < min_opportunity:
+            return self._reject(
+                f"opportunity score too low ({opportunity_score:.4f} < {min_opportunity:.4f})",
+                engine_mode,
+                now,
+                probability=probability,
+                expected_value=expected_value,
+                cost=cost,
+            )
+
         if self._bleed_detected(asset_class, portfolio_state):
             return self._reject(
                 "bleed protection triggered",
@@ -156,6 +176,8 @@ class CSSUnifiedTradeGate:
                 "min_ev": min_ev,
                 "vwap_elasticity": elasticity,
                 "min_elasticity": min_elasticity,
+                "opportunity_score": opportunity_score,
+                "min_opportunity": min_opportunity,
                 "portfolio_state": portfolio_state,
             },
         )
