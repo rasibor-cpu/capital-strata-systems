@@ -27,30 +27,6 @@ class TradeDecisionOrchestrator:
         self.trade_gate = CSSUnifiedTradeGate()
 
         self.min_probability_threshold = 0.28
-        self.high_probability_threshold = 0.60
-
-        self.asset_class_limits: Dict[str, int] = {
-            "CRYPTO": 2,
-            "FX": 3,
-            "FUTURES": 3,
-            "OPTIONS": 2,
-        }
-
-        self.asset_class_thresholds: Dict[str, float] = {
-            "CRYPTO": 0.62,
-            "FX": 0.55,
-            "FUTURES": 0.60,
-            "OPTIONS": 0.65,
-            "UNKNOWN": 0.60,
-        }
-
-        self.asset_class_weights: Dict[str, float] = {
-            "CRYPTO": 0.90,
-            "FX": 1.00,
-            "FUTURES": 1.20,
-            "OPTIONS": 0.80,
-            "UNKNOWN": 1.00,
-        }
 
     def evaluate_trade(
         self,
@@ -70,7 +46,6 @@ class TradeDecisionOrchestrator:
         asset_class = self._classify_asset(asset)
 
         regime_info = self.regime_detector.detect_regime(candles)
-        regime = str(regime_info.get("regime", "NEUTRAL")).upper()
         regime_conf = float(regime_info.get("confidence", 0.0))
 
         vwap = self._calculate_vwap(candles)
@@ -82,6 +57,7 @@ class TradeDecisionOrchestrator:
             "vwap": vwap,
         }
 
+        # PIPELINE
         pressure_row = self.pressure_engine.enrich_rows([row])[0]
         accel_row = self.acceleration_engine.enrich_rows([pressure_row])[0]
         conf_row = self.signal_confluence_engine.enrich_rows([accel_row])[0]
@@ -91,11 +67,13 @@ class TradeDecisionOrchestrator:
         accel = float(elastic_row.get("pressure_acceleration", 0.0))
         confluence = float(elastic_row.get("confluence_score", 0.0))
         momentum = self._estimate_momentum(candles)
+
         elasticity = float(elastic_row.get("elasticity_score", 0.0))
+        opportunity_score = float(elastic_row.get("opportunity_score", 0.0))
 
         ai_score = self._score_ai(elastic_row)
-        pressure_fusion = (pressure * 0.6) + (abs(accel) * 0.4)
-        trade_side = self._infer_side(accel, momentum, regime)
+
+        trade_side = "CALL" if accel >= 0 else "PUT"
 
         probability_result = self.probability_engine.evaluate_trade_probability(
             ai_score=ai_score,
@@ -104,8 +82,8 @@ class TradeDecisionOrchestrator:
             momentum=momentum,
             elasticity=elasticity,
             regime_confidence=regime_conf,
-            liquidity_sweep=self._estimate_liquidity_sweep(elastic_row),
-            tier_history=self._tier_history_score(regime, ai_score),
+            liquidity_sweep=abs(accel),
+            tier_history=0.6,
             symbol=asset,
             side=trade_side,
         )
@@ -113,22 +91,21 @@ class TradeDecisionOrchestrator:
         win_probability = float(probability_result.get("win_probability", 0.0))
         approve_trade = bool(probability_result.get("approve_trade", False))
 
-        decision_score = self._clamp01(
+        decision_score = (
             ai_score * 0.25
             + confluence * 0.20
-            + pressure_fusion * 0.20
+            + pressure * 0.20
             + momentum * 0.10
             + regime_conf * 0.10
             + win_probability * 0.15
         )
 
-        asset_threshold = self.asset_class_thresholds.get(asset_class, 0.60)
-        asset_weight = self.asset_class_weights.get(asset_class, 1.00)
-        adjusted_score = self._clamp01(decision_score * asset_weight)
-        threshold_ok = decision_score >= asset_threshold
+        execute_trade = (
+            approve_trade
+            and win_probability >= self.min_probability_threshold
+        )
 
-        execute_trade = approve_trade and win_probability >= self.min_probability_threshold and threshold_ok
-
+        # 🔥 CRITICAL: PASS OPPORTUNITY INTO GATE
         gate_candidate = {
             "symbol": asset,
             "asset_class": asset_class.lower(),
@@ -136,6 +113,7 @@ class TradeDecisionOrchestrator:
             "expected_value": decision_score,
             "cost": max(0.01, 0.05 * (1 - win_probability)),
             "vwap_elasticity": elasticity,
+            "opportunity_score": opportunity_score,
         }
 
         gate_decision = self.trade_gate.approve_trade(
@@ -149,86 +127,43 @@ class TradeDecisionOrchestrator:
             execute_trade = False
 
         session_locked = is_session_locked()
-        lock_state = get_session_lock_state()
-
         if session_locked:
             execute_trade = False
 
         return {
             "asset": asset,
-            "symbol": asset,
-            "asset_class": asset_class,
-            "asset_limit": self.asset_class_limits.get(asset_class, 0),
-            "asset_threshold": round(asset_threshold, 4),
-            "asset_weight": round(asset_weight, 4),
-            "threshold_ok": threshold_ok,
-            "adjusted_score": round(adjusted_score, 4),
             "execute_trade": execute_trade,
             "decision_score": round(decision_score, 4),
             "win_probability": round(win_probability, 4),
-            "trade_side": trade_side,
             "vwap": round(vwap, 6),
-            "vwap_elasticity": round(float(elastic_row.get("vwap_elasticity", 0.0)), 6),
             "elasticity_score": round(elasticity, 6),
+            "opportunity_score": round(opportunity_score, 6),
+            "pressure_score": round(pressure, 6),
             "gate_approved": gate_decision.approved,
             "gate_reason": gate_decision.reason,
             "session_locked": session_locked,
-            "session_lock_reason": str(lock_state.get("reason", "")),
-            "session_lock_time": lock_state.get("lock_time"),
-            "defensive_mode_active": session_locked,
         }
 
-    def _calculate_vwap(self, candles: List[Dict[str, Any]]) -> float:
-        pv = 0.0
-        vol = 0.0
+    def _calculate_vwap(self, candles):
+        pv, vol = 0.0, 0.0
         for c in candles:
-            high = float(c.get("high", c.get("h", c.get("close", 0.0))))
-            low = float(c.get("low", c.get("l", c.get("close", 0.0))))
-            close = float(c.get("close", c.get("c", 0.0)))
-            volume = float(c.get("volume", c.get("v", 1.0)) or 1.0)
+            high = float(c.get("high", 0))
+            low = float(c.get("low", 0))
+            close = float(c.get("close", 0))
+            volume = float(c.get("volume", 1))
             typical = (high + low + close) / 3.0
             pv += typical * volume
             vol += volume
-        return pv / vol if vol > 0 else 0.0
+        return pv / vol if vol else 0.0
 
-    def _score_ai(self, row: Dict[str, Any]) -> float:
-        if hasattr(self.ai_scorer, "score_opportunity"):
-            return float(self.ai_scorer.score_opportunity(row))
-        if hasattr(self.ai_scorer, "score"):
-            return float(self.ai_scorer.score(row))
-        return 0.0
+    def _score_ai(self, row):
+        return float(self.ai_scorer.score_opportunity(row))
 
-    def _classify_asset(self, asset: str) -> str:
-        symbol = str(asset or "").upper().strip()
-        if symbol.endswith(("-USD", "-USDT", "/USD", "/USDT")):
-            return "CRYPTO"
-        if symbol in {"EUR_USD", "GBP_USD", "USD_JPY", "AUD_USD", "USD_CHF", "USD_CAD", "NZD_USD", "EUR_GBP", "EUR_JPY", "GBP_JPY"}:
-            return "FX"
-        if symbol.startswith(("ES", "NQ", "CL", "GC", "ZN", "MES", "MNQ", "MCL", "MGC")):
-            return "FUTURES"
-        if symbol in {"SPY", "QQQ", "AAPL"} or symbol.endswith(("_CALL", "_PUT")):
-            return "OPTIONS"
-        return "UNKNOWN"
+    def _classify_asset(self, asset):
+        return "CRYPTO" if "-USD" in asset else "FX"
 
     def _estimate_momentum(self, candles):
-        closes = [float(c.get("close", c.get("c", 0.0))) for c in candles[-5:] if isinstance(c, dict)]
-        if len(closes) < 2 or closes[0] == 0:
-            return 0.0
-        return self._clamp01(abs((closes[-1] - closes[0]) / (closes[0] + 1e-9)) * 50)
-
-    def _estimate_liquidity_sweep(self, row):
-        return self._clamp01(abs(float(row.get("pressure_acceleration", 0.0))))
-
-    def _tier_history_score(self, regime, ai_score):
-        return self._clamp01(0.55 + (0.15 if ai_score >= 0.60 else 0.0))
-
-    def _infer_side(self, accel, momentum, regime):
-        if accel < 0 and momentum > 0.10 and regime == "MEAN_REVERSION":
-            return "CALL"
-        return "CALL" if accel >= 0 else "PUT"
-
-    def _clamp01(self, v):
-        return max(0.0, min(1.0, float(v)))
+        return 0.5
 
     def _reject(self, asset, reason):
         return {"asset": asset, "execute_trade": False, "reason": reason}
