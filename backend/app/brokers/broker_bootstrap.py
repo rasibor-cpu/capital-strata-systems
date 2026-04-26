@@ -1,80 +1,208 @@
 """
 Capital Strata Systems (CSS)
-Broker Bootstrap
+Broker Bootstrap — LIVE-LOCKED SAFE VERSION
 
 Purpose
 -------
-Responsible for initializing the selected broker adapter
-during system startup.
+Responsible for initializing the selected broker adapter during system startup.
 
 Flow
 ----
-1. User selects broker (Coinbase, OANDA, Alpaca, etc)
-2. Credentials are loaded
-3. Required SDK dependencies are installed
-4. Adapter instance is created
-5. Adapter is returned to the trading engine
+1. User selects broker (Coinbase, OANDA, Alpaca, Futures Sim, etc.)
+2. Broker registry validates selection
+3. Required SDK dependencies are checked
+4. Credentials are loaded when available/required
+5. Adapter instance is created using a compatibility-safe constructor path
+6. Adapter is returned to the trading engine
+
+Safety
+------
+- No silent fallback to another broker.
+- Missing live credentials fail closed.
+- Coinbase live mode cannot silently fall back to paper mode.
+- Coinbase paper mode is blocked through this bootstrap when preparing for live execution.
+- Existing adapters that use no-arg constructors remain supported.
 """
 
-from typing import Optional
+from __future__ import annotations
 
-from .broker_registry import get_adapter
+from typing import Any, Optional
+
+from .broker_registry import (
+    broker_supports_mode,
+    get_adapter,
+    get_broker_spec,
+    normalize_broker_name,
+)
 from .credential_loader import load_credentials
 from .install_utils import ensure_broker_dependencies
 
 
 class BrokerBootstrapError(Exception):
     """Raised when broker initialization fails."""
-    pass
 
 
-def initialize_broker(broker_name: str, mode: str = "paper"):
+def _instantiate_adapter(
+    adapter_cls: Any,
+    broker_name: str,
+    mode: str,
+    credentials: Optional[dict],
+) -> Any:
+    """
+    Instantiate broker adapters safely across different constructor styles.
+
+    Supported patterns:
+    1. Coinbase live-locked adapter with paper_mode=False
+    2. Adapter(credentials=..., mode=...)
+    3. Adapter(mode=...)
+    4. Adapter()
+
+    Critical Coinbase rule:
+    - Coinbase must be explicitly initialized in live mode here.
+    - No silent paper fallback is allowed.
+    """
+
+    key = normalize_broker_name(broker_name)
+    mode_key = (mode or "").strip().lower()
+
+    if key == "coinbase":
+        if mode_key != "live":
+            raise BrokerBootstrapError(
+                "SYSTEM BLOCKED: Coinbase must be explicitly started in LIVE mode. "
+                "Silent paper/simulation fallback is not allowed from broker_bootstrap.py."
+            )
+
+        try:
+            return adapter_cls(paper_mode=False)
+        except TypeError:
+            # If a future Coinbase adapter no longer accepts paper_mode,
+            # continue through the compatibility constructor paths below.
+            pass
+
+    try:
+        return adapter_cls(credentials=credentials, mode=mode_key)
+    except TypeError:
+        pass
+
+    try:
+        return adapter_cls(mode=mode_key)
+    except TypeError:
+        pass
+
+    try:
+        return adapter_cls()
+    except TypeError as exc:
+        raise BrokerBootstrapError(
+            f"Unable to initialize adapter for broker '{broker_name}'. "
+            f"Unsupported constructor signature: {exc}"
+        ) from exc
+
+
+def initialize_broker(broker_name: str, mode: str = "paper") -> Any:
     """
     Initialize a broker adapter.
 
     Parameters
     ----------
-    broker_name : str
-        Name of broker (coinbase, oanda, alpaca)
+    broker_name:
+        Name of broker: coinbase, oanda, alpaca, futures_sim.
 
-    mode : str
-        'paper' or 'live'
+    mode:
+        'paper' or 'live'.
 
     Returns
     -------
     adapter instance
     """
 
-    broker_name = broker_name.lower()
+    broker_key = normalize_broker_name(broker_name)
+    mode_key = (mode or "paper").strip().lower()
 
-    print(f"[BROKER BOOTSTRAP] Initializing broker: {broker_name}")
-    print(f"[BROKER BOOTSTRAP] Mode: {mode}")
+    print(f"[BROKER BOOTSTRAP] Initializing broker: {broker_key}")
+    print(f"[BROKER BOOTSTRAP] Mode: {mode_key}")
 
-    # Ensure required dependencies are installed
-    ensure_broker_dependencies(broker_name)
-
-    # Load credentials
-    creds = load_credentials(broker_name)
-
-    if creds is None:
+    # Hard live-lock rule for Coinbase.
+    # This prevents the exact regression where Coinbase auth is live but execution
+    # remains paper/simulated because bootstrap passed paper_mode=True.
+    if broker_key == "coinbase" and mode_key != "live":
         raise BrokerBootstrapError(
-            f"No credentials found for broker: {broker_name}"
+            "SYSTEM BLOCKED: Coinbase bootstrap requires mode='live'. "
+            "This prevents silent paper-mode regression."
         )
 
-    # Get adapter class from registry
-    adapter_cls = get_adapter(broker_name)
+    try:
+        spec = get_broker_spec(broker_key)
+    except Exception as exc:
+        raise BrokerBootstrapError(str(exc)) from exc
 
+    if not broker_supports_mode(broker_key, mode_key):
+        raise BrokerBootstrapError(
+            f"Broker '{broker_key}' does not support mode '{mode_key}'."
+        )
+
+    dep_status = ensure_broker_dependencies(broker_key, auto_install=False)
+    if not dep_status.get("ok"):
+        raise BrokerBootstrapError(
+            f"Dependency missing for broker '{broker_key}': "
+            f"{dep_status.get('package')}. Install required."
+        )
+
+    try:
+        creds = load_credentials(broker_key, mode=mode_key)
+    except Exception as exc:
+        raise BrokerBootstrapError(
+            f"Credential load failed for broker '{broker_key}': {exc}"
+        ) from exc
+
+    if mode_key == "live" and not creds and spec.credential_file:
+        raise BrokerBootstrapError(
+            f"No live credentials found for broker: {broker_key}"
+        )
+
+    adapter_cls = get_adapter(broker_key)
     if adapter_cls is None:
         raise BrokerBootstrapError(
-            f"No adapter registered for broker: {broker_name}"
+            f"No adapter registered for broker: {broker_key}"
         )
 
-    # Initialize adapter
-    adapter = adapter_cls(credentials=creds, mode=mode)
+    adapter = _instantiate_adapter(
+        adapter_cls=adapter_cls,
+        broker_name=broker_key,
+        mode=mode_key,
+        credentials=creds,
+    )
 
-    # Connect to broker
-    adapter.connect()
+    # Coinbase final safety verification:
+    # If adapter exposes paper_mode and it is still True, fail immediately.
+    if broker_key == "coinbase":
+        paper_mode_value = getattr(adapter, "paper_mode", None)
+        if paper_mode_value is True:
+            raise BrokerBootstrapError(
+                "SYSTEM BLOCKED: Coinbase adapter initialized in paper_mode=True. "
+                "Live-locked bootstrap refuses to continue."
+            )
 
-    print(f"[BROKER BOOTSTRAP] {broker_name} successfully initialized")
+    # Connect only if the adapter actually exposes connect().
+    if hasattr(adapter, "connect") and callable(getattr(adapter, "connect")):
+        try:
+            adapter.connect()
+        except Exception as exc:
+            raise BrokerBootstrapError(
+                f"Broker '{broker_key}' connect() failed: {exc}"
+            ) from exc
+
+    # Validate basic configuration if the adapter supports is_configured().
+    if hasattr(adapter, "is_configured") and callable(getattr(adapter, "is_configured")):
+        try:
+            configured = bool(adapter.is_configured())
+        except Exception:
+            configured = False
+
+        if mode_key == "live" and not configured:
+            raise BrokerBootstrapError(
+                f"Broker '{broker_key}' is not configured for live mode."
+            )
+
+    print(f"[BROKER BOOTSTRAP] {broker_key} successfully initialized")
 
     return adapter

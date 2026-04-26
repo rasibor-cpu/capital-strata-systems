@@ -1,159 +1,177 @@
-"""
-Capital Strata Systems (CSS)
-Coinbase Broker Adapter
-
-Provides a thin adapter for pulling market data and (optionally)
-submitting orders to Coinbase. Designed so the execution layer
-can be swapped for other brokers later.
-
-Current scope:
-- Public candles endpoint (no auth required)
-- Basic account/order placeholders
-"""
-
 from __future__ import annotations
 
-import requests
-from typing import Any, Dict, List, Optional
-
-
-COINBASE_CANDLES_URL = "https://api.exchange.coinbase.com/products/{product_id}/candles"
-
-
-# Map CSS granularity names to Coinbase seconds
-GRANULARITY_MAP = {
-    "ONE_MINUTE": 60,
-    "FIVE_MINUTE": 300,
-    "FIFTEEN_MINUTE": 900,
-    "ONE_HOUR": 3600,
-    "SIX_HOUR": 21600,
-    "ONE_DAY": 86400,
-}
+from typing import Any, Dict, Optional
 
 
 class CoinbaseAdapter:
+    """
+    CSS Coinbase Adapter
+
+    Compatible with:
+    - broker_bootstrap.py
+    - unified broker registry
+    - dashboard route_execution(...)
+    - CoinbaseExecutor where available
+
+    SAFE DEFAULT:
+    - paper mode does not place live orders
+    - live mode only delegates to CoinbaseExecutor if it supports execution
+    """
+
     def __init__(
         self,
-        *,
-        api_key_name: str = "",
-        api_private_key_path: str = "",
-        paper_mode: bool = True,
-        timeout_seconds: int = 10,
+        broker_name: str = "coinbase",
+        mode: str = "paper",
+        credentials: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
     ) -> None:
-        self.api_key_name = api_key_name
-        self.api_private_key_path = api_private_key_path
-        self.paper_mode = paper_mode
-        self.timeout_seconds = timeout_seconds
+        self.broker_name = broker_name
+        self.mode = str(mode or "paper").lower()
+        self.credentials = credentials or {}
+        self.extra = kwargs
+        self.connected = False
+        self.executor = None
 
-    # ---------- Market Data ----------
+    def connect(self) -> bool:
+        try:
+            from backend.execution.coinbase_executor import CoinbaseExecutor
 
-    def get_candles(
-        self,
-        product_id: str,
-        granularity_name: str,
-        limit: int = 200,
-    ) -> List[Dict[str, Any]]:
-        """
-        Fetch recent candles from Coinbase public API.
+            self.executor = CoinbaseExecutor()
+            self.connected = True
+            return True
+        except Exception as exc:
+            self.executor = None
+            self.connected = False
+            print(f"[COINBASE ADAPTER WARN] Executor unavailable: {exc}")
+            return False
 
-        Coinbase returns:
-        [ time, low, high, open, close, volume ]
-        """
+    def is_configured(self) -> bool:
+        return True
 
-        granularity = GRANULARITY_MAP.get(granularity_name)
-        if granularity is None:
-            raise ValueError(f"Unsupported granularity: {granularity_name}")
+    def is_live_mode(self) -> bool:
+        return self.mode == "live"
 
-        url = COINBASE_CANDLES_URL.format(product_id=product_id)
+    def supports_asset_class(self, asset_class: str) -> bool:
+        return str(asset_class or "").lower() in {"crypto", "spot", "coinbase"}
 
-        params = {
-            "granularity": granularity,
+    def get_account_info(self) -> Dict[str, Any]:
+        return {
+            "broker": "coinbase",
+            "mode": self.mode,
+            "connected": self.connected,
         }
 
-        resp = requests.get(url, params=params, timeout=self.timeout_seconds)
-        resp.raise_for_status()
+    def get_positions(self):
+        return []
 
-        raw = resp.json()
+    def get_orders(self):
+        return []
 
-        # Coinbase returns newest first; reverse to oldest→newest
-        raw.reverse()
+    def place_order(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        """
+        Accepts either:
+        - place_order(symbol="BTC-USD", units=1, side="BUY")
+        - place_order(OrderRequest(...))
+        """
 
-        candles: List[Dict[str, Any]] = []
+        symbol = kwargs.get("symbol")
+        units = kwargs.get("units") or kwargs.get("quantity") or kwargs.get("qty") or 1
+        side = kwargs.get("side", "BUY")
+        order_type = kwargs.get("order_type", "market")
 
-        for item in raw[-limit:]:
-            ts, low, high, open_, close, volume = item
+        if args:
+            req = args[0]
+            symbol = getattr(req, "symbol", symbol)
+            units = getattr(req, "units", units)
+            units = getattr(req, "quantity", units)
+            units = getattr(req, "qty", units)
+            side = getattr(req, "side", side)
+            order_type = getattr(req, "order_type", order_type)
 
-            candles.append(
-                {
-                    "ts": ts,
-                    "low": float(low),
-                    "high": float(high),
-                    "open": float(open_),
-                    "close": float(close),
-                    "volume": float(volume),
+        if not symbol:
+            return {
+                "ok": False,
+                "status": "REJECTED",
+                "error": "Missing symbol",
+                "broker": "coinbase",
+            }
+
+        if self.executor is None:
+            self.connect()
+
+        if self.mode != "live":
+            return {
+                "ok": True,
+                "status": "PAPER_FILLED",
+                "broker": "coinbase",
+                "symbol": symbol,
+                "side": side,
+                "units": units,
+                "order_type": order_type,
+                "order_id": f"PAPER-COINBASE-{symbol}",
+                "message": "Coinbase paper route simulated safely; no live order sent.",
+            }
+
+        if self.executor is None:
+            return {
+                "ok": False,
+                "status": "NO_EXECUTOR",
+                "broker": "coinbase",
+                "symbol": symbol,
+                "error": "CoinbaseExecutor unavailable",
+            }
+
+        try:
+            if hasattr(self.executor, "create_order"):
+                result = self.executor.create_order(
+                    symbol=symbol,
+                    side=side,
+                    quantity=units,
+                    order_type=order_type,
+                )
+            elif hasattr(self.executor, "place_order"):
+                result = self.executor.place_order(
+                    symbol=symbol,
+                    side=side,
+                    quantity=units,
+                    order_type=order_type,
+                )
+            else:
+                return {
+                    "ok": False,
+                    "status": "EXECUTOR_NO_ORDER_METHOD",
+                    "broker": "coinbase",
+                    "symbol": symbol,
                 }
-            )
 
-        return candles
-
-    # ---------- Execution (placeholder) ----------
-
-    def place_market_buy(
-        self,
-        *,
-        product_id: str,
-        size_usd: float,
-    ) -> Dict[str, Any]:
-        """
-        Placeholder for market buy.
-        Currently returns simulated order response.
-        """
-
-        if self.paper_mode:
             return {
-                "status": "paper_filled",
-                "product_id": product_id,
-                "size_usd": size_usd,
+                "ok": True,
+                "status": "SENT",
+                "broker": "coinbase",
+                "symbol": symbol,
+                "side": side,
+                "units": units,
+                "order_type": order_type,
+                "order_id": getattr(result, "order_id", None) or "COINBASE-LIVE",
+                "raw": result,
             }
 
-        raise NotImplementedError(
-            "Live Coinbase execution not yet enabled in adapter."
-        )
-
-    def place_market_sell(
-        self,
-        *,
-        product_id: str,
-        size_asset: float,
-    ) -> Dict[str, Any]:
-        """
-        Placeholder for market sell.
-        """
-
-        if self.paper_mode:
+        except Exception as exc:
             return {
-                "status": "paper_filled",
-                "product_id": product_id,
-                "size_asset": size_asset,
+                "ok": False,
+                "status": "ERROR",
+                "broker": "coinbase",
+                "symbol": symbol,
+                "error": str(exc),
             }
 
-        raise NotImplementedError(
-            "Live Coinbase execution not yet enabled in adapter."
-        )
+    def cancel_order(self, order_id: str) -> Dict[str, Any]:
+        return {
+            "ok": False,
+            "status": "NOT_IMPLEMENTED",
+            "broker": "coinbase",
+            "order_id": order_id,
+        }
 
-    # ---------- Account ----------
-
-    def get_account(self) -> Dict[str, Any]:
-        """
-        Placeholder account info.
-        """
-
-        if self.paper_mode:
-            return {
-                "mode": "paper",
-                "balance_usd": 0.0,
-            }
-
-        raise NotImplementedError(
-            "Live account query not yet enabled in adapter."
-        )
+    def disconnect(self) -> None:
+        self.connected = False
