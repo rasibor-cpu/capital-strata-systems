@@ -132,6 +132,7 @@ ORDER_AUDIT_FILE = STATE_DIR / "css_order_audit.jsonl"
 FILL_AUDIT_FILE = STATE_DIR / "css_fill_audit.jsonl"
 POSITION_SNAPSHOT_FILE = STATE_DIR / "css_position_snapshot.json"
 ACCOUNT_STATE_FILE = STATE_DIR / "css_account_state.json"
+EQUITY_HISTORY_FILE = STATE_DIR / "css_equity_history.json"
 
 MAX_ASSET_OPEN_POSITIONS = {
     "CRYPTO": 3,
@@ -200,6 +201,100 @@ def safe_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+
+
+
+
+def load_equity_history() -> list[Dict[str, Any]]:
+    try:
+        if EQUITY_HISTORY_FILE.exists():
+            with open(EQUITY_HISTORY_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    return data
+    except Exception as exc:
+        print(f"[EQUITY HISTORY WARN] Could not load history: {str(exc)[:80]}")
+    return []
+
+
+def save_equity_history(history: list[Dict[str, Any]]) -> None:
+    try:
+        with open(EQUITY_HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(history[-250:], f, indent=2, default=str)
+    except Exception as exc:
+        print(f"[EQUITY HISTORY WARN] Could not save history: {str(exc)[:80]}")
+
+
+def record_equity_point(cycle_no: int, live_equity: float, broker_balance: float, total_pnl: float) -> None:
+    """
+    Persistent display-layer equity tracking.
+
+    PCNRASS safety:
+    - Writes only to artifacts/css_equity_history.json.
+    - Does not alter orders, routing, PnL calculations, broker state, or risk logic.
+    """
+    history = load_equity_history()
+    history.append({
+        "timestamp": datetime.now().isoformat(),
+        "cycle": int(cycle_no),
+        "live_equity": round(safe_float(live_equity), 6),
+        "broker_balance": round(safe_float(broker_balance), 6),
+        "total_pnl": round(safe_float(total_pnl), 6),
+        "mode": execution_metrics.get("mode"),
+        "broker": execution_metrics.get("broker"),
+    })
+    save_equity_history(history)
+
+
+def render_equity_trend_panel() -> None:
+    """
+    Text-based equity curve summary for screenshot-friendly monitoring.
+    """
+    try:
+        history = load_equity_history()
+        if not history:
+            print("\n--- EQUITY TREND ---")
+            print("No equity history recorded yet.")
+            print("--------------------")
+            return
+
+        first = history[0]
+        last = history[-1]
+        first_equity = safe_float(first.get("live_equity"), 0.0)
+        last_equity = safe_float(last.get("live_equity"), 0.0)
+        change = last_equity - first_equity
+        pct = (change / first_equity * 100.0) if first_equity > 0 else 0.0
+
+        recent = history[-10:]
+        recent_values = [safe_float(x.get("live_equity"), 0.0) for x in recent]
+        up_moves = 0
+        down_moves = 0
+        for prev, curr in zip(recent_values, recent_values[1:]):
+            if curr > prev:
+                up_moves += 1
+            elif curr < prev:
+                down_moves += 1
+
+        if up_moves > down_moves:
+            trend = "UPWARD"
+        elif down_moves > up_moves:
+            trend = "DOWNWARD"
+        else:
+            trend = "SIDEWAYS"
+
+        print("\n--- EQUITY TREND ---")
+        print(f"History Points: {len(history)}")
+        print(f"First Equity:   {first_equity:,.2f}")
+        print(f"Latest Equity:  {last_equity:,.2f}")
+        print(f"Change:         {change:+.4f} ({pct:+.2f}%)")
+        print(f"Recent Trend:   {trend} | Up {up_moves} / Down {down_moves}")
+
+        compact = " -> ".join(f"{v:,.2f}" for v in recent_values[-6:])
+        print(f"Last Points:    {compact}")
+        print("--------------------")
+
+    except Exception as exc:
+        print(f"[EQUITY TREND WARN] {str(exc)[:120]}")
 
 
 # ==============================
@@ -1547,6 +1642,13 @@ while True:
     except Exception:
         live_equity = CSS_LIVE_EQUITY
 
+    record_equity_point(
+        cycle_no=cycle,
+        live_equity=live_equity,
+        broker_balance=CSS_LAST_VERIFIED_BROKER_BALANCE,
+        total_pnl=total,
+    )
+
     print("\n--- LIVE EXECUTION SUMMARY ---")
     print(f"TOTAL PNL: {total:+.4f}")
     print(f"STARTING EQUITY: {CSS_STARTING_EQUITY:,.2f}")
@@ -1573,6 +1675,7 @@ while True:
     print("-" * 60)
 
     render_enhanced_metrics()
+    render_equity_trend_panel()
 
     regime_board = []
     vwap_board = []
