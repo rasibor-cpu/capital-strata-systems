@@ -1,9 +1,13 @@
-# FULL LARGE DASHBOARD - PCNRASS FINAL STABILIZED
+# FULL LARGE DASHBOARD - PCNRASS FINAL STABILIZED + REAL CAPITAL SYNC
 # Preserves real dashboard modules, broker routing, fill visibility, caps, bleed governor, options, futures bias.
+# Upgrade scope: remove static starting capital, add selected-broker balance visibility,
+# persist verified equity, and pause after each cycle for screenshot/readability control.
 from __future__ import annotations
 CSS_POSITIONS = []
 CSS_CLOSED = []
-CSS_STARTING_EQUITY = 100000.0
+CSS_STARTING_EQUITY = 0.0
+CSS_LAST_VERIFIED_BROKER_BALANCE = 0.0
+CSS_LIVE_EQUITY = 0.0
 import sys, time, random, json
 from datetime import datetime
 from pathlib import Path
@@ -35,6 +39,15 @@ try:
     from backend.app.brokers.base import OrderRequest
 except Exception:
     OrderRequest = None
+
+# Optional capital engine hook. The dashboard must not fail if this module is
+# unavailable on an older branch; selected broker balance resolution below remains
+# the primary source of truth.
+try:
+    from backend.app.core.account_engine import CapitalEngine, AccountPersistence
+except Exception:
+    CapitalEngine = None
+    AccountPersistence = None
 
 STATE_DIR = PROJECT_ROOT / "artifacts"
 STATE_DIR.mkdir(exist_ok=True)
@@ -118,6 +131,7 @@ OPTION_FORCE_FALLBACK_ONLY_IF_STRONG = True
 ORDER_AUDIT_FILE = STATE_DIR / "css_order_audit.jsonl"
 FILL_AUDIT_FILE = STATE_DIR / "css_fill_audit.jsonl"
 POSITION_SNAPSHOT_FILE = STATE_DIR / "css_position_snapshot.json"
+ACCOUNT_STATE_FILE = STATE_DIR / "css_account_state.json"
 
 MAX_ASSET_OPEN_POSITIONS = {
     "CRYPTO": 3,
@@ -129,8 +143,8 @@ MAX_ASSET_OPEN_POSITIONS = {
 MAX_NEW_PER_CYCLE = {
     "CRYPTO": 2,
     "FX": 2,
-    "FUTURES": 1,
-    "OPTIONS": 1,
+    "FUTURES": 2,
+    "OPTIONS": 2,
 }
 
 cycle_new_entries = {
@@ -158,6 +172,9 @@ execution_metrics = {
     "unrealized_pnl": 0.0,
     "open_position_count": 0,
     "closed_trade_count": 0,
+    "broker_balance": 0.0,
+    "live_equity": 0.0,
+    "starting_equity": 0.0,
     "winner_run_active": 0,
     "loser_cut_active": 0,
 }
@@ -172,6 +189,185 @@ def append_jsonl(path: Path, payload: Dict[str, Any]) -> None:
             f.write(json.dumps(payload, default=str) + "\n")
     except Exception as exc:
         print(f"[AUDIT WARN] Could not write {path.name}: {exc}")
+
+
+def safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except Exception:
+        return default
+
+
+def load_account_state() -> Dict[str, Any]:
+    try:
+        if ACCOUNT_STATE_FILE.exists():
+            with open(ACCOUNT_STATE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+    except Exception as exc:
+        print(f"[ACCOUNT STATE WARN] Could not load account state: {str(exc)[:80]}")
+    return {}
+
+
+def save_account_state(payload: Dict[str, Any]) -> None:
+    try:
+        current = load_account_state()
+        current.update(payload)
+        current["updated_at"] = datetime.now().isoformat()
+        with open(ACCOUNT_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(current, f, indent=2, default=str)
+    except Exception as exc:
+        print(f"[ACCOUNT STATE WARN] Could not save account state: {str(exc)[:80]}")
+
+
+def _extract_balance_from_mapping(info: Dict[str, Any]) -> float:
+    # Different brokers expose different balance/equity names.
+    # Prefer verified account equity/balance-style fields, not buying-power only.
+    candidate_keys = [
+        "equity", "balance", "cash", "NAV", "nav", "net_liquidation",
+        "netLiquidation", "account_value", "accountValue",
+        "total_equity", "totalEquity", "accountBalance",
+        "available_balance", "availableBalance", "marginAvailable",
+    ]
+    for key in candidate_keys:
+        if key in info:
+            val = safe_float(info.get(key), 0.0)
+            if val > 0:
+                return val
+
+    # Nested account payloads are common.
+    for nested_key in ["account", "data", "result"]:
+        nested = info.get(nested_key)
+        if isinstance(nested, dict):
+            val = _extract_balance_from_mapping(nested)
+            if val > 0:
+                return val
+
+    return 0.0
+
+
+def fetch_selected_broker_balance() -> float:
+    """
+    Fetch balance from the broker actually selected for this dashboard run.
+
+    PCNRASS rule:
+    - Use selected broker balance when available.
+    - Do not force a static starting balance.
+    - In SIM/no-broker mode, fall back only to last verified persisted equity.
+    """
+    broker = globals().get("BROKER_ADAPTER")
+
+    if broker is not None:
+        for method_name in [
+            "get_balance",
+            "get_account_balance",
+            "get_equity",
+            "get_cash_balance",
+        ]:
+            method = getattr(broker, method_name, None)
+            if callable(method):
+                try:
+                    val = safe_float(method(), 0.0)
+                    if val > 0:
+                        return val
+                except Exception:
+                    pass
+
+        info_method = getattr(broker, "get_account_info", None)
+        if callable(info_method):
+            try:
+                info = info_method()
+                if isinstance(info, dict):
+                    val = _extract_balance_from_mapping(info)
+                    if val > 0:
+                        return val
+                else:
+                    for attr in ["equity", "balance", "cash", "NAV", "nav"]:
+                        val = safe_float(getattr(info, attr, None), 0.0)
+                        if val > 0:
+                            return val
+            except Exception:
+                pass
+
+        for attr in ["equity", "balance", "cash", "NAV", "nav"]:
+            val = safe_float(getattr(broker, attr, None), 0.0)
+            if val > 0:
+                return val
+
+    # Optional universal capital engine fallback for branches where it exists.
+    # This is deliberately secondary because the selected dashboard broker should
+    # remain visible and authoritative during the run.
+    if CapitalEngine is not None:
+        try:
+            engine = CapitalEngine()
+            engine.initialize()
+            val = safe_float(engine.get_balance(), 0.0)
+            if val > 0:
+                return val
+        except Exception:
+            pass
+
+    state = load_account_state()
+    for key in ["last_verified_broker_balance", "live_equity", "balance"]:
+        val = safe_float(state.get(key), 0.0)
+        if val > 0:
+            return val
+
+    return 0.0
+
+
+def initialize_css_capital() -> float:
+    global CSS_STARTING_EQUITY, CSS_LAST_VERIFIED_BROKER_BALANCE, CSS_LIVE_EQUITY
+
+    balance = fetch_selected_broker_balance()
+    CSS_STARTING_EQUITY = round(balance, 6)
+    CSS_LAST_VERIFIED_BROKER_BALANCE = round(balance, 6)
+    CSS_LIVE_EQUITY = round(balance, 6)
+
+    save_account_state({
+        "active_broker": execution_metrics.get("broker"),
+        "trading_mode": execution_metrics.get("mode"),
+        "starting_equity": CSS_STARTING_EQUITY,
+        "last_verified_broker_balance": CSS_LAST_VERIFIED_BROKER_BALANCE,
+        "live_equity": CSS_LIVE_EQUITY,
+    })
+
+    if CSS_STARTING_EQUITY <= 0:
+        print("[CAPITAL WARN] No verified broker balance found. Equity starts at 0.00 until broker balance is available.")
+    else:
+        print(f"[CAPITAL SYNC] Starting equity from selected broker/state: {CSS_STARTING_EQUITY:.2f}")
+
+    return CSS_STARTING_EQUITY
+
+
+def sync_live_equity() -> float:
+    global CSS_LAST_VERIFIED_BROKER_BALANCE, CSS_LIVE_EQUITY
+
+    broker_balance = fetch_selected_broker_balance()
+    if broker_balance > 0:
+        CSS_LAST_VERIFIED_BROKER_BALANCE = round(broker_balance, 6)
+
+    CSS_LIVE_EQUITY = round(float(CSS_STARTING_EQUITY) + float(get_total_pnl()), 6)
+
+    execution_metrics["broker_balance"] = CSS_LAST_VERIFIED_BROKER_BALANCE
+    execution_metrics["live_equity"] = CSS_LIVE_EQUITY
+
+    save_account_state({
+        "active_broker": execution_metrics.get("broker"),
+        "trading_mode": execution_metrics.get("mode"),
+        "starting_equity": CSS_STARTING_EQUITY,
+        "last_verified_broker_balance": CSS_LAST_VERIFIED_BROKER_BALANCE,
+        "live_equity": CSS_LIVE_EQUITY,
+        "realized_pnl": execution_metrics.get("realized_pnl"),
+        "unrealized_pnl": execution_metrics.get("unrealized_pnl"),
+        "open_position_count": execution_metrics.get("open_position_count"),
+        "closed_trade_count": execution_metrics.get("closed_trade_count"),
+    })
+
+    return CSS_LIVE_EQUITY
 
 
 def select_trading_mode() -> str:
@@ -447,6 +643,18 @@ def refresh_broker_snapshots() -> None:
                     execution_metrics["unrealized_pnl"] = float(info.get("unrealizedPL") or 0.0)
     except Exception as exc:
         print(f"[BROKER SNAPSHOT WARN] account info unavailable: {str(exc)[:80]}")
+
+    try:
+        broker_balance = fetch_selected_broker_balance()
+        if broker_balance > 0:
+            execution_metrics["broker_balance"] = round(float(broker_balance), 6)
+    except Exception as exc:
+        print(f"[BROKER SNAPSHOT WARN] balance unavailable: {str(exc)[:80]}")
+
+    try:
+        sync_live_equity()
+    except Exception as exc:
+        print(f"[BROKER SNAPSHOT WARN] live equity sync unavailable: {str(exc)[:80]}")
 
     try:
         with open(POSITION_SNAPSHOT_FILE, "w", encoding="utf-8") as f:
@@ -837,6 +1045,11 @@ except Exception as e:
 execution_metrics["mode"] = TRADING_MODE
 execution_metrics["broker"] = BROKER_NAME
 execution_metrics["armed"] = ARMED_FOR_LIVE_TRADING
+
+CSS_STARTING_EQUITY = initialize_css_capital()
+execution_metrics["starting_equity"] = CSS_STARTING_EQUITY
+execution_metrics["broker_balance"] = CSS_LAST_VERIFIED_BROKER_BALANCE
+execution_metrics["live_equity"] = CSS_LIVE_EQUITY
 
 
 pm = PositionManager()
@@ -1252,8 +1465,16 @@ while True:
     winner_sym, winner_val = get_top_winner()
     loser_sym, loser_val = get_top_loser()
 
+    try:
+        live_equity = sync_live_equity()
+    except Exception:
+        live_equity = CSS_LIVE_EQUITY
+
     print("\n--- LIVE EXECUTION SUMMARY ---")
     print(f"TOTAL PNL: {total:+.4f}")
+    print(f"STARTING EQUITY: {CSS_STARTING_EQUITY:,.2f}")
+    print(f"LIVE EQUITY: {live_equity:,.2f}")
+    print(f"BROKER BALANCE (LAST VERIFIED): {CSS_LAST_VERIFIED_BROKER_BALANCE:,.2f}")
     print(f"CRYPTO OPEN: {sum(crypto_trades.values())} | PNL {sum(crypto_pnl.values()):+.4f}")
     print(f"FX OPEN: {sum(fx_trades.values())} | PNL {sum(fx_pnl.values()):+.4f}")
     print(f"OPTIONS OPEN: {sum(options_trades.values())} | PNL {sum(options_pnl.values()):+.4f}")
@@ -1481,4 +1702,6 @@ while True:
     print("\n--- FUTURES SYMBOL BIAS ---")
     print(futures_symbol_bias)
 
+    print(f"\nCycle pause: review dashboard, take screenshots if needed.")
+    input("Press ENTER to continue to next cycle...")
     time.sleep(CYCLE_SLEEP)
