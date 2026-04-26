@@ -1,0 +1,325 @@
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:2:Broker Adapter Manager
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:6:- Resolve the selected broker to the correct adapter class.
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:8:- Keep broker selection explicit and governance-controlled.
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:11:- No silent fallback to another broker.
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:12:- Unsupported brokers must fail closed.
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:20:from .base_adapter import BaseBrokerAdapter, BrokerCapabilityError
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:21:from .broker_registry import get_broker_spec
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:24:class AdapterManagerError(Exception):
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:28:class CoinbaseAdapter(BaseBrokerAdapter):
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:45:            "broker": self.broker_name,
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:64:    def place_order(
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:93:class OandaAdapter(BaseBrokerAdapter):
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:107:            "broker": self.broker_name,
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:126:    def place_order(
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:155:class AlpacaAdapter(BaseBrokerAdapter):
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:169:            "broker": self.broker_name,
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:188:    def place_order(
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:218:ADAPTER_CLASS_REGISTRY: Dict[str, Type[BaseBrokerAdapter]] = {
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:226:    broker_name: str,
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:230:) -> BaseBrokerAdapter:
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:232:    Create a broker adapter instance for the selected broker.
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:235:        AdapterManagerError: If the broker is unsupported or adapter creation fails.
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:236:        BrokerCapabilityError: If the broker does not support the requested asset class.
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:238:    spec = get_broker_spec(broker_name)
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:242:        raise AdapterManagerError(
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:243:            f"No adapter class registered for broker '{broker_name}'."
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:250:            broker_name=spec.name,
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:255:        raise AdapterManagerError(
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:256:            f"Failed to instantiate adapter for broker '{broker_name}': {exc}"
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:260:        raise BrokerCapabilityError(
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\backend\app\brokers\adapter_manager.py:261:            f"Broker '{broker_name}' does not support asset class '{asset_class}'."
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\credential_loader.py:2:Broker Credential Loader
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\credential_loader.py:6:- Load broker credentials from controlled local files.
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\credential_loader.py:7:- Support broker-specific credential formats.
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\credential_loader.py:22:from .broker_registry import get_broker_spec
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\credential_loader.py:26:    """Raised when broker credentials cannot be loaded safely."""
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\credential_loader.py:74:def load_credentials_for_broker(
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\credential_loader.py:75:    broker_name: str,
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\credential_loader.py:79:    Load credentials for the selected broker using the registry metadata.
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\credential_loader.py:82:        broker_name: Normalized broker name (e.g. coinbase, oanda, alpaca)
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\credential_loader.py:91:    spec = get_broker_spec(broker_name)
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\credential_loader.py:101:    broker_name: str,
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\credential_loader.py:105:    Return True if the expected credential file exists for the broker.
+backend\app\backend\app\brokers\backend\app\brokers\backend\app\brokers\credential_loader.py:107:    spec = get_broker_spec(broker_name)
+backend\app\backend\app\brokers\backend\app\brokers\install_utils.py:2:Broker Install Utilities
+backend\app\backend\app\brokers\backend\app\brokers\install_utils.py:6:- Check whether the SDK/package required for a selected broker is installed.
+backend\app\backend\app\brokers\backend\app\brokers\install_utils.py:8:- Support startup-time broker bootstrap validation.
+backend\app\backend\app\brokers\backend\app\brokers\install_utils.py:37:            f"Unrecognized package '{pip_package}' for broker install utility."
+backend\app\backend\app\brokers\backend\app\brokers\install_utils.py:44:    Return True if the broker package is importable in the current environment.
+backend\app\backend\app\brokers\backend\app\brokers\install_utils.py:52:    Install a broker package using pip.
+backend\app\backend\app\brokers\backend\app\brokers\install_utils.py:87:    Ensure the required broker package is installed.
+backend\app\backend\app\brokers\broker_registry.py:2:Broker Registry
+backend\app\backend\app\brokers\broker_registry.py:6:- Maintain the authoritative registry of supported brokers.
+backend\app\backend\app\brokers\broker_registry.py:7:- Provide metadata required by the Broker Bootstrap / Adapter Manager.
+backend\app\backend\app\brokers\broker_registry.py:8:- Keep broker selection governance-controlled and explicit.
+backend\app\backend\app\brokers\broker_registry.py:11:- No silent fallback to another broker.
+backend\app\backend\app\brokers\broker_registry.py:12:- Unsupported brokers must fail closed.
+backend\app\backend\app\brokers\broker_registry.py:23:class BrokerSpec:
+backend\app\backend\app\brokers\broker_registry.py:25:    Immutable broker specification used by bootstrap and adapter layers.
+backend\app\backend\app\brokers\broker_registry.py:37:BROKER_REGISTRY: Dict[str, BrokerSpec] = {
+backend\app\backend\app\brokers\broker_registry.py:38:    "coinbase": BrokerSpec(
+backend\app\backend\app\brokers\broker_registry.py:47:    "oanda": BrokerSpec(
+backend\app\backend\app\brokers\broker_registry.py:56:    "alpaca": BrokerSpec(
+backend\app\backend\app\brokers\broker_registry.py:68:def list_supported_brokers() -> List[str]:
+backend\app\backend\app\brokers\broker_registry.py:70:    Return sorted list of supported broker keys.
+backend\app\backend\app\brokers\broker_registry.py:72:    return sorted(BROKER_REGISTRY.keys())
+backend\app\backend\app\brokers\broker_registry.py:75:def get_broker_spec(broker_name: str) -> BrokerSpec:
+backend\app\backend\app\brokers\broker_registry.py:77:    Fetch a broker specification by normalized broker name.
+backend\app\backend\app\brokers\broker_registry.py:80:        KeyError: If the broker is not registered.
+backend\app\backend\app\brokers\broker_registry.py:82:    key = broker_name.strip().lower()
+backend\app\backend\app\brokers\broker_registry.py:83:    if key not in BROKER_REGISTRY:
+backend\app\backend\app\brokers\broker_registry.py:84:        supported = ", ".join(list_supported_brokers())
+backend\app\backend\app\brokers\broker_registry.py:86:            f"Unsupported broker '{broker_name}'. Supported brokers: {supported}"
+backend\app\backend\app\brokers\broker_registry.py:88:    return BROKER_REGISTRY[key]
+backend\app\backend\app\brokers\broker_registry.py:91:def broker_supports_mode(broker_name: str, mode: str) -> bool:
+backend\app\backend\app\brokers\broker_registry.py:93:    Return True if the broker supports the requested mode.
+backend\app\backend\app\brokers\broker_registry.py:95:    spec = get_broker_spec(broker_name)
+backend\app\backend\app\brokers\broker_registry.py:106:def broker_supports_asset_class(broker_name: str, asset_class: str) -> bool:
+backend\app\backend\app\brokers\broker_registry.py:108:    Return True if the broker supports the requested asset class.
+backend\app\backend\app\brokers\broker_registry.py:110:    spec = get_broker_spec(broker_name)
+backend\app\brokers\base.py:1:# backend/app/brokers/base.py
+backend\app\brokers\base.py:20:    broker: str
+backend\app\brokers\base.py:29:class BrokerAdapter(Protocol):
+backend\app\brokers\base.py:35:    def place_order(self, req: OrderRequest) -> OrderResult:
+backend\app\brokers\base_adapter.py:2:Base Broker Adapter
+backend\app\brokers\base_adapter.py:6:- Define the minimum broker adapter contract for all supported brokers.
+backend\app\brokers\base_adapter.py:7:- Ensure strategy, execution, and bootstrap layers interact with a stable interface.
+backend\app\brokers\base_adapter.py:8:- Enforce a governance-first, broker-agnostic architecture.
+backend\app\brokers\base_adapter.py:22:class BrokerAdapterError(Exception):
+backend\app\brokers\base_adapter.py:23:    """Base exception for broker adapter failures."""
+backend\app\brokers\base_adapter.py:26:class BrokerConnectionError(BrokerAdapterError):
+backend\app\brokers\base_adapter.py:27:    """Raised when broker connection fails."""
+backend\app\brokers\base_adapter.py:30:class BrokerCapabilityError(BrokerAdapterError):
+backend\app\brokers\base_adapter.py:31:    """Raised when a broker does not support a requested feature."""
+backend\app\brokers\base_adapter.py:34:class BaseBrokerAdapter(ABC):
+backend\app\brokers\base_adapter.py:36:    Abstract base class for all broker adapters.
+backend\app\brokers\base_adapter.py:38:    Every broker implementation should inherit from this class and implement
+backend\app\brokers\base_adapter.py:39:    the required interface methods below.
+backend\app\brokers\base_adapter.py:44:        broker_name: str,
+backend\app\brokers\base_adapter.py:48:        self.broker_name = broker_name.strip().lower()
+backend\app\brokers\base_adapter.py:59:                f"Invalid broker mode '{self.mode}'. Allowed modes: {sorted(allowed)}"
+backend\app\brokers\base_adapter.py:71:        Establish broker connection.
+backend\app\brokers\base_adapter.py:77:            BrokerConnectionError: If connection fails.
+backend\app\brokers\base_adapter.py:83:        """Close broker connection cleanly."""
+backend\app\brokers\base_adapter.py:118:    def place_order(
+backend\app\brokers\base_adapter.py:128:        Place an order through the broker.
+backend\app\brokers\base_adapter.py:130:        Returns a broker-normalized response payload.
+backend\app\brokers\base_adapter.py:141:        """Return True if the broker supports the requested asset class."""
+backend\app\brokers\base_adapter.py:151:            "broker_name": self.broker_name,
+backend\app\brokers\base_adapter.py:159:            f"broker_name='{self.broker_name}', "
+backend\app\brokers\broker_bootstrap.py:3:Broker Bootstrap — LIVE-LOCKED SAFE VERSION
+backend\app\brokers\broker_bootstrap.py:7:Responsible for initializing the selected broker adapter during system startup.
+backend\app\brokers\broker_bootstrap.py:11:1. User selects broker (Coinbase, OANDA, Alpaca, Futures Sim, etc.)
+backend\app\brokers\broker_bootstrap.py:12:2. Broker registry validates selection
+backend\app\brokers\broker_bootstrap.py:20:- No silent fallback to another broker.
+backend\app\brokers\broker_bootstrap.py:31:from .broker_registry import (
+backend\app\brokers\broker_bootstrap.py:32:    broker_supports_mode,
+backend\app\brokers\broker_bootstrap.py:33:    get_adapter,
+backend\app\brokers\broker_bootstrap.py:34:    get_broker_spec,
+backend\app\brokers\broker_bootstrap.py:35:    normalize_broker_name,
+backend\app\brokers\broker_bootstrap.py:38:from .install_utils import ensure_broker_dependencies
+backend\app\brokers\broker_bootstrap.py:41:class BrokerBootstrapError(Exception):
+backend\app\brokers\broker_bootstrap.py:42:    """Raised when broker initialization fails."""
+backend\app\brokers\broker_bootstrap.py:47:    broker_name: str,
+backend\app\brokers\broker_bootstrap.py:52:    Instantiate broker adapters safely across different constructor styles.
+backend\app\brokers\broker_bootstrap.py:65:    key = normalize_broker_name(broker_name)
+backend\app\brokers\broker_bootstrap.py:70:            raise BrokerBootstrapError(
+backend\app\brokers\broker_bootstrap.py:72:                "Silent paper/simulation fallback is not allowed from broker_bootstrap.py."
+backend\app\brokers\broker_bootstrap.py:95:        raise BrokerBootstrapError(
+backend\app\brokers\broker_bootstrap.py:96:            f"Unable to initialize adapter for broker '{broker_name}'. "
+backend\app\brokers\broker_bootstrap.py:101:def initialize_broker(broker_name: str, mode: str = "paper") -> Any:
+backend\app\brokers\broker_bootstrap.py:103:    Initialize a broker adapter.
+backend\app\brokers\broker_bootstrap.py:107:    broker_name:
+backend\app\brokers\broker_bootstrap.py:108:        Name of broker: coinbase, oanda, alpaca, futures_sim.
+backend\app\brokers\broker_bootstrap.py:118:    broker_key = normalize_broker_name(broker_name)
+backend\app\brokers\broker_bootstrap.py:121:    print(f"[BROKER BOOTSTRAP] Initializing broker: {broker_key}")
+backend\app\brokers\broker_bootstrap.py:122:    print(f"[BROKER BOOTSTRAP] Mode: {mode_key}")
+backend\app\brokers\broker_bootstrap.py:127:    if broker_key == "coinbase" and mode_key != "live":
+backend\app\brokers\broker_bootstrap.py:128:        raise BrokerBootstrapError(
+backend\app\brokers\broker_bootstrap.py:134:        spec = get_broker_spec(broker_key)
+backend\app\brokers\broker_bootstrap.py:136:        raise BrokerBootstrapError(str(exc)) from exc
+backend\app\brokers\broker_bootstrap.py:138:    if not broker_supports_mode(broker_key, mode_key):
+backend\app\brokers\broker_bootstrap.py:139:        raise BrokerBootstrapError(
+backend\app\brokers\broker_bootstrap.py:140:            f"Broker '{broker_key}' does not support mode '{mode_key}'."
+backend\app\brokers\broker_bootstrap.py:143:    dep_status = ensure_broker_dependencies(broker_key, auto_install=False)
+backend\app\brokers\broker_bootstrap.py:145:        raise BrokerBootstrapError(
+backend\app\brokers\broker_bootstrap.py:146:            f"Dependency missing for broker '{broker_key}': "
+backend\app\brokers\broker_bootstrap.py:151:        creds = load_credentials(broker_key, mode=mode_key)
+backend\app\brokers\broker_bootstrap.py:153:        raise BrokerBootstrapError(
+backend\app\brokers\broker_bootstrap.py:154:            f"Credential load failed for broker '{broker_key}': {exc}"
+backend\app\brokers\broker_bootstrap.py:158:        raise BrokerBootstrapError(
+backend\app\brokers\broker_bootstrap.py:159:            f"No live credentials found for broker: {broker_key}"
+backend\app\brokers\broker_bootstrap.py:162:    adapter_cls = get_adapter(broker_key)
+backend\app\brokers\broker_bootstrap.py:164:        raise BrokerBootstrapError(
+backend\app\brokers\broker_bootstrap.py:165:            f"No adapter registered for broker: {broker_key}"
+backend\app\brokers\broker_bootstrap.py:170:        broker_name=broker_key,
+backend\app\brokers\broker_bootstrap.py:177:    if broker_key == "coinbase":
+backend\app\brokers\broker_bootstrap.py:180:            raise BrokerBootstrapError(
+backend\app\brokers\broker_bootstrap.py:190:            raise BrokerBootstrapError(
+backend\app\brokers\broker_bootstrap.py:191:                f"Broker '{broker_key}' connect() failed: {exc}"
+backend\app\brokers\broker_bootstrap.py:202:            raise BrokerBootstrapError(
+backend\app\brokers\broker_bootstrap.py:203:                f"Broker '{broker_key}' is not configured for live mode."
+backend\app\brokers\broker_bootstrap.py:206:    print(f"[BROKER BOOTSTRAP] {broker_key} successfully initialized")
+backend\app\brokers\broker_gate_audit.py:3:Broker Gate Audit Logger
+backend\app\brokers\broker_gate_audit.py:7:Writes an audit record every time any broker/instrument execution gate
+backend\app\brokers\broker_gate_audit.py:10:This module is broker-neutral and instrument-neutral.
+backend\app\brokers\broker_gate_audit.py:17:    audit_logs/broker_gate_audit.jsonl
+backend\app\brokers\broker_gate_audit.py:28:class BrokerGateAuditLogger:
+backend\app\brokers\broker_gate_audit.py:30:        self.audit_file = audit_file or Path("audit_logs") / "broker_gate_audit.jsonl"
+backend\app\brokers\broker_gate_audit.py:36:        broker: str,
+backend\app\brokers\broker_gate_audit.py:45:        selected_broker: str = "",
+backend\app\brokers\broker_gate_audit.py:46:        broker_mode: str = "",
+backend\app\brokers\broker_gate_audit.py:54:            "event": "broker_gate_decision",
+backend\app\brokers\broker_gate_audit.py:55:            "broker": str(broker),
+backend\app\brokers\broker_gate_audit.py:64:            "selected_broker": str(selected_broker),
+backend\app\brokers\broker_gate_audit.py:65:            "broker_mode": str(broker_mode),
+backend\app\brokers\broker_registry.py:2:Broker Registry
+backend\app\brokers\broker_registry.py:6:- Maintain the authoritative registry of supported brokers.
+backend\app\brokers\broker_registry.py:7:- Provide metadata required by the Broker Bootstrap / Adapter Manager.
+backend\app\brokers\broker_registry.py:8:- Keep broker selection governance-controlled and explicit.
+backend\app\brokers\broker_registry.py:9:- Resolve adapter classes lazily so missing optional broker packages do not
+backend\app\brokers\broker_registry.py:10:  break unrelated brokers.
+backend\app\brokers\broker_registry.py:13:- No silent fallback to another broker.
+backend\app\brokers\broker_registry.py:14:- Unsupported brokers must fail closed.
+backend\app\brokers\broker_registry.py:25:class BrokerSpec:
+backend\app\brokers\broker_registry.py:27:    Immutable broker specification used by bootstrap and adapter layers.
+backend\app\brokers\broker_registry.py:39:BROKER_REGISTRY: Dict[str, BrokerSpec] = {
+backend\app\brokers\broker_registry.py:40:    "coinbase": BrokerSpec(
+backend\app\brokers\broker_registry.py:49:    "oanda": BrokerSpec(
+backend\app\brokers\broker_registry.py:58:    "alpaca": BrokerSpec(
+backend\app\brokers\broker_registry.py:67:    "futures_sim": BrokerSpec(
+backend\app\brokers\broker_registry.py:79:BROKER_ALIASES: Dict[str, str] = {
+backend\app\brokers\broker_registry.py:90:def normalize_broker_name(broker_name: str) -> str:
+backend\app\brokers\broker_registry.py:92:    Normalize broker names and aliases to registry keys.
+backend\app\brokers\broker_registry.py:94:    key = (broker_name or "").strip().lower()
+backend\app\brokers\broker_registry.py:95:    return BROKER_ALIASES.get(key, key)
+backend\app\brokers\broker_registry.py:98:def list_supported_brokers() -> List[str]:
+backend\app\brokers\broker_registry.py:100:    Return sorted list of supported broker keys.
+backend\app\brokers\broker_registry.py:102:    return sorted(BROKER_REGISTRY.keys())
+backend\app\brokers\broker_registry.py:105:def get_broker_spec(broker_name: str) -> BrokerSpec:
+backend\app\brokers\broker_registry.py:107:    Fetch a broker specification by normalized broker name.
+backend\app\brokers\broker_registry.py:110:        KeyError: If the broker is not registered.
+backend\app\brokers\broker_registry.py:112:    key = normalize_broker_name(broker_name)
+backend\app\brokers\broker_registry.py:113:    if key not in BROKER_REGISTRY:
+backend\app\brokers\broker_registry.py:114:        supported = ", ".join(list_supported_brokers())
+backend\app\brokers\broker_registry.py:116:            f"Unsupported broker '{broker_name}'. Supported brokers: {supported}"
+backend\app\brokers\broker_registry.py:118:    return BROKER_REGISTRY[key]
+backend\app\brokers\broker_registry.py:121:def broker_supports_mode(broker_name: str, mode: str) -> bool:
+backend\app\brokers\broker_registry.py:123:    Return True if the broker supports the requested mode.
+backend\app\brokers\broker_registry.py:125:    spec = get_broker_spec(broker_name)
+backend\app\brokers\broker_registry.py:136:def broker_supports_asset_class(broker_name: str, asset_class: str) -> bool:
+backend\app\brokers\broker_registry.py:138:    Return True if the broker supports the requested asset class.
+backend\app\brokers\broker_registry.py:140:    spec = get_broker_spec(broker_name)
+backend\app\brokers\broker_registry.py:145:def get_adapter(broker_name: str) -> Optional[Type[Any]]:
+backend\app\brokers\broker_registry.py:147:    Resolve and return the adapter class for the selected broker.
+backend\app\brokers\broker_registry.py:155:    key = normalize_broker_name(broker_name)
+backend\app\brokers\broker_registry.py:180:            from backend.broker.coinbase_adapter import CoinbaseAdapter
+backend\app\brokers\coinbase_live_order_gate.py:14:1. Global broker execution must be armed.
+backend\app\brokers\coinbase_live_order_gate.py:15:2. Selected broker must be COINBASE.
+backend\app\brokers\coinbase_live_order_gate.py:16:3. Broker mode must be live.
+backend\app\brokers\coinbase_live_order_gate.py:43:    selected_broker: str = ""
+backend\app\brokers\coinbase_live_order_gate.py:51:    reused by execution engines, broker runners, and audit-governed live trading.
+backend\app\brokers\coinbase_live_order_gate.py:86:        broker_execution_armed: bool,
+backend\app\brokers\coinbase_live_order_gate.py:87:        selected_broker: str,
+backend\app\brokers\coinbase_live_order_gate.py:88:        broker_mode: str,
+backend\app\brokers\coinbase_live_order_gate.py:95:        selected = (selected_broker or "").strip().upper()
+backend\app\brokers\coinbase_live_order_gate.py:96:        mode = (broker_mode or "").strip().lower()
+backend\app\brokers\coinbase_live_order_gate.py:105:        if not broker_execution_armed:
+backend\app\brokers\coinbase_live_order_gate.py:108:                "BROKER_EXECUTION_NOT_ARMED",
+backend\app\brokers\coinbase_live_order_gate.py:118:                f"SELECTED_BROKER_NOT_COINBASE_{selected}",
+backend\app\brokers\credential_loader.py:2:Broker Credential Loader
+backend\app\brokers\credential_loader.py:6:- Load broker credentials from controlled local files.
+backend\app\brokers\credential_loader.py:7:- Support broker-specific credential formats.
+backend\app\brokers\credential_loader.py:10:    - load_credentials_for_broker(...)
+backend\app\brokers\credential_loader.py:25:from .broker_registry import get_broker_spec
+backend\app\brokers\credential_loader.py:29:    """Raised when broker credentials cannot be loaded safely."""
+backend\app\brokers\credential_loader.py:77:def _load_from_environment(broker_name: str) -> Dict[str, Any]:
+backend\app\brokers\credential_loader.py:84:    key = (broker_name or "").strip().lower()
+backend\app\brokers\credential_loader.py:121:def load_credentials_for_broker(
+backend\app\brokers\credential_loader.py:122:    broker_name: str,
+backend\app\brokers\credential_loader.py:128:    Load credentials for the selected broker using registry metadata.
+backend\app\brokers\credential_loader.py:131:        broker_name: Normalized broker name, e.g. coinbase, oanda, alpaca.
+backend\app\brokers\credential_loader.py:139:    spec = get_broker_spec(broker_name)
+backend\app\brokers\credential_loader.py:162:            f"No credentials found for broker '{broker_name}' via file or environment."
+backend\app\brokers\credential_loader.py:169:    broker_name: str,
+backend\app\brokers\credential_loader.py:174:    Compatibility wrapper used by broker_bootstrap.py.
+backend\app\brokers\credential_loader.py:185:    return load_credentials_for_broker(
+backend\app\brokers\credential_loader.py:186:        broker_name=broker_name,
+backend\app\brokers\credential_loader.py:194:    broker_name: str,
+backend\app\brokers\credential_loader.py:198:    Return True if the expected credential file exists for the broker.
+backend\app\brokers\credential_loader.py:200:    spec = get_broker_spec(broker_name)
+backend\app\brokers\install_utils.py:2:Broker Install Utilities
+backend\app\brokers\install_utils.py:6:- Check whether the SDK/package required for a selected broker is installed.
+backend\app\brokers\install_utils.py:8:- Support startup-time broker bootstrap validation.
+backend\app\brokers\install_utils.py:23:from .broker_registry import get_broker_spec
+backend\app\brokers\install_utils.py:40:            f"Unrecognized package '{pip_package}' for broker install utility."
+backend\app\brokers\install_utils.py:47:    Return True if the broker package is importable in the current environment.
+backend\app\brokers\install_utils.py:58:    Install a broker package using pip.
+backend\app\brokers\install_utils.py:96:    Ensure the required broker package is installed.
+backend\app\brokers\install_utils.py:126:def ensure_broker_dependencies(
+backend\app\brokers\install_utils.py:127:    broker_name: str,
+backend\app\brokers\install_utils.py:131:    Compatibility wrapper used by broker_bootstrap.py.
+backend\app\brokers\install_utils.py:133:    Looks up the broker in the registry, then checks its required package.
+backend\app\brokers\install_utils.py:136:    spec = get_broker_spec(broker_name)
+backend\app\brokers\install_utils.py:144:            "broker": spec.name,
+backend\app\brokers\install_utils.py:151:    status["broker"] = spec.name
+backend\app\brokers\oanda_adapter.py:11:    - place_order(...)
+backend\app\brokers\oanda_adapter.py:107:    def place_order(
+backend\app\brokers\oanda_adapter.py:117:          - place_order(OrderRequest(...))
+backend\app\brokers\oanda_adapter.py:118:          - place_order(symbol="EUR_USD", units=1, side="BUY")
+backend\app\engine_data.py:35:    Abstract interface for data providers.
+backend\app\engine_data.py:48:    - Avoids broker wiring until BROKER phase.
+backend\app\financial_statements.py:6:Uses reporting_store as the read-only interface to the immutable journal.
+backend\app\global_futures_store.py:8:- backward compatible interface
+backend\app\phase1_smoke_test.py:67:        from backend.app.brokers.oanda_adapter import OandaAdapter
+backend\app\risk\futures_contract_specs.py:72:    # approval, not broker-native contract specs.
+backend\app\risk\futures_position_manager.py:21:from backend.app.brokers.futures_sim_adapter import FuturesSimAdapter
+backend\app\risk\portfolio_risk_engine.py:11:- No broker calls
+backend\app\run_demo_guarded.py:15:from backend.app.brokers.oanda_adapter import OandaAdapter, OrderRequest
+backend\app\run_demo_guarded.py:73:    result = adapter.place_order(order=order)
+backend\app\run_live_guarded.py:56:        from backend.app.brokers.oanda_adapter import OandaAdapter, OrderRequest  # type: ignore
+backend\app\run_live_guarded.py:236:        order_result = oanda.place_order(req)
+backend\app\run_live_guarded.py:238:        _abort(f"OANDA place_order failed: {e}")
+backend\app\run_practice_guarded.py:7:from backend.app.brokers.oanda_adapter import OandaAdapter
+backend\app\simulator.py:32:    This is a Phase-1 sanity test only (no broker, no execution).
+backend\broker\coinbase_adapter.py:3:Coinbase Broker Adapter
+backend\broker\coinbase_adapter.py:7:can be swapped for other brokers later.
+backend\data\coinbase_historical_downloader.py:13:BASE_URL = "https://api.coinbase.com/api/v3/brokerage/market/products"
+backend\engine\css_trading_engine.py:14:from backend.scanner.unified_market_scanner import UnifiedMarketScanner
+backend\engine\css_trading_engine.py:34:        self.scanner = UnifiedMarketScanner()
+backend\engine\css_trading_engine_before_range_upgrade.py:20:from engine.brokers.oanda_paper_broker import OandaPaperBroker
+backend\engine\css_trading_engine_before_range_upgrade.py:56:        self.fx_broker = OandaPaperBroker()
+backend\engine\css_trading_engine_before_range_upgrade.py:343:        result = self.fx_broker.submit_order(
+backend\execution\execution_cost_engine.py:29:    - No live broker dependency
+backend\governance\css_unified_trade_gate.py:50:class CSSUnifiedTradeGate:
+backend\intelligence\feature_builder.py:16:    - Backward-compatible enrich_rows(rows) interface
+backend\intelligence\opportunity_router.py:12:from backend.scanner.unified_market_scanner import UnifiedMarketScanner
+backend\intelligence\opportunity_router.py:34:        self.scanner = UnifiedMarketScanner()
+backend\intelligence\trade_decision_orchestrator.py:17:from backend.governance.css_unified_trade_gate import CSSUnifiedTradeGate
+backend\intelligence\trade_decision_orchestrator.py:49:        self.trade_gate = CSSUnifiedTradeGate()
+backend\risk\session_policy_loader.py:157:    broker_mode = _prompt_nonempty("Broker mode (paper/live): ").lower()
+backend\risk\session_policy_loader.py:171:        broker_mode=broker_mode,
+backend\risk\session_risk_policy.py:27:    broker_mode: str
+backend\risk\session_risk_policy.py:56:        broker_mode="paper",
+backend\risk\session_risk_policy.py:97:        broker_mode="paper",
+backend\risk\session_risk_policy.py:127:        broker_mode="paper",
+backend\risk\session_risk_policy.py:150:    broker_mode: str,
+backend\risk\session_risk_policy.py:169:        broker_mode=broker_mode,
+backend\scanner\coinbase_universe.py:9:    CSS Broker-Agnostic Market Discovery Engine
+backend\scanner\coinbase_universe.py:13:    - discover tradable instruments from a broker/venue
+backend\scanner\coinbase_universe.py:19:    - broker-agnostic outer interface
+backend\scanner\coinbase_universe.py:20:    - broker-specific fetch methods contained internally
+backend\scanner\coinbase_universe.py:65:    # BROKER-AGNOSTIC ROUTERS
+backend\scanner\coinbase_universe.py:71:        # Placeholder for future brokers
+backend\scanner\coinbase_universe.py:78:        # Placeholder for future brokers
+backend\scanner\coinbase_universe.py:91:        and can be replaced/extended per broker later.
+backend\scanner\options_chain_adapter.py:61:    - Uses MOCK chains (no broker dependency yet)
+backend\scanner\options_chain_adapter.py:63:    - NO execution at broker layer
+backend\scanner\options_chain_adapter.py:67:    - Plug into real broker APIs (Alpaca / Tradier / IBKR)
+backend\scanner\unified_market_scanner.py:4:Unified Market Scanner
+backend\scanner\unified_market_scanner.py:15:- simple scan() interface
+backend\scanner\unified_market_scanner.py:102:class UnifiedMarketScanner:
+backend\trading\profit_manager.py:88:# UNIFIED PROFIT MANAGER
+backend\trading\profit_manager.py:93:    Unified live CSS profit manager.
+backend\trading\profit_manager.py:330:    print("\n=== UNIFIED PROFIT MANAGER TEST ===\n")

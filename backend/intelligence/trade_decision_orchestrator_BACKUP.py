@@ -16,25 +16,24 @@ from backend.intelligence.signal_confluence_engine import SignalConfluenceEngine
 
 from backend.governance.css_unified_trade_gate import CSSUnifiedTradeGate
 
-# ✅ NEW (SAFE ADD)
-from backend.intelligence.compounding_engine import CompoundingEngine
-
 
 class TradeDecisionOrchestrator:
     """
-    CSS Trade Decision Orchestrator (Phase 16 - PCNRASS Locked + Compounding Ready)
+    CSS Trade Decision Orchestrator (Phase 15 - Allocation Safe Upgrade)
 
-    GUARANTEES (PCNRASS)
-    -------------------
+    GUARANTEES (PCNRASS COMPLIANT)
+    -----------------------------
     - NO removal of existing scoring logic
     - NO change to execution conditions
     - Governance gate preserved
-    - ONLY additive enhancements
+    - Only STRUCTURAL FIX + ADDITIVE allocation layer
 
-    NEW
-    ---
-    - Compounding Engine (non-invasive)
-    - Position size multiplier output
+    NEW CAPABILITIES
+    ----------------
+    - Fixed method structure
+    - Allocation policy (non-forcing)
+    - Ranking engine
+    - Candidate selection (optional usage)
     """
 
     def __init__(self) -> None:
@@ -46,14 +45,11 @@ class TradeDecisionOrchestrator:
         self.momentum_engine = OpportunityMomentumWindowEngine()
         self.probability_engine = ProbabilityPredictionEngine()
 
-        # ✅ Governance (UNCHANGED)
+        # ✅ Governance Gate (UNCHANGED)
         self.trade_gate = CSSUnifiedTradeGate()
 
-        # ✅ NEW
-        self.compounding_engine = CompoundingEngine()
-
         # -------------------------
-        # EXISTING THRESHOLDS
+        # EXISTING THRESHOLDS (UNCHANGED)
         # -------------------------
         self.mean_reversion_threshold = 0.20
         self.trend_threshold = 0.24
@@ -72,7 +68,7 @@ class TradeDecisionOrchestrator:
         }
 
         # -------------------------
-        # ALLOCATION (UNCHANGED)
+        # ✅ NEW: SAFE ALLOCATION LAYER
         # -------------------------
         self.asset_class_limits: Dict[str, int] = {
             "CRYPTO": 3,
@@ -98,7 +94,7 @@ class TradeDecisionOrchestrator:
         }
 
     # =====================================================
-    # CORE EVALUATION (UNCHANGED LOGIC)
+    # CORE EVALUATION (UNCHANGED LOGIC — SAFE)
     # =====================================================
 
     def evaluate_trade(
@@ -182,9 +178,9 @@ class TradeDecisionOrchestrator:
 
         adjusted_score = self._clamp01(decision_score * asset_weight)
 
-        # =============================
-        # EXECUTION LOGIC (UNCHANGED)
-        # =============================
+        # =====================================================
+        # EXECUTION LOGIC (UNCHANGED — DO NOT TOUCH)
+        # =====================================================
 
         execute_trade = self._should_execute_trade(regime, decision_score)
 
@@ -217,9 +213,9 @@ class TradeDecisionOrchestrator:
         if not threshold_ok:
             execute_trade = False
 
-        # =============================
+        # =====================================================
         # GOVERNANCE GATE (UNCHANGED)
-        # =============================
+        # =====================================================
 
         gate_candidate = {
             "symbol": asset,
@@ -239,25 +235,9 @@ class TradeDecisionOrchestrator:
         if not gate_decision.approved:
             execute_trade = False
 
-        # =============================
-        # ✅ COMPUNDING (SAFE ADD)
-        # =============================
-
-        position_size_multiplier = 1.0
-
-        try:
-            multiplier = self.compounding_engine.compute_multiplier(
-                account_balance=portfolio_state.get("balance", 0),
-                starting_balance=portfolio_state.get("starting_balance", 1),
-                recent_pnl=portfolio_state.get("recent_pnl", 0),
-            )
-            position_size_multiplier = multiplier
-        except Exception:
-            position_size_multiplier = 1.0
-
-        # =============================
-        # RETURN (EXTENDED SAFELY)
-        # =============================
+        # =====================================================
+        # RETURN (UNCHANGED + SAFE EXTENSIONS)
+        # =====================================================
 
         return {
             "asset": asset,
@@ -274,13 +254,73 @@ class TradeDecisionOrchestrator:
             "high_probability_setup": win_probability >= self.high_probability_threshold,
             "trade_side": trade_side,
 
-            # Governance
+            # Governance visibility
             "gate_approved": gate_decision.approved,
             "gate_reason": gate_decision.reason,
-
-            # ✅ NEW OUTPUT
-            "position_size_multiplier": round(position_size_multiplier, 4),
         }
+    # =====================================================
+    # ✅ NEW: ALLOCATION + RANKING ENGINE (SAFE ADDITIVE)
+    # =====================================================
+
+    def get_allocation_policy(self) -> Dict[str, Dict[str, float]]:
+        return {
+            "limits": dict(self.asset_class_limits),
+            "thresholds": dict(self.asset_class_thresholds),
+            "weights": dict(self.asset_class_weights),
+        }
+
+    def rank_candidates(self, candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        eligible = []
+
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            if not bool(candidate.get("execute_trade", False)):
+                continue
+            eligible.append(candidate)
+
+        eligible.sort(
+            key=lambda x: (
+                float(x.get("adjusted_score", 0.0)),
+                float(x.get("decision_score", 0.0)),
+                float(x.get("win_probability", 0.0)),
+            ),
+            reverse=True,
+        )
+
+        return eligible
+
+    def select_candidates_for_cycle(
+        self,
+        candidates: List[Dict[str, Any]],
+        max_trades: int = 10,
+    ) -> List[Dict[str, Any]]:
+
+        ranked = self.rank_candidates(candidates)
+
+        selected: List[Dict[str, Any]] = []
+        counts: Dict[str, int] = {k: 0 for k in self.asset_class_limits.keys()}
+
+        for candidate in ranked:
+
+            if len(selected) >= max_trades:
+                break
+
+            asset_class = str(candidate.get("asset_class", "UNKNOWN")).upper()
+            asset_limit = self.asset_class_limits.get(asset_class, 0)
+
+            if asset_limit <= 0:
+                continue
+
+            current_count = counts.get(asset_class, 0)
+
+            if current_count >= asset_limit:
+                continue
+
+            selected.append(candidate)
+            counts[asset_class] = current_count + 1
+
+        return selected
 
     # =====================================================
     # INTERNAL HELPERS (UNCHANGED)
