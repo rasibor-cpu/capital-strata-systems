@@ -200,6 +200,83 @@ def safe_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+
+
+# ==============================
+# ENHANCED DASHBOARD METRICS (PCNRASS SAFE)
+# ==============================
+
+def render_enhanced_metrics():
+    """
+    Display-only dashboard enhancement.
+
+    PCNRASS safety:
+    - Reads existing state only.
+    - Does not place orders.
+    - Does not mutate broker, routing, position, PnL, risk, or allocation logic.
+    - Failure is contained to a warning line so the main dashboard continues.
+    """
+    try:
+        total_pnl = get_total_pnl()
+        live_equity = safe_float(globals().get("CSS_LIVE_EQUITY"), 0.0)
+        broker_balance = safe_float(globals().get("CSS_LAST_VERIFIED_BROKER_BALANCE"), 0.0)
+        starting_equity = safe_float(globals().get("CSS_STARTING_EQUITY"), 0.0)
+        asset_pnls = get_asset_class_pnls()
+
+        open_total = (
+            get_asset_open_count("CRYPTO")
+            + get_asset_open_count("FX")
+            + get_asset_open_count("OPTIONS")
+            + get_asset_open_count("FUTURES")
+        )
+
+        print("\n=== ENHANCED PERFORMANCE PANEL ===")
+        print(f"Starting Equity: {starting_equity:,.2f}")
+        print(f"Broker Balance:  {broker_balance:,.2f}")
+        print(f"Live Equity:     {live_equity:,.2f}")
+        print(f"Total PnL:       {total_pnl:+.4f}")
+        print(f"Open Exposure Count: {open_total}")
+
+        print("\n--- Asset-Class PnL Breakdown ---")
+        for asset_name in ["CRYPTO", "FX", "OPTIONS", "FUTURES"]:
+            pnl_value = safe_float(asset_pnls.get(asset_name), 0.0)
+            open_count = get_asset_open_count(asset_name)
+            max_open = MAX_ASSET_OPEN_POSITIONS.get(asset_name, 0)
+            cycle_max = MAX_NEW_PER_CYCLE.get(asset_name, 0)
+            print(
+                f"{asset_name:<8} | PnL {pnl_value:+.4f} | "
+                f"Open {open_count}/{max_open} | Cycle Cap {cycle_max}"
+            )
+
+        print("\n--- Adaptive Scaling Insight ---")
+        if total_pnl > 0 and live_equity >= starting_equity:
+            scaling_mode = "EXPANSION WATCH — capital base improving"
+        elif total_pnl < 0:
+            scaling_mode = "DEFENSIVE WATCH — risk should tighten if losses persist"
+        else:
+            scaling_mode = "NEUTRAL WATCH — no scaling pressure"
+
+        print(f"Scaling Mode: {scaling_mode}")
+        print(f"Winner-Run Flags: {execution_metrics.get('winner_run_active', 0)}")
+        print(f"Loser-Cut Flags:  {execution_metrics.get('loser_cut_active', 0)}")
+
+        print("\n--- Broker / Governance Snapshot ---")
+        print(
+            f"Mode: {execution_metrics.get('mode')} | "
+            f"Broker: {execution_metrics.get('broker')} | "
+            f"Armed: {execution_metrics.get('armed')}"
+        )
+        print(
+            f"Orders Sent: {execution_metrics.get('orders_sent', 0)} | "
+            f"Blocked: {execution_metrics.get('orders_blocked', 0)} | "
+            f"Fills: {execution_metrics.get('fills_recorded', 0)}"
+        )
+        print("====================================\n")
+
+    except Exception as exc:
+        print(f"[ENHANCED METRICS WARN] {str(exc)[:120]}")
+
+
 def load_account_state() -> Dict[str, Any]:
     try:
         if ACCOUNT_STATE_FILE.exists():
@@ -1494,6 +1571,8 @@ while True:
     print(f"OPEN POSITIONS: {execution_metrics['open_position_count']} | CLOSED TRADES: {execution_metrics['closed_trade_count']}")
     print(f"WINNER-RUN FLAGS: {execution_metrics['winner_run_active']} | LOSER-CUT FLAGS: {execution_metrics['loser_cut_active']}")
     print("-" * 60)
+
+    render_enhanced_metrics()
 
     regime_board = []
     vwap_board = []
