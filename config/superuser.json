@@ -1,8 +1,11 @@
 {
   "primary": {
+    "user_id": "00000",
     "name": "Robert Asibor",
-    "email": "rasibor@gmail.com",
-    "phone_e164": "+12149726804"
+    "email": "rasibon@gmail.com",
+    "phone_e164": "+12149726804",
+    "role": "ADMIN",
+    "permissions": ["*"]
   },
   "delegates": [
     {
