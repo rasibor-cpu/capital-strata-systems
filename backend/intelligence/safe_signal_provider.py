@@ -1,138 +1,122 @@
 from __future__ import annotations
 
-import random
-from typing import Any
+from typing import Any, Tuple
 
-
-try:
-    from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
-except Exception:
-    AIOpportunityScorer = None
-
-try:
-    from backend.intelligence.signal_confluence_engine import SignalConfluenceEngine
-except Exception:
-    SignalConfluenceEngine = None
-
-
-def _coerce_number(value: Any, default: float) -> float:
-    try:
-        if isinstance(value, dict):
-            for key in (
-                "score",
-                "signal_score",
-                "value",
-                "probability",
-                "prob",
-                "confidence",
-                "confidence_score",
-            ):
-                if key in value:
-                    return float(value[key])
-            return float(default)
-
-        if isinstance(value, (int, float)):
-            return float(value)
-
-        if isinstance(value, str):
-            try:
-                return float(value.strip())
-            except Exception:
-                return float(default)
-
-        for attr in (
-            "score",
-            "signal_score",
-            "value",
-            "probability",
-            "prob",
-            "confidence",
-            "confidence_score",
-        ):
-            if hasattr(value, attr):
-                return float(getattr(value, attr))
-
-        return float(default)
-    except Exception:
-        return float(default)
+from backend.data.coinbase_historical_downloader import load_runtime_asset
 
 
 class SafeSignalProvider:
     """
-    PCNRASS-compliant signal provider.
+    Phase 3D-F: Futures-calibrated provider with directional-entry refinement.
 
-    Contract:
-    - Never crashes dashboard
-    - Never blocks trade loop
-    - Uses intelligence modules only when their output is usable
-    - Falls back safely when modules return strings/None/unexpected objects
+    PCNRASS intent:
+    - Preserve working futures activation from Phase 3D-E
+    - Keep crypto/FX selective
+    - Add momentum-direction confirmation to reduce early entries
+    - No random fallback
+    - Deterministic output
     """
 
     def __init__(self) -> None:
-        self.ai_scorer = None
-        self.confluence = None
+        self.last_symbol = None
+        self.repeat_count = 0
 
-        if AIOpportunityScorer is not None:
-            try:
-                self.ai_scorer = AIOpportunityScorer()
-            except Exception as exc:
-                print(f"[SIGNAL INIT FALLBACK] AIOpportunityScorer unavailable: {str(exc)[:80]}")
-                self.ai_scorer = None
+    def _num(self, v: Any, d: float = 0.0) -> float:
+        try:
+            if v is None:
+                return d
+            return float(v)
+        except Exception:
+            return d
 
-        if SignalConfluenceEngine is not None:
-            try:
-                self.confluence = SignalConfluenceEngine()
-            except Exception as exc:
-                print(f"[SIGNAL INIT FALLBACK] SignalConfluenceEngine unavailable: {str(exc)[:80]}")
-                self.confluence = None
+    def _clamp(self, v: float, lo: float, hi: float) -> float:
+        return max(lo, min(hi, float(v)))
 
-    def _score_from_ai(self, symbol: str, asset_class: str) -> Any:
-        if self.ai_scorer is None:
-            return None
+    def _is_futures(self, symbol: str) -> bool:
+        futures_roots = ("ES", "NQ", "GC", "CL", "ZN")
+        return str(symbol or "").upper().startswith(futures_roots)
 
-        for method_name in ("score", "evaluate", "score_opportunity", "get_score"):
-            method = getattr(self.ai_scorer, method_name, None)
-            if callable(method):
-                try:
-                    try:
-                        return method(symbol=symbol, asset_class=asset_class)
-                    except TypeError:
-                        return method(symbol)
-                except Exception as exc:
-                    print(f"[SIGNAL AI METHOD FALLBACK] {symbol} {method_name}: {str(exc)[:80]}")
-                    return None
+    def get_signal(self, symbol: str, asset_class: str) -> Tuple[float, float]:
+        try:
+            row = load_runtime_asset(symbol)
 
-        return None
+            if not isinstance(row, dict):
+                print(f"[SIGNAL BLOCKED] {symbol} -> BAD_RUNTIME_ROW {type(row).__name__}")
+                return 0.0, 0.0
 
-    def _prob_from_confluence(self, symbol: str, asset_class: str) -> Any:
-        if self.confluence is None:
-            return None
+            price = self._num(row.get("price", row.get("current_price", 0.0)))
+            vwap = self._num(row.get("vwap", price))
 
-        for method_name in ("probability", "evaluate", "get_probability", "confidence"):
-            method = getattr(self.confluence, method_name, None)
-            if callable(method):
-                try:
-                    try:
-                        return method(symbol=symbol, asset_class=asset_class)
-                    except TypeError:
-                        return method(symbol)
-                except Exception as exc:
-                    print(f"[SIGNAL CONFLUENCE METHOD FALLBACK] {symbol} {method_name}: {str(exc)[:80]}")
-                    return None
+            momentum_raw = self._num(row.get("momentum", 0.0))
+            momentum = abs(momentum_raw)
 
-        return None
+            volatility = abs(self._num(row.get("volatility", row.get("avg_volatility", 0.0))))
+            trend = abs(self._num(row.get("trend_efficiency", 0.0)))
+            spread = abs(self._num(row.get("spread_bps", 0.0)))
 
-    def get_signal(self, symbol: str, asset_class: str) -> tuple[float, float]:
-        default_score = random.uniform(5.0, 15.0)
-        default_prob = random.uniform(0.4, 0.6)
+            if price <= 0:
+                print(f"[SIGNAL BLOCKED] {symbol} -> BAD_PRICE")
+                return 0.0, 0.0
 
-        score_raw = self._score_from_ai(symbol, asset_class)
-        prob_raw = self._prob_from_confluence(symbol, asset_class)
+            vwap_dev = abs((price - vwap) / price) if vwap > 0 else 0.0
 
-        score = _coerce_number(score_raw, default_score)
-        prob = _coerce_number(prob_raw, default_prob)
+            momentum_s = self._clamp(momentum * 50.0, 0.0, 1.0)
+            vwap_s = self._clamp(vwap_dev * 400.0, 0.0, 1.0)
+            vol_s = self._clamp(volatility * 60.0, 0.0, 1.0)
+            trend_s = self._clamp(trend, 0.0, 1.0)
 
-        score = float(max(0.0, min(20.0, score)))
-        prob = float(max(0.0, min(1.0, prob)))
+            spread_penalty = self._clamp(spread / 80.0, 0.0, 0.25)
 
-        return score, prob
+            direction_alignment = 1.0 if momentum_raw > 0 else 0.6
+
+            core = (
+                momentum_s * 0.30
+                + vwap_s * 0.30
+                + vol_s * 0.15
+                + trend_s * 0.25
+            ) * direction_alignment
+
+            core = self._clamp(core - spread_penalty, 0.0, 1.0)
+
+            if symbol == self.last_symbol:
+                self.repeat_count += 1
+            else:
+                self.repeat_count = 0
+
+            self.last_symbol = symbol
+            core += min(0.05 * self.repeat_count, 0.15)
+            core = self._clamp(core, 0.0, 1.0)
+
+            if self._is_futures(symbol):
+                core += 0.20
+                trend_s = self._clamp(trend_s + 0.10, 0.0, 1.0)
+
+            core = self._clamp(core, 0.0, 1.0)
+
+            signal_score = 5.0 + (core * 11.0)
+
+            probability = (
+                0.40
+                + core * 0.45
+                + trend_s * 0.10
+                + momentum_s * 0.05
+                - spread_penalty
+            )
+
+            if self._is_futures(symbol):
+                probability += 0.05
+
+            probability = self._clamp(probability, 0.05, 0.90)
+
+            print(
+                f"[DECISION] {symbol} | score={signal_score:.2f} "
+                f"prob={probability:.3f} core={core:.3f} "
+                f"mom={momentum_raw:.5f} align={direction_alignment:.1f} "
+                f"rep={self.repeat_count}"
+            )
+
+            return round(signal_score, 4), round(probability, 4)
+
+        except Exception as e:
+            print(f"[SIGNAL ERROR] {symbol}: {str(e)[:120]}")
+            return 0.0, 0.0
