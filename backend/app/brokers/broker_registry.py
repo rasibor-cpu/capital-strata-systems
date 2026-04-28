@@ -37,7 +37,7 @@ BROKER_REGISTRY: Dict[str, BrokerSpec] = {
         display_name="Coinbase",
         adapter_class=CoinbaseAdapter,
         supported_asset_classes=("crypto",),
-        supported_modes=("live",),
+        supported_modes=("paper", "live"),
         pip_package="coinbase-advanced-py",
         credential_file=".env",
     ),
