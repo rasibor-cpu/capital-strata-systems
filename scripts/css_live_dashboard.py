@@ -1,40 +1,4 @@
-
 from __future__ import annotations
-
-
-# ===== PCNRASS REALISM LAYER v1 =====
-import random
-
-def apply_realism_adjustment(pnl, asset_class, signal_score):
-    # Base spread/slippage per asset class
-    spread_map = {
-        "FX": 0.0003,
-        "CRYPTO": 0.0008,
-        "FUTURES": 0.0005,
-        "OPTIONS": 0.0012,
-    }
-
-    base_cost = spread_map.get(asset_class, 0.0005)
-
-    # Volatility scaling (simulated)
-    volatility_factor = random.uniform(0.8, 1.5)
-
-    # Signal quality dampener
-    if signal_score < 12:
-        quality_factor = 1.15  # worse fills
-    elif signal_score > 15:
-        quality_factor = 0.85  # better fills
-    else:
-        quality_factor = 1.0
-
-    # Combined cost impact
-    cost = base_cost * volatility_factor * quality_factor
-
-    # Apply cost (reduce pnl)
-    adjusted_pnl = pnl - abs(pnl) * cost
-
-    return round(adjusted_pnl, 4)
-
 import os
 print("RUNNING FILE:", os.path.abspath(__file__))
 import contextlib
@@ -59,6 +23,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 load_dotenv(PROJECT_ROOT / ".env")
+
+# === PCNRASS PHASE 2 REAL MARKET PRICE FEED ===
+from backend.data.price_feed import get_price_feed
+price_feed = get_price_feed()
 
 # === PCNRASS SAFE PNL IMPORT COMPATIBILITY ===
 # Some CSS branches used backend.app.pnl.pnl_engine.
@@ -127,81 +95,6 @@ from backend.app.accounting.pnl_engine import (
     ExecutionCost,
 )
 from engine.performance.pnl_tracker import PnLTracker
-
-
-# === PCNRASS REAL ACCOUNT ENGINE INTEGRATION (SAFE, ADDITIVE) ===
-try:
-    from backend.app.account_engine import get_account_engine
-except ModuleNotFoundError:
-    get_account_engine = None
-
-CSS_REAL_ACCOUNT_ENGINE = None
-CSS_REAL_ACCOUNT_STATE: dict[str, Any] = {}
-CSS_REAL_ACCOUNT_BALANCE = 0.0
-CSS_REAL_ACCOUNT_STATUS = "NOT_INITIALIZED"
-CSS_REAL_ACCOUNT_SOURCE = "UNAVAILABLE"
-
-
-def pcnrass_initialize_real_account_engine(*, auto_sync: bool = True, live: bool = True) -> dict[str, Any]:
-    """
-    PCNRASS-safe account initialization.
-    Preserves the full dashboard and uses AccountEngine as the preferred source
-    for broker/persisted starting capital. If unavailable, existing dashboard
-    recovery state remains the fallback.
-    """
-    global CSS_REAL_ACCOUNT_ENGINE, CSS_REAL_ACCOUNT_STATE
-    global CSS_REAL_ACCOUNT_BALANCE, CSS_REAL_ACCOUNT_STATUS, CSS_REAL_ACCOUNT_SOURCE
-
-    if get_account_engine is None:
-        CSS_REAL_ACCOUNT_STATUS = "ACCOUNT_ENGINE_IMPORT_UNAVAILABLE"
-        CSS_REAL_ACCOUNT_SOURCE = "DASHBOARD_RECOVERY_FALLBACK"
-        return {}
-
-    try:
-        CSS_REAL_ACCOUNT_ENGINE = get_account_engine(auto_sync=auto_sync)
-        CSS_REAL_ACCOUNT_STATE = CSS_REAL_ACCOUNT_ENGINE.get_state(live=live)
-        CSS_REAL_ACCOUNT_BALANCE = float(CSS_REAL_ACCOUNT_STATE.get("balance") or 0.0)
-        CSS_REAL_ACCOUNT_STATUS = str(CSS_REAL_ACCOUNT_STATE.get("last_sync_status") or "UNKNOWN")
-        CSS_REAL_ACCOUNT_SOURCE = "ACCOUNT_ENGINE"
-        return CSS_REAL_ACCOUNT_STATE
-    except Exception as exc:
-        CSS_REAL_ACCOUNT_STATE = {
-            "balance": 0.0,
-            "broker": "UNKNOWN",
-            "currency": "USD",
-            "last_sync_status": "ACCOUNT_ENGINE_SYNC_FAILED",
-            "metadata": {"dashboard_account_engine_error": str(exc)[:200]},
-        }
-        CSS_REAL_ACCOUNT_BALANCE = 0.0
-        CSS_REAL_ACCOUNT_STATUS = "ACCOUNT_ENGINE_SYNC_FAILED"
-        CSS_REAL_ACCOUNT_SOURCE = "DASHBOARD_RECOVERY_FALLBACK"
-        return CSS_REAL_ACCOUNT_STATE
-
-
-def pcnrass_authoritative_start_balance(existing_balance: Any = None) -> float:
-    """
-    Priority:
-    1. AccountEngine broker/persisted balance, if positive.
-    2. Existing dashboard recovery state, if positive.
-    3. 0.0 — never inject a fake static trading balance.
-    """
-    try:
-        if float(CSS_REAL_ACCOUNT_BALANCE or 0.0) > 0.0:
-            return round(float(CSS_REAL_ACCOUNT_BALANCE), 4)
-    except Exception:
-        pass
-
-    try:
-        recovered = float(existing_balance or 0.0)
-        if recovered > 0.0:
-            return round(recovered, 4)
-    except Exception:
-        pass
-
-    return 0.0
-
-
-pcnrass_initialize_real_account_engine(auto_sync=True, live=True)
 
 # === PCNRASS SAFE INFRASTRUCTURE IMPORT COMPATIBILITY ===
 # These fallbacks prevent dashboard startup failure when a branch is missing
@@ -394,27 +287,17 @@ def _pcnrass_write_json(path, payload):
     Path(path).write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
 
 pcnrass_account_state = _pcnrass_read_json(ACCOUNT_STATE_FILE, {
-    "account_balance": pcnrass_authoritative_start_balance(),
+    "account_balance": 200.0,
     "lifetime_realized_pnl": 0.0,
     "last_session_close": None,
 })
 
-# PCNRASS: AccountEngine overrides stale dashboard-only recovery defaults
-# such as the old 200.0 shadow balance when a verified/persisted value exists.
-pcnrass_account_state["account_balance"] = pcnrass_authoritative_start_balance(
-    pcnrass_account_state.get("account_balance", 0.0)
-)
-pcnrass_account_state["account_source"] = CSS_REAL_ACCOUNT_SOURCE
-pcnrass_account_state["account_sync_status"] = CSS_REAL_ACCOUNT_STATUS
-pcnrass_account_state["account_engine_broker"] = CSS_REAL_ACCOUNT_STATE.get("broker", "UNKNOWN")
-pcnrass_account_state["account_engine_currency"] = CSS_REAL_ACCOUNT_STATE.get("currency", "USD")
-
 pcnrass_session_state = {
     "session_id": datetime.now().isoformat(timespec="seconds"),
-    "starting_account_balance": float(pcnrass_account_state.get("account_balance", 0.0)),
+    "starting_account_balance": float(pcnrass_account_state.get("account_balance", 200.0)),
     "session_realized_pnl": 0.0,
     "session_unrealized_pnl": 0.0,
-    "session_equity": float(pcnrass_account_state.get("account_balance", 0.0)),
+    "session_equity": float(pcnrass_account_state.get("account_balance", 200.0)),
 }
 
 pcnrass_asset_balances = {
@@ -451,44 +334,6 @@ def pcnrass_refresh_balances(realized_by_asset, floating_by_asset):
         "account_balance_pending_close": pcnrass_session_state["session_equity"],
     })
 
-
-# ===== PCNRASS REAL ACCOUNT ENGINE SESSION MIRROR =====
-def pcnrass_mirror_session_to_real_account_engine(reason: str = "session_update") -> None:
-    """
-    Mirror dashboard session data to AccountEngine metadata/open positions.
-
-    This does not fabricate broker cash or place orders. It preserves broker truth
-    while making the dashboard's session equity/positions visible to the real
-    account persistence layer.
-    """
-    try:
-        if CSS_REAL_ACCOUNT_ENGINE is None:
-            return
-
-        if "mtm_engine" in globals():
-            try:
-                CSS_REAL_ACCOUNT_ENGINE.update_open_positions(getattr(mtm_engine, "positions", []))
-            except Exception:
-                pass
-
-        state_obj = getattr(CSS_REAL_ACCOUNT_ENGINE, "state", None)
-        if state_obj is not None:
-            state_obj.metadata["dashboard_session_equity"] = float(
-                pcnrass_session_state.get("session_equity", 0.0)
-            )
-            state_obj.metadata["dashboard_session_realized_pnl"] = float(
-                pcnrass_session_state.get("session_realized_pnl", 0.0)
-            )
-            state_obj.metadata["dashboard_session_unrealized_pnl"] = float(
-                pcnrass_session_state.get("session_unrealized_pnl", 0.0)
-            )
-            state_obj.metadata["dashboard_session_mirror_reason"] = reason
-            state_obj.metadata["dashboard_session_mirrored_at"] = datetime.now().isoformat(timespec="seconds")
-            CSS_REAL_ACCOUNT_ENGINE.save()
-    except Exception as exc:
-        print(f"[ACCOUNT ENGINE MIRROR WARN] {str(exc)[:120]}")
-
-
 def pcnrass_close_session_to_account():
     pcnrass_account_state["account_balance"] = round(float(pcnrass_session_state["session_equity"]), 4)
     pcnrass_account_state["lifetime_realized_pnl"] = round(
@@ -498,7 +343,6 @@ def pcnrass_close_session_to_account():
     )
     pcnrass_account_state["last_session_close"] = datetime.now().isoformat(timespec="seconds")
     _pcnrass_write_json(ACCOUNT_STATE_FILE, pcnrass_account_state)
-    pcnrass_mirror_session_to_real_account_engine("pcnrass_close_session_to_account")
 
 def pcnrass_print_balance_panel():
     print("--- PCNRASS CAPITAL BALANCES ---")
@@ -835,7 +679,6 @@ def enforce_dashboard_startup_access(user_ctx: dict[str, Any]) -> dict[str, Any]
 def authenticate_startup_user() -> dict[str, Any]:
     try:
         user_ctx = await_login_ready_state()
-
         try:
             session = session_manager.create_session(
                 username=str(user_ctx.get("user_id")),
@@ -851,7 +694,6 @@ def authenticate_startup_user() -> dict[str, Any]:
                 )
             except TypeError:
                 session = session_manager.create_session(str(user_ctx.get("user_id")))
-
         origin = runtime_origin_context()
 
         user_ctx["session_id"] = session.session_id
@@ -885,13 +727,11 @@ def authenticate_startup_user() -> dict[str, Any]:
             f"unit={user_ctx.get('unit_code')} "
             f"session_id={session.session_id}"
         )
-
         return user_ctx
 
     except KeyboardInterrupt:
         try:
             pcnrass_close_session_to_account()
-            print(f"[ACCOUNT UPDATED] new balance: {pcnrass_account_state.get('account_balance', 0.0):.2f}")
         except Exception as e:
             print(f"[SESSION SETTLEMENT WARN] {e}")
 
@@ -1256,9 +1096,8 @@ def close_active_session(reason: str, extra: Optional[dict[str, Any]] = None) ->
     # PCNRASS: settle session balance into account balance only at session close.
     try:
         pcnrass_close_session_to_account()
-        print(f"[ACCOUNT UPDATED] new balance: {pcnrass_account_state.get('account_balance', 0.0):.2f}")
-    except Exception as e:
-        print(f"[SESSION SETTLEMENT WARN] {e}")
+    except Exception:
+        pass
 
     session_id = SESSION_USER_CTX.get("session_id")
     if session_id:
@@ -1494,16 +1333,6 @@ record_startup_configuration(
     engine_mode=ENGINE_MODE,
 )
 
-print("--- PCNRASS REAL ACCOUNT ENGINE ---")
-print(f"ACCOUNT SOURCE: {CSS_REAL_ACCOUNT_SOURCE}")
-print(f"BROKER: {CSS_REAL_ACCOUNT_STATE.get('broker', 'UNKNOWN')}")
-print(f"CURRENCY: {CSS_REAL_ACCOUNT_STATE.get('currency', 'USD')}")
-print(f"START BALANCE: ${float(pcnrass_session_state.get('starting_account_balance', 0.0)):,.2f}")
-print(f"SYNC STATUS: {CSS_REAL_ACCOUNT_STATUS}")
-if CSS_REAL_ACCOUNT_STATE.get("metadata", {}).get("last_sync_error"):
-    print(f"SYNC WARNING: {CSS_REAL_ACCOUNT_STATE['metadata']['last_sync_error']}")
-print("------------------------------------")
-
 
 class AdaptiveConcurrencyEnvelopeController:
     def __init__(self) -> None:
@@ -1549,9 +1378,7 @@ class CapitalDeploymentGovernor:
 
     def __init__(self) -> None:
         self.paper_mode = False
-        self.simulated_capital_pool = pcnrass_authoritative_start_balance(
-            pcnrass_account_state.get("account_balance", 0.0)
-        )
+        self.simulated_capital_pool = 200.00
         self.max_capital_per_trade = 25.00
         self.max_broker_test_positions = 5
         self.active_test_allocations: dict[str, float] = {}
@@ -1658,6 +1485,37 @@ def initialize_selected_coinbase() -> None:
 
 
 initialize_selected_coinbase()
+
+# === PCNRASS PHASE 2 BROKER ISOLATION + REAL PRICE HELPERS ===
+# Real market pricing only activates when broker execution is ARMED and selected broker mode is LIVE.
+# Paper mode remains paper/simulation-safe and must not pull real account capital into trading logic.
+def pcnrass_real_market_enabled() -> bool:
+    return (
+        bool(BROKER_EXECUTION_ARMED)
+        and str(SELECTED_BROKER_MODE).lower() == "live"
+        and str(SELECTED_BROKER).upper() in {"COINBASE", "OANDA"}
+    )
+
+
+def pcnrass_selected_broker_is(name: str) -> bool:
+    return str(SELECTED_BROKER).upper() == str(name).upper()
+
+
+def pcnrass_get_reference_price(symbol: str, fallback: float = 100.0) -> float:
+    if pcnrass_real_market_enabled():
+        try:
+            px = price_feed.get_price(symbol)
+            if px is not None and float(px) > 0:
+                return float(px)
+        except Exception:
+            pass
+    return float(fallback)
+
+
+def pcnrass_wait_for_next_cycle(cycle: int) -> bool:
+    response = input(f"\n[PCNRASS PAUSE] Cycle {cycle} complete. Press ENTER for next cycle, or type Q to quit: ").strip().lower()
+    return response not in {"q", "quit", "exit", "stop"}
+
 
 
 def is_oanda_practice_mode() -> bool:
@@ -2127,11 +1985,15 @@ class MarkToMarketEngine:
         if allow_live_funding:
             broker_tested = capital_governor.allocate_trade(pid)
 
+        entry_price = pcnrass_get_reference_price(symbol, fallback=100.0)
+
         position = {
             "position_id": pid,
             "asset_class": asset_class,
             "symbol": symbol,
             "cluster_name": cluster_name,
+            "entry_price": float(entry_price),
+            "current_price": float(entry_price),
             "floating": 0.0,
             "forced_exit": False,
             "exit_reason": None,
@@ -2241,7 +2103,8 @@ cycle = 0
 
 
 saved_state = session_recovery.load_state()
-if saved_state:
+RESUME_PREVIOUS_SESSION = (os.getenv("CSS_RESUME_SESSION", "false").strip().lower() in {"1", "true", "yes", "y", "on"})
+if saved_state and RESUME_PREVIOUS_SESSION:
     cycle = 0
     crypto_pnl.update(saved_state.get("crypto_pnl", {}))
     fx_pnl.update(saved_state.get("fx_pnl", {}))
@@ -2251,9 +2114,11 @@ if saved_state:
     mtm_engine.position_counter = saved_state.get("position_counter", 0)
 
     print(
-        "[RECOVERY] Realized PnL restored, stale open positions not reloaded. "
+        "[RECOVERY] Realized PnL restored because CSS_RESUME_SESSION=true; stale open positions not reloaded. "
         "Cycle counter reset."
     )
+elif saved_state and not RESUME_PREVIOUS_SESSION:
+    print("[RECOVERY IGNORED] Previous realized PnL was not restored. Fresh session active. Set CSS_RESUME_SESSION=true to resume.")
 
 
 def total_realized_pnl() -> float:
@@ -2534,13 +2399,6 @@ try:
             }
 
         print(f"=== Cycle {cycle} | {datetime.now()} ===")
-        print(
-            f"[ACCOUNT] source={CSS_REAL_ACCOUNT_SOURCE} "
-            f"broker={CSS_REAL_ACCOUNT_STATE.get('broker', 'UNKNOWN')} "
-            f"start=${float(pcnrass_session_state.get('starting_account_balance', 0.0)):,.2f} "
-            f"equity=${float(pcnrass_session_state.get('session_equity', 0.0)):,.2f} "
-            f"status={CSS_REAL_ACCOUNT_STATUS}"
-        )
 
         exit_profile = MODE_EXIT_PROFILE.get(
             ENGINE_MODE,
@@ -2697,8 +2555,25 @@ try:
         print(f"CAN LIVE EXECUTE: {'YES' if role_profile.get('can_execute_live_trading') else 'NO'}")
         print(f"ALLOWED ENGINE MODES: {', '.join(role_profile.get('allowed_engine_modes', [])) or 'NONE'}")
 
-        print_oanda_broker_status()
-        print_coinbase_broker_status()
+        if SELECTED_BROKER == "OANDA":
+            print_oanda_broker_status()
+            print("--- COINBASE BROKER STATUS ---")
+            print("COINBASE SELECTED: NO")
+            print("COINBASE CONNECTED: NO")
+        elif SELECTED_BROKER == "COINBASE":
+            print("--- OANDA BROKER STATUS ---")
+            print("OANDA SELECTED: NO")
+            print("OANDA CONNECTED: NO")
+            print("OANDA OPEN TRADES: N/A")
+            print_coinbase_broker_status()
+        else:
+            print("--- OANDA BROKER STATUS ---")
+            print("OANDA SELECTED: NO")
+            print("OANDA CONNECTED: NO")
+            print("OANDA OPEN TRADES: N/A")
+            print("--- COINBASE BROKER STATUS ---")
+            print("COINBASE SELECTED: NO")
+            print("COINBASE CONNECTED: NO")
 
         print("--- BROKER EXECUTION CONTROL ---")
         print(f"BROKER EXECUTION: {broker_execution_status_label()}")
@@ -2939,8 +2814,8 @@ try:
                     NewPosition(
                         symbol=pos["symbol"],
                         side="LONG",
-                        entry_price=100.0,
-                        current_price=100.0 + pos["floating"],
+                        entry_price=float(pos.get("entry_price", 100.0)),
+                        current_price=float(pos.get("current_price", pos.get("entry_price", 100.0))),
                         quantity=1.0,
                         instrument_spec=InstrumentSpec(
                             symbol=pos["symbol"],
@@ -2970,7 +2845,13 @@ try:
         except Exception as e:
             print(f"[NEW PNL ERROR] {e}")
 
-        time.sleep(CYCLE_SLEEP)
+        if not pcnrass_wait_for_next_cycle(cycle):
+
+            close_active_session("operator_quit_after_cycle")
+
+            break
+
+        time.sleep(1)
 
 except KeyboardInterrupt:
     print("[SESSION STOPPED] Keyboard interrupt received.")
