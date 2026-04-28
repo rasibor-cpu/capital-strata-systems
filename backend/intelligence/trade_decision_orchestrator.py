@@ -15,26 +15,25 @@ from backend.intelligence.probability_prediction_engine import ProbabilityPredic
 from backend.intelligence.signal_confluence_engine import SignalConfluenceEngine
 
 from backend.governance.css_unified_trade_gate import CSSUnifiedTradeGate
-
-# ✅ NEW (SAFE ADD)
 from backend.intelligence.compounding_engine import CompoundingEngine
 
 
 class TradeDecisionOrchestrator:
     """
-    CSS Trade Decision Orchestrator (Phase 16 - PCNRASS Locked + Compounding Ready)
+    CSS Trade Decision Orchestrator (Phase 3D-B - Controlled Relaxation)
 
-    GUARANTEES (PCNRASS)
-    -------------------
-    - NO removal of existing scoring logic
-    - NO change to execution conditions
-    - Governance gate preserved
-    - ONLY additive enhancements
+    PCNRASS GUARANTEES
+    ------------------
+    - Preserves existing intelligence stack
+    - Preserves governance gate
+    - Preserves probability engine
+    - Preserves compounding output
+    - Replaces over-strict all-or-nothing execution with tiered deterministic gating
 
-    NEW
-    ---
-    - Compounding Engine (non-invasive)
-    - Position size multiplier output
+    Phase 3D-B Objective
+    --------------------
+    Keep the unified decision engine, but prevent the engine from becoming dead/silent
+    by allowing moderate-conviction trades under controlled reduced-conviction rules.
     """
 
     def __init__(self) -> None:
@@ -46,15 +45,10 @@ class TradeDecisionOrchestrator:
         self.momentum_engine = OpportunityMomentumWindowEngine()
         self.probability_engine = ProbabilityPredictionEngine()
 
-        # ✅ Governance (UNCHANGED)
         self.trade_gate = CSSUnifiedTradeGate()
-
-        # ✅ NEW
         self.compounding_engine = CompoundingEngine()
 
-        # -------------------------
-        # EXISTING THRESHOLDS
-        # -------------------------
+        # Existing thresholds preserved
         self.mean_reversion_threshold = 0.20
         self.trend_threshold = 0.24
         self.breakout_threshold = 0.28
@@ -71,9 +65,6 @@ class TradeDecisionOrchestrator:
             "probability_score": 0.15,
         }
 
-        # -------------------------
-        # ALLOCATION (UNCHANGED)
-        # -------------------------
         self.asset_class_limits: Dict[str, int] = {
             "CRYPTO": 3,
             "FX": 3,
@@ -97,9 +88,12 @@ class TradeDecisionOrchestrator:
             "UNKNOWN": 1.00,
         }
 
-    # =====================================================
-    # CORE EVALUATION (UNCHANGED LOGIC)
-    # =====================================================
+        # Phase 3D-B controlled relaxation parameters
+        self.tier2_score_factor = 0.85
+        self.tier2_probability_factor = 0.85
+        self.min_pressure_floor = 0.10
+        self.min_confluence_floor = 0.06
+        self.min_combined_signal_floor = 0.18
 
     def evaluate_trade(
         self,
@@ -169,57 +163,28 @@ class TradeDecisionOrchestrator:
             + regime_conf * self.weights["regime_confidence"]
             + win_probability * self.weights["probability_score"]
         )
-
         decision_score = self._clamp01(decision_score)
 
         asset_threshold = self.asset_class_thresholds.get(
             asset_class, self.asset_class_thresholds["UNKNOWN"]
         )
-
         asset_weight = self.asset_class_weights.get(
             asset_class, self.asset_class_weights["UNKNOWN"]
         )
-
         adjusted_score = self._clamp01(decision_score * asset_weight)
 
-        # =============================
-        # EXECUTION LOGIC (UNCHANGED)
-        # =============================
+        decision = self._tiered_decision(
+            decision_score=decision_score,
+            adjusted_score=adjusted_score,
+            win_probability=win_probability,
+            pressure=pressure,
+            confluence=confluence,
+            pressure_fusion=pressure_fusion,
+            asset_threshold=asset_threshold,
+            approve_trade=approve_trade,
+        )
 
-        execute_trade = self._should_execute_trade(regime, decision_score)
-
-        pressure_ok = pressure >= 0.18
-        confluence_ok = confluence >= 0.10
-        momentum_ok = (accel > -0.02) or (pressure > 0.22)
-        probability_ok = win_probability >= self.min_probability_threshold
-        threshold_ok = decision_score >= asset_threshold
-
-        if pressure_ok and confluence_ok and momentum_ok and probability_ok and threshold_ok:
-            execute_trade = True
-
-        if decision_score >= 0.20 and probability_ok and threshold_ok:
-            execute_trade = True
-
-        if (
-            decision_score >= 0.18
-            and pressure >= 0.15
-            and win_probability >= 0.30
-            and threshold_ok
-        ):
-            execute_trade = True
-
-        if not approve_trade:
-            execute_trade = False
-
-        if win_probability < self.min_probability_threshold:
-            execute_trade = False
-
-        if not threshold_ok:
-            execute_trade = False
-
-        # =============================
-        # GOVERNANCE GATE (UNCHANGED)
-        # =============================
+        execute_trade = bool(decision["execute_trade"])
 
         gate_candidate = {
             "symbol": asset,
@@ -238,26 +203,12 @@ class TradeDecisionOrchestrator:
 
         if not gate_decision.approved:
             execute_trade = False
+            decision["block_reasons"].append(f"GOVERNANCE_BLOCK:{gate_decision.reason}")
 
-        # =============================
-        # ✅ COMPUNDING (SAFE ADD)
-        # =============================
+        position_size_multiplier = self._safe_compounding_multiplier(portfolio_state)
 
-        position_size_multiplier = 1.0
-
-        try:
-            multiplier = self.compounding_engine.compute_multiplier(
-                account_balance=portfolio_state.get("balance", 0),
-                starting_balance=portfolio_state.get("starting_balance", 1),
-                recent_pnl=portfolio_state.get("recent_pnl", 0),
-            )
-            position_size_multiplier = multiplier
-        except Exception:
-            position_size_multiplier = 1.0
-
-        # =============================
-        # RETURN (EXTENDED SAFELY)
-        # =============================
+        if decision.get("execution_tier") == "TIER_2_MODERATE":
+            position_size_multiplier = min(position_size_multiplier, 0.65)
 
         return {
             "asset": asset,
@@ -273,22 +224,104 @@ class TradeDecisionOrchestrator:
             "probability_approved": approve_trade,
             "high_probability_setup": win_probability >= self.high_probability_threshold,
             "trade_side": trade_side,
-
-            # Governance
             "gate_approved": gate_decision.approved,
             "gate_reason": gate_decision.reason,
-
-            # ✅ NEW OUTPUT
             "position_size_multiplier": round(position_size_multiplier, 4),
+            "execution_tier": decision.get("execution_tier", "REJECT"),
+            "decision_reason": decision.get("decision_reason", "UNKNOWN"),
+            "block_reasons": decision.get("block_reasons", []),
+            "signal_snapshot": {
+                "ai_score": round(ai_score, 4),
+                "confluence": round(confluence, 4),
+                "pressure": round(pressure, 4),
+                "acceleration": round(accel, 4),
+                "pressure_fusion": round(pressure_fusion, 4),
+                "momentum": round(momentum, 4),
+                "regime": regime,
+                "regime_confidence": round(regime_conf, 4),
+                "asset_threshold": round(asset_threshold, 4),
+            },
         }
 
-    # =====================================================
-    # INTERNAL HELPERS (UNCHANGED)
-    # =====================================================
+    def _tiered_decision(
+        self,
+        *,
+        decision_score: float,
+        adjusted_score: float,
+        win_probability: float,
+        pressure: float,
+        confluence: float,
+        pressure_fusion: float,
+        asset_threshold: float,
+        approve_trade: bool,
+    ) -> Dict[str, Any]:
+        block_reasons: List[str] = []
+
+        probability_threshold = self.min_probability_threshold
+        signal_floor_ok = (
+            pressure >= self.min_pressure_floor
+            or confluence >= self.min_confluence_floor
+            or pressure_fusion >= self.min_combined_signal_floor
+        )
+
+        if not approve_trade:
+            block_reasons.append("PROBABILITY_ENGINE_NOT_APPROVED")
+
+        if win_probability < probability_threshold * self.tier2_probability_factor:
+            block_reasons.append("WIN_PROBABILITY_BELOW_TIER2")
+
+        if not signal_floor_ok:
+            block_reasons.append("SIGNAL_FLOOR_NOT_MET")
+
+        # Tier 1: full conviction.
+        tier1_ok = (
+            decision_score >= asset_threshold
+            and win_probability >= probability_threshold
+            and signal_floor_ok
+            and approve_trade
+        )
+
+        if tier1_ok:
+            return {
+                "execute_trade": True,
+                "execution_tier": "TIER_1_HIGH_CONVICTION",
+                "decision_reason": "FULL_UNIFIED_GATE_PASS",
+                "block_reasons": [],
+            }
+
+        # Tier 2: controlled relaxation. Uses adjusted_score OR decision_score so asset
+        # weighting can help strong futures/FX setups without reopening loose fallback logic.
+        tier2_score_ok = (
+            decision_score >= asset_threshold * self.tier2_score_factor
+            or adjusted_score >= asset_threshold * self.tier2_score_factor
+        )
+        tier2_probability_ok = win_probability >= probability_threshold * self.tier2_probability_factor
+        tier2_ok = tier2_score_ok and tier2_probability_ok and signal_floor_ok and approve_trade
+
+        if tier2_ok:
+            return {
+                "execute_trade": True,
+                "execution_tier": "TIER_2_MODERATE",
+                "decision_reason": "CONTROLLED_RELAXATION_PASS",
+                "block_reasons": [],
+            }
+
+        if not tier2_score_ok:
+            block_reasons.append("DECISION_SCORE_BELOW_TIER2")
+
+        return {
+            "execute_trade": False,
+            "execution_tier": "REJECT",
+            "decision_reason": "NO_TIER_PASSED",
+            "block_reasons": block_reasons,
+        }
 
     def _score_ai(self, row: Dict[str, Any]) -> float:
         if hasattr(self.ai_scorer, "score_opportunity"):
-            return float(self.ai_scorer.score_opportunity(row))
+            try:
+                return float(self.ai_scorer.score_opportunity(row))
+            except TypeError:
+                pass
         if hasattr(self.ai_scorer, "score"):
             return float(self.ai_scorer.score(row))
         return 0.0
@@ -401,6 +434,18 @@ class TradeDecisionOrchestrator:
             return "CALL"
         return "PUT"
 
+    def _safe_compounding_multiplier(self, portfolio_state: Dict[str, Any]) -> float:
+        try:
+            return float(
+                self.compounding_engine.compute_multiplier(
+                    account_balance=portfolio_state.get("balance", 0),
+                    starting_balance=portfolio_state.get("starting_balance", 1),
+                    recent_pnl=portfolio_state.get("recent_pnl", 0),
+                )
+            )
+        except Exception:
+            return 1.0
+
     def _clamp01(self, v: float) -> float:
         return max(0.0, min(1.0, float(v)))
 
@@ -414,6 +459,7 @@ class TradeDecisionOrchestrator:
             "execute_trade": False,
             "reason": reason,
             "decision_score": 0.0,
+            "adjusted_score": 0.0,
             "win_probability": 0.0,
             "loss_probability": 1.0,
             "probability_confidence": "LOW",
@@ -421,4 +467,11 @@ class TradeDecisionOrchestrator:
             "probability_approved": False,
             "high_probability_setup": False,
             "trade_side": "CALL",
+            "gate_approved": False,
+            "gate_reason": reason,
+            "position_size_multiplier": 1.0,
+            "execution_tier": "REJECT",
+            "decision_reason": reason,
+            "block_reasons": [reason],
+            "signal_snapshot": {},
         }

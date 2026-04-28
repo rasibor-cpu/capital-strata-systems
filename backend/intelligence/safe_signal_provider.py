@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 from typing import Any, Tuple
+
 from backend.data.coinbase_historical_downloader import load_runtime_asset
 
 
 class SafeSignalProvider:
     """
-    Phase 4C (Corrected): Full feature integration with conditional activation
+    Phase 5C: Unified multi-asset provider with active feature intelligence.
 
-    - Restores strong core (momentum + vwap + trend + volatility)
-    - Uses advanced features ONLY when available (no dilution)
-    - Preserves futures dominance
-    - PCNRASS compliant (no regression risk)
+    PCNRASS intent:
+    - Preserve Phase 4E multi-asset activation.
+    - Use real-data Phase 5B features:
+      velocity, acceleration, pressure_score, top_of_book_depth.
+    - Display feature values in the decision log for verification.
+    - Keep futures/options/crypto/FX working together.
+    - No fake/random fallback.
     """
 
     def __init__(self) -> None:
@@ -20,150 +24,238 @@ class SafeSignalProvider:
 
     def _num(self, v: Any, d: float = 0.0) -> float:
         try:
+            if v is None:
+                return d
             return float(v)
         except Exception:
             return d
 
     def _clamp(self, v: float, lo: float, hi: float) -> float:
-        return max(lo, min(hi, v))
+        return max(lo, min(hi, float(v)))
 
     def _is_futures(self, symbol: str) -> bool:
-        return symbol.startswith(("ES", "NQ", "GC", "CL", "ZN"))
+        return str(symbol or "").upper().startswith(("ES", "NQ", "GC", "CL", "ZN"))
+
+    def _is_crypto(self, symbol: str) -> bool:
+        s = str(symbol or "").upper()
+        return (
+            s.endswith("-USD")
+            or s.endswith("-USDT")
+            or any(
+                token in s
+                for token in (
+                    "BTC",
+                    "ETH",
+                    "SOL",
+                    "XRP",
+                    "ADA",
+                    "DOGE",
+                    "AVAX",
+                    "LINK",
+                    "LTC",
+                    "BCH",
+                )
+            )
+        )
 
     def _is_primary_crypto(self, symbol: str) -> bool:
-        return symbol in ("BTC-USD", "ETH-USD")
+        return str(symbol or "").upper() in ("BTC-USD", "ETH-USD", "SOL-USD")
 
     def _is_major_fx(self, symbol: str) -> bool:
-        return symbol in ("EUR_USD", "GBP_USD", "USD_JPY", "USD_CHF")
+        return str(symbol or "").upper() in (
+            "EUR_USD",
+            "GBP_USD",
+            "USD_JPY",
+            "USD_CHF",
+            "USD_CAD",
+            "AUD_USD",
+            "NZD_USD",
+            "EUR_GBP",
+            "EUR_JPY",
+            "GBP_JPY",
+        )
 
-    def get_signal(self, symbol: str, asset_class: str) -> Tuple[float, float]:
+    def _is_option(self, symbol: str) -> bool:
+        s = str(symbol or "").upper()
+        return s.endswith("-C") or s.endswith("-P") or s.endswith("_CALL") or s.endswith("_PUT")
 
+    def _option_proxy_candidates(self, symbol: str) -> list[str]:
+        s = str(symbol or "").upper()
+        root = s
+        for suffix in ("-C", "-P", "_CALL", "_PUT"):
+            if root.endswith(suffix):
+                root = root[: -len(suffix)]
+
+        proxy_map = {
+            "SPY": ["SPY", "ES"],
+            "QQQ": ["QQQ", "NQ"],
+            "AAPL": ["AAPL", "QQQ", "NQ"],
+        }
+        return proxy_map.get(root, [root])
+
+    def _row_price(self, row: dict[str, Any]) -> float:
+        return self._num(
+            row.get(
+                "price",
+                row.get(
+                    "current_price",
+                    row.get("last", row.get("close", row.get("Close", 0.0))),
+                ),
+            )
+        )
+
+    def _load_row(self, symbol: str) -> tuple[dict[str, Any] | None, bool, str | None]:
         try:
             row = load_runtime_asset(symbol)
+            if isinstance(row, dict) and self._row_price(row) > 0:
+                return row, False, None
+        except Exception:
+            pass
+
+        if self._is_option(symbol):
+            for proxy in self._option_proxy_candidates(symbol):
+                try:
+                    row = load_runtime_asset(proxy)
+                    if isinstance(row, dict) and self._row_price(row) > 0:
+                        row = dict(row)
+                        row["_proxy_source"] = proxy
+                        return row, True, proxy
+                except Exception:
+                    continue
+
+        return None, False, None
+
+    def get_signal(self, symbol: str, asset_class: str) -> Tuple[float, float]:
+        try:
+            row, proxy_used, proxy_source = self._load_row(symbol)
 
             if not isinstance(row, dict):
+                print(f"[SIGNAL BLOCKED] {symbol} -> NO_VALID_ROW")
                 return 0.0, 0.0
 
-            # --- CORE INPUTS ---
-            price = self._num(row.get("price", 0.0))
-            vwap = self._num(row.get("vwap", price))
+            price = self._row_price(row)
+            if price <= 0:
+                print(f"[SIGNAL BLOCKED] {symbol} -> BAD_PRICE")
+                return 0.0, 0.0
 
+            vwap = self._num(row.get("vwap", price))
             momentum_raw = self._num(row.get("momentum", 0.0))
             momentum = abs(momentum_raw)
-
-            volatility = abs(self._num(row.get("volatility", 0.0)))
+            volatility = abs(self._num(row.get("volatility", row.get("avg_volatility", 0.0))))
             trend = abs(self._num(row.get("trend_efficiency", 0.0)))
             spread = abs(self._num(row.get("spread_bps", 0.0)))
 
-            # --- OPTIONAL FEATURES ---
-            velocity = abs(self._num(row.get("velocity", 0.0)))
-            acceleration = abs(self._num(row.get("acceleration", 0.0)))
-            pressure = abs(self._num(row.get("pressure_score", 0.0)))
-            liquidity = self._num(row.get("top_of_book_depth", 0.0))
+            # Phase 5B real-data features.
+            velocity = self._num(row.get("velocity", 0.0))
+            acceleration = self._num(row.get("acceleration", 0.0))
+            pressure = abs(self._num(row.get("pressure_score", row.get("pressure", 0.0))))
+            liquidity = self._num(row.get("top_of_book_depth", row.get("volume_24h", 0.0)))
 
-            if price <= 0:
-                return 0.0, 0.0
-
-            # --- DERIVED ---
             vwap_dev = abs((price - vwap) / price) if vwap > 0 else 0.0
-            mean_reversion = self._clamp(vwap_dev * 500.0, 0, 1)
+            mean_reversion = self._clamp(vwap_dev * 500.0, 0.0, 1.0)
 
-            # --- NORMALIZATION ---
-            momentum_s = self._clamp(momentum * 50.0, 0, 1)
-            vwap_s = self._clamp(vwap_dev * 400.0, 0, 1)
-            vol_s = self._clamp(volatility * 60.0, 0, 1)
-            trend_s = self._clamp(trend, 0, 1)
+            # Normalized core features.
+            momentum_s = self._clamp(momentum * 50.0, 0.0, 1.0)
+            vwap_s = self._clamp(vwap_dev * 400.0, 0.0, 1.0)
+            vol_s = self._clamp(volatility * 60.0, 0.0, 1.0)
+            trend_s = self._clamp(trend, 0.0, 1.0)
 
-            velocity_s = self._clamp(velocity * 40.0, 0, 1)
-            accel_s = self._clamp(acceleration * 30.0, 0, 1)
-            pressure_s = self._clamp(pressure, 0, 1)
-            liquidity_s = self._clamp(liquidity / 100000, 0, 1)
+            # Active feature intelligence.
+            velocity_s = self._clamp(abs(velocity) * 40.0, 0.0, 1.0)
+            accel_s = self._clamp(abs(acceleration) * 30.0, 0.0, 1.0)
+            pressure_s = self._clamp(pressure, 0.0, 1.0)
+            liquidity_s = self._clamp(liquidity / 1_000_000.0, 0.0, 1.0)
 
-            spread_penalty = self._clamp(spread / 80.0, 0, 0.25)
+            spread_penalty = self._clamp(spread / 80.0, 0.0, 0.25)
 
-            # --- FEATURE FLAGS ---
-            has_velocity = velocity > 0
-            has_accel = acceleration > 0
-            has_pressure = pressure > 0
-            has_liquidity = liquidity > 0
-
-            # --- DIRECTION FILTER ---
+            # Direction filter: positive momentum has full conviction; negative/flat is discounted.
             direction_alignment = 1.0 if momentum_raw > 0 else 0.6
 
-            # =========================
-            # 🔥 STRONG CORE (RESTORED)
-            # =========================
             core = (
-                momentum_s * 0.30
-                + vwap_s * 0.30
-                + trend_s * 0.20
-                + vol_s * 0.20
+                momentum_s * 0.24
+                + vwap_s * 0.24
+                + trend_s * 0.16
+                + vol_s * 0.14
+                + mean_reversion * 0.08
+                + velocity_s * 0.06
+                + accel_s * 0.04
+                + pressure_s * 0.06
+                + liquidity_s * 0.03
             ) * direction_alignment
 
-            # --- CONDITIONAL FEATURES ---
-            if has_velocity:
-                core += velocity_s * 0.08
+            core = self._clamp(core - spread_penalty, 0.0, 1.0)
 
-            if has_accel:
-                core += accel_s * 0.07
-
-            if has_pressure:
-                core += pressure_s * 0.08
-
-            if has_liquidity:
-                core += liquidity_s * 0.05
-
-            # --- MEAN REVERSION (ALWAYS SAFE) ---
-            core += mean_reversion * 0.10
-
-            core = self._clamp(core - spread_penalty, 0, 1)
-
-            # --- PERSISTENCE ---
             if symbol == self.last_symbol:
                 self.repeat_count += 1
             else:
                 self.repeat_count = 0
-
             self.last_symbol = symbol
+
             core += min(0.05 * self.repeat_count, 0.15)
 
-            # --- ASSET CALIBRATION ---
+            # Asset calibration: active but controlled.
             if self._is_futures(symbol):
                 core += 0.20
-                trend_s += 0.10
+                trend_s = self._clamp(trend_s + 0.10, 0.0, 1.0)
+
+            elif self._is_option(symbol):
+                core += 0.16
+                trend_s = self._clamp(trend_s + 0.08, 0.0, 1.0)
+                if proxy_used:
+                    core -= 0.02
 
             elif self._is_primary_crypto(symbol):
-                core += 0.08
+                core += 0.16
+                trend_s = self._clamp(trend_s + 0.05, 0.0, 1.0)
+
+            elif self._is_crypto(symbol):
+                core += 0.12
+                trend_s = self._clamp(trend_s + 0.03, 0.0, 1.0)
 
             elif self._is_major_fx(symbol):
-                core += 0.05
+                core += 0.12
+                trend_s = self._clamp(trend_s + 0.05, 0.0, 1.0)
 
-            core = self._clamp(core, 0, 1)
+            core = self._clamp(core, 0.0, 1.0)
 
-            # --- SCORE ---
-            score = 5 + core * 11
+            score = 5.0 + core * 11.0
 
-            # --- PROBABILITY ---
             prob = (
                 0.40
-                + core * 0.40
-                + trend_s * 0.10
-                + velocity_s * 0.05
-                + pressure_s * 0.05
+                + core * 0.36
+                + trend_s * 0.08
+                + velocity_s * 0.04
+                + accel_s * 0.03
+                + pressure_s * 0.04
+                + liquidity_s * 0.02
                 - spread_penalty
             )
 
             if self._is_futures(symbol):
                 prob += 0.05
+            elif self._is_option(symbol):
+                prob += 0.05
+                if proxy_used:
+                    prob -= 0.015
+            elif self._is_primary_crypto(symbol):
+                prob += 0.055
+            elif self._is_crypto(symbol):
+                prob += 0.04
+            elif self._is_major_fx(symbol):
+                prob += 0.04
 
             prob = self._clamp(prob, 0.05, 0.90)
 
+            proxy_note = f" proxy={proxy_source}" if proxy_used and proxy_source else ""
             print(
-                f"[DECISION] {symbol} | score={score:.2f} prob={prob:.3f} core={core:.3f}"
+                f"[DECISION] {symbol} | score={score:.2f} prob={prob:.3f} "
+                f"core={core:.3f}{proxy_note} "
+                f"vel={velocity_s:.3f} acc={accel_s:.3f} "
+                f"press={pressure_s:.3f} liq={liquidity_s:.3f}"
             )
 
             return round(score, 4), round(prob, 4)
 
         except Exception as e:
-            print(f"[SIGNAL ERROR] {symbol}: {str(e)[:100]}")
+            print(f"[SIGNAL ERROR] {symbol}: {str(e)[:120]}")
             return 0.0, 0.0
