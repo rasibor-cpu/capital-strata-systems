@@ -15,7 +15,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
-
+from backend.intelligence.safe_signal_provider import SafeSignalProvider
 from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -1432,7 +1432,7 @@ pnl_observer = Portfolio(
 
 # === INITIALIZE NEW TRACKER ===
 pnl_tracker = PnLTracker(starting_equity=pnl_observer.starting_balance)
-
+signal_provider = SafeSignalProvider()
 
 def map_oanda_env() -> None:
     if not os.getenv("OANDA_API_KEY"):
@@ -1490,10 +1490,19 @@ initialize_selected_coinbase()
 # Real market pricing only activates when broker execution is ARMED and selected broker mode is LIVE.
 # Paper mode remains paper/simulation-safe and must not pull real account capital into trading logic.
 def pcnrass_real_market_enabled() -> bool:
+    """
+    Legacy name retained for PCNRASS compatibility.
+    In Phase 3A, price discovery is allowed in paper and live modes
+    when a supported broker is selected. Execution safety remains separate.
+    """
+    return pcnrass_price_feed_enabled()
+
+
+def pcnrass_price_feed_enabled() -> bool:
     return (
         bool(BROKER_EXECUTION_ARMED)
-        and str(SELECTED_BROKER_MODE).lower() == "live"
         and str(SELECTED_BROKER).upper() in {"COINBASE", "OANDA"}
+        and str(SELECTED_BROKER_MODE).lower() in {"paper", "live"}
     )
 
 
@@ -1501,15 +1510,27 @@ def pcnrass_selected_broker_is(name: str) -> bool:
     return str(SELECTED_BROKER).upper() == str(name).upper()
 
 
-def pcnrass_get_reference_price(symbol: str, fallback: float = 100.0) -> float:
-    if pcnrass_real_market_enabled():
+def pcnrass_get_reference_price(symbol: str, fallback: float | None = None) -> float | None:
+    """
+    Phase 3A:
+    - Use real/public price feed in PAPER and LIVE where supported.
+    - Do not force 100.0 as market truth.
+    - If no price is available, return fallback only for initialization safety.
+    """
+    if pcnrass_price_feed_enabled():
         try:
             px = price_feed.get_price(symbol)
             if px is not None and float(px) > 0:
                 return float(px)
-        except Exception:
-            pass
-    return float(fallback)
+        except Exception as exc:
+            print(f"[PRICE FEED WARN] {symbol}: {str(exc)[:80]}")
+
+    if fallback is None:
+        return None
+    try:
+        return float(fallback)
+    except Exception:
+        return None
 
 
 def pcnrass_wait_for_next_cycle(cycle: int) -> bool:
@@ -2349,20 +2370,30 @@ def active_execution_scope_label() -> str:
 
     return f"{SELECTED_BROKER} RESERVED / BLOCKED"
 
-
 def select_cycle_candidates() -> list[tuple[str, str, float, float]]:
-    candidates = [
-        ("CRYPTO", random.choice(SYMBOLS), 12.0, 0.68),
-        ("CRYPTO", random.choice(SYMBOLS), 12.2, 0.69),
-        ("FX", random.choice(FX_SYMBOLS), 11.5, 0.66),
-        ("FX", random.choice(FX_SYMBOLS), 11.7, 0.67),
-        ("OPTIONS", random.choice(OPTION_SYMBOLS), 14.0, 0.71),
-        ("OPTIONS", random.choice(OPTION_SYMBOLS), 14.2, 0.72),
-        ("FUTURES", random.choice(FUTURES_SYMBOLS), 13.0, 0.69),
-        ("FUTURES", random.choice(FUTURES_SYMBOLS), 13.2, 0.70),
+    raw_candidates = [
+        ("CRYPTO", random.choice(SYMBOLS)),
+        ("CRYPTO", random.choice(SYMBOLS)),
+        ("FX", random.choice(FX_SYMBOLS)),
+        ("FX", random.choice(FX_SYMBOLS)),
+        ("OPTIONS", random.choice(OPTION_SYMBOLS)),
+        ("OPTIONS", random.choice(OPTION_SYMBOLS)),
+        ("FUTURES", random.choice(FUTURES_SYMBOLS)),
+        ("FUTURES", random.choice(FUTURES_SYMBOLS)),
     ]
+
+    candidates = []
+
+    for asset_class, symbol in raw_candidates:
+        sig, prob = signal_provider.get_signal(
+            symbol=symbol,
+            asset_class=asset_class,
+        )
+        candidates.append((asset_class, symbol, sig, prob))
+
     random.shuffle(candidates)
     return candidates
+
 
 
 def pnl_divergence_warning(
