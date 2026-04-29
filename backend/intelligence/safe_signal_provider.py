@@ -1,21 +1,28 @@
 from __future__ import annotations
 
-from typing import Any, Tuple
+from typing import Any, Optional, Tuple
 
 from backend.data.coinbase_historical_downloader import load_runtime_asset
 
 
 class SafeSignalProvider:
     """
-    Phase 5C: Unified multi-asset provider with active feature intelligence.
+    Phase 5C / 5D PCNRASS-safe unified multi-asset signal provider.
 
-    PCNRASS intent:
-    - Preserve Phase 4E multi-asset activation.
-    - Use real-data Phase 5B features:
+    Preserved behavior:
+    - Uses real-data Phase 5B features:
       velocity, acceleration, pressure_score, top_of_book_depth.
-    - Display feature values in the decision log for verification.
-    - Keep futures/options/crypto/FX working together.
+    - Keeps futures/options/crypto/FX working together.
+    - Preserves decision logging and scoring structure.
     - No fake/random fallback.
+
+    Surgical compatibility improvement:
+    - Supports BOTH call styles without breaking either one:
+        get_signal(symbol, asset_class)
+        get_signal(asset=asset, symbol=symbol, asset_class=asset_class)
+
+    This is intentionally limited to SafeSignalProvider only.
+    It does not modify dashboard, broker logic, PnL, auth, session, or execution flow.
     """
 
     def __init__(self) -> None:
@@ -77,7 +84,12 @@ class SafeSignalProvider:
 
     def _is_option(self, symbol: str) -> bool:
         s = str(symbol or "").upper()
-        return s.endswith("-C") or s.endswith("-P") or s.endswith("_CALL") or s.endswith("_PUT")
+        return (
+            s.endswith("-C")
+            or s.endswith("-P")
+            or s.endswith("_CALL")
+            or s.endswith("_PUT")
+        )
 
     def _option_proxy_candidates(self, symbol: str) -> list[str]:
         s = str(symbol or "").upper()
@@ -125,9 +137,53 @@ class SafeSignalProvider:
 
         return None, False, None
 
-    def get_signal(self, symbol: str, asset_class: str) -> Tuple[float, float]:
+    def _resolve_row(
+        self,
+        symbol: Optional[str],
+        asset: Optional[dict[str, Any]],
+    ) -> tuple[dict[str, Any] | None, bool, str | None]:
+        """
+        PCNRASS-safe compatibility resolver.
+
+        If dashboard passes a full asset row, use it.
+        Otherwise preserve the existing behavior and load data by symbol.
+        """
+        if isinstance(asset, dict) and self._row_price(asset) > 0:
+            return asset, False, asset.get("_proxy_source")
+
+        if not symbol:
+            return None, False, None
+
+        return self._load_row(str(symbol))
+
+    def get_signal(
+        self,
+        symbol: Optional[str] = None,
+        asset_class: Optional[str] = None,
+        asset: Optional[dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> Tuple[float, float]:
+        """
+        Returns:
+            score, probability
+
+        Compatible call styles:
+            get_signal(symbol, asset_class)
+            get_signal(asset=asset, symbol=symbol, asset_class=asset_class)
+        """
         try:
-            row, proxy_used, proxy_source = self._load_row(symbol)
+            # Accept symbol/asset_class if passed via kwargs by any older dashboard variant.
+            if symbol is None:
+                symbol = kwargs.get("symbol")
+            if asset_class is None:
+                asset_class = kwargs.get("asset_class")
+            if asset is None and isinstance(kwargs.get("asset"), dict):
+                asset = kwargs.get("asset")
+
+            symbol = str(symbol or "").strip()
+            asset_class = str(asset_class or "").strip().upper()
+
+            row, proxy_used, proxy_source = self._resolve_row(symbol, asset)
 
             if not isinstance(row, dict):
                 print(f"[SIGNAL BLOCKED] {symbol} -> NO_VALID_ROW")
@@ -191,6 +247,7 @@ class SafeSignalProvider:
                 self.repeat_count = 0
             self.last_symbol = symbol
 
+            # Preserved from Phase 5C.
             core += min(0.05 * self.repeat_count, 0.15)
 
             # Asset calibration: active but controlled.
@@ -198,7 +255,7 @@ class SafeSignalProvider:
                 core += 0.20
                 trend_s = self._clamp(trend_s + 0.10, 0.0, 1.0)
 
-            elif self._is_option(symbol):
+            elif self._is_option(symbol) or asset_class == "OPTIONS":
                 core += 0.16
                 trend_s = self._clamp(trend_s + 0.08, 0.0, 1.0)
                 if proxy_used:
@@ -218,6 +275,7 @@ class SafeSignalProvider:
 
             core = self._clamp(core, 0.0, 1.0)
 
+            # Preserved Phase 5C score scale.
             score = 5.0 + core * 11.0
 
             prob = (
@@ -233,7 +291,7 @@ class SafeSignalProvider:
 
             if self._is_futures(symbol):
                 prob += 0.05
-            elif self._is_option(symbol):
+            elif self._is_option(symbol) or asset_class == "OPTIONS":
                 prob += 0.05
                 if proxy_used:
                     prob -= 0.015
