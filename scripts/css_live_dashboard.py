@@ -3356,6 +3356,23 @@ try:
             "FUTURES": 0,
         }
 
+        # PCNRASS DAY 1 CLARITY PATCH:
+        # Display-only diagnostics so the operator can see why an asset class,
+        # especially OPTIONS, did or did not appear in the current cycle.
+        candidate_seen_this_cycle = {
+            "CRYPTO": 0,
+            "FX": 0,
+            "OPTIONS": 0,
+            "FUTURES": 0,
+        }
+        candidate_blocked_this_cycle = {
+            "CRYPTO": defaultdict(int),
+            "FX": defaultdict(int),
+            "OPTIONS": defaultdict(int),
+            "FUTURES": defaultdict(int),
+        }
+        cycle_candidates = []
+
         if is_session_locked():
             if defensive_reductions > 0:
                 print(
@@ -3368,7 +3385,12 @@ try:
             if not role_profile.get("can_execute_paper_trading", False):
                 print("[RBAC] New position generation blocked for current role.")
             else:
-                for asset_class, symbol, sig, prob in select_cycle_candidates():
+                cycle_candidates = select_cycle_candidates()
+                for asset_class, symbol, sig, prob in cycle_candidates:
+                    asset_class = str(asset_class).upper()
+                    if asset_class in candidate_seen_this_cycle:
+                        candidate_seen_this_cycle[asset_class] += 1
+
                     # =========================
                     # MODE-AWARE ENTRY FILTER
                     # =========================
@@ -3393,9 +3415,13 @@ try:
                     # PCNRASS profitability guardrail:
                     # avoid very weak/noisy entries while preserving existing mode behavior.
                     if sig < min_sig or prob < min_prob:
+                        if asset_class in candidate_blocked_this_cycle:
+                            candidate_blocked_this_cycle[asset_class]["MODE_FILTER"] += 1
                         continue
 
                     if asset_class != "FX" and sig < 10.0:
+                        if asset_class in candidate_blocked_this_cycle:
+                            candidate_blocked_this_cycle[asset_class]["NON_FX_MIN_SIG"] += 1
                         continue
 
                     quality_ok, quality_reason = pcnrass_phase2g_entry_quality_gate(
@@ -3405,6 +3431,8 @@ try:
                         prob,
                     )
                     if not quality_ok:
+                        if asset_class in candidate_blocked_this_cycle:
+                            candidate_blocked_this_cycle[asset_class][str(quality_reason)] += 1
                         print(f"[PHASE2G ENTRY BLOCK] {symbol} {asset_class} -> {quality_reason}")
                         continue
 
@@ -3413,9 +3441,13 @@ try:
                     if not concurrency_controller.can_add_position(
                         mtm_engine.count_open_positions()
                     ):
+                        if asset_class in candidate_blocked_this_cycle:
+                            candidate_blocked_this_cycle[asset_class]["CONCURRENCY_LIMIT"] += 1
                         break
 
                     if mtm_engine.count_open_positions() >= hard_position_limit():
+                        if asset_class in candidate_blocked_this_cycle:
+                            candidate_blocked_this_cycle[asset_class]["HARD_TOTAL_CAP"] += 1
                         break
 
                     allowed_to_open, open_reason = can_open_position(
@@ -3424,6 +3456,8 @@ try:
                         new_counts_this_cycle=new_counts_this_cycle,
                     )
                     if not allowed_to_open:
+                        if asset_class in candidate_blocked_this_cycle:
+                            candidate_blocked_this_cycle[asset_class][str(open_reason)] += 1
                         continue
 
                     if asset_class == "CRYPTO":
@@ -3554,7 +3588,35 @@ try:
             print(f"| NEW ACCOUNTING ENGINE | CYCLE {cycle:<33}|")
             print(f"| NET UNREALIZED        | {snapshot.total_net_unrealized:+.4f}{' ' * 35}|")
             print(f"| LIVE EQUITY           | {snapshot.live_equity:+.4f}{' ' * 35}|")
-            print(f"| PAPER NOTIONAL/POS    | ${SIMULATED_PAPER_NOTIONAL_PER_POSITION:,.2f}{' ' * 34}|")
+            print(f"| PAPER TEST NOTIONAL   | ${SIMULATED_PAPER_NOTIONAL_PER_POSITION:,.2f} PER POSITION (SIM){' ' * 15}|")
+            print("|" + "-" * 62 + "|")
+            open_counts_diag = mtm_engine.count_open_positions_by_asset()
+            print(
+                f"| OPEN COUNTS           | "
+                f"CRYPTO={open_counts_diag.get('CRYPTO', 0)} "
+                f"FX={open_counts_diag.get('FX', 0)} "
+                f"FUTURES={open_counts_diag.get('FUTURES', 0)} "
+                f"OPTIONS={open_counts_diag.get('OPTIONS', 0)}{' ' * 13}|"
+            )
+            print(
+                f"| CANDIDATES SEEN       | "
+                f"CRYPTO={candidate_seen_this_cycle.get('CRYPTO', 0)} "
+                f"FX={candidate_seen_this_cycle.get('FX', 0)} "
+                f"FUTURES={candidate_seen_this_cycle.get('FUTURES', 0)} "
+                f"OPTIONS={candidate_seen_this_cycle.get('OPTIONS', 0)}{' ' * 10}|"
+            )
+            options_blocks = candidate_blocked_this_cycle.get("OPTIONS", {})
+            if new_counts_this_cycle.get("OPTIONS", 0) > 0:
+                options_status = "OPENED"
+            elif candidate_seen_this_cycle.get("OPTIONS", 0) <= 0:
+                options_status = "NO_OPTIONS_CANDIDATE"
+            elif options_blocks:
+                options_status = "BLOCKED: " + ", ".join(
+                    f"{k}={v}" for k, v in list(options_blocks.items())[:2]
+                )
+            else:
+                options_status = "NOT_SELECTED_OR_SLOT_LIMIT"
+            print(f"| OPTIONS STATUS        | {options_status[:38]:<38}|")
             print("|" + "-" * 62 + "|")
             print(f"| TRACKER PERFORMANCE   | CYCLE {cycle:<33}|")
             print(f"| TRACKER EQUITY        | {tracker_snapshot['current_equity']:+.4f}{' ' * 35}|")
