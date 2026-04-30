@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os
 print("RUNNING FILE:", os.path.abspath(__file__))
-print("CSS DASHBOARD VERSION: Phase 3B-4 PCNRASS True Runner Mode + Options Calibration")
+print("CSS DASHBOARD VERSION: Phase 3B-4 PCNRASS Live Size Guard + True Runner Trigger")
 import contextlib
 import hashlib
 import getpass
@@ -402,6 +402,12 @@ SIMULATED_PAPER_NOTIONAL_PER_POSITION = 100.00
 # - profit scalping locks gains by booking realized PnL and resetting the runner base
 PHASE2E_PROFIT_CAPTURE_MIN = 0.0020  # retained for compatibility with older labels
 PHASE2E_LOSS_CONTROL_MIN = -0.0020
+
+# PCNRASS Profitability Phase 3:
+# Hard stop-loss guard caps adverse MTM before routine weak-signal exits.
+# This is paper lifecycle protection only; live broker sizing/routing remains
+# governed separately by RiskGovernor / CapitalAllocator / broker adapters.
+PHASE2F_HARD_STOP_LOSS_MIN = -0.0500
 # PCNRASS Profitability Phase 1: runner-mode tuning.
 # Entry logic is untouched. These settings only slow premature profit-taking
 # so winning paper trades can express before being scalped or trailed out.
@@ -412,9 +418,10 @@ PHASE2E_STAGNATION_MIN_AGE = 3
 PHASE2E_MAX_HOLD_CYCLES = 8
 
 PHASE2F_RUNNER_MODE_ENABLED = True
-# PCNRASS TRUE RUNNER MODE: positive trades above this level are held unless
-# trailing giveback or hard loss control occurs. This is an exit-layer change only.
-PHASE2F_RUNNER_HOLD_TRIGGER = 0.0050
+# PCNRASS Profitability Phase 2:
+# Runner activation is lower than scalp activation. This lets small but
+# valid winners breathe while preserving the stricter profit-scalp lock.
+PHASE2F_RUNNER_HOLD_MIN = 0.0050
 PHASE2F_MIN_PROFIT_HOLD_CYCLES = 2
 PHASE2F_PROFIT_SCALP_ARM_MIN = 0.0200
 PHASE2F_PROFIT_SCALP_MIN_INTERVAL = 3
@@ -2475,6 +2482,20 @@ def pcnrass_phase2e_exit_reason(pos: dict) -> str | None:
         or prob_now <= PHASE2F_HARD_PROFIT_FADE_PROB
     )
 
+    # 0) Hard stop-loss guard: cap single-position adverse drift before
+    # routine weak-signal logic can allow a large volatile loss to run.
+    # This protects against futures-loss asymmetry while leaving
+    # winners/runner logic intact.
+    if pnl <= PHASE2F_HARD_STOP_LOSS_MIN:
+        try:
+            print(
+                f"[PHASE2F HARD STOP] {pos.get(symbol)} | "
+                f"pnl={pnl:+.4f} limit={PHASE2F_HARD_STOP_LOSS_MIN:+.4f}"
+            )
+        except Exception:
+            pass
+        return "HARD_STOP_LOSS"
+
     # 1) Loss control remains allowed before profit-hold logic.
     if pnl <= PHASE2E_LOSS_CONTROL_MIN:
         if prob_now <= max(0.50, entry_prob - 0.020):
@@ -2486,37 +2507,32 @@ def pcnrass_phase2e_exit_reason(pos: dict) -> str | None:
 
     # 2) Profitable trades must breathe for at least two completed cycles.
     if pnl > 0.0 and age < PHASE2F_MIN_PROFIT_HOLD_CYCLES:
-        pos["runner_status"] = "EARLY_PROFIT_HOLD"
         return None
 
-    # 3) TRUE RUNNER MODE: hold qualifying winners instead of prematurely closing
-    # them on simple score/probability wobble. Loss control above remains intact.
-    if PHASE2F_RUNNER_MODE_ENABLED and pnl >= PHASE2F_RUNNER_HOLD_TRIGGER:
-        pos["runner_status"] = "RUNNER_ACTIVE_HOLD"
-
-        # Scalp only after a meaningful profit and interval. The scalp function
-        # books profit and resets the runner base while keeping the position alive.
-        if (
-            pnl >= PHASE2F_PROFIT_SCALP_ARM_MIN
-            and age >= PHASE2F_MIN_PROFIT_HOLD_CYCLES
-            and (age - last_scalp_age) >= PHASE2F_PROFIT_SCALP_MIN_INTERVAL
-        ):
-            return "PROFIT_SCALP_LOCK"
-
-        # Full exit only when a real trailing giveback combines with deterioration.
-        # A score/probability wobble alone should not kill a profitable runner.
-        if (
-            max_profit >= PHASE2E_TRAILING_ARM_MIN
-            and trail_giveback >= PHASE2E_TRAILING_GIVEBACK
-            and reversal_detected
-        ):
-            return "TRAILING_PROFIT_LOCK_REVERSAL"
-
+    # 2B) TRUE RUNNER TRIGGER:
+    # Hold small but valid winners instead of allowing weak/reversal/stagnation
+    # logic to close them before they can develop. Profit scalping still takes
+    # priority once PHASE2F_PROFIT_SCALP_ARM_MIN is reached.
+    if (
+        PHASE2F_RUNNER_MODE_ENABLED
+        and pnl >= PHASE2F_RUNNER_HOLD_MIN
+        and pnl < PHASE2F_PROFIT_SCALP_ARM_MIN
+    ):
+        try:
+            last_print_age = int(pos.get("runner_last_print_age", -999) or -999)
+            if age != last_print_age:
+                print(
+                    f"[PHASE2F RUNNER HOLD] {pos.get('symbol')} | "
+                    f"pnl={pnl:+.4f} age={age} "
+                    f"runner_min={PHASE2F_RUNNER_HOLD_MIN:.4f}"
+                )
+                pos["runner_last_print_age"] = age
+            pos["runner_active"] = True
+        except Exception:
+            pass
         return None
 
-    pos["runner_status"] = "FLAT_OR_BELOW_RUNNER_TRIGGER"
-
-    # 4) Profit scalping fallback for branches where runner mode is disabled.
+    # 3) Profit scalping: lock a meaningful gain but keep the runner alive.
     if (
         pnl >= PHASE2F_PROFIT_SCALP_ARM_MIN
         and age >= PHASE2F_MIN_PROFIT_HOLD_CYCLES
@@ -2524,7 +2540,7 @@ def pcnrass_phase2e_exit_reason(pos: dict) -> str | None:
     ):
         return "PROFIT_SCALP_LOCK"
 
-    # 5) Trail profit only when giveback combines with probable edge/reversal deterioration.
+    # 4) Trail profit only when giveback combines with probable edge/reversal deterioration.
     if (
         max_profit >= PHASE2E_TRAILING_ARM_MIN
         and trail_giveback >= PHASE2E_TRAILING_GIVEBACK
@@ -2532,12 +2548,11 @@ def pcnrass_phase2e_exit_reason(pos: dict) -> str | None:
     ):
         return "TRAILING_PROFIT_LOCK_REVERSAL"
 
-    # 6) If a very small winning trade loses its edge after minimum hold, close it defensively.
-    # True runners above PHASE2F_RUNNER_HOLD_TRIGGER are protected by the block above.
-    if 0.0 < pnl < PHASE2F_RUNNER_HOLD_TRIGGER and age >= PHASE2F_MIN_PROFIT_HOLD_CYCLES and reversal_detected:
+    # 5) If a winning trade loses its edge after minimum hold, close it defensively.
+    if pnl > 0.0 and age >= PHASE2F_MIN_PROFIT_HOLD_CYCLES and reversal_detected:
         return "PROFIT_WEAKENING_REVERSAL"
 
-    # 7) Release capital from flat trades that are not moving and no longer have strong edge.
+    # 6) Release capital from flat trades that are not moving and no longer have strong edge.
     if (
         age >= PHASE2E_STAGNATION_MIN_AGE
         and abs(pnl) <= PHASE2E_STAGNATION_BAND
@@ -3329,17 +3344,6 @@ try:
                         pnl_observer.close_position(observer_symbol, observer_price)
                     except Exception as exc:
                         print(f"[PHASE2F OBSERVER CLOSE WARN] {pos.get('symbol')}: {str(exc)[:80]}")
-            else:
-                # PCNRASS TRUE RUNNER MODE VISIBILITY:
-                # Shows that the exit engine is actively holding a profitable runner,
-                # not merely declaring runner settings at startup.
-                if pos.get("runner_status") == "RUNNER_ACTIVE_HOLD":
-                    print(
-                        f"[PHASE2F RUNNER HOLD] {pos.get('symbol')} | "
-                        f"pnl={float(pos.get('floating', 0.0) or 0.0):+.4f} | "
-                        f"max={float(pos.get('max_profit', 0.0) or 0.0):+.4f} | "
-                        f"age={int(pos.get('age_cycles', 0) or 0)}"
-                    )
 
         defensive_reductions = apply_defensive_exposure_reduction()
 
