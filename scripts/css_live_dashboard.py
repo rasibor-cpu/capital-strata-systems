@@ -428,13 +428,17 @@ PHASE2G_ASSET_EDGE_BONUS = {
     "CRYPTO": 0.00,
     "FX": 0.05,
     "FUTURES": 0.10,
-    "OPTIONS": 0.10,
+    # PCNRASS DAY 1 OPTIONS PATCH:
+    # Give options a fairer chance in BALANCED mode without bypassing filters.
+    "OPTIONS": 0.20,
 }
 PHASE2G_MIN_PROB_BY_ASSET = {
     "CRYPTO": 0.40,
     "FX": 0.50,
     "FUTURES": 0.58,
-    "OPTIONS": 0.58,
+    # PCNRASS DAY 1 OPTIONS PATCH:
+    # Slightly relaxed from 0.58 to 0.52 so valid option candidates are not over-filtered.
+    "OPTIONS": 0.52,
 }
 PHASE2G_SYMBOL_REENTRY_COOLDOWN_CYCLES = 2
 PHASE2G_BLOCK_DUPLICATE_SYMBOLS = True
@@ -466,6 +470,36 @@ PHASE2H_FX_EDGE_FLOOR_BY_MODE = {
     "BALANCED": 3.00,
     "AGGRESSIVE": 2.70,
     "EXPANSION": 2.45,
+}
+
+# === PCNRASS PHASE 2I OPTIONS PARTICIPATION / ALLOCATION GUARD ===
+# Options were being detected but repeatedly blocked by the generic mode filter
+# before portfolio construction could allocate any option slot. This guard gives
+# one valid options candidate a controlled route into the paper portfolio when
+# options data is live, slots are available, and quality still clears Phase 2G.
+# It does NOT force weak options trades and does NOT bypass execution controls.
+PHASE2I_OPTIONS_PARTICIPATION_GUARD = True
+PHASE2I_OPTIONS_MAX_NEW_PER_CYCLE = 1
+PHASE2I_OPTIONS_MIN_SIG_BY_MODE = {
+    "SAFE": 9.80,
+    "CONSERVATIVE": 9.35,
+    "BALANCED": 8.80,
+    "AGGRESSIVE": 8.35,
+    "EXPANSION": 7.90,
+}
+PHASE2I_OPTIONS_MIN_PROB_BY_MODE = {
+    "SAFE": 0.58,
+    "CONSERVATIVE": 0.55,
+    "BALANCED": 0.52,
+    "AGGRESSIVE": 0.50,
+    "EXPANSION": 0.48,
+}
+PHASE2I_OPTIONS_EDGE_FLOOR_BY_MODE = {
+    "SAFE": 5.20,
+    "CONSERVATIVE": 4.90,
+    "BALANCED": 4.55,
+    "AGGRESSIVE": 4.20,
+    "EXPANSION": 3.85,
 }
 
 SESSION_IDLE_TIMEOUT_SECONDS = int(os.getenv("CSS_SESSION_IDLE_TIMEOUT_SECONDS", "3600") or 3600)
@@ -3038,6 +3072,71 @@ def pcnrass_phase2h_prioritize_fx_candidate(
     return reordered
 
 
+
+def pcnrass_phase2i_options_candidate_is_viable(asset_class: str, sig: float, prob: float) -> bool:
+    """
+    PCNRASS Phase 2I: options participation viability check.
+
+    This is a pre-allocation guard only. The normal Phase 2G quality gate,
+    duplicate-symbol rule, asset cap, and hard position cap still apply later.
+    """
+    if str(asset_class).upper() != "OPTIONS":
+        return False
+    try:
+        sig_f = float(sig or 0.0)
+        prob_f = float(prob or 0.0)
+        edge = sig_f * prob_f
+    except Exception:
+        return False
+
+    min_sig = float(PHASE2I_OPTIONS_MIN_SIG_BY_MODE.get(ENGINE_MODE, 8.80))
+    min_prob = float(PHASE2I_OPTIONS_MIN_PROB_BY_MODE.get(ENGINE_MODE, 0.52))
+    min_edge = float(PHASE2I_OPTIONS_EDGE_FLOOR_BY_MODE.get(ENGINE_MODE, 4.55))
+    return sig_f >= min_sig and prob_f >= min_prob and edge >= min_edge
+
+
+def pcnrass_phase2i_prioritize_options_candidate(
+    candidates: list[tuple[str, str, float, float]]
+) -> list[tuple[str, str, float, float]]:
+    """
+    PCNRASS Phase 2I: controlled options slot participation.
+
+    If no option is currently open and an option slot is available, move the
+    strongest viable option candidate near the front of the ranked list. This
+    improves portfolio construction without forcing weak options or bypassing
+    execution/risk controls.
+    """
+    if not PHASE2I_OPTIONS_PARTICIPATION_GUARD:
+        return candidates
+
+    try:
+        open_counts = mtm_engine.count_open_positions_by_asset()
+        if int(open_counts.get("OPTIONS", 0)) >= hard_asset_cap("OPTIONS"):
+            return candidates
+        if int(open_counts.get("OPTIONS", 0)) > 0:
+            return candidates
+    except Exception:
+        return candidates
+
+    viable_options = [
+        c for c in candidates
+        if pcnrass_phase2i_options_candidate_is_viable(c[0], c[2], c[3])
+    ]
+    if not viable_options:
+        return candidates
+
+    best_option = sorted(
+        viable_options,
+        key=lambda x: float(x[2]) * float(x[3]),
+        reverse=True,
+    )[0]
+
+    # Keep the strongest option first, then preserve the existing ranking for
+    # every other candidate. This is allocation-aware, not random forcing.
+    return [best_option] + [c for c in candidates if c is not best_option]
+
+
+
 def select_cycle_candidates() -> list[tuple[str, str, float, float]]:
     raw_candidates = [
         ("CRYPTO", random.choice(SYMBOLS)),
@@ -3063,7 +3162,14 @@ def select_cycle_candidates() -> list[tuple[str, str, float, float]]:
     # Preserve the existing candidate universe, but consume strongest
     # signal/probability combinations first instead of randomizing the list.
     candidates.sort(key=lambda x: float(x[2]) * float(x[3]), reverse=True)
-    return pcnrass_phase2h_prioritize_fx_candidate(candidates)
+
+    # PCNRASS PHASE 2I ALLOCATION PATCH:
+    # Apply options participation first so one viable option can survive the
+    # generic ranking/mode filter when the option sleeve is empty. FX
+    # participation guard then runs as before, preserving existing FX behavior.
+    candidates = pcnrass_phase2i_prioritize_options_candidate(candidates)
+    candidates = pcnrass_phase2h_prioritize_fx_candidate(candidates)
+    return candidates
 
 
 
@@ -3411,6 +3517,14 @@ try:
                     if asset_class == "FX" and PHASE2H_FX_PARTICIPATION_GUARD:
                         min_sig = float(PHASE2H_FX_MIN_SIG_BY_MODE.get(ENGINE_MODE, min_sig))
                         min_prob = float(PHASE2H_FX_MIN_PROB_BY_MODE.get(ENGINE_MODE, min_prob))
+
+                    # PCNRASS PHASE 2I: Options participation uses an options-specific
+                    # signal/probability floor. This prevents valid options from being
+                    # blocked by the generic futures-heavy mode filter, while the
+                    # Phase 2G quality gate still protects trade quality.
+                    if asset_class == "OPTIONS" and PHASE2I_OPTIONS_PARTICIPATION_GUARD:
+                        min_sig = float(PHASE2I_OPTIONS_MIN_SIG_BY_MODE.get(ENGINE_MODE, min_sig))
+                        min_prob = float(PHASE2I_OPTIONS_MIN_PROB_BY_MODE.get(ENGINE_MODE, min_prob))
 
                     # PCNRASS profitability guardrail:
                     # avoid very weak/noisy entries while preserving existing mode behavior.
