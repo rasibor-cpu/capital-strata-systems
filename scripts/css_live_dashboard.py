@@ -390,7 +390,7 @@ COINBASE_MAX_LIVE_ORDER_USD = float(os.getenv("COINBASE_MAX_LIVE_ORDER_USD", "1.
 
 # PCNRASS Phase 2A: simulated paper PnL uses controlled notional exposure
 # instead of one full unit/contract/share. Broker execution safety is unchanged.
-SIMULATED_PAPER_NOTIONAL_PER_POSITION = 25.00
+SIMULATED_PAPER_NOTIONAL_PER_POSITION = 100.00
 
 # === PCNRASS PHASE 2F PROFIT-RUNNER / SCALPING EXIT LOGIC SETTINGS ===
 # These thresholds are deliberately scaled to the $25 controlled paper notional.
