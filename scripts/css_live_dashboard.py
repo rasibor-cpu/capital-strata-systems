@@ -1517,6 +1517,46 @@ pnl_observer = Portfolio(
 
 # === INITIALIZE NEW TRACKER ===
 pnl_tracker = PnLTracker(starting_equity=pnl_observer.starting_balance)
+
+# === PCNRASS METRIC-INTEGRITY FIX: CANONICAL EQUITY/DRAWDOWN SNAPSHOT ===
+# Display/risk metrics must come from one canonical live-equity stream.
+# We keep PnLTracker.record_trade() for compatibility, but we do NOT allow
+# manual current_equity/peak_equity overwrites to create false 50% drawdown.
+PCNRASS_EQUITY_HISTORY: list[float] = []
+
+def pcnrass_safe_tracker_snapshot(canonical_live_equity: float) -> dict[str, float]:
+    """
+    Return a stable dashboard equity snapshot using canonical accounting equity.
+
+    PCNRASS safety:
+    - Display/accounting metric only.
+    - Does not place orders.
+    - Does not change broker, routing, scoring, sizing, exits, or risk gates.
+    - Prevents corrupted PnLTracker peak/current mismatch from reporting
+      artificial ~50% drawdown when the paper seed and live-equity bases differ.
+    """
+    try:
+        current_equity = float(canonical_live_equity)
+    except Exception:
+        current_equity = float(getattr(pnl_tracker, "current_equity", 0.0) or 0.0)
+
+    if current_equity > 0:
+        PCNRASS_EQUITY_HISTORY.append(round(current_equity, 6))
+
+    valid_history = [float(x) for x in PCNRASS_EQUITY_HISTORY if float(x) > 0]
+    peak_equity = max(valid_history) if valid_history else max(current_equity, 0.0)
+    current_drawdown = (
+        (peak_equity - current_equity) / peak_equity
+        if peak_equity > 0 and current_equity <= peak_equity
+        else 0.0
+    )
+
+    return {
+        "current_equity": round(current_equity, 6),
+        "peak_equity": round(peak_equity, 6),
+        "current_drawdown": round(max(0.0, current_drawdown), 8),
+    }
+
 signal_provider = SafeSignalProvider()
 
 def map_oanda_env() -> None:
@@ -3149,21 +3189,12 @@ try:
         except Exception:
             pass
 
-        try:
-            pnl_tracker.current_equity = authoritative_live_equity
-            pnl_tracker.peak_equity = max(
-                float(getattr(pnl_tracker, "peak_equity", pnl_tracker.starting_equity)),
-                authoritative_live_equity,
-            )
-            if float(getattr(pnl_tracker, "peak_equity", 0.0)) > 0:
-                pnl_tracker.max_drawdown = max(
-                    float(getattr(pnl_tracker, "max_drawdown", 0.0)),
-                    (
-                        float(pnl_tracker.peak_equity) - authoritative_live_equity
-                    ) / float(pnl_tracker.peak_equity),
-                )
-        except Exception as e:
-            print(f"[TRACKER ALIGN WARN] {e}")
+        # PCNRASS METRIC-INTEGRITY FIX:
+        # Do not overwrite pnl_tracker.current_equity / peak_equity here.
+        # PnLTracker.record_trade() already maintains its own state, while the
+        # dashboard's live equity is now displayed through
+        # pcnrass_safe_tracker_snapshot() using canonical accounting equity.
+        # This prevents false peak inflation and artificial drawdown spikes.
 
         divergence_msg = None
 
@@ -3514,7 +3545,7 @@ try:
                 starting_equity=float(pnl_observer.starting_balance) + float(total_realized),
             )
 
-            tracker_snapshot = pnl_tracker.equity_snapshot()
+            tracker_snapshot = pcnrass_safe_tracker_snapshot(snapshot.live_equity)
 
             pnl_border = "=" * 64
             print(pnl_border)
