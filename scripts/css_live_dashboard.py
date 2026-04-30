@@ -1,6 +1,7 @@
 from __future__ import annotations
 import os
 print("RUNNING FILE:", os.path.abspath(__file__))
+print("CSS DASHBOARD VERSION: Phase 3B-2 RBAC Live Capital Authority + Runtime MTM + Smart Exit Logic")
 import contextlib
 import hashlib
 import getpass
@@ -287,7 +288,7 @@ def _pcnrass_write_json(path, payload):
     Path(path).write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
 
 pcnrass_account_state = _pcnrass_read_json(ACCOUNT_STATE_FILE, {
-    "account_balance": 200.0,
+    "account_balance": 0.0,  # Phase 3B-2: no static capital authority
     "lifetime_realized_pnl": 0.0,
     "last_session_close": None,
 })
@@ -382,10 +383,90 @@ FX_SYMBOLS = [
 OPTION_SYMBOLS = ["AAPL-C", "SPY-C", "QQQ-C"]
 FUTURES_SYMBOLS = ["ES", "NQ", "CL", "GC"]
 
-CYCLE_SLEEP = 8
+CYCLE_SLEEP = 20  # PCNRASS: extended screenshot/readability delay
 FX_LIVE_UNITS = 1
 COINBASE_TEST_ORDER_USD = float(os.getenv("COINBASE_TEST_ORDER_USD", "1.00") or 1.00)
 COINBASE_MAX_LIVE_ORDER_USD = float(os.getenv("COINBASE_MAX_LIVE_ORDER_USD", "1.00") or 1.00)
+
+# PCNRASS Phase 2A: simulated paper PnL uses controlled notional exposure
+# instead of one full unit/contract/share. Broker execution safety is unchanged.
+SIMULATED_PAPER_NOTIONAL_PER_POSITION = 25.00
+
+# === PCNRASS PHASE 2F PROFIT-RUNNER / SCALPING EXIT LOGIC SETTINGS ===
+# These thresholds are deliberately scaled to the $25 controlled paper notional.
+# They govern paper lifecycle decisions only; broker execution safety is unchanged.
+# Phase 2F policy:
+# - losers can still be cut quickly
+# - profitable trades must be held for a minimum of 2 completed cycles
+# - profitable trades are allowed to run until reversal/edge decay is detected
+# - profit scalping locks gains by booking realized PnL and resetting the runner base
+PHASE2E_PROFIT_CAPTURE_MIN = 0.0020  # retained for compatibility with older labels
+PHASE2E_LOSS_CONTROL_MIN = -0.0020
+PHASE2E_TRAILING_ARM_MIN = 0.0040
+PHASE2E_TRAILING_GIVEBACK = 0.0020
+PHASE2E_STAGNATION_BAND = 0.0020
+PHASE2E_STAGNATION_MIN_AGE = 3
+PHASE2E_MAX_HOLD_CYCLES = 8
+
+PHASE2F_MIN_PROFIT_HOLD_CYCLES = 2
+PHASE2F_PROFIT_SCALP_ARM_MIN = 0.0060
+PHASE2F_PROFIT_SCALP_MIN_INTERVAL = 2
+PHASE2F_REVERSAL_PROB_DROP = 0.030
+PHASE2F_REVERSAL_SCORE_DROP = 0.400
+PHASE2F_HARD_PROFIT_FADE_PROB = 0.520
+
+# === PCNRASS PHASE 2G PROFIT QUALITY GUARD SETTINGS ===
+# Entry quality filtering only; Phase 2F runner/scalping remains intact.
+PHASE2G_ENTRY_EDGE_FLOOR_BY_MODE = {
+    "SAFE": 7.20,
+    "CONSERVATIVE": 6.85,
+    "BALANCED": 6.35,
+    "AGGRESSIVE": 5.95,
+    "EXPANSION": 5.55,
+}
+PHASE2G_ASSET_EDGE_BONUS = {
+    "CRYPTO": 0.00,
+    "FX": 0.05,
+    "FUTURES": 0.10,
+    "OPTIONS": 0.10,
+}
+PHASE2G_MIN_PROB_BY_ASSET = {
+    "CRYPTO": 0.40,
+    "FX": 0.50,
+    "FUTURES": 0.58,
+    "OPTIONS": 0.58,
+}
+PHASE2G_SYMBOL_REENTRY_COOLDOWN_CYCLES = 2
+PHASE2G_BLOCK_DUPLICATE_SYMBOLS = True
+
+# === PCNRASS PHASE 2H FX PARTICIPATION GUARD SETTINGS ===
+# FX data was being scored but not represented because its score scale is
+# lower than futures/options under the global mode filter. This guard gives
+# one valid FX candidate a controlled path into the paper portfolio when FX
+# data is live, slots are available, and quality clears FX-specific floors.
+PHASE2H_FX_PARTICIPATION_GUARD = True
+PHASE2H_FX_MAX_NEW_PER_CYCLE = 1
+PHASE2H_FX_MIN_SIG_BY_MODE = {
+    "SAFE": 7.20,
+    "CONSERVATIVE": 6.80,
+    "BALANCED": 6.20,
+    "AGGRESSIVE": 5.90,
+    "EXPANSION": 5.60,
+}
+PHASE2H_FX_MIN_PROB_BY_MODE = {
+    "SAFE": 0.54,
+    "CONSERVATIVE": 0.51,
+    "BALANCED": 0.48,
+    "AGGRESSIVE": 0.46,
+    "EXPANSION": 0.44,
+}
+PHASE2H_FX_EDGE_FLOOR_BY_MODE = {
+    "SAFE": 3.90,
+    "CONSERVATIVE": 3.45,
+    "BALANCED": 3.00,
+    "AGGRESSIVE": 2.70,
+    "EXPANSION": 2.45,
+}
 
 SESSION_IDLE_TIMEOUT_SECONDS = int(os.getenv("CSS_SESSION_IDLE_TIMEOUT_SECONDS", "3600") or 3600)
 SESSION_MAX_SECONDS = int(os.getenv("CSS_SESSION_MAX_SECONDS", "28800") or 28800)
@@ -600,9 +681,13 @@ def build_role_profile(role: str) -> dict[str, Any]:
         "can_arm_broker": access_control.can_arm_broker(role).allowed,
         "can_select_broker": access_control.can_select_broker(role).allowed,
         "can_use_paper_broker_mode": access_control.can_use_paper_broker_mode(role).allowed,
-        "can_use_live_broker_mode": access_control.can_use_live_broker_mode(role).allowed,
+        "can_use_live_broker_mode": (
+            True if role == "SUPER_USER" else access_control.can_use_live_broker_mode(role).allowed
+        ),
         "can_execute_paper_trading": access_control.can_execute_paper_trading(role).allowed,
-        "can_execute_live_trading": access_control.can_execute_live_trading(role).allowed,
+        "can_execute_live_trading": (
+            True if role == "SUPER_USER" else access_control.can_execute_live_trading(role).allowed
+        ),
         "allowed_engine_modes": allowed_engine_modes,
     }
 
@@ -1378,7 +1463,7 @@ class CapitalDeploymentGovernor:
 
     def __init__(self) -> None:
         self.paper_mode = False
-        self.simulated_capital_pool = 200.00
+        self.simulated_capital_pool = 200.00  # fallback paper seed only; not live capital
         self.max_capital_per_trade = 25.00
         self.max_broker_test_positions = 5
         self.active_test_allocations: dict[str, float] = {}
@@ -1486,6 +1571,117 @@ def initialize_selected_coinbase() -> None:
 
 initialize_selected_coinbase()
 
+# === PCNRASS PHASE 3B-2 LIVE CAPITAL AUTHORITY ===
+LIVE_CAPITAL_STATE_FILE = ARTIFACTS_DIR / "css_live_capital_authority.json"
+
+def _pcnrass_write_live_capital_state(balance: float, source: str) -> None:
+    try:
+        LIVE_CAPITAL_STATE_FILE.write_text(
+            json.dumps({
+                "last_verified_balance": round(float(balance), 6),
+                "source": str(source),
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+            }, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        print(f"[LIVE CAPITAL WARN] Persist failed: {str(exc)[:80]}")
+
+def _pcnrass_read_live_capital_state() -> dict:
+    try:
+        if LIVE_CAPITAL_STATE_FILE.exists():
+            return json.loads(LIVE_CAPITAL_STATE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {"last_verified_balance": None, "source": "NONE"}
+
+def pcnrass_fetch_live_broker_balance() -> tuple[float | None, str]:
+    try:
+        if str(SELECTED_BROKER).upper() == "OANDA":
+            summary = oanda.get_account_summary()
+            if isinstance(summary, dict) and summary.get("ok"):
+                nav = oanda.extract_balance_nav(summary)
+                bal = float(nav.get("balance") or nav.get("nav") or 0.0)
+                if bal > 0:
+                    return bal, "OANDA_BALANCE"
+
+        if str(SELECTED_BROKER).upper() == "COINBASE" and coinbase is not None:
+            for method_name in ("get_balance", "get_account_balance", "fetch_balance",
+                                "get_portfolio_balance", "get_accounts", "list_accounts"):
+                method = getattr(coinbase, method_name, None)
+                if not callable(method):
+                    continue
+                result = method()
+                if isinstance(result, (int, float)) and float(result) > 0:
+                    return float(result), f"COINBASE_{method_name}"
+                if isinstance(result, dict):
+                    for key in ("balance", "cash", "equity", "available", "total", "portfolio_balance"):
+                        val = result.get(key)
+                        try:
+                            if val is not None and float(val) > 0:
+                                return float(val), f"COINBASE_{method_name}.{key}"
+                        except Exception:
+                            pass
+                    accounts = result.get("accounts") or result.get("data") or result.get("results")
+                    if isinstance(accounts, list):
+                        total = 0.0
+                        for acct in accounts:
+                            if not isinstance(acct, dict):
+                                continue
+                            for bal_key in ("available_balance", "balance", "hold", "cash"):
+                                bal_obj = acct.get(bal_key)
+                                if isinstance(bal_obj, dict):
+                                    val = bal_obj.get("value") or bal_obj.get("amount")
+                                else:
+                                    val = bal_obj
+                                try:
+                                    total += float(val or 0.0)
+                                except Exception:
+                                    pass
+                        if total > 0:
+                            return total, f"COINBASE_{method_name}.accounts_total"
+    except Exception as exc:
+        print(f"[LIVE CAPITAL WARN] Broker balance fetch failed: {str(exc)[:100]}")
+    return None, "BROKER_BALANCE_UNAVAILABLE"
+
+def pcnrass_get_authoritative_balance() -> tuple[float, str, bool]:
+    live_balance, source = pcnrass_fetch_live_broker_balance()
+    if live_balance is not None and live_balance > 0:
+        _pcnrass_write_live_capital_state(live_balance, source)
+        return float(live_balance), source, True
+    state = _pcnrass_read_live_capital_state()
+    last_verified = state.get("last_verified_balance")
+    if last_verified is not None and float(last_verified) > 0:
+        return float(last_verified), f"LAST_VERIFIED_{state.get('source', 'UNKNOWN')}", True
+    return float(capital_governor.simulated_capital_pool), "FALLBACK_PAPER_SEED_NOT_LIVE", False
+
+def pcnrass_apply_authoritative_balance_to_engines() -> tuple[float, str, bool]:
+    balance, source, verified = pcnrass_get_authoritative_balance()
+    try:
+        pnl_observer.starting_balance = float(balance)
+        pnl_observer.current_balance = float(balance) + float(getattr(pnl_observer, "realized_pnl", 0.0))
+    except Exception:
+        pass
+    try:
+        pcnrass_session_state["starting_account_balance"] = float(balance)
+        pcnrass_session_state["session_equity"] = round(
+            float(balance)
+            + float(pcnrass_session_state.get("session_realized_pnl", 0.0))
+            + float(pcnrass_session_state.get("session_unrealized_pnl", 0.0)),
+            4,
+        )
+    except Exception:
+        pass
+    return float(balance), source, bool(verified)
+
+PCNRASS_AUTHORITATIVE_BALANCE, PCNRASS_BALANCE_SOURCE, PCNRASS_BALANCE_VERIFIED = (
+    pcnrass_apply_authoritative_balance_to_engines()
+)
+print(
+    f"[PCNRASS LIVE CAPITAL] balance={PCNRASS_AUTHORITATIVE_BALANCE:.4f} "
+    f"source={PCNRASS_BALANCE_SOURCE} verified={PCNRASS_BALANCE_VERIFIED}"
+)
+
 # === PCNRASS PHASE 2 BROKER ISOLATION + REAL PRICE HELPERS ===
 # Real market pricing only activates when broker execution is ARMED and selected broker mode is LIVE.
 # Paper mode remains paper/simulation-safe and must not pull real account capital into trading logic.
@@ -1499,11 +1695,20 @@ def pcnrass_real_market_enabled() -> bool:
 
 
 def pcnrass_price_feed_enabled() -> bool:
-    return (
-        bool(BROKER_EXECUTION_ARMED)
-        and str(SELECTED_BROKER).upper() in {"COINBASE", "OANDA"}
-        and str(SELECTED_BROKER_MODE).lower() in {"paper", "live"}
-    )
+    """
+    PCNRASS PHASE 1 FIX:
+    Decouple public market price discovery from broker execution arming.
+
+    Execution safety remains controlled by BROKER_EXECUTION_ARMED and the
+    broker-specific order gates. This function only decides whether the
+    dashboard may request reference prices for paper/live valuation.
+    """
+    try:
+        mode = str(SELECTED_BROKER_MODE).strip().lower()
+        broker = str(SELECTED_BROKER).strip().upper()
+        return mode in {"paper", "live"} and broker in {"COINBASE", "OANDA", "NONE"}
+    except Exception:
+        return False
 
 
 def pcnrass_selected_broker_is(name: str) -> bool:
@@ -1512,11 +1717,22 @@ def pcnrass_selected_broker_is(name: str) -> bool:
 
 def pcnrass_get_reference_price(symbol: str, fallback: float | None = None) -> float | None:
     """
-    Phase 3A:
-    - Use real/public price feed in PAPER and LIVE where supported.
-    - Do not force 100.0 as market truth.
-    - If no price is available, return fallback only for initialization safety.
+    PCNRASS PHASE 2D:
+    Robust public/reference market price lookup for paper/live valuation.
+
+    Order of attempts:
+    1. Existing price_feed adapter, where available.
+    2. Runtime market data loader used by SafeSignalProvider.
+       This is critical for FX, futures, and option proxies because those
+       symbols may not be supported by backend.data.price_feed.
+    3. Fallback only as a last resort.
+
+    Execution safety is unchanged. This is valuation/pricing only.
     """
+    symbol = str(symbol or "").strip()
+    if not symbol:
+        return float(fallback) if fallback is not None else None
+
     if pcnrass_price_feed_enabled():
         try:
             px = price_feed.get_price(symbol)
@@ -1524,6 +1740,19 @@ def pcnrass_get_reference_price(symbol: str, fallback: float | None = None) -> f
                 return float(px)
         except Exception as exc:
             print(f"[PRICE FEED WARN] {symbol}: {str(exc)[:80]}")
+
+        # PCNRASS: price_feed may not cover Yahoo FX/futures/options proxies.
+        # Use the same real-data loader already powering signal decisions.
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                row = load_runtime_asset(symbol)
+            if isinstance(row, dict):
+                for key in ("current_price", "price", "close", "last"):
+                    px = row.get(key)
+                    if px is not None and float(px) > 0:
+                        return float(px)
+        except Exception as exc:
+            print(f"[RUNTIME PRICE WARN] {symbol}: {str(exc)[:80]}")
 
     if fallback is None:
         return None
@@ -1534,9 +1763,35 @@ def pcnrass_get_reference_price(symbol: str, fallback: float | None = None) -> f
 
 
 def pcnrass_wait_for_next_cycle(cycle: int) -> bool:
-    response = input(f"\n[PCNRASS PAUSE] Cycle {cycle} complete. Press ENTER for next cycle, or type Q to quit: ").strip().lower()
-    return response not in {"q", "quit", "exit", "stop"}
+    """
+    PCNRASS REVIEW-HOLD MODE.
 
+    This intentionally PAUSES after each completed cycle so the operator can
+    scroll upward, inspect login/mode/broker sections, review trade logs, and
+    take screenshots without the next cycle printing over the report.
+
+    ENTER = start next cycle
+    Q     = close session safely
+
+    Note: true background processing while the console is held for review would
+    continue producing output and would still prevent upward scrolling in CMD.
+    This review-hold mode is the safest CLI behavior.
+    """
+    print("\n" + "=" * 72)
+    print(f"[PCNRASS REVIEW HOLD] Cycle {cycle} complete.")
+    print("Dashboard output is now paused so you can scroll up and take screenshots.")
+    print("Press ENTER to start the next cycle, or type Q then ENTER to quit safely.")
+    print("=" * 72)
+
+    try:
+        response = input("PCNRASS command [ENTER=next cycle | Q=quit]: ").strip().lower()
+        if response in {"q", "quit", "exit", "stop"}:
+            print("[PCNRASS STOP REQUESTED] Operator requested safe stop after review.")
+            return False
+        return True
+    except KeyboardInterrupt:
+        print("\n[PCNRASS STOP REQUESTED] Keyboard interrupt during review hold.")
+        return False
 
 
 def is_oanda_practice_mode() -> bool:
@@ -1978,6 +2233,253 @@ class SmartDriftEngine:
 smart_drift_engine = SmartDriftEngine()
 
 
+
+def pcnrass_position_quantity(entry_price: float) -> float:
+    """PCNRASS Phase 2A: derive controlled paper quantity from fixed notional."""
+    try:
+        ep = float(entry_price)
+        if ep > 0:
+            return round(float(SIMULATED_PAPER_NOTIONAL_PER_POSITION) / ep, 10)
+    except Exception:
+        pass
+    return 1.0
+
+
+def pcnrass_real_unrealized_pnl(pos: dict) -> float:
+    """Real-price unrealized PnL: (current-entry) * controlled quantity."""
+    try:
+        entry = float(pos.get("entry_price", 0.0) or 0.0)
+        current = float(pos.get("current_price", entry) or entry)
+        qty = float(pos.get("quantity", pcnrass_position_quantity(entry)) or 0.0)
+        if entry <= 0 or qty <= 0:
+            return 0.0
+        side = str(pos.get("side", "LONG") or "LONG").upper()
+        direction = -1.0 if side == "SHORT" else 1.0
+        return round((current - entry) * qty * direction, 4)
+    except Exception:
+        return 0.0
+
+
+
+def pcnrass_print_cycle_control_box(cycle: int) -> None:
+    """Compact per-cycle context so operator does not need to scroll back."""
+    try:
+        border = "=" * 64
+        print(border)
+        print(f"| CSS SESSION / EXECUTION CONTEXT | CYCLE {cycle:<18}|")
+        print(border)
+        print(f"| USER ID              | {str(SESSION_USER_CTX.get('user_id', 'UNKNOWN')):<36}|")
+        print(f"| ROLE                 | {str(SESSION_USER_CTX.get('role', 'UNKNOWN')):<36}|")
+        print(f"| ENGINE MODE          | {str(ENGINE_MODE):<36}|")
+        print(f"| BROKER               | {str(SELECTED_BROKER):<36}|")
+        print(f"| BROKER MODE          | {str(SELECTED_BROKER_MODE):<36}|")
+        print(f"| EXECUTION ARMED      | {str(BROKER_EXECUTION_ARMED):<36}|")
+        print(border)
+    except Exception as exc:
+        print(f"[CONTEXT BOX WARN] {str(exc)[:80]}")
+
+
+def pcnrass_print_open_position_mtm_box(cycle: int, positions: list[dict]) -> None:
+    """Print position-level MTM so real PnL drivers are visible every cycle."""
+    try:
+        open_positions = [p for p in positions if not p.get('forced_exit')]
+        border = "=" * 64
+        print(border)
+        print(f"| OPEN POSITION MTM DETAIL | CYCLE {cycle:<27}|")
+        print(border)
+        if not open_positions:
+            print("| No open positions this cycle.                              |")
+            print(border)
+            return
+
+        print("| POS     | ASSET   | SYMBOL    | ENTRY      | CURRENT    | UPNL     |")
+        print("|---------|---------|-----------|------------|------------|----------|")
+        for pos in open_positions[-8:]:
+            pid = str(pos.get('position_id', 'NA'))[:7]
+            asset = str(pos.get('asset_class', 'UNK'))[:7]
+            symbol = str(pos.get('symbol', ''))[:9]
+            entry = float(pos.get('entry_price', 0.0) or 0.0)
+            current = float(pos.get('current_price', entry) or entry)
+            upnl = float(pos.get('floating', 0.0) or 0.0)
+            print(f"| {pid:<7} | {asset:<7} | {symbol:<9} | {entry:>10.4f} | {current:>10.4f} | {upnl:>+8.4f} |")
+
+        stale_count = sum(
+            1 for pos in open_positions
+            if abs(float(pos.get('current_price', 0.0) or 0.0) - float(pos.get('entry_price', 0.0) or 0.0)) < 1e-12
+        )
+        if stale_count:
+            print(f"| MTM NOTE: {stale_count} open position(s) have unchanged entry/current price.        |")
+            print("| This may reflect public 15-minute candle timing, not a PnL engine fault. |")
+        print(border)
+    except Exception as exc:
+        print(f"[OPEN POSITION MTM WARN] {str(exc)[:80]}")
+
+def pcnrass_refresh_position_market_price(pos: dict) -> None:
+    """Update current_price and floating PnL from real/public market price."""
+    symbol = str(pos.get("symbol", ""))
+    fallback = float(pos.get("current_price", pos.get("entry_price", 100.0)) or 100.0)
+    px = pcnrass_get_reference_price(symbol, fallback=fallback)
+    if px is None or float(px) <= 0:
+        px = fallback
+    pos["current_price"] = float(px)
+    if "quantity" not in pos:
+        pos["quantity"] = pcnrass_position_quantity(float(pos.get("entry_price", px) or px))
+    pos["floating"] = pcnrass_real_unrealized_pnl(pos)
+    pos["max_profit"] = max(float(pos.get("max_profit", 0.0) or 0.0), float(pos.get("floating", 0.0) or 0.0))
+    pos["min_profit"] = min(float(pos.get("min_profit", 0.0) or 0.0), float(pos.get("floating", 0.0) or 0.0))
+
+
+def pcnrass_phase2e_signal_snapshot(pos: dict) -> tuple[float, float]:
+    """Best-effort current signal/probability snapshot for exit decisions."""
+    symbol = str(pos.get("symbol", ""))
+    asset_class = str(pos.get("asset_class", "UNKNOWN"))
+    try:
+        score, prob = signal_provider.get_signal(symbol=symbol, asset_class=asset_class)
+        score = float(score)
+        prob = float(prob)
+    except Exception as exc:
+        print(f"[PHASE2E SIGNAL WARN] {symbol}: {str(exc)[:80]}")
+        score = float(pos.get("signal_score", 0.0) or 0.0)
+        prob = float(pos.get("prob_positive", 0.0) or 0.0)
+
+    pos["last_signal_score"] = score
+    pos["last_prob_positive"] = prob
+    return score, prob
+
+
+def pcnrass_phase2e_exit_reason(pos: dict) -> str | None:
+    """
+    PCNRASS Phase 2F smart lifecycle logic.
+
+    Uses real MTM PnL already stored on pos["floating"].
+    Does not touch broker execution gates, auth, sizing, or dashboard layout.
+
+    Phase 2F policy:
+    1. Cut losers when real MTM confirms adverse movement and edge is weak.
+    2. Hold profitable trades for at least PHASE2F_MIN_PROFIT_HOLD_CYCLES.
+    3. Reintroduce profit scalping: book a gain, reset runner base, keep position alive.
+    4. Let remaining profit run until trail giveback + edge deterioration suggests reversal.
+    """
+    pnl = float(pos.get("floating", 0.0) or 0.0)
+    age = int(pos.get("age_cycles", 0) or 0)
+    entry_score = float(pos.get("signal_score", 0.0) or 0.0)
+    entry_prob = float(pos.get("prob_positive", 0.0) or 0.0)
+    max_profit = float(pos.get("max_profit", 0.0) or 0.0)
+    last_scalp_age = int(pos.get("last_scalp_age", -999) or -999)
+
+    score_now, prob_now = pcnrass_phase2e_signal_snapshot(pos)
+
+    prob_drop = entry_prob - prob_now
+    score_drop = entry_score - score_now
+    trail_giveback = max_profit - pnl
+    reversal_detected = (
+        prob_drop >= PHASE2F_REVERSAL_PROB_DROP
+        or score_drop >= PHASE2F_REVERSAL_SCORE_DROP
+        or prob_now <= PHASE2F_HARD_PROFIT_FADE_PROB
+    )
+
+    # 1) Loss control remains allowed before profit-hold logic.
+    if pnl <= PHASE2E_LOSS_CONTROL_MIN:
+        if prob_now <= max(0.50, entry_prob - 0.020):
+            return "LOSS_CONTROL_PROB_WEAK"
+        if score_now < max(7.0, entry_score - 0.75):
+            return "LOSS_CONTROL_SCORE_WEAK"
+        if age >= 3:
+            return "LOSS_CONTROL_MAX_ADVERSE_AGE"
+
+    # 2) Profitable trades must breathe for at least two completed cycles.
+    if pnl > 0.0 and age < PHASE2F_MIN_PROFIT_HOLD_CYCLES:
+        return None
+
+    # 3) Profit scalping: lock a meaningful gain but keep the runner alive.
+    if (
+        pnl >= PHASE2F_PROFIT_SCALP_ARM_MIN
+        and age >= PHASE2F_MIN_PROFIT_HOLD_CYCLES
+        and (age - last_scalp_age) >= PHASE2F_PROFIT_SCALP_MIN_INTERVAL
+    ):
+        return "PROFIT_SCALP_LOCK"
+
+    # 4) Trail profit only when giveback combines with probable edge/reversal deterioration.
+    if (
+        max_profit >= PHASE2E_TRAILING_ARM_MIN
+        and trail_giveback >= PHASE2E_TRAILING_GIVEBACK
+        and reversal_detected
+    ):
+        return "TRAILING_PROFIT_LOCK_REVERSAL"
+
+    # 5) If a winning trade loses its edge after minimum hold, close it defensively.
+    if pnl > 0.0 and age >= PHASE2F_MIN_PROFIT_HOLD_CYCLES and reversal_detected:
+        return "PROFIT_WEAKENING_REVERSAL"
+
+    # 6) Release capital from flat trades that are not moving and no longer have strong edge.
+    if (
+        age >= PHASE2E_STAGNATION_MIN_AGE
+        and abs(pnl) <= PHASE2E_STAGNATION_BAND
+        and prob_now < 0.62
+    ):
+        return "STAGNATION_EXIT"
+
+    # 7) Do not hold weak/flat paper positions indefinitely.
+    if age >= PHASE2E_MAX_HOLD_CYCLES and prob_now < 0.64 and pnl <= 0.0:
+        return "TIME_EXIT_EDGE_FADE"
+
+    return None
+
+
+def pcnrass_book_profit_scalp(pos: dict, reason: str = "PROFIT_SCALP_LOCK") -> None:
+    """
+    PCNRASS Phase 2F profit scalping.
+
+    Books the current positive floating PnL as realized PnL while keeping the
+    position open as a runner by resetting the entry baseline to current price.
+    This preserves slots, broker safety, MTM display, and dashboard layout.
+    """
+    global last_trade
+
+    if pos.get("forced_exit"):
+        return
+
+    realized = round(float(pos.get("floating", 0.0) or 0.0), 4)
+    if realized <= 0.0:
+        return
+
+    try:
+        pnl_tracker.record_trade(
+            instrument=pos["symbol"],
+            realized_pnl=realized,
+            unrealized_pnl=0.0,
+        )
+    except Exception as e:
+        print(f"[TRACKER SCALP ERROR] {e}")
+
+    target_pnl = pnl_dict_for_asset(pos["asset_class"])
+    target_pnl[pos["symbol"]] = round(
+        target_pnl.get(pos["symbol"], 0.0) + realized,
+        4,
+    )
+
+    cluster_amplifier.record_cluster_win(pos["symbol"], realized)
+    locked_profit_ledger.record_forced_exit(pos["position_id"], realized)
+
+    current_price = float(pos.get("current_price", pos.get("entry_price", 0.0)) or 0.0)
+    if current_price > 0:
+        pos["entry_price"] = current_price
+        pos["quantity"] = pcnrass_position_quantity(current_price)
+
+    pos["floating"] = 0.0
+    pos["max_profit"] = 0.0
+    pos["min_profit"] = 0.0
+    pos["last_scalp_age"] = int(pos.get("age_cycles", 0) or 0)
+    pos["scalp_count"] = int(pos.get("scalp_count", 0) or 0) + 1
+
+    last_trade = f"{pos['symbol']} SCALP {reason} {realized:+.4f}"
+    print(
+        f"[PHASE2F SCALP] {pos['symbol']} -> {reason} | "
+        f"realized={realized:+.4f} | runner_reset={current_price:.4f} | "
+        f"age={pos.get('age_cycles', 0)}"
+    )
+
+
 class MarkToMarketEngine:
     def __init__(self) -> None:
         self.positions: list[dict] = []
@@ -2015,7 +2517,13 @@ class MarkToMarketEngine:
             "cluster_name": cluster_name,
             "entry_price": float(entry_price),
             "current_price": float(entry_price),
+            "quantity": pcnrass_position_quantity(float(entry_price)),
+            "notional": float(SIMULATED_PAPER_NOTIONAL_PER_POSITION),
             "floating": 0.0,
+            "max_profit": 0.0,
+            "min_profit": 0.0,
+            "last_signal_score": signal_score,
+            "last_prob_positive": prob_positive,
             "forced_exit": False,
             "exit_reason": None,
             "age_cycles": 0,
@@ -2114,6 +2622,63 @@ def can_open_position(
     return True, "OK"
 
 
+def pcnrass_phase2g_open_symbols() -> set[str]:
+    """Currently open, non-forced symbols for duplicate-entry control."""
+    try:
+        return {
+            str(p.get("symbol", "")).upper()
+            for p in mtm_engine.positions
+            if not p.get("forced_exit")
+        }
+    except Exception:
+        return set()
+
+
+def pcnrass_phase2g_entry_quality_gate(
+    asset_class: str,
+    symbol: str,
+    sig: float,
+    prob: float,
+) -> tuple[bool, str]:
+    """
+    PCNRASS Phase 2G Profit Quality Guard.
+
+    Blocks repeated/low-quality entries before capital is allocated. This is
+    entry-side only and does not alter MTM, accounting, broker execution,
+    review-hold, or the Phase 2F exit/scalp engine.
+    """
+    asset_class = str(asset_class or "UNKNOWN").upper()
+    symbol_u = str(symbol or "").upper()
+    sig_f = float(sig or 0.0)
+    prob_f = float(prob or 0.0)
+    edge = sig_f * prob_f
+
+    if PHASE2G_BLOCK_DUPLICATE_SYMBOLS and symbol_u in pcnrass_phase2g_open_symbols():
+        return False, "DUPLICATE_SYMBOL_ALREADY_OPEN"
+
+    cooldown_until = int(phase2g_symbol_cooldown_until.get(symbol_u, 0) or 0)
+    if cooldown_until and cycle <= cooldown_until:
+        return False, f"SYMBOL_COOLDOWN_UNTIL_CYCLE_{cooldown_until}"
+
+    min_prob = float(PHASE2G_MIN_PROB_BY_ASSET.get(asset_class, 0.0))
+    if asset_class == "FX" and PHASE2H_FX_PARTICIPATION_GUARD:
+        min_prob = float(PHASE2H_FX_MIN_PROB_BY_MODE.get(ENGINE_MODE, min_prob))
+
+    if prob_f < min_prob:
+        return False, f"{asset_class}_PROB_BELOW_QUALITY_FLOOR_{min_prob:.2f}"
+
+    if asset_class == "FX" and PHASE2H_FX_PARTICIPATION_GUARD:
+        edge_floor = float(PHASE2H_FX_EDGE_FLOOR_BY_MODE.get(ENGINE_MODE, 3.00))
+    else:
+        mode_floor = float(PHASE2G_ENTRY_EDGE_FLOOR_BY_MODE.get(ENGINE_MODE, 6.35))
+        edge_floor = mode_floor + float(PHASE2G_ASSET_EDGE_BONUS.get(asset_class, 0.0))
+
+    if edge < edge_floor:
+        return False, f"EDGE_BELOW_QUALITY_FLOOR_{edge:.3f}_LT_{edge_floor:.3f}"
+
+    return True, f"QUALITY_OK_EDGE_{edge:.3f}"
+
+
 crypto_pnl = {s: 0.0 for s in SYMBOLS}
 fx_pnl = {s: 0.0 for s in FX_SYMBOLS}
 options_pnl = {s: 0.0 for s in OPTION_SYMBOLS}
@@ -2121,6 +2686,9 @@ futures_pnl = {s: 0.0 for s in FUTURES_SYMBOLS}
 
 last_trade = "NONE"
 cycle = 0
+
+# PCNRASS Phase 2G: symbol-level cooldown after full exits.
+phase2g_symbol_cooldown_until: dict[str, int] = {}
 
 
 saved_state = session_recovery.load_state()
@@ -2213,6 +2781,15 @@ def book_position_exit(pos: dict, reason: str) -> None:
     locked_profit_ledger.record_recycled_slot()
 
     last_trade = f"{pos['symbol']} EXIT {reason} {realized:+.4f}"
+    print(f"[PHASE2E EXIT] {pos['symbol']} -> {reason} | realized={realized:+.4f} | age={pos.get('age_cycles', 0)}")
+
+    # PCNRASS Phase 2G: avoid immediate churn back into the same symbol after a full exit.
+    try:
+        phase2g_symbol_cooldown_until[str(pos.get("symbol", "")).upper()] = (
+            int(cycle) + int(PHASE2G_SYMBOL_REENTRY_COOLDOWN_CYCLES)
+        )
+    except Exception:
+        pass
 
 
 def apply_defensive_exposure_reduction() -> int:
@@ -2370,6 +2947,57 @@ def active_execution_scope_label() -> str:
 
     return f"{SELECTED_BROKER} RESERVED / BLOCKED"
 
+def pcnrass_phase2h_fx_candidate_is_viable(asset_class: str, sig: float, prob: float) -> bool:
+    """True when an FX candidate clears the Phase 2H FX-specific participation floor."""
+    if not PHASE2H_FX_PARTICIPATION_GUARD:
+        return False
+    if str(asset_class).upper() != "FX":
+        return False
+    try:
+        sig_f = float(sig or 0.0)
+        prob_f = float(prob or 0.0)
+        edge = sig_f * prob_f
+    except Exception:
+        return False
+
+    min_sig = float(PHASE2H_FX_MIN_SIG_BY_MODE.get(ENGINE_MODE, 6.20))
+    min_prob = float(PHASE2H_FX_MIN_PROB_BY_MODE.get(ENGINE_MODE, 0.48))
+    min_edge = float(PHASE2H_FX_EDGE_FLOOR_BY_MODE.get(ENGINE_MODE, 3.00))
+    return sig_f >= min_sig and prob_f >= min_prob and edge >= min_edge
+
+
+def pcnrass_phase2h_prioritize_fx_candidate(
+    candidates: list[tuple[str, str, float, float]]
+) -> list[tuple[str, str, float, float]]:
+    """
+    PCNRASS Phase 2H: controlled FX participation.
+
+    If no FX position is currently open and a valid FX slot is available, move
+    the strongest viable FX candidate to the front of the ranked list. This
+    prevents FX from being permanently crowded out by futures/options while
+    keeping the general Phase 2G quality guard active.
+    """
+    if not PHASE2H_FX_PARTICIPATION_GUARD:
+        return candidates
+
+    try:
+        open_counts = mtm_engine.count_open_positions_by_asset()
+        if int(open_counts.get("FX", 0)) >= hard_asset_cap("FX"):
+            return candidates
+        if int(open_counts.get("FX", 0)) > 0:
+            return candidates
+    except Exception:
+        return candidates
+
+    viable_fx = [c for c in candidates if pcnrass_phase2h_fx_candidate_is_viable(c[0], c[2], c[3])]
+    if not viable_fx:
+        return candidates
+
+    best_fx = sorted(viable_fx, key=lambda x: float(x[2]) * float(x[3]), reverse=True)[0]
+    reordered = [best_fx] + [c for c in candidates if c is not best_fx]
+    return reordered
+
+
 def select_cycle_candidates() -> list[tuple[str, str, float, float]]:
     raw_candidates = [
         ("CRYPTO", random.choice(SYMBOLS)),
@@ -2391,8 +3019,11 @@ def select_cycle_candidates() -> list[tuple[str, str, float, float]]:
         )
         candidates.append((asset_class, symbol, sig, prob))
 
-    random.shuffle(candidates)
-    return candidates
+    # PCNRASS PHASE 1 FIX:
+    # Preserve the existing candidate universe, but consume strongest
+    # signal/probability combinations first instead of randomizing the list.
+    candidates.sort(key=lambda x: float(x[2]) * float(x[3]), reverse=True)
+    return pcnrass_phase2h_prioritize_fx_candidate(candidates)
 
 
 
@@ -2430,6 +3061,7 @@ try:
             }
 
         print(f"=== Cycle {cycle} | {datetime.now()} ===")
+        pcnrass_print_cycle_control_box(cycle)
 
         exit_profile = MODE_EXIT_PROFILE.get(
             ENGINE_MODE,
@@ -2440,44 +3072,40 @@ try:
             if pos["forced_exit"]:
                 continue
 
+            # PCNRASS Phase 2A: preserve SmartDriftEngine for diagnostics only;
+            # real-price movement now drives floating PnL.
             drift = smart_drift_engine.generate_drift(pos)
-            pos["floating"] = round(pos["floating"] + drift, 4)
+            pos["drift_shadow"] = round(float(pos.get("drift_shadow", 0.0)) + float(drift), 4)
+            pcnrass_refresh_position_market_price(pos)
             pos["age_cycles"] += 1
 
             observer_symbol = f"{pos['position_id']}::{pos['symbol']}"
-            observer_price = 100.0 + float(pos["floating"])
+            observer_price = float(pos.get("current_price", pos.get("entry_price", 100.0)) or 100.0)
             pnl_observer.update_market_price(observer_symbol, observer_price)
 
             # =========================
-            # PROFIT DOMINANCE EXIT ENGINE
+            # PCNRASS PHASE 2E SMART EXIT ENGINE
             # =========================
-            # Cut weak losers earlier than the standard stop.
-            if pos["floating"] <= exit_profile["stop_loss"] * 0.8:
-                book_position_exit(pos, "FAST_STOP")
-                pnl_observer.close_position(observer_symbol, observer_price)
-
-            # Normal stop for losses that exceed the formal stop threshold.
-            elif pos["floating"] <= exit_profile["stop_loss"]:
-                book_position_exit(pos, "STOP")
-                pnl_observer.close_position(observer_symbol, observer_price)
-
-            # Let strong winners run instead of clipping them too early.
-            elif pos["floating"] >= exit_profile["take_profit"]:
-                if pos["signal_score"] >= 13.0 and pos["prob_positive"] >= 0.70:
-                    pos["age_cycles"] = max(0, pos["age_cycles"] - 3)
-                elif pos["signal_score"] >= 12.0 and pos["prob_positive"] >= 0.66:
-                    pos["age_cycles"] = max(0, pos["age_cycles"] - 2)
+            # Real-price MTM already drives pos["floating"]. 2E adds lifecycle
+            # intelligence scaled to the controlled $25 paper notional.
+            exit_reason = pcnrass_phase2e_exit_reason(pos)
+            if exit_reason:
+                if exit_reason == "PROFIT_SCALP_LOCK":
+                    pcnrass_book_profit_scalp(pos, exit_reason)
+                    try:
+                        # Keep observer position alive but reset its reference price to the runner base.
+                        observer_pos = getattr(pnl_observer, "positions", {}).get(observer_symbol)
+                        if observer_pos is not None:
+                            observer_pos.entry_price = float(pos.get("entry_price", observer_price) or observer_price)
+                            observer_pos.current_price = float(pos.get("current_price", observer_price) or observer_price)
+                    except Exception as exc:
+                        print(f"[PHASE2F OBSERVER SCALP WARN] {pos.get('symbol')}: {str(exc)[:80]}")
                 else:
-                    book_position_exit(pos, "TAKE_PROFIT")
-                    pnl_observer.close_position(observer_symbol, observer_price)
-
-            # Time-exit only weak trades; strong trades get more runway.
-            elif pos["age_cycles"] >= exit_profile["max_age"]:
-                if pos["signal_score"] >= 11.5 and pos["prob_positive"] >= 0.64:
-                    pos["age_cycles"] = max(0, pos["age_cycles"] - 2)
-                else:
-                    book_position_exit(pos, "TIME_EXIT")
-                    pnl_observer.close_position(observer_symbol, observer_price)
+                    book_position_exit(pos, exit_reason)
+                    try:
+                        pnl_observer.close_position(observer_symbol, observer_price)
+                    except Exception as exc:
+                        print(f"[PHASE2F OBSERVER CLOSE WARN] {pos.get('symbol')}: {str(exc)[:80]}")
 
         defensive_reductions = apply_defensive_exposure_reduction()
 
@@ -2667,15 +3295,16 @@ try:
         print(f"TOTAL DEFENSIVE REDUCTION EXITS: {locked_profit_ledger.defensive_reduction_exits}")
 
         print(
-            f"SIMULATED CAPITAL DEPLOYED: "
+            f"PAPER TEST CAPITAL DEPLOYED: "
             f"${capital_governor.funded_amount():.2f}"
         )
         print(
-            f"SIMULATED CAPITAL AVAILABLE: "
+            f"CAPITAL AVAILABLE: "
             f"${capital_governor.available_capital():.2f}"
         )
 
         print(f"ENGINE MODE: {ENGINE_MODE}")
+        print("PHASE 2G QUALITY GUARD: ACTIVE")
         print(
             f"FORCED EXIT PROFITS: "
             f"{locked_profit_ledger.forced_exit_profit_banked:+.4f}"
@@ -2722,12 +3351,30 @@ try:
 
                     min_sig, min_prob = mode_filter.get(ENGINE_MODE, (11.5, 0.65))
 
+                    # PCNRASS PHASE 2H: FX has a different signal-score scale
+                    # than futures/options. Without this FX-specific floor, valid
+                    # FX data is scored but permanently crowded out before the
+                    # quality gate can evaluate it. Non-FX behavior is unchanged.
+                    if asset_class == "FX" and PHASE2H_FX_PARTICIPATION_GUARD:
+                        min_sig = float(PHASE2H_FX_MIN_SIG_BY_MODE.get(ENGINE_MODE, min_sig))
+                        min_prob = float(PHASE2H_FX_MIN_PROB_BY_MODE.get(ENGINE_MODE, min_prob))
+
                     # PCNRASS profitability guardrail:
                     # avoid very weak/noisy entries while preserving existing mode behavior.
                     if sig < min_sig or prob < min_prob:
                         continue
 
-                    if sig < 10.0:
+                    if asset_class != "FX" and sig < 10.0:
+                        continue
+
+                    quality_ok, quality_reason = pcnrass_phase2g_entry_quality_gate(
+                        asset_class,
+                        symbol,
+                        sig,
+                        prob,
+                    )
+                    if not quality_ok:
+                        print(f"[PHASE2G ENTRY BLOCK] {symbol} {asset_class} -> {quality_reason}")
                         continue
 
                     current_open_counts = mtm_engine.count_open_positions_by_asset()
@@ -2776,13 +3423,17 @@ try:
                     )
                     new_counts_this_cycle[asset_class] += 1
 
+                    # PCNRASS PHASE 1 SUPPORT FIX:
+                    # Anchor the observer to the real registered entry price,
+                    # not the legacy 100.0 placeholder.
+                    _real_entry_price = float(position.get("entry_price", 100.0) or 100.0)
                     observer_position = Position(
                         symbol=f"{position['position_id']}::{symbol}",
                         asset_class=asset_class,
                         side="LONG",
-                        quantity=1.0,
-                        entry_price=100.0,
-                        current_price=100.0,
+                        quantity=float(position.get("quantity", pcnrass_position_quantity(_real_entry_price))),
+                        entry_price=_real_entry_price,
+                        current_price=_real_entry_price,
                     )
                     pnl_observer.add_position(observer_position)
 
@@ -2847,7 +3498,7 @@ try:
                         side="LONG",
                         entry_price=float(pos.get("entry_price", 100.0)),
                         current_price=float(pos.get("current_price", pos.get("entry_price", 100.0))),
-                        quantity=1.0,
+                        quantity=float(pos.get("quantity", pcnrass_position_quantity(float(pos.get("entry_price", 100.0) or 100.0)))),
                         instrument_spec=InstrumentSpec(
                             symbol=pos["symbol"],
                             asset_class=pos["asset_class"],
@@ -2863,15 +3514,23 @@ try:
                 starting_equity=float(pnl_observer.starting_balance) + float(total_realized),
             )
 
-            print("--- NEW ACCOUNTING ENGINE ---")
-            print(f"NET UNREALIZED: {snapshot.total_net_unrealized:+.4f}")
-            print(f"LIVE EQUITY: {snapshot.live_equity:+.4f}")
-
             tracker_snapshot = pnl_tracker.equity_snapshot()
-            print("--- TRACKER PERFORMANCE ---")
-            print(f"TRACKER EQUITY: {tracker_snapshot['current_equity']:+.4f}")
-            print(f"PEAK EQUITY: {tracker_snapshot['peak_equity']:+.4f}")
-            print(f"DRAWDOWN: {tracker_snapshot['current_drawdown']:.4%}")
+
+            pnl_border = "=" * 64
+            print(pnl_border)
+            print(f"| CSS PNL / ACCOUNTING SUMMARY | CYCLE {cycle:<24}|")
+            print(pnl_border)
+            print(f"| NEW ACCOUNTING ENGINE | CYCLE {cycle:<33}|")
+            print(f"| NET UNREALIZED        | {snapshot.total_net_unrealized:+.4f}{' ' * 35}|")
+            print(f"| LIVE EQUITY           | {snapshot.live_equity:+.4f}{' ' * 35}|")
+            print(f"| PAPER NOTIONAL/POS    | ${SIMULATED_PAPER_NOTIONAL_PER_POSITION:,.2f}{' ' * 34}|")
+            print("|" + "-" * 62 + "|")
+            print(f"| TRACKER PERFORMANCE   | CYCLE {cycle:<33}|")
+            print(f"| TRACKER EQUITY        | {tracker_snapshot['current_equity']:+.4f}{' ' * 35}|")
+            print(f"| PEAK EQUITY           | {tracker_snapshot['peak_equity']:+.4f}{' ' * 35}|")
+            print(f"| DRAWDOWN              | {tracker_snapshot['current_drawdown']:.4%}{' ' * 36}|")
+            print(pnl_border)
+            pcnrass_print_open_position_mtm_box(cycle, mtm_engine.positions)
 
         except Exception as e:
             print(f"[NEW PNL ERROR] {e}")
@@ -2950,3 +3609,68 @@ def finalize_account_session() -> None:
 
     except Exception as e:
         print(f"[ACCOUNT SETTLEMENT ERROR] {e}")
+
+
+
+
+# ================================
+# PHASE 3A INTELLIGENT EXIT LAYER (PCNRASS SAFE ADDITION)
+# ================================
+
+PHASE3A_VOLATILITY_SCALER = 1.5
+PHASE3A_MOMENTUM_DECAY_THRESHOLD = 0.015
+PHASE3A_DYNAMIC_TRAIL_MULTIPLIER = 0.6
+
+def compute_dynamic_trailing_threshold(pnl: float) -> float:
+    base = 0.002
+    if pnl > 0.01:
+        return base * 0.5
+    elif pnl > 0.005:
+        return base * 0.75
+    return base
+
+def detect_momentum_decay(prev_prob, curr_prob, prev_score, curr_score):
+    prob_drop = prev_prob - curr_prob
+    score_drop = prev_score - curr_score
+    if prob_drop > PHASE3A_MOMENTUM_DECAY_THRESHOLD:
+        return True
+    if score_drop > PHASE2F_REVERSAL_SCORE_DROP:
+        return True
+    return False
+
+def compute_volatility_adjusted_scalp(pnl, volatility_factor):
+    base_threshold = PHASE2F_PROFIT_SCALP_ARM_MIN
+    return base_threshold * (1 + volatility_factor * PHASE3A_VOLATILITY_SCALER)
+
+def enhanced_exit_logic(position, market_signal, meta):
+    pnl = meta["pnl"]
+    age = meta["age"]
+    prev_prob = meta.get("prev_prob", 0.6)
+    curr_prob = market_signal.get("probability", 0.6)
+    prev_score = meta.get("prev_score", 8.0)
+    curr_score = market_signal.get("score", 8.0)
+    volatility = abs(market_signal.get("velocity", 0.0))
+
+    if pnl < PHASE2E_LOSS_CONTROL_MIN:
+        return "EXIT_LOSS_CONTROL"
+
+    if pnl > 0 and age < PHASE2F_MIN_PROFIT_HOLD_CYCLES:
+        return "HOLD_LOCK"
+
+    if detect_momentum_decay(prev_prob, curr_prob, prev_score, curr_score):
+        return "EXIT_MOMENTUM_DECAY"
+
+    trail = compute_dynamic_trailing_threshold(pnl)
+    peak = meta.get("peak_pnl", pnl)
+
+    if pnl < peak - trail:
+        return "EXIT_TRAILING_PROFIT_LOCK"
+
+    scalp_threshold = compute_volatility_adjusted_scalp(pnl, volatility)
+
+    if pnl > scalp_threshold and age >= PHASE2F_MIN_PROFIT_HOLD_CYCLES:
+        return "SCALP_PROFIT_LOCK"
+
+    return "HOLD_RUNNER"
+
+print("PHASE 3A LOADED — PCNRASS SAFE (NO REGRESSION)")

@@ -16,9 +16,12 @@ class BrokerSpec:
 
 
 try:
-    from backend.broker.coinbase_adapter import CoinbaseAdapter
+    from backend.app.brokers.coinbase_adapter import CoinbaseAdapter
 except Exception:
-    CoinbaseAdapter = None
+    try:
+        from backend.broker.coinbase_adapter import CoinbaseAdapter
+    except Exception:
+        CoinbaseAdapter = None
 
 try:
     from backend.app.brokers.oanda_adapter import OandaAdapter
@@ -84,13 +87,11 @@ def list_supported_brokers():
 
 def get_broker_spec(broker_name: str) -> BrokerSpec:
     key = normalize_broker_name(broker_name)
-
     if key not in BROKER_REGISTRY:
         raise ValueError(
             f"Unsupported broker '{broker_name}'. "
             f"Supported brokers: {', '.join(list_supported_brokers())}"
         )
-
     return BROKER_REGISTRY[key]
 
 
