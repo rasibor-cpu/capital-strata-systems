@@ -438,3 +438,83 @@ class TradeDecisionOrchestrator:
             "high_probability_setup": False,
             "trade_side": "CALL",
         }
+        # ================================
+# CSS PCNRASS SAFE DECISION LAYER
+# ================================
+
+def compute_css_decision_score(
+    vwap_edge: float = 0.0,
+    momentum: float = 0.0,
+    pressure: float = 0.0,
+    liquidity: float = 0.0,
+    regime_alignment: float = 0.0,
+) -> float:
+    """
+    CSS weighted scoring model.
+    SAFE: additive only, does not replace existing logic.
+    """
+
+    score = (
+        (vwap_edge * 0.30)
+        + (momentum * 0.25)
+        + (pressure * 0.20)
+        + (liquidity * 0.10)
+        + (regime_alignment * 0.15)
+    )
+
+    return round(max(0.0, min(score, 100.0)), 2)
+
+
+def get_css_mode_threshold(mode: str) -> float:
+    """
+    Engine mode threshold mapping.
+    SAFE: no side effects.
+    """
+    thresholds = {
+        "SAFE": 80.0,
+        "CONSERVATIVE": 70.0,
+        "BALANCED": 60.0,
+        "AGGRESSIVE": 50.0,
+        "EXPANSION": 45.0,
+    }
+    return thresholds.get(str(mode).upper(), 60.0)
+
+
+def css_trade_gate(
+    score: float,
+    mode: str,
+    vwap_edge: float,
+    momentum: float,
+    pressure: float,
+    cost_estimate: float = 0.0,
+) -> bool:
+    """
+    Final decision gate — HIGH CONVICTION ONLY.
+
+    Conditions:
+    1. Score must exceed mode threshold
+    2. VWAP edge must exist
+    3. Momentum confirms direction
+    4. Pressure supports move
+    5. Costs do not destroy edge
+    """
+
+    threshold = get_css_mode_threshold(mode)
+
+    if score < threshold:
+        return False
+
+    if abs(vwap_edge) < 0.05:
+        return False
+
+    if abs(momentum) < 0.05:
+        return False
+
+    if abs(pressure) < 0.05:
+        return False
+
+    # Simple cost sanity check
+    if cost_estimate > (score * 0.2):
+        return False
+
+    return True
