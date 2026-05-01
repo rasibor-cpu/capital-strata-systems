@@ -14,20 +14,10 @@ from backend.intelligence.pressure_acceleration_engine import (
 from backend.intelligence.probability_prediction_engine import ProbabilityPredictionEngine
 from backend.intelligence.signal_confluence_engine import SignalConfluenceEngine
 
-# ✅ NEW IMPORT (Unified Governance Gate)
 from backend.governance.css_unified_trade_gate import CSSUnifiedTradeGate
 
 
 class TradeDecisionOrchestrator:
-    """
-    CSS Trade Decision Orchestrator (Phase 14 - Governed)
-
-    Enhancements
-    ------------
-    - Integrated Unified Trade Gate (final authority)
-    - Preserves ALL existing scoring logic (NO REGRESSION)
-    - Adds governance-based approval layer AFTER scoring
-    """
 
     def __init__(self) -> None:
         self.regime_detector = MarketRegimeDetector()
@@ -38,7 +28,6 @@ class TradeDecisionOrchestrator:
         self.momentum_engine = OpportunityMomentumWindowEngine()
         self.probability_engine = ProbabilityPredictionEngine()
 
-        # ✅ NEW: Unified Gate
         self.trade_gate = CSSUnifiedTradeGate()
 
         self.mean_reversion_threshold = 0.20
@@ -79,7 +68,8 @@ class TradeDecisionOrchestrator:
             "OPTIONS": 0.80,
             "UNKNOWN": 1.00,
         }
-        def evaluate_trade(
+
+    def evaluate_trade(
         self,
         asset: str,
         candles: List[Dict[str, Any]],
@@ -91,16 +81,14 @@ class TradeDecisionOrchestrator:
         if not candles or len(candles) < 20:
             return self._reject(asset, "INSUFFICIENT_DATA")
 
-        if portfolio_state is None:
-            portfolio_state = {}
-
+        portfolio_state = portfolio_state or {}
         asset_class = self._classify_asset(asset)
 
         regime_info = self.regime_detector.detect_regime(candles)
         regime = str(regime_info.get("regime", "NEUTRAL")).upper()
         regime_conf = float(regime_info.get("confidence", 0.0))
 
-        row: Dict[str, Any] = {"symbol": asset, "candles": candles, "asset_class": asset_class}
+        row = {"symbol": asset, "candles": candles, "asset_class": asset_class}
 
         pressure_row = self.pressure_engine.enrich_rows([row])[0]
         accel_row = self.acceleration_engine.enrich_rows([pressure_row])[0]
@@ -130,9 +118,6 @@ class TradeDecisionOrchestrator:
         )
 
         win_probability = float(probability_result.get("win_probability", 0.0))
-        loss_probability = float(probability_result.get("loss_probability", 0.0))
-        confidence_label = str(probability_result.get("confidence_label", "LOW"))
-        expected_edge_label = str(probability_result.get("expected_edge", "WEAK"))
         approve_trade = bool(probability_result.get("approve_trade", False))
 
         decision_score = (
@@ -143,378 +128,101 @@ class TradeDecisionOrchestrator:
             + regime_conf * self.weights["regime_confidence"]
             + win_probability * self.weights["probability_score"]
         )
+
         decision_score = self._clamp01(decision_score)
 
-        asset_threshold = self.asset_class_thresholds.get(
-            asset_class, self.asset_class_thresholds["UNKNOWN"]
-        )
-        asset_weight = self.asset_class_weights.get(
-            asset_class, self.asset_class_weights["UNKNOWN"]
-        )
-
-        adjusted_score = self._clamp01(decision_score * asset_weight)
-
-        # --------------------------------
-        # BASE EXECUTION LOGIC (UNCHANGED)
-        # --------------------------------
-
         execute_trade = self._should_execute_trade(regime, decision_score)
-
-        pressure_ok = pressure >= 0.18
-        confluence_ok = confluence >= 0.10
-        momentum_ok = (accel > -0.02) or (pressure > 0.22)
-        probability_ok = win_probability >= self.min_probability_threshold
-        threshold_ok = decision_score >= asset_threshold
-
-        if pressure_ok and confluence_ok and momentum_ok and probability_ok and threshold_ok:
-            execute_trade = True
-
-        if decision_score >= 0.20 and probability_ok and threshold_ok:
-            execute_trade = True
-
-        if (
-            decision_score >= 0.18
-            and pressure >= 0.15
-            and win_probability >= 0.30
-            and threshold_ok
-        ):
-            execute_trade = True
 
         if not approve_trade:
             execute_trade = False
 
-        if win_probability < self.min_probability_threshold:
-            execute_trade = False
-
-        if not threshold_ok:
-            execute_trade = False
-
-        # --------------------------------
-        # ✅ NEW: GOVERNANCE GATE
-        # --------------------------------
-
-        gate_candidate = {
-            "symbol": asset,
-            "asset_class": asset_class.lower(),
-            "probability": win_probability,
-            "expected_value": decision_score,  # proxy for EV for now
-            "cost": max(0.01, 0.05 * (1 - win_probability)),  # simple cost model
-        }
-
+        # GOVERNANCE GATE
         gate_decision = self.trade_gate.approve_trade(
-            candidate=gate_candidate,
-            session=session or {"created": 0, "role": "ADMIN"},
+            candidate={"symbol": asset, "probability": win_probability},
+            session=session or {"role": "ADMIN"},
             engine_mode=engine_mode,
             portfolio_state=portfolio_state,
         )
 
-        # Gate overrides execution if blocked
         if not gate_decision.approved:
             execute_trade = False
 
-        # --------------------------------
-        # RETURN
-        # --------------------------------
+        # ===== CSS OBSERVER LAYER =====
+        normalized = normalize_css_inputs(
+            vwap_edge=confluence,
+            momentum=momentum,
+            pressure=pressure,
+            liquidity=self._estimate_liquidity_sweep(conf_row),
+            regime_alignment=regime_conf,
+        )
+
+        css_score = compute_css_decision_score(**normalized)
+
+        css_gate = css_trade_gate(
+            score=css_score,
+            mode=engine_mode,
+            vwap_edge=normalized["vwap_edge"],
+            momentum=normalized["momentum"],
+            pressure=normalized["pressure"],
+        )
 
         return {
             "asset": asset,
-            "symbol": asset,
-            "asset_class": asset_class,
             "execute_trade": execute_trade,
-            "adjusted_score": round(adjusted_score, 4),
-            "decision_score": round(decision_score, 4),
-            "win_probability": round(win_probability, 4),
-            "loss_probability": round(loss_probability, 4),
-            "probability_confidence": confidence_label,
-            "expected_edge": expected_edge_label,
-            "probability_approved": approve_trade,
-            "high_probability_setup": win_probability >= self.high_probability_threshold,
-            "trade_side": trade_side,
-
-            # ✅ NEW: Gate visibility
-            "gate_approved": gate_decision.approved,
-           
-            "gate_reason": gate_decision.reason,
-        }
-        def get_allocation_policy(self) -> Dict[str, Dict[str, float]]:
-        return {
-            "limits": dict(self.asset_class_limits),
-            "thresholds": dict(self.asset_class_thresholds),
-            "weights": dict(self.asset_class_weights),
+            "decision_score": decision_score,
+            "css_score": css_score,
+            "css_gate": css_gate,
         }
 
-    def rank_candidates(self, candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        eligible = []
-        for candidate in candidates:
-            if not isinstance(candidate, dict):
-                continue
-            if not bool(candidate.get("execute_trade", False)):
-                continue
-            eligible.append(candidate)
+    def _score_ai(self, row):
+        return float(self.ai_scorer.score(row)) if hasattr(self.ai_scorer, "score") else 0.0
 
-        eligible.sort(
-            key=lambda x: (
-                float(x.get("adjusted_score", 0.0)),
-                float(x.get("decision_score", 0.0)),
-                float(x.get("win_probability", 0.0)),
-            ),
-            reverse=True,
-        )
-        return eligible
-
-    def select_candidates_for_cycle(
-        self,
-        candidates: List[Dict[str, Any]],
-        max_trades: int = 10,
-    ) -> List[Dict[str, Any]]:
-
-        ranked = self.rank_candidates(candidates)
-        selected: List[Dict[str, Any]] = []
-        counts: Dict[str, int] = {k: 0 for k in self.asset_class_limits.keys()}
-
-        for candidate in ranked:
-            if len(selected) >= max_trades:
-                break
-
-            asset_class = str(candidate.get("asset_class", "UNKNOWN")).upper()
-            asset_limit = self.asset_class_limits.get(asset_class, 0)
-
-            if asset_limit <= 0:
-                continue
-
-            current_count = counts.get(asset_class, 0)
-            if current_count >= asset_limit:
-                continue
-
-            selected.append(candidate)
-            counts[asset_class] = current_count + 1
-
-        return selected
-
-    # ==============================
-    # INTERNAL HELPERS (UNCHANGED)
-    # ==============================
-
-    def _score_ai(self, row: Dict[str, Any]) -> float:
-        if hasattr(self.ai_scorer, "score_opportunity"):
-            return float(self.ai_scorer.score_opportunity(row))
-        if hasattr(self.ai_scorer, "score"):
-            return float(self.ai_scorer.score(row))
-        return 0.0
-
-    def _should_execute_trade(self, regime: str, score: float) -> bool:
-        if regime == "MEAN_REVERSION":
-            return score >= self.mean_reversion_threshold
-        if regime == "TREND":
-            return score >= self.trend_threshold
-        if regime == "BREAKOUT":
-            return score >= self.breakout_threshold
+    def _should_execute_trade(self, regime, score):
         return score >= 0.26
 
-    def _classify_asset(self, asset: str) -> str:
-        symbol = str(asset or "").upper().strip()
+    def _estimate_momentum(self, candles):
+        closes = [c["close"] for c in candles[-5:]]
+        return self._clamp01(abs(closes[-1] - closes[0]) * 10)
 
-        option_names = {"SPY", "QQQ", "AAPL"}
-        futures_prefixes = ("ES", "NQ", "CL", "GC", "ZN", "MES", "MNQ", "MCL", "MGC")
-        crypto_suffixes = ("-USD", "-USDT", "/USD", "/USDT")
-        fx_names = {
-            "EUR_USD",
-            "GBP_USD",
-            "USD_JPY",
-            "AUD_USD",
-            "USD_CHF",
-            "USD_CAD",
-            "NZD_USD",
-            "EUR_GBP",
-            "EUR_JPY",
-            "GBP_JPY",
-        }
-
-        if symbol in option_names or symbol.endswith("_CALL") or symbol.endswith("_PUT"):
-            return "OPTIONS"
-
-        if symbol.startswith(futures_prefixes):
-            return "FUTURES"
-
-        if symbol in fx_names or ("_" in symbol and len(symbol) == 7):
-            return "FX"
-
-        if any(symbol.endswith(sfx) for sfx in crypto_suffixes):
-            return "CRYPTO"
-
-        if any(token in symbol for token in ("BTC", "ETH", "SOL", "XRP", "ADA", "DOGE")):
-            return "CRYPTO"
-
-        return "UNKNOWN"
-
-    def _estimate_momentum(self, candles: List[Dict[str, Any]]) -> float:
-        closes = [float(c.get("close", 0.0)) for c in candles[-5:] if isinstance(c, dict)]
-        if len(closes) < 2 or closes[0] == 0:
-            return 0.0
-        return self._clamp01(abs((closes[-1] - closes[0]) / (closes[0] + 1e-9)) * 50)
-
-    def _estimate_elasticity(self, candles: List[Dict[str, Any]]) -> float:
-        closes = [float(c.get("close", 0.0)) for c in candles[-8:] if isinstance(c, dict)]
-        if len(closes) < 3:
-            return 0.0
-
-        changes = []
-        for i in range(1, len(closes)):
-            prev = closes[i - 1]
-            curr = closes[i]
-            if prev == 0:
-                continue
-            changes.append(abs((curr - prev) / prev))
-
-        if not changes:
-            return 0.0
-
-        avg_change = sum(changes) / len(changes)
-        return self._clamp01(avg_change * 40)
-
-    def _estimate_liquidity_sweep(self, row: Dict[str, Any]) -> float:
-        candidates = [
-            row.get("liquidity_sweep_score"),
-            row.get("sweep_score"),
-            row.get("liquidity_score"),
-            row.get("pressure_acceleration"),
-        ]
-
-        for value in candidates:
-            try:
-                if value is not None:
-                    return self._clamp01(abs(float(value)))
-            except Exception:
-                pass
-
+    def _estimate_elasticity(self, candles):
         return 0.5
 
-    def _tier_history_score(self, regime: str, ai_score: float) -> float:
-        regime = str(regime or "").upper()
+    def _estimate_liquidity_sweep(self, row):
+        return 0.5
 
-        if regime == "MEAN_REVERSION":
-            base = 0.72
-        elif regime == "TREND":
-            base = 0.68
-        elif regime == "BREAKOUT":
-            base = 0.64
-        else:
-            base = 0.55
+    def _tier_history_score(self, regime, ai_score):
+        return 0.5
 
-        if ai_score >= 0.80:
-            base += 0.10
-        elif ai_score >= 0.60:
-            base += 0.06
-        elif ai_score >= 0.40:
-            base += 0.03
+    def _infer_side(self, accel, momentum, regime):
+        return "CALL" if accel >= 0 else "PUT"
 
-        return self._clamp01(base)
-
-    def _infer_side(self, accel: float, momentum: float, regime: str) -> str:
-        if accel < 0 and momentum > 0.10 and regime == "MEAN_REVERSION":
-            return "CALL"
-        if accel >= 0:
-            return "CALL"
-        return "PUT"
-
-    def _clamp01(self, v: float) -> float:
+    def _clamp01(self, v):
         return max(0.0, min(1.0, float(v)))
 
-    def _reject(self, asset: str, reason: str) -> Dict[str, Any]:
-        asset_class = self._classify_asset(asset)
+    def _classify_asset(self, asset):
+        return "CRYPTO"
 
-        return {
-            "asset": asset,
-            "symbol": asset,
-            "asset_class": asset_class,
-            "execute_trade": False,
-            "reason": reason,
-            "decision_score": 0.0,
-            "win_probability": 0.0,
-            "loss_probability": 1.0,
-            "probability_confidence": "LOW",
-            "expected_edge": "WEAK",
-            "probability_approved": False,
-            "high_probability_setup": False,
-            "trade_side": "CALL",
-        }
-        # ================================
-# CSS PCNRASS SAFE DECISION LAYER
-# ================================
-
-def compute_css_decision_score(
-    vwap_edge: float = 0.0,
-    momentum: float = 0.0,
-    pressure: float = 0.0,
-    liquidity: float = 0.0,
-    regime_alignment: float = 0.0,
-) -> float:
-    """
-    CSS weighted scoring model.
-    SAFE: additive only, does not replace existing logic.
-    """
-
-    score = (
-        (vwap_edge * 0.30)
-        + (momentum * 0.25)
-        + (pressure * 0.20)
-        + (liquidity * 0.10)
-        + (regime_alignment * 0.15)
-    )
-
-    return round(max(0.0, min(score, 100.0)), 2)
+    def _reject(self, asset, reason):
+        return {"asset": asset, "execute_trade": False}
 
 
-def get_css_mode_threshold(mode: str) -> float:
-    """
-    Engine mode threshold mapping.
-    SAFE: no side effects.
-    """
-    thresholds = {
-        "SAFE": 80.0,
-        "CONSERVATIVE": 70.0,
-        "BALANCED": 60.0,
-        "AGGRESSIVE": 50.0,
-        "EXPANSION": 45.0,
-    }
-    return thresholds.get(str(mode).upper(), 60.0)
+# ===== CSS HELPERS =====
+
+def compute_css_decision_score(vwap_edge, momentum, pressure, liquidity, regime_alignment):
+    return (vwap_edge*0.3 + momentum*0.25 + pressure*0.2 + liquidity*0.1 + regime_alignment*0.15)
 
 
-def css_trade_gate(
-    score: float,
-    mode: str,
-    vwap_edge: float,
-    momentum: float,
-    pressure: float,
-    cost_estimate: float = 0.0,
-) -> bool:
-    """
-    Final decision gate — HIGH CONVICTION ONLY.
-
-    Conditions:
-    1. Score must exceed mode threshold
-    2. VWAP edge must exist
-    3. Momentum confirms direction
-    4. Pressure supports move
-    5. Costs do not destroy edge
-    """
-
-    threshold = get_css_mode_threshold(mode)
-
-    if score < threshold:
+def css_trade_gate(score, mode, vwap_edge, momentum, pressure):
+    if score < 60:
         return False
-
-    if abs(vwap_edge) < 0.05:
-        return False
-
-    if abs(momentum) < 0.05:
-        return False
-
-    if abs(pressure) < 0.05:
-        return False
-
-    # Simple cost sanity check
-    if cost_estimate > (score * 0.2):
-        return False
-
     return True
+
+
+def normalize_css_inputs(vwap_edge, momentum, pressure, liquidity, regime_alignment):
+    return {
+        "vwap_edge": vwap_edge*100,
+        "momentum": momentum*100,
+        "pressure": pressure*100,
+        "liquidity": liquidity*100,
+        "regime_alignment": regime_alignment*100,
+    }
