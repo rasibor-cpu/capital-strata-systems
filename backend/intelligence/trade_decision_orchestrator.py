@@ -121,6 +121,23 @@ class TradeDecisionOrchestrator:
             "css_diagnostics": css_diag,
         }
 
+    def rank_candidates(self, candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        CSS-enhanced ranking (observer-only influence)
+        """
+
+        eligible = [c for c in candidates if c.get("execute_trade")]
+
+        eligible.sort(
+            key=lambda x: (
+                float(x.get("css_score", 0.0)),
+                float(x.get("decision_score", 0.0)),
+            ),
+            reverse=True,
+        )
+
+        return eligible
+
     def _score_ai(self, row):
         return float(self.ai_scorer.score(row)) if hasattr(self.ai_scorer, "score") else 0.0
 
