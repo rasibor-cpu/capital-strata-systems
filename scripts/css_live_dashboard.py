@@ -24,6 +24,21 @@ STATE_DIR.mkdir(exist_ok=True)
 FUTURES_BIAS_FILE = STATE_DIR / "futures_symbol_bias.json"
 FUTURES_LOSS_FILE = STATE_DIR / "futures_loss_streak.json"
 
+CRYPTO_PNL_FILE = STATE_DIR / "crypto_pnl.json"
+FX_PNL_FILE = STATE_DIR / "fx_pnl.json"
+OPTIONS_PNL_FILE = STATE_DIR / "options_pnl.json"
+FUTURES_PNL_FILE = STATE_DIR / "futures_pnl.json"
+
+CRYPTO_TRADES_FILE = STATE_DIR / "crypto_trades.json"
+FX_TRADES_FILE = STATE_DIR / "fx_trades.json"
+OPTIONS_TRADES_FILE = STATE_DIR / "options_trades.json"
+FUTURES_TRADES_FILE = STATE_DIR / "futures_trades.json"
+
+CRYPTO_WINS_FILE = STATE_DIR / "crypto_wins.json"
+FX_WINS_FILE = STATE_DIR / "fx_wins.json"
+OPTIONS_WINS_FILE = STATE_DIR / "options_wins.json"
+FUTURES_WINS_FILE = STATE_DIR / "futures_wins.json"
+
 SYMBOLS = [
     "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD",
     "DOGE-USD", "AVAX-USD", "LINK-USD", "LTC-USD", "BCH-USD"
@@ -95,7 +110,14 @@ def load_json_state(path: Path, default: Dict):
     try:
         if path.exists():
             with open(path, "r") as f:
-                return json.load(f)
+                loaded = json.load(f)
+
+            if isinstance(default, dict) and isinstance(loaded, dict):
+                merged = default.copy()
+                merged.update(loaded)
+                return merged
+
+            return loaded
     except Exception:
         pass
     return default.copy()
@@ -362,23 +384,23 @@ futures_loss_streak = load_json_state(
     {s: 0 for s in FUTURES_SYMBOLS}
 )
 
-crypto_pnl = {s: 0.0 for s in SYMBOLS}
-crypto_trades = {s: 0 for s in SYMBOLS}
-crypto_wins = {s: 0 for s in SYMBOLS}
+crypto_pnl = load_json_state(CRYPTO_PNL_FILE, {s: 0.0 for s in SYMBOLS})
+crypto_trades = load_json_state(CRYPTO_TRADES_FILE, {s: 0 for s in SYMBOLS})
+crypto_wins = load_json_state(CRYPTO_WINS_FILE, {s: 0 for s in SYMBOLS})
 
-fx_pnl = {s: 0.0 for s in FX_SYMBOLS}
-fx_trades = {s: 0 for s in FX_SYMBOLS}
-fx_wins = {s: 0 for s in FX_SYMBOLS}
+fx_pnl = load_json_state(FX_PNL_FILE, {s: 0.0 for s in FX_SYMBOLS})
+fx_trades = load_json_state(FX_TRADES_FILE, {s: 0 for s in FX_SYMBOLS})
+fx_wins = load_json_state(FX_WINS_FILE, {s: 0 for s in FX_SYMBOLS})
 
-options_pnl = {s: 0.0 for s in OPTION_SYMBOLS}
-options_trades = {s: 0 for s in OPTION_SYMBOLS}
-options_wins = {s: 0 for s in OPTION_SYMBOLS}
+options_pnl = load_json_state(OPTIONS_PNL_FILE, {})
+options_trades = load_json_state(OPTIONS_TRADES_FILE, {})
+options_wins = load_json_state(OPTIONS_WINS_FILE, {})
 
-futures_realized_pnl = {s: 0.0 for s in FUTURES_SYMBOLS}
-futures_trade_count = {s: 0 for s in FUTURES_SYMBOLS}
-futures_win_count = {s: 0 for s in FUTURES_SYMBOLS}
+futures_realized_pnl = load_json_state(FUTURES_PNL_FILE, {s: 0.0 for s in FUTURES_SYMBOLS})
+futures_trade_count = load_json_state(FUTURES_TRADES_FILE, {s: 0 for s in FUTURES_SYMBOLS})
+futures_win_count = load_json_state(FUTURES_WINS_FILE, {s: 0 for s in FUTURES_SYMBOLS})
 
-futures_lifetime_total = 0.0
+futures_lifetime_total = sum(float(v) for v in futures_realized_pnl.values())
 last_trade = "NONE"
 cycle = 0
 
@@ -412,6 +434,26 @@ def update_reinforcement(symbol, pnl):
     futures_symbol_bias[symbol] = clamp_bias(current)
 
 
+def save_all_runtime_state():
+    save_json_state(FUTURES_BIAS_FILE, futures_symbol_bias)
+    save_json_state(FUTURES_LOSS_FILE, futures_loss_streak)
+
+    save_json_state(CRYPTO_PNL_FILE, crypto_pnl)
+    save_json_state(FX_PNL_FILE, fx_pnl)
+    save_json_state(OPTIONS_PNL_FILE, options_pnl)
+    save_json_state(FUTURES_PNL_FILE, futures_realized_pnl)
+
+    save_json_state(CRYPTO_TRADES_FILE, crypto_trades)
+    save_json_state(FX_TRADES_FILE, fx_trades)
+    save_json_state(OPTIONS_TRADES_FILE, options_trades)
+    save_json_state(FUTURES_TRADES_FILE, futures_trade_count)
+
+    save_json_state(CRYPTO_WINS_FILE, crypto_wins)
+    save_json_state(FX_WINS_FILE, fx_wins)
+    save_json_state(OPTIONS_WINS_FILE, options_wins)
+    save_json_state(FUTURES_WINS_FILE, futures_win_count)
+
+
 def execute_trade(asset_class, symbol, score, eff_mult):
     global futures_lifetime_total, last_trade
 
@@ -434,10 +476,10 @@ def execute_trade(asset_class, symbol, score, eff_mult):
             fx_wins[symbol] += 1
 
     elif asset_class == "OPTIONS":
-        options_pnl[symbol] += pnl
-        options_trades[symbol] += 1
+        options_pnl[symbol] = options_pnl.get(symbol, 0.0) + pnl
+        options_trades[symbol] = options_trades.get(symbol, 0) + 1
         if pnl > 0:
-            options_wins[symbol] += 1
+            options_wins[symbol] = options_wins.get(symbol, 0) + 1
 
     elif asset_class == "FUTURES":
         futures_realized_pnl[symbol] += pnl
@@ -447,6 +489,7 @@ def execute_trade(asset_class, symbol, score, eff_mult):
             futures_win_count[symbol] += 1
         update_reinforcement(symbol, pnl)
 
+    save_all_runtime_state()
     print(f"[{asset_class} EXECUTED] {symbol} pnl={pnl:+.4f}")
 
 
@@ -462,20 +505,20 @@ def get_total_pnl():
 
 def get_top_winner():
     combined = {}
-    combined.update(crypto_pnl)
-    combined.update(fx_pnl)
-    combined.update(options_pnl)
-    combined.update(futures_realized_pnl)
-    return max(combined.items(), key=lambda x: x[1])
+    combined.update({f"CRYPTO:{k}": v for k, v in crypto_pnl.items()})
+    combined.update({f"FX:{k}": v for k, v in fx_pnl.items()})
+    combined.update({f"OPTIONS:{k}": v for k, v in options_pnl.items()})
+    combined.update({f"FUTURES:{k}": v for k, v in futures_realized_pnl.items()})
+    return max(combined.items(), key=lambda x: x[1]) if combined else ("NONE", 0.0)
 
 
 def get_top_loser():
     combined = {}
-    combined.update(crypto_pnl)
-    combined.update(fx_pnl)
-    combined.update(options_pnl)
-    combined.update(futures_realized_pnl)
-    return min(combined.items(), key=lambda x: x[1])
+    combined.update({f"CRYPTO:{k}": v for k, v in crypto_pnl.items()})
+    combined.update({f"FX:{k}": v for k, v in fx_pnl.items()})
+    combined.update({f"OPTIONS:{k}": v for k, v in options_pnl.items()})
+    combined.update({f"FUTURES:{k}": v for k, v in futures_realized_pnl.items()})
+    return min(combined.items(), key=lambda x: x[1]) if combined else ("NONE", 0.0)
 
 
 def get_asset_class_pnls() -> Dict[str, float]:
@@ -487,8 +530,11 @@ def get_asset_class_pnls() -> Dict[str, float]:
     }
 
 
-def get_bleed_governor_state(asset_class: str) -> Tuple[bool, float, float, float]:
-    pnl_map = get_asset_class_pnls()
+def get_bleed_governor_state(
+    asset_class: str,
+    snapshot: Optional[Dict[str, float]] = None
+) -> Tuple[bool, float, float, float]:
+    pnl_map = snapshot if snapshot is not None else get_asset_class_pnls()
     asset_pnl = float(pnl_map.get(asset_class, 0.0))
 
     if not BLEED_GOVERNOR_ENABLED:
@@ -521,7 +567,8 @@ def execute_intelligent_option_trade(
     vol,
     sw,
     cycle,
-    eff
+    eff,
+    cycle_pnl_snapshot=None
 ):
     global last_trade
 
@@ -529,7 +576,10 @@ def execute_intelligent_option_trade(
         print(f"[OPTIONS SKIPPED] {option_symbol_stub} blocked by regime")
         return
 
-    governor_frozen, asset_loss, freeze_limit, other_positive = get_bleed_governor_state("OPTIONS")
+    governor_frozen, asset_loss, freeze_limit, other_positive = get_bleed_governor_state(
+        "OPTIONS",
+        cycle_pnl_snapshot
+    )
     if governor_frozen:
         print(
             f"[BLEED FREEZE] OPTIONS "
@@ -673,12 +723,15 @@ def execute_intelligent_option_trade(
 
     if open_result.get("status") == "OPENED":
         pnl_seed = round(random.uniform(-8, 15) * eff, 4)
-        options_pnl[option_symbol_stub] += pnl_seed
-        options_trades[option_symbol_stub] += 1
+
+        options_pnl[option_symbol] = options_pnl.get(option_symbol, 0.0) + pnl_seed
+        options_trades[option_symbol] = options_trades.get(option_symbol, 0) + 1
+
         if pnl_seed > 0:
-            options_wins[option_symbol_stub] += 1
+            options_wins[option_symbol] = options_wins.get(option_symbol, 0) + 1
 
         last_trade = f"{option_symbol} [{option_type}]"
+        save_all_runtime_state()
 
         print(
             f"[OPTIONS EXECUTED] {option_symbol} "
@@ -697,16 +750,18 @@ while True:
 
     apply_bias_decay()
 
+    cycle_pnl_snapshot = get_asset_class_pnls()
+
     total = get_total_pnl()
     winner_sym, winner_val = get_top_winner()
     loser_sym, loser_val = get_top_loser()
 
-    print("\n--- LIVE EXECUTION SUMMARY ---")
+    print("\n--- START-OF-CYCLE EXECUTION SUMMARY ---")
     print(f"TOTAL PNL: {total:+.4f}")
-    print(f"CRYPTO OPEN: {sum(crypto_trades.values())} | PNL {sum(crypto_pnl.values()):+.4f}")
-    print(f"FX OPEN: {sum(fx_trades.values())} | PNL {sum(fx_pnl.values()):+.4f}")
-    print(f"OPTIONS OPEN: {sum(options_trades.values())} | PNL {sum(options_pnl.values()):+.4f}")
-    print(f"FUTURES OPEN: {sum(futures_trade_count.values())} | PNL {sum(futures_realized_pnl.values()):+.4f}")
+    print(f"CRYPTO TRADES: {sum(crypto_trades.values())} | PNL {sum(crypto_pnl.values()):+.4f}")
+    print(f"FX TRADES: {sum(fx_trades.values())} | PNL {sum(fx_pnl.values()):+.4f}")
+    print(f"OPTIONS TRADES: {sum(options_trades.values())} | PNL {sum(options_pnl.values()):+.4f}")
+    print(f"FUTURES TRADES: {sum(futures_trade_count.values())} | PNL {sum(futures_realized_pnl.values()):+.4f}")
     print(f"TOP WINNER: {winner_sym} {winner_val:+.4f}")
     print(f"TOP LOSER: {loser_sym} {loser_val:+.4f}")
     print(f"LAST TRADE: {last_trade}")
@@ -739,7 +794,10 @@ while True:
         if reg["priority"] == "BLOCK":
             continue
 
-        governor_frozen, asset_loss, freeze_limit, other_positive = get_bleed_governor_state("CRYPTO")
+        governor_frozen, asset_loss, freeze_limit, other_positive = get_bleed_governor_state(
+            "CRYPTO",
+            cycle_pnl_snapshot
+        )
         if governor_frozen:
             print(
                 f"[BLEED FREEZE] CRYPTO "
@@ -785,7 +843,10 @@ while True:
         if reg["priority"] == "BLOCK":
             continue
 
-        governor_frozen, asset_loss, freeze_limit, other_positive = get_bleed_governor_state("FX")
+        governor_frozen, asset_loss, freeze_limit, other_positive = get_bleed_governor_state(
+            "FX",
+            cycle_pnl_snapshot
+        )
         if governor_frozen:
             print(
                 f"[BLEED FREEZE] FX "
@@ -829,7 +890,7 @@ while True:
         )
 
         execute_intelligent_option_trade(
-            s, reg, vw, vol, sw, cycle, eff
+            s, reg, vw, vol, sw, cycle, eff, cycle_pnl_snapshot
         )
 
     for symbol in FUTURES_SYMBOLS:
@@ -851,7 +912,10 @@ while True:
         if reg["priority"] == "BLOCK":
             continue
 
-        governor_frozen, asset_loss, freeze_limit, other_positive = get_bleed_governor_state("FUTURES")
+        governor_frozen, asset_loss, freeze_limit, other_positive = get_bleed_governor_state(
+            "FUTURES",
+            cycle_pnl_snapshot
+        )
         if governor_frozen:
             print(
                 f"[BLEED FREEZE] FUTURES "
@@ -888,8 +952,7 @@ while True:
                 f"P+={prob_pos:.2%} EV={ev:+.2f}"
             )
 
-    save_json_state(FUTURES_BIAS_FILE, futures_symbol_bias)
-    save_json_state(FUTURES_LOSS_FILE, futures_loss_streak)
+    save_all_runtime_state()
 
     print("\n--- LIQUIDITY SWEEP BOARD ---")
     for sym, sw in sweep_board[:12]:
@@ -912,5 +975,13 @@ while True:
 
     print("\n--- FUTURES SYMBOL BIAS ---")
     print(futures_symbol_bias)
+
+    print("\n--- END-OF-CYCLE TRUE PNL SUMMARY ---")
+    print(f"TOTAL PNL: {get_total_pnl():+.4f}")
+    print(f"CRYPTO PNL: {sum(crypto_pnl.values()):+.4f}")
+    print(f"FX PNL: {sum(fx_pnl.values()):+.4f}")
+    print(f"OPTIONS PNL: {sum(options_pnl.values()):+.4f}")
+    print(f"FUTURES PNL: {sum(futures_realized_pnl.values()):+.4f}")
+    print("-" * 60)
 
     time.sleep(CYCLE_SLEEP)
