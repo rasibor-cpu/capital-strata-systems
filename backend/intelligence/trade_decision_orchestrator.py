@@ -25,7 +25,6 @@ class TradeDecisionOrchestrator:
         self.probability_engine = ProbabilityPredictionEngine()
 
         self.trade_gate = CSSUnifiedTradeGate()
-
         self.min_probability_threshold = 0.28
 
     def evaluate_trade(
@@ -112,6 +111,16 @@ class TradeDecisionOrchestrator:
             pressure=normalized["pressure"],
         )
 
+        # ===== PARTIAL CSS ACTIVATION (SAFE) =====
+        css_high_confidence = (
+            css_score >= 70
+            and css_gate
+            and win_probability >= 0.35
+        )
+
+        if css_high_confidence:
+            execute_trade = True
+
         return {
             "asset": asset,
             "execute_trade": execute_trade,
@@ -122,10 +131,6 @@ class TradeDecisionOrchestrator:
         }
 
     def rank_candidates(self, candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        CSS-enhanced ranking (observer-only influence)
-        """
-
         eligible = [c for c in candidates if c.get("execute_trade")]
 
         eligible.sort(
