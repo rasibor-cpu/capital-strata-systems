@@ -344,4 +344,648 @@ def get_bleed_governor_state(
     frozen = loss_abs > limit
 
     return frozen, round(loss_abs,4), round(limit,4), round(other_positive,4)
-  
+    # =========================
+# EXECUTION + DISPLAY LAYER
+# =========================
+
+def execute_trade(candidate, broker, position_managers):
+    asset_class = candidate.get("asset_class")
+    symbol = candidate.get("symbol")
+    size = candidate.get("size", 1)
+
+    try:
+        if asset_class == "crypto":
+            position_managers["crypto"].open_position(symbol, size)
+
+        elif asset_class == "fx":
+            position_managers["fx"].open_position(symbol, size)
+
+        elif asset_class == "futures":
+            position_managers["futures"].open_position(symbol, size)
+
+        elif asset_class == "options":
+            position_managers["options"].open_position(symbol, size)
+
+        return True, "executed"
+
+    except Exception as e:
+        return False, str(e)
+
+
+def display_dashboard(state, broker_name, engine_mode, cycle, pnl_snapshot):
+    print("\n" + "=" * 80)
+    print(f"CSS LIVE DASHBOARD V5 | Cycle: {cycle}")
+    print("=" * 80)
+
+    print(f"Broker: {broker_name}")
+    print(f"Engine Mode: {engine_mode}")
+    print(f"Balance: {round(state.balance, 2)}")
+
+    print("\n--- PnL Snapshot ---")
+    print(f"Realized: {round(pnl_snapshot.get('realized', 0), 2)}")
+    print(f"Unrealized: {round(pnl_snapshot.get('unrealized', 0), 2)}")
+    print(f"Total: {round(pnl_snapshot.get('total', 0), 2)}")
+
+    print("\n--- Open Positions ---")
+    for pos in state.open_positions:
+        print(f"{pos}")
+
+    print("\n--- Trade History Count ---")
+    print(len(state.trade_history))
+
+    print("=" * 80)
+
+
+# =========================
+# MAIN LOOP
+# =========================
+
+def run_dashboard():
+
+    broker_name = select_broker()
+    engine_mode = select_engine_mode()
+
+    broker = initialize_broker(broker_name)
+
+    state = AccountState()
+    state.load()
+
+    orchestrator = TradeDecisionOrchestrator()
+    pnl_engine = PnLEngine()
+
+    position_managers = {
+        "crypto": PositionManager(),
+        "fx": PositionManager(),
+        "futures": FuturesPositionManager(FuturesSimAdapter()),
+        "options": OptionsPositionManager(OptionsChainAdapter()),
+    }
+
+    cycle = 0
+
+    print("\nSystem initialized. Awaiting login readiness...")
+
+    while True:
+        cycle += 1
+
+        print(f"\n[Cycle {cycle}] Running market scan...")
+
+        candidates = []
+
+        for symbol in ["BTC-USD", "ETH-USD", "EURUSD", "AAPL", "SPY"]:
+            data = load_runtime_asset(symbol)
+
+            decision = orchestrator.evaluate_trade(
+                symbol=symbol,
+                data=data,
+                mode=engine_mode
+            )
+
+            if decision.get("approved"):
+                candidates.append(decision)
+
+        # =========================
+        # EXECUTION CONTROL
+        # =========================
+
+        executed = 0
+        max_per_cycle = 4
+
+        for c in candidates:
+            if executed >= max_per_cycle:
+                break
+
+            success, msg = execute_trade(c, broker, position_managers)
+
+            if success:
+                executed += 1
+                state.trade_history.append(c)
+
+        # =========================
+        # PnL UPDATE
+        # =========================
+
+        pnl_snapshot = pnl_engine.compute(state)
+
+        state.balance += pnl_snapshot.get("delta", 0)
+
+        # =========================
+        # SAVE STATE
+        # =========================
+
+        state.save()
+
+        # =========================
+        # DISPLAY
+        # =========================
+
+        display_dashboard(
+            state,
+            broker_name,
+            engine_mode,
+            cycle,
+            pnl_snapshot
+        )
+
+        # =========================
+        # CONTROLLED LOOP
+        # =========================
+
+        input("\nPress ENTER to proceed to next cycle...")
+        time.sleep(2)
+
+
+# =========================
+# ENTRY POINT
+# =========================
+
+if __name__ == "__main__":
+    run_dashboard()
+
+# ============================================================
+# CSS LIVE DASHBOARD V5 — PART 4
+# ADVANCED ENHANCEMENTS LAYER
+# ============================================================
+
+def sync_live_balance(state, broker):
+    """
+    Safely sync account balance from connected broker.
+    Falls back to persisted state balance if broker balance is unavailable.
+    """
+    try:
+        if broker is None:
+            return False
+
+        if hasattr(broker, "get_balance"):
+            live_balance = broker.get_balance()
+
+            if live_balance is not None:
+                live_balance = float(live_balance)
+
+                if live_balance > 0:
+                    state.balance = live_balance
+                    return True
+
+        return False
+
+    except Exception as e:
+        print(f"[WARN] Balance sync failed: {e}")
+        return False
+
+
+def estimate_execution_cost(symbol, price):
+    """
+    Lightweight execution-cost estimate.
+    Preserves existing external cost engine if already present elsewhere.
+    """
+    try:
+        price = float(price or 0)
+
+        if price <= 0:
+            return 0.0
+
+        spread = price * 0.0005
+        slippage = price * 0.0003
+        fee = price * 0.0002
+
+        return round(spread + slippage + fee, 6)
+
+    except Exception:
+        return 0.0
+
+
+def log_trade_diagnostics(symbol, decision):
+    """
+    Prints visible decision diagnostics so dashboard is not silent.
+    """
+    print(f"\n[DIAGNOSTIC] {symbol}")
+
+    if not decision:
+        print(" → No decision returned")
+        return
+
+    print(f" → Approved: {decision.get('approved')}")
+    print(f" → Asset Class: {decision.get('asset_class')}")
+    print(f" → Score: {decision.get('score')}")
+    print(f" → Confidence: {decision.get('confidence')}")
+    print(f" → Regime: {decision.get('regime')}")
+    print(f" → Reason: {decision.get('reason')}")
+
+
+def rank_candidates(candidates):
+    """
+    Rank approved candidates by score and confidence.
+    Does not force trades.
+    """
+    try:
+        return sorted(
+            candidates,
+            key=lambda x: (
+                float(x.get("score", 0) or 0),
+                float(x.get("confidence", 0) or 0),
+            ),
+            reverse=True,
+        )
+    except Exception:
+        return candidates
+
+
+def compute_performance_metrics(trade_history):
+    """
+    Computes simple win/loss/expectancy metrics from stored trade history.
+    Safe when pnl field is absent.
+    """
+    wins = 0
+    losses = 0
+    pnl_total = 0.0
+
+    for trade in trade_history:
+        pnl = float(trade.get("pnl", 0) or 0)
+        pnl_total += pnl
+
+        if pnl > 0:
+            wins += 1
+        elif pnl < 0:
+            losses += 1
+
+    closed_trades = wins + losses
+
+    win_rate = (wins / closed_trades) * 100 if closed_trades > 0 else 0.0
+    expectancy = pnl_total / closed_trades if closed_trades > 0 else 0.0
+
+    return {
+        "wins": wins,
+        "losses": losses,
+        "closed_trades": closed_trades,
+        "win_rate": round(win_rate, 2),
+        "expectancy": round(expectancy, 2),
+        "total_pnl": round(pnl_total, 2),
+    }
+
+
+def extract_signal_metrics(data):
+    """
+    Extracts useful signal visibility fields from market data.
+    """
+    if not isinstance(data, dict):
+        return {
+            "price": None,
+            "vwap": None,
+            "momentum": None,
+            "pressure": None,
+        }
+
+    return {
+        "price": data.get("price") or data.get("close"),
+        "vwap": data.get("vwap"),
+        "momentum": data.get("momentum"),
+        "pressure": data.get("pressure_score"),
+    }
+
+
+def display_signal_metrics(symbol, data):
+    """
+    Optional per-symbol visibility helper.
+    """
+    metrics = extract_signal_metrics(data)
+
+    print(f"\n[SIGNAL] {symbol}")
+    print(f" → Price: {metrics.get('price')}")
+    print(f" → VWAP: {metrics.get('vwap')}")
+    print(f" → Momentum: {metrics.get('momentum')}")
+    print(f" → Pressure: {metrics.get('pressure')}")
+
+
+def display_dashboard(state, broker_name, engine_mode, cycle, pnl_snapshot, metrics):
+    """
+    Enhanced dashboard display.
+    Replaces earlier display_dashboard only.
+    """
+
+    print("\n" + "=" * 90)
+    print(f"CSS LIVE DASHBOARD V5 | Cycle: {cycle}")
+    print("=" * 90)
+
+    print(f"Broker: {broker_name}")
+    print(f"Engine Mode: {engine_mode}")
+    print(f"Balance: {round(float(state.balance or 0), 2)}")
+
+    print("\n--- PnL ---")
+    print(f"Realized: {round(float(pnl_snapshot.get('realized', 0) or 0), 2)}")
+    print(f"Unrealized: {round(float(pnl_snapshot.get('unrealized', 0) or 0), 2)}")
+    print(f"Total: {round(float(pnl_snapshot.get('total', 0) or 0), 2)}")
+
+    print("\n--- Performance ---")
+    print(f"Wins: {metrics.get('wins', 0)} | Losses: {metrics.get('losses', 0)}")
+    print(f"Closed Trades: {metrics.get('closed_trades', 0)}")
+    print(f"Win Rate: {metrics.get('win_rate', 0)}%")
+    print(f"Expectancy: {metrics.get('expectancy', 0)}")
+    print(f"Total PnL: {metrics.get('total_pnl', 0)}")
+
+    print("\n--- Open Positions ---")
+    if getattr(state, "open_positions", None):
+        for pos in state.open_positions:
+            print(pos)
+    else:
+        print("No open positions")
+
+    print("\n--- Trade History Count ---")
+    print(len(getattr(state, "trade_history", [])))
+
+    print("=" * 90)
+
+
+# ============================================================
+# P4 SAFE MAIN LOOP INSERTS
+# ============================================================
+
+"""
+Insert these into run_dashboard():
+
+1. At the START of each cycle, before scanning:
+
+    balance_synced = sync_live_balance(state, broker)
+    if balance_synced:
+        print("[BALANCE] Live broker balance synced.")
+    else:
+        print("[BALANCE] Using persisted account balance.")
+
+2. During symbol scan, after loading data:
+
+    display_signal_metrics(symbol, data)
+
+3. After orchestrator decision:
+
+    log_trade_diagnostics(symbol, decision)
+
+4. After collecting candidates:
+
+    candidates = rank_candidates(candidates)
+
+5. Before executing each candidate:
+
+    price = c.get("price") or c.get("close") or 0
+    c["estimated_cost"] = estimate_execution_cost(c.get("symbol"), price)
+
+6. After PnL update:
+
+    metrics = compute_performance_metrics(state.trade_history)
+
+7. Replace display call with:
+
+    display_dashboard(
+        state,
+        broker_name,
+        engine_mode,
+        cycle,
+        pnl_snapshot,
+        metrics
+    )
+"""
+
+# ============================================================
+# CSS LIVE DASHBOARD V5 — P5 FULL HARDENING LAYER
+# ============================================================
+
+import time
+import json
+from datetime import datetime
+
+
+# ============================================================
+# 1. TRADE LIFECYCLE ENGINE
+# ============================================================
+
+def update_trade_lifecycle(state):
+    """
+    Manage open trades: update pnl and close positions when exit conditions are met.
+    """
+
+    updated_positions = []
+
+    for pos in state.open_positions:
+
+        entry_price = pos.get("entry_price", 0)
+        current_price = pos.get("current_price", entry_price)
+        size = pos.get("size", 1)
+
+        pnl = (current_price - entry_price) * size
+        pos["pnl"] = pnl
+
+        # Track holding duration
+        pos["hold_time"] = pos.get("hold_time", 0) + 1
+
+        exit_reason = evaluate_exit_conditions(pos)
+
+        if exit_reason:
+            pos["closed_at"] = datetime.utcnow().isoformat()
+            pos["exit_reason"] = exit_reason
+
+            state.trade_history.append(pos)
+            audit_log("TRADE_CLOSE", pos)
+
+        else:
+            updated_positions.append(pos)
+
+    state.open_positions = updated_positions
+
+
+# ============================================================
+# 2. SMART EXIT ENGINE
+# ============================================================
+
+def evaluate_exit_conditions(position):
+
+    pnl = position.get("pnl", 0)
+    entry_price = position.get("entry_price", 0)
+    current_price = position.get("current_price", entry_price)
+
+    vwap = position.get("vwap")
+    momentum = position.get("momentum", 0)
+    hold_time = position.get("hold_time", 0)
+
+    # PROFIT TARGET (~1%)
+    if pnl > entry_price * 0.01:
+        return "target_hit"
+
+    # STOP LOSS (~0.5%)
+    if pnl < -entry_price * 0.005:
+        return "stop_loss"
+
+    # VWAP REVERSION
+    if vwap and current_price < vwap:
+        return "vwap_reversion"
+
+    # MOMENTUM COLLAPSE
+    if momentum < -0.3:
+        return "momentum_loss"
+
+    # TIME EXIT
+    if hold_time > 300:
+        return "time_exit"
+
+    return None
+
+
+# ============================================================
+# 3. RISK GOVERNOR (CRITICAL CONTROL)
+# ============================================================
+
+def risk_governor(state):
+
+    total_realized = sum([t.get("pnl", 0) for t in state.trade_history])
+    total_open = sum([p.get("pnl", 0) for p in state.open_positions])
+
+    equity = state.balance + total_open
+
+    # DRAWDOWN CONTROL (10%)
+    if equity < state.balance * 0.90:
+        print("[RISK] Drawdown breach — trading halted")
+        return False
+
+    # BLEED CONTROL
+    if total_open < -abs(total_realized) * 0.25:
+        print("[RISK] Bleed threshold exceeded — trading paused")
+        return False
+
+    return True
+
+
+# ============================================================
+# 4. ADAPTIVE POSITION SIZING
+# ============================================================
+
+def adaptive_position_size(balance, confidence):
+
+    base_size = balance * 0.01
+
+    if confidence > 0.8:
+        return base_size * 2
+
+    elif confidence < 0.4:
+        return base_size * 0.5
+
+    return base_size
+
+
+# ============================================================
+# 5. REGIME-BASED TRADE LIMIT
+# ============================================================
+
+def regime_trade_limit(regime):
+
+    if regime == "strong_trend":
+        return 6
+
+    elif regime == "neutral":
+        return 3
+
+    elif regime == "volatile":
+        return 2
+
+    return 4
+
+
+# ============================================================
+# 6. AUDIT LOGGER (JSONL TRAIL)
+# ============================================================
+
+def audit_log(event_type, payload):
+
+    log_entry = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "event": event_type,
+        "data": payload,
+    }
+
+    try:
+        with open("audit_logs/trades.jsonl", "a") as f:
+            f.write(json.dumps(log_entry) + "\n")
+    except Exception as e:
+        print(f"[AUDIT ERROR] {e}")
+
+
+# ============================================================
+# 7. EXECUTION ENGINE (UPGRADED)
+# ============================================================
+
+def execute_trade(candidate, broker, position_managers, state):
+
+    asset_class = candidate.get("asset_class")
+    symbol = candidate.get("symbol")
+    confidence = candidate.get("confidence", 0.5)
+
+    size = adaptive_position_size(state.balance, confidence)
+
+    try:
+        if asset_class == "crypto":
+            position_managers["crypto"].open_position(symbol, size)
+
+        elif asset_class == "fx":
+            position_managers["fx"].open_position(symbol, size)
+
+        elif asset_class == "futures":
+            position_managers["futures"].open_position(symbol, size)
+
+        elif asset_class == "options":
+            position_managers["options"].open_position(symbol, size)
+
+        candidate["size"] = size
+        candidate["opened_at"] = datetime.utcnow().isoformat()
+        candidate["entry_price"] = candidate.get("price", 0)
+
+        state.open_positions.append(candidate)
+
+        audit_log("TRADE_OPEN", candidate)
+
+        return True, "executed"
+
+    except Exception as e:
+        return False, str(e)
+
+
+# ============================================================
+# 8. MAIN LOOP INSERTIONS (MANDATORY)
+# ============================================================
+
+"""
+Insert into your run_dashboard() loop:
+
+-------------------------------------------------
+
+# 1. BEFORE EXECUTION
+if not risk_governor(state):
+    print("[BLOCKED] Risk conditions not met")
+    continue
+
+-------------------------------------------------
+
+# 2. REGIME LIMIT
+if candidates:
+    regime = candidates[0].get("regime", "neutral")
+    max_per_cycle = regime_trade_limit(regime)
+
+-------------------------------------------------
+
+# 3. EXECUTION LOOP (UPDATED)
+for c in candidates:
+
+    if executed >= max_per_cycle:
+        break
+
+    success, msg = execute_trade(c, broker, position_managers, state)
+
+    if success:
+        executed += 1
+
+-------------------------------------------------
+
+# 4. AFTER EXECUTION
+update_trade_lifecycle(state)
+
+-------------------------------------------------
+
+"""
+
+# ============================================================
+# END OF P5 MODULE
+# ============================================================
