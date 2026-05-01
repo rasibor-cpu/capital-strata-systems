@@ -1,21 +1,9 @@
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from typing import Dict, Any, Tuple
+import time
 
-
-# ==============================
-# CONFIGURATION
-# ==============================
-
-MODE_THRESHOLDS = {
-    "SAFE": 0.65,
-    "CONSERVATIVE": 0.62,
-    "BALANCED": 0.58,
-    "AGGRESSIVE": 0.55,
-    "EXPANSION": 0.52,
-}
 
 MAX_POSITIONS_BY_ASSET = {
     "crypto": 3,
@@ -24,150 +12,125 @@ MAX_POSITIONS_BY_ASSET = {
     "options": 2,
 }
 
-SESSION_TIMEOUT_SECONDS = 3600  # 1 hour
+ENGINE_MODE_PROBABILITY_THRESHOLD = {
+    "SAFE": 0.65,
+    "CONSERVATIVE": 0.60,
+    "BALANCED": 0.58,
+    "AGGRESSIVE": 0.55,
+    "EXPANSION": 0.52,
+}
 
+SESSION_TIMEOUT_SECONDS = 3600
 
-# ==============================
-# DATA STRUCTURES
-# ==============================
 
 @dataclass
 class GateDecision:
     approved: bool
     reason: str
-    mode: str
-    probability: float
-    expected_value: float
-    cost: float
+    engine_mode: str
     timestamp: float
     details: Dict[str, Any]
 
 
-# ==============================
-# MAIN GATE CLASS
-# ==============================
-
 class CSSUnifiedTradeGate:
-    """
-    Central Governance Gate for all trade approvals in CSS.
-
-    This enforces:
-    - Session validity
-    - Role authorization
-    - Engine mode thresholds
-    - Probability gating
-    - Expected value gating
-    - Cost control
-    - Position limits
-    - Audit payload generation
-    """
-
-    def __init__(self):
-        pass
-
-    # ==============================
-    # PUBLIC ENTRY POINT
-    # ==============================
 
     def approve_trade(
         self,
         candidate: Dict[str, Any],
         session: Dict[str, Any],
-        engine_mode: str,
         portfolio_state: Dict[str, Any],
+        engine_mode: str,
     ) -> GateDecision:
 
         now = time.time()
 
-        # ------------------------------
-        # 1. SESSION VALIDATION
-        # ------------------------------
+        # --------------------------------------------------
+        # 1. SESSION VALIDATION (FAIL-CLOSED)
+        # --------------------------------------------------
         valid, reason = self._validate_session(session, now)
         if not valid:
-            return self._reject(reason, engine_mode, now)
+            return self._reject(reason, engine_mode, now, candidate)
 
-        # ------------------------------
+        # --------------------------------------------------
         # 2. ROLE VALIDATION
-        # ------------------------------
-        if not self._validate_role(session):
-            return self._reject("unauthorized role", engine_mode, now)
+        # --------------------------------------------------
+        role = session.get("role")
+        if not self._check_role(role):
+            return self._reject("unauthorized role", engine_mode, now, candidate)
 
-        # ------------------------------
-        # 3. ENGINE MODE VALIDATION
-        # ------------------------------
-        threshold = MODE_THRESHOLDS.get(engine_mode)
-        if threshold is None:
-            return self._reject("invalid engine mode", engine_mode, now)
+        # --------------------------------------------------
+        # 3. PORTFOLIO STATE VALIDATION
+        # --------------------------------------------------
+        if not portfolio_state:
+            return self._reject("portfolio state unavailable", engine_mode, now, candidate)
 
-        # ------------------------------
-        # 4. POSITION LIMIT CHECK
-        # ------------------------------
-        asset_class = candidate.get("asset_class", "unknown")
+        # --------------------------------------------------
+        # 4. ASSET CLASS VALIDATION (FIX C2)
+        # --------------------------------------------------
+        asset_class = candidate.get("asset_class")
+        if asset_class not in MAX_POSITIONS_BY_ASSET:
+            return self._reject("unrecognized asset class", engine_mode, now, candidate)
+
+        # --------------------------------------------------
+        # 5. POSITION LIMIT CHECK
+        # --------------------------------------------------
         if not self._check_position_limits(asset_class, portfolio_state):
-            return self._reject("position limit reached", engine_mode, now)
+            return self._reject("position limit reached", engine_mode, now, candidate)
 
-        # ------------------------------
-        # 5. PROBABILITY CHECK
-        # ------------------------------
-        probability = float(candidate.get("probability", 0.0))
-        if probability < threshold:
-            return self._reject(
-                f"probability too low ({probability:.2f} < {threshold:.2f})",
-                engine_mode,
-                now,
-                probability=probability,
-            )
+        # --------------------------------------------------
+        # 6. REQUIRED FIELD VALIDATION (FIX C3)
+        # --------------------------------------------------
+        if "expected_value" not in candidate:
+            return self._reject("missing expected_value", engine_mode, now, candidate)
 
-        # ------------------------------
-        # 6. EXPECTED VALUE CHECK
-        # ------------------------------
-        expected_value = float(candidate.get("expected_value", 0.0))
+        if "cost" not in candidate:
+            return self._reject("missing cost", engine_mode, now, candidate)
+
+        expected_value = float(candidate.get("expected_value"))
+        cost = float(candidate.get("cost"))
+
         if expected_value <= 0:
-            return self._reject(
-                "negative or zero expected value",
-                engine_mode,
-                now,
-                probability=probability,
-                expected_value=expected_value,
-            )
+            return self._reject("negative or zero expected value", engine_mode, now, candidate)
 
-        # ------------------------------
-        # 7. COST CHECK
-        # ------------------------------
-        cost = float(candidate.get("cost", 0.0))
-        edge = expected_value
+        if cost < 0:
+            return self._reject("invalid cost value", engine_mode, now, candidate)
 
-        if cost >= edge:
-            return self._reject(
-                "cost exceeds edge",
-                engine_mode,
-                now,
-                probability=probability,
-                expected_value=expected_value,
-                cost=cost,
-            )
+        if cost >= expected_value:
+            return self._reject("cost exceeds edge", engine_mode, now, candidate)
 
-        # ------------------------------
-        # APPROVED
-        # ------------------------------
+        # --------------------------------------------------
+        # 7. PROBABILITY VALIDATION (FIX E1)
+        # --------------------------------------------------
+        probability = float(candidate.get("probability", 0.0))
+
+        if not (0.0 <= probability <= 1.0):
+            return self._reject("invalid probability", engine_mode, now, candidate)
+
+        threshold = ENGINE_MODE_PROBABILITY_THRESHOLD.get(engine_mode, 0.58)
+
+        if probability < threshold:
+            return self._reject("probability below threshold", engine_mode, now, candidate)
+
+        # --------------------------------------------------
+        # 8. APPROVE
+        # --------------------------------------------------
         return GateDecision(
             approved=True,
             reason="approved",
-            mode=engine_mode,
-            probability=probability,
-            expected_value=expected_value,
-            cost=cost,
+            engine_mode=engine_mode,
             timestamp=now,
             details={
                 "asset_class": asset_class,
-                "symbol": candidate.get("symbol"),
+                "expected_value": expected_value,
+                "cost": cost,
+                "probability": probability,
                 "threshold": threshold,
             },
         )
 
-    # ==============================
-    # INTERNAL METHODS
-    # ==============================
+    # ======================================================
+    # INTERNAL HELPERS
+    # ======================================================
 
     def _validate_session(self, session: Dict[str, Any], now: float) -> Tuple[bool, str]:
         if not session:
@@ -182,8 +145,7 @@ class CSSUnifiedTradeGate:
 
         return True, "ok"
 
-    def _validate_role(self, session: Dict[str, Any]) -> bool:
-        role = session.get("role")
+    def _check_role(self, role: str) -> bool:
         return role in {"ADMIN", "SUPER_USER", "TRADER"}
 
     def _check_position_limits(self, asset_class: str, portfolio_state: Dict[str, Any]) -> bool:
@@ -194,19 +156,17 @@ class CSSUnifiedTradeGate:
     def _reject(
         self,
         reason: str,
-        mode: str,
+        engine_mode: str,
         timestamp: float,
-        probability: float = 0.0,
-        expected_value: float = 0.0,
-        cost: float = 0.0,
+        candidate: Dict[str, Any] = None,
     ) -> GateDecision:
         return GateDecision(
             approved=False,
             reason=reason,
-            mode=mode,
-            probability=probability,
-            expected_value=expected_value,
-            cost=cost,
+            engine_mode=engine_mode,
             timestamp=timestamp,
-            details={},
+            details={
+                "asset_class": candidate.get("asset_class") if candidate else None,
+                "symbol": candidate.get("symbol") if candidate else None,
+            },
         )
