@@ -1,9 +1,10 @@
 from __future__ import annotations
 import os
 print("RUNNING FILE:", os.path.abspath(__file__))
-print("CSS DASHBOARD VERSION: Phase 3B-3 PCNRASS Options Edge Normalization + Strict Quality Guard")
+print("CSS DASHBOARD VERSION: Phase 3B-3 PCNRASS Audit Fix Pack 1 (C02 C01 H01 L03 Safe)")
 import contextlib
 import hashlib
+import inspect
 import getpass
 import io
 import json
@@ -28,6 +29,15 @@ if PROJECT_ROOT_STR not in sys.path:
 
 os.environ["PYTHONPATH"] = PROJECT_ROOT_STR
 from backend.intelligence.safe_signal_provider import SafeSignalProvider
+
+# === PCNRASS PHASE 3C ORCHESTRATOR ACTIVATION (SAFE OPTIONAL IMPORT) ===
+# This keeps the dashboard non-regressive: if the orchestrator module, constructor,
+# or method signature differs across branches, CSS falls back to the existing
+# SafeSignalProvider path instead of failing startup.
+try:
+    from backend.intelligence.trade_decision_orchestrator import TradeDecisionOrchestrator
+except Exception:
+    TradeDecisionOrchestrator = None
 from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -191,9 +201,9 @@ except ModuleNotFoundError:
 
 
 try:
-    from backend.app.security.auth_gate import await_login_ready_state
+    from backend.app.security.auth_gate import await_login_ready_state as external_await_login_ready_state
 except ModuleNotFoundError:
-    def await_login_ready_state():
+    def external_await_login_ready_state():
         print("[SAFE FALLBACK AUTH] auth_gate unavailable; using local OPERATOR diagnostic context.")
         return {
             "user_id": "LOCAL_OPERATOR",
@@ -347,13 +357,29 @@ def pcnrass_refresh_balances(realized_by_asset, floating_by_asset):
     })
 
 def pcnrass_close_session_to_account():
-    pcnrass_account_state["account_balance"] = round(float(pcnrass_session_state["session_equity"]), 4)
+    """
+    PCNRASS audit fix: persist only realized session PnL into account balance.
+
+    Unrealized MTM remains visible in session_equity and dashboard panels, but it
+    must not become the next session's account_balance until positions are closed.
+    """
+    starting_balance = float(pcnrass_session_state.get("starting_account_balance", 0.0) or 0.0)
+    realized_pnl = float(pcnrass_session_state.get("session_realized_pnl", 0.0) or 0.0)
+    settled_balance = round(starting_balance + realized_pnl, 4)
+
+    if settled_balance > 0:
+        pcnrass_account_state["account_balance"] = settled_balance
+
     pcnrass_account_state["lifetime_realized_pnl"] = round(
         float(pcnrass_account_state.get("lifetime_realized_pnl", 0.0))
-        + float(pcnrass_session_state.get("session_realized_pnl", 0.0)),
+        + realized_pnl,
         4,
     )
     pcnrass_account_state["last_session_close"] = datetime.now().isoformat(timespec="seconds")
+    pcnrass_account_state["last_session_unrealized_pnl_shadow"] = round(
+        float(pcnrass_session_state.get("session_unrealized_pnl", 0.0) or 0.0),
+        4,
+    )
     _pcnrass_write_json(ACCOUNT_STATE_FILE, pcnrass_account_state)
 
 def pcnrass_print_balance_panel():
@@ -828,7 +854,7 @@ def enforce_dashboard_startup_access(user_ctx: dict[str, Any]) -> dict[str, Any]
 
 def authenticate_startup_user() -> dict[str, Any]:
     try:
-        user_ctx = await_login_ready_state()
+        user_ctx = css_local_await_login_ready_state()
         try:
             session = session_manager.create_session(
                 username=str(user_ctx.get("user_id")),
@@ -1245,6 +1271,8 @@ def close_active_session(reason: str, extra: Optional[dict[str, Any]] = None) ->
 
     # PCNRASS: settle session balance into account balance only at session close.
     try:
+        finalize_account_session()
+    except NameError:
         pcnrass_close_session_to_account()
     except Exception:
         pass
@@ -1431,7 +1459,7 @@ def _css_persist_login_session(user_ctx: dict[str, Any]) -> None:
     }, indent=2), encoding="utf-8")
 
 
-def await_login_ready_state():
+def css_local_await_login_ready_state():
     users = _css_load_users()
 
     while True:
@@ -1623,6 +1651,205 @@ def pcnrass_safe_tracker_snapshot(canonical_live_equity: float) -> dict[str, flo
     }
 
 signal_provider = SafeSignalProvider()
+
+# === PCNRASS PHASE 3C ORCHESTRATOR ACTIVATION HELPERS ===
+# Purpose:
+# - Wire TradeDecisionOrchestrator into candidate scoring without breaking the
+#   legacy SafeSignalProvider path.
+# - Maintain the existing candidate tuple shape: (asset_class, symbol, sig, prob).
+# - Use orchestrator output only when it returns clear numeric score/probability
+#   values; otherwise preserve the legacy signal/probability unchanged.
+# - Never block dashboard startup or cycle execution because of orchestrator errors.
+
+CSS_TRADE_ORCHESTRATOR = None
+CSS_ORCHESTRATOR_ENABLED = False
+CSS_ORCHESTRATOR_LAST_STATUS = "NOT_INITIALIZED"
+
+
+def pcnrass_init_trade_orchestrator() -> Any:
+    global CSS_ORCHESTRATOR_ENABLED, CSS_ORCHESTRATOR_LAST_STATUS
+    if TradeDecisionOrchestrator is None:
+        CSS_ORCHESTRATOR_ENABLED = False
+        CSS_ORCHESTRATOR_LAST_STATUS = "UNAVAILABLE_IMPORT"
+        return None
+    try:
+        orch = TradeDecisionOrchestrator()
+        CSS_ORCHESTRATOR_ENABLED = True
+        CSS_ORCHESTRATOR_LAST_STATUS = "READY"
+        return orch
+    except Exception as exc:
+        CSS_ORCHESTRATOR_ENABLED = False
+        CSS_ORCHESTRATOR_LAST_STATUS = f"INIT_FAILED: {str(exc)[:80]}"
+        return None
+
+
+CSS_TRADE_ORCHESTRATOR = pcnrass_init_trade_orchestrator()
+
+
+def _pcnrass_read_value(obj: Any, names: list[str], default: Any = None) -> Any:
+    """Read value from dict/dataclass/object using a list of possible field names."""
+    for name in names:
+        try:
+            if isinstance(obj, dict) and name in obj:
+                return obj.get(name)
+            if hasattr(obj, name):
+                return getattr(obj, name)
+        except Exception:
+            pass
+    return default
+
+
+def _pcnrass_as_float(value: Any, default: float) -> float:
+    try:
+        if value is None:
+            return float(default)
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def pcnrass_call_trade_orchestrator(
+    *,
+    asset_class: str,
+    symbol: str,
+    legacy_sig: float,
+    legacy_prob: float,
+) -> Any:
+    """
+    Best-effort orchestrator call with signature introspection.
+
+    This is intentionally defensive because CSS has carried multiple
+    TradeDecisionOrchestrator variants across phases. Any mismatch returns None
+    and the dashboard continues with SafeSignalProvider output.
+    """
+    if CSS_TRADE_ORCHESTRATOR is None:
+        return None
+
+    method = getattr(CSS_TRADE_ORCHESTRATOR, "evaluate_trade", None)
+    if not callable(method):
+        return None
+
+    candidate = {
+        "symbol": symbol,
+        "asset_class": asset_class,
+        "score": float(legacy_sig),
+        "signal_score": float(legacy_sig),
+        "probability": float(legacy_prob),
+        "legacy_probability": float(legacy_prob),
+        "engine_mode": globals().get("ENGINE_MODE", "BALANCED"),
+        "broker": globals().get("SELECTED_BROKER", "NONE"),
+        "broker_mode": globals().get("SELECTED_BROKER_MODE", "paper"),
+    }
+
+    # First try introspection-based kwargs. This covers most modern variants.
+    try:
+        params = inspect.signature(method).parameters
+        kwargs = {}
+        for name in params:
+            lname = name.lower()
+            if lname == "candidate":
+                kwargs[name] = candidate
+            elif lname in {"symbol", "ticker"}:
+                kwargs[name] = symbol
+            elif lname in {"asset_class", "asset", "instrument_class"}:
+                kwargs[name] = asset_class
+            elif lname in {"signal_score", "score", "sig"}:
+                kwargs[name] = float(legacy_sig)
+            elif lname in {"probability", "prob", "confidence"}:
+                kwargs[name] = float(legacy_prob)
+            elif lname in {"session", "user_session", "session_ctx", "user_ctx"}:
+                kwargs[name] = globals().get("SESSION_USER_CTX", {"role": "SUPER_USER", "created": time.time()})
+            elif lname in {"engine_mode", "mode"}:
+                kwargs[name] = globals().get("ENGINE_MODE", "BALANCED")
+            elif lname in {"broker", "selected_broker"}:
+                kwargs[name] = globals().get("SELECTED_BROKER", "NONE")
+            elif lname in {"broker_mode", "selected_broker_mode"}:
+                kwargs[name] = globals().get("SELECTED_BROKER_MODE", "paper")
+        return method(**kwargs)
+    except TypeError:
+        pass
+    except Exception:
+        return None
+
+    # Conservative fallback call patterns for older variants.
+    for args, kwargs in [
+        ((), {"candidate": candidate, "session": globals().get("SESSION_USER_CTX", {"role": "SUPER_USER", "created": time.time()})}),
+        ((candidate,), {}),
+        ((symbol, asset_class, float(legacy_sig), float(legacy_prob)), {}),
+        ((symbol, asset_class), {}),
+    ]:
+        try:
+            return method(*args, **kwargs)
+        except TypeError:
+            continue
+        except Exception:
+            return None
+    return None
+
+
+def pcnrass_apply_orchestrator_to_signal(
+    *,
+    asset_class: str,
+    symbol: str,
+    legacy_sig: float,
+    legacy_prob: float,
+) -> tuple[float, float, str]:
+    """
+    Convert orchestrator output into the existing sig/prob tuple.
+
+    PCNRASS non-regression rule:
+    - If orchestrator output is absent or unclear, keep legacy values.
+    - If orchestrator explicitly blocks, reduce probability but do not crash.
+    - If orchestrator provides score/probability, use them as adjusted values.
+    """
+    decision = pcnrass_call_trade_orchestrator(
+        asset_class=asset_class,
+        symbol=symbol,
+        legacy_sig=legacy_sig,
+        legacy_prob=legacy_prob,
+    )
+    if decision is None:
+        return float(legacy_sig), float(legacy_prob), "LEGACY_SIGNAL_PROVIDER"
+
+    allowed = _pcnrass_read_value(decision, ["allowed", "allow", "approved", "can_trade"], None)
+    action = str(_pcnrass_read_value(decision, ["action", "decision", "status", "verdict"], "")).upper()
+
+    orch_score = _pcnrass_read_value(
+        decision,
+        [
+            "adjusted_score",
+            "final_score",
+            "score",
+            "signal_score",
+            "weighted_score",
+            "quality_score",
+        ],
+        legacy_sig,
+    )
+    orch_prob = _pcnrass_read_value(
+        decision,
+        [
+            "probability",
+            "prob",
+            "confidence",
+            "trade_probability",
+            "pre_trade_probability",
+        ],
+        legacy_prob,
+    )
+
+    new_sig = _pcnrass_as_float(orch_score, float(legacy_sig))
+    new_prob = _pcnrass_as_float(orch_prob, float(legacy_prob))
+
+    # Normalize probability if an orchestrator variant returns percentages.
+    if new_prob > 1.0 and new_prob <= 100.0:
+        new_prob = new_prob / 100.0
+    new_prob = max(0.0, min(1.0, new_prob))
+
+    if allowed is False or action in {"BLOCK", "BLOCKED", "DENY", "DENIED", "REJECT", "REJECTED"}:
+        return float(new_sig), min(float(new_prob), 0.01), "ORCHESTRATOR_BLOCKED"
+
+    return float(new_sig), float(new_prob), "ORCHESTRATOR_ACTIVE"
 
 def map_oanda_env() -> None:
     if not os.getenv("OANDA_API_KEY"):
@@ -1820,6 +2047,7 @@ print(
     f"[PCNRASS LIVE CAPITAL] balance={PCNRASS_AUTHORITATIVE_BALANCE:.4f} "
     f"source={PCNRASS_BALANCE_SOURCE} verified={PCNRASS_BALANCE_VERIFIED}"
 )
+print(f"[PCNRASS ORCHESTRATOR] enabled={CSS_ORCHESTRATOR_ENABLED} status={CSS_ORCHESTRATOR_LAST_STATUS}")
 
 # === PCNRASS PHASE 2 BROKER ISOLATION + REAL PRICE HELPERS ===
 # Real market pricing only activates when broker execution is ARMED and selected broker mode is LIVE.
@@ -1845,7 +2073,7 @@ def pcnrass_price_feed_enabled() -> bool:
     try:
         mode = str(SELECTED_BROKER_MODE).strip().lower()
         broker = str(SELECTED_BROKER).strip().upper()
-        return mode in {"paper", "live"} and broker in {"COINBASE", "OANDA", "NONE"}
+        return mode in {"paper", "live"} and broker in {"COINBASE", "OANDA"}
     except Exception:
         return False
 
@@ -3246,6 +3474,19 @@ def select_cycle_candidates() -> list[tuple[str, str, float, float]]:
             symbol=symbol,
             asset_class=asset_class,
         )
+
+        sig, prob, orch_status = pcnrass_apply_orchestrator_to_signal(
+            asset_class=asset_class,
+            symbol=symbol,
+            legacy_sig=float(sig),
+            legacy_prob=float(prob),
+        )
+
+        if orch_status == "ORCHESTRATOR_ACTIVE":
+            print(f"[ORCH ACTIVE] {symbol} | asset={asset_class} score={sig:.2f} prob={prob:.3f}")
+        elif orch_status == "ORCHESTRATOR_BLOCKED":
+            print(f"[ORCH BLOCK] {symbol} | asset={asset_class} score={sig:.2f} prob={prob:.3f}")
+
         candidates.append((asset_class, symbol, sig, prob))
 
     # PCNRASS PHASE 1 FIX:
@@ -3280,6 +3521,93 @@ def pnl_divergence_warning(
             f"unrealized_gap={unrealized_gap:.6f}"
         )
     return None
+
+
+# ===== PCNRASS FINAL ACCOUNT SETTLEMENT =====
+def finalize_account_session() -> None:
+    """
+    Final account settlement wrapper used by close_active_session().
+
+    PCNRASS audit fix:
+    - Function is defined before the main try/finally loop.
+    - Settlement delegates to pcnrass_close_session_to_account(), which persists
+      realized PnL only and keeps unrealized PnL as shadow diagnostics.
+    """
+    try:
+        if "pcnrass_close_session_to_account" not in globals():
+            return
+        pcnrass_close_session_to_account()
+        try:
+            settled = pcnrass_account_state.get("account_balance")
+            print(f"[ACCOUNT UPDATED] realized-only balance: {float(settled):.2f}")
+        except Exception:
+            print("[ACCOUNT UPDATED] realized-only settlement complete")
+    except Exception as e:
+        print(f"[ACCOUNT SETTLEMENT ERROR] {e}")
+
+
+# ================================
+# PHASE 3A INTELLIGENT EXIT LAYER (PCNRASS SAFE ADDITION)
+# ================================
+
+PHASE3A_VOLATILITY_SCALER = 1.5
+PHASE3A_MOMENTUM_DECAY_THRESHOLD = 0.015
+PHASE3A_DYNAMIC_TRAIL_MULTIPLIER = 0.6
+
+def compute_dynamic_trailing_threshold(pnl: float) -> float:
+    base = 0.002
+    if pnl > 0.01:
+        return base * 0.5
+    elif pnl > 0.005:
+        return base * 0.75
+    return base
+
+def detect_momentum_decay(prev_prob, curr_prob, prev_score, curr_score):
+    prob_drop = prev_prob - curr_prob
+    score_drop = prev_score - curr_score
+    if prob_drop > PHASE3A_MOMENTUM_DECAY_THRESHOLD:
+        return True
+    if score_drop > PHASE2F_REVERSAL_SCORE_DROP:
+        return True
+    return False
+
+def compute_volatility_adjusted_scalp(pnl, volatility_factor):
+    base_threshold = PHASE2F_PROFIT_SCALP_ARM_MIN
+    return base_threshold * (1 + volatility_factor * PHASE3A_VOLATILITY_SCALER)
+
+def enhanced_exit_logic(position, market_signal, meta):
+    pnl = meta["pnl"]
+    age = meta["age"]
+    prev_prob = meta.get("prev_prob", 0.6)
+    curr_prob = market_signal.get("probability", 0.6)
+    prev_score = meta.get("prev_score", 8.0)
+    curr_score = market_signal.get("score", 8.0)
+    volatility = abs(market_signal.get("velocity", 0.0))
+
+    if pnl < PHASE2E_LOSS_CONTROL_MIN:
+        return "EXIT_LOSS_CONTROL"
+
+    if pnl > 0 and age < PHASE2F_MIN_PROFIT_HOLD_CYCLES:
+        return "HOLD_LOCK"
+
+    if detect_momentum_decay(prev_prob, curr_prob, prev_score, curr_score):
+        return "EXIT_MOMENTUM_DECAY"
+
+    trail = compute_dynamic_trailing_threshold(pnl)
+    peak = meta.get("peak_pnl", pnl)
+
+    if pnl < peak - trail:
+        return "EXIT_TRAILING_PROFIT_LOCK"
+
+    scalp_threshold = compute_volatility_adjusted_scalp(pnl, volatility)
+
+    if pnl > scalp_threshold and age >= PHASE2F_MIN_PROFIT_HOLD_CYCLES:
+        return "SCALP_PROFIT_LOCK"
+
+    return "HOLD_RUNNER"
+
+print("PHASE 3A LOADED — PCNRASS SAFE (NO REGRESSION)")
+print("PROFITABILITY PHASE 1 LOADED — RUNNER MODE ENABLED | PAPER NOTIONAL=100")
 
 
 try:
@@ -3895,93 +4223,3 @@ finally:
             "defensive_mode_active": is_session_locked(),
         },
     )
-# ===== PCNRASS FINAL ACCOUNT SETTLEMENT =====
-def finalize_account_session() -> None:
-    try:
-        if "pcnrass_session_state" not in globals() or "pcnrass_account_state" not in globals():
-            return
-
-        new_balance = float(pcnrass_session_state.get("session_equity", 0.0))
-        if new_balance <= 0:
-            return
-
-        pcnrass_account_state["account_balance"] = round(new_balance, 4)
-        pcnrass_account_state["last_session_close"] = datetime.now().isoformat(timespec="seconds")
-
-        if "ACCOUNT_STATE_FILE" in globals():
-            Path(ACCOUNT_STATE_FILE).parent.mkdir(parents=True, exist_ok=True)
-            Path(ACCOUNT_STATE_FILE).write_text(
-                json.dumps(pcnrass_account_state, indent=2, default=str),
-                encoding="utf-8",
-            )
-
-        print(f"[ACCOUNT UPDATED] new balance: {new_balance:.2f}")
-
-    except Exception as e:
-        print(f"[ACCOUNT SETTLEMENT ERROR] {e}")
-
-
-
-
-# ================================
-# PHASE 3A INTELLIGENT EXIT LAYER (PCNRASS SAFE ADDITION)
-# ================================
-
-PHASE3A_VOLATILITY_SCALER = 1.5
-PHASE3A_MOMENTUM_DECAY_THRESHOLD = 0.015
-PHASE3A_DYNAMIC_TRAIL_MULTIPLIER = 0.6
-
-def compute_dynamic_trailing_threshold(pnl: float) -> float:
-    base = 0.002
-    if pnl > 0.01:
-        return base * 0.5
-    elif pnl > 0.005:
-        return base * 0.75
-    return base
-
-def detect_momentum_decay(prev_prob, curr_prob, prev_score, curr_score):
-    prob_drop = prev_prob - curr_prob
-    score_drop = prev_score - curr_score
-    if prob_drop > PHASE3A_MOMENTUM_DECAY_THRESHOLD:
-        return True
-    if score_drop > PHASE2F_REVERSAL_SCORE_DROP:
-        return True
-    return False
-
-def compute_volatility_adjusted_scalp(pnl, volatility_factor):
-    base_threshold = PHASE2F_PROFIT_SCALP_ARM_MIN
-    return base_threshold * (1 + volatility_factor * PHASE3A_VOLATILITY_SCALER)
-
-def enhanced_exit_logic(position, market_signal, meta):
-    pnl = meta["pnl"]
-    age = meta["age"]
-    prev_prob = meta.get("prev_prob", 0.6)
-    curr_prob = market_signal.get("probability", 0.6)
-    prev_score = meta.get("prev_score", 8.0)
-    curr_score = market_signal.get("score", 8.0)
-    volatility = abs(market_signal.get("velocity", 0.0))
-
-    if pnl < PHASE2E_LOSS_CONTROL_MIN:
-        return "EXIT_LOSS_CONTROL"
-
-    if pnl > 0 and age < PHASE2F_MIN_PROFIT_HOLD_CYCLES:
-        return "HOLD_LOCK"
-
-    if detect_momentum_decay(prev_prob, curr_prob, prev_score, curr_score):
-        return "EXIT_MOMENTUM_DECAY"
-
-    trail = compute_dynamic_trailing_threshold(pnl)
-    peak = meta.get("peak_pnl", pnl)
-
-    if pnl < peak - trail:
-        return "EXIT_TRAILING_PROFIT_LOCK"
-
-    scalp_threshold = compute_volatility_adjusted_scalp(pnl, volatility)
-
-    if pnl > scalp_threshold and age >= PHASE2F_MIN_PROFIT_HOLD_CYCLES:
-        return "SCALP_PROFIT_LOCK"
-
-    return "HOLD_RUNNER"
-
-print("PHASE 3A LOADED — PCNRASS SAFE (NO REGRESSION)")
-print("PROFITABILITY PHASE 1 LOADED — RUNNER MODE ENABLED | PAPER NOTIONAL=100")
