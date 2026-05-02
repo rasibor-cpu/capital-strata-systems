@@ -3237,16 +3237,42 @@ def pcnrass_phase2i_prioritize_options_candidate(
 
 
 def select_cycle_candidates() -> list[tuple[str, str, float, float]]:
-    raw_candidates = [
-        ("CRYPTO", random.choice(SYMBOLS)),
-        ("CRYPTO", random.choice(SYMBOLS)),
-        ("FX", random.choice(FX_SYMBOLS)),
-        ("FX", random.choice(FX_SYMBOLS)),
-        ("OPTIONS", random.choice(OPTION_SYMBOLS)),
-        ("OPTIONS", random.choice(OPTION_SYMBOLS)),
-        ("FUTURES", random.choice(FUTURES_SYMBOLS)),
-        ("FUTURES", random.choice(FUTURES_SYMBOLS)),
-    ]
+    # ============================================================
+
+    # PHASE A1 - FULL UNIVERSE CANDIDATE GENERATION (PCNRASS SAFE)
+
+    # ============================================================
+
+    raw_candidates = []
+
+
+    # CRYPTO
+
+    for sym in SYMBOLS:
+
+        raw_candidates.append(("CRYPTO", sym))
+
+
+    # FX
+
+    for sym in FX_SYMBOLS:
+
+        raw_candidates.append(("FX", sym))
+
+
+    # OPTIONS
+
+    for sym in OPTION_SYMBOLS:
+
+        raw_candidates.append(("OPTIONS", sym))
+
+
+    # FUTURES
+
+    for sym in FUTURES_SYMBOLS:
+
+        raw_candidates.append(("FUTURES", sym))
+
 
     candidates = []
 
