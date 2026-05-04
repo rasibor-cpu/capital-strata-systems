@@ -1,36 +1,49 @@
 # capital_allocator.py
-from audit_logger import CSSAuditLogger
+"""
+CSS-GEMINI CAPITAL ALLOCATOR
+Institutional slot management and dynamic reallocation logic.
+Synced with Singleton AuditLogger.
+"""
+from audit_logger import get_audit
 
 class CapitalAllocator:
     def __init__(self):
-        self.logger = CSSAuditLogger()
+        # Sync with the global audit singleton
+        self.audit = get_audit()
         self.max_slots = 10
-        self.active_trades = [] # Track assets and performance
+        self.active_trades = [] 
 
-    def check_slot_availability(self):
-        """Standard check for open diversification slots."""
+    def check_slot_availability(self) -> bool:
+        """Ensures the engine stays within the 10-trade diversification limit."""
         return len(self.active_trades) < self.max_slots
 
-    def request_dynamic_reallocation(self, high_conviction_signal):
+    def request_dynamic_reallocation(self, signal: dict) -> bool:
         """
-        Institutional-grade pivot: identifies weak trades to close 
-        in favor of a stronger opportunity.
+        Identifies weak trades to recycle capital for higher-conviction signals.
+        Helps protect the $98.0199 SSoT balance.
         """
         if not self.active_trades:
             return False
 
-        # Sort current trades by performance (PnL)
-        weak_trade = min(self.active_trades, key=lambda x: x['pnl'])
+        # Simple logic: find the trade with the lowest PnL
+        weak_trade = min(self.active_trades, key=lambda x: x.get('pnl', 0))
         
-        # Condition: Only pivot if new signal 'edge' > current weak performance
-        if high_conviction_signal['expected_edge'] > abs(weak_trade['pnl']):
-            self.logger.log_event(f"REALLOCATION: Closing weak {weak_trade['asset']} for {high_conviction_signal['asset']}")
+        # If new signal has higher expected edge, recycle the capital
+        if signal.get('expected_edge', 0) > abs(weak_trade.get('pnl', 0)):
+            self.audit.log("CAPITAL_REALLOCATED", "capital_allocator", 
+                           {"from": weak_trade['asset'], "to": signal['asset']})
             self.close_trade(weak_trade)
             return True
         
         return False
 
-    def close_trade(self, trade):
-        """Forces an exit on a weak asset to free a slot."""
-        self.active_trades.remove(trade)
-        self.logger.log_event(f"FORCE CLOSED: {trade['asset']} for capital recycling.")
+    def close_trade(self, trade: dict):
+        """Standard exit procedure."""
+        if trade in self.active_trades:
+            self.active_trades.remove(trade)
+            self.audit.position_closed(
+                symbol=trade['asset'], 
+                pnl=trade.get('pnl', 0), 
+                reason="REALLOCATION", 
+                capital=98.0199
+            )
