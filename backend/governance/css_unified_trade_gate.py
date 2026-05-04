@@ -45,7 +45,14 @@ class CSSUnifiedTradeGate:
         now = time.time()
 
         # --------------------------------------------------
-        # 1. SESSION VALIDATION (FAIL-CLOSED)
+        # 0. FAIL-CLOSED CANDIDATE VALIDATION (B1)
+        # --------------------------------------------------
+        valid, reason = self._validate_candidate(candidate)
+        if not valid:
+            return self._reject(f"validation failed: {reason}", engine_mode, now, candidate)
+
+        # --------------------------------------------------
+        # 1. SESSION VALIDATION
         # --------------------------------------------------
         valid, reason = self._validate_session(session, now)
         if not valid:
@@ -64,47 +71,26 @@ class CSSUnifiedTradeGate:
         if not portfolio_state:
             return self._reject("portfolio state unavailable", engine_mode, now, candidate)
 
-        # --------------------------------------------------
-        # 4. ASSET CLASS VALIDATION (FIX C2)
-        # --------------------------------------------------
         asset_class = candidate.get("asset_class")
-        if asset_class not in MAX_POSITIONS_BY_ASSET:
-            return self._reject("unrecognized asset class", engine_mode, now, candidate)
 
         # --------------------------------------------------
-        # 5. POSITION LIMIT CHECK
+        # 4. POSITION LIMIT CHECK
         # --------------------------------------------------
         if not self._check_position_limits(asset_class, portfolio_state):
             return self._reject("position limit reached", engine_mode, now, candidate)
 
         # --------------------------------------------------
-        # 6. REQUIRED FIELD VALIDATION (FIX C3)
+        # 5. SAFE EXTRACTION
         # --------------------------------------------------
-        if "expected_value" not in candidate:
-            return self._reject("missing expected_value", engine_mode, now, candidate)
-
-        if "cost" not in candidate:
-            return self._reject("missing cost", engine_mode, now, candidate)
-
         expected_value = float(candidate.get("expected_value"))
         cost = float(candidate.get("cost"))
+        probability = float(candidate.get("probability"))
 
-        if expected_value <= 0:
-            return self._reject("negative or zero expected value", engine_mode, now, candidate)
-
-        if cost < 0:
-            return self._reject("invalid cost value", engine_mode, now, candidate)
-
+        # --------------------------------------------------
+        # 6. EDGE VALIDATION
+        # --------------------------------------------------
         if cost >= expected_value:
             return self._reject("cost exceeds edge", engine_mode, now, candidate)
-
-        # --------------------------------------------------
-        # 7. PROBABILITY VALIDATION (FIX E1)
-        # --------------------------------------------------
-        probability = float(candidate.get("probability", 0.0))
-
-        if not (0.0 <= probability <= 1.0):
-            return self._reject("invalid probability", engine_mode, now, candidate)
 
         threshold = ENGINE_MODE_PROBABILITY_THRESHOLD.get(engine_mode, 0.58)
 
@@ -112,11 +98,16 @@ class CSSUnifiedTradeGate:
             return self._reject("probability below threshold", engine_mode, now, candidate)
 
         # --------------------------------------------------
-        # 8. APPROVE
+        # 7. APPROVAL (B2 — NO SILENT APPROVALS)
         # --------------------------------------------------
+        approval_reason = (
+            f"approved: prob={probability:.3f} >= {threshold:.3f}, "
+            f"cost={cost:.4f} < ev={expected_value:.4f}"
+        )
+
         return GateDecision(
             approved=True,
-            reason="approved",
+            reason=approval_reason,
             engine_mode=engine_mode,
             timestamp=now,
             details={
@@ -131,6 +122,41 @@ class CSSUnifiedTradeGate:
     # ======================================================
     # INTERNAL HELPERS
     # ======================================================
+
+    def _validate_candidate(self, candidate: Dict[str, Any]) -> Tuple[bool, str]:
+        """
+        FAIL-CLOSED validation
+        """
+
+        if not candidate:
+            return False, "no candidate"
+
+        required_fields = ["asset_class", "expected_value", "cost", "probability"]
+
+        for field in required_fields:
+            if field not in candidate:
+                return False, f"missing {field}"
+
+        asset_class = candidate.get("asset_class")
+        if asset_class not in MAX_POSITIONS_BY_ASSET:
+            return False, "unrecognized asset class"
+
+        for field in ["expected_value", "cost", "probability"]:
+            try:
+                value = float(candidate.get(field))
+            except (TypeError, ValueError):
+                return False, f"invalid {field}"
+
+            if field == "expected_value" and value <= 0:
+                return False, "negative or zero expected value"
+
+            if field == "cost" and value < 0:
+                return False, "invalid cost value"
+
+            if field == "probability" and not (0.0 <= value <= 1.0):
+                return False, "invalid probability"
+
+        return True, "ok"
 
     def _validate_session(self, session: Dict[str, Any], now: float) -> Tuple[bool, str]:
         if not session:
@@ -162,7 +188,7 @@ class CSSUnifiedTradeGate:
     ) -> GateDecision:
         return GateDecision(
             approved=False,
-            reason=reason,
+            reason=f"rejected: {reason}",
             engine_mode=engine_mode,
             timestamp=timestamp,
             details={

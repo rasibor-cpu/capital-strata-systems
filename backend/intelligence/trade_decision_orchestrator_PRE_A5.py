@@ -37,9 +37,12 @@ class TradeDecisionOrchestrator:
         # 2. SIGNAL COMPONENTS
         # --------------------------------------------------
         ai_score = self.ai_scorer.score(market_data, regime)
+
         confluence = self.signal_confluence_engine.evaluate(market_data)
+
         pressure = self.pressure_engine.evaluate(market_data)
         acceleration = self.acceleration_engine.evaluate(market_data)
+
         momentum = self.momentum_engine.evaluate(market_data)
 
         # --------------------------------------------------
@@ -54,7 +57,7 @@ class TradeDecisionOrchestrator:
         )
 
         # --------------------------------------------------
-        # 4. PROBABILITY ENGINE
+        # 4. PROBABILITY ENGINE (PRIMARY INTELLIGENCE FILTER)
         # --------------------------------------------------
         probability_output = self.probability_engine.predict(
             market_data,
@@ -65,62 +68,46 @@ class TradeDecisionOrchestrator:
         win_probability = probability_output.get("win_probability", 0.0)
         approve_trade = probability_output.get("approve_trade", False)
 
-        # ✅ FIX A1 — enforce bounds
-        if not isinstance(win_probability, (int, float)):
-            win_probability = 0.0
-        win_probability = max(0.0, min(float(win_probability), 1.0))
-
         # --------------------------------------------------
-        # 5. CSS QUALITY FILTER
+        # 5. CSS QUALITY FILTER (STRICTER)
         # --------------------------------------------------
         vwap_edge = market_data.get("vwap_edge", 0.0)
         volume = market_data.get("volume", 0.0)
 
         css_quality_pass = (
-            abs(vwap_edge) >= 10
+            abs(vwap_edge) >= 10      # tightened from 5 → 10
             and volume > 0
-            and raw_score > 1.2
-            and win_probability >= 0.35   # ✅ FIX A3
+            and raw_score > 1.2       # NEW: prevents weak signals
         )
 
         # --------------------------------------------------
-        # 6. GOVERNANCE GATE
+        # 6. GOVERNANCE GATE (FINAL AUTHORITY)
         # --------------------------------------------------
-        # ✅ FIX A2 — validate inputs
-        if not isinstance(raw_score, (int, float)):
-            raw_score = 0.0
-
         gate_decision = self.trade_gate.evaluate(
             market_data=market_data,
             regime=regime,
-            score=float(raw_score),
-            probability=float(win_probability)
+            score=raw_score,
+            probability=win_probability
         )
 
-        # ✅ FIX A4 — explicit handling
-        if not hasattr(gate_decision, "approved"):
-            governance_approved = False
-            governance_error = True
-        else:
-            governance_approved = bool(gate_decision.approved)
-            governance_error = False
+        governance_approved = getattr(gate_decision, "approved", False)
 
         # --------------------------------------------------
-        # 7. FINAL EXECUTION DECISION
+        # 7. FINAL EXECUTION DECISION (FIXED LOGIC)
         # --------------------------------------------------
         execute_trade = (
             css_quality_pass
-            and approve_trade
-            and governance_approved
+            and approve_trade              # FIX: use probability engine
+            and governance_approved        # FIX: HARD VETO ENFORCED
         )
 
         # --------------------------------------------------
-        # 8. NORMALIZED SCORE (DISPLAY ONLY)
+        # 8. NORMALIZED SCORE (FOR DISPLAY ONLY)
         # --------------------------------------------------
         decision_score = max(0.0, min(raw_score / 5.0, 1.0))
 
         # --------------------------------------------------
-        # 9. RETURN PACKAGE
+        # 9. RETURN DECISION PACKAGE
         # --------------------------------------------------
         return {
             "execute_trade": execute_trade,
@@ -139,6 +126,5 @@ class TradeDecisionOrchestrator:
             "filters": {
                 "css_quality_pass": css_quality_pass,
                 "governance_approved": governance_approved,
-                "governance_error": governance_error,
             },
         }
