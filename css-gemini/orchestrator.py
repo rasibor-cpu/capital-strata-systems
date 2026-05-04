@@ -1,59 +1,63 @@
 # orchestrator.py
 """
 CAPITAL STRATA SYSTEMS (CSS) - CORE ORCHESTRATOR
-Institutional-grade execution engine with dynamic capital reallocation.
-Reference Balance: 98.0199 SSoT
+Integrated with Operational Firewall and Liquidity Guardrails.
 """
 
 from gemini_regime_detector import MarketRegimeDetector
 from gemini_context_gate import IntermarketContextGate
 from gemini_momentum_sync import GeminiMomentumSync
+from gemini_liquidity_filter import LiquidityFilter
+from security_gate import SecurityGate
 from capital_allocator import CapitalAllocator
-from audit_logger import CSSAuditLogger
+from audit_logger import get_audit
 
 class TradeDecisionOrchestrator:
     def __init__(self):
-        # 1. Intelligence Layer Initialization
+        self.security = SecurityGate()
+        self.liquidity = LiquidityFilter()
         self.regime_detector = MarketRegimeDetector()
         self.context_gate = IntermarketContextGate()
         self.momentum_sync = GeminiMomentumSync()
-        
-        # 2. Governance & Allocation Initialization
         self.allocator = CapitalAllocator()
-        self.logger = CSSAuditLogger()
-        self.ssot_balance = 98.0199  # Single Source of Truth for capital alignment
+        self.audit = get_audit()
+        self.ssot_balance = 98.0199 
 
     def pre_trade_validation(self, signal):
-        """
-        Multi-stage institutional filter to protect $98.0199 capital.
-        Stages: Regime -> Context -> Capacity/Reallocation
-        """
+        """Sequential multi-layer validation for capital protection."""
+        symbol = signal.get('asset', 'UNKNOWN')
         
-        # STAGE 1: Market Regime Analysis
+        # 1. Operational Firewall: check_system_integrity()
+        if not self.security.check_system_integrity():
+            return False
+
+        # 2. Liquidity Filter: check volume floor
+        if not self.liquidity.has_sufficient_liquidity(symbol, signal.get('vol', 2000000)):
+            return False
+
+        # 3. Intelligence Gates: Regime & Macro Context
         if not self.regime_detector.is_regime_favorable(signal.get('strategy')):
-            self.logger.log_event(f"REJECTED: Regime mismatch for {signal['asset']}")
             return False
 
-        # STAGE 2: Intermarket Context Gate
         if not self.context_gate.allow_execution(signal):
-            self.logger.log_event(f"REJECTED: Context Gate block for {signal['asset']}")
             return False
 
-        # STAGE 3: Capacity Management & Dynamic Reallocation
+        # 4. Governance: Slot Capacity & Dynamic Reallocation
         if not self.allocator.check_slot_availability():
-            # Trigger 'Hunting' mode: Can we recycle capital from a weak asset?
             if self.allocator.request_dynamic_reallocation(signal):
-                self.logger.log_event(f"REALLOCATION SUCCESS: Recycled slot for high-conviction {signal['asset']}")
                 return True
-            else:
-                self.logger.log_event("REJECTED: Capacity (10 slots) full with no weak trades to exit.")
-                return False
+            return False
 
         return True
 
     def run_alpha_cycle(self):
-        """Main execution loop for processing Gemini Alpha signals."""
-        self.logger.log_event("SYSTEM: Starting Alpha Intelligence Cycle.")
+        """Primary Engine Loop."""
+        # Final safety check before boot
+        if not self.security.check_system_integrity():
+            print("[HALTED] Engine cannot start. Check security gate.")
+            return
+        
+        self.audit.log("ENGINE_START", "orchestrator", {"balance": self.ssot_balance})
         
         signals = self.momentum_sync.get_signals()
         for sig in signals:
@@ -61,11 +65,16 @@ class TradeDecisionOrchestrator:
                 self.execute_trade(sig)
 
     def execute_trade(self, signal):
-        """Final execution execution at the broker level."""
-        self.logger.log_event(f"EXECUTING: {signal['asset']} position based on $SSOT_BALANCE.")
-        # Logic for diversified execution across FX, Crypto, and Futures goes here.
+        """Execution at SSoT reference level."""
+        self.audit.trade_executed(
+            symbol=signal.get('asset'), 
+            side=signal.get('side', 'BUY'), 
+            qty=1.0, 
+            price=0, 
+            sl=0, 
+            tp=0, 
+            cost_bps=0.1
+        )
 
 if __name__ == "__main__":
-    # Boot up the engine
-    engine = TradeDecisionOrchestrator()
-    engine.run_alpha_cycle()
+    TradeDecisionOrchestrator().run_alpha_cycle()
