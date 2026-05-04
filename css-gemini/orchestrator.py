@@ -1,4 +1,10 @@
 # orchestrator.py
+"""
+CAPITAL STRATA SYSTEMS (CSS) - CORE ORCHESTRATOR
+Institutional-grade execution engine with dynamic capital reallocation.
+Reference Balance: 98.0199 SSoT
+"""
+
 from gemini_regime_detector import MarketRegimeDetector
 from gemini_context_gate import IntermarketContextGate
 from gemini_momentum_sync import GeminiMomentumSync
@@ -7,42 +13,59 @@ from audit_logger import CSSAuditLogger
 
 class TradeDecisionOrchestrator:
     def __init__(self):
-        # Initialize the Intelligence Layer
+        # 1. Intelligence Layer Initialization
         self.regime_detector = MarketRegimeDetector()
         self.context_gate = IntermarketContextGate()
         self.momentum_sync = GeminiMomentumSync()
         
-        # Initialize Governance & Allocation
+        # 2. Governance & Allocation Initialization
         self.allocator = CapitalAllocator()
         self.logger = CSSAuditLogger()
-        self.ssot_balance = 98.0199 # Single Source of Truth
+        self.ssot_balance = 98.0199  # Single Source of Truth for capital alignment
 
     def pre_trade_validation(self, signal):
-        """Institutional-grade filtering for capital protection."""
+        """
+        Multi-stage institutional filter to protect $98.0199 capital.
+        Stages: Regime -> Context -> Capacity/Reallocation
+        """
         
-        # 1. Regime Detection: Only trade in aligned market conditions
-        if not self.regime_detector.is_regime_favorable(signal['strategy']):
+        # STAGE 1: Market Regime Analysis
+        if not self.regime_detector.is_regime_favorable(signal.get('strategy')):
             self.logger.log_event(f"REJECTED: Regime mismatch for {signal['asset']}")
             return False
 
-        # 2. Context Gate: Check Macro/Intermarket headwinds
+        # STAGE 2: Intermarket Context Gate
         if not self.context_gate.allow_execution(signal):
             self.logger.log_event(f"REJECTED: Context Gate block for {signal['asset']}")
             return False
 
-        # 3. Capacity Check: Enforce 10-trade cycle limit
+        # STAGE 3: Capacity Management & Dynamic Reallocation
         if not self.allocator.check_slot_availability():
-            self.logger.log_event("REJECTED: Maximum portfolio diversification reached (10 slots)")
-            return False
+            # Trigger 'Hunting' mode: Can we recycle capital from a weak asset?
+            if self.allocator.request_dynamic_reallocation(signal):
+                self.logger.log_event(f"REALLOCATION SUCCESS: Recycled slot for high-conviction {signal['asset']}")
+                return True
+            else:
+                self.logger.log_event("REJECTED: Capacity (10 slots) full with no weak trades to exit.")
+                return False
 
         return True
 
     def run_alpha_cycle(self):
-        """Primary execution loop for the Gemini Alpha Engine."""
+        """Main execution loop for processing Gemini Alpha signals."""
+        self.logger.log_event("SYSTEM: Starting Alpha Intelligence Cycle.")
+        
         signals = self.momentum_sync.get_signals()
         for sig in signals:
             if self.pre_trade_validation(sig):
                 self.execute_trade(sig)
 
     def execute_trade(self, signal):
-        self.logger.log_event(f"EXECUTING: {signal['asset']} at $SSOT_BALANCE reference.")
+        """Final execution execution at the broker level."""
+        self.logger.log_event(f"EXECUTING: {signal['asset']} position based on $SSOT_BALANCE.")
+        # Logic for diversified execution across FX, Crypto, and Futures goes here.
+
+if __name__ == "__main__":
+    # Boot up the engine
+    engine = TradeDecisionOrchestrator()
+    engine.run_alpha_cycle()
