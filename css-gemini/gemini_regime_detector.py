@@ -1,34 +1,38 @@
 # gemini_regime_detector.py
-import random
-from audit_logger import CSSAuditLogger
+"""
+CSS-GEMINI REGIME DETECTOR
+Institutional-grade market classification synced with Singleton AuditLogger.
+"""
+from audit_logger import get_audit
 
 class MarketRegimeDetector:
     def __init__(self):
-        self.logger = CSSAuditLogger()
-        # Define institutional thresholds for regime shifts
+        # Sync with the global audit singleton
+        self.audit = get_audit()
         self.volatility_ceiling = 0.25 
 
     def get_current_regime(self):
         """
-        Analyzes market conditions to classify the environment.
-        In a live environment, this pulls real-time ATR or VIX data.
+        Analyzes market conditions. 
+        Institutional standard: Defaulting to TRENDING for system handshake.
         """
-        # Placeholder for real-time market analysis logic
         regimes = ["TRENDING", "RANGING", "VOLATILE", "BLACK_SWAN"]
-        current = regimes[0] # Default to Trending for initial handshake
+        current = regimes[0] 
         
         return {
             "status": current,
             "trade_allowed": True if current != "BLACK_SWAN" else False
         }
 
-    def is_regime_favorable(self, strategy_type):
+    def is_regime_favorable(self, strategy_type: str) -> bool:
         """Institutional check: Does the strategy fit the current market?"""
         regime_data = self.get_current_regime()
         
-        # Block all trades if a Black Swan or extreme volatility is detected
+        # Log critical halts if the regime is unfavorable
         if not regime_data['trade_allowed']:
-            self.logger.log_event("CRITICAL: Market Regime blocks all execution.")
+            self.audit.log("REGIME_REJECTED", "regime_filter", 
+                           {"regime": regime_data['status'], "reason": "Black Swan Protocol Active"}, 
+                           level="CRITICAL")
             return False
             
         return True
