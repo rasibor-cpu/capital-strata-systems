@@ -554,13 +554,29 @@ for _method_name in [
     if not hasattr(access_control, _method_name):
         setattr(access_control, _method_name, _pcnrass_allow)
 
-# Live mode remains conservative unless the repo explicitly supports it.
-for _method_name in [
-    "can_use_live_broker_mode",
-    "can_execute_live_trading",
-]:
-    if not hasattr(access_control, _method_name):
-        setattr(access_control, _method_name, _pcnrass_deny_live)
+# PCNRASS R2:
+# SUPER_USER may enter live broker mode for real balance visibility.
+# Live execution remains separately controlled by broker gates, env flags,
+# live-order switches, and order-specific protections.
+def _pcnrass_live_mode_permission(role=None, *args, **kwargs):
+    role_value = str(role or "").strip().upper()
+    return _PCNRASSPermissionResult(role_value == "SUPER_USER")
+
+
+def _pcnrass_live_execution_permission(role=None, *args, **kwargs):
+    role_value = str(role or "").strip().upper()
+    live_orders_enabled = (
+        str(os.getenv("COINBASE_ENABLE_LIVE_ORDERS", "")).strip().lower()
+        in {"1", "true", "yes", "y", "on"}
+    )
+    return _PCNRASSPermissionResult(role_value == "SUPER_USER" and live_orders_enabled)
+
+
+# Allow SUPER_USER to select live mode so real broker balances can be fetched.
+access_control.can_use_live_broker_mode = _pcnrass_live_mode_permission
+
+# Keep actual live execution more restrictive.
+access_control.can_execute_live_trading = _pcnrass_live_execution_permission
 
 SESSION_CLOSED = False
 
@@ -1369,24 +1385,85 @@ concurrency_controller = AdaptiveConcurrencyEnvelopeController()
 
 
 class CapitalDeploymentGovernor:
-    """
-    Controlled test allocation governor.
 
-    These values are internal CSS test allocations. They are not real broker
-    balances unless a broker order is separately allowed and executed.
+    """
+    PCNRASS R1 UPGRADE:
+    Dynamic capital source:
+    - PAPER mode keeps controlled simulated test capital.
+    - LIVE mode attempts broker-fetched account balance through RealBalanceEngine.
+    - Fail-closed: if real balance fetch fails, available live capital becomes 0.0.
     """
 
     def __init__(self) -> None:
-        self.paper_mode = False
+        self.paper_mode = True
         self.simulated_capital_pool = 200.00
         self.max_capital_per_trade = 25.00
         self.max_broker_test_positions = 5
         self.active_test_allocations: dict[str, float] = {}
+        self.real_balance = 0.0
+        self.real_equity = 0.0
+        self.balance_source = "SIMULATED"
+
+    def _get_adapter(self):
+        try:
+            if str(SELECTED_BROKER).upper() == "OANDA":
+                return oanda
+            if str(SELECTED_BROKER).upper() == "COINBASE":
+                return coinbase
+        except Exception:
+            return None
+        return None
+
+    def refresh_real_balance(self) -> dict:
+        try:
+            from backend.app.accounting.real_balance_engine import RealBalanceEngine
+
+            engine = RealBalanceEngine(SELECTED_BROKER, self._get_adapter())
+            data = engine.get_balance()
+
+            self.real_balance = float(data.get("balance", 0.0) or 0.0)
+            self.real_equity = float(data.get("equity", self.real_balance) or 0.0)
+            self.balance_source = str(data.get("source", "UNKNOWN"))
+
+            print(
+                f"[REAL BALANCE LOADED] broker={SELECTED_BROKER} "
+                f"mode={SELECTED_BROKER_MODE} balance=${self.real_balance:,.2f} "
+                f"equity=${self.real_equity:,.2f} source={self.balance_source}"
+            )
+
+            return data
+
+        except Exception as e:
+            self.real_balance = 0.0
+            self.real_equity = 0.0
+            self.balance_source = f"REAL_BALANCE_ERROR_{str(e)[:40]}"
+            print(f"[REAL BALANCE ERROR] {str(e)[:80]}")
+            return {
+                "balance": 0.0,
+                "equity": 0.0,
+                "source": self.balance_source,
+            }
 
     def available_capital(self) -> float:
         allocated = sum(self.active_test_allocations.values())
-        base_capital = float(getattr(pnl_observer, "current_balance", self.simulated_capital_pool))
+
+        if self.paper_mode:
+            try:
+                base_capital = float(pnl_observer.equity())
+            except Exception:
+                try:
+                    base_capital = float(pnl_observer.current_balance)
+                except Exception:
+                    base_capital = float(self.simulated_capital_pool)
+        else:
+            base_capital = float(self.real_balance)
+
         return round(base_capital - allocated, 4)
+
+    def capital_source_label(self) -> str:
+        if self.paper_mode:
+            return "SIMULATED"
+        return self.balance_source or "REAL_BROKER"
 
     def can_fund_trade(self, position_id: str) -> bool:
         if self.paper_mode:
@@ -1417,9 +1494,11 @@ class CapitalDeploymentGovernor:
 
     def set_live_mode(self) -> None:
         self.paper_mode = False
+        self.refresh_real_balance()
 
     def set_paper_mode(self) -> None:
         self.paper_mode = True
+        self.balance_source = "SIMULATED"
 
 
 capital_governor = CapitalDeploymentGovernor()
@@ -1485,6 +1564,30 @@ def initialize_selected_coinbase() -> None:
 
 
 initialize_selected_coinbase()
+
+# PCNRASS R3: activate correct capital source after broker adapters are initialized.
+def pcnrass_activate_capital_source() -> None:
+    if str(SELECTED_BROKER_MODE).lower() == "live":
+        capital_governor.set_live_mode()
+    else:
+        capital_governor.set_paper_mode()
+
+    base_capital = capital_governor.available_capital() + capital_governor.funded_amount()
+
+    try:
+        pnl_observer.starting_balance = float(base_capital)
+        pnl_observer.current_balance = float(base_capital)
+    except Exception as e:
+        print(f"[CAPITAL SYNC WARN] pnl_observer sync failed: {str(e)[:60]}")
+
+    print(
+        f"[CAPITAL SOURCE ACTIVE] source={capital_governor.capital_source_label()} "
+        f"mode={SELECTED_BROKER_MODE} available=${capital_governor.available_capital():,.2f}"
+    )
+
+
+pcnrass_activate_capital_source()
+
 
 # === PCNRASS PHASE 2 BROKER ISOLATION + REAL PRICE HELPERS ===
 # Real market pricing only activates when broker execution is ARMED and selected broker mode is LIVE.
@@ -2635,12 +2738,13 @@ try:
         print(f"DEFENSIVE REDUCTIONS THIS CYCLE: {defensive_reductions}")
         print(f"TOTAL DEFENSIVE REDUCTION EXITS: {locked_profit_ledger.defensive_reduction_exits}")
 
+        capital_source = capital_governor.capital_source_label()
         print(
-            f"SIMULATED CAPITAL DEPLOYED: "
+            f"{capital_source} CAPITAL DEPLOYED: "
             f"${capital_governor.funded_amount():.2f}"
         )
         print(
-            f"SIMULATED CAPITAL AVAILABLE: "
+            f"{capital_source} CAPITAL AVAILABLE: "
             f"${capital_governor.available_capital():.2f}"
         )
 
