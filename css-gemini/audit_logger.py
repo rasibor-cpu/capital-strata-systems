@@ -1,45 +1,54 @@
 # audit_logger.py
 import json
-import datetime
 import os
+import threading
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional
 
-class CSSAuditLogger:
-    def __init__(self):
-        self.log_file = "css_institutional_audit.json"
-        # Ensure the log file exists as a valid JSON list if it doesn't
-        if not os.path.exists(self.log_file):
-            with open(self.log_file, 'w') as f:
-                json.dump([], f)
+# Institutional standard: JSON Lines for crash-resilient logging
+AUDIT_LOG_PATH = "logs/audit.jsonl"
+_lock = threading.Lock()
 
-    def log_event(self, message, level="INFO"):
-        """Logs a standard system event with timestamp."""
-        entry = {
-            "timestamp": datetime.datetime.now().isoformat(),
+class AuditLogger:
+    def __init__(self, path: str = AUDIT_LOG_PATH):
+        self.path = path
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    def log(self, event: str, module: str, payload: Dict[str, Any], level: str = "INFO", symbol: Optional[str] = None):
+        """Standard thread-safe log entry."""
+        record = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "event": event,
+            "module": module,
             "level": level,
-            "message": message
+            "symbol": symbol,
+            "data": payload,
         }
-        self._write_to_log(entry)
-        print(f"[{level}] {message}")
+        with _lock:
+            try:
+                with open(self.path, "a") as f:
+                    f.write(json.dumps(record) + "\n")
+            except Exception as e:
+                print(f"Audit write failed: {e}")
 
-    def log_rejection(self, signal, reason):
-        """Specifically logs trade rejections for post-session analysis."""
-        entry = {
-            "timestamp": datetime.datetime.now().isoformat(),
-            "level": "TRADE_REJECTED",
-            "asset": signal.get('asset', 'UNKNOWN'),
-            "reason": reason,
-            "context": "Capital Protection Layer"
-        }
-        self._write_to_log(entry)
-        print(f"[REJECTED] {signal.get('asset')} - Reason: {reason}")
+    def trade_executed(self, symbol, side, qty, price, sl, tp, cost_bps):
+        self.log("TRADE_EXECUTED", "orchestrator", {"side": side, "qty": qty, "price": price}, symbol=symbol)
 
-    def _write_to_log(self, entry):
-        """Appends the entry to the JSON audit file."""
-        try:
-            with open(self.log_file, 'r+') as f:
-                data = json.load(f)
-                data.append(entry)
-                f.seek(0)
-                json.dump(data, f, indent=4)
-        except Exception as e:
-            print(f"Audit Logging Error: {e}")
+    def trade_rejected(self, symbol, reason, module):
+        self.log("TRADE_REJECTED", module, {"reason": reason}, level="WARNING", symbol=symbol)
+
+    def position_closed(self, symbol, pnl, reason, capital):
+        self.log("POSITION_CLOSED", "orchestrator", {"pnl": pnl, "reason": reason, "capital": capital}, symbol=symbol)
+
+    def regime_change(self, symbol, old, new):
+        self.log("REGIME_CHANGE", "regime_filter", {"from": old, "to": new}, symbol=symbol)
+
+# --- SINGLETON INTERFACE ---
+_audit: Optional[AuditLogger] = None
+
+def get_audit() -> AuditLogger:
+    """Provides a single, global entry point for the logging engine."""
+    global _audit
+    if _audit is None:
+        _audit = AuditLogger()
+    return _audit
