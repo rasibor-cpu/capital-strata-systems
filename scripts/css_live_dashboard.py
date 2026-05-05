@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+from backend.intelligence.dashboard_orchestrator_bridge import run_dashboard_orchestration
 
 
 # === R15B MODE-AWARE EXIT PROFILE ===
@@ -164,6 +164,7 @@ import random
 import socket
 import sys
 import time
+from backend.intelligence.dashboard_orchestrator_bridge import run_dashboard_orchestration
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
