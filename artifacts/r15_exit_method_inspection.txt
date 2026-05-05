@@ -1,0 +1,1136 @@
+
+--- MATCH AROUND LINE 84: if capital_governor.capital_source_label().upper() == "SIMULATED": ---
+79: def enforce_execution_boundary():
+80:     mode = str(SELECTED_BROKER_MODE).lower()
+81: 
+82:     if mode == "live":
+83:         # Live mode must not use simulated paths
+84:         if capital_governor.capital_source_label().upper() == "SIMULATED":
+85:             print("[BOUNDARY VIOLATION] Live mode cannot use simulated capital")
+86:             import sys
+87:             sys.exit(1)
+88: 
+89:     elif mode == "paper":
+90:         # Paper mode must not attempt live execution
+91:         if "LIVE" in str(globals()):
+92:             pass  # safeguard placeholder
+
+--- MATCH AROUND LINE 202: def close_position(self, symbol: str, exit_price: float) -> float: ---
+197:         def update_market_price(self, symbol: str, current_price: float) -> None:
+198:             pos = self.positions.get(symbol)
+199:             if pos is not None:
+200:                 pos.current_price = float(current_price)
+201: 
+202:         def close_position(self, symbol: str, exit_price: float) -> float:
+203:             pos = self.positions.pop(symbol, None)
+204:             if pos is None:
+205:                 return 0.0
+206: 
+207:             side = str(pos.side or "LONG").upper()
+208:             direction = 1.0 if side != "SHORT" else -1.0
+209:             pnl = (float(exit_price) - float(pos.entry_price)) * float(pos.quantity) * direction
+210:             self.realized_pnl += pnl
+
+--- MATCH AROUND LINE 1692: base_capital = float(pnl_observer.equity()) ---
+1687:     def available_capital(self) -> float:
+1688:         allocated = sum(self.active_test_allocations.values())
+1689: 
+1690:         if self.paper_mode:
+1691:             try:
+1692:                 base_capital = float(pnl_observer.equity())
+1693:             except Exception:
+1694:                 try:
+1695:                     base_capital = float(pnl_observer.current_balance)
+1696:                 except Exception:
+1697:                     base_capital = float(self.simulated_capital_pool)
+1698:         else:
+1699:             base_capital = float(self.real_balance)
+1700: 
+
+--- MATCH AROUND LINE 1695: base_capital = float(pnl_observer.current_balance) ---
+1690:         if self.paper_mode:
+1691:             try:
+1692:                 base_capital = float(pnl_observer.equity())
+1693:             except Exception:
+1694:                 try:
+1695:                     base_capital = float(pnl_observer.current_balance)
+1696:                 except Exception:
+1697:                     base_capital = float(self.simulated_capital_pool)
+1698:         else:
+1699:             base_capital = float(self.real_balance)
+1700: 
+1701:         return round(base_capital - allocated, 4)
+1702: 
+1703:     def capital_source_label(self) -> str:
+
+--- MATCH AROUND LINE 1725: def release_trade(self, position_id: str) -> None: ---
+1720:         if not self.can_fund_trade(position_id):
+1721:             return False
+1722:         self.active_test_allocations[position_id] = self.max_capital_per_trade
+1723:         return True
+1724: 
+1725:     def release_trade(self, position_id: str) -> None:
+1726:         if position_id in self.active_test_allocations:
+1727:             del self.active_test_allocations[position_id]
+1728: 
+1729:     def live_positions_count(self) -> int:
+1730:         return len(self.active_test_allocations)
+1731: 
+1732:     def funded_amount(self) -> float:
+1733:         return round(sum(self.active_test_allocations.values()), 4)
+
+--- MATCH AROUND LINE 1744: capital_governor = CapitalDeploymentGovernor() ---
+1739:     def set_paper_mode(self) -> None:
+1740:         self.paper_mode = True
+1741:         self.balance_source = "SIMULATED"
+1742: 
+1743: 
+1744: capital_governor = CapitalDeploymentGovernor()
+1745: 
+1746: # Phase 1 PnL observer only
+1747: pnl_observer = Portfolio(
+1748:     starting_balance=capital_governor.simulated_capital_pool,
+1749:     current_balance=capital_governor.simulated_capital_pool,
+1750: )
+1751: 
+1752: # === INITIALIZE NEW TRACKER ===
+
+--- MATCH AROUND LINE 1747: pnl_observer = Portfolio( ---
+1742: 
+1743: 
+1744: capital_governor = CapitalDeploymentGovernor()
+1745: 
+1746: # Phase 1 PnL observer only
+1747: pnl_observer = Portfolio(
+1748:     starting_balance=capital_governor.simulated_capital_pool,
+1749:     current_balance=capital_governor.simulated_capital_pool,
+1750: )
+1751: 
+1752: # === INITIALIZE NEW TRACKER ===
+1753: pnl_tracker = PnLTracker(starting_equity=pnl_observer.starting_balance)
+1754: 
+1755: 
+
+--- MATCH AROUND LINE 1748: starting_balance=capital_governor.simulated_capital_pool, ---
+1743: 
+1744: capital_governor = CapitalDeploymentGovernor()
+1745: 
+1746: # Phase 1 PnL observer only
+1747: pnl_observer = Portfolio(
+1748:     starting_balance=capital_governor.simulated_capital_pool,
+1749:     current_balance=capital_governor.simulated_capital_pool,
+1750: )
+1751: 
+1752: # === INITIALIZE NEW TRACKER ===
+1753: pnl_tracker = PnLTracker(starting_equity=pnl_observer.starting_balance)
+1754: 
+1755: 
+1756: def map_oanda_env() -> None:
+
+--- MATCH AROUND LINE 1749: current_balance=capital_governor.simulated_capital_pool, ---
+1744: capital_governor = CapitalDeploymentGovernor()
+1745: 
+1746: # Phase 1 PnL observer only
+1747: pnl_observer = Portfolio(
+1748:     starting_balance=capital_governor.simulated_capital_pool,
+1749:     current_balance=capital_governor.simulated_capital_pool,
+1750: )
+1751: 
+1752: # === INITIALIZE NEW TRACKER ===
+1753: pnl_tracker = PnLTracker(starting_equity=pnl_observer.starting_balance)
+1754: 
+1755: 
+1756: def map_oanda_env() -> None:
+1757:     if not os.getenv("OANDA_API_KEY"):
+
+--- MATCH AROUND LINE 1753: pnl_tracker = PnLTracker(starting_equity=pnl_observer.starting_balance) ---
+1748:     starting_balance=capital_governor.simulated_capital_pool,
+1749:     current_balance=capital_governor.simulated_capital_pool,
+1750: )
+1751: 
+1752: # === INITIALIZE NEW TRACKER ===
+1753: pnl_tracker = PnLTracker(starting_equity=pnl_observer.starting_balance)
+1754: 
+1755: 
+1756: def map_oanda_env() -> None:
+1757:     if not os.getenv("OANDA_API_KEY"):
+1758:         if os.getenv("OANDA_PRACTICE_TOKEN"):
+1759:             os.environ["OANDA_API_KEY"] = os.getenv("OANDA_PRACTICE_TOKEN", "")
+1760:         elif os.getenv("OANDA_LIVE_TOKEN"):
+1761:             os.environ["OANDA_API_KEY"] = os.getenv("OANDA_LIVE_TOKEN", "")
+
+--- MATCH AROUND LINE 1811: capital_governor.set_live_mode() ---
+1806: initialize_selected_coinbase()
+1807: 
+1808: # PCNRASS R3: activate correct capital source after broker adapters are initialized.
+1809: def pcnrass_activate_capital_source() -> None:
+1810:     if str(SELECTED_BROKER_MODE).lower() == "live":
+1811:         capital_governor.set_live_mode()
+1812:     else:
+1813:         capital_governor.set_paper_mode()
+1814: 
+1815:     base_capital = capital_governor.available_capital() + capital_governor.funded_amount()
+1816: 
+1817:     try:
+1818:         pnl_observer.starting_balance = float(base_capital)
+1819:         pnl_observer.current_balance = float(base_capital)
+
+--- MATCH AROUND LINE 1813: capital_governor.set_paper_mode() ---
+1808: # PCNRASS R3: activate correct capital source after broker adapters are initialized.
+1809: def pcnrass_activate_capital_source() -> None:
+1810:     if str(SELECTED_BROKER_MODE).lower() == "live":
+1811:         capital_governor.set_live_mode()
+1812:     else:
+1813:         capital_governor.set_paper_mode()
+1814: 
+1815:     base_capital = capital_governor.available_capital() + capital_governor.funded_amount()
+1816: 
+1817:     try:
+1818:         pnl_observer.starting_balance = float(base_capital)
+1819:         pnl_observer.current_balance = float(base_capital)
+1820:     except Exception as e:
+1821:         print(f"[CAPITAL SYNC WARN] pnl_observer sync failed: {str(e)[:60]}")
+
+--- MATCH AROUND LINE 1815: base_capital = capital_governor.available_capital() + capital_governor.funded_amount() ---
+1810:     if str(SELECTED_BROKER_MODE).lower() == "live":
+1811:         capital_governor.set_live_mode()
+1812:     else:
+1813:         capital_governor.set_paper_mode()
+1814: 
+1815:     base_capital = capital_governor.available_capital() + capital_governor.funded_amount()
+1816: 
+1817:     try:
+1818:         pnl_observer.starting_balance = float(base_capital)
+1819:         pnl_observer.current_balance = float(base_capital)
+1820:     except Exception as e:
+1821:         print(f"[CAPITAL SYNC WARN] pnl_observer sync failed: {str(e)[:60]}")
+1822: 
+1823:     if str(SELECTED_BROKER_MODE).lower() == "live":
+
+--- MATCH AROUND LINE 1818: pnl_observer.starting_balance = float(base_capital) ---
+1813:         capital_governor.set_paper_mode()
+1814: 
+1815:     base_capital = capital_governor.available_capital() + capital_governor.funded_amount()
+1816: 
+1817:     try:
+1818:         pnl_observer.starting_balance = float(base_capital)
+1819:         pnl_observer.current_balance = float(base_capital)
+1820:     except Exception as e:
+1821:         print(f"[CAPITAL SYNC WARN] pnl_observer sync failed: {str(e)[:60]}")
+1822: 
+1823:     if str(SELECTED_BROKER_MODE).lower() == "live":
+1824:         if float(capital_governor.real_balance or 0.0) <= 0.0:
+1825:             print(
+1826:                 f"[LIVE CAPITAL WARNING] broker={SELECTED_BROKER} "
+
+--- MATCH AROUND LINE 1819: pnl_observer.current_balance = float(base_capital) ---
+1814: 
+1815:     base_capital = capital_governor.available_capital() + capital_governor.funded_amount()
+1816: 
+1817:     try:
+1818:         pnl_observer.starting_balance = float(base_capital)
+1819:         pnl_observer.current_balance = float(base_capital)
+1820:     except Exception as e:
+1821:         print(f"[CAPITAL SYNC WARN] pnl_observer sync failed: {str(e)[:60]}")
+1822: 
+1823:     if str(SELECTED_BROKER_MODE).lower() == "live":
+1824:         if float(capital_governor.real_balance or 0.0) <= 0.0:
+1825:             print(
+1826:                 f"[LIVE CAPITAL WARNING] broker={SELECTED_BROKER} "
+1827:                 f"mode=live url={os.environ.get('OANDA_BASE_URL', 'UNKNOWN')} "
+
+--- MATCH AROUND LINE 1821: print(f"[CAPITAL SYNC WARN] pnl_observer sync failed: {str(e)[:60]}") ---
+1816: 
+1817:     try:
+1818:         pnl_observer.starting_balance = float(base_capital)
+1819:         pnl_observer.current_balance = float(base_capital)
+1820:     except Exception as e:
+1821:         print(f"[CAPITAL SYNC WARN] pnl_observer sync failed: {str(e)[:60]}")
+1822: 
+1823:     if str(SELECTED_BROKER_MODE).lower() == "live":
+1824:         if float(capital_governor.real_balance or 0.0) <= 0.0:
+1825:             print(
+1826:                 f"[LIVE CAPITAL WARNING] broker={SELECTED_BROKER} "
+1827:                 f"mode=live url={os.environ.get('OANDA_BASE_URL', 'UNKNOWN')} "
+1828:                 f"balance_fetch_failed_or_zero. Live trading must remain blocked until real balance is loaded."
+1829:             )
+
+--- MATCH AROUND LINE 1824: if float(capital_governor.real_balance or 0.0) <= 0.0: ---
+1819:         pnl_observer.current_balance = float(base_capital)
+1820:     except Exception as e:
+1821:         print(f"[CAPITAL SYNC WARN] pnl_observer sync failed: {str(e)[:60]}")
+1822: 
+1823:     if str(SELECTED_BROKER_MODE).lower() == "live":
+1824:         if float(capital_governor.real_balance or 0.0) <= 0.0:
+1825:             print(
+1826:                 f"[LIVE CAPITAL WARNING] broker={SELECTED_BROKER} "
+1827:                 f"mode=live url={os.environ.get('OANDA_BASE_URL', 'UNKNOWN')} "
+1828:                 f"balance_fetch_failed_or_zero. Live trading must remain blocked until real balance is loaded."
+1829:             )
+1830: 
+1831:     # === R11 CAPITAL HARD LOCK ===
+1832: if str(SELECTED_BROKER_MODE).lower() == "live":
+
+--- MATCH AROUND LINE 1833: real_balance = float(getattr(capital_governor, "real_balance", 0.0) or 0.0) ---
+1828:                 f"balance_fetch_failed_or_zero. Live trading must remain blocked until real balance is loaded."
+1829:             )
+1830: 
+1831:     # === R11 CAPITAL HARD LOCK ===
+1832: if str(SELECTED_BROKER_MODE).lower() == "live":
+1833:     real_balance = float(getattr(capital_governor, "real_balance", 0.0) or 0.0)
+1834: 
+1835:     if real_balance <= 0.0:
+1836:         print(
+1837:             f"[LIVE CAPITAL BLOCKED] broker={SELECTED_BROKER} "
+1838:             f"url={get_active_broker_url()} "
+1839:             f"reason=NO_REAL_BALANCE"
+1840:         )
+1841: 
+
+--- MATCH AROUND LINE 1849: f"[CAPITAL SOURCE ACTIVE] source={capital_governor.capital_source_label()} " ---
+1844:         # HARD STOP — prevent fake execution
+1845:         import sys
+1846:         sys.exit(1)
+1847: 
+1848: print(
+1849:     f"[CAPITAL SOURCE ACTIVE] source={capital_governor.capital_source_label()} "
+1850:     f"mode={SELECTED_BROKER_MODE} available=${capital_governor.available_capital():,.2f}"
+1851: )
+1852: 
+1853: 
+1854: enforce_mode_dominance()
+1855: pcnrass_activate_capital_source()
+1856: enforce_execution_boundary()
+1857: 
+
+--- MATCH AROUND LINE 1850: f"mode={SELECTED_BROKER_MODE} available=${capital_governor.available_capital():,.2f}" ---
+1845:         import sys
+1846:         sys.exit(1)
+1847: 
+1848: print(
+1849:     f"[CAPITAL SOURCE ACTIVE] source={capital_governor.capital_source_label()} "
+1850:     f"mode={SELECTED_BROKER_MODE} available=${capital_governor.available_capital():,.2f}"
+1851: )
+1852: 
+1853: 
+1854: enforce_mode_dominance()
+1855: pcnrass_activate_capital_source()
+1856: enforce_execution_boundary()
+1857: 
+1858: 
+
+--- MATCH AROUND LINE 2227: self.forced_exit_profit_banked = 0.0 ---
+2222: session_recovery = SessionRecoveryEngine()
+2223: 
+2224: 
+2225: class LockedProfitLedger:
+2226:     def __init__(self) -> None:
+2227:         self.forced_exit_profit_banked = 0.0
+2228:         self.priority_exits = 0
+2229:         self.recycled_slots = 0
+2230:         self.trail_stops_hit = 0
+2231:         self.defensive_reduction_exits = 0
+2232:         self._booked: set[str] = set()
+2233: 
+2234:     def record_forced_exit(self, pid: str, amount: float) -> None:
+2235:         if pid in self._booked:
+
+--- MATCH AROUND LINE 2234: def record_forced_exit(self, pid: str, amount: float) -> None: ---
+2229:         self.recycled_slots = 0
+2230:         self.trail_stops_hit = 0
+2231:         self.defensive_reduction_exits = 0
+2232:         self._booked: set[str] = set()
+2233: 
+2234:     def record_forced_exit(self, pid: str, amount: float) -> None:
+2235:         if pid in self._booked:
+2236:             return
+2237: 
+2238:         self._booked.add(pid)
+2239:         self.forced_exit_profit_banked += round(amount, 4)
+2240:         self.trail_stops_hit += 1
+2241: 
+2242:     def record_priority_exit(self) -> None:
+
+--- MATCH AROUND LINE 2239: self.forced_exit_profit_banked += round(amount, 4) ---
+2234:     def record_forced_exit(self, pid: str, amount: float) -> None:
+2235:         if pid in self._booked:
+2236:             return
+2237: 
+2238:         self._booked.add(pid)
+2239:         self.forced_exit_profit_banked += round(amount, 4)
+2240:         self.trail_stops_hit += 1
+2241: 
+2242:     def record_priority_exit(self) -> None:
+2243:         self.priority_exits += 1
+2244: 
+2245:     def record_recycled_slot(self) -> None:
+2246:         self.recycled_slots += 1
+2247: 
+
+--- MATCH AROUND LINE 2356: broker_tested = capital_governor.allocate_trade(pid) ---
+2351: 
+2352:         cluster_risk_governor.record_cluster_slot(cluster_name)
+2353: 
+2354:         broker_tested = False
+2355:         if allow_live_funding:
+2356:             broker_tested = capital_governor.allocate_trade(pid)
+2357: 
+2358:         entry_price = pcnrass_get_reference_price(symbol, fallback=100.0)
+2359: 
+2360:         position = {
+2361:             "position_id": pid,
+2362:             "asset_class": asset_class,
+2363:             "symbol": symbol,
+2364:             "cluster_name": cluster_name,
+
+--- MATCH AROUND LINE 2368: "forced_exit": False, ---
+2363:             "symbol": symbol,
+2364:             "cluster_name": cluster_name,
+2365:             "entry_price": float(entry_price),
+2366:             "current_price": float(entry_price),
+2367:             "floating": 0.0,
+2368:             "forced_exit": False,
+2369:             "exit_reason": None,
+2370:             "age_cycles": 0,
+2371:             "signal_score": signal_score,
+2372:             "prob_positive": prob_positive,
+2373:             "broker_tested": broker_tested,
+2374:             "live_funded": broker_tested,
+2375:             "broker_order_ok": False,
+2376:             "broker_note": "NO_BROKER_ORDER",
+
+--- MATCH AROUND LINE 2386: return sum(1 for p in self.positions if not p["forced_exit"]) ---
+2381: 
+2382:         self.positions.append(position)
+2383:         return position
+2384: 
+2385:     def count_open_positions(self) -> int:
+2386:         return sum(1 for p in self.positions if not p["forced_exit"])
+2387: 
+2388:     def count_open_positions_by_asset(self) -> dict[str, int]:
+2389:         counts = {
+2390:             "CRYPTO": 0,
+2391:             "FX": 0,
+2392:             "OPTIONS": 0,
+2393:             "FUTURES": 0,
+2394:         }
+
+--- MATCH AROUND LINE 2397: if pos["forced_exit"]: ---
+2392:             "OPTIONS": 0,
+2393:             "FUTURES": 0,
+2394:         }
+2395: 
+2396:         for pos in self.positions:
+2397:             if pos["forced_exit"]:
+2398:                 continue
+2399:             counts[pos["asset_class"]] += 1
+2400: 
+2401:         return counts
+2402: 
+2403:     def count_open_broker_test_positions(self) -> int:
+2404:         return sum(
+2405:             1
+
+--- MATCH AROUND LINE 2407: if not p["forced_exit"] and p.get("broker_tested", False) ---
+2402: 
+2403:     def count_open_broker_test_positions(self) -> int:
+2404:         return sum(
+2405:             1
+2406:             for p in self.positions
+2407:             if not p["forced_exit"] and p.get("broker_tested", False)
+2408:         )
+2409: 
+2410:     def count_open_funded_positions(self) -> int:
+2411:         return self.count_open_broker_test_positions()
+2412: 
+2413:     def floating_by_asset(self, funded_only: bool = False) -> dict[str, float]:
+2414:         by_asset = {
+2415:             "CRYPTO": 0.0,
+
+--- MATCH AROUND LINE 2422: if pos["forced_exit"]: ---
+2417:             "OPTIONS": 0.0,
+2418:             "FUTURES": 0.0,
+2419:         }
+2420: 
+2421:         for pos in self.positions:
+2422:             if pos["forced_exit"]:
+2423:                 continue
+2424: 
+2425:             if funded_only and not pos.get("broker_tested", False):
+2426:                 continue
+2427: 
+2428:             by_asset[pos["asset_class"]] += pos["floating"]
+2429: 
+2430:         return by_asset
+
+--- MATCH AROUND LINE 2431: mtm_engine = MarkToMarketEngine() ---
+2426:                 continue
+2427: 
+2428:             by_asset[pos["asset_class"]] += pos["floating"]
+2429: 
+2430:         return by_asset
+2431: mtm_engine = MarkToMarketEngine()
+2432: 
+2433: 
+2434: def hard_position_limit() -> int:
+2435:     return HARD_TOTAL_OPEN_POSITION_CAP
+2436: 
+2437: 
+2438: def hard_asset_cap(asset_class: str) -> int:
+2439:     return HARD_ASSET_OPEN_CAPS.get(asset_class, 0)
+
+--- MATCH AROUND LINE 2484: mtm_engine.position_counter = saved_state.get("position_counter", 0) ---
+2479:     crypto_pnl.update(saved_state.get("crypto_pnl", {}))
+2480:     fx_pnl.update(saved_state.get("fx_pnl", {}))
+2481:     options_pnl.update(saved_state.get("options_pnl", {}))
+2482:     futures_pnl.update(saved_state.get("futures_pnl", {}))
+2483:     last_trade = saved_state.get("last_trade", "NONE")
+2484:     mtm_engine.position_counter = saved_state.get("position_counter", 0)
+2485: 
+2486:     print(
+2487:         "[RECOVERY] Realized PnL restored because CSS_RESUME_SESSION=true; stale open positions not reloaded. "
+2488:         "Cycle counter reset."
+2489:     )
+2490: elif saved_state and not RESUME_PREVIOUS_SESSION:
+2491:     print("[RECOVERY IGNORED] Previous realized PnL was not restored. Fresh session active. Set CSS_RESUME_SESSION=true to resume.")
+2492: 
+
+--- MATCH AROUND LINE 2520: if pos["forced_exit"]: ---
+2515: 
+2516: 
+2517: def book_position_exit(pos: dict, reason: str) -> None:
+2518:     global last_trade
+2519: 
+2520:     if pos["forced_exit"]:
+2521:         return
+2522: 
+2523:     if pos.get("broker_order_ok"):
+2524:         last_trade = f"{pos['symbol']} BROKER_OPEN_MANUAL_REVIEW"
+2525:         return
+2526: 
+2527:     realized = round(pos["floating"], 4)
+2528: 
+
+--- MATCH AROUND LINE 2539: pos["forced_exit"] = True ---
+2534:             unrealized_pnl=0.0
+2535:         )
+2536:     except Exception as e:
+2537:         print(f"[TRACKER ERROR] {e}")
+2538: 
+2539:     pos["forced_exit"] = True
+2540:     pos["exit_reason"] = reason
+2541: 
+2542:     cluster_risk_governor.release_cluster_slot(pos["cluster_name"])
+2543: 
+2544:     if pos.get("broker_tested", False):
+2545:         capital_governor.release_trade(pos["position_id"])
+2546: 
+2547:     target_pnl = pnl_dict_for_asset(pos["asset_class"])
+
+--- MATCH AROUND LINE 2545: capital_governor.release_trade(pos["position_id"]) ---
+2540:     pos["exit_reason"] = reason
+2541: 
+2542:     cluster_risk_governor.release_cluster_slot(pos["cluster_name"])
+2543: 
+2544:     if pos.get("broker_tested", False):
+2545:         capital_governor.release_trade(pos["position_id"])
+2546: 
+2547:     target_pnl = pnl_dict_for_asset(pos["asset_class"])
+2548:     target_pnl[pos["symbol"]] = round(
+2549:         target_pnl.get(pos["symbol"], 0.0) + realized,
+2550:         4,
+2551:     )
+2552: 
+2553:     cluster_amplifier.record_cluster_win(pos["symbol"], realized)
+
+--- MATCH AROUND LINE 2556: locked_profit_ledger.record_forced_exit(pos["position_id"], realized) ---
+2551:     )
+2552: 
+2553:     cluster_amplifier.record_cluster_win(pos["symbol"], realized)
+2554: 
+2555:     if reason in {"STOP", "FAST_STOP"}:
+2556:         locked_profit_ledger.record_forced_exit(pos["position_id"], realized)
+2557:     elif reason == "TAKE_PROFIT":
+2558:         locked_profit_ledger.record_priority_exit()
+2559:     elif reason == "DEFENSIVE_REDUCTION":
+2560:         locked_profit_ledger.record_defensive_reduction_exit()
+2561: 
+2562:     locked_profit_ledger.record_recycled_slot()
+2563: 
+2564:     last_trade = f"{pos['symbol']} EXIT {reason} {realized:+.4f}"
+
+--- MATCH AROUND LINE 2572: p for p in mtm_engine.positions if not p["forced_exit"] ---
+2567: def apply_defensive_exposure_reduction() -> int:
+2568:     if not is_session_locked():
+2569:         return 0
+2570: 
+2571:     open_positions_list = [
+2572:         p for p in mtm_engine.positions if not p["forced_exit"]
+2573:     ]
+2574: 
+2575:     if not open_positions_list:
+2576:         return 0
+2577: 
+2578:     open_positions_list.sort(
+2579:         key=lambda x: (float(x.get("floating", 0.0)), -int(x.get("age_cycles", 0)))
+2580:     )
+
+--- MATCH AROUND LINE 2778: for pos in mtm_engine.positions: ---
+2773:         exit_profile = MODE_EXIT_PROFILE.get(
+2774:             ENGINE_MODE,
+2775:             MODE_EXIT_PROFILE["BALANCED"],
+2776:         )
+2777: 
+2778:         for pos in mtm_engine.positions:
+2779:             if pos["forced_exit"]:
+2780:                 continue
+2781: 
+2782:             drift = smart_drift_engine.generate_drift(pos)
+2783:             pos["floating"] = round(pos["floating"] + drift, 4)
+2784:             pos["age_cycles"] += 1
+2785: 
+2786:             observer_symbol = f"{pos['position_id']}::{pos['symbol']}"
+
+--- MATCH AROUND LINE 2779: if pos["forced_exit"]: ---
+2774:             ENGINE_MODE,
+2775:             MODE_EXIT_PROFILE["BALANCED"],
+2776:         )
+2777: 
+2778:         for pos in mtm_engine.positions:
+2779:             if pos["forced_exit"]:
+2780:                 continue
+2781: 
+2782:             drift = smart_drift_engine.generate_drift(pos)
+2783:             pos["floating"] = round(pos["floating"] + drift, 4)
+2784:             pos["age_cycles"] += 1
+2785: 
+2786:             observer_symbol = f"{pos['position_id']}::{pos['symbol']}"
+2787:             observer_price = 100.0 + float(pos["floating"])
+
+--- MATCH AROUND LINE 2788: pnl_observer.update_market_price(observer_symbol, observer_price) ---
+2783:             pos["floating"] = round(pos["floating"] + drift, 4)
+2784:             pos["age_cycles"] += 1
+2785: 
+2786:             observer_symbol = f"{pos['position_id']}::{pos['symbol']}"
+2787:             observer_price = 100.0 + float(pos["floating"])
+2788:             pnl_observer.update_market_price(observer_symbol, observer_price)
+2789: 
+2790:             # =========================
+2791:             # PROFIT DOMINANCE EXIT ENGINE
+2792:             # =========================
+2793:             # Cut weak losers earlier than the standard stop.
+2794:             if pos["floating"] <= exit_profile["stop_loss"] * 0.8:
+2795:                 book_position_exit(pos, "FAST_STOP")
+2796:                 pnl_observer.close_position(observer_symbol, observer_price)
+
+--- MATCH AROUND LINE 2796: pnl_observer.close_position(observer_symbol, observer_price) ---
+2791:             # PROFIT DOMINANCE EXIT ENGINE
+2792:             # =========================
+2793:             # Cut weak losers earlier than the standard stop.
+2794:             if pos["floating"] <= exit_profile["stop_loss"] * 0.8:
+2795:                 book_position_exit(pos, "FAST_STOP")
+2796:                 pnl_observer.close_position(observer_symbol, observer_price)
+2797: 
+2798:             # Normal stop for losses that exceed the formal stop threshold.
+2799:             elif pos["floating"] <= exit_profile["stop_loss"]:
+2800:                 book_position_exit(pos, "STOP")
+2801:                 pnl_observer.close_position(observer_symbol, observer_price)
+2802: 
+2803:             # Let strong winners run instead of clipping them too early.
+2804:             elif pos["floating"] >= exit_profile["take_profit"]:
+
+--- MATCH AROUND LINE 2801: pnl_observer.close_position(observer_symbol, observer_price) ---
+2796:                 pnl_observer.close_position(observer_symbol, observer_price)
+2797: 
+2798:             # Normal stop for losses that exceed the formal stop threshold.
+2799:             elif pos["floating"] <= exit_profile["stop_loss"]:
+2800:                 book_position_exit(pos, "STOP")
+2801:                 pnl_observer.close_position(observer_symbol, observer_price)
+2802: 
+2803:             # Let strong winners run instead of clipping them too early.
+2804:             elif pos["floating"] >= exit_profile["take_profit"]:
+2805:                 if pos["signal_score"] >= 13.0 and pos["prob_positive"] >= 0.70:
+2806:                     pos["age_cycles"] = max(0, pos["age_cycles"] - 3)
+2807:                 elif pos["signal_score"] >= 12.0 and pos["prob_positive"] >= 0.66:
+2808:                     pos["age_cycles"] = max(0, pos["age_cycles"] - 2)
+2809:                 else:
+
+--- MATCH AROUND LINE 2811: pnl_observer.close_position(observer_symbol, observer_price) ---
+2806:                     pos["age_cycles"] = max(0, pos["age_cycles"] - 3)
+2807:                 elif pos["signal_score"] >= 12.0 and pos["prob_positive"] >= 0.66:
+2808:                     pos["age_cycles"] = max(0, pos["age_cycles"] - 2)
+2809:                 else:
+2810:                     book_position_exit(pos, "TAKE_PROFIT")
+2811:                     pnl_observer.close_position(observer_symbol, observer_price)
+2812: 
+2813:             # Time-exit only weak trades; strong trades get more runway.
+2814:             elif pos["age_cycles"] >= exit_profile["max_age"]:
+2815:                 if pos["signal_score"] >= 11.5 and pos["prob_positive"] >= 0.64:
+2816:                     pos["age_cycles"] = max(0, pos["age_cycles"] - 2)
+2817:                 else:
+2818:                     book_position_exit(pos, "TIME_EXIT")
+2819:                     pnl_observer.close_position(observer_symbol, observer_price)
+
+--- MATCH AROUND LINE 2819: pnl_observer.close_position(observer_symbol, observer_price) ---
+2814:             elif pos["age_cycles"] >= exit_profile["max_age"]:
+2815:                 if pos["signal_score"] >= 11.5 and pos["prob_positive"] >= 0.64:
+2816:                     pos["age_cycles"] = max(0, pos["age_cycles"] - 2)
+2817:                 else:
+2818:                     book_position_exit(pos, "TIME_EXIT")
+2819:                     pnl_observer.close_position(observer_symbol, observer_price)
+2820: 
+2821:         defensive_reductions = apply_defensive_exposure_reduction()
+2822: 
+2823:         display_by_asset = mtm_engine.floating_by_asset(funded_only=False)
+2824:         broker_test_positions = mtm_engine.count_open_broker_test_positions()
+2825:         mtm_unrealized = round(sum(display_by_asset.values()), 4)
+2826:         open_positions = mtm_engine.count_open_positions()
+2827: 
+
+--- MATCH AROUND LINE 2823: display_by_asset = mtm_engine.floating_by_asset(funded_only=False) ---
+2818:                     book_position_exit(pos, "TIME_EXIT")
+2819:                     pnl_observer.close_position(observer_symbol, observer_price)
+2820: 
+2821:         defensive_reductions = apply_defensive_exposure_reduction()
+2822: 
+2823:         display_by_asset = mtm_engine.floating_by_asset(funded_only=False)
+2824:         broker_test_positions = mtm_engine.count_open_broker_test_positions()
+2825:         mtm_unrealized = round(sum(display_by_asset.values()), 4)
+2826:         open_positions = mtm_engine.count_open_positions()
+2827: 
+2828:         mtm_realized = total_realized_pnl()
+2829: 
+2830:         realized_by_asset = {
+2831:             "CRYPTO": sum(crypto_pnl.values()),
+
+--- MATCH AROUND LINE 2824: broker_test_positions = mtm_engine.count_open_broker_test_positions() ---
+2819:                     pnl_observer.close_position(observer_symbol, observer_price)
+2820: 
+2821:         defensive_reductions = apply_defensive_exposure_reduction()
+2822: 
+2823:         display_by_asset = mtm_engine.floating_by_asset(funded_only=False)
+2824:         broker_test_positions = mtm_engine.count_open_broker_test_positions()
+2825:         mtm_unrealized = round(sum(display_by_asset.values()), 4)
+2826:         open_positions = mtm_engine.count_open_positions()
+2827: 
+2828:         mtm_realized = total_realized_pnl()
+2829: 
+2830:         realized_by_asset = {
+2831:             "CRYPTO": sum(crypto_pnl.values()),
+2832:             "FX": sum(fx_pnl.values()),
+
+--- MATCH AROUND LINE 2826: open_positions = mtm_engine.count_open_positions() ---
+2821:         defensive_reductions = apply_defensive_exposure_reduction()
+2822: 
+2823:         display_by_asset = mtm_engine.floating_by_asset(funded_only=False)
+2824:         broker_test_positions = mtm_engine.count_open_broker_test_positions()
+2825:         mtm_unrealized = round(sum(display_by_asset.values()), 4)
+2826:         open_positions = mtm_engine.count_open_positions()
+2827: 
+2828:         mtm_realized = total_realized_pnl()
+2829: 
+2830:         realized_by_asset = {
+2831:             "CRYPTO": sum(crypto_pnl.values()),
+2832:             "FX": sum(fx_pnl.values()),
+2833:             "OPTIONS": sum(options_pnl.values()),
+2834:             "FUTURES": sum(futures_pnl.values()),
+
+--- MATCH AROUND LINE 2838: observer_unrealized = pnl_observer.compute_unrealized_pnl() ---
+2833:             "OPTIONS": sum(options_pnl.values()),
+2834:             "FUTURES": sum(futures_pnl.values()),
+2835:         }
+2836:         pcnrass_refresh_balances(realized_by_asset, display_by_asset)
+2837: 
+2838:         observer_unrealized = pnl_observer.compute_unrealized_pnl()
+2839:         observer_realized = pnl_observer.realized_pnl
+2840:         observer_equity = pnl_observer.equity()
+2841:         observer_balance = pnl_observer.current_balance
+2842: 
+2843:         # ============================================================
+2844:         # PCNRASS PNL UNIFICATION
+2845:         # ============================================================
+2846:         authoritative_realized = mtm_realized
+
+--- MATCH AROUND LINE 2839: observer_realized = pnl_observer.realized_pnl ---
+2834:             "FUTURES": sum(futures_pnl.values()),
+2835:         }
+2836:         pcnrass_refresh_balances(realized_by_asset, display_by_asset)
+2837: 
+2838:         observer_unrealized = pnl_observer.compute_unrealized_pnl()
+2839:         observer_realized = pnl_observer.realized_pnl
+2840:         observer_equity = pnl_observer.equity()
+2841:         observer_balance = pnl_observer.current_balance
+2842: 
+2843:         # ============================================================
+2844:         # PCNRASS PNL UNIFICATION
+2845:         # ============================================================
+2846:         authoritative_realized = mtm_realized
+2847:         authoritative_unrealized = mtm_unrealized
+
+--- MATCH AROUND LINE 2840: observer_equity = pnl_observer.equity() ---
+2835:         }
+2836:         pcnrass_refresh_balances(realized_by_asset, display_by_asset)
+2837: 
+2838:         observer_unrealized = pnl_observer.compute_unrealized_pnl()
+2839:         observer_realized = pnl_observer.realized_pnl
+2840:         observer_equity = pnl_observer.equity()
+2841:         observer_balance = pnl_observer.current_balance
+2842: 
+2843:         # ============================================================
+2844:         # PCNRASS PNL UNIFICATION
+2845:         # ============================================================
+2846:         authoritative_realized = mtm_realized
+2847:         authoritative_unrealized = mtm_unrealized
+2848:         authoritative_equity_pnl = round(authoritative_realized + authoritative_unrealized, 4)
+
+--- MATCH AROUND LINE 2841: observer_balance = pnl_observer.current_balance ---
+2836:         pcnrass_refresh_balances(realized_by_asset, display_by_asset)
+2837: 
+2838:         observer_unrealized = pnl_observer.compute_unrealized_pnl()
+2839:         observer_realized = pnl_observer.realized_pnl
+2840:         observer_equity = pnl_observer.equity()
+2841:         observer_balance = pnl_observer.current_balance
+2842: 
+2843:         # ============================================================
+2844:         # PCNRASS PNL UNIFICATION
+2845:         # ============================================================
+2846:         authoritative_realized = mtm_realized
+2847:         authoritative_unrealized = mtm_unrealized
+2848:         authoritative_equity_pnl = round(authoritative_realized + authoritative_unrealized, 4)
+2849:         authoritative_live_equity = round(
+
+--- MATCH AROUND LINE 2850: float(pnl_observer.starting_balance) + authoritative_equity_pnl, ---
+2845:         # ============================================================
+2846:         authoritative_realized = mtm_realized
+2847:         authoritative_unrealized = mtm_unrealized
+2848:         authoritative_equity_pnl = round(authoritative_realized + authoritative_unrealized, 4)
+2849:         authoritative_live_equity = round(
+2850:             float(pnl_observer.starting_balance) + authoritative_equity_pnl,
+2851:             4,
+2852:         )
+2853: 
+2854:         total_realized = authoritative_realized
+2855:         total_unrealized = authoritative_unrealized
+2856:         total_equity = authoritative_equity_pnl
+2857: 
+2858:         try:
+
+--- MATCH AROUND LINE 2859: pnl_observer.current_balance = authoritative_live_equity ---
+2854:         total_realized = authoritative_realized
+2855:         total_unrealized = authoritative_unrealized
+2856:         total_equity = authoritative_equity_pnl
+2857: 
+2858:         try:
+2859:             pnl_observer.current_balance = authoritative_live_equity
+2860:         except Exception:
+2861:             pass
+2862: 
+2863:         try:
+2864:             pnl_tracker.current_equity = authoritative_live_equity
+2865:             pnl_tracker.peak_equity = max(
+2866:                 float(getattr(pnl_tracker, "peak_equity", pnl_tracker.starting_equity)),
+2867:                 authoritative_live_equity,
+
+--- MATCH AROUND LINE 2993: open_counts_by_asset = mtm_engine.count_open_positions_by_asset() ---
+2988:         print(
+2989:             f"FUTURES REALIZED: {sum(futures_pnl.values()):+.4f} | "
+2990:             f"FLOATING: {display_by_asset['FUTURES']:+.4f}"
+2991:         )
+2992: 
+2993:         open_counts_by_asset = mtm_engine.count_open_positions_by_asset()
+2994: 
+2995:         print(f"OPEN POSITIONS: {open_positions} / {hard_position_limit()}")
+2996:         print(
+2997:             "OPEN BY ASSET: "
+2998:             f"CRYPTO {open_counts_by_asset['CRYPTO']}/{hard_asset_cap('CRYPTO')} | "
+2999:             f"FX {open_counts_by_asset['FX']}/{hard_asset_cap('FX')} | "
+3000:             f"FUTURES {open_counts_by_asset['FUTURES']}/{hard_asset_cap('FUTURES')} | "
+3001:             f"OPTIONS {open_counts_by_asset['OPTIONS']}/{hard_asset_cap('OPTIONS')}"
+
+--- MATCH AROUND LINE 3008: capital_source = capital_governor.capital_source_label() ---
+3003:         print(f"ADAPTIVE POSITION LIMIT: {dynamic_limit}")
+3004:         print(f"BROKER TEST POSITIONS: {broker_test_positions}")
+3005:         print(f"DEFENSIVE REDUCTIONS THIS CYCLE: {defensive_reductions}")
+3006:         print(f"TOTAL DEFENSIVE REDUCTION EXITS: {locked_profit_ledger.defensive_reduction_exits}")
+3007: 
+3008:         capital_source = capital_governor.capital_source_label()
+3009:         print(
+3010:             f"{capital_source} CAPITAL DEPLOYED: "
+3011:             f"${capital_governor.funded_amount():.2f}"
+3012:         )
+3013:         print(
+3014:             f"{capital_source} CAPITAL AVAILABLE: "
+3015:             f"${capital_governor.available_capital():.2f}"
+3016:         )
+
+--- MATCH AROUND LINE 3011: f"${capital_governor.funded_amount():.2f}" ---
+3006:         print(f"TOTAL DEFENSIVE REDUCTION EXITS: {locked_profit_ledger.defensive_reduction_exits}")
+3007: 
+3008:         capital_source = capital_governor.capital_source_label()
+3009:         print(
+3010:             f"{capital_source} CAPITAL DEPLOYED: "
+3011:             f"${capital_governor.funded_amount():.2f}"
+3012:         )
+3013:         print(
+3014:             f"{capital_source} CAPITAL AVAILABLE: "
+3015:             f"${capital_governor.available_capital():.2f}"
+3016:         )
+3017: 
+3018:         print(f"ENGINE MODE: {ENGINE_MODE}")
+3019:         print(
+
+--- MATCH AROUND LINE 3015: f"${capital_governor.available_capital():.2f}" ---
+3010:             f"{capital_source} CAPITAL DEPLOYED: "
+3011:             f"${capital_governor.funded_amount():.2f}"
+3012:         )
+3013:         print(
+3014:             f"{capital_source} CAPITAL AVAILABLE: "
+3015:             f"${capital_governor.available_capital():.2f}"
+3016:         )
+3017: 
+3018:         print(f"ENGINE MODE: {ENGINE_MODE}")
+3019:         print(
+3020:             f"FORCED EXIT PROFITS: "
+3021:             f"{locked_profit_ledger.forced_exit_profit_banked:+.4f}"
+3022:         )
+3023:         print(
+
+--- MATCH AROUND LINE 3021: f"{locked_profit_ledger.forced_exit_profit_banked:+.4f}" ---
+3016:         )
+3017: 
+3018:         print(f"ENGINE MODE: {ENGINE_MODE}")
+3019:         print(
+3020:             f"FORCED EXIT PROFITS: "
+3021:             f"{locked_profit_ledger.forced_exit_profit_banked:+.4f}"
+3022:         )
+3023:         print(
+3024:             f"CLUSTER SATURATION: "
+3025:             f"{top_cluster if top_cluster else 'NONE'} {cluster_pct:.1f}%"
+3026:         )
+3027:         print(f"LAST TRADE: {last_trade}")
+3028:         print("-" * 60)
+3029: 
+
+--- MATCH AROUND LINE 3047: elif mtm_engine.count_open_positions() < hard_position_limit(): ---
+3042:                     f"[DEFENSIVE MODE] New trade creation blocked. "
+3043:                     f"Reduced exposure by {defensive_reductions} positions this cycle."
+3044:                 )
+3045:             else:
+3046:                 print("[DEFENSIVE MODE] New trade creation blocked. Managing existing positions only.")
+3047:         elif mtm_engine.count_open_positions() < hard_position_limit():
+3048:             if not role_profile.get("can_execute_paper_trading", False):
+3049:                 print("[RBAC] New position generation blocked for current role.")
+3050:             else:
+3051:                 for asset_class, symbol, sig, prob in select_cycle_candidates():
+3052:                     # =========================
+3053:                     # MODE-AWARE ENTRY FILTER
+3054:                     # =========================
+3055:                     mode_filter = {
+
+--- MATCH AROUND LINE 3073: current_open_counts = mtm_engine.count_open_positions_by_asset() ---
+3068:                         continue
+3069: 
+3070:                     if sig < 10.0:
+3071:                         continue
+3072: 
+3073:                     current_open_counts = mtm_engine.count_open_positions_by_asset()
+3074: 
+3075:                     if not concurrency_controller.can_add_position(
+3076:                         mtm_engine.count_open_positions()
+3077:                     ):
+3078:                         break
+3079: 
+3080:                     if mtm_engine.count_open_positions() >= hard_position_limit():
+3081:                         break
+
+--- MATCH AROUND LINE 3076: mtm_engine.count_open_positions() ---
+3071:                         continue
+3072: 
+3073:                     current_open_counts = mtm_engine.count_open_positions_by_asset()
+3074: 
+3075:                     if not concurrency_controller.can_add_position(
+3076:                         mtm_engine.count_open_positions()
+3077:                     ):
+3078:                         break
+3079: 
+3080:                     if mtm_engine.count_open_positions() >= hard_position_limit():
+3081:                         break
+3082: 
+3083:                     allowed_to_open, open_reason = can_open_position(
+3084:                         asset_class,
+
+--- MATCH AROUND LINE 3080: if mtm_engine.count_open_positions() >= hard_position_limit(): ---
+3075:                     if not concurrency_controller.can_add_position(
+3076:                         mtm_engine.count_open_positions()
+3077:                     ):
+3078:                         break
+3079: 
+3080:                     if mtm_engine.count_open_positions() >= hard_position_limit():
+3081:                         break
+3082: 
+3083:                     allowed_to_open, open_reason = can_open_position(
+3084:                         asset_class,
+3085:                         open_counts=current_open_counts,
+3086:                         new_counts_this_cycle=new_counts_this_cycle,
+3087:                     )
+3088:                     if not allowed_to_open:
+
+--- MATCH AROUND LINE 3132: position = mtm_engine.register_position( ---
+3127: 
+3128:                     if not r14f_ok:
+3129:                         last_trade = f"{symbol} R14F_BLOCKED"
+3130:                         continue
+3131: 
+3132:                     position = mtm_engine.register_position(
+3133:                         asset_class,
+3134:                         symbol,
+3135:                         sig,
+3136:                         prob,
+3137:                         allow_live_funding=allow_broker_test,
+3138:                     )
+3139:                     new_counts_this_cycle[asset_class] += 1
+3140: 
+
+--- MATCH AROUND LINE 3149: pnl_observer.add_position(observer_position) ---
+3144:                         side="LONG",
+3145:                         quantity=1.0,
+3146:                         entry_price=100.0,
+3147:                         current_price=100.0,
+3148:                     )
+3149:                     pnl_observer.add_position(observer_position)
+3150:                     exit_signal = evaluate_exit_signal(position)
+3151:                     print(f"[R15A EXIT] {symbol} signal={exit_signal}")
+3152: 
+3153:                     if position.get("broker_tested"):
+3154:                         if asset_class == "FX" and SELECTED_BROKER == "OANDA":
+3155:                             live_fx_funded_this_cycle += 1
+3156:                             ok, broker_msg = attempt_oanda_fx_execution(symbol)
+3157: 
+
+--- MATCH AROUND LINE 3174: capital_governor.release_trade(position["position_id"]) ---
+3169:                             print(
+3170:                                 f"[{asset_class} BROKER EXECUTED] {symbol} opened | "
+3171:                                 f"{broker_msg}"
+3172:                             )
+3173:                         else:
+3174:                             capital_governor.release_trade(position["position_id"])
+3175:                             position["broker_tested"] = False
+3176:                             position["live_funded"] = False
+3177:                             position["broker_order_ok"] = False
+3178:                             position["broker_note"] = broker_msg
+3179:                             last_trade = f"{symbol} PAPER_OPENED BROKER_BLOCKED {broker_msg}"
+3180:                             print(
+3181:                                 f"[{asset_class} PAPER OPENED] {symbol} opened | "
+3182:                                 f"BROKER_BLOCKED | {broker_msg}"
+
+--- MATCH AROUND LINE 3199: position_counter=mtm_engine.position_counter, ---
+3194:             crypto_pnl=crypto_pnl,
+3195:             fx_pnl=fx_pnl,
+3196:             options_pnl=options_pnl,
+3197:             futures_pnl=futures_pnl,
+3198:             last_trade=last_trade,
+3199:             position_counter=mtm_engine.position_counter,
+3200:         )
+3201: 
+3202:         
+3203:         try:
+3204:             new_positions = []
+3205:             for pos in mtm_engine.positions:
+3206:                 if pos["forced_exit"]:
+3207:                     continue
+
+--- MATCH AROUND LINE 3205: for pos in mtm_engine.positions: ---
+3200:         )
+3201: 
+3202:         
+3203:         try:
+3204:             new_positions = []
+3205:             for pos in mtm_engine.positions:
+3206:                 if pos["forced_exit"]:
+3207:                     continue
+3208:                 new_positions.append(
+3209:                     NewPosition(
+3210:                         symbol=pos["symbol"],
+3211:                         side="LONG",
+3212:                         entry_price=float(pos.get("entry_price", 100.0)),
+3213:                         current_price=float(pos.get("current_price", pos.get("entry_price", 100.0))),
+
+--- MATCH AROUND LINE 3206: if pos["forced_exit"]: ---
+3201: 
+3202:         
+3203:         try:
+3204:             new_positions = []
+3205:             for pos in mtm_engine.positions:
+3206:                 if pos["forced_exit"]:
+3207:                     continue
+3208:                 new_positions.append(
+3209:                     NewPosition(
+3210:                         symbol=pos["symbol"],
+3211:                         side="LONG",
+3212:                         entry_price=float(pos.get("entry_price", 100.0)),
+3213:                         current_price=float(pos.get("current_price", pos.get("entry_price", 100.0))),
+3214:                         quantity=1.0,
+
+--- MATCH AROUND LINE 3227: starting_equity=float(pnl_observer.starting_balance) + float(total_realized), ---
+3222:                     )
+3223:                 )
+3224: 
+3225:             snapshot = compute_portfolio_snapshot(
+3226:                 new_positions,
+3227:                 starting_equity=float(pnl_observer.starting_balance) + float(total_realized),
+3228:             )
+3229: 
+3230:             print("--- NEW ACCOUNTING ENGINE ---")
+3231:             print(f"NET UNREALIZED: {snapshot.total_net_unrealized:+.4f}")
+3232:             print(f"LIVE EQUITY: {snapshot.live_equity:+.4f}")
+3233: 
+3234:             tracker_snapshot = pnl_tracker.equity_snapshot()
+3235:             print("--- TRACKER PERFORMANCE ---")
+
+--- MATCH AROUND LINE 3258: "open_positions": mtm_engine.count_open_positions(), ---
+3253:     close_active_session(
+3254:         "keyboard_interrupt",
+3255:         extra={
+3256:             "cycle": cycle,
+3257:             "last_trade": last_trade,
+3258:             "open_positions": mtm_engine.count_open_positions(),
+3259:             "realized_pnl": total_realized_pnl(),
+3260:             "defensive_mode_active": is_session_locked(),
+3261:         },
+3262:     )
+3263: 
+3264: except SystemExit:
+3265:     raise
+3266: 
+
+--- MATCH AROUND LINE 3274: "open_positions": mtm_engine.count_open_positions(), ---
+3269:     close_active_session(
+3270:         "runtime_error",
+3271:         extra={
+3272:             "cycle": cycle,
+3273:             "last_trade": last_trade,
+3274:             "open_positions": mtm_engine.count_open_positions(),
+3275:             "realized_pnl": total_realized_pnl(),
+3276:             "error": str(e)[:200],
+3277:             "defensive_mode_active": is_session_locked(),
+3278:         },
+3279:     )
+3280:     raise
+3281: 
+3282: finally:
+
+--- MATCH AROUND LINE 3288: "open_positions": mtm_engine.count_open_positions(), ---
+3283:     close_active_session(
+3284:         "normal_shutdown",
+3285:         extra={
+3286:             "cycle": cycle,
+3287:             "last_trade": last_trade,
+3288:             "open_positions": mtm_engine.count_open_positions(),
+3289:             "realized_pnl": total_realized_pnl(),
+3290:             "defensive_mode_active": is_session_locked(),
+3291:         },
+3292:     )
+3293: # ===== PCNRASS FINAL ACCOUNT SETTLEMENT =====
+3294: def finalize_account_session() -> None:
+3295:     try:
+3296:         if "pcnrass_session_state" not in globals() or "pcnrass_account_state" not in globals():
