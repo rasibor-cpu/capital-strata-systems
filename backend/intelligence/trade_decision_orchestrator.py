@@ -8,6 +8,7 @@ from backend.intelligence.opportunity_momentum_window_engine import OpportunityM
 from backend.intelligence.opportunity_pressure_engine import OpportunityPressureEngine
 from backend.intelligence.pressure_acceleration_engine import PressureAccelerationEngine
 from backend.intelligence.probability_prediction_engine import ProbabilityPredictionEngine
+from backend.intelligence.profitability_guard import ProfitabilityGuard
 from backend.intelligence.signal_confluence_engine import SignalConfluenceEngine
 
 from backend.governance.css_unified_trade_gate import CSSUnifiedTradeGate
