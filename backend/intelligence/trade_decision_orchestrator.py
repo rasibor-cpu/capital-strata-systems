@@ -153,10 +153,11 @@ profitability_approved, profit_reason = self.profitability_guard.evaluate(profit
                 "pressure": pressure,
                 "acceleration": acceleration,
                 "momentum": momentum,
-            },
-            "filters": {
-                "css_quality_pass": css_quality_pass,
-                "governance_approved": governance_approved,
-                "governance_error": governance_error,
-            },
+            },"filters": {
+    "css_quality_pass": css_quality_pass,
+    "governance_approved": governance_approved,
+    "governance_error": governance_error,
+    "profitability_approved": profitability_approved,
+    "profitability_reason": profit_reason,
+},
         }
