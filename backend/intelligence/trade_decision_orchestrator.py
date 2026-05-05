@@ -10,6 +10,8 @@ from backend.intelligence.pressure_acceleration_engine import PressureAccelerati
 from backend.intelligence.probability_prediction_engine import ProbabilityPredictionEngine
 from backend.intelligence.profitability_guard import ProfitabilityGuard
 from backend.intelligence.signal_confluence_engine import SignalConfluenceEngine
+from backend.intelligence.capital_allocator import CapitalAllocator
+from backend.intelligence.adaptive_exit_engine import AdaptiveExitEngine
 
 from backend.governance.css_unified_trade_gate import CSSUnifiedTradeGate
 
@@ -22,6 +24,8 @@ class TradeDecisionOrchestrator:
         self.signal_confluence_engine = SignalConfluenceEngine()
         self.pressure_engine = OpportunityPressureEngine()
         self.acceleration_engine = PressureAccelerationEngine()
+        self.capital_allocator = CapitalAllocator()
+        self.exit_engine = AdaptiveExitEngine()
         self.momentum_engine = OpportunityMomentumWindowEngine()
         self.probability_engine = ProbabilityPredictionEngine()
         self.profitability_guard = ProfitabilityGuard()
@@ -166,3 +170,30 @@ class TradeDecisionOrchestrator:
                 "profitability_reason": profit_reason,
             },
         }
+
+
+    def enrich_decision(self, decision: dict, asset_class: str, confidence: float, regime: str):
+        try:
+            allocation = self.capital_allocator.allocate(
+                asset_class=asset_class,
+                confidence=confidence,
+                regime=regime
+            )
+
+            exit_plan = self.exit_engine.get_exit_plan(
+                asset_class=asset_class,
+                regime=regime,
+                confidence=confidence
+            )
+
+            decision.update({
+                "capital_allocation": allocation,
+                "position_size": allocation.get("size", 0),
+                "max_hold_cycles": exit_plan.get("max_cycles", 3),
+                "exit_type": exit_plan.get("type", "adaptive")
+            })
+
+        except Exception as e:
+            decision["enrichment_error"] = str(e)
+
+        return decision
