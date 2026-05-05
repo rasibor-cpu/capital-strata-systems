@@ -61,7 +61,7 @@ class TradeDecisionOrchestrator:
         probability_output = self.probability_engine.predict(
             market_data,
             regime=regime,
-            raw_score=raw_score
+            raw_score=raw_score,
         )
 
         win_probability = probability_output.get("win_probability", 0.0)
@@ -96,7 +96,7 @@ class TradeDecisionOrchestrator:
             market_data=market_data,
             regime=regime,
             score=float(raw_score),
-            probability=float(win_probability)
+            probability=float(win_probability),
         )
 
         # ✅ FIX A4 — explicit handling
@@ -108,31 +108,34 @@ class TradeDecisionOrchestrator:
             governance_error = False
 
         # --------------------------------------------------
-# 6B. PROFITABILITY GUARD (PCNRASS SAFE)
-# --------------------------------------------------
-profit_signal = {
-    "score": raw_score,
-    "probability": win_probability,
-    "vwap_edge": vwap_edge,
-    "regime": regime,
-    "liquidity_score": market_data.get("liquidity_score", 100),
-    "spread_pct": market_data.get("spread_pct", 0.0),
-    "volatility": market_data.get("volatility", 0.01),
-    "acceleration": acceleration,
-    "pressure_score": pressure,
-}
+        # 6B. PROFITABILITY GUARD (PCNRASS SAFE)
+        # --------------------------------------------------
+        profit_signal = {
+            "score": raw_score,
+            "probability": win_probability,
+            "vwap_edge": vwap_edge,
+            "regime": regime,
+            "liquidity_score": market_data.get("liquidity_score", 100),
+            "spread_pct": market_data.get("spread_pct", 0.0),
+            "volatility": market_data.get("volatility", 0.01),
+            "acceleration": acceleration,
+            "pressure_score": pressure,
+        }
 
-profitability_approved, profit_reason = self.profitability_guard.evaluate(profit_signal)
-# --------------------------------------------------
+        profitability_approved, profit_reason = self.profitability_guard.evaluate(
+            profit_signal
+        )
+
+        # --------------------------------------------------
         # 7. FINAL EXECUTION DECISION
         # --------------------------------------------------
-        
-execute_trade = (
-    css_quality_pass
-    and approve_trade
-    and governance_approved
-    and profitability_approved
-)
+        execute_trade = (
+            css_quality_pass
+            and approve_trade
+            and governance_approved
+            and profitability_approved
+        )
+
         # --------------------------------------------------
         # 8. NORMALIZED SCORE (DISPLAY ONLY)
         # --------------------------------------------------
@@ -154,11 +157,12 @@ execute_trade = (
                 "pressure": pressure,
                 "acceleration": acceleration,
                 "momentum": momentum,
-            },"filters": {
-    "css_quality_pass": css_quality_pass,
-    "governance_approved": governance_approved,
-    "governance_error": governance_error,
-    "profitability_approved": profitability_approved,
-    "profitability_reason": profit_reason,
-},
+            },
+            "filters": {
+                "css_quality_pass": css_quality_pass,
+                "governance_approved": governance_approved,
+                "governance_error": governance_error,
+                "profitability_approved": profitability_approved,
+                "profitability_reason": profit_reason,
+            },
         }
