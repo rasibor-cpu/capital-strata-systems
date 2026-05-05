@@ -108,6 +108,22 @@ class TradeDecisionOrchestrator:
             governance_error = False
 
         # --------------------------------------------------
+# 6B. PROFITABILITY GUARD (PCNRASS SAFE)
+# --------------------------------------------------
+profit_signal = {
+    "score": raw_score,
+    "probability": win_probability,
+    "vwap_edge": vwap_edge,
+    "regime": regime,
+    "liquidity_score": market_data.get("liquidity_score", 100),
+    "spread_pct": market_data.get("spread_pct", 0.0),
+    "volatility": market_data.get("volatility", 0.01),
+    "acceleration": acceleration,
+    "pressure_score": pressure,
+}
+
+profitability_approved, profit_reason = self.profitability_guard.evaluate(profit_signal)
+# --------------------------------------------------
         # 7. FINAL EXECUTION DECISION
         # --------------------------------------------------
         execute_trade = (
