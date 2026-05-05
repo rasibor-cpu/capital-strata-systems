@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
 from backend.intelligence.market_regime_detector import MarketRegimeDetector
@@ -29,28 +29,21 @@ class TradeDecisionOrchestrator:
         self.momentum_engine = OpportunityMomentumWindowEngine()
         self.probability_engine = ProbabilityPredictionEngine()
         self.profitability_guard = ProfitabilityGuard()
-
         self.trade_gate = CSSUnifiedTradeGate()
 
+    # =========================================================
+    # CORE SINGLE-ASSET EVALUATION (UNCHANGED LOGIC)
+    # =========================================================
     def evaluate_trade(self, market_data: Dict[str, Any]) -> Dict[str, Any]:
 
-        # --------------------------------------------------
-        # 1. REGIME DETECTION
-        # --------------------------------------------------
         regime = self.regime_detector.detect(market_data)
 
-        # --------------------------------------------------
-        # 2. SIGNAL COMPONENTS
-        # --------------------------------------------------
         ai_score = self.ai_scorer.score(market_data, regime)
         confluence = self.signal_confluence_engine.evaluate(market_data)
         pressure = self.pressure_engine.evaluate(market_data)
         acceleration = self.acceleration_engine.evaluate(market_data)
         momentum = self.momentum_engine.evaluate(market_data)
 
-        # --------------------------------------------------
-        # 3. RAW SCORE (NO COMPRESSION)
-        # --------------------------------------------------
         raw_score = (
             ai_score
             + confluence
@@ -59,9 +52,6 @@ class TradeDecisionOrchestrator:
             + momentum
         )
 
-        # --------------------------------------------------
-        # 4. PROBABILITY ENGINE
-        # --------------------------------------------------
         probability_output = self.probability_engine.predict(
             market_data,
             regime=regime,
@@ -71,14 +61,10 @@ class TradeDecisionOrchestrator:
         win_probability = probability_output.get("win_probability", 0.0)
         approve_trade = probability_output.get("approve_trade", False)
 
-        # ✅ FIX A1 — enforce bounds
         if not isinstance(win_probability, (int, float)):
             win_probability = 0.0
         win_probability = max(0.0, min(float(win_probability), 1.0))
 
-        # --------------------------------------------------
-        # 5. CSS QUALITY FILTER
-        # --------------------------------------------------
         vwap_edge = market_data.get("vwap_edge", 0.0)
         volume = market_data.get("volume", 0.0)
 
@@ -86,13 +72,9 @@ class TradeDecisionOrchestrator:
             abs(vwap_edge) >= 10
             and volume > 0
             and raw_score > 1.2
-            and win_probability >= 0.35   # ✅ FIX A3
+            and win_probability >= 0.35
         )
 
-        # --------------------------------------------------
-        # 6. GOVERNANCE GATE
-        # --------------------------------------------------
-        # ✅ FIX A2 — validate inputs
         if not isinstance(raw_score, (int, float)):
             raw_score = 0.0
 
@@ -103,7 +85,6 @@ class TradeDecisionOrchestrator:
             probability=float(win_probability),
         )
 
-        # ✅ FIX A4 — explicit handling
         if not hasattr(gate_decision, "approved"):
             governance_approved = False
             governance_error = True
@@ -111,9 +92,6 @@ class TradeDecisionOrchestrator:
             governance_approved = bool(gate_decision.approved)
             governance_error = False
 
-        # --------------------------------------------------
-        # 6B. PROFITABILITY GUARD (PCNRASS SAFE)
-        # --------------------------------------------------
         profit_signal = {
             "score": raw_score,
             "probability": win_probability,
@@ -130,9 +108,6 @@ class TradeDecisionOrchestrator:
             profit_signal
         )
 
-        # --------------------------------------------------
-        # 7. FINAL EXECUTION DECISION
-        # --------------------------------------------------
         execute_trade = (
             css_quality_pass
             and approve_trade
@@ -140,20 +115,14 @@ class TradeDecisionOrchestrator:
             and profitability_approved
         )
 
-        # --------------------------------------------------
-        # 8. NORMALIZED SCORE (DISPLAY ONLY)
-        # --------------------------------------------------
         decision_score = max(0.0, min(raw_score / 5.0, 1.0))
 
-        # --------------------------------------------------
-        # 9. RETURN PACKAGE
-        # --------------------------------------------------
         return {
+            "symbol": market_data.get("symbol"),
             "execute_trade": execute_trade,
             "decision_score": decision_score,
             "raw_score": raw_score,
             "win_probability": win_probability,
-            "approve_trade": approve_trade,
             "regime": regime,
             "components": {
                 "ai_score": ai_score,
@@ -171,7 +140,37 @@ class TradeDecisionOrchestrator:
             },
         }
 
+    # =========================================================
+    # NEW — BATCH / CYCLE ENGINE (THIS IS THE BIG WIN)
+    # =========================================================
+    def evaluate_market_batch(self, market_dataset: List[Dict[str, Any]]) -> Dict[str, Any]:
 
+        results = []
+        executed = []
+
+        for data in market_dataset:
+            decision = self.evaluate_trade(data)
+
+            if decision["execute_trade"]:
+                decision = self.enrich_decision(
+                    decision,
+                    asset_class=data.get("asset_class", "unknown"),
+                    confidence=decision["decision_score"],
+                    regime=decision["regime"],
+                )
+                executed.append(decision)
+
+            results.append(decision)
+
+        return {
+            "total_scanned": len(results),
+            "executed_trades": executed,
+            "all_decisions": results,
+        }
+
+    # =========================================================
+    # ENRICHMENT (UNCHANGED)
+    # =========================================================
     def enrich_decision(self, decision: dict, asset_class: str, confidence: float, regime: str):
         try:
             allocation = self.capital_allocator.allocate(
