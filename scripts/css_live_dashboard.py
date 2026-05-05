@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 
+
 # === R15B MODE-AWARE EXIT PROFILE ===
 
 R15B_EXIT_PROFILE = {
@@ -2465,6 +2466,17 @@ def can_open_position(
     open_counts: dict[str, int],
     new_counts_this_cycle: dict[str, int],
 ) -> tuple[bool, str]:
+    # =========================
+    # R16B DRAWDOWN CIRCUIT BREAKER
+    # =========================
+    try:
+        current_dd = float(getattr(pnl_tracker, "max_drawdown", 0.0))
+        if current_dd >= 0.05:
+            print(f"[R16B BLOCK] Drawdown limit reached: {current_dd:.2%}")
+            return False, "DRAWDOWN_LIMIT"
+    except Exception:
+        pass
+
     total_open = sum(open_counts.values())
 
     if total_open >= hard_position_limit():
@@ -2853,6 +2865,8 @@ try:
 
             # =========================
             # TIME EXIT (WEAK ONLY)
+            if pos.get('forced_exit', False):
+                continue  # R16A guard: prevent dual exit execution
             # =========================
             elif pos["age_cycles"] >= exit_profile["max_age"]:
                 if sig >= 12.0 and prob >= 0.65:
