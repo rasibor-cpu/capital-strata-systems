@@ -183,13 +183,7 @@ try:
 except ModuleNotFoundError:
     def await_login_ready_state():
         print("[SAFE FALLBACK AUTH] auth_gate unavailable; using local OPERATOR diagnostic context.")
-        return {
-            "user_id": "LOCAL_OPERATOR",
-            "display_name": "Local Operator",
-            "role": "ADMIN",
-            "unit_code": "LOCAL",
-            "home_branch": "LOCAL",
-        }
+        raise Exception("AUTHENTICATION_REQUIRED_NO_FALLBACK_ALLOWED")
 
 
 class _PermissionResult:
@@ -825,6 +819,24 @@ def enforce_active_session(cycle: int, last_trade: str) -> dict[str, Any]:
     return status
 
 
+
+def select_global_broker_mode():
+    print("=== GLOBAL BROKER MODE ===")
+    print("1. PAPER / PRACTICE (default)")
+    print("2. LIVE (real trading)")
+
+    choice = input("Enter mode (1-2) [default=1]: ").strip() or "1"
+
+    if choice == "2":
+        confirm = input("Type LIVE to confirm GLOBAL LIVE trading: ").strip()
+        if confirm.strip().upper() == "LIVE":
+            return "live"
+
+    return "paper"
+
+
+
+
 def select_broker_execution_config() -> tuple[bool, str, str]:
     role = str(SESSION_USER_CTX.get("role", "VIEWER")).strip().upper()
     role_profile = SESSION_USER_CTX.get("role_profile", {})
@@ -876,7 +888,7 @@ def select_broker_execution_config() -> tuple[bool, str, str]:
 
     print("=== CSS BROKER SELECTION ===")
     print("1. NONE / ARMED BUT NO BROKER")
-    print("2. OANDA - FX practice execution")
+    print("2. OANDA - FX broker")
     print("3. COINBASE - crypto spot broker")
     print("4. ALPACA - registered, adapter not active yet")
     print("5. FUTURES BROKER - reserved, blocked for now")
@@ -897,29 +909,35 @@ def select_broker_execution_config() -> tuple[bool, str, str]:
         return True, "NONE", "paper"
 
     if selected == "OANDA":
-        if not role_profile.get("can_use_paper_broker_mode", False):
-            print(f"[RBAC] OANDA practice mode denied for role {role}.")
-            record_rbac_event(
-                "broker_mode_denied",
-                SESSION_USER_CTX,
-                {
-                    "selected_broker": "OANDA",
-                    "selected_broker_mode": "paper",
-                    "reason": "role_cannot_use_paper_broker_mode",
-                },
-            )
-            return False, "NONE", "paper"
+        broker_mode = GLOBAL_BROKER_MODE
+
+        if broker_mode == "live":
+            if not role_profile.get("can_use_live_broker_mode", False):
+                print(f"[RBAC] OANDA live mode denied for role {role}. Falling back to paper.")
+                broker_mode = "paper"
+
+            os.environ["OANDA_ENV"] = "live"
+            os.environ["OANDA_BASE_URL"] = "https://api-fxtrade.oanda.com"
+
+        else:
+            if not role_profile.get("can_use_paper_broker_mode", False):
+                print(f"[RBAC] OANDA practice mode denied for role {role}.")
+                return False, "NONE", "paper"
+
+            os.environ["OANDA_ENV"] = "practice"
+            os.environ["OANDA_BASE_URL"] = "https://api-fxpractice.oanda.com"
 
         record_rbac_event(
             "broker_selected",
             SESSION_USER_CTX,
             {
                 "selected_broker": "OANDA",
-                "selected_broker_mode": "paper",
+                "selected_broker_mode": broker_mode,
             },
         )
-        print("[BROKER EXECUTION ARMED] Selected broker: OANDA / FX practice only")
-        return True, "OANDA", "paper"
+
+        print(f"[BROKER EXECUTION ARMED] Selected broker: OANDA / mode={broker_mode} / url={os.environ.get('OANDA_BASE_URL', 'UNKNOWN')}")
+        return True, "OANDA", broker_mode
 
     if selected == "COINBASE":
         print("=== COINBASE MODE ===")
@@ -1336,6 +1354,8 @@ def await_login_ready_state():
 
 SESSION_USER_CTX = authenticate_startup_user()
 
+GLOBAL_BROKER_MODE = select_global_broker_mode()
+
 BROKER_EXECUTION_ARMED, SELECTED_BROKER, SELECTED_BROKER_MODE = select_broker_execution_config()
 
 ENGINE_MODE = select_engine_mode()
@@ -1348,6 +1368,89 @@ record_startup_configuration(
     selected_broker_mode=SELECTED_BROKER_MODE,
     engine_mode=ENGINE_MODE,
 )
+
+
+
+# === R7 PCNRASS UNIFIED TRADE GATE ===
+class CSSUnifiedTradeGate:
+    """
+    Single pre-position authority for paper and broker-routed trade openings.
+    This does not replace broker-specific live gates; it sits before any
+    position registration so blocked trades do not enter MTM/PnL state.
+    """
+
+    def approve_trade(self, *, candidate: dict, session: dict, role_profile: dict) -> dict:
+        symbol = str(candidate.get("symbol", "UNKNOWN"))
+        asset_class = str(candidate.get("asset_class", "UNKNOWN")).upper()
+
+        if not isinstance(session, dict) or not session.get("session_id"):
+            return {"approved": False, "reason": "NO_VALID_SESSION"}
+
+        if not session.get("session_status", {}).get("active", True):
+            return {"approved": False, "reason": "SESSION_NOT_ACTIVE"}
+
+        if is_session_locked():
+            return {"approved": False, "reason": "SESSION_LOCKED_DEFENSIVE_MODE"}
+
+        if asset_class not in {"CRYPTO", "FX", "FUTURES", "OPTIONS"}:
+            return {"approved": False, "reason": f"UNSUPPORTED_ASSET_CLASS_{asset_class}"}
+
+        broker_mode = str(candidate.get("broker_mode", "paper")).lower()
+        if broker_mode == "live":
+            if not role_profile.get("can_use_live_broker_mode", False):
+                return {"approved": False, "reason": "RBAC_BLOCKED_LIVE_MODE"}
+            if not role_profile.get("can_execute_live_trading", False):
+                return {"approved": False, "reason": "RBAC_BLOCKED_LIVE_EXECUTION"}
+        else:
+            if not role_profile.get("can_execute_paper_trading", False):
+                return {"approved": False, "reason": "RBAC_BLOCKED_PAPER_EXECUTION"}
+
+        if ENGINE_MODE == "SAFE" and broker_mode == "live":
+            return {"approved": False, "reason": "SAFE_MODE_BLOCKS_LIVE_EXECUTION"}
+
+        return {"approved": True, "reason": "UNIFIED_GATE_APPROVED"}
+
+
+css_unified_trade_gate = CSSUnifiedTradeGate()
+
+
+def approve_trade_before_register(asset_class: str, symbol: str, sig: float, prob: float) -> tuple[bool, str]:
+    decision = css_unified_trade_gate.approve_trade(
+        candidate={
+            "asset_class": asset_class,
+            "symbol": symbol,
+            "signal_score": sig,
+            "prob_positive": prob,
+            "selected_broker": SELECTED_BROKER,
+            "broker_mode": SELECTED_BROKER_MODE,
+            "engine_mode": ENGINE_MODE,
+        },
+        session=SESSION_USER_CTX,
+        role_profile=SESSION_USER_CTX.get("role_profile", {}),
+    )
+
+    if not decision.get("approved", False):
+        try:
+            audit_ledger.record(
+                "unified_trade_gate_reject",
+                str(SESSION_USER_CTX.get("user_id")),
+                {
+                    "session_id": SESSION_USER_CTX.get("session_id"),
+                    "asset_class": asset_class,
+                    "symbol": symbol,
+                    "reason": decision.get("reason"),
+                    "selected_broker": SELECTED_BROKER,
+                    "broker_mode": SELECTED_BROKER_MODE,
+                    "engine_mode": ENGINE_MODE,
+                },
+            )
+        except Exception:
+            pass
+
+        print(f"[UNIFIED GATE BLOCKED] {asset_class} {symbol} | {decision.get('reason')}")
+        return False, str(decision.get("reason"))
+
+    return True, str(decision.get("reason"))
 
 
 class AdaptiveConcurrencyEnvelopeController:
@@ -1385,7 +1488,6 @@ concurrency_controller = AdaptiveConcurrencyEnvelopeController()
 
 
 class CapitalDeploymentGovernor:
-
     """
     PCNRASS R1 UPGRADE:
     Dynamic capital source:
@@ -1463,7 +1565,7 @@ class CapitalDeploymentGovernor:
     def capital_source_label(self) -> str:
         if self.paper_mode:
             return "SIMULATED"
-        return self.balance_source or "REAL_BROKER"
+        return self.balance_source or f"REAL_BROKER_{SELECTED_BROKER}"
 
     def can_fund_trade(self, position_id: str) -> bool:
         if self.paper_mode:
@@ -1579,6 +1681,14 @@ def pcnrass_activate_capital_source() -> None:
         pnl_observer.current_balance = float(base_capital)
     except Exception as e:
         print(f"[CAPITAL SYNC WARN] pnl_observer sync failed: {str(e)[:60]}")
+
+    if str(SELECTED_BROKER_MODE).lower() == "live":
+        if float(capital_governor.real_balance or 0.0) <= 0.0:
+            print(
+                f"[LIVE CAPITAL WARNING] broker={SELECTED_BROKER} "
+                f"mode=live url={os.environ.get('OANDA_BASE_URL', 'UNKNOWN')} "
+                f"balance_fetch_failed_or_zero. Live trading must remain blocked until real balance is loaded."
+            )
 
     print(
         f"[CAPITAL SOURCE ACTIVE] source={capital_governor.capital_source_label()} "
@@ -2636,7 +2746,7 @@ try:
         lock_state = get_session_lock_state()
 
         print("--- SESSION CONTEXT ---")
-        print(f"USER ID: {SESSION_USER_CTX.get('user_id')}")
+        print(f"USER ID: {SESSION_USER_CTX.get('user_id')} | NAME: {SESSION_USER_CTX.get('display_name')}")
         print(f"DISPLAY NAME: {SESSION_USER_CTX.get('display_name')}")
         print(f"ROLE: {SESSION_USER_CTX.get('role')}")
         print(f"UNIT: {SESSION_USER_CTX.get('unit_code')}")
@@ -2839,6 +2949,17 @@ try:
                         and live_crypto_funded_this_cycle < max_new_per_cycle("CRYPTO")
                     ):
                         allow_broker_test = True
+
+                    gate_ok, gate_reason = approve_trade_before_register(
+                        asset_class=asset_class,
+                        symbol=symbol,
+                        sig=sig,
+                        prob=prob,
+                    )
+
+                    if not gate_ok:
+                        last_trade = f"{symbol} UNIFIED_GATE_BLOCKED {gate_reason}"
+                        continue
 
                     position = mtm_engine.register_position(
                         asset_class,
