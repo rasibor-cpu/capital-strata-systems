@@ -24,6 +24,7 @@ class TradeDecisionOrchestrator:
         self.acceleration_engine = PressureAccelerationEngine()
         self.momentum_engine = OpportunityMomentumWindowEngine()
         self.probability_engine = ProbabilityPredictionEngine()
+        self.profitability_guard = ProfitabilityGuard()
 
         self.trade_gate = CSSUnifiedTradeGate()
 
