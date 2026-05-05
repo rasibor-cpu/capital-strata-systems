@@ -126,12 +126,13 @@ profitability_approved, profit_reason = self.profitability_guard.evaluate(profit
 # --------------------------------------------------
         # 7. FINAL EXECUTION DECISION
         # --------------------------------------------------
-        execute_trade = (
-            css_quality_pass
-            and approve_trade
-            and governance_approved
-        )
-
+        
+execute_trade = (
+    css_quality_pass
+    and approve_trade
+    and governance_approved
+    and profitability_approved
+)
         # --------------------------------------------------
         # 8. NORMALIZED SCORE (DISPLAY ONLY)
         # --------------------------------------------------
