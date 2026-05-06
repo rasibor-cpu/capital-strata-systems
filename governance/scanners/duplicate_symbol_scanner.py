@@ -2,6 +2,27 @@ import ast
 import os
 import json
 from pathlib import Path
+
+
+
+EXCLUDED_DIRECTORIES = [
+
+    "css-gemini",
+    "CSS-CLAUDE",
+    "CLAUDE_REVIEW_2026_05_01",
+    "CLAUDE_REVIEW_2026_05_02",
+    "__pycache__",
+    ".git",
+    ".venv",
+    "venv",
+    "archive",
+    "backup",
+    "old"
+]
+
+EXCLUDED_DIRS = EXCLUDED_DIRECTORIES
+
+
 from datetime import datetime
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -26,14 +47,20 @@ ALLOWLIST_FILE = (
 )
 
 EXCLUDED_DIRS = {
-    ".git",
+    "css-gemini",
+    "CSS-CLAUDE",
+    "CLAUDE_REVIEW_2026_05_01",
+    "CLAUDE_REVIEW_2026_05_02",
     "__pycache__",
+    ".git",
     ".venv",
     "venv",
-    "node_modules",
     "archive",
-    "reports",
-    "keys",
+    "backup",
+    "old",
+    "out",
+    "feeds",
+    "data_fx",
 }
 
 SYMBOLS = {}
