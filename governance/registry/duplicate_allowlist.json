@@ -1,0 +1,18 @@
+{
+  "Position": {
+    "status": "ALLOWLISTED_SPECIALIZED_DUPLICATE",
+    "reason": "CSS intentionally uses multiple domain-specific position models for execution, options, futures, risk sizing, and core position book logic.",
+    "approved_paths": [
+      "backend/execution/position_manager.py",
+      "backend/options/options_position_manager.py",
+      "backend/app/risk/futures_position_manager.py",
+      "engine/core/position_book.py",
+      "backend/risk/position_sizing_engine.py"
+    ]
+  },
+
+  "main": {
+    "status": "ALLOWLISTED_ENTRYPOINT_PATTERN",
+    "reason": "Multiple Python scripts legitimately define main() as CLI/script entry points."
+  }
+}

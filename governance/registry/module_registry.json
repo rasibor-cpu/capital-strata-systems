@@ -1,0 +1,43 @@
+{
+  "TradeDecisionOrchestrator": {
+    "canonical_path":
+      "backend/intelligence/trade_decision_orchestrator.py",
+    "status": "ACTIVE"
+  },
+
+  "CSSUnifiedTradeGate": {
+    "canonical_path":
+      "backend/governance/css_unified_trade_gate.py",
+    "status": "ACTIVE"
+  },
+
+  "PnLEngine": {
+    "canonical_path":
+      "backend/app/accounting/pnl_engine.py",
+    "status": "ACTIVE"
+  },
+
+  "Position": {
+    "canonical_path":
+      "backend/execution/position_manager.py",
+    "status": "ACTIVE"
+  },
+
+  "css_live_dashboard": {
+    "canonical_path":
+      "scripts/css_live_dashboard.py",
+    "status": "ACTIVE"
+  },
+
+  "UserRegistry": {
+    "canonical_path":
+      "backend/app/security/user_registry.py",
+    "status": "ACTIVE"
+  },
+
+  "AuthGate": {
+    "canonical_path":
+      "backend/app/security/auth_gate.py",
+    "status": "ACTIVE"
+  }
+}

@@ -1,145 +1,93 @@
+# ================================
+# CSS Canonical .gitignore
+# PCNRASS Governance Protected
+# ================================
+
 # --- Environment / secrets ---
 .env
 .env.*
 !.env.example
-
-# --- Runtime outputs ---
-out/
-feeds/
-data_fx/
+keys/
+*.pem
+*.key
+*.p8
+*.p12
+*.secret
 
 # --- Python cache ---
-__pycache__/
-*.pyc
-# =============================
-# Local data (never commit)
-# =============================
-data/
-*.csv
-.env
-
-
-# =============================
-# Experimental / test scripts
-# =============================
-test_*.py
-run_live_*.py
-run_fx_pairs_replay_*_fxrulesless_*.py
-
-# =============================
-# Live adapters (separate branch only)
-# =============================
-live_data/
-
-# =============================
-# Scratch / temp
-# =============================
-str/
-__pycache__/
-*.pyc
-!engine/execution/execution_gate.py
-!engine/execution/
-!engine/execution/execution_gate.py
-analysis/
-*.csv
-*.log
-*.json
-__pycache__/
-*.pyc
-
-
-# --- OS ---
-.DS_Store
-Thumbs.db
-# Runtime audit artifacts
-audit_logs/
-# --- live market adapters (TRACKED) ---
-!live_data/
-!live_data/*.py
-
-# --- ignore runtime noise ---
-live_data/__pycache__/
-live_data/**/*.log
-
-
-
-# Local helper scripts
-_find_csv.cmd
-# junk/encoding artifacts accidentally created at repo root
-!engine/execution/execution_gate.py!test_end_to_end_dryrun.py
-!run_live_guarded.py
-# === REA Runtime / Governance Artifacts (NEVER COMMIT) ===
-audit/
-state/
-*.log
-# Runtime controls (never commit)
-runtime/
-!engine/execution_decision.py
-!engine/test_execution_decision_runner.py
-!engine/execution_decision.py
-!engine/adapters/regime_gate_adapter.py
-# --- REA Phase-1: allow tracked tests + decision envelope ---
-!engine/test_execution_decision_runner.py
-!engine/execution_decision.py# --- GOVERNANCE CRITICAL (explicitly tracked) ---
-!engine/execution_firewall.py
-!engine/execution_decision.py
-!engine/execution_router.py
-# --- GOVERNANCE CRITICAL (explicitly tracked) ---
-!engine/execution_firewall.py
-!engine/execution_router.py
-# ================================
-# GOVERNANCE CRITICAL (TRACKED)
-# ================================
-
-!engine/
-!engine/execution/
-!engine/execution/execution_firewall.py
-# ================================
-# GOVERNANCE CRITICAL (TRACKED)
-# ================================
-!engine/execution_firewall.py
-tatus
-git diff --cached --name-only
-# Runtime reporting
-reporting_store/
-*.jsonl
-# Find/grep scratch outputs
-_find_*.txt
-# REA engine runtime state / logs (never commit)
-engine/risk/risk_state.json
-engine/risk/*.json
-live_tick_*.json
-*.log
-runlog.txt
-# Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 
-# Virtual environments
+# --- Virtual environments ---
 venv/
+.venv/
+env/
 .env/
 
-# Secrets
-coinbase_private_key.pem
-*.pem
-*.key
-*.secret
-
-# OS
-Thumbs.db
-.DS_Store
-
-# Logs
+# --- Runtime outputs / logs ---
 *.log
+*.jsonl
+audit_logs/
+audit/
+state/
+runtime/
+reporting_store/
+out/
+feeds/
+data_fx/
+live_tick_*.json
+runlog.txt
 
-# Temporary files
-2
-50
-65
-List[Dict[str
-List[str]
-Optional[List[Dict[str
-float
+# --- Governance generated reports ---
+governance/reports/
+
+# --- Archives / recovery snapshots ---
+archive/
 *_before_*.py
+*_backup*.py
+*_PRE_*.py
+*_pre_*.py
+
+# --- Local data / generated datasets ---
+data/
+*.csv
+
+# --- Scratch / temporary files ---
+_find_*.txt
+_find_csv.cmd
+analysis/
+str/
+
+# --- Experimental / one-off scripts ---
+test_*.py
+run_live_*.py
+run_fx_pairs_replay_*_fxrulesless_*.py
+
+# --- OS files ---
+.DS_Store
+Thumbs.db
+
+# ================================
+# Explicitly tracked governance/runtime code
+# ================================
+
+!engine/
+!engine/execution/
+!engine/execution_firewall.py
+!engine/execution_router.py
+!engine/execution_decision.py
+!engine/adapters/regime_gate_adapter.py
+!engine/test_execution_decision_runner.py
+!engine/execution/execution_gate.py
+
+!live_data/
+!live_data/*.py
+live_data/__pycache__/
+live_data/**/*.log
+# --- Runtime artifacts ---
+artifacts/
+data_cache/
+data_store/
+backend/app/futures_exposure.json
