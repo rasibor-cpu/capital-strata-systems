@@ -1,0 +1,31 @@
+CSS Unified Trade Gate Migration Notes
+
+Status:
+- Dashboard has embedded CSSUnifiedTradeGate.
+- Backend canonical CSSUnifiedTradeGate exists.
+- Direct replacement is NOT plug-compatible yet.
+
+Dashboard gate signature:
+approve_trade(candidate, session, role_profile) -> dict
+
+Backend canonical gate signature:
+approve_trade(candidate, session, portfolio_state, engine_mode) -> GateDecision
+
+Key gaps:
+1. Backend expects expected_value, cost, probability.
+2. Dashboard currently sends signal_score and prob_positive.
+3. Backend expects session.created and session.role.
+4. Dashboard uses SESSION_USER_CTX and role_profile.
+5. Backend expects portfolio_state for position limits.
+6. Dashboard currently returns dict while backend returns GateDecision.
+
+Safe migration plan:
+1. Do not remove dashboard gate yet.
+2. Build compatibility wrapper first.
+3. Wrapper should translate dashboard candidate fields into backend candidate fields.
+4. Wrapper should convert GateDecision into dashboard dict format.
+5. Compile and validate before runtime testing.
+6. Only remove embedded dashboard gate after successful wrapper validation.
+
+Current remaining HIGH duplicate:
+CSSUnifiedTradeGate shadow copy in scripts/css_live_dashboard.py.
