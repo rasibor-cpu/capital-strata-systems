@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from dashboard.auth.css_sign_on import (
@@ -12,6 +13,7 @@ from dashboard.auth.css_sign_on import (
     authenticate_credentials,
     change_password,
     load_users,
+    lockout_seconds_for_attempt,
     save_users,
 )
 
@@ -60,9 +62,40 @@ def main() -> int:
         try:
             authenticate_credentials(users, INITIAL_ADMIN_ID, "wrong-password")
         except AuthFailure as exc:
-            assert exc.code == "ACCOUNT_LOCKED"
+            assert exc.code == "AUTH_LOCKOUT"
+            assert users[INITIAL_ADMIN_ID]["failed_attempts"] == 3
+            assert users[INITIAL_ADMIN_ID]["locked"] is True
+            assert users[INITIAL_ADMIN_ID]["lockout_seconds"] == lockout_seconds_for_attempt(3)
         else:
-            raise AssertionError("Third bad password should lock the account")
+            raise AssertionError("Third bad password should start timed lockout")
+
+        try:
+            authenticate_credentials(users, INITIAL_ADMIN_ID, "cssgood1")
+        except AuthFailure as exc:
+            assert exc.code == "AUTH_LOCKOUT"
+        else:
+            raise AssertionError("Correct password should be blocked during timed lockout")
+
+        users[INITIAL_ADMIN_ID]["lockout_until"] = (
+            datetime.now() - timedelta(seconds=1)
+        ).isoformat(timespec="seconds")
+
+        try:
+            authenticate_credentials(users, INITIAL_ADMIN_ID, "wrong-password")
+        except AuthFailure as exc:
+            assert exc.code == "AUTH_LOCKOUT"
+            assert users[INITIAL_ADMIN_ID]["failed_attempts"] == 4
+            assert users[INITIAL_ADMIN_ID]["lockout_seconds"] == lockout_seconds_for_attempt(4)
+        else:
+            raise AssertionError("Fourth sequential bad password should increase timed lockout")
+
+        users[INITIAL_ADMIN_ID]["lockout_until"] = (
+            datetime.now() - timedelta(seconds=1)
+        ).isoformat(timespec="seconds")
+        user_ctx = authenticate_credentials(users, INITIAL_ADMIN_ID, "cssgood1")
+        assert user_ctx["role"] == "SUPER_USER"
+        assert users[INITIAL_ADMIN_ID]["failed_attempts"] == 0
+        assert users[INITIAL_ADMIN_ID]["locked"] is False
 
     print("CSS sign-on smoke test PASSED")
     return 0

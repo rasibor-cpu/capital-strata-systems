@@ -21,7 +21,8 @@ INITIAL_ROLE = "SUPER_USER"
 MIN_PASSWORD_LENGTH = 6
 PASSWORD_MAX_AGE_DAYS = 30
 PASSWORD_HISTORY_LIMIT = 2
-MAX_FAILED_ATTEMPTS = 3
+LOCKOUT_START_ATTEMPT = 3
+LOCKOUT_SCHEDULE_SECONDS = (60, 300, 900, 1800, 3600)
 
 CSS_AUTH_PANEL_WIDTH = 78
 
@@ -116,6 +117,9 @@ def load_users(users_file: Path = USERS_FILE) -> Dict[str, Any]:
             "failed_attempts": 0,
             "locked": False,
             "locked_at": None,
+            "lockout_until": None,
+            "lockout_seconds": 0,
+            "lockout_started_at": None,
         }
         for field, default in defaults.items():
             if field not in record:
@@ -133,6 +137,9 @@ def load_users(users_file: Path = USERS_FILE) -> Dict[str, Any]:
         if key != normalized:
             users[normalized] = record
             users.pop(key, None)
+            changed = True
+
+        if clear_expired_lockout(record):
             changed = True
 
     if changed:
@@ -155,10 +162,15 @@ def authenticate_credentials(users: Dict[str, Any], user_id: str, password: str)
     if not isinstance(user_record, dict):
         raise AuthFailure("INVALID_USER_ID", "User ID not recognized.")
 
-    if bool(user_record.get("locked", False)):
+    now = datetime.now()
+    lockout_remaining = active_lockout_remaining_seconds(user_record, now)
+    if lockout_remaining > 0:
         raise AuthFailure(
-            "ACCOUNT_LOCKED",
-            "Account locked after failed attempts. Admin reset required.",
+            "AUTH_LOCKOUT",
+            (
+                "Sequential failed sign-ons paused for "
+                f"{format_duration(lockout_remaining)} for user ID {normalized_user_id}."
+            ),
         )
 
     expected_hash = str(user_record.get("password_hash", "")).strip()
@@ -168,23 +180,25 @@ def authenticate_credentials(users: Dict[str, Any], user_id: str, password: str)
         failed_attempts = int(user_record.get("failed_attempts", 0) or 0) + 1
         user_record["failed_attempts"] = failed_attempts
 
-        if failed_attempts >= MAX_FAILED_ATTEMPTS:
-            user_record["locked"] = True
-            user_record["locked_at"] = datetime.now().isoformat(timespec="seconds")
+        if failed_attempts >= LOCKOUT_START_ATTEMPT:
+            lockout_seconds = lockout_seconds_for_attempt(failed_attempts)
+            apply_timed_lockout(user_record, lockout_seconds, now)
             raise AuthFailure(
-                "ACCOUNT_LOCKED",
-                "Account locked after failed attempts. Admin reset required.",
+                "AUTH_LOCKOUT",
+                (
+                    "Sequential failed sign-ons paused for "
+                    f"{format_duration(lockout_seconds)} after failed attempt {failed_attempts}."
+                ),
             )
 
-        remaining = MAX_FAILED_ATTEMPTS - failed_attempts
+        remaining = LOCKOUT_START_ATTEMPT - failed_attempts
         raise AuthFailure(
             "AUTH_FAILED",
             f"Authentication failed. {remaining} attempt(s) remaining.",
         )
 
     user_record["failed_attempts"] = 0
-    user_record["locked"] = False
-    user_record["locked_at"] = None
+    clear_lockout_state(user_record)
 
     if password_expired(user_record):
         raise PasswordChangeRequired(normalized_user_id)
@@ -217,8 +231,7 @@ def change_password(
     user_record["must_change_password"] = False
     user_record["last_password_change"] = datetime.now().isoformat(timespec="seconds")
     user_record["failed_attempts"] = 0
-    user_record["locked"] = False
-    user_record["locked_at"] = None
+    clear_lockout_state(user_record)
 
     return build_user_context(user_record, normalized_user_id)
 
@@ -271,6 +284,107 @@ def password_expired(user_record: Dict[str, Any]) -> bool:
         return True
 
     return datetime.now() - last_dt >= timedelta(days=PASSWORD_MAX_AGE_DAYS)
+
+
+def lockout_seconds_for_attempt(failed_attempts: int) -> int:
+    if failed_attempts < LOCKOUT_START_ATTEMPT:
+        return 0
+
+    index = failed_attempts - LOCKOUT_START_ATTEMPT
+    if index >= len(LOCKOUT_SCHEDULE_SECONDS):
+        return LOCKOUT_SCHEDULE_SECONDS[-1]
+
+    return LOCKOUT_SCHEDULE_SECONDS[index]
+
+
+def apply_timed_lockout(
+    user_record: Dict[str, Any],
+    lockout_seconds: int,
+    now: Optional[datetime] = None,
+) -> None:
+    current_time = now or datetime.now()
+    user_record["locked"] = True
+    user_record["locked_at"] = current_time.isoformat(timespec="seconds")
+    user_record["lockout_started_at"] = current_time.isoformat(timespec="seconds")
+    user_record["lockout_seconds"] = int(lockout_seconds)
+    user_record["lockout_until"] = (
+        current_time + timedelta(seconds=int(lockout_seconds))
+    ).isoformat(timespec="seconds")
+
+
+def active_lockout_remaining_seconds(
+    user_record: Dict[str, Any],
+    now: Optional[datetime] = None,
+) -> int:
+    current_time = now or datetime.now()
+    lockout_until = parse_datetime(user_record.get("lockout_until"))
+
+    if lockout_until is None:
+        if bool(user_record.get("locked", False)):
+            clear_lockout_state(user_record, preserve_failed_attempts=True)
+        return 0
+
+    if lockout_until <= current_time:
+        clear_lockout_state(user_record, preserve_failed_attempts=True)
+        return 0
+
+    remaining = int((lockout_until - current_time).total_seconds())
+    return max(1, remaining)
+
+
+def clear_expired_lockout(user_record: Dict[str, Any]) -> bool:
+    before = (
+        user_record.get("locked"),
+        user_record.get("locked_at"),
+        user_record.get("lockout_until"),
+    )
+    active_lockout_remaining_seconds(user_record)
+    after = (
+        user_record.get("locked"),
+        user_record.get("locked_at"),
+        user_record.get("lockout_until"),
+    )
+    return before != after
+
+
+def clear_lockout_state(
+    user_record: Dict[str, Any],
+    preserve_failed_attempts: bool = False,
+) -> None:
+    user_record["locked"] = False
+    user_record["locked_at"] = None
+    user_record["lockout_until"] = None
+    user_record["lockout_seconds"] = 0
+    user_record["lockout_started_at"] = None
+    if not preserve_failed_attempts:
+        user_record["failed_attempts"] = 0
+
+
+def parse_datetime(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+
+    try:
+        return datetime.fromisoformat(str(value))
+    except Exception:
+        return None
+
+
+def format_duration(seconds: int) -> str:
+    value = max(1, int(seconds))
+
+    if value < 60:
+        unit = "second" if value == 1 else "seconds"
+        return f"{value} {unit}"
+
+    minutes = (value + 59) // 60
+    if minutes < 60:
+        unit = "minute" if minutes == 1 else "minutes"
+        return f"{minutes} {unit}"
+
+    hours = (minutes + 59) // 60
+    unit = "hour" if hours == 1 else "hours"
+    return f"{hours} {unit}"
 
 
 def build_user_context(user_record: Dict[str, Any], user_id: str) -> Dict[str, Any]:
@@ -422,7 +536,7 @@ def await_gui_login(users: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     policy.pack(anchor="w", padx=42, fill="x")
     _policy_badge(policy, "AUTH REQUIRED", colors["teal"], "#e8fbfb", small_font)
     _policy_badge(policy, f"{PASSWORD_MAX_AGE_DAYS} DAY PASSWORD", colors["amber"], "#fff5df", small_font)
-    _policy_badge(policy, f"{MAX_FAILED_ATTEMPTS} ATTEMPT LOCK", "#7c3aed", "#f1ebff", small_font)
+    _policy_badge(policy, f"LOCKOUT AFTER {LOCKOUT_START_ATTEMPT}", "#7c3aed", "#f1ebff", small_font)
 
     right = tk.Frame(shell, bg=colors["panel"])
     right.grid(row=0, column=1, sticky="nsew")
@@ -702,7 +816,7 @@ def render_console_sign_in_screen() -> None:
     print(_panel_line("Initial Admin ID", INITIAL_ADMIN_ID))
     print(_panel_line("Password Age", f"{PASSWORD_MAX_AGE_DAYS} calendar days"))
     print(_panel_line("Password History", f"last {PASSWORD_HISTORY_LIMIT} blocked"))
-    print(_panel_line("Failed Attempts", f"{MAX_FAILED_ATTEMPTS} then account lock"))
+    print(_panel_line("Failed Attempts", f"timed lockouts from attempt {LOCKOUT_START_ATTEMPT}"))
     print(_panel_border("="))
     print()
 
@@ -779,6 +893,9 @@ def _default_admin_record() -> Dict[str, Any]:
         "failed_attempts": 0,
         "locked": False,
         "locked_at": None,
+        "lockout_until": None,
+        "lockout_seconds": 0,
+        "lockout_started_at": None,
     }
 
 
