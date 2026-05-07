@@ -2,3 +2,6 @@ fastapi
 uvicorn
 pydantic
 python-jose
+python-dotenv
+requests
+coinbase-advanced-py
