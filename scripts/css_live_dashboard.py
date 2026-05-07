@@ -1569,6 +1569,17 @@ def await_login_ready_state():
         return ctx
 
 
+# === PCNRASS GRAPHICAL SIGN-ON BRIDGE ===
+# Authentication remains first; this delegates the screen and password policy
+# to the dashboard auth module without touching trading, PnL, broker, or risk logic.
+try:
+    from dashboard.auth.css_sign_on import await_login_ready_state as _pcnrass_await_login_ready_state
+except Exception as _pcnrass_sign_on_import_error:
+    raise RuntimeError("CSS_SIGN_ON_SCREEN_UNAVAILABLE") from _pcnrass_sign_on_import_error
+
+await_login_ready_state = _pcnrass_await_login_ready_state
+
+
 SESSION_USER_CTX = authenticate_startup_user()
 
 GLOBAL_BROKER_MODE = select_global_broker_mode()
