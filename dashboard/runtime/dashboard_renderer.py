@@ -5,12 +5,18 @@ from dashboard.runtime.render_contracts.account_render_contract import AccountRe
 from dashboard.runtime.render_contracts.governance_render_contract import (
     GovernanceRenderContract,
 )
+from dashboard.runtime.render_contracts.execution_render_contract import (
+    ExecutionRenderContract,
+)
 from dashboard.runtime.render_contracts.market_render_contract import MarketRenderContract
 from dashboard.runtime.render_contracts.pnl_render_contract import PnLRenderContract
+from dashboard.runtime.render_contracts.risk_render_contract import RiskRenderContract
 from dashboard.runtime.renderers.account_renderer import AccountRenderer
+from dashboard.runtime.renderers.execution_renderer import ExecutionRenderer
 from dashboard.runtime.renderers.governance_renderer import GovernanceRenderer
 from dashboard.runtime.renderers.market_renderer import MarketRenderer
 from dashboard.runtime.renderers.pnl_renderer import PnLRenderer
+from dashboard.runtime.renderers.risk_renderer import RiskRenderer
 
 
 class DashboardRenderer:
@@ -29,6 +35,8 @@ class DashboardRenderer:
         self.pnl_renderer = PnLRenderer()
         self.market_renderer = MarketRenderer()
         self.governance_renderer = GovernanceRenderer()
+        self.risk_renderer = RiskRenderer()
+        self.execution_renderer = ExecutionRenderer()
 
     def render(self, state: DashboardState) -> str:
         account_contract = AccountRenderContract.from_account_state(
@@ -65,6 +73,16 @@ class DashboardRenderer:
             state.governance_state
         )
 
+        runtime_summaries = state.last_scan_results or {}
+
+        risk_contract = RiskRenderContract.from_summary(
+            runtime_summaries.get("risk_summary", {})
+        )
+
+        execution_contract = ExecutionRenderContract.from_summary(
+            runtime_summaries.get("execution_summary", {})
+        )
+
         sections = [
             "======================================",
             " CAPITAL STRATA SYSTEMS DASHBOARD",
@@ -83,6 +101,10 @@ class DashboardRenderer:
             self.market_renderer.render(market_contract),
             "",
             self.governance_renderer.render(governance_contract),
+            "",
+            self.risk_renderer.render(risk_contract),
+            "",
+            self.execution_renderer.render(execution_contract),
             "",
             "======================================",
         ]

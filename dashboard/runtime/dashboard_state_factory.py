@@ -7,7 +7,11 @@ from dashboard.runtime.state_builders.account_state_builder import AccountStateB
 from dashboard.runtime.state_builders.governance_state_builder import GovernanceStateBuilder
 from dashboard.runtime.state_builders.market_state_builder import MarketStateBuilder
 from dashboard.runtime.state_builders.position_state_builder import PositionStateBuilder
+from dashboard.runtime.summary_builders.execution_summary_builder import (
+    ExecutionSummaryBuilder,
+)
 from dashboard.runtime.summary_builders.pnl_summary_builder import PnLSummaryBuilder
+from dashboard.runtime.summary_builders.risk_summary_builder import RiskSummaryBuilder
 
 
 class DashboardStateFactory:
@@ -25,6 +29,8 @@ class DashboardStateFactory:
         self.governance_builder = GovernanceStateBuilder()
         self.market_builder = MarketStateBuilder()
         self.position_builder = PositionStateBuilder()
+        self.risk_summary_builder = RiskSummaryBuilder()
+        self.execution_summary_builder = ExecutionSummaryBuilder()
         self.pnl_summary_builder = PnLSummaryBuilder()
 
     def build(
@@ -33,6 +39,8 @@ class DashboardStateFactory:
         positions_payload: Dict[str, Any] | None = None,
         market_payload: Dict[str, Any] | None = None,
         governance_payload: Dict[str, Any] | None = None,
+        risk_payload: Dict[str, Any] | None = None,
+        execution_payload: Dict[str, Any] | None = None,
         session_payload: Dict[str, Any] | None = None,
         diagnostics_payload: Dict[str, Any] | None = None,
     ) -> DashboardState:
@@ -58,15 +66,30 @@ class DashboardStateFactory:
             positions_payload or {}
         )
 
+        account_summary_state = {
+            "cash_balance": dashboard_state.cash_balance,
+            "total_equity": dashboard_state.total_equity,
+            "equity": dashboard_state.total_equity,
+            "balance": dashboard_state.cash_balance,
+        }
+
         pnl_summary = self.pnl_summary_builder.build(
-            account_state={
-                "cash_balance": dashboard_state.cash_balance,
-                "total_equity": dashboard_state.total_equity,
-                "equity": dashboard_state.total_equity,
-                "balance": dashboard_state.cash_balance,
-            },
+            account_state=account_summary_state,
             position_state=position_state,
         )
+
+        risk_summary = self.risk_summary_builder.build(
+            account_state=account_summary_state,
+            position_state=position_state,
+            risk_payload=risk_payload,
+        )
+
+        execution_summary = self.execution_summary_builder.build(
+            execution_payload=execution_payload,
+        )
+
+        dashboard_state.last_scan_results["risk_summary"] = risk_summary
+        dashboard_state.last_scan_results["execution_summary"] = execution_summary
 
         dashboard_state.realized_pnl = float(
             pnl_summary.get("realized_pnl", dashboard_state.realized_pnl)
