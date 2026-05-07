@@ -31,38 +31,44 @@ class DashboardStateFactory:
         diagnostics_payload: Dict[str, Any] | None = None,
     ) -> DashboardState:
 
-        account_state = self.account_builder.build(account_payload)
-        position_state = self.position_builder.build(positions_payload)
+        dashboard_state = DashboardState()
+
+        dashboard_state = self.account_builder.build(
+            account_payload=account_payload or {},
+            state=dashboard_state,
+        )
+
+        position_state = self.position_builder.build(
+            positions_payload or {}
+        )
 
         pnl_summary = self.pnl_summary_builder.build(
-            account_state=account_state,
+            account_state={
+                "cash_balance": dashboard_state.cash_balance,
+                "total_equity": dashboard_state.total_equity,
+                "equity": dashboard_state.total_equity,
+                "balance": dashboard_state.cash_balance,
+            },
             position_state=position_state,
         )
 
-        dashboard_state = DashboardState()
-
-        dashboard_state.cash_balance = float(
-            account_state.get("cash_balance", account_state.get("balance", 0.0))
-        )
-
-        dashboard_state.total_equity = float(
-            account_state.get("total_equity", account_state.get("equity", 0.0))
-        )
-
         dashboard_state.realized_pnl = float(
-            pnl_summary.get("realized_pnl", 0.0)
+            pnl_summary.get("realized_pnl", dashboard_state.realized_pnl)
         )
 
         dashboard_state.unrealized_pnl = float(
-            pnl_summary.get("unrealized_pnl", 0.0)
+            pnl_summary.get("unrealized_pnl", dashboard_state.unrealized_pnl)
         )
 
         dashboard_state.total_open_positions = int(
-            position_state.get("open_count", 0)
+            position_state.get("open_count", dashboard_state.total_open_positions)
         )
 
         dashboard_state.open_positions_by_asset = dict(
-            position_state.get("asset_counts", {})
+            position_state.get(
+                "asset_counts",
+                dashboard_state.open_positions_by_asset,
+            )
         )
 
         session = session_payload or {}
