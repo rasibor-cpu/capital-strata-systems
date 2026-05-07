@@ -1312,6 +1312,57 @@ SESSION_AUTH_FILE = ARTIFACTS_DIR / "css_auth_session.json"
 PASSWORD_MAX_AGE_DAYS = 30
 
 
+CSS_AUTH_PANEL_WIDTH = 72
+
+
+def _css_panel_border(char: str = "=") -> str:
+    return char * CSS_AUTH_PANEL_WIDTH
+
+
+def _css_panel_line(label: str = "", value: str = "") -> str:
+    content_width = CSS_AUTH_PANEL_WIDTH - 4
+
+    if not label and not value:
+        return f"| {' ' * content_width} |"
+
+    if value:
+        text = f"{label}: {value}"
+    else:
+        text = label
+
+    return f"| {text[:content_width].ljust(content_width)} |"
+
+
+def render_css_sign_in_screen() -> None:
+    print()
+    print(_css_panel_border("="))
+    print(_css_panel_line("CAPITAL STRATA SYSTEMS"))
+    print(_css_panel_line("Governance Runtime Access"))
+    print(_css_panel_border("-"))
+    print(_css_panel_line("Authentication", "required"))
+    print(_css_panel_line("Session Policy", f"{SESSION_IDLE_TIMEOUT_SECONDS // 60}m idle / {SESSION_MAX_SECONDS // 60}m max"))
+    print(_css_panel_line("Default Runtime", "paper-first, governance-gated"))
+    print(_css_panel_line("Initial Admin ID", "00000"))
+    print(_css_panel_border("="))
+    print()
+
+
+def render_css_auth_status(title: str, message: str) -> None:
+    print()
+    print(_css_panel_border("-"))
+    print(_css_panel_line(title, message))
+    print(_css_panel_border("-"))
+    print()
+
+
+def css_auth_input(prompt_label: str) -> str:
+    return input(f"CSS AUTH | {prompt_label}: ")
+
+
+def css_auth_secret(prompt_label: str) -> str:
+    return masked_password_input(f"CSS AUTH | {prompt_label}: ")
+
+
 
 # ===== PCNRASS MASKED PASSWORD INPUT =====
 def masked_password_input(prompt: str = "CSS LOGIN | password: ") -> str:
@@ -1424,33 +1475,42 @@ def _css_password_expired(user_record: dict[str, Any]) -> bool:
 
 
 def _css_force_password_change(users: dict[str, Any], user_key: str) -> None:
-    print("[PASSWORD CHANGE REQUIRED] Initial/expired password must be changed now.")
+    render_css_auth_status(
+        "PASSWORD CHANGE REQUIRED",
+        "Initial or expired password must be changed now",
+    )
 
     while True:
-        new_password = getpass.getpass("Enter new password: ").strip()
-        confirm_password = getpass.getpass("Confirm new password: ").strip()
+        new_password = css_auth_secret("new password").strip()
+        confirm_password = css_auth_secret("confirm password").strip()
 
         if not new_password:
-            print("[PASSWORD ERROR] Password cannot be blank.")
+            render_css_auth_status("PASSWORD ERROR", "Password cannot be blank")
             continue
 
         if len(new_password) < 6:
-            print("[PASSWORD ERROR] Password must be at least 6 characters.")
+            render_css_auth_status(
+                "PASSWORD ERROR",
+                "Password must be at least 6 characters",
+            )
             continue
 
         if new_password == "123456":
-            print("[PASSWORD ERROR] New password cannot remain the initial default password.")
+            render_css_auth_status(
+                "PASSWORD ERROR",
+                "New password cannot remain the initial default password",
+            )
             continue
 
         if new_password != confirm_password:
-            print("[PASSWORD ERROR] Passwords do not match.")
+            render_css_auth_status("PASSWORD ERROR", "Passwords do not match")
             continue
 
         users[user_key]["password_hash"] = _css_hash_password(new_password)
         users[user_key]["must_change_password"] = False
         users[user_key]["last_password_change"] = datetime.now().isoformat(timespec="seconds")
         _css_save_users(users)
-        print("[PASSWORD UPDATED] Password changed successfully.")
+        render_css_auth_status("PASSWORD UPDATED", "Password changed successfully")
         return
 
 
@@ -1469,21 +1529,22 @@ def _css_persist_login_session(user_ctx: dict[str, Any]) -> None:
 
 def await_login_ready_state():
     users = _css_load_users()
+    render_css_sign_in_screen()
 
     while True:
-        user_id = input("CSS LOGIN | user_id (numeric): ").strip().zfill(5)
+        user_id = css_auth_input("user id").strip().zfill(5)
 
         user_record = users.get(user_id)
         if not user_record:
-            print("[AUTH FAILED] INVALID_USER_ID")
+            render_css_auth_status("AUTH FAILED", "INVALID_USER_ID")
             continue
 
-        password = masked_password_input("CSS LOGIN | password: ")
+        password = css_auth_secret("password")
         expected_hash = str(user_record.get("password_hash", "")).strip()
         supplied_hash = _css_hash_password(password)
 
         if supplied_hash != expected_hash:
-            print("[AUTH FAILED] AUTH_FAILED")
+            render_css_auth_status("AUTH FAILED", "AUTH_FAILED")
             continue
 
         if _css_password_expired(user_record):
@@ -1500,7 +1561,10 @@ def await_login_ready_state():
         }
 
         _css_persist_login_session(ctx)
-        print(f"[AUTH SUCCESS] {ctx['display_name']} | role={ctx['role']}")
+        render_css_auth_status(
+            "AUTH SUCCESS",
+            f"{ctx['display_name']} | role={ctx['role']}",
+        )
         return ctx
 
 
