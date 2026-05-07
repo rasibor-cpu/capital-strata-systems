@@ -12,6 +12,7 @@ from dashboard.auth.css_sign_on import (
     PasswordValidationError,
     authenticate_credentials,
     change_password,
+    create_user,
     load_users,
     lockout_seconds_for_attempt,
     save_users,
@@ -43,6 +44,29 @@ def main() -> int:
 
         user_ctx = authenticate_credentials(users, INITIAL_ADMIN_ID, "cssgood1")
         assert user_ctx["role"] == "SUPER_USER"
+
+        created = create_user(
+            users,
+            user_ctx,
+            user_id="17",
+            display_name="CSS Test Trader",
+            role="TRADER",
+            initial_password="trader1",
+            unit_code="TRD",
+            home_branch="HQ",
+        )
+        assert created["user_id"] == "00017"
+        assert created["role"] == "TRADER"
+
+        try:
+            authenticate_credentials(users, "00017", "trader1")
+        except PasswordChangeRequired:
+            pass
+        else:
+            raise AssertionError("Created users must change initial passwords")
+
+        trader_ctx = change_password(users, "00017", "trader2", "trader2")
+        assert trader_ctx["role"] == "TRADER"
 
         try:
             change_password(users, INITIAL_ADMIN_ID, "cssgood1", "cssgood1")

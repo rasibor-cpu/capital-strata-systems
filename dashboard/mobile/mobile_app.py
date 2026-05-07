@@ -19,10 +19,15 @@ from dashboard.auth.css_sign_on import (
     PasswordValidationError,
     PROJECT_ROOT,
     authenticate_credentials,
+    available_roles,
+    can_manage_users,
     change_password,
+    create_user,
+    list_user_summaries,
     load_users,
     save_users,
 )
+from backend.security.permissions import PermissionEngine
 from dashboard.runtime.broker_credential_check import _load_coinbase_credentials, load_local_env
 from dashboard.runtime.runtime_bootstrap import DashboardRuntimeBootstrap
 
@@ -32,7 +37,14 @@ PASSWORD_CHANGE_COOKIE = "css_mobile_pw_change"
 SESSION_MAX_SECONDS = int(os.getenv("CSS_MOBILE_SESSION_SECONDS", "28800") or 28800)
 PASSWORD_CHANGE_SECONDS = int(os.getenv("CSS_MOBILE_PASSWORD_CHANGE_SECONDS", "600") or 600)
 MOBILE_EVENTS_FILE = PROJECT_ROOT / "artifacts" / "css_mobile_trade_events.jsonl"
+MOBILE_CONTROL_FILE = PROJECT_ROOT / "artifacts" / "css_mobile_controls.json"
 DEFAULT_COINBASE_MAX_LIVE_ORDER_USD = 1.00
+ENGINE_MODES = ("SAFE", "CONSERVATIVE", "BALANCED", "AGGRESSIVE")
+DEFAULT_MOBILE_CONTROLS = {
+    "runtime_mode": "paper",
+    "orders_enabled": True,
+    "engine_mode": "SAFE",
+}
 
 app = FastAPI(title="Capital Strata Systems Mobile", version="0.1.0")
 
@@ -146,13 +158,59 @@ async def logout(request: Request):
 @app.get("/api/status")
 async def status(request: Request):
     session = _get_session(request)
+    system_status = _system_status(session["user_ctx"] if session else None)
     return JSONResponse(
         {
             "ok": True,
             "authenticated": bool(session),
             "mode": "mobile-full-access",
-            "live_orders_enabled": _mobile_live_orders_enabled(),
+            "system_mode": system_status["runtime_mode"],
+            "orders_enabled": system_status["orders_enabled"],
+            "engine_mode": system_status["engine_mode"],
+            "broker_live_gate": system_status["broker_live_gate"],
+            "live_orders_enabled": system_status["broker_live_ready"],
         }
+    )
+
+
+@app.get("/controls", response_class=HTMLResponse)
+async def controls_screen(request: Request):
+    session = _get_session(request)
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+
+    return HTMLResponse(_controls_page(session["user_ctx"]))
+
+
+@app.post("/controls", response_class=HTMLResponse)
+async def controls_submit(request: Request):
+    session = _get_session(request)
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+
+    user_ctx = session["user_ctx"]
+    if not _can_manage_mobile_controls(user_ctx):
+        return HTMLResponse(
+            _controls_page(
+                user_ctx,
+                message="Your CSS role cannot change system controls.",
+                status="error",
+            ),
+            status_code=403,
+        )
+
+    form = await _read_form(request)
+    controls = _update_mobile_controls(form)
+    return HTMLResponse(
+        _controls_page(
+            user_ctx,
+            message=(
+                f"Controls saved: {controls['runtime_mode'].upper()} mode, "
+                f"orders {'enabled' if controls['orders_enabled'] else 'disabled'}, "
+                f"engine {controls['engine_mode']}."
+            ),
+            status="success",
+        )
     )
 
 
@@ -175,6 +233,66 @@ async def trade_ticket_submit(request: Request):
     result = execute_mobile_trade_ticket(session["user_ctx"], form)
     status = "success" if result.get("ok") else "error"
     return HTMLResponse(_trade_ticket_page(session["user_ctx"], result=result, status=status))
+
+
+@app.get("/users", response_class=HTMLResponse)
+async def users_screen(request: Request):
+    session = _get_session(request)
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+
+    user_ctx = session["user_ctx"]
+    if not can_manage_users(user_ctx):
+        return HTMLResponse(
+            _access_denied_page(user_ctx, "User administration requires SUPER_USER authority."),
+            status_code=403,
+        )
+
+    return HTMLResponse(_users_page(user_ctx))
+
+
+@app.post("/users", response_class=HTMLResponse)
+async def users_submit(request: Request):
+    session = _get_session(request)
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+
+    user_ctx = session["user_ctx"]
+    if not can_manage_users(user_ctx):
+        return HTMLResponse(
+            _access_denied_page(user_ctx, "User administration requires SUPER_USER authority."),
+            status_code=403,
+        )
+
+    form = await _read_form(request)
+    users = load_users()
+    try:
+        created = create_user(
+            users,
+            user_ctx,
+            user_id=form.get("user_id", ""),
+            display_name=form.get("display_name", ""),
+            role=form.get("role", "VIEWER"),
+            initial_password=form.get("initial_password", ""),
+            unit_code=form.get("unit_code", "CORE"),
+            home_branch=form.get("home_branch", "HQ"),
+            must_change_password=form.get("must_change_password", "on") == "on",
+        )
+        save_users(users)
+    except (AuthFailure, PasswordValidationError, ValueError) as exc:
+        save_users(users)
+        return HTMLResponse(
+            _users_page(user_ctx, message=str(exc), status="error"),
+            status_code=400,
+        )
+
+    return HTMLResponse(
+        _users_page(
+            user_ctx,
+            message=f"User {created['user_id']} created with role {created['role']}.",
+            status="success",
+        )
+    )
 
 
 @app.get("/manifest.webmanifest")
@@ -314,6 +432,163 @@ async def _read_form(request: Request) -> Dict[str, str]:
     return {key: values[-1] if values else "" for key, values in parsed.items()}
 
 
+def load_mobile_controls() -> Dict[str, Any]:
+    controls = dict(DEFAULT_MOBILE_CONTROLS)
+    try:
+        raw = MOBILE_CONTROL_FILE.read_text(encoding="utf-8").strip()
+        data = json.loads(raw) if raw else {}
+        if isinstance(data, dict):
+            controls.update(data)
+    except FileNotFoundError:
+        pass
+    except Exception:
+        controls = dict(DEFAULT_MOBILE_CONTROLS)
+
+    runtime_mode = str(controls.get("runtime_mode", "paper")).strip().lower()
+    controls["runtime_mode"] = runtime_mode if runtime_mode in {"paper", "live"} else "paper"
+
+    engine_mode = str(controls.get("engine_mode", "SAFE")).strip().upper()
+    controls["engine_mode"] = engine_mode if engine_mode in ENGINE_MODES else "SAFE"
+    controls["orders_enabled"] = bool(controls.get("orders_enabled", True))
+    return controls
+
+
+def save_mobile_controls(controls: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = dict(DEFAULT_MOBILE_CONTROLS)
+    normalized.update(controls)
+    runtime_mode = str(normalized.get("runtime_mode", "paper")).strip().lower()
+    engine_mode = str(normalized.get("engine_mode", "SAFE")).strip().upper()
+    normalized["runtime_mode"] = runtime_mode if runtime_mode in {"paper", "live"} else "paper"
+    normalized["engine_mode"] = engine_mode if engine_mode in ENGINE_MODES else "SAFE"
+    normalized["orders_enabled"] = bool(normalized.get("orders_enabled", True))
+    normalized["updated_utc"] = datetime.now(timezone.utc).isoformat()
+
+    MOBILE_CONTROL_FILE.parent.mkdir(parents=True, exist_ok=True)
+    MOBILE_CONTROL_FILE.write_text(json.dumps(normalized, indent=2), encoding="utf-8")
+    return normalized
+
+
+def _update_mobile_controls(form: Dict[str, str]) -> Dict[str, Any]:
+    return save_mobile_controls(
+        {
+            "runtime_mode": form.get("runtime_mode", "paper"),
+            "orders_enabled": form.get("orders_enabled", "off") == "on",
+            "engine_mode": form.get("engine_mode", "SAFE"),
+        }
+    )
+
+
+def _system_status(user_ctx: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    controls = load_mobile_controls()
+    broker_ready = _mobile_live_orders_enabled()
+    return {
+        "runtime_mode": controls["runtime_mode"],
+        "system_live": controls["runtime_mode"] == "live",
+        "orders_enabled": bool(controls["orders_enabled"]),
+        "engine_mode": controls["engine_mode"],
+        "broker_live_ready": broker_ready,
+        "broker_live_gate": "READY" if broker_ready else "OFF",
+        "can_trade": _can_submit_trade(user_ctx or {}),
+        "can_manage_controls": _can_manage_mobile_controls(user_ctx or {}),
+        "can_manage_users": can_manage_users(user_ctx or {}),
+    }
+
+
+def _status_strip(user_ctx: Optional[Dict[str, Any]] = None) -> str:
+    status = _system_status(user_ctx)
+    role = html.escape(str((user_ctx or {}).get("role", "SIGNED_OUT")))
+    system_mode = "LIVE" if status["system_live"] else "PAPER"
+    order_state = "ENABLED" if status["orders_enabled"] else "DISABLED"
+    trade_state = "TRADE AUTH" if status["can_trade"] else "VIEW AUTH"
+    return f"""
+      <section class="system-strip" aria-label="CSS system status">
+        <span>System {system_mode}</span>
+        <span>Engine {html.escape(str(status['engine_mode']))}</span>
+        <span>Orders {order_state}</span>
+        <span>Broker Gate {html.escape(str(status['broker_live_gate']))}</span>
+        <span>{role}</span>
+        <span>{trade_state}</span>
+      </section>
+    """
+
+
+def _top_nav(user_ctx: Dict[str, Any], active: str) -> str:
+    links = []
+    if active != "dashboard":
+        links.append('<a class="button-link" href="/dashboard">Dashboard</a>')
+    if active != "trade" and _can_submit_trade(user_ctx):
+        links.append('<a class="button-link" href="/trade">Trade</a>')
+    if active != "controls" and _can_manage_mobile_controls(user_ctx):
+        links.append('<a class="button-link" href="/controls">Controls</a>')
+    if active != "users" and can_manage_users(user_ctx):
+        links.append('<a class="button-link" href="/users">Users</a>')
+    links.append(
+        '<form method="post" action="/logout"><button class="ghost" type="submit">Logout</button></form>'
+    )
+    return "\n".join(links)
+
+
+def _header(title: str, user_ctx: Dict[str, Any], active: str) -> str:
+    return f"""
+      <header class="mobile-topbar">
+        <div>
+          <p class="eyebrow">Capital Strata Systems</p>
+          <h1>{html.escape(title)}</h1>
+        </div>
+        <nav class="top-actions" aria-label="Mobile controls">
+          {_top_nav(user_ctx, active)}
+        </nav>
+      </header>
+      {_status_strip(user_ctx)}
+    """
+
+
+def _identity_strip(user_ctx: Dict[str, Any], extra: str = "") -> str:
+    safe_name = html.escape(str(user_ctx.get("display_name", "CSS User")))
+    safe_role = html.escape(str(user_ctx.get("role", "VIEWER")))
+    safe_user_id = html.escape(str(user_ctx.get("user_id", "")))
+    extra_markup = f"<span>{html.escape(extra)}</span>" if extra else ""
+    return f"""
+      <section class="identity-strip">
+        <span>{safe_name}</span>
+        <span>{safe_role}</span>
+        <span>ID {safe_user_id}</span>
+        {extra_markup}
+      </section>
+    """
+
+
+def _can_submit_trade(user_ctx: Dict[str, Any]) -> bool:
+    role = _normalize_role(user_ctx.get("role", ""))
+    if role == "SUPER_USER":
+        return True
+    return _permission_allowed(role, "submit_trade") or _permission_allowed(role, "place_trade")
+
+
+def _can_manage_mobile_controls(user_ctx: Dict[str, Any]) -> bool:
+    role = _normalize_role(user_ctx.get("role", ""))
+    return role == "SUPER_USER" or _permission_allowed(role, "manage_system")
+
+
+def _permission_allowed(role: str, action: str) -> bool:
+    try:
+        return bool(PermissionEngine().check(role, action).allowed)
+    except Exception:
+        return False
+
+
+def _normalize_role(value: Any) -> str:
+    return str(value or "").strip().upper().replace(" ", "_").replace("-", "_")
+
+
+def _selected(value: str, current: str) -> str:
+    return " selected" if str(value).lower() == str(current).lower() else ""
+
+
+def _checked(value: bool) -> str:
+    return " checked" if value else ""
+
+
 def _login_page(message: str = "", status: str = "info") -> str:
     return _page(
         "Sign On",
@@ -332,17 +607,18 @@ def _login_page(message: str = "", status: str = "info") -> str:
             <div class="policy-row">
               <span>Auth Required</span>
               <span>Timed Lockouts</span>
-              <span>Read Only</span>
+              <span>Role Authority</span>
             </div>
           </section>
 
           <section class="form-panel" aria-label="Sign on form">
             <h2>Sign On</h2>
             <p class="muted">Use your CSS user ID and password.</p>
+            {_status_strip(None)}
             {_status_markup(message, status)}
             <form method="post" action="/login" autocomplete="on">
               <label for="user_id">User ID</label>
-              <input id="user_id" name="user_id" inputmode="numeric" pattern="[0-9]*" value="00000" required>
+              <input id="user_id" name="user_id" inputmode="numeric" pattern="[0-9]*" autocomplete="username" required>
 
               <label for="password">Password</label>
               <input id="password" name="password" type="password" required>
@@ -363,6 +639,7 @@ def _password_change_page(message: str = "", status: str = "info") -> str:
           <section class="form-panel" aria-label="Password change form">
             <h2>Password Update</h2>
             <p class="muted">Initial or expired passwords must be changed now.</p>
+            {_status_strip(None)}
             {_status_markup(message, status)}
             <form method="post" action="/password-change" autocomplete="off">
               <label for="new_password">New Password</label>
@@ -381,39 +658,23 @@ def _password_change_page(message: str = "", status: str = "info") -> str:
 
 def _dashboard_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
     dashboard_text = _mobile_dashboard_text(user_ctx, session)
-    safe_name = html.escape(str(user_ctx.get("display_name", "CSS User")))
-    safe_role = html.escape(str(user_ctx.get("role", "VIEWER")))
-    safe_user_id = html.escape(str(user_ctx.get("user_id", "")))
+    status = _system_status(user_ctx)
+    system_mode = "Live" if status["system_live"] else "Paper"
+    order_state = "Enabled" if status["orders_enabled"] else "Disabled"
+    broker_gate = "Ready" if status["broker_live_ready"] else "Off"
 
     return _page(
         "Dashboard",
         f"""
         <main class="dashboard-shell">
-          <header class="mobile-topbar">
-            <div>
-              <p class="eyebrow">Capital Strata Systems</p>
-              <h1>Dashboard</h1>
-            </div>
-            <nav class="top-actions" aria-label="Mobile controls">
-              <a class="button-link" href="/trade">Trade</a>
-              <form method="post" action="/logout">
-                <button class="ghost" type="submit">Logout</button>
-              </form>
-            </nav>
-          </header>
-
-          <section class="identity-strip">
-            <span>{safe_name}</span>
-            <span>{safe_role}</span>
-            <span>ID {safe_user_id}</span>
-            <span>Mobile Full Access</span>
-          </section>
+          {_header("Dashboard", user_ctx, "dashboard")}
+          {_identity_strip(user_ctx, "Mobile Role Access")}
 
           <section class="metric-grid" aria-label="Dashboard summary">
-            <article><strong>Mode</strong><span>Paper</span></article>
-            <article><strong>Orders</strong><span>Governed</span></article>
-            <article><strong>Gate</strong><span>Authenticated</span></article>
-            <article><strong>Runtime</strong><span>Mobile</span></article>
+            <article><strong>System</strong><span>{system_mode}</span></article>
+            <article><strong>Engine</strong><span>{html.escape(str(status['engine_mode']))}</span></article>
+            <article><strong>Orders</strong><span>{order_state}</span></article>
+            <article><strong>Broker Gate</strong><span>{broker_gate}</span></article>
           </section>
 
           <section class="terminal-panel" aria-label="Dashboard output">
@@ -425,6 +686,10 @@ def _dashboard_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
 
 
 def _mobile_dashboard_text(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
+    controls = load_mobile_controls()
+    runtime_mode = str(controls["runtime_mode"])
+    engine_mode = str(controls["engine_mode"])
+    orders_enabled = bool(controls["orders_enabled"])
     return DashboardRuntimeBootstrap().run(
         account_payload={
             "cash_balance": 10000.00,
@@ -434,7 +699,7 @@ def _mobile_dashboard_text(user_ctx: Dict[str, Any], session: Dict[str, Any]) ->
             "available_margin": 5000.00,
             "currency": "USD",
             "broker": "MOBILE",
-            "account_mode": "paper",
+            "account_mode": runtime_mode,
         },
         positions_payload={
             "positions": [
@@ -473,7 +738,7 @@ def _mobile_dashboard_text(user_ctx: Dict[str, Any], session: Dict[str, Any]) ->
             "momentum_state": "POSITIVE",
             "pressure_state": "BUY_PRESSURE",
             "acceleration_state": "STABLE",
-            "regime_state": "MOBILE_FULL_ACCESS",
+            "regime_state": f"MOBILE_{runtime_mode.upper()}",
             "spread_state": "TIGHT",
             "execution_cost_state": "MOBILE_GOVERNED",
             "signal_confluence_state": "CONFIRMED",
@@ -484,11 +749,14 @@ def _mobile_dashboard_text(user_ctx: Dict[str, Any], session: Dict[str, Any]) ->
             "defensive_mode_active": False,
             "unified_trade_gate_active": True,
             "audit_enabled": True,
-            "last_governance_event": "Mobile full-access dashboard session authenticated",
+            "last_governance_event": (
+                f"Mobile dashboard authenticated; mode={runtime_mode}; "
+                f"orders={'enabled' if orders_enabled else 'disabled'}"
+            ),
         },
         risk_payload={
             "risk_state": "AUTHENTICATED",
-            "gate_status": "MOBILE_GOVERNED_ACCESS",
+            "gate_status": f"MOBILE_{runtime_mode.upper()}_ACCESS",
             "current_drawdown_pct": 0.35,
             "max_drawdown_pct": 2.00,
             "daily_loss_limit": 500.00,
@@ -497,7 +765,7 @@ def _mobile_dashboard_text(user_ctx: Dict[str, Any], session: Dict[str, Any]) ->
             "risk_limits_breached": [],
         },
         execution_payload={
-            "execution_state": "AUTHORIZED_MOBILE",
+            "execution_state": "AUTHORIZED_MOBILE" if orders_enabled else "MOBILE_ORDERS_DISABLED",
             "accepted_trade_count": 0,
             "rejected_trade_count": 0,
             "pending_trade_count": 0,
@@ -508,19 +776,178 @@ def _mobile_dashboard_text(user_ctx: Dict[str, Any], session: Dict[str, Any]) ->
             "avg_slippage_bps": 0.00,
             "avg_spread_bps": 0.00,
             "execution_cost_state": "GOVERNED_BY_CSS",
-            "last_execution_event": "Phone dashboard has governed execution controls",
+            "last_execution_event": "Phone dashboard is governed by mobile runtime controls",
         },
         session_payload={
             "session_id": "MOBILE-SESSION",
             "user_id": str(user_ctx.get("user_id", "mobile_user")),
             "role": str(user_ctx.get("role", "VIEWER")),
             "cycle_number": 1,
-            "engine_mode": "SAFE",
-            "live_or_paper": "paper",
+            "engine_mode": engine_mode,
+            "live_or_paper": runtime_mode,
         },
         diagnostics_payload={
             "message": f"Mobile session created={int(float(session.get('created', 0)))}"
         },
+    )
+
+
+def _controls_page(
+    user_ctx: Dict[str, Any],
+    message: str = "",
+    status: str = "info",
+) -> str:
+    controls = load_mobile_controls()
+    can_manage = _can_manage_mobile_controls(user_ctx)
+    disabled = "" if can_manage else " disabled"
+    submit_markup = "<button type=\"submit\">Save Controls</button>" if can_manage else ""
+    runtime_mode = str(controls["runtime_mode"])
+    order_value = "on" if controls["orders_enabled"] else "off"
+    engine_mode = str(controls["engine_mode"])
+    broker_gate = str(_system_status(user_ctx)["broker_live_gate"])
+    return _page(
+        "System Controls",
+        f"""
+        <main class="dashboard-shell">
+          {_header("System Controls", user_ctx, "controls")}
+          {_identity_strip(user_ctx, "Control Authority" if can_manage else "View Only")}
+          {_status_markup(message, status)}
+
+          <section class="form-panel trade-form-panel" aria-label="Mobile runtime controls">
+            <h2>Runtime Controls</h2>
+            <p class="muted">Mode and order state apply to all mobile trade tickets for authenticated users.</p>
+            <form method="post" action="/controls" autocomplete="off">
+              <label for="runtime_mode">System Mode</label>
+              <select id="runtime_mode" name="runtime_mode"{disabled}>
+                <option value="paper"{_selected("paper", runtime_mode)}>Paper</option>
+                <option value="live"{_selected("live", runtime_mode)}>Live</option>
+              </select>
+
+              <label for="orders_enabled">Orders</label>
+              <select id="orders_enabled" name="orders_enabled"{disabled}>
+                <option value="on"{_selected("on", order_value)}>Enabled</option>
+                <option value="off"{_selected("off", order_value)}>Disabled</option>
+              </select>
+
+              <label for="engine_mode">Engine Mode</label>
+              <select id="engine_mode" name="engine_mode"{disabled}>
+                {_engine_mode_options(engine_mode)}
+              </select>
+
+              {submit_markup}
+            </form>
+          </section>
+
+          <section class="metric-grid" aria-label="Control guardrails">
+            <article><strong>Live Broker Gate</strong><span>{html.escape(broker_gate)}</span></article>
+            <article><strong>Live Confirmation</strong><span>Required</span></article>
+            <article><strong>User Gate</strong><span>{'Manage' if can_manage else 'View'}</span></article>
+            <article><strong>Audit</strong><span>On</span></article>
+          </section>
+        </main>
+        """,
+    )
+
+
+def _engine_mode_options(current: str) -> str:
+    return "\n".join(
+        f'<option value="{html.escape(mode)}"{_selected(mode, current)}>{html.escape(mode)}</option>'
+        for mode in ENGINE_MODES
+    )
+
+
+def _users_page(
+    user_ctx: Dict[str, Any],
+    message: str = "",
+    status: str = "info",
+) -> str:
+    users = load_users()
+    rows = "\n".join(_user_row_markup(summary) for summary in list_user_summaries(users))
+    role_options = "\n".join(
+        f'<option value="{html.escape(role)}"{_selected(role, "VIEWER")}>{html.escape(role)}</option>'
+        for role in available_roles()
+    )
+    return _page(
+        "Users",
+        f"""
+        <main class="dashboard-shell">
+          {_header("Users", user_ctx, "users")}
+          {_identity_strip(user_ctx, "SUPER_USER Administration")}
+          {_status_markup(message, status)}
+
+          <section class="data-panel" aria-label="CSS users">
+            <h2>CSS Users</h2>
+            <div class="user-table" role="table" aria-label="Current CSS users">
+              <div class="user-row user-head" role="row">
+                <span>User ID</span><span>Name</span><span>Role</span><span>Unit</span><span>Status</span>
+              </div>
+              {rows}
+            </div>
+          </section>
+
+          <section class="form-panel trade-form-panel" aria-label="Create CSS user form">
+            <h2>Create User</h2>
+            <p class="muted">New users sign on with their assigned user ID, then change the initial password.</p>
+            <form method="post" action="/users" autocomplete="off">
+              <label for="user_id">User ID</label>
+              <input id="user_id" name="user_id" inputmode="numeric" pattern="[0-9]*" required>
+
+              <label for="display_name">Display Name</label>
+              <input id="display_name" name="display_name" required>
+
+              <label for="role">Role</label>
+              <select id="role" name="role">{role_options}</select>
+
+              <label for="initial_password">Initial Password</label>
+              <input id="initial_password" name="initial_password" type="password" required>
+
+              <label for="unit_code">Unit Code</label>
+              <input id="unit_code" name="unit_code" value="CORE" required>
+
+              <label for="home_branch">Home Branch</label>
+              <input id="home_branch" name="home_branch" value="HQ" required>
+
+              <label class="checkbox-row">
+                <input name="must_change_password" type="checkbox"{_checked(True)}>
+                <span>Require password change at first sign-on</span>
+              </label>
+
+              <button type="submit">Create User</button>
+            </form>
+          </section>
+        </main>
+        """,
+    )
+
+
+def _user_row_markup(summary: Dict[str, Any]) -> str:
+    locked = "Locked" if summary.get("locked") else "Active"
+    password = "Password Change" if summary.get("must_change_password") else "Current"
+    safe_user_id = html.escape(str(summary.get("user_id", "")))
+    safe_name = html.escape(str(summary.get("display_name", "")))
+    safe_role = html.escape(str(summary.get("role", "")))
+    safe_unit = html.escape(str(summary.get("unit_code", "")))
+    return f"""
+      <div class="user-row" role="row">
+        <span>{safe_user_id}</span>
+        <span>{safe_name}</span>
+        <span>{safe_role}</span>
+        <span>{safe_unit}</span>
+        <span>{locked} / {password}</span>
+      </div>
+    """
+
+
+def _access_denied_page(user_ctx: Dict[str, Any], message: str) -> str:
+    return _page(
+        "Access Denied",
+        f"""
+        <main class="dashboard-shell">
+          {_header("Access Denied", user_ctx, "access")}
+          {_identity_strip(user_ctx, "Authority Restricted")}
+          {_status_markup(message, "error")}
+        </main>
+        """,
     )
 
 
@@ -529,7 +956,6 @@ def _trade_ticket_page(
     result: Optional[Dict[str, Any]] = None,
     status: str = "info",
 ) -> str:
-    safe_name = html.escape(str(user_ctx.get("display_name", "CSS User")))
     result_markup = ""
     if result:
         safe_status = "success" if status == "success" else "error"
@@ -540,41 +966,20 @@ def _trade_ticket_page(
             "</section>"
         )
 
-    live_flag = "ON" if _mobile_live_orders_enabled() else "OFF"
-    return _page(
-        "Trade Ticket",
-        f"""
-        <main class="dashboard-shell">
-          <header class="mobile-topbar">
-            <div>
-              <p class="eyebrow">Capital Strata Systems</p>
-              <h1>Trade Ticket</h1>
-            </div>
-            <nav class="top-actions" aria-label="Mobile controls">
-              <a class="button-link" href="/dashboard">Dashboard</a>
-              <form method="post" action="/logout">
-                <button class="ghost" type="submit">Logout</button>
-              </form>
-            </nav>
-          </header>
-
-          <section class="identity-strip">
-            <span>{safe_name}</span>
-            <span>Authenticated Access</span>
-            <span>Coinbase Live Flag {live_flag}</span>
-          </section>
-
-          {result_markup}
-
+    controls = load_mobile_controls()
+    system_mode = str(controls["runtime_mode"])
+    orders_enabled = bool(controls["orders_enabled"])
+    trade_allowed = _can_submit_trade(user_ctx)
+    live_flag = "READY" if _mobile_live_orders_enabled() else "OFF"
+    if trade_allowed:
+        trade_form_markup = f"""
           <section class="form-panel trade-form-panel" aria-label="Mobile trade ticket form">
             <h2>Submit Trade Ticket</h2>
-            <p class="muted">Paper tickets are recorded immediately. Live tickets require broker credentials, CSS live flags, and confirmation.</p>
+            <p class="muted">Tickets use the current mobile system mode. Live tickets require broker credentials, CSS live flags, and confirmation.</p>
             <form method="post" action="/trade" autocomplete="off">
-              <label for="mode">Mode</label>
-              <select id="mode" name="mode">
-                <option value="paper">Paper</option>
-                <option value="live">Live</option>
-              </select>
+              <label for="mode_display">System Mode</label>
+              <input id="mode_display" value="{html.escape(system_mode.upper())}" disabled>
+              <input name="mode" type="hidden" value="{html.escape(system_mode)}">
 
               <label for="broker">Broker</label>
               <select id="broker" name="broker">
@@ -612,6 +1017,32 @@ def _trade_ticket_page(
               <button type="submit">Submit Ticket</button>
             </form>
           </section>
+        """
+    else:
+        trade_form_markup = (
+            '<section class="status error">'
+            "<strong>Trading authority required.</strong>"
+            "<p>Your current CSS role can view the system but cannot submit trade tickets.</p>"
+            "</section>"
+        )
+
+    return _page(
+        "Trade Ticket",
+        f"""
+        <main class="dashboard-shell">
+          {_header("Trade Ticket", user_ctx, "trade")}
+          {_identity_strip(user_ctx, f"Broker Gate {live_flag}")}
+
+          <section class="metric-grid" aria-label="Trade controls">
+            <article><strong>Ticket Mode</strong><span>{html.escape(system_mode.title())}</span></article>
+            <article><strong>Orders</strong><span>{'Enabled' if orders_enabled else 'Disabled'}</span></article>
+            <article><strong>Authority</strong><span>{'Submit' if trade_allowed else 'View'}</span></article>
+            <article><strong>Live Confirm</strong><span>EXECUTE</span></article>
+          </section>
+
+          {result_markup}
+
+          {trade_form_markup}
         </main>
         """,
     )
@@ -620,9 +1051,33 @@ def _trade_ticket_page(
 def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) -> Dict[str, Any]:
     load_local_env()
 
-    ticket = _build_mobile_ticket(user_ctx, form)
+    controls = load_mobile_controls()
+    ticket = _build_mobile_ticket(user_ctx, form, controls=controls)
     mode = ticket["mode"]
     broker = ticket["broker"]
+
+    if not _can_submit_trade(user_ctx):
+        result = {
+            "ok": False,
+            "status": "MOBILE_AUTHORITY_DENIED",
+            "ticket": ticket,
+            "broker_response": {
+                "role": str(user_ctx.get("role", "")),
+                "required": "submit_trade or place_trade",
+            },
+        }
+        _record_mobile_event(result)
+        return result
+
+    if not bool(controls.get("orders_enabled", True)):
+        result = {
+            "ok": False,
+            "status": "MOBILE_ORDERS_DISABLED",
+            "ticket": ticket,
+            "broker_response": None,
+        }
+        _record_mobile_event(result)
+        return result
 
     if mode == "paper":
         result = {
@@ -664,8 +1119,13 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
     return result
 
 
-def _build_mobile_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) -> Dict[str, Any]:
-    mode = str(form.get("mode", "paper")).strip().lower()
+def _build_mobile_ticket(
+    user_ctx: Dict[str, Any],
+    form: Dict[str, str],
+    controls: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    active_controls = controls if controls is not None else load_mobile_controls()
+    mode = str(active_controls.get("runtime_mode", form.get("mode", "paper"))).strip().lower()
     if mode not in {"paper", "live"}:
         mode = "paper"
 
@@ -692,6 +1152,8 @@ def _build_mobile_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) -> Dict
         "side": side,
         "amount": amount,
         "qty": qty,
+        "engine_mode": str(active_controls.get("engine_mode", "SAFE")),
+        "orders_enabled": bool(active_controls.get("orders_enabled", True)),
         "source": "CSS_MOBILE",
     }
 
@@ -1050,6 +1512,17 @@ input {
   padding: 14px 13px;
   border-radius: 0;
 }
+input[type="checkbox"] {
+  width: auto;
+  min-width: 18px;
+  min-height: 18px;
+  padding: 0;
+}
+input:disabled,
+select:disabled {
+  color: var(--muted);
+  background: #f6f9fa;
+}
 select {
   width: 100%;
   border: 1px solid var(--line);
@@ -1148,6 +1621,22 @@ button.ghost {
   font-size: 13px;
   font-weight: 700;
 }
+.system-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  border: 1px solid var(--line);
+  background: #edf6f7;
+  padding: 10px;
+  margin-bottom: 14px;
+}
+.system-strip span {
+  padding: 7px 9px;
+  background: #ffffff;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+}
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1184,6 +1673,42 @@ button.ghost {
 }
 .trade-form-panel button {
   grid-column: 1 / -1;
+}
+.checkbox-row {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+}
+.data-panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  padding: 18px;
+  margin-bottom: 14px;
+}
+.user-table {
+  display: grid;
+  gap: 0;
+  border: 1px solid var(--line);
+  overflow-x: auto;
+}
+.user-row {
+  display: grid;
+  grid-template-columns: 110px minmax(160px, 1fr) 160px 110px 150px;
+  min-width: 690px;
+  border-bottom: 1px solid var(--line);
+}
+.user-row:last-child {
+  border-bottom: 0;
+}
+.user-row span {
+  padding: 11px 10px;
+  font-size: 13px;
+}
+.user-head {
+  background: var(--field);
+  font-weight: 700;
 }
 .status.success {
   color: var(--success);
@@ -1233,6 +1758,9 @@ pre {
   }
   .trade-form-panel form {
     grid-template-columns: 1fr;
+  }
+  .system-strip span {
+    flex: 1 1 42%;
   }
 }
 """

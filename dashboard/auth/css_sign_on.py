@@ -6,7 +6,7 @@ import json
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -23,6 +23,20 @@ PASSWORD_MAX_AGE_DAYS = 30
 PASSWORD_HISTORY_LIMIT = 2
 LOCKOUT_START_ATTEMPT = 3
 LOCKOUT_SCHEDULE_SECONDS = (60, 300, 900, 1800, 3600)
+FALLBACK_CSS_ROLES = (
+    "ADMIN",
+    "SUPER_USER",
+    "TRADER",
+    "TREASURY",
+    "HEAD_TREASURY",
+    "RISK",
+    "HEAD_RISK",
+    "FINCON",
+    "AUDIT",
+    "TECH",
+    "VIEWER",
+)
+USER_ADMIN_ROLES = {"SUPER_USER"}
 
 CSS_AUTH_PANEL_WIDTH = 78
 
@@ -151,6 +165,110 @@ def load_users(users_file: Path = USERS_FILE) -> Dict[str, Any]:
 def save_users(users: Dict[str, Any], users_file: Path = USERS_FILE) -> None:
     users_file.parent.mkdir(parents=True, exist_ok=True)
     users_file.write_text(json.dumps(users, indent=2), encoding="utf-8")
+
+
+def available_roles() -> Tuple[str, ...]:
+    try:
+        from backend.security.permissions import PermissionEngine
+
+        return tuple(sorted(PermissionEngine().permissions.keys()))
+    except Exception:
+        return tuple(sorted(FALLBACK_CSS_ROLES))
+
+
+def can_manage_users(user_ctx: Dict[str, Any]) -> bool:
+    role = normalize_role(user_ctx.get("role", ""))
+    return role in USER_ADMIN_ROLES
+
+
+def create_user(
+    users: Dict[str, Any],
+    actor_ctx: Dict[str, Any],
+    user_id: str,
+    display_name: str,
+    role: str,
+    initial_password: str,
+    unit_code: str = "CORE",
+    home_branch: str = "HQ",
+    must_change_password: bool = True,
+) -> Dict[str, Any]:
+    if not can_manage_users(actor_ctx):
+        raise AuthFailure("USER_ADMIN_DENIED", "Only a CSS super user can create users.")
+
+    normalized_user_id = normalize_user_id(user_id)
+    if not normalized_user_id:
+        raise PasswordValidationError("User ID must be one to five numeric digits.")
+
+    if normalized_user_id in users:
+        raise PasswordValidationError(f"User ID {normalized_user_id} already exists.")
+
+    normalized_role = normalize_role(role)
+    if normalized_role not in available_roles():
+        raise PasswordValidationError(f"Role {normalized_role or role} is not recognized by CSS.")
+
+    clean_display_name = str(display_name or "").strip()
+    if not clean_display_name:
+        raise PasswordValidationError("Display name cannot be blank.")
+
+    validate_initial_password(initial_password)
+
+    user_record = {
+        "user_id": normalized_user_id,
+        "display_name": clean_display_name,
+        "role": normalized_role,
+        "unit_code": str(unit_code or "CORE").strip().upper() or "CORE",
+        "home_branch": str(home_branch or "HQ").strip().upper() or "HQ",
+        "password_hash": hash_password(initial_password),
+        "must_change_password": bool(must_change_password),
+        "last_password_change": None,
+        "password_history": [],
+        "failed_attempts": 0,
+        "locked": False,
+        "locked_at": None,
+        "lockout_until": None,
+        "lockout_seconds": 0,
+        "lockout_started_at": None,
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "created_by": str(actor_ctx.get("user_id", "")),
+    }
+    users[normalized_user_id] = user_record
+    return build_user_context(user_record, normalized_user_id)
+
+
+def list_user_summaries(users: Dict[str, Any]) -> Tuple[Dict[str, Any], ...]:
+    summaries = []
+    for user_id, record in sorted(users.items()):
+        if not isinstance(record, dict):
+            continue
+        normalized_user_id = normalize_user_id(record.get("user_id", user_id))
+        summaries.append(
+            {
+                "user_id": normalized_user_id,
+                "display_name": str(record.get("display_name", "CSS User")),
+                "role": normalize_role(record.get("role", "VIEWER")) or "VIEWER",
+                "unit_code": str(record.get("unit_code", "CORE")),
+                "home_branch": str(record.get("home_branch", "HQ")),
+                "must_change_password": bool(record.get("must_change_password", False)),
+                "locked": bool(record.get("locked", False)),
+                "lockout_until": record.get("lockout_until"),
+            }
+        )
+    return tuple(summaries)
+
+
+def validate_initial_password(password: str) -> None:
+    if not password:
+        raise PasswordValidationError("Initial password cannot be blank.")
+
+    if len(password) < MIN_PASSWORD_LENGTH:
+        raise PasswordValidationError(
+            f"Initial password must be at least {MIN_PASSWORD_LENGTH} characters."
+        )
+
+    if password == INITIAL_ADMIN_PASSWORD:
+        raise PasswordValidationError(
+            "Initial password cannot use the bootstrap administrator default password."
+        )
 
 
 def authenticate_credentials(users: Dict[str, Any], user_id: str, password: str) -> Dict[str, Any]:
@@ -717,7 +835,7 @@ def await_gui_login(users: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
             font=subtitle_font,
         ).grid(row=1, column=0, sticky="w", pady=(8, 30))
 
-        user_var = tk.StringVar(value=INITIAL_ADMIN_ID)
+        user_var = tk.StringVar()
         password_var = tk.StringVar()
         show_var = tk.BooleanVar(value=False)
 
@@ -873,6 +991,10 @@ def normalize_user_id(value: Any) -> str:
     if len(raw) > 5:
         return ""
     return raw.zfill(5)
+
+
+def normalize_role(value: Any) -> str:
+    return str(value or "").strip().upper().replace(" ", "_").replace("-", "_")
 
 
 def hash_password(password: str) -> str:
