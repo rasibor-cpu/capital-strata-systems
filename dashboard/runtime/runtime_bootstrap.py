@@ -23,6 +23,7 @@ class DashboardRuntimeBootstrap:
     def run(
         self,
         account_payload: Dict[str, Any] | None = None,
+        broker_payload: Dict[str, Any] | None = None,
         positions_payload: Dict[str, Any] | None = None,
         market_payload: Dict[str, Any] | None = None,
         governance_payload: Dict[str, Any] | None = None,
@@ -33,6 +34,7 @@ class DashboardRuntimeBootstrap:
     ) -> str:
         state = self.state_factory.build(
             account_payload=account_payload,
+            broker_payload=broker_payload,
             positions_payload=positions_payload,
             market_payload=market_payload,
             governance_payload=governance_payload,

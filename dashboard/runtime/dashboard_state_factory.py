@@ -4,6 +4,7 @@ from typing import Any, Dict
 
 from dashboard.runtime.dashboard_state import DashboardState
 from dashboard.runtime.state_builders.account_state_builder import AccountStateBuilder
+from dashboard.runtime.state_builders.broker_state_builder import BrokerStateBuilder
 from dashboard.runtime.state_builders.governance_state_builder import GovernanceStateBuilder
 from dashboard.runtime.state_builders.market_state_builder import MarketStateBuilder
 from dashboard.runtime.state_builders.position_state_builder import PositionStateBuilder
@@ -26,6 +27,7 @@ class DashboardStateFactory:
 
     def __init__(self) -> None:
         self.account_builder = AccountStateBuilder()
+        self.broker_builder = BrokerStateBuilder()
         self.governance_builder = GovernanceStateBuilder()
         self.market_builder = MarketStateBuilder()
         self.position_builder = PositionStateBuilder()
@@ -36,6 +38,7 @@ class DashboardStateFactory:
     def build(
         self,
         account_payload: Dict[str, Any] | None = None,
+        broker_payload: Dict[str, Any] | None = None,
         positions_payload: Dict[str, Any] | None = None,
         market_payload: Dict[str, Any] | None = None,
         governance_payload: Dict[str, Any] | None = None,
@@ -46,9 +49,29 @@ class DashboardStateFactory:
     ) -> DashboardState:
 
         dashboard_state = DashboardState()
+        account = account_payload or {}
 
         dashboard_state = self.account_builder.build(
-            account_payload=account_payload or {},
+            account_payload=account,
+            state=dashboard_state,
+        )
+
+        broker = broker_payload or {
+            "selected_broker": account.get(
+                "selected_broker",
+                account.get("broker", "NONE"),
+            ),
+            "broker_mode": account.get(
+                "broker_mode",
+                account.get("account_mode", "paper"),
+            ),
+            "connected": account.get("connected", False),
+            "live_trading_enabled": account.get("live_trading_enabled", False),
+            "last_heartbeat": account.get("last_heartbeat", ""),
+        }
+
+        dashboard_state = self.broker_builder.build(
+            broker_payload=broker,
             state=dashboard_state,
         )
 
@@ -71,6 +94,12 @@ class DashboardStateFactory:
             "total_equity": dashboard_state.total_equity,
             "equity": dashboard_state.total_equity,
             "balance": dashboard_state.cash_balance,
+            "buying_power": account.get("buying_power", 0.0),
+            "margin_used": account.get("margin_used", 0.0),
+            "available_margin": account.get("available_margin", 0.0),
+            "currency": account.get("currency", "USD"),
+            "broker": dashboard_state.broker_state.selected_broker,
+            "account_mode": dashboard_state.broker_state.broker_mode,
         }
 
         pnl_summary = self.pnl_summary_builder.build(
@@ -88,6 +117,8 @@ class DashboardStateFactory:
             execution_payload=execution_payload,
         )
 
+        dashboard_state.last_scan_results["account_summary"] = account_summary_state
+        dashboard_state.last_scan_results["pnl_summary"] = pnl_summary
         dashboard_state.last_scan_results["risk_summary"] = risk_summary
         dashboard_state.last_scan_results["execution_summary"] = execution_summary
 
