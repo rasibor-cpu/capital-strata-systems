@@ -4,6 +4,7 @@ from typing import Any, Dict
 
 from dashboard.runtime.dashboard_state import DashboardState
 from dashboard.runtime.state_builders.account_state_builder import AccountStateBuilder
+from dashboard.runtime.state_builders.market_state_builder import MarketStateBuilder
 from dashboard.runtime.state_builders.position_state_builder import PositionStateBuilder
 from dashboard.runtime.summary_builders.pnl_summary_builder import PnLSummaryBuilder
 
@@ -20,6 +21,7 @@ class DashboardStateFactory:
 
     def __init__(self) -> None:
         self.account_builder = AccountStateBuilder()
+        self.market_builder = MarketStateBuilder()
         self.position_builder = PositionStateBuilder()
         self.pnl_summary_builder = PnLSummaryBuilder()
 
@@ -27,6 +29,7 @@ class DashboardStateFactory:
         self,
         account_payload: Dict[str, Any] | None = None,
         positions_payload: Dict[str, Any] | None = None,
+        market_payload: Dict[str, Any] | None = None,
         session_payload: Dict[str, Any] | None = None,
         diagnostics_payload: Dict[str, Any] | None = None,
     ) -> DashboardState:
@@ -35,6 +38,11 @@ class DashboardStateFactory:
 
         dashboard_state = self.account_builder.build(
             account_payload=account_payload or {},
+            state=dashboard_state,
+        )
+
+        dashboard_state = self.market_builder.build(
+            market_payload=market_payload or {},
             state=dashboard_state,
         )
 
