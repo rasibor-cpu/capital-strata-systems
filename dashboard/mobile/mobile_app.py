@@ -677,6 +677,8 @@ def _dashboard_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
             <article><strong>Broker Gate</strong><span>{broker_gate}</span></article>
           </section>
 
+          {_recent_tickets_panel()}
+
           <section class="terminal-panel" aria-label="Dashboard output">
             <pre>{html.escape(dashboard_text)}</pre>
           </section>
@@ -920,6 +922,67 @@ def _users_page(
     )
 
 
+def _recent_tickets_panel(limit: int = 5) -> str:
+    events = _recent_mobile_events(limit)
+    if not events:
+        rows = '<div class="ticket-row"><span>No mobile tickets yet.</span></div>'
+    else:
+        rows = "\n".join(_ticket_row_markup(event) for event in events)
+
+    return f"""
+      <section class="data-panel" aria-label="Recent mobile tickets">
+        <h2>Recent Mobile Tickets</h2>
+        <div class="ticket-table">
+          {rows}
+        </div>
+      </section>
+    """
+
+
+def _recent_mobile_events(limit: int = 5) -> tuple[Dict[str, Any], ...]:
+    try:
+        lines = MOBILE_EVENTS_FILE.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return ()
+    except Exception:
+        return ()
+
+    events = []
+    for line in reversed(lines):
+        try:
+            item = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(item, dict):
+            events.append(item)
+        if len(events) >= limit:
+            break
+    return tuple(events)
+
+
+def _ticket_row_markup(event: Dict[str, Any]) -> str:
+    ticket = event.get("ticket") if isinstance(event.get("ticket"), dict) else {}
+    status = str(event.get("status", "UNKNOWN"))
+    ok = bool(event.get("ok", False))
+    css_class = "ok" if ok else "blocked"
+    ticket_id = str(ticket.get("ticket_id", ""))[:8] or "N/A"
+    mode = str(ticket.get("mode", "")).upper() or "N/A"
+    broker = str(ticket.get("broker", "")) or "N/A"
+    symbol = str(ticket.get("symbol", "")) or "N/A"
+    side = str(ticket.get("side", "")) or "N/A"
+    amount = ticket.get("amount", "")
+    return f"""
+      <div class="ticket-row {css_class}">
+        <span>{html.escape(status)}</span>
+        <span>{html.escape(mode)}</span>
+        <span>{html.escape(broker)}</span>
+        <span>{html.escape(symbol)}</span>
+        <span>{html.escape(side)} {html.escape(str(amount))}</span>
+        <span>{html.escape(ticket_id)}</span>
+      </div>
+    """
+
+
 def _user_row_markup(summary: Dict[str, Any]) -> str:
     locked = "Locked" if summary.get("locked") else "Active"
     password = "Password Change" if summary.get("must_change_password") else "Current"
@@ -951,6 +1014,85 @@ def _access_denied_page(user_ctx: Dict[str, Any], message: str) -> str:
     )
 
 
+def _trade_readiness_panel(user_ctx: Dict[str, Any]) -> str:
+    status = _system_status(user_ctx)
+    messages = []
+    kind = "success"
+
+    if not status["can_trade"]:
+        kind = "error"
+        messages.append("Your CSS role can view this screen but cannot submit trade tickets.")
+
+    if not status["orders_enabled"]:
+        kind = "error"
+        messages.append("Mobile order submission is disabled in CSS Controls.")
+
+    if status["system_live"] and not status["broker_live_ready"]:
+        kind = "error"
+        messages.append(
+            "System mode is LIVE, but the broker live gate is OFF. Coinbase requires COINBASE_ENABLE_LIVE_ORDERS=true; OANDA requires valid token and account settings."
+        )
+
+    if not status["system_live"]:
+        kind = "info" if kind == "success" else kind
+        messages.append("System mode is PAPER. Tickets will be recorded to the CSS paper ledger, not sent to a broker.")
+
+    if not messages:
+        messages.append("Live trade path is armed. A live ticket still requires the confirmation word EXECUTE.")
+
+    body = " ".join(messages)
+    return f'<section class="status {kind}"><strong>Trade Activation Status</strong><p>{html.escape(body)}</p></section>'
+
+
+def _trade_result_markup(result: Dict[str, Any], status: str) -> str:
+    safe_status = "success" if status == "success" else "error"
+    code = str(result.get("status", "RESULT"))
+    headline = _trade_status_headline(code)
+    return (
+        f'<section class="status trade-result {safe_status}">'
+        f"<strong>{html.escape(headline)}</strong>"
+        f"<p>{html.escape(_trade_status_detail(result))}</p>"
+        f"<pre>{html.escape(json.dumps(_redact_result(result), indent=2))}</pre>"
+        "</section>"
+    )
+
+
+def _trade_status_headline(code: str) -> str:
+    labels = {
+        "PAPER_TICKET_RECORDED": "Paper ticket recorded",
+        "LIVE_CONFIRMATION_REQUIRED": "Live confirmation required",
+        "MOBILE_ORDERS_DISABLED": "Mobile orders are disabled",
+        "MOBILE_AUTHORITY_DENIED": "Trading authority denied",
+        "COINBASE_LIVE_ORDERS_FLAG_OFF": "Coinbase live orders are not enabled",
+        "COINBASE_ORDER_SENT": "Coinbase order sent",
+        "COINBASE_ORDER_FAILED": "Coinbase order failed",
+        "COINBASE_ORDER_SIZE_BLOCKED": "Coinbase order size blocked",
+        "COINBASE_NOT_CONFIGURED": "Coinbase credentials not configured",
+        "OANDA_ORDER_SENT": "OANDA order sent",
+        "OANDA_ORDER_FAILED": "OANDA order failed",
+        "OANDA_NOT_CONFIGURED": "OANDA credentials not configured",
+        "LIVE_BROKER_NOT_SUPPORTED": "Live broker not supported for this ticket",
+    }
+    return labels.get(code, code.replace("_", " ").title())
+
+
+def _trade_status_detail(result: Dict[str, Any]) -> str:
+    code = str(result.get("status", ""))
+    if code == "PAPER_TICKET_RECORDED":
+        return "The ticket was saved in CSS paper mode. No live broker order was sent."
+    if code == "LIVE_CONFIRMATION_REQUIRED":
+        return "Type EXECUTE in the confirmation field and submit again while system mode is LIVE."
+    if code == "COINBASE_LIVE_ORDERS_FLAG_OFF":
+        return "The Coinbase credential check may pass, but live orders remain blocked until the live-order flag is enabled in CSS environment controls."
+    if code == "MOBILE_ORDERS_DISABLED":
+        return "Open Controls as a super user and set Orders to Enabled."
+    if code == "MOBILE_AUTHORITY_DENIED":
+        return "Ask a super user to assign a trading role such as TRADER, TREASURY, HEAD_TREASURY, ADMIN, or SUPER_USER."
+    if bool(result.get("ok")):
+        return "CSS accepted the ticket and recorded the outcome below."
+    return "CSS blocked the ticket. The detail below shows the governing reason."
+
+
 def _trade_ticket_page(
     user_ctx: Dict[str, Any],
     result: Optional[Dict[str, Any]] = None,
@@ -958,13 +1100,7 @@ def _trade_ticket_page(
 ) -> str:
     result_markup = ""
     if result:
-        safe_status = "success" if status == "success" else "error"
-        result_markup = (
-            f'<section class="status {safe_status}">'
-            f"<strong>{html.escape(str(result.get('status', 'RESULT')))}</strong>"
-            f"<pre>{html.escape(json.dumps(_redact_result(result), indent=2))}</pre>"
-            "</section>"
-        )
+        result_markup = _trade_result_markup(result, status)
 
     controls = load_mobile_controls()
     system_mode = str(controls["runtime_mode"])
@@ -1033,6 +1169,8 @@ def _trade_ticket_page(
           {_header("Trade Ticket", user_ctx, "trade")}
           {_identity_strip(user_ctx, f"Broker Gate {live_flag}")}
 
+          {_trade_readiness_panel(user_ctx)}
+
           <section class="metric-grid" aria-label="Trade controls">
             <article><strong>Ticket Mode</strong><span>{html.escape(system_mode.title())}</span></article>
             <article><strong>Orders</strong><span>{'Enabled' if orders_enabled else 'Disabled'}</span></article>
@@ -1043,6 +1181,8 @@ def _trade_ticket_page(
           {result_markup}
 
           {trade_form_markup}
+
+          {_recent_tickets_panel()}
         </main>
         """,
     )
@@ -1074,7 +1214,10 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
             "ok": False,
             "status": "MOBILE_ORDERS_DISABLED",
             "ticket": ticket,
-            "broker_response": None,
+            "broker_response": {
+                "mobile_orders_enabled": False,
+                "required_control": "orders_enabled",
+            },
         }
         _record_mobile_event(result)
         return result
@@ -1084,7 +1227,10 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
             "ok": True,
             "status": "PAPER_TICKET_RECORDED",
             "ticket": ticket,
-            "broker_response": None,
+            "broker_response": {
+                "paper_trade_recorded": True,
+                "live_order_sent": False,
+            },
         }
         _record_mobile_event(result)
         return result
@@ -1094,7 +1240,10 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
             "ok": False,
             "status": "LIVE_CONFIRMATION_REQUIRED",
             "ticket": ticket,
-            "broker_response": None,
+            "broker_response": {
+                "required_confirmation": "EXECUTE",
+                "confirmation_received": bool(str(form.get("confirm", "")).strip()),
+            },
         }
         _record_mobile_event(result)
         return result
@@ -1208,7 +1357,11 @@ def _execute_coinbase_mobile_ticket(ticket: Dict[str, Any]) -> Dict[str, Any]:
             "ok": False,
             "status": "COINBASE_LIVE_ORDERS_FLAG_OFF",
             "ticket": ticket,
-            "broker_response": None,
+            "broker_response": {
+                "coinbase_live_orders_flag": "OFF",
+                "required_env": "COINBASE_ENABLE_LIVE_ORDERS=true",
+                "max_live_order_usd": _coinbase_max_live_order_usd(),
+            },
         }
 
     max_order_usd = _coinbase_max_live_order_usd()
@@ -1578,6 +1731,17 @@ button.ghost {
   border-color: #f0b8b4;
   background: #fff1f0;
 }
+.status.info {
+  color: #24515c;
+  border-color: #b9d9df;
+  background: #eef8fa;
+}
+.status p {
+  margin: 8px 0 0;
+}
+.trade-result {
+  margin-bottom: 14px;
+}
 .dashboard-shell {
   width: min(1120px, 100%);
   margin: 0 auto;
@@ -1710,6 +1874,29 @@ button.ghost {
   background: var(--field);
   font-weight: 700;
 }
+.ticket-table {
+  display: grid;
+  gap: 8px;
+}
+.ticket-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.4fr) 80px 110px minmax(110px, 1fr) minmax(90px, 1fr) 90px;
+  gap: 8px;
+  border: 1px solid var(--line);
+  padding: 10px;
+  background: #fff;
+}
+.ticket-row span {
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.ticket-row.ok {
+  border-left: 5px solid var(--success);
+}
+.ticket-row.blocked {
+  border-left: 5px solid var(--danger);
+}
 .status.success {
   color: var(--success);
   border-color: #a7dfbc;
@@ -1761,6 +1948,9 @@ pre {
   }
   .system-strip span {
     flex: 1 1 42%;
+  }
+  .ticket-row {
+    grid-template-columns: 1fr 1fr;
   }
 }
 """
