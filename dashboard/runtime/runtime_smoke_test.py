@@ -31,6 +31,7 @@ from dashboard.runtime.renderers.market_renderer import MarketRenderer
 from dashboard.runtime.renderers.pnl_renderer import PnLRenderer
 from dashboard.runtime.renderers.risk_renderer import RiskRenderer
 from dashboard.runtime.runtime_bootstrap import DashboardRuntimeBootstrap
+from dashboard.runtime.live_dashboard_payload_adapter import build_dashboard_payloads
 from dashboard.runtime.state_builders.account_state_builder import AccountStateBuilder
 from dashboard.runtime.state_builders.broker_state_builder import BrokerStateBuilder
 from dashboard.runtime.state_builders.governance_state_builder import (
@@ -311,6 +312,30 @@ def validate_demo_runner(failures: List[str]) -> None:
         require(expected in output, f"demo runner missing: {expected}", failures)
 
 
+def validate_live_payload_adapter(
+    payloads: Dict[str, Dict[str, Any]],
+    failures: List[str],
+) -> None:
+    adapted = build_dashboard_payloads(**payloads)
+    output = DashboardRuntimeBootstrap().run(**adapted)
+
+    require(
+        adapted["account_payload"]["broker"] == "DEMO",
+        "live payload adapter account broker mismatch",
+        failures,
+    )
+    require(
+        adapted["positions_payload"]["positions"][0]["symbol"] == "BTC-USD",
+        "live payload adapter position mismatch",
+        failures,
+    )
+    require(
+        "Execution State:         READY" in output,
+        "live payload adapter runtime output mismatch",
+        failures,
+    )
+
+
 def main() -> int:
     failures: List[str] = []
     payloads = build_smoke_payloads()
@@ -319,6 +344,7 @@ def main() -> int:
     validate_hydration_and_rendering(payloads, failures)
     validate_bootstrap(payloads, failures)
     validate_demo_runner(failures)
+    validate_live_payload_adapter(payloads, failures)
 
     if failures:
         print("CSS runtime smoke test FAILED")
@@ -327,7 +353,10 @@ def main() -> int:
         return 1
 
     print("CSS runtime smoke test PASSED")
-    print("Validated: imports, builders, contracts, renderers, bootstrap, demo runner")
+    print(
+        "Validated: imports, builders, contracts, renderers, bootstrap, "
+        "demo runner, live payload adapter"
+    )
     return 0
 
 
