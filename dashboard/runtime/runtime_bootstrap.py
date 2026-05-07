@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from dashboard.runtime.dashboard_hydration_coordinator import (
+    DashboardHydrationCoordinator,
+)
 from dashboard.runtime.dashboard_renderer import DashboardRenderer
-from dashboard.runtime.dashboard_state_factory import DashboardStateFactory
 
 
 class DashboardRuntimeBootstrap:
@@ -11,13 +13,13 @@ class DashboardRuntimeBootstrap:
     PCNRASS-safe dashboard runtime bootstrap.
 
     Purpose:
-    - Connect normalized runtime payloads to the dashboard state factory.
+    - Connect normalized runtime payloads to the hydration coordinator.
     - Render canonical DashboardState through DashboardRenderer.
     - Provide one clean runtime entrypoint for future dashboard integration.
     """
 
     def __init__(self) -> None:
-        self.state_factory = DashboardStateFactory()
+        self.hydration_coordinator = DashboardHydrationCoordinator()
         self.renderer = DashboardRenderer()
 
     def run(
@@ -32,7 +34,7 @@ class DashboardRuntimeBootstrap:
         session_payload: Dict[str, Any] | None = None,
         diagnostics_payload: Dict[str, Any] | None = None,
     ) -> str:
-        state = self.state_factory.build(
+        state = self.hydration_coordinator.hydrate(
             account_payload=account_payload,
             broker_payload=broker_payload,
             positions_payload=positions_payload,
