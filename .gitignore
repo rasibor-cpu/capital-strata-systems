@@ -12,7 +12,20 @@ keys/
 *.key
 *.p8
 *.p12
+*.pfx
+*.jks
 *.secret
+*.env
+*.token
+*.tokens
+*.credential
+*.credentials
+*token*.json
+*tokens*.json
+*secret*.json
+*credential*.json
+*credentials*.json
+cdp_api_key*.json
 
 # --- Python cache ---
 __pycache__/
