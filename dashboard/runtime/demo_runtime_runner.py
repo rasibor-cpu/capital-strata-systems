@@ -59,6 +59,14 @@ def main() -> None:
             "execution_cost_state": "ACCEPTABLE",
             "signal_confluence_state": "CONFIRMED",
         },
+        governance_payload={
+            "governance_enabled": True,
+            "session_locked": False,
+            "defensive_mode_active": False,
+            "unified_trade_gate_active": True,
+            "audit_enabled": True,
+            "last_governance_event": "Demo governance state hydrated",
+        },
         session_payload={
             "session_id": "DEMO-SESSION",
             "user_id": "demo_user",

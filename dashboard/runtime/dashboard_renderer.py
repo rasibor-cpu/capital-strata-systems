@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from dashboard.runtime.dashboard_state import DashboardState
 from dashboard.runtime.render_contracts.account_render_contract import AccountRenderContract
+from dashboard.runtime.render_contracts.governance_render_contract import (
+    GovernanceRenderContract,
+)
 from dashboard.runtime.render_contracts.market_render_contract import MarketRenderContract
 from dashboard.runtime.render_contracts.pnl_render_contract import PnLRenderContract
 from dashboard.runtime.renderers.account_renderer import AccountRenderer
+from dashboard.runtime.renderers.governance_renderer import GovernanceRenderer
 from dashboard.runtime.renderers.market_renderer import MarketRenderer
 from dashboard.runtime.renderers.pnl_renderer import PnLRenderer
 
@@ -24,6 +28,7 @@ class DashboardRenderer:
         self.account_renderer = AccountRenderer()
         self.pnl_renderer = PnLRenderer()
         self.market_renderer = MarketRenderer()
+        self.governance_renderer = GovernanceRenderer()
 
     def render(self, state: DashboardState) -> str:
         account_contract = AccountRenderContract.from_account_state(
@@ -56,6 +61,10 @@ class DashboardRenderer:
             state.global_market_state
         )
 
+        governance_contract = GovernanceRenderContract.from_governance_state(
+            state.governance_state
+        )
+
         sections = [
             "======================================",
             " CAPITAL STRATA SYSTEMS DASHBOARD",
@@ -72,6 +81,8 @@ class DashboardRenderer:
             self.pnl_renderer.render(pnl_contract),
             "",
             self.market_renderer.render(market_contract),
+            "",
+            self.governance_renderer.render(governance_contract),
             "",
             "======================================",
         ]

@@ -25,6 +25,7 @@ class DashboardRuntimeBootstrap:
         account_payload: Dict[str, Any] | None = None,
         positions_payload: Dict[str, Any] | None = None,
         market_payload: Dict[str, Any] | None = None,
+        governance_payload: Dict[str, Any] | None = None,
         session_payload: Dict[str, Any] | None = None,
         diagnostics_payload: Dict[str, Any] | None = None,
     ) -> str:
@@ -32,6 +33,7 @@ class DashboardRuntimeBootstrap:
             account_payload=account_payload,
             positions_payload=positions_payload,
             market_payload=market_payload,
+            governance_payload=governance_payload,
             session_payload=session_payload,
             diagnostics_payload=diagnostics_payload,
         )
