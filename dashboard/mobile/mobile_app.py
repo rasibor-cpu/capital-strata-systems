@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import html
+import json
 import os
 import secrets
 import time
 import urllib.parse
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Request
@@ -14,11 +17,13 @@ from dashboard.auth.css_sign_on import (
     AuthFailure,
     PasswordChangeRequired,
     PasswordValidationError,
+    PROJECT_ROOT,
     authenticate_credentials,
     change_password,
     load_users,
     save_users,
 )
+from dashboard.runtime.broker_credential_check import _load_coinbase_credentials, load_local_env
 from dashboard.runtime.runtime_bootstrap import DashboardRuntimeBootstrap
 
 
@@ -26,6 +31,8 @@ SESSION_COOKIE = "css_mobile_session"
 PASSWORD_CHANGE_COOKIE = "css_mobile_pw_change"
 SESSION_MAX_SECONDS = int(os.getenv("CSS_MOBILE_SESSION_SECONDS", "28800") or 28800)
 PASSWORD_CHANGE_SECONDS = int(os.getenv("CSS_MOBILE_PASSWORD_CHANGE_SECONDS", "600") or 600)
+MOBILE_EVENTS_FILE = PROJECT_ROOT / "artifacts" / "css_mobile_trade_events.jsonl"
+DEFAULT_COINBASE_MAX_LIVE_ORDER_USD = 1.00
 
 app = FastAPI(title="Capital Strata Systems Mobile", version="0.1.0")
 
@@ -143,10 +150,31 @@ async def status(request: Request):
         {
             "ok": True,
             "authenticated": bool(session),
-            "mode": "mobile-read-only",
-            "live_orders_enabled": False,
+            "mode": "mobile-full-access",
+            "live_orders_enabled": _mobile_live_orders_enabled(),
         }
     )
+
+
+@app.get("/trade", response_class=HTMLResponse)
+async def trade_ticket_screen(request: Request):
+    session = _get_session(request)
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+
+    return HTMLResponse(_trade_ticket_page(session["user_ctx"]))
+
+
+@app.post("/trade", response_class=HTMLResponse)
+async def trade_ticket_submit(request: Request):
+    session = _get_session(request)
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+
+    form = await _read_form(request)
+    result = execute_mobile_trade_ticket(session["user_ctx"], form)
+    status = "success" if result.get("ok") else "error"
+    return HTMLResponse(_trade_ticket_page(session["user_ctx"], result=result, status=status))
 
 
 @app.get("/manifest.webmanifest")
@@ -366,22 +394,25 @@ def _dashboard_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
               <p class="eyebrow">Capital Strata Systems</p>
               <h1>Dashboard</h1>
             </div>
-            <form method="post" action="/logout">
-              <button class="ghost" type="submit">Logout</button>
-            </form>
+            <nav class="top-actions" aria-label="Mobile controls">
+              <a class="button-link" href="/trade">Trade</a>
+              <form method="post" action="/logout">
+                <button class="ghost" type="submit">Logout</button>
+              </form>
+            </nav>
           </header>
 
           <section class="identity-strip">
             <span>{safe_name}</span>
             <span>{safe_role}</span>
             <span>ID {safe_user_id}</span>
-            <span>Mobile Read Only</span>
+            <span>Mobile Full Access</span>
           </section>
 
           <section class="metric-grid" aria-label="Dashboard summary">
             <article><strong>Mode</strong><span>Paper</span></article>
-            <article><strong>Orders</strong><span>Disabled</span></article>
-            <article><strong>Gate</strong><span>Read Only</span></article>
+            <article><strong>Orders</strong><span>Governed</span></article>
+            <article><strong>Gate</strong><span>Authenticated</span></article>
             <article><strong>Runtime</strong><span>Mobile</span></article>
           </section>
 
@@ -442,9 +473,9 @@ def _mobile_dashboard_text(user_ctx: Dict[str, Any], session: Dict[str, Any]) ->
             "momentum_state": "POSITIVE",
             "pressure_state": "BUY_PRESSURE",
             "acceleration_state": "STABLE",
-            "regime_state": "MOBILE_READ_ONLY",
+            "regime_state": "MOBILE_FULL_ACCESS",
             "spread_state": "TIGHT",
-            "execution_cost_state": "NO_PHONE_EXECUTION",
+            "execution_cost_state": "MOBILE_GOVERNED",
             "signal_confluence_state": "CONFIRMED",
         },
         governance_payload={
@@ -453,20 +484,20 @@ def _mobile_dashboard_text(user_ctx: Dict[str, Any], session: Dict[str, Any]) ->
             "defensive_mode_active": False,
             "unified_trade_gate_active": True,
             "audit_enabled": True,
-            "last_governance_event": "Mobile read-only dashboard session authenticated",
+            "last_governance_event": "Mobile full-access dashboard session authenticated",
         },
         risk_payload={
-            "risk_state": "READ_ONLY",
-            "gate_status": "PHONE_EXECUTION_DISABLED",
+            "risk_state": "AUTHENTICATED",
+            "gate_status": "MOBILE_GOVERNED_ACCESS",
             "current_drawdown_pct": 0.35,
             "max_drawdown_pct": 2.00,
             "daily_loss_limit": 500.00,
-            "position_limit": 0,
-            "exposure_limit": 0.00,
+            "position_limit": 10,
+            "exposure_limit": 25000.00,
             "risk_limits_breached": [],
         },
         execution_payload={
-            "execution_state": "VIEW_ONLY",
+            "execution_state": "AUTHORIZED_MOBILE",
             "accepted_trade_count": 0,
             "rejected_trade_count": 0,
             "pending_trade_count": 0,
@@ -476,8 +507,8 @@ def _mobile_dashboard_text(user_ctx: Dict[str, Any], session: Dict[str, Any]) ->
             "fee_cost": 0.00,
             "avg_slippage_bps": 0.00,
             "avg_spread_bps": 0.00,
-            "execution_cost_state": "NO_PHONE_ORDERS",
-            "last_execution_event": "Phone dashboard is read-only",
+            "execution_cost_state": "GOVERNED_BY_CSS",
+            "last_execution_event": "Phone dashboard has governed execution controls",
         },
         session_payload={
             "session_id": "MOBILE-SESSION",
@@ -491,6 +522,385 @@ def _mobile_dashboard_text(user_ctx: Dict[str, Any], session: Dict[str, Any]) ->
             "message": f"Mobile session created={int(float(session.get('created', 0)))}"
         },
     )
+
+
+def _trade_ticket_page(
+    user_ctx: Dict[str, Any],
+    result: Optional[Dict[str, Any]] = None,
+    status: str = "info",
+) -> str:
+    safe_name = html.escape(str(user_ctx.get("display_name", "CSS User")))
+    result_markup = ""
+    if result:
+        safe_status = "success" if status == "success" else "error"
+        result_markup = (
+            f'<section class="status {safe_status}">'
+            f"<strong>{html.escape(str(result.get('status', 'RESULT')))}</strong>"
+            f"<pre>{html.escape(json.dumps(_redact_result(result), indent=2))}</pre>"
+            "</section>"
+        )
+
+    live_flag = "ON" if _mobile_live_orders_enabled() else "OFF"
+    return _page(
+        "Trade Ticket",
+        f"""
+        <main class="dashboard-shell">
+          <header class="mobile-topbar">
+            <div>
+              <p class="eyebrow">Capital Strata Systems</p>
+              <h1>Trade Ticket</h1>
+            </div>
+            <nav class="top-actions" aria-label="Mobile controls">
+              <a class="button-link" href="/dashboard">Dashboard</a>
+              <form method="post" action="/logout">
+                <button class="ghost" type="submit">Logout</button>
+              </form>
+            </nav>
+          </header>
+
+          <section class="identity-strip">
+            <span>{safe_name}</span>
+            <span>Authenticated Access</span>
+            <span>Coinbase Live Flag {live_flag}</span>
+          </section>
+
+          {result_markup}
+
+          <section class="form-panel trade-form-panel" aria-label="Mobile trade ticket form">
+            <h2>Submit Trade Ticket</h2>
+            <p class="muted">Paper tickets are recorded immediately. Live tickets require broker credentials, CSS live flags, and confirmation.</p>
+            <form method="post" action="/trade" autocomplete="off">
+              <label for="mode">Mode</label>
+              <select id="mode" name="mode">
+                <option value="paper">Paper</option>
+                <option value="live">Live</option>
+              </select>
+
+              <label for="broker">Broker</label>
+              <select id="broker" name="broker">
+                <option value="CSS_PAPER">CSS Paper</option>
+                <option value="OANDA">OANDA</option>
+                <option value="COINBASE">Coinbase</option>
+              </select>
+
+              <label for="asset_class">Asset Class</label>
+              <select id="asset_class" name="asset_class">
+                <option value="CRYPTO">Crypto</option>
+                <option value="FX">FX</option>
+                <option value="OPTIONS">Options</option>
+                <option value="FUTURES">Futures</option>
+              </select>
+
+              <label for="symbol">Symbol</label>
+              <input id="symbol" name="symbol" value="BTC-USD" required>
+
+              <label for="side">Side</label>
+              <select id="side" name="side">
+                <option value="BUY">Buy</option>
+                <option value="SELL">Sell</option>
+              </select>
+
+              <label for="amount">USD Amount / Notional</label>
+              <input id="amount" name="amount" inputmode="decimal" value="1.00" required>
+
+              <label for="qty">Quantity / Units</label>
+              <input id="qty" name="qty" inputmode="decimal" value="1">
+
+              <label for="confirm">Live Confirmation</label>
+              <input id="confirm" name="confirm" placeholder="Type EXECUTE for live orders">
+
+              <button type="submit">Submit Ticket</button>
+            </form>
+          </section>
+        </main>
+        """,
+    )
+
+
+def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) -> Dict[str, Any]:
+    load_local_env()
+
+    ticket = _build_mobile_ticket(user_ctx, form)
+    mode = ticket["mode"]
+    broker = ticket["broker"]
+
+    if mode == "paper":
+        result = {
+            "ok": True,
+            "status": "PAPER_TICKET_RECORDED",
+            "ticket": ticket,
+            "broker_response": None,
+        }
+        _record_mobile_event(result)
+        return result
+
+    if str(form.get("confirm", "")).strip().upper() != "EXECUTE":
+        result = {
+            "ok": False,
+            "status": "LIVE_CONFIRMATION_REQUIRED",
+            "ticket": ticket,
+            "broker_response": None,
+        }
+        _record_mobile_event(result)
+        return result
+
+    if broker == "OANDA":
+        result = _execute_oanda_mobile_ticket(ticket)
+        _record_mobile_event(result)
+        return result
+
+    if broker == "COINBASE":
+        result = _execute_coinbase_mobile_ticket(ticket)
+        _record_mobile_event(result)
+        return result
+
+    result = {
+        "ok": False,
+        "status": "LIVE_BROKER_NOT_SUPPORTED",
+        "ticket": ticket,
+        "broker_response": None,
+    }
+    _record_mobile_event(result)
+    return result
+
+
+def _build_mobile_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) -> Dict[str, Any]:
+    mode = str(form.get("mode", "paper")).strip().lower()
+    if mode not in {"paper", "live"}:
+        mode = "paper"
+
+    broker = str(form.get("broker", "CSS_PAPER")).strip().upper()
+    asset_class = str(form.get("asset_class", "CRYPTO")).strip().upper()
+    symbol = str(form.get("symbol", "")).strip().upper()
+    side = str(form.get("side", "BUY")).strip().upper()
+    if side not in {"BUY", "SELL"}:
+        side = "BUY"
+
+    amount = _safe_float(form.get("amount"), 0.0)
+    qty = _safe_float(form.get("qty"), 0.0)
+
+    return {
+        "ticket_id": secrets.token_hex(8).upper(),
+        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "user_id": str(user_ctx.get("user_id", "")),
+        "display_name": str(user_ctx.get("display_name", "")),
+        "role": str(user_ctx.get("role", "")),
+        "mode": mode,
+        "broker": broker,
+        "asset_class": asset_class,
+        "symbol": symbol,
+        "side": side,
+        "amount": amount,
+        "qty": qty,
+        "source": "CSS_MOBILE",
+    }
+
+
+def _execute_oanda_mobile_ticket(ticket: Dict[str, Any]) -> Dict[str, Any]:
+    if ticket["asset_class"] != "FX":
+        return {
+            "ok": False,
+            "status": "OANDA_REQUIRES_FX_TICKET",
+            "ticket": ticket,
+            "broker_response": None,
+        }
+
+    _prepare_oanda_env()
+
+    from backend.app.brokers.oanda_adapter import OandaAdapter
+
+    adapter = OandaAdapter()
+    if not adapter.is_configured():
+        return {
+            "ok": False,
+            "status": "OANDA_NOT_CONFIGURED",
+            "ticket": ticket,
+            "broker_response": None,
+        }
+
+    response = adapter.place_order(
+        symbol=str(ticket["symbol"]),
+        side=str(ticket["side"]),
+        units=max(1, int(float(ticket["qty"] or 1))),
+        order_type="MARKET",
+    )
+    return {
+        "ok": bool(response.get("ok")),
+        "status": "OANDA_ORDER_SENT" if response.get("ok") else "OANDA_ORDER_FAILED",
+        "ticket": ticket,
+        "broker_response": _broker_response_summary(response),
+    }
+
+
+def _execute_coinbase_mobile_ticket(ticket: Dict[str, Any]) -> Dict[str, Any]:
+    if ticket["asset_class"] != "CRYPTO":
+        return {
+            "ok": False,
+            "status": "COINBASE_REQUIRES_CRYPTO_TICKET",
+            "ticket": ticket,
+            "broker_response": None,
+        }
+
+    if not _coinbase_live_orders_enabled():
+        return {
+            "ok": False,
+            "status": "COINBASE_LIVE_ORDERS_FLAG_OFF",
+            "ticket": ticket,
+            "broker_response": None,
+        }
+
+    max_order_usd = _coinbase_max_live_order_usd()
+    amount = float(ticket.get("amount", 0.0) or 0.0)
+    if amount <= 0 or amount > max_order_usd:
+        return {
+            "ok": False,
+            "status": "COINBASE_ORDER_SIZE_BLOCKED",
+            "ticket": ticket,
+            "broker_response": {
+                "max_live_order_usd": max_order_usd,
+                "requested_usd": amount,
+            },
+        }
+
+    if ticket["side"] != "BUY":
+        return {
+            "ok": False,
+            "status": "COINBASE_MOBILE_SELL_NOT_WIRED",
+            "ticket": ticket,
+            "broker_response": None,
+        }
+
+    api_key, api_secret, _source = _load_coinbase_credentials()
+    if not api_key or not api_secret:
+        return {
+            "ok": False,
+            "status": "COINBASE_NOT_CONFIGURED",
+            "ticket": ticket,
+            "broker_response": None,
+        }
+
+    from coinbase.rest import RESTClient  # type: ignore
+
+    client = RESTClient(api_key=api_key, api_secret=api_secret)
+    client_order_id = f"CSS-MOBILE-{ticket['ticket_id']}"
+    response = client.market_order_buy(
+        client_order_id=client_order_id,
+        product_id=str(ticket["symbol"]),
+        quote_size=f"{amount:.2f}",
+    )
+    response_dict = _to_response_dict(response)
+    ok = bool(response_dict.get("success") or response_dict.get("order_id") or response_dict.get("success_response"))
+    return {
+        "ok": ok,
+        "status": "COINBASE_ORDER_SENT" if ok else "COINBASE_ORDER_FAILED",
+        "ticket": ticket,
+        "broker_response": _broker_response_summary(response_dict),
+    }
+
+
+def _prepare_oanda_env() -> None:
+    token = (
+        os.getenv("OANDA_API_KEY")
+        or os.getenv("OANDA_API_TOKEN")
+        or os.getenv("OANDA_PRACTICE_TOKEN")
+        or os.getenv("OANDA_LIVE_TOKEN")
+        or ""
+    ).strip()
+    account_id = (
+        os.getenv("OANDA_ACCOUNT_ID")
+        or os.getenv("OANDA_PRACTICE_ACCOUNT_ID")
+        or os.getenv("OANDA_LIVE_ACCOUNT_ID")
+        or ""
+    ).strip()
+    env_name = (os.getenv("OANDA_ENV") or "practice").strip().lower()
+
+    if token:
+        os.environ["OANDA_API_KEY"] = token
+    if account_id:
+        os.environ["OANDA_ACCOUNT_ID"] = account_id
+    if not os.getenv("OANDA_BASE_URL"):
+        os.environ["OANDA_BASE_URL"] = (
+            "https://api-fxtrade.oanda.com"
+            if env_name == "live"
+            else "https://api-fxpractice.oanda.com"
+        )
+
+
+def _mobile_live_orders_enabled() -> bool:
+    load_local_env()
+    return _coinbase_live_orders_enabled() or (
+        bool(os.getenv("OANDA_API_KEY") or os.getenv("OANDA_API_TOKEN"))
+        and bool(os.getenv("OANDA_ACCOUNT_ID") or os.getenv("OANDA_PRACTICE_ACCOUNT_ID"))
+    )
+
+
+def _coinbase_live_orders_enabled() -> bool:
+    return (os.getenv("COINBASE_ENABLE_LIVE_ORDERS") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "y",
+        "on",
+    }
+
+
+def _coinbase_max_live_order_usd() -> float:
+    return _safe_float(os.getenv("COINBASE_MAX_LIVE_ORDER_USD"), DEFAULT_COINBASE_MAX_LIVE_ORDER_USD)
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _to_response_dict(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        data = to_dict()
+        if isinstance(data, dict):
+            return data
+    raw = getattr(value, "__dict__", None)
+    return raw if isinstance(raw, dict) else {"response_type": type(value).__name__}
+
+
+def _broker_response_summary(response: Any) -> Dict[str, Any]:
+    data = _to_response_dict(response)
+    allowed = {
+        "ok",
+        "status",
+        "success",
+        "order_id",
+        "error",
+        "error_response",
+        "success_response",
+        "message",
+        "data",
+    }
+    return {key: value for key, value in data.items() if key in allowed}
+
+
+def _record_mobile_event(payload: Dict[str, Any]) -> None:
+    MOBILE_EVENTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    event = {
+        "recorded_utc": datetime.now(timezone.utc).isoformat(),
+        **payload,
+    }
+    with MOBILE_EVENTS_FILE.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(event, sort_keys=True) + "\n")
+
+
+def _redact_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    redacted = json.loads(json.dumps(result, default=str))
+    broker_response = redacted.get("broker_response")
+    if isinstance(broker_response, dict):
+        for key in list(broker_response):
+            if "key" in key.lower() or "token" in key.lower() or "secret" in key.lower():
+                broker_response[key] = "REDACTED"
+    return redacted
 
 
 def _status_markup(message: str, status: str) -> str:
@@ -640,7 +1050,20 @@ input {
   padding: 14px 13px;
   border-radius: 0;
 }
+select {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: var(--field);
+  color: var(--ink);
+  font-size: 17px;
+  padding: 14px 13px;
+  border-radius: 0;
+}
 input:focus {
+  outline: 2px solid var(--teal);
+  outline-offset: 1px;
+}
+select:focus {
   outline: 2px solid var(--teal);
   outline-offset: 1px;
 }
@@ -653,6 +1076,18 @@ button {
   font-size: 16px;
   font-weight: 700;
   cursor: pointer;
+}
+a.button-link {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 16px;
+  background: var(--teal);
+  color: #fff;
+  text-decoration: none;
+  font-size: 15px;
+  font-weight: 700;
 }
 button:active { background: var(--teal-dark); }
 button.ghost {
@@ -681,6 +1116,15 @@ button.ghost {
   justify-content: space-between;
   gap: 16px;
   padding: 18px 0;
+}
+.top-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.top-actions form {
+  margin: 0;
+  display: block;
 }
 .eyebrow {
   margin-bottom: 3px;
@@ -731,6 +1175,28 @@ button.ghost {
   border: 1px solid #23323d;
   overflow: auto;
 }
+.trade-form-panel {
+  border: 1px solid var(--line);
+  margin-bottom: 14px;
+}
+.trade-form-panel form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.trade-form-panel button {
+  grid-column: 1 / -1;
+}
+.status.success {
+  color: var(--success);
+  border-color: #a7dfbc;
+  background: #edfdf3;
+}
+.status pre {
+  color: inherit;
+  background: transparent;
+  border: 0;
+  padding: 8px 0 0;
+  font-size: 12px;
+}
 pre {
   margin: 0;
   padding: 16px;
@@ -760,6 +1226,13 @@ pre {
   }
   .mobile-topbar {
     align-items: flex-start;
+  }
+  .top-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .trade-form-panel form {
+    grid-template-columns: 1fr;
   }
 }
 """

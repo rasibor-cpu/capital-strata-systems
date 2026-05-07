@@ -10,4 +10,4 @@ Start it from the project root:
 
 Then open `http://<your-pc-ip>:8090` from the phone while it is on the same network.
 
-This mobile surface is intentionally read-only. It uses the same CSS sign-on and password rules as the desktop dashboard, but it does not expose live trading actions.
+This mobile surface uses the same CSS sign-on and password rules as the desktop dashboard. Authenticated users can access the dashboard and submit mobile trade tickets. Live broker tickets still route through CSS credentials, broker availability, live-order flags, explicit `EXECUTE` confirmation, and audit logging.
