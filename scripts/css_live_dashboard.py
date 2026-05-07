@@ -175,6 +175,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 load_dotenv(PROJECT_ROOT / ".env")
+load_dotenv(PROJECT_ROOT / ".env.practice", override=False)
 
 # === PCNRASS PHASE 2 REAL MARKET PRICE FEED ===
 from backend.data.price_feed import get_price_feed
@@ -1835,7 +1836,9 @@ pnl_tracker = PnLTracker(starting_equity=pnl_observer.starting_balance)
 
 def map_oanda_env() -> None:
     if not os.getenv("OANDA_API_KEY"):
-        if os.getenv("OANDA_PRACTICE_TOKEN"):
+        if os.getenv("OANDA_API_TOKEN"):
+            os.environ["OANDA_API_KEY"] = os.getenv("OANDA_API_TOKEN", "")
+        elif os.getenv("OANDA_PRACTICE_TOKEN"):
             os.environ["OANDA_API_KEY"] = os.getenv("OANDA_PRACTICE_TOKEN", "")
         elif os.getenv("OANDA_LIVE_TOKEN"):
             os.environ["OANDA_API_KEY"] = os.getenv("OANDA_LIVE_TOKEN", "")
