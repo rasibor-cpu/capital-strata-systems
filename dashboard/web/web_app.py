@@ -52,6 +52,10 @@ def create_app(
     async def positions() -> HTMLResponse:
         return HTMLResponse(_positions_page())
 
+    @app.get("/execution", response_class=HTMLResponse)
+    async def execution() -> HTMLResponse:
+        return HTMLResponse(_execution_page())
+
     @app.get("/health")
     async def health() -> dict[str, Any]:
         state = provider()
@@ -69,6 +73,7 @@ def _app_nav(active: str) -> str:
     links = [
         ("dashboard", "/dashboard", "Dashboard"),
         ("positions", "/positions", "Positions"),
+        ("execution", "/execution", "Execution"),
     ]
 
     return "\n".join(
@@ -627,6 +632,207 @@ refreshPositions().catch(() => undefined);
 """
 
 
+def _execution_page() -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111820">
+  <title>CSS Execution History</title>
+  <style>{_css()}</style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">CSS</div>
+        <div>
+          <p class="eyebrow">Capital Strata Systems</p>
+          <h1>Execution / Trade History</h1>
+        </div>
+      </div>
+      <section class="status-strip" aria-label="System status">
+        <span id="execution-mode">System PAPER</span>
+        <span id="execution-engine">Engine SAFE</span>
+        <span id="execution-session">Session pending</span>
+        <span id="execution-updated">Snapshot pending</span>
+      </section>
+    </header>
+    {_app_nav("execution")}
+
+    <section class="control-row" aria-label="Execution controls">
+      <button type="button" data-refresh-execution>Refresh</button>
+      <span>DashboardState execution contract</span>
+      <span>Read-only history</span>
+      <span>No order placement from this view</span>
+    </section>
+
+    <section class="metric-band" aria-label="Execution metrics">
+      <article>
+        <strong>Execution State</strong>
+        <span data-exec-value="execution.execution_state">IDLE</span>
+      </article>
+      <article>
+        <strong>Accepted</strong>
+        <span data-exec-value="execution.accepted_trade_count">0</span>
+      </article>
+      <article>
+        <strong>Rejected</strong>
+        <span data-exec-value="execution.rejected_trade_count">0</span>
+      </article>
+      <article>
+        <strong>Pending</strong>
+        <span data-exec-value="execution.pending_trade_count">0</span>
+      </article>
+      <article>
+        <strong>Total Cost</strong>
+        <span data-exec-value="execution.total_execution_cost">$0.00</span>
+      </article>
+      <article>
+        <strong>History Rows</strong>
+        <span data-exec-value="execution.recent_trade_count">0</span>
+      </article>
+    </section>
+
+    <section class="execution-workspace">
+      <article class="panel execution-main">
+        <div class="panel-head">
+          <h2>Trade / Execution History</h2>
+          <span id="execution-history-badge">0 ROWS</span>
+        </div>
+        <div class="execution-table" id="execution-history-table"></div>
+      </article>
+
+      <aside class="execution-side">
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Cost Breakdown</h2>
+            <span data-exec-value="execution.execution_cost_state">UNKNOWN</span>
+          </div>
+          <div class="kv-grid two">
+            <div><strong>Slippage</strong><span data-exec-value="execution.slippage_cost">$0.00</span></div>
+            <div><strong>Spread</strong><span data-exec-value="execution.spread_cost">$0.00</span></div>
+            <div><strong>Fee</strong><span data-exec-value="execution.fee_cost">$0.00</span></div>
+            <div><strong>Avg Slip</strong><span data-exec-value="execution.avg_slippage_bps">0.00 bps</span></div>
+          </div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Last Event</h2>
+            <span>SUMMARY</span>
+          </div>
+          <p class="panel-note" data-exec-value="execution.last_execution_event">No execution event</p>
+        </article>
+      </aside>
+    </section>
+  </main>
+
+  <script>{_execution_script()}</script>
+</body>
+</html>"""
+
+
+def _execution_script() -> str:
+    return """
+const executionState = { payload: null, sections: {} };
+
+function money(value) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(value || 0));
+}
+
+function numberValue(value) {
+  return Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 6 });
+}
+
+function bps(value) {
+  return `${Number(value || 0).toFixed(2)} bps`;
+}
+
+function getValue(path) {
+  const [section, key] = path.split(".");
+  return executionState.sections?.[section]?.[key];
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\\"": "&quot;",
+    "'": "&#39;"
+  }[char]));
+}
+
+function formatExecutionValue(path, value) {
+  if (["total_execution_cost", "slippage_cost", "spread_cost", "fee_cost"].some((key) => path.endsWith(key))) {
+    return money(value);
+  }
+  if (["avg_slippage_bps", "avg_spread_bps"].some((key) => path.endsWith(key))) {
+    return bps(value);
+  }
+  if (value === null || value === undefined || value === "") return "NONE";
+  return String(value);
+}
+
+function renderExecutionSnapshot(payload) {
+  executionState.payload = payload;
+  executionState.sections = payload.sections || {};
+  const session = payload.session || {};
+  const execution = executionState.sections.execution || {};
+
+  document.getElementById("execution-mode").textContent = `System ${String(payload.resolved_mode || "paper").toUpperCase()}`;
+  document.getElementById("execution-engine").textContent = `Engine ${session.engine_mode || "SAFE"}`;
+  document.getElementById("execution-session").textContent = `Session ${payload.session_id || session.session_id || "pending"}`;
+  document.getElementById("execution-updated").textContent = `Updated ${payload.generated_at || "pending"}`;
+  document.getElementById("execution-history-badge").textContent = `${execution.recent_trade_count || 0} ROWS`;
+
+  document.querySelectorAll("[data-exec-value]").forEach((node) => {
+    const path = node.getAttribute("data-exec-value");
+    node.textContent = formatExecutionValue(path, getValue(path));
+  });
+
+  renderExecutionHistory(execution.recent_trades || []);
+}
+
+function renderExecutionHistory(rows) {
+  const target = document.getElementById("execution-history-table");
+  if (!rows.length) {
+    target.innerHTML = `<div class="empty-state">No execution history rows</div>`;
+    return;
+  }
+  target.innerHTML = `
+    <div class="execution-row execution-head">
+      <span>Time</span><span>Symbol</span><span>Asset</span><span>Side</span><span>Mode</span><span>Broker</span><span>Status</span><span>Qty</span><span>Amount</span><span>Cost</span>
+    </div>
+    ${rows.map((row) => `
+      <div class="execution-row">
+        <span>${escapeHtml(row.timestamp || "UNKNOWN")}</span>
+        <span>${escapeHtml(row.symbol || "UNKNOWN")}</span>
+        <span>${escapeHtml(row.asset_class || "UNKNOWN")}</span>
+        <span><em class="side-badge ${String(row.side || "").toLowerCase()}">${escapeHtml(row.side || "UNKNOWN")}</em></span>
+        <span>${escapeHtml(row.mode || "paper")}</span>
+        <span>${escapeHtml(row.broker || "CSS")}</span>
+        <span>${escapeHtml(row.status || "UNKNOWN")}</span>
+        <span>${numberValue(row.qty)}</span>
+        <span>${money(row.amount)}</span>
+        <span>${money(row.execution_cost)}</span>
+      </div>
+    `).join("")}
+  `;
+}
+
+async function refreshExecution() {
+  const response = await fetch("/api/v1/frontend-state", { cache: "no-store" });
+  renderExecutionSnapshot(await response.json());
+}
+
+document.querySelector("[data-refresh-execution]").addEventListener("click", refreshExecution);
+refreshExecution().catch(() => undefined);
+"""
+
+
 def _css() -> str:
     return """
 :root {
@@ -895,10 +1101,23 @@ button {
   grid-template-columns: minmax(0, 1.6fr) minmax(320px, 0.8fr);
   gap: 12px;
 }
+.execution-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(320px, 0.75fr);
+  gap: 12px;
+}
 .positions-main {
   min-height: 520px;
 }
+.execution-main {
+  min-height: 520px;
+}
 .positions-side {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+.execution-side {
   display: grid;
   gap: 12px;
   align-content: start;
@@ -907,6 +1126,7 @@ button {
   min-height: 0;
 }
 .position-table,
+.execution-table,
 .summary-table {
   overflow-x: auto;
 }
@@ -925,7 +1145,23 @@ button {
   text-transform: uppercase;
   font-weight: 800;
 }
+.execution-row {
+  display: grid;
+  grid-template-columns: 210px 120px 90px 80px 80px 120px 180px 90px 110px 90px;
+  gap: 8px;
+  min-width: 1250px;
+  border-bottom: 1px solid var(--line);
+  padding: 10px 0;
+  align-items: center;
+}
+.execution-head {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  font-weight: 800;
+}
 .position-row span,
+.execution-row span,
 .summary-row span {
   overflow-wrap: anywhere;
   font-weight: 700;
@@ -976,7 +1212,8 @@ button {
 @media (max-width: 1120px) {
   .metric-band,
   .dashboard-grid,
-  .positions-workspace {
+  .positions-workspace,
+  .execution-workspace {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -986,6 +1223,7 @@ button {
   .metric-band,
   .dashboard-grid,
   .positions-workspace,
+  .execution-workspace,
   .kv-grid,
   .kv-grid.two,
   .signal-grid {

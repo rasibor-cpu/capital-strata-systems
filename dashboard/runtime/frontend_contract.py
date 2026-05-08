@@ -268,6 +268,7 @@ def market(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
 
 def execution(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     execution_payload = _mapping(dashboard_payload.get("execution_summary"))
+    recent_trades = _execution_history(dashboard_payload)
     return {
         "execution_state": str(execution_payload.get("execution_state", "IDLE")),
         "accepted_trade_count": _integer(
@@ -293,7 +294,40 @@ def execution(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         "last_execution_event": str(
             execution_payload.get("last_execution_event", "")
         ),
+        "recent_trade_count": len(recent_trades),
+        "recent_trades": recent_trades,
     }
+
+
+def _execution_history(dashboard_payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+
+    for item in _list(dashboard_payload.get("execution_history")):
+        trade = _mapping(item)
+        rows.append(
+            {
+                "timestamp": str(
+                    trade.get(
+                        "timestamp",
+                        trade.get("created_utc", trade.get("recorded_utc", "")),
+                    )
+                ),
+                "symbol": str(trade.get("symbol", "UNKNOWN")),
+                "asset_class": str(trade.get("asset_class", "UNKNOWN")),
+                "side": str(trade.get("side", "UNKNOWN")),
+                "mode": str(trade.get("mode", "paper")),
+                "broker": str(trade.get("broker", "CSS")),
+                "status": str(trade.get("status", "UNKNOWN")),
+                "qty": _number(trade.get("qty")),
+                "amount": _number(trade.get("amount")),
+                "execution_cost": _number(
+                    trade.get("execution_cost", trade.get("cost", 0.0))
+                ),
+                "source": str(trade.get("source", "DashboardState")),
+            }
+        )
+
+    return rows
 
 
 def opportunities(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:

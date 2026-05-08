@@ -71,6 +71,8 @@ def test_frontend_payload_schema_integrity_and_size() -> None:
     assert payload["sections"]["risk"]["risk_state"] == "NORMAL"
     assert payload["sections"]["governance"]["governance_enabled"] is True
     assert payload["sections"]["execution"]["execution_state"] == "READY"
+    assert payload["sections"]["execution"]["recent_trade_count"] == 2
+    assert payload["sections"]["execution"]["recent_trades"][0]["symbol"] == "BTC-USD"
 
 
 def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:

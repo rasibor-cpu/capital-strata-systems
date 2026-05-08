@@ -116,12 +116,14 @@ class DashboardStateFactory:
         execution_summary = self.execution_summary_builder.build(
             execution_payload=execution_payload,
         )
+        execution_history = self._execution_history(execution_payload or {})
 
         dashboard_state.last_scan_results["account_summary"] = account_summary_state
         dashboard_state.last_scan_results["position_state"] = position_state
         dashboard_state.last_scan_results["pnl_summary"] = pnl_summary
         dashboard_state.last_scan_results["risk_summary"] = risk_summary
         dashboard_state.last_scan_results["execution_summary"] = execution_summary
+        dashboard_state.last_scan_results["execution_history"] = execution_history
 
         dashboard_state.realized_pnl = float(
             pnl_summary.get("realized_pnl", dashboard_state.realized_pnl)
@@ -159,3 +161,19 @@ class DashboardStateFactory:
             )
 
         return dashboard_state
+
+    @staticmethod
+    def _execution_history(execution_payload: Dict[str, Any]) -> list[dict[str, Any]]:
+        raw_history = execution_payload.get(
+            "execution_history",
+            execution_payload.get("recent_trades", []),
+        )
+
+        if not isinstance(raw_history, list):
+            return []
+
+        return [
+            dict(item)
+            for item in raw_history
+            if isinstance(item, dict)
+        ]

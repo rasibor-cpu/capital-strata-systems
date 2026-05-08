@@ -25,4 +25,5 @@ Local run:
 Routes:
 
 - `/dashboard` - institutional web command dashboard
+- `/execution` - read-only execution and trade history
 - `/positions` - read-only professional positions inventory

@@ -236,6 +236,7 @@ class DashboardState:
         risk_summary = self._scan_summary("risk_summary")
         execution_summary = self._scan_summary("execution_summary")
         position_state = self._scan_summary("position_state")
+        execution_history = self._scan_list("execution_history")
 
         if not pnl_summary:
             pnl_summary = {
@@ -291,6 +292,7 @@ class DashboardState:
             "market_summary": self._json_safe(self.global_market_state),
             "execution_summary": execution_summary,
             "position_state": position_state,
+            "execution_history": execution_history,
             "open_positions": {
                 "total": self.total_open_positions,
                 "by_asset": dict(self.open_positions_by_asset),
@@ -328,6 +330,14 @@ class DashboardState:
             return self._json_safe(summary)
 
         return {}
+
+    def _scan_list(self, key: str) -> List[Any]:
+        items = self.last_scan_results.get(key, [])
+
+        if isinstance(items, list):
+            return self._json_safe(items)
+
+        return []
 
     @classmethod
     def _json_safe(cls, value: Any) -> Any:
