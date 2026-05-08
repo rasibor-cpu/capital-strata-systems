@@ -237,6 +237,7 @@ class DashboardState:
         execution_summary = self._scan_summary("execution_summary")
         position_state = self._scan_summary("position_state")
         execution_history = self._scan_list("execution_history")
+        opportunities = self._scan_list("opportunities")
 
         if not pnl_summary:
             pnl_summary = {
@@ -293,6 +294,7 @@ class DashboardState:
             "execution_summary": execution_summary,
             "position_state": position_state,
             "execution_history": execution_history,
+            "opportunities": opportunities,
             "open_positions": {
                 "total": self.total_open_positions,
                 "by_asset": dict(self.open_positions_by_asset),

@@ -107,6 +107,28 @@ def build_smoke_payloads() -> Dict[str, Dict[str, Any]]:
             "spread_state": "TIGHT",
             "execution_cost_state": "ACCEPTABLE",
             "signal_confluence_state": "CONFIRMED",
+            "opportunities": [
+                {
+                    "symbol": "BTC-USD",
+                    "asset_class": "CRYPTO",
+                    "side": "BUY",
+                    "signal": "CONFIRMED",
+                    "score": 15.40,
+                    "probability": 0.68,
+                    "status": "MONITOR_ONLY",
+                    "reason": "Smoke opportunity candidate",
+                },
+                {
+                    "symbol": "CL",
+                    "asset_class": "FUTURES",
+                    "side": "HOLD",
+                    "signal": "WATCH",
+                    "score": 16.45,
+                    "probability": 0.70,
+                    "status": "MONITOR_ONLY",
+                    "reason": "Smoke futures candidate",
+                },
+            ],
         },
         "governance_payload": {
             "governance_enabled": True,

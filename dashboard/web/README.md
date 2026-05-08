@@ -26,5 +26,6 @@ Routes:
 
 - `/dashboard` - institutional web command dashboard
 - `/execution` - read-only execution and trade history
+- `/market-opportunities` - read-only market regime and opportunity monitor
 - `/positions` - read-only professional positions inventory
 - `/risk-governance` - read-only risk and governance center

@@ -335,9 +335,23 @@ def opportunities(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(raw_opportunities, list):
         raw_opportunities = []
     return {
-        "items": [_mapping(item) for item in raw_opportunities],
+        "items": [_opportunity_item(item) for item in raw_opportunities],
         "count": len(raw_opportunities),
         "source": "DashboardState",
+    }
+
+
+def _opportunity_item(value: Any) -> dict[str, Any]:
+    item = _mapping(value)
+    return {
+        "symbol": str(item.get("symbol", "UNKNOWN")),
+        "asset_class": str(item.get("asset_class", "UNKNOWN")),
+        "side": str(item.get("side", item.get("direction", "WATCH"))),
+        "signal": str(item.get("signal", item.get("signal_state", "WATCH"))),
+        "score": _number(item.get("score", item.get("composite_score"))),
+        "probability": _number(item.get("probability", item.get("prob", 0.0))),
+        "status": str(item.get("status", "MONITOR_ONLY")),
+        "reason": str(item.get("reason", item.get("note", ""))),
     }
 
 

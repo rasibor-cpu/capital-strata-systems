@@ -4,6 +4,7 @@ from dashboard.runtime.api_bridge import get_frontend_payload
 from dashboard.web.web_app import (
     _dashboard_page,
     _execution_page,
+    _market_opportunities_page,
     _positions_page,
     _risk_governance_page,
     create_app,
@@ -18,6 +19,7 @@ def main() -> int:
         "/",
         "/dashboard",
         "/execution",
+        "/market-opportunities",
         "/positions",
         "/risk-governance",
         "/health",
@@ -48,6 +50,7 @@ def main() -> int:
         "Broker Control Panel",
         "Opportunity Monitor",
         'href="/execution"',
+        'href="/market-opportunities"',
         'href="/positions"',
         'href="/risk-governance"',
         "/api/v1/frontend-state",
@@ -99,6 +102,19 @@ def main() -> int:
         if expected not in risk_governance_markup:
             raise AssertionError(f"Web risk/governance markup missing: {expected}")
 
+    market_opportunities_markup = _market_opportunities_page()
+    expected_market_opportunities_markup = [
+        "CSS Market & Opportunity Center",
+        "Market & Opportunity Center",
+        "Market Regime Panel",
+        "Opportunity Monitor",
+        "DashboardState market contract",
+        "/api/v1/frontend-state",
+    ]
+    for expected in expected_market_opportunities_markup:
+        if expected not in market_opportunities_markup:
+            raise AssertionError(f"Web market/opportunity markup missing: {expected}")
+
     payload = get_frontend_payload(demo_dashboard_state_provider)
     sections = payload.get("sections", {})
     if sections.get("account_summary", {}).get("broker") != "DEMO":
@@ -116,6 +132,10 @@ def main() -> int:
         raise AssertionError("Web risk center must expose risk gate status")
     if sections.get("governance", {}).get("governance_enabled") is not True:
         raise AssertionError("Web governance center must expose governance authority")
+    if sections.get("market", {}).get("regime_state") != "RISK_ON":
+        raise AssertionError("Web market center must expose market regime")
+    if sections.get("opportunities", {}).get("count") != 2:
+        raise AssertionError("Web opportunity center must expose monitor rows")
     if sections.get("execution", {}).get("execution_state") != "READY":
         raise AssertionError("Web dashboard provider must expose demo execution state")
     recent_trades = sections.get("execution", {}).get("recent_trades", [])

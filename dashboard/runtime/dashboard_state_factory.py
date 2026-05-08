@@ -79,6 +79,7 @@ class DashboardStateFactory:
             market_payload=market_payload or {},
             state=dashboard_state,
         )
+        opportunities = self._opportunities(market_payload or {})
 
         dashboard_state = self.governance_builder.build(
             governance_payload=governance_payload or {},
@@ -124,6 +125,7 @@ class DashboardStateFactory:
         dashboard_state.last_scan_results["risk_summary"] = risk_summary
         dashboard_state.last_scan_results["execution_summary"] = execution_summary
         dashboard_state.last_scan_results["execution_history"] = execution_history
+        dashboard_state.last_scan_results["opportunities"] = opportunities
 
         dashboard_state.realized_pnl = float(
             pnl_summary.get("realized_pnl", dashboard_state.realized_pnl)
@@ -175,5 +177,21 @@ class DashboardStateFactory:
         return [
             dict(item)
             for item in raw_history
+            if isinstance(item, dict)
+        ]
+
+    @staticmethod
+    def _opportunities(market_payload: Dict[str, Any]) -> list[dict[str, Any]]:
+        raw_opportunities = market_payload.get(
+            "opportunities",
+            market_payload.get("candidate_opportunities", []),
+        )
+
+        if not isinstance(raw_opportunities, list):
+            return []
+
+        return [
+            dict(item)
+            for item in raw_opportunities
             if isinstance(item, dict)
         ]

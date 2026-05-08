@@ -60,6 +60,10 @@ def create_app(
     async def risk_governance() -> HTMLResponse:
         return HTMLResponse(_risk_governance_page())
 
+    @app.get("/market-opportunities", response_class=HTMLResponse)
+    async def market_opportunities() -> HTMLResponse:
+        return HTMLResponse(_market_opportunities_page())
+
     @app.get("/health")
     async def health() -> dict[str, Any]:
         state = provider()
@@ -79,6 +83,7 @@ def _app_nav(active: str) -> str:
         ("positions", "/positions", "Positions"),
         ("execution", "/execution", "Execution"),
         ("risk_governance", "/risk-governance", "Risk & Governance"),
+        ("market_opportunities", "/market-opportunities", "Market"),
     ]
 
     return "\n".join(
@@ -1037,6 +1042,197 @@ refreshRiskGovernance().catch(() => undefined);
 """
 
 
+def _market_opportunities_page() -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111820">
+  <title>CSS Market & Opportunity Center</title>
+  <style>{_css()}</style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">CSS</div>
+        <div>
+          <p class="eyebrow">Capital Strata Systems</p>
+          <h1>Market & Opportunity Center</h1>
+        </div>
+      </div>
+      <section class="status-strip" aria-label="System status">
+        <span id="mo-mode">System PAPER</span>
+        <span id="mo-engine">Engine SAFE</span>
+        <span id="mo-session">Session pending</span>
+        <span id="mo-updated">Snapshot pending</span>
+      </section>
+    </header>
+    {_app_nav("market_opportunities")}
+
+    <section class="control-row" aria-label="Market and opportunity controls">
+      <button type="button" data-refresh-market-opportunities>Refresh</button>
+      <span>DashboardState market contract</span>
+      <span>Monitor-only opportunities</span>
+      <span>No order placement from this view</span>
+    </section>
+
+    <section class="metric-band" aria-label="Market regime metrics">
+      <article>
+        <strong>Regime</strong>
+        <span data-mo-value="market.regime_state">UNKNOWN</span>
+      </article>
+      <article>
+        <strong>Trend</strong>
+        <span data-mo-value="market.trend_state">UNKNOWN</span>
+      </article>
+      <article>
+        <strong>Volatility</strong>
+        <span data-mo-value="market.volatility_state">UNKNOWN</span>
+      </article>
+      <article>
+        <strong>Liquidity</strong>
+        <span data-mo-value="market.liquidity_state">UNKNOWN</span>
+      </article>
+      <article>
+        <strong>Confluence</strong>
+        <span data-mo-value="market.signal_confluence_state">UNKNOWN</span>
+      </article>
+      <article>
+        <strong>Opportunities</strong>
+        <span data-mo-value="opportunities.count">0</span>
+      </article>
+    </section>
+
+    <section class="market-opportunity-workspace">
+      <article class="panel market-main">
+        <div class="panel-head">
+          <h2>Market Regime Panel</h2>
+          <span data-mo-value="market.execution_cost_state">UNKNOWN</span>
+        </div>
+        <div class="signal-grid">
+          <div><strong>Probability</strong><span data-mo-value="market.probability_state">UNKNOWN</span></div>
+          <div><strong>Velocity</strong><span data-mo-value="market.velocity_state">UNKNOWN</span></div>
+          <div><strong>Mean Reversion</strong><span data-mo-value="market.mean_reversion_state">UNKNOWN</span></div>
+          <div><strong>Momentum</strong><span data-mo-value="market.momentum_state">UNKNOWN</span></div>
+          <div><strong>Pressure</strong><span data-mo-value="market.pressure_state">UNKNOWN</span></div>
+          <div><strong>Acceleration</strong><span data-mo-value="market.acceleration_state">UNKNOWN</span></div>
+          <div><strong>Spread</strong><span data-mo-value="market.spread_state">UNKNOWN</span></div>
+          <div><strong>VWAP State</strong><span data-mo-value="market.vwap_state">UNKNOWN</span></div>
+          <div><strong>VWAP Distance</strong><span data-mo-value="market.vwap_distance">0.0000</span></div>
+          <div><strong>VWAP Elasticity</strong><span data-mo-value="market.vwap_elasticity">0.0000</span></div>
+        </div>
+      </article>
+
+      <article class="panel opportunity-main">
+        <div class="panel-head">
+          <h2>Opportunity Monitor</h2>
+          <span id="opportunity-count-badge">0 ITEMS</span>
+        </div>
+        <div class="opportunity-table" id="opportunity-table"></div>
+      </article>
+    </section>
+  </main>
+
+  <script>{_market_opportunities_script()}</script>
+</body>
+</html>"""
+
+
+def _market_opportunities_script() -> str:
+    return """
+const moState = { payload: null, sections: {} };
+
+function numberValue(value) {
+  return Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 4 });
+}
+
+function pct(value) {
+  return `${(Number(value || 0) * 100).toFixed(2)}%`;
+}
+
+function getValue(path) {
+  const [section, key] = path.split(".");
+  return moState.sections?.[section]?.[key];
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\\"": "&quot;",
+    "'": "&#39;"
+  }[char]));
+}
+
+function formatMarketOpportunityValue(path, value) {
+  if (["vwap_distance", "vwap_elasticity", "score"].some((key) => path.endsWith(key))) {
+    return numberValue(value);
+  }
+  if (path.endsWith("probability")) {
+    return pct(value);
+  }
+  if (value === null || value === undefined || value === "") return "NONE";
+  return String(value);
+}
+
+function renderMarketOpportunitySnapshot(payload) {
+  moState.payload = payload;
+  moState.sections = payload.sections || {};
+  const session = payload.session || {};
+  const opportunities = moState.sections.opportunities || {};
+
+  document.getElementById("mo-mode").textContent = `System ${String(payload.resolved_mode || "paper").toUpperCase()}`;
+  document.getElementById("mo-engine").textContent = `Engine ${session.engine_mode || "SAFE"}`;
+  document.getElementById("mo-session").textContent = `Session ${payload.session_id || session.session_id || "pending"}`;
+  document.getElementById("mo-updated").textContent = `Updated ${payload.generated_at || "pending"}`;
+  document.getElementById("opportunity-count-badge").textContent = `${opportunities.count || 0} ITEMS`;
+
+  document.querySelectorAll("[data-mo-value]").forEach((node) => {
+    const path = node.getAttribute("data-mo-value");
+    node.textContent = formatMarketOpportunityValue(path, getValue(path));
+  });
+
+  renderOpportunities(opportunities.items || []);
+}
+
+function renderOpportunities(items) {
+  const target = document.getElementById("opportunity-table");
+  if (!items.length) {
+    target.innerHTML = `<div class="empty-state">No active opportunities</div>`;
+    return;
+  }
+  target.innerHTML = `
+    <div class="opportunity-row opportunity-head">
+      <span>Symbol</span><span>Asset</span><span>Side</span><span>Signal</span><span>Score</span><span>Probability</span><span>Status</span><span>Reason</span>
+    </div>
+    ${items.map((item) => `
+      <div class="opportunity-row">
+        <span>${escapeHtml(item.symbol || "UNKNOWN")}</span>
+        <span>${escapeHtml(item.asset_class || "UNKNOWN")}</span>
+        <span><em class="side-badge ${String(item.side || "").toLowerCase()}">${escapeHtml(item.side || "WATCH")}</em></span>
+        <span>${escapeHtml(item.signal || "WATCH")}</span>
+        <span>${numberValue(item.score)}</span>
+        <span>${pct(item.probability)}</span>
+        <span>${escapeHtml(item.status || "MONITOR_ONLY")}</span>
+        <span>${escapeHtml(item.reason || "")}</span>
+      </div>
+    `).join("")}
+  `;
+}
+
+async function refreshMarketOpportunities() {
+  const response = await fetch("/api/v1/frontend-state", { cache: "no-store" });
+  renderMarketOpportunitySnapshot(await response.json());
+}
+
+document.querySelector("[data-refresh-market-opportunities]").addEventListener("click", refreshMarketOpportunities);
+refreshMarketOpportunities().catch(() => undefined);
+"""
+
+
 def _css() -> str:
     return """
 :root {
@@ -1315,6 +1511,11 @@ button {
   grid-template-columns: minmax(0, 1.35fr) minmax(340px, 0.8fr);
   gap: 12px;
 }
+.market-opportunity-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  gap: 12px;
+}
 .positions-main {
   min-height: 520px;
 }
@@ -1323,6 +1524,10 @@ button {
 }
 .risk-main {
   min-height: 460px;
+}
+.market-main,
+.opportunity-main {
+  min-height: 320px;
 }
 .positions-side {
   display: grid;
@@ -1344,6 +1549,7 @@ button {
 }
 .position-table,
 .execution-table,
+.opportunity-table,
 .summary-table {
   overflow-x: auto;
 }
@@ -1377,8 +1583,24 @@ button {
   text-transform: uppercase;
   font-weight: 800;
 }
+.opportunity-row {
+  display: grid;
+  grid-template-columns: 120px 100px 90px 120px 90px 110px 140px minmax(220px, 1fr);
+  gap: 8px;
+  min-width: 1060px;
+  border-bottom: 1px solid var(--line);
+  padding: 10px 0;
+  align-items: center;
+}
+.opportunity-head {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  font-weight: 800;
+}
 .position-row span,
 .execution-row span,
+.opportunity-row span,
 .summary-row span {
   overflow-wrap: anywhere;
   font-weight: 700;
@@ -1444,7 +1666,8 @@ button {
   .dashboard-grid,
   .positions-workspace,
   .execution-workspace,
-  .risk-governance-workspace {
+  .risk-governance-workspace,
+  .market-opportunity-workspace {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -1456,6 +1679,7 @@ button {
   .positions-workspace,
   .execution-workspace,
   .risk-governance-workspace,
+  .market-opportunity-workspace,
   .kv-grid,
   .kv-grid.two,
   .signal-grid {
