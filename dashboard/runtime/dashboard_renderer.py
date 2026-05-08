@@ -140,8 +140,22 @@ class DashboardRenderer:
             migrated_risk_summary
         )
 
+        legacy_execution_summary = self._legacy_execution_summary(
+            runtime_summaries=runtime_summaries,
+        )
+        dashboard_state_execution_summary = self._mapping_summary(
+            dashboard_state_payload.get("execution_summary", {})
+        )
+        compare_dashboard_shadow(
+            legacy_execution_summary,
+            dashboard_state_execution_summary,
+        )
+        migrated_execution_summary = {
+            **legacy_execution_summary,
+            **dashboard_state_execution_summary,
+        }
         execution_contract = ExecutionRenderContract.from_summary(
-            runtime_summaries.get("execution_summary", {})
+            migrated_execution_summary
         )
 
         sections = [
@@ -213,6 +227,29 @@ class DashboardRenderer:
                 "position_limit": 0,
                 "exposure_limit": 0.0,
                 "risk_limits_breached": [],
+            },
+        )
+
+    @staticmethod
+    def _legacy_execution_summary(
+        *,
+        runtime_summaries: dict,
+    ) -> dict:
+        return runtime_summaries.get(
+            "execution_summary",
+            {
+                "execution_state": "IDLE",
+                "accepted_trade_count": 0,
+                "rejected_trade_count": 0,
+                "pending_trade_count": 0,
+                "total_execution_cost": 0.0,
+                "slippage_cost": 0.0,
+                "spread_cost": 0.0,
+                "fee_cost": 0.0,
+                "avg_slippage_bps": 0.0,
+                "avg_spread_bps": 0.0,
+                "execution_cost_state": "UNKNOWN",
+                "last_execution_event": "",
             },
         )
 
