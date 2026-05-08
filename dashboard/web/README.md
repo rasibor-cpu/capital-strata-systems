@@ -24,8 +24,15 @@ Local run:
 
 Routes:
 
+- `/broker` - read-only broker readiness and mode-resolution center
 - `/dashboard` - institutional web command dashboard
 - `/execution` - read-only execution and trade history
 - `/market-opportunities` - read-only market regime and opportunity monitor
 - `/positions` - read-only professional positions inventory
 - `/risk-governance` - read-only risk and governance center
+
+Performance smoke:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests\dashboard\test_frontend_performance_budget.py -q
+```

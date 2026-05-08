@@ -86,6 +86,29 @@ def build_delta_ws_messages(
     return messages
 
 
+def build_delta_ws_message(
+    previous_payload: dict[str, Any] | None,
+    current_state: DashboardState,
+    *,
+    sequence: int,
+) -> dict[str, Any]:
+    """
+    Backward-compatible aggregate delta helper.
+
+    The websocket router now emits one lightweight message per changed section,
+    while existing smoke tests and callers still use the original aggregate
+    shape. Keep this helper as a stable contract boundary.
+    """
+
+    current_payload = build_frontend_payload(current_state)
+    return build_websocket_delta(
+        previous_payload,
+        current_payload,
+        sequence=sequence,
+        sections=WS_DELTA_SECTIONS,
+    )
+
+
 def build_heartbeat_ws_message(
     *,
     sequence: int,
@@ -159,6 +182,7 @@ def _state_from_provider(provider: DashboardStateProvider) -> DashboardState:
 __all__ = [
     "DashboardStateProvider",
     "WS_DELTA_SECTIONS",
+    "build_delta_ws_message",
     "build_delta_ws_messages",
     "build_heartbeat_ws_message",
     "build_initial_ws_message",
