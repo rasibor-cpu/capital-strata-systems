@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import inspect
+import logging
 from typing import Any, Dict, Optional
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class ExecutionGate:
@@ -94,6 +98,14 @@ class ExecutionGate:
                 last_err = e
 
         debug["vol_size_error"] = str(last_err) if last_err else "unknown"
+        LOGGER.warning(
+            "ExecutionGate volatility sizing fallback invoked; "
+            "instrument=%s base_notional=%s volatility_state=%s error=%s",
+            instrument,
+            base_notional,
+            volatility_state,
+            debug["vol_size_error"],
+        )
         # If vol sizing fails, be conservative: return base_notional unchanged (don’t crash the engine)
         return float(base_notional)
 
