@@ -11,6 +11,10 @@ class PnLSummaryBuilder:
     - Build executive/runtime PnL summaries from normalized dashboard state.
     - Keep aggregation logic separate from renderers.
     - Prevent dashboard layers from touching raw engine internals.
+    - Remain a presentation-layer builder, not the accounting authority.
+    - In production/live mode, consume canonical ledger state rather than
+      independently determining accounting truth.
+    - Treat engine.ledger.pnl_engine.PnLEngine as the canonical PnL source.
     """
 
     def build(
