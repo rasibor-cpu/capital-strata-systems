@@ -33,10 +33,12 @@ class PnLEngine:
     - Computes realized P&L on SELL
     - Computes unrealized P&L from provided market prices
     - Stores snapshots into LedgerStore
+    - Optionally nets realized exit P&L through an execution cost engine
     """
 
-    def __init__(self, store: LedgerStore):
+    def __init__(self, store: LedgerStore, cost_engine=None):
         self.store = store
+        self.cost_engine = cost_engine
         self._state: Dict[PosKey, PositionState] = {}
 
     # ─────────────────────────────
@@ -83,6 +85,11 @@ class PnLEngine:
                 sold_qty = st.qty
 
             realized = (price - st.avg_cost) * sold_qty
+            realized = self._apply_exit_costs(
+                symbol=symbol,
+                notional=abs(sold_qty * price),
+                realized=realized,
+            )
             st.realized_pnl += realized
             st.qty -= sold_qty
 
@@ -158,3 +165,25 @@ class PnLEngine:
             r.department_id or "DEPT:NA",
             r.user_id or "USER:NA",
         )
+
+    def _apply_exit_costs(
+        self,
+        *,
+        symbol: str,
+        notional: Decimal,
+        realized: Decimal,
+    ) -> Decimal:
+        if self.cost_engine is None or notional <= 0:
+            return realized
+
+        raw_pnl = float(realized)
+        adjusted_pnl = self.cost_engine.apply_costs(
+            instrument=symbol,
+            notional=float(notional),
+            raw_pnl=raw_pnl,
+        )
+        # Cost engines are currently float-based; preserve the gross Decimal
+        # realized value and subtract only the boundary-converted cost delta.
+        cost_delta = Decimal(str(raw_pnl)) - Decimal(str(adjusted_pnl))
+
+        return realized - cost_delta

@@ -6,6 +6,7 @@ from decimal import Decimal
 from dashboard.runtime.state_builders.position_state_builder import PositionStateBuilder
 from dashboard.runtime.summary_builders.pnl_summary_builder import PnLSummaryBuilder
 from engine.domain.executions import ExecutionReport
+from engine.execution.execution_cost_engine import ExecutionCostEngine
 from engine.ledger.ledger_store import LedgerStore
 from engine.ledger.pnl_engine import PnLEngine
 
@@ -70,9 +71,9 @@ def _report(
     )
 
 
-def test_ledger_and_dashboard_pnl_reconcile_for_deterministic_round_trip() -> None:
+def _round_trip_snapshot(cost_engine=None):
     store = LedgerStore()
-    engine = PnLEngine(store)
+    engine = PnLEngine(store, cost_engine=cost_engine)
 
     engine.update_from_execution(
         _report(side="BUY", qty=2.0, price=100.0, execution_id="BUY-1")
@@ -95,9 +96,10 @@ def test_ledger_and_dashboard_pnl_reconcile_for_deterministic_round_trip() -> No
         department_id="DEPT-1",
         user_id="USER-1",
     )
-    assert snapshot.realized_pnl == Decimal("50.0")
-    assert snapshot.unrealized_pnl == Decimal("0.0")
+    return snapshot
 
+
+def _dashboard_summary_from_snapshot(snapshot):
     position_state = PositionStateBuilder().build(
         {
             "positions": [
@@ -121,4 +123,43 @@ def test_ledger_and_dashboard_pnl_reconcile_for_deterministic_round_trip() -> No
 
     assert dashboard_summary["realized_pnl"] == float(snapshot.realized_pnl)
     assert dashboard_summary["unrealized_pnl"] == float(snapshot.unrealized_pnl)
+    return dashboard_summary
+
+
+def test_ledger_and_dashboard_pnl_reconcile_for_deterministic_round_trip() -> None:
+    snapshot = _round_trip_snapshot()
+
+    assert snapshot.realized_pnl == Decimal("50.0")
+    assert snapshot.unrealized_pnl == Decimal("0.0")
+
+    dashboard_summary = _dashboard_summary_from_snapshot(snapshot)
+
     assert dashboard_summary["net_pnl"] == 50.0
+
+
+def test_pnl_engine_without_cost_engine_preserves_gross_realized_pnl() -> None:
+    snapshot = _round_trip_snapshot(cost_engine=None)
+
+    assert snapshot.realized_pnl == Decimal("50.0")
+    assert snapshot.unrealized_pnl == Decimal("0.0")
+
+
+def test_pnl_engine_with_cost_engine_subtracts_exit_friction() -> None:
+    snapshot = _round_trip_snapshot(
+        cost_engine=ExecutionCostEngine(deterministic=True)
+    )
+
+    assert snapshot.realized_pnl == Decimal("44.9525")
+    assert snapshot.unrealized_pnl == Decimal("0.0")
+
+
+def test_dashboard_pnl_reconciles_to_canonical_net_cost_pnl() -> None:
+    snapshot = _round_trip_snapshot(
+        cost_engine=ExecutionCostEngine(deterministic=True)
+    )
+
+    dashboard_summary = _dashboard_summary_from_snapshot(snapshot)
+
+    assert dashboard_summary["realized_pnl"] == float(snapshot.realized_pnl)
+    assert dashboard_summary["unrealized_pnl"] == float(snapshot.unrealized_pnl)
+    assert dashboard_summary["net_pnl"] == 44.9525

@@ -83,6 +83,16 @@ def test_execution_cost_engine_unknown_asset_uses_safe_fallback() -> None:
     assert adjusted < 100.0
 
 
+def test_execution_cost_engine_exit_cost_matches_pnl_reconciliation_fixture() -> None:
+    adjusted = ExecutionCostEngine(deterministic=True).apply_costs(
+        instrument="BTC-USD",
+        notional=250.0,
+        raw_pnl=50.0,
+    )
+
+    assert round(adjusted, 4) == 44.9525
+
+
 def test_execution_cost_model_applies_non_negative_fees_for_buy() -> None:
     report = _execution_report(side="BUY", gross_amount=1000.0)
     schedule = FeeSchedule(
