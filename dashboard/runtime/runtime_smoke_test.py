@@ -16,6 +16,9 @@ from dashboard.runtime.render_contracts.account_render_contract import (
 from dashboard.runtime.render_contracts.broker_render_contract import (
     BrokerRenderContract,
 )
+from dashboard.runtime.render_contracts.diagnostics_render_contract import (
+    DiagnosticsRenderContract,
+)
 from dashboard.runtime.render_contracts.execution_render_contract import (
     ExecutionRenderContract,
 )
@@ -29,6 +32,7 @@ from dashboard.runtime.render_contracts.pnl_render_contract import PnLRenderCont
 from dashboard.runtime.render_contracts.risk_render_contract import RiskRenderContract
 from dashboard.runtime.renderers.account_renderer import AccountRenderer
 from dashboard.runtime.renderers.broker_renderer import BrokerRenderer
+from dashboard.runtime.renderers.diagnostics_renderer import DiagnosticsRenderer
 from dashboard.runtime.renderers.execution_renderer import ExecutionRenderer
 from dashboard.runtime.renderers.governance_renderer import GovernanceRenderer
 from dashboard.runtime.renderers.market_renderer import MarketRenderer
@@ -250,6 +254,7 @@ def validate_hydration_and_rendering(
         "RISK SUMMARY",
         "EXECUTION SUMMARY",
         "BROKER STATE",
+        "RUNTIME DIAGNOSTICS",
     ]:
         require(expected in output, f"missing rendered section: {expected}", failures)
 
@@ -274,6 +279,9 @@ def validate_hydration_and_rendering(
     broker_contract = BrokerRenderContract.from_summary(
         state.to_dict()["broker_summary"]
     )
+    diagnostics_contract = DiagnosticsRenderContract.from_dashboard_state(
+        state
+    )
 
     renderer_outputs = [
         AccountRenderer().render(account_contract),
@@ -283,6 +291,7 @@ def validate_hydration_and_rendering(
         RiskRenderer().render(risk_contract),
         ExecutionRenderer().render(execution_contract),
         BrokerRenderer().render(broker_contract),
+        DiagnosticsRenderer().render(diagnostics_contract),
     ]
 
     for renderer_output in renderer_outputs:
@@ -297,6 +306,7 @@ def validate_bootstrap(payloads: Dict[str, Dict[str, Any]], failures: List[str])
         "Broker:                  DEMO",
         "BROKER STATE",
         "Selected Broker:         DEMO",
+        "RUNTIME DIAGNOSTICS",
         "Trend State:             UPTREND",
         "Risk State:              NORMAL",
         "Execution State:         READY",
@@ -320,6 +330,7 @@ def validate_demo_runner(failures: List[str]) -> None:
         "RISK SUMMARY",
         "EXECUTION SUMMARY",
         "BROKER STATE",
+        "RUNTIME DIAGNOSTICS",
     ]:
         require(expected in output, f"demo runner missing: {expected}", failures)
 

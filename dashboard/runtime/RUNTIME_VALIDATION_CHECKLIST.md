@@ -66,6 +66,8 @@ Expected sections:
 - Governance State
 - Risk Summary
 - Execution Summary
+- Broker State
+- Runtime Diagnostics
 
 Expected demo signals:
 
@@ -121,6 +123,8 @@ Current pure renderers:
 - `GovernanceRenderer`
 - `RiskRenderer`
 - `ExecutionRenderer`
+- `BrokerRenderer`
+- `DiagnosticsRenderer`
 
 ## 6. Regression Checks
 

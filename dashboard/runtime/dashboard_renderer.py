@@ -13,6 +13,9 @@ from dashboard.runtime.render_contracts.account_render_contract import AccountRe
 from dashboard.runtime.render_contracts.broker_render_contract import (
     BrokerRenderContract,
 )
+from dashboard.runtime.render_contracts.diagnostics_render_contract import (
+    DiagnosticsRenderContract,
+)
 from dashboard.runtime.render_contracts.governance_render_contract import (
     GovernanceRenderContract,
 )
@@ -24,6 +27,7 @@ from dashboard.runtime.render_contracts.pnl_render_contract import PnLRenderCont
 from dashboard.runtime.render_contracts.risk_render_contract import RiskRenderContract
 from dashboard.runtime.renderers.account_renderer import AccountRenderer
 from dashboard.runtime.renderers.broker_renderer import BrokerRenderer
+from dashboard.runtime.renderers.diagnostics_renderer import DiagnosticsRenderer
 from dashboard.runtime.renderers.execution_renderer import ExecutionRenderer
 from dashboard.runtime.renderers.governance_renderer import GovernanceRenderer
 from dashboard.runtime.renderers.market_renderer import MarketRenderer
@@ -50,6 +54,7 @@ class DashboardRenderer:
         self.risk_renderer = RiskRenderer()
         self.execution_renderer = ExecutionRenderer()
         self.broker_renderer = BrokerRenderer()
+        self.diagnostics_renderer = DiagnosticsRenderer()
 
     def render(self, state: DashboardState) -> str:
         runtime_summaries = state.last_scan_results or {}
@@ -178,6 +183,12 @@ class DashboardRenderer:
         broker_contract = BrokerRenderContract.from_summary(
             migrated_broker_summary
         )
+        diagnostics_contract = DiagnosticsRenderContract.from_dashboard_state(
+            state
+        )
+        diagnostics_output = self.diagnostics_renderer.render(
+            diagnostics_contract
+        )
 
         sections = [
             "======================================",
@@ -204,8 +215,12 @@ class DashboardRenderer:
             "",
             self.broker_renderer.render(broker_contract),
             "",
-            "======================================",
         ]
+
+        if diagnostics_output:
+            sections.extend([diagnostics_output, ""])
+
+        sections.append("======================================")
 
         return "\n".join(sections)
 
