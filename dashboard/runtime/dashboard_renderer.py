@@ -10,6 +10,9 @@ from dashboard.runtime.dashboard_state import (
 )
 from dashboard.runtime.dashboard_shadow_compare import compare_dashboard_shadow
 from dashboard.runtime.render_contracts.account_render_contract import AccountRenderContract
+from dashboard.runtime.render_contracts.broker_render_contract import (
+    BrokerRenderContract,
+)
 from dashboard.runtime.render_contracts.governance_render_contract import (
     GovernanceRenderContract,
 )
@@ -20,6 +23,7 @@ from dashboard.runtime.render_contracts.market_render_contract import MarketRend
 from dashboard.runtime.render_contracts.pnl_render_contract import PnLRenderContract
 from dashboard.runtime.render_contracts.risk_render_contract import RiskRenderContract
 from dashboard.runtime.renderers.account_renderer import AccountRenderer
+from dashboard.runtime.renderers.broker_renderer import BrokerRenderer
 from dashboard.runtime.renderers.execution_renderer import ExecutionRenderer
 from dashboard.runtime.renderers.governance_renderer import GovernanceRenderer
 from dashboard.runtime.renderers.market_renderer import MarketRenderer
@@ -45,6 +49,7 @@ class DashboardRenderer:
         self.governance_renderer = GovernanceRenderer()
         self.risk_renderer = RiskRenderer()
         self.execution_renderer = ExecutionRenderer()
+        self.broker_renderer = BrokerRenderer()
 
     def render(self, state: DashboardState) -> str:
         runtime_summaries = state.last_scan_results or {}
@@ -158,6 +163,22 @@ class DashboardRenderer:
             migrated_execution_summary
         )
 
+        legacy_broker_summary = self._legacy_broker_summary(state=state)
+        dashboard_state_broker_summary = self._mapping_summary(
+            dashboard_state_payload.get("broker_summary", {})
+        )
+        compare_dashboard_shadow(
+            legacy_broker_summary,
+            dashboard_state_broker_summary,
+        )
+        migrated_broker_summary = {
+            **legacy_broker_summary,
+            **dashboard_state_broker_summary,
+        }
+        broker_contract = BrokerRenderContract.from_summary(
+            migrated_broker_summary
+        )
+
         sections = [
             "======================================",
             " CAPITAL STRATA SYSTEMS DASHBOARD",
@@ -180,6 +201,8 @@ class DashboardRenderer:
             self.risk_renderer.render(risk_contract),
             "",
             self.execution_renderer.render(execution_contract),
+            "",
+            self.broker_renderer.render(broker_contract),
             "",
             "======================================",
         ]
@@ -280,6 +303,13 @@ class DashboardRenderer:
         state: DashboardState,
     ) -> dict:
         return asdict(state.governance_state)
+
+    @staticmethod
+    def _legacy_broker_summary(
+        *,
+        state: DashboardState,
+    ) -> dict:
+        return asdict(state.broker_state)
 
     @staticmethod
     def _governance_state_from_summary(summary: dict) -> GovernanceState:
