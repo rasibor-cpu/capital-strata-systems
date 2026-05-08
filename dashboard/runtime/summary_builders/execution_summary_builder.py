@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from dashboard.runtime._utils import safe_float, safe_int
+
 
 class ExecutionSummaryBuilder:
     """
@@ -21,23 +23,23 @@ class ExecutionSummaryBuilder:
 
         return {
             "execution_state": str(execution.get("execution_state", "IDLE")),
-            "accepted_trade_count": int(
+            "accepted_trade_count": safe_int(
                 execution.get("accepted_trade_count", 0)
             ),
-            "rejected_trade_count": int(
+            "rejected_trade_count": safe_int(
                 execution.get("rejected_trade_count", 0)
             ),
-            "pending_trade_count": int(execution.get("pending_trade_count", 0)),
-            "total_execution_cost": self._to_float(
+            "pending_trade_count": safe_int(execution.get("pending_trade_count", 0)),
+            "total_execution_cost": safe_float(
                 execution.get("total_execution_cost", 0.0)
             ),
-            "slippage_cost": self._to_float(execution.get("slippage_cost", 0.0)),
-            "spread_cost": self._to_float(execution.get("spread_cost", 0.0)),
-            "fee_cost": self._to_float(execution.get("fee_cost", 0.0)),
-            "avg_slippage_bps": self._to_float(
+            "slippage_cost": safe_float(execution.get("slippage_cost", 0.0)),
+            "spread_cost": safe_float(execution.get("spread_cost", 0.0)),
+            "fee_cost": safe_float(execution.get("fee_cost", 0.0)),
+            "avg_slippage_bps": safe_float(
                 execution.get("avg_slippage_bps", 0.0)
             ),
-            "avg_spread_bps": self._to_float(
+            "avg_spread_bps": safe_float(
                 execution.get("avg_spread_bps", 0.0)
             ),
             "execution_cost_state": str(
@@ -47,12 +49,3 @@ class ExecutionSummaryBuilder:
                 execution.get("last_execution_event", "")
             ),
         }
-
-    @staticmethod
-    def _to_float(value: Any) -> float:
-        try:
-            if value is None:
-                return 0.0
-            return float(value)
-        except (TypeError, ValueError):
-            return 0.0

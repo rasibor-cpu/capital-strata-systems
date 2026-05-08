@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, Mapping
 
+from dashboard.runtime._utils import safe_float, safe_int
+
 
 def build_account_payload(
     *,
@@ -15,11 +17,11 @@ def build_account_payload(
     account_mode: Any = "paper",
 ) -> Dict[str, Any]:
     return {
-        "cash_balance": _to_float(cash_balance),
-        "total_equity": _to_float(total_equity),
-        "buying_power": _to_float(buying_power),
-        "margin_used": _to_float(margin_used),
-        "available_margin": _to_float(available_margin),
+        "cash_balance": safe_float(cash_balance),
+        "total_equity": safe_float(total_equity),
+        "buying_power": safe_float(buying_power),
+        "margin_used": safe_float(margin_used),
+        "available_margin": safe_float(available_margin),
         "currency": str(currency or "USD"),
         "broker": str(broker or "NONE"),
         "account_mode": str(account_mode or "paper"),
@@ -54,18 +56,18 @@ def build_positions_payload(
                 "symbol": str(position.get("symbol", "UNKNOWN")),
                 "asset_class": str(position.get("asset_class", "UNKNOWN")),
                 "side": str(position.get("side", "UNKNOWN")),
-                "qty": _to_float(position.get("qty", position.get("quantity", 0.0))),
-                "entry_price": _to_float(
+                "qty": safe_float(position.get("qty", position.get("quantity", 0.0))),
+                "entry_price": safe_float(
                     position.get("entry_price", position.get("entry", 0.0))
                 ),
-                "current_price": _to_float(
+                "current_price": safe_float(
                     position.get(
                         "current_price",
                         position.get("mark_price", position.get("entry_price", 0.0)),
                     )
                 ),
-                "unrealized_pnl": _to_float(position.get("unrealized_pnl", 0.0)),
-                "realized_pnl": _to_float(position.get("realized_pnl", 0.0)),
+                "unrealized_pnl": safe_float(position.get("unrealized_pnl", 0.0)),
+                "realized_pnl": safe_float(position.get("realized_pnl", 0.0)),
             }
         )
 
@@ -92,8 +94,8 @@ def build_market_payload(**values: Any) -> Dict[str, Any]:
         "signal_confluence_state": "UNKNOWN",
     }
     payload.update(values)
-    payload["vwap_distance"] = _to_float(payload.get("vwap_distance"))
-    payload["vwap_elasticity"] = _to_float(payload.get("vwap_elasticity"))
+    payload["vwap_distance"] = safe_float(payload.get("vwap_distance"))
+    payload["vwap_elasticity"] = safe_float(payload.get("vwap_elasticity"))
     return payload
 
 
@@ -133,9 +135,9 @@ def build_risk_payload(**values: Any) -> Dict[str, Any]:
         "daily_loss_limit",
         "exposure_limit",
     ]:
-        payload[key] = _to_float(payload.get(key))
+        payload[key] = safe_float(payload.get(key))
 
-    payload["position_limit"] = int(payload.get("position_limit", 0) or 0)
+    payload["position_limit"] = safe_int(payload.get("position_limit"))
     return payload
 
 
@@ -164,14 +166,14 @@ def build_execution_payload(**values: Any) -> Dict[str, Any]:
         "avg_slippage_bps",
         "avg_spread_bps",
     ]:
-        payload[key] = _to_float(payload.get(key))
+        payload[key] = safe_float(payload.get(key))
 
     for key in [
         "accepted_trade_count",
         "rejected_trade_count",
         "pending_trade_count",
     ]:
-        payload[key] = int(payload.get(key, 0) or 0)
+        payload[key] = safe_int(payload.get(key))
 
     return payload
 
@@ -186,7 +188,7 @@ def build_session_payload(**values: Any) -> Dict[str, Any]:
         "live_or_paper": "paper",
     }
     payload.update(values)
-    payload["cycle_number"] = int(payload.get("cycle_number", 0) or 0)
+    payload["cycle_number"] = safe_int(payload.get("cycle_number"))
     return payload
 
 
@@ -229,12 +231,3 @@ def build_dashboard_payloads(
             **dict(diagnostics_payload or {})
         ),
     }
-
-
-def _to_float(value: Any) -> float:
-    try:
-        if value is None:
-            return 0.0
-        return float(value)
-    except (TypeError, ValueError):
-        return 0.0

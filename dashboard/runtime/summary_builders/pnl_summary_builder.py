@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from dashboard.runtime._utils import safe_float, safe_int
+
 
 class PnLSummaryBuilder:
     """
@@ -26,21 +28,21 @@ class PnLSummaryBuilder:
         account = account_state or {}
         positions = position_state or {}
 
-        realized_pnl = self._to_float(
+        realized_pnl = safe_float(
             positions.get("total_realized_pnl", 0.0)
         )
 
-        unrealized_pnl = self._to_float(
+        unrealized_pnl = safe_float(
             positions.get("total_unrealized_pnl", 0.0)
         )
 
         net_pnl = realized_pnl + unrealized_pnl
 
-        total_exposure = self._to_float(
+        total_exposure = safe_float(
             positions.get("total_exposure", 0.0)
         )
 
-        account_equity = self._to_float(
+        account_equity = safe_float(
             account.get("equity", account.get("balance", 0.0))
         )
 
@@ -51,8 +53,8 @@ class PnLSummaryBuilder:
                 total_exposure / account_equity
             ) * 100.0
 
-        winners = int(positions.get("winner_count", 0))
-        losers = int(positions.get("loser_count", 0))
+        winners = safe_int(positions.get("winner_count", 0))
+        losers = safe_int(positions.get("loser_count", 0))
 
         total_closed_bias = winners + losers
 
@@ -85,11 +87,3 @@ class PnLSummaryBuilder:
             "account_equity": account_equity,
         }
 
-    @staticmethod
-    def _to_float(value: Any) -> float:
-        try:
-            if value is None:
-                return 0.0
-            return float(value)
-        except (TypeError, ValueError):
-            return 0.0

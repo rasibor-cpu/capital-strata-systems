@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from dashboard.runtime._utils import safe_float, safe_int
+
 
 class RiskSummaryBuilder:
     """
@@ -23,10 +25,10 @@ class RiskSummaryBuilder:
         positions = position_state or {}
         risk = risk_payload or {}
 
-        account_equity = self._to_float(
+        account_equity = safe_float(
             account.get("equity", account.get("balance", 0.0))
         )
-        total_exposure = self._to_float(positions.get("total_exposure", 0.0))
+        total_exposure = safe_float(positions.get("total_exposure", 0.0))
         exposure_utilization_pct = 0.0
 
         if account_equity > 0:
@@ -40,30 +42,21 @@ class RiskSummaryBuilder:
         return {
             "risk_state": str(risk.get("risk_state", "NORMAL")),
             "gate_status": str(risk.get("gate_status", "OPEN")),
-            "total_exposure": self._to_float(
+            "total_exposure": safe_float(
                 risk.get("total_exposure", total_exposure)
             ),
-            "exposure_utilization_pct": self._to_float(
+            "exposure_utilization_pct": safe_float(
                 risk.get("exposure_utilization_pct", exposure_utilization_pct)
             ),
-            "current_drawdown_pct": self._to_float(
+            "current_drawdown_pct": safe_float(
                 risk.get("current_drawdown_pct", 0.0)
             ),
-            "max_drawdown_pct": self._to_float(risk.get("max_drawdown_pct", 0.0)),
-            "daily_loss_limit": self._to_float(risk.get("daily_loss_limit", 0.0)),
-            "position_limit": int(risk.get("position_limit", 0)),
-            "exposure_limit": self._to_float(risk.get("exposure_limit", 0.0)),
+            "max_drawdown_pct": safe_float(risk.get("max_drawdown_pct", 0.0)),
+            "daily_loss_limit": safe_float(risk.get("daily_loss_limit", 0.0)),
+            "position_limit": safe_int(risk.get("position_limit", 0)),
+            "exposure_limit": safe_float(risk.get("exposure_limit", 0.0)),
             "risk_limits_breached": self._normalize_strings(limit_breaches),
         }
-
-    @staticmethod
-    def _to_float(value: Any) -> float:
-        try:
-            if value is None:
-                return 0.0
-            return float(value)
-        except (TypeError, ValueError):
-            return 0.0
 
     @staticmethod
     def _normalize_strings(values: List[Any]) -> List[str]:
