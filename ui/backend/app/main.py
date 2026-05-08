@@ -30,7 +30,21 @@ try:
     from app.auth.auth_router import router as auth_router  # type: ignore
     app.include_router(auth_router)
 except Exception as e:
-    print(f"[WARN] Auth router not loaded: {e}")
+    try:
+        from .auth.auth_router import router as auth_router  # type: ignore
+        app.include_router(auth_router)
+    except Exception as fallback_error:
+        print(f"[WARN] Auth router not loaded: {e}; {fallback_error}")
+
+try:
+    from app.dashboard_state_router import router as dashboard_state_router  # type: ignore
+    app.include_router(dashboard_state_router)
+except Exception as e:
+    try:
+        from .dashboard_state_router import router as dashboard_state_router  # type: ignore
+        app.include_router(dashboard_state_router)
+    except Exception as fallback_error:
+        print(f"[WARN] DashboardState router not loaded: {e}; {fallback_error}")
 
 # Optional other routers (defensive)
 for mod_path, attr in [

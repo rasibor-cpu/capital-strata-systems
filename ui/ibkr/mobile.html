@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CSS Mobile Console</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="mobile-shell">
+    <header class="mobile-header">
+      <div class="mobile-title">
+        <h1>CSS Mobile Console</h1>
+        <p id="mobile-source">Shadow state</p>
+      </div>
+      <div class="status-strip">
+        <span class="pill warn">Mode <strong id="mobile-mode">paper</strong></span>
+        <span class="pill">Engine <strong id="mobile-engine">SAFE</strong></span>
+        <span class="pill good">Orders <strong id="mobile-orders">shadow</strong></span>
+      </div>
+    </header>
+
+    <section id="mobile-content" data-testid="mobile-content"></section>
+  </main>
+
+  <nav class="bottom-nav" aria-label="Mobile screens">
+    <button type="button" class="active" data-screen="home">Home</button>
+    <button type="button" data-screen="positions">Positions</button>
+    <button type="button" data-screen="execution">Execution</button>
+    <button type="button" data-screen="risk">Risk</button>
+    <button type="button" data-screen="alerts">Alerts</button>
+  </nav>
+
+  <script src="state_sample.js"></script>
+  <script src="mobile.js"></script>
+</body>
+</html>

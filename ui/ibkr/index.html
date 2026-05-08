@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CSS Institutional Console</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <nav class="rail" aria-label="Primary">
+      <div class="mark">CSS</div>
+      <button class="rail-button" id="refresh-state" title="Refresh state">R</button>
+      <a class="rail-button" href="mobile.html" title="Mobile console" aria-label="Mobile console">
+        <button class="rail-button" type="button">M</button>
+      </a>
+      <a class="rail-button" href="../menu.html" title="Menu" aria-label="Menu">
+        <button class="rail-button" type="button">N</button>
+      </a>
+    </nav>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div class="title">
+          <h1>CSS Institutional Console</h1>
+          <p id="state-source">Loading dashboard state</p>
+        </div>
+        <div class="status-strip" aria-label="System status">
+          <span class="pill warn">Mode <strong id="resolved-mode">paper</strong></span>
+          <span class="pill">Broker <strong id="broker-mode">paper</strong></span>
+          <span class="pill">Engine <strong id="engine-mode">SAFE</strong></span>
+          <span class="pill good">Orders <strong id="orders-state">shadow</strong></span>
+        </div>
+      </header>
+
+      <section class="panel span-12" data-testid="control-strip">
+        <div class="panel-header">
+          <h2>Control Strip</h2>
+          <span class="pill warn">Shadow Mode</span>
+        </div>
+        <div class="panel-body action-row">
+          <input class="control-input" id="api-base" value="http://127.0.0.1:8000" aria-label="API base URL" />
+          <button class="quiet-action" id="save-api-base" type="button">Save API Base</button>
+          <button class="primary-action" id="stage-shadow-ticket" type="button">Stage Ticket</button>
+          <button class="danger-action" id="disable-orders" type="button" disabled>Disable Live Orders</button>
+          <span class="pill" id="action-status">No order route active</span>
+        </div>
+      </section>
+
+      <section class="panel-grid" aria-label="Dashboard panels">
+        <article class="panel span-4" data-testid="account-overview-panel">
+          <div class="panel-header">
+            <h2>Account Overview</h2>
+            <span class="pill" id="account-broker">DEMO</span>
+          </div>
+          <div class="panel-body">
+            <div class="metric-grid">
+              <div class="metric"><span>Total Equity</span><strong id="total-equity">$0.00</strong></div>
+              <div class="metric"><span>Cash Balance</span><strong id="cash-balance">$0.00</strong></div>
+              <div class="metric"><span>Buying Power</span><strong id="buying-power">$0.00</strong></div>
+              <div class="metric"><span>Available Margin</span><strong id="available-margin">$0.00</strong></div>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel span-4" data-testid="pnl-panel">
+          <div class="panel-header">
+            <h2>PnL Monitor</h2>
+            <span class="pill" id="pnl-source">presentation</span>
+          </div>
+          <div class="panel-body">
+            <div class="metric-grid">
+              <div class="metric"><span>Realized</span><strong id="realized-pnl">$0.00</strong></div>
+              <div class="metric"><span>Unrealized</span><strong id="unrealized-pnl">$0.00</strong></div>
+              <div class="metric"><span>Net PnL</span><strong id="net-pnl">$0.00</strong></div>
+              <div class="metric"><span>Win Rate</span><strong id="win-rate">0%</strong></div>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel span-4" data-testid="broker-control-panel">
+          <div class="panel-header">
+            <h2>Broker Control Panel</h2>
+            <span class="pill" id="broker-connected">offline</span>
+          </div>
+          <div class="panel-body stack">
+            <div class="status-row"><span>Selected</span><strong id="selected-broker">NONE</strong></div>
+            <div class="status-row"><span>Broker Mode</span><strong id="broker-mode-detail">paper</strong></div>
+            <div class="status-row"><span>Live Trading</span><strong id="live-trading-enabled">false</strong></div>
+            <div class="status-row"><span>Heartbeat</span><strong id="last-heartbeat">none</strong></div>
+          </div>
+        </article>
+
+        <article class="panel span-7" data-testid="live-positions-panel">
+          <div class="panel-header">
+            <h2>Live Positions</h2>
+            <span class="pill" id="open-position-count">0 open</span>
+          </div>
+          <div class="panel-body">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Class</th>
+                  <th>Side</th>
+                  <th>Qty</th>
+                  <th>Mark</th>
+                  <th>PnL</th>
+                </tr>
+              </thead>
+              <tbody id="positions-body"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel span-5" data-testid="risk-control-center-panel">
+          <div class="panel-header">
+            <h2>Risk Control Center</h2>
+            <span class="pill" id="risk-state">NORMAL</span>
+          </div>
+          <div class="panel-body stack" id="risk-bars"></div>
+        </article>
+
+        <article class="panel span-4" data-testid="governance-center-panel">
+          <div class="panel-header">
+            <h2>Governance Center</h2>
+            <span class="pill" id="gate-status">OPEN</span>
+          </div>
+          <div class="panel-body stack">
+            <div class="status-row"><span>Governance</span><strong id="governance-enabled">true</strong></div>
+            <div class="status-row"><span>Session Lock</span><strong id="session-locked">false</strong></div>
+            <div class="status-row"><span>Defensive Mode</span><strong id="defensive-mode">false</strong></div>
+            <div class="status-row"><span>Audit</span><strong id="audit-enabled">true</strong></div>
+          </div>
+        </article>
+
+        <article class="panel span-4" data-testid="market-regime-panel">
+          <div class="panel-header">
+            <h2>Market Regime Panel</h2>
+            <span class="pill" id="regime-state">UNKNOWN</span>
+          </div>
+          <div class="panel-body stack">
+            <div class="status-row"><span>Trend</span><strong id="trend-state">UNKNOWN</strong></div>
+            <div class="status-row"><span>Volatility</span><strong id="volatility-state">UNKNOWN</strong></div>
+            <div class="status-row"><span>Liquidity</span><strong id="liquidity-state">UNKNOWN</strong></div>
+            <div class="status-row"><span>VWAP</span><strong id="vwap-state">UNKNOWN</strong></div>
+          </div>
+        </article>
+
+        <article class="panel span-4" data-testid="execution-center-panel">
+          <div class="panel-header">
+            <h2>Execution Center</h2>
+            <span class="pill" id="execution-state">READY</span>
+          </div>
+          <div class="panel-body stack">
+            <div class="status-row"><span>Accepted</span><strong id="accepted-trades">0</strong></div>
+            <div class="status-row"><span>Rejected</span><strong id="rejected-trades">0</strong></div>
+            <div class="status-row"><span>Pending</span><strong id="pending-trades">0</strong></div>
+            <div class="status-row"><span>Total Cost</span><strong id="total-execution-cost">$0.00</strong></div>
+          </div>
+        </article>
+
+        <article class="panel span-6" data-testid="opportunity-monitor-panel">
+          <div class="panel-header">
+            <h2>Opportunity Monitor</h2>
+            <span class="pill">watchlist</span>
+          </div>
+          <div class="panel-body stack" id="opportunity-list"></div>
+        </article>
+
+        <article class="panel span-3" data-testid="equity-curve-panel">
+          <div class="panel-header">
+            <h2>Equity Curve</h2>
+            <span class="pill">cycle</span>
+          </div>
+          <div class="panel-body">
+            <canvas class="chart" id="equity-chart" width="520" height="190"></canvas>
+          </div>
+        </article>
+
+        <article class="panel span-3" data-testid="alerts-center-panel">
+          <div class="panel-header">
+            <h2>Alerts Center</h2>
+            <span class="pill" id="alert-count">0</span>
+          </div>
+          <div class="panel-body alert-list" id="alerts-list"></div>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <script src="state_sample.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
