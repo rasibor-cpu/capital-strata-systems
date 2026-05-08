@@ -8,7 +8,7 @@ governance-first and keeps `DashboardState` as the canonical frontend bridge.
 ## Status
 
 - Phase 26: IBKR-style instrument coverage registry and broker capability payload - complete
-- Phase 27: End-to-end trade lifecycle audit - pending
+- Phase 27: End-to-end trade lifecycle audit - complete
 - Phase 28: Live/paper mode reconciliation tests - pending
 - Phase 29: Broker readiness certification layer - pending
 - Phase 30: Live order kill switch - pending
