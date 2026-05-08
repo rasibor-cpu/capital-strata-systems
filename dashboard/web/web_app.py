@@ -56,6 +56,10 @@ def create_app(
     async def execution() -> HTMLResponse:
         return HTMLResponse(_execution_page())
 
+    @app.get("/risk-governance", response_class=HTMLResponse)
+    async def risk_governance() -> HTMLResponse:
+        return HTMLResponse(_risk_governance_page())
+
     @app.get("/health")
     async def health() -> dict[str, Any]:
         state = provider()
@@ -74,6 +78,7 @@ def _app_nav(active: str) -> str:
         ("dashboard", "/dashboard", "Dashboard"),
         ("positions", "/positions", "Positions"),
         ("execution", "/execution", "Execution"),
+        ("risk_governance", "/risk-governance", "Risk & Governance"),
     ]
 
     return "\n".join(
@@ -833,6 +838,205 @@ refreshExecution().catch(() => undefined);
 """
 
 
+def _risk_governance_page() -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111820">
+  <title>CSS Risk & Governance Center</title>
+  <style>{_css()}</style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">CSS</div>
+        <div>
+          <p class="eyebrow">Capital Strata Systems</p>
+          <h1>Risk & Governance Center</h1>
+        </div>
+      </div>
+      <section class="status-strip" aria-label="System status">
+        <span id="rg-mode">System PAPER</span>
+        <span id="rg-engine">Engine SAFE</span>
+        <span id="rg-session">Session pending</span>
+        <span id="rg-updated">Snapshot pending</span>
+      </section>
+    </header>
+    {_app_nav("risk_governance")}
+
+    <section class="control-row" aria-label="Risk and governance controls">
+      <button type="button" data-refresh-risk-governance>Refresh</button>
+      <span>DashboardState risk contract</span>
+      <span>Governance-safe display</span>
+      <span>No authority mutation from this view</span>
+    </section>
+
+    <section class="metric-band" aria-label="Risk and governance metrics">
+      <article>
+        <strong>Risk State</strong>
+        <span data-rg-value="risk.risk_state">NORMAL</span>
+      </article>
+      <article>
+        <strong>Gate Status</strong>
+        <span data-rg-value="risk.gate_status">OPEN</span>
+      </article>
+      <article>
+        <strong>Drawdown</strong>
+        <span data-rg-value="risk.current_drawdown_pct">0.00%</span>
+      </article>
+      <article>
+        <strong>Exposure Utilization</strong>
+        <span data-rg-value="risk.exposure_utilization_pct">0.00%</span>
+      </article>
+      <article>
+        <strong>Session Lock</strong>
+        <span data-rg-bool="governance.session_locked">NO</span>
+      </article>
+      <article>
+        <strong>Defensive Mode</strong>
+        <span data-rg-bool="governance.defensive_mode_active">NO</span>
+      </article>
+    </section>
+
+    <section class="risk-governance-workspace">
+      <article class="panel risk-main">
+        <div class="panel-head">
+          <h2>Risk Control Center</h2>
+          <span data-rg-value="risk.gate_status">OPEN</span>
+        </div>
+        <div class="kv-grid two">
+          <div><strong>Total Exposure</strong><span data-rg-value="risk.total_exposure">$0.00</span></div>
+          <div><strong>Exposure Limit</strong><span data-rg-value="risk.exposure_limit">$0.00</span></div>
+          <div><strong>Daily Loss Limit</strong><span data-rg-value="risk.daily_loss_limit">$0.00</span></div>
+          <div><strong>Position Limit</strong><span data-rg-value="risk.position_limit">0</span></div>
+          <div><strong>Current Drawdown</strong><span data-rg-value="risk.current_drawdown_pct">0.00%</span></div>
+          <div><strong>Max Drawdown</strong><span data-rg-value="risk.max_drawdown_pct">0.00%</span></div>
+        </div>
+        <div class="breach-panel">
+          <h3>Risk Limit Breaches</h3>
+          <ul class="compact-list" id="rg-risk-breaches"></ul>
+        </div>
+      </article>
+
+      <aside class="risk-governance-side">
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Governance Authority</h2>
+            <span id="rg-authority-state">READY</span>
+          </div>
+          <div class="toggle-grid">
+            <span data-rg-flag="governance.governance_enabled">Governance Enabled</span>
+            <span data-rg-flag="governance.audit_enabled">Audit Enabled</span>
+            <span data-rg-flag="governance.unified_trade_gate_active">Unified Gate</span>
+            <span data-rg-flag="governance.defensive_mode_active">Defensive Mode</span>
+          </div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Governance Event</h2>
+            <span>LAST</span>
+          </div>
+          <p class="panel-note" data-rg-value="governance.last_governance_event">No governance event</p>
+        </article>
+      </aside>
+    </section>
+  </main>
+
+  <script>{_risk_governance_script()}</script>
+</body>
+</html>"""
+
+
+def _risk_governance_script() -> str:
+    return """
+const rgState = { payload: null, sections: {} };
+
+function money(value) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(value || 0));
+}
+
+function pct(value) {
+  return `${Number(value || 0).toFixed(2)}%`;
+}
+
+function getValue(path) {
+  const [section, key] = path.split(".");
+  return rgState.sections?.[section]?.[key];
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\\"": "&quot;",
+    "'": "&#39;"
+  }[char]));
+}
+
+function formatRiskGovernanceValue(path, value) {
+  if (["total_exposure", "exposure_limit", "daily_loss_limit"].some((key) => path.endsWith(key))) {
+    return money(value);
+  }
+  if (["current_drawdown_pct", "max_drawdown_pct", "exposure_utilization_pct"].some((key) => path.endsWith(key))) {
+    return pct(value);
+  }
+  if (value === true) return "YES";
+  if (value === false) return "NO";
+  if (value === null || value === undefined || value === "") return "NONE";
+  return String(value);
+}
+
+function renderRiskGovernanceSnapshot(payload) {
+  rgState.payload = payload;
+  rgState.sections = payload.sections || {};
+  const session = payload.session || {};
+  const risk = rgState.sections.risk || {};
+  const governance = rgState.sections.governance || {};
+
+  document.getElementById("rg-mode").textContent = `System ${String(payload.resolved_mode || "paper").toUpperCase()}`;
+  document.getElementById("rg-engine").textContent = `Engine ${session.engine_mode || "SAFE"}`;
+  document.getElementById("rg-session").textContent = `Session ${payload.session_id || session.session_id || "pending"}`;
+  document.getElementById("rg-updated").textContent = `Updated ${payload.generated_at || "pending"}`;
+  document.getElementById("rg-authority-state").textContent = governance.session_locked ? "LOCKED" : "READY";
+
+  document.querySelectorAll("[data-rg-value]").forEach((node) => {
+    const path = node.getAttribute("data-rg-value");
+    node.textContent = formatRiskGovernanceValue(path, getValue(path));
+  });
+  document.querySelectorAll("[data-rg-bool]").forEach((node) => {
+    node.textContent = getValue(node.getAttribute("data-rg-bool")) ? "YES" : "NO";
+  });
+  document.querySelectorAll("[data-rg-flag]").forEach((node) => {
+    const value = Boolean(getValue(node.getAttribute("data-rg-flag")));
+    node.classList.toggle("on", value);
+    node.classList.toggle("off", !value);
+  });
+
+  renderRiskBreaches(risk.risk_limits_breached || []);
+}
+
+function renderRiskBreaches(breaches) {
+  const target = document.getElementById("rg-risk-breaches");
+  target.innerHTML = breaches.length
+    ? breaches.map((item) => `<li>${escapeHtml(item)}</li>`).join("")
+    : "<li>NONE</li>";
+}
+
+async function refreshRiskGovernance() {
+  const response = await fetch("/api/v1/frontend-state", { cache: "no-store" });
+  renderRiskGovernanceSnapshot(await response.json());
+}
+
+document.querySelector("[data-refresh-risk-governance]").addEventListener("click", refreshRiskGovernance);
+refreshRiskGovernance().catch(() => undefined);
+"""
+
+
 def _css() -> str:
     return """
 :root {
@@ -1106,11 +1310,19 @@ button {
   grid-template-columns: minmax(0, 1.65fr) minmax(320px, 0.75fr);
   gap: 12px;
 }
+.risk-governance-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(340px, 0.8fr);
+  gap: 12px;
+}
 .positions-main {
   min-height: 520px;
 }
 .execution-main {
   min-height: 520px;
+}
+.risk-main {
+  min-height: 460px;
 }
 .positions-side {
   display: grid;
@@ -1118,6 +1330,11 @@ button {
   align-content: start;
 }
 .execution-side {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+.risk-governance-side {
   display: grid;
   gap: 12px;
   align-content: start;
@@ -1209,11 +1426,25 @@ button {
   font-size: 13px;
   font-weight: 800;
 }
+.breach-panel {
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  padding: 12px;
+}
+.breach-panel h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
 @media (max-width: 1120px) {
   .metric-band,
   .dashboard-grid,
   .positions-workspace,
-  .execution-workspace {
+  .execution-workspace,
+  .risk-governance-workspace {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -1224,6 +1455,7 @@ button {
   .dashboard-grid,
   .positions-workspace,
   .execution-workspace,
+  .risk-governance-workspace,
   .kv-grid,
   .kv-grid.two,
   .signal-grid {

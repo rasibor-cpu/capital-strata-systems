@@ -5,6 +5,7 @@ from dashboard.web.web_app import (
     _dashboard_page,
     _execution_page,
     _positions_page,
+    _risk_governance_page,
     create_app,
     demo_dashboard_state_provider,
 )
@@ -18,6 +19,7 @@ def main() -> int:
         "/dashboard",
         "/execution",
         "/positions",
+        "/risk-governance",
         "/health",
         "/api/v1/dashboard-state",
         "/api/v1/frontend-state",
@@ -47,6 +49,7 @@ def main() -> int:
         "Opportunity Monitor",
         'href="/execution"',
         'href="/positions"',
+        'href="/risk-governance"',
         "/api/v1/frontend-state",
         "/ws/v1/dashboard-state",
     ]
@@ -82,6 +85,20 @@ def main() -> int:
         if expected not in execution_markup:
             raise AssertionError(f"Web execution markup missing: {expected}")
 
+    risk_governance_markup = _risk_governance_page()
+    expected_risk_governance_markup = [
+        "CSS Risk & Governance Center",
+        "Risk & Governance Center",
+        "Risk Control Center",
+        "Governance Authority",
+        "Risk Limit Breaches",
+        "DashboardState risk contract",
+        "/api/v1/frontend-state",
+    ]
+    for expected in expected_risk_governance_markup:
+        if expected not in risk_governance_markup:
+            raise AssertionError(f"Web risk/governance markup missing: {expected}")
+
     payload = get_frontend_payload(demo_dashboard_state_provider)
     sections = payload.get("sections", {})
     if sections.get("account_summary", {}).get("broker") != "DEMO":
@@ -95,6 +112,10 @@ def main() -> int:
         raise AssertionError("Web positions contract must preserve position symbols")
     if sections.get("risk", {}).get("risk_state") != "NORMAL":
         raise AssertionError("Web dashboard provider must expose demo risk state")
+    if sections.get("risk", {}).get("gate_status") != "OPEN":
+        raise AssertionError("Web risk center must expose risk gate status")
+    if sections.get("governance", {}).get("governance_enabled") is not True:
+        raise AssertionError("Web governance center must expose governance authority")
     if sections.get("execution", {}).get("execution_state") != "READY":
         raise AssertionError("Web dashboard provider must expose demo execution state")
     recent_trades = sections.get("execution", {}).get("recent_trades", [])
