@@ -117,10 +117,34 @@ def account_summary(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
 def positions(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     open_positions = _mapping(dashboard_payload.get("open_positions"))
     by_asset = _mapping(open_positions.get("by_asset"))
+    position_state = _mapping(dashboard_payload.get("position_state"))
     asset_summaries = _mapping(dashboard_payload.get("asset_class_summaries"))
     items = []
 
+    for position in _list(position_state.get("positions")):
+        position_payload = _mapping(position)
+        items.append(
+            {
+                "symbol": str(position_payload.get("symbol", "UNKNOWN")),
+                "asset_class": str(
+                    position_payload.get("asset_class", "UNKNOWN")
+                ),
+                "side": str(position_payload.get("side", "UNKNOWN")),
+                "qty": _number(position_payload.get("qty")),
+                "entry_price": _number(position_payload.get("entry_price")),
+                "current_price": _number(position_payload.get("current_price")),
+                "exposure": _number(position_payload.get("exposure")),
+                "realized_pnl": _number(position_payload.get("realized_pnl")),
+                "unrealized_pnl": _number(
+                    position_payload.get("unrealized_pnl")
+                ),
+            }
+        )
+
     for asset_class, summary in asset_summaries.items():
+        if items:
+            break
+
         summary_payload = _mapping(summary)
         items.append(
             {
@@ -138,8 +162,15 @@ def positions(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         )
 
     return {
-        "total": _integer(open_positions.get("total")),
+        "total": _integer(
+            open_positions.get("total", position_state.get("open_count"))
+        ),
         "by_asset": {str(key): _integer(value) for key, value in by_asset.items()},
+        "long_count": _integer(position_state.get("long_count")),
+        "short_count": _integer(position_state.get("short_count")),
+        "winner_count": _integer(position_state.get("winner_count")),
+        "loser_count": _integer(position_state.get("loser_count")),
+        "active_symbols": _string_list(position_state.get("active_symbols")),
         "items": items,
     }
 
@@ -346,6 +377,10 @@ def _dashboard_payload(
 
 def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
 
 
 def _number(value: Any, default: float = 0.0) -> float:

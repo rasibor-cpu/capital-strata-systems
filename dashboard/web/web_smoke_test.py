@@ -3,6 +3,7 @@ from __future__ import annotations
 from dashboard.runtime.api_bridge import get_frontend_payload
 from dashboard.web.web_app import (
     _dashboard_page,
+    _positions_page,
     create_app,
     demo_dashboard_state_provider,
 )
@@ -14,6 +15,7 @@ def main() -> int:
     required_routes = {
         "/",
         "/dashboard",
+        "/positions",
         "/health",
         "/api/v1/dashboard-state",
         "/api/v1/frontend-state",
@@ -41,6 +43,7 @@ def main() -> int:
         "Execution Center",
         "Broker Control Panel",
         "Opportunity Monitor",
+        'href="/positions"',
         "/api/v1/frontend-state",
         "/ws/v1/dashboard-state",
     ]
@@ -48,12 +51,31 @@ def main() -> int:
         if expected not in markup:
             raise AssertionError(f"Web dashboard markup missing: {expected}")
 
+    positions_markup = _positions_page()
+    expected_positions_markup = [
+        "CSS Professional Positions",
+        "Professional Positions",
+        "Position Inventory",
+        "Asset Allocation",
+        "Active Symbols",
+        "DashboardState positions contract",
+        "/api/v1/frontend-state",
+    ]
+    for expected in expected_positions_markup:
+        if expected not in positions_markup:
+            raise AssertionError(f"Web positions markup missing: {expected}")
+
     payload = get_frontend_payload(demo_dashboard_state_provider)
     sections = payload.get("sections", {})
     if sections.get("account_summary", {}).get("broker") != "DEMO":
         raise AssertionError("Web dashboard provider must expose demo account payload")
     if sections.get("positions", {}).get("total") != 2:
         raise AssertionError("Web dashboard provider must expose demo positions")
+    position_items = sections.get("positions", {}).get("items", [])
+    if len(position_items) != 2:
+        raise AssertionError("Web positions contract must expose detailed rows")
+    if position_items[0].get("symbol") != "BTC-USD":
+        raise AssertionError("Web positions contract must preserve position symbols")
     if sections.get("risk", {}).get("risk_state") != "NORMAL":
         raise AssertionError("Web dashboard provider must expose demo risk state")
     if sections.get("execution", {}).get("execution_state") != "READY":

@@ -21,3 +21,8 @@ Local run:
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn dashboard.web.web_app:app --host 0.0.0.0 --port 8091
 ```
+
+Routes:
+
+- `/dashboard` - institutional web command dashboard
+- `/positions` - read-only professional positions inventory

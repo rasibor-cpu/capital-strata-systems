@@ -118,6 +118,7 @@ class DashboardStateFactory:
         )
 
         dashboard_state.last_scan_results["account_summary"] = account_summary_state
+        dashboard_state.last_scan_results["position_state"] = position_state
         dashboard_state.last_scan_results["pnl_summary"] = pnl_summary
         dashboard_state.last_scan_results["risk_summary"] = risk_summary
         dashboard_state.last_scan_results["execution_summary"] = execution_summary

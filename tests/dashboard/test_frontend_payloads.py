@@ -65,6 +65,9 @@ def test_frontend_payload_schema_integrity_and_size() -> None:
     assert set(FRONTEND_SECTIONS) <= set(payload["sections"])
     assert payload["sections"]["account_summary"]["currency"] == "USD"
     assert payload["sections"]["positions"]["total"] == 2
+    assert payload["sections"]["positions"]["items"][0]["symbol"] == "BTC-USD"
+    assert payload["sections"]["positions"]["long_count"] == 1
+    assert payload["sections"]["positions"]["short_count"] == 1
     assert payload["sections"]["risk"]["risk_state"] == "NORMAL"
     assert payload["sections"]["governance"]["governance_enabled"] is True
     assert payload["sections"]["execution"]["execution_state"] == "READY"

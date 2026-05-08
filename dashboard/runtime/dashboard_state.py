@@ -235,6 +235,7 @@ class DashboardState:
         pnl_summary = self._scan_summary("pnl_summary")
         risk_summary = self._scan_summary("risk_summary")
         execution_summary = self._scan_summary("execution_summary")
+        position_state = self._scan_summary("position_state")
 
         if not pnl_summary:
             pnl_summary = {
@@ -289,6 +290,7 @@ class DashboardState:
             "governance_summary": self._json_safe(self.governance_state),
             "market_summary": self._json_safe(self.global_market_state),
             "execution_summary": execution_summary,
+            "position_state": position_state,
             "open_positions": {
                 "total": self.total_open_positions,
                 "by_asset": dict(self.open_positions_by_asset),

@@ -48,6 +48,10 @@ def create_app(
     async def dashboard() -> HTMLResponse:
         return HTMLResponse(_dashboard_page())
 
+    @app.get("/positions", response_class=HTMLResponse)
+    async def positions() -> HTMLResponse:
+        return HTMLResponse(_positions_page())
+
     @app.get("/health")
     async def health() -> dict[str, Any]:
         state = provider()
@@ -59,6 +63,27 @@ def create_app(
         }
 
     return app
+
+
+def _app_nav(active: str) -> str:
+    links = [
+        ("dashboard", "/dashboard", "Dashboard"),
+        ("positions", "/positions", "Positions"),
+    ]
+
+    return "\n".join(
+        (
+            '<nav class="app-nav" aria-label="Web dashboard navigation">',
+            *(
+                (
+                    f'<a href="{href}" class="{"active" if key == active else ""}">'
+                    f"{label}</a>"
+                )
+                for key, href, label in links
+            ),
+            "</nav>",
+        )
+    )
 
 
 def _dashboard_page() -> str:
@@ -109,6 +134,7 @@ def _dashboard_page() -> str:
       <span>Read-only web surface</span>
       <span>No frontend broker access</span>
     </section>
+    {_app_nav("dashboard")}
 
     <section class="metric-band" aria-label="Account overview">
       <article>
@@ -379,6 +405,228 @@ def _dashboard_page() -> str:
 </html>"""
 
 
+def _positions_page() -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111820">
+  <title>CSS Professional Positions</title>
+  <style>{_css()}</style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">CSS</div>
+        <div>
+          <p class="eyebrow">Capital Strata Systems</p>
+          <h1>Professional Positions</h1>
+        </div>
+      </div>
+      <section class="status-strip" aria-label="System status">
+        <span id="positions-mode">System PAPER</span>
+        <span id="positions-engine">Engine SAFE</span>
+        <span id="positions-session">Session pending</span>
+        <span id="positions-updated">Snapshot pending</span>
+      </section>
+    </header>
+    {_app_nav("positions")}
+
+    <section class="control-row" aria-label="Positions controls">
+      <button type="button" data-refresh-positions>Refresh</button>
+      <span>DashboardState positions contract</span>
+      <span>Read-only inventory</span>
+      <span>No trade execution from this view</span>
+    </section>
+
+    <section class="metric-band positions-metrics" aria-label="Position metrics">
+      <article>
+        <strong>Total Positions</strong>
+        <span data-pos-value="positions.total">0</span>
+      </article>
+      <article>
+        <strong>Long / Short</strong>
+        <span id="long-short-metric">0 / 0</span>
+      </article>
+      <article>
+        <strong>Winners / Losers</strong>
+        <span id="winner-loser-metric">0 / 0</span>
+      </article>
+      <article>
+        <strong>Total Exposure</strong>
+        <span data-pos-value="pnl_summary.total_exposure">$0.00</span>
+      </article>
+      <article>
+        <strong>Unrealized PnL</strong>
+        <span data-pos-value="pnl_summary.unrealized_pnl">$0.00</span>
+      </article>
+      <article>
+        <strong>Risk Gate</strong>
+        <span data-pos-value="risk.gate_status">OPEN</span>
+      </article>
+    </section>
+
+    <section class="positions-workspace">
+      <article class="panel positions-main">
+        <div class="panel-head">
+          <h2>Position Inventory</h2>
+          <span id="position-count-badge">0 OPEN</span>
+        </div>
+        <div class="position-table" id="position-detail-table"></div>
+      </article>
+
+      <aside class="positions-side">
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Asset Allocation</h2>
+            <span>BY ASSET</span>
+          </div>
+          <div class="summary-table" id="asset-allocation-table"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Active Symbols</h2>
+            <span id="active-symbol-count">0</span>
+          </div>
+          <div class="symbol-cloud" id="active-symbols"></div>
+        </article>
+      </aside>
+    </section>
+  </main>
+
+  <script>{_positions_script()}</script>
+</body>
+</html>"""
+
+
+def _positions_script() -> str:
+    return """
+const positionState = { payload: null, sections: {} };
+
+function money(value) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(value || 0));
+}
+
+function numberValue(value) {
+  return Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 6 });
+}
+
+function getValue(path) {
+  const [section, key] = path.split(".");
+  return positionState.sections?.[section]?.[key];
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\\"": "&quot;",
+    "'": "&#39;"
+  }[char]));
+}
+
+function formatValue(path, value) {
+  if (["total_exposure", "unrealized_pnl"].some((key) => path.endsWith(key))) {
+    return money(value);
+  }
+  if (value === null || value === undefined || value === "") return "NONE";
+  return String(value);
+}
+
+function renderPositionSnapshot(payload) {
+  positionState.payload = payload;
+  positionState.sections = payload.sections || {};
+  const session = payload.session || {};
+  const positions = positionState.sections.positions || {};
+
+  document.getElementById("positions-mode").textContent = `System ${String(payload.resolved_mode || "paper").toUpperCase()}`;
+  document.getElementById("positions-engine").textContent = `Engine ${session.engine_mode || "SAFE"}`;
+  document.getElementById("positions-session").textContent = `Session ${payload.session_id || session.session_id || "pending"}`;
+  document.getElementById("positions-updated").textContent = `Updated ${payload.generated_at || "pending"}`;
+  document.getElementById("long-short-metric").textContent = `${positions.long_count || 0} / ${positions.short_count || 0}`;
+  document.getElementById("winner-loser-metric").textContent = `${positions.winner_count || 0} / ${positions.loser_count || 0}`;
+  document.getElementById("position-count-badge").textContent = `${positions.total || 0} OPEN`;
+
+  document.querySelectorAll("[data-pos-value]").forEach((node) => {
+    const path = node.getAttribute("data-pos-value");
+    node.textContent = formatValue(path, getValue(path));
+  });
+
+  renderPositionTable(positions.items || []);
+  renderAssetAllocation(positions);
+  renderActiveSymbols(positions.active_symbols || []);
+}
+
+function renderPositionTable(items) {
+  const target = document.getElementById("position-detail-table");
+  if (!items.length) {
+    target.innerHTML = `<div class="empty-state">No open positions</div>`;
+    return;
+  }
+  target.innerHTML = `
+    <div class="position-row position-head">
+      <span>Symbol</span><span>Asset</span><span>Side</span><span>Qty</span><span>Entry</span><span>Mark</span><span>Exposure</span><span>Unrealized</span>
+    </div>
+    ${items.map((item) => `
+      <div class="position-row">
+        <span>${escapeHtml(item.symbol || "UNKNOWN")}</span>
+        <span>${escapeHtml(item.asset_class || "UNKNOWN")}</span>
+        <span><em class="side-badge ${String(item.side || "").toLowerCase()}">${escapeHtml(item.side || "UNKNOWN")}</em></span>
+        <span>${numberValue(item.qty)}</span>
+        <span>${money(item.entry_price)}</span>
+        <span>${money(item.current_price)}</span>
+        <span>${money(item.exposure)}</span>
+        <span class="${Number(item.unrealized_pnl || 0) >= 0 ? "positive" : "negative"}">${money(item.unrealized_pnl)}</span>
+      </div>
+    `).join("")}
+  `;
+}
+
+function renderAssetAllocation(positions) {
+  const target = document.getElementById("asset-allocation-table");
+  const byAsset = positions.by_asset || {};
+  const items = positions.items || [];
+  const rows = Object.entries(byAsset).map(([asset, count]) => {
+    const exposure = items.filter((item) => item.asset_class === asset).reduce((total, item) => total + Number(item.exposure || 0), 0);
+    const unrealized = items.filter((item) => item.asset_class === asset).reduce((total, item) => total + Number(item.unrealized_pnl || 0), 0);
+    return { asset, count, exposure, unrealized };
+  });
+  if (!rows.length) {
+    target.innerHTML = `<div class="empty-state">No asset allocation</div>`;
+    return;
+  }
+  target.innerHTML = rows.map((row) => `
+    <div class="summary-row">
+      <span>${escapeHtml(row.asset)}</span>
+      <span>${row.count} open</span>
+      <span>${money(row.exposure)}</span>
+      <span class="${row.unrealized >= 0 ? "positive" : "negative"}">${money(row.unrealized)}</span>
+    </div>
+  `).join("");
+}
+
+function renderActiveSymbols(symbols) {
+  const target = document.getElementById("active-symbols");
+  document.getElementById("active-symbol-count").textContent = String(symbols.length);
+  target.innerHTML = symbols.length
+    ? symbols.map((symbol) => `<span>${escapeHtml(symbol)}</span>`).join("")
+    : `<div class="empty-state">No active symbols</div>`;
+}
+
+async function refreshPositions() {
+  const response = await fetch("/api/v1/frontend-state", { cache: "no-store" });
+  renderPositionSnapshot(await response.json());
+}
+
+document.querySelector("[data-refresh-positions]").addEventListener("click", refreshPositions);
+refreshPositions().catch(() => undefined);
+"""
+
+
 def _css() -> str:
     return """
 :root {
@@ -468,6 +716,26 @@ h2 {
 .control-row {
   align-items: center;
   margin-bottom: 14px;
+}
+.app-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.app-nav a {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  padding: 8px 11px;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 800;
+}
+.app-nav a.active {
+  border-color: var(--teal);
+  color: var(--teal);
+  background: #14292c;
 }
 button {
   min-height: 36px;
@@ -622,9 +890,93 @@ button {
   padding: 14px;
   font-weight: 700;
 }
+.positions-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(320px, 0.8fr);
+  gap: 12px;
+}
+.positions-main {
+  min-height: 520px;
+}
+.positions-side {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+.compact-panel {
+  min-height: 0;
+}
+.position-table,
+.summary-table {
+  overflow-x: auto;
+}
+.position-row {
+  display: grid;
+  grid-template-columns: 120px 100px 90px 90px 120px 120px 120px 120px;
+  gap: 8px;
+  min-width: 880px;
+  border-bottom: 1px solid var(--line);
+  padding: 10px 0;
+  align-items: center;
+}
+.position-head {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  font-weight: 800;
+}
+.position-row span,
+.summary-row span {
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+.side-badge {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  padding: 4px 7px;
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 900;
+}
+.side-badge.long,
+.side-badge.buy {
+  border-color: rgba(112, 184, 112, 0.55);
+  color: var(--ok);
+}
+.side-badge.short,
+.side-badge.sell {
+  border-color: rgba(223, 91, 82, 0.55);
+  color: var(--danger);
+}
+.positive {
+  color: var(--ok);
+}
+.negative {
+  color: var(--danger);
+}
+.summary-row {
+  display: grid;
+  grid-template-columns: 1fr 76px 100px 100px;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+  padding: 9px 0;
+}
+.symbol-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.symbol-cloud span {
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  padding: 7px 9px;
+  font-size: 13px;
+  font-weight: 800;
+}
 @media (max-width: 1120px) {
   .metric-band,
-  .dashboard-grid {
+  .dashboard-grid,
+  .positions-workspace {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -633,6 +985,7 @@ button {
   .topbar { align-items: flex-start; flex-direction: column; }
   .metric-band,
   .dashboard-grid,
+  .positions-workspace,
   .kv-grid,
   .kv-grid.two,
   .signal-grid {
