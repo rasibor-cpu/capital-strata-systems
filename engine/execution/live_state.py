@@ -19,11 +19,18 @@ import json
 import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional, Dict, Any
 
 from engine.execution.arming_rate_limit import check_and_record_arm, check_and_record_confirm
 
-STATE_PATH = os.path.join("audit", "live_state.json")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+STATE_PATH = Path(
+    os.getenv(
+        "CSS_LIVE_STATE_PATH",
+        str(PROJECT_ROOT / "audit" / "live_state.json"),
+    )
+)
 
 
 @dataclass
@@ -61,16 +68,16 @@ def _normalize(d: Dict[str, Any]) -> LiveState:
 
 
 def _write(ls: LiveState) -> None:
-    os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
-    with open(STATE_PATH, "w", encoding="utf-8") as f:
+    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with STATE_PATH.open("w", encoding="utf-8") as f:
         json.dump(ls.__dict__, f, indent=2)
 
 
 def _read() -> LiveState:
-    if not os.path.exists(STATE_PATH):
+    if not STATE_PATH.exists():
         return LiveState("DISARMED", None, _utc_now(), "initial")
     try:
-        with open(STATE_PATH, "r", encoding="utf-8") as f:
+        with STATE_PATH.open("r", encoding="utf-8") as f:
             d = json.load(f)
         return _normalize(d)
     except Exception:
