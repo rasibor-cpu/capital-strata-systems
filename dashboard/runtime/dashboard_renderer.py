@@ -89,8 +89,22 @@ class DashboardRenderer:
             state.governance_state
         )
 
+        legacy_risk_summary = self._legacy_risk_summary(
+            runtime_summaries=runtime_summaries,
+        )
+        dashboard_state_risk_summary = self._mapping_summary(
+            dashboard_state_payload.get("risk_summary", {})
+        )
+        compare_dashboard_shadow(
+            legacy_risk_summary,
+            dashboard_state_risk_summary,
+        )
+        migrated_risk_summary = {
+            **legacy_risk_summary,
+            **dashboard_state_risk_summary,
+        }
         risk_contract = RiskRenderContract.from_summary(
-            runtime_summaries.get("risk_summary", {})
+            migrated_risk_summary
         )
 
         execution_contract = ExecutionRenderContract.from_summary(
@@ -145,6 +159,27 @@ class DashboardRenderer:
                 "account_equity": state.total_equity,
                 "asset_realized_pnl": {},
                 "asset_unrealized_pnl": {},
+            },
+        )
+
+    @staticmethod
+    def _legacy_risk_summary(
+        *,
+        runtime_summaries: dict,
+    ) -> dict:
+        return runtime_summaries.get(
+            "risk_summary",
+            {
+                "risk_state": "NORMAL",
+                "gate_status": "OPEN",
+                "total_exposure": 0.0,
+                "exposure_utilization_pct": 0.0,
+                "current_drawdown_pct": 0.0,
+                "max_drawdown_pct": 0.0,
+                "daily_loss_limit": 0.0,
+                "position_limit": 0,
+                "exposure_limit": 0.0,
+                "risk_limits_breached": [],
             },
         )
 
