@@ -15,6 +15,10 @@ from dashboard.runtime.dashboard_state import (
 
 FRONTEND_CONTRACT_VERSION = "1.0.0"
 FRONTEND_CONTRACT_SCHEMA = "css.frontend.contract.v1"
+
+CONTRACT_NAME = "CSS Institutional Frontend Payload"
+CONTRACT_VERSION = FRONTEND_CONTRACT_VERSION
+CONTRACT_TIMESTAMP = "2026-05-08T00:00:00Z"
 FRONTEND_SECTIONS = (
     "account_summary",
     "positions",
@@ -39,6 +43,16 @@ class FrontendEnvelope:
     )
     message_type: str = "dashboard_snapshot"
     source: str = "dashboard.runtime.frontend_contract"
+    contract_name: str = CONTRACT_NAME
+    contract_version: str = CONTRACT_VERSION
+    contract_timestamp: str = CONTRACT_TIMESTAMP
+    schema_metadata: dict[str, str] = field(
+        default_factory=lambda: {
+            "strict_typing": "True",
+            "enforces_payload_versioning": "True",
+            "compatibility": "Backward compatible with CSS legacy dashboards",
+        }
+    )
 
 
 @dataclass(frozen=True)
@@ -81,6 +95,10 @@ def build_frontend_payload(
             "frontend_safe": True,
             "secrets_redacted": True,
         },
+        "contract_name": envelope.contract_name,
+        "contract_version": envelope.contract_version,
+        "contract_timestamp": envelope.contract_timestamp,
+        "schema_metadata": envelope.schema_metadata,
         "session": _mapping(dashboard_payload.get("session")),
         "session_id": str(dashboard_payload.get("session_id", "")),
         "resolved_mode": str(dashboard_payload.get("resolved_mode", "paper")),

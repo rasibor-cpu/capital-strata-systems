@@ -24,6 +24,7 @@ WS_DELTA_SECTIONS = (
     "governance",
     "execution",
     "risk",
+    "broker",
 )
 
 
@@ -43,19 +44,46 @@ def build_initial_ws_message(
     return payload
 
 
-def build_delta_ws_message(
+def build_delta_ws_messages(
     previous_payload: dict[str, Any] | None,
     current_state: DashboardState,
     *,
     sequence: int,
-) -> dict[str, Any]:
+) -> list[dict[str, Any]]:
     current_payload = build_frontend_payload(current_state)
-    return build_websocket_delta(
+    delta = build_websocket_delta(
         previous_payload,
         current_payload,
         sequence=sequence,
         sections=WS_DELTA_SECTIONS,
     )
+
+    if not delta.get("changed_sections"):
+        return []
+
+    event_map = {
+        "pnl_summary": "pnl_update",
+        "positions": "position_update",
+        "governance": "governance_alert",
+        "execution": "execution_alert",
+        "broker": "broker_status",
+        "risk": "risk_update",
+    }
+
+    messages = []
+    for section in delta["changed_sections"]:
+        msg_type = event_map.get(section, "dashboard_delta")
+        messages.append({
+            "message_type": msg_type,
+            "payload_version": delta["payload_version"],
+            "generated_at": delta["generated_at"],
+            "sequence": sequence,
+            "stale_after_ms": delta.get("stale_after_ms", 15000),
+            "changed_sections": [section],
+            "data": {section: delta["data"][section]},
+        })
+        
+    return messages
 
 
 def build_heartbeat_ws_message(
@@ -100,14 +128,15 @@ def create_ws_router(
                 await asyncio.sleep(interval_seconds)
                 sequence += 1
                 state = _state_from_provider(provider)
-                delta = build_delta_ws_message(
+                messages = build_delta_ws_messages(
                     previous_payload,
                     state,
                     sequence=sequence,
                 )
 
-                if delta["changed_sections"]:
-                    await websocket.send_json(delta)
+                if messages:
+                    for msg in messages:
+                        await websocket.send_json(msg)
                     previous_payload = build_frontend_payload(state)
                     continue
 
@@ -130,7 +159,7 @@ def _state_from_provider(provider: DashboardStateProvider) -> DashboardState:
 __all__ = [
     "DashboardStateProvider",
     "WS_DELTA_SECTIONS",
-    "build_delta_ws_message",
+    "build_delta_ws_messages",
     "build_heartbeat_ws_message",
     "build_initial_ws_message",
     "create_ws_router",
