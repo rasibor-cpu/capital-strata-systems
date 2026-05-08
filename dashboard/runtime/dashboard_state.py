@@ -79,6 +79,18 @@ class BrokerState:
 
     last_heartbeat: str = ""
 
+    api_health: str = "UNKNOWN"
+
+    reconnect_state: str = "NONE"
+
+    supported_assets: List[str] = field(default_factory=list)
+
+    account_readiness: str = "UNKNOWN"
+
+    missing_credentials: bool = False
+
+    latency_ms: float = 0.0
+
 
 # =========================================================
 # GOVERNANCE STATE
@@ -376,6 +388,7 @@ class DashboardState:
         safe_metadata_keys = {
             "secrets_redacted",
             "credentials_redacted",
+            "missing_credentials",
         }
 
         if normalized in safe_metadata_keys:

@@ -383,6 +383,16 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
             broker_payload.get("live_trading_enabled")
         ),
         "last_heartbeat": str(broker_payload.get("last_heartbeat", "")),
+        "api_health": str(broker_payload.get("api_health", "UNKNOWN")),
+        "reconnect_state": str(broker_payload.get("reconnect_state", "NONE")),
+        "supported_assets": _string_list(broker_payload.get("supported_assets")),
+        "account_readiness": str(
+            broker_payload.get("account_readiness", "UNKNOWN")
+        ),
+        "missing_credentials": _boolean(
+            broker_payload.get("missing_credentials")
+        ),
+        "latency_ms": _number(broker_payload.get("latency_ms")),
     }
 
 
@@ -505,6 +515,7 @@ def _is_sensitive_key(key: str) -> bool:
     safe_metadata_keys = {
         "secrets_redacted",
         "credentials_redacted",
+        "missing_credentials",
     }
 
     if normalized in safe_metadata_keys:

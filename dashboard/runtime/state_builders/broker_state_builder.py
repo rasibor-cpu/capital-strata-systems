@@ -6,6 +6,7 @@ from dashboard.runtime.dashboard_state import (
     BrokerState,
     DashboardState,
 )
+from engine.instruments import frontend_supported_assets
 
 
 class BrokerStateBuilder:
@@ -66,8 +67,74 @@ class BrokerStateBuilder:
                     "",
                 )
             ),
+
+            api_health=str(
+                broker_payload.get(
+                    "api_health",
+                    "UNKNOWN",
+                )
+            ),
+
+            reconnect_state=str(
+                broker_payload.get(
+                    "reconnect_state",
+                    "NONE",
+                )
+            ),
+
+            supported_assets=_asset_list(
+                broker_payload.get(
+                    "supported_assets",
+                    frontend_supported_assets(),
+                )
+            ),
+
+            account_readiness=str(
+                broker_payload.get(
+                    "account_readiness",
+                    "UNKNOWN",
+                )
+            ),
+
+            missing_credentials=bool(
+                broker_payload.get(
+                    "missing_credentials",
+                    False,
+                )
+            ),
+
+            latency_ms=_safe_float(
+                broker_payload.get(
+                    "latency_ms",
+                    0.0,
+                )
+            ),
         )
 
         state.broker_state = broker_state
 
         return state
+
+
+def _asset_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip().upper() for item in value if str(item).strip()]
+
+    if isinstance(value, tuple):
+        return [str(item).strip().upper() for item in value if str(item).strip()]
+
+    if isinstance(value, str):
+        return [
+            item.strip().upper()
+            for item in value.split(",")
+            if item.strip()
+        ]
+
+    return []
+
+
+def _safe_float(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0

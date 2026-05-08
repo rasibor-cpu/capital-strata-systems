@@ -23,6 +23,15 @@ class BrokerRenderer:
                 f"{self._format_bool(contract.live_trading_enabled)}"
             ),
             f"Last Heartbeat:          {contract.last_heartbeat or 'NONE'}",
+            f"API Health:              {contract.api_health}",
+            f"Reconnect State:         {contract.reconnect_state}",
+            f"Account Readiness:       {contract.account_readiness}",
+            f"Missing Credentials:     {self._format_bool(contract.missing_credentials)}",
+            f"Latency MS:              {contract.latency_ms:.2f}",
+            (
+                "Supported Assets:       "
+                f"{', '.join(contract.supported_assets) if contract.supported_assets else 'NONE'}"
+            ),
             "==============================",
         ]
 

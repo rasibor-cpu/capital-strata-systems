@@ -15,6 +15,7 @@ from dashboard.runtime.summary_builders.execution_summary_builder import (
 )
 from dashboard.runtime.summary_builders.pnl_summary_builder import PnLSummaryBuilder
 from dashboard.runtime.summary_builders.risk_summary_builder import RiskSummaryBuilder
+from engine.instruments import frontend_supported_assets
 
 
 LOGGER = logging.getLogger(__name__)
@@ -74,6 +75,15 @@ class DashboardStateFactory:
             "connected": account.get("connected", False),
             "live_trading_enabled": account.get("live_trading_enabled", False),
             "last_heartbeat": account.get("last_heartbeat", ""),
+            "api_health": account.get("api_health", "UNKNOWN"),
+            "reconnect_state": account.get("reconnect_state", "NONE"),
+            "supported_assets": account.get(
+                "supported_assets",
+                frontend_supported_assets(),
+            ),
+            "account_readiness": account.get("account_readiness", "UNKNOWN"),
+            "missing_credentials": account.get("missing_credentials", False),
+            "latency_ms": account.get("latency_ms", 0.0),
         }
 
         self._log_builder_stage("broker", broker)
