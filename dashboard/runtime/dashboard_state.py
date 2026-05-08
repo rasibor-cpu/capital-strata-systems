@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, is_dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from decimal import Decimal
 from typing import Any, Dict, List
+
+
+DASHBOARD_PAYLOAD_VERSION = "1.0.0"
+DASHBOARD_PAYLOAD_SCHEMA = "css.dashboard.frontend.v1"
+DASHBOARD_PAYLOAD_SOURCE = "dashboard.runtime.DashboardState"
 
 
 # =========================================================
@@ -242,8 +248,22 @@ class DashboardState:
             "dashboard.runtime.summary_builders.pnl_summary_builder.PnLSummaryBuilder",
         )
 
+        generated_at = datetime.now(timezone.utc).isoformat()
+
         payload = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "payload_version": DASHBOARD_PAYLOAD_VERSION,
+            "payload_schema": DASHBOARD_PAYLOAD_SCHEMA,
+            "timestamp": generated_at,
+            "generated_at": generated_at,
+            "session_identifier": self.session_id,
+            "source_metadata": {
+                "source": DASHBOARD_PAYLOAD_SOURCE,
+                "canonical_state": "DashboardState",
+                "generator": "DashboardState.to_dict",
+                "transport": "snapshot",
+                "frontend_safe": True,
+                "secrets_redacted": True,
+            },
             "session": {
                 "session_id": self.session_id,
                 "user_id": self.user_id,
@@ -325,6 +345,12 @@ class DashboardState:
         if isinstance(value, (list, tuple, set)):
             return [cls._json_safe(item) for item in value]
 
+        if isinstance(value, Decimal):
+            return format(value, "f")
+
+        if isinstance(value, (datetime, date)):
+            return value.isoformat()
+
         if isinstance(value, (str, int, float, bool)) or value is None:
             return value
 
@@ -333,6 +359,14 @@ class DashboardState:
     @staticmethod
     def _is_sensitive_key(key: str) -> bool:
         normalized = key.strip().lower()
+        safe_metadata_keys = {
+            "secrets_redacted",
+            "credentials_redacted",
+        }
+
+        if normalized in safe_metadata_keys:
+            return False
+
         sensitive_fragments = (
             "api_key",
             "access_key",
@@ -343,8 +377,24 @@ class DashboardState:
             "passphrase",
             "credential",
             "pem",
+            "authorization",
+            "bearer",
+            "oauth",
+            "session_cookie",
         )
 
         return normalized == "key" or any(
             fragment in normalized for fragment in sensitive_fragments
         )
+
+
+__all__ = [
+    "AssetClassSummary",
+    "BrokerState",
+    "DASHBOARD_PAYLOAD_SCHEMA",
+    "DASHBOARD_PAYLOAD_SOURCE",
+    "DASHBOARD_PAYLOAD_VERSION",
+    "DashboardState",
+    "GovernanceState",
+    "MarketStatePayload",
+]

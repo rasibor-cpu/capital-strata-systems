@@ -9,6 +9,11 @@ from dashboard.runtime.dashboard_hydration_coordinator import (
     DashboardHydrationCoordinator,
 )
 from dashboard.runtime.dashboard_state import DashboardState
+from dashboard.runtime.frontend_contract import (
+    build_frontend_payload,
+    build_section_payload,
+)
+from dashboard.runtime.ws_bridge import create_ws_router
 
 
 DashboardStateProvider = Callable[[], DashboardState]
@@ -25,16 +30,28 @@ def default_dashboard_state_provider() -> DashboardState:
     return DashboardHydrationCoordinator().hydrate()
 
 
-def get_dashboard_state_payload(
+def _state_from_provider(
     state_provider: DashboardStateProvider | None = None,
-) -> dict[str, Any]:
+) -> DashboardState:
     provider = state_provider or default_dashboard_state_provider
     state = provider()
 
     if not isinstance(state, DashboardState):
         raise TypeError("dashboard state provider must return DashboardState")
 
-    return state.to_dict()
+    return state
+
+
+def get_dashboard_state_payload(
+    state_provider: DashboardStateProvider | None = None,
+) -> dict[str, Any]:
+    return _state_from_provider(state_provider).to_dict()
+
+
+def get_frontend_payload(
+    state_provider: DashboardStateProvider | None = None,
+) -> dict[str, Any]:
+    return build_frontend_payload(_state_from_provider(state_provider))
 
 
 def create_dashboard_state_router(
@@ -45,6 +62,52 @@ def create_dashboard_state_router(
     @router.get("/api/v1/dashboard-state")
     def read_dashboard_state() -> dict[str, Any]:
         return get_dashboard_state_payload(state_provider)
+
+    @router.get("/api/v1/frontend-state")
+    def read_frontend_state() -> dict[str, Any]:
+        return get_frontend_payload(state_provider)
+
+    @router.get("/api/v1/account-summary")
+    def read_account_summary() -> dict[str, Any]:
+        return build_section_payload(
+            _state_from_provider(state_provider),
+            "account_summary",
+        )
+
+    @router.get("/api/v1/positions")
+    def read_positions() -> dict[str, Any]:
+        return build_section_payload(
+            _state_from_provider(state_provider),
+            "positions",
+        )
+
+    @router.get("/api/v1/risk")
+    def read_risk() -> dict[str, Any]:
+        return build_section_payload(
+            _state_from_provider(state_provider),
+            "risk",
+        )
+
+    @router.get("/api/v1/governance")
+    def read_governance() -> dict[str, Any]:
+        return build_section_payload(
+            _state_from_provider(state_provider),
+            "governance",
+        )
+
+    @router.get("/api/v1/opportunities")
+    def read_opportunities() -> dict[str, Any]:
+        return build_section_payload(
+            _state_from_provider(state_provider),
+            "opportunities",
+        )
+
+    @router.get("/api/v1/broker")
+    def read_broker() -> dict[str, Any]:
+        return build_section_payload(
+            _state_from_provider(state_provider),
+            "broker",
+        )
 
     return router
 
@@ -57,6 +120,7 @@ def create_app(
         version="0.1.0",
     )
     app.include_router(create_dashboard_state_router(state_provider))
+    app.include_router(create_ws_router(state_provider))
     return app
 
 
@@ -70,4 +134,5 @@ __all__ = [
     "create_dashboard_state_router",
     "default_dashboard_state_provider",
     "get_dashboard_state_payload",
+    "get_frontend_payload",
 ]
