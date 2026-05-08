@@ -114,8 +114,12 @@ class ExecutionGate:
                          policy: str, debug: Dict[str, Any]) -> Dict[str, Any]:
         """
         RiskGovernor.validate_trade signature may vary; call safely.
+
+        This delegates using a precomputed risk_pct after ExecutionGate has
+        already applied compounding, volatility sizing, and drawdown scaling.
         """
         fn = self.risk_governor.validate_trade
+        debug["riskgov_path"] = "validate_trade_precomputed_risk_pct"
 
         preferred = {
             "instrument": instrument,

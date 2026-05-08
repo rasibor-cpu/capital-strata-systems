@@ -23,12 +23,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, ClassVar
 
 from engine.equity_authority import EquityAuthority
 from engine.performance.pnl_tracker import PnLTracker
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -70,6 +74,7 @@ class RiskGovernor:
     MAX_DRAWDOWN_LIMIT = 0.20
     LOSS_STREAK_COMPRESSION = 0.5
     MIN_NOTIONAL = 1.0
+    _LOW_INFO_VALIDATION_WARNED: ClassVar[bool] = False
 
     def __init__(
         self,
@@ -228,6 +233,27 @@ class RiskGovernor:
         policy: str = "core",
         **_kwargs: Any,
     ) -> Dict[str, Any]:
+        """
+        ExecutionGate compatibility adapter.
+
+        This path expects upstream layers to have already computed risk_pct
+        and adjusted requested_notional for execution context. It intentionally
+        does not re-apply the richer allow_trade() regime, volatility, spread,
+        news, or loss-streak modifiers.
+        """
+
+        ignored_context = sorted(
+            set(_kwargs).intersection(
+                {
+                    "regime_persistence",
+                    "vol_ratio",
+                    "spread_bps",
+                    "high_risk_news",
+                    "consecutive_losses",
+                }
+            )
+        )
+        self._warn_low_information_validation(ignored_context=ignored_context)
 
         if policy != "core":
             return RiskDecision(
@@ -327,6 +353,27 @@ class RiskGovernor:
             risk_pct=float(effective_risk_pct),
             adjusted=adjusted,
         ).as_dict()
+
+    @classmethod
+    def _warn_low_information_validation(
+        cls,
+        *,
+        ignored_context: list[str],
+    ) -> None:
+        if cls._LOW_INFO_VALIDATION_WARNED:
+            return
+
+        suffix = ""
+        if ignored_context:
+            suffix = f"; ignored_context={','.join(ignored_context)}"
+
+        LOGGER.warning(
+            "RiskGovernor.validate_trade lower-information adapter path used; "
+            "risk_pct and requested_notional must already include upstream "
+            "execution context scaling%s",
+            suffix,
+        )
+        cls._LOW_INFO_VALIDATION_WARNED = True
 
     # ========================================================
     # Core Evaluation (legacy interface)

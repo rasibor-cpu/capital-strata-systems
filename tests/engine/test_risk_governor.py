@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+
+from engine.execution.execution_gate import ExecutionGate
 from engine.risk.risk_governor import RiskGovernor
 
 
@@ -110,3 +113,72 @@ def test_validate_trade_fails_safe_for_invalid_inputs() -> None:
     assert result["status"] == "REJECTED"
     assert result["reason"] == "invalid_stop_distance"
 
+
+def test_validate_trade_exposes_lower_information_adapter_path(caplog) -> None:
+    RiskGovernor._LOW_INFO_VALIDATION_WARNED = False
+    caplog.set_level(logging.WARNING, logger="engine.risk.risk_governor")
+
+    result = RiskGovernor().validate_trade(
+        instrument="EUR_USD",
+        side="BUY",
+        requested_notional=10000.0,
+        stop_distance_pct=0.01,
+        equity=10000.0,
+        risk_pct=RiskGovernor.BASE_RISK_PCT,
+        regime_persistence=0.2,
+        vol_ratio=2.0,
+        spread_bps=10.0,
+        high_risk_news=True,
+    )
+
+    assert result["ok"] is True
+    assert result["recommended_notional"] == 5000.0
+    assert "lower-information adapter path" in caplog.text
+    assert "ignored_context" in caplog.text
+
+
+def test_allow_trade_applies_context_that_validate_trade_expects_upstream() -> None:
+    governor = RiskGovernor()
+
+    allow_decision = governor.allow_trade(
+        instrument="EUR_USD",
+        side="BUY",
+        notional=10000.0,
+        stop_distance_pct=0.01,
+        equity=10000.0,
+        regime_persistence=0.2,
+        vol_ratio=2.0,
+        spread_bps=10.0,
+        high_risk_news=True,
+    )
+    validate_result = governor.validate_trade(
+        instrument="EUR_USD",
+        side="BUY",
+        requested_notional=10000.0,
+        stop_distance_pct=0.01,
+        equity=10000.0,
+        risk_pct=RiskGovernor.BASE_RISK_PCT,
+        regime_persistence=0.2,
+        vol_ratio=2.0,
+        spread_bps=10.0,
+        high_risk_news=True,
+    )
+
+    assert allow_decision.ok is True
+    assert allow_decision.recommended_notional == 187.5
+    assert validate_result["recommended_notional"] == 5000.0
+
+
+def test_execution_gate_marks_precomputed_risk_governor_path() -> None:
+    result = ExecutionGate().evaluate_trade(
+        instrument="EUR_USD",
+        side="BUY",
+        notional=100.0,
+        stop_distance_pct=0.02,
+        equity=10000.0,
+        equity_peak=10000.0,
+        regime_persistence=1.0,
+    )
+
+    assert result["debug"]["riskgov_path"] == "validate_trade_precomputed_risk_pct"
+    assert "governor_response" in result["debug"]
