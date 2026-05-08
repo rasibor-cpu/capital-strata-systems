@@ -3,7 +3,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import asdict, fields
 
-from dashboard.runtime.dashboard_state import DashboardState, MarketStatePayload
+from dashboard.runtime.dashboard_state import (
+    DashboardState,
+    GovernanceState,
+    MarketStatePayload,
+)
 from dashboard.runtime.dashboard_shadow_compare import compare_dashboard_shadow
 from dashboard.runtime.render_contracts.account_render_contract import AccountRenderContract
 from dashboard.runtime.render_contracts.governance_render_contract import (
@@ -98,8 +102,24 @@ class DashboardRenderer:
             self._market_state_from_summary(migrated_market_summary)
         )
 
+        legacy_governance_summary = self._legacy_governance_summary(
+            state=state
+        )
+        dashboard_state_governance_summary = self._mapping_summary(
+            dashboard_state_payload.get("governance_summary", {})
+        )
+        compare_dashboard_shadow(
+            legacy_governance_summary,
+            dashboard_state_governance_summary,
+        )
+        migrated_governance_summary = {
+            **legacy_governance_summary,
+            **dashboard_state_governance_summary,
+        }
         governance_contract = GovernanceRenderContract.from_governance_state(
-            state.governance_state
+            self._governance_state_from_summary(
+                migrated_governance_summary
+            )
         )
 
         legacy_risk_summary = self._legacy_risk_summary(
@@ -214,6 +234,27 @@ class DashboardRenderer:
                     getattr(default_market_state, field.name),
                 )
                 for field in fields(default_market_state)
+            }
+        )
+
+    @staticmethod
+    def _legacy_governance_summary(
+        *,
+        state: DashboardState,
+    ) -> dict:
+        return asdict(state.governance_state)
+
+    @staticmethod
+    def _governance_state_from_summary(summary: dict) -> GovernanceState:
+        default_governance_state = GovernanceState()
+
+        return GovernanceState(
+            **{
+                field.name: summary.get(
+                    field.name,
+                    getattr(default_governance_state, field.name),
+                )
+                for field in fields(default_governance_state)
             }
         )
 
