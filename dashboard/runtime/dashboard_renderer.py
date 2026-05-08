@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from dashboard.runtime.dashboard_state import DashboardState
+from dashboard.runtime.dashboard_shadow_compare import compare_dashboard_shadow
 from dashboard.runtime.render_contracts.account_render_contract import AccountRenderContract
 from dashboard.runtime.render_contracts.governance_render_contract import (
     GovernanceRenderContract,
@@ -58,23 +61,24 @@ class DashboardRenderer:
             )
         )
 
+        legacy_pnl_summary = self._legacy_pnl_summary(
+            state=state,
+            runtime_summaries=runtime_summaries,
+        )
+        dashboard_state_payload = state.to_dict()
+        dashboard_state_pnl_summary = self._mapping_summary(
+            dashboard_state_payload.get("pnl_summary", {})
+        )
+        compare_dashboard_shadow(
+            legacy_pnl_summary,
+            dashboard_state_pnl_summary,
+        )
+        migrated_pnl_summary = {
+            **legacy_pnl_summary,
+            **dashboard_state_pnl_summary,
+        }
         pnl_contract = PnLRenderContract.from_summary(
-            runtime_summaries.get(
-                "pnl_summary",
-                {
-                    "realized_pnl": state.realized_pnl,
-                    "unrealized_pnl": state.unrealized_pnl,
-                    "net_pnl": state.realized_pnl + state.unrealized_pnl,
-                    "total_exposure": 0.0,
-                    "exposure_utilization_pct": 0.0,
-                    "winner_count": 0,
-                    "loser_count": 0,
-                    "win_rate_pct": 0.0,
-                    "account_equity": state.total_equity,
-                    "asset_realized_pnl": {},
-                    "asset_unrealized_pnl": {},
-                },
-            )
+            migrated_pnl_summary
         )
 
         market_contract = MarketRenderContract.from_market_state(
@@ -120,3 +124,33 @@ class DashboardRenderer:
         ]
 
         return "\n".join(sections)
+
+    @staticmethod
+    def _legacy_pnl_summary(
+        *,
+        state: DashboardState,
+        runtime_summaries: dict,
+    ) -> dict:
+        return runtime_summaries.get(
+            "pnl_summary",
+            {
+                "realized_pnl": state.realized_pnl,
+                "unrealized_pnl": state.unrealized_pnl,
+                "net_pnl": state.realized_pnl + state.unrealized_pnl,
+                "total_exposure": 0.0,
+                "exposure_utilization_pct": 0.0,
+                "winner_count": 0,
+                "loser_count": 0,
+                "win_rate_pct": 0.0,
+                "account_equity": state.total_equity,
+                "asset_realized_pnl": {},
+                "asset_unrealized_pnl": {},
+            },
+        )
+
+    @staticmethod
+    def _mapping_summary(value: object) -> dict:
+        if isinstance(value, Mapping):
+            return dict(value)
+
+        return {}
