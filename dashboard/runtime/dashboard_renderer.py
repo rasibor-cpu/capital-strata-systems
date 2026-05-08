@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import asdict, fields
 
-from dashboard.runtime.dashboard_state import DashboardState
+from dashboard.runtime.dashboard_state import DashboardState, MarketStatePayload
 from dashboard.runtime.dashboard_shadow_compare import compare_dashboard_shadow
 from dashboard.runtime.render_contracts.account_render_contract import AccountRenderContract
 from dashboard.runtime.render_contracts.governance_render_contract import (
@@ -81,8 +82,20 @@ class DashboardRenderer:
             migrated_pnl_summary
         )
 
+        legacy_market_summary = self._legacy_market_summary(state=state)
+        dashboard_state_market_summary = self._mapping_summary(
+            dashboard_state_payload.get("market_summary", {})
+        )
+        compare_dashboard_shadow(
+            legacy_market_summary,
+            dashboard_state_market_summary,
+        )
+        migrated_market_summary = {
+            **legacy_market_summary,
+            **dashboard_state_market_summary,
+        }
         market_contract = MarketRenderContract.from_market_state(
-            state.global_market_state
+            self._market_state_from_summary(migrated_market_summary)
         )
 
         governance_contract = GovernanceRenderContract.from_governance_state(
@@ -181,6 +194,27 @@ class DashboardRenderer:
                 "exposure_limit": 0.0,
                 "risk_limits_breached": [],
             },
+        )
+
+    @staticmethod
+    def _legacy_market_summary(
+        *,
+        state: DashboardState,
+    ) -> dict:
+        return asdict(state.global_market_state)
+
+    @staticmethod
+    def _market_state_from_summary(summary: dict) -> MarketStatePayload:
+        default_market_state = MarketStatePayload()
+
+        return MarketStatePayload(
+            **{
+                field.name: summary.get(
+                    field.name,
+                    getattr(default_market_state, field.name),
+                )
+                for field in fields(default_market_state)
+            }
         )
 
     @staticmethod
