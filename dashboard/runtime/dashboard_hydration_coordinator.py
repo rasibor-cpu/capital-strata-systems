@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict
 
 from dashboard.runtime.dashboard_state import DashboardState
 from dashboard.runtime.dashboard_state_factory import DashboardStateFactory
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class DashboardHydrationCoordinator:
@@ -48,7 +52,22 @@ class DashboardHydrationCoordinator:
         without changing callers.
         """
 
-        return self.state_factory.build(
+        LOGGER.debug(
+            "Dashboard hydration coordinator started payloads=%s",
+            _payload_summary(
+                account_payload=account_payload,
+                broker_payload=broker_payload,
+                positions_payload=positions_payload,
+                market_payload=market_payload,
+                governance_payload=governance_payload,
+                risk_payload=risk_payload,
+                execution_payload=execution_payload,
+                session_payload=session_payload,
+                diagnostics_payload=diagnostics_payload,
+            ),
+        )
+
+        state = self.state_factory.build(
             account_payload=dict(account_payload or {}),
             broker_payload=dict(broker_payload or {}),
             positions_payload=dict(positions_payload or {}),
@@ -59,3 +78,25 @@ class DashboardHydrationCoordinator:
             session_payload=dict(session_payload or {}),
             diagnostics_payload=dict(diagnostics_payload or {}),
         )
+
+        LOGGER.debug(
+            "Dashboard hydration coordinator completed session_id=%s "
+            "resolved_mode=%s open_positions=%s",
+            state.session_id,
+            state.resolved_mode(),
+            state.total_open_positions,
+        )
+
+        return state
+
+
+def _payload_summary(
+    **payloads: Dict[str, Any] | None,
+) -> dict[str, dict[str, int | bool]]:
+    return {
+        name: {
+            "present": isinstance(payload, dict) and bool(payload),
+            "field_count": len(payload) if isinstance(payload, dict) else 0,
+        }
+        for name, payload in payloads.items()
+    }

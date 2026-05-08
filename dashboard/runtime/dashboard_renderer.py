@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from dataclasses import asdict, fields
 
@@ -35,6 +36,9 @@ from dashboard.runtime.renderers.pnl_renderer import PnLRenderer
 from dashboard.runtime.renderers.risk_renderer import RiskRenderer
 
 
+LOGGER = logging.getLogger(__name__)
+
+
 class DashboardRenderer:
     """
     PCNRASS-safe dashboard renderer orchestrator.
@@ -58,6 +62,13 @@ class DashboardRenderer:
 
     def render(self, state: DashboardState) -> str:
         runtime_summaries = state.last_scan_results or {}
+        LOGGER.debug(
+            "Dashboard renderer started session_id=%s resolved_mode=%s "
+            "runtime_summary_count=%s",
+            state.session_id,
+            state.resolved_mode(),
+            len(runtime_summaries),
+        )
 
         account_contract = AccountRenderContract.from_account_state(
             runtime_summaries.get(
@@ -75,6 +86,7 @@ class DashboardRenderer:
                 },
             )
         )
+        self._log_render_stage("account")
 
         legacy_pnl_summary = self._legacy_pnl_summary(
             state=state,
@@ -95,6 +107,7 @@ class DashboardRenderer:
         pnl_contract = PnLRenderContract.from_summary(
             migrated_pnl_summary
         )
+        self._log_render_stage("pnl")
 
         legacy_market_summary = self._legacy_market_summary(state=state)
         dashboard_state_market_summary = self._mapping_summary(
@@ -111,6 +124,7 @@ class DashboardRenderer:
         market_contract = MarketRenderContract.from_market_state(
             self._market_state_from_summary(migrated_market_summary)
         )
+        self._log_render_stage("market")
 
         legacy_governance_summary = self._legacy_governance_summary(
             state=state
@@ -131,6 +145,7 @@ class DashboardRenderer:
                 migrated_governance_summary
             )
         )
+        self._log_render_stage("governance")
 
         legacy_risk_summary = self._legacy_risk_summary(
             runtime_summaries=runtime_summaries,
@@ -149,6 +164,7 @@ class DashboardRenderer:
         risk_contract = RiskRenderContract.from_summary(
             migrated_risk_summary
         )
+        self._log_render_stage("risk")
 
         legacy_execution_summary = self._legacy_execution_summary(
             runtime_summaries=runtime_summaries,
@@ -167,6 +183,7 @@ class DashboardRenderer:
         execution_contract = ExecutionRenderContract.from_summary(
             migrated_execution_summary
         )
+        self._log_render_stage("execution")
 
         legacy_broker_summary = self._legacy_broker_summary(state=state)
         dashboard_state_broker_summary = self._mapping_summary(
@@ -183,12 +200,14 @@ class DashboardRenderer:
         broker_contract = BrokerRenderContract.from_summary(
             migrated_broker_summary
         )
+        self._log_render_stage("broker")
         diagnostics_contract = DiagnosticsRenderContract.from_dashboard_state(
             state
         )
         diagnostics_output = self.diagnostics_renderer.render(
             diagnostics_contract
         )
+        self._log_render_stage("diagnostics")
 
         sections = [
             "======================================",
@@ -222,7 +241,18 @@ class DashboardRenderer:
 
         sections.append("======================================")
 
-        return "\n".join(sections)
+        output = "\n".join(sections)
+        LOGGER.debug(
+            "Dashboard renderer completed session_id=%s output_chars=%s",
+            state.session_id,
+            len(output),
+        )
+
+        return output
+
+    @staticmethod
+    def _log_render_stage(stage: str) -> None:
+        LOGGER.debug("Dashboard renderer stage=%s", stage)
 
     @staticmethod
     def _legacy_pnl_summary(

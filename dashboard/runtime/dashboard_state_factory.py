@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+from collections.abc import Mapping
 from typing import Any, Dict
 
 from dashboard.runtime.dashboard_state import DashboardState
@@ -13,6 +15,9 @@ from dashboard.runtime.summary_builders.execution_summary_builder import (
 )
 from dashboard.runtime.summary_builders.pnl_summary_builder import PnLSummaryBuilder
 from dashboard.runtime.summary_builders.risk_summary_builder import RiskSummaryBuilder
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class DashboardStateFactory:
@@ -51,6 +56,7 @@ class DashboardStateFactory:
         dashboard_state = DashboardState()
         account = account_payload or {}
 
+        self._log_builder_stage("account", account)
         dashboard_state = self.account_builder.build(
             account_payload=account,
             state=dashboard_state,
@@ -70,22 +76,26 @@ class DashboardStateFactory:
             "last_heartbeat": account.get("last_heartbeat", ""),
         }
 
+        self._log_builder_stage("broker", broker)
         dashboard_state = self.broker_builder.build(
             broker_payload=broker,
             state=dashboard_state,
         )
 
+        self._log_builder_stage("market", market_payload)
         dashboard_state = self.market_builder.build(
             market_payload=market_payload or {},
             state=dashboard_state,
         )
         opportunities = self._opportunities(market_payload or {})
 
+        self._log_builder_stage("governance", governance_payload)
         dashboard_state = self.governance_builder.build(
             governance_payload=governance_payload or {},
             state=dashboard_state,
         )
 
+        self._log_builder_stage("positions", positions_payload)
         position_state = self.position_builder.build(
             positions_payload or {}
         )
@@ -103,17 +113,20 @@ class DashboardStateFactory:
             "account_mode": dashboard_state.broker_state.broker_mode,
         }
 
+        self._log_builder_stage("pnl_summary", position_state)
         pnl_summary = self.pnl_summary_builder.build(
             account_state=account_summary_state,
             position_state=position_state,
         )
 
+        self._log_builder_stage("risk_summary", risk_payload)
         risk_summary = self.risk_summary_builder.build(
             account_state=account_summary_state,
             position_state=position_state,
             risk_payload=risk_payload,
         )
 
+        self._log_builder_stage("execution_summary", execution_payload)
         execution_summary = self.execution_summary_builder.build(
             execution_payload=execution_payload,
         )
@@ -148,6 +161,7 @@ class DashboardStateFactory:
 
         session = session_payload or {}
 
+        self._log_builder_stage("session", session)
         dashboard_state.session_id = str(session.get("session_id", ""))
         dashboard_state.user_id = str(session.get("user_id", ""))
         dashboard_state.role = str(session.get("role", "TRADER"))
@@ -157,12 +171,32 @@ class DashboardStateFactory:
 
         diagnostics = diagnostics_payload or {}
 
+        self._log_builder_stage("diagnostics", diagnostics)
         if diagnostics:
             dashboard_state.dashboard_messages.append(
                 str(diagnostics.get("message", "Diagnostics payload received"))
             )
 
+        LOGGER.debug(
+            "Dashboard state factory completed session_id=%s resolved_mode=%s "
+            "open_positions=%s opportunity_count=%s",
+            dashboard_state.session_id,
+            dashboard_state.resolved_mode(),
+            dashboard_state.total_open_positions,
+            len(opportunities),
+        )
+
         return dashboard_state
+
+    @staticmethod
+    def _log_builder_stage(stage: str, payload: Mapping[str, Any] | None) -> None:
+        LOGGER.debug(
+            "Dashboard state factory builder stage=%s payload_present=%s "
+            "field_count=%s",
+            stage,
+            isinstance(payload, Mapping) and bool(payload),
+            len(payload) if isinstance(payload, Mapping) else 0,
+        )
 
     @staticmethod
     def _execution_history(execution_payload: Dict[str, Any]) -> list[dict[str, Any]]:

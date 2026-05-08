@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict
 
 from dashboard.runtime.dashboard_hydration_coordinator import (
     DashboardHydrationCoordinator,
 )
 from dashboard.runtime.dashboard_renderer import DashboardRenderer
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class DashboardRuntimeBootstrap:
@@ -34,6 +38,8 @@ class DashboardRuntimeBootstrap:
         session_payload: Dict[str, Any] | None = None,
         diagnostics_payload: Dict[str, Any] | None = None,
     ) -> str:
+        LOGGER.debug("Dashboard runtime bootstrap started")
+
         state = self.hydration_coordinator.hydrate(
             account_payload=account_payload,
             broker_payload=broker_payload,
@@ -46,4 +52,14 @@ class DashboardRuntimeBootstrap:
             diagnostics_payload=diagnostics_payload,
         )
 
-        return self.renderer.render(state)
+        output = self.renderer.render(state)
+
+        LOGGER.debug(
+            "Dashboard runtime bootstrap completed session_id=%s "
+            "resolved_mode=%s output_chars=%s",
+            state.session_id,
+            state.resolved_mode(),
+            len(output),
+        )
+
+        return output
