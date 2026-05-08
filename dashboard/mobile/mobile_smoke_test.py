@@ -5,9 +5,16 @@ from pathlib import Path
 
 from dashboard.mobile.mobile_app import (
     app,
+    _broker_page,
     _controls_page,
     _dashboard_page,
+    _governance_page,
+    _history_page,
     _login_page,
+    _market_page,
+    _opportunities_page,
+    _positions_page,
+    _risk_page,
     _users_page,
 )
 
@@ -20,6 +27,13 @@ def main() -> int:
         "/password-change",
         "/controls",
         "/dashboard",
+        "/positions",
+        "/history",
+        "/risk",
+        "/governance",
+        "/opportunities",
+        "/market",
+        "/broker",
         "/trade",
         "/users",
         "/api/status",
@@ -54,6 +68,42 @@ def main() -> int:
         raise AssertionError("Dashboard must show system status and engine mode")
     if "Recent Mobile Tickets" not in dashboard:
         raise AssertionError("Dashboard must show recent mobile ticket outcomes")
+    if "Account Summary" not in dashboard or "Command Center" not in dashboard:
+        raise AssertionError("Dashboard must show institutional account cards and command center")
+
+    session = {"created": 1.0}
+    trader_ctx = {
+        "user_id": "00017",
+        "display_name": "CSS Trader",
+        "role": "TRADER",
+    }
+    positions_page = _positions_page(trader_ctx, session)
+    if "Positions Screen" not in positions_page or "BTC-USD" not in positions_page:
+        raise AssertionError("Positions screen must show mobile position inventory")
+
+    history_page = _history_page(trader_ctx, session)
+    if "Trade / Execution History" not in history_page:
+        raise AssertionError("History screen must render the execution history shell")
+
+    risk_page = _risk_page(trader_ctx, session)
+    if "Risk Control Center" not in risk_page or "Risk Limit Breaches" not in risk_page:
+        raise AssertionError("Risk screen must show risk control center content")
+
+    governance_page = _governance_page(trader_ctx, session)
+    if "Governance Center" not in governance_page or "Submit Trades" not in governance_page:
+        raise AssertionError("Governance screen must show authority state")
+
+    opportunities_page = _opportunities_page(trader_ctx, session)
+    if "Opportunity Monitor" not in opportunities_page or "Monitor Only" not in opportunities_page:
+        raise AssertionError("Opportunity monitor must be observational")
+
+    market_page = _market_page(trader_ctx, session)
+    if "Market Regime Panel" not in market_page or "Signal Context" not in market_page:
+        raise AssertionError("Market screen must show regime and signal context")
+
+    broker_page = _broker_page(trader_ctx, session)
+    if "Broker Control Panel" not in broker_page or "Broker secrets are never displayed" not in broker_page:
+        raise AssertionError("Broker screen must show safe broker readiness content")
 
     controls_page = _controls_page(
         user_ctx={

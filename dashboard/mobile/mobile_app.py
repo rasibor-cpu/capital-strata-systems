@@ -29,6 +29,7 @@ from dashboard.auth.css_sign_on import (
 )
 from backend.security.permissions import PermissionEngine
 from dashboard.runtime.broker_credential_check import _load_coinbase_credentials, load_local_env
+from dashboard.runtime.dashboard_hydration_coordinator import DashboardHydrationCoordinator
 from dashboard.runtime.runtime_bootstrap import DashboardRuntimeBootstrap
 
 
@@ -143,6 +144,69 @@ async def dashboard(request: Request):
 
     user_ctx = session["user_ctx"]
     return HTMLResponse(_dashboard_page(user_ctx=user_ctx, session=session))
+
+
+@app.get("/positions", response_class=HTMLResponse)
+async def positions_screen(request: Request):
+    session = _get_session(request)
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+
+    return HTMLResponse(_positions_page(session["user_ctx"], session))
+
+
+@app.get("/history", response_class=HTMLResponse)
+async def history_screen(request: Request):
+    session = _get_session(request)
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+
+    return HTMLResponse(_history_page(session["user_ctx"], session))
+
+
+@app.get("/risk", response_class=HTMLResponse)
+async def risk_screen(request: Request):
+    session = _get_session(request)
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+
+    return HTMLResponse(_risk_page(session["user_ctx"], session))
+
+
+@app.get("/governance", response_class=HTMLResponse)
+async def governance_screen(request: Request):
+    session = _get_session(request)
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+
+    return HTMLResponse(_governance_page(session["user_ctx"], session))
+
+
+@app.get("/opportunities", response_class=HTMLResponse)
+async def opportunities_screen(request: Request):
+    session = _get_session(request)
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+
+    return HTMLResponse(_opportunities_page(session["user_ctx"], session))
+
+
+@app.get("/market", response_class=HTMLResponse)
+async def market_screen(request: Request):
+    session = _get_session(request)
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+
+    return HTMLResponse(_market_page(session["user_ctx"], session))
+
+
+@app.get("/broker", response_class=HTMLResponse)
+async def broker_screen(request: Request):
+    session = _get_session(request)
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+
+    return HTMLResponse(_broker_page(session["user_ctx"], session))
 
 
 @app.post("/logout")
@@ -516,6 +580,19 @@ def _top_nav(user_ctx: Dict[str, Any], active: str) -> str:
     links = []
     if active != "dashboard":
         links.append('<a class="button-link" href="/dashboard">Dashboard</a>')
+    for key, label, href in (
+        ("positions", "Positions", "/positions"),
+        ("history", "History", "/history"),
+        ("risk", "Risk", "/risk"),
+        ("governance", "Governance", "/governance"),
+        ("opportunities", "Opportunities", "/opportunities"),
+        ("market", "Market", "/market"),
+        ("broker", "Broker", "/broker"),
+    ):
+        if active != key:
+            links.append(
+                f'<a class="button-link quiet" href="{href}">{label}</a>'
+            )
     if active != "trade" and _can_submit_trade(user_ctx):
         links.append('<a class="button-link" href="/trade">Trade</a>')
     if active != "controls" and _can_manage_mobile_controls(user_ctx):
@@ -658,6 +735,7 @@ def _password_change_page(message: str = "", status: str = "info") -> str:
 
 def _dashboard_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
     dashboard_text = _mobile_dashboard_text(user_ctx, session)
+    dashboard_payload = _mobile_dashboard_payload(user_ctx, session)
     status = _system_status(user_ctx)
     system_mode = "Live" if status["system_live"] else "Paper"
     order_state = "Enabled" if status["orders_enabled"] else "Disabled"
@@ -677,6 +755,8 @@ def _dashboard_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
             <article><strong>Broker Gate</strong><span>{broker_gate}</span></article>
           </section>
 
+          {_account_summary_cards(dashboard_payload)}
+          {_command_center_panel(user_ctx)}
           {_recent_tickets_panel()}
 
           <section class="terminal-panel" aria-label="Dashboard output">
@@ -688,12 +768,31 @@ def _dashboard_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
 
 
 def _mobile_dashboard_text(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
+    return DashboardRuntimeBootstrap().run(
+        **_mobile_runtime_payloads(user_ctx, session)
+    )
+
+
+def _mobile_dashboard_payload(
+    user_ctx: Dict[str, Any],
+    session: Dict[str, Any],
+) -> Dict[str, Any]:
+    state = DashboardHydrationCoordinator().hydrate(
+        **_mobile_runtime_payloads(user_ctx, session)
+    )
+    return state.to_dict()
+
+
+def _mobile_runtime_payloads(
+    user_ctx: Dict[str, Any],
+    session: Dict[str, Any],
+) -> Dict[str, Dict[str, Any]]:
     controls = load_mobile_controls()
     runtime_mode = str(controls["runtime_mode"])
     engine_mode = str(controls["engine_mode"])
     orders_enabled = bool(controls["orders_enabled"])
-    return DashboardRuntimeBootstrap().run(
-        account_payload={
+    return {
+        "account_payload": {
             "cash_balance": 10000.00,
             "total_equity": 10250.00,
             "buying_power": 5000.00,
@@ -703,7 +802,7 @@ def _mobile_dashboard_text(user_ctx: Dict[str, Any], session: Dict[str, Any]) ->
             "broker": "MOBILE",
             "account_mode": runtime_mode,
         },
-        positions_payload={
+        "positions_payload": {
             "positions": [
                 {
                     "symbol": "BTC-USD",
@@ -727,7 +826,7 @@ def _mobile_dashboard_text(user_ctx: Dict[str, Any], session: Dict[str, Any]) ->
                 },
             ]
         },
-        market_payload={
+        "market_payload": {
             "trend_state": "UPTREND",
             "volatility_state": "NORMAL",
             "liquidity_state": "HEALTHY",
@@ -745,7 +844,7 @@ def _mobile_dashboard_text(user_ctx: Dict[str, Any], session: Dict[str, Any]) ->
             "execution_cost_state": "MOBILE_GOVERNED",
             "signal_confluence_state": "CONFIRMED",
         },
-        governance_payload={
+        "governance_payload": {
             "governance_enabled": True,
             "session_locked": False,
             "defensive_mode_active": False,
@@ -756,7 +855,7 @@ def _mobile_dashboard_text(user_ctx: Dict[str, Any], session: Dict[str, Any]) ->
                 f"orders={'enabled' if orders_enabled else 'disabled'}"
             ),
         },
-        risk_payload={
+        "risk_payload": {
             "risk_state": "AUTHENTICATED",
             "gate_status": f"MOBILE_{runtime_mode.upper()}_ACCESS",
             "current_drawdown_pct": 0.35,
@@ -766,7 +865,7 @@ def _mobile_dashboard_text(user_ctx: Dict[str, Any], session: Dict[str, Any]) ->
             "exposure_limit": 25000.00,
             "risk_limits_breached": [],
         },
-        execution_payload={
+        "execution_payload": {
             "execution_state": "AUTHORIZED_MOBILE" if orders_enabled else "MOBILE_ORDERS_DISABLED",
             "accepted_trade_count": 0,
             "rejected_trade_count": 0,
@@ -780,7 +879,7 @@ def _mobile_dashboard_text(user_ctx: Dict[str, Any], session: Dict[str, Any]) ->
             "execution_cost_state": "GOVERNED_BY_CSS",
             "last_execution_event": "Phone dashboard is governed by mobile runtime controls",
         },
-        session_payload={
+        "session_payload": {
             "session_id": "MOBILE-SESSION",
             "user_id": str(user_ctx.get("user_id", "mobile_user")),
             "role": str(user_ctx.get("role", "VIEWER")),
@@ -788,9 +887,303 @@ def _mobile_dashboard_text(user_ctx: Dict[str, Any], session: Dict[str, Any]) ->
             "engine_mode": engine_mode,
             "live_or_paper": runtime_mode,
         },
-        diagnostics_payload={
+        "diagnostics_payload": {
             "message": f"Mobile session created={int(float(session.get('created', 0)))}"
         },
+    }
+
+
+def _account_summary_cards(dashboard_payload: Dict[str, Any]) -> str:
+    account = _mapping(dashboard_payload.get("account_summary"))
+    pnl = _mapping(dashboard_payload.get("pnl_summary"))
+    open_positions = _mapping(dashboard_payload.get("open_positions"))
+
+    return f"""
+      <section class="data-panel" aria-label="Institutional account summary">
+        <h2>Account Summary</h2>
+        <div class="metric-grid account-grid">
+          <article><strong>Cash</strong><span>{_money(account.get("cash_balance"))}</span></article>
+          <article><strong>Total Equity</strong><span>{_money(account.get("total_equity"))}</span></article>
+          <article><strong>Net PnL</strong><span>{_money(pnl.get("net_pnl"))}</span></article>
+          <article><strong>Open Positions</strong><span>{html.escape(str(open_positions.get("total", 0)))}</span></article>
+          <article><strong>Buying Power</strong><span>{_money(account.get("buying_power"))}</span></article>
+          <article><strong>Margin Used</strong><span>{_money(account.get("margin_used"))}</span></article>
+          <article><strong>Available Margin</strong><span>{_money(account.get("available_margin"))}</span></article>
+          <article><strong>Exposure</strong><span>{_money(pnl.get("total_exposure"))}</span></article>
+        </div>
+      </section>
+    """
+
+
+def _command_center_panel(user_ctx: Dict[str, Any]) -> str:
+    cards = [
+        ("Positions", "Open position inventory and asset counts.", "/positions"),
+        ("History", "Trade ticket and execution outcome log.", "/history"),
+        ("Risk", "Drawdown, exposure, limits, and breaches.", "/risk"),
+        ("Governance", "Session gate, audit, and authority state.", "/governance"),
+        ("Opportunities", "Current monitor queue and watchlist posture.", "/opportunities"),
+        ("Market", "Regime, VWAP, liquidity, and pressure state.", "/market"),
+        ("Broker", "Broker readiness and live-order gate posture.", "/broker"),
+    ]
+    if _can_submit_trade(user_ctx):
+        cards.append(("Trade", "Submit governed paper/live tickets.", "/trade"))
+    if _can_manage_mobile_controls(user_ctx):
+        cards.append(("Controls", "Change mobile mode and order state.", "/controls"))
+    if can_manage_users(user_ctx):
+        cards.append(("Users", "Create users and assign authority.", "/users"))
+
+    links = "\n".join(
+        f"""
+        <a class="command-card" href="{href}">
+          <strong>{html.escape(title)}</strong>
+          <span>{html.escape(description)}</span>
+        </a>
+        """
+        for title, description, href in cards
+    )
+    return f"""
+      <section class="data-panel" aria-label="CSS command center">
+        <h2>Command Center</h2>
+        <div class="command-grid">
+          {links}
+        </div>
+      </section>
+    """
+
+
+def _positions_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
+    payloads = _mobile_runtime_payloads(user_ctx, session)
+    dashboard_payload = _mobile_dashboard_payload(user_ctx, session)
+    positions = payloads["positions_payload"].get("positions", [])
+    rows = "\n".join(_position_row_markup(position) for position in positions)
+    if not rows:
+        rows = '<div class="ops-row"><span>No open positions.</span></div>'
+    open_positions = _mapping(dashboard_payload.get("open_positions"))
+    by_asset = _mapping(open_positions.get("by_asset"))
+
+    return _page(
+        "Positions",
+        f"""
+        <main class="dashboard-shell">
+          {_header("Positions", user_ctx, "positions")}
+          {_identity_strip(user_ctx, "Position Inventory")}
+          <section class="metric-grid" aria-label="Position summary">
+            <article><strong>Total Open</strong><span>{html.escape(str(open_positions.get("total", 0)))}</span></article>
+            <article><strong>Crypto</strong><span>{html.escape(str(by_asset.get("CRYPTO", 0)))}</span></article>
+            <article><strong>FX</strong><span>{html.escape(str(by_asset.get("FX", 0)))}</span></article>
+            <article><strong>Source</strong><span>Runtime</span></article>
+          </section>
+          <section class="data-panel" aria-label="Positions screen">
+            <h2>Positions Screen</h2>
+            <div class="ops-table positions-table">
+              <div class="ops-row ops-head">
+                <span>Symbol</span><span>Asset</span><span>Side</span><span>Qty</span><span>Entry</span><span>Mark</span><span>Unrealized</span>
+              </div>
+              {rows}
+            </div>
+          </section>
+        </main>
+        """,
+    )
+
+
+def _history_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
+    events = _recent_mobile_events(25)
+    rows = "\n".join(_history_row_markup(event) for event in events)
+    if not rows:
+        rows = '<div class="ops-row"><span>No mobile execution events yet.</span></div>'
+
+    return _page(
+        "Trade History",
+        f"""
+        <main class="dashboard-shell">
+          {_header("Trade / Execution History", user_ctx, "history")}
+          {_identity_strip(user_ctx, "Audit Trail")}
+          <section class="metric-grid" aria-label="History summary">
+            <article><strong>Visible Events</strong><span>{len(events)}</span></article>
+            <article><strong>Audit Source</strong><span>JSONL</span></article>
+            <article><strong>Secrets</strong><span>Redacted</span></article>
+            <article><strong>Mode</strong><span>{html.escape(str(load_mobile_controls()["runtime_mode"]).title())}</span></article>
+          </section>
+          <section class="data-panel" aria-label="Trade and execution history">
+            <h2>Trade / Execution History</h2>
+            <div class="ops-table history-table">
+              <div class="ops-row ops-head">
+                <span>Recorded</span><span>Status</span><span>Mode</span><span>Broker</span><span>Symbol</span><span>Side</span><span>Amount</span>
+              </div>
+              {rows}
+            </div>
+          </section>
+        </main>
+        """,
+    )
+
+
+def _risk_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
+    risk = _mapping(_mobile_dashboard_payload(user_ctx, session).get("risk_summary"))
+    breaches = risk.get("risk_limits_breached")
+    breach_items = breaches if isinstance(breaches, list) and breaches else ["NONE"]
+    breach_markup = "\n".join(
+        f"<li>{html.escape(str(item))}</li>" for item in breach_items
+    )
+
+    return _page(
+        "Risk",
+        f"""
+        <main class="dashboard-shell">
+          {_header("Risk Control Center", user_ctx, "risk")}
+          {_identity_strip(user_ctx, "Risk Oversight")}
+          <section class="metric-grid" aria-label="Risk control center">
+            <article><strong>Risk State</strong><span>{html.escape(str(risk.get("risk_state", "NORMAL")))}</span></article>
+            <article><strong>Gate</strong><span>{html.escape(str(risk.get("gate_status", "OPEN")))}</span></article>
+            <article><strong>Drawdown</strong><span>{_percent(risk.get("current_drawdown_pct"))}</span></article>
+            <article><strong>Max Drawdown</strong><span>{_percent(risk.get("max_drawdown_pct"))}</span></article>
+            <article><strong>Exposure</strong><span>{_money(risk.get("total_exposure"))}</span></article>
+            <article><strong>Exposure Util.</strong><span>{_percent(risk.get("exposure_utilization_pct"))}</span></article>
+            <article><strong>Daily Loss Limit</strong><span>{_money(risk.get("daily_loss_limit"))}</span></article>
+            <article><strong>Position Limit</strong><span>{html.escape(str(risk.get("position_limit", 0)))}</span></article>
+          </section>
+          <section class="data-panel" aria-label="Risk breaches">
+            <h2>Risk Limit Breaches</h2>
+            <ul class="compact-list">{breach_markup}</ul>
+          </section>
+        </main>
+        """,
+    )
+
+
+def _governance_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
+    governance = _mapping(
+        _mobile_dashboard_payload(user_ctx, session).get("governance_summary")
+    )
+    authority = {
+        "Submit Trades": _can_submit_trade(user_ctx),
+        "Manage Controls": _can_manage_mobile_controls(user_ctx),
+        "Manage Users": can_manage_users(user_ctx),
+    }
+    authority_cards = "\n".join(
+        f"<article><strong>{html.escape(label)}</strong><span>{_yes_no(value)}</span></article>"
+        for label, value in authority.items()
+    )
+
+    return _page(
+        "Governance",
+        f"""
+        <main class="dashboard-shell">
+          {_header("Governance Center", user_ctx, "governance")}
+          {_identity_strip(user_ctx, "Authority And Audit")}
+          <section class="metric-grid" aria-label="Governance center">
+            <article><strong>Governance</strong><span>{_yes_no(governance.get("governance_enabled"))}</span></article>
+            <article><strong>Session Locked</strong><span>{_yes_no(governance.get("session_locked"))}</span></article>
+            <article><strong>Defensive Mode</strong><span>{_yes_no(governance.get("defensive_mode_active"))}</span></article>
+            <article><strong>Unified Gate</strong><span>{_yes_no(governance.get("unified_trade_gate_active"))}</span></article>
+            <article><strong>Audit</strong><span>{_yes_no(governance.get("audit_enabled"))}</span></article>
+            {authority_cards}
+          </section>
+          <section class="data-panel" aria-label="Governance event">
+            <h2>Last Governance Event</h2>
+            <p>{html.escape(str(governance.get("last_governance_event", "NONE") or "NONE"))}</p>
+          </section>
+        </main>
+        """,
+    )
+
+
+def _opportunities_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
+    opportunities = _opportunity_rows(user_ctx, session)
+    rows = "\n".join(_opportunity_row_markup(item) for item in opportunities)
+
+    return _page(
+        "Opportunities",
+        f"""
+        <main class="dashboard-shell">
+          {_header("Opportunity Monitor", user_ctx, "opportunities")}
+          {_identity_strip(user_ctx, "Monitor Only")}
+          <section class="data-panel" aria-label="Opportunity monitor">
+            <h2>Opportunity Monitor</h2>
+            <p class="muted">This screen is observational. Trade execution remains governed by CSS tickets, role authority, order controls, and broker gates.</p>
+            <div class="ops-table opportunity-table">
+              <div class="ops-row ops-head">
+                <span>Symbol</span><span>Asset</span><span>Bias</span><span>State</span><span>Action</span>
+              </div>
+              {rows}
+            </div>
+          </section>
+        </main>
+        """,
+    )
+
+
+def _market_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
+    market = _mapping(_mobile_dashboard_payload(user_ctx, session).get("market_summary"))
+
+    return _page(
+        "Market",
+        f"""
+        <main class="dashboard-shell">
+          {_header("Market Regime Panel", user_ctx, "market")}
+          {_identity_strip(user_ctx, "Regime And Microstructure")}
+          <section class="metric-grid" aria-label="Market regime panel">
+            <article><strong>Trend</strong><span>{html.escape(str(market.get("trend_state", "UNKNOWN")))}</span></article>
+            <article><strong>Volatility</strong><span>{html.escape(str(market.get("volatility_state", "UNKNOWN")))}</span></article>
+            <article><strong>Liquidity</strong><span>{html.escape(str(market.get("liquidity_state", "UNKNOWN")))}</span></article>
+            <article><strong>Regime</strong><span>{html.escape(str(market.get("regime_state", "UNKNOWN")))}</span></article>
+            <article><strong>VWAP</strong><span>{html.escape(str(market.get("vwap_state", "UNKNOWN")))}</span></article>
+            <article><strong>VWAP Dist.</strong><span>{_number(market.get("vwap_distance"), 4)}</span></article>
+            <article><strong>Momentum</strong><span>{html.escape(str(market.get("momentum_state", "UNKNOWN")))}</span></article>
+            <article><strong>Pressure</strong><span>{html.escape(str(market.get("pressure_state", "UNKNOWN")))}</span></article>
+          </section>
+          <section class="data-panel" aria-label="Market details">
+            <h2>Signal Context</h2>
+            <div class="kv-grid">
+              {_kv("Mean Reversion", market.get("mean_reversion_state"))}
+              {_kv("Probability", market.get("probability_state"))}
+              {_kv("Velocity", market.get("velocity_state"))}
+              {_kv("Acceleration", market.get("acceleration_state"))}
+              {_kv("Spread", market.get("spread_state"))}
+              {_kv("Execution Cost", market.get("execution_cost_state"))}
+              {_kv("Signal Confluence", market.get("signal_confluence_state"))}
+            </div>
+          </section>
+        </main>
+        """,
+    )
+
+
+def _broker_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
+    load_local_env()
+    dashboard_payload = _mobile_dashboard_payload(user_ctx, session)
+    broker = _mapping(dashboard_payload.get("broker_summary"))
+    status = _system_status(user_ctx)
+    controls_link = (
+        '<a class="button-link" href="/controls">Open Controls</a>'
+        if _can_manage_mobile_controls(user_ctx)
+        else ""
+    )
+
+    return _page(
+        "Broker",
+        f"""
+        <main class="dashboard-shell">
+          {_header("Broker Control Panel", user_ctx, "broker")}
+          {_identity_strip(user_ctx, "Broker Readiness")}
+          <section class="metric-grid" aria-label="Broker control panel">
+            <article><strong>Selected</strong><span>{html.escape(str(broker.get("selected_broker", "MOBILE")))}</span></article>
+            <article><strong>Mode</strong><span>{html.escape(str(status["runtime_mode"]).title())}</span></article>
+            <article><strong>Broker Gate</strong><span>{html.escape(str(status["broker_live_gate"]))}</span></article>
+            <article><strong>Orders</strong><span>{'Enabled' if status["orders_enabled"] else 'Disabled'}</span></article>
+            <article><strong>Coinbase Flag</strong><span>{_yes_no(_coinbase_live_orders_enabled())}</span></article>
+            <article><strong>Coinbase Creds</strong><span>{_yes_no(_coinbase_credentials_present())}</span></article>
+            <article><strong>OANDA Creds</strong><span>{_yes_no(_oanda_credentials_present())}</span></article>
+            <article><strong>Live Trading</strong><span>{_yes_no(status["broker_live_ready"])}</span></article>
+          </section>
+          <section class="data-panel" aria-label="Broker controls">
+            <h2>Broker Controls</h2>
+            <p class="muted">Broker secrets are never displayed. Live orders still require CSS live mode, order enablement, broker readiness, role authority, and explicit EXECUTE confirmation.</p>
+            {controls_link}
+          </section>
+        </main>
+        """,
     )
 
 
@@ -981,6 +1374,118 @@ def _ticket_row_markup(event: Dict[str, Any]) -> str:
         <span>{html.escape(ticket_id)}</span>
       </div>
     """
+
+
+def _position_row_markup(position: Dict[str, Any]) -> str:
+    return f"""
+      <div class="ops-row">
+        <span>{html.escape(str(position.get("symbol", "N/A")))}</span>
+        <span>{html.escape(str(position.get("asset_class", "N/A")))}</span>
+        <span>{html.escape(str(position.get("side", "N/A")))}</span>
+        <span>{_number(position.get("qty"), 4)}</span>
+        <span>{_number(position.get("entry_price"), 4)}</span>
+        <span>{_number(position.get("current_price"), 4)}</span>
+        <span>{_money(position.get("unrealized_pnl"))}</span>
+      </div>
+    """
+
+
+def _history_row_markup(event: Dict[str, Any]) -> str:
+    ticket = event.get("ticket") if isinstance(event.get("ticket"), dict) else {}
+    return f"""
+      <div class="ops-row">
+        <span>{html.escape(str(event.get("recorded_utc", "N/A")))}</span>
+        <span>{html.escape(str(event.get("status", "UNKNOWN")))}</span>
+        <span>{html.escape(str(ticket.get("mode", "N/A")).upper())}</span>
+        <span>{html.escape(str(ticket.get("broker", "N/A")))}</span>
+        <span>{html.escape(str(ticket.get("symbol", "N/A")))}</span>
+        <span>{html.escape(str(ticket.get("side", "N/A")))}</span>
+        <span>{_money(ticket.get("amount"))}</span>
+      </div>
+    """
+
+
+def _opportunity_rows(
+    user_ctx: Dict[str, Any],
+    session: Dict[str, Any],
+) -> tuple[Dict[str, Any], ...]:
+    payloads = _mobile_runtime_payloads(user_ctx, session)
+    market = payloads["market_payload"]
+    positions = payloads["positions_payload"].get("positions", [])
+    rows = [
+        {
+            "symbol": position.get("symbol", "N/A"),
+            "asset_class": position.get("asset_class", "N/A"),
+            "bias": position.get("side", "N/A"),
+            "state": market.get("signal_confluence_state", "UNKNOWN"),
+            "action": "Monitor open exposure",
+        }
+        for position in positions
+        if isinstance(position, dict)
+    ]
+    rows.append(
+        {
+            "symbol": "CL",
+            "asset_class": "FUTURES",
+            "bias": "WATCH",
+            "state": market.get("execution_cost_state", "UNKNOWN"),
+            "action": "Await governed ticket",
+        }
+    )
+    return tuple(rows)
+
+
+def _opportunity_row_markup(item: Dict[str, Any]) -> str:
+    return f"""
+      <div class="ops-row">
+        <span>{html.escape(str(item.get("symbol", "N/A")))}</span>
+        <span>{html.escape(str(item.get("asset_class", "N/A")))}</span>
+        <span>{html.escape(str(item.get("bias", "N/A")))}</span>
+        <span>{html.escape(str(item.get("state", "UNKNOWN")))}</span>
+        <span>{html.escape(str(item.get("action", "")))}</span>
+      </div>
+    """
+
+
+def _kv(label: str, value: Any) -> str:
+    return f"""
+      <div>
+        <strong>{html.escape(label)}</strong>
+        <span>{html.escape(str(value if value not in (None, "") else "UNKNOWN"))}</span>
+      </div>
+    """
+
+
+def _mapping(value: Any) -> Dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _money(value: Any) -> str:
+    return f"{_safe_float(value):,.2f}"
+
+
+def _number(value: Any, precision: int = 2) -> str:
+    return f"{_safe_float(value):,.{precision}f}"
+
+
+def _percent(value: Any) -> str:
+    return f"{_safe_float(value):,.2f}%"
+
+
+def _yes_no(value: Any) -> str:
+    return "YES" if bool(value) else "NO"
+
+
+def _coinbase_credentials_present() -> bool:
+    api_key, api_secret, _source = _load_coinbase_credentials()
+    return bool(api_key and api_secret)
+
+
+def _oanda_credentials_present() -> bool:
+    return bool(
+        (os.getenv("OANDA_API_KEY") or os.getenv("OANDA_API_TOKEN"))
+        and (os.getenv("OANDA_ACCOUNT_ID") or os.getenv("OANDA_PRACTICE_ACCOUNT_ID"))
+    )
 
 
 def _user_row_markup(summary: Dict[str, Any]) -> str:
@@ -1715,6 +2220,10 @@ a.button-link {
   font-size: 15px;
   font-weight: 700;
 }
+a.button-link.quiet {
+  background: #e7eef1;
+  color: var(--ink);
+}
 button:active { background: var(--teal-dark); }
 button.ghost {
   min-height: 40px;
@@ -1757,6 +2266,8 @@ button.ghost {
 .top-actions {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 10px;
 }
 .top-actions form {
@@ -1821,6 +2332,36 @@ button.ghost {
 .metric-grid span {
   font-size: 18px;
   font-weight: 700;
+}
+.account-grid span {
+  font-variant-numeric: tabular-nums;
+}
+.command-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.command-card {
+  display: block;
+  min-height: 94px;
+  border: 1px solid var(--line);
+  background: #f8fbfc;
+  color: var(--ink);
+  padding: 14px;
+  text-decoration: none;
+}
+.command-card strong,
+.command-card span {
+  display: block;
+}
+.command-card strong {
+  margin-bottom: 8px;
+  font-size: 15px;
+}
+.command-card span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
 }
 .terminal-panel {
   background: #0f1720;
@@ -1897,6 +2438,76 @@ button.ghost {
 .ticket-row.blocked {
   border-left: 5px solid var(--danger);
 }
+.ops-table {
+  display: grid;
+  gap: 8px;
+  overflow-x: auto;
+}
+.ops-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(110px, 1fr));
+  min-width: 620px;
+  gap: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 10px;
+}
+.positions-table .ops-row {
+  grid-template-columns: 130px 100px 90px 100px 110px 110px 120px;
+  min-width: 780px;
+}
+.history-table .ops-row {
+  grid-template-columns: minmax(180px, 1.4fr) 150px 90px 120px 120px 90px 100px;
+  min-width: 850px;
+}
+.opportunity-table .ops-row {
+  grid-template-columns: 130px 110px 100px minmax(140px, 1fr) minmax(170px, 1.3fr);
+  min-width: 710px;
+}
+.ops-row span {
+  font-size: 13px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.ops-head {
+  background: var(--field);
+}
+.ops-head span {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+.kv-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.kv-grid div {
+  border: 1px solid var(--line);
+  background: #f8fbfc;
+  padding: 12px;
+}
+.kv-grid strong,
+.kv-grid span {
+  display: block;
+}
+.kv-grid strong {
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.kv-grid span {
+  font-size: 15px;
+  font-weight: 700;
+}
+.compact-list {
+  margin: 0;
+  padding-left: 18px;
+}
+.compact-list li {
+  margin: 7px 0;
+  font-weight: 700;
+}
 .status.success {
   color: var(--success);
   border-color: #a7dfbc;
@@ -1942,6 +2553,10 @@ pre {
   .top-actions {
     flex-direction: column;
     align-items: stretch;
+  }
+  .command-grid,
+  .kv-grid {
+    grid-template-columns: 1fr;
   }
   .trade-form-panel form {
     grid-template-columns: 1fr;
