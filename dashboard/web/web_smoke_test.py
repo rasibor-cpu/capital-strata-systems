@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dashboard.runtime.api_bridge import get_frontend_payload
 from dashboard.web.web_app import (
+    _broker_page,
     _dashboard_page,
     _execution_page,
     _market_opportunities_page,
@@ -17,6 +18,7 @@ def main() -> int:
     routes = {getattr(route, "path", "") for route in app.routes}
     required_routes = {
         "/",
+        "/broker",
         "/dashboard",
         "/execution",
         "/market-opportunities",
@@ -49,6 +51,7 @@ def main() -> int:
         "Execution Center",
         "Broker Control Panel",
         "Opportunity Monitor",
+        'href="/broker"',
         'href="/execution"',
         'href="/market-opportunities"',
         'href="/positions"',
@@ -115,6 +118,26 @@ def main() -> int:
         if expected not in market_opportunities_markup:
             raise AssertionError(f"Web market/opportunity markup missing: {expected}")
 
+    broker_markup = _broker_page()
+    expected_broker_markup = [
+        "CSS Broker Control Center",
+        "Broker Control Center",
+        "Broker Readiness",
+        "Mode Resolution",
+        "Safety Boundary",
+        "Broker secrets are never displayed",
+        "API Health",
+        "Reconnect State",
+        "Supported Assets",
+        "Broker Latency",
+        "Account Readiness",
+        "WARNING: Broker credentials missing. Trade execution disabled.",
+        "/api/v1/frontend-state",
+    ]
+    for expected in expected_broker_markup:
+        if expected not in broker_markup:
+            raise AssertionError(f"Web broker markup missing: {expected}")
+
     payload = get_frontend_payload(demo_dashboard_state_provider)
     sections = payload.get("sections", {})
     if sections.get("account_summary", {}).get("broker") != "DEMO":
@@ -136,6 +159,10 @@ def main() -> int:
         raise AssertionError("Web market center must expose market regime")
     if sections.get("opportunities", {}).get("count") != 2:
         raise AssertionError("Web opportunity center must expose monitor rows")
+    if sections.get("broker", {}).get("selected_broker") != "DEMO":
+        raise AssertionError("Web broker center must expose selected broker")
+    if sections.get("broker", {}).get("broker_mode") != "paper":
+        raise AssertionError("Web broker center must expose broker mode")
     if sections.get("execution", {}).get("execution_state") != "READY":
         raise AssertionError("Web dashboard provider must expose demo execution state")
     recent_trades = sections.get("execution", {}).get("recent_trades", [])

@@ -64,6 +64,10 @@ def create_app(
     async def market_opportunities() -> HTMLResponse:
         return HTMLResponse(_market_opportunities_page())
 
+    @app.get("/broker", response_class=HTMLResponse)
+    async def broker() -> HTMLResponse:
+        return HTMLResponse(_broker_page())
+
     @app.get("/health")
     async def health() -> dict[str, Any]:
         state = provider()
@@ -84,6 +88,7 @@ def _app_nav(active: str) -> str:
         ("execution", "/execution", "Execution"),
         ("risk_governance", "/risk-governance", "Risk & Governance"),
         ("market_opportunities", "/market-opportunities", "Market"),
+        ("broker", "/broker", "Broker"),
     ]
 
     return "\n".join(
@@ -1233,6 +1238,195 @@ refreshMarketOpportunities().catch(() => undefined);
 """
 
 
+def _broker_page() -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111820">
+  <title>CSS Broker Control Center</title>
+  <style>{_css()}</style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">CSS</div>
+        <div>
+          <p class="eyebrow">Capital Strata Systems</p>
+          <h1>Broker Control Center</h1>
+        </div>
+      </div>
+      <section class="status-strip" aria-label="System status">
+        <span id="broker-mode">System PAPER</span>
+        <span id="broker-engine">Engine SAFE</span>
+        <span id="broker-session">Session pending</span>
+        <span id="broker-updated">Snapshot pending</span>
+      </section>
+    </header>
+    {_app_nav("broker")}
+
+    <section class="control-row" aria-label="Broker controls">
+      <button type="button" data-refresh-broker>Refresh</button>
+      <span>DashboardState broker contract</span>
+      <span>Read-only readiness view</span>
+      <span>Broker secrets are never displayed</span>
+    </section>
+
+    <section class="metric-band" aria-label="Broker metrics">
+      <article>
+        <strong>Selected Broker</strong>
+        <span data-broker-value="broker.selected_broker">NONE</span>
+      </article>
+      <article>
+        <strong>Broker Mode</strong>
+        <span data-broker-value="broker.broker_mode">paper</span>
+      </article>
+      <article>
+        <strong>Resolved Mode</strong>
+        <span id="broker-resolved-mode">paper</span>
+      </article>
+      <article>
+        <strong>Connected</strong>
+        <span data-broker-bool="broker.connected">NO</span>
+      </article>
+      <article>
+        <strong>Live Trading</strong>
+        <span data-broker-bool="broker.live_trading_enabled">NO</span>
+      </article>
+      <article>
+        <strong>Account Mode</strong>
+        <span data-broker-value="account_summary.account_mode">paper</span>
+      </article>
+    </section>
+
+    <section class="broker-workspace">
+      <article class="panel broker-main">
+        <div class="panel-head">
+          <h2>Broker Readiness</h2>
+          <span id="broker-readiness-state">PAPER SAFE</span>
+        </div>
+        <div class="kv-grid two">
+          <div><strong>Selected Broker</strong><span data-broker-value="broker.selected_broker">NONE</span></div>
+          <div><strong>Broker Mode</strong><span data-broker-value="broker.broker_mode">paper</span></div>
+          <div><strong>Connected</strong><span data-broker-bool="broker.connected">NO</span></div>
+          <div><strong>Live Trading Enabled</strong><span data-broker-bool="broker.live_trading_enabled">NO</span></div>
+          <div><strong>Last Heartbeat</strong><span data-broker-value="broker.last_heartbeat">NONE</span></div>
+          <div><strong>Account Broker</strong><span data-broker-value="account_summary.broker">NONE</span></div>
+          <div><strong>API Health</strong><span data-broker-value="broker.api_health">UNKNOWN</span></div>
+          <div><strong>Reconnect State</strong><span data-broker-value="broker.reconnect_state">NONE</span></div>
+          <div><strong>Supported Assets</strong><span data-broker-value="broker.supported_assets">UNKNOWN</span></div>
+          <div><strong>Broker Latency</strong><span id="broker-latency">-- ms</span></div>
+          <div><strong>Account Readiness</strong><span data-broker-value="account_summary.account_readiness">UNKNOWN</span></div>
+        </div>
+        <div id="missing-credential-warning" style="display: none; background: var(--danger); color: #fff; padding: 10px; margin-top: 15px; font-weight: bold; text-align: center;">
+          WARNING: Broker credentials missing. Trade execution disabled.
+        </div>
+      </article>
+
+      <aside class="broker-side">
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Mode Resolution</h2>
+            <span id="broker-mode-state">PAPER</span>
+          </div>
+          <div class="toggle-grid">
+            <span id="broker-session-live">Session Live</span>
+            <span id="broker-mode-live">Broker Live</span>
+            <span id="broker-connection-ready">Connected</span>
+            <span id="broker-live-ready">Live Orders</span>
+          </div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Safety Boundary</h2>
+            <span>READ ONLY</span>
+          </div>
+          <ul class="compact-list">
+            <li>No credential values are rendered.</li>
+            <li>No direct broker calls run from this web view.</li>
+            <li>Live mode requires session and broker mode agreement.</li>
+          </ul>
+        </article>
+      </aside>
+    </section>
+  </main>
+
+  <script>{_broker_script()}</script>
+</body>
+</html>"""
+
+
+def _broker_script() -> str:
+    return """
+const brokerState = { payload: null, sections: {} };
+
+function getValue(path) {
+  const [section, key] = path.split(".");
+  return brokerState.sections?.[section]?.[key];
+}
+
+function formatBrokerValue(value) {
+  if (value === true) return "YES";
+  if (value === false) return "NO";
+  if (value === null || value === undefined || value === "") return "NONE";
+  return String(value);
+}
+
+function setFlag(id, value) {
+  const node = document.getElementById(id);
+  node.classList.toggle("on", Boolean(value));
+  node.classList.toggle("off", !Boolean(value));
+}
+
+function renderBrokerSnapshot(payload) {
+  brokerState.payload = payload;
+  brokerState.sections = payload.sections || {};
+  const session = payload.session || {};
+  const broker = brokerState.sections.broker || {};
+  const account = brokerState.sections.account_summary || {};
+  const resolvedMode = String(payload.resolved_mode || session.resolved_mode || "paper").toUpperCase();
+  const sessionLive = String(session.live_or_paper || "").toLowerCase() === "live";
+  const brokerLive = String(broker.broker_mode || "").toLowerCase() === "live";
+  const liveReady = Boolean(broker.live_trading_enabled);
+
+  document.getElementById("broker-mode").textContent = `System ${resolvedMode}`;
+  document.getElementById("broker-engine").textContent = `Engine ${session.engine_mode || "SAFE"}`;
+  document.getElementById("broker-session").textContent = `Session ${payload.session_id || session.session_id || "pending"}`;
+  document.getElementById("broker-updated").textContent = `Updated ${payload.generated_at || "pending"}`;
+  document.getElementById("broker-resolved-mode").textContent = resolvedMode;
+  document.getElementById("broker-mode-state").textContent = resolvedMode;
+  document.getElementById("broker-readiness-state").textContent = resolvedMode === "LIVE" && liveReady ? "LIVE READY" : "PAPER SAFE";
+
+  document.querySelectorAll("[data-broker-value]").forEach((node) => {
+    node.textContent = formatBrokerValue(getValue(node.getAttribute("data-broker-value")));
+  });
+  document.querySelectorAll("[data-broker-bool]").forEach((node) => {
+    node.textContent = getValue(node.getAttribute("data-broker-bool")) ? "YES" : "NO";
+  });
+
+  setFlag("broker-session-live", sessionLive);
+  setFlag("broker-mode-live", brokerLive);
+  setFlag("broker-connection-ready", broker.connected);
+  setFlag("broker-live-ready", liveReady);
+
+  const latency = broker.latency_ms;
+  document.getElementById("broker-latency").textContent = latency !== undefined && latency !== null ? `${latency} ms` : "-- ms";
+  document.getElementById("missing-credential-warning").style.display = Boolean(broker.missing_credentials) ? "block" : "none";
+}
+
+async function refreshBroker() {
+  const response = await fetch("/api/v1/frontend-state", { cache: "no-store" });
+  renderBrokerSnapshot(await response.json());
+}
+
+document.querySelector("[data-refresh-broker]").addEventListener("click", refreshBroker);
+refreshBroker().catch(() => undefined);
+"""
+
+
 def _css() -> str:
     return """
 :root {
@@ -1516,6 +1710,11 @@ button {
   grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
   gap: 12px;
 }
+.broker-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(340px, 0.8fr);
+  gap: 12px;
+}
 .positions-main {
   min-height: 520px;
 }
@@ -1529,6 +1728,9 @@ button {
 .opportunity-main {
   min-height: 320px;
 }
+.broker-main {
+  min-height: 360px;
+}
 .positions-side {
   display: grid;
   gap: 12px;
@@ -1540,6 +1742,11 @@ button {
   align-content: start;
 }
 .risk-governance-side {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+.broker-side {
   display: grid;
   gap: 12px;
   align-content: start;
@@ -1667,7 +1874,8 @@ button {
   .positions-workspace,
   .execution-workspace,
   .risk-governance-workspace,
-  .market-opportunity-workspace {
+  .market-opportunity-workspace,
+  .broker-workspace {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -1680,6 +1888,7 @@ button {
   .execution-workspace,
   .risk-governance-workspace,
   .market-opportunity-workspace,
+  .broker-workspace,
   .kv-grid,
   .kv-grid.two,
   .signal-grid {
