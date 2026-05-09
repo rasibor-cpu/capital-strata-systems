@@ -36,6 +36,7 @@ from dashboard.runtime.audit_trail_viewer import (
     load_mobile_trade_audit_events,
     summarize_audit_events,
 )
+from dashboard.runtime.trade_replay_harness import replay_mobile_trade_event_file
 from dashboard.runtime.dashboard_hydration_coordinator import DashboardHydrationCoordinator
 from dashboard.runtime.runtime_bootstrap import DashboardRuntimeBootstrap
 from engine.execution.live_order_kill_switch import evaluate_live_order_kill_switch
@@ -277,6 +278,25 @@ async def audit_export(request: Request):
     events = load_mobile_trade_audit_events(MOBILE_EVENTS_FILE, limit=250)
     filtered = filter_audit_events(events, **filters)
     return JSONResponse({"ok": True, **export_audit_events(filtered)})
+
+
+@app.get("/api/audit/replay")
+async def audit_replay(request: Request):
+    session = _get_session(request)
+    if not session:
+        return JSONResponse({"ok": False, "error": "AUTH_REQUIRED"}, status_code=401)
+
+    user_ctx = session["user_ctx"]
+    if not _can_view_audit_logs(user_ctx):
+        return JSONResponse({"ok": False, "error": "AUDIT_AUTH_REQUIRED"}, status_code=403)
+
+    limit = min(250, max(1, _safe_int(request.query_params.get("limit"), 100)))
+    report = replay_mobile_trade_event_file(
+        MOBILE_EVENTS_FILE,
+        session_id=str(request.query_params.get("session_id", "MOBILE-AUDIT")),
+        limit=limit,
+    )
+    return JSONResponse({"ok": True, **report.as_dict()})
 
 
 @app.get("/controls", response_class=HTMLResponse)
@@ -1273,6 +1293,7 @@ def _audit_page(
         rows = '<div class="ops-row"><span>No matching audit events.</span></div>'
 
     export_href = _audit_export_href(category=category, status=status, actor=actor)
+    replay_href = _audit_replay_href()
     return _page(
         "Audit Trail",
         f"""
@@ -1303,6 +1324,7 @@ def _audit_page(
 
               <button type="submit">Apply Filters</button>
               <a class="button-link quiet" href="{html.escape(export_href)}">Export JSON</a>
+              <a class="button-link quiet" href="{html.escape(replay_href)}">Replay JSON</a>
             </form>
           </section>
 
@@ -1354,6 +1376,10 @@ def _audit_export_href(category: str = "", status: str = "", actor: str = "") ->
         }
     )
     return "/api/audit/export" if not query else f"/api/audit/export?{query}"
+
+
+def _audit_replay_href() -> str:
+    return "/api/audit/replay"
 
 
 def _controls_page(
@@ -2183,6 +2209,13 @@ def _coinbase_max_live_order_usd() -> float:
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
         return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(float(value))
     except (TypeError, ValueError):
         return default
 

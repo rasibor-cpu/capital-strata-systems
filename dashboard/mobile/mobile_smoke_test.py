@@ -40,6 +40,7 @@ def main() -> int:
         "/users",
         "/api/status",
         "/api/audit/export",
+        "/api/audit/replay",
         "/manifest.webmanifest",
         "/service-worker.js",
         "/icon.svg",
@@ -181,6 +182,8 @@ def main() -> int:
             raise AssertionError("Audit viewer must expose recent mobile ticket outcomes")
         if "/api/audit/export" not in audit_page:
             raise AssertionError("Audit viewer must expose redacted export")
+        if "/api/audit/replay" not in audit_page:
+            raise AssertionError("Audit viewer must expose deterministic replay")
 
         mobile_app.save_mobile_controls(
             {"runtime_mode": "paper", "orders_enabled": False, "engine_mode": "SAFE"}

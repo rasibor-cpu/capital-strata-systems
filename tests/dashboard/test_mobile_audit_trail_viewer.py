@@ -22,6 +22,7 @@ def test_mobile_audit_routes_are_registered() -> None:
 
     assert "/audit" in routes
     assert "/api/audit/export" in routes
+    assert "/api/audit/replay" in routes
 
 
 def test_mobile_audit_view_requires_audit_authority() -> None:
@@ -67,6 +68,7 @@ def test_mobile_audit_page_renders_filtered_redacted_events(monkeypatch, tmp_pat
     assert "Kill Switch" in page
     assert "GLOBAL_LIVE_ORDER_KILL_SWITCH_ENGAGED" in page
     assert "/api/audit/export?category=kill_switch" in page
+    assert "/api/audit/replay" in page
     assert "api_secret" not in page.lower()
 
 
