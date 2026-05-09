@@ -91,6 +91,10 @@ class BrokerState:
 
     latency_ms: float = 0.0
 
+    readiness_status: str = "BROKER_BLOCKED"
+
+    readiness_reasons: List[str] = field(default_factory=list)
+
 
 # =========================================================
 # GOVERNANCE STATE

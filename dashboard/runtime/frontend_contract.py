@@ -393,6 +393,12 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
             broker_payload.get("missing_credentials")
         ),
         "latency_ms": _number(broker_payload.get("latency_ms")),
+        "readiness_status": str(
+            broker_payload.get("readiness_status", "BROKER_BLOCKED")
+        ),
+        "readiness_reasons": _string_list(
+            broker_payload.get("readiness_reasons")
+        ),
     }
 
 

@@ -6,6 +6,7 @@ from dashboard.runtime.dashboard_state import (
     BrokerState,
     DashboardState,
 )
+from engine.brokers.broker_readiness import certify_broker_readiness
 from engine.instruments import frontend_supported_assets
 
 
@@ -31,35 +32,66 @@ class BrokerStateBuilder:
         broker_payload: Dict[str, Any],
         state: DashboardState,
     ) -> DashboardState:
+        selected_broker = str(
+            broker_payload.get(
+                "selected_broker",
+                "NONE",
+            )
+        )
+        broker_mode = str(
+            broker_payload.get(
+                "broker_mode",
+                "paper",
+            )
+        )
+        connected = bool(
+            broker_payload.get(
+                "connected",
+                False,
+            )
+        )
+        live_trading_enabled = bool(
+            broker_payload.get(
+                "live_trading_enabled",
+                False,
+            )
+        )
+        api_health = str(
+            broker_payload.get(
+                "api_health",
+                "UNKNOWN",
+            )
+        )
+        account_readiness = str(
+            broker_payload.get(
+                "account_readiness",
+                "UNKNOWN",
+            )
+        )
+        missing_credentials = bool(
+            broker_payload.get(
+                "missing_credentials",
+                False,
+            )
+        )
+        readiness = certify_broker_readiness(
+            selected_broker=selected_broker,
+            broker_mode=broker_mode,
+            connected=connected,
+            live_trading_enabled=live_trading_enabled,
+            missing_credentials=missing_credentials,
+            api_health=api_health,
+            account_readiness=account_readiness,
+        )
 
         broker_state = BrokerState(
-            selected_broker=str(
-                broker_payload.get(
-                    "selected_broker",
-                    "NONE",
-                )
-            ),
+            selected_broker=selected_broker,
 
-            broker_mode=str(
-                broker_payload.get(
-                    "broker_mode",
-                    "paper",
-                )
-            ),
+            broker_mode=broker_mode,
 
-            connected=bool(
-                broker_payload.get(
-                    "connected",
-                    False,
-                )
-            ),
+            connected=connected,
 
-            live_trading_enabled=bool(
-                broker_payload.get(
-                    "live_trading_enabled",
-                    False,
-                )
-            ),
+            live_trading_enabled=live_trading_enabled,
 
             last_heartbeat=str(
                 broker_payload.get(
@@ -68,12 +100,7 @@ class BrokerStateBuilder:
                 )
             ),
 
-            api_health=str(
-                broker_payload.get(
-                    "api_health",
-                    "UNKNOWN",
-                )
-            ),
+            api_health=api_health,
 
             reconnect_state=str(
                 broker_payload.get(
@@ -89,24 +116,28 @@ class BrokerStateBuilder:
                 )
             ),
 
-            account_readiness=str(
-                broker_payload.get(
-                    "account_readiness",
-                    "UNKNOWN",
-                )
-            ),
+            account_readiness=account_readiness,
 
-            missing_credentials=bool(
-                broker_payload.get(
-                    "missing_credentials",
-                    False,
-                )
-            ),
+            missing_credentials=missing_credentials,
 
             latency_ms=_safe_float(
                 broker_payload.get(
                     "latency_ms",
                     0.0,
+                )
+            ),
+
+            readiness_status=str(
+                broker_payload.get(
+                    "readiness_status",
+                    readiness.status,
+                )
+            ),
+
+            readiness_reasons=_string_list(
+                broker_payload.get(
+                    "readiness_reasons",
+                    list(readiness.reasons),
                 )
             ),
         )
@@ -138,3 +169,16 @@ def _safe_float(value: Any) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item)]
+
+    if isinstance(value, tuple):
+        return [str(item) for item in value if str(item)]
+
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+
+    return []

@@ -40,6 +40,8 @@ def test_broker_payload_exposes_capability_fields_without_credentials() -> None:
     assert broker["account_readiness"] == "PAPER_READY"
     assert broker["missing_credentials"] is True
     assert broker["latency_ms"] == 42.5
+    assert broker["readiness_status"] == "BROKER_BLOCKED"
+    assert "missing_credentials" in broker["readiness_reasons"]
     assert set(broker["supported_assets"]) == set(CANONICAL_IBKR_PRODUCT_CODES)
     assert "SHOULD_NOT_LEAK" not in encoded
     assert "SHOULD_NOT_LEAK_EITHER" not in encoded
@@ -53,3 +55,5 @@ def test_default_broker_payload_registers_full_ibkr_style_asset_catalog() -> Non
     assert broker["api_health"] == "UNKNOWN"
     assert broker["account_readiness"] == "UNKNOWN"
     assert broker["missing_credentials"] is False
+    assert broker["readiness_status"] == "BROKER_DEGRADED"
+    assert "broker_not_connected" in broker["readiness_reasons"]

@@ -21,6 +21,8 @@ class BrokerRenderContract:
     account_readiness: str = "UNKNOWN"
     missing_credentials: bool = False
     latency_ms: float = 0.0
+    readiness_status: str = "BROKER_BLOCKED"
+    readiness_reasons: tuple[str, ...] = ()
 
     @classmethod
     def from_summary(cls, broker_summary: dict) -> "BrokerRenderContract":
@@ -42,6 +44,12 @@ class BrokerRenderContract:
                 summary.get("missing_credentials", False)
             ),
             latency_ms=cls._to_float(summary.get("latency_ms", 0.0)),
+            readiness_status=str(
+                summary.get("readiness_status", "BROKER_BLOCKED")
+            ),
+            readiness_reasons=cls._to_assets(
+                summary.get("readiness_reasons", [])
+            ),
         )
 
     @staticmethod

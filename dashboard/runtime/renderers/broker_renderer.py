@@ -28,6 +28,11 @@ class BrokerRenderer:
             f"Account Readiness:       {contract.account_readiness}",
             f"Missing Credentials:     {self._format_bool(contract.missing_credentials)}",
             f"Latency MS:              {contract.latency_ms:.2f}",
+            f"Readiness Status:        {contract.readiness_status}",
+            (
+                "Readiness Reasons:       "
+                f"{', '.join(contract.readiness_reasons) if contract.readiness_reasons else 'NONE'}"
+            ),
             (
                 "Supported Assets:       "
                 f"{', '.join(contract.supported_assets) if contract.supported_assets else 'NONE'}"
