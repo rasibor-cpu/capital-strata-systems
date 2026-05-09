@@ -31,6 +31,7 @@ from backend.security.permissions import PermissionEngine
 from dashboard.runtime.broker_credential_check import _load_coinbase_credentials, load_local_env
 from dashboard.runtime.dashboard_hydration_coordinator import DashboardHydrationCoordinator
 from dashboard.runtime.runtime_bootstrap import DashboardRuntimeBootstrap
+from engine.execution.live_order_kill_switch import evaluate_live_order_kill_switch
 
 
 SESSION_COOKIE = "css_mobile_session"
@@ -45,6 +46,7 @@ DEFAULT_MOBILE_CONTROLS = {
     "runtime_mode": "paper",
     "orders_enabled": True,
     "engine_mode": "SAFE",
+    "live_order_kill_switch": False,
 }
 
 app = FastAPI(title="Capital Strata Systems Mobile", version="0.1.0")
@@ -232,7 +234,8 @@ async def status(request: Request):
             "orders_enabled": system_status["orders_enabled"],
             "engine_mode": system_status["engine_mode"],
             "broker_live_gate": system_status["broker_live_gate"],
-            "live_orders_enabled": system_status["broker_live_ready"],
+            "live_order_kill_switch": system_status["live_order_kill_switch"],
+            "live_orders_enabled": system_status["live_orders_enabled"],
         }
     )
 
@@ -514,6 +517,9 @@ def load_mobile_controls() -> Dict[str, Any]:
     engine_mode = str(controls.get("engine_mode", "SAFE")).strip().upper()
     controls["engine_mode"] = engine_mode if engine_mode in ENGINE_MODES else "SAFE"
     controls["orders_enabled"] = bool(controls.get("orders_enabled", True))
+    controls["live_order_kill_switch"] = bool(
+        controls.get("live_order_kill_switch", False)
+    )
     return controls
 
 
@@ -525,6 +531,9 @@ def save_mobile_controls(controls: Dict[str, Any]) -> Dict[str, Any]:
     normalized["runtime_mode"] = runtime_mode if runtime_mode in {"paper", "live"} else "paper"
     normalized["engine_mode"] = engine_mode if engine_mode in ENGINE_MODES else "SAFE"
     normalized["orders_enabled"] = bool(normalized.get("orders_enabled", True))
+    normalized["live_order_kill_switch"] = bool(
+        normalized.get("live_order_kill_switch", False)
+    )
     normalized["updated_utc"] = datetime.now(timezone.utc).isoformat()
 
     MOBILE_CONTROL_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -538,6 +547,9 @@ def _update_mobile_controls(form: Dict[str, str]) -> Dict[str, Any]:
             "runtime_mode": form.get("runtime_mode", "paper"),
             "orders_enabled": form.get("orders_enabled", "off") == "on",
             "engine_mode": form.get("engine_mode", "SAFE"),
+            "live_order_kill_switch": (
+                form.get("live_order_kill_switch", "off") == "on"
+            ),
         }
     )
 
@@ -545,13 +557,17 @@ def _update_mobile_controls(form: Dict[str, str]) -> Dict[str, Any]:
 def _system_status(user_ctx: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     controls = load_mobile_controls()
     broker_ready = _mobile_live_orders_enabled()
+    kill_switch = evaluate_live_order_kill_switch(controls)
     return {
         "runtime_mode": controls["runtime_mode"],
         "system_live": controls["runtime_mode"] == "live",
         "orders_enabled": bool(controls["orders_enabled"]),
         "engine_mode": controls["engine_mode"],
+        "live_order_kill_switch": kill_switch.blocked,
+        "live_order_kill_switch_reason": kill_switch.reason,
         "broker_live_ready": broker_ready,
         "broker_live_gate": "READY" if broker_ready else "OFF",
+        "live_orders_enabled": broker_ready and not kill_switch.blocked,
         "can_trade": _can_submit_trade(user_ctx or {}),
         "can_manage_controls": _can_manage_mobile_controls(user_ctx or {}),
         "can_manage_users": can_manage_users(user_ctx or {}),
@@ -563,12 +579,14 @@ def _status_strip(user_ctx: Optional[Dict[str, Any]] = None) -> str:
     role = html.escape(str((user_ctx or {}).get("role", "SIGNED_OUT")))
     system_mode = "LIVE" if status["system_live"] else "PAPER"
     order_state = "ENABLED" if status["orders_enabled"] else "DISABLED"
+    kill_state = "ON" if status["live_order_kill_switch"] else "OFF"
     trade_state = "TRADE AUTH" if status["can_trade"] else "VIEW AUTH"
     return f"""
       <section class="system-strip" aria-label="CSS system status">
         <span>System {system_mode}</span>
         <span>Engine {html.escape(str(status['engine_mode']))}</span>
         <span>Orders {order_state}</span>
+        <span>Kill Switch {kill_state}</span>
         <span>Broker Gate {html.escape(str(status['broker_live_gate']))}</span>
         <span>{role}</span>
         <span>{trade_state}</span>
@@ -1198,8 +1216,11 @@ def _controls_page(
     submit_markup = "<button type=\"submit\">Save Controls</button>" if can_manage else ""
     runtime_mode = str(controls["runtime_mode"])
     order_value = "on" if controls["orders_enabled"] else "off"
+    kill_switch_value = "on" if controls["live_order_kill_switch"] else "off"
     engine_mode = str(controls["engine_mode"])
-    broker_gate = str(_system_status(user_ctx)["broker_live_gate"])
+    system_status = _system_status(user_ctx)
+    broker_gate = str(system_status["broker_live_gate"])
+    kill_switch_state = "ENGAGED" if system_status["live_order_kill_switch"] else "CLEAR"
     return _page(
         "System Controls",
         f"""
@@ -1224,6 +1245,12 @@ def _controls_page(
                 <option value="off"{_selected("off", order_value)}>Disabled</option>
               </select>
 
+              <label for="live_order_kill_switch">Live Order Kill Switch</label>
+              <select id="live_order_kill_switch" name="live_order_kill_switch"{disabled}>
+                <option value="off"{_selected("off", kill_switch_value)}>Clear</option>
+                <option value="on"{_selected("on", kill_switch_value)}>Engaged</option>
+              </select>
+
               <label for="engine_mode">Engine Mode</label>
               <select id="engine_mode" name="engine_mode"{disabled}>
                 {_engine_mode_options(engine_mode)}
@@ -1235,6 +1262,7 @@ def _controls_page(
 
           <section class="metric-grid" aria-label="Control guardrails">
             <article><strong>Live Broker Gate</strong><span>{html.escape(broker_gate)}</span></article>
+            <article><strong>Kill Switch</strong><span>{html.escape(kill_switch_state)}</span></article>
             <article><strong>Live Confirmation</strong><span>Required</span></article>
             <article><strong>User Gate</strong><span>{'Manage' if can_manage else 'View'}</span></article>
             <article><strong>Audit</strong><span>On</span></article>
@@ -1566,6 +1594,7 @@ def _trade_status_headline(code: str) -> str:
     labels = {
         "PAPER_TICKET_RECORDED": "Paper ticket recorded",
         "LIVE_CONFIRMATION_REQUIRED": "Live confirmation required",
+        "GLOBAL_LIVE_ORDER_KILL_SWITCH_ENGAGED": "Live order kill switch engaged",
         "MOBILE_ORDERS_DISABLED": "Mobile orders are disabled",
         "MOBILE_AUTHORITY_DENIED": "Trading authority denied",
         "COINBASE_LIVE_ORDERS_FLAG_OFF": "Coinbase live orders are not enabled",
@@ -1587,6 +1616,8 @@ def _trade_status_detail(result: Dict[str, Any]) -> str:
         return "The ticket was saved in CSS paper mode. No live broker order was sent."
     if code == "LIVE_CONFIRMATION_REQUIRED":
         return "Type EXECUTE in the confirmation field and submit again while system mode is LIVE."
+    if code == "GLOBAL_LIVE_ORDER_KILL_SWITCH_ENGAGED":
+        return "The global live-order kill switch is engaged. Clear it from Controls before any live order can leave CSS."
     if code == "COINBASE_LIVE_ORDERS_FLAG_OFF":
         return "The Coinbase credential check may pass, but live orders remain blocked until the live-order flag is enabled in CSS environment controls."
     if code == "MOBILE_ORDERS_DISABLED":
@@ -1735,6 +1766,21 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
             "broker_response": {
                 "paper_trade_recorded": True,
                 "live_order_sent": False,
+            },
+        }
+        _record_mobile_event(result)
+        return result
+
+    kill_switch = evaluate_live_order_kill_switch(controls)
+    if kill_switch.blocked:
+        result = {
+            "ok": False,
+            "status": "GLOBAL_LIVE_ORDER_KILL_SWITCH_ENGAGED",
+            "ticket": ticket,
+            "broker_response": {
+                "live_order_sent": False,
+                "kill_switch_source": kill_switch.source,
+                "kill_switch_reason": kill_switch.reason,
             },
         }
         _record_mobile_event(result)
