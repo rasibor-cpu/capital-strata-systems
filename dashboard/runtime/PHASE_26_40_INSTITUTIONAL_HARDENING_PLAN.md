@@ -12,7 +12,7 @@ governance-first and keeps `DashboardState` as the canonical frontend bridge.
 - Phase 28: Live/paper mode reconciliation tests - complete
 - Phase 29: Broker readiness certification layer - complete
 - Phase 30: Live order kill switch - complete
-- Phase 31: Role-based permission matrix tests - pending
+- Phase 31: Role-based permission matrix tests - complete
 - Phase 32: Audit trail viewer - pending
 - Phase 33: Trade replay and simulation harness - pending
 - Phase 34: Broker balance reconciliation - pending
