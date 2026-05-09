@@ -29,6 +29,9 @@ from dashboard.auth.css_sign_on import (
 )
 from backend.security.permissions import PermissionEngine
 from dashboard.runtime.broker_credential_check import _load_coinbase_credentials, load_local_env
+from dashboard.runtime.broker_balance_reconciliation import (
+    build_broker_reconciliation_payload,
+)
 from dashboard.runtime.audit_trail_viewer import (
     AUDIT_CATEGORY_OPTIONS,
     export_audit_events,
@@ -1241,6 +1244,7 @@ def _broker_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
     load_local_env()
     dashboard_payload = _mobile_dashboard_payload(user_ctx, session)
     broker = _mapping(dashboard_payload.get("broker_summary"))
+    reconciliation = build_broker_reconciliation_payload(dashboard_payload)
     status = _system_status(user_ctx)
     controls_link = (
         '<a class="button-link" href="/controls">Open Controls</a>'
@@ -1263,6 +1267,8 @@ def _broker_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
             <article><strong>Coinbase Creds</strong><span>{_yes_no(_coinbase_credentials_present())}</span></article>
             <article><strong>OANDA Creds</strong><span>{_yes_no(_oanda_credentials_present())}</span></article>
             <article><strong>Live Trading</strong><span>{_yes_no(status["broker_live_ready"])}</span></article>
+            <article><strong>Reconciliation</strong><span>{html.escape(str(reconciliation.get("status", "UNKNOWN")))}</span></article>
+            <article><strong>Safe Downgrade</strong><span>{_yes_no(reconciliation.get("safe_degradation_required"))}</span></article>
           </section>
           <section class="data-panel" aria-label="Broker controls">
             <h2>Broker Controls</h2>

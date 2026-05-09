@@ -108,6 +108,8 @@ def main() -> int:
     broker_page = _broker_page(trader_ctx, session)
     if "Broker Control Panel" not in broker_page or "Broker secrets are never displayed" not in broker_page:
         raise AssertionError("Broker screen must show safe broker readiness content")
+    if "Reconciliation" not in broker_page or "Safe Downgrade" not in broker_page:
+        raise AssertionError("Broker screen must show reconciliation posture")
 
     controls_page = _controls_page(
         user_ctx={

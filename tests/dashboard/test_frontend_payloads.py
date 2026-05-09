@@ -91,12 +91,17 @@ def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
         "/api/v1/governance",
         "/api/v1/opportunities",
         "/api/v1/broker",
+        "/api/v1/broker-reconciliation",
         "/ws/v1/dashboard-state",
     }
 
     assert required_routes <= routes
     assert get_dashboard_state_payload(lambda: state)["session_id"] == "SMOKE-SESSION"
     assert get_frontend_payload(lambda: state)["sections"]["positions"]["total"] == 2
+    assert (
+        get_frontend_payload(lambda: state)["sections"]["broker_reconciliation"]["status"]
+        == "BROKER_UNAVAILABLE"
+    )
     assert build_section_payload(state, "risk")["data"]["risk_state"] == "NORMAL"
 
 

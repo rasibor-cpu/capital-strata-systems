@@ -11,6 +11,9 @@ from dashboard.runtime.dashboard_state import (
     DASHBOARD_PAYLOAD_VERSION,
     DashboardState,
 )
+from dashboard.runtime.broker_balance_reconciliation import (
+    build_broker_reconciliation_payload,
+)
 
 
 FRONTEND_CONTRACT_VERSION = "1.0.0"
@@ -29,6 +32,7 @@ FRONTEND_SECTIONS = (
     "execution",
     "opportunities",
     "broker",
+    "broker_reconciliation",
 )
 
 
@@ -112,6 +116,7 @@ def build_frontend_payload(
             "execution": execution(dashboard_payload),
             "opportunities": opportunities(dashboard_payload),
             "broker": broker(dashboard_payload),
+            "broker_reconciliation": broker_reconciliation(dashboard_payload),
         },
     }
 
@@ -402,6 +407,10 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def broker_reconciliation(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
+    return build_broker_reconciliation_payload(dashboard_payload)
+
+
 def build_section_payload(
     dashboard_state: DashboardState | Mapping[str, Any] | None,
     section: str,
@@ -555,6 +564,7 @@ __all__ = [
     "WebsocketDelta",
     "account_summary",
     "broker",
+    "broker_reconciliation",
     "build_frontend_payload",
     "build_section_payload",
     "build_websocket_delta",

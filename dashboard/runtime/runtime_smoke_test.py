@@ -39,6 +39,9 @@ from dashboard.runtime.renderers.market_renderer import MarketRenderer
 from dashboard.runtime.renderers.pnl_renderer import PnLRenderer
 from dashboard.runtime.renderers.risk_renderer import RiskRenderer
 from dashboard.runtime.runtime_bootstrap import DashboardRuntimeBootstrap
+from dashboard.runtime.broker_balance_reconciliation import (
+    build_broker_reconciliation_payload,
+)
 from dashboard.runtime.live_dashboard_payload_adapter import build_dashboard_payloads
 from dashboard.runtime.state_builders.account_state_builder import AccountStateBuilder
 from dashboard.runtime.state_builders.broker_state_builder import BrokerStateBuilder
@@ -332,6 +335,9 @@ def validate_hydration_and_rendering(
     diagnostics_contract = DiagnosticsRenderContract.from_dashboard_state(
         state
     )
+    reconciliation_payload = build_broker_reconciliation_payload(
+        state.to_dict()
+    )
 
     renderer_outputs = [
         AccountRenderer().render(account_contract),
@@ -346,6 +352,12 @@ def validate_hydration_and_rendering(
 
     for renderer_output in renderer_outputs:
         require(bool(renderer_output.strip()), "renderer produced empty output", failures)
+
+    require(
+        reconciliation_payload["payload_version"] == "css.broker_reconciliation.v1",
+        "broker reconciliation payload version mismatch",
+        failures,
+    )
 
 
 def validate_bootstrap(payloads: Dict[str, Dict[str, Any]], failures: List[str]) -> None:

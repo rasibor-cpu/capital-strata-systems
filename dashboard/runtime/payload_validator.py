@@ -32,6 +32,7 @@ class FrontendPayloadValidator:
         "execution",
         "opportunities",
         "broker",
+        "broker_reconciliation",
     ]
 
     def validate(self, payload: Dict[str, Any]) -> bool:

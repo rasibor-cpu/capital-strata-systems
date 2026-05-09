@@ -13,6 +13,9 @@ from dashboard.runtime.frontend_contract import (
     build_frontend_payload,
     build_section_payload,
 )
+from dashboard.runtime.broker_balance_reconciliation import (
+    build_broker_reconciliation_payload,
+)
 from dashboard.runtime.ws_bridge import create_ws_router
 
 
@@ -52,6 +55,13 @@ def get_frontend_payload(
     state_provider: DashboardStateProvider | None = None,
 ) -> dict[str, Any]:
     return build_frontend_payload(_state_from_provider(state_provider))
+
+
+def get_broker_reconciliation_payload(
+    state_provider: DashboardStateProvider | None = None,
+) -> dict[str, Any]:
+    state = _state_from_provider(state_provider)
+    return build_broker_reconciliation_payload(state.to_dict())
 
 
 def create_dashboard_state_router(
@@ -109,6 +119,13 @@ def create_dashboard_state_router(
             "broker",
         )
 
+    @router.get("/api/v1/broker-reconciliation")
+    def read_broker_reconciliation() -> dict[str, Any]:
+        return build_section_payload(
+            _state_from_provider(state_provider),
+            "broker_reconciliation",
+        )
+
     return router
 
 
@@ -133,6 +150,7 @@ __all__ = [
     "create_app",
     "create_dashboard_state_router",
     "default_dashboard_state_provider",
+    "get_broker_reconciliation_payload",
     "get_dashboard_state_payload",
     "get_frontend_payload",
 ]

@@ -15,7 +15,7 @@ governance-first and keeps `DashboardState` as the canonical frontend bridge.
 - Phase 31: Role-based permission matrix tests - complete
 - Phase 32: Audit trail viewer - complete
 - Phase 33: Trade replay and simulation harness - complete
-- Phase 34: Broker balance reconciliation - pending
+- Phase 34: Broker balance reconciliation - complete
 - Phase 35: Production deployment profiles - pending
 - Phase 36: Persistent session store - pending
 - Phase 37: Database-backed user management - pending

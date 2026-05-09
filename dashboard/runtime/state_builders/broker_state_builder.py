@@ -140,6 +140,20 @@ class BrokerStateBuilder:
                     list(readiness.reasons),
                 )
             ),
+
+            account_snapshot=_mapping(
+                broker_payload.get(
+                    "account_snapshot",
+                    broker_payload.get("broker_account_snapshot", {}),
+                )
+            ),
+
+            position_snapshot=_position_snapshots(
+                broker_payload.get(
+                    "position_snapshot",
+                    broker_payload.get("broker_position_snapshot", []),
+                )
+            ),
         )
 
         state.broker_state = broker_state
@@ -182,3 +196,13 @@ def _string_list(value: Any) -> list[str]:
         return [item.strip() for item in value.split(",") if item.strip()]
 
     return []
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _position_snapshots(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, dict)]

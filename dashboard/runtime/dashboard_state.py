@@ -95,6 +95,10 @@ class BrokerState:
 
     readiness_reasons: List[str] = field(default_factory=list)
 
+    account_snapshot: Dict[str, Any] = field(default_factory=dict)
+
+    position_snapshot: List[Dict[str, Any]] = field(default_factory=list)
+
 
 # =========================================================
 # GOVERNANCE STATE
