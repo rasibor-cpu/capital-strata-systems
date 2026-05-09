@@ -5,6 +5,7 @@ from pathlib import Path
 
 from dashboard.mobile.mobile_app import (
     app,
+    _audit_page,
     _broker_page,
     _controls_page,
     _dashboard_page,
@@ -34,9 +35,11 @@ def main() -> int:
         "/opportunities",
         "/market",
         "/broker",
+        "/audit",
         "/trade",
         "/users",
         "/api/status",
+        "/api/audit/export",
         "/manifest.webmanifest",
         "/service-worker.js",
         "/icon.svg",
@@ -166,6 +169,18 @@ def main() -> int:
             raise AssertionError("Paper mobile trade ticket was not recorded")
         if paper_result.get("broker_response", {}).get("live_order_sent") is not False:
             raise AssertionError("Paper ticket must clearly state that no live order was sent")
+
+        audit_page = _audit_page(
+            {
+                "user_id": "00000",
+                "display_name": "CSS Administrator",
+                "role": "SUPER_USER",
+            }
+        )
+        if "Audit Trail Viewer" not in audit_page or "PAPER_TICKET_RECORDED" not in audit_page:
+            raise AssertionError("Audit viewer must expose recent mobile ticket outcomes")
+        if "/api/audit/export" not in audit_page:
+            raise AssertionError("Audit viewer must expose redacted export")
 
         mobile_app.save_mobile_controls(
             {"runtime_mode": "paper", "orders_enabled": False, "engine_mode": "SAFE"}

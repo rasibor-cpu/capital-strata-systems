@@ -29,6 +29,13 @@ from dashboard.auth.css_sign_on import (
 )
 from backend.security.permissions import PermissionEngine
 from dashboard.runtime.broker_credential_check import _load_coinbase_credentials, load_local_env
+from dashboard.runtime.audit_trail_viewer import (
+    AUDIT_CATEGORY_OPTIONS,
+    export_audit_events,
+    filter_audit_events,
+    load_mobile_trade_audit_events,
+    summarize_audit_events,
+)
 from dashboard.runtime.dashboard_hydration_coordinator import DashboardHydrationCoordinator
 from dashboard.runtime.runtime_bootstrap import DashboardRuntimeBootstrap
 from engine.execution.live_order_kill_switch import evaluate_live_order_kill_switch
@@ -211,6 +218,22 @@ async def broker_screen(request: Request):
     return HTMLResponse(_broker_page(session["user_ctx"], session))
 
 
+@app.get("/audit", response_class=HTMLResponse)
+async def audit_screen(request: Request):
+    session = _get_session(request)
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+
+    user_ctx = session["user_ctx"]
+    if not _can_view_audit_logs(user_ctx):
+        return HTMLResponse(
+            _access_denied_page(user_ctx, "Audit trail access requires audit authority."),
+            status_code=403,
+        )
+
+    return HTMLResponse(_audit_page(user_ctx, **_audit_query_filters(request)))
+
+
 @app.post("/logout")
 async def logout(request: Request):
     token = request.cookies.get(SESSION_COOKIE)
@@ -238,6 +261,22 @@ async def status(request: Request):
             "live_orders_enabled": system_status["live_orders_enabled"],
         }
     )
+
+
+@app.get("/api/audit/export")
+async def audit_export(request: Request):
+    session = _get_session(request)
+    if not session:
+        return JSONResponse({"ok": False, "error": "AUTH_REQUIRED"}, status_code=401)
+
+    user_ctx = session["user_ctx"]
+    if not _can_view_audit_logs(user_ctx):
+        return JSONResponse({"ok": False, "error": "AUDIT_AUTH_REQUIRED"}, status_code=403)
+
+    filters = _audit_query_filters(request)
+    events = load_mobile_trade_audit_events(MOBILE_EVENTS_FILE, limit=250)
+    filtered = filter_audit_events(events, **filters)
+    return JSONResponse({"ok": True, **export_audit_events(filtered)})
 
 
 @app.get("/controls", response_class=HTMLResponse)
@@ -571,6 +610,7 @@ def _system_status(user_ctx: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         "can_trade": _can_submit_trade(user_ctx or {}),
         "can_manage_controls": _can_manage_mobile_controls(user_ctx or {}),
         "can_manage_users": can_manage_users(user_ctx or {}),
+        "can_view_audit": _can_view_audit_logs(user_ctx or {}),
     }
 
 
@@ -611,6 +651,8 @@ def _top_nav(user_ctx: Dict[str, Any], active: str) -> str:
             links.append(
                 f'<a class="button-link quiet" href="{href}">{label}</a>'
             )
+    if active != "audit" and _can_view_audit_logs(user_ctx):
+        links.append('<a class="button-link quiet" href="/audit">Audit</a>')
     if active != "trade" and _can_submit_trade(user_ctx):
         links.append('<a class="button-link" href="/trade">Trade</a>')
     if active != "controls" and _can_manage_mobile_controls(user_ctx):
@@ -663,6 +705,11 @@ def _can_submit_trade(user_ctx: Dict[str, Any]) -> bool:
 def _can_manage_mobile_controls(user_ctx: Dict[str, Any]) -> bool:
     role = _normalize_role(user_ctx.get("role", ""))
     return role == "SUPER_USER" or _permission_allowed(role, "manage_system")
+
+
+def _can_view_audit_logs(user_ctx: Dict[str, Any]) -> bool:
+    role = _normalize_role(user_ctx.get("role", ""))
+    return role == "SUPER_USER" or _permission_allowed(role, "view_audit_logs")
 
 
 def _permission_allowed(role: str, action: str) -> bool:
@@ -943,6 +990,8 @@ def _command_center_panel(user_ctx: Dict[str, Any]) -> str:
         ("Market", "Regime, VWAP, liquidity, and pressure state.", "/market"),
         ("Broker", "Broker readiness and live-order gate posture.", "/broker"),
     ]
+    if _can_view_audit_logs(user_ctx):
+        cards.append(("Audit", "Filter, export, and review governed event trails.", "/audit"))
     if _can_submit_trade(user_ctx):
         cards.append(("Trade", "Submit governed paper/live tickets.", "/trade"))
     if _can_manage_mobile_controls(user_ctx):
@@ -1205,6 +1254,108 @@ def _broker_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
     )
 
 
+def _audit_page(
+    user_ctx: Dict[str, Any],
+    category: str = "",
+    status: str = "",
+    actor: str = "",
+) -> str:
+    events = load_mobile_trade_audit_events(MOBILE_EVENTS_FILE, limit=250)
+    filtered = filter_audit_events(
+        events,
+        category=category,
+        status=status,
+        actor=actor,
+    )
+    summary = summarize_audit_events(filtered)
+    rows = "\n".join(_audit_row_markup(event) for event in filtered)
+    if not rows:
+        rows = '<div class="ops-row"><span>No matching audit events.</span></div>'
+
+    export_href = _audit_export_href(category=category, status=status, actor=actor)
+    return _page(
+        "Audit Trail",
+        f"""
+        <main class="dashboard-shell">
+          {_header("Audit Trail Viewer", user_ctx, "audit")}
+          {_identity_strip(user_ctx, "Read Only Audit")}
+
+          <section class="metric-grid" aria-label="Audit summary">
+            <article><strong>Visible Events</strong><span>{summary["event_count"]}</span></article>
+            <article><strong>Replayable</strong><span>{summary["replayable_count"]}</span></article>
+            <article><strong>Payload</strong><span>v1</span></article>
+            <article><strong>Secrets</strong><span>Redacted</span></article>
+          </section>
+
+          <section class="form-panel trade-form-panel audit-filter-panel" aria-label="Audit filters">
+            <h2>Filters</h2>
+            <form method="get" action="/audit" autocomplete="off">
+              <label for="category">Category</label>
+              <select id="category" name="category">
+                {_audit_category_options(category)}
+              </select>
+
+              <label for="status">Status Contains</label>
+              <input id="status" name="status" value="{html.escape(status)}">
+
+              <label for="actor">User ID Contains</label>
+              <input id="actor" name="actor" value="{html.escape(actor)}">
+
+              <button type="submit">Apply Filters</button>
+              <a class="button-link quiet" href="{html.escape(export_href)}">Export JSON</a>
+            </form>
+          </section>
+
+          <section class="data-panel" aria-label="Institutional audit trail viewer">
+            <h2>Audit Trail Viewer</h2>
+            <p class="muted">Read-only operational trail sourced from CSS runtime events. Exports use the same redacted frontend-safe payload.</p>
+            <div class="ops-table audit-table">
+              <div class="ops-row ops-head">
+                <span>Time</span><span>Category</span><span>Status</span><span>User</span><span>Source</span><span>Reason</span><span>Replay</span>
+              </div>
+              {rows}
+            </div>
+          </section>
+        </main>
+        """,
+    )
+
+
+def _audit_query_filters(request: Request) -> Dict[str, str]:
+    query = request.query_params
+    return {
+        "category": str(query.get("category", ""))[:64],
+        "status": str(query.get("status", ""))[:96],
+        "actor": str(query.get("actor", ""))[:64],
+    }
+
+
+def _audit_category_options(current: str) -> str:
+    options = ['<option value="">All Categories</option>']
+    for category in AUDIT_CATEGORY_OPTIONS:
+        selected = " selected" if category == current else ""
+        label = category.replace("_", " ").title()
+        options.append(
+            f'<option value="{html.escape(category)}"{selected}>{html.escape(label)}</option>'
+        )
+    return "\n".join(options)
+
+
+def _audit_export_href(category: str = "", status: str = "", actor: str = "") -> str:
+    query = urllib.parse.urlencode(
+        {
+            key: value
+            for key, value in {
+                "category": category,
+                "status": status,
+                "actor": actor,
+            }.items()
+            if value
+        }
+    )
+    return "/api/audit/export" if not query else f"/api/audit/export?{query}"
+
+
 def _controls_page(
     user_ctx: Dict[str, Any],
     message: str = "",
@@ -1429,6 +1580,21 @@ def _history_row_markup(event: Dict[str, Any]) -> str:
         <span>{html.escape(str(ticket.get("symbol", "N/A")))}</span>
         <span>{html.escape(str(ticket.get("side", "N/A")))}</span>
         <span>{_money(ticket.get("amount"))}</span>
+      </div>
+    """
+
+
+def _audit_row_markup(event: Any) -> str:
+    css_class = "ok" if event.category in {"approval", "execution_attempt"} else "blocked"
+    return f"""
+      <div class="ops-row {css_class}">
+        <span>{html.escape(str(event.timestamp_utc))}</span>
+        <span>{html.escape(str(event.category).replace("_", " ").title())}</span>
+        <span>{html.escape(str(event.status))}</span>
+        <span>{html.escape(str(event.actor))}</span>
+        <span>{html.escape(str(event.source))}</span>
+        <span>{html.escape(str(event.reason))}</span>
+        <span>{'YES' if event.replayable else 'NO'}</span>
       </div>
     """
 
@@ -2505,6 +2671,19 @@ button.ghost {
 .history-table .ops-row {
   grid-template-columns: minmax(180px, 1.4fr) 150px 90px 120px 120px 90px 100px;
   min-width: 850px;
+}
+.audit-filter-panel a.button-link {
+  min-height: 48px;
+}
+.audit-table .ops-row {
+  grid-template-columns: minmax(180px, 1.3fr) 130px minmax(180px, 1.2fr) 90px 120px minmax(180px, 1.2fr) 80px;
+  min-width: 1020px;
+}
+.audit-table .ops-row.ok {
+  border-left: 5px solid var(--success);
+}
+.audit-table .ops-row.blocked {
+  border-left: 5px solid var(--danger);
 }
 .opportunity-table .ops-row {
   grid-template-columns: 130px 110px 100px minmax(140px, 1fr) minmax(170px, 1.3fr);
