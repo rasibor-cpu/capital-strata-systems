@@ -64,6 +64,30 @@ BROKER_CAPABILITIES: Dict[str, BrokerCapabilities] = {
         supports_limit_orders=True,
         paper_only=True,
     ),
+    "IBKR_PAPER": BrokerCapabilities(
+        name="IBKR_PAPER",
+        instruments={"AAPL", "MSFT", "SPY", "QQQ", "ES", "CL"},
+        order_types={"MARKET", "LIMIT"},
+        min_qty=1,
+        max_qty=100_000,
+        supports_fractional=False,
+        supports_short=True,
+        supports_market_orders=True,
+        supports_limit_orders=True,
+        paper_only=True,
+    ),
+    "BINANCE_PAPER": BrokerCapabilities(
+        name="BINANCE_PAPER",
+        instruments={"BTCUSDT", "ETHUSDT", "SOLUSDT"},
+        order_types={"MARKET", "LIMIT"},
+        min_qty=1,
+        max_qty=1_000_000,
+        supports_fractional=True,
+        supports_short=False,
+        supports_market_orders=True,
+        supports_limit_orders=True,
+        paper_only=True,
+    ),
 }
 
 
