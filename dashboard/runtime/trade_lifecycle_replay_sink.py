@@ -8,6 +8,9 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from dashboard.runtime.replay_correlation import correlation_key, create_lifecycle_id
+from dashboard.runtime.replay_event_envelope import is_replay_event_envelope
+
 
 TRADE_LIFECYCLE_REPLAY_SINK_VERSION = "css.trade_lifecycle.replay_sink.v1"
 _SENSITIVE_KEY_PARTS = (
@@ -69,18 +72,63 @@ class TradeLifecycleReplaySink:
 
     def _build_record(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         safe_payload = _json_safe(payload)
-        event_type = str(safe_payload.get("event_type", "unknown_lifecycle_event"))
-        event_id = str(safe_payload.get("event_id") or _event_id(safe_payload))
+        envelope_payload = safe_payload if is_replay_event_envelope(safe_payload) else {}
+        inner_payload = (
+            envelope_payload.get("payload")
+            if isinstance(envelope_payload.get("payload"), Mapping)
+            else {}
+        )
+        identity_payload = inner_payload if envelope_payload else safe_payload
+
+        event_type = str(
+            envelope_payload.get("event_type")
+            or identity_payload.get("event_type")
+            or "unknown_lifecycle_event"
+        )
+        event_id = str(envelope_payload.get("event_id") or safe_payload.get("event_id") or _event_id(safe_payload))
+        correlation_id = str(
+            envelope_payload.get("correlation_id")
+            or identity_payload.get("correlation_id")
+            or correlation_key(identity_payload)
+        )
+        lifecycle_id = str(
+            envelope_payload.get("lifecycle_id")
+            or identity_payload.get("lifecycle_id")
+            or create_lifecycle_id(identity_payload)
+        )
         return {
             "sink_payload_version": TRADE_LIFECYCLE_REPLAY_SINK_VERSION,
             "event_id": event_id,
             "event_type": event_type,
             "persisted_utc": datetime.now(timezone.utc).isoformat(),
-            "position_id": str(safe_payload.get("position_id", "")),
-            "symbol": str(safe_payload.get("symbol", "")),
-            "asset_class": str(safe_payload.get("asset_class", "")),
-            "mode": str(safe_payload.get("mode", "paper")),
-            "session_id": str(safe_payload.get("session_id", "")),
+            "schema_version": str(envelope_payload.get("schema_version", "")),
+            "correlation_id": correlation_id,
+            "lifecycle_id": lifecycle_id,
+            "subsystem": str(envelope_payload.get("subsystem") or identity_payload.get("subsystem") or ""),
+            "parent_event_id": str(envelope_payload.get("parent_event_id", "")),
+            "position_id": str(identity_payload.get("position_id", "")),
+            "symbol": str(envelope_payload.get("symbol") or identity_payload.get("symbol", "")),
+            "asset_class": str(
+                envelope_payload.get("asset_class") or identity_payload.get("asset_class", "")
+            ),
+            "mode": str(
+                envelope_payload.get("broker_mode")
+                or identity_payload.get("broker_mode")
+                or identity_payload.get("mode")
+                or "paper"
+            ),
+            "broker": str(envelope_payload.get("broker") or identity_payload.get("broker", "")),
+            "broker_mode": str(
+                envelope_payload.get("broker_mode")
+                or identity_payload.get("broker_mode")
+                or identity_payload.get("mode")
+                or ""
+            ),
+            "engine_mode": str(
+                envelope_payload.get("engine_mode") or identity_payload.get("engine_mode", "")
+            ),
+            "cycle": str(envelope_payload.get("cycle") or identity_payload.get("cycle", "")),
+            "session_id": str(identity_payload.get("session_id", "")),
             "payload": safe_payload,
         }
 

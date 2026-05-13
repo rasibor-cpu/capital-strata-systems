@@ -734,7 +734,9 @@ def test_trade_lifecycle_service_writes_named_replay_events(tmp_path) -> None:
         "locked_profit_updated",
         "lifecycle_audit_payload_created",
     } <= event_types
-    assert all(event["payload"]["session_id"] == "SESSION-17" for event in events)
+    assert all(event["schema_version"] == "css.replay_event_envelope.v1" for event in events)
+    assert len({event["correlation_id"] for event in events}) == 1
+    assert all(event["payload"]["payload"]["session_id"] == "SESSION-17" for event in events)
     assert json.dumps([event["payload"] for event in events], sort_keys=True)
 
 

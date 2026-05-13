@@ -5,6 +5,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from dashboard.runtime.replay_correlation import enrich_with_correlation
+from dashboard.runtime.replay_event_envelope import build_replay_event_envelope
+
 
 TRADE_LIFECYCLE_SERVICE_VERSION = "css.trade_lifecycle.execution_state.v1"
 FORCED_EXIT_REASONS = {"STOP", "FAST_STOP"}
@@ -258,12 +261,16 @@ class TradeLifecycleExecutionStateService:
             mode=self.mode_provider(),
             session_context=self.session_context_provider(),
         )
+        audit_payload = enrich_with_correlation(audit_payload)
         replay_payload = {
             "payload_version": TRADE_LIFECYCLE_SERVICE_VERSION,
             "event_type": "trade_exit_replay_event",
+            "correlation_id": audit_payload["correlation_id"],
+            "lifecycle_id": audit_payload["lifecycle_id"],
             "position_id": audit_payload["position_id"],
             "symbol": audit_payload["symbol"],
             "asset_class": audit_payload["asset_class"],
+            "cycle": audit_payload["cycle"],
             "status": status,
             "reason": reason,
             "classification": classification,
@@ -346,6 +353,13 @@ def build_trade_exit_audit_payload(
         "classification": classification,
         "realized_pnl": round(_safe_float(realized_pnl), 4),
         "mode": _safe_mode(mode),
+        "cycle": str(
+            pos.get("cycle")
+            or pos.get("cycle_number")
+            or session_context.get("cycle")
+            or session_context.get("cycle_number")
+            or ""
+        ),
         "broker_tested": bool(pos.get("broker_tested", False)),
         "broker_order_ok": bool(pos.get("broker_order_ok", False)),
         "cluster_name": str(pos.get("cluster_name") or ""),
@@ -379,10 +393,13 @@ def build_trade_exit_replay_events(
 
     common = {
         "payload_version": TRADE_LIFECYCLE_SERVICE_VERSION,
+        "correlation_id": audit_payload["correlation_id"],
+        "lifecycle_id": audit_payload["lifecycle_id"],
         "position_id": audit_payload["position_id"],
         "symbol": audit_payload["symbol"],
         "asset_class": audit_payload["asset_class"],
         "mode": audit_payload["mode"],
+        "cycle": audit_payload["cycle"],
         "session_id": audit_payload["session_id"],
         "session_user_id": audit_payload["session_user_id"],
         "timestamp_utc": audit_payload["timestamp_utc"],
@@ -438,7 +455,16 @@ def build_trade_exit_replay_events(
             }
         )
 
-    return tuple(events)
+    return tuple(
+        build_replay_event_envelope(
+            event,
+            subsystem="trade_lifecycle",
+            source_module="dashboard.runtime.trade_lifecycle_service",
+            correlation_id=str(audit_payload["correlation_id"]),
+            lifecycle_id=str(audit_payload["lifecycle_id"]),
+        )
+        for event in events
+    )
 
 
 def _safe_float(value: Any) -> float:

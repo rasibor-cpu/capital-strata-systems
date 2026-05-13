@@ -105,6 +105,10 @@ Implemented:
 - governance and broker event reconstruction summaries
 - replay-safe redacted serialization
 - mobile audit replay endpoint
+- unified replay correlation foundation
+- normalized replay event envelopes
+- lifecycle replay sink/viewer compatibility for legacy and envelope records
+- read-only replay timeline grouping by correlation, symbol, cycle, and event sequence
 
 ---
 
@@ -228,6 +232,138 @@ Implemented:
 
 ---
 
+## Post-Backlog Product Queue
+
+### Market-Facing Companion App
+
+Status:
+Specification queued
+
+Reference:
+- docs/product/CSS_MARKET_COMPANION_APP_SPEC_2026.md
+
+Working product names:
+- CSS Pulse
+- CSS Sentinel
+- CSS Intelligence Hub
+
+Scope:
+- public/controlled-access marketing and intelligence companion app
+- investor/client demo support
+- safe replay/demo views
+- lead capture and demo request workflows
+
+Boundaries:
+- no trade execution
+- no broker credentials
+- no live account data
+- no alpha/proprietary decision-rule exposure
+- no public control of CSS Core
+
+Next steps:
+- choose preferred product name
+- approve wireframes
+- approve safe sample datasets
+- create a separate implementation directive only after approval
+
+---
+
+## Institutional Elevation Backlog
+
+### Phase 41 - Broker Live Dry-Run Certification
+
+Status:
+Foundation complete
+
+Implemented:
+- broker live dry-run certification service
+- API-safe certification payload
+- fail-closed broker readiness checks
+- credential-presence checks without secret exposure
+- broker reconciliation dependency
+- non-executing dry-run order probe validation
+- JSONL certification log helper
+- focused dashboard test coverage
+
+Remaining:
+- approved operator workflow must supply real broker-specific dry-run probe evidence
+- unrestricted live trading remains blocked until live certification, operator approval,
+  and PCNRASS release checks are complete
+
+### Phase 42 - Broker Adapter Conformance Suite
+
+Status:
+Foundation complete
+
+Purpose:
+Validate all executable broker adapters against a common capability and snapshot
+contract before they are eligible for live workflows.
+
+Implemented:
+- broker adapter conformance service
+- API-safe conformance payload
+- paper adapter coverage for OANDA, Alpaca, IBKR, and Binance
+- capability registry additions for IBKR and Binance paper adapters
+- denied-envelope refusal checks
+- focused conformance tests
+
+Remaining:
+- live adapter conformance should be added only after explicit operator approval
+  and live-safe adapter contracts are available
+
+### Phase 43 - Live Credential Readiness Attestation
+
+Status:
+Foundation complete
+
+Implemented:
+- redacted live credential attestation service
+- API-safe attestation payload
+- Coinbase, OANDA, and Alpaca requirement checks
+- local env/key-path presence checks only
+- no network calls
+- no credential values or local paths exposed
+- focused credential attestation tests
+
+Remaining:
+- credential expiry and rotation checks require broker/key-provider metadata
+  that is not present in the current local credential format
+- real live approval still requires operator review and broker-specific dry-run
+  certification evidence
+
+### Phase 9B - Live-Readiness Certification Framework
+
+Status:
+Foundation complete
+
+Implemented:
+- broker-layer live-readiness certifier
+- PASS/FAIL certification result object
+- explicit broker identity validation
+- adapter availability validation
+- broker asset-class support validation
+- credential file presence and safe-load validation
+- capital-source and balance-source separation checks
+- dry-run-only order safety checks
+- CSSUnifiedTradeGate approval path check
+- valid-session and known-engine-mode checks
+- explicit operator approval requirement
+- redacted audit payload and JSONL log helper
+- deployment documentation
+- focused engine tests
+
+Live-trading status:
+Still not approved. A PASS result means readiness evidence is complete for review;
+it does not enable live execution or bypass operator approval.
+
+Remaining:
+- real broker-specific dry-run evidence
+- operator-approved live runbook
+- kill-switch verification
+- clean broker reconciliation immediately before any restricted live session
+
+---
+
 ## Readiness Tracking
 
 ### Replay Readiness
@@ -328,8 +464,9 @@ Preferred use:
 Recommended next engineering priority:
 
 1. Run PCNRASS release checklist before every commit or push
-2. Keep live trading restricted until broker-specific live dry-run certification is approved
-3. Continue dashboard separation only in bounded, no-regression slices
-4. Treat new feature ideas as post-backlog enhancements
+2. Keep live trading restricted until real broker-specific dry-run probe evidence is supplied and approved
+3. Implement Phase 44 operator approval workflow as the next bounded elevation item
+4. Continue dashboard separation only in bounded, no-regression slices
+5. Treat new feature ideas as post-backlog enhancements
 
 No unrestricted live trading should occur without operator approval, broker certification, and PCNRASS-confirmed release checks.

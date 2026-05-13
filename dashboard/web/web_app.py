@@ -1495,6 +1495,8 @@ def _replay_page() -> str:
       <label>Symbol <input id="replay-filter-symbol" type="text" placeholder="BTC-USD"></label>
       <label>Asset <input id="replay-filter-asset" type="text" placeholder="CRYPTO"></label>
       <label>Cycle <input id="replay-filter-cycle" type="number" min="0" step="1"></label>
+      <label>Correlation <input id="replay-filter-correlation" type="text" placeholder="COR-..."></label>
+      <label>Subsystem <input id="replay-filter-subsystem" type="text" placeholder="trade_lifecycle"></label>
       <label>Limit <input id="replay-filter-limit" type="number" min="1" max="1000" step="1" value="100"></label>
     </section>
 
@@ -1589,17 +1591,26 @@ function formatTime(value) {
   return date.toLocaleString("en-US", { hour12: false });
 }
 
+function shortId(value) {
+  const text = String(value || "");
+  return text.length > 12 ? text.slice(0, 12) : text;
+}
+
 function replayFilters() {
   const params = new URLSearchParams();
   const eventType = document.getElementById("replay-filter-event").value.trim();
   const symbol = document.getElementById("replay-filter-symbol").value.trim();
   const asset = document.getElementById("replay-filter-asset").value.trim();
   const cycle = document.getElementById("replay-filter-cycle").value.trim();
+  const correlation = document.getElementById("replay-filter-correlation").value.trim();
+  const subsystem = document.getElementById("replay-filter-subsystem").value.trim();
   const limit = document.getElementById("replay-filter-limit").value.trim() || "100";
   if (eventType) params.set("event_type", eventType);
   if (symbol) params.set("symbol", symbol);
   if (asset) params.set("asset_class", asset);
   if (cycle) params.set("cycle", cycle);
+  if (correlation) params.set("correlation_id", correlation);
+  if (subsystem) params.set("subsystem", subsystem);
   params.set("limit", limit);
   return params;
 }
@@ -1611,6 +1622,8 @@ function hydrateReplayFiltersFromLocation() {
     ["symbol", "replay-filter-symbol"],
     ["asset_class", "replay-filter-asset"],
     ["cycle", "replay-filter-cycle"],
+    ["correlation_id", "replay-filter-correlation"],
+    ["subsystem", "replay-filter-subsystem"],
     ["limit", "replay-filter-limit"]
   ];
   mapping.forEach(([key, id]) => {
@@ -1657,12 +1670,15 @@ function renderReplayTable(events) {
   }
   target.innerHTML = `
     <div class="replay-row replay-head">
-      <span>Time</span><span>Event</span><span>Symbol</span><span>Asset</span><span>Cycle</span><span>Mode</span><span>Reason</span><span>Realized PnL</span><span>Position</span>
+      <span>Time</span><span>Event</span><span>Correlation</span><span>Subsystem</span><span>Schema</span><span>Symbol</span><span>Asset</span><span>Cycle</span><span>Mode</span><span>Reason</span><span>Realized PnL</span><span>Position</span>
     </div>
     ${events.map((event) => `
       <div class="replay-row">
         <span>${escapeHtml(formatTime(event.timestamp_utc || event.persisted_utc))}</span>
         <span>${escapeHtml(event.event_type || "UNKNOWN")}</span>
+        <span>${escapeHtml(shortId(event.correlation_id || ""))}</span>
+        <span>${escapeHtml(event.subsystem || "legacy")}</span>
+        <span>${escapeHtml(event.schema_version || "legacy")}</span>
         <span>${escapeHtml(event.symbol || "UNKNOWN")}</span>
         <span>${escapeHtml(event.asset_class || "UNKNOWN")}</span>
         <span>${escapeHtml(event.cycle || "")}</span>
@@ -2139,9 +2155,9 @@ button {
 }
 .replay-row {
   display: grid;
-  grid-template-columns: 180px 220px 120px 90px 70px 80px minmax(160px, 1fr) 120px 120px;
+  grid-template-columns: 180px 220px 120px 130px 190px 120px 90px 70px 80px minmax(160px, 1fr) 120px 120px;
   gap: 8px;
-  min-width: 1200px;
+  min-width: 1620px;
   border-bottom: 1px solid var(--line);
   padding: 10px 0;
   align-items: center;

@@ -105,8 +105,19 @@ dashboard/runtime/*
 !dashboard/runtime/trade_lifecycle_service.py
 !dashboard/runtime/trade_lifecycle_replay_sink.py
 !dashboard/runtime/trade_lifecycle_replay_viewer.py
+!dashboard/runtime/replay_correlation.py
+!dashboard/runtime/replay_event_envelope.py
+!dashboard/runtime/replay_timeline_builder.py
+!dashboard/runtime/broker_live_dry_run_certification.py
+!dashboard/runtime/broker_adapter_conformance.py
+!dashboard/runtime/live_credential_attestation.py
 !tests/dashboard/test_trade_lifecycle_replay_viewer.py
 !tests/dashboard/test_trade_lifecycle_replay_ui.py
+!tests/dashboard/test_replay_correlation_lineage.py
+!tests/dashboard/test_broker_live_dry_run_certification.py
+!tests/dashboard/test_broker_adapter_conformance.py
+!tests/dashboard/test_live_credential_attestation.py
+!tests/engine/test_live_readiness_certifier.py
 
 !live_data/
 !live_data/*.py

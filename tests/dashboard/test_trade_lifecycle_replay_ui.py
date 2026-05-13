@@ -20,6 +20,8 @@ def test_replay_page_registers_read_only_route_and_markup() -> None:
     assert "replay-filter-symbol" in markup
     assert "replay-filter-asset" in markup
     assert "replay-filter-cycle" in markup
+    assert "replay-filter-correlation" in markup
+    assert "replay-filter-subsystem" in markup
     assert "replay-filter-limit" in markup
 
 
@@ -35,7 +37,8 @@ def test_replay_page_exposes_summary_metrics_and_safe_columns() -> None:
         "Returned Rows",
         "Malformed Lines",
         "Source Exists",
-        "<span>Time</span><span>Event</span><span>Symbol</span>",
+        "<span>Time</span><span>Event</span><span>Correlation</span>",
+        "<span>Subsystem</span><span>Schema</span><span>Symbol</span>",
         "<span>Asset</span><span>Cycle</span><span>Mode</span>",
         "<span>Reason</span><span>Realized PnL</span><span>Position</span>",
     ]
@@ -53,8 +56,12 @@ def test_replay_page_uses_lightweight_limiting_and_filter_query() -> None:
     assert 'params.set("symbol", symbol)' in markup
     assert 'params.set("asset_class", asset)' in markup
     assert 'params.set("cycle", cycle)' in markup
+    assert 'params.set("correlation_id", correlation)' in markup
+    assert 'params.set("subsystem", subsystem)' in markup
     assert 'params.set("limit", limit)' in markup
     assert "hydrateReplayFiltersFromLocation" in markup
+    assert '["correlation_id", "replay-filter-correlation"]' in markup
+    assert '["subsystem", "replay-filter-subsystem"]' in markup
     assert '["limit", "replay-filter-limit"]' in markup
     assert 'fetch(`/api/v1/trade-lifecycle-replay?' in markup
 
