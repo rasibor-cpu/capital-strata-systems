@@ -15,6 +15,7 @@ from dashboard.runtime.frontend_contract import (
     build_frontend_payload,
     build_websocket_delta,
 )
+from dashboard.runtime.runtime_event_bus import runtime_event_to_ws_message
 
 
 DashboardStateProvider = Callable[[], DashboardState]
@@ -137,6 +138,27 @@ def build_heartbeat_ws_message(
     }
 
 
+def build_ws_message_from_runtime_event(
+    event: dict[str, Any],
+    *,
+    sequence: int,
+    stale_after_ms: int = 15000,
+) -> dict[str, Any]:
+    """
+    Compatibility adapter for future event-bus-backed websocket delivery.
+
+    Existing websocket snapshot/delta routing remains unchanged; this helper
+    lets typed runtime events be rendered into the current websocket message
+    shape when a caller opts in.
+    """
+
+    return runtime_event_to_ws_message(
+        event,
+        sequence=sequence,
+        stale_after_ms=stale_after_ms,
+    )
+
+
 def is_stale_ws_message(
     message: dict[str, Any],
     *,
@@ -238,6 +260,7 @@ __all__ = [
     "build_delta_ws_messages",
     "build_heartbeat_ws_message",
     "build_initial_ws_message",
+    "build_ws_message_from_runtime_event",
     "create_ws_router",
     "default_dashboard_state_provider",
     "is_stale_ws_message",

@@ -130,6 +130,7 @@ Implemented:
 - reconnect handling
 - heartbeat payloads
 - stale sequence detection helpers
+- runtime-event-to-websocket compatibility adapter
 
 Remaining:
 - deeper mobile websocket live-view migration can be added as a future enhancement
@@ -383,6 +384,28 @@ Foundation complete
 
 Blocking items:
 - deeper mobile websocket live-view migration remains optional future enhancement
+
+---
+
+### Runtime Event Bus Readiness
+
+Status:
+Foundation complete
+
+Implemented:
+- canonical runtime event object
+- in-process publish/subscribe bus
+- recent event retrieval and testing clear helper
+- JSON-safe redaction for event payloads
+- replay-envelope compatibility adapter
+- websocket compatibility adapter
+- alert payload adapter
+- optional trade lifecycle service publisher hook
+
+Blocking items:
+- full subsystem migration is intentionally deferred
+- persistent event-bus storage is not yet implemented
+- cross-process queueing is not yet implemented
 
 ---
 
