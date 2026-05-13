@@ -106,6 +106,7 @@ dashboard/runtime/*
 !dashboard/runtime/trade_lifecycle_replay_sink.py
 !dashboard/runtime/trade_lifecycle_replay_viewer.py
 !tests/dashboard/test_trade_lifecycle_replay_viewer.py
+!tests/dashboard/test_trade_lifecycle_replay_ui.py
 
 !live_data/
 !live_data/*.py

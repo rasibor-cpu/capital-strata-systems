@@ -7,6 +7,7 @@ from dashboard.web.web_app import (
     _execution_page,
     _market_opportunities_page,
     _positions_page,
+    _replay_page,
     _risk_governance_page,
     create_app,
     demo_dashboard_state_provider,
@@ -23,6 +24,7 @@ def main() -> int:
         "/execution",
         "/market-opportunities",
         "/positions",
+        "/replay",
         "/risk-governance",
         "/health",
         "/api/v1/dashboard-state",
@@ -35,6 +37,7 @@ def main() -> int:
         "/api/v1/broker",
         "/api/v1/alerts",
         "/api/v1/deployment-profiles",
+        "/api/v1/trade-lifecycle-replay",
         "/ws/v1/dashboard-state",
     }
     missing = required_routes - routes
@@ -58,6 +61,7 @@ def main() -> int:
         'href="/market-opportunities"',
         'href="/positions"',
         'href="/risk-governance"',
+        'href="/replay"',
         "/api/v1/frontend-state",
         "/ws/v1/dashboard-state",
     ]
@@ -139,6 +143,23 @@ def main() -> int:
     for expected in expected_broker_markup:
         if expected not in broker_markup:
             raise AssertionError(f"Web broker markup missing: {expected}")
+
+    replay_markup = _replay_page()
+    expected_replay_markup = [
+        "CSS Lifecycle Replay Viewer",
+        "Lifecycle Replay Viewer",
+        "Lifecycle Replay Table",
+        "Event Mix",
+        "Replay Health",
+        "Total Events",
+        "Realized PnL Handoffs",
+        "Defensive Reductions",
+        "Exits Booked",
+        "/api/v1/trade-lifecycle-replay",
+    ]
+    for expected in expected_replay_markup:
+        if expected not in replay_markup:
+            raise AssertionError(f"Web replay markup missing: {expected}")
 
     payload = get_frontend_payload(demo_dashboard_state_provider)
     sections = payload.get("sections", {})

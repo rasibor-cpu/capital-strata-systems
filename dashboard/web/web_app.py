@@ -68,6 +68,10 @@ def create_app(
     async def broker() -> HTMLResponse:
         return HTMLResponse(_broker_page())
 
+    @app.get("/replay", response_class=HTMLResponse)
+    async def replay() -> HTMLResponse:
+        return HTMLResponse(_replay_page())
+
     @app.get("/health")
     async def health() -> dict[str, Any]:
         state = provider()
@@ -89,6 +93,7 @@ def _app_nav(active: str) -> str:
         ("risk_governance", "/risk-governance", "Risk & Governance"),
         ("market_opportunities", "/market-opportunities", "Market"),
         ("broker", "/broker", "Broker"),
+        ("replay", "/replay", "Replay"),
     ]
 
     return "\n".join(
@@ -1456,6 +1461,240 @@ refreshBroker().catch(() => undefined);
 """
 
 
+def _replay_page() -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111820">
+  <title>CSS Lifecycle Replay Viewer</title>
+  <style>{_css()}</style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">CSS</div>
+        <div>
+          <p class="eyebrow">Capital Strata Systems</p>
+          <h1>Lifecycle Replay Viewer</h1>
+        </div>
+      </div>
+      <section class="status-strip" aria-label="Replay viewer status">
+        <span id="replay-source">Replay source pending</span>
+        <span id="replay-updated">Snapshot pending</span>
+        <span id="replay-malformed">Malformed 0</span>
+      </section>
+    </header>
+    {_app_nav("replay")}
+
+    <section class="control-row replay-controls" aria-label="Replay filters">
+      <button type="button" data-refresh-replay>Refresh</button>
+      <label>Event <input id="replay-filter-event" type="text" placeholder="event_type"></label>
+      <label>Symbol <input id="replay-filter-symbol" type="text" placeholder="BTC-USD"></label>
+      <label>Asset <input id="replay-filter-asset" type="text" placeholder="CRYPTO"></label>
+      <label>Cycle <input id="replay-filter-cycle" type="number" min="0" step="1"></label>
+      <label>Limit <input id="replay-filter-limit" type="number" min="1" max="1000" step="1" value="100"></label>
+    </section>
+
+    <section class="metric-band replay-metrics" aria-label="Replay summary">
+      <article>
+        <strong>Total Events</strong>
+        <span id="replay-total-events">0</span>
+      </article>
+      <article>
+        <strong>Exits Booked</strong>
+        <span id="replay-exits-booked">0</span>
+      </article>
+      <article>
+        <strong>Realized PnL Handoffs</strong>
+        <span id="replay-pnl-handoffs">0</span>
+      </article>
+      <article>
+        <strong>Defensive Reductions</strong>
+        <span id="replay-defensive-reductions">0</span>
+      </article>
+      <article>
+        <strong>Capital Releases</strong>
+        <span id="replay-capital-releases">0</span>
+      </article>
+      <article>
+        <strong>Returned Rows</strong>
+        <span id="replay-returned-rows">0</span>
+      </article>
+    </section>
+
+    <section class="replay-workspace">
+      <article class="panel replay-main">
+        <div class="panel-head">
+          <h2>Lifecycle Replay Table</h2>
+          <span id="replay-table-badge">0 ROWS</span>
+        </div>
+        <div class="replay-table" id="replay-table"></div>
+      </article>
+
+      <aside class="replay-side">
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Event Mix</h2>
+            <span>SUMMARY</span>
+          </div>
+          <div class="summary-table" id="replay-event-mix"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Replay Health</h2>
+            <span>READ ONLY</span>
+          </div>
+          <div class="kv-grid two">
+            <div><strong>Loaded</strong><span id="replay-loaded-count">0</span></div>
+            <div><strong>Filtered</strong><span id="replay-filtered-count">0</span></div>
+            <div><strong>Malformed Lines</strong><span id="replay-health-malformed">0</span></div>
+            <div><strong>Source Exists</strong><span id="replay-source-exists">NO</span></div>
+          </div>
+        </article>
+      </aside>
+    </section>
+  </main>
+
+  <script>{_replay_script()}</script>
+</body>
+</html>"""
+
+
+def _replay_script() -> str:
+    return """
+const replayState = { payload: null };
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\\"": "&quot;",
+    "'": "&#39;"
+  }[char]));
+}
+
+function money(value) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(value || 0));
+}
+
+function formatTime(value) {
+  if (!value) return "UNKNOWN";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("en-US", { hour12: false });
+}
+
+function replayFilters() {
+  const params = new URLSearchParams();
+  const eventType = document.getElementById("replay-filter-event").value.trim();
+  const symbol = document.getElementById("replay-filter-symbol").value.trim();
+  const asset = document.getElementById("replay-filter-asset").value.trim();
+  const cycle = document.getElementById("replay-filter-cycle").value.trim();
+  const limit = document.getElementById("replay-filter-limit").value.trim() || "100";
+  if (eventType) params.set("event_type", eventType);
+  if (symbol) params.set("symbol", symbol);
+  if (asset) params.set("asset_class", asset);
+  if (cycle) params.set("cycle", cycle);
+  params.set("limit", limit);
+  return params;
+}
+
+function setText(id, value) {
+  document.getElementById(id).textContent = String(value);
+}
+
+function renderReplay(payload) {
+  replayState.payload = payload;
+  const summary = payload.summary || {};
+  const events = payload.events || [];
+
+  setText("replay-source", payload.source_exists ? "Replay source active" : "Replay source empty");
+  setText("replay-updated", `Updated ${payload.generated_utc || "pending"}`);
+  setText("replay-malformed", `Malformed ${payload.malformed_line_count || 0}`);
+  setText("replay-total-events", summary.total_events || 0);
+  setText("replay-exits-booked", summary.exits_booked || 0);
+  setText("replay-pnl-handoffs", summary.realized_pnl_handoffs || 0);
+  setText("replay-defensive-reductions", summary.defensive_reductions || 0);
+  setText("replay-capital-releases", summary.capital_releases || 0);
+  setText("replay-returned-rows", payload.returned_event_count || 0);
+  setText("replay-table-badge", `${payload.returned_event_count || 0} ROWS`);
+  setText("replay-loaded-count", payload.total_loaded_events || 0);
+  setText("replay-filtered-count", payload.filtered_event_count || 0);
+  setText("replay-health-malformed", payload.malformed_line_count || 0);
+  setText("replay-source-exists", payload.source_exists ? "YES" : "NO");
+
+  renderReplayTable(events);
+  renderEventMix(summary.by_event_type || {});
+}
+
+function renderReplayTable(events) {
+  const target = document.getElementById("replay-table");
+  if (!events.length) {
+    target.innerHTML = `<div class="empty-state">No lifecycle replay events match the current view</div>`;
+    return;
+  }
+  target.innerHTML = `
+    <div class="replay-row replay-head">
+      <span>Time</span><span>Event</span><span>Symbol</span><span>Asset</span><span>Cycle</span><span>Mode</span><span>Reason</span><span>Realized PnL</span><span>Position</span>
+    </div>
+    ${events.map((event) => `
+      <div class="replay-row">
+        <span>${escapeHtml(formatTime(event.timestamp_utc || event.persisted_utc))}</span>
+        <span>${escapeHtml(event.event_type || "UNKNOWN")}</span>
+        <span>${escapeHtml(event.symbol || "UNKNOWN")}</span>
+        <span>${escapeHtml(event.asset_class || "UNKNOWN")}</span>
+        <span>${escapeHtml(event.cycle || "")}</span>
+        <span>${escapeHtml(event.mode || "paper")}</span>
+        <span>${escapeHtml(event.reason || "")}</span>
+        <span class="${Number(event.realized_pnl || 0) >= 0 ? "positive" : "negative"}">${money(event.realized_pnl)}</span>
+        <span>${escapeHtml(event.position_id || "")}</span>
+      </div>
+    `).join("")}
+  `;
+}
+
+function renderEventMix(mix) {
+  const target = document.getElementById("replay-event-mix");
+  const rows = Object.entries(mix);
+  if (!rows.length) {
+    target.innerHTML = `<div class="empty-state">No replay event mix</div>`;
+    return;
+  }
+  target.innerHTML = rows.map(([eventType, count]) => `
+    <div class="summary-row replay-summary-row">
+      <span>${escapeHtml(eventType)}</span>
+      <span>${Number(count || 0)}</span>
+    </div>
+  `).join("");
+}
+
+async function refreshReplay() {
+  const response = await fetch(`/api/v1/trade-lifecycle-replay?${replayFilters().toString()}`, { cache: "no-store" });
+  renderReplay(await response.json());
+}
+
+document.querySelector("[data-refresh-replay]").addEventListener("click", refreshReplay);
+document.querySelectorAll(".replay-controls input").forEach((input) => {
+  input.addEventListener("change", refreshReplay);
+});
+refreshReplay().catch(() => renderReplay({
+  source_exists: false,
+  generated_utc: "",
+  malformed_line_count: 0,
+  total_loaded_events: 0,
+  filtered_event_count: 0,
+  returned_event_count: 0,
+  summary: {},
+  events: []
+}));
+"""
+
+
 def _css() -> str:
     return """
 :root {
@@ -1744,6 +1983,31 @@ button {
   grid-template-columns: minmax(0, 1.2fr) minmax(340px, 0.8fr);
   gap: 12px;
 }
+.replay-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(340px, 0.75fr);
+  gap: 12px;
+}
+.replay-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+  padding: 7px 9px;
+  font-size: 12px;
+  font-weight: 800;
+}
+.replay-controls input {
+  width: 120px;
+  min-height: 28px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--ink);
+  padding: 5px 7px;
+  font: inherit;
+}
 .positions-main {
   min-height: 520px;
 }
@@ -1759,6 +2023,9 @@ button {
 }
 .broker-main {
   min-height: 360px;
+}
+.replay-main {
+  min-height: 560px;
 }
 .positions-side {
   display: grid;
@@ -1780,12 +2047,18 @@ button {
   gap: 12px;
   align-content: start;
 }
+.replay-side {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
 .compact-panel {
   min-height: 0;
 }
 .position-table,
 .execution-table,
 .opportunity-table,
+.replay-table,
 .summary-table {
   overflow-x: auto;
 }
@@ -1834,9 +2107,25 @@ button {
   text-transform: uppercase;
   font-weight: 800;
 }
+.replay-row {
+  display: grid;
+  grid-template-columns: 180px 220px 120px 90px 70px 80px minmax(160px, 1fr) 120px 120px;
+  gap: 8px;
+  min-width: 1200px;
+  border-bottom: 1px solid var(--line);
+  padding: 10px 0;
+  align-items: center;
+}
+.replay-head {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  font-weight: 800;
+}
 .position-row span,
 .execution-row span,
 .opportunity-row span,
+.replay-row span,
 .summary-row span {
   overflow-wrap: anywhere;
   font-weight: 700;
@@ -1871,6 +2160,9 @@ button {
   gap: 8px;
   border-bottom: 1px solid var(--line);
   padding: 9px 0;
+}
+.replay-summary-row {
+  grid-template-columns: 1fr 70px;
 }
 .symbol-cloud {
   display: flex;
@@ -1907,6 +2199,9 @@ button {
   .broker-workspace {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .replay-workspace {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 @media (max-width: 720px) {
   .shell { padding: 14px; }
@@ -1918,6 +2213,7 @@ button {
   .risk-governance-workspace,
   .market-opportunity-workspace,
   .broker-workspace,
+  .replay-workspace,
   .kv-grid,
   .kv-grid.two,
   .signal-grid {
