@@ -25,6 +25,7 @@ class TradeLifecycleExitResult:
     last_trade: str | None = None
     audit_payload: dict[str, Any] = field(default_factory=dict)
     replay_payload: dict[str, Any] = field(default_factory=dict)
+    replay_events: tuple[dict[str, Any], ...] = field(default_factory=tuple)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -40,6 +41,7 @@ class TradeLifecycleExitResult:
             "last_trade": self.last_trade,
             "audit_payload": self.audit_payload,
             "replay_payload": self.replay_payload,
+            "replay_events": list(self.replay_events),
         }
 
 
@@ -78,6 +80,7 @@ class TradeLifecycleExecutionStateService:
         mode_provider: Callable[[], str] | None = None,
         audit_recorder: Callable[[dict[str, Any]], None] | None = None,
         replay_recorder: Callable[[dict[str, Any]], None] | None = None,
+        strict_replay_persistence: bool = False,
         logger: Callable[[str], None] | None = None,
     ) -> None:
         self.pnl_tracker = pnl_tracker
@@ -90,6 +93,7 @@ class TradeLifecycleExecutionStateService:
         self.mode_provider = mode_provider or (lambda: "paper")
         self.audit_recorder = audit_recorder
         self.replay_recorder = replay_recorder
+        self.strict_replay_persistence = strict_replay_persistence
         self.logger = logger
 
     def execute_exit(
@@ -267,6 +271,12 @@ class TradeLifecycleExecutionStateService:
             "mode": audit_payload["mode"],
             "timestamp_utc": audit_payload["timestamp_utc"],
         }
+        replay_events = build_trade_exit_replay_events(
+            pos,
+            audit_payload=audit_payload,
+            replay_payload=replay_payload,
+            booked=booked,
+        )
         return TradeLifecycleExitResult(
             status=status,
             booked=booked,
@@ -279,6 +289,7 @@ class TradeLifecycleExecutionStateService:
             last_trade=last_trade,
             audit_payload=audit_payload,
             replay_payload=replay_payload,
+            replay_events=replay_events,
         )
 
     def _handoff_event(self, result: TradeLifecycleExitResult) -> None:
@@ -289,10 +300,13 @@ class TradeLifecycleExecutionStateService:
                 self._log(f"[R17 WARN] Audit handoff failed: {str(exc)[:60]}")
 
         if self.replay_recorder is not None:
-            try:
-                self.replay_recorder(result.replay_payload)
-            except Exception as exc:
-                self._log(f"[R17 WARN] Replay handoff failed: {str(exc)[:60]}")
+            for replay_event in result.replay_events:
+                try:
+                    self.replay_recorder(replay_event)
+                except Exception as exc:
+                    self._log(f"[R17 WARN] Replay handoff failed: {str(exc)[:60]}")
+                    if self.strict_replay_persistence:
+                        raise
 
     def _log(self, message: str) -> None:
         if self.logger is not None:
@@ -351,6 +365,80 @@ def build_trade_exit_audit_payload(
             or ""
         ),
     }
+
+
+def build_trade_exit_replay_events(
+    pos: Mapping[str, Any],
+    *,
+    audit_payload: Mapping[str, Any],
+    replay_payload: Mapping[str, Any],
+    booked: bool,
+) -> tuple[dict[str, Any], ...]:
+    if not booked:
+        return (dict(replay_payload),)
+
+    common = {
+        "payload_version": TRADE_LIFECYCLE_SERVICE_VERSION,
+        "position_id": audit_payload["position_id"],
+        "symbol": audit_payload["symbol"],
+        "asset_class": audit_payload["asset_class"],
+        "mode": audit_payload["mode"],
+        "session_id": audit_payload["session_id"],
+        "session_user_id": audit_payload["session_user_id"],
+        "timestamp_utc": audit_payload["timestamp_utc"],
+        "reason": audit_payload["reason"],
+        "classification": audit_payload["classification"],
+        "status": audit_payload["status"],
+    }
+    realized_pnl = round(_safe_float(audit_payload.get("realized_pnl")), 4)
+    events = [
+        {
+            **common,
+            "event_type": "position_exit_booked",
+            "realized_pnl": realized_pnl,
+        },
+        {
+            **common,
+            "event_type": "realized_pnl_handoff",
+            "realized_pnl": realized_pnl,
+        },
+    ]
+
+    if bool(audit_payload.get("broker_tested", False)):
+        events.append(
+            {
+                **common,
+                "event_type": "capital_released",
+                "capital_position_id": audit_payload["position_id"],
+            }
+        )
+
+    events.append(
+        {
+            **common,
+            "event_type": "locked_profit_updated",
+            "realized_pnl": realized_pnl,
+        }
+    )
+    events.append(
+        {
+            **common,
+            "event_type": "lifecycle_audit_payload_created",
+            "audit_payload": dict(audit_payload),
+        }
+    )
+
+    if str(audit_payload.get("classification")) == "DEFENSIVE_REDUCTION":
+        events.append(
+            {
+                **common,
+                "event_type": "defensive_reduction_applied",
+                "age_cycles": _safe_int(pos.get("age_cycles")),
+                "floating": _safe_float(pos.get("floating")),
+            }
+        )
+
+    return tuple(events)
 
 
 def _safe_float(value: Any) -> float:

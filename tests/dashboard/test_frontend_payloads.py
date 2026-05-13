@@ -4,6 +4,8 @@ import json
 import time
 from decimal import Decimal
 
+import pytest
+
 from backend.app.brokers.execution_boundary import (
     resolve_mode_dominance,
     validate_execution_boundary,
@@ -45,6 +47,12 @@ from dashboard.runtime.trade_lifecycle_service import (
     TRADE_LIFECYCLE_SERVICE_VERSION,
     TradeLifecycleExecutionStateService,
     classify_exit_reason,
+)
+from dashboard.runtime.trade_lifecycle_replay_sink import (
+    TRADE_LIFECYCLE_REPLAY_SINK_VERSION,
+    TradeLifecycleReplaySink,
+    TradeLifecycleReplaySinkError,
+    load_trade_lifecycle_replay_events,
 )
 from dashboard.runtime.deployment_profiles import (
     DEPLOYMENT_PROFILE_VERSION,
@@ -609,3 +617,182 @@ def test_trade_lifecycle_service_applies_defensive_reduction_order() -> None:
     assert positions[0]["forced_exit"] is False
     assert positions[1]["forced_exit"] is True
     assert asset_pnls["FX"]["GBP_USD"] == -2.0
+
+
+def test_trade_lifecycle_replay_sink_persists_jsonl_and_redacts(tmp_path) -> None:
+    sink_path = tmp_path / "trade_lifecycle_replay.jsonl"
+    sink = TradeLifecycleReplaySink(sink_path)
+
+    result = sink.record(
+        {
+            "event_type": "position_exit_booked",
+            "position_id": "POS-1",
+            "symbol": "BTC-USD",
+            "asset_class": "CRYPTO",
+            "mode": "paper",
+            "session_id": "SESSION-17",
+            "realized_pnl": Decimal("1.25"),
+            "api_secret": "do-not-export",
+        }
+    )
+    events = load_trade_lifecycle_replay_events(sink_path)
+    serialized = sink_path.read_text(encoding="utf-8")
+
+    assert result["ok"] is True
+    assert len(events) == 1
+    assert events[0]["sink_payload_version"] == TRADE_LIFECYCLE_REPLAY_SINK_VERSION
+    assert events[0]["event_type"] == "position_exit_booked"
+    assert events[0]["payload"]["realized_pnl"] == "1.25"
+    assert "do-not-export" not in serialized
+    assert "REDACTED" in serialized
+
+
+def test_trade_lifecycle_replay_sink_non_strict_failure_does_not_raise(tmp_path) -> None:
+    sink = TradeLifecycleReplaySink(tmp_path)
+
+    result = sink.record({"event_type": "position_exit_booked", "position_id": "POS-FAIL"})
+
+    assert result["ok"] is False
+    assert "error" in result
+
+
+def test_trade_lifecycle_replay_sink_strict_failure_raises(tmp_path) -> None:
+    sink = TradeLifecycleReplaySink(tmp_path, strict=True)
+
+    with pytest.raises(TradeLifecycleReplaySinkError):
+        sink.record({"event_type": "position_exit_booked", "position_id": "POS-FAIL"})
+
+
+def test_trade_lifecycle_service_writes_named_replay_events(tmp_path) -> None:
+    class Noop:
+        def record_trade(self, **_kwargs) -> None:
+            return None
+
+        def release_trade(self, _position_id: str) -> None:
+            return None
+
+        def release_cluster_slot(self, _cluster_name: str) -> None:
+            return None
+
+        def record_cluster_win(self, _symbol: str, _pnl: float) -> None:
+            return None
+
+        def record_forced_exit(self, _position_id: str, _amount: float) -> None:
+            return None
+
+        def record_priority_exit(self) -> None:
+            return None
+
+        def record_defensive_reduction_exit(self) -> None:
+            return None
+
+        def record_recycled_slot(self) -> None:
+            return None
+
+    sink_path = tmp_path / "lifecycle_replay.jsonl"
+    sink = TradeLifecycleReplaySink(sink_path)
+    asset_pnls = {"FX": {"EUR_USD": 0.0}}
+    service = TradeLifecycleExecutionStateService(
+        pnl_tracker=Noop(),
+        capital_tracker=Noop(),
+        pnl_dict_provider=lambda asset_class: asset_pnls[asset_class],
+        cluster_amplifier=Noop(),
+        cluster_risk_governor=Noop(),
+        locked_profit_ledger=Noop(),
+        session_context_provider=lambda: {
+            "user_id": "00017",
+            "role": "TRADER",
+            "session_id": "SESSION-17",
+        },
+        mode_provider=lambda: "paper",
+        replay_recorder=sink.record,
+    )
+    position = {
+        "position_id": "POS-9",
+        "asset_class": "FX",
+        "symbol": "EUR_USD",
+        "cluster_name": "FX_MAJOR",
+        "floating": -2.5,
+        "age_cycles": 5,
+        "forced_exit": False,
+        "broker_tested": True,
+        "broker_order_ok": False,
+    }
+
+    result = service.book_position_exit(position, "DEFENSIVE_REDUCTION")
+    events = load_trade_lifecycle_replay_events(sink_path)
+    event_types = {event["event_type"] for event in events}
+
+    assert result.booked is True
+    assert len(result.replay_events) == 6
+    assert {
+        "position_exit_booked",
+        "defensive_reduction_applied",
+        "realized_pnl_handoff",
+        "capital_released",
+        "locked_profit_updated",
+        "lifecycle_audit_payload_created",
+    } <= event_types
+    assert all(event["payload"]["session_id"] == "SESSION-17" for event in events)
+    assert json.dumps([event["payload"] for event in events], sort_keys=True)
+
+
+def test_trade_lifecycle_service_non_strict_replay_failure_keeps_booking(tmp_path) -> None:
+    class Noop:
+        def __init__(self) -> None:
+            self.released = []
+
+        def record_trade(self, **_kwargs) -> None:
+            return None
+
+        def release_trade(self, position_id: str) -> None:
+            self.released.append(position_id)
+
+        def release_cluster_slot(self, _cluster_name: str) -> None:
+            return None
+
+        def record_cluster_win(self, _symbol: str, _pnl: float) -> None:
+            return None
+
+        def record_forced_exit(self, _position_id: str, _amount: float) -> None:
+            return None
+
+        def record_priority_exit(self) -> None:
+            return None
+
+        def record_defensive_reduction_exit(self) -> None:
+            return None
+
+        def record_recycled_slot(self) -> None:
+            return None
+
+    sink = TradeLifecycleReplaySink(tmp_path, strict=True)
+    asset_pnls = {"CRYPTO": {"BTC-USD": 0.0}}
+    log_messages = []
+    service = TradeLifecycleExecutionStateService(
+        pnl_tracker=Noop(),
+        capital_tracker=Noop(),
+        pnl_dict_provider=lambda asset_class: asset_pnls[asset_class],
+        cluster_amplifier=Noop(),
+        cluster_risk_governor=Noop(),
+        locked_profit_ledger=Noop(),
+        replay_recorder=sink.record,
+        logger=log_messages.append,
+    )
+    position = {
+        "position_id": "POS-10",
+        "asset_class": "CRYPTO",
+        "symbol": "BTC-USD",
+        "cluster_name": "CRYPTO_CORE",
+        "floating": 1.0,
+        "forced_exit": False,
+        "broker_tested": False,
+        "broker_order_ok": False,
+    }
+
+    result = service.book_position_exit(position, "TAKE_PROFIT")
+
+    assert result.booked is True
+    assert position["forced_exit"] is True
+    assert asset_pnls["CRYPTO"]["BTC-USD"] == 1.0
+    assert any("Replay handoff failed" in message for message in log_messages)

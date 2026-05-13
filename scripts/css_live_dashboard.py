@@ -171,6 +171,7 @@ from dashboard.runtime.live_dashboard_state import (
 from dashboard.runtime.trade_lifecycle_service import (
     TradeLifecycleExecutionStateService,
 )
+from dashboard.runtime.trade_lifecycle_replay_sink import TradeLifecycleReplaySink
 price_feed = get_price_feed()
 
 # === PCNRASS SAFE PNL IMPORT COMPATIBILITY ===
@@ -2387,6 +2388,13 @@ def _record_trade_lifecycle_audit(payload: dict[str, Any]) -> None:
     )
 
 
+trade_lifecycle_replay_sink = TradeLifecycleReplaySink(
+    ARTIFACTS_DIR / "css_trade_lifecycle_replay.jsonl",
+    strict=os.getenv("CSS_STRICT_REPLAY_PERSISTENCE", "false").strip().lower()
+    in {"1", "true", "yes", "y", "on"},
+)
+
+
 trade_lifecycle_service = TradeLifecycleExecutionStateService(
     pnl_tracker=pnl_tracker,
     capital_tracker=capital_governor,
@@ -2397,6 +2405,11 @@ trade_lifecycle_service = TradeLifecycleExecutionStateService(
     session_context_provider=_trade_lifecycle_session_context,
     mode_provider=lambda: SELECTED_BROKER_MODE,
     audit_recorder=_record_trade_lifecycle_audit,
+    replay_recorder=trade_lifecycle_replay_sink.record,
+    strict_replay_persistence=os.getenv(
+        "CSS_STRICT_REPLAY_PERSISTENCE",
+        "false",
+    ).strip().lower() in {"1", "true", "yes", "y", "on"},
     logger=print,
 )
 

@@ -103,6 +103,7 @@ dashboard/runtime/*
 !dashboard/runtime/deployment_profiles.py
 !dashboard/runtime/live_dashboard_state.py
 !dashboard/runtime/trade_lifecycle_service.py
+!dashboard/runtime/trade_lifecycle_replay_sink.py
 
 !live_data/
 !live_data/*.py
