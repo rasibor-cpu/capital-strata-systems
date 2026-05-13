@@ -41,6 +41,11 @@ from dashboard.runtime.live_dashboard_state import (
     pnl_dict_for_asset as runtime_pnl_dict_for_asset,
     total_realized_pnl as runtime_total_realized_pnl,
 )
+from dashboard.runtime.trade_lifecycle_service import (
+    TRADE_LIFECYCLE_SERVICE_VERSION,
+    TradeLifecycleExecutionStateService,
+    classify_exit_reason,
+)
 from dashboard.runtime.deployment_profiles import (
     DEPLOYMENT_PROFILE_VERSION,
     get_deployment_profiles,
@@ -354,3 +359,253 @@ def test_smart_drift_engine_is_deterministic_with_injected_rng() -> None:
     )
 
     assert drift == -0.022
+
+
+def test_trade_lifecycle_service_books_position_exit_and_payloads() -> None:
+    asset_pnls = {"CRYPTO": {"BTC-USD": 0.0}}
+    audit_events = []
+
+    class PnLTracker:
+        def __init__(self) -> None:
+            self.records = []
+
+        def record_trade(self, **kwargs) -> None:
+            self.records.append(kwargs)
+
+    class CapitalTracker:
+        def __init__(self) -> None:
+            self.released = []
+
+        def release_trade(self, position_id: str) -> None:
+            self.released.append(position_id)
+
+    class ClusterRisk:
+        def __init__(self) -> None:
+            self.released = []
+
+        def release_cluster_slot(self, cluster_name: str) -> None:
+            self.released.append(cluster_name)
+
+    class ClusterAmplifier:
+        def __init__(self) -> None:
+            self.wins = []
+
+        def record_cluster_win(self, symbol: str, pnl: float) -> None:
+            self.wins.append((symbol, pnl))
+
+    class LockedProfitLedger:
+        def __init__(self) -> None:
+            self.forced = []
+            self.priority = 0
+            self.defensive = 0
+            self.recycled = 0
+
+        def record_forced_exit(self, position_id: str, amount: float) -> None:
+            self.forced.append((position_id, amount))
+
+        def record_priority_exit(self) -> None:
+            self.priority += 1
+
+        def record_defensive_reduction_exit(self) -> None:
+            self.defensive += 1
+
+        def record_recycled_slot(self) -> None:
+            self.recycled += 1
+
+    pnl_tracker = PnLTracker()
+    capital_tracker = CapitalTracker()
+    cluster_risk = ClusterRisk()
+    cluster_amplifier = ClusterAmplifier()
+    locked_profit = LockedProfitLedger()
+    service = TradeLifecycleExecutionStateService(
+        pnl_tracker=pnl_tracker,
+        capital_tracker=capital_tracker,
+        pnl_dict_provider=lambda asset_class: asset_pnls[asset_class],
+        cluster_amplifier=cluster_amplifier,
+        cluster_risk_governor=cluster_risk,
+        locked_profit_ledger=locked_profit,
+        session_context_provider=lambda: {
+            "user_id": "00017",
+            "role": "TRADER",
+            "session_id": "SESSION-17",
+        },
+        mode_provider=lambda: "paper",
+        audit_recorder=audit_events.append,
+    )
+    position = {
+        "position_id": "POS-1",
+        "asset_class": "CRYPTO",
+        "symbol": "BTC-USD",
+        "cluster_name": "CRYPTO_CORE",
+        "floating": -1.23456,
+        "forced_exit": False,
+        "broker_tested": True,
+        "broker_order_ok": False,
+    }
+
+    result = service.book_position_exit(position, "STOP")
+    payload = result.as_dict()
+
+    assert result.booked is True
+    assert result.status == "EXIT_BOOKED"
+    assert result.classification == "FORCED_EXIT"
+    assert result.last_trade == "BTC-USD EXIT STOP -1.2346"
+    assert position["forced_exit"] is True
+    assert position["exit_reason"] == "STOP"
+    assert asset_pnls["CRYPTO"]["BTC-USD"] == -1.2346
+    assert pnl_tracker.records[0]["realized_pnl"] == -1.2346
+    assert capital_tracker.released == ["POS-1"]
+    assert cluster_risk.released == ["CRYPTO_CORE"]
+    assert cluster_amplifier.wins == [("BTC-USD", -1.2346)]
+    assert locked_profit.forced == [("POS-1", -1.2346)]
+    assert locked_profit.recycled == 1
+    assert audit_events[0]["payload_version"] == TRADE_LIFECYCLE_SERVICE_VERSION
+    assert payload["replay_payload"]["event_type"] == "trade_exit_replay_event"
+    assert json.dumps(payload)
+
+
+def test_trade_lifecycle_service_execute_exit_preserves_observer_and_capital_release() -> None:
+    class PnLTracker:
+        def record_trade(self, **_kwargs) -> None:
+            return None
+
+    class CapitalTracker:
+        def __init__(self) -> None:
+            self.released = []
+
+        def release_trade(self, position_id: str) -> None:
+            self.released.append(position_id)
+
+    class NoopCluster:
+        def release_cluster_slot(self, _cluster_name: str) -> None:
+            return None
+
+        def record_cluster_win(self, _symbol: str, _pnl: float) -> None:
+            return None
+
+    class LockedProfitLedger:
+        def record_forced_exit(self, _position_id: str, _amount: float) -> None:
+            return None
+
+        def record_priority_exit(self) -> None:
+            return None
+
+        def record_defensive_reduction_exit(self) -> None:
+            return None
+
+        def record_recycled_slot(self) -> None:
+            return None
+
+    class Observer:
+        def __init__(self) -> None:
+            self.closed = []
+
+        def close_position(self, symbol: str, price: float) -> float:
+            self.closed.append((symbol, price))
+            return 1.0
+
+    capital_tracker = CapitalTracker()
+    service = TradeLifecycleExecutionStateService(
+        pnl_tracker=PnLTracker(),
+        capital_tracker=capital_tracker,
+        pnl_dict_provider=lambda _asset_class: {"BTC-USD": 0.0},
+        cluster_amplifier=NoopCluster(),
+        cluster_risk_governor=NoopCluster(),
+        locked_profit_ledger=LockedProfitLedger(),
+    )
+    observer = Observer()
+    position = {
+        "position_id": "POS-2",
+        "asset_class": "CRYPTO",
+        "symbol": "BTC-USD",
+        "cluster_name": "CRYPTO_CORE",
+        "floating": 2.0,
+        "forced_exit": False,
+        "broker_tested": True,
+        "broker_order_ok": False,
+    }
+
+    result = service.execute_exit(
+        position,
+        observer_symbol="POS-2::BTC-USD",
+        observer_price=102.0,
+        reason="TAKE_PROFIT",
+        pnl_observer=observer,
+    )
+
+    assert result.booked is True
+    assert result.classification == "PRIORITY_EXIT"
+    assert observer.closed == [("POS-2::BTC-USD", 102.0)]
+    assert capital_tracker.released == ["POS-2", "POS-2"]
+    assert classify_exit_reason("DEFENSIVE_REDUCTION") == "DEFENSIVE_REDUCTION"
+
+
+def test_trade_lifecycle_service_applies_defensive_reduction_order() -> None:
+    class Noop:
+        def record_trade(self, **_kwargs) -> None:
+            return None
+
+        def release_trade(self, _position_id: str) -> None:
+            return None
+
+        def release_cluster_slot(self, _cluster_name: str) -> None:
+            return None
+
+        def record_cluster_win(self, _symbol: str, _pnl: float) -> None:
+            return None
+
+        def record_forced_exit(self, _position_id: str, _amount: float) -> None:
+            return None
+
+        def record_priority_exit(self) -> None:
+            return None
+
+        def record_defensive_reduction_exit(self) -> None:
+            return None
+
+        def record_recycled_slot(self) -> None:
+            return None
+
+    asset_pnls = {"FX": {"EUR_USD": 0.0, "GBP_USD": 0.0}}
+    service = TradeLifecycleExecutionStateService(
+        pnl_tracker=Noop(),
+        capital_tracker=Noop(),
+        pnl_dict_provider=lambda asset_class: asset_pnls[asset_class],
+        cluster_amplifier=Noop(),
+        cluster_risk_governor=Noop(),
+        locked_profit_ledger=Noop(),
+    )
+    positions = [
+        {
+            "position_id": "POS-1",
+            "asset_class": "FX",
+            "symbol": "EUR_USD",
+            "cluster_name": "FX_MAJOR",
+            "floating": 1.0,
+            "age_cycles": 4,
+            "forced_exit": False,
+            "broker_order_ok": False,
+        },
+        {
+            "position_id": "POS-2",
+            "asset_class": "FX",
+            "symbol": "GBP_USD",
+            "cluster_name": "FX_MAJOR",
+            "floating": -2.0,
+            "age_cycles": 1,
+            "forced_exit": False,
+            "broker_order_ok": False,
+        },
+    ]
+
+    result = service.apply_defensive_exposure_reduction(
+        positions=positions,
+        is_session_locked=lambda: True,
+        limit=1,
+    )
+
+    assert result.reductions == 1
+    assert result.last_trade == "GBP_USD EXIT DEFENSIVE_REDUCTION -2.0000"
+    assert positions[0]["forced_exit"] is False
+    assert positions[1]["forced_exit"] is True
+    assert asset_pnls["FX"]["GBP_USD"] == -2.0

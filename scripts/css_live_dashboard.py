@@ -168,6 +168,9 @@ from dashboard.runtime.live_dashboard_state import (
     pnl_dict_for_asset as runtime_pnl_dict_for_asset,
     total_realized_pnl as runtime_total_realized_pnl,
 )
+from dashboard.runtime.trade_lifecycle_service import (
+    TradeLifecycleExecutionStateService,
+)
 price_feed = get_price_feed()
 
 # === PCNRASS SAFE PNL IMPORT COMPATIBILITY ===
@@ -2372,6 +2375,32 @@ def pnl_dict_for_asset(asset_class: str) -> dict:
     return runtime_pnl_dict_for_asset(_asset_pnls, asset_class)
 
 
+def _trade_lifecycle_session_context() -> dict[str, Any]:
+    return SESSION_USER_CTX
+
+
+def _record_trade_lifecycle_audit(payload: dict[str, Any]) -> None:
+    audit_ledger.record(
+        "trade_lifecycle_exit",
+        str(SESSION_USER_CTX.get("user_id")),
+        payload,
+    )
+
+
+trade_lifecycle_service = TradeLifecycleExecutionStateService(
+    pnl_tracker=pnl_tracker,
+    capital_tracker=capital_governor,
+    pnl_dict_provider=pnl_dict_for_asset,
+    cluster_amplifier=cluster_amplifier,
+    cluster_risk_governor=cluster_risk_governor,
+    locked_profit_ledger=locked_profit_ledger,
+    session_context_provider=_trade_lifecycle_session_context,
+    mode_provider=lambda: SELECTED_BROKER_MODE,
+    audit_recorder=_record_trade_lifecycle_audit,
+    logger=print,
+)
+
+
 
 # =========================
 # R17 EXIT EXECUTION LAYER
@@ -2381,107 +2410,37 @@ def r17_execute_exit(pos, observer_symbol, observer_price, reason):
     Institutional exit execution pipeline:
     - Ensures capital, PnL, and lifecycle stay in sync
     """
-    try:
-        if pos.get("forced_exit"):
-            return
+    global last_trade
 
-        # 1. Book exit (authoritative)
-        book_position_exit(pos, reason)
-
-        # 2. Close observer position (PnL)
-        try:
-            pnl_observer.close_position(observer_symbol, observer_price)
-        except Exception as e:
-            print(f"[R17 WARN] Observer close failed: {str(e)[:60]}")
-
-        # 3. Ensure capital release safety (idempotent)
-        try:
-            if pos.get("broker_tested", False):
-                capital_governor.release_trade(pos["position_id"])
-        except Exception as e:
-            print(f"[R17 WARN] Capital release failed: {str(e)[:60]}")
-
-    except Exception as e:
-        print(f"[R17 ERROR] Exit execution failure: {str(e)[:80]}")
+    result = trade_lifecycle_service.execute_exit(
+        pos,
+        observer_symbol=observer_symbol,
+        observer_price=observer_price,
+        reason=reason,
+        pnl_observer=pnl_observer,
+    )
+    if result.last_trade:
+        last_trade = result.last_trade
 
 def book_position_exit(pos: dict, reason: str) -> None:
     global last_trade
 
-    if pos["forced_exit"]:
-        return
-
-    if pos.get("broker_order_ok"):
-        last_trade = f"{pos['symbol']} BROKER_OPEN_MANUAL_REVIEW"
-        return
-
-    realized = round(pos["floating"], 4)
-
-    # === TRACKER UPDATE ===
-    try:
-        pnl_tracker.record_trade(
-            instrument=pos["symbol"],
-            realized_pnl=realized,
-            unrealized_pnl=0.0
-        )
-    except Exception as e:
-        print(f"[TRACKER ERROR] {e}")
-
-    pos["forced_exit"] = True
-    pos["exit_reason"] = reason
-
-    cluster_risk_governor.release_cluster_slot(pos["cluster_name"])
-
-    if pos.get("broker_tested", False):
-        capital_governor.release_trade(pos["position_id"])
-
-    target_pnl = pnl_dict_for_asset(pos["asset_class"])
-    target_pnl[pos["symbol"]] = round(
-        target_pnl.get(pos["symbol"], 0.0) + realized,
-        4,
-    )
-
-    cluster_amplifier.record_cluster_win(pos["symbol"], realized)
-
-    if reason in {"STOP", "FAST_STOP"}:
-        locked_profit_ledger.record_forced_exit(pos["position_id"], realized)
-    elif reason == "TAKE_PROFIT":
-        locked_profit_ledger.record_priority_exit()
-    elif reason == "DEFENSIVE_REDUCTION":
-        locked_profit_ledger.record_defensive_reduction_exit()
-
-    locked_profit_ledger.record_recycled_slot()
-
-    last_trade = f"{pos['symbol']} EXIT {reason} {realized:+.4f}"
+    result = trade_lifecycle_service.book_position_exit(pos, reason)
+    if result.last_trade:
+        last_trade = result.last_trade
 
 
 def apply_defensive_exposure_reduction() -> int:
-    if not is_session_locked():
-        return 0
+    global last_trade
 
-    open_positions_list = [
-        p for p in mtm_engine.positions if not p["forced_exit"]
-    ]
-
-    if not open_positions_list:
-        return 0
-
-    open_positions_list.sort(
-        key=lambda x: (float(x.get("floating", 0.0)), -int(x.get("age_cycles", 0)))
+    result = trade_lifecycle_service.apply_defensive_exposure_reduction(
+        positions=mtm_engine.positions,
+        is_session_locked=is_session_locked,
+        limit=DEFENSIVE_REDUCTION_PER_CYCLE,
     )
-
-    reductions = 0
-
-    for pos in open_positions_list:
-        if reductions >= DEFENSIVE_REDUCTION_PER_CYCLE:
-            break
-
-        if pos.get("broker_order_ok"):
-            continue
-
-        book_position_exit(pos, "DEFENSIVE_REDUCTION")
-        reductions += 1
-
-    return reductions
+    if result.last_trade:
+        last_trade = result.last_trade
+    return result.reductions
 
 
 def print_oanda_broker_status() -> None:
