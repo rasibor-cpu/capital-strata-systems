@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import tempfile
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import dashboard.auth.css_sign_on as css_auth
 from dashboard.auth.css_sign_on import (
     AuthFailure,
     INITIAL_ADMIN_ID,
@@ -120,6 +122,23 @@ def main() -> int:
         assert user_ctx["role"] == "SUPER_USER"
         assert users[INITIAL_ADMIN_ID]["failed_attempts"] == 0
         assert users[INITIAL_ADMIN_ID]["locked"] is False
+
+        previous_store = os.environ.get("CSS_AUTH_STORE")
+        previous_db = css_auth.USER_DB_FILE
+        try:
+            os.environ["CSS_AUTH_STORE"] = "db"
+            css_auth.USER_DB_FILE = Path(tmp) / "css_users.sqlite3"
+            db_users = css_auth.load_users()
+            db_ctx = css_auth.change_password(db_users, INITIAL_ADMIN_ID, "dbgood1", "dbgood1")
+            css_auth.save_users(db_users)
+            reloaded = css_auth.load_users()
+            assert css_auth.authenticate_credentials(reloaded, INITIAL_ADMIN_ID, "dbgood1")["role"] == db_ctx["role"]
+        finally:
+            css_auth.USER_DB_FILE = previous_db
+            if previous_store is None:
+                os.environ.pop("CSS_AUTH_STORE", None)
+            else:
+                os.environ["CSS_AUTH_STORE"] = previous_store
 
     print("CSS sign-on smoke test PASSED")
     return 0

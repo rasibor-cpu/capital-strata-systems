@@ -16,6 +16,8 @@ from dashboard.runtime.frontend_contract import (
 from dashboard.runtime.broker_balance_reconciliation import (
     build_broker_reconciliation_payload,
 )
+from dashboard.runtime.alerting_layer import build_alert_payload
+from dashboard.runtime.deployment_profiles import get_deployment_profiles
 from dashboard.runtime.ws_bridge import create_ws_router
 
 
@@ -62,6 +64,12 @@ def get_broker_reconciliation_payload(
 ) -> dict[str, Any]:
     state = _state_from_provider(state_provider)
     return build_broker_reconciliation_payload(state.to_dict())
+
+
+def get_alert_payload(
+    state_provider: DashboardStateProvider | None = None,
+) -> dict[str, Any]:
+    return build_alert_payload(get_frontend_payload(state_provider))
 
 
 def create_dashboard_state_router(
@@ -126,6 +134,14 @@ def create_dashboard_state_router(
             "broker_reconciliation",
         )
 
+    @router.get("/api/v1/alerts")
+    def read_alerts() -> dict[str, Any]:
+        return get_alert_payload(state_provider)
+
+    @router.get("/api/v1/deployment-profiles")
+    def read_deployment_profiles() -> dict[str, Any]:
+        return get_deployment_profiles()
+
     return router
 
 
@@ -151,6 +167,7 @@ __all__ = [
     "create_dashboard_state_router",
     "default_dashboard_state_provider",
     "get_broker_reconciliation_payload",
+    "get_alert_payload",
     "get_dashboard_state_payload",
     "get_frontend_payload",
 ]

@@ -8,6 +8,7 @@ from dashboard.runtime.trade_replay_harness import (
     ACCEPTED_LIFECYCLE_PATH,
     TRADE_REPLAY_PAYLOAD_VERSION,
     compare_expected_to_actual,
+    reconstruct_replay_state,
     replay_lifecycle_audit,
     replay_mobile_trade_event_file,
 )
@@ -53,6 +54,10 @@ def test_replay_lifecycle_audit_passes_for_blocked_trade_path() -> None:
     assert payload["steps"][-1]["actual_action"] == "BLOCKED"
     assert payload["steps"][-1]["actual_status"] == "BLOCKED"
     assert payload["steps"][-1]["reason"] == "risk_gate_blocked"
+    reconstruction = reconstruct_replay_state(report)
+    assert reconstruction["sequence_integrity"] is True
+    assert reconstruction["blocked_reasons"] == ["risk_gate_blocked"]
+    assert "live" in reconstruction["modes_observed"]
 
 
 def test_replay_detects_expected_vs_actual_mismatch() -> None:

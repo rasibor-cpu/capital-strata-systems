@@ -39,6 +39,7 @@ def main() -> int:
         "/trade",
         "/users",
         "/api/status",
+        "/api/alerts",
         "/api/audit/export",
         "/api/audit/replay",
         "/manifest.webmanifest",

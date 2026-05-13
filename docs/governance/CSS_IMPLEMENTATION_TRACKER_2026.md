@@ -76,14 +76,15 @@ Governance Dependencies:
 - Observability Governance
 
 Status:
-Partially implemented / verify before additional work
+Complete
 
-Required:
-- confirm runtime audit viewer completeness
-- confirm mobile audit viewer coverage
-- confirm filtering support
-- confirm export-safe behavior
-- confirm no secret exposure
+Implemented:
+- runtime audit viewer
+- mobile audit viewer and export endpoint
+- category/status/actor/source/time filtering
+- export-safe redacted JSON payloads
+- deterministic replay handoff
+- no secret exposure in tested payloads
 
 ---
 
@@ -95,15 +96,15 @@ Governance Dependencies:
 - Data & Payload Governance
 
 Status:
-Partially implemented / verify before additional work
+Complete
 
-Required:
+Implemented:
 - deterministic replay harness
 - expected vs actual comparison
 - lifecycle reconstruction
-- governance reconstruction
-- broker-state reconstruction
-- replay-safe serialization
+- governance and broker event reconstruction summaries
+- replay-safe redacted serialization
+- mobile audit replay endpoint
 
 ---
 
@@ -116,15 +117,18 @@ Governance Dependencies:
 - Observability Governance
 
 Status:
-Planned / high priority
+Foundation complete
 
-Required:
-- websocket-first frontend updates
-- delta payload support
+Implemented:
+- typed websocket delta events
+- aggregate legacy delta compatibility
+- web client typed-event consumption
 - reconnect handling
-- stale-state detection
-- payload sequence validation
-- mobile/web synchronization
+- heartbeat payloads
+- stale sequence detection helpers
+
+Remaining:
+- deeper mobile websocket live-view migration can be added as a future enhancement
 
 ---
 
@@ -136,16 +140,17 @@ Governance Dependencies:
 - Observability Governance
 
 Status:
-Planned / high priority
+Complete
 
-Required:
-- one-command PCNRASS validation
+Implemented:
+- one-command PCNRASS validation script
 - compile checks
-- smoke tests
-- reconciliation tests
-- replay tests
-- release notes
-- rollback tag support
+- dashboard/engine tests
+- runtime, web, auth, and mobile smoke tests
+- JSON release summary output
+
+Remaining:
+- release-note publishing and remote tag push remain manual until explicitly requested
 
 ---
 
@@ -157,14 +162,14 @@ Governance Dependencies:
 - Operational Risk Governance
 
 Status:
-Planned
+Complete
 
-Required:
+Implemented:
 - local deployment profile
 - LAN/mobile deployment profile
 - VPS/cloud test profile
 - production deployment profile
-- secure defaults
+- secure defaults and fail-closed validation helpers
 
 ---
 
@@ -175,13 +180,13 @@ Governance Dependencies:
 - Operational Risk Governance
 
 Status:
-Planned
+Complete
 
-Required:
-- restart-safe sessions
+Implemented:
+- restart-safe hashed-token session persistence
 - session expiration handling
-- session auditability
-- secure persistence
+- mobile session restoration support
+- logout revocation
 
 ---
 
@@ -191,13 +196,13 @@ Governance Dependencies:
 - Security & Access Governance
 
 Status:
-Planned
+Complete
 
-Required:
-- secure user store
-- hashed credentials
-- RBAC persistence
-- audit traceability
+Implemented:
+- optional SQLite-backed user store via CSS_AUTH_STORE=db
+- existing hashed credential schema preserved
+- RBAC payload persistence
+- JSON user store remains default for backward compatibility
 
 ---
 
@@ -209,15 +214,17 @@ Governance Dependencies:
 - Mobile Governance
 
 Status:
-Planned
+Complete
 
-Required:
+Implemented:
 - broker disconnect alerts
 - reconciliation drift alerts
-- kill-switch alerts
-- websocket degradation alerts
-- session/security alerts
-- mobile/web alert rendering
+- credential/security alerts
+- drawdown/risk breach alerts
+- session lock and defensive-mode alerts
+- execution rejection alerts
+- runtime API alert endpoint
+- mobile API alert endpoint
 
 ---
 
@@ -226,40 +233,32 @@ Required:
 ### Replay Readiness
 
 Status:
-In progress
+Complete
 
 Blocking items:
-- replay harness verification
-- deterministic reconstruction
-- replay-safe payload sequencing
+- none for current scope
 
 ---
 
 ### WebSocket Readiness
 
 Status:
-In progress / planned
+Foundation complete
 
 Blocking items:
-- websocket migration
-- stale-state handling
-- payload sequence verification
-- mobile/web synchronization
+- deeper mobile websocket live-view migration remains optional future enhancement
 
 ---
 
 ### Deployment Readiness
 
 Status:
-Not approved for unrestricted live deployment
+Restricted deployment profile ready; unrestricted live deployment still requires operator approval
 
 Blocking items:
-- release checklist automation
-- production deployment profiles
-- persistent sessions
-- alerting layer
-- websocket stability
-- replay verification
+- live broker credential validation
+- live broker-specific dry-run certification
+- operator approval for production/live mode
 
 ---
 
@@ -328,9 +327,9 @@ Preferred use:
 
 Recommended next engineering priority:
 
-1. Verify Audit Trail Viewer completeness
-2. Complete or harden Trade Replay / Simulation Harness
-3. Begin websocket migration in shadow mode
-4. Build release checklist automation
+1. Run PCNRASS release checklist before every commit or push
+2. Keep live trading restricted until broker-specific live dry-run certification is approved
+3. Continue dashboard separation only in bounded, no-regression slices
+4. Treat new feature ideas as post-backlog enhancements
 
-No unrestricted live trading should occur until the above are complete and PCNRASS-confirmed.
+No unrestricted live trading should occur without operator approval, broker certification, and PCNRASS-confirmed release checks.

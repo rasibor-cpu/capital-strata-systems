@@ -27,11 +27,14 @@ from dashboard.auth.css_sign_on import (
     load_users,
     save_users,
 )
+from dashboard.auth.persistent_session_store import PersistentSessionStore
 from backend.security.permissions import PermissionEngine
 from dashboard.runtime.broker_credential_check import _load_coinbase_credentials, load_local_env
 from dashboard.runtime.broker_balance_reconciliation import (
     build_broker_reconciliation_payload,
 )
+from dashboard.runtime.alerting_layer import build_alert_payload
+from dashboard.runtime.frontend_contract import build_frontend_payload
 from dashboard.runtime.audit_trail_viewer import (
     AUDIT_CATEGORY_OPTIONS,
     export_audit_events,
@@ -51,6 +54,7 @@ SESSION_MAX_SECONDS = int(os.getenv("CSS_MOBILE_SESSION_SECONDS", "28800") or 28
 PASSWORD_CHANGE_SECONDS = int(os.getenv("CSS_MOBILE_PASSWORD_CHANGE_SECONDS", "600") or 600)
 MOBILE_EVENTS_FILE = PROJECT_ROOT / "artifacts" / "css_mobile_trade_events.jsonl"
 MOBILE_CONTROL_FILE = PROJECT_ROOT / "artifacts" / "css_mobile_controls.json"
+MOBILE_SESSION_FILE = PROJECT_ROOT / "artifacts" / "css_mobile_sessions.json"
 DEFAULT_COINBASE_MAX_LIVE_ORDER_USD = 1.00
 ENGINE_MODES = ("SAFE", "CONSERVATIVE", "BALANCED", "AGGRESSIVE")
 DEFAULT_MOBILE_CONTROLS = {
@@ -64,6 +68,7 @@ app = FastAPI(title="Capital Strata Systems Mobile", version="0.1.0")
 
 _SESSIONS: Dict[str, Dict[str, Any]] = {}
 _PASSWORD_CHANGES: Dict[str, Dict[str, Any]] = {}
+_SESSION_STORE = PersistentSessionStore(MOBILE_SESSION_FILE, max_age_seconds=SESSION_MAX_SECONDS)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -243,6 +248,7 @@ async def logout(request: Request):
     token = request.cookies.get(SESSION_COOKIE)
     if token:
         _SESSIONS.pop(token, None)
+        _SESSION_STORE.revoke(token)
     response = RedirectResponse("/login", status_code=303)
     response.delete_cookie(SESSION_COOKIE)
     return response
@@ -265,6 +271,18 @@ async def status(request: Request):
             "live_orders_enabled": system_status["live_orders_enabled"],
         }
     )
+
+
+@app.get("/api/alerts")
+async def alerts(request: Request):
+    session = _get_session(request)
+    if not session:
+        return JSONResponse({"ok": False, "error": "AUTH_REQUIRED"}, status_code=401)
+
+    state = DashboardHydrationCoordinator().hydrate(
+        **_mobile_runtime_payloads(session["user_ctx"], session)
+    )
+    return JSONResponse({"ok": True, **build_alert_payload(build_frontend_payload(state))})
 
 
 @app.get("/api/audit/export")
@@ -504,11 +522,13 @@ def _login_success_response(user_ctx: Dict[str, Any]) -> RedirectResponse:
 def _create_session(user_ctx: Dict[str, Any]) -> str:
     token = secrets.token_urlsafe(32)
     now = time.time()
-    _SESSIONS[token] = {
+    session = {
         "created": now,
         "last_activity": now,
         "user_ctx": dict(user_ctx),
     }
+    _SESSIONS[token] = session
+    _SESSION_STORE.save(token, session)
     return token
 
 
@@ -519,14 +539,22 @@ def _get_session(request: Request) -> Optional[Dict[str, Any]]:
 
     session = _SESSIONS.get(token)
     if not session:
+        session = _SESSION_STORE.get(token)
+        if session:
+            _SESSIONS[token] = session
+
+    if not session:
         return None
 
     now = time.time()
     if now - float(session.get("created", now)) > SESSION_MAX_SECONDS:
         _SESSIONS.pop(token, None)
+        _SESSION_STORE.revoke(token)
         return None
 
     session["last_activity"] = now
+    _SESSIONS[token] = session
+    _SESSION_STORE.touch(token, now=now)
     return session
 
 
@@ -1355,6 +1383,9 @@ def _audit_query_filters(request: Request) -> Dict[str, str]:
         "category": str(query.get("category", ""))[:64],
         "status": str(query.get("status", ""))[:96],
         "actor": str(query.get("actor", ""))[:64],
+        "source": str(query.get("source", ""))[:64],
+        "start_utc": str(query.get("start_utc", ""))[:64],
+        "end_utc": str(query.get("end_utc", ""))[:64],
     }
 
 
@@ -1369,7 +1400,14 @@ def _audit_category_options(current: str) -> str:
     return "\n".join(options)
 
 
-def _audit_export_href(category: str = "", status: str = "", actor: str = "") -> str:
+def _audit_export_href(
+    category: str = "",
+    status: str = "",
+    actor: str = "",
+    source: str = "",
+    start_utc: str = "",
+    end_utc: str = "",
+) -> str:
     query = urllib.parse.urlencode(
         {
             key: value
@@ -1377,6 +1415,9 @@ def _audit_export_href(category: str = "", status: str = "", actor: str = "") ->
                 "category": category,
                 "status": status,
                 "actor": actor,
+                "source": source,
+                "start_utc": start_utc,
+                "end_utc": end_utc,
             }.items()
             if value
         }

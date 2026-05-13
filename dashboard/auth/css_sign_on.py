@@ -13,6 +13,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 USERS_FILE = PROJECT_ROOT / "data" / "users.json"
 ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
 SESSION_AUTH_FILE = ARTIFACTS_DIR / "css_auth_session.json"
+USER_DB_FILE = ARTIFACTS_DIR / "css_users.sqlite3"
 
 INITIAL_ADMIN_ID = "00000"
 INITIAL_ADMIN_PASSWORD = "123456"
@@ -90,6 +91,16 @@ def await_login_ready_state() -> Dict[str, Any]:
 
 
 def load_users(users_file: Path = USERS_FILE) -> Dict[str, Any]:
+    if _use_db_user_store(users_file):
+        from dashboard.auth.user_store_db import SQLiteUserStore
+
+        users = SQLiteUserStore(USER_DB_FILE).load_users()
+        if not users:
+            users = {INITIAL_ADMIN_ID: _default_admin_record()}
+            save_users(users, users_file)
+            return users
+        return _normalize_loaded_users(users, users_file)
+
     users_file.parent.mkdir(parents=True, exist_ok=True)
 
     changed = False
@@ -156,13 +167,84 @@ def load_users(users_file: Path = USERS_FILE) -> Dict[str, Any]:
         if clear_expired_lockout(record):
             changed = True
 
+    return _normalize_loaded_users(users, users_file, changed=changed)
+
+
+def _normalize_loaded_users(
+    users: Dict[str, Any],
+    users_file: Path,
+    *,
+    changed: bool = False,
+) -> Dict[str, Any]:
+    if INITIAL_ADMIN_ID not in users:
+        users[INITIAL_ADMIN_ID] = _default_admin_record()
+        changed = True
+
+    for key, record in list(users.items()):
+        if not isinstance(record, dict):
+            continue
+
+        normalized = normalize_user_id(record.get("user_id", key))
+        if record.get("user_id") != normalized:
+            record["user_id"] = normalized
+            changed = True
+
+        defaults = {
+            "display_name": "CSS User",
+            "role": "VIEWER",
+            "unit_code": "CORE",
+            "home_branch": "HQ",
+            "must_change_password": False,
+            "last_password_change": None,
+            "password_history": [],
+            "failed_attempts": 0,
+            "locked": False,
+            "locked_at": None,
+            "lockout_until": None,
+            "lockout_seconds": 0,
+            "lockout_started_at": None,
+        }
+        for field, default in defaults.items():
+            if field not in record:
+                record[field] = default
+                changed = True
+
+        history = record.get("password_history")
+        if not isinstance(history, list):
+            record["password_history"] = []
+            changed = True
+        elif len(history) > PASSWORD_HISTORY_LIMIT:
+            record["password_history"] = history[-PASSWORD_HISTORY_LIMIT:]
+            changed = True
+
+        if key != normalized:
+            users[normalized] = record
+            users.pop(key, None)
+            changed = True
+
+        if clear_expired_lockout(record):
+            changed = True
+
     if changed:
         save_users(users, users_file)
 
     return users
 
 
+def _use_db_user_store(users_file: Path) -> bool:
+    return (
+        users_file == USERS_FILE
+        and os.getenv("CSS_AUTH_STORE", "").strip().lower() in {"db", "sqlite", "sqlite3"}
+    )
+
+
 def save_users(users: Dict[str, Any], users_file: Path = USERS_FILE) -> None:
+    if _use_db_user_store(users_file):
+        from dashboard.auth.user_store_db import SQLiteUserStore
+
+        SQLiteUserStore(USER_DB_FILE).save_users(users)
+        return
+
     users_file.parent.mkdir(parents=True, exist_ok=True)
     users_file.write_text(json.dumps(users, indent=2), encoding="utf-8")
 

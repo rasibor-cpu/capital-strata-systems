@@ -33,6 +33,8 @@ def main() -> int:
         "/api/v1/governance",
         "/api/v1/opportunities",
         "/api/v1/broker",
+        "/api/v1/alerts",
+        "/api/v1/deployment-profiles",
         "/ws/v1/dashboard-state",
     }
     missing = required_routes - routes

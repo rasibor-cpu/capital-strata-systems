@@ -401,6 +401,7 @@ def _dashboard_page() -> str:
       const indicator = document.getElementById("status-ws");
       const protocol = location.protocol === "https:" ? "wss" : "ws";
       const socket = new WebSocket(`${{protocol}}://${{location.host}}/ws/v1/dashboard-state`);
+      let lastSequence = -1;
       const deltaTypes = new Set([
         "dashboard_delta",
         "pnl_update",
@@ -413,11 +414,17 @@ def _dashboard_page() -> str:
       socket.addEventListener("open", () => {{ indicator.textContent = "WebSocket live"; }});
       socket.addEventListener("message", (event) => {{
         const message = JSON.parse(event.data);
+        if (Number(message.sequence ?? -1) <= lastSequence && message.message_type !== "dashboard_snapshot") {{
+          indicator.textContent = "WebSocket stale update ignored";
+          return;
+        }}
         if (message.message_type === "dashboard_snapshot") {{
+          lastSequence = Number(message.sequence ?? lastSequence);
           render(message);
           return;
         }}
         if (deltaTypes.has(message.message_type)) {{
+          lastSequence = Number(message.sequence ?? lastSequence);
           state.sections = {{ ...state.sections, ...(message.data || {{}}) }};
           render({{
             ...(state.payload || {{}}),
@@ -428,6 +435,7 @@ def _dashboard_page() -> str:
           return;
         }}
         if (message.message_type === "dashboard_heartbeat") {{
+          lastSequence = Number(message.sequence ?? lastSequence);
           indicator.textContent = `WebSocket live · seq ${{message.sequence ?? "?"}}`;
         }}
       }});

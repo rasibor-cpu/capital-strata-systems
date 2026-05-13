@@ -26,6 +26,17 @@ WS_DELTA_SECTIONS = (
     "risk",
     "broker",
 )
+WEBSOCKET_EVENT_TYPES = {
+    "dashboard_snapshot",
+    "dashboard_delta",
+    "dashboard_heartbeat",
+    "pnl_update",
+    "position_update",
+    "governance_alert",
+    "execution_alert",
+    "broker_status",
+    "risk_update",
+}
 
 
 def default_dashboard_state_provider() -> DashboardState:
@@ -80,9 +91,11 @@ def build_delta_ws_messages(
             "sequence": sequence,
             "stale_after_ms": delta.get("stale_after_ms", 15000),
             "changed_sections": [section],
+            "section": section,
+            "transport": "websocket_delta",
             "data": {section: delta["data"][section]},
         })
-        
+
     return messages
 
 
@@ -122,6 +135,29 @@ def build_heartbeat_ws_message(
         "data": {},
         "stale_after_ms": 15000,
     }
+
+
+def is_stale_ws_message(
+    message: dict[str, Any],
+    *,
+    last_sequence: int,
+    now_ms: int | None = None,
+) -> bool:
+    sequence = _safe_int(message.get("sequence"), -1)
+    if sequence <= last_sequence:
+        return True
+
+    generated_at = message.get("generated_at")
+    if not generated_at:
+        return False
+
+    generated_ms = _timestamp_ms(str(generated_at))
+    if generated_ms is None:
+        return False
+
+    current_ms = now_ms if now_ms is not None else int(datetime.now(timezone.utc).timestamp() * 1000)
+    stale_after_ms = _safe_int(message.get("stale_after_ms"), 15000)
+    return current_ms - generated_ms > stale_after_ms
 
 
 def create_ws_router(
@@ -179,13 +215,30 @@ def _state_from_provider(provider: DashboardStateProvider) -> DashboardState:
     return state
 
 
+def _safe_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def _timestamp_ms(value: str) -> int | None:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except Exception:
+        return None
+    return int(parsed.timestamp() * 1000)
+
+
 __all__ = [
     "DashboardStateProvider",
     "WS_DELTA_SECTIONS",
+    "WEBSOCKET_EVENT_TYPES",
     "build_delta_ws_message",
     "build_delta_ws_messages",
     "build_heartbeat_ws_message",
     "build_initial_ws_message",
     "create_ws_router",
     "default_dashboard_state_provider",
+    "is_stale_ws_message",
 ]

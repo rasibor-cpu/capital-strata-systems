@@ -130,10 +130,16 @@ def filter_audit_events(
     category: str = "",
     status: str = "",
     actor: str = "",
+    source: str = "",
+    start_utc: str = "",
+    end_utc: str = "",
 ) -> tuple[AuditTrailEvent, ...]:
     category_filter = category.strip().lower()
     status_filter = status.strip().lower()
     actor_filter = actor.strip().lower()
+    source_filter = source.strip().lower()
+    start_dt = _parse_timestamp(start_utc)
+    end_dt = _parse_timestamp(end_utc)
     filtered: list[AuditTrailEvent] = []
 
     for event in events:
@@ -142,6 +148,13 @@ def filter_audit_events(
         if status_filter and status_filter not in event.status.lower():
             continue
         if actor_filter and actor_filter not in event.actor.lower():
+            continue
+        if source_filter and source_filter not in event.source.lower():
+            continue
+        event_dt = _parse_timestamp(event.timestamp_utc)
+        if start_dt and event_dt and event_dt < start_dt:
+            continue
+        if end_dt and event_dt and event_dt > end_dt:
             continue
         filtered.append(event)
     return tuple(filtered)
@@ -218,6 +231,15 @@ def _stable_hash(value: Mapping[str, Any]) -> str:
 
 def _mapping(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
+
+
+def _parse_timestamp(value: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except Exception:
+        return None
 
 
 def _redact(value: Any) -> Any:

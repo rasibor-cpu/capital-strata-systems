@@ -348,6 +348,45 @@ def compare_expected_to_actual(
     )
 
 
+def reconstruct_replay_state(report: TradeReplayReport | Mapping[str, Any]) -> dict[str, Any]:
+    payload = report.as_dict() if isinstance(report, TradeReplayReport) else _json_safe(report)
+    steps = payload.get("steps", [])
+    if not isinstance(steps, Sequence) or isinstance(steps, (str, bytes)):
+        steps = []
+
+    normalized_steps = [step for step in steps if isinstance(step, Mapping)]
+    sequences = [_safe_int(step.get("sequence"), 0) for step in normalized_steps]
+    lifecycle_path = [str(step.get("actual_action", "UNKNOWN")) for step in normalized_steps]
+    governance_events = [
+        step
+        for step in normalized_steps
+        if str(step.get("category", "")).lower() in {"governance", "permission_denial"}
+    ]
+    broker_events = [
+        step
+        for step in normalized_steps
+        if str(step.get("category", "")).lower() in {"broker", "execution"}
+    ]
+    blocked_reasons = [
+        str(step.get("reason"))
+        for step in normalized_steps
+        if str(step.get("actual_status", "")).upper() in {"BLOCKED", "REJECTED"}
+        and step.get("reason")
+    ]
+
+    return {
+        "payload_version": "css.trade_replay.reconstruction.v1",
+        "replay_id": payload.get("replay_id", ""),
+        "session_id": payload.get("session_id", ""),
+        "sequence_integrity": sequences == list(range(1, len(sequences) + 1)),
+        "lifecycle_path": lifecycle_path,
+        "governance_event_count": len(governance_events),
+        "broker_event_count": len(broker_events),
+        "blocked_reasons": blocked_reasons,
+        "modes_observed": sorted({str(step.get("mode", "paper")) for step in normalized_steps}),
+    }
+
+
 def _events_from_lifecycle_trail(trail: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:
     events = trail.get("events", ())
     if not isinstance(events, Sequence) or isinstance(events, (str, bytes)):
@@ -455,6 +494,13 @@ def _parse_timestamp(value: str) -> datetime | None:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except Exception:
         return None
+
+
+def _safe_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
 
 
 def _replay_id(

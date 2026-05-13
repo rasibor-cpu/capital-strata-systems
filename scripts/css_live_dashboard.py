@@ -141,7 +141,6 @@ import socket
 import sys
 import time
 # PCNRASS: orchestrator bridge import deferred until after PROJECT_ROOT bootstrap
-from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
@@ -157,6 +156,18 @@ load_dotenv(PROJECT_ROOT / ".env.practice", override=False)
 
 # === PCNRASS PHASE 2 REAL MARKET PRICE FEED ===
 from backend.data.price_feed import get_price_feed
+from dashboard.runtime.live_dashboard_state import (
+    ClusterSaturationRiskGovernor,
+    LockedProfitLedger,
+    MarkToMarketEngine,
+    MomentumClusterAmplifier,
+    SessionRecoveryEngine,
+    SmartDriftEngine,
+    build_asset_pnl_maps,
+    build_cycle_runtime_summary,
+    pnl_dict_for_asset as runtime_pnl_dict_for_asset,
+    total_realized_pnl as runtime_total_realized_pnl,
+)
 price_feed = get_price_feed()
 
 # === PCNRASS SAFE PNL IMPORT COMPATIBILITY ===
@@ -2244,263 +2255,36 @@ def attempt_coinbase_crypto_execution(symbol: str) -> tuple[bool, str]:
         return False, f"COINBASE_ERROR_{str(e)[:40]}"
 
 
-class SessionRecoveryEngine:
-    def __init__(self) -> None:
-        self.state_file = STATE_FILE
-
-    def save_state(
-        self,
-        *,
-        cycle: int,
-        crypto_pnl: dict,
-        fx_pnl: dict,
-        options_pnl: dict,
-        futures_pnl: dict,
-        last_trade: str,
-        position_counter: int,
-    ) -> None:
-        payload = {
-            "cycle": cycle,
-            "crypto_pnl": crypto_pnl,
-            "fx_pnl": fx_pnl,
-            "options_pnl": options_pnl,
-            "futures_pnl": futures_pnl,
-            "last_trade": last_trade,
-            "position_counter": position_counter,
-            "session_user_ctx": SESSION_USER_CTX,
-            "selected_broker": SELECTED_BROKER,
-            "selected_broker_mode": SELECTED_BROKER_MODE,
-            "engine_mode": ENGINE_MODE,
-            "session_lock_state": get_session_lock_state(),
-        }
-
-        with open(self.state_file, "w", encoding="utf-8") as f:
-            json.dump(payload, f)
-
-    def load_state(self):
-        if RESET_SESSION_ON_BOOT:
-            return None
-
-        if not self.state_file.exists():
-            return None
-
-        try:
-            with open(self.state_file, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return None
+def _session_recovery_context() -> dict[str, Any]:
+    return {
+        "session_user_ctx": SESSION_USER_CTX,
+        "selected_broker": SELECTED_BROKER,
+        "selected_broker_mode": SELECTED_BROKER_MODE,
+        "engine_mode": ENGINE_MODE,
+        "session_lock_state": get_session_lock_state(),
+    }
 
 
-session_recovery = SessionRecoveryEngine()
+def _mtm_session_context() -> dict[str, Any]:
+    return SESSION_USER_CTX
 
 
-class LockedProfitLedger:
-    def __init__(self) -> None:
-        self.forced_exit_profit_banked = 0.0
-        self.priority_exits = 0
-        self.recycled_slots = 0
-        self.trail_stops_hit = 0
-        self.defensive_reduction_exits = 0
-        self._booked: set[str] = set()
-
-    def record_forced_exit(self, pid: str, amount: float) -> None:
-        if pid in self._booked:
-            return
-
-        self._booked.add(pid)
-        self.forced_exit_profit_banked += round(amount, 4)
-        self.trail_stops_hit += 1
-
-    def record_priority_exit(self) -> None:
-        self.priority_exits += 1
-
-    def record_recycled_slot(self) -> None:
-        self.recycled_slots += 1
-
-    def record_defensive_reduction_exit(self) -> None:
-        self.defensive_reduction_exits += 1
-
-
+session_recovery = SessionRecoveryEngine(
+    STATE_FILE,
+    reset_on_boot=RESET_SESSION_ON_BOOT,
+    context_provider=_session_recovery_context,
+)
 locked_profit_ledger = LockedProfitLedger()
-
-
-class MomentumClusterAmplifier:
-    def __init__(self) -> None:
-        self.cluster_map = {
-            "CRYPTO_CORE": ["BTC-USD", "ETH-USD", "SOL-USD"],
-            "CRYPTO_ALT": ["XRP-USD", "ADA-USD", "DOGE-USD"],
-            "FX_MAJOR": ["EUR_USD", "GBP_USD", "EUR_GBP"],
-            "FX_YEN": ["USD_JPY", "EUR_JPY", "GBP_JPY"],
-            "OPTIONS_INDEX": ["SPY-C", "QQQ-C", "AAPL-C"],
-            "FUTURES_INDEX": ["ES", "NQ", "CL"],
-        }
-
-        self.cluster_strength: dict[str, float] = defaultdict(float)
-
-    def record_cluster_win(self, symbol: str, pnl: float) -> None:
-        if pnl <= 0:
-            return
-
-        for cname, members in self.cluster_map.items():
-            if symbol in members:
-                self.cluster_strength[cname] += pnl
-
-    def top_cluster(self) -> str | None:
-        if not self.cluster_strength:
-            return None
-
-        ranked = sorted(
-            self.cluster_strength.items(),
-            key=lambda x: x[1],
-            reverse=True,
-        )
-        return ranked[0][0]
-
-
 cluster_amplifier = MomentumClusterAmplifier()
-
-
-class ClusterSaturationRiskGovernor:
-    def __init__(self) -> None:
-        self.cluster_slot_counts: dict[str, int] = defaultdict(int)
-        self.total_slots_seen = 0
-
-    def record_cluster_slot(self, cluster_name: str | None) -> None:
-        if cluster_name:
-            self.cluster_slot_counts[cluster_name] += 1
-            self.total_slots_seen += 1
-
-    def release_cluster_slot(self, cluster_name: str | None) -> None:
-        if cluster_name and self.cluster_slot_counts[cluster_name] > 0:
-            self.cluster_slot_counts[cluster_name] -= 1
-            self.total_slots_seen = max(0, self.total_slots_seen - 1)
-
-    def cluster_share(self, cluster_name: str | None) -> float:
-        if not cluster_name or self.total_slots_seen == 0:
-            return 0.0
-
-        return self.cluster_slot_counts[cluster_name] / self.total_slots_seen
-
-
 cluster_risk_governor = ClusterSaturationRiskGovernor()
-
-
-class SmartDriftEngine:
-    def generate_drift(self, pos: dict) -> float:
-        lo, hi = ASSET_DRIFT_PROFILE.get(pos["asset_class"], (-0.05, 0.10))
-        base = random.uniform(lo, hi)
-
-        signal_bias = ((pos["signal_score"] - 10.0) / 10.0) * 0.04
-        prob_bias = (pos["prob_positive"] - 0.5) * 0.08
-
-        return round(base + signal_bias + prob_bias, 4)
-
-
-smart_drift_engine = SmartDriftEngine()
-
-
-class MarkToMarketEngine:
-    def __init__(self) -> None:
-        self.positions: list[dict] = []
-        self.position_counter = 0
-
-    def register_position(
-        self,
-        asset_class: str,
-        symbol: str,
-        signal_score: float,
-        prob_positive: float,
-        allow_live_funding: bool = False,
-    ) -> dict:
-        self.position_counter += 1
-        pid = f"POS-{self.position_counter}"
-
-        cluster_name = None
-        for cname, members in cluster_amplifier.cluster_map.items():
-            if symbol in members:
-                cluster_name = cname
-                break
-
-        cluster_risk_governor.record_cluster_slot(cluster_name)
-
-        broker_tested = False
-        if allow_live_funding:
-            broker_tested = capital_governor.allocate_trade(pid)
-
-        entry_price = pcnrass_get_reference_price(symbol, fallback=100.0)
-
-        position = {
-            "position_id": pid,
-            "asset_class": asset_class,
-            "symbol": symbol,
-            "cluster_name": cluster_name,
-            "entry_price": float(entry_price),
-            "current_price": float(entry_price),
-            "floating": 0.0,
-            "forced_exit": False,
-            "exit_reason": None,
-            "age_cycles": 0,
-            "signal_score": signal_score,
-            "prob_positive": prob_positive,
-            "broker_tested": broker_tested,
-            "live_funded": broker_tested,
-            "broker_order_ok": False,
-            "broker_note": "NO_BROKER_ORDER",
-            "session_user_id": SESSION_USER_CTX.get("user_id"),
-            "session_role": SESSION_USER_CTX.get("role"),
-            "session_id": SESSION_USER_CTX.get("session_id"),
-        }
-
-        self.positions.append(position)
-        return position
-
-    def count_open_positions(self) -> int:
-        return sum(1 for p in self.positions if not p["forced_exit"])
-
-    def count_open_positions_by_asset(self) -> dict[str, int]:
-        counts = {
-            "CRYPTO": 0,
-            "FX": 0,
-            "OPTIONS": 0,
-            "FUTURES": 0,
-        }
-
-        for pos in self.positions:
-            if pos["forced_exit"]:
-                continue
-            counts[pos["asset_class"]] += 1
-
-        return counts
-
-    def count_open_broker_test_positions(self) -> int:
-        return sum(
-            1
-            for p in self.positions
-            if not p["forced_exit"] and p.get("broker_tested", False)
-        )
-
-    def count_open_funded_positions(self) -> int:
-        return self.count_open_broker_test_positions()
-
-    def floating_by_asset(self, funded_only: bool = False) -> dict[str, float]:
-        by_asset = {
-            "CRYPTO": 0.0,
-            "FX": 0.0,
-            "OPTIONS": 0.0,
-            "FUTURES": 0.0,
-        }
-
-        for pos in self.positions:
-            if pos["forced_exit"]:
-                continue
-
-            if funded_only and not pos.get("broker_tested", False):
-                continue
-
-            by_asset[pos["asset_class"]] += pos["floating"]
-
-        return by_asset
-mtm_engine = MarkToMarketEngine()
+smart_drift_engine = SmartDriftEngine(ASSET_DRIFT_PROFILE)
+mtm_engine = MarkToMarketEngine(
+    cluster_amplifier=cluster_amplifier,
+    cluster_risk_governor=cluster_risk_governor,
+    capital_governor=capital_governor,
+    price_provider=pcnrass_get_reference_price,
+    session_context_provider=_mtm_session_context,
+)
 
 
 def hard_position_limit() -> int:
@@ -2546,10 +2330,16 @@ def can_open_position(
     return True, "OK"
 
 
-crypto_pnl = {s: 0.0 for s in SYMBOLS}
-fx_pnl = {s: 0.0 for s in FX_SYMBOLS}
-options_pnl = {s: 0.0 for s in OPTION_SYMBOLS}
-futures_pnl = {s: 0.0 for s in FUTURES_SYMBOLS}
+_asset_pnls = build_asset_pnl_maps(
+    SYMBOLS,
+    FX_SYMBOLS,
+    OPTION_SYMBOLS,
+    FUTURES_SYMBOLS,
+)
+crypto_pnl = _asset_pnls["CRYPTO"]
+fx_pnl = _asset_pnls["FX"]
+options_pnl = _asset_pnls["OPTIONS"]
+futures_pnl = _asset_pnls["FUTURES"]
 
 last_trade = "NONE"
 cycle = 0
@@ -2575,26 +2365,11 @@ elif saved_state and not RESUME_PREVIOUS_SESSION:
 
 
 def total_realized_pnl() -> float:
-    return round(
-        sum(crypto_pnl.values())
-        + sum(fx_pnl.values())
-        + sum(options_pnl.values())
-        + sum(futures_pnl.values()),
-        4,
-    )
+    return runtime_total_realized_pnl(_asset_pnls)
 
 
 def pnl_dict_for_asset(asset_class: str) -> dict:
-    if asset_class == "CRYPTO":
-        return crypto_pnl
-    if asset_class == "FX":
-        return fx_pnl
-    if asset_class == "OPTIONS":
-        return options_pnl
-    if asset_class == "FUTURES":
-        return futures_pnl
-
-    raise ValueError(f"Unsupported asset class: {asset_class}")
+    return runtime_pnl_dict_for_asset(_asset_pnls, asset_class)
 
 
 
@@ -2985,19 +2760,13 @@ try:
 
         defensive_reductions = apply_defensive_exposure_reduction()
 
-        display_by_asset = mtm_engine.floating_by_asset(funded_only=False)
-        broker_test_positions = mtm_engine.count_open_broker_test_positions()
-        mtm_unrealized = round(sum(display_by_asset.values()), 4)
-        open_positions = mtm_engine.count_open_positions()
-
-        mtm_realized = total_realized_pnl()
-
-        realized_by_asset = {
-            "CRYPTO": sum(crypto_pnl.values()),
-            "FX": sum(fx_pnl.values()),
-            "OPTIONS": sum(options_pnl.values()),
-            "FUTURES": sum(futures_pnl.values()),
-        }
+        cycle_runtime_summary = build_cycle_runtime_summary(_asset_pnls, mtm_engine)
+        display_by_asset = cycle_runtime_summary["display_by_asset"]
+        broker_test_positions = cycle_runtime_summary["broker_test_positions"]
+        mtm_unrealized = cycle_runtime_summary["mtm_unrealized"]
+        open_positions = cycle_runtime_summary["open_positions"]
+        mtm_realized = cycle_runtime_summary["mtm_realized"]
+        realized_by_asset = cycle_runtime_summary["realized_by_asset"]
         pcnrass_refresh_balances(realized_by_asset, display_by_asset)
 
         observer_unrealized = pnl_observer.compute_unrealized_pnl()

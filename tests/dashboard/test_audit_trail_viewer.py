@@ -70,6 +70,11 @@ def test_audit_filters_match_category_status_and_actor() -> None:
     assert filter_audit_events((approved, blocked), category="approval") == (approved,)
     assert filter_audit_events((approved, blocked), status="AUTHORITY") == (blocked,)
     assert filter_audit_events((approved, blocked), actor="00017") == (approved,)
+    assert filter_audit_events((approved, blocked), source="CSS") == (approved, blocked)
+    assert filter_audit_events(
+        (approved, blocked),
+        start_utc="2026-05-08T20:01:30+00:00",
+    ) == (blocked,)
 
 
 def test_audit_export_is_json_safe_with_decimal_payloads() -> None:

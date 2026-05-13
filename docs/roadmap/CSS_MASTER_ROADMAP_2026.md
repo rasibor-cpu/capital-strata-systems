@@ -9,7 +9,7 @@ PCNRASS = Please Confirm No Regression And Stable State
 Current Focus:
 - Institutional operational hardening
 - Replay and audit infrastructure
-- Websocket migration
+- Websocket migration foundation
 - Deployment readiness
 - Mobile/web stabilization
 - Broker reconciliation integrity
@@ -17,22 +17,31 @@ Current Focus:
 
 Current State:
 - Foundational 25-point agenda materially complete
-- Institutional hardening Phases 26–34 largely complete
+- Institutional hardening Phases 26-34 largely complete
 - Runtime/web/mobile/sign-on smoke tests operational
 - Broker reconciliation layer integrated
+- Audit, replay, release-check, deployment-profile, persistent-session, optional DB-user-store, websocket-foundation, and alerting backlog closed for current scope
 - Governance and rollback discipline active
-- ## Remaining Institutional Priorities
 
-### Priority Order
+## Current Institutional Posture
 
-1. Audit Trail Viewer
-2. Trade Replay / Simulation Harness
-3. Full WebSocket Frontend Migration
-4. Release Checklist Automation
-5. Production Deployment Profiles
-6. Persistent Session Store
-7. Database-Backed User Management
-8. Alerting Layer
+### Backlog Closure Status
+
+1. Audit Trail Viewer: Complete
+2. Trade Replay / Simulation Harness: Complete
+3. Full WebSocket Frontend Migration Foundation: Complete
+4. Release Checklist Automation: Complete
+5. Production Deployment Profiles: Complete
+6. Persistent Session Store: Complete
+7. Database-Backed User Management: Complete as optional SQLite store
+8. Alerting Layer: Complete
+
+### Remaining Guardrails
+
+- No unrestricted live trading without operator approval
+- Broker-specific live dry-run certification remains required
+- Dashboard separation should continue only in bounded no-regression slices
+- New feature ideas should be treated as post-backlog enhancements
 
 ---
 
@@ -48,4 +57,4 @@ Stable paper-trading environment with governance enforcement.
 Restricted live-trading environment with reconciliation and kill-switch enforcement.
 
 ### Production
-Institutional-grade audited deployment.
+Institutional-grade audited deployment after operator-approved live certification.

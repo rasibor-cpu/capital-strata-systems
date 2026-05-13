@@ -96,6 +96,13 @@ Thumbs.db
 !engine/test_execution_decision_runner.py
 !engine/execution/execution_gate.py
 
+!dashboard/
+!dashboard/runtime/
+dashboard/runtime/*
+!dashboard/runtime/alerting_layer.py
+!dashboard/runtime/deployment_profiles.py
+!dashboard/runtime/live_dashboard_state.py
+
 !live_data/
 !live_data/*.py
 live_data/__pycache__/
