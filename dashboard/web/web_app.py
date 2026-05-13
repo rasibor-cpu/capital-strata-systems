@@ -1604,6 +1604,23 @@ function replayFilters() {
   return params;
 }
 
+function hydrateReplayFiltersFromLocation() {
+  const params = new URLSearchParams(location.search);
+  const mapping = [
+    ["event_type", "replay-filter-event"],
+    ["symbol", "replay-filter-symbol"],
+    ["asset_class", "replay-filter-asset"],
+    ["cycle", "replay-filter-cycle"],
+    ["limit", "replay-filter-limit"]
+  ];
+  mapping.forEach(([key, id]) => {
+    const value = params.get(key);
+    if (value !== null) {
+      document.getElementById(id).value = value;
+    }
+  });
+}
+
 function setText(id, value) {
   document.getElementById(id).textContent = String(value);
 }
@@ -1614,7 +1631,7 @@ function renderReplay(payload) {
   const events = payload.events || [];
 
   setText("replay-source", payload.source_exists ? "Replay source active" : "Replay source empty");
-  setText("replay-updated", `Updated ${payload.generated_utc || "pending"}`);
+  setText("replay-updated", payload.generated_utc ? `Updated ${formatTime(payload.generated_utc)}` : "Updated pending");
   setText("replay-malformed", `Malformed ${payload.malformed_line_count || 0}`);
   setText("replay-total-events", summary.total_events || 0);
   setText("replay-exits-booked", summary.exits_booked || 0);
@@ -1682,6 +1699,7 @@ document.querySelector("[data-refresh-replay]").addEventListener("click", refres
 document.querySelectorAll(".replay-controls input").forEach((input) => {
   input.addEventListener("change", refreshReplay);
 });
+hydrateReplayFiltersFromLocation();
 refreshReplay().catch(() => renderReplay({
   source_exists: false,
   generated_utc: "",
@@ -1771,6 +1789,8 @@ h2 {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  max-width: 100%;
+  width: 100%;
 }
 .status-strip span,
 .control-row span {
@@ -1780,6 +1800,8 @@ h2 {
   padding: 8px 10px;
   font-size: 12px;
   font-weight: 700;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .control-row {
   align-items: center;
@@ -1790,6 +1812,8 @@ h2 {
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 14px;
+  max-width: 100%;
+  width: 100%;
 }
 .app-nav a {
   border: 1px solid var(--line);
@@ -1825,6 +1849,7 @@ button {
 .panel {
   border: 1px solid var(--line);
   background: var(--panel);
+  min-width: 0;
 }
 .metric-band article {
   min-height: 86px;
@@ -1985,7 +2010,7 @@ button {
 }
 .replay-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(340px, 0.75fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }
 .replay-controls label {
@@ -1998,9 +2023,12 @@ button {
   padding: 7px 9px;
   font-size: 12px;
   font-weight: 800;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .replay-controls input {
-  width: 120px;
+  width: 160px;
+  max-width: 42vw;
   min-height: 28px;
   border: 1px solid var(--line);
   background: var(--panel-2);
@@ -2049,6 +2077,7 @@ button {
 }
 .replay-side {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   align-content: start;
 }
@@ -2061,6 +2090,7 @@ button {
 .replay-table,
 .summary-table {
   overflow-x: auto;
+  max-width: 100%;
 }
 .position-row {
   display: grid;
@@ -2199,13 +2229,40 @@ button {
   .broker-workspace {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .replay-workspace {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 @media (max-width: 720px) {
-  .shell { padding: 14px; }
+  .shell {
+    padding: 14px;
+    width: 100%;
+    max-width: 100%;
+  }
+  .topbar,
+  .status-strip,
+  .control-row,
+  .app-nav {
+    width: 100%;
+    max-width: 100%;
+  }
   .topbar { align-items: flex-start; flex-direction: column; }
+  .status-strip {
+    align-items: stretch;
+  }
+  .status-strip span {
+    flex: 1 1 100%;
+  }
+  .app-nav a {
+    flex: 1 1 100%;
+    min-width: 0;
+    text-align: center;
+    overflow-wrap: anywhere;
+  }
+  .replay-controls label {
+    flex: 1 1 100%;
+  }
+  .replay-controls input {
+    flex: 1 1 auto;
+    max-width: none;
+  }
   .metric-band,
   .dashboard-grid,
   .positions-workspace,

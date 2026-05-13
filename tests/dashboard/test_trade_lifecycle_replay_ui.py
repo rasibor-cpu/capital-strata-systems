@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dashboard.web.web_app import _replay_page, create_app
+from dashboard.web.web_app import _css, _replay_page, create_app
 
 
 def test_replay_page_registers_read_only_route_and_markup() -> None:
@@ -54,4 +54,16 @@ def test_replay_page_uses_lightweight_limiting_and_filter_query() -> None:
     assert 'params.set("asset_class", asset)' in markup
     assert 'params.set("cycle", cycle)' in markup
     assert 'params.set("limit", limit)' in markup
+    assert "hydrateReplayFiltersFromLocation" in markup
+    assert '["limit", "replay-filter-limit"]' in markup
     assert 'fetch(`/api/v1/trade-lifecycle-replay?' in markup
+
+
+def test_replay_layout_keeps_table_full_width_and_mobile_safe() -> None:
+    css = _css()
+
+    assert ".replay-workspace" in css
+    assert "grid-template-columns: minmax(0, 1fr);" in css
+    assert ".status-strip span {\n    flex: 1 1 100%;" in css
+    assert ".app-nav a {\n    flex: 1 1 100%;" in css
+    assert "calc(100vw - 28px)" not in css
