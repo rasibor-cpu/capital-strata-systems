@@ -3,7 +3,11 @@ from __future__ import annotations
 import json
 from decimal import Decimal
 
+import pytest
+
 from dashboard.runtime.alerting_layer import build_alert_payload
+from dashboard.runtime.dashboard_hydration_coordinator import DashboardHydrationCoordinator
+from dashboard.runtime.runtime_smoke_test import build_smoke_payloads
 from dashboard.runtime.runtime_event_bus import (
     RUNTIME_EVENT_SCHEMA_VERSION,
     RuntimeEventBus,
@@ -15,8 +19,13 @@ from dashboard.runtime.runtime_event_bus import (
     runtime_events_from_alert_payload,
     safe_json_dumps,
 )
+from dashboard.runtime.trade_lifecycle_replay_sink import TradeLifecycleReplaySink
 from dashboard.runtime.trade_lifecycle_service import TradeLifecycleExecutionStateService
-from dashboard.runtime.ws_bridge import build_ws_message_from_runtime_event
+from dashboard.runtime.ws_bridge import (
+    build_delta_ws_messages,
+    build_initial_ws_message,
+    build_ws_message_from_runtime_event,
+)
 
 
 def test_runtime_event_creation_is_json_safe_and_redacted() -> None:
@@ -146,6 +155,171 @@ def test_runtime_event_adapters_for_replay_alert_and_websocket() -> None:
     assert all(event["subsystem"] == "alerting" for event in alert_events)
 
 
+def test_alerting_layer_shadow_publishes_alert_events_without_changing_payload() -> None:
+    bus = RuntimeEventBus()
+    frontend_payload = {
+        "sections": {
+            "broker": {
+                "connected": False,
+                "missing_credentials": True,
+            }
+        }
+    }
+
+    baseline = build_alert_payload(frontend_payload)
+    shadow = build_alert_payload(frontend_payload, event_publisher=bus.publish)
+
+    assert shadow["payload_version"] == baseline["payload_version"]
+    assert shadow["alert_count"] == baseline["alert_count"]
+    assert [alert["alert_id"] for alert in shadow["alerts"]] == [
+        alert["alert_id"] for alert in baseline["alerts"]
+    ]
+    assert {event["event_type"] for event in bus.get_recent(subsystem="alerting")} == {
+        "broker_disconnect",
+        "credential_missing",
+    }
+
+
+def test_alerting_shadow_publish_failure_is_nonfatal_by_default() -> None:
+    messages: list[str] = []
+
+    def failing_publisher(_event: dict) -> None:
+        raise RuntimeError("bus unavailable")
+
+    payload = build_alert_payload(
+        {"sections": {"broker": {"connected": False}}},
+        event_publisher=failing_publisher,
+        logger=messages.append,
+    )
+
+    assert payload["alert_count"] == 1
+    assert any("shadow publish failed" in message for message in messages)
+    with pytest.raises(RuntimeError):
+        build_alert_payload(
+            {"sections": {"broker": {"connected": False}}},
+            event_publisher=failing_publisher,
+            strict_event_publishing=True,
+        )
+
+
+def test_websocket_delta_shadow_publishes_runtime_events_without_changing_messages() -> None:
+    state = DashboardHydrationCoordinator().hydrate(**build_smoke_payloads())
+    initial = build_initial_ws_message(state, sequence=1)
+    updated = DashboardHydrationCoordinator().hydrate(**build_smoke_payloads())
+    updated.last_scan_results["pnl_summary"] = {
+        **updated.last_scan_results["pnl_summary"],
+        "net_pnl": 456.78,
+    }
+    bus = RuntimeEventBus()
+
+    baseline = build_delta_ws_messages(initial, updated, sequence=2)
+    shadow = build_delta_ws_messages(
+        initial,
+        updated,
+        sequence=2,
+        event_publisher=bus.publish,
+    )
+
+    assert [message["message_type"] for message in shadow] == [
+        message["message_type"] for message in baseline
+    ]
+    assert [message["section"] for message in shadow] == [
+        message["section"] for message in baseline
+    ]
+    assert [message["data"] for message in shadow] == [
+        message["data"] for message in baseline
+    ]
+    assert any(
+        event["event_type"] == "pnl_update"
+        for event in bus.get_recent(subsystem="pnl_summary")
+    )
+
+
+def test_websocket_shadow_publish_failure_is_nonfatal_by_default() -> None:
+    state = DashboardHydrationCoordinator().hydrate(**build_smoke_payloads())
+    initial = build_initial_ws_message(state, sequence=1)
+    updated = DashboardHydrationCoordinator().hydrate(**build_smoke_payloads())
+    updated.last_scan_results["pnl_summary"] = {
+        **updated.last_scan_results["pnl_summary"],
+        "net_pnl": 123.45,
+    }
+    messages: list[str] = []
+
+    def failing_publisher(_event: dict) -> None:
+        raise RuntimeError("bus unavailable")
+
+    deltas = build_delta_ws_messages(
+        initial,
+        updated,
+        sequence=2,
+        event_publisher=failing_publisher,
+        logger=messages.append,
+    )
+
+    assert deltas
+    assert any("shadow publish failed" in message for message in messages)
+    with pytest.raises(RuntimeError):
+        build_delta_ws_messages(
+            initial,
+            updated,
+            sequence=2,
+            event_publisher=failing_publisher,
+            strict_event_publishing=True,
+        )
+
+
+def test_replay_sink_shadow_publishes_persisted_events_without_mutating_file(tmp_path) -> None:
+    sink_path = tmp_path / "replay.jsonl"
+    bus = RuntimeEventBus()
+    sink = TradeLifecycleReplaySink(sink_path, event_publisher=bus.publish)
+
+    result = sink.record(
+        {
+            "event_type": "position_exit_booked",
+            "position_id": "POS-REPLAY",
+            "symbol": "BTC-USD",
+            "asset_class": "CRYPTO",
+            "cycle": 2,
+            "correlation_id": "COR-REPLAY-SHADOW",
+        }
+    )
+
+    events = bus.get_recent(subsystem="replay", event_type="replay_persisted")
+    lines = sink_path.read_text(encoding="utf-8").splitlines()
+
+    assert result["ok"] is True
+    assert len(lines) == 1
+    assert len(events) == 1
+    assert events[0]["correlation_id"] == "COR-REPLAY-SHADOW"
+    assert events[0]["payload"]["event_type"] == "position_exit_booked"
+
+
+def test_replay_sink_shadow_publish_failure_is_nonfatal_by_default(tmp_path) -> None:
+    sink_path = tmp_path / "replay.jsonl"
+    messages: list[str] = []
+
+    def failing_publisher(_event: dict) -> None:
+        raise RuntimeError("bus unavailable")
+
+    sink = TradeLifecycleReplaySink(
+        sink_path,
+        event_publisher=failing_publisher,
+        logger=messages.append,
+    )
+
+    result = sink.record({"event_type": "position_exit_booked", "position_id": "POS-FAIL"})
+
+    assert result["ok"] is True
+    assert sink_path.exists()
+    assert any("shadow publish failed" in message for message in messages)
+    with pytest.raises(RuntimeError):
+        TradeLifecycleReplaySink(
+            sink_path,
+            event_publisher=failing_publisher,
+            strict_event_publishing=True,
+        ).record({"event_type": "position_exit_booked", "position_id": "POS-STRICT"})
+
+
 def test_trade_lifecycle_service_optionally_publishes_runtime_events() -> None:
     class Noop:
         def record_trade(self, **_kwargs) -> None:
@@ -209,3 +383,64 @@ def test_trade_lifecycle_service_optionally_publishes_runtime_events() -> None:
         "realized_pnl_handoff",
         "locked_profit_updated",
     }
+
+
+def test_trade_lifecycle_shadow_publish_failure_keeps_booking() -> None:
+    class Noop:
+        def record_trade(self, **_kwargs) -> None:
+            return None
+
+        def release_trade(self, _position_id: str) -> None:
+            return None
+
+        def release_cluster_slot(self, _cluster_name: str) -> None:
+            return None
+
+        def record_cluster_win(self, _symbol: str, _pnl: float) -> None:
+            return None
+
+        def record_forced_exit(self, _position_id: str, _amount: float) -> None:
+            return None
+
+        def record_priority_exit(self) -> None:
+            return None
+
+        def record_defensive_reduction_exit(self) -> None:
+            return None
+
+        def record_recycled_slot(self) -> None:
+            return None
+
+    def failing_publisher(_event: dict) -> None:
+        raise RuntimeError("bus unavailable")
+
+    messages: list[str] = []
+    asset_pnls = {"CRYPTO": {"ETH-USD": 0.0}}
+    service = TradeLifecycleExecutionStateService(
+        pnl_tracker=Noop(),
+        capital_tracker=Noop(),
+        pnl_dict_provider=lambda asset_class: asset_pnls[asset_class],
+        cluster_amplifier=Noop(),
+        cluster_risk_governor=Noop(),
+        locked_profit_ledger=Noop(),
+        event_publisher=failing_publisher,
+        logger=messages.append,
+    )
+
+    result = service.book_position_exit(
+        {
+            "position_id": "POS-BUS-FAIL",
+            "asset_class": "CRYPTO",
+            "symbol": "ETH-USD",
+            "cluster_name": "CRYPTO_CORE",
+            "floating": 4.0,
+            "forced_exit": False,
+            "broker_tested": False,
+            "broker_order_ok": False,
+        },
+        "TAKE_PROFIT",
+    )
+
+    assert result.booked is True
+    assert asset_pnls["CRYPTO"]["ETH-USD"] == 4.0
+    assert any("shadow publish failed" in message for message in messages)

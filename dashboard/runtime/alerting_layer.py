@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
+
+from dashboard.runtime.runtime_event_bus import (
+    publish_shadow_runtime_event,
+    runtime_events_from_alert_payload,
+)
 
 
 ALERT_PAYLOAD_VERSION = "css.alerts.v1"
@@ -21,7 +26,13 @@ class CSSAlert:
         return asdict(self)
 
 
-def build_alert_payload(frontend_payload: Mapping[str, Any]) -> dict[str, Any]:
+def build_alert_payload(
+    frontend_payload: Mapping[str, Any],
+    *,
+    event_publisher: Callable[[dict[str, Any]], Any] | None = None,
+    strict_event_publishing: bool = False,
+    logger: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
     sections = frontend_payload.get("sections", {})
     if not isinstance(sections, Mapping):
         sections = {}
@@ -56,12 +67,20 @@ def build_alert_payload(frontend_payload: Mapping[str, Any]) -> dict[str, Any]:
     if _safe_int(execution.get("rejected_trade_count")) > 0:
         alerts.append(_alert("rejected_orders", "warning", "execution", "Rejected trades require review", generated))
 
-    return {
+    payload = {
         "payload_version": ALERT_PAYLOAD_VERSION,
         "generated_utc": generated,
         "alert_count": len(alerts),
         "alerts": [alert.as_dict() for alert in alerts],
     }
+    for event in runtime_events_from_alert_payload(payload):
+        publish_shadow_runtime_event(
+            event_publisher,
+            event,
+            strict=strict_event_publishing,
+            logger=logger,
+        )
+    return payload
 
 
 def _alert(alert_id: str, severity: str, category: str, message: str, generated: str) -> CSSAlert:

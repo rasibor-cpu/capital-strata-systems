@@ -296,6 +296,23 @@ def runtime_event_from_replay_payload(
     )
 
 
+def runtime_event_from_replay_persisted_record(
+    record: Mapping[str, Any],
+    *,
+    source_module: str = "dashboard.runtime.trade_lifecycle_replay_sink",
+) -> dict[str, Any]:
+    return build_runtime_event(
+        record,
+        event_type="replay_persisted",
+        subsystem="replay",
+        severity="INFO",
+        source_module=source_module,
+        correlation_id=str(record.get("correlation_id") or ""),
+        timestamp_utc=str(record.get("persisted_utc") or record.get("timestamp_utc") or ""),
+        event_id="",
+    )
+
+
 def runtime_events_from_alert_payload(
     alert_payload: Mapping[str, Any],
     *,
@@ -357,6 +374,27 @@ def runtime_event_to_ws_message(
         "data": {section: normalized.get("payload", {})},
         "event": normalized,
     }
+
+
+def publish_shadow_runtime_event(
+    event_publisher: Callable[[dict[str, Any]], Any] | None,
+    event: RuntimeEvent | Mapping[str, Any],
+    *,
+    strict: bool = False,
+    logger: Callable[[str], None] | None = None,
+) -> bool:
+    if event_publisher is None:
+        return False
+
+    try:
+        event_publisher(normalize_runtime_event(event))
+        return True
+    except Exception as exc:
+        if logger is not None:
+            logger(f"[EVENT BUS WARN] shadow publish failed: {str(exc)[:80]}")
+        if strict:
+            raise
+        return False
 
 
 def safe_json_dumps(value: Any) -> str:
@@ -430,7 +468,9 @@ __all__ = [
     "get_default_runtime_event_bus",
     "is_runtime_event",
     "normalize_runtime_event",
+    "publish_shadow_runtime_event",
     "runtime_event_from_replay_payload",
+    "runtime_event_from_replay_persisted_record",
     "runtime_event_from_ws_message",
     "runtime_event_to_replay_envelope",
     "runtime_event_to_ws_message",

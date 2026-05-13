@@ -15,7 +15,11 @@ from dashboard.runtime.frontend_contract import (
     build_frontend_payload,
     build_websocket_delta,
 )
-from dashboard.runtime.runtime_event_bus import runtime_event_to_ws_message
+from dashboard.runtime.runtime_event_bus import (
+    publish_shadow_runtime_event,
+    runtime_event_from_ws_message,
+    runtime_event_to_ws_message,
+)
 
 
 DashboardStateProvider = Callable[[], DashboardState]
@@ -61,6 +65,9 @@ def build_delta_ws_messages(
     current_state: DashboardState,
     *,
     sequence: int,
+    event_publisher: Callable[[dict[str, Any]], Any] | None = None,
+    strict_event_publishing: bool = False,
+    logger: Callable[[str], None] | None = None,
 ) -> list[dict[str, Any]]:
     current_payload = build_frontend_payload(current_state)
     delta = build_websocket_delta(
@@ -96,6 +103,14 @@ def build_delta_ws_messages(
             "transport": "websocket_delta",
             "data": {section: delta["data"][section]},
         })
+
+    for message in messages:
+        publish_shadow_runtime_event(
+            event_publisher,
+            runtime_event_from_ws_message(message),
+            strict=strict_event_publishing,
+            logger=logger,
+        )
 
     return messages
 
@@ -186,6 +201,8 @@ def create_ws_router(
     state_provider: DashboardStateProvider | None = None,
     *,
     interval_seconds: float = 5.0,
+    event_publisher: Callable[[dict[str, Any]], Any] | None = None,
+    strict_event_publishing: bool = False,
 ) -> APIRouter:
     provider = state_provider or default_dashboard_state_provider
     router = APIRouter()
@@ -213,6 +230,8 @@ def create_ws_router(
                     previous_payload,
                     state,
                     sequence=sequence,
+                    event_publisher=event_publisher,
+                    strict_event_publishing=strict_event_publishing,
                 )
 
                 if messages:

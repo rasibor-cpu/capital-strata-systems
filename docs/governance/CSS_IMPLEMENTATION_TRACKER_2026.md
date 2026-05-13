@@ -401,6 +401,10 @@ Implemented:
 - websocket compatibility adapter
 - alert payload adapter
 - optional trade lifecycle service publisher hook
+- shadow-mode websocket delta publishing hook
+- shadow-mode alert-created publishing hook
+- shadow-mode replay-persisted publishing hook
+- non-fatal event bus publishing by default, with strict mode for tests
 
 Blocking items:
 - full subsystem migration is intentionally deferred

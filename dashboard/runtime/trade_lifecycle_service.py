@@ -7,7 +7,10 @@ from typing import Any
 
 from dashboard.runtime.replay_correlation import enrich_with_correlation
 from dashboard.runtime.replay_event_envelope import build_replay_event_envelope
-from dashboard.runtime.runtime_event_bus import runtime_event_from_replay_payload
+from dashboard.runtime.runtime_event_bus import (
+    publish_shadow_runtime_event,
+    runtime_event_from_replay_payload,
+)
 
 
 TRADE_LIFECYCLE_SERVICE_VERSION = "css.trade_lifecycle.execution_state.v1"
@@ -86,6 +89,7 @@ class TradeLifecycleExecutionStateService:
         replay_recorder: Callable[[dict[str, Any]], None] | None = None,
         event_publisher: Callable[[dict[str, Any]], None] | None = None,
         strict_replay_persistence: bool = False,
+        strict_event_publishing: bool = False,
         logger: Callable[[str], None] | None = None,
     ) -> None:
         self.pnl_tracker = pnl_tracker
@@ -100,6 +104,7 @@ class TradeLifecycleExecutionStateService:
         self.replay_recorder = replay_recorder
         self.event_publisher = event_publisher
         self.strict_replay_persistence = strict_replay_persistence
+        self.strict_event_publishing = strict_event_publishing
         self.logger = logger
 
     def execute_exit(
@@ -320,15 +325,15 @@ class TradeLifecycleExecutionStateService:
 
         if self.event_publisher is not None:
             for replay_event in result.replay_events:
-                try:
-                    self.event_publisher(
-                        runtime_event_from_replay_payload(
-                            replay_event,
-                            source_module="dashboard.runtime.trade_lifecycle_service",
-                        )
-                    )
-                except Exception as exc:
-                    self._log(f"[R17 WARN] Runtime event publish failed: {str(exc)[:60]}")
+                publish_shadow_runtime_event(
+                    self.event_publisher,
+                    runtime_event_from_replay_payload(
+                        replay_event,
+                        source_module="dashboard.runtime.trade_lifecycle_service",
+                    ),
+                    strict=self.strict_event_publishing,
+                    logger=self.logger,
+                )
 
     def _log(self, message: str) -> None:
         if self.logger is not None:

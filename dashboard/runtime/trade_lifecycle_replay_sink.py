@@ -6,10 +6,14 @@ from collections.abc import Iterable, Mapping
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from dashboard.runtime.replay_correlation import correlation_key, create_lifecycle_id
 from dashboard.runtime.replay_event_envelope import is_replay_event_envelope
+from dashboard.runtime.runtime_event_bus import (
+    publish_shadow_runtime_event,
+    runtime_event_from_replay_persisted_record,
+)
 
 
 TRADE_LIFECYCLE_REPLAY_SINK_VERSION = "css.trade_lifecycle.replay_sink.v1"
@@ -37,9 +41,15 @@ class TradeLifecycleReplaySink:
         path: str | Path,
         *,
         strict: bool = False,
+        event_publisher: Callable[[dict[str, Any]], Any] | None = None,
+        strict_event_publishing: bool = False,
+        logger: Callable[[str], None] | None = None,
     ) -> None:
         self.path = Path(path)
         self.strict = strict
+        self.event_publisher = event_publisher
+        self.strict_event_publishing = strict_event_publishing
+        self.logger = logger
 
     def record(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         record = self._build_record(payload)
@@ -47,11 +57,6 @@ class TradeLifecycleReplaySink:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with self.path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(record, separators=(",", ":"), default=str) + "\n")
-            return {
-                "ok": True,
-                "event_id": record["event_id"],
-                "path": str(self.path),
-            }
         except Exception as exc:
             if self.strict:
                 raise TradeLifecycleReplaySinkError(
@@ -63,6 +68,17 @@ class TradeLifecycleReplaySink:
                 "path": str(self.path),
                 "error": str(exc),
             }
+        publish_shadow_runtime_event(
+            self.event_publisher,
+            runtime_event_from_replay_persisted_record(record),
+            strict=self.strict_event_publishing,
+            logger=self.logger,
+        )
+        return {
+            "ok": True,
+            "event_id": record["event_id"],
+            "path": str(self.path),
+        }
 
     def record_many(self, payloads: Iterable[Mapping[str, Any]]) -> tuple[dict[str, Any], ...]:
         return tuple(self.record(payload) for payload in payloads)
