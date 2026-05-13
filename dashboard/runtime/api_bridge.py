@@ -18,6 +18,9 @@ from dashboard.runtime.broker_balance_reconciliation import (
 )
 from dashboard.runtime.alerting_layer import build_alert_payload
 from dashboard.runtime.deployment_profiles import get_deployment_profiles
+from dashboard.runtime.trade_lifecycle_replay_viewer import (
+    get_trade_lifecycle_replay_payload,
+)
 from dashboard.runtime.ws_bridge import create_ws_router
 
 
@@ -142,6 +145,26 @@ def create_dashboard_state_router(
     def read_deployment_profiles() -> dict[str, Any]:
         return get_deployment_profiles()
 
+    @router.get("/api/v1/trade-lifecycle-replay")
+    def read_trade_lifecycle_replay(
+        event_type: str = "",
+        symbol: str = "",
+        asset_class: str = "",
+        cycle: str = "",
+        start_utc: str = "",
+        end_utc: str = "",
+        limit: int = 250,
+    ) -> dict[str, Any]:
+        return get_trade_lifecycle_replay_payload(
+            event_type=event_type,
+            symbol=symbol,
+            asset_class=asset_class,
+            cycle=cycle,
+            start_utc=start_utc,
+            end_utc=end_utc,
+            limit=limit,
+        )
+
     return router
 
 
@@ -170,4 +193,5 @@ __all__ = [
     "get_alert_payload",
     "get_dashboard_state_payload",
     "get_frontend_payload",
+    "get_trade_lifecycle_replay_payload",
 ]

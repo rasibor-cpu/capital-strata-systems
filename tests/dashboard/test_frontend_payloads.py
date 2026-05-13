@@ -138,6 +138,7 @@ def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
         "/api/v1/broker-reconciliation",
         "/api/v1/alerts",
         "/api/v1/deployment-profiles",
+        "/api/v1/trade-lifecycle-replay",
         "/ws/v1/dashboard-state",
     }
 
