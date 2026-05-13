@@ -4,6 +4,15 @@ import json
 import time
 from decimal import Decimal
 
+from backend.app.brokers.execution_boundary import (
+    resolve_mode_dominance,
+    validate_execution_boundary,
+)
+from backend.intelligence.live_dashboard_trade_controls import (
+    evaluate_exit_signal,
+    format_option_symbol,
+    profitability_allows,
+)
 from dashboard.runtime.api_bridge import (
     create_app,
     get_dashboard_state_payload,
@@ -22,6 +31,7 @@ from dashboard.runtime.runtime_smoke_test import build_smoke_payloads
 from dashboard.runtime.ws_bridge import (
     WS_DELTA_SECTIONS,
     build_delta_ws_message,
+    build_delta_ws_messages,
     build_heartbeat_ws_message,
     build_initial_ws_message,
 )
@@ -128,14 +138,46 @@ def test_websocket_snapshot_delta_and_heartbeat_payloads_are_stable() -> None:
     }
 
     delta = build_delta_ws_message(initial, updated, sequence=2)
+    typed_deltas = build_delta_ws_messages(initial, updated, sequence=4)
     heartbeat = build_heartbeat_ws_message(sequence=3)
 
     assert initial["message_type"] == "dashboard_snapshot"
     assert delta["message_type"] == "dashboard_delta"
     assert "pnl_summary" in delta["changed_sections"]
     assert set(delta["changed_sections"]) <= set(WS_DELTA_SECTIONS)
+    assert any(message["message_type"] == "pnl_update" for message in typed_deltas)
+    assert all(message["message_type"] != "dashboard_delta" for message in typed_deltas)
     assert heartbeat["message_type"] == "dashboard_heartbeat"
     assert heartbeat["changed_sections"] == []
     assert json.dumps(initial)
     assert json.dumps(delta)
     assert json.dumps(heartbeat)
+
+
+def test_live_dashboard_separated_trade_helpers_preserve_formulas() -> None:
+    allowed, composite, threshold = profitability_allows(
+        engine_mode="BALANCED",
+        signal_score=15.0,
+        probability=0.2,
+    )
+
+    assert allowed is True
+    assert composite == 16.0
+    assert threshold == 15.8
+    assert evaluate_exit_signal({"entry_price": 100, "current_price": 101.2}) == "RUNNER"
+    assert evaluate_exit_signal({"entry_price": 100, "current_price": 98.9}) == "STOP_LOSS"
+    assert format_option_symbol("SPY-C") == "SPY-C-500"
+    assert format_option_symbol("SPY-C-500") == "SPY-C-500"
+
+
+def test_execution_boundary_fails_closed_for_live_simulated_capital() -> None:
+    dominance = resolve_mode_dominance(global_mode="live", selected_mode="paper")
+    boundary = validate_execution_boundary(
+        selected_mode="live",
+        capital_source_label="SIMULATED",
+    )
+
+    assert dominance.corrected is True
+    assert dominance.selected_mode == "live"
+    assert boundary.allowed is False
+    assert boundary.reason == "live_mode_cannot_use_simulated_capital"

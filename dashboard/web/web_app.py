@@ -401,13 +401,34 @@ def _dashboard_page() -> str:
       const indicator = document.getElementById("status-ws");
       const protocol = location.protocol === "https:" ? "wss" : "ws";
       const socket = new WebSocket(`${{protocol}}://${{location.host}}/ws/v1/dashboard-state`);
+      const deltaTypes = new Set([
+        "dashboard_delta",
+        "pnl_update",
+        "position_update",
+        "governance_alert",
+        "execution_alert",
+        "broker_status",
+        "risk_update"
+      ]);
       socket.addEventListener("open", () => {{ indicator.textContent = "WebSocket live"; }});
       socket.addEventListener("message", (event) => {{
         const message = JSON.parse(event.data);
-        if (message.message_type === "dashboard_snapshot") render(message);
-        if (message.message_type === "dashboard_delta") {{
+        if (message.message_type === "dashboard_snapshot") {{
+          render(message);
+          return;
+        }}
+        if (deltaTypes.has(message.message_type)) {{
           state.sections = {{ ...state.sections, ...(message.data || {{}}) }};
-          render({{ ...(state.payload || {{}}), sections: state.sections }});
+          render({{
+            ...(state.payload || {{}}),
+            generated_at: message.generated_at || state.payload?.generated_at,
+            sequence: message.sequence ?? state.payload?.sequence,
+            sections: state.sections
+          }});
+          return;
+        }}
+        if (message.message_type === "dashboard_heartbeat") {{
+          indicator.textContent = `WebSocket live · seq ${{message.sequence ?? "?"}}`;
         }}
       }});
       socket.addEventListener("close", () => {{

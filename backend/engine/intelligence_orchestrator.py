@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Dict, Any, List
 
 from backend.intelligence.scanner_coordinator import ScannerCoordinator
-from backend.intelligence.trade_decision_orchestrator import TradeDecisionEngine
+from backend.intelligence.trade_decision_orchestrator import TradeDecisionOrchestrator
 from backend.intelligence.adaptive_exit_engine import AdaptiveExitEngine
 
 
@@ -20,7 +20,7 @@ class IntelligenceOrchestrator:
     def __init__(self) -> None:
 
         self.scanner = ScannerCoordinator()
-        self.trade_engine = TradeDecisionEngine()
+        self.trade_engine = TradeDecisionOrchestrator()
         self.exit_engine = AdaptiveExitEngine()
 
     def discover_opportunities(
@@ -36,7 +36,12 @@ class IntelligenceOrchestrator:
         candles: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
 
-        return self.trade_engine.evaluate_trade(symbol, candles)
+        return self.trade_engine.evaluate_trade(
+            {
+                "symbol": symbol,
+                "candles": candles,
+            }
+        )
 
     def evaluate_exit(
         self,

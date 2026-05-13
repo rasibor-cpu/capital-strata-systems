@@ -12,43 +12,30 @@ R15B_EXIT_PROFILE = {
 
 
 def r15b_profile():
-    return R15B_EXIT_PROFILE.get(str(ENGINE_MODE).upper(), R15B_EXIT_PROFILE["BALANCED"])
+    from backend.intelligence.live_dashboard_trade_controls import mode_exit_profile
+
+    return mode_exit_profile(ENGINE_MODE)
 
 
 
 # === R15A EXIT INTELLIGENCE ENGINE ===
 
 def evaluate_exit_signal(position: dict) -> str:
-    entry = float(position.get("entry_price", 0.0))
-    current = float(position.get("current_price", entry))
+    from backend.intelligence.live_dashboard_trade_controls import (
+        evaluate_exit_signal as _evaluate_exit_signal,
+    )
 
-    if entry == 0:
-        return "HOLD"
-
-    pnl_pct = (current - entry) / entry
-
-    if pnl_pct >= 0.015:
-        return "TAKE_PROFIT"
-
-    if pnl_pct <= -0.010:
-        return "STOP_LOSS"
-
-    if pnl_pct >= 0.010:
-        return "RUNNER"
-
-    return "HOLD"
+    return _evaluate_exit_signal(position)
 
 
 
 # === R14F PRE-POSITION PROFITABILITY GATE ===
 def css_profitability_threshold(mode: str) -> float:
-    return {
-        "SAFE": 17.5,
-        "CONSERVATIVE": 16.5,
-        "BALANCED": 15.8,
-        "AGGRESSIVE": 15.0,
-        "EXPANSION": 14.2,
-    }.get(str(mode).upper(), 15.8)
+    from backend.intelligence.live_dashboard_trade_controls import (
+        profitability_threshold,
+    )
+
+    return profitability_threshold(mode)
 
 
 def css_profitability_allows(symbol: str, asset_class: str, sig: float, prob: float) -> tuple[bool, float, float]:
@@ -58,11 +45,17 @@ def css_profitability_allows(symbol: str, asset_class: str, sig: float, prob: fl
     """
     signal_score = float(sig or 0.0)
     probability = float(prob or 0.0)
-    threshold = css_profitability_threshold(ENGINE_MODE)
+    from backend.intelligence.live_dashboard_trade_controls import (
+        profitability_allows,
+    )
 
-    composite = signal_score + (probability * 5.0)
+    allowed, composite, threshold = profitability_allows(
+        engine_mode=ENGINE_MODE,
+        signal_score=signal_score,
+        probability=probability,
+    )
 
-    if composite < threshold:
+    if not allowed:
         print(
             f"[R14F BLOCK] {asset_class} {symbol} "
             f"composite={composite:.2f} threshold={threshold:.2f} "
@@ -82,32 +75,33 @@ def css_profitability_allows(symbol: str, asset_class: str, sig: float, prob: fl
 # === R13C GLOBAL MODE DOMINANCE ===
 def enforce_mode_dominance():
     global SELECTED_BROKER_MODE
+    from backend.app.brokers.execution_boundary import resolve_mode_dominance
 
-    if str(GLOBAL_BROKER_MODE).lower() == "live":
-        if str(SELECTED_BROKER_MODE).lower() != "live":
-            print("[MODE CORRECTION] Forcing broker mode to LIVE due to global mode")
-            SELECTED_BROKER_MODE = "live"
+    decision = resolve_mode_dominance(
+        global_mode=GLOBAL_BROKER_MODE,
+        selected_mode=SELECTED_BROKER_MODE,
+    )
+    if decision.corrected:
+        print("[MODE CORRECTION] Forcing broker mode to LIVE due to global mode")
+        SELECTED_BROKER_MODE = decision.selected_mode
 
 
 
 # === R13 EXECUTION BOUNDARY ENFORCEMENT ===
 def enforce_execution_boundary():
-    mode = str(SELECTED_BROKER_MODE).lower()
+    from backend.app.brokers.execution_boundary import validate_execution_boundary
 
-    if mode == "live":
-        # Live mode must not use simulated paths
-        if capital_governor.capital_source_label().upper() == "SIMULATED":
-            print("[BOUNDARY VIOLATION] Live mode cannot use simulated capital")
-            import sys
-            sys.exit(1)
+    decision = validate_execution_boundary(
+        selected_mode=SELECTED_BROKER_MODE,
+        capital_source_label=capital_governor.capital_source_label(),
+    )
+    if decision.allowed:
+        return
 
-    elif mode == "paper":
-        # Paper mode must not attempt live execution
-        if "LIVE" in str(globals()):
-            pass  # safeguard placeholder
-
+    if decision.reason == "live_mode_cannot_use_simulated_capital":
+        print("[BOUNDARY VIOLATION] Live mode cannot use simulated capital")
     else:
-        print(f"[UNKNOWN MODE] {mode}")
+        print(f"[UNKNOWN MODE] {SELECTED_BROKER_MODE}")
         import sys
         sys.exit(1)
 
@@ -118,27 +112,11 @@ def format_option_symbol(symbol: str) -> str:
     """
     Ensure option symbols are fully qualified
     """
-    if "-" not in symbol:
-        return symbol
+    from backend.intelligence.live_dashboard_trade_controls import (
+        format_option_symbol as _format_option_symbol,
+    )
 
-    parts = symbol.split("-")
-
-    # Already fully qualified
-    if len(parts) == 3:
-        return symbol
-
-    # Convert stub to default strike
-    if len(parts) == 2:
-        underlying, opt_type = parts
-        default_strike = {
-            "AAPL": "175",
-            "SPY": "500",
-            "QQQ": "400",
-        }.get(underlying, "100")
-
-        return f"{underlying}-{opt_type}-{default_strike}"
-
-    return symbol
+    return _format_option_symbol(symbol)
 
 
 
