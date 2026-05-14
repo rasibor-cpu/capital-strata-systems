@@ -2055,6 +2055,10 @@ def _micro_live_pilot_readiness_page() -> str:
       No unrestricted live trading. This dashboard reviews future micro-live pilot readiness only.
     </section>
 
+    <section class="empty-state sim-banner" id="pilot-intent-banner">
+      No order will be placed from this page. The pilot order intent is non-executing evidence for operator review only.
+    </section>
+
     <section class="metric-band pilot-metrics" aria-label="Micro-live pilot summary">
       <article>
         <strong>Readiness</strong>
@@ -2122,6 +2126,22 @@ def _micro_live_pilot_readiness_page() -> str:
             <span>LOCKED</span>
           </div>
           <div class="summary-table" id="pilot-restrictions"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Order Intent Evidence</h2>
+            <span>NO EXECUTE</span>
+          </div>
+          <div class="summary-table" id="pilot-order-intent"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Required Approvals</h2>
+            <span>REQUIRED</span>
+          </div>
+          <div class="summary-table" id="pilot-required-approvals"></div>
         </article>
       </aside>
     </section>
@@ -2334,6 +2354,24 @@ function renderConstraints(payload) {
   renderRows("pilot-constraints", rows, "No pilot constraints available");
 }
 
+function renderOrderIntent(intent) {
+  const rows = [
+    { label: "Execution Allowed", status: intent.execution_allowed ? "YES" : "NO" },
+    { label: "Broker", status: intent.broker || "Coinbase Advanced" },
+    { label: "Symbol", status: intent.symbol || "BTC-USD" },
+    { label: "Order Type", status: intent.order_type || "limit" },
+    { label: "Side", status: intent.side || "REVIEW_ONLY" },
+    { label: "Max Capital", status: `CAD ${intent.max_pilot_capital_cad || "15.00"}` },
+    { label: "Max Slippage", status: `${intent.max_slippage_pct || "0.35"}%` },
+    { label: "Max Live Orders", status: intent.max_live_orders ?? 1 },
+  ];
+  renderRows("pilot-order-intent", rows, "No pilot order-intent evidence available");
+  renderStringRows("pilot-required-approvals", intent.required_approvals || [], "No required approvals available");
+  document.getElementById("pilot-intent-banner").textContent = intent.execution_allowed
+    ? "STOP: order-intent package unexpectedly allows execution."
+    : "No order will be placed from this page. Intent package is non-executing evidence for operator review only.";
+}
+
 function renderPilot(payload) {
   const passed = payload.passed_checks || [];
   const failed = payload.failed_checks || [];
@@ -2365,8 +2403,12 @@ function renderPilot(payload) {
 }
 
 async function refreshPilot() {
-  const response = await fetch("/api/v1/micro-live-pilot-readiness", { cache: "no-store" });
-  renderPilot(await response.json());
+  const [readinessResponse, intentResponse] = await Promise.all([
+    fetch("/api/v1/micro-live-pilot-readiness", { cache: "no-store" }),
+    fetch("/api/v1/micro-live-pilot-order-intent", { cache: "no-store" }),
+  ]);
+  renderPilot(await readinessResponse.json());
+  renderOrderIntent(await intentResponse.json());
 }
 
 document.querySelector("[data-refresh-pilot]").addEventListener("click", refreshPilot);
@@ -2385,6 +2427,17 @@ refreshPilot().catch(() => renderPilot({
   pilot_constraints: { max_pilot_capital: { display: "CAD $15" } },
   live_restrictions: ["No unrestricted live trading"]
 }));
+renderOrderIntent({
+  execution_allowed: false,
+  broker: "Coinbase Advanced",
+  symbol: "BTC-USD",
+  order_type: "limit",
+  side: "REVIEW_ONLY",
+  max_pilot_capital_cad: "15.00",
+  max_slippage_pct: "0.35",
+  max_live_orders: 1,
+  required_approvals: ["explicit operator confirmation"]
+});
 """
 
 

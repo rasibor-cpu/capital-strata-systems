@@ -469,6 +469,9 @@ Implemented:
 - controlled micro-live pilot readiness model
 - read-only `/api/v1/micro-live-pilot-readiness` endpoint
 - operator `/micro-live-pilot-readiness` review dashboard
+- non-executing micro-live pilot order-intent evidence package
+- read-only `/api/v1/micro-live-pilot-order-intent` endpoint
+- operator review display of order-intent blockers and required approvals
 - explicit pilot constraints: Coinbase Advanced, BTC-USD, CAD $15 maximum,
   one limit order, 0.35% maximum slippage, mandatory logging, mandatory
   post-trade pause, and fail-closed governance

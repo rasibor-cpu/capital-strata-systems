@@ -31,6 +31,9 @@ from dashboard.runtime.micro_live_pilot_readiness import (
     build_micro_live_pilot_readiness_payload,
     load_pcnrass_validation_summary,
 )
+from dashboard.runtime.micro_live_pilot_order_intent import (
+    build_micro_live_pilot_order_intent_payload,
+)
 from dashboard.runtime.runtime_event_bus import (
     RuntimeEventBus,
     get_default_runtime_event_bus,
@@ -335,6 +338,10 @@ def get_micro_live_pilot_readiness_payload(
     )
 
 
+def get_micro_live_pilot_order_intent_payload() -> dict[str, Any]:
+    return build_micro_live_pilot_order_intent_payload()
+
+
 def create_dashboard_state_router(
     state_provider: DashboardStateProvider | None = None,
     *,
@@ -580,6 +587,10 @@ def create_dashboard_state_router(
             runtime_event_bus,
         )
 
+    @router.get("/api/v1/micro-live-pilot-order-intent")
+    def read_micro_live_pilot_order_intent() -> dict[str, Any]:
+        return get_micro_live_pilot_order_intent_payload()
+
     @router.get("/api/v1/deployment-profiles")
     def read_deployment_profiles() -> dict[str, Any]:
         return get_deployment_profiles()
@@ -647,6 +658,7 @@ __all__ = [
     "get_frontend_payload",
     "get_live_credential_attestation_payload",
     "get_micro_live_pilot_readiness_payload",
+    "get_micro_live_pilot_order_intent_payload",
     "get_runtime_event_persistence_checklist_export_payload",
     "get_runtime_event_persistence_checklist_payload",
     "get_runtime_event_persistence_policy_inspection_payload",

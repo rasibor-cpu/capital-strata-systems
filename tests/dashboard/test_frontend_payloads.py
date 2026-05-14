@@ -22,6 +22,7 @@ from dashboard.runtime.api_bridge import (
     get_alert_payload,
     get_dashboard_state_payload,
     get_frontend_payload,
+    get_micro_live_pilot_order_intent_payload,
     get_micro_live_pilot_readiness_payload,
     get_runtime_event_persistence_checklist_export_payload,
     get_runtime_event_persistence_checklist_payload,
@@ -145,6 +146,7 @@ def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
         "/api/v1/broker",
         "/api/v1/broker-reconciliation",
         "/api/v1/alerts",
+        "/api/v1/micro-live-pilot-order-intent",
         "/api/v1/micro-live-pilot-readiness",
         "/api/v1/runtime-events",
         "/api/v1/runtime-event-persistence-checklist",
@@ -193,6 +195,7 @@ def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
         ]
         is False
     )
+    assert get_micro_live_pilot_order_intent_payload()["execution_allowed"] is False
     assert build_section_payload(state, "risk")["data"]["risk_state"] == "NORMAL"
 
 
