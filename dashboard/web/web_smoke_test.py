@@ -39,6 +39,7 @@ def main() -> int:
         "/api/v1/broker",
         "/api/v1/alerts",
         "/api/v1/runtime-events",
+        "/api/v1/runtime-event-persistence-policy",
         "/api/v1/deployment-profiles",
         "/api/v1/trade-lifecycle-replay",
         "/ws/v1/dashboard-state",

@@ -413,10 +413,15 @@ Implemented:
 - JSON-only read-only export helper
 - inspection and export limit caps
 - export redaction enforcement without automatic persistence
+- guarded runtime event persistence approval policy
+- validation-only persistence request evaluator
+- read-only `/api/v1/runtime-event-persistence-policy` policy endpoint
+- audit-safe approval result payload with token redaction
 
 Blocking items:
 - full subsystem migration is intentionally deferred
 - persistent event-bus storage is not yet implemented
+- event-bus persistence remains disabled by default and is not activated by validation
 - cross-process queueing is not yet implemented
 
 ---

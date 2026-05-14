@@ -34,6 +34,9 @@ from dashboard.runtime.runtime_event_bus import (
 from dashboard.runtime.runtime_event_inspector import (
     get_runtime_event_inspection_payload,
 )
+from dashboard.runtime.runtime_event_persistence_policy import (
+    get_runtime_event_persistence_policy_payload,
+)
 from dashboard.runtime.trade_lifecycle_replay_viewer import (
     get_trade_lifecycle_replay_payload,
 )
@@ -125,6 +128,10 @@ def get_runtime_events_payload(
         limit=limit,
         export=export,
     )
+
+
+def get_runtime_event_persistence_policy_inspection_payload() -> dict[str, Any]:
+    return get_runtime_event_persistence_policy_payload()
 
 
 def create_dashboard_state_router(
@@ -226,6 +233,10 @@ def create_dashboard_state_router(
             export=export,
         )
 
+    @router.get("/api/v1/runtime-event-persistence-policy")
+    def read_runtime_event_persistence_policy() -> dict[str, Any]:
+        return get_runtime_event_persistence_policy_inspection_payload()
+
     @router.get("/api/v1/deployment-profiles")
     def read_deployment_profiles() -> dict[str, Any]:
         return get_deployment_profiles()
@@ -292,6 +303,7 @@ __all__ = [
     "get_dashboard_state_payload",
     "get_frontend_payload",
     "get_live_credential_attestation_payload",
+    "get_runtime_event_persistence_policy_inspection_payload",
     "get_runtime_events_payload",
     "get_trade_lifecycle_replay_payload",
 ]
