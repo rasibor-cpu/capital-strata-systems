@@ -22,6 +22,7 @@ from dashboard.runtime.api_bridge import (
     get_alert_payload,
     get_dashboard_state_payload,
     get_frontend_payload,
+    get_runtime_event_persistence_checklist_export_payload,
     get_runtime_event_persistence_checklist_payload,
     get_runtime_event_persistence_policy_inspection_payload,
     get_runtime_event_persistence_report_payload,
@@ -145,6 +146,7 @@ def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
         "/api/v1/alerts",
         "/api/v1/runtime-events",
         "/api/v1/runtime-event-persistence-checklist",
+        "/api/v1/runtime-event-persistence-checklist-export",
         "/api/v1/runtime-event-persistence-policy",
         "/api/v1/runtime-event-persistence-report",
         "/api/v1/runtime-event-persistence-sim",
@@ -177,6 +179,10 @@ def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
     assert get_runtime_event_persistence_report_payload()["persistence_enabled"] is False
     assert (
         get_runtime_event_persistence_checklist_payload()["persistence_enabled"]
+        is False
+    )
+    assert (
+        get_runtime_event_persistence_checklist_export_payload()["persistence_enabled"]
         is False
     )
     assert build_section_payload(state, "risk")["data"]["risk_state"] == "NORMAL"

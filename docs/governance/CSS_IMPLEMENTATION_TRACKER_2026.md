@@ -432,6 +432,10 @@ Implemented:
 - operator runtime event persistence approval checklist builder
 - read-only `/api/v1/runtime-event-persistence-checklist` checklist endpoint
 - checklist readiness, failed-check, warning, and operator-review rendering
+- read-only checklist export package builder
+- read-only `/api/v1/runtime-event-persistence-checklist-export` JSON export endpoint
+- print-friendly `/runtime-event-persistence-checklist-print` operator review page
+- export/print safety disclaimer confirming persistence remains disabled
 
 Blocking items:
 - full subsystem migration is intentionally deferred

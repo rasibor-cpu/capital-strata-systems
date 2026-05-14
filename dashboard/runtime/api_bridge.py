@@ -49,6 +49,9 @@ from dashboard.runtime.runtime_event_persistence_report import (
 from dashboard.runtime.runtime_event_persistence_checklist import (
     build_runtime_event_persistence_checklist,
 )
+from dashboard.runtime.runtime_event_persistence_checklist_export import (
+    build_runtime_event_persistence_checklist_export,
+)
 from dashboard.runtime.runtime_event_storage_profiles import (
     get_runtime_event_storage_profiles_payload,
 )
@@ -279,6 +282,36 @@ def get_runtime_event_persistence_checklist_payload(
     return build_runtime_event_persistence_checklist(report)
 
 
+def get_runtime_event_persistence_checklist_export_payload(
+    event_bus: RuntimeEventBus | None = None,
+    *,
+    event_type: str = "",
+    subsystem: str = "",
+    severity: str = "",
+    correlation_id: str = "",
+    limit: int | None = None,
+    requested_window_minutes: int = 15,
+    reason: str = "runtime event persistence checklist export",
+    operator_id: str = "",
+    approval_token_present: bool = False,
+    requested_export_format: str = "json",
+) -> dict[str, Any]:
+    checklist = get_runtime_event_persistence_checklist_payload(
+        event_bus,
+        event_type=event_type,
+        subsystem=subsystem,
+        severity=severity,
+        correlation_id=correlation_id,
+        limit=limit,
+        requested_window_minutes=requested_window_minutes,
+        reason=reason,
+        operator_id=operator_id,
+        approval_token_present=approval_token_present,
+        requested_export_format=requested_export_format,
+    )
+    return build_runtime_event_persistence_checklist_export(checklist)
+
+
 def create_dashboard_state_router(
     state_provider: DashboardStateProvider | None = None,
     *,
@@ -490,6 +523,33 @@ def create_dashboard_state_router(
             requested_export_format=requested_export_format,
         )
 
+    @router.get("/api/v1/runtime-event-persistence-checklist-export")
+    def read_runtime_event_persistence_checklist_export(
+        event_type: str = "",
+        subsystem: str = "",
+        severity: str = "",
+        correlation_id: str = "",
+        limit: int = 100,
+        requested_window_minutes: int = 15,
+        reason: str = "runtime event persistence checklist export",
+        operator_id: str = "",
+        approval_token_present: bool = False,
+        requested_export_format: str = "json",
+    ) -> dict[str, Any]:
+        return get_runtime_event_persistence_checklist_export_payload(
+            runtime_event_bus,
+            event_type=event_type,
+            subsystem=subsystem,
+            severity=severity,
+            correlation_id=correlation_id,
+            limit=limit,
+            requested_window_minutes=requested_window_minutes,
+            reason=reason,
+            operator_id=operator_id,
+            approval_token_present=approval_token_present,
+            requested_export_format=requested_export_format,
+        )
+
     @router.get("/api/v1/deployment-profiles")
     def read_deployment_profiles() -> dict[str, Any]:
         return get_deployment_profiles()
@@ -556,6 +616,7 @@ __all__ = [
     "get_dashboard_state_payload",
     "get_frontend_payload",
     "get_live_credential_attestation_payload",
+    "get_runtime_event_persistence_checklist_export_payload",
     "get_runtime_event_persistence_checklist_payload",
     "get_runtime_event_persistence_policy_inspection_payload",
     "get_runtime_event_persistence_report_payload",

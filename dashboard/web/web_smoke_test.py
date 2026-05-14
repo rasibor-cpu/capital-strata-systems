@@ -7,6 +7,7 @@ from dashboard.web.web_app import (
     _execution_page,
     _market_opportunities_page,
     _positions_page,
+    _runtime_event_persistence_checklist_print_page,
     _runtime_event_persistence_sim_page,
     _runtime_events_page,
     _replay_page,
@@ -29,6 +30,7 @@ def main() -> int:
         "/replay",
         "/runtime-events",
         "/runtime-event-persistence-sim",
+        "/runtime-event-persistence-checklist-print",
         "/risk-governance",
         "/health",
         "/api/v1/dashboard-state",
@@ -42,6 +44,7 @@ def main() -> int:
         "/api/v1/alerts",
         "/api/v1/runtime-events",
         "/api/v1/runtime-event-persistence-checklist",
+        "/api/v1/runtime-event-persistence-checklist-export",
         "/api/v1/runtime-event-persistence-policy",
         "/api/v1/runtime-event-persistence-report",
         "/api/v1/runtime-event-persistence-sim",
@@ -74,6 +77,7 @@ def main() -> int:
         'href="/replay"',
         'href="/runtime-events"',
         'href="/runtime-event-persistence-sim"',
+        'href="/runtime-event-persistence-checklist-print"',
         "/api/v1/frontend-state",
         "/ws/v1/dashboard-state",
     ]
@@ -108,6 +112,24 @@ def main() -> int:
     for expected in expected_persistence_sim_markup:
         if expected not in persistence_sim_markup:
             raise AssertionError(f"Web persistence simulator markup missing: {expected}")
+
+    checklist_print_markup = _runtime_event_persistence_checklist_print_page()
+    expected_checklist_print_markup = [
+        "CSS Persistence Checklist Print View",
+        "Persistence Checklist Print View",
+        "Read-only export view",
+        "No approval action",
+        "Persistence remains disabled",
+        "Required Checks",
+        "Passed Checks",
+        "Failed Checks",
+        "Blocking Items",
+        "Warnings",
+        "/api/v1/runtime-event-persistence-checklist-export",
+    ]
+    for expected in expected_checklist_print_markup:
+        if expected not in checklist_print_markup:
+            raise AssertionError(f"Web checklist print markup missing: {expected}")
 
     positions_markup = _positions_page()
     expected_positions_markup = [

@@ -88,6 +88,10 @@ def create_app(
     async def runtime_event_persistence_sim() -> HTMLResponse:
         return HTMLResponse(_runtime_event_persistence_sim_page())
 
+    @app.get("/runtime-event-persistence-checklist-print", response_class=HTMLResponse)
+    async def runtime_event_persistence_checklist_print() -> HTMLResponse:
+        return HTMLResponse(_runtime_event_persistence_checklist_print_page())
+
     @app.get("/health")
     async def health() -> dict[str, Any]:
         state = provider()
@@ -112,6 +116,11 @@ def _app_nav(active: str) -> str:
         ("replay", "/replay", "Replay"),
         ("events", "/runtime-events", "Events"),
         ("persistence_sim", "/runtime-event-persistence-sim", "Persistence Sim"),
+        (
+            "checklist_print",
+            "/runtime-event-persistence-checklist-print",
+            "Checklist Print",
+        ),
     ]
 
     return "\n".join(
@@ -596,7 +605,7 @@ function escapeHtml(value) {
     "&": "&amp;",
     "<": "&lt;",
     ">": "&gt;",
-    "\\"": "&quot;",
+    '"': "&quot;",
     "'": "&#39;"
   }[char]));
 }
@@ -1882,6 +1891,122 @@ def _runtime_event_persistence_sim_page() -> str:
 </html>"""
 
 
+def _runtime_event_persistence_checklist_print_page() -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111820">
+  <title>CSS Persistence Checklist Print View</title>
+  <style>{_css()}</style>
+</head>
+<body>
+  <main class="shell print-shell">
+    <header class="topbar print-topbar">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">CSS</div>
+        <div>
+          <p class="eyebrow">Capital Strata Systems</p>
+          <h1>Persistence Checklist Print View</h1>
+        </div>
+      </div>
+      <section class="status-strip" aria-label="Checklist print status">
+        <span id="print-readiness">Readiness pending</span>
+        <span id="print-generated">Generated pending</span>
+        <span id="print-persistence">Persistence disabled</span>
+      </section>
+    </header>
+    {_app_nav("checklist_print")}
+
+    <section class="control-row print-controls" aria-label="Checklist print controls">
+      <button type="button" data-refresh-print>Refresh</button>
+      <button type="button" data-print-page>Print</button>
+      <span>Read-only export view</span>
+      <span>No approval action</span>
+    </section>
+
+    <section class="empty-state sim-banner" id="print-disclaimer">
+      Persistence remains disabled. This export is a read-only operator review record and does not approve, activate, or write runtime event persistence.
+    </section>
+
+    <section class="metric-band print-metrics" aria-label="Checklist print summary">
+      <article>
+        <strong>Checklist</strong>
+        <span id="print-checklist-id">PENDING</span>
+      </article>
+      <article>
+        <strong>Report</strong>
+        <span id="print-report-id">PENDING</span>
+      </article>
+      <article>
+        <strong>Status</strong>
+        <span id="print-status">NOT_READY</span>
+      </article>
+      <article>
+        <strong>Passed</strong>
+        <span id="print-passed-count">0</span>
+      </article>
+      <article>
+        <strong>Failed</strong>
+        <span id="print-failed-count">0</span>
+      </article>
+      <article>
+        <strong>Writes</strong>
+        <span id="print-writes">NO</span>
+      </article>
+    </section>
+
+    <section class="print-workspace">
+      <article class="panel print-main">
+        <div class="panel-head">
+          <h2>Required Checks</h2>
+          <span id="print-required-badge">0 CHECKS</span>
+        </div>
+        <div class="summary-table" id="print-required-checks"></div>
+      </article>
+
+      <aside class="print-side">
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Passed Checks</h2>
+            <span>PASS</span>
+          </div>
+          <div class="summary-table" id="print-passed-checks"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Failed Checks</h2>
+            <span>FAIL</span>
+          </div>
+          <div class="summary-table" id="print-failed-checks"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Blocking Items</h2>
+            <span>BLOCK</span>
+          </div>
+          <div class="summary-table" id="print-blockers"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Warnings</h2>
+            <span>REVIEW</span>
+          </div>
+          <div class="summary-table" id="print-warnings"></div>
+        </article>
+      </aside>
+    </section>
+  </main>
+
+  <script>{_runtime_event_persistence_checklist_print_script()}</script>
+</body>
+</html>"""
+
+
 def _runtime_events_script() -> str:
     return """
 const eventState = { payload: null };
@@ -2018,6 +2143,101 @@ refreshEvents().catch(() => renderEvents({
   total_returned: 0,
   summary: {},
   events: []
+}));
+"""
+
+
+def _runtime_event_persistence_checklist_print_script() -> str:
+    return """
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\\"": "&quot;",
+    "'": "&#39;"
+  }[char]));
+}
+
+function formatTime(value) {
+  if (!value) return "UNKNOWN";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("en-US", { hour12: false });
+}
+
+function shortId(value) {
+  const text = String(value || "");
+  return text.length > 18 ? text.slice(0, 18) : text;
+}
+
+function setText(id, value) {
+  document.getElementById(id).textContent = String(value);
+}
+
+function renderPrintList(id, items, badge) {
+  const target = document.getElementById(id);
+  if (!items.length) {
+    target.innerHTML = `<div class="empty-state">No checklist export items</div>`;
+    return;
+  }
+  target.innerHTML = items.map((item) => {
+    const label = item.label || item.check_id || item;
+    const status = item.status || badge;
+    return `
+      <div class="summary-row print-summary-row">
+        <span>${escapeHtml(label)}</span>
+        <span>${escapeHtml(status)}</span>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderChecklistExport(payload) {
+  const required = payload.required_checks || [];
+  const passed = payload.passed_checks || [];
+  const failed = payload.failed_checks || [];
+
+  setText("print-readiness", payload.readiness_status || "NOT_READY");
+  setText("print-generated", payload.generated_at_utc ? `Generated ${formatTime(payload.generated_at_utc)}` : "Generated pending");
+  setText("print-persistence", payload.persistence_enabled ? "Persistence enabled" : "Persistence disabled");
+  setText("print-checklist-id", shortId(payload.checklist_id || "PENDING"));
+  setText("print-report-id", shortId(payload.report_id || "PENDING"));
+  setText("print-status", payload.readiness_status || "NOT_READY");
+  setText("print-passed-count", passed.length);
+  setText("print-failed-count", failed.length);
+  setText("print-writes", payload.writes_performed ? "YES" : "NO");
+  setText("print-required-badge", `${required.length} CHECKS`);
+  document.getElementById("print-disclaimer").textContent = payload.safety_disclaimer || "Persistence remains disabled.";
+
+  renderPrintList("print-required-checks", required, "REQ");
+  renderPrintList("print-passed-checks", passed, "PASS");
+  renderPrintList("print-failed-checks", failed, "FAIL");
+  renderPrintList("print-blockers", payload.blocking_items || [], "BLOCK");
+  renderPrintList("print-warnings", payload.warnings || [], "WARN");
+}
+
+async function refreshChecklistPrint() {
+  const response = await fetch("/api/v1/runtime-event-persistence-checklist-export", { cache: "no-store" });
+  renderChecklistExport(await response.json());
+}
+
+document.querySelector("[data-refresh-print]").addEventListener("click", refreshChecklistPrint);
+document.querySelector("[data-print-page]").addEventListener("click", () => window.print());
+refreshChecklistPrint().catch(() => renderChecklistExport({
+  readiness_status: "NOT_READY",
+  generated_at_utc: "",
+  checklist_id: "PENDING",
+  report_id: "PENDING",
+  required_checks: [],
+  passed_checks: [],
+  failed_checks: [],
+  blocking_items: [],
+  warnings: ["OPERATOR_REVIEW_REQUIRED_BEFORE_ANY_PROPOSAL"],
+  operator_review_required: true,
+  persistence_enabled: false,
+  writes_performed: false,
+  safety_disclaimer: "Persistence remains disabled."
 }));
 """
 
@@ -2799,14 +3019,16 @@ button {
 }
 .replay-workspace,
 .event-workspace,
-.sim-workspace {
+.sim-workspace,
+.print-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }
 .replay-controls label,
 .event-controls label,
-.sim-controls label {
+.sim-controls label,
+.print-controls label {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -2821,7 +3043,8 @@ button {
 }
 .replay-controls input,
 .event-controls input,
-.sim-controls input {
+.sim-controls input,
+.print-controls input {
   width: 160px;
   max-width: 42vw;
   min-height: 28px;
@@ -2849,7 +3072,8 @@ button {
 }
 .replay-main,
 .event-main,
-.sim-main {
+.sim-main,
+.print-main {
   min-height: 560px;
 }
 .positions-side {
@@ -2874,7 +3098,8 @@ button {
 }
 .replay-side,
 .event-side,
-.sim-side {
+.sim-side,
+.print-side {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
@@ -3028,6 +3253,9 @@ button {
 .sim-backend-row {
   grid-template-columns: 1fr 130px 90px 90px;
 }
+.print-summary-row {
+  grid-template-columns: 1fr 90px;
+}
 .sim-banner {
   margin-bottom: 12px;
   border-color: rgba(211, 155, 50, 0.65);
@@ -3097,12 +3325,14 @@ button {
   }
   .replay-controls label,
   .event-controls label,
-  .sim-controls label {
+  .sim-controls label,
+  .print-controls label {
     flex: 1 1 100%;
   }
   .replay-controls input,
   .event-controls input,
-  .sim-controls input {
+  .sim-controls input,
+  .print-controls input {
     flex: 1 1 auto;
     max-width: none;
   }
@@ -3116,6 +3346,7 @@ button {
     .replay-workspace,
     .event-workspace,
     .sim-workspace,
+    .print-workspace,
     .kv-grid,
   .kv-grid.two,
   .signal-grid {
@@ -3123,6 +3354,43 @@ button {
   }
   .panel.wide { grid-column: span 1; }
   h1 { font-size: 24px; }
+}
+@media print {
+  :root {
+    color-scheme: light;
+    --bg: #ffffff;
+    --panel: #ffffff;
+    --panel-2: #f3f6f6;
+    --ink: #111820;
+    --muted: #526368;
+    --line: #b8c4c7;
+  }
+  body {
+    background: #ffffff;
+    color: #111820;
+  }
+  .shell {
+    width: 100%;
+    max-width: 100%;
+    padding: 0;
+  }
+  .app-nav,
+  .print-controls,
+  button {
+    display: none !important;
+  }
+  .panel,
+  .metric-band article,
+  .empty-state {
+    break-inside: avoid;
+  }
+  .print-workspace,
+  .print-side {
+    display: block;
+  }
+  .panel {
+    margin-bottom: 12px;
+  }
 }
 """
 

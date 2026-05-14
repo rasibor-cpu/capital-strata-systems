@@ -110,6 +110,7 @@ dashboard/runtime/*
 !dashboard/runtime/replay_timeline_builder.py
 !dashboard/runtime/runtime_event_bus.py
 !dashboard/runtime/runtime_event_inspector.py
+!dashboard/runtime/runtime_event_persistence_checklist_export.py
 !dashboard/runtime/runtime_event_persistence_checklist.py
 !dashboard/runtime/runtime_event_persistence_policy.py
 !dashboard/runtime/runtime_event_persistence_report.py
@@ -124,6 +125,7 @@ dashboard/runtime/*
 !tests/dashboard/test_replay_correlation_lineage.py
 !tests/dashboard/test_runtime_event_bus.py
 !tests/dashboard/test_runtime_event_inspector.py
+!tests/dashboard/test_runtime_event_persistence_checklist_export.py
 !tests/dashboard/test_runtime_event_persistence_checklist.py
 !tests/dashboard/test_runtime_event_persistence_policy.py
 !tests/dashboard/test_runtime_event_persistence_report.py
