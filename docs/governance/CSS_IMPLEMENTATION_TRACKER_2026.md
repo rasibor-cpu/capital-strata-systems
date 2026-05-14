@@ -485,6 +485,11 @@ Implemented:
 - operator display of Coinbase/BTC-USD/limit-only readiness, broker-mutation
   false state, order-submit false state, credential exposure status, and
   remaining broker confirmation blockers
+- final pre-pilot go/no-go evidence record
+- read-only `/api/v1/micro-live-pre-pilot-go-no-go` endpoint
+- operator display of go/no-go status, trading-armed false state, execution
+  disabled state, final PCNRASS requirement, manual approval requirement,
+  kill-switch confirmation requirement, and remaining blockers
 - explicit pilot constraints: Coinbase Advanced, BTC-USD, CAD $15 maximum,
   one limit order, 0.35% maximum slippage, mandatory logging, mandatory
   post-trade pause, and fail-closed governance

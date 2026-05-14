@@ -27,6 +27,7 @@ from dashboard.runtime.api_bridge import (
     get_micro_live_operator_approval_gate_payload,
     get_micro_live_pilot_order_intent_payload,
     get_micro_live_pilot_readiness_payload,
+    get_micro_live_pre_pilot_go_no_go_payload,
     get_runtime_event_persistence_checklist_export_payload,
     get_runtime_event_persistence_checklist_payload,
     get_runtime_event_persistence_policy_inspection_payload,
@@ -152,6 +153,7 @@ def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
         "/api/v1/coinbase-micro-live-dry-run-probe",
         "/api/v1/micro-live-broker-readiness-confirmation",
         "/api/v1/micro-live-operator-approval-gate",
+        "/api/v1/micro-live-pre-pilot-go-no-go",
         "/api/v1/micro-live-pilot-order-intent",
         "/api/v1/micro-live-pilot-readiness",
         "/api/v1/runtime-events",
@@ -230,6 +232,14 @@ def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
         get_micro_live_broker_readiness_confirmation_payload(lambda: state)[
             "broker_mutation_allowed"
         ]
+        is False
+    )
+    assert (
+        get_micro_live_pre_pilot_go_no_go_payload(lambda: state)["trading_armed"]
+        is False
+    )
+    assert (
+        get_micro_live_pre_pilot_go_no_go_payload(lambda: state)["execution_allowed"]
         is False
     )
     assert build_section_payload(state, "risk")["data"]["risk_state"] == "NORMAL"

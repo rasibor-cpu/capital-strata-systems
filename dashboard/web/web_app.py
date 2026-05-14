@@ -2071,6 +2071,10 @@ def _micro_live_pilot_readiness_page() -> str:
       No broker state was modified. Broker readiness confirmation is evidence-only.
     </section>
 
+    <section class="empty-state sim-banner" id="pilot-go-no-go-banner">
+      No trading is armed from this page. Final go/no-go is review evidence only.
+    </section>
+
     <section class="metric-band pilot-metrics" aria-label="Micro-live pilot summary">
       <article>
         <strong>Readiness</strong>
@@ -2218,6 +2222,30 @@ def _micro_live_pilot_readiness_page() -> str:
             <span>FAIL CLOSED</span>
           </div>
           <div class="summary-table" id="pilot-broker-confirmation-review"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Final Pre-Pilot Go/No-Go</h2>
+            <span>NO ARM</span>
+          </div>
+          <div class="summary-table" id="pilot-go-no-go"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Go/No-Go Checks</h2>
+            <span>REVIEW</span>
+          </div>
+          <div class="summary-table" id="pilot-go-no-go-checks"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Go/No-Go Blockers / Warnings</h2>
+            <span>FAIL CLOSED</span>
+          </div>
+          <div class="summary-table" id="pilot-go-no-go-review"></div>
         </article>
       </aside>
     </section>
@@ -2535,6 +2563,39 @@ function renderBrokerConfirmation(confirmation) {
     "No broker state was modified. Broker readiness confirmation is evidence-only and order-submit disabled.";
 }
 
+function renderGoNoGo(record) {
+  const rows = [
+    { label: "Go/No-Go Status", status: record.go_no_go_status || "NO_GO" },
+    { label: "Broker", status: record.broker || "Coinbase Advanced" },
+    { label: "Symbol", status: record.symbol || "BTC-USD" },
+    { label: "Order Type", status: record.order_type || "limit" },
+    { label: "Max Capital", status: `CAD ${record.max_pilot_capital_cad || "15.00"}` },
+    { label: "Max Slippage", status: `${record.max_slippage_pct || "0.35"}%` },
+    { label: "Max Live Orders", status: record.max_live_orders ?? 1 },
+    { label: "Trading Armed", status: record.trading_armed ? "YES" : "NO" },
+    { label: "Execution Allowed", status: record.execution_allowed ? "YES" : "NO" },
+    { label: "Order Submit Allowed", status: record.order_submit_allowed ? "YES" : "NO" },
+    { label: "Broker Mutation Allowed", status: record.broker_mutation_allowed ? "YES" : "NO" },
+    { label: "Persistence Enabled", status: record.persistence_enabled ? "YES" : "NO" },
+    { label: "Final PCNRASS Required", status: record.final_pcnrass_required ? "YES" : "NO" },
+    { label: "Manual Approval Required", status: record.manual_operator_approval_required ? "YES" : "NO" },
+    { label: "Kill-Switch Confirmation Required", status: record.kill_switch_confirmation_required ? "YES" : "NO" },
+  ];
+  const checks = [
+    ...(record.failed_checks || []),
+    ...(record.passed_checks || []),
+  ];
+  const reviewRows = [
+    ...(record.blockers || []).map((item) => ({ label: item, status: "BLOCK" })),
+    ...(record.warnings || []).map((item) => ({ label: item, status: "WARN" })),
+  ];
+  renderRows("pilot-go-no-go", rows, "No pre-pilot go/no-go evidence available");
+  renderRows("pilot-go-no-go-checks", checks, "No go/no-go checks available", "severity");
+  renderRows("pilot-go-no-go-review", reviewRows, "No go/no-go blockers or warnings");
+  document.getElementById("pilot-go-no-go-banner").textContent =
+    "No trading is armed from this page. Final go/no-go remains review-only and non-executing.";
+}
+
 function renderPilot(payload) {
   const passed = payload.passed_checks || [];
   const failed = payload.failed_checks || [];
@@ -2571,19 +2632,22 @@ async function refreshPilot() {
     intentResponse,
     probeResponse,
     approvalGateResponse,
-    brokerConfirmationResponse
+    brokerConfirmationResponse,
+    goNoGoResponse
   ] = await Promise.all([
     fetch("/api/v1/micro-live-pilot-readiness", { cache: "no-store" }),
     fetch("/api/v1/micro-live-pilot-order-intent", { cache: "no-store" }),
     fetch("/api/v1/coinbase-micro-live-dry-run-probe", { cache: "no-store" }),
     fetch("/api/v1/micro-live-operator-approval-gate", { cache: "no-store" }),
     fetch("/api/v1/micro-live-broker-readiness-confirmation", { cache: "no-store" }),
+    fetch("/api/v1/micro-live-pre-pilot-go-no-go", { cache: "no-store" }),
   ]);
   renderPilot(await readinessResponse.json());
   renderOrderIntent(await intentResponse.json());
   renderDryRunProbe(await probeResponse.json());
   renderApprovalGate(await approvalGateResponse.json());
   renderBrokerConfirmation(await brokerConfirmationResponse.json());
+  renderGoNoGo(await goNoGoResponse.json());
 }
 
 document.querySelector("[data-refresh-pilot]").addEventListener("click", refreshPilot);
@@ -2666,6 +2730,27 @@ renderBrokerConfirmation({
   failed_checks: [],
   blockers: [],
   warnings: ["NO_BROKER_STATE_WAS_MODIFIED"]
+});
+renderGoNoGo({
+  go_no_go_status: "NO_GO",
+  broker: "Coinbase Advanced",
+  symbol: "BTC-USD",
+  order_type: "limit",
+  max_pilot_capital_cad: "15.00",
+  max_slippage_pct: "0.35",
+  max_live_orders: 1,
+  trading_armed: false,
+  execution_allowed: false,
+  order_submit_allowed: false,
+  broker_mutation_allowed: false,
+  persistence_enabled: false,
+  final_pcnrass_required: true,
+  manual_operator_approval_required: true,
+  kill_switch_confirmation_required: true,
+  passed_checks: [],
+  failed_checks: [],
+  blockers: [],
+  warnings: ["NO_TRADING_IS_ARMED_FROM_THIS_PAGE"]
 });
 """
 
