@@ -436,6 +436,8 @@ Implemented:
 - read-only `/api/v1/runtime-event-persistence-checklist-export` JSON export endpoint
 - print-friendly `/runtime-event-persistence-checklist-print` operator review page
 - export/print safety disclaimer confirming persistence remains disabled
+- browser-validated desktop, tablet, mobile, and print checklist export artifacts
+- phone-width print surface containment and checklist control wrapping
 
 Blocking items:
 - full subsystem migration is intentionally deferred
@@ -462,6 +464,15 @@ Blocking items:
 
 Status:
 Not approved
+
+Implemented:
+- controlled micro-live pilot readiness model
+- read-only `/api/v1/micro-live-pilot-readiness` endpoint
+- operator `/micro-live-pilot-readiness` review dashboard
+- explicit pilot constraints: Coinbase Advanced, BTC-USD, CAD $15 maximum,
+  one limit order, 0.35% maximum slippage, mandatory logging, mandatory
+  post-trade pause, and fail-closed governance
+- unrestricted live trading and automatic live execution remain disabled
 
 Blocking items:
 - restricted live governance review

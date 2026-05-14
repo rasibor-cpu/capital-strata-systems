@@ -27,6 +27,10 @@ from dashboard.runtime.deployment_profiles import get_deployment_profiles
 from dashboard.runtime.live_credential_attestation import (
     build_live_credential_attestation_payload,
 )
+from dashboard.runtime.micro_live_pilot_readiness import (
+    build_micro_live_pilot_readiness_payload,
+    load_pcnrass_validation_summary,
+)
 from dashboard.runtime.runtime_event_bus import (
     RuntimeEventBus,
     get_default_runtime_event_bus,
@@ -312,6 +316,25 @@ def get_runtime_event_persistence_checklist_export_payload(
     return build_runtime_event_persistence_checklist_export(checklist)
 
 
+def get_micro_live_pilot_readiness_payload(
+    state_provider: DashboardStateProvider | None = None,
+    event_bus: RuntimeEventBus | None = None,
+) -> dict[str, Any]:
+    state = _state_from_provider(state_provider)
+    dashboard_payload = state.to_dict()
+    certification = build_broker_live_dry_run_certification_payload(dashboard_payload)
+    persistence_checklist = get_runtime_event_persistence_checklist_payload(
+        event_bus or get_default_runtime_event_bus(),
+    )
+    return build_micro_live_pilot_readiness_payload(
+        dashboard_payload,
+        live_readiness_certification=certification,
+        persistence_checklist=persistence_checklist,
+        pcnrass_summary=load_pcnrass_validation_summary(),
+        operator_review_completed=False,
+    )
+
+
 def create_dashboard_state_router(
     state_provider: DashboardStateProvider | None = None,
     *,
@@ -550,6 +573,13 @@ def create_dashboard_state_router(
             requested_export_format=requested_export_format,
         )
 
+    @router.get("/api/v1/micro-live-pilot-readiness")
+    def read_micro_live_pilot_readiness() -> dict[str, Any]:
+        return get_micro_live_pilot_readiness_payload(
+            state_provider,
+            runtime_event_bus,
+        )
+
     @router.get("/api/v1/deployment-profiles")
     def read_deployment_profiles() -> dict[str, Any]:
         return get_deployment_profiles()
@@ -616,6 +646,7 @@ __all__ = [
     "get_dashboard_state_payload",
     "get_frontend_payload",
     "get_live_credential_attestation_payload",
+    "get_micro_live_pilot_readiness_payload",
     "get_runtime_event_persistence_checklist_export_payload",
     "get_runtime_event_persistence_checklist_payload",
     "get_runtime_event_persistence_policy_inspection_payload",

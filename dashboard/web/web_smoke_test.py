@@ -6,6 +6,7 @@ from dashboard.web.web_app import (
     _dashboard_page,
     _execution_page,
     _market_opportunities_page,
+    _micro_live_pilot_readiness_page,
     _positions_page,
     _runtime_event_persistence_checklist_print_page,
     _runtime_event_persistence_sim_page,
@@ -26,6 +27,7 @@ def main() -> int:
         "/dashboard",
         "/execution",
         "/market-opportunities",
+        "/micro-live-pilot-readiness",
         "/positions",
         "/replay",
         "/runtime-events",
@@ -42,6 +44,7 @@ def main() -> int:
         "/api/v1/opportunities",
         "/api/v1/broker",
         "/api/v1/alerts",
+        "/api/v1/micro-live-pilot-readiness",
         "/api/v1/runtime-events",
         "/api/v1/runtime-event-persistence-checklist",
         "/api/v1/runtime-event-persistence-checklist-export",
@@ -72,6 +75,7 @@ def main() -> int:
         'href="/broker"',
         'href="/execution"',
         'href="/market-opportunities"',
+        'href="/micro-live-pilot-readiness"',
         'href="/positions"',
         'href="/risk-governance"',
         'href="/replay"',
@@ -130,6 +134,26 @@ def main() -> int:
     for expected in expected_checklist_print_markup:
         if expected not in checklist_print_markup:
             raise AssertionError(f"Web checklist print markup missing: {expected}")
+
+    pilot_markup = _micro_live_pilot_readiness_page()
+    expected_pilot_markup = [
+        "CSS Micro-Live Pilot Readiness",
+        "Controlled Micro-Live Pilot Readiness",
+        "Readiness review only",
+        "No live order action",
+        "No approval grant",
+        "No unrestricted live trading",
+        "Approved Pilot Constraints",
+        "Live Restrictions",
+        "Coinbase Advanced",
+        "BTC-USD",
+        "CAD $15",
+        "Persistence remains disabled",
+        "/api/v1/micro-live-pilot-readiness",
+    ]
+    for expected in expected_pilot_markup:
+        if expected not in pilot_markup:
+            raise AssertionError(f"Web micro-live pilot markup missing: {expected}")
 
     positions_markup = _positions_page()
     expected_positions_markup = [

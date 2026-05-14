@@ -92,6 +92,10 @@ def create_app(
     async def runtime_event_persistence_checklist_print() -> HTMLResponse:
         return HTMLResponse(_runtime_event_persistence_checklist_print_page())
 
+    @app.get("/micro-live-pilot-readiness", response_class=HTMLResponse)
+    async def micro_live_pilot_readiness() -> HTMLResponse:
+        return HTMLResponse(_micro_live_pilot_readiness_page())
+
     @app.get("/health")
     async def health() -> dict[str, Any]:
         state = provider()
@@ -120,6 +124,11 @@ def _app_nav(active: str) -> str:
             "checklist_print",
             "/runtime-event-persistence-checklist-print",
             "Checklist Print",
+        ),
+        (
+            "micro_live_pilot",
+            "/micro-live-pilot-readiness",
+            "Pilot Readiness",
         ),
     ]
 
@@ -2007,6 +2016,122 @@ def _runtime_event_persistence_checklist_print_page() -> str:
 </html>"""
 
 
+def _micro_live_pilot_readiness_page() -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111820">
+  <title>CSS Micro-Live Pilot Readiness</title>
+  <style>{_css()}</style>
+</head>
+<body>
+  <main class="shell pilot-shell">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">CSS</div>
+        <div>
+          <p class="eyebrow">Capital Strata Systems</p>
+          <h1>Controlled Micro-Live Pilot Readiness</h1>
+        </div>
+      </div>
+      <section class="status-strip" aria-label="Micro-live pilot status">
+        <span id="pilot-status">Status pending</span>
+        <span id="pilot-generated">Generated pending</span>
+        <span id="pilot-persistence">Persistence disabled</span>
+      </section>
+    </header>
+    {_app_nav("micro_live_pilot")}
+
+    <section class="control-row pilot-controls" aria-label="Pilot readiness controls">
+      <button type="button" data-refresh-pilot>Refresh</button>
+      <span>Readiness review only</span>
+      <span>No live order action</span>
+      <span>No approval grant</span>
+    </section>
+
+    <section class="empty-state sim-banner" id="pilot-banner">
+      No unrestricted live trading. This dashboard reviews future micro-live pilot readiness only.
+    </section>
+
+    <section class="metric-band pilot-metrics" aria-label="Micro-live pilot summary">
+      <article>
+        <strong>Readiness</strong>
+        <span id="pilot-overall">NOT_READY</span>
+      </article>
+      <article>
+        <strong>Broker</strong>
+        <span id="pilot-broker">Coinbase Advanced</span>
+      </article>
+      <article>
+        <strong>Asset</strong>
+        <span id="pilot-asset">BTC-USD</span>
+      </article>
+      <article>
+        <strong>Capital</strong>
+        <span id="pilot-capital">CAD $15</span>
+      </article>
+      <article>
+        <strong>Kill Switch</strong>
+        <span id="pilot-kill-switch">CHECKING</span>
+      </article>
+      <article>
+        <strong>Live Orders</strong>
+        <span id="pilot-live-orders">DISABLED</span>
+      </article>
+    </section>
+
+    <section class="pilot-workspace">
+      <article class="panel pilot-main">
+        <div class="panel-head">
+          <h2>Readiness Checks</h2>
+          <span id="pilot-check-count">0 CHECKS</span>
+        </div>
+        <div class="summary-table" id="pilot-checks"></div>
+      </article>
+
+      <aside class="pilot-side">
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Blockers</h2>
+            <span>FAIL CLOSED</span>
+          </div>
+          <div class="summary-table" id="pilot-blockers"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Warnings</h2>
+            <span>REVIEW</span>
+          </div>
+          <div class="summary-table" id="pilot-warnings"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Approved Pilot Constraints</h2>
+            <span>BOUNDARY</span>
+          </div>
+          <div class="summary-table" id="pilot-constraints"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Live Restrictions</h2>
+            <span>LOCKED</span>
+          </div>
+          <div class="summary-table" id="pilot-restrictions"></div>
+        </article>
+      </aside>
+    </section>
+  </main>
+
+  <script>{_micro_live_pilot_readiness_script()}</script>
+</body>
+</html>"""
+
+
 def _runtime_events_script() -> str:
     return """
 const eventState = { payload: null };
@@ -2143,6 +2268,122 @@ refreshEvents().catch(() => renderEvents({
   total_returned: 0,
   summary: {},
   events: []
+}));
+"""
+
+
+def _micro_live_pilot_readiness_script() -> str:
+    return """
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  }[char]));
+}
+
+function formatTime(value) {
+  if (!value) return "UNKNOWN";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("en-US", { hour12: false });
+}
+
+function setText(id, value) {
+  document.getElementById(id).textContent = String(value);
+}
+
+function renderRows(id, rows, emptyText, statusKey = "status") {
+  const target = document.getElementById(id);
+  if (!rows.length) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(emptyText)}</div>`;
+    return;
+  }
+  target.innerHTML = rows.map((row) => {
+    const label = row.label || row.check_id || row;
+    const status = row[statusKey] || row.severity || "";
+    return `
+      <div class="summary-row pilot-summary-row">
+        <span>${escapeHtml(label)}</span>
+        <span>${escapeHtml(status)}</span>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderStringRows(id, rows, emptyText) {
+  renderRows(id, rows.map((item) => ({ label: item, status: "REVIEW" })), emptyText);
+}
+
+function renderConstraints(payload) {
+  const constraints = payload.pilot_constraints || {};
+  const capital = constraints.max_pilot_capital || {};
+  const rows = [
+    { label: "Broker", status: constraints.broker || "Coinbase Advanced only" },
+    { label: "Symbol", status: (constraints.allowed_symbols || []).join(", ") || "BTC-USD" },
+    { label: "Asset Classes", status: (constraints.allowed_asset_classes || []).join(", ") },
+    { label: "Max Capital", status: capital.display || "CAD $15" },
+    { label: "Max Orders", status: constraints.max_live_order_count ?? 1 },
+    { label: "Order Types", status: (constraints.allowed_order_types || []).join(", ") },
+    { label: "Max Slippage", status: `${constraints.max_slippage_pct || "0.35"}%` },
+    { label: "Mandatory Logging", status: constraints.mandatory_logging ? "YES" : "NO" },
+    { label: "Post-Trade Pause", status: constraints.mandatory_post_trade_pause ? "YES" : "NO" },
+  ];
+  renderRows("pilot-constraints", rows, "No pilot constraints available");
+}
+
+function renderPilot(payload) {
+  const passed = payload.passed_checks || [];
+  const failed = payload.failed_checks || [];
+  const checks = [...failed, ...passed];
+  const constraints = payload.pilot_constraints || {};
+  const capital = constraints.max_pilot_capital || {};
+  const killSwitch = payload.kill_switch || {};
+
+  setText("pilot-status", payload.overall_status || "NOT_READY");
+  setText("pilot-generated", payload.generated_at_utc ? `Generated ${formatTime(payload.generated_at_utc)}` : "Generated pending");
+  setText("pilot-persistence", payload.persistence_enabled ? "Persistence enabled" : "Persistence disabled");
+  setText("pilot-overall", payload.overall_status || "NOT_READY");
+  setText("pilot-broker", (payload.allowed_broker_targets || ["Coinbase Advanced"]).join(", "));
+  setText("pilot-asset", (payload.allowed_symbols || ["BTC-USD"]).join(", "));
+  setText("pilot-capital", capital.display || "CAD $15");
+  setText("pilot-kill-switch", killSwitch.blocked ? "ENGAGED" : "CLEAR");
+  setText("pilot-live-orders", payload.automatic_live_execution_enabled ? "ENABLED" : "DISABLED");
+  setText("pilot-check-count", `${checks.length} CHECKS`);
+
+  document.getElementById("pilot-banner").textContent = payload.persistence_enabled
+    ? "STOP: persistence flag is not disabled."
+    : "Persistence remains disabled. Readiness review only. No unrestricted live trading and no automatic live execution.";
+
+  renderRows("pilot-checks", checks, "No pilot readiness checks available", "severity");
+  renderStringRows("pilot-blockers", payload.blockers || [], "No technical blockers reported");
+  renderStringRows("pilot-warnings", payload.warnings || [], "No warnings reported");
+  renderConstraints(payload);
+  renderStringRows("pilot-restrictions", payload.live_restrictions || [], "No live restrictions available");
+}
+
+async function refreshPilot() {
+  const response = await fetch("/api/v1/micro-live-pilot-readiness", { cache: "no-store" });
+  renderPilot(await response.json());
+}
+
+document.querySelector("[data-refresh-pilot]").addEventListener("click", refreshPilot);
+refreshPilot().catch(() => renderPilot({
+  overall_status: "NOT_READY",
+  generated_at_utc: "",
+  passed_checks: [],
+  failed_checks: [],
+  blockers: ["READINESS_PAYLOAD_UNAVAILABLE"],
+  warnings: ["PILOT_NOT_APPROVED_UNTIL_ALL_CHECKS_PASS"],
+  allowed_broker_targets: ["Coinbase Advanced"],
+  allowed_symbols: ["BTC-USD"],
+  persistence_enabled: false,
+  automatic_live_execution_enabled: false,
+  kill_switch: { blocked: true },
+  pilot_constraints: { max_pilot_capital: { display: "CAD $15" } },
+  live_restrictions: ["No unrestricted live trading"]
 }));
 """
 
@@ -2751,6 +2992,9 @@ body {
   margin: 0 auto;
   padding: 20px;
 }
+.print-shell {
+  overflow-x: hidden;
+}
 .topbar {
   display: flex;
   justify-content: space-between;
@@ -2762,6 +3006,9 @@ body {
   display: flex;
   align-items: center;
   gap: 14px;
+  min-width: 0;
+}
+.brand-lockup > div {
   min-width: 0;
 }
 .brand-mark {
@@ -2787,6 +3034,7 @@ h1 {
   font-size: 28px;
   line-height: 1.1;
   letter-spacing: 0;
+  overflow-wrap: anywhere;
 }
 h2 {
   font-size: 16px;
@@ -3020,7 +3268,8 @@ button {
 .replay-workspace,
 .event-workspace,
 .sim-workspace,
-.print-workspace {
+.print-workspace,
+.pilot-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
@@ -3028,7 +3277,8 @@ button {
 .replay-controls label,
 .event-controls label,
 .sim-controls label,
-.print-controls label {
+.print-controls label,
+.pilot-controls label {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -3044,7 +3294,8 @@ button {
 .replay-controls input,
 .event-controls input,
 .sim-controls input,
-.print-controls input {
+.print-controls input,
+.pilot-controls input {
   width: 160px;
   max-width: 42vw;
   min-height: 28px;
@@ -3073,7 +3324,8 @@ button {
 .replay-main,
 .event-main,
 .sim-main,
-.print-main {
+.print-main,
+.pilot-main {
   min-height: 560px;
 }
 .positions-side {
@@ -3099,7 +3351,8 @@ button {
 .replay-side,
 .event-side,
 .sim-side,
-.print-side {
+.print-side,
+.pilot-side {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
@@ -3114,6 +3367,7 @@ button {
 .replay-table,
 .event-table,
 .sim-table,
+.pilot-table,
 .summary-table {
   overflow-x: auto;
   max-width: 100%;
@@ -3256,6 +3510,9 @@ button {
 .print-summary-row {
   grid-template-columns: 1fr 90px;
 }
+.pilot-summary-row {
+  grid-template-columns: minmax(0, 1fr) 110px;
+}
 .sim-banner {
   margin-bottom: 12px;
   border-color: rgba(211, 155, 50, 0.65);
@@ -3303,6 +3560,10 @@ button {
     width: 100%;
     max-width: 100%;
   }
+  .print-shell {
+    width: 100vw;
+    max-width: 100vw;
+  }
   .topbar,
   .status-strip,
   .control-row,
@@ -3311,6 +3572,24 @@ button {
     max-width: 100%;
   }
   .topbar { align-items: flex-start; flex-direction: column; }
+  .print-topbar .brand-lockup {
+    display: grid;
+    grid-template-columns: 58px minmax(0, 1fr);
+    width: 100%;
+  }
+  .print-topbar h1 {
+    font-size: 22px;
+    max-width: 100%;
+  }
+  .print-topbar h1,
+  #print-disclaimer {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  #print-disclaimer {
+    width: 100%;
+    max-width: 100%;
+  }
   .status-strip {
     align-items: stretch;
   }
@@ -3326,13 +3605,25 @@ button {
   .replay-controls label,
   .event-controls label,
   .sim-controls label,
-  .print-controls label {
+  .print-controls label,
+  .pilot-controls label {
     flex: 1 1 100%;
+  }
+  .print-controls button,
+  .print-controls span {
+    flex: 1 1 100%;
+    text-align: center;
+  }
+  .pilot-controls button,
+  .pilot-controls span {
+    flex: 1 1 100%;
+    text-align: center;
   }
   .replay-controls input,
   .event-controls input,
   .sim-controls input,
-  .print-controls input {
+  .print-controls input,
+  .pilot-controls input {
     flex: 1 1 auto;
     max-width: none;
   }
@@ -3347,6 +3638,7 @@ button {
     .event-workspace,
     .sim-workspace,
     .print-workspace,
+    .pilot-workspace,
     .kv-grid,
   .kv-grid.two,
   .signal-grid {
