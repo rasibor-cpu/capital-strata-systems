@@ -113,7 +113,8 @@ def get_runtime_events_payload(
     subsystem: str = "",
     severity: str = "",
     correlation_id: str = "",
-    limit: int = 100,
+    limit: int | None = None,
+    export: bool = False,
 ) -> dict[str, Any]:
     return get_runtime_event_inspection_payload(
         event_bus or get_default_runtime_event_bus(),
@@ -122,6 +123,7 @@ def get_runtime_events_payload(
         severity=severity,
         correlation_id=correlation_id,
         limit=limit,
+        export=export,
     )
 
 
@@ -212,6 +214,7 @@ def create_dashboard_state_router(
         severity: str = "",
         correlation_id: str = "",
         limit: int = 100,
+        export: bool = False,
     ) -> dict[str, Any]:
         return get_runtime_events_payload(
             runtime_event_bus,
@@ -220,6 +223,7 @@ def create_dashboard_state_router(
             severity=severity,
             correlation_id=correlation_id,
             limit=limit,
+            export=export,
         )
 
     @router.get("/api/v1/deployment-profiles")

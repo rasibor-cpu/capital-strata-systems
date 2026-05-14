@@ -409,6 +409,10 @@ Implemented:
 - `/api/v1/runtime-events` inspection endpoint
 - `/runtime-events` operator inspection page
 - filterable recent-event view by event type, subsystem, severity, correlation id, and limit
+- runtime event retention/export policy object
+- JSON-only read-only export helper
+- inspection and export limit caps
+- export redaction enforcement without automatic persistence
 
 Blocking items:
 - full subsystem migration is intentionally deferred
