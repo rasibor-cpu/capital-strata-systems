@@ -7,6 +7,7 @@ from dashboard.web.web_app import (
     _execution_page,
     _market_opportunities_page,
     _positions_page,
+    _runtime_event_persistence_sim_page,
     _runtime_events_page,
     _replay_page,
     _risk_governance_page,
@@ -27,6 +28,7 @@ def main() -> int:
         "/positions",
         "/replay",
         "/runtime-events",
+        "/runtime-event-persistence-sim",
         "/risk-governance",
         "/health",
         "/api/v1/dashboard-state",
@@ -68,12 +70,29 @@ def main() -> int:
         'href="/risk-governance"',
         'href="/replay"',
         'href="/runtime-events"',
+        'href="/runtime-event-persistence-sim"',
         "/api/v1/frontend-state",
         "/ws/v1/dashboard-state",
     ]
     for expected in expected_markup:
         if expected not in markup:
             raise AssertionError(f"Web dashboard markup missing: {expected}")
+
+    persistence_sim_markup = _runtime_event_persistence_sim_page()
+    expected_persistence_sim_markup = [
+        "CSS Runtime Event Persistence Simulator",
+        "Persistence Simulation Review",
+        "Persistence Simulation Results",
+        "Rejection Reasons",
+        "Subsystem Breakdown",
+        "Simulation Warnings",
+        "SIMULATION ONLY - persistence remains disabled",
+        "No persistence simulation events match the current view",
+        "/api/v1/runtime-event-persistence-sim",
+    ]
+    for expected in expected_persistence_sim_markup:
+        if expected not in persistence_sim_markup:
+            raise AssertionError(f"Web persistence simulator markup missing: {expected}")
 
     positions_markup = _positions_page()
     expected_positions_markup = [

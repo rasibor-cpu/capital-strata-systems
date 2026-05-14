@@ -84,6 +84,10 @@ def create_app(
     async def runtime_events() -> HTMLResponse:
         return HTMLResponse(_runtime_events_page())
 
+    @app.get("/runtime-event-persistence-sim", response_class=HTMLResponse)
+    async def runtime_event_persistence_sim() -> HTMLResponse:
+        return HTMLResponse(_runtime_event_persistence_sim_page())
+
     @app.get("/health")
     async def health() -> dict[str, Any]:
         state = provider()
@@ -107,6 +111,7 @@ def _app_nav(active: str) -> str:
         ("broker", "/broker", "Broker"),
         ("replay", "/replay", "Replay"),
         ("events", "/runtime-events", "Events"),
+        ("persistence_sim", "/runtime-event-persistence-sim", "Persistence Sim"),
     ]
 
     return "\n".join(
@@ -1677,6 +1682,117 @@ def _runtime_events_page() -> str:
 </html>"""
 
 
+def _runtime_event_persistence_sim_page() -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111820">
+  <title>CSS Runtime Event Persistence Simulator</title>
+  <style>{_css()}</style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">CSS</div>
+        <div>
+          <p class="eyebrow">Capital Strata Systems</p>
+          <h1>Persistence Simulation Review</h1>
+        </div>
+      </div>
+      <section class="status-strip" aria-label="Persistence simulator status">
+        <span id="sim-status">Simulation pending</span>
+        <span id="sim-updated">Snapshot pending</span>
+        <span id="sim-persistence">Persistence disabled</span>
+      </section>
+    </header>
+    {_app_nav("persistence_sim")}
+
+    <section class="control-row sim-controls" aria-label="Persistence simulator filters">
+      <button type="button" data-refresh-sim>Refresh</button>
+      <label>Event <input id="sim-filter-event" type="text" placeholder="event_type"></label>
+      <label>Subsystem <input id="sim-filter-subsystem" type="text" placeholder="alerting"></label>
+      <label>Severity <input id="sim-filter-severity" type="text" placeholder="WARNING"></label>
+      <label>Correlation <input id="sim-filter-correlation" type="text" placeholder="COR-..."></label>
+      <label>Limit <input id="sim-filter-limit" type="number" min="1" max="1000" step="1" value="100"></label>
+      <label>Window <input id="sim-filter-window" type="number" min="1" max="60" step="1" value="15"></label>
+    </section>
+
+    <section class="empty-state sim-banner" id="sim-banner">
+      SIMULATION ONLY - persistence remains disabled and no runtime event-bus writes are performed.
+    </section>
+
+    <section class="metric-band sim-metrics" aria-label="Persistence simulation summary">
+      <article>
+        <strong>Accepted</strong>
+        <span id="sim-accepted">0</span>
+      </article>
+      <article>
+        <strong>Rejected</strong>
+        <span id="sim-rejected">0</span>
+      </article>
+      <article>
+        <strong>Estimated Bytes</strong>
+        <span id="sim-bytes">0</span>
+      </article>
+      <article>
+        <strong>Event Rate</strong>
+        <span id="sim-rate">0/min</span>
+      </article>
+      <article>
+        <strong>Inspected</strong>
+        <span id="sim-inspected">0</span>
+      </article>
+      <article>
+        <strong>Writes</strong>
+        <span id="sim-writes">NO</span>
+      </article>
+    </section>
+
+    <section class="sim-workspace">
+      <article class="panel sim-main">
+        <div class="panel-head">
+          <h2>Persistence Simulation Results</h2>
+          <span id="sim-table-badge">0 ROWS</span>
+        </div>
+        <div class="sim-table" id="sim-table"></div>
+      </article>
+
+      <aside class="sim-side">
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Rejection Reasons</h2>
+            <span>SUMMARY</span>
+          </div>
+          <div class="summary-table" id="sim-rejection-mix"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Subsystem Breakdown</h2>
+            <span>DRY RUN</span>
+          </div>
+          <div class="summary-table" id="sim-subsystem-breakdown"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Simulation Warnings</h2>
+            <span>NO WRITES</span>
+          </div>
+          <div class="summary-table" id="sim-warnings"></div>
+        </article>
+      </aside>
+    </section>
+  </main>
+
+  <script>{_runtime_event_persistence_sim_script()}</script>
+</body>
+</html>"""
+
+
 def _runtime_events_script() -> str:
     return """
 const eventState = { payload: null };
@@ -1813,6 +1929,200 @@ refreshEvents().catch(() => renderEvents({
   total_returned: 0,
   summary: {},
   events: []
+}));
+"""
+
+
+def _runtime_event_persistence_sim_script() -> str:
+    return """
+const simState = { payload: null };
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\\"": "&quot;",
+    "'": "&#39;"
+  }[char]));
+}
+
+function formatTime(value) {
+  if (!value) return "UNKNOWN";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("en-US", { hour12: false });
+}
+
+function shortId(value) {
+  const text = String(value || "");
+  return text.length > 12 ? text.slice(0, 12) : text;
+}
+
+function simFilters() {
+  const params = new URLSearchParams();
+  const eventType = document.getElementById("sim-filter-event").value.trim();
+  const subsystem = document.getElementById("sim-filter-subsystem").value.trim();
+  const severity = document.getElementById("sim-filter-severity").value.trim();
+  const correlation = document.getElementById("sim-filter-correlation").value.trim();
+  const limit = document.getElementById("sim-filter-limit").value.trim() || "100";
+  const windowMinutes = document.getElementById("sim-filter-window").value.trim() || "15";
+  if (eventType) params.set("event_type", eventType);
+  if (subsystem) params.set("subsystem", subsystem);
+  if (severity) params.set("severity", severity);
+  if (correlation) params.set("correlation_id", correlation);
+  params.set("limit", limit);
+  params.set("requested_window_minutes", windowMinutes);
+  return params;
+}
+
+function hydrateSimFiltersFromLocation() {
+  const params = new URLSearchParams(location.search);
+  const mapping = [
+    ["event_type", "sim-filter-event"],
+    ["subsystem", "sim-filter-subsystem"],
+    ["severity", "sim-filter-severity"],
+    ["correlation_id", "sim-filter-correlation"],
+    ["limit", "sim-filter-limit"],
+    ["requested_window_minutes", "sim-filter-window"]
+  ];
+  mapping.forEach(([key, id]) => {
+    const value = params.get(key);
+    if (value !== null) {
+      document.getElementById(id).value = value;
+    }
+  });
+}
+
+function setText(id, value) {
+  document.getElementById(id).textContent = String(value);
+}
+
+function renderSim(payload) {
+  simState.payload = payload;
+  const rows = payload.event_results || [];
+
+  setText("sim-status", payload.simulation_only ? "Simulation only" : "Unsafe state");
+  setText("sim-updated", payload.simulated_timestamp ? `Updated ${formatTime(payload.simulated_timestamp)}` : "Updated pending");
+  setText("sim-persistence", payload.persistence_enabled ? "Persistence enabled" : "Persistence disabled");
+  setText("sim-accepted", payload.accepted_events_count || 0);
+  setText("sim-rejected", payload.rejected_events_count || 0);
+  setText("sim-bytes", payload.estimated_storage_bytes || 0);
+  setText("sim-rate", `${Number(payload.estimated_event_rate || 0).toFixed(3)}/min`);
+  setText("sim-inspected", payload.inspected_events_count || 0);
+  setText("sim-writes", payload.writes_performed ? "YES" : "NO");
+  setText("sim-table-badge", `${rows.length} ROWS`);
+  document.getElementById("sim-banner").textContent = payload.simulation_only && !payload.persistence_enabled && !payload.writes_performed
+    ? "SIMULATION ONLY - persistence remains disabled and no runtime event-bus writes are performed."
+    : "WARNING - simulation safety flags require review.";
+
+  renderSimTable(rows);
+  renderRejectionMix(payload.rejection_reasons || {});
+  renderSubsystemBreakdown(payload.subsystem_breakdown || {});
+  renderWarnings(payload);
+}
+
+function renderSimTable(rows) {
+  const target = document.getElementById("sim-table");
+  if (!rows.length) {
+    target.innerHTML = `<div class="empty-state">No persistence simulation events match the current view</div>`;
+    return;
+  }
+  target.innerHTML = `
+    <div class="sim-row sim-head">
+      <span>Index</span><span>Event</span><span>Subsystem</span><span>Decision</span><span>Reasons</span><span>Correlation</span>
+    </div>
+    ${rows.map((event) => `
+      <div class="sim-row">
+        <span>${Number(event.index || 0)}</span>
+        <span>${escapeHtml(event.event_type || "UNKNOWN")}</span>
+        <span>${escapeHtml(event.subsystem || "UNKNOWN")}</span>
+        <span class="${event.accepted ? "positive" : "negative"}">${event.accepted ? "ACCEPTED" : "REJECTED"}</span>
+        <span>${escapeHtml((event.rejection_reasons || []).join(", ") || "NONE")}</span>
+        <span>${escapeHtml(shortId(event.correlation_id || ""))}</span>
+      </div>
+    `).join("")}
+  `;
+}
+
+function renderRejectionMix(mix) {
+  const target = document.getElementById("sim-rejection-mix");
+  const rows = Object.entries(mix);
+  if (!rows.length) {
+    target.innerHTML = `<div class="empty-state">No rejection reasons</div>`;
+    return;
+  }
+  target.innerHTML = rows.map(([reason, count]) => `
+    <div class="summary-row replay-summary-row">
+      <span>${escapeHtml(reason)}</span>
+      <span>${Number(count || 0)}</span>
+    </div>
+  `).join("");
+}
+
+function renderSubsystemBreakdown(breakdown) {
+  const target = document.getElementById("sim-subsystem-breakdown");
+  const rows = Object.entries(breakdown);
+  if (!rows.length) {
+    target.innerHTML = `<div class="empty-state">No subsystem simulation data</div>`;
+    return;
+  }
+  target.innerHTML = rows.map(([subsystem, item]) => `
+    <div class="summary-row sim-summary-row">
+      <span>${escapeHtml(subsystem)}</span>
+      <span>${Number(item.total || 0)}</span>
+      <span>${Number(item.accepted || 0)}</span>
+      <span>${Number(item.rejected || 0)}</span>
+    </div>
+  `).join("");
+}
+
+function renderWarnings(payload) {
+  const target = document.getElementById("sim-warnings");
+  const warnings = [
+    payload.simulation_only ? "SIMULATION_ONLY" : "SIMULATION_FLAG_MISSING",
+    payload.persistence_enabled ? "PERSISTENCE_FLAG_TRUE" : "PERSISTENCE_DISABLED",
+    payload.writes_performed ? "WRITES_PERFORMED" : "NO_WRITES_PERFORMED",
+    payload.redaction_failures?.length ? "REDACTION_FAILURES_PRESENT" : "NO_REDACTION_FAILURES"
+  ];
+  const reviewWarnings = new Set([
+    "SIMULATION_FLAG_MISSING",
+    "PERSISTENCE_FLAG_TRUE",
+    "WRITES_PERFORMED",
+    "REDACTION_FAILURES_PRESENT"
+  ]);
+  target.innerHTML = warnings.map((warning) => `
+    <div class="summary-row replay-summary-row">
+      <span>${escapeHtml(warning)}</span>
+      <span>${reviewWarnings.has(warning) ? "REVIEW" : "OK"}</span>
+    </div>
+  `).join("");
+}
+
+async function refreshSim() {
+  const response = await fetch(`/api/v1/runtime-event-persistence-sim?${simFilters().toString()}`, { cache: "no-store" });
+  renderSim(await response.json());
+}
+
+document.querySelector("[data-refresh-sim]").addEventListener("click", refreshSim);
+document.querySelectorAll(".sim-controls input").forEach((input) => {
+  input.addEventListener("change", refreshSim);
+});
+hydrateSimFiltersFromLocation();
+refreshSim().catch(() => renderSim({
+  simulation_only: true,
+  persistence_enabled: false,
+  writes_performed: false,
+  simulated_timestamp: "",
+  accepted_events_count: 0,
+  rejected_events_count: 0,
+  estimated_storage_bytes: 0,
+  estimated_event_rate: 0,
+  inspected_events_count: 0,
+  rejection_reasons: {},
+  redaction_failures: [],
+  subsystem_breakdown: {},
+  event_results: []
 }));
 """
 
@@ -2276,13 +2586,15 @@ button {
   gap: 12px;
 }
 .replay-workspace,
-.event-workspace {
+.event-workspace,
+.sim-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }
 .replay-controls label,
-.event-controls label {
+.event-controls label,
+.sim-controls label {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -2296,7 +2608,8 @@ button {
   overflow-wrap: anywhere;
 }
 .replay-controls input,
-.event-controls input {
+.event-controls input,
+.sim-controls input {
   width: 160px;
   max-width: 42vw;
   min-height: 28px;
@@ -2323,7 +2636,8 @@ button {
   min-height: 360px;
 }
 .replay-main,
-.event-main {
+.event-main,
+.sim-main {
   min-height: 560px;
 }
 .positions-side {
@@ -2347,7 +2661,8 @@ button {
   align-content: start;
 }
 .replay-side,
-.event-side {
+.event-side,
+.sim-side {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
@@ -2361,6 +2676,7 @@ button {
 .opportunity-table,
 .replay-table,
 .event-table,
+.sim-table,
 .summary-table {
   overflow-x: auto;
   max-width: 100%;
@@ -2428,13 +2744,23 @@ button {
   padding: 10px 0;
   align-items: center;
 }
+.sim-row {
+  display: grid;
+  grid-template-columns: 70px 220px 150px 110px minmax(280px, 1fr) 120px;
+  gap: 8px;
+  min-width: 1040px;
+  border-bottom: 1px solid var(--line);
+  padding: 10px 0;
+  align-items: center;
+}
 .replay-head {
   color: var(--muted);
   font-size: 12px;
   text-transform: uppercase;
   font-weight: 800;
 }
-.event-head {
+.event-head,
+.sim-head {
   color: var(--muted);
   font-size: 12px;
   text-transform: uppercase;
@@ -2445,6 +2771,7 @@ button {
 .opportunity-row span,
 .replay-row span,
 .event-row span,
+.sim-row span,
 .summary-row span {
   overflow-wrap: anywhere;
   font-weight: 700;
@@ -2482,6 +2809,14 @@ button {
 }
 .replay-summary-row {
   grid-template-columns: 1fr 70px;
+}
+.sim-summary-row {
+  grid-template-columns: 1fr 70px 86px 86px;
+}
+.sim-banner {
+  margin-bottom: 12px;
+  border-color: rgba(211, 155, 50, 0.65);
+  color: var(--gold);
 }
 .symbol-cloud {
   display: flex;
@@ -2546,11 +2881,13 @@ button {
     overflow-wrap: anywhere;
   }
   .replay-controls label,
-  .event-controls label {
+  .event-controls label,
+  .sim-controls label {
     flex: 1 1 100%;
   }
   .replay-controls input,
-  .event-controls input {
+  .event-controls input,
+  .sim-controls input {
     flex: 1 1 auto;
     max-width: none;
   }
@@ -2563,6 +2900,7 @@ button {
     .broker-workspace,
     .replay-workspace,
     .event-workspace,
+    .sim-workspace,
     .kv-grid,
   .kv-grid.two,
   .signal-grid {

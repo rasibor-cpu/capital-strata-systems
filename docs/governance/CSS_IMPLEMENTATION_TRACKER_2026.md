@@ -421,6 +421,8 @@ Implemented:
 - dry-run runtime event persistence simulator
 - read-only `/api/v1/runtime-event-persistence-sim` simulation endpoint
 - simulator enforcement of retention, approval, subsystem, and redaction policy
+- operator runtime event persistence simulator review page
+- simulator summary, rejection, subsystem, warning, and empty-state rendering
 
 Blocking items:
 - full subsystem migration is intentionally deferred

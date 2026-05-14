@@ -122,6 +122,7 @@ dashboard/runtime/*
 !tests/dashboard/test_runtime_event_inspector.py
 !tests/dashboard/test_runtime_event_persistence_policy.py
 !tests/dashboard/test_runtime_event_persistence_simulator.py
+!tests/dashboard/test_runtime_event_persistence_sim_ui.py
 !tests/dashboard/test_broker_live_dry_run_certification.py
 !tests/dashboard/test_broker_adapter_conformance.py
 !tests/dashboard/test_live_credential_attestation.py
