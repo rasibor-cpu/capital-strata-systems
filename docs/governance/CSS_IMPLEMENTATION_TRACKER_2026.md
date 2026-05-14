@@ -417,11 +417,14 @@ Implemented:
 - validation-only persistence request evaluator
 - read-only `/api/v1/runtime-event-persistence-policy` policy endpoint
 - audit-safe approval result payload with token redaction
+- runtime event persistence architecture design document
 
 Blocking items:
 - full subsystem migration is intentionally deferred
 - persistent event-bus storage is not yet implemented
 - event-bus persistence remains disabled by default and is not activated by validation
+- dry-run event persistence simulator is not yet implemented
+- storage backend selection is not yet approved
 - cross-process queueing is not yet implemented
 
 ---
