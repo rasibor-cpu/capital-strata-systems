@@ -119,5 +119,9 @@ def test_checklist_print_view_has_lightweight_print_css() -> None:
     assert ".print-workspace" in css
     assert ".print-summary-row" in css
     assert "@media print" in css
+    assert ".print-shell" in css
+    assert "100vw" in css
+    assert "#print-disclaimer" in css
+    assert "word-break: break-word" in css
     assert ".print-controls" in css
     assert "display: none !important" in css
