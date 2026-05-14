@@ -429,6 +429,9 @@ Implemented:
 - audit-safe runtime event persistence dry-run report builder
 - read-only `/api/v1/runtime-event-persistence-report` JSON report endpoint
 - operator dry-run report, safety assertion, and approval requirement rendering
+- operator runtime event persistence approval checklist builder
+- read-only `/api/v1/runtime-event-persistence-checklist` checklist endpoint
+- checklist readiness, failed-check, warning, and operator-review rendering
 
 Blocking items:
 - full subsystem migration is intentionally deferred

@@ -1844,6 +1844,35 @@ def _runtime_event_persistence_sim_page() -> str:
           </div>
           <div class="summary-table" id="report-approvals"></div>
         </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Operator Approval Checklist</h2>
+            <span>REVIEW ONLY</span>
+          </div>
+          <div class="kv-grid two">
+            <div><strong>Readiness</strong><span id="checklist-status">NOT_READY</span></div>
+            <div><strong>Review Required</strong><span id="checklist-review-required">YES</span></div>
+            <div><strong>Passed</strong><span id="checklist-passed-count">0</span></div>
+            <div><strong>Failed</strong><span id="checklist-failed-count">0</span></div>
+          </div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Checklist Failed Checks</h2>
+            <span>BLOCKING</span>
+          </div>
+          <div class="summary-table" id="checklist-failed"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Checklist Warnings</h2>
+            <span>OPERATOR</span>
+          </div>
+          <div class="summary-table" id="checklist-warnings"></div>
+        </article>
       </aside>
     </section>
   </main>
@@ -2228,16 +2257,43 @@ function renderReportList(id, items, badge) {
   `).join("");
 }
 
+function renderChecklist(payload) {
+  const failed = payload.failed_checks || [];
+  const passed = payload.passed_checks || [];
+  setText("checklist-status", payload.readiness_status || "NOT_READY");
+  setText("checklist-review-required", payload.operator_review_required ? "YES" : "NO");
+  setText("checklist-passed-count", passed.length);
+  setText("checklist-failed-count", failed.length);
+  renderChecklistItems("checklist-failed", failed, "FAIL");
+  renderReportList("checklist-warnings", payload.warnings || [], "WARN");
+}
+
+function renderChecklistItems(id, items, badge) {
+  const target = document.getElementById(id);
+  if (!items.length) {
+    target.innerHTML = `<div class="empty-state">No failed checklist items</div>`;
+    return;
+  }
+  target.innerHTML = items.map((item) => `
+    <div class="summary-row replay-summary-row">
+      <span>${escapeHtml(item.label || item.check_id || item)}</span>
+      <span>${escapeHtml(badge)}</span>
+    </div>
+  `).join("");
+}
+
 async function refreshSim() {
   const params = simFilters().toString();
-  const [simResponse, scenarioResponse, reportResponse] = await Promise.all([
+  const [simResponse, scenarioResponse, reportResponse, checklistResponse] = await Promise.all([
     fetch(`/api/v1/runtime-event-persistence-sim?${params}`, { cache: "no-store" }),
     fetch(`/api/v1/runtime-event-persistence-scenarios?${params}`, { cache: "no-store" }),
-    fetch(`/api/v1/runtime-event-persistence-report?${params}`, { cache: "no-store" })
+    fetch(`/api/v1/runtime-event-persistence-report?${params}`, { cache: "no-store" }),
+    fetch(`/api/v1/runtime-event-persistence-checklist?${params}`, { cache: "no-store" })
   ]);
   renderSim(await simResponse.json());
   renderScenario(await scenarioResponse.json());
   renderReport(await reportResponse.json());
+  renderChecklist(await checklistResponse.json());
 }
 
 document.querySelector("[data-refresh-sim]").addEventListener("click", refreshSim);
@@ -2271,6 +2327,13 @@ refreshSim().catch(() => {
     export_format: "json",
     safety_assertions: ["REPORT_EXPORT_ONLY", "NO_RUNTIME_EVENT_WRITES"],
     remaining_approval_requirements: ["explicit operator approval"]
+  });
+  renderChecklist({
+    readiness_status: "NOT_READY",
+    operator_review_required: true,
+    passed_checks: [],
+    failed_checks: [],
+    warnings: ["OPERATOR_REVIEW_REQUIRED_BEFORE_ANY_PROPOSAL"]
   });
 });
 """

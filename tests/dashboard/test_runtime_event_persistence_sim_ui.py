@@ -13,6 +13,7 @@ def test_persistence_sim_page_registers_read_only_route_and_markup() -> None:
     markup = _runtime_event_persistence_sim_page()
 
     assert "/runtime-event-persistence-sim" in routes
+    assert "/api/v1/runtime-event-persistence-checklist" in routes
     assert "/api/v1/runtime-event-persistence-sim" in routes
     assert "/api/v1/runtime-event-persistence-scenarios" in routes
     assert "/api/v1/runtime-event-persistence-report" in routes
@@ -27,6 +28,9 @@ def test_persistence_sim_page_registers_read_only_route_and_markup() -> None:
     assert "Persistence Dry-Run Report" in markup
     assert "Report Safety Assertions" in markup
     assert "Approval Requirements" in markup
+    assert "Operator Approval Checklist" in markup
+    assert "Checklist Failed Checks" in markup
+    assert "Checklist Warnings" in markup
     assert "data-refresh-sim" in markup
 
 
@@ -49,6 +53,10 @@ def test_persistence_sim_page_exposes_summary_and_empty_state() -> None:
         "Simulation Only",
         "Persistence Enabled",
         "Export Format",
+        "Readiness",
+        "Review Required",
+        "Passed",
+        "Failed",
         "No persistence simulation events match the current view",
         "No storage backend scenario data",
         "<span>Index</span><span>Event</span><span>Subsystem</span>",
@@ -75,6 +83,7 @@ def test_persistence_sim_page_uses_safe_filter_query() -> None:
     assert "hydrateSimFiltersFromLocation" in markup
     assert '["requested_window_minutes", "sim-filter-window"]' in markup
     assert 'fetch(`/api/v1/runtime-event-persistence-sim?' in markup
+    assert 'fetch(`/api/v1/runtime-event-persistence-checklist?' in markup
     assert 'fetch(`/api/v1/runtime-event-persistence-scenarios?' in markup
     assert 'fetch(`/api/v1/runtime-event-persistence-report?' in markup
 
@@ -91,6 +100,8 @@ def test_persistence_sim_page_preserves_simulation_only_flags() -> None:
     assert "backend_comparison" in markup
     assert "payload.safety_assertions" in markup
     assert "payload.remaining_approval_requirements" in markup
+    assert "payload.operator_review_required" in markup
+    assert "payload.readiness_status" in markup
 
 
 def test_persistence_sim_layout_is_mobile_safe() -> None:
