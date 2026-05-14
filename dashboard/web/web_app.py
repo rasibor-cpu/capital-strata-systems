@@ -1813,6 +1813,37 @@ def _runtime_event_persistence_sim_page() -> str:
           </div>
           <div class="summary-table" id="scenario-blockers"></div>
         </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Persistence Dry-Run Report</h2>
+            <span>JSON EXPORT</span>
+          </div>
+          <div class="kv-grid two">
+            <div><strong>Report ID</strong><span id="report-id">PENDING</span></div>
+            <div><strong>Generated</strong><span id="report-generated">PENDING</span></div>
+            <div><strong>Simulation Only</strong><span id="report-simulation-only">YES</span></div>
+            <div><strong>Persistence Enabled</strong><span id="report-persistence-enabled">NO</span></div>
+            <div><strong>Recommended</strong><span id="report-recommended">NONE</span></div>
+            <div><strong>Export Format</strong><span id="report-export-format">json</span></div>
+          </div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Report Safety Assertions</h2>
+            <span>AUDIT SAFE</span>
+          </div>
+          <div class="summary-table" id="report-safety"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Approval Requirements</h2>
+            <span>BEFORE ACTIVATION</span>
+          </div>
+          <div class="summary-table" id="report-approvals"></div>
+        </article>
       </aside>
     </section>
   </main>
@@ -2172,14 +2203,41 @@ function renderScenarioBlockers(blockers) {
   `).join("");
 }
 
+function renderReport(payload) {
+  setText("report-id", payload.report_id || "PENDING");
+  setText("report-generated", payload.generated_at_utc ? formatTime(payload.generated_at_utc) : "PENDING");
+  setText("report-simulation-only", payload.simulation_only ? "YES" : "NO");
+  setText("report-persistence-enabled", payload.persistence_enabled ? "YES" : "NO");
+  setText("report-recommended", payload.recommended_backend || "NONE");
+  setText("report-export-format", payload.export_format || "json");
+  renderReportList("report-safety", payload.safety_assertions || [], "OK");
+  renderReportList("report-approvals", payload.remaining_approval_requirements || [], "REQ");
+}
+
+function renderReportList(id, items, badge) {
+  const target = document.getElementById(id);
+  if (!items.length) {
+    target.innerHTML = `<div class="empty-state">No report items</div>`;
+    return;
+  }
+  target.innerHTML = items.map((item) => `
+    <div class="summary-row replay-summary-row">
+      <span>${escapeHtml(item)}</span>
+      <span>${escapeHtml(badge)}</span>
+    </div>
+  `).join("");
+}
+
 async function refreshSim() {
   const params = simFilters().toString();
-  const [simResponse, scenarioResponse] = await Promise.all([
+  const [simResponse, scenarioResponse, reportResponse] = await Promise.all([
     fetch(`/api/v1/runtime-event-persistence-sim?${params}`, { cache: "no-store" }),
-    fetch(`/api/v1/runtime-event-persistence-scenarios?${params}`, { cache: "no-store" })
+    fetch(`/api/v1/runtime-event-persistence-scenarios?${params}`, { cache: "no-store" }),
+    fetch(`/api/v1/runtime-event-persistence-report?${params}`, { cache: "no-store" })
   ]);
   renderSim(await simResponse.json());
   renderScenario(await scenarioResponse.json());
+  renderReport(await reportResponse.json());
 }
 
 document.querySelector("[data-refresh-sim]").addEventListener("click", refreshSim);
@@ -2204,6 +2262,16 @@ refreshSim().catch(() => {
     event_results: []
   });
   renderScenario({ scenario_report: { backend_comparison: [], governance_blockers: [] } });
+  renderReport({
+    report_id: "PENDING",
+    generated_at_utc: "",
+    simulation_only: true,
+    persistence_enabled: false,
+    recommended_backend: "NONE",
+    export_format: "json",
+    safety_assertions: ["REPORT_EXPORT_ONLY", "NO_RUNTIME_EVENT_WRITES"],
+    remaining_approval_requirements: ["explicit operator approval"]
+  });
 });
 """
 

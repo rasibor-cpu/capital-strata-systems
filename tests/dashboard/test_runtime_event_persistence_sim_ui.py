@@ -15,6 +15,7 @@ def test_persistence_sim_page_registers_read_only_route_and_markup() -> None:
     assert "/runtime-event-persistence-sim" in routes
     assert "/api/v1/runtime-event-persistence-sim" in routes
     assert "/api/v1/runtime-event-persistence-scenarios" in routes
+    assert "/api/v1/runtime-event-persistence-report" in routes
     assert "CSS Runtime Event Persistence Simulator" in markup
     assert "Persistence Simulation Results" in markup
     assert "Rejection Reasons" in markup
@@ -23,6 +24,9 @@ def test_persistence_sim_page_registers_read_only_route_and_markup() -> None:
     assert "Backend Recommendation" in markup
     assert "Storage Backend Comparison" in markup
     assert "Governance Blockers" in markup
+    assert "Persistence Dry-Run Report" in markup
+    assert "Report Safety Assertions" in markup
+    assert "Approval Requirements" in markup
     assert "data-refresh-sim" in markup
 
 
@@ -41,6 +45,10 @@ def test_persistence_sim_page_exposes_summary_and_empty_state() -> None:
         "Storage Estimate",
         "Queryability",
         "Risk",
+        "Report ID",
+        "Simulation Only",
+        "Persistence Enabled",
+        "Export Format",
         "No persistence simulation events match the current view",
         "No storage backend scenario data",
         "<span>Index</span><span>Event</span><span>Subsystem</span>",
@@ -68,6 +76,7 @@ def test_persistence_sim_page_uses_safe_filter_query() -> None:
     assert '["requested_window_minutes", "sim-filter-window"]' in markup
     assert 'fetch(`/api/v1/runtime-event-persistence-sim?' in markup
     assert 'fetch(`/api/v1/runtime-event-persistence-scenarios?' in markup
+    assert 'fetch(`/api/v1/runtime-event-persistence-report?' in markup
 
 
 def test_persistence_sim_page_preserves_simulation_only_flags() -> None:
@@ -80,6 +89,8 @@ def test_persistence_sim_page_preserves_simulation_only_flags() -> None:
     assert "NO_WRITES_PERFORMED" in markup
     assert "scenario_report" in markup
     assert "backend_comparison" in markup
+    assert "payload.safety_assertions" in markup
+    assert "payload.remaining_approval_requirements" in markup
 
 
 def test_persistence_sim_layout_is_mobile_safe() -> None:

@@ -426,6 +426,9 @@ Implemented:
 - simulator-only runtime event storage backend profiles
 - read-only `/api/v1/runtime-event-persistence-scenarios` scenario endpoint
 - backend comparison, recommendation, governance blocker, and storage estimate reporting
+- audit-safe runtime event persistence dry-run report builder
+- read-only `/api/v1/runtime-event-persistence-report` JSON report endpoint
+- operator dry-run report, safety assertion, and approval requirement rendering
 
 Blocking items:
 - full subsystem migration is intentionally deferred

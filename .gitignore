@@ -111,6 +111,7 @@ dashboard/runtime/*
 !dashboard/runtime/runtime_event_bus.py
 !dashboard/runtime/runtime_event_inspector.py
 !dashboard/runtime/runtime_event_persistence_policy.py
+!dashboard/runtime/runtime_event_persistence_report.py
 !dashboard/runtime/runtime_event_persistence_scenario.py
 !dashboard/runtime/runtime_event_persistence_simulator.py
 !dashboard/runtime/runtime_event_storage_profiles.py
@@ -123,6 +124,7 @@ dashboard/runtime/*
 !tests/dashboard/test_runtime_event_bus.py
 !tests/dashboard/test_runtime_event_inspector.py
 !tests/dashboard/test_runtime_event_persistence_policy.py
+!tests/dashboard/test_runtime_event_persistence_report.py
 !tests/dashboard/test_runtime_event_persistence_scenario.py
 !tests/dashboard/test_runtime_event_persistence_simulator.py
 !tests/dashboard/test_runtime_event_persistence_sim_ui.py
