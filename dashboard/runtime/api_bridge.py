@@ -27,6 +27,13 @@ from dashboard.runtime.deployment_profiles import get_deployment_profiles
 from dashboard.runtime.live_credential_attestation import (
     build_live_credential_attestation_payload,
 )
+from dashboard.runtime.runtime_event_bus import (
+    RuntimeEventBus,
+    get_default_runtime_event_bus,
+)
+from dashboard.runtime.runtime_event_inspector import (
+    get_runtime_event_inspection_payload,
+)
 from dashboard.runtime.trade_lifecycle_replay_viewer import (
     get_trade_lifecycle_replay_payload,
 )
@@ -99,8 +106,29 @@ def get_alert_payload(
     return build_alert_payload(get_frontend_payload(state_provider))
 
 
+def get_runtime_events_payload(
+    event_bus: RuntimeEventBus | None = None,
+    *,
+    event_type: str = "",
+    subsystem: str = "",
+    severity: str = "",
+    correlation_id: str = "",
+    limit: int = 100,
+) -> dict[str, Any]:
+    return get_runtime_event_inspection_payload(
+        event_bus or get_default_runtime_event_bus(),
+        event_type=event_type,
+        subsystem=subsystem,
+        severity=severity,
+        correlation_id=correlation_id,
+        limit=limit,
+    )
+
+
 def create_dashboard_state_router(
     state_provider: DashboardStateProvider | None = None,
+    *,
+    runtime_event_bus: RuntimeEventBus | None = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -177,6 +205,23 @@ def create_dashboard_state_router(
     def read_alerts() -> dict[str, Any]:
         return get_alert_payload(state_provider)
 
+    @router.get("/api/v1/runtime-events")
+    def read_runtime_events(
+        event_type: str = "",
+        subsystem: str = "",
+        severity: str = "",
+        correlation_id: str = "",
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        return get_runtime_events_payload(
+            runtime_event_bus,
+            event_type=event_type,
+            subsystem=subsystem,
+            severity=severity,
+            correlation_id=correlation_id,
+            limit=limit,
+        )
+
     @router.get("/api/v1/deployment-profiles")
     def read_deployment_profiles() -> dict[str, Any]:
         return get_deployment_profiles()
@@ -210,12 +255,19 @@ def create_dashboard_state_router(
 
 def create_app(
     state_provider: DashboardStateProvider | None = None,
+    *,
+    runtime_event_bus: RuntimeEventBus | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="Capital Strata Systems Dashboard Runtime API",
         version="0.1.0",
     )
-    app.include_router(create_dashboard_state_router(state_provider))
+    app.include_router(
+        create_dashboard_state_router(
+            state_provider,
+            runtime_event_bus=runtime_event_bus,
+        )
+    )
     app.include_router(create_ws_router(state_provider))
     return app
 
@@ -236,5 +288,6 @@ __all__ = [
     "get_dashboard_state_payload",
     "get_frontend_payload",
     "get_live_credential_attestation_payload",
+    "get_runtime_events_payload",
     "get_trade_lifecycle_replay_payload",
 ]

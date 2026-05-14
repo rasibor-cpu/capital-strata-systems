@@ -15,6 +15,7 @@ from dashboard.runtime.dashboard_hydration_coordinator import (
 )
 from dashboard.runtime.dashboard_state import DashboardState
 from dashboard.runtime.runtime_smoke_test import build_smoke_payloads
+from dashboard.runtime.runtime_event_bus import RuntimeEventBus
 from dashboard.runtime.ws_bridge import create_ws_router
 
 
@@ -31,13 +32,20 @@ def demo_dashboard_state_provider() -> DashboardState:
 
 def create_app(
     state_provider: DashboardStateProvider | None = None,
+    *,
+    runtime_event_bus: RuntimeEventBus | None = None,
 ) -> FastAPI:
     provider = state_provider or demo_dashboard_state_provider
     app = FastAPI(
         title="Capital Strata Systems Institutional Web Dashboard",
         version="0.1.0",
     )
-    app.include_router(create_dashboard_state_router(provider))
+    app.include_router(
+        create_dashboard_state_router(
+            provider,
+            runtime_event_bus=runtime_event_bus,
+        )
+    )
     app.include_router(create_ws_router(provider))
 
     @app.get("/", include_in_schema=False)
@@ -72,6 +80,10 @@ def create_app(
     async def replay() -> HTMLResponse:
         return HTMLResponse(_replay_page())
 
+    @app.get("/runtime-events", response_class=HTMLResponse)
+    async def runtime_events() -> HTMLResponse:
+        return HTMLResponse(_runtime_events_page())
+
     @app.get("/health")
     async def health() -> dict[str, Any]:
         state = provider()
@@ -94,6 +106,7 @@ def _app_nav(active: str) -> str:
         ("market_opportunities", "/market-opportunities", "Market"),
         ("broker", "/broker", "Broker"),
         ("replay", "/replay", "Replay"),
+        ("events", "/runtime-events", "Events"),
     ]
 
     return "\n".join(
@@ -1566,6 +1579,244 @@ def _replay_page() -> str:
 </html>"""
 
 
+def _runtime_events_page() -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111820">
+  <title>CSS Runtime Events</title>
+  <style>{_css()}</style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">CSS</div>
+        <div>
+          <p class="eyebrow">Capital Strata Systems</p>
+          <h1>Runtime Event Bus</h1>
+        </div>
+      </div>
+      <section class="status-strip" aria-label="Runtime event status">
+        <span id="events-source">Event bus pending</span>
+        <span id="events-updated">Snapshot pending</span>
+        <span id="events-readonly">Read only</span>
+      </section>
+    </header>
+    {_app_nav("events")}
+
+    <section class="control-row event-controls" aria-label="Runtime event filters">
+      <button type="button" data-refresh-events>Refresh</button>
+      <label>Event <input id="event-filter-event" type="text" placeholder="event_type"></label>
+      <label>Subsystem <input id="event-filter-subsystem" type="text" placeholder="alerting"></label>
+      <label>Severity <input id="event-filter-severity" type="text" placeholder="WARNING"></label>
+      <label>Correlation <input id="event-filter-correlation" type="text" placeholder="COR-..."></label>
+      <label>Limit <input id="event-filter-limit" type="number" min="1" max="1000" step="1" value="100"></label>
+    </section>
+
+    <section class="metric-band event-metrics" aria-label="Runtime event summary">
+      <article>
+        <strong>Returned Events</strong>
+        <span id="events-returned">0</span>
+      </article>
+      <article>
+        <strong>Subsystems</strong>
+        <span id="events-subsystems">0</span>
+      </article>
+      <article>
+        <strong>Event Types</strong>
+        <span id="events-types">0</span>
+      </article>
+      <article>
+        <strong>Severities</strong>
+        <span id="events-severities">0</span>
+      </article>
+      <article>
+        <strong>Bus Available</strong>
+        <span id="events-bus-available">NO</span>
+      </article>
+      <article>
+        <strong>Mode</strong>
+        <span>READ ONLY</span>
+      </article>
+    </section>
+
+    <section class="event-workspace">
+      <article class="panel event-main">
+        <div class="panel-head">
+          <h2>Runtime Event Table</h2>
+          <span id="event-table-badge">0 ROWS</span>
+        </div>
+        <div class="event-table" id="event-table"></div>
+      </article>
+
+      <aside class="event-side">
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Subsystem Mix</h2>
+            <span>SUMMARY</span>
+          </div>
+          <div class="summary-table" id="events-subsystem-mix"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Severity Mix</h2>
+            <span>SUMMARY</span>
+          </div>
+          <div class="summary-table" id="events-severity-mix"></div>
+        </article>
+      </aside>
+    </section>
+  </main>
+
+  <script>{_runtime_events_script()}</script>
+</body>
+</html>"""
+
+
+def _runtime_events_script() -> str:
+    return """
+const eventState = { payload: null };
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\\"": "&quot;",
+    "'": "&#39;"
+  }[char]));
+}
+
+function formatTime(value) {
+  if (!value) return "UNKNOWN";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("en-US", { hour12: false });
+}
+
+function shortId(value) {
+  const text = String(value || "");
+  return text.length > 12 ? text.slice(0, 12) : text;
+}
+
+function eventFilters() {
+  const params = new URLSearchParams();
+  const eventType = document.getElementById("event-filter-event").value.trim();
+  const subsystem = document.getElementById("event-filter-subsystem").value.trim();
+  const severity = document.getElementById("event-filter-severity").value.trim();
+  const correlation = document.getElementById("event-filter-correlation").value.trim();
+  const limit = document.getElementById("event-filter-limit").value.trim() || "100";
+  if (eventType) params.set("event_type", eventType);
+  if (subsystem) params.set("subsystem", subsystem);
+  if (severity) params.set("severity", severity);
+  if (correlation) params.set("correlation_id", correlation);
+  params.set("limit", limit);
+  return params;
+}
+
+function hydrateEventFiltersFromLocation() {
+  const params = new URLSearchParams(location.search);
+  const mapping = [
+    ["event_type", "event-filter-event"],
+    ["subsystem", "event-filter-subsystem"],
+    ["severity", "event-filter-severity"],
+    ["correlation_id", "event-filter-correlation"],
+    ["limit", "event-filter-limit"]
+  ];
+  mapping.forEach(([key, id]) => {
+    const value = params.get(key);
+    if (value !== null) {
+      document.getElementById(id).value = value;
+    }
+  });
+}
+
+function setText(id, value) {
+  document.getElementById(id).textContent = String(value);
+}
+
+function renderEvents(payload) {
+  eventState.payload = payload;
+  const summary = payload.summary || {};
+  const events = payload.events || [];
+
+  setText("events-source", payload.bus_available ? "Event bus active" : "Event bus empty");
+  setText("events-updated", payload.generated_utc ? `Updated ${formatTime(payload.generated_utc)}` : "Updated pending");
+  setText("events-returned", payload.total_returned || 0);
+  setText("events-subsystems", Object.keys(summary.counts_by_subsystem || {}).length);
+  setText("events-types", Object.keys(summary.counts_by_event_type || {}).length);
+  setText("events-severities", Object.keys(summary.counts_by_severity || {}).length);
+  setText("events-bus-available", payload.bus_available ? "YES" : "NO");
+  setText("event-table-badge", `${payload.total_returned || 0} ROWS`);
+
+  renderEventTable(events);
+  renderMix("events-subsystem-mix", summary.counts_by_subsystem || {});
+  renderMix("events-severity-mix", summary.counts_by_severity || {});
+}
+
+function renderEventTable(events) {
+  const target = document.getElementById("event-table");
+  if (!events.length) {
+    target.innerHTML = `<div class="empty-state">No runtime events match the current view</div>`;
+    return;
+  }
+  target.innerHTML = `
+    <div class="event-row event-head">
+      <span>Time</span><span>Event</span><span>Subsystem</span><span>Severity</span><span>Correlation</span><span>Source</span><span>Schema</span>
+    </div>
+    ${events.map((event) => `
+      <div class="event-row">
+        <span>${escapeHtml(formatTime(event.timestamp_utc))}</span>
+        <span>${escapeHtml(event.event_type || "UNKNOWN")}</span>
+        <span>${escapeHtml(event.subsystem || "UNKNOWN")}</span>
+        <span>${escapeHtml(event.severity || "INFO")}</span>
+        <span>${escapeHtml(shortId(event.correlation_id || ""))}</span>
+        <span>${escapeHtml(event.source_module || "")}</span>
+        <span>${escapeHtml(event.schema_version || "")}</span>
+      </div>
+    `).join("")}
+  `;
+}
+
+function renderMix(id, mix) {
+  const target = document.getElementById(id);
+  const rows = Object.entries(mix);
+  if (!rows.length) {
+    target.innerHTML = `<div class="empty-state">No event mix</div>`;
+    return;
+  }
+  target.innerHTML = rows.map(([key, count]) => `
+    <div class="summary-row replay-summary-row">
+      <span>${escapeHtml(key)}</span>
+      <span>${Number(count || 0)}</span>
+    </div>
+  `).join("");
+}
+
+async function refreshEvents() {
+  const response = await fetch(`/api/v1/runtime-events?${eventFilters().toString()}`, { cache: "no-store" });
+  renderEvents(await response.json());
+}
+
+document.querySelector("[data-refresh-events]").addEventListener("click", refreshEvents);
+document.querySelectorAll(".event-controls input").forEach((input) => {
+  input.addEventListener("change", refreshEvents);
+});
+hydrateEventFiltersFromLocation();
+refreshEvents().catch(() => renderEvents({
+  bus_available: false,
+  generated_utc: "",
+  total_returned: 0,
+  summary: {},
+  events: []
+}));
+"""
+
+
 def _replay_script() -> str:
     return """
 const replayState = { payload: null };
@@ -2024,12 +2275,14 @@ button {
   grid-template-columns: minmax(0, 1.2fr) minmax(340px, 0.8fr);
   gap: 12px;
 }
-.replay-workspace {
+.replay-workspace,
+.event-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }
-.replay-controls label {
+.replay-controls label,
+.event-controls label {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -2042,7 +2295,8 @@ button {
   max-width: 100%;
   overflow-wrap: anywhere;
 }
-.replay-controls input {
+.replay-controls input,
+.event-controls input {
   width: 160px;
   max-width: 42vw;
   min-height: 28px;
@@ -2068,7 +2322,8 @@ button {
 .broker-main {
   min-height: 360px;
 }
-.replay-main {
+.replay-main,
+.event-main {
   min-height: 560px;
 }
 .positions-side {
@@ -2091,7 +2346,8 @@ button {
   gap: 12px;
   align-content: start;
 }
-.replay-side {
+.replay-side,
+.event-side {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
@@ -2104,6 +2360,7 @@ button {
 .execution-table,
 .opportunity-table,
 .replay-table,
+.event-table,
 .summary-table {
   overflow-x: auto;
   max-width: 100%;
@@ -2162,7 +2419,22 @@ button {
   padding: 10px 0;
   align-items: center;
 }
+.event-row {
+  display: grid;
+  grid-template-columns: 180px 220px 130px 90px 120px minmax(220px, 1fr) 170px;
+  gap: 8px;
+  min-width: 1180px;
+  border-bottom: 1px solid var(--line);
+  padding: 10px 0;
+  align-items: center;
+}
 .replay-head {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  font-weight: 800;
+}
+.event-head {
   color: var(--muted);
   font-size: 12px;
   text-transform: uppercase;
@@ -2172,6 +2444,7 @@ button {
 .execution-row span,
 .opportunity-row span,
 .replay-row span,
+.event-row span,
 .summary-row span {
   overflow-wrap: anywhere;
   font-weight: 700;
@@ -2272,10 +2545,12 @@ button {
     text-align: center;
     overflow-wrap: anywhere;
   }
-  .replay-controls label {
+  .replay-controls label,
+  .event-controls label {
     flex: 1 1 100%;
   }
-  .replay-controls input {
+  .replay-controls input,
+  .event-controls input {
     flex: 1 1 auto;
     max-width: none;
   }
@@ -2285,9 +2560,10 @@ button {
   .execution-workspace,
   .risk-governance-workspace,
   .market-opportunity-workspace,
-  .broker-workspace,
-  .replay-workspace,
-  .kv-grid,
+    .broker-workspace,
+    .replay-workspace,
+    .event-workspace,
+    .kv-grid,
   .kv-grid.two,
   .signal-grid {
     grid-template-columns: 1fr;

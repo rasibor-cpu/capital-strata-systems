@@ -7,6 +7,7 @@ from dashboard.web.web_app import (
     _execution_page,
     _market_opportunities_page,
     _positions_page,
+    _runtime_events_page,
     _replay_page,
     _risk_governance_page,
     create_app,
@@ -25,6 +26,7 @@ def main() -> int:
         "/market-opportunities",
         "/positions",
         "/replay",
+        "/runtime-events",
         "/risk-governance",
         "/health",
         "/api/v1/dashboard-state",
@@ -36,6 +38,7 @@ def main() -> int:
         "/api/v1/opportunities",
         "/api/v1/broker",
         "/api/v1/alerts",
+        "/api/v1/runtime-events",
         "/api/v1/deployment-profiles",
         "/api/v1/trade-lifecycle-replay",
         "/ws/v1/dashboard-state",
@@ -62,6 +65,7 @@ def main() -> int:
         'href="/positions"',
         'href="/risk-governance"',
         'href="/replay"',
+        'href="/runtime-events"',
         "/api/v1/frontend-state",
         "/ws/v1/dashboard-state",
     ]
@@ -160,6 +164,20 @@ def main() -> int:
     for expected in expected_replay_markup:
         if expected not in replay_markup:
             raise AssertionError(f"Web replay markup missing: {expected}")
+
+    runtime_events_markup = _runtime_events_page()
+    expected_runtime_events_markup = [
+        "CSS Runtime Events",
+        "Runtime Event Bus",
+        "Runtime Event Table",
+        "Subsystem Mix",
+        "Severity Mix",
+        "No runtime events match the current view",
+        "/api/v1/runtime-events",
+    ]
+    for expected in expected_runtime_events_markup:
+        if expected not in runtime_events_markup:
+            raise AssertionError(f"Web runtime events markup missing: {expected}")
 
     payload = get_frontend_payload(demo_dashboard_state_provider)
     sections = payload.get("sections", {})

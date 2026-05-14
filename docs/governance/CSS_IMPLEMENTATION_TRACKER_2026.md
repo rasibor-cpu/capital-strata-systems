@@ -405,6 +405,10 @@ Implemented:
 - shadow-mode alert-created publishing hook
 - shadow-mode replay-persisted publishing hook
 - non-fatal event bus publishing by default, with strict mode for tests
+- read-only runtime event inspection helper
+- `/api/v1/runtime-events` inspection endpoint
+- `/runtime-events` operator inspection page
+- filterable recent-event view by event type, subsystem, severity, correlation id, and limit
 
 Blocking items:
 - full subsystem migration is intentionally deferred
