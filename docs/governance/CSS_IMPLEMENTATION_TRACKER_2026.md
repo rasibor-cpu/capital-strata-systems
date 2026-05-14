@@ -480,6 +480,11 @@ Implemented:
 - read-only `/api/v1/micro-live-operator-approval-gate` endpoint
 - operator display of approval status, trading-armed false state, kill-switch
   evidence, and remaining manual approval blockers
+- final micro-live broker readiness confirmation evidence package
+- read-only `/api/v1/micro-live-broker-readiness-confirmation` endpoint
+- operator display of Coinbase/BTC-USD/limit-only readiness, broker-mutation
+  false state, order-submit false state, credential exposure status, and
+  remaining broker confirmation blockers
 - explicit pilot constraints: Coinbase Advanced, BTC-USD, CAD $15 maximum,
   one limit order, 0.35% maximum slippage, mandatory logging, mandatory
   post-trade pause, and fail-closed governance

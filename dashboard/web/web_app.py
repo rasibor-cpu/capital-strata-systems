@@ -2067,6 +2067,10 @@ def _micro_live_pilot_readiness_page() -> str:
       Manual approval still required; no trading is armed.
     </section>
 
+    <section class="empty-state sim-banner" id="pilot-broker-confirmation-banner">
+      No broker state was modified. Broker readiness confirmation is evidence-only.
+    </section>
+
     <section class="metric-band pilot-metrics" aria-label="Micro-live pilot summary">
       <article>
         <strong>Readiness</strong>
@@ -2190,6 +2194,30 @@ def _micro_live_pilot_readiness_page() -> str:
             <span>REVIEW</span>
           </div>
           <div class="summary-table" id="pilot-approval-review"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Broker Readiness Confirmation</h2>
+            <span>NO MUTATION</span>
+          </div>
+          <div class="summary-table" id="pilot-broker-confirmation"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Broker Confirmation Checks</h2>
+            <span>REVIEW</span>
+          </div>
+          <div class="summary-table" id="pilot-broker-confirmation-checks"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Broker Confirmation Blockers / Warnings</h2>
+            <span>FAIL CLOSED</span>
+          </div>
+          <div class="summary-table" id="pilot-broker-confirmation-review"></div>
         </article>
       </aside>
     </section>
@@ -2477,6 +2505,36 @@ function renderApprovalGate(gate) {
     "Manual approval still required; no trading is armed and no approval-grant endpoint exists.";
 }
 
+function renderBrokerConfirmation(confirmation) {
+  const rows = [
+    { label: "Readiness Status", status: confirmation.readiness_status || "REVIEW_REQUIRED" },
+    { label: "Broker", status: confirmation.broker || "Coinbase Advanced" },
+    { label: "Broker Connection Expected", status: confirmation.broker_connection_expected ? "YES" : "NO" },
+    { label: "Credential Presence Expected", status: confirmation.credential_presence_expected ? "YES" : "NO" },
+    { label: "Credential Secret Exposed", status: confirmation.credential_secret_exposed ? "YES" : "NO" },
+    { label: "Order Submit Allowed", status: confirmation.order_submit_allowed ? "YES" : "NO" },
+    { label: "Broker Mutation Allowed", status: confirmation.broker_mutation_allowed ? "YES" : "NO" },
+    { label: "Supported Symbol", status: confirmation.supported_symbol || "BTC-USD" },
+    { label: "Supported Order Type", status: confirmation.supported_order_type || "limit" },
+    { label: "Max Capital", status: `CAD ${confirmation.max_pilot_capital_cad || "15.00"}` },
+    { label: "Max Slippage", status: `${confirmation.max_slippage_pct || "0.35"}%` },
+    { label: "Max Live Orders", status: confirmation.max_live_orders ?? 1 },
+  ];
+  const checks = [
+    ...(confirmation.failed_checks || []),
+    ...(confirmation.passed_checks || []),
+  ];
+  const reviewRows = [
+    ...(confirmation.blockers || []).map((item) => ({ label: item, status: "BLOCK" })),
+    ...(confirmation.warnings || []).map((item) => ({ label: item, status: "WARN" })),
+  ];
+  renderRows("pilot-broker-confirmation", rows, "No broker readiness confirmation available");
+  renderRows("pilot-broker-confirmation-checks", checks, "No broker readiness confirmation checks available", "severity");
+  renderRows("pilot-broker-confirmation-review", reviewRows, "No broker confirmation blockers or warnings");
+  document.getElementById("pilot-broker-confirmation-banner").textContent =
+    "No broker state was modified. Broker readiness confirmation is evidence-only and order-submit disabled.";
+}
+
 function renderPilot(payload) {
   const passed = payload.passed_checks || [];
   const failed = payload.failed_checks || [];
@@ -2512,17 +2570,20 @@ async function refreshPilot() {
     readinessResponse,
     intentResponse,
     probeResponse,
-    approvalGateResponse
+    approvalGateResponse,
+    brokerConfirmationResponse
   ] = await Promise.all([
     fetch("/api/v1/micro-live-pilot-readiness", { cache: "no-store" }),
     fetch("/api/v1/micro-live-pilot-order-intent", { cache: "no-store" }),
     fetch("/api/v1/coinbase-micro-live-dry-run-probe", { cache: "no-store" }),
     fetch("/api/v1/micro-live-operator-approval-gate", { cache: "no-store" }),
+    fetch("/api/v1/micro-live-broker-readiness-confirmation", { cache: "no-store" }),
   ]);
   renderPilot(await readinessResponse.json());
   renderOrderIntent(await intentResponse.json());
   renderDryRunProbe(await probeResponse.json());
   renderApprovalGate(await approvalGateResponse.json());
+  renderBrokerConfirmation(await brokerConfirmationResponse.json());
 }
 
 document.querySelector("[data-refresh-pilot]").addEventListener("click", refreshPilot);
@@ -2587,6 +2648,24 @@ renderApprovalGate({
   },
   blockers: [],
   warnings: ["MANUAL_APPROVAL_STILL_REQUIRED_NO_TRADING_ARMED"]
+});
+renderBrokerConfirmation({
+  readiness_status: "REVIEW_REQUIRED",
+  broker: "Coinbase Advanced",
+  broker_connection_expected: true,
+  broker_mutation_allowed: false,
+  order_submit_allowed: false,
+  credential_presence_expected: true,
+  credential_secret_exposed: false,
+  supported_symbol: "BTC-USD",
+  supported_order_type: "limit",
+  max_pilot_capital_cad: "15.00",
+  max_slippage_pct: "0.35",
+  max_live_orders: 1,
+  passed_checks: [],
+  failed_checks: [],
+  blockers: [],
+  warnings: ["NO_BROKER_STATE_WAS_MODIFIED"]
 });
 """
 

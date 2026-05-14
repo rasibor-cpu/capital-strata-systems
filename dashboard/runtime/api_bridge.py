@@ -30,6 +30,9 @@ from dashboard.runtime.deployment_profiles import get_deployment_profiles
 from dashboard.runtime.live_credential_attestation import (
     build_live_credential_attestation_payload,
 )
+from dashboard.runtime.micro_live_broker_readiness_confirmation import (
+    build_micro_live_broker_readiness_confirmation_payload,
+)
 from dashboard.runtime.micro_live_pilot_readiness import (
     build_micro_live_pilot_readiness_payload,
     load_pcnrass_validation_summary,
@@ -370,6 +373,29 @@ def get_micro_live_operator_approval_gate_payload(
     )
 
 
+def get_micro_live_broker_readiness_confirmation_payload(
+    state_provider: DashboardStateProvider | None = None,
+    event_bus: RuntimeEventBus | None = None,
+) -> dict[str, Any]:
+    state = _state_from_provider(state_provider)
+    pcnrass_summary = load_pcnrass_validation_summary()
+    dry_run_probe = get_coinbase_micro_live_dry_run_probe_payload()
+    operator_gate = get_micro_live_operator_approval_gate_payload(
+        state_provider,
+        event_bus,
+    )
+    persistence_checklist = get_runtime_event_persistence_checklist_payload(
+        event_bus or get_default_runtime_event_bus(),
+    )
+    return build_micro_live_broker_readiness_confirmation_payload(
+        dashboard_payload=state.to_dict(),
+        dry_run_probe=dry_run_probe,
+        operator_approval_gate=operator_gate,
+        persistence_checklist=persistence_checklist,
+        pcnrass_summary=pcnrass_summary,
+    )
+
+
 def create_dashboard_state_router(
     state_provider: DashboardStateProvider | None = None,
     *,
@@ -630,6 +656,13 @@ def create_dashboard_state_router(
             runtime_event_bus,
         )
 
+    @router.get("/api/v1/micro-live-broker-readiness-confirmation")
+    def read_micro_live_broker_readiness_confirmation() -> dict[str, Any]:
+        return get_micro_live_broker_readiness_confirmation_payload(
+            state_provider,
+            runtime_event_bus,
+        )
+
     @router.get("/api/v1/deployment-profiles")
     def read_deployment_profiles() -> dict[str, Any]:
         return get_deployment_profiles()
@@ -697,6 +730,7 @@ __all__ = [
     "get_dashboard_state_payload",
     "get_frontend_payload",
     "get_live_credential_attestation_payload",
+    "get_micro_live_broker_readiness_confirmation_payload",
     "get_micro_live_operator_approval_gate_payload",
     "get_micro_live_pilot_readiness_payload",
     "get_micro_live_pilot_order_intent_payload",
