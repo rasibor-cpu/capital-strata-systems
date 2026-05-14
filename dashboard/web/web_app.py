@@ -2059,6 +2059,10 @@ def _micro_live_pilot_readiness_page() -> str:
       No order will be placed from this page. The pilot order intent is non-executing evidence for operator review only.
     </section>
 
+    <section class="empty-state sim-banner" id="pilot-probe-banner">
+      No order was submitted. Coinbase dry-run probe evidence is non-executing and broker-mutation disabled.
+    </section>
+
     <section class="metric-band pilot-metrics" aria-label="Micro-live pilot summary">
       <article>
         <strong>Readiness</strong>
@@ -2142,6 +2146,22 @@ def _micro_live_pilot_readiness_page() -> str:
             <span>REQUIRED</span>
           </div>
           <div class="summary-table" id="pilot-required-approvals"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Coinbase Dry-Run Probe Evidence</h2>
+            <span>NO SUBMIT</span>
+          </div>
+          <div class="summary-table" id="pilot-dry-run-probe"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Probe Blockers / Warnings</h2>
+            <span>REVIEW</span>
+          </div>
+          <div class="summary-table" id="pilot-probe-review"></div>
         </article>
       </aside>
     </section>
@@ -2372,6 +2392,30 @@ function renderOrderIntent(intent) {
     : "No order will be placed from this page. Intent package is non-executing evidence for operator review only.";
 }
 
+function renderDryRunProbe(probe) {
+  const rows = [
+    { label: "Validation Status", status: probe.validation_status || "REVIEW_REQUIRED" },
+    { label: "Probe Mode", status: probe.probe_mode || "non_executing" },
+    { label: "Order Submit Allowed", status: probe.order_submit_allowed ? "YES" : "NO" },
+    { label: "Broker Mutation Allowed", status: probe.broker_mutation_allowed ? "YES" : "NO" },
+    { label: "Credential Secret Exposed", status: probe.credential_secret_exposed ? "YES" : "NO" },
+    { label: "Broker", status: probe.broker || "Coinbase Advanced" },
+    { label: "Symbol", status: probe.symbol || "BTC-USD" },
+    { label: "Order Type", status: probe.order_type || "limit" },
+    { label: "Max Capital", status: `CAD ${probe.max_pilot_capital_cad || "15.00"}` },
+    { label: "Max Slippage", status: `${probe.max_slippage_pct || "0.35"}%` },
+    { label: "Max Live Orders", status: probe.max_live_orders ?? 1 },
+  ];
+  const reviewRows = [
+    ...(probe.blockers || []).map((item) => ({ label: item, status: "BLOCK" })),
+    ...(probe.warnings || []).map((item) => ({ label: item, status: "WARN" })),
+  ];
+  renderRows("pilot-dry-run-probe", rows, "No Coinbase dry-run probe evidence available");
+  renderRows("pilot-probe-review", reviewRows, "No Coinbase dry-run probe blockers or warnings");
+  document.getElementById("pilot-probe-banner").textContent =
+    "No order was submitted. Probe evidence is non-executing, broker-mutation disabled, and review-only.";
+}
+
 function renderPilot(payload) {
   const passed = payload.passed_checks || [];
   const failed = payload.failed_checks || [];
@@ -2403,12 +2447,14 @@ function renderPilot(payload) {
 }
 
 async function refreshPilot() {
-  const [readinessResponse, intentResponse] = await Promise.all([
+  const [readinessResponse, intentResponse, probeResponse] = await Promise.all([
     fetch("/api/v1/micro-live-pilot-readiness", { cache: "no-store" }),
     fetch("/api/v1/micro-live-pilot-order-intent", { cache: "no-store" }),
+    fetch("/api/v1/coinbase-micro-live-dry-run-probe", { cache: "no-store" }),
   ]);
   renderPilot(await readinessResponse.json());
   renderOrderIntent(await intentResponse.json());
+  renderDryRunProbe(await probeResponse.json());
 }
 
 document.querySelector("[data-refresh-pilot]").addEventListener("click", refreshPilot);
@@ -2437,6 +2483,21 @@ renderOrderIntent({
   max_slippage_pct: "0.35",
   max_live_orders: 1,
   required_approvals: ["explicit operator confirmation"]
+});
+renderDryRunProbe({
+  validation_status: "REVIEW_REQUIRED",
+  probe_mode: "non_executing",
+  order_submit_allowed: false,
+  broker_mutation_allowed: false,
+  credential_secret_exposed: false,
+  broker: "Coinbase Advanced",
+  symbol: "BTC-USD",
+  order_type: "limit",
+  max_pilot_capital_cad: "15.00",
+  max_slippage_pct: "0.35",
+  max_live_orders: 1,
+  blockers: [],
+  warnings: ["NO_ORDER_WAS_SUBMITTED"]
 });
 """
 

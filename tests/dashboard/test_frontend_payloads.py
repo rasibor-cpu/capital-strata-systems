@@ -20,6 +20,7 @@ from dashboard.runtime.alerting_layer import ALERT_PAYLOAD_VERSION, build_alert_
 from dashboard.runtime.api_bridge import (
     create_app,
     get_alert_payload,
+    get_coinbase_micro_live_dry_run_probe_payload,
     get_dashboard_state_payload,
     get_frontend_payload,
     get_micro_live_pilot_order_intent_payload,
@@ -146,6 +147,7 @@ def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
         "/api/v1/broker",
         "/api/v1/broker-reconciliation",
         "/api/v1/alerts",
+        "/api/v1/coinbase-micro-live-dry-run-probe",
         "/api/v1/micro-live-pilot-order-intent",
         "/api/v1/micro-live-pilot-readiness",
         "/api/v1/runtime-events",
@@ -196,6 +198,14 @@ def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
         is False
     )
     assert get_micro_live_pilot_order_intent_payload()["execution_allowed"] is False
+    assert (
+        get_coinbase_micro_live_dry_run_probe_payload()["order_submit_allowed"]
+        is False
+    )
+    assert (
+        get_coinbase_micro_live_dry_run_probe_payload()["broker_mutation_allowed"]
+        is False
+    )
     assert build_section_payload(state, "risk")["data"]["risk_state"] == "NORMAL"
 
 

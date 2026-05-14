@@ -102,6 +102,7 @@ dashboard/runtime/*
 !dashboard/runtime/alerting_layer.py
 !dashboard/runtime/deployment_profiles.py
 !dashboard/runtime/live_dashboard_state.py
+!dashboard/runtime/coinbase_micro_live_dry_run_probe.py
 !dashboard/runtime/micro_live_pilot_order_intent.py
 !dashboard/runtime/micro_live_pilot_readiness.py
 !dashboard/runtime/trade_lifecycle_service.py
@@ -137,6 +138,7 @@ dashboard/runtime/*
 !tests/dashboard/test_broker_live_dry_run_certification.py
 !tests/dashboard/test_broker_adapter_conformance.py
 !tests/dashboard/test_live_credential_attestation.py
+!tests/dashboard/test_coinbase_micro_live_dry_run_probe.py
 !tests/dashboard/test_micro_live_pilot_order_intent.py
 !tests/dashboard/test_micro_live_pilot_readiness.py
 !tests/engine/test_live_readiness_certifier.py

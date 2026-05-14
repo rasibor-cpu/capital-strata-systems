@@ -22,6 +22,9 @@ from dashboard.runtime.broker_adapter_conformance import (
 from dashboard.runtime.broker_live_dry_run_certification import (
     build_broker_live_dry_run_certification_payload,
 )
+from dashboard.runtime.coinbase_micro_live_dry_run_probe import (
+    build_coinbase_micro_live_dry_run_probe_payload,
+)
 from dashboard.runtime.alerting_layer import build_alert_payload
 from dashboard.runtime.deployment_profiles import get_deployment_profiles
 from dashboard.runtime.live_credential_attestation import (
@@ -342,6 +345,12 @@ def get_micro_live_pilot_order_intent_payload() -> dict[str, Any]:
     return build_micro_live_pilot_order_intent_payload()
 
 
+def get_coinbase_micro_live_dry_run_probe_payload() -> dict[str, Any]:
+    return build_coinbase_micro_live_dry_run_probe_payload(
+        get_micro_live_pilot_order_intent_payload(),
+    )
+
+
 def create_dashboard_state_router(
     state_provider: DashboardStateProvider | None = None,
     *,
@@ -591,6 +600,10 @@ def create_dashboard_state_router(
     def read_micro_live_pilot_order_intent() -> dict[str, Any]:
         return get_micro_live_pilot_order_intent_payload()
 
+    @router.get("/api/v1/coinbase-micro-live-dry-run-probe")
+    def read_coinbase_micro_live_dry_run_probe() -> dict[str, Any]:
+        return get_coinbase_micro_live_dry_run_probe_payload()
+
     @router.get("/api/v1/deployment-profiles")
     def read_deployment_profiles() -> dict[str, Any]:
         return get_deployment_profiles()
@@ -652,6 +665,7 @@ __all__ = [
     "default_dashboard_state_provider",
     "get_broker_adapter_conformance_payload",
     "get_broker_live_dry_run_certification_payload",
+    "get_coinbase_micro_live_dry_run_probe_payload",
     "get_broker_reconciliation_payload",
     "get_alert_payload",
     "get_dashboard_state_payload",

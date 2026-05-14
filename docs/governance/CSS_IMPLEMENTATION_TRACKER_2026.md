@@ -472,6 +472,10 @@ Implemented:
 - non-executing micro-live pilot order-intent evidence package
 - read-only `/api/v1/micro-live-pilot-order-intent` endpoint
 - operator review display of order-intent blockers and required approvals
+- Coinbase non-executing micro-live dry-run probe evidence package
+- read-only `/api/v1/coinbase-micro-live-dry-run-probe` endpoint
+- operator display of dry-run probe status, blockers, warnings, and no-submit
+  state
 - explicit pilot constraints: Coinbase Advanced, BTC-USD, CAD $15 maximum,
   one limit order, 0.35% maximum slippage, mandatory logging, mandatory
   post-trade pause, and fail-closed governance
