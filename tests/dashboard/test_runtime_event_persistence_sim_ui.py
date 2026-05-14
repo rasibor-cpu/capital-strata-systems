@@ -14,11 +14,15 @@ def test_persistence_sim_page_registers_read_only_route_and_markup() -> None:
 
     assert "/runtime-event-persistence-sim" in routes
     assert "/api/v1/runtime-event-persistence-sim" in routes
+    assert "/api/v1/runtime-event-persistence-scenarios" in routes
     assert "CSS Runtime Event Persistence Simulator" in markup
     assert "Persistence Simulation Results" in markup
     assert "Rejection Reasons" in markup
     assert "Subsystem Breakdown" in markup
     assert "Simulation Warnings" in markup
+    assert "Backend Recommendation" in markup
+    assert "Storage Backend Comparison" in markup
+    assert "Governance Blockers" in markup
     assert "data-refresh-sim" in markup
 
 
@@ -33,7 +37,12 @@ def test_persistence_sim_page_exposes_summary_and_empty_state() -> None:
         "Event Rate",
         "Inspected",
         "Writes",
+        "Recommended",
+        "Storage Estimate",
+        "Queryability",
+        "Risk",
         "No persistence simulation events match the current view",
+        "No storage backend scenario data",
         "<span>Index</span><span>Event</span><span>Subsystem</span>",
         "<span>Decision</span><span>Reasons</span><span>Correlation</span>",
     ]
@@ -58,6 +67,7 @@ def test_persistence_sim_page_uses_safe_filter_query() -> None:
     assert "hydrateSimFiltersFromLocation" in markup
     assert '["requested_window_minutes", "sim-filter-window"]' in markup
     assert 'fetch(`/api/v1/runtime-event-persistence-sim?' in markup
+    assert 'fetch(`/api/v1/runtime-event-persistence-scenarios?' in markup
 
 
 def test_persistence_sim_page_preserves_simulation_only_flags() -> None:
@@ -68,6 +78,8 @@ def test_persistence_sim_page_preserves_simulation_only_flags() -> None:
     assert "payload.writes_performed" in markup
     assert "Persistence disabled" in markup
     assert "NO_WRITES_PERFORMED" in markup
+    assert "scenario_report" in markup
+    assert "backend_comparison" in markup
 
 
 def test_persistence_sim_layout_is_mobile_safe() -> None:
@@ -75,6 +87,7 @@ def test_persistence_sim_layout_is_mobile_safe() -> None:
 
     assert ".sim-workspace" in css
     assert ".sim-row" in css
+    assert ".sim-backend-row" in css
     assert ".sim-controls label" in css
     assert ".sim-controls input" in css
     assert ".sim-banner" in css

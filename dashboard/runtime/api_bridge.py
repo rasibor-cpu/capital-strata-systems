@@ -40,6 +40,12 @@ from dashboard.runtime.runtime_event_persistence_policy import (
 from dashboard.runtime.runtime_event_persistence_simulator import (
     get_runtime_event_persistence_simulation_payload,
 )
+from dashboard.runtime.runtime_event_persistence_scenario import (
+    build_runtime_event_persistence_scenario_report,
+)
+from dashboard.runtime.runtime_event_storage_profiles import (
+    get_runtime_event_storage_profiles_payload,
+)
 from dashboard.runtime.trade_lifecycle_replay_viewer import (
     get_trade_lifecycle_replay_payload,
 )
@@ -164,6 +170,44 @@ def get_runtime_event_persistence_sim_payload(
         approval_token_present=approval_token_present,
         requested_export_format=requested_export_format,
     )
+
+
+def get_runtime_event_persistence_scenarios_payload(
+    event_bus: RuntimeEventBus | None = None,
+    *,
+    event_type: str = "",
+    subsystem: str = "",
+    severity: str = "",
+    correlation_id: str = "",
+    limit: int | None = None,
+    requested_window_minutes: int = 15,
+    reason: str = "runtime event persistence dry-run scenario",
+    operator_id: str = "",
+    approval_token_present: bool = False,
+    requested_export_format: str = "json",
+) -> dict[str, Any]:
+    simulation = get_runtime_event_persistence_sim_payload(
+        event_bus,
+        event_type=event_type,
+        subsystem=subsystem,
+        severity=severity,
+        correlation_id=correlation_id,
+        limit=limit,
+        requested_window_minutes=requested_window_minutes,
+        reason=reason,
+        operator_id=operator_id,
+        approval_token_present=approval_token_present,
+        requested_export_format=requested_export_format,
+    )
+    return {
+        "read_only": True,
+        "simulation_only": True,
+        "persistence_enabled": False,
+        "writes_performed": False,
+        "storage_profiles": get_runtime_event_storage_profiles_payload(),
+        "simulation": simulation,
+        "scenario_report": build_runtime_event_persistence_scenario_report(simulation),
+    }
 
 
 def create_dashboard_state_router(
@@ -296,6 +340,33 @@ def create_dashboard_state_router(
             requested_export_format=requested_export_format,
         )
 
+    @router.get("/api/v1/runtime-event-persistence-scenarios")
+    def read_runtime_event_persistence_scenarios(
+        event_type: str = "",
+        subsystem: str = "",
+        severity: str = "",
+        correlation_id: str = "",
+        limit: int = 100,
+        requested_window_minutes: int = 15,
+        reason: str = "runtime event persistence dry-run scenario",
+        operator_id: str = "",
+        approval_token_present: bool = False,
+        requested_export_format: str = "json",
+    ) -> dict[str, Any]:
+        return get_runtime_event_persistence_scenarios_payload(
+            runtime_event_bus,
+            event_type=event_type,
+            subsystem=subsystem,
+            severity=severity,
+            correlation_id=correlation_id,
+            limit=limit,
+            requested_window_minutes=requested_window_minutes,
+            reason=reason,
+            operator_id=operator_id,
+            approval_token_present=approval_token_present,
+            requested_export_format=requested_export_format,
+        )
+
     @router.get("/api/v1/deployment-profiles")
     def read_deployment_profiles() -> dict[str, Any]:
         return get_deployment_profiles()
@@ -363,6 +434,7 @@ __all__ = [
     "get_frontend_payload",
     "get_live_credential_attestation_payload",
     "get_runtime_event_persistence_policy_inspection_payload",
+    "get_runtime_event_persistence_scenarios_payload",
     "get_runtime_event_persistence_sim_payload",
     "get_runtime_events_payload",
     "get_trade_lifecycle_replay_payload",

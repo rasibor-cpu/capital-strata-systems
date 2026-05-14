@@ -1784,6 +1784,35 @@ def _runtime_event_persistence_sim_page() -> str:
           </div>
           <div class="summary-table" id="sim-warnings"></div>
         </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Backend Recommendation</h2>
+            <span>SCENARIO</span>
+          </div>
+          <div class="kv-grid two">
+            <div><strong>Recommended</strong><span id="scenario-recommended">NONE</span></div>
+            <div><strong>Storage Estimate</strong><span id="scenario-estimate">0</span></div>
+            <div><strong>Queryability</strong><span id="scenario-queryability">UNKNOWN</span></div>
+            <div><strong>Risk</strong><span id="scenario-risk">UNKNOWN</span></div>
+          </div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Storage Backend Comparison</h2>
+            <span>READ ONLY</span>
+          </div>
+          <div class="summary-table" id="scenario-backends"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Governance Blockers</h2>
+            <span>FAIL CLOSED</span>
+          </div>
+          <div class="summary-table" id="scenario-blockers"></div>
+        </article>
       </aside>
     </section>
   </main>
@@ -2099,9 +2128,58 @@ function renderWarnings(payload) {
   `).join("");
 }
 
+function renderScenario(payload) {
+  const report = payload.scenario_report || {};
+  const comparison = report.backend_comparison || [];
+  const recommended = report.recommended_backend || "NONE";
+  const recommendedRow = comparison.find((item) => item.backend_name === recommended) || {};
+
+  setText("scenario-recommended", recommended);
+  setText("scenario-estimate", recommendedRow.estimated_backend_storage_bytes || 0);
+  setText("scenario-queryability", recommendedRow.queryability || "UNKNOWN");
+  setText("scenario-risk", recommendedRow.operational_risk || "UNKNOWN");
+  renderScenarioBackends(comparison);
+  renderScenarioBlockers(report.governance_blockers || []);
+}
+
+function renderScenarioBackends(backends) {
+  const target = document.getElementById("scenario-backends");
+  if (!backends.length) {
+    target.innerHTML = `<div class="empty-state">No storage backend scenario data</div>`;
+    return;
+  }
+  target.innerHTML = backends.map((backend) => `
+    <div class="summary-row sim-backend-row">
+      <span>${escapeHtml(backend.backend_name || "UNKNOWN")}</span>
+      <span>${escapeHtml(backend.queryability || "UNKNOWN")}</span>
+      <span>${escapeHtml(backend.operational_risk || "UNKNOWN")}</span>
+      <span>${Number(backend.estimated_backend_storage_bytes || 0)}</span>
+    </div>
+  `).join("");
+}
+
+function renderScenarioBlockers(blockers) {
+  const target = document.getElementById("scenario-blockers");
+  if (!blockers.length) {
+    target.innerHTML = `<div class="empty-state">No governance blockers</div>`;
+    return;
+  }
+  target.innerHTML = blockers.map((blocker) => `
+    <div class="summary-row replay-summary-row">
+      <span>${escapeHtml(blocker)}</span>
+      <span>BLOCK</span>
+    </div>
+  `).join("");
+}
+
 async function refreshSim() {
-  const response = await fetch(`/api/v1/runtime-event-persistence-sim?${simFilters().toString()}`, { cache: "no-store" });
-  renderSim(await response.json());
+  const params = simFilters().toString();
+  const [simResponse, scenarioResponse] = await Promise.all([
+    fetch(`/api/v1/runtime-event-persistence-sim?${params}`, { cache: "no-store" }),
+    fetch(`/api/v1/runtime-event-persistence-scenarios?${params}`, { cache: "no-store" })
+  ]);
+  renderSim(await simResponse.json());
+  renderScenario(await scenarioResponse.json());
 }
 
 document.querySelector("[data-refresh-sim]").addEventListener("click", refreshSim);
@@ -2109,21 +2187,24 @@ document.querySelectorAll(".sim-controls input").forEach((input) => {
   input.addEventListener("change", refreshSim);
 });
 hydrateSimFiltersFromLocation();
-refreshSim().catch(() => renderSim({
-  simulation_only: true,
-  persistence_enabled: false,
-  writes_performed: false,
-  simulated_timestamp: "",
-  accepted_events_count: 0,
-  rejected_events_count: 0,
-  estimated_storage_bytes: 0,
-  estimated_event_rate: 0,
-  inspected_events_count: 0,
-  rejection_reasons: {},
-  redaction_failures: [],
-  subsystem_breakdown: {},
-  event_results: []
-}));
+refreshSim().catch(() => {
+  renderSim({
+    simulation_only: true,
+    persistence_enabled: false,
+    writes_performed: false,
+    simulated_timestamp: "",
+    accepted_events_count: 0,
+    rejected_events_count: 0,
+    estimated_storage_bytes: 0,
+    estimated_event_rate: 0,
+    inspected_events_count: 0,
+    rejection_reasons: {},
+    redaction_failures: [],
+    subsystem_breakdown: {},
+    event_results: []
+  });
+  renderScenario({ scenario_report: { backend_comparison: [], governance_blockers: [] } });
+});
 """
 
 
@@ -2812,6 +2893,9 @@ button {
 }
 .sim-summary-row {
   grid-template-columns: 1fr 70px 86px 86px;
+}
+.sim-backend-row {
+  grid-template-columns: 1fr 130px 90px 90px;
 }
 .sim-banner {
   margin-bottom: 12px;

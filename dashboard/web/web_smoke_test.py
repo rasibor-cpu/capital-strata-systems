@@ -43,6 +43,7 @@ def main() -> int:
         "/api/v1/runtime-events",
         "/api/v1/runtime-event-persistence-policy",
         "/api/v1/runtime-event-persistence-sim",
+        "/api/v1/runtime-event-persistence-scenarios",
         "/api/v1/deployment-profiles",
         "/api/v1/trade-lifecycle-replay",
         "/ws/v1/dashboard-state",
@@ -86,9 +87,13 @@ def main() -> int:
         "Rejection Reasons",
         "Subsystem Breakdown",
         "Simulation Warnings",
+        "Backend Recommendation",
+        "Storage Backend Comparison",
+        "Governance Blockers",
         "SIMULATION ONLY - persistence remains disabled",
         "No persistence simulation events match the current view",
         "/api/v1/runtime-event-persistence-sim",
+        "/api/v1/runtime-event-persistence-scenarios",
     ]
     for expected in expected_persistence_sim_markup:
         if expected not in persistence_sim_markup:

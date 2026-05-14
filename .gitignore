@@ -111,7 +111,9 @@ dashboard/runtime/*
 !dashboard/runtime/runtime_event_bus.py
 !dashboard/runtime/runtime_event_inspector.py
 !dashboard/runtime/runtime_event_persistence_policy.py
+!dashboard/runtime/runtime_event_persistence_scenario.py
 !dashboard/runtime/runtime_event_persistence_simulator.py
+!dashboard/runtime/runtime_event_storage_profiles.py
 !dashboard/runtime/broker_live_dry_run_certification.py
 !dashboard/runtime/broker_adapter_conformance.py
 !dashboard/runtime/live_credential_attestation.py
@@ -121,6 +123,7 @@ dashboard/runtime/*
 !tests/dashboard/test_runtime_event_bus.py
 !tests/dashboard/test_runtime_event_inspector.py
 !tests/dashboard/test_runtime_event_persistence_policy.py
+!tests/dashboard/test_runtime_event_persistence_scenario.py
 !tests/dashboard/test_runtime_event_persistence_simulator.py
 !tests/dashboard/test_runtime_event_persistence_sim_ui.py
 !tests/dashboard/test_broker_live_dry_run_certification.py

@@ -423,12 +423,15 @@ Implemented:
 - simulator enforcement of retention, approval, subsystem, and redaction policy
 - operator runtime event persistence simulator review page
 - simulator summary, rejection, subsystem, warning, and empty-state rendering
+- simulator-only runtime event storage backend profiles
+- read-only `/api/v1/runtime-event-persistence-scenarios` scenario endpoint
+- backend comparison, recommendation, governance blocker, and storage estimate reporting
 
 Blocking items:
 - full subsystem migration is intentionally deferred
 - persistent event-bus storage is not yet implemented
 - event-bus persistence remains disabled by default and is not activated by validation
-- storage backend selection is not yet approved
+- storage backend selection is modeled but not yet approved
 - cross-process queueing is not yet implemented
 
 ---
