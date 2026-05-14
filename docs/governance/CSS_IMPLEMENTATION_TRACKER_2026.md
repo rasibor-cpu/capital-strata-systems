@@ -476,6 +476,10 @@ Implemented:
 - read-only `/api/v1/coinbase-micro-live-dry-run-probe` endpoint
 - operator display of dry-run probe status, blockers, warnings, and no-submit
   state
+- operator approval and kill-switch verification evidence gate
+- read-only `/api/v1/micro-live-operator-approval-gate` endpoint
+- operator display of approval status, trading-armed false state, kill-switch
+  evidence, and remaining manual approval blockers
 - explicit pilot constraints: Coinbase Advanced, BTC-USD, CAD $15 maximum,
   one limit order, 0.35% maximum slippage, mandatory logging, mandatory
   post-trade pause, and fail-closed governance

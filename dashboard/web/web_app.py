@@ -2063,6 +2063,10 @@ def _micro_live_pilot_readiness_page() -> str:
       No order was submitted. Coinbase dry-run probe evidence is non-executing and broker-mutation disabled.
     </section>
 
+    <section class="empty-state sim-banner" id="pilot-approval-banner">
+      Manual approval still required; no trading is armed.
+    </section>
+
     <section class="metric-band pilot-metrics" aria-label="Micro-live pilot summary">
       <article>
         <strong>Readiness</strong>
@@ -2162,6 +2166,30 @@ def _micro_live_pilot_readiness_page() -> str:
             <span>REVIEW</span>
           </div>
           <div class="summary-table" id="pilot-probe-review"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Operator Approval Gate</h2>
+            <span>NO ARM</span>
+          </div>
+          <div class="summary-table" id="pilot-approval-gate"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Kill-Switch Verification Evidence</h2>
+            <span>REQUIRED</span>
+          </div>
+          <div class="summary-table" id="pilot-kill-switch-evidence"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Approval Gate Blockers / Warnings</h2>
+            <span>REVIEW</span>
+          </div>
+          <div class="summary-table" id="pilot-approval-review"></div>
         </article>
       </aside>
     </section>
@@ -2416,6 +2444,39 @@ function renderDryRunProbe(probe) {
     "No order was submitted. Probe evidence is non-executing, broker-mutation disabled, and review-only.";
 }
 
+function renderApprovalGate(gate) {
+  const killSwitch = gate.kill_switch_evidence || {};
+  const currentDecision = killSwitch.current_decision || {};
+  const rows = [
+    { label: "Readiness Status", status: gate.readiness_status || "REVIEW_REQUIRED" },
+    { label: "Operator Approval Required", status: gate.operator_approval_required ? "YES" : "NO" },
+    { label: "Operator Approval Granted", status: gate.operator_approval_granted ? "YES" : "NO" },
+    { label: "Approval Grant Endpoint Exists", status: gate.approval_grant_endpoint_exists ? "YES" : "NO" },
+    { label: "Trading Armed", status: gate.trading_armed ? "YES" : "NO" },
+    { label: "Broker Mutation Allowed", status: gate.broker_mutation_allowed ? "YES" : "NO" },
+    { label: "Final PCNRASS Required", status: gate.requires_final_pcnrass_check ? "YES" : "NO" },
+    { label: "Broker Readiness Required", status: gate.requires_broker_readiness_confirmation ? "YES" : "NO" },
+  ];
+  const killRows = [
+    { label: "Reference Available", status: killSwitch.kill_switch_reference_available ? "YES" : "NO" },
+    { label: "Verification Required", status: killSwitch.verification_required ? "YES" : "NO" },
+    { label: "Pre-Pilot Confirmation", status: killSwitch.pre_pilot_confirmation_present ? "YES" : "NO" },
+    { label: "Bypassed", status: killSwitch.kill_switch_bypassed ? "YES" : "NO" },
+    { label: "Activation Performed", status: killSwitch.activation_performed ? "YES" : "NO" },
+    { label: "Current Decision", status: currentDecision.blocked ? "BLOCKED" : "CLEAR" },
+    { label: "Decision Source", status: currentDecision.source || "default" },
+  ];
+  const reviewRows = [
+    ...(gate.blockers || []).map((item) => ({ label: item, status: "BLOCK" })),
+    ...(gate.warnings || []).map((item) => ({ label: item, status: "WARN" })),
+  ];
+  renderRows("pilot-approval-gate", rows, "No operator approval gate evidence available");
+  renderRows("pilot-kill-switch-evidence", killRows, "No kill-switch verification evidence available");
+  renderRows("pilot-approval-review", reviewRows, "No operator approval gate blockers or warnings");
+  document.getElementById("pilot-approval-banner").textContent =
+    "Manual approval still required; no trading is armed and no approval-grant endpoint exists.";
+}
+
 function renderPilot(payload) {
   const passed = payload.passed_checks || [];
   const failed = payload.failed_checks || [];
@@ -2447,14 +2508,21 @@ function renderPilot(payload) {
 }
 
 async function refreshPilot() {
-  const [readinessResponse, intentResponse, probeResponse] = await Promise.all([
+  const [
+    readinessResponse,
+    intentResponse,
+    probeResponse,
+    approvalGateResponse
+  ] = await Promise.all([
     fetch("/api/v1/micro-live-pilot-readiness", { cache: "no-store" }),
     fetch("/api/v1/micro-live-pilot-order-intent", { cache: "no-store" }),
     fetch("/api/v1/coinbase-micro-live-dry-run-probe", { cache: "no-store" }),
+    fetch("/api/v1/micro-live-operator-approval-gate", { cache: "no-store" }),
   ]);
   renderPilot(await readinessResponse.json());
   renderOrderIntent(await intentResponse.json());
   renderDryRunProbe(await probeResponse.json());
+  renderApprovalGate(await approvalGateResponse.json());
 }
 
 document.querySelector("[data-refresh-pilot]").addEventListener("click", refreshPilot);
@@ -2498,6 +2566,27 @@ renderDryRunProbe({
   max_live_orders: 1,
   blockers: [],
   warnings: ["NO_ORDER_WAS_SUBMITTED"]
+});
+renderApprovalGate({
+  readiness_status: "REVIEW_REQUIRED",
+  operator_approval_required: true,
+  operator_approval_granted: false,
+  approval_grant_endpoint_exists: false,
+  trading_armed: false,
+  broker_mutation_allowed: false,
+  requires_final_pcnrass_check: true,
+  requires_kill_switch_verification: true,
+  requires_broker_readiness_confirmation: true,
+  kill_switch_evidence: {
+    kill_switch_reference_available: true,
+    verification_required: true,
+    pre_pilot_confirmation_present: false,
+    kill_switch_bypassed: false,
+    activation_performed: false,
+    current_decision: { blocked: true, source: "fallback" }
+  },
+  blockers: [],
+  warnings: ["MANUAL_APPROVAL_STILL_REQUIRED_NO_TRADING_ARMED"]
 });
 """
 

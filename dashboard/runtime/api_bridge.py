@@ -34,6 +34,9 @@ from dashboard.runtime.micro_live_pilot_readiness import (
     build_micro_live_pilot_readiness_payload,
     load_pcnrass_validation_summary,
 )
+from dashboard.runtime.micro_live_operator_approval_gate import (
+    build_micro_live_operator_approval_gate_payload,
+)
 from dashboard.runtime.micro_live_pilot_order_intent import (
     build_micro_live_pilot_order_intent_payload,
 )
@@ -351,6 +354,22 @@ def get_coinbase_micro_live_dry_run_probe_payload() -> dict[str, Any]:
     )
 
 
+def get_micro_live_operator_approval_gate_payload(
+    state_provider: DashboardStateProvider | None = None,
+    event_bus: RuntimeEventBus | None = None,
+) -> dict[str, Any]:
+    return build_micro_live_operator_approval_gate_payload(
+        pilot_readiness=get_micro_live_pilot_readiness_payload(
+            state_provider,
+            event_bus,
+        ),
+        dry_run_probe=get_coinbase_micro_live_dry_run_probe_payload(),
+        pcnrass_summary=load_pcnrass_validation_summary(),
+        broker_readiness_confirmed=False,
+        kill_switch_confirmed=False,
+    )
+
+
 def create_dashboard_state_router(
     state_provider: DashboardStateProvider | None = None,
     *,
@@ -604,6 +623,13 @@ def create_dashboard_state_router(
     def read_coinbase_micro_live_dry_run_probe() -> dict[str, Any]:
         return get_coinbase_micro_live_dry_run_probe_payload()
 
+    @router.get("/api/v1/micro-live-operator-approval-gate")
+    def read_micro_live_operator_approval_gate() -> dict[str, Any]:
+        return get_micro_live_operator_approval_gate_payload(
+            state_provider,
+            runtime_event_bus,
+        )
+
     @router.get("/api/v1/deployment-profiles")
     def read_deployment_profiles() -> dict[str, Any]:
         return get_deployment_profiles()
@@ -671,6 +697,7 @@ __all__ = [
     "get_dashboard_state_payload",
     "get_frontend_payload",
     "get_live_credential_attestation_payload",
+    "get_micro_live_operator_approval_gate_payload",
     "get_micro_live_pilot_readiness_payload",
     "get_micro_live_pilot_order_intent_payload",
     "get_runtime_event_persistence_checklist_export_payload",

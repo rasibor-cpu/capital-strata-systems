@@ -45,6 +45,7 @@ def main() -> int:
         "/api/v1/broker",
         "/api/v1/alerts",
         "/api/v1/coinbase-micro-live-dry-run-probe",
+        "/api/v1/micro-live-operator-approval-gate",
         "/api/v1/micro-live-pilot-readiness",
         "/api/v1/micro-live-pilot-order-intent",
         "/api/v1/runtime-events",
@@ -147,11 +148,15 @@ def main() -> int:
         "No unrestricted live trading",
         "No order will be placed from this page",
         "No order was submitted",
+        "Manual approval still required; no trading is armed",
         "Approved Pilot Constraints",
         "Live Restrictions",
         "Order Intent Evidence",
         "Coinbase Dry-Run Probe Evidence",
         "Probe Blockers / Warnings",
+        "Operator Approval Gate",
+        "Kill-Switch Verification Evidence",
+        "Approval Gate Blockers / Warnings",
         "Required Approvals",
         "Coinbase Advanced",
         "BTC-USD",
@@ -160,6 +165,7 @@ def main() -> int:
         "/api/v1/micro-live-pilot-readiness",
         "/api/v1/micro-live-pilot-order-intent",
         "/api/v1/coinbase-micro-live-dry-run-probe",
+        "/api/v1/micro-live-operator-approval-gate",
     ]
     for expected in expected_pilot_markup:
         if expected not in pilot_markup:
