@@ -37,6 +37,9 @@ from dashboard.runtime.runtime_event_inspector import (
 from dashboard.runtime.runtime_event_persistence_policy import (
     get_runtime_event_persistence_policy_payload,
 )
+from dashboard.runtime.runtime_event_persistence_simulator import (
+    get_runtime_event_persistence_simulation_payload,
+)
 from dashboard.runtime.trade_lifecycle_replay_viewer import (
     get_trade_lifecycle_replay_payload,
 )
@@ -132,6 +135,35 @@ def get_runtime_events_payload(
 
 def get_runtime_event_persistence_policy_inspection_payload() -> dict[str, Any]:
     return get_runtime_event_persistence_policy_payload()
+
+
+def get_runtime_event_persistence_sim_payload(
+    event_bus: RuntimeEventBus | None = None,
+    *,
+    event_type: str = "",
+    subsystem: str = "",
+    severity: str = "",
+    correlation_id: str = "",
+    limit: int | None = None,
+    requested_window_minutes: int = 15,
+    reason: str = "runtime event persistence dry-run simulation",
+    operator_id: str = "",
+    approval_token_present: bool = False,
+    requested_export_format: str = "json",
+) -> dict[str, Any]:
+    return get_runtime_event_persistence_simulation_payload(
+        event_bus or get_default_runtime_event_bus(),
+        event_type=event_type,
+        subsystem=subsystem,
+        severity=severity,
+        correlation_id=correlation_id,
+        limit=limit,
+        requested_window_minutes=requested_window_minutes,
+        reason=reason,
+        operator_id=operator_id,
+        approval_token_present=approval_token_present,
+        requested_export_format=requested_export_format,
+    )
 
 
 def create_dashboard_state_router(
@@ -237,6 +269,33 @@ def create_dashboard_state_router(
     def read_runtime_event_persistence_policy() -> dict[str, Any]:
         return get_runtime_event_persistence_policy_inspection_payload()
 
+    @router.get("/api/v1/runtime-event-persistence-sim")
+    def read_runtime_event_persistence_sim(
+        event_type: str = "",
+        subsystem: str = "",
+        severity: str = "",
+        correlation_id: str = "",
+        limit: int = 100,
+        requested_window_minutes: int = 15,
+        reason: str = "runtime event persistence dry-run simulation",
+        operator_id: str = "",
+        approval_token_present: bool = False,
+        requested_export_format: str = "json",
+    ) -> dict[str, Any]:
+        return get_runtime_event_persistence_sim_payload(
+            runtime_event_bus,
+            event_type=event_type,
+            subsystem=subsystem,
+            severity=severity,
+            correlation_id=correlation_id,
+            limit=limit,
+            requested_window_minutes=requested_window_minutes,
+            reason=reason,
+            operator_id=operator_id,
+            approval_token_present=approval_token_present,
+            requested_export_format=requested_export_format,
+        )
+
     @router.get("/api/v1/deployment-profiles")
     def read_deployment_profiles() -> dict[str, Any]:
         return get_deployment_profiles()
@@ -304,6 +363,7 @@ __all__ = [
     "get_frontend_payload",
     "get_live_credential_attestation_payload",
     "get_runtime_event_persistence_policy_inspection_payload",
+    "get_runtime_event_persistence_sim_payload",
     "get_runtime_events_payload",
     "get_trade_lifecycle_replay_payload",
 ]

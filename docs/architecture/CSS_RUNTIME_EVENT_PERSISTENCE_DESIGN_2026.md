@@ -147,7 +147,7 @@ If redaction status is unknown, storage must be denied. If subsystem approval is
 
 Phase A: Design only. Define architecture, governance, data model, and test plan without enabling persistence.
 
-Phase B: Dry-run persistence simulator. Validate which events would be persisted, where they would go, and why they would pass or fail policy checks. The simulator must not write event-bus records automatically.
+Phase B: Dry-run persistence simulator. Validate which events would be persisted, where they would go, and why they would pass or fail policy checks. The simulator must not write event-bus records automatically. Initial dry-run simulator support now exists and remains non-persistent.
 
 Phase C: Local append-only storage behind approval. Add a disabled-by-default JSONL or append-only store that requires explicit operator approval and passes PCNRASS.
 
@@ -192,4 +192,4 @@ Runtime event persistence should remain disabled until:
 - PCNRASS release check passes
 - operator approval is explicit
 
-The recommended next step is Phase 17: build a dry-run persistence simulator that evaluates candidate runtime events against the policy and reports what would happen, without writing runtime event-bus events to disk or changing runtime delivery behavior.
+The recommended next step is to review dry-run simulator output under realistic operator scenarios before selecting a storage backend. Runtime event persistence should remain disabled during this review.

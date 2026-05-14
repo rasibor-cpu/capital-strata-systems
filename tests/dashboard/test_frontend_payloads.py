@@ -23,6 +23,7 @@ from dashboard.runtime.api_bridge import (
     get_dashboard_state_payload,
     get_frontend_payload,
     get_runtime_event_persistence_policy_inspection_payload,
+    get_runtime_event_persistence_sim_payload,
     get_runtime_events_payload,
 )
 from dashboard.runtime.dashboard_hydration_coordinator import (
@@ -141,6 +142,7 @@ def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
         "/api/v1/alerts",
         "/api/v1/runtime-events",
         "/api/v1/runtime-event-persistence-policy",
+        "/api/v1/runtime-event-persistence-sim",
         "/api/v1/deployment-profiles",
         "/api/v1/trade-lifecycle-replay",
         "/ws/v1/dashboard-state",
@@ -159,6 +161,8 @@ def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
         get_runtime_event_persistence_policy_inspection_payload()["persistence_enabled"]
         is False
     )
+    assert get_runtime_event_persistence_sim_payload()["simulation_only"] is True
+    assert get_runtime_event_persistence_sim_payload()["persistence_enabled"] is False
     assert build_section_payload(state, "risk")["data"]["risk_state"] == "NORMAL"
 
 
