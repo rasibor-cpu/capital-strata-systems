@@ -92,6 +92,10 @@ def create_app(
     async def runtime_event_persistence_checklist_print() -> HTMLResponse:
         return HTMLResponse(_runtime_event_persistence_checklist_print_page())
 
+    @app.get("/evidence-verification-checklist-print", response_class=HTMLResponse)
+    async def evidence_verification_checklist_print() -> HTMLResponse:
+        return HTMLResponse(_evidence_verification_checklist_print_page())
+
     @app.get("/micro-live-pilot-readiness", response_class=HTMLResponse)
     async def micro_live_pilot_readiness() -> HTMLResponse:
         return HTMLResponse(_micro_live_pilot_readiness_page())
@@ -128,6 +132,11 @@ def _app_nav(active: str) -> str:
             "checklist_print",
             "/runtime-event-persistence-checklist-print",
             "Checklist Print",
+        ),
+        (
+            "evidence_verification_print",
+            "/evidence-verification-checklist-print",
+            "Verify Print",
         ),
         (
             "micro_live_pilot",
@@ -2025,6 +2034,123 @@ def _runtime_event_persistence_checklist_print_page() -> str:
 </html>"""
 
 
+def _evidence_verification_checklist_print_page() -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111820">
+  <title>CSS Evidence Verification Checklist Print View</title>
+  <style>{_css()}</style>
+</head>
+<body>
+  <main class="shell print-shell">
+    <header class="topbar print-topbar">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">CSS</div>
+        <div>
+          <p class="eyebrow">Capital Strata Systems</p>
+          <h1>Evidence Verification Checklist Print View</h1>
+        </div>
+      </div>
+      <section class="status-strip" aria-label="Evidence verification print status">
+        <span id="verify-print-status">Status pending</span>
+        <span id="verify-print-generated">Generated pending</span>
+        <span id="verify-print-safety">No verification performed</span>
+      </section>
+    </header>
+    {_app_nav("evidence_verification_print")}
+
+    <section class="control-row print-controls" aria-label="Evidence verification print controls">
+      <button type="button" data-refresh-verification-print>Refresh</button>
+      <button type="button" data-print-page>Print</button>
+      <span>Print/export view only</span>
+      <span>No verification action</span>
+      <span>No external file read</span>
+    </section>
+
+    <section class="empty-state sim-banner" id="verify-print-disclaimer">
+      No verification was performed by CSS. This view is a print-safe operator review package only.
+    </section>
+
+    <section class="metric-band print-metrics" aria-label="Evidence verification print summary">
+      <article>
+        <strong>Export</strong>
+        <span id="verify-print-export-id">PENDING</span>
+      </article>
+      <article>
+        <strong>Checklist</strong>
+        <span id="verify-print-checklist-id">PENDING</span>
+      </article>
+      <article>
+        <strong>Status</strong>
+        <span id="verify-print-checklist-status">INCOMPLETE</span>
+      </article>
+      <article>
+        <strong>Required</strong>
+        <span id="verify-print-required-count">0</span>
+      </article>
+      <article>
+        <strong>Missing</strong>
+        <span id="verify-print-missing-count">0</span>
+      </article>
+      <article>
+        <strong>Verification</strong>
+        <span id="verify-print-verification">NO</span>
+      </article>
+    </section>
+
+    <section class="print-workspace">
+      <article class="panel print-main">
+        <div class="panel-head">
+          <h2>Verification Packet Summary</h2>
+          <span>READBACK REVIEW</span>
+        </div>
+        <div class="summary-table" id="verify-print-summary"></div>
+      </article>
+
+      <aside class="print-side">
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Required Items</h2>
+            <span id="verify-print-required-badge">0 ITEMS</span>
+          </div>
+          <div class="summary-table" id="verify-print-required-items"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Missing Items</h2>
+            <span>MANUAL</span>
+          </div>
+          <div class="summary-table" id="verify-print-missing-items"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Blockers</h2>
+            <span>FAIL CLOSED</span>
+          </div>
+          <div class="summary-table" id="verify-print-blockers"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Warnings</h2>
+            <span>REVIEW</span>
+          </div>
+          <div class="summary-table" id="verify-print-warnings"></div>
+        </article>
+      </aside>
+    </section>
+  </main>
+
+  <script>{_evidence_verification_checklist_print_script()}</script>
+</body>
+</html>"""
+
+
 def _micro_live_pilot_readiness_page() -> str:
     return f"""<!doctype html>
 <html lang="en">
@@ -3691,6 +3817,141 @@ refreshChecklistPrint().catch(() => renderChecklistExport({
   persistence_enabled: false,
   writes_performed: false,
   safety_disclaimer: "Persistence remains disabled."
+}));
+"""
+
+
+def _evidence_verification_checklist_print_script() -> str:
+    return """
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\\"": "&quot;",
+    "'": "&#39;"
+  }[char]));
+}
+
+function formatTime(value) {
+  if (!value) return "UNKNOWN";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("en-US", { hour12: false });
+}
+
+function shortId(value) {
+  const text = String(value || "");
+  return text.length > 22 ? text.slice(0, 22) : text;
+}
+
+function setText(id, value) {
+  document.getElementById(id).textContent = String(value);
+}
+
+function renderList(id, items, emptyText) {
+  const target = document.getElementById(id);
+  if (!items.length) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(emptyText)}</div>`;
+    return;
+  }
+  target.innerHTML = items.map((item) => {
+    const label = item.label || item.item_id || item;
+    const status = item.severity || (item.completed ? "DONE" : "OPEN");
+    const message = item.message ? `<small>${escapeHtml(item.message)}</small>` : "";
+    return `
+      <div class="summary-row print-summary-row">
+        <span>${escapeHtml(label)}${message}</span>
+        <span>${escapeHtml(status)}</span>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderSummaryRows(id, rows) {
+  const target = document.getElementById(id);
+  target.innerHTML = rows.map((row) => `
+    <div class="summary-row print-summary-row">
+      <span>${escapeHtml(row.label)}</span>
+      <span>${escapeHtml(row.status)}</span>
+    </div>
+  `).join("");
+}
+
+function renderVerificationExport(payload) {
+  const required = payload.required_items || [];
+  const missing = payload.missing_items || [];
+  const blockers = payload.blockers || [];
+  const warnings = payload.warnings || [];
+  const summaryRows = [
+    { label: "Verification Export ID", status: payload.verification_export_id || "PENDING" },
+    { label: "Generated", status: payload.generated_at_utc ? formatTime(payload.generated_at_utc) : "PENDING" },
+    { label: "Verification Checklist ID", status: payload.verification_checklist_id || "MISSING" },
+    { label: "Verification Readiness ID", status: payload.verification_readiness_id || "MISSING" },
+    { label: "Manifest Hash ID", status: payload.manifest_hash_id || "MISSING" },
+    { label: "Combined Manifest Hash", status: shortId(payload.combined_manifest_hash || "MISSING") },
+    { label: "Manual Verification Required", status: payload.manual_verification_required ? "YES" : "NO" },
+    { label: "Manual Verification Recorded", status: payload.manual_verification_recorded ? "YES" : "NO" },
+    { label: "Archive Read Performed", status: payload.archive_read_performed ? "YES" : "NO" },
+    { label: "External File Read", status: payload.external_file_read_performed ? "YES" : "NO" },
+    { label: "Verification Performed", status: payload.verification_performed ? "YES" : "NO" },
+    { label: "Signature Verified", status: payload.signature_verified ? "YES" : "NO" },
+    { label: "Notarization Verified", status: payload.notarization_verified ? "YES" : "NO" },
+    { label: "Trading Armed", status: payload.trading_armed ? "YES" : "NO" },
+    { label: "Execution Allowed", status: payload.execution_allowed ? "YES" : "NO" },
+    { label: "Persistence Enabled", status: payload.persistence_enabled ? "YES" : "NO" },
+  ];
+
+  setText("verify-print-status", payload.checklist_status || "INCOMPLETE");
+  setText("verify-print-generated", payload.generated_at_utc ? `Generated ${formatTime(payload.generated_at_utc)}` : "Generated pending");
+  setText("verify-print-safety", payload.verification_performed ? "Verification performed" : "No verification performed");
+  setText("verify-print-export-id", shortId(payload.verification_export_id || "PENDING"));
+  setText("verify-print-checklist-id", shortId(payload.verification_checklist_id || "PENDING"));
+  setText("verify-print-checklist-status", payload.checklist_status || "INCOMPLETE");
+  setText("verify-print-required-count", required.length);
+  setText("verify-print-missing-count", missing.length);
+  setText("verify-print-verification", payload.verification_performed ? "YES" : "NO");
+  setText("verify-print-required-badge", `${required.length} ITEMS`);
+  document.getElementById("verify-print-disclaimer").textContent =
+    payload.safety_disclaimer || "No verification was performed by CSS.";
+
+  renderSummaryRows("verify-print-summary", summaryRows);
+  renderList("verify-print-required-items", required, "No required checklist items available");
+  renderList("verify-print-missing-items", missing, "No verification checklist items are missing");
+  renderList("verify-print-blockers", blockers, "No verification export blockers reported");
+  renderList("verify-print-warnings", warnings, "No verification export warnings reported");
+}
+
+async function refreshVerificationPrint() {
+  const response = await fetch("/api/v1/evidence-verification-checklist-export", { cache: "no-store" });
+  renderVerificationExport(await response.json());
+}
+
+document.querySelector("[data-refresh-verification-print]").addEventListener("click", refreshVerificationPrint);
+document.querySelector("[data-print-page]").addEventListener("click", () => window.print());
+refreshVerificationPrint().catch(() => renderVerificationExport({
+  verification_export_id: "PENDING",
+  generated_at_utc: "",
+  verification_checklist_id: "PENDING",
+  verification_readiness_id: "PENDING",
+  manifest_hash_id: "",
+  combined_manifest_hash: "",
+  checklist_status: "INCOMPLETE",
+  manual_verification_required: true,
+  manual_verification_recorded: false,
+  archive_read_performed: false,
+  external_file_read_performed: false,
+  verification_performed: false,
+  signature_verified: false,
+  notarization_verified: false,
+  required_items: [],
+  missing_items: [],
+  blockers: [],
+  warnings: ["MANUAL_VERIFICATION_REVIEW_REQUIRED"],
+  trading_armed: false,
+  execution_allowed: false,
+  persistence_enabled: false,
+  safety_disclaimer: "No verification was performed by CSS."
 }));
 """
 

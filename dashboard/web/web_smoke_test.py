@@ -4,6 +4,7 @@ from dashboard.runtime.api_bridge import get_frontend_payload
 from dashboard.web.web_app import (
     _broker_page,
     _dashboard_page,
+    _evidence_verification_checklist_print_page,
     _execution_page,
     _market_opportunities_page,
     _micro_live_manual_pilot_checklist_page,
@@ -26,6 +27,7 @@ def main() -> int:
         "/",
         "/broker",
         "/dashboard",
+        "/evidence-verification-checklist-print",
         "/execution",
         "/market-opportunities",
         "/micro-live-manual-pilot-checklist",
@@ -51,6 +53,7 @@ def main() -> int:
         "/api/v1/evidence-notarization-readiness",
         "/api/v1/evidence-signature-readiness",
         "/api/v1/evidence-verification-checklist",
+        "/api/v1/evidence-verification-checklist-export",
         "/api/v1/evidence-verification-readiness",
         "/api/v1/micro-live-broker-readiness-confirmation",
         "/api/v1/micro-live-manual-pilot-checklist",
@@ -100,6 +103,7 @@ def main() -> int:
         'href="/runtime-events"',
         'href="/runtime-event-persistence-sim"',
         'href="/runtime-event-persistence-checklist-print"',
+        'href="/evidence-verification-checklist-print"',
         "/api/v1/frontend-state",
         "/ws/v1/dashboard-state",
     ]
@@ -152,6 +156,27 @@ def main() -> int:
     for expected in expected_checklist_print_markup:
         if expected not in checklist_print_markup:
             raise AssertionError(f"Web checklist print markup missing: {expected}")
+
+    verification_print_markup = _evidence_verification_checklist_print_page()
+    expected_verification_print_markup = [
+        "CSS Evidence Verification Checklist Print View",
+        "Evidence Verification Checklist Print View",
+        "Print/export view only",
+        "No verification action",
+        "No external file read",
+        "No verification was performed by CSS",
+        "Verification Packet Summary",
+        "Required Items",
+        "Missing Items",
+        "Blockers",
+        "Warnings",
+        "/api/v1/evidence-verification-checklist-export",
+    ]
+    for expected in expected_verification_print_markup:
+        if expected not in verification_print_markup:
+            raise AssertionError(
+                f"Web evidence verification print markup missing: {expected}"
+            )
 
     pilot_markup = _micro_live_pilot_readiness_page()
     expected_pilot_markup = [

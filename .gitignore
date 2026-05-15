@@ -104,6 +104,7 @@ dashboard/runtime/*
 !dashboard/runtime/evidence_notarization_readiness.py
 !dashboard/runtime/evidence_signature_readiness.py
 !dashboard/runtime/evidence_verification_checklist.py
+!dashboard/runtime/evidence_verification_checklist_export.py
 !dashboard/runtime/evidence_verification_readiness.py
 !dashboard/runtime/evidence_hashing.py
 !dashboard/runtime/live_dashboard_state.py
@@ -153,6 +154,7 @@ dashboard/runtime/*
 !tests/dashboard/test_evidence_notarization_readiness.py
 !tests/dashboard/test_evidence_signature_readiness.py
 !tests/dashboard/test_evidence_verification_checklist.py
+!tests/dashboard/test_evidence_verification_checklist_export.py
 !tests/dashboard/test_evidence_verification_readiness.py
 !tests/dashboard/test_evidence_hashing.py
 !tests/dashboard/test_live_credential_attestation.py
