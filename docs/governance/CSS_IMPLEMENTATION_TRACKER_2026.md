@@ -512,6 +512,9 @@ Implemented:
 - micro-live pilot incident review worksheet for anomalies, blockers,
   reconciliation mismatches, safety events, root-cause review, resolution
   planning, closure, and NO-GO escalation
+- micro-live pilot evidence bundle manifest for artifact ownership,
+  completion status, archive locations, evidence references, pre-pilot,
+  during-pilot, and post-pilot evidence tracking
 - explicit pilot constraints: Coinbase Advanced, BTC-USD, CAD $15 maximum,
   one limit order, 0.35% maximum slippage, mandatory logging, mandatory
   post-trade pause, and fail-closed governance
