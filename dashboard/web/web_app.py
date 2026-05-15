@@ -2100,6 +2100,10 @@ def _micro_live_pilot_readiness_page() -> str:
       Archive manifest hashing is integrity evidence only. No archive file is written and no trading is armed.
     </section>
 
+    <section class="empty-state sim-banner" id="pilot-signature-readiness-banner">
+      Signature readiness is metadata only. No signing key is loaded and no digital signature is generated.
+    </section>
+
     <section class="metric-band pilot-metrics" aria-label="Micro-live pilot summary">
       <article>
         <strong>Readiness</strong>
@@ -2335,6 +2339,14 @@ def _micro_live_pilot_readiness_page() -> str:
             <span>SHA-256</span>
           </div>
           <div class="summary-table" id="pilot-archive-manifest-hash"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Signature Readiness</h2>
+            <span>NO SIGN</span>
+          </div>
+          <div class="summary-table" id="pilot-signature-readiness"></div>
         </article>
       </aside>
     </section>
@@ -2933,6 +2945,27 @@ function renderArchiveManifestHash(payload) {
     payload.safety_disclaimer || "Archive manifest hash is integrity metadata only.";
 }
 
+function renderSignatureReadiness(payload) {
+  const rows = [
+    { label: "Signature Readiness ID", status: payload.signature_readiness_id || "PENDING" },
+    { label: "Signing Status", status: payload.signing_status || "NOT_SIGNED" },
+    { label: "Manifest Hash ID", status: payload.manifest_hash_id || "MISSING" },
+    { label: "Algorithm", status: payload.algorithm || "sha256" },
+    { label: "Manual Review Required", status: payload.manual_signature_review_required ? "YES" : "NO" },
+    { label: "Signature Required", status: payload.signature_required ? "YES" : "NO" },
+    { label: "Signing Key Present", status: payload.signing_key_present ? "YES" : "NO" },
+    { label: "Signing Key Exposed", status: payload.signing_key_exposed ? "YES" : "NO" },
+    { label: "External Notarization", status: payload.external_notarization_performed ? "YES" : "NO" },
+    { label: "Archive Write Performed", status: payload.archive_write_performed ? "YES" : "NO" },
+    { label: "Trading Armed", status: payload.trading_armed ? "YES" : "NO" },
+    { label: "Execution Allowed", status: payload.execution_allowed ? "YES" : "NO" },
+    { label: "Persistence Enabled", status: payload.persistence_enabled ? "YES" : "NO" },
+  ];
+  renderRows("pilot-signature-readiness", rows, "No signature readiness evidence available");
+  document.getElementById("pilot-signature-readiness-banner").textContent =
+    payload.safety_disclaimer || "Signature readiness is metadata only.";
+}
+
 function renderPilot(payload) {
   const passed = payload.passed_checks || [];
   const failed = payload.failed_checks || [];
@@ -2975,7 +3008,8 @@ async function refreshPilot() {
     operatorAuditResponse,
     postReconciliationResponse,
     postArchiveResponse,
-    manifestHashResponse
+    manifestHashResponse,
+    signatureReadinessResponse
   ] = await Promise.all([
     fetch("/api/v1/micro-live-pilot-readiness", { cache: "no-store" }),
     fetch("/api/v1/micro-live-pilot-order-intent", { cache: "no-store" }),
@@ -2988,6 +3022,7 @@ async function refreshPilot() {
     fetch("/api/v1/post-pilot-reconciliation", { cache: "no-store" }),
     fetch("/api/v1/post-pilot-evidence-archive-export", { cache: "no-store" }),
     fetch("/api/v1/post-pilot-archive-manifest-hash", { cache: "no-store" }),
+    fetch("/api/v1/evidence-signature-readiness", { cache: "no-store" }),
   ]);
   renderPilot(await readinessResponse.json());
   renderOrderIntent(await intentResponse.json());
@@ -3000,6 +3035,7 @@ async function refreshPilot() {
   renderPostPilotReconciliation(await postReconciliationResponse.json());
   renderPostPilotArchiveExport(await postArchiveResponse.json());
   renderArchiveManifestHash(await manifestHashResponse.json());
+  renderSignatureReadiness(await signatureReadinessResponse.json());
 }
 
 document.querySelector("[data-refresh-pilot]").addEventListener("click", refreshPilot);
@@ -3180,6 +3216,22 @@ renderArchiveManifestHash({
   broker_mutation_allowed: false,
   persistence_enabled: false,
   safety_disclaimer: "Archive manifest hash is integrity metadata only."
+});
+renderSignatureReadiness({
+  signature_readiness_id: "PENDING",
+  signing_status: "NOT_SIGNED",
+  manifest_hash_id: "",
+  algorithm: "sha256",
+  manual_signature_review_required: true,
+  signature_required: false,
+  signing_key_present: false,
+  signing_key_exposed: false,
+  external_notarization_performed: false,
+  archive_write_performed: false,
+  trading_armed: false,
+  execution_allowed: false,
+  persistence_enabled: false,
+  safety_disclaimer: "Signature readiness is metadata only."
 });
 """
 

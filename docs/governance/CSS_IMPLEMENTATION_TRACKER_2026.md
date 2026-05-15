@@ -552,6 +552,11 @@ Implemented:
   `/api/v1/post-pilot-archive-manifest-hash`, and operator manifest-hash
   display without archive writes, broker calls, execution, approval grants, or
   runtime event persistence
+- signed evidence packet readiness layer for manifest-hash validation, manual
+  signature review metadata, no-key/no-signing assertions,
+  `/api/v1/evidence-signature-readiness`, and operator signature-readiness
+  display without key loading, digital signing, signature file writes, broker
+  calls, execution, approval grants, or runtime event persistence
 - explicit pilot constraints: Coinbase Advanced, BTC-USD, CAD $15 maximum,
   one limit order, 0.35% maximum slippage, mandatory logging, mandatory
   post-trade pause, and fail-closed governance

@@ -23,6 +23,7 @@ from dashboard.runtime.api_bridge import (
     get_coinbase_micro_live_dry_run_probe_payload,
     get_dashboard_state_payload,
     get_evidence_hash_chain_payload,
+    get_evidence_signature_readiness_payload,
     get_frontend_payload,
     get_micro_live_broker_readiness_confirmation_payload,
     get_micro_live_manual_pilot_checklist_payload,
@@ -158,6 +159,7 @@ def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
         "/api/v1/alerts",
         "/api/v1/coinbase-micro-live-dry-run-probe",
         "/api/v1/evidence-hash-chain",
+        "/api/v1/evidence-signature-readiness",
         "/api/v1/micro-live-broker-readiness-confirmation",
         "/api/v1/micro-live-manual-pilot-checklist",
         "/api/v1/micro-live-operator-approval-gate",
@@ -324,6 +326,15 @@ def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
     assert manifest_hash["execution_allowed"] is False
     assert manifest_hash["broker_mutation_allowed"] is False
     assert manifest_hash["persistence_enabled"] is False
+    signature_readiness = get_evidence_signature_readiness_payload(lambda: state)
+    assert signature_readiness["signing_status"] == "NOT_SIGNED"
+    assert signature_readiness["manual_signature_review_required"] is True
+    assert signature_readiness["signing_key_present"] is False
+    assert signature_readiness["signing_key_exposed"] is False
+    assert signature_readiness["trading_armed"] is False
+    assert signature_readiness["execution_allowed"] is False
+    assert signature_readiness["broker_mutation_allowed"] is False
+    assert signature_readiness["persistence_enabled"] is False
     assert build_section_payload(state, "risk")["data"]["risk_state"] == "NORMAL"
 
 
