@@ -96,6 +96,10 @@ def create_app(
     async def micro_live_pilot_readiness() -> HTMLResponse:
         return HTMLResponse(_micro_live_pilot_readiness_page())
 
+    @app.get("/micro-live-manual-pilot-checklist", response_class=HTMLResponse)
+    async def micro_live_manual_pilot_checklist() -> HTMLResponse:
+        return HTMLResponse(_micro_live_manual_pilot_checklist_page())
+
     @app.get("/health")
     async def health() -> dict[str, Any]:
         state = provider()
@@ -129,6 +133,11 @@ def _app_nav(active: str) -> str:
             "micro_live_pilot",
             "/micro-live-pilot-readiness",
             "Pilot Readiness",
+        ),
+        (
+            "manual_pilot_checklist",
+            "/micro-live-manual-pilot-checklist",
+            "Pilot Checklist",
         ),
     ]
 
@@ -2256,6 +2265,141 @@ def _micro_live_pilot_readiness_page() -> str:
 </html>"""
 
 
+def _micro_live_manual_pilot_checklist_page() -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111820">
+  <title>CSS Manual Micro-Live Pilot Checklist</title>
+  <style>{_css()}</style>
+</head>
+<body>
+  <main class="shell print-shell">
+    <header class="topbar print-topbar">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">CSS</div>
+        <div>
+          <p class="eyebrow">Capital Strata Systems</p>
+          <h1>Manual Micro-Live Pilot Checklist</h1>
+        </div>
+      </div>
+      <section class="status-strip" aria-label="Manual pilot checklist status">
+        <span id="manual-checklist-status">Checklist pending</span>
+        <span id="manual-checklist-generated">Generated pending</span>
+        <span id="manual-checklist-persistence">Persistence disabled</span>
+      </section>
+    </header>
+    {_app_nav("manual_pilot_checklist")}
+
+    <section class="control-row print-controls" aria-label="Manual pilot checklist controls">
+      <button type="button" data-refresh-manual-checklist>Refresh</button>
+      <button type="button" data-print-manual-checklist>Print</button>
+      <span>Checklist/export only</span>
+      <span>No approval grant</span>
+      <span>No live order action</span>
+    </section>
+
+    <section class="empty-state sim-banner" id="manual-checklist-banner">
+      No trading is armed by this checklist. Manual approval, kill-switch confirmation, and final PCNRASS remain external pre-pilot requirements.
+    </section>
+
+    <section class="metric-band print-metrics" aria-label="Manual pilot checklist summary">
+      <article>
+        <strong>Status</strong>
+        <span id="manual-checklist-overall">INCOMPLETE</span>
+      </article>
+      <article>
+        <strong>Broker</strong>
+        <span id="manual-checklist-broker">Coinbase Advanced</span>
+      </article>
+      <article>
+        <strong>Asset</strong>
+        <span id="manual-checklist-symbol">BTC-USD</span>
+      </article>
+      <article>
+        <strong>Capital</strong>
+        <span id="manual-checklist-capital">CAD $15</span>
+      </article>
+      <article>
+        <strong>Trading Armed</strong>
+        <span id="manual-checklist-armed">NO</span>
+      </article>
+      <article>
+        <strong>Manual Approval</strong>
+        <span id="manual-checklist-approval">NOT RECORDED</span>
+      </article>
+    </section>
+
+    <section class="print-workspace">
+      <article class="panel print-main">
+        <div class="panel-head">
+          <h2>Pilot Scope</h2>
+          <span id="manual-checklist-id">PENDING</span>
+        </div>
+        <div class="summary-table" id="manual-checklist-scope"></div>
+      </article>
+
+      <aside class="print-side">
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Required Items</h2>
+            <span id="manual-required-count">0 ITEMS</span>
+          </div>
+          <div class="summary-table" id="manual-required-items"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Completed Items</h2>
+            <span id="manual-completed-count">0 DONE</span>
+          </div>
+          <div class="summary-table" id="manual-completed-items"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Missing Items</h2>
+            <span id="manual-missing-count">0 OPEN</span>
+          </div>
+          <div class="summary-table" id="manual-missing-items"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Blockers / Warnings</h2>
+            <span>FAIL CLOSED</span>
+          </div>
+          <div class="summary-table" id="manual-blockers-warnings"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Evidence Chain Summary</h2>
+            <span>TRACE</span>
+          </div>
+          <div class="summary-table" id="manual-evidence-chain"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Safety Disclaimer</h2>
+            <span>REVIEW</span>
+          </div>
+          <p class="panel-note" id="manual-safety-disclaimer">
+            No trading is armed by this checklist.
+          </p>
+        </article>
+      </aside>
+    </section>
+  </main>
+
+  <script>{_micro_live_manual_pilot_checklist_script()}</script>
+</body>
+</html>"""
+
+
 def _runtime_events_script() -> str:
     return """
 const eventState = { payload: null };
@@ -2752,6 +2896,173 @@ renderGoNoGo({
   blockers: [],
   warnings: ["NO_TRADING_IS_ARMED_FROM_THIS_PAGE"]
 });
+"""
+
+
+def _micro_live_manual_pilot_checklist_script() -> str:
+    return """
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  }[char]));
+}
+
+function formatTime(value) {
+  if (!value) return "UNKNOWN";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("en-US", { hour12: false });
+}
+
+function shortId(value) {
+  const text = String(value || "");
+  return text.length > 20 ? text.slice(0, 20) : text;
+}
+
+function setText(id, value) {
+  document.getElementById(id).textContent = String(value);
+}
+
+function yesNo(value) {
+  return value ? "YES" : "NO";
+}
+
+function renderManualRows(id, rows, emptyText, statusKey = "status") {
+  const target = document.getElementById(id);
+  if (!rows.length) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(emptyText)}</div>`;
+    return;
+  }
+  target.innerHTML = rows.map((row) => {
+    const label = row.label || row.item_id || row.check_id || row;
+    const status = row[statusKey] || row.severity || "";
+    return `
+      <div class="summary-row print-summary-row">
+        <span>${escapeHtml(label)}</span>
+        <span>${escapeHtml(status)}</span>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderManualStrings(id, rows, emptyText, status) {
+  renderManualRows(
+    id,
+    rows.map((item) => ({ label: item, status })),
+    emptyText
+  );
+}
+
+function renderManualScope(payload) {
+  const scope = payload.pilot_scope || {};
+  const rows = [
+    { label: "Checklist ID", status: payload.checklist_id || "PENDING" },
+    { label: "Broker", status: payload.broker || scope.broker || "Coinbase Advanced" },
+    { label: "Symbol", status: payload.symbol || scope.symbol || "BTC-USD" },
+    { label: "Order Type", status: payload.order_type || scope.order_type || "limit" },
+    { label: "Max Pilot Capital", status: `CAD ${payload.max_pilot_capital_cad || scope.max_pilot_capital_cad || "15.00"}` },
+    { label: "Max Slippage", status: `${payload.max_slippage_pct || scope.max_slippage_pct || "0.35"}%` },
+    { label: "Max Live Orders", status: payload.max_live_orders ?? scope.max_live_orders ?? 1 },
+    { label: "Manual Approval Recorded", status: yesNo(payload.manual_operator_approval_recorded) },
+    { label: "Kill-Switch Confirmation Recorded", status: yesNo(payload.kill_switch_confirmation_recorded) },
+    { label: "Final PCNRASS Recorded", status: yesNo(payload.final_pcnrass_recorded) },
+    { label: "Execution Allowed", status: yesNo(payload.execution_allowed) },
+    { label: "Order Submit Allowed", status: yesNo(payload.order_submit_allowed) },
+    { label: "Broker Mutation Allowed", status: yesNo(payload.broker_mutation_allowed) },
+    { label: "Persistence Enabled", status: yesNo(payload.persistence_enabled) },
+  ];
+  renderManualRows("manual-checklist-scope", rows, "No pilot scope available");
+}
+
+function renderEvidenceChain(chain) {
+  const rows = Object.entries(chain || {}).map(([key, value]) => {
+    const status =
+      value?.status ||
+      value?.validation_status ||
+      value?.readiness_status ||
+      value?.go_no_go_status ||
+      (value?.present ? "PRESENT" : "MISSING");
+    return {
+      label: key.replaceAll("_", " "),
+      status
+    };
+  });
+  renderManualRows("manual-evidence-chain", rows, "No evidence chain summary available");
+}
+
+function renderManualChecklist(payload) {
+  const required = payload.required_items || [];
+  const completed = payload.completed_items || [];
+  const missing = payload.missing_items || [];
+  const blockerWarningRows = [
+    ...(payload.blockers || []).map((item) => ({ label: item, status: "BLOCK" })),
+    ...(payload.warnings || []).map((item) => ({ label: item, status: "WARN" }))
+  ];
+
+  setText("manual-checklist-status", payload.checklist_status || "INCOMPLETE");
+  setText("manual-checklist-generated", payload.generated_at_utc ? `Generated ${formatTime(payload.generated_at_utc)}` : "Generated pending");
+  setText("manual-checklist-persistence", payload.persistence_enabled ? "Persistence enabled" : "Persistence disabled");
+  setText("manual-checklist-overall", payload.checklist_status || "INCOMPLETE");
+  setText("manual-checklist-broker", payload.broker || "Coinbase Advanced");
+  setText("manual-checklist-symbol", payload.symbol || "BTC-USD");
+  setText("manual-checklist-capital", `CAD ${payload.max_pilot_capital_cad || "15.00"}`);
+  setText("manual-checklist-armed", yesNo(payload.trading_armed));
+  setText("manual-checklist-approval", payload.manual_operator_approval_recorded ? "RECORDED" : "NOT RECORDED");
+  setText("manual-checklist-id", shortId(payload.checklist_id || "PENDING"));
+  setText("manual-required-count", `${required.length} ITEMS`);
+  setText("manual-completed-count", `${completed.length} DONE`);
+  setText("manual-missing-count", `${missing.length} OPEN`);
+
+  document.getElementById("manual-checklist-banner").textContent =
+    "No trading is armed by this checklist. Checklist/export only; no approval grant, no broker mutation, and no order placement.";
+  document.getElementById("manual-safety-disclaimer").textContent =
+    payload.safety_disclaimer || "No trading is armed by this checklist.";
+
+  renderManualScope(payload);
+  renderManualRows("manual-required-items", required, "No required checklist items", "severity");
+  renderManualRows("manual-completed-items", completed, "No completed checklist items", "severity");
+  renderManualRows("manual-missing-items", missing, "No missing checklist items", "severity");
+  renderManualRows("manual-blockers-warnings", blockerWarningRows, "No blockers or warnings");
+  renderEvidenceChain(payload.evidence_chain_summary || {});
+}
+
+async function refreshManualChecklist() {
+  const response = await fetch("/api/v1/micro-live-manual-pilot-checklist", { cache: "no-store" });
+  renderManualChecklist(await response.json());
+}
+
+document.querySelector("[data-refresh-manual-checklist]").addEventListener("click", refreshManualChecklist);
+document.querySelector("[data-print-manual-checklist]").addEventListener("click", () => window.print());
+refreshManualChecklist().catch(() => renderManualChecklist({
+  checklist_status: "INCOMPLETE",
+  generated_at_utc: "",
+  checklist_id: "PENDING",
+  broker: "Coinbase Advanced",
+  symbol: "BTC-USD",
+  order_type: "limit",
+  max_pilot_capital_cad: "15.00",
+  max_slippage_pct: "0.35",
+  max_live_orders: 1,
+  manual_operator_approval_recorded: false,
+  kill_switch_confirmation_recorded: false,
+  final_pcnrass_recorded: false,
+  trading_armed: false,
+  execution_allowed: false,
+  order_submit_allowed: false,
+  broker_mutation_allowed: false,
+  persistence_enabled: false,
+  required_items: [],
+  completed_items: [],
+  missing_items: [],
+  blockers: ["MANUAL_CHECKLIST_PAYLOAD_UNAVAILABLE"],
+  warnings: ["NO_TRADING_IS_ARMED_BY_THIS_CHECKLIST"],
+  evidence_chain_summary: {},
+  safety_disclaimer: "No trading is armed by this checklist."
+}));
 """
 
 

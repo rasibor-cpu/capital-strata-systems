@@ -6,6 +6,7 @@ from dashboard.web.web_app import (
     _dashboard_page,
     _execution_page,
     _market_opportunities_page,
+    _micro_live_manual_pilot_checklist_page,
     _micro_live_pilot_readiness_page,
     _positions_page,
     _runtime_event_persistence_checklist_print_page,
@@ -27,6 +28,7 @@ def main() -> int:
         "/dashboard",
         "/execution",
         "/market-opportunities",
+        "/micro-live-manual-pilot-checklist",
         "/micro-live-pilot-readiness",
         "/positions",
         "/replay",
@@ -46,6 +48,7 @@ def main() -> int:
         "/api/v1/alerts",
         "/api/v1/coinbase-micro-live-dry-run-probe",
         "/api/v1/micro-live-broker-readiness-confirmation",
+        "/api/v1/micro-live-manual-pilot-checklist",
         "/api/v1/micro-live-operator-approval-gate",
         "/api/v1/micro-live-pre-pilot-go-no-go",
         "/api/v1/micro-live-pilot-readiness",
@@ -80,6 +83,7 @@ def main() -> int:
         'href="/broker"',
         'href="/execution"',
         'href="/market-opportunities"',
+        'href="/micro-live-manual-pilot-checklist"',
         'href="/micro-live-pilot-readiness"',
         'href="/positions"',
         'href="/risk-governance"',
@@ -182,6 +186,32 @@ def main() -> int:
     for expected in expected_pilot_markup:
         if expected not in pilot_markup:
             raise AssertionError(f"Web micro-live pilot markup missing: {expected}")
+
+    manual_checklist_markup = _micro_live_manual_pilot_checklist_page()
+    expected_manual_checklist_markup = [
+        "CSS Manual Micro-Live Pilot Checklist",
+        "Manual Micro-Live Pilot Checklist",
+        "Checklist/export only",
+        "No approval grant",
+        "No live order action",
+        "No trading is armed by this checklist",
+        "Pilot Scope",
+        "Required Items",
+        "Completed Items",
+        "Missing Items",
+        "Blockers / Warnings",
+        "Evidence Chain Summary",
+        "Safety Disclaimer",
+        "Coinbase Advanced",
+        "BTC-USD",
+        "CAD $15",
+        "/api/v1/micro-live-manual-pilot-checklist",
+    ]
+    for expected in expected_manual_checklist_markup:
+        if expected not in manual_checklist_markup:
+            raise AssertionError(
+                f"Web manual pilot checklist markup missing: {expected}"
+            )
 
     positions_markup = _positions_page()
     expected_positions_markup = [

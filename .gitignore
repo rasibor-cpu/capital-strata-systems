@@ -105,6 +105,7 @@ dashboard/runtime/*
 !dashboard/runtime/coinbase_micro_live_dry_run_probe.py
 !dashboard/runtime/micro_live_broker_readiness_confirmation.py
 !dashboard/runtime/micro_live_operator_approval_gate.py
+!dashboard/runtime/micro_live_manual_pilot_checklist.py
 !dashboard/runtime/micro_live_pilot_order_intent.py
 !dashboard/runtime/micro_live_pilot_readiness.py
 !dashboard/runtime/micro_live_pre_pilot_go_no_go.py
@@ -144,6 +145,7 @@ dashboard/runtime/*
 !tests/dashboard/test_coinbase_micro_live_dry_run_probe.py
 !tests/dashboard/test_micro_live_broker_readiness_confirmation.py
 !tests/dashboard/test_micro_live_operator_approval_gate.py
+!tests/dashboard/test_micro_live_manual_pilot_checklist.py
 !tests/dashboard/test_micro_live_pilot_order_intent.py
 !tests/dashboard/test_micro_live_pilot_readiness.py
 !tests/dashboard/test_micro_live_pre_pilot_go_no_go.py

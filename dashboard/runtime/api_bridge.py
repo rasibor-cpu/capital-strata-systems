@@ -40,6 +40,9 @@ from dashboard.runtime.micro_live_pilot_readiness import (
 from dashboard.runtime.micro_live_operator_approval_gate import (
     build_micro_live_operator_approval_gate_payload,
 )
+from dashboard.runtime.micro_live_manual_pilot_checklist import (
+    build_micro_live_manual_pilot_checklist_payload,
+)
 from dashboard.runtime.micro_live_pilot_order_intent import (
     build_micro_live_pilot_order_intent_payload,
 )
@@ -428,6 +431,40 @@ def get_micro_live_pre_pilot_go_no_go_payload(
     )
 
 
+def get_micro_live_manual_pilot_checklist_payload(
+    state_provider: DashboardStateProvider | None = None,
+    event_bus: RuntimeEventBus | None = None,
+) -> dict[str, Any]:
+    pcnrass_summary = load_pcnrass_validation_summary()
+    pilot_readiness = get_micro_live_pilot_readiness_payload(
+        state_provider,
+        event_bus,
+    )
+    order_intent = get_micro_live_pilot_order_intent_payload()
+    dry_run_probe = get_coinbase_micro_live_dry_run_probe_payload()
+    operator_gate = get_micro_live_operator_approval_gate_payload(
+        state_provider,
+        event_bus,
+    )
+    broker_confirmation = get_micro_live_broker_readiness_confirmation_payload(
+        state_provider,
+        event_bus,
+    )
+    pre_pilot_go_no_go = get_micro_live_pre_pilot_go_no_go_payload(
+        state_provider,
+        event_bus,
+    )
+    return build_micro_live_manual_pilot_checklist_payload(
+        pilot_readiness=pilot_readiness,
+        order_intent=order_intent,
+        dry_run_probe=dry_run_probe,
+        operator_approval_gate=operator_gate,
+        broker_readiness_confirmation=broker_confirmation,
+        pre_pilot_go_no_go=pre_pilot_go_no_go,
+        pcnrass_summary=pcnrass_summary,
+    )
+
+
 def create_dashboard_state_router(
     state_provider: DashboardStateProvider | None = None,
     *,
@@ -702,6 +739,13 @@ def create_dashboard_state_router(
             runtime_event_bus,
         )
 
+    @router.get("/api/v1/micro-live-manual-pilot-checklist")
+    def read_micro_live_manual_pilot_checklist() -> dict[str, Any]:
+        return get_micro_live_manual_pilot_checklist_payload(
+            state_provider,
+            runtime_event_bus,
+        )
+
     @router.get("/api/v1/deployment-profiles")
     def read_deployment_profiles() -> dict[str, Any]:
         return get_deployment_profiles()
@@ -770,6 +814,7 @@ __all__ = [
     "get_frontend_payload",
     "get_live_credential_attestation_payload",
     "get_micro_live_broker_readiness_confirmation_payload",
+    "get_micro_live_manual_pilot_checklist_payload",
     "get_micro_live_operator_approval_gate_payload",
     "get_micro_live_pilot_readiness_payload",
     "get_micro_live_pilot_order_intent_payload",

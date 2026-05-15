@@ -490,6 +490,12 @@ Implemented:
 - operator display of go/no-go status, trading-armed false state, execution
   disabled state, final PCNRASS requirement, manual approval requirement,
   kill-switch confirmation requirement, and remaining blockers
+- manual micro-live pilot checklist/export pack
+- read-only `/api/v1/micro-live-manual-pilot-checklist` endpoint
+- operator `/micro-live-manual-pilot-checklist` print/export review surface
+- operator display of required, completed, and missing manual pilot items,
+  evidence-chain summary, pilot scope, safety disclaimer, and no-trading-armed
+  state
 - explicit pilot constraints: Coinbase Advanced, BTC-USD, CAD $15 maximum,
   one limit order, 0.35% maximum slippage, mandatory logging, mandatory
   post-trade pause, and fail-closed governance
