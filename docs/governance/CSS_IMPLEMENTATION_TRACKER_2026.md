@@ -527,6 +527,9 @@ Implemented:
 - micro-live pilot readiness cross-reference map tying documents, APIs, UI
   pages, checklists, and evidence artifacts to operational and governance
   risk controls, validation methods, failure consequences, and NO-GO triggers
+- micro-live pilot operations index tying Phase 30-39 runbooks, templates,
+  indexes, registers, manifests, policies, daily briefs, NO-GO logs, and
+  cross-reference maps into one navigable operator document set
 - explicit pilot constraints: Coinbase Advanced, BTC-USD, CAD $15 maximum,
   one limit order, 0.35% maximum slippage, mandatory logging, mandatory
   post-trade pause, and fail-closed governance
