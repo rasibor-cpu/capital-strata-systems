@@ -500,6 +500,9 @@ Implemented:
 - post-pilot evidence template for reconciliation, replay/audit review,
   broker balance checks, CSS ledger/PnL checks, fee/slippage/fill review,
   kill-switch status, incident notes, and final operator conclusion
+- micro-live pilot evidence archive index linking readiness, intent, dry-run,
+  approval gate, broker confirmation, go/no-go, manual checklist, runbook, and
+  post-pilot evidence records into one operator packet
 - explicit pilot constraints: Coinbase Advanced, BTC-USD, CAD $15 maximum,
   one limit order, 0.35% maximum slippage, mandatory logging, mandatory
   post-trade pause, and fail-closed governance
