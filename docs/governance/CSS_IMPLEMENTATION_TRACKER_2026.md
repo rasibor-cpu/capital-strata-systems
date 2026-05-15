@@ -518,6 +518,9 @@ Implemented:
 - micro-live pilot archive naming and retention policy covering naming
   conventions, folder structure, retention windows, redaction rules, review
   cadence, chain-of-custody notes, and archive safety disclaimers
+- micro-live pilot operator daily brief template for pre-session scope,
+  readiness, market/session context, operational constraints, safety decision,
+  operator notes, and final safety disclaimers
 - explicit pilot constraints: Coinbase Advanced, BTC-USD, CAD $15 maximum,
   one limit order, 0.35% maximum slippage, mandatory logging, mandatory
   post-trade pause, and fail-closed governance
