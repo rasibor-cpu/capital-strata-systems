@@ -2104,6 +2104,10 @@ def _micro_live_pilot_readiness_page() -> str:
       Signature readiness is metadata only. No signing key is loaded and no digital signature is generated.
     </section>
 
+    <section class="empty-state sim-banner" id="pilot-notarization-readiness-banner">
+      Notarization readiness is metadata only. No external notarization is performed and no notarization file is written.
+    </section>
+
     <section class="metric-band pilot-metrics" aria-label="Micro-live pilot summary">
       <article>
         <strong>Readiness</strong>
@@ -2347,6 +2351,14 @@ def _micro_live_pilot_readiness_page() -> str:
             <span>NO SIGN</span>
           </div>
           <div class="summary-table" id="pilot-signature-readiness"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Notarization Readiness</h2>
+            <span>NO NOTARY</span>
+          </div>
+          <div class="summary-table" id="pilot-notarization-readiness"></div>
         </article>
       </aside>
     </section>
@@ -2966,6 +2978,30 @@ function renderSignatureReadiness(payload) {
     payload.safety_disclaimer || "Signature readiness is metadata only.";
 }
 
+function renderNotarizationReadiness(payload) {
+  const rows = [
+    { label: "Notarization Readiness ID", status: payload.notarization_readiness_id || "PENDING" },
+    { label: "Notarization Status", status: payload.notarization_status || "NOT_NOTARIZED" },
+    { label: "Signature Readiness ID", status: payload.signature_readiness_id || "MISSING" },
+    { label: "Manifest Hash ID", status: payload.manifest_hash_id || "MISSING" },
+    { label: "Manual Review Required", status: payload.manual_notarization_review_required ? "YES" : "NO" },
+    { label: "External Notarization Required", status: payload.external_notarization_required ? "YES" : "NO" },
+    { label: "Provider Selected", status: payload.notarization_provider_selected ? "YES" : "NO" },
+    { label: "Provider Name", status: payload.notarization_provider_name || "NONE" },
+    { label: "Receipt Present", status: payload.notarization_receipt_present ? "YES" : "NO" },
+    { label: "Notarization File Written", status: payload.notarization_file_written ? "YES" : "NO" },
+    { label: "Signing Key Present", status: payload.signing_key_present ? "YES" : "NO" },
+    { label: "Signing Key Exposed", status: payload.signing_key_exposed ? "YES" : "NO" },
+    { label: "Archive Write Performed", status: payload.archive_write_performed ? "YES" : "NO" },
+    { label: "Trading Armed", status: payload.trading_armed ? "YES" : "NO" },
+    { label: "Execution Allowed", status: payload.execution_allowed ? "YES" : "NO" },
+    { label: "Persistence Enabled", status: payload.persistence_enabled ? "YES" : "NO" },
+  ];
+  renderRows("pilot-notarization-readiness", rows, "No notarization readiness evidence available");
+  document.getElementById("pilot-notarization-readiness-banner").textContent =
+    payload.safety_disclaimer || "Notarization readiness is metadata only.";
+}
+
 function renderPilot(payload) {
   const passed = payload.passed_checks || [];
   const failed = payload.failed_checks || [];
@@ -3009,7 +3045,8 @@ async function refreshPilot() {
     postReconciliationResponse,
     postArchiveResponse,
     manifestHashResponse,
-    signatureReadinessResponse
+    signatureReadinessResponse,
+    notarizationReadinessResponse
   ] = await Promise.all([
     fetch("/api/v1/micro-live-pilot-readiness", { cache: "no-store" }),
     fetch("/api/v1/micro-live-pilot-order-intent", { cache: "no-store" }),
@@ -3023,6 +3060,7 @@ async function refreshPilot() {
     fetch("/api/v1/post-pilot-evidence-archive-export", { cache: "no-store" }),
     fetch("/api/v1/post-pilot-archive-manifest-hash", { cache: "no-store" }),
     fetch("/api/v1/evidence-signature-readiness", { cache: "no-store" }),
+    fetch("/api/v1/evidence-notarization-readiness", { cache: "no-store" }),
   ]);
   renderPilot(await readinessResponse.json());
   renderOrderIntent(await intentResponse.json());
@@ -3036,6 +3074,7 @@ async function refreshPilot() {
   renderPostPilotArchiveExport(await postArchiveResponse.json());
   renderArchiveManifestHash(await manifestHashResponse.json());
   renderSignatureReadiness(await signatureReadinessResponse.json());
+  renderNotarizationReadiness(await notarizationReadinessResponse.json());
 }
 
 document.querySelector("[data-refresh-pilot]").addEventListener("click", refreshPilot);
@@ -3232,6 +3271,25 @@ renderSignatureReadiness({
   execution_allowed: false,
   persistence_enabled: false,
   safety_disclaimer: "Signature readiness is metadata only."
+});
+renderNotarizationReadiness({
+  notarization_readiness_id: "PENDING",
+  notarization_status: "NOT_NOTARIZED",
+  signature_readiness_id: "",
+  manifest_hash_id: "",
+  manual_notarization_review_required: true,
+  external_notarization_required: false,
+  notarization_provider_selected: false,
+  notarization_provider_name: "",
+  notarization_receipt_present: false,
+  notarization_file_written: false,
+  signing_key_present: false,
+  signing_key_exposed: false,
+  archive_write_performed: false,
+  trading_armed: false,
+  execution_allowed: false,
+  persistence_enabled: false,
+  safety_disclaimer: "Notarization readiness is metadata only."
 });
 """
 
