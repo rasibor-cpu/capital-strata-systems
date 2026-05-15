@@ -31,6 +31,7 @@ from dashboard.runtime.api_bridge import (
     get_micro_live_pilot_readiness_payload,
     get_micro_live_pre_pilot_go_no_go_payload,
     get_operator_action_audit_ledger_payload,
+    get_post_pilot_archive_manifest_hash_payload,
     get_post_pilot_evidence_archive_export_payload,
     get_post_pilot_reconciliation_payload,
     get_runtime_event_persistence_checklist_export_payload,
@@ -164,6 +165,7 @@ def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
         "/api/v1/micro-live-pilot-order-intent",
         "/api/v1/micro-live-pilot-readiness",
         "/api/v1/operator-action-audit-ledger",
+        "/api/v1/post-pilot-archive-manifest-hash",
         "/api/v1/post-pilot-evidence-archive-export",
         "/api/v1/post-pilot-reconciliation",
         "/api/v1/runtime-events",
@@ -315,6 +317,13 @@ def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
     assert post_pilot_archive["execution_allowed"] is False
     assert post_pilot_archive["broker_mutation_allowed"] is False
     assert post_pilot_archive["persistence_enabled"] is False
+    manifest_hash = get_post_pilot_archive_manifest_hash_payload(lambda: state)
+    assert manifest_hash["algorithm"] == "sha256"
+    assert manifest_hash["archive_write_performed"] is False
+    assert manifest_hash["trading_armed"] is False
+    assert manifest_hash["execution_allowed"] is False
+    assert manifest_hash["broker_mutation_allowed"] is False
+    assert manifest_hash["persistence_enabled"] is False
     assert build_section_payload(state, "risk")["data"]["risk_state"] == "NORMAL"
 
 

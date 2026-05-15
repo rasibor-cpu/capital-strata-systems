@@ -2096,6 +2096,10 @@ def _micro_live_pilot_readiness_page() -> str:
       Post-pilot archive export is JSON-safe review metadata only. No archive file is written from this page.
     </section>
 
+    <section class="empty-state sim-banner" id="pilot-manifest-hash-banner">
+      Archive manifest hashing is integrity evidence only. No archive file is written and no trading is armed.
+    </section>
+
     <section class="metric-band pilot-metrics" aria-label="Micro-live pilot summary">
       <article>
         <strong>Readiness</strong>
@@ -2323,6 +2327,14 @@ def _micro_live_pilot_readiness_page() -> str:
             <span>PACKAGE</span>
           </div>
           <div class="summary-table" id="pilot-post-archive-links"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Archive Manifest Hash</h2>
+            <span>SHA-256</span>
+          </div>
+          <div class="summary-table" id="pilot-archive-manifest-hash"></div>
         </article>
       </aside>
     </section>
@@ -2900,6 +2912,27 @@ function renderPostPilotArchiveExport(payload) {
     payload.safety_disclaimer || "Archive export package is review metadata only.";
 }
 
+function renderArchiveManifestHash(payload) {
+  const shortHash = String(payload.combined_manifest_hash || "PENDING").slice(0, 20);
+  const rows = [
+    { label: "Manifest Hash ID", status: payload.manifest_hash_id || "PENDING" },
+    { label: "Archive Export ID", status: payload.archive_export_id || "PENDING" },
+    { label: "Reconciliation ID", status: payload.reconciliation_id || "MISSING" },
+    { label: "Evidence Hash Chain", status: payload.evidence_hash_chain_id || "MISSING" },
+    { label: "Algorithm", status: payload.algorithm || "sha256" },
+    { label: "Combined Hash", status: shortHash },
+    { label: "Evidence References", status: payload.evidence_reference_count ?? 0 },
+    { label: "Archive Write Performed", status: payload.archive_write_performed ? "YES" : "NO" },
+    { label: "Trading Armed", status: payload.trading_armed ? "YES" : "NO" },
+    { label: "Execution Allowed", status: payload.execution_allowed ? "YES" : "NO" },
+    { label: "Broker Mutation Allowed", status: payload.broker_mutation_allowed ? "YES" : "NO" },
+    { label: "Persistence Enabled", status: payload.persistence_enabled ? "YES" : "NO" },
+  ];
+  renderRows("pilot-archive-manifest-hash", rows, "No archive manifest hash evidence available");
+  document.getElementById("pilot-manifest-hash-banner").textContent =
+    payload.safety_disclaimer || "Archive manifest hash is integrity metadata only.";
+}
+
 function renderPilot(payload) {
   const passed = payload.passed_checks || [];
   const failed = payload.failed_checks || [];
@@ -2941,7 +2974,8 @@ async function refreshPilot() {
     evidenceHashResponse,
     operatorAuditResponse,
     postReconciliationResponse,
-    postArchiveResponse
+    postArchiveResponse,
+    manifestHashResponse
   ] = await Promise.all([
     fetch("/api/v1/micro-live-pilot-readiness", { cache: "no-store" }),
     fetch("/api/v1/micro-live-pilot-order-intent", { cache: "no-store" }),
@@ -2953,6 +2987,7 @@ async function refreshPilot() {
     fetch("/api/v1/operator-action-audit-ledger", { cache: "no-store" }),
     fetch("/api/v1/post-pilot-reconciliation", { cache: "no-store" }),
     fetch("/api/v1/post-pilot-evidence-archive-export", { cache: "no-store" }),
+    fetch("/api/v1/post-pilot-archive-manifest-hash", { cache: "no-store" }),
   ]);
   renderPilot(await readinessResponse.json());
   renderOrderIntent(await intentResponse.json());
@@ -2964,6 +2999,7 @@ async function refreshPilot() {
   renderOperatorActionAudit(await operatorAuditResponse.json());
   renderPostPilotReconciliation(await postReconciliationResponse.json());
   renderPostPilotArchiveExport(await postArchiveResponse.json());
+  renderArchiveManifestHash(await manifestHashResponse.json());
 }
 
 document.querySelector("[data-refresh-pilot]").addEventListener("click", refreshPilot);
@@ -3129,6 +3165,21 @@ renderPostPilotArchiveExport({
   broker_mutation_allowed: false,
   persistence_enabled: false,
   safety_disclaimer: "Archive export package is review metadata only."
+});
+renderArchiveManifestHash({
+  manifest_hash_id: "PENDING",
+  archive_export_id: "PENDING",
+  reconciliation_id: "",
+  evidence_hash_chain_id: "",
+  algorithm: "sha256",
+  combined_manifest_hash: "PENDING",
+  evidence_reference_count: 0,
+  archive_write_performed: false,
+  trading_armed: false,
+  execution_allowed: false,
+  broker_mutation_allowed: false,
+  persistence_enabled: false,
+  safety_disclaimer: "Archive manifest hash is integrity metadata only."
 });
 """
 

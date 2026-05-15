@@ -111,6 +111,7 @@ dashboard/runtime/*
 !dashboard/runtime/micro_live_pilot_readiness.py
 !dashboard/runtime/micro_live_pre_pilot_go_no_go.py
 !dashboard/runtime/operator_action_audit_ledger.py
+!dashboard/runtime/post_pilot_archive_manifest_hash.py
 !dashboard/runtime/post_pilot_evidence_archive_export.py
 !dashboard/runtime/post_pilot_reconciliation_workflow.py
 !dashboard/runtime/trade_lifecycle_service.py
@@ -155,6 +156,7 @@ dashboard/runtime/*
 !tests/dashboard/test_micro_live_pilot_readiness.py
 !tests/dashboard/test_micro_live_pre_pilot_go_no_go.py
 !tests/dashboard/test_operator_action_audit_ledger.py
+!tests/dashboard/test_post_pilot_archive_manifest_hash.py
 !tests/dashboard/test_post_pilot_evidence_archive_export.py
 !tests/dashboard/test_post_pilot_reconciliation_workflow.py
 !tests/engine/test_live_readiness_certifier.py

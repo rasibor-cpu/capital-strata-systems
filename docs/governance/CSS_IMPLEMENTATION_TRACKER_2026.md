@@ -547,6 +547,11 @@ Implemented:
   CSS ledger summaries, fee/slippage/fill summaries, and operator conclusion
   metadata through `/api/v1/post-pilot-evidence-archive-export` without disk
   writes, broker calls, execution, approval grants, or runtime event persistence
+- immutable post-pilot archive manifest hashing for redacted SHA-256 archive
+  export package hashes, ordered evidence-reference combined hashes,
+  `/api/v1/post-pilot-archive-manifest-hash`, and operator manifest-hash
+  display without archive writes, broker calls, execution, approval grants, or
+  runtime event persistence
 - explicit pilot constraints: Coinbase Advanced, BTC-USD, CAD $15 maximum,
   one limit order, 0.35% maximum slippage, mandatory logging, mandatory
   post-trade pause, and fail-closed governance
