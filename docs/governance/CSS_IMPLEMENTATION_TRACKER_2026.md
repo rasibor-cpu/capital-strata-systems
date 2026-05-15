@@ -509,6 +509,9 @@ Implemented:
 - micro-live pilot governance sign-off register for GO, NO-GO, deferred,
   review-required, and blocker rejection decisions, including supporting
   evidence references and manual signature fields
+- micro-live pilot incident review worksheet for anomalies, blockers,
+  reconciliation mismatches, safety events, root-cause review, resolution
+  planning, closure, and NO-GO escalation
 - explicit pilot constraints: Coinbase Advanced, BTC-USD, CAD $15 maximum,
   one limit order, 0.35% maximum slippage, mandatory logging, mandatory
   post-trade pause, and fail-closed governance
