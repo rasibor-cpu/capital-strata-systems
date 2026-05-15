@@ -521,6 +521,9 @@ Implemented:
 - micro-live pilot operator daily brief template for pre-session scope,
   readiness, market/session context, operational constraints, safety decision,
   operator notes, and final safety disclaimers
+- micro-live pilot NO-GO decision log template for stopped, deferred,
+  rejected, not-ready, and review-required decisions, including trigger
+  categories, corrective actions, outcomes, sign-off, and safety disclaimers
 - explicit pilot constraints: Coinbase Advanced, BTC-USD, CAD $15 maximum,
   one limit order, 0.35% maximum slippage, mandatory logging, mandatory
   post-trade pause, and fail-closed governance
