@@ -110,6 +110,7 @@ dashboard/runtime/*
 !dashboard/runtime/micro_live_pilot_order_intent.py
 !dashboard/runtime/micro_live_pilot_readiness.py
 !dashboard/runtime/micro_live_pre_pilot_go_no_go.py
+!dashboard/runtime/operator_action_audit_ledger.py
 !dashboard/runtime/trade_lifecycle_service.py
 !dashboard/runtime/trade_lifecycle_replay_sink.py
 !dashboard/runtime/trade_lifecycle_replay_viewer.py
@@ -151,6 +152,7 @@ dashboard/runtime/*
 !tests/dashboard/test_micro_live_pilot_order_intent.py
 !tests/dashboard/test_micro_live_pilot_readiness.py
 !tests/dashboard/test_micro_live_pre_pilot_go_no_go.py
+!tests/dashboard/test_operator_action_audit_ledger.py
 !tests/engine/test_live_readiness_certifier.py
 
 !live_data/

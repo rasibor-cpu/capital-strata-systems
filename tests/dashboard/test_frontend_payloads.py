@@ -30,6 +30,7 @@ from dashboard.runtime.api_bridge import (
     get_micro_live_pilot_order_intent_payload,
     get_micro_live_pilot_readiness_payload,
     get_micro_live_pre_pilot_go_no_go_payload,
+    get_operator_action_audit_ledger_payload,
     get_runtime_event_persistence_checklist_export_payload,
     get_runtime_event_persistence_checklist_payload,
     get_runtime_event_persistence_policy_inspection_payload,
@@ -160,6 +161,7 @@ def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
         "/api/v1/micro-live-pre-pilot-go-no-go",
         "/api/v1/micro-live-pilot-order-intent",
         "/api/v1/micro-live-pilot-readiness",
+        "/api/v1/operator-action-audit-ledger",
         "/api/v1/runtime-events",
         "/api/v1/runtime-event-persistence-checklist",
         "/api/v1/runtime-event-persistence-checklist-export",
@@ -287,6 +289,13 @@ def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
     assert evidence_hash_chain["execution_allowed"] is False
     assert evidence_hash_chain["broker_mutation_allowed"] is False
     assert evidence_hash_chain["persistence_enabled"] is False
+    operator_audit = get_operator_action_audit_ledger_payload()
+    assert operator_audit["read_only"] is True
+    assert operator_audit["trading_armed"] is False
+    assert operator_audit["execution_allowed"] is False
+    assert operator_audit["broker_mutation_allowed"] is False
+    assert operator_audit["persistence_enabled"] is False
+    assert operator_audit["approval_grant_endpoint_exists"] is False
     assert build_section_payload(state, "risk")["data"]["risk_state"] == "NORMAL"
 
 

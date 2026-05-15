@@ -2084,6 +2084,10 @@ def _micro_live_pilot_readiness_page() -> str:
       No trading is armed from this page. Final go/no-go is review evidence only.
     </section>
 
+    <section class="empty-state sim-banner" id="pilot-operator-audit-banner">
+      Review actions do not approve or arm trading. Operator action audit is read-only foundation evidence.
+    </section>
+
     <section class="metric-band pilot-metrics" aria-label="Micro-live pilot summary">
       <article>
         <strong>Readiness</strong>
@@ -2263,6 +2267,22 @@ def _micro_live_pilot_readiness_page() -> str:
             <span>SHA-256</span>
           </div>
           <div class="summary-table" id="pilot-evidence-hash"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Operator Action Audit</h2>
+            <span>REVIEW ONLY</span>
+          </div>
+          <div class="summary-table" id="pilot-operator-action-audit"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Audit Review Actions</h2>
+            <span>NO APPROVAL</span>
+          </div>
+          <div class="summary-table" id="pilot-operator-action-entries"></div>
         </article>
       </aside>
     </section>
@@ -2763,6 +2783,29 @@ function renderEvidenceHashChain(chain) {
   renderRows("pilot-evidence-hash", rows, "No evidence hash chain available");
 }
 
+function renderOperatorActionAudit(payload) {
+  const entries = (payload.entries || []).length ? payload.entries : (payload.sample_entries || []);
+  const rows = [
+    { label: "Ledger Status", status: payload.read_only ? "READ_ONLY" : "UNKNOWN" },
+    { label: "Entry Count", status: payload.entry_count ?? 0 },
+    { label: "Sample Entry Count", status: payload.sample_entry_count ?? 0 },
+    { label: "Supported Actions", status: (payload.supported_action_types || []).length },
+    { label: "Trading Armed", status: payload.trading_armed ? "YES" : "NO" },
+    { label: "Execution Allowed", status: payload.execution_allowed ? "YES" : "NO" },
+    { label: "Broker Mutation Allowed", status: payload.broker_mutation_allowed ? "YES" : "NO" },
+    { label: "Persistence Enabled", status: payload.persistence_enabled ? "YES" : "NO" },
+    { label: "Approval Grant Endpoint", status: payload.approval_grant_endpoint_exists ? "YES" : "NO" },
+  ];
+  const actionRows = entries.slice(0, 6).map((entry) => ({
+    label: `${entry.action_type || "UNKNOWN"} @ ${entry.source_page || "UNKNOWN"}`,
+    status: entry.sample_only ? "SAMPLE" : "RECENT",
+  }));
+  renderRows("pilot-operator-action-audit", rows, "No operator action audit payload available");
+  renderRows("pilot-operator-action-entries", actionRows, "No operator review action entries available");
+  document.getElementById("pilot-operator-audit-banner").textContent =
+    payload.safety_disclaimer || "Review actions do not approve or arm trading.";
+}
+
 function renderPilot(payload) {
   const passed = payload.passed_checks || [];
   const failed = payload.failed_checks || [];
@@ -2801,7 +2844,8 @@ async function refreshPilot() {
     approvalGateResponse,
     brokerConfirmationResponse,
     goNoGoResponse,
-    evidenceHashResponse
+    evidenceHashResponse,
+    operatorAuditResponse
   ] = await Promise.all([
     fetch("/api/v1/micro-live-pilot-readiness", { cache: "no-store" }),
     fetch("/api/v1/micro-live-pilot-order-intent", { cache: "no-store" }),
@@ -2810,6 +2854,7 @@ async function refreshPilot() {
     fetch("/api/v1/micro-live-broker-readiness-confirmation", { cache: "no-store" }),
     fetch("/api/v1/micro-live-pre-pilot-go-no-go", { cache: "no-store" }),
     fetch("/api/v1/evidence-hash-chain", { cache: "no-store" }),
+    fetch("/api/v1/operator-action-audit-ledger", { cache: "no-store" }),
   ]);
   renderPilot(await readinessResponse.json());
   renderOrderIntent(await intentResponse.json());
@@ -2818,6 +2863,7 @@ async function refreshPilot() {
   renderBrokerConfirmation(await brokerConfirmationResponse.json());
   renderGoNoGo(await goNoGoResponse.json());
   renderEvidenceHashChain(await evidenceHashResponse.json());
+  renderOperatorActionAudit(await operatorAuditResponse.json());
 }
 
 document.querySelector("[data-refresh-pilot]").addEventListener("click", refreshPilot);
@@ -2932,6 +2978,20 @@ renderEvidenceHashChain({
   broker_mutation_allowed: false,
   persistence_enabled: false,
   safety_disclaimer: "Evidence hashes are integrity metadata only."
+});
+renderOperatorActionAudit({
+  read_only: true,
+  entry_count: 0,
+  sample_entry_count: 0,
+  supported_action_types: [],
+  entries: [],
+  sample_entries: [],
+  trading_armed: false,
+  execution_allowed: false,
+  broker_mutation_allowed: false,
+  persistence_enabled: false,
+  approval_grant_endpoint_exists: false,
+  safety_disclaimer: "Review actions do not approve or arm trading."
 });
 """
 

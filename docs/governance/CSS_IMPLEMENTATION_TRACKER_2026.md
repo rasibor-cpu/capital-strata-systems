@@ -533,6 +533,10 @@ Implemented:
 - immutable evidence hashing foundation for read-only SHA-256 evidence item
   hashes, combined hash-chain packages, `/api/v1/evidence-hash-chain`, and
   operator evidence-integrity display without execution or broker mutation
+- operator action audit ledger foundation for JSON-safe review-action records,
+  supported action-type governance, in-memory review entries,
+  `/api/v1/operator-action-audit-ledger`, and operator action display without
+  approval grants, execution, broker mutation, or runtime event persistence
 - explicit pilot constraints: Coinbase Advanced, BTC-USD, CAD $15 maximum,
   one limit order, 0.35% maximum slippage, mandatory logging, mandatory
   post-trade pause, and fail-closed governance

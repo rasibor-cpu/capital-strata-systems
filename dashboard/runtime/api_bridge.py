@@ -50,6 +50,11 @@ from dashboard.runtime.micro_live_pilot_order_intent import (
 from dashboard.runtime.micro_live_pre_pilot_go_no_go import (
     build_micro_live_pre_pilot_go_no_go_payload,
 )
+from dashboard.runtime.operator_action_audit_ledger import (
+    OperatorActionAuditLedger,
+    build_operator_action_audit_ledger_payload,
+    get_default_operator_action_audit_ledger,
+)
 from dashboard.runtime.runtime_event_bus import (
     RuntimeEventBus,
     get_default_runtime_event_bus,
@@ -535,6 +540,25 @@ def get_evidence_hash_chain_payload(
     )
 
 
+def get_operator_action_audit_ledger_payload(
+    ledger: OperatorActionAuditLedger | None = None,
+    *,
+    limit: int = 25,
+    action_type: str = "",
+    action_scope: str = "",
+    operator_id: str = "",
+    related_hash_chain_id: str = "",
+) -> dict[str, Any]:
+    return build_operator_action_audit_ledger_payload(
+        ledger or get_default_operator_action_audit_ledger(),
+        limit=limit,
+        action_type=action_type,
+        action_scope=action_scope,
+        operator_id=operator_id,
+        related_hash_chain_id=related_hash_chain_id,
+    )
+
+
 def create_dashboard_state_router(
     state_provider: DashboardStateProvider | None = None,
     *,
@@ -823,6 +847,22 @@ def create_dashboard_state_router(
             runtime_event_bus,
         )
 
+    @router.get("/api/v1/operator-action-audit-ledger")
+    def read_operator_action_audit_ledger(
+        action_type: str = "",
+        action_scope: str = "",
+        operator_id: str = "",
+        related_hash_chain_id: str = "",
+        limit: int = 25,
+    ) -> dict[str, Any]:
+        return get_operator_action_audit_ledger_payload(
+            limit=limit,
+            action_type=action_type,
+            action_scope=action_scope,
+            operator_id=operator_id,
+            related_hash_chain_id=related_hash_chain_id,
+        )
+
     @router.get("/api/v1/deployment-profiles")
     def read_deployment_profiles() -> dict[str, Any]:
         return get_deployment_profiles()
@@ -897,6 +937,7 @@ __all__ = [
     "get_micro_live_pilot_readiness_payload",
     "get_micro_live_pilot_order_intent_payload",
     "get_micro_live_pre_pilot_go_no_go_payload",
+    "get_operator_action_audit_ledger_payload",
     "get_runtime_event_persistence_checklist_export_payload",
     "get_runtime_event_persistence_checklist_payload",
     "get_runtime_event_persistence_policy_inspection_payload",
