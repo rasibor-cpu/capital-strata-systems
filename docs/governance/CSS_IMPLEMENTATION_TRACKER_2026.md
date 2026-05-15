@@ -563,6 +563,13 @@ Implemented:
   display without signing, external notarization, provider selection, receipt
   creation, file writes, broker calls, execution, approval grants, or runtime
   event persistence
+- evidence packet verification/readback readiness layer for manifest-hash,
+  signature-readiness, and notarization-readiness references,
+  hash-recheck-available metadata, no-archive-read/no-external-file-read
+  assertions, `/api/v1/evidence-verification-readiness`, and operator
+  verification-readiness display without file reads, verification, signing,
+  notarization, archive writes, broker calls, execution, approval grants, or
+  runtime event persistence
 - explicit pilot constraints: Coinbase Advanced, BTC-USD, CAD $15 maximum,
   one limit order, 0.35% maximum slippage, mandatory logging, mandatory
   post-trade pause, and fail-closed governance

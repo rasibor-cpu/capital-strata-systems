@@ -16,6 +16,9 @@ from dashboard.runtime.evidence_notarization_readiness import (
 from dashboard.runtime.evidence_signature_readiness import (
     build_evidence_signature_readiness_payload,
 )
+from dashboard.runtime.evidence_verification_readiness import (
+    build_evidence_verification_readiness_payload,
+)
 from dashboard.runtime.frontend_contract import (
     build_frontend_payload,
     build_section_payload,
@@ -643,6 +646,29 @@ def get_evidence_notarization_readiness_payload(
     return build_evidence_notarization_readiness_payload(signature_readiness)
 
 
+def get_evidence_verification_readiness_payload(
+    state_provider: DashboardStateProvider | None = None,
+    event_bus: RuntimeEventBus | None = None,
+) -> dict[str, Any]:
+    manifest_hash = get_post_pilot_archive_manifest_hash_payload(
+        state_provider,
+        event_bus,
+    )
+    signature_readiness = get_evidence_signature_readiness_payload(
+        state_provider,
+        event_bus,
+    )
+    notarization_readiness = get_evidence_notarization_readiness_payload(
+        state_provider,
+        event_bus,
+    )
+    return build_evidence_verification_readiness_payload(
+        manifest_hash,
+        signature_readiness_payload=signature_readiness,
+        notarization_readiness_payload=notarization_readiness,
+    )
+
+
 def create_dashboard_state_router(
     state_provider: DashboardStateProvider | None = None,
     *,
@@ -982,6 +1008,13 @@ def create_dashboard_state_router(
             runtime_event_bus,
         )
 
+    @router.get("/api/v1/evidence-verification-readiness")
+    def read_evidence_verification_readiness() -> dict[str, Any]:
+        return get_evidence_verification_readiness_payload(
+            state_provider,
+            runtime_event_bus,
+        )
+
     @router.get("/api/v1/deployment-profiles")
     def read_deployment_profiles() -> dict[str, Any]:
         return get_deployment_profiles()
@@ -1050,6 +1083,7 @@ __all__ = [
     "get_evidence_hash_chain_payload",
     "get_evidence_notarization_readiness_payload",
     "get_evidence_signature_readiness_payload",
+    "get_evidence_verification_readiness_payload",
     "get_frontend_payload",
     "get_live_credential_attestation_payload",
     "get_micro_live_broker_readiness_confirmation_payload",
