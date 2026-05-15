@@ -515,6 +515,9 @@ Implemented:
 - micro-live pilot evidence bundle manifest for artifact ownership,
   completion status, archive locations, evidence references, pre-pilot,
   during-pilot, and post-pilot evidence tracking
+- micro-live pilot archive naming and retention policy covering naming
+  conventions, folder structure, retention windows, redaction rules, review
+  cadence, chain-of-custody notes, and archive safety disclaimers
 - explicit pilot constraints: Coinbase Advanced, BTC-USD, CAD $15 maximum,
   one limit order, 0.35% maximum slippage, mandatory logging, mandatory
   post-trade pause, and fail-closed governance
