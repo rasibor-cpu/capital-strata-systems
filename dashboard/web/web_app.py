@@ -2256,6 +2256,14 @@ def _micro_live_pilot_readiness_page() -> str:
           </div>
           <div class="summary-table" id="pilot-go-no-go-review"></div>
         </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Evidence Integrity Hash</h2>
+            <span>SHA-256</span>
+          </div>
+          <div class="summary-table" id="pilot-evidence-hash"></div>
+        </article>
       </aside>
     </section>
   </main>
@@ -2740,6 +2748,21 @@ function renderGoNoGo(record) {
     "No trading is armed from this page. Final go/no-go remains review-only and non-executing.";
 }
 
+function renderEvidenceHashChain(chain) {
+  const rows = [
+    { label: "Chain ID", status: chain.chain_id || "PENDING" },
+    { label: "Item Count", status: chain.item_count ?? 0 },
+    { label: "Algorithm", status: chain.algorithm || "sha256" },
+    { label: "Combined Hash", status: chain.combined_chain_hash || "PENDING" },
+    { label: "Trading Armed", status: chain.trading_armed ? "YES" : "NO" },
+    { label: "Execution Allowed", status: chain.execution_allowed ? "YES" : "NO" },
+    { label: "Broker Mutation Allowed", status: chain.broker_mutation_allowed ? "YES" : "NO" },
+    { label: "Persistence Enabled", status: chain.persistence_enabled ? "YES" : "NO" },
+    { label: "Safety", status: chain.safety_disclaimer || "Integrity metadata only" },
+  ];
+  renderRows("pilot-evidence-hash", rows, "No evidence hash chain available");
+}
+
 function renderPilot(payload) {
   const passed = payload.passed_checks || [];
   const failed = payload.failed_checks || [];
@@ -2777,7 +2800,8 @@ async function refreshPilot() {
     probeResponse,
     approvalGateResponse,
     brokerConfirmationResponse,
-    goNoGoResponse
+    goNoGoResponse,
+    evidenceHashResponse
   ] = await Promise.all([
     fetch("/api/v1/micro-live-pilot-readiness", { cache: "no-store" }),
     fetch("/api/v1/micro-live-pilot-order-intent", { cache: "no-store" }),
@@ -2785,6 +2809,7 @@ async function refreshPilot() {
     fetch("/api/v1/micro-live-operator-approval-gate", { cache: "no-store" }),
     fetch("/api/v1/micro-live-broker-readiness-confirmation", { cache: "no-store" }),
     fetch("/api/v1/micro-live-pre-pilot-go-no-go", { cache: "no-store" }),
+    fetch("/api/v1/evidence-hash-chain", { cache: "no-store" }),
   ]);
   renderPilot(await readinessResponse.json());
   renderOrderIntent(await intentResponse.json());
@@ -2792,6 +2817,7 @@ async function refreshPilot() {
   renderApprovalGate(await approvalGateResponse.json());
   renderBrokerConfirmation(await brokerConfirmationResponse.json());
   renderGoNoGo(await goNoGoResponse.json());
+  renderEvidenceHashChain(await evidenceHashResponse.json());
 }
 
 document.querySelector("[data-refresh-pilot]").addEventListener("click", refreshPilot);
@@ -2895,6 +2921,17 @@ renderGoNoGo({
   failed_checks: [],
   blockers: [],
   warnings: ["NO_TRADING_IS_ARMED_FROM_THIS_PAGE"]
+});
+renderEvidenceHashChain({
+  chain_id: "PENDING",
+  item_count: 0,
+  algorithm: "sha256",
+  combined_chain_hash: "PENDING",
+  trading_armed: false,
+  execution_allowed: false,
+  broker_mutation_allowed: false,
+  persistence_enabled: false,
+  safety_disclaimer: "Evidence hashes are integrity metadata only."
 });
 """
 

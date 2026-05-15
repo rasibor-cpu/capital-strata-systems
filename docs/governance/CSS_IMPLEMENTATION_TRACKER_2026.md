@@ -530,6 +530,9 @@ Implemented:
 - micro-live pilot operations index tying Phase 30-39 runbooks, templates,
   indexes, registers, manifests, policies, daily briefs, NO-GO logs, and
   cross-reference maps into one navigable operator document set
+- immutable evidence hashing foundation for read-only SHA-256 evidence item
+  hashes, combined hash-chain packages, `/api/v1/evidence-hash-chain`, and
+  operator evidence-integrity display without execution or broker mutation
 - explicit pilot constraints: Coinbase Advanced, BTC-USD, CAD $15 maximum,
   one limit order, 0.35% maximum slippage, mandatory logging, mandatory
   post-trade pause, and fail-closed governance

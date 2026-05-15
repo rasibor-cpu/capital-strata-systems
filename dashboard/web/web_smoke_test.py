@@ -47,6 +47,7 @@ def main() -> int:
         "/api/v1/broker",
         "/api/v1/alerts",
         "/api/v1/coinbase-micro-live-dry-run-probe",
+        "/api/v1/evidence-hash-chain",
         "/api/v1/micro-live-broker-readiness-confirmation",
         "/api/v1/micro-live-manual-pilot-checklist",
         "/api/v1/micro-live-operator-approval-gate",
@@ -171,6 +172,8 @@ def main() -> int:
         "Final Pre-Pilot Go/No-Go",
         "Go/No-Go Checks",
         "Go/No-Go Blockers / Warnings",
+        "Evidence Integrity Hash",
+        "SHA-256",
         "Required Approvals",
         "Coinbase Advanced",
         "BTC-USD",
@@ -182,6 +185,7 @@ def main() -> int:
         "/api/v1/micro-live-operator-approval-gate",
         "/api/v1/micro-live-broker-readiness-confirmation",
         "/api/v1/micro-live-pre-pilot-go-no-go",
+        "/api/v1/evidence-hash-chain",
     ]
     for expected in expected_pilot_markup:
         if expected not in pilot_markup:

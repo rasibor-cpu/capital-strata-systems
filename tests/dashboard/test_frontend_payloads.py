@@ -22,6 +22,7 @@ from dashboard.runtime.api_bridge import (
     get_alert_payload,
     get_coinbase_micro_live_dry_run_probe_payload,
     get_dashboard_state_payload,
+    get_evidence_hash_chain_payload,
     get_frontend_payload,
     get_micro_live_broker_readiness_confirmation_payload,
     get_micro_live_manual_pilot_checklist_payload,
@@ -152,6 +153,7 @@ def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
         "/api/v1/broker-reconciliation",
         "/api/v1/alerts",
         "/api/v1/coinbase-micro-live-dry-run-probe",
+        "/api/v1/evidence-hash-chain",
         "/api/v1/micro-live-broker-readiness-confirmation",
         "/api/v1/micro-live-manual-pilot-checklist",
         "/api/v1/micro-live-operator-approval-gate",
@@ -278,6 +280,13 @@ def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
         ]
         is False
     )
+    evidence_hash_chain = get_evidence_hash_chain_payload(lambda: state)
+    assert evidence_hash_chain["algorithm"] == "sha256"
+    assert evidence_hash_chain["item_count"] == 7
+    assert evidence_hash_chain["trading_armed"] is False
+    assert evidence_hash_chain["execution_allowed"] is False
+    assert evidence_hash_chain["broker_mutation_allowed"] is False
+    assert evidence_hash_chain["persistence_enabled"] is False
     assert build_section_payload(state, "risk")["data"]["risk_state"] == "NORMAL"
 
 

@@ -9,6 +9,7 @@ from dashboard.runtime.dashboard_hydration_coordinator import (
     DashboardHydrationCoordinator,
 )
 from dashboard.runtime.dashboard_state import DashboardState
+from dashboard.runtime.evidence_hashing import build_evidence_hash_chain
 from dashboard.runtime.frontend_contract import (
     build_frontend_payload,
     build_section_payload,
@@ -465,6 +466,75 @@ def get_micro_live_manual_pilot_checklist_payload(
     )
 
 
+def get_evidence_hash_chain_payload(
+    state_provider: DashboardStateProvider | None = None,
+    event_bus: RuntimeEventBus | None = None,
+) -> dict[str, Any]:
+    pilot_readiness = get_micro_live_pilot_readiness_payload(
+        state_provider,
+        event_bus,
+    )
+    order_intent = get_micro_live_pilot_order_intent_payload()
+    dry_run_probe = get_coinbase_micro_live_dry_run_probe_payload()
+    operator_gate = get_micro_live_operator_approval_gate_payload(
+        state_provider,
+        event_bus,
+    )
+    broker_confirmation = get_micro_live_broker_readiness_confirmation_payload(
+        state_provider,
+        event_bus,
+    )
+    go_no_go = get_micro_live_pre_pilot_go_no_go_payload(
+        state_provider,
+        event_bus,
+    )
+    manual_checklist = get_micro_live_manual_pilot_checklist_payload(
+        state_provider,
+        event_bus,
+    )
+    return build_evidence_hash_chain(
+        [
+            {
+                "source_type": "micro_live_readiness",
+                "source_reference": "/api/v1/micro-live-pilot-readiness",
+                "payload": pilot_readiness,
+            },
+            {
+                "source_type": "micro_live_order_intent",
+                "source_reference": "/api/v1/micro-live-pilot-order-intent",
+                "payload": order_intent,
+            },
+            {
+                "source_type": "coinbase_dry_run_probe",
+                "source_reference": "/api/v1/coinbase-micro-live-dry-run-probe",
+                "payload": dry_run_probe,
+            },
+            {
+                "source_type": "operator_approval_gate",
+                "source_reference": "/api/v1/micro-live-operator-approval-gate",
+                "payload": operator_gate,
+            },
+            {
+                "source_type": "broker_readiness_confirmation",
+                "source_reference": (
+                    "/api/v1/micro-live-broker-readiness-confirmation"
+                ),
+                "payload": broker_confirmation,
+            },
+            {
+                "source_type": "pre_pilot_go_no_go",
+                "source_reference": "/api/v1/micro-live-pre-pilot-go-no-go",
+                "payload": go_no_go,
+            },
+            {
+                "source_type": "manual_pilot_checklist",
+                "source_reference": "/api/v1/micro-live-manual-pilot-checklist",
+                "payload": manual_checklist,
+            },
+        ]
+    )
+
+
 def create_dashboard_state_router(
     state_provider: DashboardStateProvider | None = None,
     *,
@@ -746,6 +816,13 @@ def create_dashboard_state_router(
             runtime_event_bus,
         )
 
+    @router.get("/api/v1/evidence-hash-chain")
+    def read_evidence_hash_chain() -> dict[str, Any]:
+        return get_evidence_hash_chain_payload(
+            state_provider,
+            runtime_event_bus,
+        )
+
     @router.get("/api/v1/deployment-profiles")
     def read_deployment_profiles() -> dict[str, Any]:
         return get_deployment_profiles()
@@ -811,6 +888,7 @@ __all__ = [
     "get_broker_reconciliation_payload",
     "get_alert_payload",
     "get_dashboard_state_payload",
+    "get_evidence_hash_chain_payload",
     "get_frontend_payload",
     "get_live_credential_attestation_payload",
     "get_micro_live_broker_readiness_confirmation_payload",
