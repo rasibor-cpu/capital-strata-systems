@@ -19,6 +19,9 @@ from dashboard.runtime.evidence_signature_readiness import (
 from dashboard.runtime.evidence_verification_readiness import (
     build_evidence_verification_readiness_payload,
 )
+from dashboard.runtime.evidence_verification_checklist import (
+    build_evidence_verification_checklist_payload,
+)
 from dashboard.runtime.frontend_contract import (
     build_frontend_payload,
     build_section_payload,
@@ -669,6 +672,17 @@ def get_evidence_verification_readiness_payload(
     )
 
 
+def get_evidence_verification_checklist_payload(
+    state_provider: DashboardStateProvider | None = None,
+    event_bus: RuntimeEventBus | None = None,
+) -> dict[str, Any]:
+    verification_readiness = get_evidence_verification_readiness_payload(
+        state_provider,
+        event_bus,
+    )
+    return build_evidence_verification_checklist_payload(verification_readiness)
+
+
 def create_dashboard_state_router(
     state_provider: DashboardStateProvider | None = None,
     *,
@@ -1015,6 +1029,13 @@ def create_dashboard_state_router(
             runtime_event_bus,
         )
 
+    @router.get("/api/v1/evidence-verification-checklist")
+    def read_evidence_verification_checklist() -> dict[str, Any]:
+        return get_evidence_verification_checklist_payload(
+            state_provider,
+            runtime_event_bus,
+        )
+
     @router.get("/api/v1/deployment-profiles")
     def read_deployment_profiles() -> dict[str, Any]:
         return get_deployment_profiles()
@@ -1083,6 +1104,7 @@ __all__ = [
     "get_evidence_hash_chain_payload",
     "get_evidence_notarization_readiness_payload",
     "get_evidence_signature_readiness_payload",
+    "get_evidence_verification_checklist_payload",
     "get_evidence_verification_readiness_payload",
     "get_frontend_payload",
     "get_live_credential_attestation_payload",

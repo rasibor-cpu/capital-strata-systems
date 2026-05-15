@@ -570,6 +570,13 @@ Implemented:
   verification-readiness display without file reads, verification, signing,
   notarization, archive writes, broker calls, execution, approval grants, or
   runtime event persistence
+- manual evidence verification checklist/export surface for verification
+  readiness, manifest hash, signature-readiness, notarization-readiness,
+  manual verification, final PCNRASS reference, missing-item, and safety flag
+  review through `/api/v1/evidence-verification-checklist` and operator
+  checklist display without external file reads, verification, signing,
+  notarization, archive writes, broker calls, execution, approval grants, or
+  runtime event persistence
 - explicit pilot constraints: Coinbase Advanced, BTC-USD, CAD $15 maximum,
   one limit order, 0.35% maximum slippage, mandatory logging, mandatory
   post-trade pause, and fail-closed governance

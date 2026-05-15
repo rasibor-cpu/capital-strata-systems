@@ -25,6 +25,7 @@ from dashboard.runtime.api_bridge import (
     get_evidence_hash_chain_payload,
     get_evidence_notarization_readiness_payload,
     get_evidence_signature_readiness_payload,
+    get_evidence_verification_checklist_payload,
     get_evidence_verification_readiness_payload,
     get_frontend_payload,
     get_micro_live_broker_readiness_confirmation_payload,
@@ -163,6 +164,7 @@ def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
         "/api/v1/evidence-hash-chain",
         "/api/v1/evidence-notarization-readiness",
         "/api/v1/evidence-signature-readiness",
+        "/api/v1/evidence-verification-checklist",
         "/api/v1/evidence-verification-readiness",
         "/api/v1/micro-live-broker-readiness-confirmation",
         "/api/v1/micro-live-manual-pilot-checklist",
@@ -364,6 +366,22 @@ def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
     assert verification_readiness["execution_allowed"] is False
     assert verification_readiness["broker_mutation_allowed"] is False
     assert verification_readiness["persistence_enabled"] is False
+    verification_checklist = get_evidence_verification_checklist_payload(lambda: state)
+    assert verification_checklist["checklist_status"] in {
+        "REVIEW_READY",
+        "ELIGIBLE_FOR_MANUAL_REVIEW",
+    }
+    assert verification_checklist["manual_verification_required"] is True
+    assert verification_checklist["manual_verification_recorded"] is False
+    assert verification_checklist["archive_read_performed"] is False
+    assert verification_checklist["external_file_read_performed"] is False
+    assert verification_checklist["verification_performed"] is False
+    assert verification_checklist["signature_verified"] is False
+    assert verification_checklist["notarization_verified"] is False
+    assert verification_checklist["trading_armed"] is False
+    assert verification_checklist["execution_allowed"] is False
+    assert verification_checklist["broker_mutation_allowed"] is False
+    assert verification_checklist["persistence_enabled"] is False
     assert build_section_payload(state, "risk")["data"]["risk_state"] == "NORMAL"
 
 

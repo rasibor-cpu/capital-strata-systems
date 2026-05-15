@@ -2112,6 +2112,10 @@ def _micro_live_pilot_readiness_page() -> str:
       Evidence verification readiness is metadata only. No external archive file is read and no verification is performed.
     </section>
 
+    <section class="empty-state sim-banner" id="pilot-verification-checklist-banner">
+      Evidence verification checklist is export-only. Manual verification is not recorded and no archive file is read.
+    </section>
+
     <section class="metric-band pilot-metrics" aria-label="Micro-live pilot summary">
       <article>
         <strong>Readiness</strong>
@@ -2371,6 +2375,22 @@ def _micro_live_pilot_readiness_page() -> str:
             <span>NO READBACK</span>
           </div>
           <div class="summary-table" id="pilot-verification-readiness"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Evidence Verification Checklist</h2>
+            <span>EXPORT ONLY</span>
+          </div>
+          <div class="summary-table" id="pilot-verification-checklist"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Verification Checklist Missing Items</h2>
+            <span>MANUAL</span>
+          </div>
+          <div class="summary-table" id="pilot-verification-checklist-missing"></div>
         </article>
       </aside>
     </section>
@@ -3039,6 +3059,41 @@ function renderVerificationReadiness(payload) {
     payload.safety_disclaimer || "Evidence verification readiness is metadata only.";
 }
 
+function renderVerificationChecklist(payload) {
+  const missingItems = (payload.missing_items || []).map((item) =>
+    `${item.item_id || "item"}: ${item.message || item.label || "manual review required"}`
+  );
+  const rows = [
+    { label: "Checklist ID", status: payload.verification_checklist_id || "PENDING" },
+    { label: "Checklist Status", status: payload.checklist_status || "INCOMPLETE" },
+    { label: "Verification Readiness ID", status: payload.verification_readiness_id || "MISSING" },
+    { label: "Manifest Hash ID", status: payload.manifest_hash_id || "MISSING" },
+    { label: "Signature Readiness ID", status: payload.signature_readiness_id || "MISSING" },
+    { label: "Notarization Readiness ID", status: payload.notarization_readiness_id || "MISSING" },
+    { label: "Required Items", status: (payload.required_items || []).length },
+    { label: "Completed Items", status: (payload.completed_items || []).length },
+    { label: "Missing Items", status: missingItems.length },
+    { label: "Manual Verification Required", status: payload.manual_verification_required ? "YES" : "NO" },
+    { label: "Manual Verification Recorded", status: payload.manual_verification_recorded ? "YES" : "NO" },
+    { label: "Archive Read Performed", status: payload.archive_read_performed ? "YES" : "NO" },
+    { label: "External File Read", status: payload.external_file_read_performed ? "YES" : "NO" },
+    { label: "Verification Performed", status: payload.verification_performed ? "YES" : "NO" },
+    { label: "Signature Verified", status: payload.signature_verified ? "YES" : "NO" },
+    { label: "Notarization Verified", status: payload.notarization_verified ? "YES" : "NO" },
+    { label: "Trading Armed", status: payload.trading_armed ? "YES" : "NO" },
+    { label: "Execution Allowed", status: payload.execution_allowed ? "YES" : "NO" },
+    { label: "Persistence Enabled", status: payload.persistence_enabled ? "YES" : "NO" },
+  ];
+  renderRows("pilot-verification-checklist", rows, "No verification checklist available");
+  renderStringRows(
+    "pilot-verification-checklist-missing",
+    missingItems,
+    "No verification checklist items are missing"
+  );
+  document.getElementById("pilot-verification-checklist-banner").textContent =
+    payload.safety_disclaimer || "Evidence verification checklist is export-only.";
+}
+
 function renderPilot(payload) {
   const passed = payload.passed_checks || [];
   const failed = payload.failed_checks || [];
@@ -3084,7 +3139,8 @@ async function refreshPilot() {
     manifestHashResponse,
     signatureReadinessResponse,
     notarizationReadinessResponse,
-    verificationReadinessResponse
+    verificationReadinessResponse,
+    verificationChecklistResponse
   ] = await Promise.all([
     fetch("/api/v1/micro-live-pilot-readiness", { cache: "no-store" }),
     fetch("/api/v1/micro-live-pilot-order-intent", { cache: "no-store" }),
@@ -3100,6 +3156,7 @@ async function refreshPilot() {
     fetch("/api/v1/evidence-signature-readiness", { cache: "no-store" }),
     fetch("/api/v1/evidence-notarization-readiness", { cache: "no-store" }),
     fetch("/api/v1/evidence-verification-readiness", { cache: "no-store" }),
+    fetch("/api/v1/evidence-verification-checklist", { cache: "no-store" }),
   ]);
   renderPilot(await readinessResponse.json());
   renderOrderIntent(await intentResponse.json());
@@ -3115,6 +3172,7 @@ async function refreshPilot() {
   renderSignatureReadiness(await signatureReadinessResponse.json());
   renderNotarizationReadiness(await notarizationReadinessResponse.json());
   renderVerificationReadiness(await verificationReadinessResponse.json());
+  renderVerificationChecklist(await verificationChecklistResponse.json());
 }
 
 document.querySelector("[data-refresh-pilot]").addEventListener("click", refreshPilot);
@@ -3349,6 +3407,28 @@ renderVerificationReadiness({
   execution_allowed: false,
   persistence_enabled: false,
   safety_disclaimer: "Evidence verification readiness is metadata only."
+});
+renderVerificationChecklist({
+  verification_checklist_id: "PENDING",
+  checklist_status: "INCOMPLETE",
+  verification_readiness_id: "",
+  manifest_hash_id: "",
+  signature_readiness_id: "",
+  notarization_readiness_id: "",
+  required_items: [],
+  completed_items: [],
+  missing_items: [],
+  manual_verification_required: true,
+  manual_verification_recorded: false,
+  archive_read_performed: false,
+  external_file_read_performed: false,
+  verification_performed: false,
+  signature_verified: false,
+  notarization_verified: false,
+  trading_armed: false,
+  execution_allowed: false,
+  persistence_enabled: false,
+  safety_disclaimer: "Evidence verification checklist is export-only."
 });
 """
 
