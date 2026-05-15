@@ -55,6 +55,9 @@ from dashboard.runtime.operator_action_audit_ledger import (
     build_operator_action_audit_ledger_payload,
     get_default_operator_action_audit_ledger,
 )
+from dashboard.runtime.post_pilot_evidence_archive_export import (
+    build_post_pilot_evidence_archive_export_payload,
+)
 from dashboard.runtime.post_pilot_reconciliation_workflow import (
     build_post_pilot_reconciliation_payload,
 )
@@ -584,6 +587,20 @@ def get_post_pilot_reconciliation_payload(
     )
 
 
+def get_post_pilot_evidence_archive_export_payload(
+    state_provider: DashboardStateProvider | None = None,
+    event_bus: RuntimeEventBus | None = None,
+) -> dict[str, Any]:
+    reconciliation = get_post_pilot_reconciliation_payload(
+        state_provider,
+        event_bus,
+    )
+    return build_post_pilot_evidence_archive_export_payload(
+        reconciliation=reconciliation,
+        operator_conclusion="operator conclusion pending",
+    )
+
+
 def create_dashboard_state_router(
     state_provider: DashboardStateProvider | None = None,
     *,
@@ -895,6 +912,13 @@ def create_dashboard_state_router(
             runtime_event_bus,
         )
 
+    @router.get("/api/v1/post-pilot-evidence-archive-export")
+    def read_post_pilot_evidence_archive_export() -> dict[str, Any]:
+        return get_post_pilot_evidence_archive_export_payload(
+            state_provider,
+            runtime_event_bus,
+        )
+
     @router.get("/api/v1/deployment-profiles")
     def read_deployment_profiles() -> dict[str, Any]:
         return get_deployment_profiles()
@@ -970,6 +994,7 @@ __all__ = [
     "get_micro_live_pilot_order_intent_payload",
     "get_micro_live_pre_pilot_go_no_go_payload",
     "get_operator_action_audit_ledger_payload",
+    "get_post_pilot_evidence_archive_export_payload",
     "get_post_pilot_reconciliation_payload",
     "get_runtime_event_persistence_checklist_export_payload",
     "get_runtime_event_persistence_checklist_payload",

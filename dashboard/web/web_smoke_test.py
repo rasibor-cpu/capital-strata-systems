@@ -55,6 +55,7 @@ def main() -> int:
         "/api/v1/micro-live-pilot-readiness",
         "/api/v1/micro-live-pilot-order-intent",
         "/api/v1/operator-action-audit-ledger",
+        "/api/v1/post-pilot-evidence-archive-export",
         "/api/v1/post-pilot-reconciliation",
         "/api/v1/runtime-events",
         "/api/v1/runtime-event-persistence-checklist",
@@ -182,6 +183,9 @@ def main() -> int:
         "Post-Pilot Reconciliation",
         "Reconciliation Evidence Links",
         "Reconciliation does not authorize additional trading",
+        "Post-Pilot Evidence Archive Export",
+        "Archive Export Evidence Links",
+        "No archive file is written from this page",
         "Required Approvals",
         "Coinbase Advanced",
         "BTC-USD",
@@ -195,6 +199,7 @@ def main() -> int:
         "/api/v1/micro-live-pre-pilot-go-no-go",
         "/api/v1/evidence-hash-chain",
         "/api/v1/operator-action-audit-ledger",
+        "/api/v1/post-pilot-evidence-archive-export",
         "/api/v1/post-pilot-reconciliation",
     ]
     for expected in expected_pilot_markup:

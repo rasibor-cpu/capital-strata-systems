@@ -2092,6 +2092,10 @@ def _micro_live_pilot_readiness_page() -> str:
       Reconciliation does not authorize additional trading. Post-pilot evidence review is read-only.
     </section>
 
+    <section class="empty-state sim-banner" id="pilot-archive-export-banner">
+      Post-pilot archive export is JSON-safe review metadata only. No archive file is written from this page.
+    </section>
+
     <section class="metric-band pilot-metrics" aria-label="Micro-live pilot summary">
       <article>
         <strong>Readiness</strong>
@@ -2303,6 +2307,22 @@ def _micro_live_pilot_readiness_page() -> str:
             <span>AUDIT / REPLAY</span>
           </div>
           <div class="summary-table" id="pilot-post-reconciliation-links"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Post-Pilot Evidence Archive Export</h2>
+            <span>NO WRITE</span>
+          </div>
+          <div class="summary-table" id="pilot-post-archive-export"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Archive Export Evidence Links</h2>
+            <span>PACKAGE</span>
+          </div>
+          <div class="summary-table" id="pilot-post-archive-links"></div>
         </article>
       </aside>
     </section>
@@ -2853,6 +2873,33 @@ function renderPostPilotReconciliation(payload) {
     "Reconciliation does not authorize additional trading. Evidence review remains read-only and non-mutating.";
 }
 
+function renderPostPilotArchiveExport(payload) {
+  const rows = [
+    { label: "Archive Export ID", status: payload.archive_export_id || "PENDING" },
+    { label: "Reconciliation Status", status: payload.reconciliation_status || "INCOMPLETE" },
+    { label: "Reconciliation ID", status: payload.reconciliation_id || "MISSING" },
+    { label: "Broker", status: payload.broker || "Coinbase Advanced" },
+    { label: "Symbol", status: payload.symbol || "BTC-USD" },
+    { label: "Archive Write Performed", status: payload.archive_write_performed ? "YES" : "NO" },
+    { label: "Trading Armed", status: payload.trading_armed ? "YES" : "NO" },
+    { label: "Execution Allowed", status: payload.execution_allowed ? "YES" : "NO" },
+    { label: "Broker Mutation Allowed", status: payload.broker_mutation_allowed ? "YES" : "NO" },
+    { label: "Persistence Enabled", status: payload.persistence_enabled ? "YES" : "NO" },
+  ];
+  const linkRows = [
+    { label: "Evidence Hash Chain", status: payload.evidence_hash_chain_id || "MISSING" },
+    { label: "Replay Correlation IDs", status: (payload.replay_correlation_ids || []).length },
+    { label: "Audit Action IDs", status: (payload.audit_action_ids || []).length },
+    { label: "Incident IDs", status: (payload.incident_ids || []).length },
+    { label: "NO-GO Decision IDs", status: (payload.no_go_decision_ids || []).length },
+    { label: "Operator Conclusion", status: payload.operator_conclusion || "PENDING" },
+  ];
+  renderRows("pilot-post-archive-export", rows, "No post-pilot archive export package available");
+  renderRows("pilot-post-archive-links", linkRows, "No archive export evidence links available");
+  document.getElementById("pilot-archive-export-banner").textContent =
+    payload.safety_disclaimer || "Archive export package is review metadata only.";
+}
+
 function renderPilot(payload) {
   const passed = payload.passed_checks || [];
   const failed = payload.failed_checks || [];
@@ -2893,7 +2940,8 @@ async function refreshPilot() {
     goNoGoResponse,
     evidenceHashResponse,
     operatorAuditResponse,
-    postReconciliationResponse
+    postReconciliationResponse,
+    postArchiveResponse
   ] = await Promise.all([
     fetch("/api/v1/micro-live-pilot-readiness", { cache: "no-store" }),
     fetch("/api/v1/micro-live-pilot-order-intent", { cache: "no-store" }),
@@ -2904,6 +2952,7 @@ async function refreshPilot() {
     fetch("/api/v1/evidence-hash-chain", { cache: "no-store" }),
     fetch("/api/v1/operator-action-audit-ledger", { cache: "no-store" }),
     fetch("/api/v1/post-pilot-reconciliation", { cache: "no-store" }),
+    fetch("/api/v1/post-pilot-evidence-archive-export", { cache: "no-store" }),
   ]);
   renderPilot(await readinessResponse.json());
   renderOrderIntent(await intentResponse.json());
@@ -2914,6 +2963,7 @@ async function refreshPilot() {
   renderEvidenceHashChain(await evidenceHashResponse.json());
   renderOperatorActionAudit(await operatorAuditResponse.json());
   renderPostPilotReconciliation(await postReconciliationResponse.json());
+  renderPostPilotArchiveExport(await postArchiveResponse.json());
 }
 
 document.querySelector("[data-refresh-pilot]").addEventListener("click", refreshPilot);
@@ -3060,6 +3110,25 @@ renderPostPilotReconciliation({
   execution_allowed: false,
   broker_mutation_allowed: false,
   persistence_enabled: false
+});
+renderPostPilotArchiveExport({
+  archive_export_id: "PENDING",
+  reconciliation_status: "INCOMPLETE",
+  reconciliation_id: "",
+  broker: "Coinbase Advanced",
+  symbol: "BTC-USD",
+  evidence_hash_chain_id: "",
+  replay_correlation_ids: [],
+  audit_action_ids: [],
+  incident_ids: [],
+  no_go_decision_ids: [],
+  operator_conclusion: "PENDING",
+  archive_write_performed: false,
+  trading_armed: false,
+  execution_allowed: false,
+  broker_mutation_allowed: false,
+  persistence_enabled: false,
+  safety_disclaimer: "Archive export package is review metadata only."
 });
 """
 

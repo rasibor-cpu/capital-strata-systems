@@ -542,6 +542,11 @@ Implemented:
   state, replay correlation IDs, audit action IDs, and evidence hash-chain
   references through `/api/v1/post-pilot-reconciliation` without broker calls,
   execution, approval grants, or runtime event persistence
+- post-pilot evidence archive export package for JSON-safe reconciliation,
+  replay/audit linkage, incident/NO-GO references, broker balance summaries,
+  CSS ledger summaries, fee/slippage/fill summaries, and operator conclusion
+  metadata through `/api/v1/post-pilot-evidence-archive-export` without disk
+  writes, broker calls, execution, approval grants, or runtime event persistence
 - explicit pilot constraints: Coinbase Advanced, BTC-USD, CAD $15 maximum,
   one limit order, 0.35% maximum slippage, mandatory logging, mandatory
   post-trade pause, and fail-closed governance
