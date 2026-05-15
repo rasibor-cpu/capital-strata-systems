@@ -506,6 +506,9 @@ Implemented:
 - printable micro-live pilot packet cover checklist for packet identification,
   scope confirmation, evidence inclusion, final pre-pilot confirmations,
   post-pilot evidence confirmations, and safety disclaimers
+- micro-live pilot governance sign-off register for GO, NO-GO, deferred,
+  review-required, and blocker rejection decisions, including supporting
+  evidence references and manual signature fields
 - explicit pilot constraints: Coinbase Advanced, BTC-USD, CAD $15 maximum,
   one limit order, 0.35% maximum slippage, mandatory logging, mandatory
   post-trade pause, and fail-closed governance
