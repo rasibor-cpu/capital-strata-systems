@@ -2088,6 +2088,10 @@ def _micro_live_pilot_readiness_page() -> str:
       Review actions do not approve or arm trading. Operator action audit is read-only foundation evidence.
     </section>
 
+    <section class="empty-state sim-banner" id="pilot-post-reconciliation-banner">
+      Reconciliation does not authorize additional trading. Post-pilot evidence review is read-only.
+    </section>
+
     <section class="metric-band pilot-metrics" aria-label="Micro-live pilot summary">
       <article>
         <strong>Readiness</strong>
@@ -2283,6 +2287,22 @@ def _micro_live_pilot_readiness_page() -> str:
             <span>NO APPROVAL</span>
           </div>
           <div class="summary-table" id="pilot-operator-action-entries"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Post-Pilot Reconciliation</h2>
+            <span>REVIEW ONLY</span>
+          </div>
+          <div class="summary-table" id="pilot-post-reconciliation"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-head">
+            <h2>Reconciliation Evidence Links</h2>
+            <span>AUDIT / REPLAY</span>
+          </div>
+          <div class="summary-table" id="pilot-post-reconciliation-links"></div>
         </article>
       </aside>
     </section>
@@ -2806,6 +2826,33 @@ function renderOperatorActionAudit(payload) {
     payload.safety_disclaimer || "Review actions do not approve or arm trading.";
 }
 
+function renderPostPilotReconciliation(payload) {
+  const rows = [
+    { label: "Status", status: payload.reconciliation_status || "INCOMPLETE" },
+    { label: "Broker", status: payload.broker || "Coinbase Advanced" },
+    { label: "Symbol", status: payload.symbol || "BTC-USD" },
+    { label: "Expected Orders", status: payload.expected_order_count ?? 1 },
+    { label: "Observed Orders", status: payload.observed_order_count ?? "PENDING" },
+    { label: "Expected Position", status: payload.expected_position_state || "FLAT_OR_CLOSED" },
+    { label: "Observed Position", status: payload.observed_position_state || "UNKNOWN" },
+    { label: "Trading Armed", status: payload.trading_armed ? "YES" : "NO" },
+    { label: "Execution Allowed", status: payload.execution_allowed ? "YES" : "NO" },
+    { label: "Broker Mutation Allowed", status: payload.broker_mutation_allowed ? "YES" : "NO" },
+    { label: "Persistence Enabled", status: payload.persistence_enabled ? "YES" : "NO" },
+  ];
+  const linkRows = [
+    { label: "Evidence Hash Chain", status: payload.evidence_hash_chain_id || "MISSING" },
+    { label: "Replay Correlation IDs", status: (payload.replay_correlation_ids || []).length },
+    { label: "Audit Action IDs", status: (payload.audit_action_ids || []).length },
+    ...(payload.mismatch_flags || []).map((item) => ({ label: item, status: "FLAG" })),
+    ...(payload.warnings || []).map((item) => ({ label: item, status: "WARN" })),
+  ];
+  renderRows("pilot-post-reconciliation", rows, "No post-pilot reconciliation evidence available");
+  renderRows("pilot-post-reconciliation-links", linkRows, "No reconciliation evidence links available");
+  document.getElementById("pilot-post-reconciliation-banner").textContent =
+    "Reconciliation does not authorize additional trading. Evidence review remains read-only and non-mutating.";
+}
+
 function renderPilot(payload) {
   const passed = payload.passed_checks || [];
   const failed = payload.failed_checks || [];
@@ -2845,7 +2892,8 @@ async function refreshPilot() {
     brokerConfirmationResponse,
     goNoGoResponse,
     evidenceHashResponse,
-    operatorAuditResponse
+    operatorAuditResponse,
+    postReconciliationResponse
   ] = await Promise.all([
     fetch("/api/v1/micro-live-pilot-readiness", { cache: "no-store" }),
     fetch("/api/v1/micro-live-pilot-order-intent", { cache: "no-store" }),
@@ -2855,6 +2903,7 @@ async function refreshPilot() {
     fetch("/api/v1/micro-live-pre-pilot-go-no-go", { cache: "no-store" }),
     fetch("/api/v1/evidence-hash-chain", { cache: "no-store" }),
     fetch("/api/v1/operator-action-audit-ledger", { cache: "no-store" }),
+    fetch("/api/v1/post-pilot-reconciliation", { cache: "no-store" }),
   ]);
   renderPilot(await readinessResponse.json());
   renderOrderIntent(await intentResponse.json());
@@ -2864,6 +2913,7 @@ async function refreshPilot() {
   renderGoNoGo(await goNoGoResponse.json());
   renderEvidenceHashChain(await evidenceHashResponse.json());
   renderOperatorActionAudit(await operatorAuditResponse.json());
+  renderPostPilotReconciliation(await postReconciliationResponse.json());
 }
 
 document.querySelector("[data-refresh-pilot]").addEventListener("click", refreshPilot);
@@ -2992,6 +3042,24 @@ renderOperatorActionAudit({
   persistence_enabled: false,
   approval_grant_endpoint_exists: false,
   safety_disclaimer: "Review actions do not approve or arm trading."
+});
+renderPostPilotReconciliation({
+  reconciliation_status: "INCOMPLETE",
+  broker: "Coinbase Advanced",
+  symbol: "BTC-USD",
+  expected_order_count: 1,
+  observed_order_count: null,
+  expected_position_state: "FLAT_OR_CLOSED",
+  observed_position_state: "UNKNOWN",
+  replay_correlation_ids: [],
+  audit_action_ids: [],
+  evidence_hash_chain_id: "",
+  mismatch_flags: ["BROKER_BALANCE_EVIDENCE_INCOMPLETE"],
+  warnings: ["REPLAY_EVIDENCE_MISSING", "AUDIT_ACTION_EVIDENCE_MISSING"],
+  trading_armed: false,
+  execution_allowed: false,
+  broker_mutation_allowed: false,
+  persistence_enabled: false
 });
 """
 

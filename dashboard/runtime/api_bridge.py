@@ -55,6 +55,9 @@ from dashboard.runtime.operator_action_audit_ledger import (
     build_operator_action_audit_ledger_payload,
     get_default_operator_action_audit_ledger,
 )
+from dashboard.runtime.post_pilot_reconciliation_workflow import (
+    build_post_pilot_reconciliation_payload,
+)
 from dashboard.runtime.runtime_event_bus import (
     RuntimeEventBus,
     get_default_runtime_event_bus,
@@ -559,6 +562,28 @@ def get_operator_action_audit_ledger_payload(
     )
 
 
+def get_post_pilot_reconciliation_payload(
+    state_provider: DashboardStateProvider | None = None,
+    event_bus: RuntimeEventBus | None = None,
+) -> dict[str, Any]:
+    evidence_hash_chain = get_evidence_hash_chain_payload(
+        state_provider,
+        event_bus,
+    )
+    operator_audit = get_operator_action_audit_ledger_payload()
+    audit_action_ids = [
+        str(entry.get("action_id"))
+        for entry in operator_audit.get("entries", [])
+        if entry.get("action_id")
+    ]
+    return build_post_pilot_reconciliation_payload(
+        evidence_hash_chain_id=str(evidence_hash_chain.get("chain_id") or ""),
+        audit_action_ids=audit_action_ids,
+        replay_correlation_ids=[],
+        notes="post-pilot reconciliation evidence workflow foundation",
+    )
+
+
 def create_dashboard_state_router(
     state_provider: DashboardStateProvider | None = None,
     *,
@@ -863,6 +888,13 @@ def create_dashboard_state_router(
             related_hash_chain_id=related_hash_chain_id,
         )
 
+    @router.get("/api/v1/post-pilot-reconciliation")
+    def read_post_pilot_reconciliation() -> dict[str, Any]:
+        return get_post_pilot_reconciliation_payload(
+            state_provider,
+            runtime_event_bus,
+        )
+
     @router.get("/api/v1/deployment-profiles")
     def read_deployment_profiles() -> dict[str, Any]:
         return get_deployment_profiles()
@@ -938,6 +970,7 @@ __all__ = [
     "get_micro_live_pilot_order_intent_payload",
     "get_micro_live_pre_pilot_go_no_go_payload",
     "get_operator_action_audit_ledger_payload",
+    "get_post_pilot_reconciliation_payload",
     "get_runtime_event_persistence_checklist_export_payload",
     "get_runtime_event_persistence_checklist_payload",
     "get_runtime_event_persistence_policy_inspection_payload",

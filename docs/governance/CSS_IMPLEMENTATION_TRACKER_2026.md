@@ -537,6 +537,11 @@ Implemented:
   supported action-type governance, in-memory review entries,
   `/api/v1/operator-action-audit-ledger`, and operator action display without
   approval grants, execution, broker mutation, or runtime event persistence
+- post-pilot reconciliation evidence workflow foundation for comparing broker
+  and CSS balance deltas, expected versus observed order counts, position
+  state, replay correlation IDs, audit action IDs, and evidence hash-chain
+  references through `/api/v1/post-pilot-reconciliation` without broker calls,
+  execution, approval grants, or runtime event persistence
 - explicit pilot constraints: Coinbase Advanced, BTC-USD, CAD $15 maximum,
   one limit order, 0.35% maximum slippage, mandatory logging, mandatory
   post-trade pause, and fail-closed governance

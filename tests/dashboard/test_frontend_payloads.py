@@ -31,6 +31,7 @@ from dashboard.runtime.api_bridge import (
     get_micro_live_pilot_readiness_payload,
     get_micro_live_pre_pilot_go_no_go_payload,
     get_operator_action_audit_ledger_payload,
+    get_post_pilot_reconciliation_payload,
     get_runtime_event_persistence_checklist_export_payload,
     get_runtime_event_persistence_checklist_payload,
     get_runtime_event_persistence_policy_inspection_payload,
@@ -162,6 +163,7 @@ def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
         "/api/v1/micro-live-pilot-order-intent",
         "/api/v1/micro-live-pilot-readiness",
         "/api/v1/operator-action-audit-ledger",
+        "/api/v1/post-pilot-reconciliation",
         "/api/v1/runtime-events",
         "/api/v1/runtime-event-persistence-checklist",
         "/api/v1/runtime-event-persistence-checklist-export",
@@ -296,6 +298,15 @@ def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
     assert operator_audit["broker_mutation_allowed"] is False
     assert operator_audit["persistence_enabled"] is False
     assert operator_audit["approval_grant_endpoint_exists"] is False
+    post_pilot_reconciliation = get_post_pilot_reconciliation_payload(lambda: state)
+    assert post_pilot_reconciliation["reconciliation_status"] in {
+        "INCOMPLETE",
+        "REVIEW_REQUIRED",
+    }
+    assert post_pilot_reconciliation["trading_armed"] is False
+    assert post_pilot_reconciliation["execution_allowed"] is False
+    assert post_pilot_reconciliation["broker_mutation_allowed"] is False
+    assert post_pilot_reconciliation["persistence_enabled"] is False
     assert build_section_payload(state, "risk")["data"]["risk_state"] == "NORMAL"
 
 
