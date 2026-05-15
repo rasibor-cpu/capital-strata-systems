@@ -524,6 +524,9 @@ Implemented:
 - micro-live pilot NO-GO decision log template for stopped, deferred,
   rejected, not-ready, and review-required decisions, including trigger
   categories, corrective actions, outcomes, sign-off, and safety disclaimers
+- micro-live pilot readiness cross-reference map tying documents, APIs, UI
+  pages, checklists, and evidence artifacts to operational and governance
+  risk controls, validation methods, failure consequences, and NO-GO triggers
 - explicit pilot constraints: Coinbase Advanced, BTC-USD, CAD $15 maximum,
   one limit order, 0.35% maximum slippage, mandatory logging, mandatory
   post-trade pause, and fail-closed governance
