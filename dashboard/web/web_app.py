@@ -5016,6 +5016,13 @@ button {
   text-transform: uppercase;
   letter-spacing: 0;
 }
+.sim-banner {
+  border: 2px solid #e07a5f;
+  padding: 16px;
+  font-weight: 700;
+  color: #e07a5f;
+  background: rgba(224, 122, 95, 0.05);
+}
 @media (max-width: 1120px) {
   .metric-band,
   .dashboard-grid,
@@ -5055,7 +5062,9 @@ button {
     max-width: 100%;
   }
   .print-topbar h1,
-  #print-disclaimer {
+  #print-disclaimer,
+  #verify-print-export-id,
+  #verify-print-checklist-id {
     overflow-wrap: anywhere;
     word-break: break-word;
   }
@@ -5070,7 +5079,7 @@ button {
     flex: 1 1 100%;
   }
   .app-nav a {
-    flex: 1 1 100%;
+    flex: 1 1 45%;
     min-width: 0;
     text-align: center;
     overflow-wrap: anywhere;
@@ -5133,6 +5142,8 @@ button {
   body {
     background: #ffffff;
     color: #111820;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
   .shell {
     width: 100%;
