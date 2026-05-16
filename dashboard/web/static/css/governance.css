@@ -1,0 +1,42 @@
+/* GOVERNANCE EXTRACTION (PHASE 52) */
+.sim-banner {
+  margin-bottom: 12px;
+  border: 2px solid #e07a5f;
+  padding: 16px;
+  font-weight: 700;
+  color: #e07a5f;
+  background: rgba(224, 122, 95, 0.05);
+}
+.breach-panel {
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  padding: 12px;
+}
+.breach-panel h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+.panel-note {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+.empty-state {
+  border: 1px dashed var(--line);
+  color: var(--muted);
+  padding: 14px;
+  font-weight: 700;
+}
+@media (max-width: 720px) {
+  #print-disclaimer,
+  #verify-print-export-id,
+  #verify-print-checklist-id {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+}

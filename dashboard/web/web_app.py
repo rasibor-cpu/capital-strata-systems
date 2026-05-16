@@ -5,6 +5,8 @@ from typing import Any
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+import os
 
 from dashboard.runtime.api_bridge import (
     DashboardStateProvider,
@@ -36,10 +38,16 @@ def create_app(
     runtime_event_bus: RuntimeEventBus | None = None,
 ) -> FastAPI:
     provider = state_provider or demo_dashboard_state_provider
+    
     app = FastAPI(
         title="Capital Strata Systems Institutional Web Dashboard",
         version="0.1.0",
     )
+    
+    static_dir = os.path.join(os.path.dirname(__file__), "static")
+    os.makedirs(static_dir, exist_ok=True)
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
     app.include_router(
         create_dashboard_state_router(
             provider,
@@ -188,6 +196,7 @@ def _dashboard_page() -> str:
   <meta name="theme-color" content="#111820">
   <title>CSS Institutional Web Dashboard</title>
   <style>{_css()}</style>
+  <link rel="stylesheet" href="/static/css/governance.css">
 </head>
 <body>
   <main class="shell">
@@ -522,6 +531,7 @@ def _positions_page() -> str:
   <meta name="theme-color" content="#111820">
   <title>CSS Professional Positions</title>
   <style>{_css()}</style>
+  <link rel="stylesheet" href="/static/css/governance.css">
 </head>
 <body>
   <main class="shell">
@@ -744,6 +754,7 @@ def _execution_page() -> str:
   <meta name="theme-color" content="#111820">
   <title>CSS Execution History</title>
   <style>{_css()}</style>
+  <link rel="stylesheet" href="/static/css/governance.css">
 </head>
 <body>
   <main class="shell">
@@ -945,6 +956,7 @@ def _risk_governance_page() -> str:
   <meta name="theme-color" content="#111820">
   <title>CSS Risk & Governance Center</title>
   <style>{_css()}</style>
+  <link rel="stylesheet" href="/static/css/governance.css">
 </head>
 <body>
   <main class="shell">
@@ -1144,6 +1156,7 @@ def _market_opportunities_page() -> str:
   <meta name="theme-color" content="#111820">
   <title>CSS Market & Opportunity Center</title>
   <style>{_css()}</style>
+  <link rel="stylesheet" href="/static/css/governance.css">
 </head>
 <body>
   <main class="shell">
@@ -1335,6 +1348,7 @@ def _broker_page() -> str:
   <meta name="theme-color" content="#111820">
   <title>CSS Broker Control Center</title>
   <style>{_css()}</style>
+  <link rel="stylesheet" href="/static/css/governance.css">
 </head>
 <body>
   <main class="shell">
@@ -1524,6 +1538,7 @@ def _replay_page() -> str:
   <meta name="theme-color" content="#111820">
   <title>CSS Lifecycle Replay Viewer</title>
   <style>{_css()}</style>
+  <link rel="stylesheet" href="/static/css/governance.css">
 </head>
 <body>
   <main class="shell">
@@ -1629,6 +1644,7 @@ def _runtime_events_page() -> str:
   <meta name="theme-color" content="#111820">
   <title>CSS Runtime Events</title>
   <style>{_css()}</style>
+  <link rel="stylesheet" href="/static/css/governance.css">
 </head>
 <body>
   <main class="shell">
@@ -1727,6 +1743,7 @@ def _runtime_event_persistence_sim_page() -> str:
   <meta name="theme-color" content="#111820">
   <title>CSS Runtime Event Persistence Simulator</title>
   <style>{_css()}</style>
+  <link rel="stylesheet" href="/static/css/governance.css">
 </head>
 <body>
   <main class="shell">
@@ -1927,6 +1944,7 @@ def _runtime_event_persistence_checklist_print_page() -> str:
   <meta name="theme-color" content="#111820">
   <title>CSS Persistence Checklist Print View</title>
   <style>{_css()}</style>
+  <link rel="stylesheet" href="/static/css/governance.css">
 </head>
 <body>
   <main class="shell print-shell">
@@ -2043,6 +2061,7 @@ def _evidence_verification_checklist_print_page() -> str:
   <meta name="theme-color" content="#111820">
   <title>CSS Evidence Verification Checklist Print View</title>
   <style>{_css()}</style>
+  <link rel="stylesheet" href="/static/css/governance.css">
 </head>
 <body>
   <main class="shell print-shell">
@@ -2160,6 +2179,7 @@ def _micro_live_pilot_readiness_page() -> str:
   <meta name="theme-color" content="#111820">
   <title>CSS Micro-Live Pilot Readiness</title>
   <style>{_css()}</style>
+  <link rel="stylesheet" href="/static/css/governance.css">
 </head>
 <body>
   <main class="shell pilot-shell">
@@ -2536,6 +2556,7 @@ def _micro_live_manual_pilot_checklist_page() -> str:
   <meta name="theme-color" content="#111820">
   <title>CSS Manual Micro-Live Pilot Checklist</title>
   <style>{_css()}</style>
+  <link rel="stylesheet" href="/static/css/governance.css">
 </head>
 <body>
   <main class="shell print-shell">
@@ -4695,24 +4716,14 @@ button {
   border-color: rgba(223, 91, 82, 0.5);
   color: var(--danger);
 }
-.panel-note {
-  margin: 12px 0 0;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.35;
-}
+
 .compact-list {
   margin: 12px 0 0;
   padding-left: 17px;
   color: var(--muted);
   font-weight: 700;
 }
-.empty-state {
-  border: 1px dashed var(--line);
-  color: var(--muted);
-  padding: 14px;
-  font-weight: 700;
-}
+
 .positions-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1.6fr) minmax(320px, 0.8fr);
@@ -4986,11 +4997,7 @@ button {
 .pilot-summary-row {
   grid-template-columns: minmax(0, 1fr) 110px;
 }
-.sim-banner {
-  margin-bottom: 12px;
-  border-color: rgba(211, 155, 50, 0.65);
-  color: var(--gold);
-}
+
 .symbol-cloud {
   display: flex;
   flex-wrap: wrap;
@@ -5003,26 +5010,9 @@ button {
   font-size: 13px;
   font-weight: 800;
 }
-.breach-panel {
-  margin-top: 14px;
-  border: 1px solid var(--line);
-  background: var(--panel-2);
-  padding: 12px;
-}
-.breach-panel h3 {
-  margin: 0 0 8px;
-  font-size: 13px;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0;
-}
-.sim-banner {
-  border: 2px solid #e07a5f;
-  padding: 16px;
-  font-weight: 700;
-  color: #e07a5f;
-  background: rgba(224, 122, 95, 0.05);
-}
+
+
+
 @media (max-width: 1120px) {
   .metric-band,
   .dashboard-grid,
@@ -5061,10 +5051,7 @@ button {
     font-size: 22px;
     max-width: 100%;
   }
-  .print-topbar h1,
-  #print-disclaimer,
-  #verify-print-export-id,
-  #verify-print-checklist-id {
+  .print-topbar h1 {
     overflow-wrap: anywhere;
     word-break: break-word;
   }
@@ -5157,9 +5144,7 @@ button {
   }
   .panel,
   .metric-band article,
-  .empty-state {
-    break-inside: avoid;
-  }
+  
   .print-workspace,
   .print-side {
     display: block;
