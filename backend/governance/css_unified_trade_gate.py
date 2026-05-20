@@ -71,7 +71,7 @@ class CSSUnifiedTradeGate:
         if not portfolio_state:
             return self._reject("portfolio state unavailable", engine_mode, now, candidate)
 
-        asset_class = candidate.get("asset_class")
+        asset_class = str(candidate.get("asset_class", "")).strip().lower()
 
         # --------------------------------------------------
         # 4. POSITION LIMIT CHECK
@@ -137,7 +137,7 @@ class CSSUnifiedTradeGate:
             if field not in candidate:
                 return False, f"missing {field}"
 
-        asset_class = candidate.get("asset_class")
+        asset_class = str(candidate.get("asset_class", "")).strip().lower()
         if asset_class not in MAX_POSITIONS_BY_ASSET:
             return False, "unrecognized asset class"
 
@@ -175,9 +175,13 @@ class CSSUnifiedTradeGate:
         return role in {"ADMIN", "SUPER_USER", "TRADER"}
 
     def _check_position_limits(self, asset_class: str, portfolio_state: Dict[str, Any]) -> bool:
+        asset_class = str(asset_class or "").strip().lower()
         limits = MAX_POSITIONS_BY_ASSET.get(asset_class, 0)
         current = portfolio_state.get(asset_class, 0)
         return current < limits
+
+    def evaluate(self, *args, **kwargs) -> GateDecision:
+        return self.approve_trade(*args, **kwargs)
 
     def _reject(
         self,

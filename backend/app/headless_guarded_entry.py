@@ -228,7 +228,7 @@ def run_headless(req: Dict[str, Any], cfg: Optional[HeadlessConfig] = None) -> D
     # Execution gate evaluation
     # -----------------------------
     try:
-        gate = ExecutionGate(allow_live=cfg.allow_live)
+        gate = ExecutionGate()
     except Exception as e:
         return {
             "ok": False,

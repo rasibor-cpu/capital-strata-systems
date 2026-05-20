@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, List
 
 from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
@@ -24,7 +25,14 @@ class TradeDecisionOrchestrator:
         self.signal_confluence_engine = SignalConfluenceEngine()
         self.pressure_engine = OpportunityPressureEngine()
         self.acceleration_engine = PressureAccelerationEngine()
-        self.capital_allocator = CapitalAllocator()
+        total_capital_raw = os.getenv("CSS_TOTAL_CAPITAL", os.getenv("ACCOUNT_EQUITY", "100000.0"))
+        try:
+            total_capital = float(total_capital_raw)
+        except Exception:
+            total_capital = 100000.0
+        if total_capital <= 0:
+            total_capital = 100000.0
+        self.capital_allocator = CapitalAllocator(total_capital=total_capital)
         self.exit_engine = AdaptiveExitEngine()
         self.momentum_engine = OpportunityMomentumWindowEngine()
         self.probability_engine = ProbabilityPredictionEngine()
