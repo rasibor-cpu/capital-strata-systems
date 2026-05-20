@@ -76,6 +76,9 @@ str/
 
 # --- Experimental / one-off scripts ---
 test_*.py
+!tests/
+!tests/**/*.py
+!tests/**/test_*.py
 run_live_*.py
 run_fx_pairs_replay_*_fxrulesless_*.py
 

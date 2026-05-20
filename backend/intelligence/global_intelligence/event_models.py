@@ -38,6 +38,15 @@ class RegimeState(Enum):
     LIQUIDITY_CRISIS = "LIQUIDITY_CRISIS"
 
 
+class EventState(Enum):
+    NEW = "NEW"
+    ACTIVE = "ACTIVE"
+    MONITORING = "MONITORING"
+    STABILIZING = "STABILIZING"
+    EXPIRED = "EXPIRED"
+    ARCHIVED = "ARCHIVED"
+
+
 @dataclass
 class IntelligenceEvent:
     event_id: str
@@ -51,13 +60,21 @@ class IntelligenceEvent:
     description: str = ""
     active: bool = True
     expiration_time: Optional[datetime] = None
+    event_state: EventState = EventState.NEW
+    cooldown_until: Optional[datetime] = None
+    raw_confidence: float = field(init=False)
 
     def __post_init__(self) -> None:
         try:
-            self.confidence = float(self.confidence)
+            self.event_state = EventState(self.event_state)
+        except Exception:
+            self.event_state = EventState.NEW
+        try:
+            self.raw_confidence = float(self.confidence)
         except (TypeError, ValueError):
-            self.confidence = 0.0
+            self.raw_confidence = 0.0
 
+        self.confidence = self.raw_confidence
         if self.confidence < 0.0:
             self.confidence = 0.0
         elif self.confidence > 100.0:
