@@ -29,7 +29,32 @@ class TradeDecisionOrchestrator:
         self.trade_runtime_service = TradeRuntimeService()
         self.pnl_runtime_service = PnlRuntimeService()
 
-        self.session_id = (
+        self.session_id = self._initialize_runtime_session(
+            mode=mode,
+            broker_name=broker_name,
+            broker_mode=broker_mode,
+        )
+
+    def _initialize_runtime_session(
+        self,
+        mode: str,
+        broker_name: str,
+        broker_mode: str,
+    ) -> str:
+
+        active_sessions = (
+            self.session_repository
+            .get_active_sessions()
+        )
+
+        if active_sessions:
+            active_session = active_sessions[0]
+
+            return str(
+                active_session["session_id"]
+            )
+
+        return (
             self.session_runtime_service
             .create_runtime_session(
                 mode=mode,
@@ -53,10 +78,31 @@ class TradeDecisionOrchestrator:
         except Exception:
             return default
 
+    def _trade_already_exists(
+        self,
+        symbol: str,
+        direction: str = "long",
+    ) -> bool:
+
+        return (
+            self.trade_runtime_service
+            .trade_exists(
+                session_id=self.session_id,
+                symbol=symbol,
+                direction=direction,
+            )
+        )
+
     def _persist_trade_open(
         self,
         symbol: str,
-    ) -> str:
+    ) -> str | None:
+
+        if self._trade_already_exists(
+            symbol=symbol,
+            direction="long",
+        ):
+            return None
 
         trade_id = str(uuid4())
 
@@ -75,6 +121,20 @@ class TradeDecisionOrchestrator:
         )
 
         return trade_id
+
+    def _persist_trade_close(
+        self,
+        trade_id: str | None,
+    ) -> None:
+
+        if trade_id is None:
+            return
+
+        self.trade_runtime_service.close_trade(
+            trade_id=trade_id,
+            exit_price=Decimal("0"),
+            realized_pnl=Decimal("0"),
+        )
 
     def _persist_runtime_snapshot(self) -> None:
 
@@ -104,7 +164,15 @@ class TradeDecisionOrchestrator:
             symbol=symbol
         )
 
+        self._persist_trade_close(
+            trade_id=trade_id
+        )
+
         self._persist_runtime_snapshot()
+
+        duplicate_trade_blocked = (
+            trade_id is None
+        )
 
         return {
             "symbol": symbol,
@@ -117,6 +185,7 @@ class TradeDecisionOrchestrator:
             "filters": {
                 "governance_approved": False,
                 "persistence_enabled": True,
+                "duplicate_trade_blocked": duplicate_trade_blocked,
             },
             "runtime": {
                 "session_id": self.session_id,
@@ -124,6 +193,7 @@ class TradeDecisionOrchestrator:
                 "session_tracking": True,
                 "trade_tracking": True,
                 "pnl_tracking": True,
+                "startup_recovery_enabled": True,
             },
         }
 
