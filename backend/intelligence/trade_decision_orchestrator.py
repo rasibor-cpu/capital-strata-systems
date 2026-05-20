@@ -76,6 +76,21 @@ class TradeDecisionOrchestrator:
 
         return trade_id
 
+    def _persist_runtime_snapshot(self) -> None:
+
+        self.pnl_runtime_service.create_snapshot(
+            session_id=self.session_id,
+            broker_name="internal",
+            broker_mode="paper",
+            equity=Decimal(str(self.total_capital)),
+            cash_balance=Decimal(str(self.total_capital)),
+            buying_power=Decimal(str(self.total_capital)),
+            unrealized_pnl=Decimal("0"),
+            realized_pnl=Decimal("0"),
+            open_positions=0,
+            payload_json=None,
+        )
+
     def _build_decision_payload(
         self,
         market_data: Dict[str, Any],
@@ -88,6 +103,8 @@ class TradeDecisionOrchestrator:
         trade_id = self._persist_trade_open(
             symbol=symbol
         )
+
+        self._persist_runtime_snapshot()
 
         return {
             "symbol": symbol,
