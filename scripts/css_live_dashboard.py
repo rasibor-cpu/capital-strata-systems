@@ -1896,16 +1896,25 @@ initialize_selected_coinbase()
 def pcnrass_activate_capital_source() -> None:
     if str(SELECTED_BROKER_MODE).lower() == "live":
         capital_governor.set_live_mode()
+        # In live mode, use real broker balance exclusively — never simulated capital.
+        base_capital = float(capital_governor.real_balance or 0.0)
     else:
         capital_governor.set_paper_mode()
-
-    base_capital = capital_governor.available_capital() + capital_governor.funded_amount()
+        base_capital = capital_governor.available_capital() + capital_governor.funded_amount()
 
     try:
         pnl_observer.starting_balance = float(base_capital)
         pnl_observer.current_balance = float(base_capital)
     except Exception as e:
         print(f"[CAPITAL SYNC WARN] pnl_observer sync failed: {str(e)[:60]}")
+
+    # === SYNC pnl_tracker with confirmed capital source ===
+    try:
+        pnl_tracker.starting_equity = float(base_capital)
+        pnl_tracker.current_equity = float(base_capital)
+        pnl_tracker.peak_equity = float(base_capital)
+    except Exception as e:
+        print(f"[CAPITAL SYNC WARN] pnl_tracker sync failed: {str(e)[:60]}")
 
     if str(SELECTED_BROKER_MODE).lower() == "live":
         if float(capital_governor.real_balance or 0.0) <= 0.0:
@@ -1915,7 +1924,12 @@ def pcnrass_activate_capital_source() -> None:
                 f"balance_fetch_failed_or_zero. Live trading must remain blocked until real balance is loaded."
             )
 
-    # === R11 CAPITAL HARD LOCK ===
+
+enforce_mode_dominance()
+pcnrass_activate_capital_source()
+
+# === R11 CAPITAL HARD LOCK ===
+# MUST run AFTER pcnrass_activate_capital_source() so real_balance has been fetched.
 if str(SELECTED_BROKER_MODE).lower() == "live":
     real_balance = float(getattr(capital_governor, "real_balance", 0.0) or 0.0)
 
@@ -1925,11 +1939,8 @@ if str(SELECTED_BROKER_MODE).lower() == "live":
             f"url={get_active_broker_url()} "
             f"reason=NO_REAL_BALANCE"
         )
-
         print("[SYSTEM HALT] Live trading disabled until real broker balance is loaded.")
-        
-        # HARD STOP — prevent fake execution
-        import sys
+        # HARD STOP — prevent fake execution with stale simulated capital
         sys.exit(1)
 
 print(
@@ -1937,9 +1948,6 @@ print(
     f"mode={SELECTED_BROKER_MODE} available=${capital_governor.available_capital():,.2f}"
 )
 
-
-enforce_mode_dominance()
-pcnrass_activate_capital_source()
 enforce_execution_boundary()
 
 
