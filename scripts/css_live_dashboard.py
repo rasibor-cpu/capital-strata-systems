@@ -1086,11 +1086,16 @@ def select_broker_execution_config() -> tuple[bool, str, str]:
         return True, "OANDA", broker_mode
 
     if selected == "COINBASE":
-        print("=== COINBASE MODE ===")
-        print("1. PAPER / AUTH TEST / SIMULATED ORDER PATH")
-        print("2. LIVE / REAL COINBASE ACCOUNT CONNECTION")
-        mode_choice = input("Enter Coinbase mode (1-2) [default=1]: ").strip() or "1"
-        broker_mode = "live" if mode_choice == "2" else "paper"
+        # PCNRASS:
+        # Coinbase inherits the already-selected global broker mode.
+        # This prevents dashboard/execution divergence where GLOBAL LIVE
+        # can be accidentally overwritten by a second Coinbase-only prompt.
+        broker_mode = str(GLOBAL_BROKER_MODE).strip().lower()
+
+        print(
+            f"[COINBASE MODE INHERITED] "
+            f"global_mode={broker_mode}"
+        )
 
         if broker_mode == "live" and not role_profile.get("can_use_live_broker_mode", False):
             print(f"[RBAC] Coinbase live mode denied for role {role}. Falling back safely.")
