@@ -1587,6 +1587,15 @@ BROKER_EXECUTION_ARMED, SELECTED_BROKER, SELECTED_BROKER_MODE = select_broker_ex
 ENGINE_MODE = select_engine_mode()
 print(f"[ENGINE MODE SELECTED] {ENGINE_MODE}")
 
+print("--- PCNRASS MULTI-BROKER ROUTING MAP ---")
+for _asset, _broker in {
+    "CRYPTO": "COINBASE",
+    "FX": "OANDA",
+    "FUTURES": "BLOCKED / NO LIVE ADAPTER",
+    "OPTIONS": "BLOCKED / NO LIVE ADAPTER",
+}.items():
+    print(f"{_asset:<10} -> {_broker}")
+
 
 
 record_startup_configuration(
@@ -1681,42 +1690,144 @@ def approve_trade_before_register(asset_class: str, symbol: str, sig: float, pro
     return True, str(decision.get("reason"))
 
 
+SUPPORTED_LIVE_ROUTES = {
+    "CRYPTO": "COINBASE",
+    "FX": "OANDA",
+    "FUTURES": None,
+    "OPTIONS": None,
+}
+
+
+def normalize_execution_asset_class(asset_class: str) -> str:
+    """
+    Normalize asset-class aliases before broker routing.
+
+    This prevents FX candidates from being treated as NO_ROUTE because one
+    caller supplied an alias such as FOREX, CURRENCY, CURRENCIES, or FX_SPOT.
+    """
+    value = str(asset_class or "UNKNOWN").strip().upper().replace("-", "_").replace(" ", "_")
+
+    aliases = {
+        "FOREX": "FX",
+        "FOREX_SPOT": "FX",
+        "CURRENCY": "FX",
+        "CURRENCIES": "FX",
+        "FX_SPOT": "FX",
+        "CRYPTOCURRENCY": "CRYPTO",
+        "CRYPTOCURRENCIES": "CRYPTO",
+        "DIGITAL_ASSET": "CRYPTO",
+        "DIGITAL_ASSETS": "CRYPTO",
+        "FUTURE": "FUTURES",
+        "OPTION": "OPTIONS",
+    }
+
+    return aliases.get(value, value)
+
+
+def resolve_live_execution_route(asset_class: str) -> dict:
+    """
+    PCNRASS multi-broker live routing authority.
+
+    Institutional rule:
+    - The selected runtime mode remains globally authoritative.
+    - PAPER mode allows all asset classes through paper execution.
+    - LIVE mode routes each asset class to its approved live broker.
+    - Unsupported live asset classes are blocked, never downgraded to paper.
+    """
+    asset = normalize_execution_asset_class(asset_class)
+    mode = str(SELECTED_BROKER_MODE or GLOBAL_BROKER_MODE or "paper").strip().lower()
+
+    if mode == "paper":
+        return {
+            "allowed": True,
+            "mode": "paper",
+            "broker": "PAPER_ENGINE",
+            "allow_live_funding": False,
+            "reason": "PAPER_MODE_ALL_ASSETS_ALLOWED",
+        }
+
+    if mode != "live":
+        return {
+            "allowed": False,
+            "mode": mode,
+            "broker": None,
+            "allow_live_funding": False,
+            "reason": f"UNKNOWN_EXECUTION_MODE_{mode.upper()}",
+        }
+
+    routed_broker = SUPPORTED_LIVE_ROUTES.get(asset)
+
+    if routed_broker is None:
+        return {
+            "allowed": False,
+            "mode": "live",
+            "broker": None,
+            "allow_live_funding": False,
+            "reason": f"NO_LIVE_ADAPTER_FOR_{asset}",
+        }
+
+    if routed_broker == "COINBASE":
+        if asset != "CRYPTO":
+            return {
+                "allowed": False,
+                "mode": "live",
+                "broker": "COINBASE",
+                "allow_live_funding": False,
+                "reason": f"COINBASE_DOES_NOT_SUPPORT_LIVE_{asset}",
+            }
+        return {
+            "allowed": True,
+            "mode": "live",
+            "broker": "COINBASE",
+            "allow_live_funding": True,
+            "reason": "COINBASE_CRYPTO_LIVE_ALLOWED",
+        }
+
+    if routed_broker == "OANDA":
+        if asset != "FX":
+            return {
+                "allowed": False,
+                "mode": "live",
+                "broker": "OANDA",
+                "allow_live_funding": False,
+                "reason": f"OANDA_DOES_NOT_SUPPORT_LIVE_{asset}",
+            }
+        return {
+            "allowed": True,
+            "mode": "live",
+            "broker": "OANDA",
+            "allow_live_funding": True,
+            "reason": "OANDA_FX_LIVE_ALLOWED",
+        }
+
+    return {
+        "allowed": False,
+        "mode": "live",
+        "broker": routed_broker,
+        "allow_live_funding": False,
+        "reason": f"UNSUPPORTED_LIVE_ROUTE_{asset}_{routed_broker}",
+    }
+
+
 def resolve_asset_execution_authority(asset_class: str) -> tuple[bool, str, bool, str]:
     """
-    PCNRASS unified runtime-mode authority.
-
-    Rule:
-    - PAPER mode means every asset class may run in PAPER mode.
-    - LIVE mode means every asset class is governed by LIVE mode.
-      Unsupported live asset/broker combinations are BLOCKED, never silently
-      downgraded into paper execution.
+    Backward-compatible tuple wrapper for existing dashboard runtime code.
 
     Returns:
         allowed, effective_mode, allow_live_funding, reason
     """
-    asset = str(asset_class or "UNKNOWN").strip().upper()
-    broker = str(SELECTED_BROKER or "NONE").strip().upper()
-    mode = str(SELECTED_BROKER_MODE or "paper").strip().lower()
+    route = resolve_live_execution_route(asset_class)
+    return (
+        bool(route.get("allowed", False)),
+        str(route.get("mode", SELECTED_BROKER_MODE)),
+        bool(route.get("allow_live_funding", False)),
+        str(route.get("reason", "UNKNOWN_ROUTE_DECISION")),
+    )
 
-    if mode == "paper":
-        return True, "paper", False, "PAPER_MODE_ALL_ASSETS_ALLOWED"
 
-    if mode != "live":
-        return False, mode, False, f"UNKNOWN_EXECUTION_MODE_{mode.upper()}"
-
-    # LIVE mode: no asset may fall back to paper. It must either have a
-    # live-capable broker route or be blocked before position registration.
-    if broker == "COINBASE" and asset == "CRYPTO":
-        return True, "live", True, "COINBASE_CRYPTO_LIVE_ALLOWED"
-
-    if broker == "OANDA" and asset == "FX":
-        return True, "live", True, "OANDA_FX_LIVE_ALLOWED"
-
-    if broker in {"NONE", ""}:
-        return False, "live", False, f"LIVE_MODE_REQUIRES_BROKER_FOR_{asset}"
-
-    return False, "live", False, f"SELECTED_BROKER_{broker}_DOES_NOT_SUPPORT_LIVE_{asset}"
-
+def routed_broker_for_asset(asset_class: str) -> str:
+    route = resolve_live_execution_route(asset_class)
+    return str(route.get("broker") or "NO_ROUTE")
 
 def rollback_registered_position(position: dict, observer_symbol: str = "") -> None:
     """
@@ -2061,6 +2172,12 @@ pnl_tracker = PnLTracker(starting_equity=pnl_observer.starting_balance)
 
 
 def map_oanda_env() -> None:
+    # PCNRASS multi-broker routing: OANDA may be required for FX in a
+    # global/live session even when another primary broker was selected.
+    if str(globals().get("SELECTED_BROKER_MODE", GLOBAL_BROKER_MODE)).strip().lower() == "live":
+        os.environ["OANDA_ENV"] = "live"
+        os.environ["OANDA_BASE_URL"] = "https://api-fxtrade.oanda.com"
+
     if not os.getenv("OANDA_API_KEY"):
         if os.getenv("OANDA_API_TOKEN"):
             os.environ["OANDA_API_KEY"] = os.getenv("OANDA_API_TOKEN", "")
@@ -2101,7 +2218,16 @@ def initialize_selected_coinbase() -> None:
     if not BROKER_EXECUTION_ARMED:
         return
 
-    if SELECTED_BROKER != "COINBASE":
+    # PCNRASS multi-broker routing:
+    # Coinbase may be required for CRYPTO even when the operator selected
+    # another primary broker for the session. Do not tie Coinbase bootstrap
+    # only to SELECTED_BROKER when global/live routing is active.
+    should_initialize_coinbase = (
+        str(SELECTED_BROKER).upper() == "COINBASE"
+        or str(SELECTED_BROKER_MODE).lower() == "live"
+    )
+
+    if not should_initialize_coinbase:
         return
 
     try:
@@ -2274,8 +2400,9 @@ def attempt_oanda_fx_execution(symbol: str) -> tuple[bool, str]:
             _audit(False, "RBAC_BLOCKED_PAPER_EXECUTION")
             return False, "RBAC_BLOCKED_PAPER_EXECUTION"
 
-    if SELECTED_BROKER != "OANDA":
-        reason = f"BROKER_NOT_SELECTED_FOR_OANDA_{SELECTED_BROKER}"
+    route = resolve_live_execution_route("FX")
+    if str(route.get("broker") or "").upper() != "OANDA":
+        reason = str(route.get("reason") or f"NO_OANDA_ROUTE_{SELECTED_BROKER}")
         _audit(False, reason)
         return False, reason
 
@@ -2404,7 +2531,7 @@ def evaluate_coinbase_live_gate(symbol: str, size_usd: float):
 
     result = coinbase_live_gate.evaluate(
         broker_execution_armed=BROKER_EXECUTION_ARMED,
-        selected_broker=SELECTED_BROKER,
+        selected_broker="COINBASE",
         broker_mode=SELECTED_BROKER_MODE,
         engine_mode=ENGINE_MODE,
         symbol=symbol,
@@ -2450,8 +2577,9 @@ def attempt_coinbase_crypto_execution(symbol: str) -> tuple[bool, str]:
     if not BROKER_EXECUTION_ARMED:
         return False, "BROKER_DISABLED_BY_GLOBAL_SWITCH"
 
-    if SELECTED_BROKER != "COINBASE":
-        return False, f"BROKER_NOT_SELECTED_FOR_COINBASE_{SELECTED_BROKER}"
+    route = resolve_live_execution_route("CRYPTO")
+    if str(route.get("broker") or "").upper() != "COINBASE":
+        return False, str(route.get("reason") or f"NO_COINBASE_ROUTE_{SELECTED_BROKER}")
 
     if ENGINE_MODE == "SAFE":
         return False, "COINBASE_BLOCKED_SAFE_MODE"
@@ -3238,9 +3366,15 @@ try:
                         last_trade = f"{symbol} MODE_BLOCKED {mode_reason}"
                         print(
                             f"[MODE AUTHORITY BLOCK] {asset_class} {symbol} | "
-                            f"selected_mode={SELECTED_BROKER_MODE} broker={SELECTED_BROKER} | {mode_reason}"
+                            f"selected_mode={SELECTED_BROKER_MODE} routed_broker={routed_broker_for_asset(asset_class)} | {mode_reason}"
                         )
                         continue
+
+                    if str(SELECTED_BROKER_MODE).strip().lower() == "live":
+                        print(
+                            f"[ROUTE RESOLVED] {asset_class} {symbol} -> "
+                            f"{routed_broker_for_asset(asset_class)} LIVE | {mode_reason}"
+                        )
 
                     if allow_broker_test and asset_class == "FX" and live_fx_funded_this_cycle >= max_new_per_cycle("FX"):
                         last_trade = f"{symbol} LIVE_CYCLE_LIMIT_BLOCKED"
@@ -3296,16 +3430,18 @@ try:
                     print(f"[R15A EXIT] {symbol} signal={exit_signal}")
 
                     if position.get("broker_tested"):
-                        if asset_class == "FX" and SELECTED_BROKER == "OANDA":
+                        execution_broker = routed_broker_for_asset(asset_class)
+
+                        if asset_class == "FX" and execution_broker == "OANDA":
                             live_fx_funded_this_cycle += 1
                             ok, broker_msg = attempt_oanda_fx_execution(symbol)
 
-                        elif asset_class == "CRYPTO" and SELECTED_BROKER == "COINBASE":
+                        elif asset_class == "CRYPTO" and execution_broker == "COINBASE":
                             live_crypto_funded_this_cycle += 1
                             ok, broker_msg = attempt_coinbase_crypto_execution(symbol)
 
                         else:
-                            ok, broker_msg = False, "BROKER_ASSET_MISMATCH"
+                            ok, broker_msg = False, f"BROKER_ASSET_ROUTE_MISMATCH_{execution_broker}"
 
                         if ok:
                             position["broker_order_ok"] = True
