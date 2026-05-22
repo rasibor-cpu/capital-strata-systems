@@ -1681,6 +1681,66 @@ def approve_trade_before_register(asset_class: str, symbol: str, sig: float, pro
     return True, str(decision.get("reason"))
 
 
+def resolve_asset_execution_authority(asset_class: str) -> tuple[bool, str, bool, str]:
+    """
+    PCNRASS unified runtime-mode authority.
+
+    Rule:
+    - PAPER mode means every asset class may run in PAPER mode.
+    - LIVE mode means every asset class is governed by LIVE mode.
+      Unsupported live asset/broker combinations are BLOCKED, never silently
+      downgraded into paper execution.
+
+    Returns:
+        allowed, effective_mode, allow_live_funding, reason
+    """
+    asset = str(asset_class or "UNKNOWN").strip().upper()
+    broker = str(SELECTED_BROKER or "NONE").strip().upper()
+    mode = str(SELECTED_BROKER_MODE or "paper").strip().lower()
+
+    if mode == "paper":
+        return True, "paper", False, "PAPER_MODE_ALL_ASSETS_ALLOWED"
+
+    if mode != "live":
+        return False, mode, False, f"UNKNOWN_EXECUTION_MODE_{mode.upper()}"
+
+    # LIVE mode: no asset may fall back to paper. It must either have a
+    # live-capable broker route or be blocked before position registration.
+    if broker == "COINBASE" and asset == "CRYPTO":
+        return True, "live", True, "COINBASE_CRYPTO_LIVE_ALLOWED"
+
+    if broker == "OANDA" and asset == "FX":
+        return True, "live", True, "OANDA_FX_LIVE_ALLOWED"
+
+    if broker in {"NONE", ""}:
+        return False, "live", False, f"LIVE_MODE_REQUIRES_BROKER_FOR_{asset}"
+
+    return False, "live", False, f"SELECTED_BROKER_{broker}_DOES_NOT_SUPPORT_LIVE_{asset}"
+
+
+def rollback_registered_position(position: dict, observer_symbol: str = "") -> None:
+    """
+    Remove a position that was tentatively registered before broker execution
+    but could not be opened in LIVE mode. This prevents failed live attempts
+    from becoming paper/MTM positions by accident.
+    """
+    try:
+        position_id = str(position.get("position_id", ""))
+        if position_id and hasattr(mtm_engine, "positions"):
+            mtm_engine.positions = [
+                pos for pos in mtm_engine.positions
+                if str(pos.get("position_id", "")) != position_id
+            ]
+    except Exception as exc:
+        print(f"[LIVE ROLLBACK WARN] MTM rollback failed: {str(exc)[:80]}")
+
+    try:
+        if observer_symbol and hasattr(pnl_observer, "positions"):
+            pnl_observer.positions.pop(observer_symbol, None)
+    except Exception as exc:
+        print(f"[LIVE ROLLBACK WARN] observer rollback failed: {str(exc)[:80]}")
+
+
 class AdaptiveConcurrencyEnvelopeController:
     def __init__(self) -> None:
         self.current_limit = HARD_TOTAL_OPEN_POSITION_CAP
@@ -2182,7 +2242,7 @@ def attempt_oanda_fx_execution(symbol: str) -> tuple[bool, str]:
             size=float(FX_LIVE_UNITS),
             size_unit="UNITS",
             selected_broker=SELECTED_BROKER,
-            broker_mode="paper",
+            broker_mode=SELECTED_BROKER_MODE,
             engine_mode=ENGINE_MODE,
             execution_armed=BROKER_EXECUTION_ARMED,
             live_orders_flag=False,
@@ -2204,9 +2264,15 @@ def attempt_oanda_fx_execution(symbol: str) -> tuple[bool, str]:
         _audit(False, "BROKER_DISABLED_BY_GLOBAL_SWITCH")
         return False, "BROKER_DISABLED_BY_GLOBAL_SWITCH"
 
-    if not role_profile.get("can_execute_paper_trading", False):
-        _audit(False, "RBAC_BLOCKED_PAPER_EXECUTION")
-        return False, "RBAC_BLOCKED_PAPER_EXECUTION"
+    selected_mode = str(SELECTED_BROKER_MODE).strip().lower()
+    if selected_mode == "live":
+        if not role_profile.get("can_execute_live_trading", False):
+            _audit(False, "RBAC_BLOCKED_LIVE_EXECUTION")
+            return False, "RBAC_BLOCKED_LIVE_EXECUTION"
+    else:
+        if not role_profile.get("can_execute_paper_trading", False):
+            _audit(False, "RBAC_BLOCKED_PAPER_EXECUTION")
+            return False, "RBAC_BLOCKED_PAPER_EXECUTION"
 
     if SELECTED_BROKER != "OANDA":
         reason = f"BROKER_NOT_SELECTED_FOR_OANDA_{SELECTED_BROKER}"
@@ -3167,21 +3233,24 @@ try:
                     if asset_class == "CRYPTO":
                         safe_load_runtime_asset(symbol)
 
-                    allow_broker_test = False
+                    mode_allowed, effective_mode, allow_broker_test, mode_reason = resolve_asset_execution_authority(asset_class)
+                    if not mode_allowed:
+                        last_trade = f"{symbol} MODE_BLOCKED {mode_reason}"
+                        print(
+                            f"[MODE AUTHORITY BLOCK] {asset_class} {symbol} | "
+                            f"selected_mode={SELECTED_BROKER_MODE} broker={SELECTED_BROKER} | {mode_reason}"
+                        )
+                        continue
 
-                    if (
-                        asset_class == "FX"
-                        and SELECTED_BROKER == "OANDA"
-                        and live_fx_funded_this_cycle < max_new_per_cycle("FX")
-                    ):
-                        allow_broker_test = True
+                    if allow_broker_test and asset_class == "FX" and live_fx_funded_this_cycle >= max_new_per_cycle("FX"):
+                        last_trade = f"{symbol} LIVE_CYCLE_LIMIT_BLOCKED"
+                        print(f"[LIVE CYCLE LIMIT] {asset_class} {symbol} | max FX live opens reached")
+                        continue
 
-                    if (
-                        asset_class == "CRYPTO"
-                        and SELECTED_BROKER == "COINBASE"
-                        and live_crypto_funded_this_cycle < max_new_per_cycle("CRYPTO")
-                    ):
-                        allow_broker_test = True
+                    if allow_broker_test and asset_class == "CRYPTO" and live_crypto_funded_this_cycle >= max_new_per_cycle("CRYPTO"):
+                        last_trade = f"{symbol} LIVE_CYCLE_LIMIT_BLOCKED"
+                        print(f"[LIVE CYCLE LIMIT] {asset_class} {symbol} | max CRYPTO live opens reached")
+                        continue
 
                     gate_ok, gate_reason = approve_trade_before_register(
                         asset_class=asset_class,
@@ -3252,15 +3321,32 @@ try:
                             position["live_funded"] = False
                             position["broker_order_ok"] = False
                             position["broker_note"] = broker_msg
-                            last_trade = f"{symbol} PAPER_OPENED BROKER_BLOCKED {broker_msg}"
-                            print(
-                                f"[{asset_class} PAPER OPENED] {symbol} opened | "
-                                f"BROKER_BLOCKED | {broker_msg}"
-                            )
+
+                            if str(SELECTED_BROKER_MODE).strip().lower() == "live":
+                                rollback_registered_position(position, observer_position.symbol)
+                                last_trade = f"{symbol} LIVE_BLOCKED {broker_msg}"
+                                print(
+                                    f"[{asset_class} LIVE BLOCKED] {symbol} not opened | "
+                                    f"BROKER_BLOCKED | {broker_msg}"
+                                )
+                            else:
+                                last_trade = f"{symbol} PAPER_OPENED BROKER_BLOCKED {broker_msg}"
+                                print(
+                                    f"[{asset_class} PAPER OPENED] {symbol} opened | "
+                                    f"BROKER_BLOCKED | {broker_msg}"
+                                )
 
                     else:
-                        last_trade = f"{symbol} PAPER_OPENED"
-                        print(f"[{asset_class} PAPER OPENED] {symbol}")
+                        if str(SELECTED_BROKER_MODE).strip().lower() == "live":
+                            rollback_registered_position(position, observer_position.symbol)
+                            last_trade = f"{symbol} LIVE_BLOCKED NO_LIVE_BROKER_ROUTE"
+                            print(
+                                f"[{asset_class} LIVE BLOCKED] {symbol} not opened | "
+                                f"NO_LIVE_BROKER_ROUTE"
+                            )
+                        else:
+                            last_trade = f"{symbol} PAPER_OPENED"
+                            print(f"[{asset_class} PAPER OPENED] {symbol}")
         else:
             print("[SIGNAL GENERATION PAUSED] hard open-position cap reached")
 
