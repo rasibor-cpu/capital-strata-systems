@@ -1,0 +1,49 @@
+name: CSS Governance Validation
+
+on:
+push:
+branches:
+- main
+pull_request:
+
+jobs:
+css-validation:
+runs-on: ubuntu-latest
+
+steps:
+  - name: Checkout Repository
+    uses: actions/checkout@v4
+
+  - name: Set Up Python
+    uses: actions/setup-python@v5
+    with:
+      python-version: "3.11"
+
+  - name: Display Repository Structure
+    run: |
+      echo "=== CSS Repository Structure ==="
+      ls -R
+
+  - name: Validate Governance Instruction File
+    run: |
+      echo "Checking Codex governance instructions..."
+
+      if [ ! -f ".codex-instructions.md" ]; then
+        echo "ERROR: .codex-instructions.md missing"
+        exit 1
+      fi
+
+      echo "Governance instruction file present."
+
+  - name: Python Syntax Validation
+    run: |
+      echo "Running Python compile validation..."
+
+      python -m compileall .
+
+  - name: Governance Success Banner
+    run: |
+      echo "======================================="
+      echo " CSS GOVERNANCE VALIDATION PASSED "
+      echo " PCNRASS STATUS: STABLE "
+      echo "======================================="
