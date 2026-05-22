@@ -1715,8 +1715,9 @@ class CapitalDeploymentGovernor:
     PCNRASS R1 UPGRADE:
     Dynamic capital source:
     - PAPER mode keeps controlled simulated test capital.
-    - LIVE mode attempts broker-fetched account balance through RealBalanceEngine.
-    - Fail-closed: if real balance fetch fails, available live capital becomes 0.0.
+    - LIVE mode attempts broker-fetched account balance.
+    - Coinbase/OANDA adapters are queried directly before the legacy RealBalanceEngine.
+    - Fail-closed: if real balance fetch fails or is zero, available live capital becomes 0.0.
     """
 
     def __init__(self) -> None:
@@ -1728,6 +1729,7 @@ class CapitalDeploymentGovernor:
         self.real_balance = 0.0
         self.real_equity = 0.0
         self.balance_source = "SIMULATED"
+        self.balance_detail = ""
 
     def _get_adapter(self):
         try:
@@ -1739,35 +1741,187 @@ class CapitalDeploymentGovernor:
             return None
         return None
 
-    def refresh_real_balance(self) -> dict:
+    def _coerce_balance_payload(self, data: Any) -> dict:
+        """
+        Normalize broker balance payloads into a common shape.
+        This method never prints secrets and never fabricates positive balances.
+        """
+
+        if data is None:
+            return {}
+
+        if isinstance(data, dict):
+            payload = dict(data)
+        else:
+            payload = {}
+            for name in (
+                "balance",
+                "equity",
+                "balance_usd",
+                "nav",
+                "NAV",
+                "source",
+                "currency",
+                "ok",
+            ):
+                if hasattr(data, name):
+                    payload[name] = getattr(data, name)
+
+        balance = (
+            payload.get("balance")
+            if payload.get("balance") is not None
+            else payload.get("balance_usd")
+        )
+        if balance is None:
+            balance = payload.get("nav", payload.get("NAV", 0.0))
+
+        equity = payload.get("equity")
+        if equity is None:
+            equity = payload.get("nav", payload.get("NAV", balance))
+
+        try:
+            normalized_balance = float(balance or 0.0)
+        except Exception:
+            normalized_balance = 0.0
+
+        try:
+            normalized_equity = float(equity or normalized_balance or 0.0)
+        except Exception:
+            normalized_equity = normalized_balance
+
+        source = str(payload.get("source") or "").strip()
+
+        return {
+            "balance": normalized_balance,
+            "equity": normalized_equity,
+            "source": source,
+            "raw_source": source,
+            "ok": bool(payload.get("ok", True)),
+        }
+
+    def _adapter_balance_methods(self) -> list[str]:
+        broker = str(SELECTED_BROKER).upper()
+        if broker == "COINBASE":
+            return [
+                "get_account_summary",
+                "get_balance",
+                "fetch_balance",
+                "get_account",
+            ]
+        if broker == "OANDA":
+            return [
+                "get_account_summary",
+                "get_balance",
+                "fetch_balance",
+                "get_account",
+            ]
+        return [
+            "get_account_summary",
+            "get_balance",
+            "fetch_balance",
+            "get_account",
+        ]
+
+    def _fetch_adapter_balance(self) -> dict:
+        adapter = self._get_adapter()
+        if adapter is None:
+            return {
+                "balance": 0.0,
+                "equity": 0.0,
+                "source": "NO_ADAPTER",
+            }
+
+        errors: list[str] = []
+
+        for method_name in self._adapter_balance_methods():
+            method = getattr(adapter, method_name, None)
+            if not callable(method):
+                continue
+
+            try:
+                payload = self._coerce_balance_payload(method())
+                if payload:
+                    payload_source = str(payload.get("source") or "").strip()
+                    if not payload_source:
+                        payload_source = f"{SELECTED_BROKER}_ADAPTER_{method_name}".upper()
+
+                    payload["source"] = payload_source
+                    payload["method"] = method_name
+                    return payload
+            except Exception as exc:
+                errors.append(f"{method_name}:{type(exc).__name__}")
+
+        return {
+            "balance": 0.0,
+            "equity": 0.0,
+            "source": "ADAPTER_BALANCE_UNAVAILABLE",
+            "error": ";".join(errors[-3:]),
+        }
+
+    def _fetch_engine_balance(self) -> dict:
         try:
             from backend.app.accounting.real_balance_engine import RealBalanceEngine
 
             engine = RealBalanceEngine(SELECTED_BROKER, self._get_adapter())
-            data = engine.get_balance()
-
-            self.real_balance = float(data.get("balance", 0.0) or 0.0)
-            self.real_equity = float(data.get("equity", self.real_balance) or 0.0)
-            self.balance_source = str(data.get("source", "UNKNOWN"))
-
-            print(
-                f"[REAL BALANCE LOADED] broker={SELECTED_BROKER} "
-                f"mode={SELECTED_BROKER_MODE} balance=${self.real_balance:,.2f} "
-                f"equity=${self.real_equity:,.2f} source={self.balance_source}"
-            )
-
-            return data
-
-        except Exception as e:
-            self.real_balance = 0.0
-            self.real_equity = 0.0
-            self.balance_source = f"REAL_BALANCE_ERROR_{str(e)[:40]}"
-            print(f"[REAL BALANCE ERROR] {str(e)[:80]}")
+            return self._coerce_balance_payload(engine.get_balance())
+        except Exception as exc:
             return {
                 "balance": 0.0,
                 "equity": 0.0,
-                "source": self.balance_source,
+                "source": f"REAL_BALANCE_ENGINE_ERROR_{type(exc).__name__}",
+                "error": str(exc)[:80],
             }
+
+    def refresh_real_balance(self) -> dict:
+        """
+        Refresh live broker balance.
+
+        Direct adapter hydration is attempted first because Coinbase is now
+        initialized through backend.broker.coinbase_adapter.CoinbaseAdapter.
+        Legacy RealBalanceEngine remains as a fallback for compatibility.
+        """
+
+        adapter_data = self._fetch_adapter_balance()
+        engine_data = {}
+
+        balance = float(adapter_data.get("balance", 0.0) or 0.0)
+        equity = float(adapter_data.get("equity", balance) or 0.0)
+
+        if balance <= 0.0 and equity <= 0.0:
+            engine_data = self._fetch_engine_balance()
+            balance = float(engine_data.get("balance", 0.0) or 0.0)
+            equity = float(engine_data.get("equity", balance) or 0.0)
+            selected = engine_data
+        else:
+            selected = adapter_data
+
+        raw_source = str(selected.get("source", "UNKNOWN") or "UNKNOWN")
+
+        self.real_balance = float(balance or 0.0)
+        self.real_equity = float(equity or self.real_balance or 0.0)
+
+        if self.real_balance > 0.0 or self.real_equity > 0.0:
+            self.balance_source = "BROKER"
+            self.balance_detail = raw_source
+        else:
+            self.balance_source = raw_source or "UNKNOWN"
+            self.balance_detail = raw_source or "UNKNOWN"
+
+        print(
+            f"[REAL BALANCE LOADED] broker={SELECTED_BROKER} "
+            f"mode={SELECTED_BROKER_MODE} balance=${self.real_balance:,.2f} "
+            f"equity=${self.real_equity:,.2f} source={self.balance_source} "
+            f"detail={self.balance_detail}"
+        )
+
+        return {
+            "balance": self.real_balance,
+            "equity": self.real_equity,
+            "source": self.balance_source,
+            "detail": self.balance_detail,
+            "adapter_source": adapter_data.get("source"),
+            "engine_source": engine_data.get("source") if engine_data else "",
+        }
 
     def available_capital(self) -> float:
         allocated = sum(self.active_test_allocations.values())
@@ -1781,13 +1935,15 @@ class CapitalDeploymentGovernor:
                 except Exception:
                     base_capital = float(self.simulated_capital_pool)
         else:
-            base_capital = float(self.real_balance)
+            base_capital = float(self.real_balance or self.real_equity or 0.0)
 
         return round(base_capital - allocated, 4)
 
     def capital_source_label(self) -> str:
         if self.paper_mode:
             return "SIMULATED"
+        if str(self.balance_source or "").upper() == "BROKER":
+            return "BROKER"
         return self.balance_source or f"REAL_BROKER_{SELECTED_BROKER}"
 
     def can_fund_trade(self, position_id: str) -> bool:
@@ -1824,6 +1980,7 @@ class CapitalDeploymentGovernor:
     def set_paper_mode(self) -> None:
         self.paper_mode = True
         self.balance_source = "SIMULATED"
+        self.balance_detail = "SIMULATED"
 
 
 capital_governor = CapitalDeploymentGovernor()

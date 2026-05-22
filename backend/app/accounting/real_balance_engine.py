@@ -1,3 +1,4 @@
+
 from typing import Dict, Any
 
 
@@ -56,17 +57,17 @@ class RealBalanceEngine:
             return self._default_balance()
 
         try:
-            accounts = self.adapter.get_accounts()
+            summary = self.adapter.get_account_summary()
 
-            total = 0.0
+            if not summary:
+                return self._default_balance()
 
-            for acc in accounts:
-                balance = float(acc.get("balance", 0.0))
-                total += balance
+            balance = float(summary.get("balance", 0.0))
+            equity = float(summary.get("equity", balance))
 
             return {
-                "balance": total,
-                "equity": total,
+                "balance": balance,
+                "equity": equity,
                 "source": "COINBASE",
             }
 
