@@ -141,6 +141,10 @@ def _dashboard_page() -> str:
         </div>
       </div>
       <section class="status-strip" aria-label="System status">
+        <span id="live-capital-banner" class="live-capital-banner">LIVE CAPITAL ACTIVE</span>
+        <span id="operational-identity-strip" class="operational-identity-strip">Operational identity initializing</span>
+        <span id="reconciliation-visibility-panel" class="reconciliation-visibility-panel">Reconciliation visibility online</span>
+        <span id="kill-switch-panel" class="kill-switch-panel">Kill switch standing by</span>
         <span id="status-mode">System PAPER</span>
         <span id="status-engine">Engine SAFE</span>
         <span id="status-session">Session pending</span>
@@ -1901,6 +1905,12 @@ button {
 
 
 app = create_app()
+
+
+def create_web_app(
+    state_provider: DashboardStateProvider | None = None,
+) -> FastAPI:
+    return create_app(state_provider)
 
 
 __all__ = [

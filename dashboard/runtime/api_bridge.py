@@ -126,6 +126,13 @@ def create_dashboard_state_router(
             "broker_reconciliation",
         )
 
+    @router.get("/api/v1/operational-identity")
+    def read_operational_identity() -> dict[str, Any]:
+        return build_section_payload(
+            _state_from_provider(state_provider),
+            "operational_identity",
+        )
+
     return router
 
 

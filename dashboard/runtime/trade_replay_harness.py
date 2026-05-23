@@ -499,3 +499,14 @@ def _json_safe(value: Any) -> Any:
 def _is_sensitive_key(key: str) -> bool:
     lowered = key.lower().replace("-", "_")
     return any(part in lowered for part in _SENSITIVE_KEY_PARTS)
+
+
+def check_replay_evidence_presence(
+    path: str | Path | None = None,
+    *,
+    replay_path: str | Path | None = None,
+) -> bool:
+    candidate = replay_path if replay_path is not None else path
+    if candidate in (None, ""):
+        return False
+    return Path(candidate).exists()
