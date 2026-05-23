@@ -1,6 +1,21 @@
-﻿from typing import Any, Dict, List
+﻿from __future__ import annotations
+
+import os
+
 from decimal import Decimal
+from typing import Any, Dict, List
 from uuid import uuid4
+
+from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
+from backend.intelligence.market_regime_detector import MarketRegimeDetector
+from backend.intelligence.opportunity_momentum_window_engine import OpportunityMomentumWindowEngine
+from backend.intelligence.opportunity_pressure_engine import OpportunityPressureEngine
+from backend.intelligence.pressure_acceleration_engine import PressureAccelerationEngine
+from backend.intelligence.probability_prediction_engine import ProbabilityPredictionEngine
+from backend.intelligence.profitability_guard import ProfitabilityGuard
+from backend.intelligence.signal_confluence_engine import SignalConfluenceEngine
+from backend.intelligence.capital_allocator import CapitalAllocator
+from backend.intelligence.adaptive_exit_engine import AdaptiveExitEngine
 
 from backend.app.persistence.repositories.session_repository import SessionRepository
 from backend.app.persistence.services.persistence_service import PersistenceService
@@ -20,7 +35,36 @@ class TradeDecisionOrchestrator:
         broker_mode: str = "paper",
     ) -> None:
 
-        self.total_capital = total_capital
+        total_capital_raw = os.getenv(
+            "CSS_TOTAL_CAPITAL",
+            os.getenv("ACCOUNT_EQUITY", str(total_capital)),
+        )
+
+        try:
+            resolved_total_capital = float(total_capital_raw)
+        except Exception:
+            resolved_total_capital = total_capital
+
+        if resolved_total_capital <= 0:
+            resolved_total_capital = total_capital
+
+        self.total_capital = resolved_total_capital
+
+        self.regime_detector = MarketRegimeDetector()
+        self.ai_scorer = AIOpportunityScorer()
+        self.signal_confluence_engine = SignalConfluenceEngine()
+        self.pressure_engine = OpportunityPressureEngine()
+        self.acceleration_engine = PressureAccelerationEngine()
+
+        self.capital_allocator = CapitalAllocator(
+            total_capital=self.total_capital
+        )
+
+        self.exit_engine = AdaptiveExitEngine()
+        self.momentum_engine = OpportunityMomentumWindowEngine()
+        self.probability_engine = ProbabilityPredictionEngine()
+        self.profitability_guard = ProfitabilityGuard()
+
         self.trade_gate = CSSUnifiedTradeGate()
 
         self.session_repository = SessionRepository()

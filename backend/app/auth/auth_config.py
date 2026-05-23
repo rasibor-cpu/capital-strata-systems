@@ -30,10 +30,10 @@ def _getenv_int(name: str, default: int) -> int:
 # --------------------------------------------------------------------
 # IMPORTANT:
 # - Default username must be "admin" (per project decision)
-# - Default password must be "123456" (6 digits)
-# - Can be overridden via env vars
+# - Superuser password must be provided via REA_SUPERUSER_PASSWORD
+# - No hardcoded password should exist in source control
 REA_SUPERUSER_USERNAME: str = (_getenv("REA_SUPERUSER_USERNAME", "admin").strip() or "admin")
-REA_SUPERUSER_PASSWORD: str = (_getenv("REA_SUPERUSER_PASSWORD", "123456").strip() or "123456")
+REA_SUPERUSER_PASSWORD: str = _getenv("REA_SUPERUSER_PASSWORD", "").strip()
 
 # Comma-separated roles, default "superuser"
 _roles_raw = _getenv("REA_SUPERUSER_ROLES", "superuser")

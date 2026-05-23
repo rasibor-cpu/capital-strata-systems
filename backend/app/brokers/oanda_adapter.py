@@ -45,6 +45,7 @@ class OandaAdapter:
         self.account_id = (os.getenv("OANDA_ACCOUNT_ID") or "").strip()
         self.base_url = (os.getenv("OANDA_BASE_URL") or "").strip().rstrip("/")
         self.env = (os.getenv("OANDA_ENV") or "").strip().lower()
+        self.allow_live_trades = os.getenv("OANDA_ENABLE_LIVE_TRADING", "0").strip().lower() in ("1", "true", "yes", "on")
 
     # -------------------------
     # configuration
@@ -104,6 +105,9 @@ class OandaAdapter:
     # -------------------------
     # trade/order endpoints
     # -------------------------
+    def _allow_live_order_execution(self) -> bool:
+        return self.allow_live_trades
+
     def place_order(
         self,
         order: Optional[OrderRequest] = None,
@@ -126,6 +130,9 @@ class OandaAdapter:
         symbol_final = (symbol or "").strip()
         if not symbol_final:
             return {"ok": False, "status": None, "data": None, "error": "missing_symbol"}
+
+        if not self._allow_live_order_execution():
+            return {"ok": False, "status": None, "data": None, "error": "live_execution_blocked_by_firewall"}
 
         side_u = (side or "BUY").upper().strip()
         if side_u not in ("BUY", "SELL"):

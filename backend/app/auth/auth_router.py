@@ -17,6 +17,8 @@ HEADLESS_DEV_MODE:
 from __future__ import annotations
 
 import os
+import time
+from collections import deque
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -39,6 +41,24 @@ def _env_true(name: str) -> bool:
 
 
 HEADLESS_DEV_MODE = _env_true("HEADLESS_DEV_MODE")
+
+AUTH_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("AUTH_RATE_LIMIT_WINDOW_SECONDS", "60"))
+AUTH_RATE_LIMIT_MAX_ATTEMPTS = int(os.getenv("AUTH_RATE_LIMIT_MAX_ATTEMPTS", "5"))
+_auth_rate_state: dict[str, deque[float]] = {}
+
+
+def _prune_attempts(attempts: deque[float], now: float) -> None:
+    while attempts and now - attempts[0] > AUTH_RATE_LIMIT_WINDOW_SECONDS:
+        attempts.popleft()
+
+
+def _check_rate_limit(username: str, operation: str) -> bool:
+    key = f"{operation}:{username.strip().lower()}"
+    now = time.time()
+    attempts = _auth_rate_state.setdefault(key, deque())
+    _prune_attempts(attempts, now)
+    attempts.append(now)
+    return len(attempts) <= AUTH_RATE_LIMIT_MAX_ATTEMPTS
 
 
 class LoginRequest(BaseModel):
@@ -85,6 +105,12 @@ def login(req: LoginRequest) -> LoginResponse:
     username = req.username.strip().lower()
     password = req.password.strip()
 
+    if not REA_SUPERUSER_PASSWORD:
+        raise HTTPException(status_code=503, detail="Superuser password not configured")
+
+    if not _check_rate_limit(username, "login"):
+        raise HTTPException(status_code=429, detail="Too many login attempts, try again later")
+
     # For now: single dev superuser
     if username != REA_SUPERUSER_USERNAME.strip().lower() or password != REA_SUPERUSER_PASSWORD:
         raise HTTPException(status_code=401, detail="Invalid username or password")
@@ -92,11 +118,11 @@ def login(req: LoginRequest) -> LoginResponse:
     # Generate OTP
     otp_code = token_store.generate_otp(username)
 
-    # HEADLESS DEV MODE: do not email OTP; return it in message so you can verify immediately.
+    # HEADLESS DEV MODE: do not email OTP; do not return it in the response.
     if HEADLESS_DEV_MODE:
         return LoginResponse(
             ok=True,
-            message=f"HEADLESS_DEV_MODE: OTP={otp_code}",
+            message="HEADLESS_DEV_MODE: OTP generated",
             expires_in_seconds=int(OTP_TTL_SECONDS),
             username=username,
             roles=list(REA_SUPERUSER_ROLES),
@@ -122,6 +148,9 @@ def login(req: LoginRequest) -> LoginResponse:
 def verify(req: VerifyRequest) -> VerifyResponse:
     username = req.username.strip().lower()
     otp = req.otp.strip()
+
+    if not _check_rate_limit(username, "verify"):
+        raise HTTPException(status_code=429, detail="Too many verification attempts, try again later")
 
     if not token_store.verify_otp(username, otp):
         raise HTTPException(status_code=401, detail="Invalid or expired OTP")
