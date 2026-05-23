@@ -100,6 +100,8 @@ class BrokerReconciliationReport:
                 },
                 "dashboard_visibility": {
                     "visible": True,
+                    "header": "LIVE CAPITAL ACTIVE",
+                    "status": "visible",
                 },
                 "css_account": self.css_account,
                 "broker_account": self.broker_account,
@@ -323,6 +325,7 @@ def _position_findings(
     for key in all_keys:
         css_item = css_by_key.get(key)
         broker_item = broker_by_key.get(key)
+
         if css_item is None:
             findings.append(
                 ReconciliationFinding(
@@ -335,6 +338,7 @@ def _position_findings(
                 )
             )
             continue
+
         if broker_item is None:
             findings.append(
                 ReconciliationFinding(
@@ -349,8 +353,11 @@ def _position_findings(
             continue
 
         css_qty = _decimal(_first_present(css_item, ("qty", "quantity", "units")))
-        broker_qty = _decimal(_first_present(broker_item, ("qty", "quantity", "units", "position")))
+        broker_qty = _decimal(
+            _first_present(broker_item, ("qty", "quantity", "units", "position"))
+        )
         difference = abs(css_qty - broker_qty)
+
         if difference > qty_tolerance:
             findings.append(
                 ReconciliationFinding(
@@ -366,6 +373,7 @@ def _position_findings(
 
         css_side = _side(css_item.get("side"))
         broker_side = _side(broker_item.get("side"))
+
         if broker_side and css_side and css_side != broker_side:
             findings.append(
                 ReconciliationFinding(
@@ -403,7 +411,9 @@ def _broker_account_snapshot(broker_summary: Mapping[str, Any]) -> Mapping[str, 
     )
 
 
-def _broker_position_snapshot(broker_summary: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:
+def _broker_position_snapshot(
+    broker_summary: Mapping[str, Any],
+) -> tuple[Mapping[str, Any], ...]:
     raw = (
         broker_summary.get("position_snapshot")
         or broker_summary.get("broker_position_snapshot")
