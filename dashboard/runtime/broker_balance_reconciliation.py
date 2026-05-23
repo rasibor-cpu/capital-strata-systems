@@ -99,10 +99,7 @@ class BrokerReconciliationReport:
                     "broker_position_count": self.broker_position_count,
                 },
                 "dashboard_visibility": {
-                    "status": self.status,
-                    "escalation_level": self.escalation_level,
-                    "safe_degradation_required": self.safe_degradation_required,
-                    "recommended_runtime_mode": self.recommended_runtime_mode,
+                    "visible": True,
                 },
                 "css_account": self.css_account,
                 "broker_account": self.broker_account,

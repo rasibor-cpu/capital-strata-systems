@@ -33,6 +33,7 @@ FRONTEND_SECTIONS = (
     "opportunities",
     "broker",
     "broker_reconciliation",
+    "operational_identity",
 )
 
 
@@ -117,6 +118,7 @@ def build_frontend_payload(
             "opportunities": opportunities(dashboard_payload),
             "broker": broker(dashboard_payload),
             "broker_reconciliation": broker_reconciliation(dashboard_payload),
+            "operational_identity": operational_identity(dashboard_payload),
         },
     }
 
@@ -411,6 +413,16 @@ def broker_reconciliation(dashboard_payload: Mapping[str, Any]) -> dict[str, Any
     return build_broker_reconciliation_payload(dashboard_payload)
 
 
+def operational_identity(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
+    payload = _mapping(dashboard_payload.get("operational_identity"))
+    return {
+        "runtime": str(payload.get("runtime", "CSS_RUNTIME")),
+        "mode": str(payload.get("mode", dashboard_payload.get("resolved_mode", "paper"))),
+        "status": str(payload.get("status", "ACTIVE")),
+        "live_capital_active": _boolean(payload.get("live_capital_active")),
+    }
+
+
 def build_section_payload(
     dashboard_state: DashboardState | Mapping[str, Any] | None,
     section: str,
@@ -572,6 +584,7 @@ __all__ = [
     "governance",
     "market",
     "opportunities",
+    "operational_identity",
     "pnl_summary",
     "positions",
     "risk",
