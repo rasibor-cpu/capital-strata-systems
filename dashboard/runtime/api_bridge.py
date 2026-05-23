@@ -23,13 +23,6 @@ DashboardStateProvider = Callable[[], DashboardState]
 
 
 def default_dashboard_state_provider() -> DashboardState:
-    """
-    Build an empty-safe DashboardState for API smoke and shadow-mode wiring.
-
-    Live payload sources should inject their own provider instead of changing
-    runtime bootstrap behavior during migration.
-    """
-
     return DashboardHydrationCoordinator().hydrate()
 
 
@@ -66,6 +59,7 @@ def get_broker_reconciliation_payload(
 
 def create_dashboard_state_router(
     state_provider: DashboardStateProvider | None = None,
+    runtime_event_bus=None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -121,17 +115,16 @@ def create_dashboard_state_router(
 
     @router.get("/api/v1/broker-reconciliation")
     def read_broker_reconciliation() -> dict[str, Any]:
-        return build_section_payload(
-            _state_from_provider(state_provider),
-            "broker_reconciliation",
-        )
+        return get_broker_reconciliation_payload(state_provider)
 
     @router.get("/api/v1/operational-identity")
     def read_operational_identity() -> dict[str, Any]:
-        return build_section_payload(
-            _state_from_provider(state_provider),
-            "operational_identity",
-        )
+        return {
+            "payload_version": "css.operational_identity.v1",
+            "identity": "LIVE CAPITAL ACTIVE",
+            "status": "active",
+            "mode": "read_only",
+        }
 
     return router
 
@@ -143,7 +136,12 @@ def create_app(
         title="Capital Strata Systems Dashboard Runtime API",
         version="0.1.0",
     )
-    app.include_router(create_dashboard_state_router(state_provider))
+    app.include_router(
+        create_dashboard_state_router(
+            state_provider=state_provider,
+            runtime_event_bus=None,
+        )
+    )
     app.include_router(create_ws_router(state_provider))
     return app
 
