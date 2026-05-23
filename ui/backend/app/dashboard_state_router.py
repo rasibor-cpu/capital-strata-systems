@@ -214,3 +214,13 @@ def build_shadow_dashboard_payload() -> Dict[str, Any]:
 @router.get("/dashboard-state")
 def dashboard_state() -> Dict[str, Any]:
     return build_shadow_dashboard_payload()
+
+
+@router.get("/operational-identity")
+def operational_identity() -> Dict[str, Any]:
+    return {
+        "payload_version": "css.operational_identity.v1",
+        "identity": "LIVE CAPITAL ACTIVE",
+        "status": "active",
+        "mode": "read_only",
+    }

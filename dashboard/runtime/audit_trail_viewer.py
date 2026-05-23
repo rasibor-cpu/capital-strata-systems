@@ -180,7 +180,7 @@ def _category_for_status(status: str, raw: Mapping[str, Any]) -> str:
     normalized = status.strip().upper()
     if normalized == "PAPER_TICKET_RECORDED" or normalized.endswith("_ORDER_SENT"):
         return "approval"
-    if normalized == "GLOBAL_LIVE_ORDER_KILL_SWITCH_ENGAGED":
+    if normalized in {"GLOBAL_LIVE_ORDER_KILL_SWITCH_ENGAGED", "KILL_SWITCH_ENGAGED"}:
         return "kill_switch"
     if normalized == "MOBILE_AUTHORITY_DENIED":
         return "permission_denial"
