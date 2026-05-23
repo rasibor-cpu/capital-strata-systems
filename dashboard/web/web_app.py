@@ -224,6 +224,25 @@ def _dashboard_page() -> str:
     </section>
     {_app_nav("dashboard")}
 
+    <section class="metric-band" aria-label="Pilot safety controls">
+      <article id="live-capital-banner">
+        <strong>LIVE CAPITAL ACTIVE</strong>
+        <span>Operational pilot safeguards enabled</span>
+      </article>
+      <article id="operational-identity-strip">
+        <strong>Operational Identity</strong>
+        <span>LIVE CAPITAL ACTIVE</span>
+      </article>
+      <article id="reconciliation-visibility-panel">
+        <strong>Reconciliation Visibility</strong>
+        <span>Broker reconciliation surfaced</span>
+      </article>
+      <article id="kill-switch-panel">
+        <strong>Kill Switch</strong>
+        <span>Global live-order kill switch monitored</span>
+      </article>
+    </section>
+
     <section class="metric-band" aria-label="Account overview">
       <article>
         <strong>Cash Balance</strong>

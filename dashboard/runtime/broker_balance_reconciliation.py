@@ -98,6 +98,12 @@ class BrokerReconciliationReport:
                     "css_position_count": self.css_position_count,
                     "broker_position_count": self.broker_position_count,
                 },
+                "dashboard_visibility": {
+                    "status": self.status,
+                    "escalation_level": self.escalation_level,
+                    "safe_degradation_required": self.safe_degradation_required,
+                    "recommended_runtime_mode": self.recommended_runtime_mode,
+                },
                 "css_account": self.css_account,
                 "broker_account": self.broker_account,
                 "findings": [finding.as_dict() for finding in self.findings],
