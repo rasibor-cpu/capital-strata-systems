@@ -1,105 +1,107 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from collections.abc import Mapping
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional
-
-
-@dataclass(frozen=True)
-class TradeOutcome:
-    symbol: str
-    asset_class: str = "unknown"
-    realized_pnl: float = 0.0
-    unrealized_pnl: float = 0.0
-    opened_at: Optional[str] = None
-    closed_at: Optional[str] = None
+from typing import Any
 
 
 class TradeOutcomeAnalyticsEngine:
-    """
-    Safe-mode, read-only trade outcome analytics engine.
+    """Safe-mode, deterministic trade outcome analytics.
 
-    This engine does not make execution, routing, sizing, or governance decisions.
-    It only summarizes supplied trade/position-like records for dashboard visibility.
+    This engine is read-only and computes summary metrics from closed/open trade
+    payloads without mutating execution or risk pathways.
     """
 
-    def summarize(self, trades: Optional[Iterable[Any]] = None) -> Dict[str, Any]:
+    def build(self, trades: list[Mapping[str, Any]] | None = None) -> dict[str, Any]:
         normalized = [self._normalize_trade(t) for t in (trades or [])]
-        realized = [t.realized_pnl for t in normalized]
-        winners = [p for p in realized if p > 0]
-        losers = [p for p in realized if p < 0]
 
-        gross_profit = sum(winners)
-        gross_loss = abs(sum(losers))
-        profit_factor = gross_profit / gross_loss if gross_loss > 0 else (gross_profit if gross_profit > 0 else 0.0)
+        realized = [t for t in normalized if t["is_closed"]]
+        unrealized = [t for t in normalized if not t["is_closed"]]
 
-        expectancy = sum(realized) / len(realized) if realized else 0.0
-        win_rate = len(winners) / len(realized) if realized else 0.0
+        winners = [t for t in realized if t["pnl"] > 0]
+        losers = [t for t in realized if t["pnl"] < 0]
 
-        payload = {
-            "timestamp": self._now(),
-            "trade_count": len(normalized),
-            "expectancy": round(expectancy, 6),
-            "profit_factor": round(profit_factor, 6),
-            "win_rate": round(win_rate, 6),
-            "average_winner": round(sum(winners) / len(winners), 6) if winners else 0.0,
-            "average_loser": round(sum(losers) / len(losers), 6) if losers else 0.0,
-            "gross_profit": round(gross_profit, 6),
-            "gross_loss": round(gross_loss, 6),
-            "max_drawdown": round(self._max_drawdown(realized), 6),
-            "average_duration_seconds": round(self._average_duration_seconds(normalized), 6),
-            "realized_total": round(sum(realized), 6),
-            "unrealized_total": round(sum(t.unrealized_pnl for t in normalized), 6),
-            "mode": "safe_read_only",
+        gross_profit = sum(t["pnl"] for t in winners)
+        gross_loss_abs = abs(sum(t["pnl"] for t in losers))
+
+        trade_count = len(realized)
+        win_rate = (len(winners) / trade_count) if trade_count else 0.0
+        loss_rate = (len(losers) / trade_count) if trade_count else 0.0
+
+        average_winner = (gross_profit / len(winners)) if winners else 0.0
+        average_loser = (sum(t["pnl"] for t in losers) / len(losers)) if losers else 0.0
+        expectancy = self._expectancy(win_rate, average_winner, loss_rate, average_loser)
+
+        cumulative = 0.0
+        max_equity = 0.0
+        max_drawdown = 0.0
+        for trade in realized:
+            cumulative += trade["pnl"]
+            max_equity = max(max_equity, cumulative)
+            drawdown = max_equity - cumulative
+            max_drawdown = max(max_drawdown, drawdown)
+
+        duration_minutes = [t["duration_minutes"] for t in realized if t["duration_minutes"] >= 0.0]
+
+        return {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "deterministic": True,
+            "trade_count": trade_count,
+            "winner_count": len(winners),
+            "loser_count": len(losers),
+            "win_rate": win_rate,
+            "loss_rate": loss_rate,
+            "average_winner": average_winner,
+            "average_loser": average_loser,
+            "expectancy": expectancy,
+            "gross_profit": gross_profit,
+            "gross_loss_abs": gross_loss_abs,
+            "profit_factor": (gross_profit / gross_loss_abs) if gross_loss_abs > 0 else 0.0,
+            "max_drawdown": max_drawdown,
+            "duration": {
+                "average_minutes": (sum(duration_minutes) / len(duration_minutes)) if duration_minutes else 0.0,
+                "median_minutes": self._median(duration_minutes),
+                "max_minutes": max(duration_minutes) if duration_minutes else 0.0,
+            },
+            "realized_vs_unrealized": {
+                "closed_trade_count": len(realized),
+                "open_trade_count": len(unrealized),
+                "realized_pnl": sum(t["pnl"] for t in realized),
+                "unrealized_pnl": sum(t["pnl"] for t in unrealized),
+            },
         }
-        return payload
 
-    def _normalize_trade(self, trade: Any) -> TradeOutcome:
-        if isinstance(trade, TradeOutcome):
-            return trade
-        if isinstance(trade, dict):
-            return TradeOutcome(
-                symbol=str(trade.get("symbol", "UNKNOWN")),
-                asset_class=str(trade.get("asset_class", trade.get("assetClass", "unknown"))),
-                realized_pnl=float(trade.get("realized_pnl", trade.get("realizedPnL", trade.get("pnl", 0.0))) or 0.0),
-                unrealized_pnl=float(trade.get("unrealized_pnl", trade.get("unrealizedPnL", 0.0)) or 0.0),
-                opened_at=trade.get("opened_at") or trade.get("openedAt"),
-                closed_at=trade.get("closed_at") or trade.get("closedAt"),
-            )
-        return TradeOutcome(
-            symbol=str(getattr(trade, "symbol", "UNKNOWN")),
-            asset_class=str(getattr(trade, "asset_class", "unknown")),
-            realized_pnl=float(getattr(trade, "realized_pnl", getattr(trade, "pnl", 0.0)) or 0.0),
-            unrealized_pnl=float(getattr(trade, "unrealized_pnl", 0.0) or 0.0),
-            opened_at=getattr(trade, "opened_at", None),
-            closed_at=getattr(trade, "closed_at", None),
-        )
+    @staticmethod
+    def _expectancy(win_rate: float, avg_winner: float, loss_rate: float, avg_loser: float) -> float:
+        return (win_rate * avg_winner) + (loss_rate * avg_loser)
 
-    def _max_drawdown(self, pnl_series: List[float]) -> float:
-        peak = 0.0
-        equity = 0.0
-        max_dd = 0.0
-        for pnl in pnl_series:
-            equity += pnl
-            peak = max(peak, equity)
-            max_dd = min(max_dd, equity - peak)
-        return abs(max_dd)
+    @staticmethod
+    def _median(values: list[float]) -> float:
+        if not values:
+            return 0.0
+        ordered = sorted(values)
+        mid = len(ordered) // 2
+        if len(ordered) % 2 == 1:
+            return ordered[mid]
+        return (ordered[mid - 1] + ordered[mid]) / 2.0
 
-    def _average_duration_seconds(self, trades: List[TradeOutcome]) -> float:
-        durations: List[float] = []
-        for trade in trades:
-            if not trade.opened_at or not trade.closed_at:
-                continue
+    def _normalize_trade(self, trade: Mapping[str, Any]) -> dict[str, Any]:
+        opened_at = self._to_dt(trade.get("opened_at"))
+        closed_at = self._to_dt(trade.get("closed_at"))
+        duration = (closed_at - opened_at).total_seconds() / 60.0 if (opened_at and closed_at) else -1.0
+        return {
+            "pnl": float(trade.get("pnl", 0.0)),
+            "is_closed": bool(trade.get("is_closed", trade.get("closed_at") is not None)),
+            "duration_minutes": duration,
+        }
+
+    @staticmethod
+    def _to_dt(raw: Any) -> datetime | None:
+        if isinstance(raw, datetime):
+            return raw
+        if isinstance(raw, str) and raw:
             try:
-                start = datetime.fromisoformat(str(trade.opened_at).replace("Z", "+00:00"))
-                end = datetime.fromisoformat(str(trade.closed_at).replace("Z", "+00:00"))
-                durations.append(max((end - start).total_seconds(), 0.0))
-            except Exception:
-                continue
-        return sum(durations) / len(durations) if durations else 0.0
-
-    def _now(self) -> str:
-        return datetime.now(timezone.utc).isoformat()
-
-    def to_dict(self, trade: TradeOutcome) -> Dict[str, Any]:
-        return asdict(trade)
+                return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+        return None

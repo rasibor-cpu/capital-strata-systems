@@ -9,6 +9,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
+from backend.intelligence.opportunity_scoring_engine import OpportunityScoringEngine
 from backend.scanner.unified_market_scanner import UnifiedMarketScanner
 from backend.strategies.market_regime import MarketRegimeDetector
 
@@ -39,6 +40,7 @@ class OpportunityRouter:
         )
         self.trade_threshold = trade_threshold
         self.watch_threshold = watch_threshold
+        self.opportunity_scoring_engine = OpportunityScoringEngine()
 
     def select_strategy(self, regime: str) -> str:
         regime = str(regime).upper()
@@ -84,8 +86,7 @@ class OpportunityRouter:
 
             strategy = self.select_strategy(str(regime_result.regime))
 
-            routed.append(
-                {
+            candidate_payload = {
                     "asset_class": prepared["asset_class"],
                     "symbol": prepared["symbol"],
                     "last_price": prepared["last_price"],
@@ -115,7 +116,9 @@ class OpportunityRouter:
                     "liquidity_sweep_flag": scoring_payload["liquidity_sweep_flag"],
                     "breakdown": scored.get("breakdown", {}),
                 }
-            )
+
+            candidate_payload["scoring_summary"] = self.opportunity_scoring_engine.score_opportunity(candidate_payload).to_dict()
+            routed.append(candidate_payload)
 
         routed.sort(key=lambda item: item["score"], reverse=True)
         return routed

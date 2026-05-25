@@ -118,6 +118,7 @@ def _dashboard_page() -> str:
             "execution",
             "broker",
             "opportunities",
+            "analytics",
         ]
     )
 
@@ -172,6 +173,56 @@ def _dashboard_page() -> str:
       <article id="kill-switch-panel">
         <strong>Kill Switch</strong>
         <span>Global live-order kill switch monitored</span>
+      </article>
+    </section>
+
+    <section class="metric-band" aria-label="Opportunity scoring governance">
+      <article>
+        <strong>Top Ranked</strong>
+        <span data-value="opportunities.scoring_overview.top_ranked_symbols.0">N/A</span>
+      </article>
+      <article>
+        <strong>Top Composite</strong>
+        <span data-value="opportunities.scoring_overview.top_composite_scores.0">0.00</span>
+      </article>
+      <article>
+        <strong>Best Adjusted Edge</strong>
+        <span data-value="opportunities.scoring_overview.best_adjusted_edge">0.00</span>
+      </article>
+      <article>
+        <strong>Avg Execution Quality</strong>
+        <span data-value="opportunities.scoring_overview.average_execution_quality">0.00</span>
+      </article>
+      <article>
+        <strong>Top Survivability</strong>
+        <span data-value="opportunities.scoring_overview.highest_survivability_symbols.0">N/A</span>
+      </article>
+    </section>
+
+    <section class="metric-band" aria-label="Profitability edge analytics">
+      <article>
+        <strong>Expectancy</strong>
+        <span data-value="analytics.expectancy">0.00</span>
+      </article>
+      <article>
+        <strong>Profit Factor</strong>
+        <span data-value="analytics.profit_factor">0.00</span>
+      </article>
+      <article>
+        <strong>Estimated Exec Costs</strong>
+        <span data-value="analytics.estimated_execution_cost">$0.00</span>
+      </article>
+      <article>
+        <strong>Signal Quality</strong>
+        <span data-value="analytics.signal_quality">0.00</span>
+      </article>
+      <article>
+        <strong>Current Edge Estimate</strong>
+        <span data-value="analytics.current_edge_estimate">0.00</span>
+      </article>
+      <article>
+        <strong>Drawdown State</strong>
+        <span data-value="analytics.drawdown_state">0.00</span>
       </article>
     </section>
 

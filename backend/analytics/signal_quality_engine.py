@@ -1,67 +1,49 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any
 
 
 class SignalQualityEngine:
-    """
-    Safe-mode signal quality analytics engine.
+    """Read-only signal quality analytics with no trade filtering."""
 
-    Read-only scoring/analytics layer.
-    No trade filtering or execution decisions occur here.
-    """
+    def build(self, signals: list[Mapping[str, Any]] | None = None) -> dict[str, Any]:
+        normalized = [self._normalize_signal(s) for s in (signals or [])]
+        total = len(normalized)
+        false_positives = sum(1 for s in normalized if s["is_false_positive"])
+        true_positives = total - false_positives
 
-    def evaluate(
-        self,
-        signal_strength: float = 0.0,
-        regime_alignment: float = 0.0,
-        persistence_score: float = 0.0,
-        false_positive_rate: float = 0.0,
-    ) -> Dict[str, Any]:
-
-        signal_strength = self._clamp(signal_strength)
-        regime_alignment = self._clamp(regime_alignment)
-        persistence_score = self._clamp(persistence_score)
-        false_positive_rate = self._clamp(false_positive_rate)
-
-        confidence = (
-            (signal_strength * 0.40)
-            + (regime_alignment * 0.30)
-            + (persistence_score * 0.20)
-            + ((1.0 - false_positive_rate) * 0.10)
-        )
-
-        quality_label = self._quality_label(confidence)
+        avg_score = (sum(s["score"] for s in normalized) / total) if total else 0.0
+        avg_confidence = (sum(s["confidence"] for s in normalized) / total) if total else 0.0
+        avg_regime_alignment = (
+            sum(s["regime_alignment"] for s in normalized) / total
+        ) if total else 0.0
+        avg_persistence = (sum(s["persistence"] for s in normalized) / total) if total else 0.0
 
         return {
-            "timestamp": self._now(),
-            "signal_strength": round(signal_strength, 6),
-            "regime_alignment": round(regime_alignment, 6),
-            "persistence_score": round(persistence_score, 6),
-            "false_positive_rate": round(false_positive_rate, 6),
-            "confidence_score": round(confidence, 6),
-            "quality_label": quality_label,
-            "mode": "safe_read_only",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "deterministic": True,
+            "signal_count": total,
+            "signal_score": avg_score,
+            "false_positive_count": false_positives,
+            "false_positive_rate": (false_positives / total) if total else 0.0,
+            "true_positive_rate": (true_positives / total) if total else 0.0,
+            "regime_alignment_score": avg_regime_alignment,
+            "signal_persistence_score": avg_persistence,
+            "confidence_analytics": {
+                "average_confidence": avg_confidence,
+                "min_confidence": min((s["confidence"] for s in normalized), default=0.0),
+                "max_confidence": max((s["confidence"] for s in normalized), default=0.0),
+            },
         }
 
-    def _quality_label(self, confidence: float) -> str:
-        if confidence >= 0.80:
-            return "institutional_grade"
-        if confidence >= 0.65:
-            return "high_quality"
-        if confidence >= 0.50:
-            return "moderate_quality"
-        if confidence >= 0.35:
-            return "weak_quality"
-        return "poor_quality"
-
-    def _clamp(self, value: Any) -> float:
-        try:
-            numeric = float(value)
-        except Exception:
-            numeric = 0.0
-        return max(0.0, min(1.0, numeric))
-
-    def _now(self) -> str:
-        return datetime.now(timezone.utc).isoformat()
+    @staticmethod
+    def _normalize_signal(signal: Mapping[str, Any]) -> dict[str, float | bool]:
+        return {
+            "score": float(signal.get("score", 0.0)),
+            "confidence": float(signal.get("confidence", 0.0)),
+            "regime_alignment": float(signal.get("regime_alignment", 0.0)),
+            "persistence": float(signal.get("persistence", 0.0)),
+            "is_false_positive": bool(signal.get("is_false_positive", False)),
+        }

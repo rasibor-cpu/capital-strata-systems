@@ -15,6 +15,7 @@ from dashboard.runtime.summary_builders.execution_summary_builder import (
 )
 from dashboard.runtime.summary_builders.pnl_summary_builder import PnLSummaryBuilder
 from dashboard.runtime.summary_builders.risk_summary_builder import RiskSummaryBuilder
+from dashboard.runtime.analytics_state_builder import AnalyticsStateBuilder
 from engine.instruments import frontend_supported_assets
 
 
@@ -40,6 +41,7 @@ class DashboardStateFactory:
         self.risk_summary_builder = RiskSummaryBuilder()
         self.execution_summary_builder = ExecutionSummaryBuilder()
         self.pnl_summary_builder = PnLSummaryBuilder()
+        self.analytics_state_builder = AnalyticsStateBuilder()
 
     def build(
         self,
@@ -149,6 +151,12 @@ class DashboardStateFactory:
         dashboard_state.last_scan_results["execution_summary"] = execution_summary
         dashboard_state.last_scan_results["execution_history"] = execution_history
         dashboard_state.last_scan_results["opportunities"] = opportunities
+
+        analytics_summary = self.analytics_state_builder.build(
+            execution_history=execution_history,
+            opportunities=opportunities,
+        )
+        dashboard_state.last_scan_results["analytics_summary"] = analytics_summary
 
         dashboard_state.realized_pnl = float(
             pnl_summary.get("realized_pnl", dashboard_state.realized_pnl)
