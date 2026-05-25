@@ -33,6 +33,7 @@ FRONTEND_SECTIONS = (
     "opportunities",
     "broker",
     "broker_reconciliation",
+    "analytics",
 )
 
 
@@ -117,6 +118,7 @@ def build_frontend_payload(
             "opportunities": opportunities(dashboard_payload),
             "broker": broker(dashboard_payload),
             "broker_reconciliation": broker_reconciliation(dashboard_payload),
+            "analytics": analytics(dashboard_payload),
         },
     }
 
@@ -357,21 +359,41 @@ def opportunities(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     raw_opportunities = dashboard_payload.get("opportunities", [])
     if not isinstance(raw_opportunities, list):
         raw_opportunities = []
+    items = [_opportunity_item(item) for item in raw_opportunities]
+    ranked_items = sorted(items, key=lambda row: _number(row.get("composite_score", row.get("score", 0.0))), reverse=True)
+    top = ranked_items[:3]
+    avg_execution_quality = (sum(_number(row.get("execution_quality", 0.0)) for row in items) / len(items)) if items else 0.0
+
     return {
-        "items": [_opportunity_item(item) for item in raw_opportunities],
+        "items": items,
         "count": len(raw_opportunities),
         "source": "DashboardState",
+        "scoring_overview": {
+            "top_ranked_symbols": [str(row.get("symbol", "UNKNOWN")) for row in top],
+            "top_composite_scores": [_number(row.get("composite_score", 0.0)) for row in top],
+            "best_adjusted_edge": max((_number(row.get("adjusted_edge", 0.0)) for row in items), default=0.0),
+            "average_execution_quality": avg_execution_quality,
+            "highest_survivability_symbols": [
+                str(row.get("symbol", "UNKNOWN"))
+                for row in sorted(items, key=lambda row: _number(row.get("survivability_score", 0.0)), reverse=True)[:3]
+            ],
+        },
     }
 
 
 def _opportunity_item(value: Any) -> dict[str, Any]:
     item = _mapping(value)
+    scoring_summary = _mapping(item.get("scoring_summary"))
     return {
         "symbol": str(item.get("symbol", "UNKNOWN")),
         "asset_class": str(item.get("asset_class", "UNKNOWN")),
         "side": str(item.get("side", item.get("direction", "WATCH"))),
         "signal": str(item.get("signal", item.get("signal_state", "WATCH"))),
         "score": _number(item.get("score", item.get("composite_score"))),
+        "composite_score": _number(item.get("composite_score", scoring_summary.get("total_score", 0.0))),
+        "adjusted_edge": _number(scoring_summary.get("adjusted_edge", 0.0)),
+        "execution_quality": _number(scoring_summary.get("execution_quality", 0.0)),
+        "survivability_score": _number(scoring_summary.get("survivability_score", 0.0)),
         "probability": _number(item.get("probability", item.get("prob", 0.0))),
         "status": str(item.get("status", "MONITOR_ONLY")),
         "reason": str(item.get("reason", item.get("note", ""))),
@@ -410,6 +432,19 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
 def broker_reconciliation(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     return build_broker_reconciliation_payload(dashboard_payload)
 
+
+
+def analytics(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
+    analytics_summary = _mapping(dashboard_payload.get("analytics_summary"))
+    headline = _mapping(analytics_summary.get("headline"))
+    return {
+        "expectancy": _number(headline.get("expectancy")),
+        "profit_factor": _number(headline.get("profit_factor")),
+        "estimated_execution_cost": _number(headline.get("estimated_execution_cost")),
+        "signal_quality": _number(headline.get("signal_quality")),
+        "current_edge_estimate": _number(headline.get("current_edge_estimate")),
+        "drawdown_state": _number(headline.get("drawdown_state")),
+    }
 
 def build_section_payload(
     dashboard_state: DashboardState | Mapping[str, Any] | None,
