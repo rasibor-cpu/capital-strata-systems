@@ -11,6 +11,8 @@ if str(PROJECT_ROOT) not in sys.path:
 from backend.intelligence.ai_opportunity_scorer import AIOpportunityScorer
 from backend.scanner.unified_market_scanner import UnifiedMarketScanner
 from backend.strategies.market_regime import MarketRegimeDetector
+from backend.intelligence.opportunity_normalizer import OpportunityNormalizer
+from backend.intelligence.opportunity_viability_engine import OpportunityViabilityEngine
 
 
 class OpportunityRouter:
@@ -39,6 +41,8 @@ class OpportunityRouter:
         )
         self.trade_threshold = trade_threshold
         self.watch_threshold = watch_threshold
+        self.opportunity_normalizer = OpportunityNormalizer()
+        self.opportunity_viability_engine = OpportunityViabilityEngine()
 
     def select_strategy(self, regime: str) -> str:
         regime = str(regime).upper()
@@ -84,8 +88,7 @@ class OpportunityRouter:
 
             strategy = self.select_strategy(str(regime_result.regime))
 
-            routed.append(
-                {
+            candidate = {
                     "asset_class": prepared["asset_class"],
                     "symbol": prepared["symbol"],
                     "last_price": prepared["last_price"],
@@ -115,7 +118,22 @@ class OpportunityRouter:
                     "liquidity_sweep_flag": scoring_payload["liquidity_sweep_flag"],
                     "breakdown": scored.get("breakdown", {}),
                 }
+
+            normalized = self.opportunity_normalizer.normalize_candidate(
+                candidate.get("asset_class", "generic"),
+                candidate,
             )
+            viability = self.opportunity_viability_engine.evaluate(normalized)
+            candidate["normalized_opportunity"] = normalized.to_dict()
+            candidate["viability_summary"] = {
+                "viable": viability.viable,
+                "reasons": viability.reasons,
+                "adjusted_edge": viability.adjusted_edge,
+                "risk_flags": viability.risk_flags,
+                "diagnostics": viability.diagnostics,
+            }
+
+            routed.append(candidate)
 
         routed.sort(key=lambda item: item["score"], reverse=True)
         return routed

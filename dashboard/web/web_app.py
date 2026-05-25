@@ -1127,6 +1127,22 @@ def _market_opportunities_page() -> str:
         <strong>Opportunities</strong>
         <span data-mo-value="opportunities.count">0</span>
       </article>
+      <article>
+        <strong>Normalized</strong>
+        <span id="normalized-count">0</span>
+      </article>
+      <article>
+        <strong>Viable</strong>
+        <span id="viable-count">0</span>
+      </article>
+      <article>
+        <strong>Rejected</strong>
+        <span id="rejected-count">0</span>
+      </article>
+      <article>
+        <strong>Top Edge</strong>
+        <span id="top-edge-estimate">0.0000</span>
+      </article>
     </section>
 
     <section class="market-opportunity-workspace">
@@ -1213,6 +1229,19 @@ function renderMarketOpportunitySnapshot(payload) {
   document.getElementById("mo-session").textContent = `Session ${payload.session_id || session.session_id || "pending"}`;
   document.getElementById("mo-updated").textContent = `Updated ${payload.generated_at || "pending"}`;
   document.getElementById("opportunity-count-badge").textContent = `${opportunities.count || 0} ITEMS`;
+
+  const items = opportunities.items || [];
+  const normalizedCount = items.filter((item) => item.normalized_opportunity).length;
+  const viableCount = items.filter((item) => item.viability_summary?.viable === true).length;
+  const rejectedCount = Math.max(normalizedCount - viableCount, 0);
+  const topEdge = items.reduce((best, item) => {
+    const value = Number(item.viability_summary?.adjusted_edge ?? item.normalized_opportunity?.expected_edge ?? 0);
+    return value > best ? value : best;
+  }, 0);
+  document.getElementById("normalized-count").textContent = numberValue(normalizedCount);
+  document.getElementById("viable-count").textContent = numberValue(viableCount);
+  document.getElementById("rejected-count").textContent = numberValue(rejectedCount);
+  document.getElementById("top-edge-estimate").textContent = numberValue(topEdge);
 
   document.querySelectorAll("[data-mo-value]").forEach((node) => {
     const path = node.getAttribute("data-mo-value");
