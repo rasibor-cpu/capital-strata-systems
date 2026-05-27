@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import time
+
+from backend.app.accounting.unified_pnl_state import (
+    UnifiedPnLState,
+)
 
 
 @dataclass
@@ -30,40 +34,104 @@ class PropRuntimeState:
 
     status: str = "ACTIVE"
 
+    # Phase 65B incremental integration
+    # PCNRASS-safe:
+    # - optional only
+    # - preserves existing schema/behavior
+    # - no destructive field removal
+    unified_pnl_state: Optional[
+        UnifiedPnLState
+    ] = None
+
     def total_equity(self) -> float:
+
         return float(
             self.current_balance
             + self.unrealized_pnl
         )
 
     def total_pnl(self) -> float:
+
         return float(
             self.realized_pnl
             + self.unrealized_pnl
         )
 
     def current_drawdown(self) -> float:
+
         return float(
             self.peak_balance
             - self.total_equity()
         )
 
-    def trailing_drawdown_breached(self) -> bool:
+    def trailing_drawdown_breached(
+        self,
+    ) -> bool:
+
         return (
             self.current_drawdown()
-            >= abs(self.trailing_drawdown_limit)
+            >= abs(
+                self.trailing_drawdown_limit
+            )
         )
 
-    def max_drawdown_breached(self) -> bool:
+    def max_drawdown_breached(
+        self,
+    ) -> bool:
+
         return (
             self.current_drawdown()
-            >= abs(self.max_drawdown_limit)
+            >= abs(
+                self.max_drawdown_limit
+            )
         )
 
-    def daily_loss_breached(self) -> bool:
+    def daily_loss_breached(
+        self,
+    ) -> bool:
+
         return (
             self.total_pnl()
-            <= (-1.0 * abs(self.daily_loss_limit))
+            <= (
+                -1.0
+                * abs(
+                    self.daily_loss_limit
+                )
+            )
+        )
+
+    def sync_from_unified_pnl_state(
+        self,
+    ) -> None:
+
+        if self.unified_pnl_state is None:
+            return
+
+        pnl_state = self.unified_pnl_state
+
+        self.current_balance = float(
+            pnl_state.cash_balance
+        )
+
+        self.realized_pnl = float(
+            pnl_state.realized_pnl
+        )
+
+        self.unrealized_pnl = float(
+            pnl_state.unrealized_pnl
+        )
+
+        current_equity = (
+            pnl_state.total_equity()
+        )
+
+        if current_equity > self.peak_balance:
+            self.peak_balance = float(
+                current_equity
+            )
+
+        self.updated_timestamp = (
+            time.time()
         )
 
     def update_equity(
@@ -90,11 +158,15 @@ class PropRuntimeState:
         if equity > self.peak_balance:
             self.peak_balance = equity
 
-        self.updated_timestamp = time.time()
+        self.updated_timestamp = (
+            time.time()
+        )
 
-    def governance_snapshot(self) -> Dict[str, Any]:
+    def governance_snapshot(
+        self,
+    ) -> Dict[str, Any]:
 
-        return {
+        snapshot = {
             "status": self.status,
             "evaluation_mode": (
                 self.evaluation_mode
@@ -128,11 +200,26 @@ class PropRuntimeState:
             ),
         }
 
-    def as_dict(self) -> Dict[str, Any]:
+        if self.unified_pnl_state is not None:
+
+            snapshot[
+                "unified_pnl_snapshot"
+            ] = (
+                self.unified_pnl_state
+                .governance_snapshot()
+            )
+
+        return snapshot
+
+    def as_dict(
+        self,
+    ) -> Dict[str, Any]:
+
         return asdict(self)
 
 
-def build_default_runtime_state() -> PropRuntimeState:
+def build_default_runtime_state(
+) -> PropRuntimeState:
 
     now = time.time()
 
@@ -152,6 +239,7 @@ def build_default_runtime_state() -> PropRuntimeState:
         created_timestamp=now,
         updated_timestamp=now,
         status="ACTIVE",
+        unified_pnl_state=None,
     )
 
 
