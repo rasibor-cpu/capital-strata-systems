@@ -1,0 +1,156 @@
+name: Build CSS Full AI Audit ZIP
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build_css_audit_zip.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build-audit-zip:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare clean audit package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PACKAGE_DIR="css_full_ai_audit_package"
+          ZIP_NAME="css_full_ai_audit_package.zip"
+
+          rm -rf "$PACKAGE_DIR" "$ZIP_NAME"
+          mkdir -p "$PACKAGE_DIR"
+
+          # Copy institutional audit-relevant project areas when present.
+          for path in \
+            backend \
+            dashboard \
+            scripts \
+            tests \
+            docs \
+            configs \
+            governance \
+            frontend \
+            web \
+            app \
+            .github/workflows
+          do
+            if [ -e "$path" ]; then
+              mkdir -p "$PACKAGE_DIR/$(dirname "$path")"
+              cp -R "$path" "$PACKAGE_DIR/$path"
+            fi
+          done
+
+          # Copy important root-level project files when present.
+          for file in \
+            README.md \
+            requirements.txt \
+            pyproject.toml \
+            setup.py \
+            setup.cfg \
+            package.json \
+            package-lock.json \
+            vite.config.js \
+            tsconfig.json \
+            .gitignore
+          do
+            if [ -f "$file" ]; then
+              cp "$file" "$PACKAGE_DIR/$file"
+            fi
+          done
+
+          # Add audit instruction file for Claude/Gemini/external AI.
+          cat > "$PACKAGE_DIR/AI_AUDIT_INSTRUCTIONS.md" <<'EOF'
+          # Capital Strata Systems (CSS) — Full Institutional AI Audit Instructions
+
+          Please perform a full institutional-grade audit of Capital Strata Systems (CSS).
+
+          Audit objectives:
+          1. Validate architecture coherence and institutional readiness.
+          2. Detect regressions, duplicated engines, dead modules, and conflicting sources of truth.
+          3. Validate governance gate integrity and fail-closed behavior.
+          4. Validate TradeDecisionOrchestrator/runtime separation.
+          5. Validate canonical PnL/accounting integrity, especially realized/unrealized PnL and cost handling.
+          6. Validate broker abstraction and live/paper isolation.
+          7. Validate dashboard render-only decoupling.
+          8. Validate multi-asset readiness across crypto, FX, futures, and options.
+          9. Validate scanner/universe architecture and cost-aware opportunity selection.
+          10. Identify security weaknesses, credential leakage risks, and unsafe defaults.
+
+          Required output:
+          - Executive summary
+          - Institutional readiness score
+          - Critical risks
+          - Architecture findings
+          - Governance findings
+          - Runtime/orchestrator findings
+          - PnL/accounting findings
+          - Broker/execution findings
+          - Dashboard findings
+          - Security findings
+          - Regression findings
+          - Top 10 remediation priorities
+          - Immediate implementation roadmap
+
+          Be extremely critical. Treat the system as if it is being prepared for institutional deployment.
+          EOF
+
+          # Remove secrets and credential-bearing files.
+          find "$PACKAGE_DIR" -type f \( \
+            -name '.env' -o \
+            -name '*.env' -o \
+            -name '*.pem' -o \
+            -name '*.key' -o \
+            -name '*.p12' -o \
+            -name '*.crt' -o \
+            -name '*.cer' -o \
+            -name '*secret*' -o \
+            -name '*credential*' \
+          \) -delete
+
+          # Remove cache/build/noise directories.
+          find "$PACKAGE_DIR" -type d \( \
+            -name '.git' -o \
+            -name '__pycache__' -o \
+            -name '.pytest_cache' -o \
+            -name 'node_modules' -o \
+            -name 'venv' -o \
+            -name '.venv' -o \
+            -name 'dist' -o \
+            -name 'build' -o \
+            -name 'CSS-claude' -o \
+            -name 'CSS-gemini' -o \
+            -name 'temp' -o \
+            -name 'tmp' -o \
+            -name 'backups' -o \
+            -name 'archive' \
+          \) -prune -exec rm -rf {} +
+
+          # Add manifest.
+          {
+            echo "# CSS Full AI Audit Package Manifest"
+            echo
+            echo "Generated: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo "Repository: $GITHUB_REPOSITORY"
+            echo "Commit: $GITHUB_SHA"
+            echo
+            echo "## Included Files"
+            find "$PACKAGE_DIR" -type f | sort
+          } > "$PACKAGE_DIR/AUDIT_MANIFEST.md"
+
+          zip -r "$ZIP_NAME" "$PACKAGE_DIR" >/dev/null
+
+      - name: Upload audit ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: css-full-ai-audit-package
+          path: css_full_ai_audit_package.zip
+          if-no-files-found: error
+          retention-days: 14
