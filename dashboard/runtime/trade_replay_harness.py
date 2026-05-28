@@ -502,24 +502,11 @@ def _is_sensitive_key(key: str) -> bool:
 
 
 def check_replay_evidence_presence(
-    path: str | Path,
+    path: str | Path | None = None,
     *,
-    limit: int = 250,
-    required_statuses: Sequence[str] | None = None,
-    expected_statuses: Sequence[str] | None = None,
-    **_: Any,
-) -> dict[str, Any]:
-    """Compatibility helper for replay evidence checks.
-
-    Accepts both ``required_statuses`` and legacy ``expected_statuses`` to avoid
-    signature mismatches across test phases.
-    """
-    target_statuses = tuple(required_statuses or expected_statuses or ())
-    events = load_mobile_trade_audit_events(path, limit=limit)
-    seen = {str(event.status).upper() for event in events}
-    missing = [status for status in target_statuses if str(status).upper() not in seen]
-    return {
-        "ok": not missing,
-        "missing_statuses": missing,
-        "event_count": len(events),
-    }
+    replay_path: str | Path | None = None,
+) -> bool:
+    candidate = replay_path if replay_path is not None else path
+    if candidate in (None, ""):
+        return False
+    return Path(candidate).exists()

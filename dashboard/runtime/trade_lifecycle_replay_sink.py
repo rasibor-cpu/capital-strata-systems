@@ -1,0 +1,208 @@
+from __future__ import annotations
+
+import hashlib
+import json
+from collections.abc import Iterable, Mapping
+from datetime import date, datetime, timezone
+from decimal import Decimal
+from pathlib import Path
+from typing import Any, Callable
+
+from dashboard.runtime.replay_correlation import correlation_key, create_lifecycle_id
+from dashboard.runtime.replay_event_envelope import is_replay_event_envelope
+from dashboard.runtime.runtime_event_bus import (
+    publish_shadow_runtime_event,
+    runtime_event_from_replay_persisted_record,
+)
+
+
+TRADE_LIFECYCLE_REPLAY_SINK_VERSION = "css.trade_lifecycle.replay_sink.v1"
+_SENSITIVE_KEY_PARTS = (
+    "api_key",
+    "apikey",
+    "secret",
+    "token",
+    "password",
+    "credential",
+    "private",
+    "pem",
+    "authorization",
+    "bearer",
+)
+
+
+class TradeLifecycleReplaySinkError(RuntimeError):
+    pass
+
+
+class TradeLifecycleReplaySink:
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        strict: bool = False,
+        event_publisher: Callable[[dict[str, Any]], Any] | None = None,
+        strict_event_publishing: bool = False,
+        logger: Callable[[str], None] | None = None,
+    ) -> None:
+        self.path = Path(path)
+        self.strict = strict
+        self.event_publisher = event_publisher
+        self.strict_event_publishing = strict_event_publishing
+        self.logger = logger
+
+    def record(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        record = self._build_record(payload)
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with self.path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, separators=(",", ":"), default=str) + "\n")
+        except Exception as exc:
+            if self.strict:
+                raise TradeLifecycleReplaySinkError(
+                    f"Failed to persist trade lifecycle replay event: {exc}"
+                ) from exc
+            return {
+                "ok": False,
+                "event_id": record["event_id"],
+                "path": str(self.path),
+                "error": str(exc),
+            }
+        publish_shadow_runtime_event(
+            self.event_publisher,
+            runtime_event_from_replay_persisted_record(record),
+            strict=self.strict_event_publishing,
+            logger=self.logger,
+        )
+        return {
+            "ok": True,
+            "event_id": record["event_id"],
+            "path": str(self.path),
+        }
+
+    def record_many(self, payloads: Iterable[Mapping[str, Any]]) -> tuple[dict[str, Any], ...]:
+        return tuple(self.record(payload) for payload in payloads)
+
+    def load_recent(self, limit: int = 100) -> tuple[dict[str, Any], ...]:
+        return load_trade_lifecycle_replay_events(self.path, limit=limit)
+
+    def _build_record(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        safe_payload = _json_safe(payload)
+        envelope_payload = safe_payload if is_replay_event_envelope(safe_payload) else {}
+        inner_payload = (
+            envelope_payload.get("payload")
+            if isinstance(envelope_payload.get("payload"), Mapping)
+            else {}
+        )
+        identity_payload = inner_payload if envelope_payload else safe_payload
+
+        event_type = str(
+            envelope_payload.get("event_type")
+            or identity_payload.get("event_type")
+            or "unknown_lifecycle_event"
+        )
+        event_id = str(envelope_payload.get("event_id") or safe_payload.get("event_id") or _event_id(safe_payload))
+        correlation_id = str(
+            envelope_payload.get("correlation_id")
+            or identity_payload.get("correlation_id")
+            or correlation_key(identity_payload)
+        )
+        lifecycle_id = str(
+            envelope_payload.get("lifecycle_id")
+            or identity_payload.get("lifecycle_id")
+            or create_lifecycle_id(identity_payload)
+        )
+        return {
+            "sink_payload_version": TRADE_LIFECYCLE_REPLAY_SINK_VERSION,
+            "event_id": event_id,
+            "event_type": event_type,
+            "persisted_utc": datetime.now(timezone.utc).isoformat(),
+            "schema_version": str(envelope_payload.get("schema_version", "")),
+            "correlation_id": correlation_id,
+            "lifecycle_id": lifecycle_id,
+            "subsystem": str(envelope_payload.get("subsystem") or identity_payload.get("subsystem") or ""),
+            "parent_event_id": str(envelope_payload.get("parent_event_id", "")),
+            "position_id": str(identity_payload.get("position_id", "")),
+            "symbol": str(envelope_payload.get("symbol") or identity_payload.get("symbol", "")),
+            "asset_class": str(
+                envelope_payload.get("asset_class") or identity_payload.get("asset_class", "")
+            ),
+            "mode": str(
+                envelope_payload.get("broker_mode")
+                or identity_payload.get("broker_mode")
+                or identity_payload.get("mode")
+                or "paper"
+            ),
+            "broker": str(envelope_payload.get("broker") or identity_payload.get("broker", "")),
+            "broker_mode": str(
+                envelope_payload.get("broker_mode")
+                or identity_payload.get("broker_mode")
+                or identity_payload.get("mode")
+                or ""
+            ),
+            "engine_mode": str(
+                envelope_payload.get("engine_mode") or identity_payload.get("engine_mode", "")
+            ),
+            "cycle": str(envelope_payload.get("cycle") or identity_payload.get("cycle", "")),
+            "session_id": str(identity_payload.get("session_id", "")),
+            "payload": safe_payload,
+        }
+
+
+def load_trade_lifecycle_replay_events(
+    path: str | Path,
+    *,
+    limit: int = 100,
+) -> tuple[dict[str, Any], ...]:
+    source_path = Path(path)
+    try:
+        lines = source_path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return ()
+    except Exception:
+        return ()
+
+    events: list[dict[str, Any]] = []
+    for line in reversed(lines):
+        try:
+            record = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(record, dict):
+            events.append(record)
+        if len(events) >= limit:
+            break
+    return tuple(reversed(events))
+
+
+def _event_id(payload: Mapping[str, Any]) -> str:
+    serialized = json.dumps(payload, sort_keys=True, default=str)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:20].upper()
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        safe: dict[str, Any] = {}
+        for key, item in value.items():
+            safe_key = str(key)
+            if _is_sensitive_key(safe_key):
+                safe[safe_key] = "REDACTED"
+            else:
+                safe[safe_key] = _json_safe(item)
+        return safe
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, tuple):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, Path):
+        return str(value)
+    return value
+
+
+def _is_sensitive_key(key: str) -> bool:
+    normalized = key.strip().lower()
+    return any(part in normalized for part in _SENSITIVE_KEY_PARTS)
