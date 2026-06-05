@@ -1,30 +1,54 @@
-"""In-memory acceptance storage used by Phase 1 validation services."""
-
-from __future__ import annotations
-
 from collections import defaultdict
+from typing import Protocol
 
 from backend.app.compliance.legal_acceptance import LegalAcceptanceRecord
 
 
+class LegalAcceptanceStore(Protocol):
+    def save(self, record: LegalAcceptanceRecord) -> LegalAcceptanceRecord:
+        ...
+
+    def latest_for(
+        self,
+        user_id: str,
+        acceptance_type: str,
+    ) -> LegalAcceptanceRecord | None:
+        ...
+
+    def all_for_user(self, user_id: str) -> tuple[LegalAcceptanceRecord, ...]:
+        ...
+
+
 class InMemoryLegalAcceptanceStore:
-    """Simple acceptance record authority for Phase 1."""
-
     def __init__(self) -> None:
-        self._records = defaultdict(dict)
+        self._records = defaultdict(list)
 
-    def save(self, record: LegalAcceptanceRecord) -> None:
-        self._records[record.user_id][record.acceptance_type] = record
+    def save(self, record: LegalAcceptanceRecord) -> LegalAcceptanceRecord:
+        self._records[record.user_id].append(record)
+        return record
+
+    def latest_for(
+        self,
+        user_id: str,
+        acceptance_type: str,
+    ) -> LegalAcceptanceRecord | None:
+        records = [
+            record
+            for record in self._records.get(user_id, [])
+            if record.acceptance_type == acceptance_type
+        ]
+
+        if not records:
+            return None
+
+        return max(records, key=lambda record: record.accepted_at)
+
+    def all_for_user(self, user_id: str) -> tuple[LegalAcceptanceRecord, ...]:
+        return tuple(self._records.get(user_id, ()))
 
     def get(
         self,
         user_id: str,
         acceptance_type: str,
     ) -> LegalAcceptanceRecord | None:
-        return self._records.get(user_id, {}).get(acceptance_type)
-
-    def get_all_for_user(
-        self,
-        user_id: str,
-    ) -> dict[str, LegalAcceptanceRecord]:
-        return dict(self._records.get(user_id, {}))
+        return self.latest_for(user_id, acceptance_type)

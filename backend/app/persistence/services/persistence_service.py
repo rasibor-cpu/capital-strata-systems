@@ -1,5 +1,8 @@
 from typing import Any
 
+from backend.app.persistence.repositories.legal_acceptance_repository import (
+    LegalAcceptanceRepository,
+)
 from backend.app.persistence.repositories.pnl_snapshot_repository import (
     PnlSnapshotRepository,
 )
@@ -31,6 +34,9 @@ class PersistenceService:
         self.pnl_snapshots = (
             PnlSnapshotRepository()
         )
+        self.legal_acceptances = (
+            LegalAcceptanceRepository()
+        )
 
     def healthcheck(self) -> dict[str, Any]:
         """
@@ -44,5 +50,6 @@ class PersistenceService:
                 "sessions": True,
                 "trades": True,
                 "pnl_snapshots": True,
+                "legal_acceptances": True,
             },
         }
