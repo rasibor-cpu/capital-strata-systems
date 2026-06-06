@@ -1029,3 +1029,4 @@ def _panel_line(label: str = "", value: str = "") -> str:
     content_width = CSS_AUTH_PANEL_WIDTH - 4
     text = f"{label}: {value}" if value else label
     return f"| {text[:content_width].ljust(content_width)} |"
+
