@@ -271,6 +271,36 @@ def validate_initial_password(password: str) -> None:
         )
 
 
+
+def change_authenticated_password(
+    users: Dict[str, Any],
+    user_id: str,
+    current_password: str,
+    new_password: str,
+    confirm_password: str,
+) -> Dict[str, Any]:
+    normalized_user_id = normalize_user_id(user_id)
+    user_record = users.get(normalized_user_id)
+    if not user_record:
+        raise AuthFailure("USER_NOT_FOUND", "User record not found.")
+
+    expected_hash = str(user_record.get("password_hash", "")).strip()
+    current_hash = hash_password(current_password)
+    if current_hash != expected_hash:
+        raise AuthFailure("INVALID_CURRENT_PASSWORD", "Current password is incorrect.")
+
+    if new_password != confirm_password:
+        raise PasswordValidationError("New password and confirmation do not match.")
+
+    user_ctx = change_password(users, normalized_user_id, new_password, confirm_password)
+    user_record = users[normalized_user_id]
+    user_record["must_change_password"] = False
+    clear_lockout_state(user_record, preserve_failed_attempts=False)
+    save_users(users)
+    return user_ctx
+
+
+
 def authenticate_credentials(users: Dict[str, Any], user_id: str, password: str) -> Dict[str, Any]:
     normalized_user_id = normalize_user_id(user_id)
     if not normalized_user_id:
@@ -545,6 +575,28 @@ def await_console_login(users: Optional[Dict[str, Any]] = None) -> Dict[str, Any
         try:
             user_ctx = authenticate_credentials(active_users, user_id, password)
             save_users(active_users)
+
+            # SELF_PASSWORD_RESET_CONSOLE_OPTION
+            print(_panel_line("Post Sign-On Options", "Press ENTER to continue or type P to change password."))
+            choice = input("CSS AUTH | option [ENTER/P]: ").strip().lower()
+            if choice == "p":
+                current_password = masked_password_input("CSS AUTH | current password: ").strip()
+                new_password = masked_password_input("CSS AUTH | new password: ").strip()
+                confirm_password = masked_password_input("CSS AUTH | confirm new password: ").strip()
+                try:
+                    user_ctx = change_authenticated_password(
+                        active_users,
+                        user_id,
+                        current_password,
+                        new_password,
+                        confirm_password,
+                    )
+                    save_users(active_users)
+                    render_console_auth_status("PASSWORD UPDATED", "Password changed successfully.")
+                except (AuthFailure, PasswordValidationError) as exc:
+                    save_users(active_users)
+                    render_console_auth_status("PASSWORD CHANGE FAILED", str(exc))
+
             persist_login_session(user_ctx)
             render_console_auth_status("AUTH SUCCESS", f"{user_ctx['display_name']} | role={user_ctx['role']}")
             return user_ctx
@@ -820,6 +872,101 @@ def await_gui_login(users: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         new_entry.focus_set()
         root.bind("<Return>", lambda _event: submit_change())
 
+
+    def show_post_auth_options(user_ctx: Dict[str, Any]) -> None:
+        # SELF_PASSWORD_RESET_GUI_OPTION
+        clear_content()
+        root.bind("<Return>", lambda _event: finish(user_ctx))
+
+        tk.Label(content, text="Sign On Successful", bg=colors["panel"], fg=colors["ink"], font=title_font).grid(
+            row=0, column=0, sticky="w"
+        )
+        tk.Label(
+            content,
+            text="Continue to the dashboard or change your password first.",
+            bg=colors["panel"],
+            fg=colors["muted"],
+            font=subtitle_font,
+        ).grid(row=1, column=0, sticky="w", pady=(8, 30))
+
+        button_row = tk.Frame(content, bg=colors["panel"])
+        button_row.grid(row=2, column=0, sticky="ew", pady=(10, 18))
+
+        primary_button(button_row, "Continue", lambda: finish(user_ctx)).pack(side="left")
+        secondary_button(button_row, "Change Password", lambda: show_self_password_change(user_ctx)).pack(
+            side="left", padx=(12, 0)
+        )
+
+        attach_status(3)
+        set_status("Authentication successful.", "success")
+
+    def show_self_password_change(user_ctx: Dict[str, Any]) -> None:
+        clear_content()
+
+        tk.Label(content, text="Change Password", bg=colors["panel"], fg=colors["ink"], font=title_font).grid(
+            row=0, column=0, sticky="w"
+        )
+        tk.Label(
+            content,
+            text="Enter your current password and choose a new password.",
+            bg=colors["panel"],
+            fg=colors["muted"],
+            font=subtitle_font,
+        ).grid(row=1, column=0, sticky="w", pady=(8, 22))
+
+        current_var = tk.StringVar()
+        new_var = tk.StringVar()
+        confirm_var = tk.StringVar()
+
+        tk.Label(content, text="Current Password", bg=colors["panel"], fg=colors["ink"], font=label_font).grid(
+            row=2, column=0, sticky="w"
+        )
+        current_entry = make_entry(content, current_var, show="*")
+        current_entry.grid(row=3, column=0, sticky="ew", ipady=10, pady=(6, 14))
+
+        tk.Label(content, text="New Password", bg=colors["panel"], fg=colors["ink"], font=label_font).grid(
+            row=4, column=0, sticky="w"
+        )
+        new_entry = make_entry(content, new_var, show="*")
+        new_entry.grid(row=5, column=0, sticky="ew", ipady=10, pady=(6, 14))
+
+        tk.Label(content, text="Confirm New Password", bg=colors["panel"], fg=colors["ink"], font=label_font).grid(
+            row=6, column=0, sticky="w"
+        )
+        confirm_entry = make_entry(content, confirm_var, show="*")
+        confirm_entry.grid(row=7, column=0, sticky="ew", ipady=10, pady=(6, 14))
+
+        def submit_change() -> None:
+            try:
+                updated_ctx = change_authenticated_password(
+                    active_users,
+                    str(user_ctx.get("user_id", "")),
+                    current_var.get(),
+                    new_var.get(),
+                    confirm_var.get(),
+                )
+                save_users(active_users)
+                set_status("Password changed successfully.", "success")
+                show_post_auth_options(updated_ctx)
+            except (AuthFailure, PasswordValidationError) as exc:
+                current_var.set("")
+                new_var.set("")
+                confirm_var.set("")
+                set_status(str(exc), "error")
+                current_entry.focus_set()
+
+        button_row = tk.Frame(content, bg=colors["panel"])
+        button_row.grid(row=8, column=0, sticky="ew", pady=(18, 18))
+
+        primary_button(button_row, "Update Password", submit_change).pack(side="left")
+        secondary_button(button_row, "Back", lambda: show_post_auth_options(user_ctx)).pack(side="left", padx=(12, 0))
+
+        attach_status(9)
+        set_status("Ready", "info")
+        current_entry.focus_set()
+        root.bind("<Return>", lambda _event: submit_change())
+
+
     def show_login() -> None:
         clear_content()
         root.bind("<Return>", lambda _event: submit_login())
@@ -887,7 +1034,7 @@ def await_gui_login(users: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
                 return
 
             set_status("Authentication successful.", "success")
-            finish(user_ctx)
+            show_post_auth_options(user_ctx)
 
         primary_button(button_row, "Sign On", submit_login).pack(side="left")
         secondary_button(button_row, "Exit", root.destroy).pack(side="left", padx=(12, 0))
