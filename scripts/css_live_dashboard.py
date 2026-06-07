@@ -2673,49 +2673,107 @@ def should_take_dashboard_paper_profit(pos: dict) -> bool:
 # =========================
 
 def render_trade_dashboard_summary() -> None:
-    """TRADE_DASHBOARD_SUMMARY: display-only cycle summary; no trading decisions."""
+    """TRADE_DASHBOARD_SUMMARY: dynamic display-only cycle summary; no trading decisions."""
     try:
-        open_positions = len([p for p in mtm_engine.positions if not p.get("forced_exit")])
-        open_by_asset = {
-            "CRYPTO": len([p for p in mtm_engine.positions if not p.get("forced_exit") and p.get("asset_class") == "CRYPTO"]),
-            "FX": len([p for p in mtm_engine.positions if not p.get("forced_exit") and p.get("asset_class") == "FX"]),
-            "FUTURES": len([p for p in mtm_engine.positions if not p.get("forced_exit") and p.get("asset_class") == "FUTURES"]),
-            "OPTIONS": len([p for p in mtm_engine.positions if not p.get("forced_exit") and p.get("asset_class") == "OPTIONS"]),
+        active_positions = [p for p in mtm_engine.positions if not p.get("forced_exit")]
+
+        pnl_maps = {
+            "CRYPTO": crypto_pnl,
+            "FX": fx_pnl,
+            "FUTURES": futures_pnl,
+            "OPTIONS": options_pnl,
         }
-        realized_total = (
-            sum(crypto_pnl.values())
-            + sum(fx_pnl.values())
-            + sum(options_pnl.values())
-            + sum(futures_pnl.values())
+
+        asset_classes = sorted(
+            set(pnl_maps.keys())
+            | {str(p.get("asset_class", "UNKNOWN") or "UNKNOWN") for p in active_positions}
         )
-        unrealized_total = sum(float(p.get("floating", 0.0)) for p in mtm_engine.positions if not p.get("forced_exit"))
+
+        asset_rows = []
+        realized_total = 0.0
+        floating_total = 0.0
+
+        for asset in asset_classes:
+            realized = sum(float(v) for v in pnl_maps.get(asset, {}).values())
+            floating = sum(
+                float(pos.get("floating", 0.0))
+                for pos in active_positions
+                if str(pos.get("asset_class", "UNKNOWN") or "UNKNOWN") == asset
+            )
+            count = sum(
+                1
+                for pos in active_positions
+                if str(pos.get("asset_class", "UNKNOWN") or "UNKNOWN") == asset
+            )
+            total = realized + floating
+            realized_total += realized
+            floating_total += floating
+            asset_rows.append((asset, count, realized, floating, total))
+
+        position_limit = globals().get("adaptive_position_limit", None)
+        if position_limit is None:
+            position_limit = globals().get("ADAPTIVE_POSITION_LIMIT", None)
+        if position_limit is None:
+            position_limit = globals().get("MAX_PAPER_OPEN_POSITIONS", "N/A")
+
+        tracker_value = globals().get("tracker_equity", None)
+        if tracker_value is None:
+            tracker_value = globals().get("TRACKER_EQUITY", None)
+
+        peak_value = globals().get("peak_equity", None)
+        if peak_value is None:
+            peak_value = globals().get("PEAK_EQUITY", None)
+
+        drawdown_value = globals().get("drawdown_pct", None)
+        if drawdown_value is None:
+            drawdown_value = globals().get("DRAWDOWN_PCT", None)
+
         ledger_exists = CLOSED_TRADE_LEDGER_PATH.exists() if "CLOSED_TRADE_LEDGER_PATH" in globals() else False
 
-        print("\n=== TRADE DASHBOARD SUMMARY ===")
+        print("")
+        print("=== TRADE DASHBOARD SUMMARY ===")
         print(f"Cycle: {globals().get('cycle', 'N/A')}")
         print(f"Engine Mode: {globals().get('ENGINE_MODE', 'N/A')}")
         print(f"Broker: {globals().get('SELECTED_BROKER', 'N/A')}")
         print(f"Broker Mode: {globals().get('SELECTED_BROKER_MODE', 'N/A')}")
-        print(f"Open Positions: {open_positions} / {globals().get('ADAPTIVE_POSITION_LIMIT', 'N/A')}")
-        print(
-            "Open by Asset: "
-            f"CRYPTO {open_by_asset['CRYPTO']} | "
-            f"FX {open_by_asset['FX']} | "
-            f"FUTURES {open_by_asset['FUTURES']} | "
-            f"OPTIONS {open_by_asset['OPTIONS']}"
-        )
-        print(f"Realized PnL: {realized_total:+.4f}")
-        print(f"Unrealized PnL: {unrealized_total:+.4f}")
-        print(f"Total Equity PnL: {(realized_total + unrealized_total):+.4f}")
-        print(f"Tracker Equity: {globals().get('tracker_equity', 'N/A')}")
-        print(f"Peak Equity: {globals().get('peak_equity', 'N/A')}")
-        print(f"Drawdown: {globals().get('drawdown_pct', 'N/A')}")
+        print(f"Open Positions: {len(active_positions)} / {position_limit}")
+
+        print("")
+        print("=== OPEN POSITIONS BY ASSET CLASS ===")
+        for asset, count, _realized, _floating, _total in asset_rows:
+            print(f"{asset:<10} {count}")
+        print(f"{'TOTAL':<10} {len(active_positions)}")
+        print("=== END OPEN POSITIONS BY ASSET CLASS ===")
+
+        print("")
+        print("=== PNL BY ASSET CLASS ===")
+        for asset, _count, realized, floating, total in asset_rows:
+            print(f"{asset:<10} Realized {realized:+.4f} | Floating {floating:+.4f} | Total {total:+.4f}")
+        print("--------------------------------")
+        print(f"{'TOTAL':<10} Realized {realized_total:+.4f} | Floating {floating_total:+.4f} | Total {(realized_total + floating_total):+.4f}")
+        print("=== END PNL BY ASSET CLASS ===")
+
+        print("")
+        if tracker_value is None:
+            print("Tracker Equity: N/A")
+        else:
+            print(f"Tracker Equity: {float(tracker_value):+.4f}")
+
+        if peak_value is None:
+            print("Peak Equity: N/A")
+        else:
+            print(f"Peak Equity: {float(peak_value):+.4f}")
+
+        if drawdown_value is None:
+            print("Drawdown: N/A")
+        else:
+            print(f"Drawdown: {float(drawdown_value):.4f}%")
+
         print(f"Last Trade: {globals().get('last_trade', 'NONE')}")
         print(f"Closed Trade Ledger: {'YES' if ledger_exists else 'NO'}")
         print("=== END TRADE DASHBOARD SUMMARY ===\n")
     except Exception as exc:
         print(f"[TRADE_DASHBOARD_SUMMARY WARN] {exc}")
-
 
 
 def r17_execute_exit(pos, observer_symbol, observer_price, reason):
