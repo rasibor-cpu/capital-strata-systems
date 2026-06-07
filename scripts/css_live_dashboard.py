@@ -541,6 +541,9 @@ MAX_PAPER_OPEN_POSITIONS = 10
 
 PAPER_PROFIT_TARGET_FLOATING = 0.25
 PAPER_PROFIT_TARGET_MIN_AGE_CYCLES = 2
+
+CLOSED_TRADE_LEDGER_PATH = Path("audit_logs") / "closed_trades.jsonl"
+CLOSED_TRADE_LEDGER_MARKER = "CLOSED_TRADE_LEDGER"
 MAX_OPEN_PER_CYCLE = 8
 DEFENSIVE_REDUCTION_PER_CYCLE = 2
 
@@ -2624,6 +2627,34 @@ def pnl_dict_for_asset(asset_class: str) -> dict:
 
 
 
+
+def append_closed_trade_ledger(pos: dict, reason: str, realized: float) -> None:
+    """CLOSED_TRADE_LEDGER: append one durable JSONL record for dashboard paper exits."""
+    try:
+        CLOSED_TRADE_LEDGER_PATH.parent.mkdir(parents=True, exist_ok=True)
+        ctx = globals().get("SESSION_USER_CTX") or {}
+        record = {
+            "marker": CLOSED_TRADE_LEDGER_MARKER,
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "symbol": str(pos.get("symbol", "")),
+            "asset_class": str(pos.get("asset_class", "")),
+            "exit_reason": str(reason),
+            "realized_pnl": float(realized),
+            "floating_at_exit": float(pos.get("floating", 0.0)),
+            "engine_mode": str(globals().get("ENGINE_MODE", "")),
+            "broker_mode": str(globals().get("SELECTED_BROKER_MODE", "")),
+            "selected_broker": str(globals().get("SELECTED_BROKER", "")),
+            "cycle": int(globals().get("cycle", 0) or 0),
+            "session_id": str(ctx.get("session_id", "")),
+            "user_id": str(ctx.get("user_id", "")),
+        }
+        with CLOSED_TRADE_LEDGER_PATH.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, sort_keys=True) + "\\n")
+    except Exception as exc:
+        print(f"[CLOSED_TRADE_LEDGER WARN] {exc}")
+
+
+
 def should_take_dashboard_paper_profit(pos: dict) -> bool:
     if str(GLOBAL_BROKER_MODE).strip().lower() == "live":
         return False
@@ -2679,6 +2710,7 @@ def book_position_exit(pos: dict, reason: str) -> None:
         return
 
     realized = round(pos["floating"], 4)
+    append_closed_trade_ledger(pos, reason, realized)
 
     # === TRACKER UPDATE ===
     try:
