@@ -538,6 +538,9 @@ SESSION_IDLE_TIMEOUT_SECONDS = int(os.getenv("CSS_SESSION_IDLE_TIMEOUT_SECONDS",
 SESSION_MAX_SECONDS = int(os.getenv("CSS_SESSION_MAX_SECONDS", "28800") or 28800)
 
 MAX_PAPER_OPEN_POSITIONS = 10
+
+PAPER_PROFIT_TARGET_FLOATING = 0.25
+PAPER_PROFIT_TARGET_MIN_AGE_CYCLES = 2
 MAX_OPEN_PER_CYCLE = 8
 DEFENSIVE_REDUCTION_PER_CYCLE = 2
 
@@ -2620,6 +2623,20 @@ def pnl_dict_for_asset(asset_class: str) -> dict:
 
 
 
+
+def should_take_dashboard_paper_profit(pos: dict) -> bool:
+    if str(GLOBAL_BROKER_MODE).strip().lower() == "live":
+        return False
+    if str(SELECTED_BROKER_MODE).strip().lower() == "live":
+        return False
+    if pos.get("forced_exit"):
+        return False
+    if int(pos.get("age_cycles", 0)) < PAPER_PROFIT_TARGET_MIN_AGE_CYCLES:
+        return False
+    return float(pos.get("floating", 0.0)) > PAPER_PROFIT_TARGET_FLOATING
+
+
+
 # =========================
 # R17 EXIT EXECUTION LAYER
 # =========================
@@ -2923,6 +2940,14 @@ try:
             observer_symbol = f"{pos['position_id']}::{pos['symbol']}"
             observer_price = 100.0 + float(pos["floating"])
             pnl_observer.update_market_price(observer_symbol, observer_price)
+
+            if should_take_dashboard_paper_profit(pos):
+                print(
+                    f"[R17 PAPER EXIT] asset={pos.get('asset_class', 'UNKNOWN')} "
+                    f"reason=profit_target floating={float(pos.get('floating', 0.0)):+.4f}"
+                )
+                r17_execute_exit(pos, observer_symbol, observer_price, "TAKE_PROFIT")
+                continue
 
             # =========================
             
