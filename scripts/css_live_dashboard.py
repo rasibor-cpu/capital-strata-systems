@@ -60,6 +60,15 @@ def css_profitability_allows(symbol: str, asset_class: str, sig: float, prob: fl
     probability = float(prob or 0.0)
     threshold = css_profitability_threshold(ENGINE_MODE)
 
+    # R14F asset-aware tuning:
+    # Preserve the base mode threshold for FUTURES/OPTIONS.
+    # Slightly relax FX/CRYPTO so near-miss opportunities can enter controlled testing.
+    asset_key = str(asset_class or "").upper()
+    if asset_key == "CRYPTO":
+        threshold -= 0.30
+    elif asset_key == "FX":
+        threshold -= 0.90
+
     composite = signal_score + (probability * 5.0)
 
     if composite < threshold:
@@ -1929,6 +1938,8 @@ def pcnrass_activate_capital_source() -> None:
             )
 
     # === R11 CAPITAL HARD LOCK ===
+pcnrass_activate_capital_source()
+
 if str(SELECTED_BROKER_MODE).lower() == "live":
     real_balance = float(getattr(capital_governor, "real_balance", 0.0) or 0.0)
 
@@ -1952,7 +1963,6 @@ print(
 
 
 enforce_mode_dominance()
-pcnrass_activate_capital_source()
 enforce_execution_boundary()
 
 
