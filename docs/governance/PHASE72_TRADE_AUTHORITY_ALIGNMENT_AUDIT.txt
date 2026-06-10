@@ -1,0 +1,61 @@
+PHASE 72 – TRADE AUTHORITY ALIGNMENT AUDIT
+
+Objective:
+Trace the full CSS execution approval path from opportunity generation to broker routing.
+
+Target Path:
+Opportunity Engine
+    →
+R14F Pre-Position Profitability Screen
+    →
+CSSUnifiedTradeGate
+    →
+Execution Router
+    →
+Broker Adapter
+
+Questions:
+1. Where is the trade candidate created?
+2. Where is R14F called?
+3. Where is CSSUnifiedTradeGate called?
+4. What fields are passed into CSSUnifiedTradeGate?
+5. Does CSSUnifiedTradeGate block before broker routing?
+6. Does any execution path bypass CSSUnifiedTradeGate?
+7. Which component is the final authority before broker execution?
+
+Known Findings:
+- R14F is active in scripts/css_live_dashboard.py.
+- R14F blocks using signal_score + probability composite.
+- CSSUnifiedTradeGate is active in backend/governance/css_unified_trade_gate.py.
+- CSSUnifiedTradeGate checks session, role, position limits, prop governor, cost < expected_value, and probability threshold.
+- ProfitabilityGuard is instantiated but not proven active.
+
+Deliverable:
+Single authority map showing:
+- every approval gate,
+- every blocker,
+- every execution handoff,
+- and whether any bypass exists.
+PHASE 72 FINDING – PORTFOLIO RISK GOVERNOR
+
+Search Target:
+PortfolioRiskGovernor
+
+Result:
+PortfolioRiskGovernor appears only in:
+- backend\engine\css_trading_engine_before_range_upgrade.py
+- backend\risk\portfolio_risk_governor.py
+
+Interpretation:
+This appears to be an older engine-local risk authority tied to a before_range_upgrade engine file.
+
+Current runtime authority is not proven.
+
+Governance Classification:
+PortfolioRiskGovernor should be classified as LEGACY or SUPPORT unless future tracing proves it is active in the current execution path.
+
+Current Authority Map:
+- R14F: Active pre-position profitability screen
+- CSSUnifiedTradeGate: Active canonical backend approval gate
+- PortfolioRiskGovernor: Legacy / older engine-local risk authority
+- ProfitabilityGuard: Dormant / unproven active authority
