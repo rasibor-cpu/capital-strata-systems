@@ -1,0 +1,77 @@
+CSS PROFITABILITY / TRADE GATE AUTHORITY ALIGNMENT
+
+FINDING:
+CSS currently has multiple profitability and trade approval surfaces.
+
+1. R14F PRE-POSITION PROFITABILITY GATE
+Location:
+scripts/css_live_dashboard.py
+
+Function:
+css_profitability_allows()
+
+Role:
+Dashboard-side pre-position profitability screen.
+
+Formula:
+composite = signal_score + (probability * 5.0)
+
+Authority Level:
+Pre-position screen / early blocker.
+
+Governance Status:
+Active.
+
+2. CSS UNIFIED TRADE GATE
+Location:
+backend/governance/css_unified_trade_gate.py
+
+Class:
+CSSUnifiedTradeGate
+
+Function:
+approve_trade()
+
+Role:
+Backend governance approval gate.
+
+Checks:
+- candidate validation
+- session validation
+- role validation
+- portfolio state availability
+- asset-class position limits
+- prop trading governor
+- cost < expected_value
+- probability >= engine-mode threshold
+
+Authority Level:
+Canonical backend execution approval gate.
+
+Governance Status:
+Active.
+
+3. PROFITABILITY GUARD
+Location:
+backend/intelligence/profitability_guard.py
+
+Role:
+Legacy or dormant profitability component.
+
+Evidence:
+Imported and instantiated in backend/intelligence/trade_decision_orchestrator.py.
+No active call proven during this audit.
+
+Authority Level:
+Dormant until integrated or retired.
+
+GOVERNANCE CONCLUSION:
+R14F should be treated as an early pre-position profitability screen.
+CSSUnifiedTradeGate should be treated as the canonical backend execution approval gate.
+ProfitabilityGuard should not be treated as active authority until runtime invocation is proven.
+
+RECOMMENDED NEXT TASK:
+Create a formal Codex task to align comments, naming, and tests so that:
+- R14F is documented as pre-position screening.
+- CSSUnifiedTradeGate is documented as canonical backend execution approval.
+- ProfitabilityGuard is either integrated, renamed as legacy, or retired.
