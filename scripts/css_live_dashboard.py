@@ -3221,17 +3221,23 @@ try:
 
         try:
             pnl_tracker.current_equity = authoritative_live_equity
-            pnl_tracker.peak_equity = max(
-                float(getattr(pnl_tracker, "peak_equity", pnl_tracker.starting_equity)),
-                authoritative_live_equity,
-            )
-            if float(getattr(pnl_tracker, "peak_equity", 0.0)) > 0:
-                pnl_tracker.max_drawdown = max(
-                    float(getattr(pnl_tracker, "max_drawdown", 0.0)),
-                    (
-                        float(pnl_tracker.peak_equity) - authoritative_live_equity
-                    ) / float(pnl_tracker.peak_equity),
+
+            if str(SELECTED_BROKER_MODE).lower() == "live" and authoritative_live_equity > 0:
+                pnl_tracker.starting_equity = authoritative_live_equity
+                pnl_tracker.peak_equity = authoritative_live_equity
+                pnl_tracker.max_drawdown = 0.0
+            else:
+                pnl_tracker.peak_equity = max(
+                    float(getattr(pnl_tracker, "peak_equity", pnl_tracker.starting_equity)),
+                    authoritative_live_equity,
                 )
+                if float(getattr(pnl_tracker, "peak_equity", 0.0)) > 0:
+                    pnl_tracker.max_drawdown = max(
+                        float(getattr(pnl_tracker, "max_drawdown", 0.0)),
+                        (
+                            float(pnl_tracker.peak_equity) - authoritative_live_equity
+                        ) / float(pnl_tracker.peak_equity),
+                    )
         except Exception as e:
             print(f"[TRACKER ALIGN WARN] {e}")
 
