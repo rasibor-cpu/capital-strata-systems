@@ -1,0 +1,35 @@
+PHASE 73 – EXECUTION AUTHORITY TRACE
+
+Objective:
+Trace the approval-to-execution path after CSSUnifiedTradeGate.
+
+Target Path:
+CSSUnifiedTradeGate
+    →
+Execution Router
+    →
+Capital Governor
+    →
+Broker Adapter
+    →
+Order Submission
+
+Questions:
+1. Which component receives the approved trade after CSSUnifiedTradeGate?
+2. Which execution router is used?
+3. Does any path bypass CSSUnifiedTradeGate?
+4. What is the final authority before broker submission?
+5. Are paper and live execution using the same governance chain?
+6. Where is live execution blocked if real balance or RBAC fails?
+7. Where are broker-mode and engine-mode enforced?
+
+Known Prior Findings:
+- R14F is active pre-position profitability screen.
+- CSSUnifiedTradeGate is canonical backend approval gate.
+- ProfitabilityGuard is dormant or unproven active.
+- PortfolioRiskGovernor appears legacy/pre-range-upgrade.
+- Coinbase live balance bootstrap is repaired.
+- Tracker rebase to authoritative equity is repaired.
+
+Deliverable:
+A single execution authority map showing every approval, blocker, routing point, and broker handoff.
