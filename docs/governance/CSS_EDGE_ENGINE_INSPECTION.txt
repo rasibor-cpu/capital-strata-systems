@@ -1,0 +1,147 @@
+CSS EDGE / PROFITABILITY INSPECTION
+==================================
+
+KEY FINDINGS
+
+1. PROFITABILITY GATE EXISTS
+----------------------------
+backend/intelligence/profitability_gate.py
+
+Contains:
+- gross_edge_bps
+- total_cost
+- net_edge_bps
+- pass_profitability_gate
+
+Current logic:
+
+net_edge = gross_edge - total_cost
+
+passed = net_edge >= self.min_net_edge
+
+This appears to be a primary profitability control.
+
+
+2. ANTI-BLEED GUARD EXISTS
+--------------------------
+backend/app/risk/anti_bleed_guard.py
+
+Contains:
+
+net_edge_bps = expected_move_bps - total_cost_bps
+
+Rejects:
+
+insufficient_net_edge
+
+Current threshold:
+
+minimum_required_net_edge_bps
+
+
+3. EXECUTION COST ENGINE EXISTS
+-------------------------------
+backend/execution/execution_cost_engine.py
+
+Calculates:
+
+- spread
+- slippage
+- fees
+- net_edge
+- viability
+
+Output:
+
+{
+    "expected_edge",
+    "net_edge",
+    "viable"
+}
+
+
+4. EDGE ENGINE EXISTS
+---------------------
+backend/intelligence/edge_engine.py
+
+Produces:
+
+gross_edge_bps
+
+Then:
+
+net_edge_bps = gross_edge_bps - cost_bps
+
+Returns:
+
+net_edge_bps
+
+
+5. COST REALITY ENGINE EXISTS
+-----------------------------
+backend/analytics/cost_reality_engine.py
+
+Produces:
+
+cost_adjusted_profitability
+net_edge_estimate
+
+Used by:
+
+dashboard/runtime/analytics_state_builder.py
+
+Current dashboard feed:
+
+current_edge_estimate
+
+
+6. RISK OF DUPLICATION
+----------------------
+Potential overlapping authorities:
+
+backend/intelligence/profitability_gate.py
+
+backend/app/risk/anti_bleed_guard.py
+
+backend/intelligence/edge_engine.py
+
+backend/execution/execution_cost_engine.py
+
+backend/analytics/cost_reality_engine.py
+
+Need governance review to determine:
+
+A. Canonical Edge Authority
+B. Canonical Cost Authority
+C. Canonical Profitability Authority
+
+
+7. NEXT AUDIT TARGET
+--------------------
+Search for:
+
+ProfitabilityGuard
+R14F
+CSSUnifiedTradeGate
+pass_profitability_gate
+net_edge_bps
+
+Goal:
+
+Determine which gate is the FINAL authority before order execution.
+
+
+PRELIMINARY CONCLUSION
+======================
+
+CSS already contains:
+
+- Edge Engine
+- Profitability Gate
+- Anti-Bleed Guard
+- Execution Cost Engine
+- Cost Reality Engine
+
+The remaining task is NOT creating profitability logic.
+
+The remaining task is identifying which profitability authority is actually used by the live execution path.

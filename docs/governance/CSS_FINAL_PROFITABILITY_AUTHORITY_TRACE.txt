@@ -1,0 +1,46 @@
+TRACE TARGETS
+=============
+
+Search for:
+
+ProfitabilityGuard(
+ProfitabilityGate(
+AntiBleedGuard(
+pass_profitability_gate
+net_edge_bps
+CSSUnifiedTradeGate(
+R14F
+
+OBJECTIVE
+=========
+
+Identify:
+
+1. Which profitability engine is instantiated.
+
+2. Which profitability engine is called by the runtime.
+
+3. Which profitability result can block execution.
+
+4. Which profitability result reaches order placement.
+
+5. Whether multiple profitability authorities exist.
+
+FINAL OUTPUT
+============
+
+Canonical Profitability Authority:
+
+_____________________
+
+Execution Blocking Authority:
+
+_____________________
+
+R14F Status:
+
+_____________________
+
+Duplicate Authorities:
+
+_____________________

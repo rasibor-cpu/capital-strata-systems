@@ -1,0 +1,17 @@
+CSS Repository Cleanup Session
+
+Completed:
+- Removed temporary investigation files
+- Removed broker backup artifacts
+- Removed dashboard backup artifacts
+- Removed Coinbase repair scripts
+- Removed transient trace files
+- Consolidated profitability authority findings under docs/governance
+
+Governance Findings:
+- R14F is active runtime profitability blocker
+- ProfitabilityGuard instantiated but not proven active
+- Coinbase balance bootstrap repaired
+- Dashboard tracker aligned to authoritative equity
+
+Repository now reduced to governance, audit, evidence and recovery artifacts only.
