@@ -1,0 +1,44 @@
+PHASE 75 – LIVE BROKER AUTHORITY AUDIT
+
+Objective:
+Trace live broker authority from broker adapter to capital governor, real balance, RBAC, and live execution lock.
+
+Target Path:
+Broker Adapter
+    →
+RealBalanceEngine
+    →
+Capital Governor
+    →
+RBAC Enforcement
+    →
+Live Execution Lock
+    →
+Order Submission
+
+Questions:
+1. Which Coinbase adapter is active?
+2. Which OANDA adapter is active?
+3. Where is real balance loaded?
+4. Where does CapitalGovernor block live execution?
+5. Where does RBAC block live execution?
+6. Does live broker mode differ from live order execution?
+7. Can any live broker path bypass real balance, RBAC, or capital lock?
+8. Are Coinbase and OANDA governed consistently?
+
+Known Prior Findings:
+- R14F is active pre-position profitability screen.
+- CSSUnifiedTradeGate is active canonical approval gate.
+- approve_trade_before_register() is active dashboard enforcement bridge.
+- CoinbaseAdapter.place_market_buy() is active execution surface.
+- PortfolioRiskGovernor is legacy.
+- css_trading_engine_before_range_upgrade.py is legacy.
+- coinbase_executor.create_order() is legacy or unproven active.
+
+Deliverable:
+Single live broker authority map showing:
+- active broker adapters,
+- real balance authority,
+- capital lock,
+- RBAC lock,
+- and final live execution blockers.
