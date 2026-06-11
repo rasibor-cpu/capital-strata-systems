@@ -68,14 +68,41 @@ Required Proof:
 
 ### 5. OANDA Real Balance Load
 
-Status: BUILT NOT TESTED
+Status: TEST FAILED
 
-Required Proof:
-- Start dashboard.
-- Select OANDA.
-- Select live mode only if valid live credentials exist.
-- Confirm RealBalanceEngine calls OANDA account summary.
-- Confirm live capital is blocked if no real balance loads.
+Evidence:
+- OANDA selected in LIVE mode.
+- OANDA live endpoint used: https://api-fxtrade.oanda.com
+- RealBalanceEngine returned:
+  source=OANDA_SUMMARY_NOT_OK
+- Loaded balance: $0.00
+- Loaded equity: $0.00
+- LIVE CAPITAL WARNING triggered.
+- LIVE CAPITAL BLOCKED triggered.
+- SYSTEM HALT triggered.
+- Live trading correctly prevented because no valid real balance was loaded.
+
+Conclusion:
+- OANDA live balance retrieval failed.
+- CSS live-capital protection operated correctly. ### 5. OANDA Real Balance Load
+
+Status: TEST FAILED
+
+Evidence:
+- OANDA selected in LIVE mode.
+- OANDA live endpoint used: https://api-fxtrade.oanda.com
+- RealBalanceEngine returned:
+  source=OANDA_SUMMARY_NOT_OK
+- Loaded balance: $0.00
+- Loaded equity: $0.00
+- LIVE CAPITAL WARNING triggered.
+- LIVE CAPITAL BLOCKED triggered.
+- SYSTEM HALT triggered.
+- Live trading correctly prevented because no valid real balance was loaded.
+
+Conclusion:
+- OANDA live balance retrieval failed.
+- CSS live-capital protection operated correctly.
 
 ### 6. FX Opportunity Visibility
 
