@@ -179,6 +179,46 @@ from typing import Any, Optional
 
 from dotenv import load_dotenv
 
+OPTION_GREEK_FIELDS = ("delta", "gamma", "theta", "vega", "rho")
+VALID_GREEKS_SOURCES = {"BROKER", "MARKET_DATA", "BLACK_SCHOLES", "UNKNOWN"}
+
+
+def default_option_greeks() -> dict[str, Any]:
+    return {
+        "delta": None,
+        "gamma": None,
+        "theta": None,
+        "vega": None,
+        "rho": None,
+        "greeks_source": "UNKNOWN",
+    }
+
+
+def normalize_option_greeks(greeks: dict[str, Any] | None = None) -> dict[str, Any]:
+    raw = greeks or {}
+    source = str(raw.get("greeks_source", "UNKNOWN") or "UNKNOWN").upper()
+    if source not in VALID_GREEKS_SOURCES:
+        source = "UNKNOWN"
+
+    normalized = default_option_greeks()
+    normalized["greeks_source"] = source
+
+    if source == "UNKNOWN":
+        return normalized
+
+    for field in OPTION_GREEK_FIELDS:
+        normalized[field] = raw.get(field)
+    return normalized
+
+
+def attach_default_greeks_to_option_position(position: dict[str, Any]) -> dict[str, Any]:
+    if str(position.get("asset_class", "")).upper() != "OPTIONS":
+        return position
+
+    position.update(normalize_option_greeks(position))
+    return position
+
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -2489,6 +2529,7 @@ class MarkToMarketEngine:
             "session_id": SESSION_USER_CTX.get("session_id"),
         }
 
+        attach_default_greeks_to_option_position(position)
         self.positions.append(position)
         return position
 
@@ -2658,8 +2699,13 @@ def append_closed_trade_ledger(pos: dict, reason: str, realized: float) -> None:
             "session_id": str(ctx.get("session_id", "")),
             "user_id": str(ctx.get("user_id", "")),
         }
+        if str(pos.get("asset_class", "")).upper() == "OPTIONS" and any(
+            key in pos for key in (*OPTION_GREEK_FIELDS, "greeks_source")
+        ):
+            record.update(normalize_option_greeks(pos))
+
         with CLOSED_TRADE_LEDGER_PATH.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, sort_keys=True) + "\\n")
+            fh.write(json.dumps(record, sort_keys=True) + "\n")
     except Exception as exc:
         print(f"[CLOSED_TRADE_LEDGER WARN] {exc}")
 
