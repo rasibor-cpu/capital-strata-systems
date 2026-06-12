@@ -181,6 +181,13 @@ from dotenv import load_dotenv
 
 OPTION_GREEK_FIELDS = ("delta", "gamma", "theta", "vega", "rho")
 VALID_GREEKS_SOURCES = {"BROKER", "MARKET_DATA", "BLACK_SCHOLES", "UNKNOWN"}
+PORTFOLIO_GREEK_FIELDS = {
+    "delta": "net_delta",
+    "gamma": "net_gamma",
+    "theta": "net_theta",
+    "vega": "net_vega",
+    "rho": "net_rho",
+}
 
 
 def default_option_greeks() -> dict[str, Any]:
@@ -217,6 +224,49 @@ def attach_default_greeks_to_option_position(position: dict[str, Any]) -> dict[s
 
     position.update(normalize_option_greeks(position))
     return position
+
+
+def portfolio_greeks_from_positions(positions: list[dict[str, Any]] | None) -> dict[str, Any]:
+    totals = {field: 0.0 for field in OPTION_GREEK_FIELDS}
+    has_numeric = {field: False for field in OPTION_GREEK_FIELDS}
+    contributing_sources: set[str] = set()
+
+    for position in positions or []:
+        if str(position.get("asset_class", "")).upper() != "OPTIONS":
+            continue
+        if position.get("forced_exit"):
+            continue
+
+        source = str(position.get("greeks_source", "UNKNOWN") or "UNKNOWN").upper()
+        if source not in VALID_GREEKS_SOURCES:
+            source = "UNKNOWN"
+
+        position_contributed = False
+        for field in OPTION_GREEK_FIELDS:
+            value = position.get(field)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                continue
+
+            totals[field] += float(value)
+            has_numeric[field] = True
+            position_contributed = True
+
+        if position_contributed:
+            contributing_sources.add(source)
+
+    portfolio = {
+        net_field: (totals[field] if has_numeric[field] else None)
+        for field, net_field in PORTFOLIO_GREEK_FIELDS.items()
+    }
+
+    if not any(has_numeric.values()):
+        portfolio["greeks_source"] = "UNKNOWN"
+    elif len(contributing_sources) > 1:
+        portfolio["greeks_source"] = "MIXED"
+    else:
+        portfolio["greeks_source"] = next(iter(contributing_sources), "UNKNOWN")
+
+    return portfolio
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
