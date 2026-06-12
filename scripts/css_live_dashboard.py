@@ -269,6 +269,66 @@ def portfolio_greeks_from_positions(positions: list[dict[str, Any]] | None) -> d
     return portfolio
 
 
+def format_greeks_dashboard_value(value: Any) -> str:
+    if isinstance(value, bool) or value is None:
+        return "UNKNOWN"
+    if isinstance(value, (int, float)):
+        return f"{float(value):.4f}"
+    text = str(value).strip()
+    return text if text else "UNKNOWN"
+
+
+def option_position_greeks_dashboard_lines(positions: list[dict[str, Any]] | None) -> list[str]:
+    lines = ["=== OPTIONS POSITION GREEKS ==="]
+    options_positions = [
+        position
+        for position in positions or []
+        if str(position.get("asset_class", "")).upper() == "OPTIONS"
+        and not position.get("forced_exit")
+    ]
+
+    if not options_positions:
+        lines.append("No open OPTIONS positions.")
+        lines.append("=== END OPTIONS POSITION GREEKS ===")
+        return lines
+
+    for position in options_positions:
+        source = str(position.get("greeks_source", "UNKNOWN") or "UNKNOWN").upper()
+        if source not in VALID_GREEKS_SOURCES:
+            source = "UNKNOWN"
+
+        lines.append(
+            f"{position.get('position_id', 'UNKNOWN')} {position.get('symbol', 'UNKNOWN')} | "
+            f"Delta {format_greeks_dashboard_value(position.get('delta'))} | "
+            f"Gamma {format_greeks_dashboard_value(position.get('gamma'))} | "
+            f"Theta {format_greeks_dashboard_value(position.get('theta'))} | "
+            f"Vega {format_greeks_dashboard_value(position.get('vega'))} | "
+            f"Rho {format_greeks_dashboard_value(position.get('rho'))} | "
+            f"Greeks Source {source}"
+        )
+
+    lines.append("=== END OPTIONS POSITION GREEKS ===")
+    return lines
+
+
+def portfolio_greeks_dashboard_lines(positions: list[dict[str, Any]] | None) -> list[str]:
+    portfolio = portfolio_greeks_from_positions(positions)
+    source = str(portfolio.get("greeks_source", "UNKNOWN") or "UNKNOWN").upper()
+
+    return [
+        "=== PORTFOLIO GREEKS ===",
+        (
+            f"Net Delta {format_greeks_dashboard_value(portfolio.get('net_delta'))} | "
+            f"Net Gamma {format_greeks_dashboard_value(portfolio.get('net_gamma'))} | "
+            f"Net Theta {format_greeks_dashboard_value(portfolio.get('net_theta'))} | "
+            f"Net Vega {format_greeks_dashboard_value(portfolio.get('net_vega'))} | "
+            f"Net Rho {format_greeks_dashboard_value(portfolio.get('net_rho'))} | "
+            f"Greeks Source {source}"
+        ),
+        "=== END PORTFOLIO GREEKS ===",
+    ]
+
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -2858,6 +2918,14 @@ def render_trade_dashboard_summary() -> None:
         print("--------------------------------")
         print(f"{'TOTAL':<10} Realized {realized_total:+.4f} | Floating {floating_total:+.4f} | Total {(realized_total + floating_total):+.4f}")
         print("=== END PNL BY ASSET CLASS ===")
+
+        print("")
+        for line in option_position_greeks_dashboard_lines(active_positions):
+            print(line)
+
+        print("")
+        for line in portfolio_greeks_dashboard_lines(active_positions):
+            print(line)
 
         print("")
         if tracker_value is None:
