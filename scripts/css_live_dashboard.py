@@ -188,6 +188,22 @@ PORTFOLIO_GREEK_FIELDS = {
     "vega": "net_vega",
     "rho": "net_rho",
 }
+SUPPORTED_OPTIONS_STRATEGIES = {"LONG_CALL", "LONG_PUT", "UNKNOWN_OPTIONS_STRATEGY"}
+FUTURE_OPTIONS_STRATEGY_PLACEHOLDERS = {
+    "COVERED_CALL",
+    "CASH_SECURED_PUT",
+    "BULL_CALL_SPREAD",
+    "BEAR_CALL_SPREAD",
+    "BULL_PUT_SPREAD",
+    "BEAR_PUT_SPREAD",
+    "IRON_CONDOR",
+    "IRON_BUTTERFLY",
+    "STRADDLE",
+    "STRANGLE",
+    "CALENDAR_SPREAD",
+    "DIAGONAL_SPREAD",
+}
+OPTION_STRATEGY_FIELDS = ("options_strategy", "strategy_family", "strategy_confidence")
 
 
 def default_option_greeks() -> dict[str, Any]:
@@ -223,6 +239,58 @@ def attach_default_greeks_to_option_position(position: dict[str, Any]) -> dict[s
         return position
 
     position.update(normalize_option_greeks(position))
+    return position
+
+
+def parse_option_symbol(symbol: str) -> dict[str, Any]:
+    parts = str(symbol or "").strip().upper().split("-")
+    if len(parts) < 2:
+        return {"underlying": None, "option_type": None, "strike": None}
+
+    option_type = parts[1]
+    if option_type not in {"C", "P"}:
+        option_type = None
+
+    return {
+        "underlying": parts[0] or None,
+        "option_type": option_type,
+        "strike": parts[2] if len(parts) >= 3 and parts[2] else None,
+    }
+
+
+def classify_option_strategy(position_or_symbol: dict[str, Any] | str) -> dict[str, str]:
+    symbol = (
+        position_or_symbol.get("symbol", "")
+        if isinstance(position_or_symbol, dict)
+        else position_or_symbol
+    )
+    parsed = parse_option_symbol(str(symbol))
+
+    if parsed["option_type"] == "C":
+        return {
+            "options_strategy": "LONG_CALL",
+            "strategy_family": "SINGLE_LEG",
+            "strategy_confidence": "HIGH",
+        }
+    if parsed["option_type"] == "P":
+        return {
+            "options_strategy": "LONG_PUT",
+            "strategy_family": "SINGLE_LEG",
+            "strategy_confidence": "HIGH",
+        }
+
+    return {
+        "options_strategy": "UNKNOWN_OPTIONS_STRATEGY",
+        "strategy_family": "UNKNOWN",
+        "strategy_confidence": "LOW",
+    }
+
+
+def attach_option_strategy_to_position(position: dict[str, Any]) -> dict[str, Any]:
+    if str(position.get("asset_class", "")).upper() != "OPTIONS":
+        return position
+
+    position.update(classify_option_strategy(position))
     return position
 
 
@@ -2640,6 +2708,9 @@ class MarkToMarketEngine:
         }
 
         attach_default_greeks_to_option_position(position)
+        strategy_attacher = globals().get("attach_option_strategy_to_position")
+        if callable(strategy_attacher):
+            strategy_attacher(position)
         self.positions.append(position)
         return position
 
@@ -2813,6 +2884,10 @@ def append_closed_trade_ledger(pos: dict, reason: str, realized: float) -> None:
             key in pos for key in (*OPTION_GREEK_FIELDS, "greeks_source")
         ):
             record.update(normalize_option_greeks(pos))
+        if str(pos.get("asset_class", "")).upper() == "OPTIONS":
+            for key in globals().get("OPTION_STRATEGY_FIELDS", ()):
+                if key in pos:
+                    record[key] = str(pos.get(key, ""))
 
         with CLOSED_TRADE_LEDGER_PATH.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, sort_keys=True) + "\n")
