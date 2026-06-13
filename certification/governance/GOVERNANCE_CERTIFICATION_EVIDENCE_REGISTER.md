@@ -42,6 +42,7 @@ This register does not certify live trading. It records evidence availability an
 | LEGAL-001 | Legal approval for production operation scope | Pending evidence attachment | NOT_STARTED | No signed legal approval artifact is attached in this certification package. |
 | LEGAL-002 | Risk acceptance for controlled paper operation | Pending evidence attachment | NOT_STARTED | Existing governance documents support controlled paper readiness, but formal acceptance evidence remains pending. |
 | LEGAL-003 | Risk acceptance for live broker access | Pending evidence attachment | NOT_STARTED | Live broker access certification requires explicit approval and retained evidence. |
+| LEGAL-004 | Legal acceptance import remediation evidence | `docs/governance/ARP_005_COMPLIANCE_IMPORT_REMEDIATION_REPORT.md` | CAPTURED | ARP-005 captures remediation of the compliance circular import while preserving legal acceptance controls; Robert review remains required. |
 | LEGAL-004 | Production onboarding approval | Pending evidence attachment | NOT_STARTED | Phase 100C and Phase 101A state production onboarding remains blocked until certification gaps close. |
 
 Governance note: Existing CSS governance artifacts consistently state capital preservation, deterministic governance, fail-safe operation, and risk-before-profit principles. Formal legal and risk acceptance attachments are still required before institutional production certification.

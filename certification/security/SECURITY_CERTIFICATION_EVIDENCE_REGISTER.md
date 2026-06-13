@@ -67,6 +67,7 @@ This register does not certify production security readiness. It records securit
 | SEC-RBAC-004 | Permission denial audit evidence | `engine/security/access_control.py`; `engine/security/audit_log.py` | REFERENCED | Denial audit paths are referenced; retained denial evidence remains pending. |
 | SEC-RBAC-005 | Legal/risk acceptance control evidence | `certification/governance/GOVERNANCE_CERTIFICATION_EVIDENCE_REGISTER.md` | CAPTURED | Governance register identifies legal and risk acceptance evidence as pending before production certification. |
 | SEC-RBAC-006 | Live-toggle RBAC remediation evidence | `docs/governance/ARP_002B_LIVE_TOGGLE_RBAC_REMEDIATION_REPORT.md`; `tests/test_live_toggle_rbac.py` | CAPTURED | ARP-002B captures replacement of hardcoded user ID live-toggle authorization with fail-closed RBAC/permission checks; Robert review remains required. |
+| SEC-RBAC-007 | Legal acceptance import remediation evidence | `docs/governance/ARP_005_COMPLIANCE_IMPORT_REMEDIATION_REPORT.md`; `tests/test_security_phase_alpha.py`; `tests/governance/test_phase1_legal_acceptance_implementation.py` | CAPTURED | ARP-005 captures remediation of the compliance circular import while preserving legal acceptance controls; Robert review remains required. |
 
 ## 7. Credential Protection Evidence
 

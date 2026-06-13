@@ -24,9 +24,17 @@ from backend.app.compliance.legal_acceptance_versions import (
     REQUIRED_ACCEPTANCE_TYPES,
     TRADING_RISK_DISCLOSURE,
 )
-from backend.app.persistence.repositories.legal_acceptance_repository import (
-    LegalAcceptanceRepository,
-)
+
+
+def __getattr__(name: str):
+    if name == "LegalAcceptanceRepository":
+        from backend.app.persistence.repositories.legal_acceptance_repository import (
+            LegalAcceptanceRepository,
+        )
+
+        return LegalAcceptanceRepository
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     "AcceptanceBlockReason",
