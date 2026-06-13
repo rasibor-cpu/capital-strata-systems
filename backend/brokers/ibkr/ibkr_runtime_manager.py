@@ -1,4 +1,4 @@
-﻿from typing import Any
+from typing import Any
 
 from backend.brokers.ibkr.ibkr_adapter import IBKRAdapter
 from backend.app.persistence.services.broker_reconciliation_service import BrokerReconciliationService

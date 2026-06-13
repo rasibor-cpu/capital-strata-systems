@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from backend.intelligence.regime_intelligence_engine import (
     RegimeDecision,
