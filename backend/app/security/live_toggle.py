@@ -20,6 +20,7 @@ from typing import Any, Mapping
 
 from backend.app.observability.audit_context import require_audit_user
 from backend.app.observability.logger import get_logger, with_trace
+from backend.app.ops.live_arm import live_armed
 
 log = get_logger("security.live_toggle")
 
@@ -137,12 +138,23 @@ def require_live_allowed(
             role,
             reason,
         )
-        raise PermissionError("LIVE_EXECUTION_DENIED")
+        raise PermissionError(f"LIVE_EXECUTION_DENIED:{reason}")
+
+    arm_decision = live_armed()
+    if not arm_decision.armed:
+        adapter.critical(
+            "LIVE_ARM_DENIED | user_id=%s | role=%s | reason=%s",
+            user_id,
+            role,
+            arm_decision.reason,
+        )
+        raise PermissionError(f"LIVE_EXECUTION_DENIED:{arm_decision.reason}")
 
     adapter.critical(
-        "LIVE_EXECUTION_ARMED | user_id=%s | role=%s | reason=%s | at_utc=%s",
+        "LIVE_EXECUTION_ARMED | user_id=%s | role=%s | auth_reason=%s | arm_reason=%s | at_utc=%s",
         user_id,
         role,
         reason,
+        arm_decision.reason,
         time.time(),
     )

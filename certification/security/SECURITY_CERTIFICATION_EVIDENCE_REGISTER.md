@@ -119,6 +119,7 @@ This register does not certify production security readiness. It records securit
 | SEC-LIVE-004 | Paper/live separation security evidence | Pending evidence attachment | NOT_STARTED | Controlled paper run must confirm no live order placement. |
 | SEC-LIVE-005 | Live mode approval gate evidence | Pending evidence attachment | NOT_STARTED | Live mode must not be used without explicit authorization and retained approval evidence. |
 | SEC-LIVE-006 | Live-toggle hardcoded identity removal evidence | `docs/governance/ARP_002B_LIVE_TOGGLE_RBAC_REMEDIATION_REPORT.md`; `tests/test_live_toggle_rbac.py` | CAPTURED | Evidence shows user ID `1369` is no longer required for authorization and does not grant authorization without role/permission authority. |
+| SEC-LIVE-007 | Two-key live arm enforcement evidence | `docs/governance/ARP_002C_LIVE_ARM_REMEDIATION_REPORT.md`; `tests/test_live_toggle_rbac.py` | CAPTURED | ARP-002C captures `live_arm` integration into `require_live_allowed(...)`; Robert review remains required before approval. |
 
 ## 12. Security Monitoring Considerations
 

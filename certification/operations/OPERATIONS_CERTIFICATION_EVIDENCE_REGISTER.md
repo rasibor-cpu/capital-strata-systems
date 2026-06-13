@@ -74,6 +74,7 @@ This register does not certify production operations. It records operational evi
 | OPS-LIVE-003 | Live broker read-only evidence | Pending evidence attachment | NOT_STARTED | OANDA and Coinbase live-read evidence remains pending. |
 | OPS-LIVE-004 | Live execution blocking evidence | Pending evidence attachment | NOT_STARTED | Unauthorized live execution must be blocked and evidenced. |
 | OPS-LIVE-005 | Production onboarding approval evidence | Pending evidence attachment | NOT_STARTED | Phase 100C and Phase 101A state production onboarding remains blocked. |
+| OPS-LIVE-006 | Two-key live arm operational enforcement evidence | `docs/governance/ARP_002C_LIVE_ARM_REMEDIATION_REPORT.md`; `tests/test_live_toggle_rbac.py` | CAPTURED | ARP-002C captures `REA_LIVE_ARM` and `REA_CONFIRM_LIVE` enforcement in the live authorization boundary; Robert review remains required. |
 
 ## 8. Monitoring Operations Evidence
 
