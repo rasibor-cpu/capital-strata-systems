@@ -34,6 +34,7 @@ This register does not certify live trading. It records evidence availability an
 | GOV-090B | Institutional registry engine | `docs/governance/PHASE90B_INSTITUTIONAL_REGISTRY_ENGINE.md` | Captured | Existing governance reference for registry discipline and canonical institutional organization. |
 | GOV-095 | Institutional margin governance framework | `docs/governance/PHASE95_INSTITUTIONAL_MARGIN_GOVERNANCE_FRAMEWORK.md` | Captured | Defines margin governance principles referenced by certification readiness. |
 | GOV-096A | Margin architecture definition | `docs/governance/PHASE96A_MARGIN_ARCHITECTURE_DEFINITION.md` | Captured | Defines institutional margin architecture concepts referenced by later evidence. |
+| GOV-ARP-009 | Post-remediation audit closure package | `docs/governance/ARP_009_POST_REMEDIATION_AUDIT_CLOSURE_REPORT.md`; `docs/governance/ARP_009_AUDIT_CLOSURE_MATRIX.md` | CAPTURED | Maps original audit findings to verification, remediation, evidence, and current closure status. Robert review remains required. |
 
 ## 4. Legal / Risk Acceptance Evidence
 
