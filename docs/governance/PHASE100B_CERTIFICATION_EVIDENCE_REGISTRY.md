@@ -94,6 +94,7 @@ Evidence records may be stored as governance tables, certification package files
 | TEST-INTEGRATION | Test Evidence | Integration test evidence across connected components. | `tests/` and runtime validation scripts | Run integration tests and retain output. | Developer Reviewer | NOT_STARTED | TBD | Retain through certification cycle and release archive. |
 | TEST-REGRESSION | Test Evidence | Regression test evidence for prior certified behavior. | Full or approved regression suite | Run regression suite and retain output. | Developer Reviewer | NOT_STARTED | TBD | Retain through certification cycle and release archive. |
 | TEST-RUNTIME | Test Evidence | Runtime validation evidence from controlled CSS run. | Runtime logs, screenshots, terminal output | Execute approved runtime validation and retain logs/screenshots. | Operational Reviewer | NOT_STARTED | TBD | Retain through certification cycle and release archive. |
+| TEST-ARP-008 | Test Evidence | Controlled remediation evidence package for parse/BOM, compile, safety, security, governance, margin, and risk tests. | `certification/testing/ARP_008_CONTROLLED_EVIDENCE/`; `docs/governance/ARP_008_CONTROLLED_EVIDENCE_CAPTURE_REPORT.md` | Review retained evidence outputs and ARP-008 summary. | Developer Reviewer | CAPTURED | 2026-06-13 | Retain through certification cycle and release archive. |
 
 Required test evidence includes:
 

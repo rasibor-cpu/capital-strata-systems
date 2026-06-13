@@ -65,6 +65,7 @@ Certification note: Existing governance materials describe a mature margin stack
 | MARGIN-CAPITAL-004 | Margin-dependent exposure control evidence | Pending evidence attachment | NOT_STARTED | Missing broker margin data must block new margin-dependent exposure when enforcement applies. |
 | MARGIN-CAPITAL-005 | Unknown live margin fail-closed evidence | Pending evidence attachment | NOT_STARTED | Phase 95 and Phase 101A require unknown live margin state to fail closed where enforcement applies. |
 | MARGIN-CAPITAL-006 | MarginTradeGate enforcement remediation evidence | `docs/governance/ARP_002D_MARGINTRADEGATE_REMEDIATION_REPORT.md`; `tests/test_margin_trade_gate_enforcement_integration.py` | CAPTURED | ARP-002D captures pre-execution margin enforcement and fail-closed missing/unknown margin behavior in `ExecutionGate`; Robert review remains required. |
+| MARGIN-CAPITAL-007 | ARP-008 controlled MarginTradeGate evidence | `certification/testing/ARP_008_CONTROLLED_EVIDENCE/06_margin_trade_gate_tests.txt`; `certification/testing/ARP_008_CONTROLLED_EVIDENCE/ARP_008_EVIDENCE_SUMMARY.md` | CAPTURED | Controlled evidence captures passing MarginTradeGate unit and enforcement integration tests; Robert review remains required. |
 
 ## 6. Asset-Class Margin Considerations
 
