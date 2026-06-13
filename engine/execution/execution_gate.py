@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import math
 from typing import Any, Dict, Optional
 
 
@@ -24,13 +25,15 @@ class ExecutionGate:
       preventing runtime crashes like: unexpected keyword argument 'instrument'
     """
 
-    def __init__(self) -> None:
+    def __init__(self, anti_bleed_guard: Optional[Any] = None) -> None:
         # Imports live here to avoid import-order traps during tooling runs
+        from backend.app.risk.anti_bleed_guard import AntiBleedGuard
         from engine.capital.compounding_engine import CompoundingEngine
         from engine.risk.drawdown_scaler import DrawdownScaler
         from engine.risk.risk_governor import RiskGovernor
         from engine.risk.volatility_position_sizer import VolatilityPositionSizer
 
+        self.anti_bleed_guard = anti_bleed_guard or AntiBleedGuard()
         self.compounding = CompoundingEngine()
         self.drawdown_scaler = DrawdownScaler()
         self.risk_governor = RiskGovernor()
@@ -142,27 +145,153 @@ class ExecutionGate:
             debug["riskgov_error"] = str(e)
             return {"ok": False, "reason": "riskgov_exception"}
 
+    def _evaluate_anti_bleed(
+        self,
+        *,
+        instrument: Any,
+        side: Any,
+        notional: Any,
+        expected_move_bps: Any,
+        fee_bps: Any,
+        spread_bps: Any,
+        slippage_bps: Any,
+    ) -> Dict[str, Any]:
+        required = {
+            "instrument": instrument,
+            "side": side,
+            "notional": notional,
+            "expected_move_bps": expected_move_bps,
+            "fee_bps": fee_bps,
+            "spread_bps": spread_bps,
+            "slippage_bps": slippage_bps,
+        }
+
+        for name, value in required.items():
+            if value is None:
+                return {
+                    "approved": False,
+                    "reason": f"missing_anti_bleed_input:{name}",
+                    "control": "AntiBleedGuard",
+                }
+            if name in {"instrument", "side"} and not str(value).strip():
+                return {
+                    "approved": False,
+                    "reason": f"missing_anti_bleed_input:{name}",
+                    "control": "AntiBleedGuard",
+                }
+
+        numeric: Dict[str, float] = {}
+        for name in (
+            "notional",
+            "expected_move_bps",
+            "fee_bps",
+            "spread_bps",
+            "slippage_bps",
+        ):
+            try:
+                number = float(required[name])
+            except (TypeError, ValueError):
+                return {
+                    "approved": False,
+                    "reason": f"invalid_anti_bleed_input:{name}",
+                    "control": "AntiBleedGuard",
+                }
+
+            if not math.isfinite(number):
+                return {
+                    "approved": False,
+                    "reason": f"invalid_anti_bleed_input:{name}",
+                    "control": "AntiBleedGuard",
+                }
+
+            numeric[name] = number
+
+        if numeric["notional"] <= 0.0:
+            return {
+                "approved": False,
+                "reason": "invalid_anti_bleed_input:notional",
+                "control": "AntiBleedGuard",
+            }
+
+        for name in ("expected_move_bps", "fee_bps", "spread_bps", "slippage_bps"):
+            if numeric[name] < 0.0:
+                return {
+                    "approved": False,
+                    "reason": f"invalid_anti_bleed_input:{name}",
+                    "control": "AntiBleedGuard",
+                }
+
+        try:
+            decision = self.anti_bleed_guard.evaluate(
+                symbol=str(instrument),
+                side=str(side),
+                trade_size=numeric["notional"],
+                expected_move_bps=numeric["expected_move_bps"],
+                fee_bps=numeric["fee_bps"],
+                spread_bps=numeric["spread_bps"],
+                slippage_bps=numeric["slippage_bps"],
+            )
+        except Exception as exc:
+            return {
+                "approved": False,
+                "reason": "anti_bleed_guard_exception",
+                "control": "AntiBleedGuard",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+
+        if not isinstance(decision, dict):
+            return {
+                "approved": False,
+                "reason": "invalid_anti_bleed_guard_response",
+                "control": "AntiBleedGuard",
+            }
+
+        decision.setdefault("control", "AntiBleedGuard")
+        return decision
+
     # -----------------------------
     # Public API (matches your signature)
     # -----------------------------
     def evaluate_trade(
         self,
         *,
-        instrument: str,
-        side: str,
-        notional: float,
-        stop_distance_pct: float,
-        equity: float,
-        equity_peak: float,
-        regime_persistence: float,
+        instrument: str = "",
+        side: Optional[str] = None,
+        notional: Optional[float] = None,
+        stop_distance_pct: Optional[float] = None,
+        equity: Optional[float] = None,
+        equity_peak: Optional[float] = None,
+        regime_persistence: Optional[float] = None,
         policy: str = "core",
         current_allocations: Optional[Dict[str, float]] = None,
         rebalance_target_weights: Optional[Dict[str, float]] = None,
         volatility_state: str = "MEDIUM",
         regime_state: str = "NORMAL",
+        expected_move_bps: Optional[float] = None,
+        fee_bps: Optional[float] = None,
+        spread_bps: Optional[float] = None,
+        slippage_bps: Optional[float] = None,
     ) -> Dict[str, Any]:
         debug: Dict[str, Any] = {}
         try:
+            anti_bleed_decision = self._evaluate_anti_bleed(
+                instrument=instrument,
+                side=side,
+                notional=notional,
+                expected_move_bps=expected_move_bps,
+                fee_bps=fee_bps,
+                spread_bps=spread_bps,
+                slippage_bps=slippage_bps,
+            )
+            debug["anti_bleed_guard"] = anti_bleed_decision
+
+            if not bool(anti_bleed_decision.get("approved", False)):
+                return {
+                    "decision": {"final": "BLOCK"},
+                    "reason": f"anti_bleed_guard:{anti_bleed_decision.get('reason', 'rejected')}",
+                    "debug": debug,
+                }
+
             # 1) Compounding layer risk%
             risk_pct = float(
                 self.compounding.compute_dynamic_risk(

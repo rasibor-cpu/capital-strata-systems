@@ -63,6 +63,9 @@ MAX_R_PER_BAR = _env_float("CSS_MAX_R_PER_BAR", 3.0)
 
 # Baseline sizing proxy for stress tests (override via env, e.g. 0.07 / 0.08 / 0.09)
 BASELINE_NOTIONAL_PCT = _env_float("CSS_BASELINE_NOTIONAL_PCT", 0.08)
+ANTI_BLEED_FEE_BPS = _env_float("CSS_ANTI_BLEED_FEE_BPS", 1.0)
+ANTI_BLEED_SPREAD_BPS = _env_float("CSS_ANTI_BLEED_SPREAD_BPS", 1.0)
+ANTI_BLEED_SLIPPAGE_BPS = _env_float("CSS_ANTI_BLEED_SLIPPAGE_BPS", 1.0)
 
 # Correlation window (rolling returns length)
 CORR_WINDOW = int(_env_float("CSS_CORR_WINDOW", 50))
@@ -353,6 +356,10 @@ class EngineLoop:
             equity=equity,
             equity_peak=self.equity_peak,
             regime_persistence=float(DEFAULT_REGIME_PERSISTENCE),
+            expected_move_bps=signal_strength * 100.0,
+            fee_bps=float(ANTI_BLEED_FEE_BPS),
+            spread_bps=float(ANTI_BLEED_SPREAD_BPS),
+            slippage_bps=float(ANTI_BLEED_SLIPPAGE_BPS),
         )
 
         if str(decision.get("decision", {}).get("final", "")).upper() != "ALLOW":

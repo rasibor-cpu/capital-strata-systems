@@ -260,6 +260,26 @@ def run_headless(req: Dict[str, Any], cfg: Optional[HeadlessConfig] = None) -> D
         if req.get("stop_distance_pct") is not None
         else (_env_float("TRADE_STOP_DISTANCE_PCT") or None)
     )
+    expected_move_bps = (
+        _as_float(req.get("expected_move_bps"), 0.0)
+        if req.get("expected_move_bps") is not None
+        else (_env_float("TRADE_EXPECTED_MOVE_BPS") or None)
+    )
+    fee_bps = (
+        _as_float(req.get("fee_bps"), 0.0)
+        if req.get("fee_bps") is not None
+        else (_env_float("TRADE_FEE_BPS") or None)
+    )
+    spread_bps = (
+        _as_float(req.get("spread_bps"), 0.0)
+        if req.get("spread_bps") is not None
+        else (_env_float("TRADE_SPREAD_BPS") or None)
+    )
+    slippage_bps = (
+        _as_float(req.get("slippage_bps"), 0.0)
+        if req.get("slippage_bps") is not None
+        else (_env_float("TRADE_SLIPPAGE_BPS") or None)
+    )
 
     try:
         gate_decision = gate.evaluate_trade(
@@ -269,6 +289,10 @@ def run_headless(req: Dict[str, Any], cfg: Optional[HeadlessConfig] = None) -> D
             stop_distance_pct=stop_distance_pct,
             equity=float(equity),
             equity_peak=float(equity_peak),
+            expected_move_bps=expected_move_bps,
+            fee_bps=fee_bps,
+            spread_bps=spread_bps,
+            slippage_bps=slippage_bps,
         )
     except Exception as e:
         return {

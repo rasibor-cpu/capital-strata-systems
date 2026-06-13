@@ -29,9 +29,10 @@ for i in range(1, 40):
         notional=10000,
         stop_distance_pct=0.01,
         regime_persistence=0.8,
-        vol_ratio=1.0,
+        expected_move_bps=80.0,
+        fee_bps=1.0,
         spread_bps=1.0,
-        high_risk_news=False,
+        slippage_bps=1.0,
         equity=equity,
         equity_peak=peak,
     )

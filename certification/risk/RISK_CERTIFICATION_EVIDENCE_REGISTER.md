@@ -44,6 +44,7 @@ This register does not certify live trading. It records what evidence exists, wh
 | RISK-GATE-003 | Margin decision interaction review | `docs/governance/PHASE100A_INSTITUTIONAL_CERTIFICATION_FRAMEWORK.md`; `docs/governance/PHASE100C_PRODUCTION_READINESS_AUDIT.md` | CAPTURED | Existing governance identifies CSSUnifiedTradeGate and margin decision interaction as a remaining review item. |
 | RISK-GATE-004 | No bypass of broker controls or capital governor | Pending evidence attachment | NOT_STARTED | Phase 101A requires evidence that margin enforcement does not bypass CSSUnifiedTradeGate, broker controls, or capital governor. |
 | RISK-GATE-005 | Full trade permission path evidence | Pending evidence attachment | NOT_STARTED | End-to-end certification run evidence remains pending. |
+| RISK-GATE-006 | AntiBleedGuard execution integration remediation | `docs/governance/ARP_002A_ANTIBLEEDGUARD_REMEDIATION_REPORT.md`; `tests/test_antibleed_guard_integration.py` | CAPTURED | ARP-002A captures AntiBleedGuard integration into `ExecutionGate`; Robert review remains required before certification approval. |
 
 ## 5. RBAC Risk Control Evidence
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from engine.execution.execution_gate import ExecutionGate
+from backend.app.risk.anti_bleed_guard import AntiBleedGuard
 from engine.risk.risk_governor import RiskGovernor
 
 
@@ -169,8 +170,13 @@ def test_allow_trade_applies_context_that_validate_trade_expects_upstream() -> N
     assert validate_result["recommended_notional"] == 5000.0
 
 
-def test_execution_gate_marks_precomputed_risk_governor_path() -> None:
-    result = ExecutionGate().evaluate_trade(
+def test_execution_gate_marks_precomputed_risk_governor_path(tmp_path) -> None:
+    guard = AntiBleedGuard(
+        cooldown_minutes=0,
+        state_file=str(tmp_path / "anti_bleed_state.json"),
+    )
+
+    result = ExecutionGate(anti_bleed_guard=guard).evaluate_trade(
         instrument="EUR_USD",
         side="BUY",
         notional=100.0,
@@ -178,7 +184,12 @@ def test_execution_gate_marks_precomputed_risk_governor_path() -> None:
         equity=10000.0,
         equity_peak=10000.0,
         regime_persistence=1.0,
+        expected_move_bps=80.0,
+        fee_bps=1.0,
+        spread_bps=1.0,
+        slippage_bps=1.0,
     )
 
+    assert result["debug"]["anti_bleed_guard"]["approved"] is True
     assert result["debug"]["riskgov_path"] == "validate_trade_precomputed_risk_pct"
     assert "governor_response" in result["debug"]
