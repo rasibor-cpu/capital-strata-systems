@@ -21,6 +21,10 @@ def _load_dashboard_display_helpers(tmp_path=None, positions=None):
         "format_greeks_dashboard_value",
         "option_position_greeks_dashboard_lines",
         "portfolio_greeks_dashboard_lines",
+        "_format_margin_dashboard_value",
+        "_margin_dashboard_mode_is_live",
+        "_margin_dashboard_adapter_for_context",
+        "margin_dashboard_lines",
         "render_trade_dashboard_summary",
     }
 

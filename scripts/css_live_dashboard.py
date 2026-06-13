@@ -397,6 +397,94 @@ def portfolio_greeks_dashboard_lines(positions: list[dict[str, Any]] | None) -> 
     ]
 
 
+def _format_margin_dashboard_value(value: Any, suffix: str = "") -> str:
+    try:
+        return f"{float(value):.2f}{suffix}"
+    except Exception:
+        return f"UNKNOWN{suffix}"
+
+
+def _margin_dashboard_mode_is_live(broker_mode: str) -> bool:
+    return str(broker_mode or "").strip().lower() == "live"
+
+
+def _margin_dashboard_adapter_for_context(
+    selected_broker: str,
+    broker_mode: str,
+):
+    from engine.risk.coinbase_margin_adapter import CoinbaseMarginAdapter
+    from engine.risk.oanda_margin_adapter import OandaMarginAdapter
+
+    broker = str(selected_broker or "NONE").strip().upper()
+    mode = "LIVE" if _margin_dashboard_mode_is_live(broker_mode) else "SIMULATED"
+
+    if broker == "OANDA":
+        return OandaMarginAdapter(mode=mode), "OANDA"
+    if broker == "COINBASE":
+        return CoinbaseMarginAdapter(mode=mode), "COINBASE"
+
+    return CoinbaseMarginAdapter(mode="SIMULATED"), broker or "NONE"
+
+
+def margin_dashboard_lines(
+    selected_broker: str | None = None,
+    selected_broker_mode: str | None = None,
+) -> list[str]:
+    try:
+        from engine.risk.margin_engine import MarginEngine
+        from engine.risk.margin_trade_gate import MarginTradeGate
+
+        broker = str(
+            selected_broker
+            if selected_broker is not None
+            else globals().get("SELECTED_BROKER", "NONE")
+        ).strip().upper()
+        broker_mode = str(
+            selected_broker_mode
+            if selected_broker_mode is not None
+            else globals().get("SELECTED_BROKER_MODE", "paper")
+        ).strip()
+
+        adapter, display_broker = _margin_dashboard_adapter_for_context(
+            broker,
+            broker_mode,
+        )
+        broker_snapshot = adapter.get_margin_snapshot()
+        margin_snapshot = MarginEngine().calculate(
+            required_margin=broker_snapshot.required_margin,
+            available_margin=broker_snapshot.available_margin,
+            margin_source=broker_snapshot.margin_source,
+        )
+        gate_decision = MarginTradeGate().evaluate(
+            margin_snapshot,
+            broker_mode=broker_mode,
+        )
+
+        return [
+            "=== MARGIN DASHBOARD ===",
+            f"Margin Source: {broker_snapshot.margin_source}",
+            f"Broker: {display_broker}",
+            f"Broker Mode: {broker_mode.upper() if broker_mode else 'UNKNOWN'}",
+            f"Required Margin: {_format_margin_dashboard_value(broker_snapshot.required_margin)}",
+            f"Available Margin: {_format_margin_dashboard_value(broker_snapshot.available_margin)}",
+            f"Free Margin: {_format_margin_dashboard_value(broker_snapshot.free_margin)}",
+            f"Utilization %: {_format_margin_dashboard_value(margin_snapshot.margin_utilization_pct, '%')}",
+            f"Margin State: {str(margin_snapshot.margin_state.value)}",
+            f"Escalation State: {str(margin_snapshot.escalation_state.value)}",
+            f"Trade Gate Decision: {gate_decision.decision}",
+            f"Trade Gate Allowed: {str(gate_decision.allowed).upper()}",
+            f"Trade Gate Reason: {gate_decision.reason}",
+            "=== END MARGIN DASHBOARD ===",
+        ]
+    except Exception as exc:
+        return [
+            "=== MARGIN DASHBOARD ===",
+            "Margin Status: UNAVAILABLE",
+            f"Reason: {str(exc)[:120]}",
+            "=== END MARGIN DASHBOARD ===",
+        ]
+
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -3000,6 +3088,13 @@ def render_trade_dashboard_summary() -> None:
 
         print("")
         for line in portfolio_greeks_dashboard_lines(active_positions):
+            print(line)
+
+        print("")
+        for line in margin_dashboard_lines(
+            selected_broker=globals().get("SELECTED_BROKER", "NONE"),
+            selected_broker_mode=globals().get("SELECTED_BROKER_MODE", "paper"),
+        ):
             print(line)
 
         print("")
