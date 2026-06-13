@@ -66,6 +66,7 @@ This register does not certify production security readiness. It records securit
 | SEC-RBAC-003 | SUPER_USER authorization control evidence | `backend/security/permissions.py`; `backend/security/transaction_governor.py`; `backend/app/security/live_toggle.py` | REFERENCED | SUPER_USER and live-toggle control paths are referenced; controlled evidence remains pending. |
 | SEC-RBAC-004 | Permission denial audit evidence | `engine/security/access_control.py`; `engine/security/audit_log.py` | REFERENCED | Denial audit paths are referenced; retained denial evidence remains pending. |
 | SEC-RBAC-005 | Legal/risk acceptance control evidence | `certification/governance/GOVERNANCE_CERTIFICATION_EVIDENCE_REGISTER.md` | CAPTURED | Governance register identifies legal and risk acceptance evidence as pending before production certification. |
+| SEC-RBAC-006 | Live-toggle RBAC remediation evidence | `docs/governance/ARP_002B_LIVE_TOGGLE_RBAC_REMEDIATION_REPORT.md`; `tests/test_live_toggle_rbac.py` | CAPTURED | ARP-002B captures replacement of hardcoded user ID live-toggle authorization with fail-closed RBAC/permission checks; Robert review remains required. |
 
 ## 7. Credential Protection Evidence
 
@@ -117,6 +118,7 @@ This register does not certify production security readiness. It records securit
 | SEC-LIVE-003 | No unauthorized live execution evidence | Pending evidence attachment | NOT_STARTED | Unauthorized live execution path is a certification failure condition. |
 | SEC-LIVE-004 | Paper/live separation security evidence | Pending evidence attachment | NOT_STARTED | Controlled paper run must confirm no live order placement. |
 | SEC-LIVE-005 | Live mode approval gate evidence | Pending evidence attachment | NOT_STARTED | Live mode must not be used without explicit authorization and retained approval evidence. |
+| SEC-LIVE-006 | Live-toggle hardcoded identity removal evidence | `docs/governance/ARP_002B_LIVE_TOGGLE_RBAC_REMEDIATION_REPORT.md`; `tests/test_live_toggle_rbac.py` | CAPTURED | Evidence shows user ID `1369` is no longer required for authorization and does not grant authorization without role/permission authority. |
 
 ## 12. Security Monitoring Considerations
 
