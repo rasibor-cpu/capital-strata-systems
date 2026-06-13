@@ -40,7 +40,7 @@ Current documented architecture status:
 | Coinbase Margin Adapter | Referenced as implemented with simulated fallback and spot non-margin default behavior | `engine/risk/coinbase_margin_adapter.py`; `tests/test_coinbase_margin_adapter.py` | Pending evidence attachment. |
 | Margin Trade Gate | Referenced as standalone decisioning | `engine/risk/margin_trade_gate.py`; `tests/test_margin_trade_gate.py` | Pending evidence attachment. |
 | Margin Dashboard Visibility | Referenced as display-only | `scripts/css_live_dashboard.py`; `tests/test_margin_dashboard_integration.py` | Runtime display evidence pending. |
-| Runtime Margin Enforcement | Deferred | `docs/governance/PHASE100C_PRODUCTION_READINESS_AUDIT.md`; `docs/governance/PHASE101A_CERTIFICATION_CLOSEOUT_AND_REMEDIATION_PLAN.md` | Pending future phase. |
+| Runtime Margin Enforcement | Captured for ExecutionGate path | `docs/governance/ARP_002D_MARGINTRADEGATE_REMEDIATION_REPORT.md`; `tests/test_margin_trade_gate_enforcement_integration.py` | ARP-002D evidence captured; Robert review and live broker margin evidence remain pending. |
 
 Certification note: Existing governance materials describe a mature margin stack, but formal certification evidence is not complete until test output, runtime output, broker live-read evidence, screenshots or logs, and Robert approval are attached.
 
@@ -64,6 +64,7 @@ Certification note: Existing governance materials describe a mature margin stack
 | MARGIN-CAPITAL-003 | Real balance and margin relationship evidence | Pending evidence attachment | NOT_STARTED | Live margin certification requires read-only broker/capital evidence without exposing secrets. |
 | MARGIN-CAPITAL-004 | Margin-dependent exposure control evidence | Pending evidence attachment | NOT_STARTED | Missing broker margin data must block new margin-dependent exposure when enforcement applies. |
 | MARGIN-CAPITAL-005 | Unknown live margin fail-closed evidence | Pending evidence attachment | NOT_STARTED | Phase 95 and Phase 101A require unknown live margin state to fail closed where enforcement applies. |
+| MARGIN-CAPITAL-006 | MarginTradeGate enforcement remediation evidence | `docs/governance/ARP_002D_MARGINTRADEGATE_REMEDIATION_REPORT.md`; `tests/test_margin_trade_gate_enforcement_integration.py` | CAPTURED | ARP-002D captures pre-execution margin enforcement and fail-closed missing/unknown margin behavior in `ExecutionGate`; Robert review remains required. |
 
 ## 6. Asset-Class Margin Considerations
 
@@ -148,7 +149,7 @@ CSS margin certification must be asset-class aware. The governance framework rec
 
 | Gap ID | Gap | Area | Required Future Evidence |
 | --- | --- | --- | --- |
-| MARGIN-GAP-001 | Margin enforcement is not active in the approved runtime trade decision path. | Enforcement | Future integration evidence showing margin gate enforcement without bypassing CSSUnifiedTradeGate, broker controls, or capital governor. |
+| MARGIN-GAP-001 | Full CSSUnifiedTradeGate-to-ExecutionGate authority chain remains unconsolidated. | Enforcement | ARP-002D captures `ExecutionGate` enforcement; future evidence must consolidate or formally document the complete CSSUnifiedTradeGate, capital governor, ExecutionGate, and broker-control ordering. |
 | MARGIN-GAP-002 | OANDA live-read evidence is incomplete. | Broker Margin | Approved read-only OANDA account or margin evidence with no order placement. |
 | MARGIN-GAP-003 | Coinbase live-read evidence is incomplete. | Broker Margin | Approved read-only Coinbase account or margin-like evidence with no order placement. |
 | MARGIN-GAP-004 | Runtime margin dashboard evidence is missing. | Monitoring | Controlled runtime screenshots or logs showing margin dashboard visibility. |

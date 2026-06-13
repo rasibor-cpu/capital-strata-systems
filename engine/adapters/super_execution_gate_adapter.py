@@ -57,6 +57,8 @@ class MarketContext:
     fee_bps: Optional[float] = None
     spread_bps: Optional[float] = None
     slippage_bps: Optional[float] = None
+    margin_snapshot: Any = None
+    broker_mode: str = "PAPER"
 
 
 # -------------------------
@@ -140,6 +142,8 @@ class SuperExecutionGateAdapter:
         fee_bps = _get(market_ctx, "fee_bps", None)
         spread_bps = _get(market_ctx, "spread_bps", None)
         slippage_bps = _get(market_ctx, "slippage_bps", None)
+        margin_snapshot = _get(market_ctx, "margin_snapshot", None)
+        broker_mode = _get(market_ctx, "broker_mode", "PAPER") or "PAPER"
 
         # Call the gate (flat interface)
         return self._gate.evaluate_trade(
@@ -160,4 +164,6 @@ class SuperExecutionGateAdapter:
             fee_bps=fee_bps,
             spread_bps=spread_bps,
             slippage_bps=slippage_bps,
+            margin_snapshot=margin_snapshot,
+            broker_mode=str(broker_mode),
         )

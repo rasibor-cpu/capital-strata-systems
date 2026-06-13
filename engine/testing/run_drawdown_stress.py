@@ -4,8 +4,10 @@ Forces consecutive losses to trigger throttle ladder
 """
 
 from engine.execution.execution_gate import ExecutionGate
+from engine.risk.margin_engine import MarginEngine
 
 gate = ExecutionGate()
+margin_engine = MarginEngine()
 
 # Initialize equity
 gate.risk_governor.set_equity(100000)
@@ -35,6 +37,12 @@ for i in range(1, 40):
         slippage_bps=1.0,
         equity=equity,
         equity_peak=peak,
+        margin_snapshot=margin_engine.calculate(
+            required_margin=0.0,
+            available_margin=equity,
+            margin_source="SIMULATED",
+        ),
+        broker_mode="PAPER",
     )
 
     print(f"Trade {i} | Equity: {equity:.2f}")

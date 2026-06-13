@@ -187,6 +187,15 @@ def run_headless(req: Dict[str, Any], cfg: Optional[HeadlessConfig] = None) -> D
             "error": f"execution_gate_import_error: {type(e).__name__}: {e}",
         }
 
+    try:
+        from engine.risk.margin_engine import MarginEngine  # type: ignore
+    except Exception as e:
+        return {
+            "ok": False,
+            "timestamp_utc": ts,
+            "error": f"margin_engine_import_error: {type(e).__name__}: {e}",
+        }
+
     # -----------------------------
     # Compute caps
     # -----------------------------
@@ -280,6 +289,32 @@ def run_headless(req: Dict[str, Any], cfg: Optional[HeadlessConfig] = None) -> D
         if req.get("slippage_bps") is not None
         else (_env_float("TRADE_SLIPPAGE_BPS") or None)
     )
+    required_margin = (
+        _as_float(req.get("required_margin"), 0.0)
+        if req.get("required_margin") is not None
+        else _env_float("TRADE_REQUIRED_MARGIN")
+    )
+    available_margin = (
+        _as_float(req.get("available_margin"), 0.0)
+        if req.get("available_margin") is not None
+        else _env_float("TRADE_AVAILABLE_MARGIN")
+    )
+    margin_source = _as_str(req.get("margin_source", _env_str("TRADE_MARGIN_SOURCE")), "")
+
+    if mode in {"PAPER", "SIMULATION"} and available_margin is None:
+        required_margin = 0.0
+        available_margin = float(equity)
+        margin_source = "SIMULATED"
+    elif required_margin is None or available_margin is None:
+        required_margin = 0.0
+        available_margin = 0.0
+        margin_source = margin_source or "UNKNOWN"
+
+    margin_snapshot = MarginEngine().calculate(
+        required_margin=float(required_margin),
+        available_margin=float(available_margin),
+        margin_source=margin_source or "UNKNOWN",
+    )
 
     try:
         gate_decision = gate.evaluate_trade(
@@ -293,6 +328,8 @@ def run_headless(req: Dict[str, Any], cfg: Optional[HeadlessConfig] = None) -> D
             fee_bps=fee_bps,
             spread_bps=spread_bps,
             slippage_bps=slippage_bps,
+            margin_snapshot=margin_snapshot,
+            broker_mode=mode,
         )
     except Exception as e:
         return {

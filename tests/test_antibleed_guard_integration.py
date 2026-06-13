@@ -4,6 +4,7 @@ from typing import Any, Dict
 
 from backend.app.risk.anti_bleed_guard import AntiBleedGuard
 from engine.execution.execution_gate import ExecutionGate
+from engine.risk.margin_engine import MarginEngine
 
 
 class RecordingAntiBleedGuard:
@@ -29,6 +30,12 @@ def _valid_gate_request() -> Dict[str, Any]:
         "fee_bps": 1.0,
         "spread_bps": 1.0,
         "slippage_bps": 1.0,
+        "margin_snapshot": MarginEngine().calculate(
+            required_margin=0.0,
+            available_margin=10000.0,
+            margin_source="SIMULATED",
+        ),
+        "broker_mode": "PAPER",
     }
 
 

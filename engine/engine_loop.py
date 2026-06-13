@@ -32,6 +32,7 @@ from engine.portfolio.portfolio_capital_controller import (
     PortfolioCapitalController,
     TradeProposal,
 )
+from engine.risk.margin_engine import MarginEngine
 
 # Optional audit spine (fail-safe import)
 try:
@@ -77,6 +78,7 @@ class EngineLoop:
         self.signal_engine = SignalEngine(self.profile)
 
         self.execution_gate = ExecutionGate()
+        self.margin_engine = MarginEngine()
         self.pnl_tracker = PnLTracker(starting_equity=float(starting_equity))
         self.position_book = PositionBook()
         self.pcc = PortfolioCapitalController()
@@ -348,6 +350,12 @@ class EngineLoop:
             return
 
         # 4) ExecutionGate (instrument-level governance + sizing)
+        margin_snapshot = self.margin_engine.calculate(
+            required_margin=0.0,
+            available_margin=equity,
+            margin_source="SIMULATED",
+        )
+
         decision = self.execution_gate.evaluate_trade(
             instrument=instrument,
             side=signal.direction,
@@ -360,6 +368,8 @@ class EngineLoop:
             fee_bps=float(ANTI_BLEED_FEE_BPS),
             spread_bps=float(ANTI_BLEED_SPREAD_BPS),
             slippage_bps=float(ANTI_BLEED_SLIPPAGE_BPS),
+            margin_snapshot=margin_snapshot,
+            broker_mode="PAPER",
         )
 
         if str(decision.get("decision", {}).get("final", "")).upper() != "ALLOW":

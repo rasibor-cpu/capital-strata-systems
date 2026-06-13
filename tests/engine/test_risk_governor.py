@@ -5,6 +5,7 @@ import logging
 from engine.execution.execution_gate import ExecutionGate
 from backend.app.risk.anti_bleed_guard import AntiBleedGuard
 from engine.risk.risk_governor import RiskGovernor
+from engine.risk.margin_engine import MarginEngine
 
 
 class StaticEquityAuthority:
@@ -188,8 +189,15 @@ def test_execution_gate_marks_precomputed_risk_governor_path(tmp_path) -> None:
         fee_bps=1.0,
         spread_bps=1.0,
         slippage_bps=1.0,
+        margin_snapshot=MarginEngine().calculate(
+            required_margin=0.0,
+            available_margin=10000.0,
+            margin_source="SIMULATED",
+        ),
+        broker_mode="PAPER",
     )
 
     assert result["debug"]["anti_bleed_guard"]["approved"] is True
+    assert result["debug"]["margin_trade_gate"]["allowed"] is True
     assert result["debug"]["riskgov_path"] == "validate_trade_precomputed_risk_pct"
     assert "governor_response" in result["debug"]

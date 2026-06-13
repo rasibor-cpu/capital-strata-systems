@@ -25,15 +25,21 @@ class ExecutionGate:
       preventing runtime crashes like: unexpected keyword argument 'instrument'
     """
 
-    def __init__(self, anti_bleed_guard: Optional[Any] = None) -> None:
+    def __init__(
+        self,
+        anti_bleed_guard: Optional[Any] = None,
+        margin_trade_gate: Optional[Any] = None,
+    ) -> None:
         # Imports live here to avoid import-order traps during tooling runs
         from backend.app.risk.anti_bleed_guard import AntiBleedGuard
         from engine.capital.compounding_engine import CompoundingEngine
         from engine.risk.drawdown_scaler import DrawdownScaler
+        from engine.risk.margin_trade_gate import MarginTradeGate
         from engine.risk.risk_governor import RiskGovernor
         from engine.risk.volatility_position_sizer import VolatilityPositionSizer
 
         self.anti_bleed_guard = anti_bleed_guard or AntiBleedGuard()
+        self.margin_trade_gate = margin_trade_gate or MarginTradeGate()
         self.compounding = CompoundingEngine()
         self.drawdown_scaler = DrawdownScaler()
         self.risk_governor = RiskGovernor()
@@ -249,6 +255,44 @@ class ExecutionGate:
         decision.setdefault("control", "AntiBleedGuard")
         return decision
 
+    def _evaluate_margin_trade(
+        self,
+        *,
+        margin_snapshot: Any,
+        broker_mode: str,
+    ) -> Dict[str, Any]:
+        if margin_snapshot is None:
+            return {
+                "allowed": False,
+                "decision": "BLOCK",
+                "reason": "missing_margin_snapshot",
+                "control": "MarginTradeGate",
+            }
+
+        try:
+            decision = self.margin_trade_gate.evaluate(
+                margin_snapshot,
+                broker_mode=broker_mode,
+            )
+        except Exception as exc:
+            return {
+                "allowed": False,
+                "decision": "BLOCK",
+                "reason": "margin_trade_gate_exception",
+                "control": "MarginTradeGate",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+
+        return {
+            "allowed": bool(getattr(decision, "allowed", False)),
+            "decision": str(getattr(decision, "decision", "BLOCK")),
+            "reason": str(getattr(decision, "reason", "margin_gate_rejected")),
+            "margin_state": str(getattr(decision, "margin_state", "UNKNOWN")),
+            "escalation_state": str(getattr(decision, "escalation_state", "UNKNOWN")),
+            "margin_utilization_pct": float(getattr(decision, "margin_utilization_pct", 0.0) or 0.0),
+            "control": "MarginTradeGate",
+        }
+
     # -----------------------------
     # Public API (matches your signature)
     # -----------------------------
@@ -271,6 +315,8 @@ class ExecutionGate:
         fee_bps: Optional[float] = None,
         spread_bps: Optional[float] = None,
         slippage_bps: Optional[float] = None,
+        margin_snapshot: Optional[Any] = None,
+        broker_mode: str = "PAPER",
     ) -> Dict[str, Any]:
         debug: Dict[str, Any] = {}
         try:
@@ -289,6 +335,19 @@ class ExecutionGate:
                 return {
                     "decision": {"final": "BLOCK"},
                     "reason": f"anti_bleed_guard:{anti_bleed_decision.get('reason', 'rejected')}",
+                    "debug": debug,
+                }
+
+            margin_decision = self._evaluate_margin_trade(
+                margin_snapshot=margin_snapshot,
+                broker_mode=broker_mode,
+            )
+            debug["margin_trade_gate"] = margin_decision
+
+            if not bool(margin_decision.get("allowed", False)):
+                return {
+                    "decision": {"final": "BLOCK"},
+                    "reason": f"margin_trade_gate:{margin_decision.get('decision', 'BLOCK')}:{margin_decision.get('reason', 'rejected')}",
                     "debug": debug,
                 }
 
