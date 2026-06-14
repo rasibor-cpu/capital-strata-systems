@@ -96,6 +96,7 @@ This register does not certify production operations. It records operational evi
 | OPS-AUDIT-003 | Reporting pack evidence | Pending evidence attachment | NOT_STARTED | Operational reporting evidence is not attached. |
 | OPS-AUDIT-004 | Operator action review evidence | Pending evidence attachment | NOT_STARTED | Operator action review record remains pending. |
 | OPS-AUDIT-005 | Certification sign-off record | Pending evidence attachment | NOT_STARTED | Developer, governance, operations, and Robert sign-off evidence remains pending. |
+| OPS-AUDIT-006 | Non-canonical authority quarantine evidence | `docs/governance/ARP_011_AUTHORITY_QUARANTINE_EXECUTION_REPORT.md` | REFERENCED | ARP-011 documents operator-facing warnings and direct-execution guardrails for retirement-candidate authority surfaces; final approval remains pending. |
 
 ## 10. Incident Escalation Considerations
 

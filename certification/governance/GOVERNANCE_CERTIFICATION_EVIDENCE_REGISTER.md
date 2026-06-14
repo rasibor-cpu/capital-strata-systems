@@ -81,6 +81,7 @@ Governance note: Session governance remains a certification evidence gap until c
 | AUDIT-003 | Certification runtime run logs | Pending evidence attachment | NOT_STARTED | Phase 100C identifies lack of formal end-to-end runtime certification run as a blocker. |
 | AUDIT-004 | Dashboard visibility evidence | Pending evidence attachment | NOT_STARTED | Dashboard screenshots and panel captures belong under the dashboard evidence package. |
 | AUDIT-005 | Retention procedure evidence | Pending evidence attachment | NOT_STARTED | Phase 100B requires evidence retention requirements for certification records. |
+| AUDIT-006 | Authority quarantine execution evidence | `docs/governance/ARP_011_AUTHORITY_QUARANTINE_EXECUTION_REPORT.md` | REFERENCED | ARP-011 records non-destructive warnings and guardrails added to tracked non-canonical authority surfaces; Robert review remains required. |
 
 Governance note: Audit and runtime event evidence are required before production certification. This register records the requirement but does not claim those attachments are present.
 

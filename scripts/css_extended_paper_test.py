@@ -1,3 +1,11 @@
+"""NON-CANONICAL RETIREMENT CANDIDATE.
+
+ARP-011 quarantine marker: this extended paper script is not a canonical
+dashboard, execution, broker, risk, or data authority. It directly imports a
+non-tracked Coinbase data helper and should not be used as the current
+operator dashboard. Use scripts/css_live_dashboard.py for dashboard operation.
+"""
+
 from __future__ import annotations
 
 import sys

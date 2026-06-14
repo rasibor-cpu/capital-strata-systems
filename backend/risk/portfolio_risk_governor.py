@@ -1,3 +1,11 @@
+"""LEGACY PORTFOLIO RISK GOVERNOR - NON-CANONICAL.
+
+ARP-011 quarantine marker: canonical execution risk governance is owned by
+engine/risk/risk_governor.py. This older portfolio-risk governor is retained
+for legacy backend engine paths and must not be treated as the current
+execution RiskGovernor authority.
+"""
+
 from __future__ import annotations
 
 from typing import Dict, Optional, Tuple

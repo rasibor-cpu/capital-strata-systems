@@ -1,3 +1,11 @@
+"""LEGACY ENGINE RISK SURFACE - NON-CANONICAL.
+
+ARP-011 quarantine marker: canonical execution risk governance is owned by
+engine/risk/risk_governor.py through engine/execution/execution_gate.py. This
+older backend engine-risk surface is retained for compatibility and audit
+traceability only.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

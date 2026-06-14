@@ -1,3 +1,11 @@
+"""NON-CANONICAL RETIREMENT CANDIDATE.
+
+ARP-011 quarantine marker: this build/insertion script contains a historical
+CSSUnifiedTradeGate definition. The canonical backend authority is
+backend/governance/css_unified_trade_gate.py, and the active dashboard-local
+support gate lives in scripts/css_live_dashboard.py.
+"""
+
 from pathlib import Path
 
 INPUT_FILE = Path("scripts/css_live_dashboard_R6_AUTH_HARDENED.py")
