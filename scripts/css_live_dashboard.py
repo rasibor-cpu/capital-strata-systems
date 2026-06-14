@@ -1923,62 +1923,71 @@ record_startup_configuration(
 
 
 # === R7 PCNRASS UNIFIED TRADE GATE ===
-class CSSUnifiedTradeGate:
-    """
-    Single pre-position authority for paper and broker-routed trade openings.
-    This does not replace broker-specific live gates; it sits before any
-    position registration so blocked trades do not enter MTM/PnL state.
-    """
-
-    def approve_trade(self, *, candidate: dict, session: dict, role_profile: dict) -> dict:
-        symbol = str(candidate.get("symbol", "UNKNOWN"))
-        asset_class = str(candidate.get("asset_class", "UNKNOWN")).upper()
-
-        if not isinstance(session, dict) or not session.get("session_id"):
-            return {"approved": False, "reason": "NO_VALID_SESSION"}
-
-        if not session.get("session_status", {}).get("active", True):
-            return {"approved": False, "reason": "SESSION_NOT_ACTIVE"}
-
-        if is_session_locked():
-            return {"approved": False, "reason": "SESSION_LOCKED_DEFENSIVE_MODE"}
-
-        if asset_class not in {"CRYPTO", "FX", "FUTURES", "OPTIONS"}:
-            return {"approved": False, "reason": f"UNSUPPORTED_ASSET_CLASS_{asset_class}"}
-
-        broker_mode = str(candidate.get("broker_mode", "paper")).lower()
-        if broker_mode == "live":
-            if not role_profile.get("can_use_live_broker_mode", False):
-                return {"approved": False, "reason": "RBAC_BLOCKED_LIVE_MODE"}
-            if not role_profile.get("can_execute_live_trading", False):
-                return {"approved": False, "reason": "RBAC_BLOCKED_LIVE_EXECUTION"}
-        else:
-            if not role_profile.get("can_execute_paper_trading", False):
-                return {"approved": False, "reason": "RBAC_BLOCKED_PAPER_EXECUTION"}
-
-        if ENGINE_MODE == "SAFE" and broker_mode == "live":
-            return {"approved": False, "reason": "SAFE_MODE_BLOCKS_LIVE_EXECUTION"}
-
-        return {"approved": True, "reason": "UNIFIED_GATE_APPROVED"}
+from backend.governance.css_gate_dashboard_adapter import CSSGateDashboardAdapter
+from backend.governance.css_unified_trade_gate import CSSUnifiedTradeGate as BackendCSSUnifiedTradeGate
 
 
-css_unified_trade_gate = CSSUnifiedTradeGate()
+css_unified_trade_gate = CSSGateDashboardAdapter(
+    BackendCSSUnifiedTradeGate()
+)
+
+
+def _dashboard_portfolio_state_for_gate() -> dict[str, int]:
+    try:
+        counts = mtm_engine.count_open_positions_by_asset()
+    except Exception:
+        counts = {}
+
+    return {
+        "crypto": int(counts.get("CRYPTO", counts.get("crypto", 0)) or 0),
+        "fx": int(counts.get("FX", counts.get("fx", 0)) or 0),
+        "futures": int(counts.get("FUTURES", counts.get("futures", 0)) or 0),
+        "options": int(counts.get("OPTIONS", counts.get("options", 0)) or 0),
+    }
 
 
 def approve_trade_before_register(asset_class: str, symbol: str, sig: float, prob: float) -> tuple[bool, str]:
-    decision = css_unified_trade_gate.approve_trade(
-        candidate={
-            "asset_class": asset_class,
-            "symbol": symbol,
-            "signal_score": sig,
-            "prob_positive": prob,
-            "selected_broker": SELECTED_BROKER,
-            "broker_mode": SELECTED_BROKER_MODE,
-            "engine_mode": ENGINE_MODE,
-        },
-        session=SESSION_USER_CTX,
-        role_profile=SESSION_USER_CTX.get("role_profile", {}),
-    )
+    session = SESSION_USER_CTX
+    role_profile = SESSION_USER_CTX.get("role_profile", {})
+    asset_key = str(asset_class or "UNKNOWN").upper()
+    broker_mode = str(SELECTED_BROKER_MODE or "paper").lower()
+
+    if not isinstance(session, dict) or not session.get("session_id"):
+        decision = {"approved": False, "reason": "NO_VALID_SESSION"}
+    elif not session.get("session_status", {}).get("active", True):
+        decision = {"approved": False, "reason": "SESSION_NOT_ACTIVE"}
+    elif is_session_locked():
+        decision = {"approved": False, "reason": "SESSION_LOCKED_DEFENSIVE_MODE"}
+    elif asset_key not in {"CRYPTO", "FX", "FUTURES", "OPTIONS"}:
+        decision = {"approved": False, "reason": f"UNSUPPORTED_ASSET_CLASS_{asset_key}"}
+    elif broker_mode == "live" and not role_profile.get("can_use_live_broker_mode", False):
+        decision = {"approved": False, "reason": "RBAC_BLOCKED_LIVE_MODE"}
+    elif broker_mode == "live" and not role_profile.get("can_execute_live_trading", False):
+        decision = {"approved": False, "reason": "RBAC_BLOCKED_LIVE_EXECUTION"}
+    elif broker_mode != "live" and not role_profile.get("can_execute_paper_trading", False):
+        decision = {"approved": False, "reason": "RBAC_BLOCKED_PAPER_EXECUTION"}
+    elif ENGINE_MODE == "SAFE" and broker_mode == "live":
+        decision = {"approved": False, "reason": "SAFE_MODE_BLOCKS_LIVE_EXECUTION"}
+    else:
+        decision = None
+
+    if decision is None:
+        portfolio_state = _dashboard_portfolio_state_for_gate()
+        decision = css_unified_trade_gate.approve_trade(
+            candidate={
+                "asset_class": asset_class,
+                "symbol": symbol,
+                "signal_score": sig,
+                "prob_positive": prob,
+                "selected_broker": SELECTED_BROKER,
+                "broker_mode": SELECTED_BROKER_MODE,
+                "engine_mode": ENGINE_MODE,
+            },
+            session=session,
+            role_profile=role_profile,
+            portfolio_state=portfolio_state,
+            engine_mode=ENGINE_MODE,
+        )
 
     if not decision.get("approved", False):
         try:
