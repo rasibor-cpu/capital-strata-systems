@@ -29,21 +29,32 @@ class PnLSummaryBuilder:
         positions = position_state or {}
 
         realized_pnl = safe_float(
-            positions.get("total_realized_pnl", 0.0)
+            positions.get(
+                "realized_pnl",
+                positions.get("total_realized_pnl", 0.0),
+            )
         )
 
         unrealized_pnl = safe_float(
-            positions.get("total_unrealized_pnl", 0.0)
+            positions.get(
+                "unrealized_pnl",
+                positions.get("total_unrealized_pnl", 0.0),
+            )
         )
 
-        net_pnl = realized_pnl + unrealized_pnl
+        net_pnl = safe_float(
+            positions.get("net_pnl", realized_pnl + unrealized_pnl)
+        )
 
         total_exposure = safe_float(
             positions.get("total_exposure", 0.0)
         )
 
         account_equity = safe_float(
-            account.get("equity", account.get("balance", 0.0))
+            positions.get(
+                "equity",
+                account.get("equity", account.get("balance", 0.0)),
+            )
         )
 
         exposure_utilization = 0.0
@@ -63,20 +74,28 @@ class PnLSummaryBuilder:
         if total_closed_bias > 0:
             win_rate = (winners / total_closed_bias) * 100.0
 
-        asset_realized = positions.get(
-            "asset_realized_pnl",
-            {},
+        asset_realized = _safe_pnl_map(
+            positions.get("asset_realized_pnl", {})
         )
 
-        asset_unrealized = positions.get(
-            "asset_unrealized_pnl",
-            {},
+        asset_unrealized = _safe_pnl_map(
+            positions.get("asset_unrealized_pnl", {})
         )
 
         return {
             "realized_pnl": realized_pnl,
             "unrealized_pnl": unrealized_pnl,
             "net_pnl": net_pnl,
+            "equity": account_equity,
+            "peak_equity": safe_float(
+                positions.get("peak_equity", account_equity)
+            ),
+            "current_drawdown": safe_float(
+                positions.get("current_drawdown", 0.0)
+            ),
+            "max_drawdown": safe_float(
+                positions.get("max_drawdown", 0.0)
+            ),
             "total_exposure": total_exposure,
             "exposure_utilization_pct": exposure_utilization,
             "winner_count": winners,
@@ -84,6 +103,23 @@ class PnLSummaryBuilder:
             "win_rate_pct": win_rate,
             "asset_realized_pnl": asset_realized,
             "asset_unrealized_pnl": asset_unrealized,
+            "open_positions": safe_int(
+                positions.get("open_positions", positions.get("open_count", 0))
+            ),
+            "closed_positions": safe_int(
+                positions.get("closed_positions", 0)
+            ),
+            "source": str(positions.get("source", "LEGACY_POSITION_STATE")),
             "account_equity": account_equity,
         }
+
+
+def _safe_pnl_map(value: Any) -> Dict[str, float]:
+    if not isinstance(value, dict):
+        return {}
+
+    return {
+        str(key): safe_float(amount)
+        for key, amount in value.items()
+    }
 
