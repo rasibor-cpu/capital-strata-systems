@@ -485,6 +485,127 @@ def margin_dashboard_lines(
         ]
 
 
+def _format_canonical_pnl_dashboard_value(value: Any) -> str:
+    try:
+        return f"{float(value):+.4f}"
+    except Exception:
+        return "UNKNOWN"
+
+
+def canonical_pnl_dashboard_lines(
+    *,
+    ledger_store: Any | None = None,
+    dashboard_summary: dict[str, Any] | None = None,
+    canonical_summary: dict[str, Any] | None = None,
+    starting_equity: Any = 0,
+    peak_equity: Any | None = None,
+    max_drawdown: Any | None = None,
+    asset_class_by_symbol: dict[str, str] | None = None,
+    company_id: str | None = None,
+    branch_id: str | None = None,
+    department_id: str | None = None,
+    user_id: str | None = None,
+) -> list[str]:
+    """
+    CANONICAL_PNL_DIAGNOSTIC: display-only comparison helper.
+
+    This helper is intentionally not wired into live dashboard rendering yet.
+    Existing MTM/accounting dashboard PnL remains the active dashboard
+    authority while canonical ledger-backed PnL parity is proven.
+    """
+    try:
+        from engine.ledger import CANONICAL_PNL_SOURCE
+
+        if canonical_summary is None:
+            if ledger_store is None:
+                return [
+                    "=== CANONICAL PNL DIAGNOSTIC ===",
+                    "Canonical PnL Status: UNAVAILABLE",
+                    "Reason: canonical ledger snapshot unavailable",
+                    "=== END CANONICAL PNL DIAGNOSTIC ===",
+                ]
+
+            from engine.ledger.pnl_snapshot_adapter import (
+                build_pnl_snapshot_contract,
+            )
+
+            canonical_summary = build_pnl_snapshot_contract(
+                ledger_store,
+                starting_equity=starting_equity,
+                peak_equity=peak_equity,
+                max_drawdown=max_drawdown,
+                asset_class_by_symbol=asset_class_by_symbol,
+                company_id=company_id,
+                branch_id=branch_id,
+                department_id=department_id,
+                user_id=user_id,
+            ).to_runtime_dict()
+
+        lines = [
+            "=== CANONICAL PNL DIAGNOSTIC ===",
+            "Canonical PnL Status: AVAILABLE",
+            f"Source: {canonical_summary.get('source', CANONICAL_PNL_SOURCE)}",
+            (
+                "Canonical Realized PnL: "
+                f"{_format_canonical_pnl_dashboard_value(canonical_summary.get('realized_pnl'))}"
+            ),
+            (
+                "Canonical Unrealized PnL: "
+                f"{_format_canonical_pnl_dashboard_value(canonical_summary.get('unrealized_pnl'))}"
+            ),
+            (
+                "Canonical Net PnL: "
+                f"{_format_canonical_pnl_dashboard_value(canonical_summary.get('net_pnl'))}"
+            ),
+            (
+                "Canonical Equity: "
+                f"{_format_canonical_pnl_dashboard_value(canonical_summary.get('equity'))}"
+            ),
+            (
+                "Canonical Peak Equity: "
+                f"{_format_canonical_pnl_dashboard_value(canonical_summary.get('peak_equity'))}"
+            ),
+            (
+                "Canonical Current Drawdown: "
+                f"{_format_canonical_pnl_dashboard_value(canonical_summary.get('current_drawdown'))}"
+            ),
+            (
+                "Canonical Max Drawdown: "
+                f"{_format_canonical_pnl_dashboard_value(canonical_summary.get('max_drawdown'))}"
+            ),
+            f"Canonical Open Positions: {int(canonical_summary.get('open_positions', 0) or 0)}",
+            f"Canonical Closed Positions: {int(canonical_summary.get('closed_positions', 0) or 0)}",
+        ]
+
+        if dashboard_summary is not None:
+            from dashboard.runtime.summary_builders.pnl_parity_check import (
+                compare_pnl_summary_parity,
+            )
+
+            parity = compare_pnl_summary_parity(
+                dashboard_summary,
+                canonical_summary,
+            )
+            lines.extend(
+                [
+                    f"PnL Parity: {'MATCH' if parity['matches'] else 'MISMATCH'}",
+                    f"Realized Diff: {_format_canonical_pnl_dashboard_value(parity['field_diffs'].get('realized_pnl'))}",
+                    f"Unrealized Diff: {_format_canonical_pnl_dashboard_value(parity['field_diffs'].get('unrealized_pnl'))}",
+                    f"Net Diff: {_format_canonical_pnl_dashboard_value(parity['field_diffs'].get('net_pnl'))}",
+                ]
+            )
+
+        lines.append("=== END CANONICAL PNL DIAGNOSTIC ===")
+        return lines
+    except Exception as exc:
+        return [
+            "=== CANONICAL PNL DIAGNOSTIC ===",
+            "Canonical PnL Status: UNAVAILABLE",
+            f"Reason: {str(exc)[:120]}",
+            "=== END CANONICAL PNL DIAGNOSTIC ===",
+        ]
+
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
