@@ -68,6 +68,7 @@ Governance note: RBAC evidence must confirm that permissions, broker access, cre
 | SESSION-002 | Session lock, resume, and close evidence | Pending evidence attachment | NOT_STARTED | Controlled evidence must show session boundaries and operator actions. |
 | SESSION-003 | Recovery and persistence session evidence | Pending evidence attachment | NOT_STARTED | Phase 100C and Phase 101A identify recovery certification as incomplete. |
 | SESSION-004 | Stale position handling evidence | Pending evidence attachment | NOT_STARTED | Phase 101A calls for stale exposure behavior validation. |
+| SESSION-005 | Session schema initialization remediation evidence | `docs/governance/ARP_010_DB_MIGRATION_REMEDIATION_REPORT.md`; `tests/test_session_schema_initialization.py` | CAPTURED | ARP-010 captures migration bootstrap evidence for fresh database session initialization; Robert review remains required. |
 
 Governance note: Session governance remains a certification evidence gap until controlled runtime session records and recovery evidence are attached.
 

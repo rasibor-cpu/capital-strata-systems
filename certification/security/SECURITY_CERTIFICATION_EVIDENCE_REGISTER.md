@@ -46,6 +46,7 @@ This register does not certify production security readiness. It records securit
 | SEC-SESSION-003 | Active session required for protected action evidence | `engine/security/security_context.py`; `backend/app/observability/audit_context.py` | REFERENCED | Security context and audit context paths are referenced; retained proof remains pending. |
 | SEC-SESSION-004 | Session lock, resume, and close evidence | Pending evidence attachment | NOT_STARTED | Governance and runtime evidence registers identify session lifecycle evidence as pending. |
 | SEC-SESSION-005 | Session recovery security evidence | Pending evidence attachment | NOT_STARTED | Recovery and persistence evidence must prove safe session behavior. |
+| SEC-SESSION-006 | Session schema initialization remediation evidence | `docs/governance/ARP_010_DB_MIGRATION_REMEDIATION_REPORT.md`; `tests/test_session_schema_initialization.py` | CAPTURED | ARP-010 captures clean-database session schema bootstrap and orchestrator initialization evidence; Robert review remains required. |
 
 ## 5. Password Protection Evidence
 

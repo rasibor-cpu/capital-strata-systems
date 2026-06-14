@@ -12,6 +12,7 @@ from backend.app.persistence.repositories.session_repository import (
 from backend.app.persistence.repositories.trade_repository import (
     TradeRepository,
 )
+from backend.app.persistence.migrations.runner import run_migrations
 
 
 class PersistenceService:
@@ -29,6 +30,7 @@ class PersistenceService:
     """
 
     def __init__(self) -> None:
+        run_migrations()
         self.sessions = SessionRepository()
         self.trades = TradeRepository()
         self.pnl_snapshots = (

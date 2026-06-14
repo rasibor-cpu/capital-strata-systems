@@ -44,6 +44,7 @@ This register does not certify production operations. It records operational evi
 | OPS-LOGIN-003 | Session initialization evidence | `certification/runtime/RUNTIME_CERTIFICATION_EVIDENCE_REGISTER.md` | CAPTURED | Runtime register maps session initialization evidence requirements; actual record remains pending. |
 | OPS-LOGIN-004 | Session timeout or expiry operations evidence | Pending evidence attachment | NOT_STARTED | Session timeout handling evidence remains pending. |
 | OPS-LOGIN-005 | Operator identity and role evidence | Pending evidence attachment | NOT_STARTED | Final RBAC/operator role matrix remains pending. |
+| OPS-LOGIN-006 | Session schema bootstrap evidence | `docs/governance/ARP_010_DB_MIGRATION_REMEDIATION_REPORT.md`; `tests/test_session_schema_initialization.py` | CAPTURED | ARP-010 captures fresh database session schema initialization and orchestrator startup evidence; Robert review remains required. |
 
 ## 5. Broker Selection Operations Evidence
 
