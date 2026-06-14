@@ -1,0 +1,43 @@
+Run ID: PHASE103A-CONTROLLED-PAPER-RUN
+Started UTC: 2026-06-14T01:47:11.007003+00:00
+Execution Mode: PAPER
+Broker: SIMULATED
+Broker Mode: PAPER
+Live Mode: NOT ENABLED
+Live Arm: NOT ARMED
+Broker Execution: NOT INVOKED
+Isolated DB: C:\rasib\source\capital-strata-systems\certification\runtime\PHASE_103A_CONTROLLED_PAPER_RUN\phase_103a_runtime.db
+Authentication module: backend.app.security.auth_gate imported
+User registry import reachable: True
+Authentication method: non-interactive certification operator context; no password or secret captured
+Certification user context: user_id=phase103a_certification_operator, role=SUPER_USER, mode=PAPER_ONLY
+PersistenceService initialized
+Persistence healthcheck:
+{
+  "repositories": {
+    "legal_acceptances": true,
+    "pnl_snapshots": true,
+    "sessions": true,
+    "trades": true
+  },
+  "service": "PersistenceService",
+  "status": "ok"
+}
+Session initialized: ad1f54f4-7178-4339-9cae-bf2b1bd1ecdc
+Active sessions after init: 1
+Legal acceptance before controlled record: allowed=False
+Legal acceptance after controlled record: allowed=True
+Legal acceptance results:
+{
+  "LEGAL_TERMS": {
+    "allowed": true,
+    "message": "Current valid acceptance found for LEGAL_TERMS",
+    "status": "AcceptanceValidationStatus.ALLOW"
+  },
+  "TRADING_RISK_DISCLOSURE": {
+    "allowed": true,
+    "message": "Current valid acceptance found for TRADING_RISK_DISCLOSURE",
+    "status": "AcceptanceValidationStatus.ALLOW"
+  }
+}
+TradeDecisionOrchestrator initialized: TradeDecisionOrchestrator

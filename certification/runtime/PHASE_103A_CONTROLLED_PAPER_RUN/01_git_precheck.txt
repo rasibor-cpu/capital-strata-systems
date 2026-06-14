@@ -1,0 +1,15 @@
+$ git remote -v
+exit_code=0
+stdout:
+origin	https://github.com/rasibor-cpu/capital-strata-systems.git (fetch)
+origin	https://github.com/rasibor-cpu/capital-strata-systems.git (push)
+
+$ git branch --show-current
+exit_code=0
+stdout:
+css-evening-consolidation-2026-06-09
+
+$ git rev-parse HEAD
+exit_code=0
+stdout:
+3c7cd869d2927a289e438eaa95b9fdcdcd709c00

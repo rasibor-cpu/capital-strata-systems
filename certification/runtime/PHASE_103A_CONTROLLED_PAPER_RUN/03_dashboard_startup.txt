@@ -1,0 +1,21 @@
+Run ID: PHASE103A-CONTROLLED-PAPER-RUN
+Dashboard Authority: scripts/css_live_dashboard.py
+Dashboard Mode: PAPER
+Selected Broker: NONE / SIMULATED
+Role Detection: certification operator context, role=SUPER_USER, live permissions not exercised
+Paper Mode Confirmation: LIVE not enabled, live_arm not armed, broker execution not invoked
+Active dashboard compile: PASS
+=== MARGIN DASHBOARD ===
+Margin Source: SIMULATED
+Broker: COINBASE
+Broker Mode: PAPER
+Required Margin: 0.00
+Available Margin: 10000.00
+Free Margin: 10000.00
+Utilization %: 0.00%
+Margin State: MarginState.GREEN
+Escalation State: MarginEscalationState.NORMAL
+Trade Gate Decision: ALLOW
+Trade Gate Allowed: True
+Trade Gate Reason: PAPER simulated margin GREEN/NORMAL allows new risk.
+=== END MARGIN DASHBOARD ===

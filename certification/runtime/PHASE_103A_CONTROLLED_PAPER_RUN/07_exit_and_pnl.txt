@@ -1,0 +1,19 @@
+Run ID: PHASE103A-CONTROLLED-PAPER-RUN
+Exit price: 1.132625
+Exit reason: TAKE_PROFIT_THRESHOLD
+Realized PnL: 25.000000
+Unrealized PnL: 0.000000
+Open positions after exit: 0
+PnL current equity: 100025.000000
+PnL journal entries: 1
+Ledger update:
+[
+  {
+    "entry_id": "ccbb2d8b-ded6-4929-87d8-ecfda3f06e29",
+    "equity_after": 100025.0,
+    "instrument": "PHASE103A_EUR_USD",
+    "realized_pnl": 25.000000000000007,
+    "timestamp": "2026-06-14 01:47:21.871224+00:00",
+    "unrealized_pnl": 0.0
+  }
+]
