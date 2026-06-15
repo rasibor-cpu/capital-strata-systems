@@ -103,7 +103,7 @@ def _verify_password_any(ur_mod, user: Dict[str, Any], password: str) -> bool:
     if callable(fn):
         try:
             out = fn(int(user.get("user_id")), password)
-            return bool(out is True)
+            return bool(out is True or _coerce_user_record(out) is not None)
         except Exception:
             return False
 
