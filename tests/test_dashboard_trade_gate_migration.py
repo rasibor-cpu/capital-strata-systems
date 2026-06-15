@@ -209,6 +209,66 @@ def test_adapter_returns_rich_dashboard_decision_output():
     }
 
 
+def test_adapter_preserves_canonical_block_reason():
+    backend = RecordingBackendGate(
+        SimpleNamespace(
+            approved=False,
+            reason="rejected: position limit reached",
+            details={"asset_class": "crypto", "symbol": "BTC-USD"},
+        )
+    )
+    adapter = CSSGateDashboardAdapter(backend)
+
+    decision = adapter.approve_trade(
+        candidate={
+            "asset_class": "CRYPTO",
+            "symbol": "BTC-USD",
+            "signal_score": 10.0,
+            "prob_positive": 0.5,
+        },
+        session={"role": "TRADER", "created": time.time()},
+        role_profile={},
+        portfolio_state={"CRYPTO": 3},
+        engine_mode="BALANCED",
+    )
+
+    assert decision == {
+        "approved": False,
+        "reason": "rejected: position limit reached",
+        "backend_reason": "rejected: position limit reached",
+        "backend_details": {"asset_class": "crypto", "symbol": "BTC-USD"},
+    }
+
+
+def test_adapter_translates_dict_gate_decision_without_governance_logic():
+    backend = RecordingBackendGate(
+        {
+            "approved": False,
+            "reason": "rejected: probability below threshold",
+            "details": {"threshold": 0.65},
+        }
+    )
+    adapter = CSSGateDashboardAdapter(backend)
+
+    decision = adapter.approve_trade(
+        candidate={
+            "asset_class": "FX",
+            "symbol": "EUR_USD",
+            "signal_score": 10.0,
+            "prob_positive": 0.5,
+        },
+        session={"role": "TRADER", "created": time.time()},
+        role_profile={},
+        portfolio_state={"FX": 1},
+        engine_mode="SAFE",
+    )
+
+    assert decision["approved"] is False
+    assert decision["reason"] == "rejected: probability below threshold"
+    assert decision["backend_reason"] == "rejected: probability below threshold"
+    assert decision["backend_details"] == {"threshold": 0.65}
+
+
 def test_adapter_integrates_with_canonical_backend_gate():
     adapter = CSSGateDashboardAdapter(CSSUnifiedTradeGate())
 
@@ -266,6 +326,25 @@ def test_dashboard_routes_approved_trade_through_adapter():
         "futures": 0,
         "options": 1,
     }
+
+
+def test_dashboard_routes_blocked_trade_through_adapter_and_preserves_reason():
+    gate = RecordingDashboardGate(
+        {
+            "approved": False,
+            "reason": "rejected: cost exceeds edge",
+            "backend_reason": "rejected: cost exceeds edge",
+            "backend_details": {"asset_class": "crypto"},
+        }
+    )
+    ns = _dashboard_gate_namespace(gate=gate)
+
+    ok, reason = ns["approve_trade_before_register"]("CRYPTO", "BTC-USD", 12.0, 0.7)
+
+    assert ok is False
+    assert reason == "rejected: cost exceeds edge"
+    assert gate.calls
+    assert ns["audit_ledger"].records[0][2]["reason"] == "rejected: cost exceeds edge"
 
 
 def test_dashboard_no_longer_defines_local_css_unified_trade_gate_class():

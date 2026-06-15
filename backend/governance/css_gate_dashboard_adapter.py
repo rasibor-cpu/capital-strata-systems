@@ -166,6 +166,19 @@ class CSSGateDashboardAdapter:
         }
 
     def _normalize_decision(self, decision) -> Dict[str, Any]:
+        if isinstance(decision, dict):
+            approved = bool(decision.get("approved", False))
+            reason = str(decision.get("reason", "UNKNOWN"))
+            details = decision.get("details", decision.get("backend_details", {}))
+            if not isinstance(details, dict):
+                details = {}
+
+            return {
+                "approved": approved,
+                "reason": "UNIFIED_GATE_APPROVED" if approved else reason,
+                "backend_reason": reason,
+                "backend_details": details,
+            }
 
         approved = bool(
             getattr(decision, "approved", False)
