@@ -9,6 +9,7 @@ from backend.governance.css_unified_trade_gate import CSSUnifiedTradeGate
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD_PATH = PROJECT_ROOT / "scripts" / "css_live_dashboard.py"
+LEGACY_R7_BUILDER_PATH = PROJECT_ROOT / "scripts" / "build_r7_unified_trade_gate.py"
 
 
 class RecordingBackendGate:
@@ -356,3 +357,7 @@ def test_dashboard_no_longer_defines_local_css_unified_trade_gate_class():
     }
 
     assert "CSSUnifiedTradeGate" not in class_names
+
+
+def test_legacy_dashboard_gate_generator_is_retired():
+    assert not LEGACY_R7_BUILDER_PATH.exists()
