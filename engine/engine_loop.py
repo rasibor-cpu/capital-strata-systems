@@ -19,6 +19,7 @@ from __future__ import annotations
 from collections import deque
 from datetime import datetime
 from typing import Any, Dict, Optional, Deque
+import logging
 import os
 import statistics
 import time
@@ -73,6 +74,8 @@ ANTI_BLEED_SLIPPAGE_BPS = _env_float("CSS_ANTI_BLEED_SLIPPAGE_BPS", 1.0)
 # Correlation window (rolling returns length)
 CORR_WINDOW = int(_env_float("CSS_CORR_WINDOW", 50))
 
+LOGGER = logging.getLogger(__name__)
+
 
 class EngineLoop:
     def __init__(self, behaviour: str = "D", starting_equity: float = 1000.0):
@@ -115,6 +118,8 @@ class EngineLoop:
         self.pcc_blocks = 0
         self.trade_count = 0
         self.exit_count = 0
+        self.diagnostics: Dict[str, Any] = {}
+        self.regime_gate_records: list[Dict[str, Any]] = []
 
         # Asset class registry (default FX)
         self.asset_class_map: Dict[str, str] = {}
@@ -308,26 +313,73 @@ class EngineLoop:
         )
 
     def _evaluate_regime_gate(self, *, instrument: str, price: float) -> Dict[str, str]:
+        inputs = self._build_regime_gate_inputs(
+            instrument=instrument,
+            price=float(price),
+        )
+
         try:
-            decision = self.regime_gate(
-                self._build_regime_gate_inputs(
-                    instrument=instrument,
-                    price=float(price),
-                )
-            )
+            decision = self.regime_gate(inputs)
         except Exception as exc:
-            return {
-                "decision": "BLOCK",
-                "reason": f"regime_gate_exception:{type(exc).__name__}",
-            }
+            return self._record_regime_gate_decision(
+                instrument=instrument,
+                bars_5m=inputs.snapshot.get("bars_5m"),
+                decision="BLOCK",
+                reason=f"regime_gate_exception:{type(exc).__name__}",
+            )
 
         if not isinstance(decision, dict):
-            return {"decision": "BLOCK", "reason": "regime_gate_invalid_response"}
+            return self._record_regime_gate_decision(
+                instrument=instrument,
+                bars_5m=inputs.snapshot.get("bars_5m"),
+                decision="BLOCK",
+                reason="regime_gate_invalid_response",
+            )
 
-        return {
-            "decision": str(decision.get("decision", "BLOCK")).upper(),
-            "reason": str(decision.get("reason", "regime_gate_rejected")),
+        return self._record_regime_gate_decision(
+            instrument=instrument,
+            bars_5m=inputs.snapshot.get("bars_5m"),
+            decision=str(decision.get("decision", "BLOCK")).upper(),
+            reason=str(decision.get("reason", "regime_gate_rejected")),
+        )
+
+    def _record_regime_gate_decision(
+        self,
+        *,
+        instrument: str,
+        bars_5m: Any,
+        decision: str,
+        reason: str,
+    ) -> Dict[str, str]:
+        normalized_decision = str(decision or "BLOCK").upper()
+        normalized_reason = str(reason or "regime_gate_rejected")
+        record: Dict[str, Any] = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "instrument": str(instrument),
+            "gate_name": "regime_gate",
+            "decision": normalized_decision,
+            "reason": normalized_reason,
+            "bars_5m": bars_5m,
         }
+
+        self.diagnostics["regime_gate"] = record
+        self.regime_gate_records.append(record)
+
+        if normalized_decision == "ALLOW":
+            LOGGER.info(
+                "[REGIME GATE PASS] instrument=%s gate=%s",
+                record["instrument"],
+                record["gate_name"],
+            )
+        else:
+            LOGGER.info(
+                "[REGIME GATE BLOCK] instrument=%s gate=%s reason=%s",
+                record["instrument"],
+                record["gate_name"],
+                record["reason"],
+            )
+
+        return {"decision": normalized_decision, "reason": normalized_reason}
 
     # ----------------------------------------------------
     # Main loop
@@ -541,4 +593,5 @@ class EngineLoop:
             "open_positions": len(self.position_book.positions),
             "baseline_notional_pct": float(BASELINE_NOTIONAL_PCT),
             "corr_window": int(self.correlation_window),
+            "diagnostics": dict(self.diagnostics),
         }
