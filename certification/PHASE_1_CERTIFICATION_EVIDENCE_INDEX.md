@@ -14,7 +14,7 @@ thresholds, credentials, or trading logic.
 | Field | Evidence |
 | --- | --- |
 | Branch | `css-evening-consolidation-2026-06-09` |
-| Evidence HEAD | `631dcf17639acd7a8e501334c320c65b27deee14` |
+| Evidence HEAD | `22ed884cfc20d1c9345f728715ca308121f3d9e4` |
 | Remote | `origin https://github.com/rasibor-cpu/capital-strata-systems.git` |
 | Scope | Certification evidence generation, Phase 1 |
 
@@ -42,6 +42,7 @@ thresholds, credentials, or trading logic.
 | `certification/testing/PHASE_1_FULL_SUITE_VALIDATION_SUMMARY.md` | Captures latest broad test validation evidence. |
 | `certification/runtime/PHASE_1_RUNTIME_GATE_CONSOLIDATION_EVIDENCE.md` | Captures runtime migration toward canonical unified trade gate authority. |
 | `certification/runtime/PHASE_1_CONTROLLED_RUNTIME_SMOKE_VALIDATION_REPORT.md` | Captures fresh controlled PAPER-mode runtime smoke evidence at the current certified commit. |
+| `certification/recovery/PHASE_1_RECOVERY_RESILIENCE_VALIDATION_REPORT.md` | Captures controlled recovery and resilience validation evidence. |
 | `certification/governance/PHASE_1_CERTIFICATION_GAP_REGISTER.md` | Captures remaining evidence gaps before final certification approval. |
 
 ## Evidence Coverage Matrix
@@ -53,7 +54,7 @@ thresholds, credentials, or trading logic.
 | Broker | Broker register and Alpaca stream collection compatibility evidence from current branch. | REFERENCED |
 | Dashboard | Dashboard gate migration, PnL, margin, and frontend test coverage. | REFERENCED |
 | Risk | AntiBleedGuard, MarginTradeGate, RiskGovernor, RegimeGate, ExecutionGate tests and reports. | CAPTURED / REFERENCED |
-| Recovery | Session schema bootstrap and recovery runbooks. | REFERENCED / GAP REMAINS |
+| Recovery | Session schema bootstrap, recovery runbooks, and controlled recovery/resilience validation evidence. | CAPTURED / PARTIAL |
 | Security | Live toggle/live arm, legal acceptance, password reset, compliance import, and auth tests. | CAPTURED / REFERENCED |
 | Operations | Phase 103B runbooks and micro-live pilot operations documents. | CAPTURED / GAP REMAINS |
 
