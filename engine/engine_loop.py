@@ -17,7 +17,7 @@ Notes:
 from __future__ import annotations
 
 from collections import deque
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Dict, Optional, Deque
 import logging
 import os
@@ -27,6 +27,7 @@ import time
 from engine.decision_builder import GateInputs
 from engine.execution.execution_gate import ExecutionGate
 from engine.gates_registry import get_configured_gates
+from engine.information.stock_alerts import generate_stock_alerts
 from engine.performance.pnl_tracker import PnLTracker
 from engine.strategy.behaviour_mapper import get_profile_for_behaviour
 from engine.strategy.signal_engine import SignalEngine
@@ -120,6 +121,8 @@ class EngineLoop:
         self.exit_count = 0
         self.diagnostics: Dict[str, Any] = {}
         self.regime_gate_records: list[Dict[str, Any]] = []
+        self.stock_alert_rules: list[Any] = []
+        self.stock_alert_records: list[Dict[str, Any]] = []
 
         # Asset class registry (default FX)
         self.asset_class_map: Dict[str, str] = {}
@@ -381,6 +384,41 @@ class EngineLoop:
 
         return {"decision": normalized_decision, "reason": normalized_reason}
 
+    def _evaluate_stock_alerts(
+        self,
+        *,
+        instrument: str,
+        price: float,
+        previous_price: float | None,
+    ) -> list[Dict[str, Any]]:
+        if not self.stock_alert_rules:
+            self.diagnostics.setdefault("stock_alerts", [])
+            return []
+
+        snapshot = {
+            "instrument": str(instrument),
+            "symbol": str(instrument),
+            "price": float(price),
+            "previous_price": previous_price,
+            "source_timestamp": datetime.now(UTC).isoformat(),
+        }
+
+        try:
+            alerts = generate_stock_alerts(snapshot, self.stock_alert_rules)
+        except Exception as exc:
+            self.diagnostics["stock_alerts_error"] = type(exc).__name__
+            self.diagnostics.setdefault("stock_alerts", [])
+            LOGGER.warning(
+                "Stock alert evaluation failed; instrument=%s error=%s",
+                instrument,
+                type(exc).__name__,
+            )
+            return []
+
+        self.stock_alert_records.extend(alerts)
+        self.diagnostics["stock_alerts"] = list(self.stock_alert_records)
+        return alerts
+
     # ----------------------------------------------------
     # Main loop
     # ----------------------------------------------------
@@ -411,6 +449,11 @@ class EngineLoop:
         self._update_returns(instrument, float(price))
 
         prev_price = float(self.prev_price_by_instrument[instrument])
+        self._evaluate_stock_alerts(
+            instrument=instrument,
+            price=float(price),
+            previous_price=float(prev_price),
+        )
         moving_avg = sum(self.price_windows[instrument]) / len(self.price_windows[instrument])
 
         signal = self.signal_engine.generate(
