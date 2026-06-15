@@ -9,6 +9,8 @@ Auto-refreshes every 5 seconds. Shows:
   - Recent trades log
   - Per-asset-class breakdown
 """
+import sys
+sys.exit("NON-CANONICAL RETIREMENT CANDIDATE: Use scripts/css_live_dashboard.py instead.")
 
 import threading
 import logging

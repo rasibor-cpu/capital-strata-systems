@@ -16,6 +16,8 @@ Safety:
 - Respects config risk flags
 - No background loops; single-run execution
 """
+import sys
+sys.exit("NON-CANONICAL RETIREMENT CANDIDATE: Use run_css.py instead.")
 
 import json
 import os
