@@ -43,6 +43,15 @@ def test_repository_then_compliance_package_imports_cleanly() -> None:
     )
 
 
+def test_persistence_service_then_compliance_repository_export_imports_cleanly() -> None:
+    _assert_fresh_import_succeeds(
+        "from backend.app.persistence.services.persistence_service "
+        "import PersistenceService; "
+        "from backend.app.compliance import LegalAcceptanceRepository; "
+        "print(PersistenceService.__name__, LegalAcceptanceRepository.__name__)"
+    )
+
+
 def test_compliance_star_import_preserves_public_repository_export() -> None:
     _assert_fresh_import_succeeds(
         "namespace = {}; "
