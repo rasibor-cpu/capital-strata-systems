@@ -3075,6 +3075,132 @@ def pnl_dict_for_asset(asset_class: str) -> dict:
     raise ValueError(f"Unsupported asset class: {asset_class}")
 
 
+def current_realized_pnl_maps_by_asset_category() -> dict[str, dict]:
+    maps = {
+        "CRYPTO": crypto_pnl,
+        "FX": fx_pnl,
+        "OPTIONS": options_pnl,
+        "FUTURES": futures_pnl,
+    }
+
+    extra_maps = globals().get("asset_category_realized_pnl_maps", {})
+    if isinstance(extra_maps, dict):
+        for category, pnl_map in extra_maps.items():
+            if isinstance(pnl_map, dict):
+                maps[normalize_asset_category(category)] = pnl_map
+
+    return maps
+
+
+def normalize_asset_category(value: Any) -> str:
+    category = str(value or "UNKNOWN").strip().upper()
+    return category or "UNKNOWN"
+
+
+def _safe_dashboard_float(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def aggregate_pnl_by_asset_category(
+    *,
+    realized_pnl_maps: dict[str, dict] | None,
+    positions: list[dict] | None,
+) -> list[dict[str, float | str | int]]:
+    """
+    Display-only PnL aggregation by asset category.
+
+    Realized PnL comes from the current dashboard realized PnL maps.
+    Unrealized PnL comes from active position floating/unrealized values.
+    The category set is dynamic so future asset classes appear without UI
+    redesign when upstream state supplies those categories.
+    """
+
+    categories: dict[str, dict[str, float | str | int]] = {}
+
+    def row_for(category_value: Any) -> dict[str, float | str | int]:
+        category = normalize_asset_category(category_value)
+        if category not in categories:
+            categories[category] = {
+                "asset_category": category,
+                "open_positions": 0,
+                "realized_pnl": 0.0,
+                "unrealized_pnl": 0.0,
+                "total_pnl": 0.0,
+            }
+        return categories[category]
+
+    for category, pnl_map in (realized_pnl_maps or {}).items():
+        row = row_for(category)
+        if isinstance(pnl_map, dict):
+            row["realized_pnl"] = _safe_dashboard_float(row["realized_pnl"]) + sum(
+                _safe_dashboard_float(value)
+                for value in pnl_map.values()
+            )
+
+    for pos in positions or []:
+        if not isinstance(pos, dict) or pos.get("forced_exit"):
+            continue
+
+        row = row_for(pos.get("asset_class", "UNKNOWN"))
+        row["open_positions"] = int(row["open_positions"]) + 1
+        row["unrealized_pnl"] = _safe_dashboard_float(row["unrealized_pnl"]) + _safe_dashboard_float(
+            pos.get("unrealized_pnl", pos.get("floating", 0.0))
+        )
+
+    for row in categories.values():
+        realized = round(_safe_dashboard_float(row["realized_pnl"]), 4)
+        unrealized = round(_safe_dashboard_float(row["unrealized_pnl"]), 4)
+        row["realized_pnl"] = realized
+        row["unrealized_pnl"] = unrealized
+        row["total_pnl"] = round(realized + unrealized, 4)
+
+    return sorted(
+        categories.values(),
+        key=lambda item: str(item["asset_category"]),
+    )
+
+
+def pnl_by_asset_category_dashboard_lines(
+    category_rows: list[dict[str, Any]],
+) -> list[str]:
+    lines = ["=== PNL BY ASSET CATEGORY ==="]
+
+    if not category_rows:
+        lines.append("No asset-category PnL available.")
+        lines.append("=== END PNL BY ASSET CATEGORY ===")
+        return lines
+
+    realized_total = 0.0
+    unrealized_total = 0.0
+
+    for row in category_rows:
+        category = normalize_asset_category(row.get("asset_category", "UNKNOWN"))
+        open_positions = int(row.get("open_positions", 0) or 0)
+        realized = _safe_dashboard_float(row.get("realized_pnl", 0.0))
+        unrealized = _safe_dashboard_float(row.get("unrealized_pnl", 0.0))
+        total = _safe_dashboard_float(row.get("total_pnl", realized + unrealized))
+        realized_total += realized
+        unrealized_total += unrealized
+        lines.append(
+            f"{category:<12} Open {open_positions:<3} | "
+            f"Realized {realized:+.4f} | "
+            f"Unrealized {unrealized:+.4f} | "
+            f"Total {total:+.4f}"
+        )
+
+    lines.append("--------------------------------")
+    lines.append(
+        f"{'TOTAL':<12} Realized {realized_total:+.4f} | "
+        f"Unrealized {unrealized_total:+.4f} | "
+        f"Total {(realized_total + unrealized_total):+.4f}"
+    )
+    lines.append("=== END PNL BY ASSET CATEGORY ===")
+    return lines
+
+
 
 
 
@@ -3136,12 +3262,7 @@ def render_trade_dashboard_summary() -> None:
     try:
         active_positions = [p for p in mtm_engine.positions if not p.get("forced_exit")]
 
-        pnl_maps = {
-            "CRYPTO": crypto_pnl,
-            "FX": fx_pnl,
-            "FUTURES": futures_pnl,
-            "OPTIONS": options_pnl,
-        }
+        pnl_maps = current_realized_pnl_maps_by_asset_category()
 
         asset_classes = sorted(
             set(pnl_maps.keys())
@@ -3168,6 +3289,11 @@ def render_trade_dashboard_summary() -> None:
             realized_total += realized
             floating_total += floating
             asset_rows.append((asset, count, realized, floating, total))
+
+        pnl_category_rows = aggregate_pnl_by_asset_category(
+            realized_pnl_maps=pnl_maps,
+            positions=active_positions,
+        )
 
         position_limit = globals().get("adaptive_position_limit", None)
         if position_limit is None:
@@ -3205,12 +3331,8 @@ def render_trade_dashboard_summary() -> None:
         print("=== END OPEN POSITIONS BY ASSET CLASS ===")
 
         print("")
-        print("=== PNL BY ASSET CLASS ===")
-        for asset, _count, realized, floating, total in asset_rows:
-            print(f"{asset:<10} Realized {realized:+.4f} | Floating {floating:+.4f} | Total {total:+.4f}")
-        print("--------------------------------")
-        print(f"{'TOTAL':<10} Realized {realized_total:+.4f} | Floating {floating_total:+.4f} | Total {(realized_total + floating_total):+.4f}")
-        print("=== END PNL BY ASSET CLASS ===")
+        for line in pnl_by_asset_category_dashboard_lines(pnl_category_rows):
+            print(line)
 
         print("")
         for line in option_position_greeks_dashboard_lines(active_positions):
@@ -3802,22 +3924,17 @@ try:
                 f"unrealized_gap={observer_gap_unrealized:.6f}"
             )
 
-        print(
-            f"CRYPTO REALIZED: {sum(crypto_pnl.values()):+.4f} | "
-            f"FLOATING: {display_by_asset['CRYPTO']:+.4f}"
-        )
-        print(
-            f"FX REALIZED: {sum(fx_pnl.values()):+.4f} | "
-            f"FLOATING: {display_by_asset['FX']:+.4f}"
-        )
-        print(
-            f"OPTIONS REALIZED: {sum(options_pnl.values()):+.4f} | "
-            f"FLOATING: {display_by_asset['OPTIONS']:+.4f}"
-        )
-        print(
-            f"FUTURES REALIZED: {sum(futures_pnl.values()):+.4f} | "
-            f"FLOATING: {display_by_asset['FUTURES']:+.4f}"
-        )
+        for line in pnl_by_asset_category_dashboard_lines(
+            aggregate_pnl_by_asset_category(
+                realized_pnl_maps=current_realized_pnl_maps_by_asset_category(),
+                positions=[
+                    pos
+                    for pos in mtm_engine.positions
+                    if not pos.get("forced_exit")
+                ],
+            )
+        ):
+            print(line)
 
         open_counts_by_asset = mtm_engine.count_open_positions_by_asset()
 

@@ -18,6 +18,11 @@ def _load_dashboard_display_helpers(tmp_path=None, positions=None):
     }
     wanted_defs = {
         "portfolio_greeks_from_positions",
+        "current_realized_pnl_maps_by_asset_category",
+        "normalize_asset_category",
+        "_safe_dashboard_float",
+        "aggregate_pnl_by_asset_category",
+        "pnl_by_asset_category_dashboard_lines",
         "format_greeks_dashboard_value",
         "option_position_greeks_dashboard_lines",
         "portfolio_greeks_dashboard_lines",
@@ -155,7 +160,7 @@ def test_existing_dashboard_summary_behavior_remains_intact(tmp_path):
 
     assert "=== TRADE DASHBOARD SUMMARY ===" in rendered
     assert "=== OPEN POSITIONS BY ASSET CLASS ===" in rendered
-    assert "=== PNL BY ASSET CLASS ===" in rendered
+    assert "=== PNL BY ASSET CATEGORY ===" in rendered
     assert "Last Trade: NONE" in rendered
     assert "Closed Trade Ledger: NO" in rendered
     assert "=== OPTIONS POSITION GREEKS ===" in rendered
