@@ -14,7 +14,7 @@ thresholds, credentials, or trading logic.
 | Field | Evidence |
 | --- | --- |
 | Branch | `css-evening-consolidation-2026-06-09` |
-| Evidence HEAD | `22ed884cfc20d1c9345f728715ca308121f3d9e4` |
+| Evidence HEAD | `33191b88e6c2c213f9ea89321bdea0949303b32c` |
 | Remote | `origin https://github.com/rasibor-cpu/capital-strata-systems.git` |
 | Scope | Certification evidence generation, Phase 1 |
 
@@ -42,6 +42,7 @@ thresholds, credentials, or trading logic.
 | `certification/testing/PHASE_1_FULL_SUITE_VALIDATION_SUMMARY.md` | Captures latest broad test validation evidence. |
 | `certification/runtime/PHASE_1_RUNTIME_GATE_CONSOLIDATION_EVIDENCE.md` | Captures runtime migration toward canonical unified trade gate authority. |
 | `certification/runtime/PHASE_1_CONTROLLED_RUNTIME_SMOKE_VALIDATION_REPORT.md` | Captures fresh controlled PAPER-mode runtime smoke evidence at the current certified commit. |
+| `certification/broker/PHASE_1_BROKER_SAFE_FAIL_VALIDATION_REPORT.md` | Captures controlled broker resilience and safe-fail validation evidence. |
 | `certification/recovery/PHASE_1_RECOVERY_RESILIENCE_VALIDATION_REPORT.md` | Captures controlled recovery and resilience validation evidence. |
 | `certification/governance/PHASE_1_CERTIFICATION_GAP_REGISTER.md` | Captures remaining evidence gaps before final certification approval. |
 
@@ -51,7 +52,7 @@ thresholds, credentials, or trading logic.
 | --- | --- | --- |
 | Governance | Existing registers, ARP remediation reports, Phase 100-105 reports, gap register. | CAPTURED |
 | Runtime | Controlled paper evidence, runtime gate consolidation evidence, and fresh Stage 3B smoke validation evidence. | CAPTURED / PARTIAL |
-| Broker | Broker register and Alpaca stream collection compatibility evidence from current branch. | REFERENCED |
+| Broker | Broker register, Alpaca stream compatibility, and controlled broker safe-fail validation evidence. | CAPTURED / PARTIAL |
 | Dashboard | Dashboard gate migration, PnL, margin, and frontend test coverage. | REFERENCED |
 | Risk | AntiBleedGuard, MarginTradeGate, RiskGovernor, RegimeGate, ExecutionGate tests and reports. | CAPTURED / REFERENCED |
 | Recovery | Session schema bootstrap, recovery runbooks, and controlled recovery/resilience validation evidence. | CAPTURED / PARTIAL |
