@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 
 from decimal import Decimal
 from typing import Any, Dict, List
@@ -195,6 +196,61 @@ class TradeDecisionOrchestrator:
             payload_json=None,
         )
 
+    def _evaluate_governance_gate(
+        self,
+        market_data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+
+        engine_mode = str(
+            market_data.get("engine_mode", "SAFE")
+        ).strip().upper()
+
+        candidate = {
+            "symbol": str(market_data.get("symbol", "UNKNOWN")),
+            "asset_class": str(market_data.get("asset_class", "")).strip().lower(),
+            "expected_value": self._safe_float(
+                market_data.get("expected_value"),
+            ),
+            "cost": self._safe_float(
+                market_data.get("cost"),
+            ),
+            "probability": self._safe_float(
+                market_data.get("probability"),
+            ),
+        }
+
+        try:
+            decision = self.trade_gate.approve_trade(
+                candidate=candidate,
+                session={
+                    "role": "TRADER",
+                    "created": time.time(),
+                },
+                portfolio_state={
+                    "crypto": 0,
+                    "fx": 0,
+                    "futures": 0,
+                    "options": 0,
+                },
+                engine_mode=engine_mode,
+            )
+        except Exception as exc:
+            return {
+                "approved": False,
+                "reason": f"canonical_gate_error:{type(exc).__name__}",
+                "details": {},
+            }
+
+        details = getattr(decision, "details", {})
+        if not isinstance(details, dict):
+            details = {}
+
+        return {
+            "approved": bool(getattr(decision, "approved", False)),
+            "reason": str(getattr(decision, "reason", "UNKNOWN")),
+            "details": details,
+        }
+
     def _build_decision_payload(
         self,
         market_data: Dict[str, Any],
@@ -218,6 +274,10 @@ class TradeDecisionOrchestrator:
             trade_id is None
         )
 
+        governance_decision = self._evaluate_governance_gate(
+            market_data
+        )
+
         return {
             "symbol": symbol,
             "trade_id": trade_id,
@@ -227,7 +287,10 @@ class TradeDecisionOrchestrator:
             "regime": "SAFE",
             "components": {},
             "filters": {
-                "governance_approved": False,
+                "governance_approved": governance_decision["approved"],
+                "governance_reason": governance_decision["reason"],
+                "governance_details": governance_decision["details"],
+                "governance_source": "CSSUnifiedTradeGate",
                 "persistence_enabled": True,
                 "duplicate_trade_blocked": duplicate_trade_blocked,
             },
