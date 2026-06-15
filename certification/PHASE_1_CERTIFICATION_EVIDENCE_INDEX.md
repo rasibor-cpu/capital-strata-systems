@@ -14,7 +14,7 @@ thresholds, credentials, or trading logic.
 | Field | Evidence |
 | --- | --- |
 | Branch | `css-evening-consolidation-2026-06-09` |
-| Evidence HEAD | `2cb0221f6dfc2510eda836f0dd066201304ee10a` |
+| Evidence HEAD | `631dcf17639acd7a8e501334c320c65b27deee14` |
 | Remote | `origin https://github.com/rasibor-cpu/capital-strata-systems.git` |
 | Scope | Certification evidence generation, Phase 1 |
 
@@ -41,6 +41,7 @@ thresholds, credentials, or trading logic.
 | `certification/PHASE_1_CERTIFICATION_EVIDENCE_INDEX.md` | Top-level Phase 1 evidence map. |
 | `certification/testing/PHASE_1_FULL_SUITE_VALIDATION_SUMMARY.md` | Captures latest broad test validation evidence. |
 | `certification/runtime/PHASE_1_RUNTIME_GATE_CONSOLIDATION_EVIDENCE.md` | Captures runtime migration toward canonical unified trade gate authority. |
+| `certification/runtime/PHASE_1_CONTROLLED_RUNTIME_SMOKE_VALIDATION_REPORT.md` | Captures fresh controlled PAPER-mode runtime smoke evidence at the current certified commit. |
 | `certification/governance/PHASE_1_CERTIFICATION_GAP_REGISTER.md` | Captures remaining evidence gaps before final certification approval. |
 
 ## Evidence Coverage Matrix
@@ -48,7 +49,7 @@ thresholds, credentials, or trading logic.
 | Domain | Evidence Converted in Phase 1 | Status |
 | --- | --- | --- |
 | Governance | Existing registers, ARP remediation reports, Phase 100-105 reports, gap register. | CAPTURED |
-| Runtime | Controlled paper evidence and runtime gate consolidation evidence. | CAPTURED / PARTIAL |
+| Runtime | Controlled paper evidence, runtime gate consolidation evidence, and fresh Stage 3B smoke validation evidence. | CAPTURED / PARTIAL |
 | Broker | Broker register and Alpaca stream collection compatibility evidence from current branch. | REFERENCED |
 | Dashboard | Dashboard gate migration, PnL, margin, and frontend test coverage. | REFERENCED |
 | Risk | AntiBleedGuard, MarginTradeGate, RiskGovernor, RegimeGate, ExecutionGate tests and reports. | CAPTURED / REFERENCED |
