@@ -23,7 +23,9 @@ import os
 import statistics
 import time
 
+from engine.decision_builder import GateInputs
 from engine.execution.execution_gate import ExecutionGate
+from engine.gates_registry import get_configured_gates
 from engine.performance.pnl_tracker import PnLTracker
 from engine.strategy.behaviour_mapper import get_profile_for_behaviour
 from engine.strategy.signal_engine import SignalEngine
@@ -78,6 +80,7 @@ class EngineLoop:
         self.signal_engine = SignalEngine(self.profile)
 
         self.execution_gate = ExecutionGate()
+        self.regime_gate = get_configured_gates()["regime_gate"]
         self.margin_engine = MarginEngine()
         self.pnl_tracker = PnLTracker(starting_equity=float(starting_equity))
         self.position_book = PositionBook()
@@ -91,6 +94,7 @@ class EngineLoop:
 
         # Per-instrument last mark (used for exposure valuation)
         self.last_price_by_instrument: Dict[str, float] = {}
+        self.bars_seen_by_instrument: Dict[str, int] = {}
 
         # Rolling returns storage for correlation governance
         self.return_history: Dict[str, Deque[float]] = {}
@@ -105,6 +109,7 @@ class EngineLoop:
         # Diagnostics
         self.total_signals = 0
         self.regime_flat_blocks = 0
+        self.regime_gate_blocks = 0
         self.threshold_blocks = 0
         self.gate_blocks = 0
         self.pcc_blocks = 0
@@ -272,6 +277,58 @@ class EngineLoop:
             # fail-silent
             return
 
+    def _regime_bars_5m(self, instrument: str) -> Optional[int]:
+        bars = self.bars_seen_by_instrument.get(instrument)
+        if isinstance(bars, int) and bars >= 0:
+            return bars
+
+        window = self.price_windows.get(instrument)
+        try:
+            window_bars = len(window)  # type: ignore[arg-type]
+        except TypeError:
+            return None
+        return int(window_bars) if window_bars >= 0 else None
+
+    def _build_regime_gate_inputs(self, *, instrument: str, price: float) -> GateInputs:
+        snapshot: Dict[str, Any] = {
+            "instrument": str(instrument),
+            "price": float(price),
+        }
+        bars_5m = self._regime_bars_5m(instrument)
+        if bars_5m is not None:
+            snapshot["bars_5m"] = bars_5m
+
+        return GateInputs(
+            instrument=str(instrument),
+            snapshot=snapshot,
+            volatility={},
+            liquidity={"spread_bps": float(ANTI_BLEED_SPREAD_BPS)},
+            slippage={},
+            risk={},
+        )
+
+    def _evaluate_regime_gate(self, *, instrument: str, price: float) -> Dict[str, str]:
+        try:
+            decision = self.regime_gate(
+                self._build_regime_gate_inputs(
+                    instrument=instrument,
+                    price=float(price),
+                )
+            )
+        except Exception as exc:
+            return {
+                "decision": "BLOCK",
+                "reason": f"regime_gate_exception:{type(exc).__name__}",
+            }
+
+        if not isinstance(decision, dict):
+            return {"decision": "BLOCK", "reason": "regime_gate_invalid_response"}
+
+        return {
+            "decision": str(decision.get("decision", "BLOCK")).upper(),
+            "reason": str(decision.get("reason", "regime_gate_rejected")),
+        }
+
     # ----------------------------------------------------
     # Main loop
     # ----------------------------------------------------
@@ -281,6 +338,9 @@ class EngineLoop:
 
         # Update mark price cache (critical for PCC exposure valuation)
         self.last_price_by_instrument[instrument] = float(price)
+        self.bars_seen_by_instrument[instrument] = (
+            int(self.bars_seen_by_instrument.get(instrument, 0)) + 1
+        )
 
         # Ensure rolling MA window exists
         if instrument not in self.price_windows:
@@ -349,7 +409,17 @@ class EngineLoop:
             self.prev_price_by_instrument[instrument] = float(price)
             return
 
-        # 4) ExecutionGate (instrument-level governance + sizing)
+        # 4) RegimeGate (pre-ExecutionGate market regime safety)
+        regime_decision = self._evaluate_regime_gate(
+            instrument=instrument,
+            price=float(price),
+        )
+        if str(regime_decision.get("decision", "")).upper() != "ALLOW":
+            self.regime_gate_blocks += 1
+            self.prev_price_by_instrument[instrument] = float(price)
+            return
+
+        # 5) ExecutionGate (instrument-level governance + sizing)
         margin_snapshot = self.margin_engine.calculate(
             required_margin=0.0,
             available_margin=equity,
@@ -384,7 +454,7 @@ class EngineLoop:
             self.prev_price_by_instrument[instrument] = float(price)
             return
 
-        # 5) PCC (portfolio-level governance + correlation throttle input)
+        # 6) PCC (portfolio-level governance + correlation throttle input)
         asset_class = self._asset_class(instrument)
         avg_corr = self._avg_abs_corr_vs_open(instrument=instrument, asset_class=asset_class)
 
@@ -433,7 +503,7 @@ class EngineLoop:
             self.prev_price_by_instrument[instrument] = float(price)
             return
 
-        # 6) Open position (qty such that qty * price = notional)
+        # 7) Open position (qty such that qty * price = notional)
         qty = float(final_notional) / float(price)
 
         self.position_book.open_position(
@@ -458,6 +528,7 @@ class EngineLoop:
             "behaviour": self.behaviour,
             "total_signals": self.total_signals,
             "regime_flat_blocks": self.regime_flat_blocks,
+            "regime_gate_blocks": self.regime_gate_blocks,
             "threshold_blocks": self.threshold_blocks,
             "gate_blocks": self.gate_blocks,
             "pcc_blocks": self.pcc_blocks,
