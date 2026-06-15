@@ -3,34 +3,9 @@ from __future__ import annotations
 import sys
 from decimal import Decimal
 
-from dashboard.runtime.summary_builders.pnl_parity_check import (
-    compare_pnl_summary_parity,
-)
 from dashboard.runtime.summary_builders.pnl_summary_builder import PnLSummaryBuilder
 from engine.ledger import CANONICAL_PNL_SOURCE
 from engine.ledger.pnl_snapshot_adapter import CanonicalPnLSnapshotContract
-
-
-def _legacy_dashboard_summary() -> dict:
-    return PnLSummaryBuilder().build(
-        account_state={"equity": 1080.0},
-        position_state={
-            "total_realized_pnl": 50.0,
-            "total_unrealized_pnl": 30.0,
-            "total_exposure": 250.0,
-            "winner_count": 2,
-            "loser_count": 1,
-            "asset_realized_pnl": {
-                "CRYPTO": 40.0,
-                "FX": 10.0,
-            },
-            "asset_unrealized_pnl": {
-                "CRYPTO": 25.0,
-                "FX": 5.0,
-            },
-            "open_count": 2,
-        },
-    )
 
 
 def _canonical_adapter_summary() -> dict:
@@ -61,50 +36,8 @@ def _canonical_adapter_summary() -> dict:
     )
 
 
-def test_dashboard_and_canonical_pnl_parity_matches_core_fields() -> None:
-    parity = compare_pnl_summary_parity(
-        _legacy_dashboard_summary(),
-        _canonical_adapter_summary(),
-    )
-
-    assert parity["matches"] is True
-    assert parity["field_diffs"] == {
-        "realized_pnl": 0.0,
-        "unrealized_pnl": 0.0,
-        "net_pnl": 0.0,
-    }
-
-
-def test_dashboard_and_canonical_pnl_parity_matches_asset_maps() -> None:
-    parity = compare_pnl_summary_parity(
-        _legacy_dashboard_summary(),
-        _canonical_adapter_summary(),
-    )
-
-    assert parity["asset_realized_diffs"] == {
-        "CRYPTO": 0.0,
-        "FX": 0.0,
-    }
-    assert parity["asset_unrealized_diffs"] == {
-        "CRYPTO": 0.0,
-        "FX": 0.0,
-    }
-
-
-def test_dashboard_and_canonical_pnl_parity_preserves_canonical_source() -> None:
-    canonical_summary = _canonical_adapter_summary()
-    parity = compare_pnl_summary_parity(
-        _legacy_dashboard_summary(),
-        canonical_summary,
-    )
-
-    assert canonical_summary["source"] == CANONICAL_PNL_SOURCE
-    assert parity["canonical_source"] == CANONICAL_PNL_SOURCE
-    assert parity["canonical_source_expected"] == CANONICAL_PNL_SOURCE
-
-
-def test_legacy_dashboard_summary_behavior_remains_intact() -> None:
-    summary = _legacy_dashboard_summary()
+def test_dashboard_consumes_canonical_adapter_output() -> None:
+    summary = _canonical_adapter_summary()
 
     assert summary["realized_pnl"] == 50.0
     assert summary["unrealized_pnl"] == 30.0
@@ -117,13 +50,20 @@ def test_legacy_dashboard_summary_behavior_remains_intact() -> None:
         "CRYPTO": 25.0,
         "FX": 5.0,
     }
-    assert summary["source"] == "LEGACY_POSITION_STATE"
 
 
-def test_parity_helper_does_not_import_live_dashboard_runtime() -> None:
-    compare_pnl_summary_parity(
-        _legacy_dashboard_summary(),
-        _canonical_adapter_summary(),
-    )
+def test_dashboard_does_not_report_legacy_position_state_as_source() -> None:
+    summary = _canonical_adapter_summary()
 
-    assert "scripts.css_live_dashboard" not in sys.modules
+    # The builder must pass through the source from canonical contract
+    assert summary["source"] == CANONICAL_PNL_SOURCE
+    assert summary["source"] != "LEGACY_POSITION_STATE"
+
+    # Even with an empty position state, the default source is CANONICAL_PNL_SOURCE
+    empty_summary = PnLSummaryBuilder().build(None, None)
+    assert empty_summary["source"] == CANONICAL_PNL_SOURCE
+
+
+def test_dashboard_pnl_totals_match_canonical_realized_and_unrealized_pnl() -> None:
+    summary = _canonical_adapter_summary()
+    assert summary["net_pnl"] == summary["realized_pnl"] + summary["unrealized_pnl"]
