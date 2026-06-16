@@ -2159,7 +2159,46 @@ def oanda_has_open_trade() -> bool:
     return False
 
 
-def attempt_oanda_fx_execution(symbol: str) -> tuple[bool, str]:
+def perform_post_trade_verification(trade_id: str, symbol: str, expected_units: str) -> None:
+    global RECONCILIATION_STATUS
+    try:
+        resp = oanda.get_open_trades()
+        if not resp.get("ok"):
+            RECONCILIATION_STATUS = "MISMATCH"
+            lock_session("POST_TRADE_VERIFICATION_API_ERROR")
+            print(f"[POST-TRADE VERIFICATION ERROR] Failed to fetch open trades: {resp.get('error')}")
+            return
+
+        trades = resp.get("data", {}).get("trades", [])
+        trade_found = None
+        for t in trades:
+            if str(t.get("id")) == str(trade_id):
+                trade_found = t
+                break
+
+        if not trade_found:
+            RECONCILIATION_STATUS = "MISMATCH"
+            lock_session("POST_TRADE_VERIFICATION_MISSING_TRADE")
+            print(f"[POST-TRADE VERIFICATION FAILED] Trade {trade_id} missing on broker.")
+            return
+
+        instr = trade_found.get("instrument")
+        current_units = trade_found.get("currentUnits")
+        if instr != symbol or str(current_units) != str(expected_units):
+            RECONCILIATION_STATUS = "MISMATCH"
+            lock_session("POST_TRADE_VERIFICATION_MISMATCH")
+            print(f"[POST-TRADE VERIFICATION FAILED] Trade {trade_id} mismatch. Expected {symbol} {expected_units}, got {instr} {current_units}")
+            return
+
+        print(f"[POST-TRADE VERIFICATION OK] Trade {trade_id} confirmed on broker.")
+
+    except Exception as e:
+        RECONCILIATION_STATUS = "MISMATCH"
+        lock_session("POST_TRADE_VERIFICATION_ERROR")
+        print(f"[POST-TRADE VERIFICATION EXCEPTION] {e}")
+
+
+def attempt_oanda_fx_execution(symbol: str) -> tuple[bool, str, str | None, float | None, str | None]:
     role_profile = SESSION_USER_CTX.get("role_profile", {})
 
     def _audit(allowed: bool, reason: str) -> None:
@@ -2190,32 +2229,32 @@ def attempt_oanda_fx_execution(symbol: str) -> tuple[bool, str]:
 
     if is_session_locked():
         _audit(False, "SESSION_LOCKED_DEFENSIVE_MODE")
-        return False, "SESSION_LOCKED_DEFENSIVE_MODE"
+        return False, "SESSION_LOCKED_DEFENSIVE_MODE", None, None, None
 
     if not BROKER_EXECUTION_ARMED:
         _audit(False, "BROKER_DISABLED_BY_GLOBAL_SWITCH")
-        return False, "BROKER_DISABLED_BY_GLOBAL_SWITCH"
+        return False, "BROKER_DISABLED_BY_GLOBAL_SWITCH", None, None, None
 
     if not role_profile.get("can_execute_paper_trading", False):
         _audit(False, "RBAC_BLOCKED_PAPER_EXECUTION")
-        return False, "RBAC_BLOCKED_PAPER_EXECUTION"
+        return False, "RBAC_BLOCKED_PAPER_EXECUTION", None, None, None
 
     if SELECTED_BROKER != "OANDA":
         reason = f"BROKER_NOT_SELECTED_FOR_OANDA_{SELECTED_BROKER}"
         _audit(False, reason)
-        return False, reason
+        return False, reason, None, None, None
 
     if ENGINE_MODE == "SAFE":
         _audit(False, "OANDA_BLOCKED_SAFE_MODE")
-        return False, "OANDA_BLOCKED_SAFE_MODE"
+        return False, "OANDA_BLOCKED_SAFE_MODE", None, None, None
 
     if symbol not in FX_SYMBOLS:
         _audit(False, "OANDA_BLOCKED_NOT_FX")
-        return False, "OANDA_BLOCKED_NOT_FX"
+        return False, "OANDA_BLOCKED_NOT_FX", None, None, None
 
     if oanda_has_open_trade():
         _audit(False, "OANDA_BLOCKED_OPEN_TRADE")
-        return False, "OANDA_BLOCKED_OPEN_TRADE"
+        return False, "OANDA_BLOCKED_OPEN_TRADE", None, None, None
 
     try:
         response = oanda.place_order(
@@ -2227,16 +2266,23 @@ def attempt_oanda_fx_execution(symbol: str) -> tuple[bool, str]:
 
         if response.get("ok"):
             _audit(True, "OANDA_ORDER_OK")
-            return True, "OANDA_ORDER_OK"
+            data = response.get("data", {})
+            fill_txn = data.get("orderFillTransaction", {})
+            trade_opened = fill_txn.get("tradeOpened", {})
+            trade_id = trade_opened.get("tradeID")
+            price_str = fill_txn.get("price")
+            fill_price = float(price_str) if price_str else None
+            execution_time = fill_txn.get("time")
+            return True, "OANDA_ORDER_OK", trade_id, fill_price, execution_time
 
         reason = f"OANDA_ORDER_FAIL_{response.get('status', 'NA')}"
         _audit(False, reason)
-        return False, reason
+        return False, reason, None, None, None
 
     except Exception as e:
         reason = f"OANDA_ERROR_{str(e)[:40]}"
         _audit(False, reason)
-        return False, reason
+        return False, reason, None, None, None
 
 
 def coinbase_live_orders_enabled() -> bool:
@@ -3843,7 +3889,13 @@ try:
                     if position.get("broker_tested"):
                         if asset_class == "FX" and SELECTED_BROKER == "OANDA":
                             live_fx_funded_this_cycle += 1
-                            ok, broker_msg = attempt_oanda_fx_execution(symbol)
+                            ok, broker_msg, t_id, f_price, e_time = attempt_oanda_fx_execution(symbol)
+
+                            if ok and t_id:
+                                position["broker_trade_id"] = t_id
+                                position["broker_fill_price"] = f_price
+                                position["broker_execution_time"] = e_time
+                                perform_post_trade_verification(t_id, symbol, FX_LIVE_UNITS)
 
                         elif asset_class == "CRYPTO" and SELECTED_BROKER == "COINBASE":
                             live_crypto_funded_this_cycle += 1
