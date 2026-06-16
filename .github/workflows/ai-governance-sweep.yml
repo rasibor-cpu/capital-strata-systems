@@ -1,6 +1,8 @@
 name: AI Governance Sweep
 
 on:
+  push:
+    branches: [ "main", "css-evening-consolidation-2026-06-09" ]
   pull_request:
     branches: [ "main", "css-evening-consolidation-2026-06-09" ]
   workflow_dispatch:
