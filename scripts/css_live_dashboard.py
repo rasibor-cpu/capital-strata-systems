@@ -1765,6 +1765,83 @@ record_startup_configuration(
     engine_mode=ENGINE_MODE,
 )
 
+_IN_FLIGHT_ORDERS = set()
+
+def register_in_flight_order(order_id: str) -> None:
+    _IN_FLIGHT_ORDERS.add(order_id)
+
+def clear_in_flight_order(order_id: str) -> None:
+    _IN_FLIGHT_ORDERS.discard(order_id)
+
+def has_in_flight_orders() -> bool:
+    return len(_IN_FLIGHT_ORDERS) > 0
+
+_DIVERGENCE_STATE = {
+    "first_detected": None,
+    "count": 0,
+    "type": None,
+    "last_simulation": None,
+    "confirmed_count": 0,
+    "pending_count": 0
+}
+
+def simulate_auto_flatten(divergences: list[tuple[str, str]]) -> None:
+    global _CSS_SESSION_LOCK, _DIVERGENCE_STATE
+    if not is_session_locked():
+        lock_session("PENDING_AUTO_FLATTEN")
+    else:
+        # Override the reason if it was locked by the generic RECONCILIATION_DIVERGENCE
+        if _CSS_SESSION_LOCK.get("reason") == "RECONCILIATION_DIVERGENCE":
+            _CSS_SESSION_LOCK["reason"] = "PENDING_AUTO_FLATTEN"
+
+    for cat, det in divergences:
+        if cat in {"ORPHAN_BROKER_POSITION", "BROKER_POSITION_MISMATCH"}:
+            symbol = "UNKNOWN"
+            broker_units = 0.0
+            ledger_units = 0.0
+            
+            try:
+                if isinstance(det, dict):
+                    symbol = det.get("symbol", "UNKNOWN")
+                    b_data = det.get("broker_data", {})
+                    # Handle OANDA specific format or plain units
+                    if isinstance(b_data, dict):
+                        if "units" in b_data:
+                            broker_units = float(b_data["units"])
+                        elif "long" in b_data and "units" in b_data["long"]:
+                            broker_units += float(b_data["long"]["units"])
+                        elif "short" in b_data and "units" in b_data["short"]:
+                            broker_units += float(b_data["short"]["units"])
+                    
+                    l_data = det.get("local_data", {})
+                    if isinstance(l_data, dict):
+                        ledger_units = float(l_data.get("quantity", 0.0))
+            except Exception:
+                pass
+            
+            delta = broker_units - ledger_units
+            action = "SELL" if delta > 0 else "BUY"
+            action_qty = abs(delta)
+
+            sim_output = (
+                f"[AUTO-FLATTEN SIMULATION]\n"
+                f"symbol={symbol}\n"
+                f"broker_units={broker_units}\n"
+                f"ledger_units={ledger_units}\n"
+                f"delta={delta}\n"
+                f"proposed_action={action} {action_qty}\n"
+                f"status=SIMULATED_ONLY"
+            )
+            print(sim_output)
+            _DIVERGENCE_STATE["last_simulation"] = sim_output
+            _DIVERGENCE_STATE["pending_count"] += 1
+            
+            repair_engine.create_record(cat, sim_output)
+            if repair_engine.records:
+                last_record = repair_engine.records[-1]
+                last_record["status"] = "AUTO_FLATTEN_SIMULATED"
+                repair_engine.save_records()
+
 
 
 # === R7 PCNRASS UNIFIED TRADE GATE ===
@@ -3564,10 +3641,38 @@ def perform_continuous_reconciliation() -> None:
             RECONCILIATION_STATUS = "MISMATCH"
             lock_session("RECONCILIATION_DIVERGENCE")
             print(f"[CONTINUOUS RECONCILIATION FAILED] {len(divergences)} divergences detected.")
-            for cat, det in divergences:
-                repair_engine.create_record(cat, det)
+            
+            if has_in_flight_orders():
+                print("[CONTINUOUS RECONCILIATION] In-flight orders exist. Suppressing auto-flatten logic.")
+                _DIVERGENCE_STATE["count"] = 0
+                _DIVERGENCE_STATE["type"] = None
+                for cat, det in divergences:
+                    repair_engine.create_record(cat, det)
+            else:
+                cat_types = [d[0] for d in divergences]
+                primary_cat = cat_types[0] if cat_types else None
+                
+                if _DIVERGENCE_STATE["type"] == primary_cat:
+                    _DIVERGENCE_STATE["count"] += 1
+                else:
+                    import time
+                    _DIVERGENCE_STATE["first_detected"] = time.time()
+                    _DIVERGENCE_STATE["count"] = 1
+                    _DIVERGENCE_STATE["type"] = primary_cat
+                
+                for cat, det in divergences:
+                    if cat in {"ORPHAN_BROKER_POSITION", "BROKER_POSITION_MISMATCH"}:
+                        if _DIVERGENCE_STATE["count"] >= 2:
+                            _DIVERGENCE_STATE["confirmed_count"] += 1
+                            simulate_auto_flatten([(cat, det)])
+                        else:
+                            repair_engine.create_record(cat, det)
+                    else:
+                        repair_engine.create_record(cat, det)
         else:
             print("[CONTINUOUS RECONCILIATION OK] Local and Broker state in parity.")
+            _DIVERGENCE_STATE["count"] = 0
+            _DIVERGENCE_STATE["type"] = None
 
     except Exception as e:
         RECONCILIATION_STATUS = "MISMATCH"
@@ -3595,7 +3700,6 @@ try:
                 "defensive_mode_active": True,
             }
 
-        # Continuous Reconciliation Heartbeat every 5 cycles
         if cycle % 5 == 0 and not is_session_locked():
             perform_continuous_reconciliation()
 
@@ -3626,72 +3730,46 @@ try:
                 r17_execute_exit(pos, observer_symbol, observer_price, "TAKE_PROFIT")
                 continue
 
-            # =========================
-            
-            # =========================
-            # R15B ENHANCED EXIT ENGINE
-            # =========================
-
             profile = r15b_profile()
 
-            # Convert floating PnL to %
             entry_price = float(pos.get("entry_price", 100.0))
             pnl_pct = pos["floating"] / max(entry_price, 1e-6)
 
             sig = float(pos.get("signal_score", 0.0))
             prob = float(pos.get("prob_positive", 0.0))
 
-            # =========================
-            # EARLY WEAK TRADE CUT
-            # =========================
             if pnl_pct <= profile["sl"] * 0.7 and sig < 11.5:
                 r17_execute_exit(pos, observer_symbol, observer_price, "FAST_STOP")
 
-            # =========================
-            # STANDARD STOP
-            # =========================
             elif pnl_pct <= profile["sl"]:
                 r17_execute_exit(pos, observer_symbol, observer_price, "STOP")
 
-            # =========================
-            # TAKE PROFIT / RUNNER LOGIC
-            # =========================
             elif pnl_pct >= profile["tp"]:
                 if sig >= 13.5 and prob >= 0.70:
-                    # strong trade → let run
                     pos["age_cycles"] = max(0, pos["age_cycles"] - 3)
                     print(f"[R15B RUNNER] {pos['symbol']} strong signal extended")
 
                 elif sig >= 12.5 and prob >= 0.66:
-                    # medium trade → slight extension
                     pos["age_cycles"] = max(0, pos["age_cycles"] - 2)
                     print(f"[R15B EXTEND] {pos['symbol']} moderate extension")
 
                 else:
-                    # weak profit → take it
                     r17_execute_exit(pos, observer_symbol, observer_price, "TAKE_PROFIT")
 
-            # =========================
-            # TIME EXIT (WEAK ONLY)
             if pos.get('forced_exit', False):
-                continue  # R16A guard: prevent dual exit execution
-            # =========================
+                continue
             elif pos["age_cycles"] >= exit_profile["max_age"]:
                 if sig >= 12.0 and prob >= 0.65:
                     pos["age_cycles"] = max(0, pos["age_cycles"] - 2)
                 else:
                     r17_execute_exit(pos, observer_symbol, observer_price, "TIME_EXIT")
 
-            # =========================
-            # Cut weak losers earlier than the standard stop.
             if pos["floating"] <= exit_profile["stop_loss"] * 0.8:
                 r17_execute_exit(pos, observer_symbol, observer_price, "FAST_STOP")
 
-            # Normal stop for losses that exceed the formal stop threshold.
             elif pos["floating"] <= exit_profile["stop_loss"]:
                 r17_execute_exit(pos, observer_symbol, observer_price, "STOP")
 
-            # Let strong winners run instead of clipping them too early.
             elif pos["floating"] >= exit_profile["take_profit"]:
                 if pos["signal_score"] >= 13.0 and pos["prob_positive"] >= 0.70:
                     pos["age_cycles"] = max(0, pos["age_cycles"] - 3)
@@ -3700,7 +3778,6 @@ try:
                 else:
                     r17_execute_exit(pos, observer_symbol, observer_price, "TAKE_PROFIT")
 
-            # Time-exit only weak trades; strong trades get more runway.
             elif pos["age_cycles"] >= exit_profile["max_age"]:
                 if pos["signal_score"] >= 11.5 and pos["prob_positive"] >= 0.64:
                     pos["age_cycles"] = max(0, pos["age_cycles"] - 2)
@@ -3729,9 +3806,6 @@ try:
         observer_equity = pnl_observer.equity()
         observer_balance = pnl_observer.current_balance
 
-        # ============================================================
-        # PCNRASS PNL UNIFICATION
-        # ============================================================
         authoritative_realized = mtm_realized
         authoritative_unrealized = mtm_unrealized
         authoritative_equity_pnl = round(authoritative_realized + authoritative_unrealized, 4)
@@ -3841,10 +3915,31 @@ try:
             print("COINBASE CONNECTED: NO")
 
         print("--- BROKER EXECUTION CONTROL ---")
-        print(f"BROKER EXECUTION: {broker_execution_status_label()}")
-        print(f"SELECTED BROKER: {selected_broker_status_label()}")
-        print(f"BROKER HEALTH: {getattr(oanda, 'health_state', 'GREEN')}")
-        print(f"BROKER MODE: {SELECTED_BROKER_MODE}")
+        labels = []
+        labels.append("=========================")
+        labels.append(f"BROKER EXECUTION : {broker_execution_status_label()}")
+        labels.append(f"SELECTED BROKER  : {selected_broker_status_label()}")
+        labels.append(f"BROKER MODE      : {SELECTED_BROKER_MODE}")
+        labels.append(f"BROKER HEALTH    : {getattr(oanda, 'health_state', 'GREEN')}")
+        
+        # Phase 118D-1 Auto-Flatten Simulation Mode
+        labels.append("")
+        labels.append("=== AUTO FLATTEN STATUS ===")
+        labels.append("Simulation Enabled: YES")
+        labels.append(f"Confirmed Divergences: {_DIVERGENCE_STATE['confirmed_count']}")
+        labels.append(f"Pending Simulations: {_DIVERGENCE_STATE['pending_count']}")
+        
+        last_sim = _DIVERGENCE_STATE.get("last_simulation")
+        if last_sim:
+            sim_lines = last_sim.split("\n")
+            labels.append("Last Simulation Result:")
+            for line in sim_lines:
+                labels.append(f"  {line}")
+        else:
+            labels.append("Last Simulation Result: None")
+            
+        labels.append("=========================")
+        for l in labels: print(l)
         print(f"EXECUTION SCOPE: {active_execution_scope_label()}")
 
         print("--- LIVE EXECUTION SUMMARY ---")
