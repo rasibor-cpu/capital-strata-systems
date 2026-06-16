@@ -58,22 +58,14 @@ def test_successful_execution_within_bounds(dashboard):
         assert not dashboard.is_session_locked()
 
 def test_missing_expected_price(dashboard):
+    # This scenario is now handled gracefully by the early return fail-closed block,
+    # so we don't even reach place_order.
     with patch("backend.app.brokers.oanda_adapter.OandaAdapter.place_order") as mock_place:
-        mock_place.return_value = {
-            "ok": True,
-            "data": {
-                "orderFillTransaction": {
-                    "tradeOpened": {"tradeID": "222"},
-                    "price": "1.0020"
-                }
-            }
-        }
-        
         ok, msg, tid, fill_price, etime, slippage = dashboard.attempt_oanda_fx_execution("EUR_USD", expected_price=None)
         
-        assert ok is True
-        assert slippage is None
-        assert mock_place.call_args[1].get("price_bound") is None
+        assert ok is False
+        assert msg == "OANDA_BLOCKED_MISSING_EXPECTED_PRICE"
+        mock_place.assert_not_called()
 
 def test_price_bound_rejection(dashboard):
     with patch("backend.app.brokers.oanda_adapter.OandaAdapter.place_order") as mock_place:
@@ -106,10 +98,6 @@ def test_slippage_calculation_accuracy(dashboard):
         assert slippage == pytest.approx(0.0049)
 
 def test_execution_exceeding_bounds(dashboard):
-    # What if OANDA somehow returned a fill outside our requested bound?
-    # Our code doesn't fail closed retroactively on the slippage variable itself, 
-    # it relies on OANDA's 400 rejection (which is tested above).
-    # But let's verify that the slippage is correctly calculated even if it's large.
     with patch("backend.app.brokers.oanda_adapter.OandaAdapter.place_order") as mock_place:
         mock_place.return_value = {
             "ok": True,
@@ -123,3 +111,33 @@ def test_execution_exceeding_bounds(dashboard):
         
         ok, msg, tid, fill_price, etime, slippage = dashboard.attempt_oanda_fx_execution("EUR_USD", expected_price=1.0000)
         assert slippage == pytest.approx(0.0500)
+
+def test_missing_expected_price_blocks_execution(dashboard):
+    ok, msg, tid, fill_price, etime, slippage = dashboard.attempt_oanda_fx_execution("EUR_USD", expected_price=None)
+    assert ok is False
+    assert msg == "OANDA_BLOCKED_MISSING_EXPECTED_PRICE"
+
+def test_negative_zero_expected_price_blocks_execution(dashboard):
+    ok, msg, tid, fill_price, etime, slippage = dashboard.attempt_oanda_fx_execution("EUR_USD", expected_price=0.0)
+    assert ok is False
+    assert msg == "OANDA_BLOCKED_MISSING_EXPECTED_PRICE"
+    
+    ok, msg, tid, fill_price, etime, slippage = dashboard.attempt_oanda_fx_execution("EUR_USD", expected_price=-1.0)
+    assert ok is False
+    assert msg == "OANDA_BLOCKED_MISSING_EXPECTED_PRICE"
+
+def test_resolve_expected_fx_price_valid(dashboard):
+    with patch("backend.data.price_feed.PriceFeed.get_price") as mock_get_price:
+        mock_get_price.return_value = 1.0500
+        assert dashboard.resolve_expected_fx_price("EUR_USD") == 1.0500
+
+def test_resolve_expected_fx_price_invalid(dashboard):
+    with patch("backend.data.price_feed.PriceFeed.get_price") as mock_get_price:
+        mock_get_price.return_value = 0.0
+        assert dashboard.resolve_expected_fx_price("EUR_USD") is None
+        
+        mock_get_price.return_value = None
+        assert dashboard.resolve_expected_fx_price("EUR_USD") is None
+        
+        mock_get_price.side_effect = Exception("Network Error")
+        assert dashboard.resolve_expected_fx_price("EUR_USD") is None

@@ -2130,6 +2130,14 @@ def pcnrass_get_reference_price(symbol: str, fallback: float = 100.0) -> float:
             pass
     return float(fallback)
 
+def resolve_expected_fx_price(symbol: str) -> float | None:
+    try:
+        px = price_feed.get_price(symbol)
+        if px is not None and float(px) > 0:
+            return float(px)
+    except Exception:
+        pass
+    return None
 
 def pcnrass_wait_for_next_cycle(cycle: int) -> bool:
     response = input(f"\n[PCNRASS PAUSE] Cycle {cycle} complete. Press ENTER for next cycle, or type Q to quit: ").strip().lower()
@@ -2232,6 +2240,10 @@ def attempt_oanda_fx_execution(symbol: str, expected_price: float | None = None)
     if is_session_locked():
         _audit(False, "SESSION_LOCKED_DEFENSIVE_MODE")
         return False, "SESSION_LOCKED_DEFENSIVE_MODE", None, None, None, None
+
+    if expected_price is None or expected_price <= 0:
+        _audit(False, "OANDA_BLOCKED_MISSING_EXPECTED_PRICE")
+        return False, "OANDA_BLOCKED_MISSING_EXPECTED_PRICE", None, None, None, None
 
     if not BROKER_EXECUTION_ARMED:
         _audit(False, "BROKER_DISABLED_BY_GLOBAL_SWITCH")
@@ -3945,12 +3957,11 @@ try:
                     if position.get("broker_tested"):
                         if asset_class == "FX" and SELECTED_BROKER == "OANDA":
                             live_fx_funded_this_cycle += 1
-                            # Simulate getting the live observer price right before dispatch
-                            simulated_expected_price = 1.0000
-                            ok, broker_msg, t_id, f_price, e_time, slippage = attempt_oanda_fx_execution(symbol, expected_price=simulated_expected_price)
+                            resolved_expected_price = resolve_expected_fx_price(symbol)
+                            ok, broker_msg, t_id, f_price, e_time, slippage = attempt_oanda_fx_execution(symbol, expected_price=resolved_expected_price)
 
                             if ok and t_id:
-                                position["broker_expected_price"] = simulated_expected_price
+                                position["broker_expected_price"] = resolved_expected_price
                                 position["broker_trade_id"] = t_id
                                 position["broker_fill_price"] = f_price
                                 position["broker_execution_time"] = e_time
