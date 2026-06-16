@@ -281,8 +281,8 @@ def test_adapter_integrates_with_canonical_backend_gate():
         engine_mode="BALANCED",
     )
 
-    assert decision["approved"] is True
-    assert decision["reason"] == "UNIFIED_GATE_APPROVED"
+    assert decision["approved"] is False
+    assert decision["reason"] == "rejected: probability below threshold"
     assert decision["backend_details"]["asset_class"] == "crypto"
 
 
@@ -364,3 +364,29 @@ def test_dashboard_no_longer_defines_local_css_unified_trade_gate_class():
 
 def test_legacy_dashboard_gate_generator_is_retired():
     assert not LEGACY_R7_BUILDER_PATH.exists()
+
+
+def test_adapter_integrates_with_canonical_backend_gate_approved():
+    adapter = CSSGateDashboardAdapter(CSSUnifiedTradeGate())
+    decision = adapter.approve_trade(
+        candidate={"asset_class": "CRYPTO", "signal_score": 12.0, "prob_positive": 0.8},
+        session={"session_id": "TEST", "role": "TRADER", "created": time.time()},
+        role_profile={"can_execute_paper_trading": True},
+        portfolio_state={"CRYPTO": 0},
+        engine_mode="BALANCED",
+    )
+    assert decision["approved"] is True
+    assert decision["reason"] == "UNIFIED_GATE_APPROVED"
+    assert decision["backend_details"]["probability"] == 0.8
+
+def test_adapter_fails_closed_on_malformed_probability():
+    adapter = CSSGateDashboardAdapter(CSSUnifiedTradeGate())
+    decision = adapter.approve_trade(
+        candidate={"asset_class": "CRYPTO", "signal_score": 12.0, "prob_positive": "not_a_number"},
+        session={"session_id": "TEST", "role": "TRADER", "created": time.time()},
+        role_profile={"can_execute_paper_trading": True},
+        portfolio_state={"CRYPTO": 0},
+        engine_mode="BALANCED",
+    )
+    assert decision["approved"] is False
+    assert decision["reason"] == "MALFORMED_CANDIDATE_DATA"

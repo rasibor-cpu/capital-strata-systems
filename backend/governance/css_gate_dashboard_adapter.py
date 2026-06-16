@@ -54,6 +54,13 @@ class CSSGateDashboardAdapter:
             engine_mode=engine_mode,
         )
 
+        if "_translation_error" in translated_candidate:
+            return self._normalize_decision({
+                "approved": False,
+                "reason": translated_candidate["_translation_error"],
+                "details": {}
+            })
+
         translated_session = self._translate_session(
             session=session,
             role_profile=role_profile,
@@ -121,56 +128,53 @@ class CSSGateDashboardAdapter:
         engine_mode: str,
     ) -> Dict[str, Any]:
         if not isinstance(candidate, dict):
-            candidate = {}
+            return {"_translation_error": "INVALID_CANDIDATE_FORMAT"}
 
-        raw_probability = float(
-            candidate.get(
-                "probability",
-                candidate.get("prob_positive", 0.0),
+        try:
+            raw_probability = float(
+                candidate.get(
+                    "probability",
+                    candidate.get("prob_positive", 0.0),
+                )
             )
-        )
 
-        signal_score = float(
-            candidate.get(
-                "signal_score",
-                0.0,
+            signal_score = float(
+                candidate.get(
+                    "signal_score",
+                    0.0,
+                )
             )
-        )
 
-        expected_value = float(
-            candidate.get(
-                "expected_value",
-                signal_score,
+            expected_value = float(
+                candidate.get(
+                    "expected_value",
+                    signal_score,
+                )
             )
-        )
-        if expected_value <= 0:
-            expected_value = 0.000001
+            if expected_value <= 0:
+                expected_value = 0.000001
 
-        cost = float(
-            candidate.get(
-                "cost",
-                0.0,
+            cost = float(
+                candidate.get(
+                    "cost",
+                    0.0,
+                )
             )
-        )
-
-        probability = self._dashboard_compatible_probability(
-            raw_probability,
-            engine_mode,
-        )
+        except (TypeError, ValueError):
+            return {"_translation_error": "MALFORMED_CANDIDATE_DATA"}
 
         return {
             "asset_class": str(candidate.get("asset_class", "UNKNOWN")).lower(),
             "symbol": str(candidate.get("symbol", "UNKNOWN")),
             "expected_value": expected_value,
             "cost": cost,
-            "probability": probability,
+            "probability": raw_probability,
             "dashboard_probability": raw_probability,
             "dashboard_signal_score": signal_score,
         }
 
     def _translate_session(
         self,
-        *,
         session: Dict[str, Any],
         role_profile: Dict[str, Any],
     ) -> Dict[str, Any]:
@@ -272,6 +276,9 @@ class CSSGateDashboardAdapter:
             "options": 0,
         }
 
+        if not isinstance(portfolio_state, dict):
+            return normalized
+
         for key, value in (portfolio_state or {}).items():
             asset_key = str(key or "").strip().lower()
             if asset_key in normalized:
@@ -281,18 +288,3 @@ class CSSGateDashboardAdapter:
                     normalized[asset_key] = 0
 
         return normalized
-
-    def _dashboard_compatible_probability(
-        self,
-        probability: float,
-        engine_mode: str,
-    ) -> float:
-        thresholds = {
-            "SAFE": 0.65,
-            "CONSERVATIVE": 0.60,
-            "BALANCED": 0.58,
-            "AGGRESSIVE": 0.55,
-            "EXPANSION": 0.52,
-        }
-        threshold = thresholds.get(str(engine_mode or "").upper(), 0.58)
-        return max(float(probability), threshold)

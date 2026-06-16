@@ -41,7 +41,7 @@ def evaluate_exit_signal(position: dict) -> str:
 
 
 # === R14F PRE-POSITION PROFITABILITY GATE ===
-def css_profitability_threshold(mode: str) -> float:
+def _legacy_css_profitability_threshold(mode: str) -> float:
     return {
         "SAFE": 17.5,
         "CONSERVATIVE": 16.5,
@@ -51,14 +51,14 @@ def css_profitability_threshold(mode: str) -> float:
     }.get(str(mode).upper(), 15.8)
 
 
-def css_profitability_allows(symbol: str, asset_class: str, sig: float, prob: float) -> tuple[bool, float, float]:
+def _legacy__legacy_css_profitability_allows(symbol: str, asset_class: str, sig: float, prob: float) -> tuple[bool, float, float]:
     """
     Uses existing dashboard signal score and probability before creating a position.
     Score remains compatible with current sig scale.
     """
     signal_score = float(sig or 0.0)
     probability = float(prob or 0.0)
-    threshold = css_profitability_threshold(ENGINE_MODE)
+    threshold = _legacy_css_profitability_threshold(ENGINE_MODE)
 
     # R14F asset-aware tuning:
     # Preserve the base mode threshold for FUTURES/OPTIONS.
@@ -89,7 +89,7 @@ def css_profitability_allows(symbol: str, asset_class: str, sig: float, prob: fl
 
 
 # === R13C GLOBAL MODE DOMINANCE ===
-def enforce_mode_dominance():
+def _legacy__legacy_enforce_mode_dominance():
     global SELECTED_BROKER_MODE
 
     if str(GLOBAL_BROKER_MODE).lower() == "live":
@@ -100,7 +100,7 @@ def enforce_mode_dominance():
 
 
 # === R13 EXECUTION BOUNDARY ENFORCEMENT ===
-def enforce_execution_boundary():
+def _legacy__legacy_enforce_execution_boundary():
     mode = str(SELECTED_BROKER_MODE).lower()
 
     if mode == "live":
@@ -2377,8 +2377,8 @@ print(
 )
 
 
-enforce_mode_dominance()
-enforce_execution_boundary()
+_legacy_enforce_mode_dominance()
+_legacy_enforce_execution_boundary()
 
 
 # === PCNRASS PHASE 2 BROKER ISOLATION + REAL PRICE HELPERS ===
@@ -4043,7 +4043,7 @@ try:
                         last_trade = f"{symbol} UNIFIED_GATE_BLOCKED {gate_reason}"
                         continue
 
-                    r14f_ok, r14f_score, r14f_threshold = css_profitability_allows(
+                    r14f_ok, r14f_score, r14f_threshold = _legacy_css_profitability_allows(
                         symbol=symbol,
                         asset_class=asset_class,
                         sig=sig,

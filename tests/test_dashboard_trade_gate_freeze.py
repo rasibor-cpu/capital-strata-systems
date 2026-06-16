@@ -118,4 +118,5 @@ def test_mismatch_identification_probability_thresholds():
         engine_mode="SAFE"
     )
     
-    assert decision["approved"] is True
+    assert decision["approved"] is False
+    assert decision["reason"] == "rejected: probability below threshold"
