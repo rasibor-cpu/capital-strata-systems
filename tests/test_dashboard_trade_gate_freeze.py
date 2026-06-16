@@ -1,53 +1,80 @@
-import pytest
-from unittest.mock import patch
+import ast
 import time
+from pathlib import Path
+from typing import Any
 
-from scripts import css_live_dashboard
 from backend.governance.css_unified_trade_gate import CSSUnifiedTradeGate
 from backend.governance.css_gate_dashboard_adapter import CSSGateDashboardAdapter
 
-@pytest.fixture
-def mock_dashboard_env():
-    with patch("scripts.css_live_dashboard.SESSION_USER_CTX", {
-        "session_id": "TEST-123",
-        "session_status": {"active": True},
-        "role_profile": {
-            "role": "TRADER",
-            "can_execute_paper_trading": True,
-            "can_use_live_broker_mode": False,
-            "can_execute_live_trading": False
-        },
-        "created": time.time()
-    }), \
-    patch("scripts.css_live_dashboard.SELECTED_BROKER_MODE", "paper"), \
-    patch("scripts.css_live_dashboard.ENGINE_MODE", "SAFE"), \
-    patch("scripts.css_live_dashboard.is_session_locked", return_value=False), \
-    patch("scripts.css_live_dashboard._dashboard_portfolio_state_for_gate", return_value={"crypto": 0}), \
-    patch("scripts.css_live_dashboard.audit_ledger"):
-        yield
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DASHBOARD_PATH = PROJECT_ROOT / "scripts" / "css_live_dashboard.py"
 
-def test_dashboard_gate_output_shape(mock_dashboard_env):
-    approved, reason = css_live_dashboard.approve_trade_before_register(
+def _load_dashboard_gate_helpers():
+    source = DASHBOARD_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    wanted = {
+        "approve_trade_before_register",
+    }
+
+    nodes = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name in wanted
+    ]
+    module = ast.Module(body=nodes, type_ignores=[])
+    ast.fix_missing_locations(module)
+
+    # Provide the necessary globals
+    backend_gate = CSSUnifiedTradeGate()
+    adapter = CSSGateDashboardAdapter(backend_gate)
+
+    namespace = {
+        "Any": Any,
+        "SESSION_USER_CTX": {
+            "session_id": "TEST-123",
+            "session_status": {"active": True},
+            "role_profile": {
+                "role": "TRADER",
+                "can_execute_paper_trading": True,
+                "can_use_live_broker_mode": False,
+                "can_execute_live_trading": False
+            },
+            "created": time.time()
+        },
+        "SELECTED_BROKER_MODE": "paper",
+        "SELECTED_BROKER": "OANDA",
+        "ENGINE_MODE": "SAFE",
+        "is_session_locked": lambda: False,
+        "_dashboard_portfolio_state_for_gate": lambda: {"crypto": 0},
+        "css_unified_trade_gate": adapter,
+        "audit_ledger": type("MockAudit", (), {"record": lambda *a, **k: None})()
+    }
+    exec(compile(module, str(DASHBOARD_PATH), "exec"), namespace)
+    return namespace
+
+def test_dashboard_gate_output_shape():
+    ns = _load_dashboard_gate_helpers()
+    approved, reason = ns["approve_trade_before_register"](
         asset_class="crypto",
         symbol="BTC-USD",
         sig=0.5,
         prob=0.9
     )
-    # Based on adapter behavior, it should be approved if expected_value > cost and probability >= threshold
-    # Cost defaults to 0.0, expected_value defaults to sig (0.5), threshold for SAFE is 0.65
     assert isinstance(approved, bool)
     assert isinstance(reason, str)
     assert approved is True
     assert reason == "UNIFIED_GATE_APPROVED"
 
-def test_dashboard_gate_precheck_session_locked(mock_dashboard_env):
-    with patch("scripts.css_live_dashboard.is_session_locked", return_value=True):
-        approved, reason = css_live_dashboard.approve_trade_before_register("crypto", "BTC-USD", 0.5, 0.9)
-        assert approved is False
-        assert reason == "SESSION_LOCKED_DEFENSIVE_MODE"
+def test_dashboard_gate_precheck_session_locked():
+    ns = _load_dashboard_gate_helpers()
+    ns["is_session_locked"] = lambda: True
+    approved, reason = ns["approve_trade_before_register"]("crypto", "BTC-USD", 0.5, 0.9)
+    assert approved is False
+    assert reason == "SESSION_LOCKED_DEFENSIVE_MODE"
 
-def test_dashboard_gate_precheck_unsupported_asset(mock_dashboard_env):
-    approved, reason = css_live_dashboard.approve_trade_before_register("realestate", "HOUSE", 0.5, 0.9)
+def test_dashboard_gate_precheck_unsupported_asset():
+    ns = _load_dashboard_gate_helpers()
+    approved, reason = ns["approve_trade_before_register"]("realestate", "HOUSE", 0.5, 0.9)
     assert approved is False
     assert reason == "UNSUPPORTED_ASSET_CLASS_REALESTATE"
 
@@ -76,10 +103,6 @@ def test_canonical_gate_adapter_matches_shape():
     assert decision["reason"] == "UNIFIED_GATE_APPROVED"
 
 def test_mismatch_identification_probability_thresholds():
-    # Adapter artificially bumps probability to meet threshold if missing, wait:
-    # `threshold = thresholds.get(str(engine_mode or "").upper(), 0.58)`
-    # `return max(float(probability), threshold)`
-    # This means the adapter ALWAYS bypasses the backend probability check!
     backend_gate = CSSUnifiedTradeGate()
     adapter = CSSGateDashboardAdapter(backend_gate)
     
@@ -94,6 +117,5 @@ def test_mismatch_identification_probability_thresholds():
         portfolio_state={"crypto": 0},
         engine_mode="SAFE"
     )
-    # The adapter forces probability to 0.65 for SAFE mode. The backend requires 0.65.
-    # Therefore, the backend approves it! This is a mismatch in behavior from pure backend gate.
+    
     assert decision["approved"] is True
