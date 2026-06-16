@@ -2198,7 +2198,9 @@ def perform_post_trade_verification(trade_id: str, symbol: str, expected_units: 
         print(f"[POST-TRADE VERIFICATION EXCEPTION] {e}")
 
 
-def attempt_oanda_fx_execution(symbol: str) -> tuple[bool, str, str | None, float | None, str | None]:
+OANDA_MAX_SLIPPAGE = 0.0050
+
+def attempt_oanda_fx_execution(symbol: str, expected_price: float | None = None) -> tuple[bool, str, str | None, float | None, str | None, float | None]:
     role_profile = SESSION_USER_CTX.get("role_profile", {})
 
     def _audit(allowed: bool, reason: str) -> None:
@@ -2229,39 +2231,41 @@ def attempt_oanda_fx_execution(symbol: str) -> tuple[bool, str, str | None, floa
 
     if is_session_locked():
         _audit(False, "SESSION_LOCKED_DEFENSIVE_MODE")
-        return False, "SESSION_LOCKED_DEFENSIVE_MODE", None, None, None
+        return False, "SESSION_LOCKED_DEFENSIVE_MODE", None, None, None, None
 
     if not BROKER_EXECUTION_ARMED:
         _audit(False, "BROKER_DISABLED_BY_GLOBAL_SWITCH")
-        return False, "BROKER_DISABLED_BY_GLOBAL_SWITCH", None, None, None
+        return False, "BROKER_DISABLED_BY_GLOBAL_SWITCH", None, None, None, None
 
     if not role_profile.get("can_execute_paper_trading", False):
         _audit(False, "RBAC_BLOCKED_PAPER_EXECUTION")
-        return False, "RBAC_BLOCKED_PAPER_EXECUTION", None, None, None
+        return False, "RBAC_BLOCKED_PAPER_EXECUTION", None, None, None, None
 
     if SELECTED_BROKER != "OANDA":
         reason = f"BROKER_NOT_SELECTED_FOR_OANDA_{SELECTED_BROKER}"
         _audit(False, reason)
-        return False, reason, None, None, None
+        return False, reason, None, None, None, None
 
     if ENGINE_MODE == "SAFE":
         _audit(False, "OANDA_BLOCKED_SAFE_MODE")
-        return False, "OANDA_BLOCKED_SAFE_MODE", None, None, None
+        return False, "OANDA_BLOCKED_SAFE_MODE", None, None, None, None
 
     if symbol not in FX_SYMBOLS:
         _audit(False, "OANDA_BLOCKED_NOT_FX")
-        return False, "OANDA_BLOCKED_NOT_FX", None, None, None
+        return False, "OANDA_BLOCKED_NOT_FX", None, None, None, None
 
     if oanda_has_open_trade():
         _audit(False, "OANDA_BLOCKED_OPEN_TRADE")
-        return False, "OANDA_BLOCKED_OPEN_TRADE", None, None, None
+        return False, "OANDA_BLOCKED_OPEN_TRADE", None, None, None, None
 
     try:
+        price_bound_val = str(expected_price + OANDA_MAX_SLIPPAGE) if expected_price is not None else None
         response = oanda.place_order(
             symbol=symbol,
             side="BUY",
             units=FX_LIVE_UNITS,
             order_type="MARKET",
+            price_bound=price_bound_val,
         )
 
         if response.get("ok"):
@@ -2273,16 +2277,31 @@ def attempt_oanda_fx_execution(symbol: str) -> tuple[bool, str, str | None, floa
             price_str = fill_txn.get("price")
             fill_price = float(price_str) if price_str else None
             execution_time = fill_txn.get("time")
-            return True, "OANDA_ORDER_OK", trade_id, fill_price, execution_time
 
-        reason = f"OANDA_ORDER_FAIL_{response.get('status', 'NA')}"
+            slippage = None
+            if fill_price is not None and expected_price is not None:
+                slippage = fill_price - expected_price
+                print(f"[{symbol} SLIPPAGE AUDIT] Expected: {expected_price:.4f}, Actual: {fill_price:.4f}, Slippage: {slippage:.4f}")
+
+            return True, "OANDA_ORDER_OK", trade_id, fill_price, execution_time, slippage
+
+        # If OANDA rejects it due to price bound, fail closed.
+        resp_status = response.get("status")
+        resp_str = str(response)
+        if resp_status == 400 and "PRICE_BOUND" in resp_str:
+            lock_session("OANDA_SLIPPAGE_REJECTION")
+            reason = "OANDA_ORDER_FAIL_PRICE_BOUND_EXCEEDED"
+            _audit(False, reason)
+            return False, reason, None, None, None, None
+
+        reason = f"OANDA_ORDER_FAIL_{resp_status}"
         _audit(False, reason)
-        return False, reason, None, None, None
+        return False, reason, None, None, None, None
 
     except Exception as e:
         reason = f"OANDA_ERROR_{str(e)[:40]}"
         _audit(False, reason)
-        return False, reason, None, None, None
+        return False, reason, None, None, None, None
 
 
 def coinbase_live_orders_enabled() -> bool:
@@ -3926,12 +3945,16 @@ try:
                     if position.get("broker_tested"):
                         if asset_class == "FX" and SELECTED_BROKER == "OANDA":
                             live_fx_funded_this_cycle += 1
-                            ok, broker_msg, t_id, f_price, e_time = attempt_oanda_fx_execution(symbol)
+                            # Simulate getting the live observer price right before dispatch
+                            simulated_expected_price = 1.0000
+                            ok, broker_msg, t_id, f_price, e_time, slippage = attempt_oanda_fx_execution(symbol, expected_price=simulated_expected_price)
 
                             if ok and t_id:
+                                position["broker_expected_price"] = simulated_expected_price
                                 position["broker_trade_id"] = t_id
                                 position["broker_fill_price"] = f_price
                                 position["broker_execution_time"] = e_time
+                                position["broker_slippage"] = slippage
                                 perform_post_trade_verification(t_id, symbol, FX_LIVE_UNITS)
 
                         elif asset_class == "CRYPTO" and SELECTED_BROKER == "COINBASE":

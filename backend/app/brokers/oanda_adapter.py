@@ -115,6 +115,7 @@ class OandaAdapter:
         side: str = "BUY",
         units: int = 1,
         order_type: str = "MARKET",
+        price_bound: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Accept either:
@@ -157,6 +158,9 @@ class OandaAdapter:
                 "positionFill": "DEFAULT",
             }
         }
+        
+        if price_bound is not None:
+            payload["order"]["priceBound"] = str(price_bound)
 
         return self._request_json("POST", f"v3/accounts/{self.account_id}/orders", payload)
 
