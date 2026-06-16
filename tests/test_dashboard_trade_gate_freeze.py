@@ -83,7 +83,7 @@ def test_canonical_gate_adapter_matches_shape():
     adapter = CSSGateDashboardAdapter(backend_gate)
     
     session = {"session_id": "TEST-123", "created": time.time()}
-    role_profile = {"role": "TRADER"}
+    role_profile = {"role": "TRADER", "can_execute_paper_trading": True}
     candidate = {"asset_class": "crypto", "symbol": "BTC-USD", "signal_score": 0.5, "prob_positive": 0.9}
     
     decision = adapter.approve_trade(
@@ -107,7 +107,7 @@ def test_mismatch_identification_probability_thresholds():
     adapter = CSSGateDashboardAdapter(backend_gate)
     
     session = {"session_id": "TEST-123", "created": time.time()}
-    role_profile = {"role": "TRADER"}
+    role_profile = {"role": "TRADER", "can_execute_paper_trading": True}
     candidate = {"asset_class": "crypto", "symbol": "BTC-USD", "signal_score": 0.5, "prob_positive": 0.1} # Prob is 0.1!
     
     decision = adapter.approve_trade(

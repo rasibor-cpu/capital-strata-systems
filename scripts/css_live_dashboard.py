@@ -2070,45 +2070,24 @@ def _dashboard_portfolio_state_for_gate() -> dict[str, int]:
 def approve_trade_before_register(asset_class: str, symbol: str, sig: float, prob: float) -> tuple[bool, str]:
     session = SESSION_USER_CTX
     role_profile = SESSION_USER_CTX.get("role_profile", {})
-    asset_key = str(asset_class or "UNKNOWN").upper()
-    broker_mode = str(SELECTED_BROKER_MODE or "paper").lower()
+    portfolio_state = _dashboard_portfolio_state_for_gate()
 
-    if not isinstance(session, dict) or not session.get("session_id"):
-        decision = {"approved": False, "reason": "NO_VALID_SESSION"}
-    elif not session.get("session_status", {}).get("active", True):
-        decision = {"approved": False, "reason": "SESSION_NOT_ACTIVE"}
-    elif is_session_locked():
-        decision = {"approved": False, "reason": "SESSION_LOCKED_DEFENSIVE_MODE"}
-    elif asset_key not in {"CRYPTO", "FX", "FUTURES", "OPTIONS"}:
-        decision = {"approved": False, "reason": f"UNSUPPORTED_ASSET_CLASS_{asset_key}"}
-    elif broker_mode == "live" and not role_profile.get("can_use_live_broker_mode", False):
-        decision = {"approved": False, "reason": "RBAC_BLOCKED_LIVE_MODE"}
-    elif broker_mode == "live" and not role_profile.get("can_execute_live_trading", False):
-        decision = {"approved": False, "reason": "RBAC_BLOCKED_LIVE_EXECUTION"}
-    elif broker_mode != "live" and not role_profile.get("can_execute_paper_trading", False):
-        decision = {"approved": False, "reason": "RBAC_BLOCKED_PAPER_EXECUTION"}
-    elif ENGINE_MODE == "SAFE" and broker_mode == "live":
-        decision = {"approved": False, "reason": "SAFE_MODE_BLOCKS_LIVE_EXECUTION"}
-    else:
-        decision = None
-
-    if decision is None:
-        portfolio_state = _dashboard_portfolio_state_for_gate()
-        decision = css_unified_trade_gate.approve_trade(
-            candidate={
-                "asset_class": asset_class,
-                "symbol": symbol,
-                "signal_score": sig,
-                "prob_positive": prob,
-                "selected_broker": SELECTED_BROKER,
-                "broker_mode": SELECTED_BROKER_MODE,
-                "engine_mode": ENGINE_MODE,
-            },
-            session=session,
-            role_profile=role_profile,
-            portfolio_state=portfolio_state,
-            engine_mode=ENGINE_MODE,
-        )
+    decision = css_unified_trade_gate.approve_trade(
+        candidate={
+            "asset_class": asset_class,
+            "symbol": symbol,
+            "signal_score": sig,
+            "prob_positive": prob,
+            "selected_broker": SELECTED_BROKER,
+            "broker_mode": SELECTED_BROKER_MODE,
+            "engine_mode": ENGINE_MODE,
+            "is_session_locked": is_session_locked(),
+        },
+        session=session,
+        role_profile=role_profile,
+        portfolio_state=portfolio_state,
+        engine_mode=ENGINE_MODE,
+    )
 
     if not decision.get("approved", False):
         try:

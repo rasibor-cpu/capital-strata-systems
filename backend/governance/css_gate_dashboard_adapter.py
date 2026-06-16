@@ -4,6 +4,7 @@ import time
 from typing import Any, Dict
 
 
+
 class CSSGateDashboardAdapter:
     """
     Dashboard compatibility adapter for the canonical
@@ -37,6 +38,16 @@ class CSSGateDashboardAdapter:
         portfolio_state: Dict[str, Any] | None = None,
         engine_mode: str = "SAFE",
     ) -> Dict[str, Any]:
+
+        # LEGACY MIGRATION: Preserve Phase 110A frozen pre-checks
+        legacy_reason = self._evaluate_legacy_dashboard_rules(candidate, session, role_profile, engine_mode)
+        if legacy_reason:
+            return {
+                "approved": False,
+                "reason": legacy_reason,
+                "backend_reason": legacy_reason,
+                "backend_details": {"legacy_block": True},
+            }
 
         translated_candidate = self._translate_candidate(
             candidate,
@@ -72,6 +83,36 @@ class CSSGateDashboardAdapter:
     # ======================================================
     # INTERNAL TRANSLATORS
     # ======================================================
+
+    def _evaluate_legacy_dashboard_rules(
+        self,
+        candidate: Dict[str, Any],
+        session: Dict[str, Any],
+        role_profile: Dict[str, Any],
+        engine_mode: str,
+    ) -> str | None:
+        if not isinstance(session, dict) or not session.get("session_id"):
+            return "NO_VALID_SESSION"
+        if not session.get("session_status", {}).get("active", True):
+            return "SESSION_NOT_ACTIVE"
+        if candidate.get("is_session_locked", False):
+            return "SESSION_LOCKED_DEFENSIVE_MODE"
+            
+        asset_key = str(candidate.get("asset_class", "UNKNOWN")).upper()
+        if asset_key not in {"CRYPTO", "FX", "FUTURES", "OPTIONS"}:
+            return f"UNSUPPORTED_ASSET_CLASS_{asset_key}"
+            
+        broker_mode = str(candidate.get("broker_mode", "paper")).lower()
+        if broker_mode == "live" and not role_profile.get("can_use_live_broker_mode", False):
+            return "RBAC_BLOCKED_LIVE_MODE"
+        if broker_mode == "live" and not role_profile.get("can_execute_live_trading", False):
+            return "RBAC_BLOCKED_LIVE_EXECUTION"
+        if broker_mode != "live" and not role_profile.get("can_execute_paper_trading", False):
+            return "RBAC_BLOCKED_PAPER_EXECUTION"
+        if engine_mode == "SAFE" and broker_mode == "live":
+            return "SAFE_MODE_BLOCKS_LIVE_EXECUTION"
+            
+        return None
 
     def _translate_candidate(
         self,

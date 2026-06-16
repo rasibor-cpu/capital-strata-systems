@@ -106,8 +106,8 @@ def test_adapter_maps_session_created_from_direct_field():
 
     adapter.approve_trade(
         candidate={"asset_class": "CRYPTO", "signal_score": 10.0, "prob_positive": 0.5},
-        session={"role": "TRADER", "created": created},
-        role_profile={},
+        session={"session_id": "TEST", "role": "TRADER", "created": created},
+        role_profile={"can_execute_paper_trading": True},
         portfolio_state={"CRYPTO": 1},
         engine_mode="BALANCED",
     )
@@ -122,8 +122,8 @@ def test_adapter_maps_session_created_from_session_created_field():
 
     adapter.approve_trade(
         candidate={"asset_class": "FX", "signal_score": 10.0, "prob_positive": 0.5},
-        session={"role": "TRADER", "session_created": created},
-        role_profile={},
+        session={"session_id": "TEST", "role": "TRADER", "session_created": created},
+        role_profile={"can_execute_paper_trading": True},
         portfolio_state={"FX": 1},
         engine_mode="BALANCED",
     )
@@ -138,8 +138,8 @@ def test_adapter_maps_session_created_from_session_status():
 
     adapter.approve_trade(
         candidate={"asset_class": "OPTIONS", "signal_score": 10.0, "prob_positive": 0.5},
-        session={"role": "TRADER", "session_status": {"created": created}},
-        role_profile={},
+        session={"session_id": "TEST", "role": "TRADER", "session_status": {"created": created}},
+        role_profile={"can_execute_paper_trading": True},
         portfolio_state={"OPTIONS": 1},
         engine_mode="BALANCED",
     )
@@ -153,8 +153,8 @@ def test_adapter_fails_closed_without_valid_timestamp():
 
     decision = adapter.approve_trade(
         candidate={"asset_class": "CRYPTO", "signal_score": 10.0, "prob_positive": 0.5},
-        session={"role": "TRADER"},
-        role_profile={},
+        session={"session_id": "TEST", "role": "TRADER"},
+        role_profile={"can_execute_paper_trading": True},
         portfolio_state={"CRYPTO": 1},
         engine_mode="BALANCED",
     )
@@ -170,8 +170,8 @@ def test_adapter_normalizes_portfolio_keys_to_backend_shape():
 
     adapter.approve_trade(
         candidate={"asset_class": "CRYPTO", "signal_score": 10.0, "prob_positive": 0.5},
-        session={"role": "TRADER", "created": time.time()},
-        role_profile={},
+        session={"session_id": "TEST", "role": "TRADER", "created": time.time()},
+        role_profile={"can_execute_paper_trading": True},
         portfolio_state={"CRYPTO": 1, "FX": 2, "FUTURES": 0, "OPTIONS": 1},
         engine_mode="BALANCED",
     )
@@ -196,8 +196,8 @@ def test_adapter_returns_rich_dashboard_decision_output():
 
     decision = adapter.approve_trade(
         candidate={"asset_class": "CRYPTO", "signal_score": 10.0, "prob_positive": 0.5},
-        session={"role": "TRADER", "created": time.time()},
-        role_profile={},
+        session={"session_id": "TEST", "role": "TRADER", "created": time.time()},
+        role_profile={"can_execute_paper_trading": True},
         portfolio_state={"CRYPTO": 1},
         engine_mode="BALANCED",
     )
@@ -227,8 +227,8 @@ def test_adapter_preserves_canonical_block_reason():
             "signal_score": 10.0,
             "prob_positive": 0.5,
         },
-        session={"role": "TRADER", "created": time.time()},
-        role_profile={},
+        session={"session_id": "TEST", "role": "TRADER", "created": time.time()},
+        role_profile={"can_execute_paper_trading": True},
         portfolio_state={"CRYPTO": 3},
         engine_mode="BALANCED",
     )
@@ -258,8 +258,8 @@ def test_adapter_translates_dict_gate_decision_without_governance_logic():
             "signal_score": 10.0,
             "prob_positive": 0.5,
         },
-        session={"role": "TRADER", "created": time.time()},
-        role_profile={},
+        session={"session_id": "TEST", "role": "TRADER", "created": time.time()},
+        role_profile={"can_execute_paper_trading": True},
         portfolio_state={"FX": 1},
         engine_mode="SAFE",
     )
@@ -275,8 +275,8 @@ def test_adapter_integrates_with_canonical_backend_gate():
 
     decision = adapter.approve_trade(
         candidate={"asset_class": "CRYPTO", "signal_score": 12.0, "prob_positive": 0.4},
-        session={"role": "TRADER", "created": time.time()},
-        role_profile={},
+        session={"session_id": "TEST", "role": "TRADER", "created": time.time()},
+        role_profile={"can_execute_paper_trading": True},
         portfolio_state={"CRYPTO": 0},
         engine_mode="BALANCED",
     )
@@ -286,8 +286,9 @@ def test_adapter_integrates_with_canonical_backend_gate():
     assert decision["backend_details"]["asset_class"] == "crypto"
 
 
-def test_dashboard_rbac_precheck_blocks_before_adapter():
-    gate = RecordingDashboardGate()
+def test_dashboard_rbac_precheck_blocks_via_adapter():
+    backend = RecordingBackendGate()
+    gate = CSSGateDashboardAdapter(backend)
     ns = _dashboard_gate_namespace(
         role_profile={"can_execute_paper_trading": False},
         gate=gate,
@@ -297,31 +298,33 @@ def test_dashboard_rbac_precheck_blocks_before_adapter():
 
     assert ok is False
     assert reason == "RBAC_BLOCKED_PAPER_EXECUTION"
-    assert gate.calls == []
+    assert backend.calls == []
     assert ns["audit_ledger"].records[0][0] == "unified_trade_gate_reject"
 
 
-def test_dashboard_session_lock_precheck_blocks_before_adapter():
-    gate = RecordingDashboardGate()
+def test_dashboard_session_lock_precheck_blocks_via_adapter():
+    backend = RecordingBackendGate()
+    gate = CSSGateDashboardAdapter(backend)
     ns = _dashboard_gate_namespace(session_locked=True, gate=gate)
 
     ok, reason = ns["approve_trade_before_register"]("CRYPTO", "BTC-USD", 12.0, 0.7)
 
     assert ok is False
     assert reason == "SESSION_LOCKED_DEFENSIVE_MODE"
-    assert gate.calls == []
+    assert backend.calls == []
 
 
 def test_dashboard_routes_approved_trade_through_adapter():
-    gate = RecordingDashboardGate()
+    backend = RecordingBackendGate()
+    gate = CSSGateDashboardAdapter(backend)
     ns = _dashboard_gate_namespace(gate=gate)
 
     ok, reason = ns["approve_trade_before_register"]("CRYPTO", "BTC-USD", 12.0, 0.7)
 
     assert ok is True
     assert reason == "UNIFIED_GATE_APPROVED"
-    assert gate.calls
-    assert gate.calls[0]["portfolio_state"] == {
+    assert backend.calls
+    assert backend.calls[0]["portfolio_state"] == {
         "crypto": 1,
         "fx": 2,
         "futures": 0,
@@ -330,21 +333,21 @@ def test_dashboard_routes_approved_trade_through_adapter():
 
 
 def test_dashboard_routes_blocked_trade_through_adapter_and_preserves_reason():
-    gate = RecordingDashboardGate(
-        {
-            "approved": False,
-            "reason": "rejected: cost exceeds edge",
-            "backend_reason": "rejected: cost exceeds edge",
-            "backend_details": {"asset_class": "crypto"},
-        }
+    backend = RecordingBackendGate(
+        SimpleNamespace(
+            approved=False,
+            reason="rejected: cost exceeds edge",
+            details={"asset_class": "crypto"},
+        )
     )
+    gate = CSSGateDashboardAdapter(backend)
     ns = _dashboard_gate_namespace(gate=gate)
 
     ok, reason = ns["approve_trade_before_register"]("CRYPTO", "BTC-USD", 12.0, 0.7)
 
     assert ok is False
     assert reason == "rejected: cost exceeds edge"
-    assert gate.calls
+    assert backend.calls
     assert ns["audit_ledger"].records[0][2]["reason"] == "rejected: cost exceeds edge"
 
 
