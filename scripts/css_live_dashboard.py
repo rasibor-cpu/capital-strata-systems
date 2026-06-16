@@ -3540,6 +3540,13 @@ def perform_continuous_reconciliation() -> None:
     if SELECTED_BROKER != "OANDA" or not BROKER_EXECUTION_ARMED:
         return
 
+    # Phase 117E: Broker Health Check
+    if getattr(oanda, "health_state", "GREEN") == "RED":
+        RECONCILIATION_STATUS = "MISMATCH"
+        lock_session("BROKER_HEALTH_RED")
+        print("[BROKER HEALTH RED] Consecutive broker failures exceeded threshold. Locking session.")
+        return
+
     try:
         resp = oanda.get_open_positions()
         if not resp.get("ok"):
@@ -3836,6 +3843,7 @@ try:
         print("--- BROKER EXECUTION CONTROL ---")
         print(f"BROKER EXECUTION: {broker_execution_status_label()}")
         print(f"SELECTED BROKER: {selected_broker_status_label()}")
+        print(f"BROKER HEALTH: {getattr(oanda, 'health_state', 'GREEN')}")
         print(f"BROKER MODE: {SELECTED_BROKER_MODE}")
         print(f"EXECUTION SCOPE: {active_execution_scope_label()}")
 

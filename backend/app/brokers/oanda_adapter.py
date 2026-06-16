@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import os
 import json
+import time
+import logging
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, List
 
@@ -46,6 +48,10 @@ class OandaAdapter:
         self.base_url = (os.getenv("OANDA_BASE_URL") or "").strip().rstrip("/")
         self.env = (os.getenv("OANDA_ENV") or "").strip().lower()
         self.allow_live_trades = os.getenv("OANDA_ENABLE_LIVE_TRADING", "0").strip().lower() in ("1", "true", "yes", "on")
+        
+        self.health_state = "GREEN"
+        self.consecutive_failures = 0
+        self.margin_rejection_lock = False
 
     # -------------------------
     # configuration
@@ -63,31 +69,82 @@ class OandaAdapter:
         if not self.is_configured():
             raise RuntimeError("OANDA not configured: set OANDA_API_KEY, OANDA_ACCOUNT_ID and OANDA_BASE_URL.")
 
+        if self.margin_rejection_lock and method.upper() in ("POST", "PUT"):
+            # Block new orders if margin rejected
+            return {"ok": False, "status": None, "data": None, "error": "margin_rejection_lock_active"}
+
         url = f"{self.base_url}/{path.lstrip('/')}"
-        try:
-            resp = requests.request(
-                method=method.upper(),
-                url=url,
-                headers=self._headers(),
-                json=payload,
-                timeout=20,
-            )
-        except Exception as e:
-            return {"ok": False, "status": None, "data": None, "error": f"request_error: {e}"}
+        
+        max_retries = 3
+        backoff_factor = 1.0
+        
+        for attempt in range(max_retries + 1):
+            try:
+                resp = requests.request(
+                    method=method.upper(),
+                    url=url,
+                    headers=self._headers(),
+                    json=payload,
+                    timeout=20,
+                )
+                
+                # Check for 429 Rate Limit
+                if resp.status_code == 429:
+                    if attempt < max_retries:
+                        time.sleep(backoff_factor * (2 ** attempt))
+                        continue
+                    else:
+                        self._record_failure()
+                        return {"ok": False, "status": 429, "data": None, "error": "rate_limit_exhausted"}
+                
+                # Check for other errors
+                ok = 200 <= (resp.status_code or 0) < 300
+                data: Any = None
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = resp.text
 
-        ok = 200 <= (resp.status_code or 0) < 300
-        data: Any = None
-        err: Optional[str] = None
+                # Check for margin rejection (usually 400 with specific message in OANDA)
+                if resp.status_code == 400 and data and isinstance(data, dict):
+                    err_msg = str(data.get("errorMessage", "")).upper()
+                    if "INSUFFICIENT" in err_msg or "MARGIN" in err_msg:
+                        self.margin_rejection_lock = True
+                        self._record_failure()
+                        logging.warning("[OANDA ADAPTER] Margin rejection detected. Order submissions locked.")
+                        return {"ok": False, "status": 400, "data": data, "error": "insufficient_margin"}
 
-        try:
-            data = resp.json()
-        except Exception:
-            data = resp.text
+                if not ok:
+                    if attempt < max_retries and resp.status_code >= 500:
+                        time.sleep(backoff_factor * (2 ** attempt))
+                        continue
+                    
+                    self._record_failure()
+                    return {"ok": False, "status": resp.status_code, "data": data, "error": f"http_{resp.status_code}"}
 
-        if not ok:
-            err = f"http_{resp.status_code}"
+                self._record_success()
+                return {"ok": True, "status": resp.status_code, "data": data, "error": None}
 
-        return {"ok": ok, "status": resp.status_code, "data": data, "error": err}
+            except requests.exceptions.RequestException as e:
+                if attempt < max_retries:
+                    time.sleep(backoff_factor * (2 ** attempt))
+                    continue
+                self._record_failure()
+                return {"ok": False, "status": None, "data": None, "error": f"request_error: {e}"}
+
+        self._record_failure()
+        return {"ok": False, "status": None, "data": None, "error": "max_retries_exhausted"}
+
+    def _record_success(self):
+        self.consecutive_failures = 0
+        self.health_state = "GREEN"
+
+    def _record_failure(self):
+        self.consecutive_failures += 1
+        if self.consecutive_failures >= 5:
+            self.health_state = "RED"
+        elif self.consecutive_failures >= 2:
+            self.health_state = "DEGRADED"
 
     # -------------------------
     # read endpoints
