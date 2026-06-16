@@ -56,7 +56,7 @@ def initialize_broker(broker_name: str, mode: str = "paper"):
             f"{broker_name}: {dependency_status.get('package')}"
         )
 
-    creds = load_credentials(broker_name)
+    creds = load_credentials(broker_name, mode=mode)
 
     if creds is None:
         raise BrokerBootstrapError(

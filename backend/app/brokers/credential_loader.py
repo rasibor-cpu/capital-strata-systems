@@ -119,7 +119,7 @@ def _env_present(*names: str) -> bool:
     return any(bool(os.getenv(name)) for name in names)
 
 
-def _load_coinbase_env_credentials() -> Optional[Dict[str, Any]]:
+def _load_coinbase_env_credentials(mode: str) -> Optional[Dict[str, Any]]:
     load_dotenv()
 
     key_file = (
@@ -173,7 +173,7 @@ def _load_coinbase_env_credentials() -> Optional[Dict[str, Any]]:
     return credentials if credentials else None
 
 
-def _load_oanda_env_credentials() -> Optional[Dict[str, Any]]:
+def _load_oanda_env_credentials(mode: str) -> Optional[Dict[str, Any]]:
     load_dotenv()
 
     token = (
@@ -181,8 +181,13 @@ def _load_oanda_env_credentials() -> Optional[Dict[str, Any]]:
         or os.getenv("OANDA_ACCESS_TOKEN")
         or os.getenv("OANDA_TOKEN")
     )
-    account_id = os.getenv("OANDA_ACCOUNT_ID") or os.getenv("OANDA_PRACTICE_ACCOUNT_ID")
-    env = os.getenv("OANDA_ENV", "practice")
+    
+    if mode == "live":
+        account_id = os.getenv("OANDA_ACCOUNT_ID")
+        env = "live"
+    else:
+        account_id = os.getenv("OANDA_PRACTICE_ACCOUNT_ID") or os.getenv("OANDA_ACCOUNT_ID")
+        env = "practice"
 
     if not token and not account_id:
         return None
@@ -206,20 +211,21 @@ def _load_oanda_env_credentials() -> Optional[Dict[str, Any]]:
     return credentials if credentials else None
 
 
-def _load_env_fallback_credentials(broker_name: str) -> Optional[Dict[str, Any]]:
-    broker = broker_name.strip().lower()
-
+def _load_env_fallback_credentials(broker_name: str, mode: str) -> Optional[Dict[str, Any]]:
+    broker = broker_name.lower()
+    
     if broker == "coinbase":
-        return _load_coinbase_env_credentials()
+        return _load_coinbase_env_credentials(mode)
 
     if broker == "oanda":
-        return _load_oanda_env_credentials()
+        return _load_oanda_env_credentials(mode)
 
     return None
 
 
 def load_credentials_for_broker(
     broker_name: str,
+    mode: str = "paper",
     base_dir: str = ".",
 ) -> Dict[str, Any]:
     spec = get_broker_spec(broker_name)
@@ -230,7 +236,7 @@ def load_credentials_for_broker(
             return _load_json_file(credential_path)
         return _load_env_style_file(credential_path)
     except CredentialLoadError:
-        env_credentials = _load_env_fallback_credentials(broker_name)
+        env_credentials = _load_env_fallback_credentials(broker_name, mode)
         if env_credentials:
             return env_credentials
         raise
@@ -238,10 +244,11 @@ def load_credentials_for_broker(
 
 def load_credentials(
     broker_name: str,
+    mode: str = "paper",
     base_dir: str = ".",
 ) -> Optional[Dict[str, Any]]:
     try:
-        return load_credentials_for_broker(broker_name, base_dir=base_dir)
+        return load_credentials_for_broker(broker_name, mode=mode, base_dir=base_dir)
     except CredentialLoadError:
         return None
 
@@ -254,6 +261,6 @@ def credential_file_exists(
     credential_path = os.path.join(base_dir, spec.credential_file)
 
     if os.path.exists(credential_path):
+       # Otherwise check env fallback
         return True
-
-    return _load_env_fallback_credentials(broker_name) is not None
+    return _load_env_fallback_credentials(broker_name, "paper") is not None

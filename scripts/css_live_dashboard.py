@@ -1752,6 +1752,26 @@ GLOBAL_BROKER_MODE = select_global_broker_mode()
 
 BROKER_EXECUTION_ARMED, SELECTED_BROKER, SELECTED_BROKER_MODE = select_broker_execution_config()
 
+import sys
+from backend.app.security.environment_validator import validate_startup_security_environment, EnvironmentValidationError
+
+print("\n=== SECURITY STATUS ===")
+try:
+    sec_status = validate_startup_security_environment(SELECTED_BROKER, SELECTED_BROKER_MODE)
+    print(f"ENVIRONMENT VALID: {'YES' if sec_status['ENVIRONMENT_VALID'] else 'NO'}")
+    print(f"BROKER CONFIG VALID: {'YES' if sec_status['BROKER_CONFIG_VALID'] else 'NO'}")
+    print(f"LIVE/PRACTICE CONSISTENT: {'YES' if sec_status['LIVE_PRACTICE_CONSISTENT'] else 'NO'}")
+    print(f"SECRET VALIDATION PASSED: {'YES' if sec_status['SECRET_VALIDATION_PASSED'] else 'NO'}")
+    print("=======================\n")
+except EnvironmentValidationError as e:
+    print(f"ENVIRONMENT VALID: NO")
+    print(f"BROKER CONFIG VALID: NO")
+    print(f"LIVE/PRACTICE CONSISTENT: NO")
+    print(f"SECRET VALIDATION PASSED: NO")
+    print(f"[FATAL SECURITY ERROR] {str(e)}")
+    print("=======================\n")
+    sys.exit(1)
+
 ENGINE_MODE = select_engine_mode()
 print(f"[ENGINE MODE SELECTED] {ENGINE_MODE}")
 
