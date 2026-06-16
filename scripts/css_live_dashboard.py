@@ -89,7 +89,7 @@ def _legacy__legacy_css_profitability_allows(symbol: str, asset_class: str, sig:
 
 
 # === R13C GLOBAL MODE DOMINANCE ===
-def _legacy__legacy_enforce_mode_dominance():
+def _legacy_enforce_mode_dominance():
     global SELECTED_BROKER_MODE
 
     if str(GLOBAL_BROKER_MODE).lower() == "live":
