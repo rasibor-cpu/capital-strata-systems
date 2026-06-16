@@ -3344,8 +3344,49 @@ def pnl_divergence_warning(
     return None
 
 
+RECONCILIATION_STATUS = "HEALTHY"
+
+def perform_startup_reconciliation() -> None:
+    global RECONCILIATION_STATUS
+    if SELECTED_BROKER != "OANDA" or not BROKER_EXECUTION_ARMED:
+        return
+
+    try:
+        resp = oanda.get_open_positions()
+        if not resp.get("ok"):
+            # Could be connection issue, lock to be safe.
+            RECONCILIATION_STATUS = "MISMATCH"
+            lock_session(f"RECONCILIATION_API_ERROR")
+            print(f"[RECONCILIATION API ERROR] Failed to fetch open positions from OANDA.")
+            return
+
+        broker_positions = resp.get("data", {}).get("positions", [])
+        local_positions = mtm_engine.positions
+
+        # We count active local FX positions.
+        local_fx_count = sum(1 for p in local_positions if p.get("asset_class") == "FX" and not p.get("forced_exit"))
+        broker_fx_count = len(broker_positions)
+
+        if local_fx_count != broker_fx_count:
+            RECONCILIATION_STATUS = "MISMATCH"
+            lock_session(f"RECONCILIATION_MISMATCH")
+            print(f"[RECONCILIATION FAILED] Local positions: {local_fx_count}, Broker positions: {broker_fx_count}")
+        else:
+            print("[RECONCILIATION OK] Local and Broker state in parity.")
+
+    except Exception as e:
+        RECONCILIATION_STATUS = "MISMATCH"
+        lock_session(f"RECONCILIATION_ERROR")
+        print(f"[RECONCILIATION ERROR] Failed to query broker: {e}")
+
+perform_startup_reconciliation()
+
+
 try:
     while True:
+        if os.getenv("CSS_TEST_MODE"):
+            break
+
         cycle += 1
         current_status = enforce_active_session(cycle, last_trade)
 
