@@ -54,8 +54,8 @@ def test_live_mode_cannot_silently_fallback_to_simulated_capital():
 @mock.patch.dict(os.environ, clear=True)
 def test_missing_credentials_fails_closed(mock_load_dotenv):
     # If no env vars and no files exist, credentials load must fail
-    assert _load_env_fallback_credentials("oanda") is None
-    assert _load_env_fallback_credentials("coinbase") is None
+    assert _load_env_fallback_credentials("oanda", "paper") is None
+    assert _load_env_fallback_credentials("coinbase", "paper") is None
 
     result = certify_live_readiness(
         selected_broker="oanda",
