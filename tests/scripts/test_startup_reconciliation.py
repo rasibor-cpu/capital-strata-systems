@@ -58,7 +58,7 @@ def test_broker_position_exists_local_absent(dashboard):
         
         assert dashboard.RECONCILIATION_STATUS == "MISMATCH"
         assert dashboard.is_session_locked()
-        assert "RECONCILIATION_MISMATCH" in dashboard._CSS_SESSION_LOCK.get("reason", "")
+        assert "RECONCILIATION_DIVERGENCE" in dashboard._CSS_SESSION_LOCK.get("reason", "")
 
 def test_local_position_exists_broker_absent(dashboard):
     with patch("backend.app.brokers.oanda_adapter.OandaAdapter.get_open_positions") as mock_get:
@@ -66,13 +66,13 @@ def test_local_position_exists_broker_absent(dashboard):
         mock_get.return_value = {"ok": True, "data": {"positions": []}}
         
         # Mock local having 1 FX position
-        dashboard.mtm_engine.positions.append({"position_id": "test", "asset_class": "FX", "forced_exit": False})
+        dashboard.mtm_engine.positions.append({"position_id": "test", "asset_class": "FX", "symbol": "USD_JPY", "quantity": 100, "forced_exit": False})
         
         dashboard.perform_startup_reconciliation()
         
         assert dashboard.RECONCILIATION_STATUS == "MISMATCH"
         assert dashboard.is_session_locked()
-        assert "RECONCILIATION_MISMATCH" in dashboard._CSS_SESSION_LOCK.get("reason", "")
+        assert "RECONCILIATION_DIVERGENCE" in dashboard._CSS_SESSION_LOCK.get("reason", "")
 
 def test_reconciliation_api_error(dashboard):
     with patch("backend.app.brokers.oanda_adapter.OandaAdapter.get_open_positions") as mock_get:

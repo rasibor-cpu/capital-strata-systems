@@ -3421,7 +3421,86 @@ def pnl_divergence_warning(
     return None
 
 
+import uuid
+
+class RepairEngine:
+    def __init__(self):
+        self.records_file = ARTIFACTS_DIR / "css_repair_records.json"
+        self.records: list[dict] = self.load_records()
+
+    def load_records(self) -> list[dict]:
+        if self.records_file.exists():
+            try:
+                with open(self.records_file, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                return []
+        return []
+
+    def save_records(self) -> None:
+        with open(self.records_file, "w", encoding="utf-8") as f:
+            json.dump(self.records, f, indent=2)
+
+    def create_record(self, category: str, details: dict) -> str:
+        record_id = f"REP-{str(uuid.uuid4())[:8]}"
+        record = {
+            "record_id": record_id,
+            "category": category,
+            "status": "OPEN",
+            "details": details,
+            "created_at": datetime.utcnow().isoformat(),
+            "resolution_note": ""
+        }
+        self.records.append(record)
+        self.save_records()
+        print(f"[REPAIR RECORD CREATED] {record_id}: {category}")
+        return record_id
+
+    def resolve_record(self, record_id: str, resolution_category: str, note: str) -> bool:
+        for record in self.records:
+            if record["record_id"] == record_id:
+                record["status"] = "REPAIRED"
+                record["resolution_note"] = f"[{resolution_category}] {note}"
+                self.save_records()
+                print(f"[REPAIR RESOLVED] {record_id} via {resolution_category}")
+                return True
+        return False
+
+    def has_open_records(self) -> bool:
+        return any(r["status"] in {"OPEN", "INVESTIGATING"} for r in self.records)
+
+repair_engine = RepairEngine()
+
 RECONCILIATION_STATUS = "HEALTHY"
+
+def detect_divergences(local_positions: list[dict], broker_positions: list[dict]) -> list[tuple[str, dict]]:
+    divergences = []
+    
+    local_map = {p["symbol"]: p for p in local_positions if p.get("asset_class") == "FX" and not p.get("forced_exit")}
+    broker_map = {p.get("instrument"): p for p in broker_positions}
+
+    local_symbols = set(local_map.keys())
+    broker_symbols = set(broker_map.keys())
+
+    for sym in broker_symbols - local_symbols:
+        divergences.append(("ORPHAN_BROKER_POSITION", {"symbol": sym, "broker_data": broker_map[sym]}))
+
+    for sym in local_symbols - broker_symbols:
+        divergences.append(("GHOST_LOCAL_POSITION", {"symbol": sym, "local_data": local_map[sym]}))
+
+    for sym in local_symbols.intersection(broker_symbols):
+        local_units = float(local_map[sym].get("quantity", 0))
+        broker_units = float(broker_map[sym].get("units", 0)) # Assuming long vs short units might be signed or absolute depending on format. In OANDA, it's typically 'long.units' or 'short.units'. Let's just pass raw for now.
+        
+        # OANDA positions actually return 'long' and 'short' dicts. The previous code didn't parse units deeply, it just counted.
+        # Let's handle OANDA format carefully. OANDA gives: "long": {"units": "0", ...}, "short": {"units": "-1000", ...}
+        # But even if we don't deeply parse, we can log the entire object.
+        # To avoid false positive unit mismatches right now without complex OANDA parsing, 
+        # we will only flag BROKER_POSITION_MISMATCH if we add specific unit comparison later, or we can check simple presence.
+        pass
+
+    return divergences
+
 
 def perform_startup_reconciliation() -> None:
     global RECONCILIATION_STATUS
@@ -3431,29 +3510,28 @@ def perform_startup_reconciliation() -> None:
     try:
         resp = oanda.get_open_positions()
         if not resp.get("ok"):
-            # Could be connection issue, lock to be safe.
             RECONCILIATION_STATUS = "MISMATCH"
-            lock_session(f"RECONCILIATION_API_ERROR")
-            print(f"[RECONCILIATION API ERROR] Failed to fetch open positions from OANDA.")
+            lock_session("RECONCILIATION_API_ERROR")
+            print("[RECONCILIATION API ERROR] Failed to fetch open positions from OANDA.")
             return
 
         broker_positions = resp.get("data", {}).get("positions", [])
         local_positions = mtm_engine.positions
 
-        # We count active local FX positions.
-        local_fx_count = sum(1 for p in local_positions if p.get("asset_class") == "FX" and not p.get("forced_exit"))
-        broker_fx_count = len(broker_positions)
-
-        if local_fx_count != broker_fx_count:
+        divergences = detect_divergences(local_positions, broker_positions)
+        
+        if divergences:
             RECONCILIATION_STATUS = "MISMATCH"
-            lock_session(f"RECONCILIATION_MISMATCH")
-            print(f"[RECONCILIATION FAILED] Local positions: {local_fx_count}, Broker positions: {broker_fx_count}")
+            lock_session("RECONCILIATION_DIVERGENCE")
+            print(f"[RECONCILIATION FAILED] {len(divergences)} divergences detected.")
+            for cat, det in divergences:
+                repair_engine.create_record(cat, det)
         else:
             print("[RECONCILIATION OK] Local and Broker state in parity.")
 
     except Exception as e:
         RECONCILIATION_STATUS = "MISMATCH"
-        lock_session(f"RECONCILIATION_ERROR")
+        lock_session("RECONCILIATION_ERROR")
         print(f"[RECONCILIATION ERROR] Failed to query broker: {e}")
 
 
@@ -3467,19 +3545,20 @@ def perform_continuous_reconciliation() -> None:
         if not resp.get("ok"):
             RECONCILIATION_STATUS = "MISMATCH"
             lock_session("CONTINUOUS_RECONCILIATION_API_ERROR")
-            print(f"[CONTINUOUS RECONCILIATION API ERROR] Failed to fetch open positions from OANDA.")
+            print("[CONTINUOUS RECONCILIATION API ERROR] Failed to fetch open positions from OANDA.")
             return
 
         broker_positions = resp.get("data", {}).get("positions", [])
         local_positions = mtm_engine.positions
 
-        local_fx_count = sum(1 for p in local_positions if p.get("asset_class") == "FX" and not p.get("forced_exit"))
-        broker_fx_count = len(broker_positions)
+        divergences = detect_divergences(local_positions, broker_positions)
 
-        if local_fx_count != broker_fx_count:
+        if divergences:
             RECONCILIATION_STATUS = "MISMATCH"
-            lock_session("CONTINUOUS_RECONCILIATION_MISMATCH")
-            print(f"[CONTINUOUS RECONCILIATION FAILED] Local positions: {local_fx_count}, Broker positions: {broker_fx_count}")
+            lock_session("RECONCILIATION_DIVERGENCE")
+            print(f"[CONTINUOUS RECONCILIATION FAILED] {len(divergences)} divergences detected.")
+            for cat, det in divergences:
+                repair_engine.create_record(cat, det)
         else:
             print("[CONTINUOUS RECONCILIATION OK] Local and Broker state in parity.")
 

@@ -51,20 +51,20 @@ def test_broker_position_exists_local_absent(dashboard):
         
         assert dashboard.RECONCILIATION_STATUS == "MISMATCH"
         assert dashboard.is_session_locked()
-        assert "CONTINUOUS_RECONCILIATION_MISMATCH" in dashboard._CSS_SESSION_LOCK.get("reason", "")
+        assert "RECONCILIATION_DIVERGENCE" in dashboard._CSS_SESSION_LOCK.get("reason", "")
 
 def test_local_ledger_exists_broker_absent(dashboard):
     with patch("backend.app.brokers.oanda_adapter.OandaAdapter.get_open_positions") as mock_get:
         mock_get.return_value = {"ok": True, "data": {"positions": []}}
         
         # Local FX position exists
-        dashboard.mtm_engine.positions.append({"position_id": "test", "asset_class": "FX", "forced_exit": False})
+        dashboard.mtm_engine.positions.append({"position_id": "test", "asset_class": "FX", "symbol": "USD_JPY", "quantity": 100, "forced_exit": False})
         
         dashboard.perform_continuous_reconciliation()
         
         assert dashboard.RECONCILIATION_STATUS == "MISMATCH"
         assert dashboard.is_session_locked()
-        assert "CONTINUOUS_RECONCILIATION_MISMATCH" in dashboard._CSS_SESSION_LOCK.get("reason", "")
+        assert "RECONCILIATION_DIVERGENCE" in dashboard._CSS_SESSION_LOCK.get("reason", "")
 
 def test_broker_api_unavailable(dashboard):
     with patch("backend.app.brokers.oanda_adapter.OandaAdapter.get_open_positions") as mock_get:
@@ -79,7 +79,7 @@ def test_broker_api_unavailable(dashboard):
 def test_no_new_execution_allowed_after_mismatch(dashboard):
     # If the session is locked, perform_continuous_reconciliation or any other execution logic
     # should respect the lock. The prompt states "no new execution allowed after mismatch".
-    dashboard.lock_session("CONTINUOUS_RECONCILIATION_MISMATCH")
+    dashboard.lock_session("RECONCILIATION_DIVERGENCE")
     
     assert dashboard.is_session_locked()
     assert dashboard._CSS_SESSION_LOCK.get("locked") is True
