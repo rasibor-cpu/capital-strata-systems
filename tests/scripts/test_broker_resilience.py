@@ -2,16 +2,29 @@ import pytest
 from unittest.mock import patch, MagicMock
 
 import os
+import sys
+
 os.environ["CSS_TEST_MODE"] = "1"
 os.environ["OANDA_API_KEY"] = "mock_key"
 os.environ["OANDA_ACCOUNT_ID"] = "mock_acc"
-os.environ["OANDA_BASE_URL"] = "http://127.0.0.1:9999" # fast fail
+os.environ["OANDA_BASE_URL"] = "http://127.0.0.1:9999"
 os.environ["OANDA_ENV"] = "practice"
 os.environ["DATA_PROVIDER"] = "SIMULATED"
 
+mock_auth = MagicMock()
+mock_auth.await_login_ready_state.return_value = {
+    "user_id": "test", 
+    "role": "admin", 
+    "display_name": "test", 
+    "unit_code": "test", 
+    "home_branch": "test"
+}
+sys.modules["dashboard.auth.css_sign_on"] = mock_auth
+sys.modules["builtins"].input = lambda prompt: "1"
+
 from backend.app.brokers.oanda_adapter import OandaAdapter
-from scripts.css_live_dashboard import perform_continuous_reconciliation, oanda, _CSS_SESSION_LOCK, lock_session
-from scripts import css_live_dashboard
+import scripts.css_live_dashboard as css_live_dashboard
+from scripts.css_live_dashboard import perform_continuous_reconciliation, oanda
 
 @pytest.fixture(autouse=True)
 def reset_state():
