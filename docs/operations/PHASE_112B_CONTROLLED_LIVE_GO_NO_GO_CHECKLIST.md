@@ -27,7 +27,7 @@ Safely transition Capital Strata Systems (CSS) from a strictly simulated executi
 - [ ] **Logging Validation:** Confirm audit trails write to persistent storage and contain properly `REDACTED` secrets.
 
 ## 5. First Controlled Live Session Procedure
-1. **Startup Sequence:** Execute `CSS_STARTUP_RUNBOOK.md` using the strictly controlled `python -m engine.engine_loop --mode live --micro-limits` flags.
+1. **Startup Sequence:** Execute `CSS_STARTUP_RUNBOOK.md` using the canonical `python scripts/css_live_dashboard.py` command, selecting the `LIVE` mode and `MICRO-LIMITS` parameters interactively via the CLI/GUI governance gate.
 2. **Monitoring Sequence:** Maintain constant visual contact with the `css_live_dashboard.py` HUD. Monitor the event router for `SEVERITY_HIGH` and `SEVERITY_CRITICAL` emissions.
 3. **Escalation Path:** If unhandled exceptions surface, the operator must immediately trigger the standard incident response path.
 4. **Stop Conditions:** The session must be gracefully terminated if any risk thresholds exceed 50% of their catastrophic ceilings (e.g., Margin limit warning, rapid drawdown).
