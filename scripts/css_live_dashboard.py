@@ -51,7 +51,7 @@ def _legacy_css_profitability_threshold(mode: str) -> float:
     }.get(str(mode).upper(), 15.8)
 
 
-def _legacy__legacy_css_profitability_allows(symbol: str, asset_class: str, sig: float, prob: float) -> tuple[bool, float, float]:
+def _legacy_css_profitability_allows(symbol: str, asset_class: str, sig: float, prob: float) -> tuple[bool, float, float]:
     """
     Uses existing dashboard signal score and probability before creating a position.
     Score remains compatible with current sig scale.
@@ -100,7 +100,7 @@ def _legacy_enforce_mode_dominance():
 
 
 # === R13 EXECUTION BOUNDARY ENFORCEMENT ===
-def _legacy__legacy_enforce_execution_boundary():
+def _legacy_enforce_execution_boundary():
     mode = str(SELECTED_BROKER_MODE).lower()
 
     if mode == "live":
