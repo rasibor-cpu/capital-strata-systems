@@ -3425,6 +3425,39 @@ def perform_startup_reconciliation() -> None:
         lock_session(f"RECONCILIATION_ERROR")
         print(f"[RECONCILIATION ERROR] Failed to query broker: {e}")
 
+
+def perform_continuous_reconciliation() -> None:
+    global RECONCILIATION_STATUS
+    if SELECTED_BROKER != "OANDA" or not BROKER_EXECUTION_ARMED:
+        return
+
+    try:
+        resp = oanda.get_open_positions()
+        if not resp.get("ok"):
+            RECONCILIATION_STATUS = "MISMATCH"
+            lock_session("CONTINUOUS_RECONCILIATION_API_ERROR")
+            print(f"[CONTINUOUS RECONCILIATION API ERROR] Failed to fetch open positions from OANDA.")
+            return
+
+        broker_positions = resp.get("data", {}).get("positions", [])
+        local_positions = mtm_engine.positions
+
+        local_fx_count = sum(1 for p in local_positions if p.get("asset_class") == "FX" and not p.get("forced_exit"))
+        broker_fx_count = len(broker_positions)
+
+        if local_fx_count != broker_fx_count:
+            RECONCILIATION_STATUS = "MISMATCH"
+            lock_session("CONTINUOUS_RECONCILIATION_MISMATCH")
+            print(f"[CONTINUOUS RECONCILIATION FAILED] Local positions: {local_fx_count}, Broker positions: {broker_fx_count}")
+        else:
+            print("[CONTINUOUS RECONCILIATION OK] Local and Broker state in parity.")
+
+    except Exception as e:
+        RECONCILIATION_STATUS = "MISMATCH"
+        lock_session("CONTINUOUS_RECONCILIATION_ERROR")
+        print(f"[CONTINUOUS RECONCILIATION ERROR] Failed to query broker: {e}")
+
+
 perform_startup_reconciliation()
 
 
@@ -3444,6 +3477,10 @@ try:
                 "active": False,
                 "defensive_mode_active": True,
             }
+
+        # Continuous Reconciliation Heartbeat every 5 cycles
+        if cycle % 5 == 0 and not is_session_locked():
+            perform_continuous_reconciliation()
 
         print(f"=== Cycle {cycle} | {datetime.now()} ===")
 
