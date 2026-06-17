@@ -265,7 +265,7 @@ class ExecutionGate:
             return {
                 "allowed": False,
                 "decision": "BLOCK",
-                "reason": "missing_margin_snapshot",
+                "reason": "MARGIN_SNAPSHOT_UNAVAILABLE",
                 "control": "MarginTradeGate",
             }
 
