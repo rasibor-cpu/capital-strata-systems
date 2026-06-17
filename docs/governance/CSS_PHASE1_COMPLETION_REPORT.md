@@ -34,3 +34,11 @@ The primary objective of Phase 1 was to establish a fully governed, safe, and au
 
 ## Current Status
 **PHASE 1 COMPLETE**
+
+## Post-Claude Validation Remediation
+- Claude audit Findings #1, #2, and #4 were remediated.
+- Hardcoded mobile risk inputs were removed.
+- Mobile order path now fails closed when canonical equity, margin, or market intelligence is unavailable.
+- Unmocked mobile risk-path regression test was added.
+- Authority map path references were corrected.
+- Remediation commit: bb190579ad8384a836e68a411e51ff7e6552ce86.

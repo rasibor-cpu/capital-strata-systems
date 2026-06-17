@@ -31,3 +31,11 @@ This document serves as the final clearance framework for the deployment of CSS 
 The system meets all mandatory Phase 1 safety, architectural, and governance baselines. Automated safeguards fail closed as expected under stress tests.
 
 ### Final Verdict: GO
+
+## Post-Claude Validation Remediation
+- Claude audit Findings #1, #2, and #4 were remediated.
+- Hardcoded mobile risk inputs were removed.
+- Mobile order path now fails closed when canonical equity, margin, or market intelligence is unavailable.
+- Unmocked mobile risk-path regression test was added.
+- Authority map path references were corrected.
+- Remediation commit: bb190579ad8384a836e68a411e51ff7e6552ce86.
