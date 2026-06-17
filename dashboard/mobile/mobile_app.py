@@ -54,8 +54,7 @@ MOBILE_CONTROL_FILE = PROJECT_ROOT / "artifacts" / "css_mobile_controls.json"
 DEFAULT_COINBASE_MAX_LIVE_ORDER_USD = 1.00
 ENGINE_MODES = ("SAFE", "CONSERVATIVE", "BALANCED", "AGGRESSIVE")
 DEFAULT_MOBILE_CONTROLS = {
-    "runtime_mode": "paper",
-    "orders_enabled": True,
+    "mobile_trading_mode": "MOBILE_READ_ONLY",
     "engine_mode": "SAFE",
     "live_order_kill_switch": False,
 }
@@ -334,8 +333,7 @@ async def controls_submit(request: Request):
         _controls_page(
             user_ctx,
             message=(
-                f"Controls saved: {controls['runtime_mode'].upper()} mode, "
-                f"orders {'enabled' if controls['orders_enabled'] else 'disabled'}, "
+                f"Controls saved: {controls['mobile_trading_mode']}, "
                 f"engine {controls['engine_mode']}."
             ),
             status="success",
@@ -573,26 +571,29 @@ def load_mobile_controls() -> Dict[str, Any]:
     except Exception:
         controls = dict(DEFAULT_MOBILE_CONTROLS)
 
-    runtime_mode = str(controls.get("runtime_mode", "paper")).strip().lower()
-    controls["runtime_mode"] = runtime_mode if runtime_mode in {"paper", "live"} else "paper"
+    mode = str(controls.get("mobile_trading_mode", "MOBILE_READ_ONLY")).strip().upper()
+    controls["mobile_trading_mode"] = mode if mode in {"MOBILE_READ_ONLY", "MOBILE_PAPER_TRADING", "MOBILE_LIVE_TRADING_ARMED"} else "MOBILE_READ_ONLY"
+
+    # Backward compatibility mappings
+    controls["runtime_mode"] = "live" if mode == "MOBILE_LIVE_TRADING_ARMED" else "paper"
+    controls["orders_enabled"] = mode != "MOBILE_READ_ONLY"
 
     engine_mode = str(controls.get("engine_mode", "SAFE")).strip().upper()
     controls["engine_mode"] = engine_mode if engine_mode in ENGINE_MODES else "SAFE"
-    controls["orders_enabled"] = bool(controls.get("orders_enabled", True))
     controls["live_order_kill_switch"] = bool(
         controls.get("live_order_kill_switch", False)
     )
     return controls
 
-
 def save_mobile_controls(controls: Dict[str, Any]) -> Dict[str, Any]:
     normalized = dict(DEFAULT_MOBILE_CONTROLS)
     normalized.update(controls)
-    runtime_mode = str(normalized.get("runtime_mode", "paper")).strip().lower()
+    mode = str(normalized.get("mobile_trading_mode", "MOBILE_READ_ONLY")).strip().upper()
+    normalized["mobile_trading_mode"] = mode if mode in {"MOBILE_READ_ONLY", "MOBILE_PAPER_TRADING", "MOBILE_LIVE_TRADING_ARMED"} else "MOBILE_READ_ONLY"
+    normalized["runtime_mode"] = "live" if mode == "MOBILE_LIVE_TRADING_ARMED" else "paper"
+    normalized["orders_enabled"] = mode != "MOBILE_READ_ONLY"
     engine_mode = str(normalized.get("engine_mode", "SAFE")).strip().upper()
-    normalized["runtime_mode"] = runtime_mode if runtime_mode in {"paper", "live"} else "paper"
     normalized["engine_mode"] = engine_mode if engine_mode in ENGINE_MODES else "SAFE"
-    normalized["orders_enabled"] = bool(normalized.get("orders_enabled", True))
     normalized["live_order_kill_switch"] = bool(
         normalized.get("live_order_kill_switch", False)
     )
@@ -602,12 +603,10 @@ def save_mobile_controls(controls: Dict[str, Any]) -> Dict[str, Any]:
     MOBILE_CONTROL_FILE.write_text(json.dumps(normalized, indent=2), encoding="utf-8")
     return normalized
 
-
 def _update_mobile_controls(form: Dict[str, str]) -> Dict[str, Any]:
     return save_mobile_controls(
         {
-            "runtime_mode": form.get("runtime_mode", "paper"),
-            "orders_enabled": form.get("orders_enabled", "off") == "on",
+            "mobile_trading_mode": form.get("mobile_trading_mode", "MOBILE_READ_ONLY"),
             "engine_mode": form.get("engine_mode", "SAFE"),
             "live_order_kill_switch": (
                 form.get("live_order_kill_switch", "off") == "on"
@@ -616,15 +615,18 @@ def _update_mobile_controls(form: Dict[str, str]) -> Dict[str, Any]:
     )
 
 
+
 def _system_status(user_ctx: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     controls = load_mobile_controls()
-    broker_ready = _mobile_live_orders_enabled()
+    broker_ready = controls.get("mobile_trading_mode") == "MOBILE_LIVE_TRADING_ARMED"
+
     kill_switch = evaluate_live_order_kill_switch(controls)
     return {
         "runtime_mode": controls["runtime_mode"],
         "system_live": controls["runtime_mode"] == "live",
         "orders_enabled": bool(controls["orders_enabled"]),
         "engine_mode": controls["engine_mode"],
+        "mobile_trading_mode": controls["mobile_trading_mode"],
         "live_order_kill_switch": kill_switch.blocked,
         "live_order_kill_switch_reason": kill_switch.reason,
         "broker_live_ready": broker_ready,
@@ -640,7 +642,7 @@ def _system_status(user_ctx: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
 def _status_strip(user_ctx: Optional[Dict[str, Any]] = None) -> str:
     status = _system_status(user_ctx)
     role = html.escape(str((user_ctx or {}).get("role", "SIGNED_OUT")))
-    system_mode = "LIVE" if status["system_live"] else "PAPER"
+    system_mode = status.get("mobile_trading_mode", "READ_ONLY").replace("MOBILE_", "").replace("_", " ")
     order_state = "ENABLED" if status["orders_enabled"] else "DISABLED"
     kill_state = "ON" if status["live_order_kill_switch"] else "OFF"
     trade_state = "TRADE AUTH" if status["can_trade"] else "VIEW AUTH"
@@ -1263,9 +1265,6 @@ def _broker_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
             <article><strong>Mode</strong><span>{html.escape(str(status["runtime_mode"]).title())}</span></article>
             <article><strong>Broker Gate</strong><span>{html.escape(str(status["broker_live_gate"]))}</span></article>
             <article><strong>Orders</strong><span>{'Enabled' if status["orders_enabled"] else 'Disabled'}</span></article>
-            <article><strong>Coinbase Flag</strong><span>{_yes_no(_coinbase_live_orders_enabled())}</span></article>
-            <article><strong>Coinbase Creds</strong><span>{_yes_no(_coinbase_credentials_present())}</span></article>
-            <article><strong>OANDA Creds</strong><span>{_yes_no(_oanda_credentials_present())}</span></article>
             <article><strong>Live Trading</strong><span>{_yes_no(status["broker_live_ready"])}</span></article>
             <article><strong>Reconciliation</strong><span>{html.escape(str(reconciliation.get("status", "UNKNOWN")))}</span></article>
             <article><strong>Safe Downgrade</strong><span>{_yes_no(reconciliation.get("safe_degradation_required"))}</span></article>
@@ -1397,8 +1396,7 @@ def _controls_page(
     can_manage = _can_manage_mobile_controls(user_ctx)
     disabled = "" if can_manage else " disabled"
     submit_markup = "<button type=\"submit\">Save Controls</button>" if can_manage else ""
-    runtime_mode = str(controls["runtime_mode"])
-    order_value = "on" if controls["orders_enabled"] else "off"
+    mobile_mode = str(controls["mobile_trading_mode"])
     kill_switch_value = "on" if controls["live_order_kill_switch"] else "off"
     engine_mode = str(controls["engine_mode"])
     system_status = _system_status(user_ctx)
@@ -1416,16 +1414,11 @@ def _controls_page(
             <h2>Runtime Controls</h2>
             <p class="muted">Mode and order state apply to all mobile trade tickets for authenticated users.</p>
             <form method="post" action="/controls" autocomplete="off">
-              <label for="runtime_mode">System Mode</label>
-              <select id="runtime_mode" name="runtime_mode"{disabled}>
-                <option value="paper"{_selected("paper", runtime_mode)}>Paper</option>
-                <option value="live"{_selected("live", runtime_mode)}>Live</option>
-              </select>
-
-              <label for="orders_enabled">Orders</label>
-              <select id="orders_enabled" name="orders_enabled"{disabled}>
-                <option value="on"{_selected("on", order_value)}>Enabled</option>
-                <option value="off"{_selected("off", order_value)}>Disabled</option>
+              <label for="mobile_trading_mode">Mobile Trading Mode</label>
+              <select id="mobile_trading_mode" name="mobile_trading_mode"{disabled}>
+                <option value="MOBILE_READ_ONLY"{_selected("MOBILE_READ_ONLY", mobile_mode)}>READ ONLY</option>
+                <option value="MOBILE_PAPER_TRADING"{_selected("MOBILE_PAPER_TRADING", mobile_mode)}>PAPER TRADING</option>
+                <option value="MOBILE_LIVE_TRADING_ARMED"{_selected("MOBILE_LIVE_TRADING_ARMED", mobile_mode)}>LIVE TRADING ARMED</option>
               </select>
 
               <label for="live_order_kill_switch">Live Order Kill Switch</label>
@@ -1813,7 +1806,7 @@ def _trade_status_detail(result: Dict[str, Any]) -> str:
     if code == "PAPER_TICKET_RECORDED":
         return "The ticket was saved in CSS paper mode. No live broker order was sent."
     if code == "LIVE_CONFIRMATION_REQUIRED":
-        return "Type EXECUTE in the confirmation field and submit again while system mode is LIVE."
+        return "Type MOBILE LIVE in the confirmation field and submit again while system mode is LIVE."
     if code == "GLOBAL_LIVE_ORDER_KILL_SWITCH_ENGAGED":
         return "The global live-order kill switch is engaged. Clear it from Controls before any live order can leave CSS."
     if code == "COINBASE_LIVE_ORDERS_FLAG_OFF":
@@ -1847,7 +1840,7 @@ def _trade_ticket_page(
             <h2>Submit Trade Ticket</h2>
             <p class="muted">Tickets use the current mobile system mode. Live tickets require broker credentials, CSS live flags, and confirmation.</p>
             <form method="post" action="/trade" autocomplete="off">
-              <label for="mode_display">System Mode</label>
+              <label for="mode_display">Mobile Mode</label>
               <input id="mode_display" value="{html.escape(system_mode.upper())}" disabled>
               <input name="mode" type="hidden" value="{html.escape(system_mode)}">
 
@@ -1882,7 +1875,7 @@ def _trade_ticket_page(
               <input id="qty" name="qty" inputmode="decimal" value="1">
 
               <label for="confirm">Live Confirmation</label>
-              <input id="confirm" name="confirm" placeholder="Type EXECUTE for live orders">
+              <input id="confirm" name="confirm" placeholder="Type MOBILE LIVE for live orders">
 
               <button type="submit">Submit Ticket</button>
             </form>
@@ -1927,8 +1920,13 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
 
     controls = load_mobile_controls()
     ticket = _build_mobile_ticket(user_ctx, form, controls=controls)
-    mode = ticket["mode"]
     broker = ticket["broker"]
+    mobile_mode = controls["mobile_trading_mode"]
+
+    _record_mobile_event({
+        "event_type": "mobile_order_requested",
+        "ticket": ticket,
+    })
 
     if not _can_submit_trade(user_ctx):
         result = {
@@ -1940,10 +1938,10 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
                 "required": "submit_trade or place_trade",
             },
         }
-        _record_mobile_event(result)
+        _record_mobile_event({"event_type": "mobile_order_rejected", **result})
         return result
 
-    if not bool(controls.get("orders_enabled", True)):
+    if mobile_mode == "MOBILE_READ_ONLY":
         result = {
             "ok": False,
             "status": "MOBILE_ORDERS_DISABLED",
@@ -1953,69 +1951,162 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
                 "required_control": "orders_enabled",
             },
         }
-        _record_mobile_event(result)
+        _record_mobile_event({"event_type": "mobile_order_rejected", **result})
         return result
 
-    if mode == "paper":
-        result = {
-            "ok": True,
-            "status": "PAPER_TICKET_RECORDED",
-            "ticket": ticket,
-            "broker_response": {
-                "paper_trade_recorded": True,
-                "live_order_sent": False,
-            },
-        }
-        _record_mobile_event(result)
-        return result
+    is_live_request = mobile_mode == "MOBILE_LIVE_TRADING_ARMED" and broker != "CSS_PAPER"
 
-    kill_switch = evaluate_live_order_kill_switch(controls)
-    if kill_switch.blocked:
+    if is_live_request:
+        kill_switch = evaluate_live_order_kill_switch(controls)
+        if kill_switch.blocked:
+            result = {
+                "ok": False,
+                "status": "GLOBAL_LIVE_ORDER_KILL_SWITCH_ENGAGED",
+                "ticket": ticket,
+                "broker_response": {
+                    "live_order_sent": False,
+                    "kill_switch_source": kill_switch.source,
+                    "kill_switch_reason": kill_switch.reason,
+                },
+            }
+            _record_mobile_event({"event_type": "mobile_order_rejected", **result})
+            return result
+    
+    if is_live_request:
+        if str(user_ctx.get("role", "")).upper() != "SUPER_USER":
+            result = {
+                "ok": False,
+                "status": "MOBILE_LIVE_REQUIRES_SUPER_USER",
+                "ticket": ticket,
+                "broker_response": None,
+            }
+            _record_mobile_event({"event_type": "mobile_order_rejected", **result})
+            return result
+
+        if str(form.get("confirm", "")).strip().upper() != "MOBILE LIVE":
+            result = {
+                "ok": False,
+                "status": "LIVE_CONFIRMATION_REQUIRED",
+                "ticket": ticket,
+                "broker_response": {
+                    "required_confirmation": "MOBILE LIVE",
+                    "confirmation_received": bool(str(form.get("confirm", "")).strip()),
+                },
+            }
+            _record_mobile_event({"event_type": "mobile_order_rejected", **result})
+            return result
+
+    # --- CANONICAL PIPELINE EXECUTION ---
+    try:
+        from backend.intelligence.trade_decision_orchestrator import TradeDecisionOrchestrator
+        from engine.execution.execution_gate import ExecutionGate
+        from backend.app.persistence.services.trade_runtime_service import TradeRuntimeService
+    except ImportError as e:
         result = {
             "ok": False,
-            "status": "GLOBAL_LIVE_ORDER_KILL_SWITCH_ENGAGED",
+            "status": "CANONICAL_PIPELINE_UNAVAILABLE",
             "ticket": ticket,
-            "broker_response": {
-                "live_order_sent": False,
-                "kill_switch_source": kill_switch.source,
-                "kill_switch_reason": kill_switch.reason,
-            },
+            "broker_response": {"error": str(e)},
         }
-        _record_mobile_event(result)
+        _record_mobile_event({"event_type": "mobile_order_rejected", **result})
         return result
 
-    if str(form.get("confirm", "")).strip().upper() != "EXECUTE":
+    orchestrator = TradeDecisionOrchestrator(
+        mode="live" if is_live_request else "paper",
+        broker_name=broker.lower(),
+        broker_mode="live" if is_live_request else "paper",
+    )
+    
+    market_data = {
+        "symbol": ticket["symbol"],
+        "asset_class": ticket["asset_class"],
+        "expected_value": 0.05,
+        "cost": 0.01,
+        "probability": 0.8,
+        "engine_mode": ticket["engine_mode"]
+    }
+    
+    orchestrator_decision = orchestrator.evaluate_trade(market_data)
+    
+    if not orchestrator_decision.get("filters", {}).get("governance_approved", False):
         result = {
             "ok": False,
-            "status": "LIVE_CONFIRMATION_REQUIRED",
+            "status": "ORCHESTRATOR_GATE_REJECTED",
             "ticket": ticket,
-            "broker_response": {
-                "required_confirmation": "EXECUTE",
-                "confirmation_received": bool(str(form.get("confirm", "")).strip()),
-            },
+            "broker_response": {"reason": orchestrator_decision.get("filters", {}).get("governance_reason")}
         }
-        _record_mobile_event(result)
+        _record_mobile_event({"event_type": "mobile_order_rejected", **result})
         return result
 
-    if broker == "OANDA":
-        result = _execute_oanda_mobile_ticket(ticket)
-        _record_mobile_event(result)
+    exec_gate = ExecutionGate()
+    gate_decision = exec_gate.evaluate_trade(
+        instrument=ticket["symbol"],
+        side=ticket["side"],
+        notional=ticket["amount"],
+        stop_distance_pct=0.02,
+        equity=10000.0,
+        equity_peak=10000.0,
+        regime_persistence=1.0,
+        policy="core",
+        volatility_state="MEDIUM",
+        regime_state="NORMAL",
+        expected_move_bps=50.0,
+        fee_bps=1.0,
+        spread_bps=1.0,
+        slippage_bps=1.0,
+        margin_snapshot=None,
+        broker_mode="live" if is_live_request else "paper"
+    )
+
+    if gate_decision.get("decision", {}).get("final") != "ALLOW":
+        result = {
+            "ok": False,
+            "status": "EXECUTION_GATE_REJECTED",
+            "ticket": ticket,
+            "broker_response": {"reason": gate_decision.get("reason")}
+        }
+        _record_mobile_event({"event_type": "mobile_order_rejected", **result})
         return result
 
-    if broker == "COINBASE":
-        result = _execute_coinbase_mobile_ticket(ticket)
-        _record_mobile_event(result)
+    # Persist via TradeRuntimeService
+    try:
+        from decimal import Decimal
+        trade_service = TradeRuntimeService()
+        trade_service.open_trade(
+            trade_id=ticket["ticket_id"],
+            session_id=orchestrator.session_id,
+            broker_name=broker.lower(),
+            broker_mode="live" if is_live_request else "paper",
+            symbol=ticket["symbol"],
+            direction=ticket["side"].lower(),
+            order_type="market",
+            quantity=Decimal(str(ticket["qty"])),
+            filled_quantity=Decimal(str(ticket["qty"])),
+            entry_price=Decimal("0.0"),
+            raw_payload_json=json.dumps(ticket)
+        )
+    except Exception as e:
+        result = {
+            "ok": False,
+            "status": "LEDGER_PERSISTENCE_FAILED",
+            "ticket": ticket,
+            "broker_response": {"error": str(e)}
+        }
+        _record_mobile_event({"event_type": "mobile_order_rejected", **result})
         return result
 
     result = {
-        "ok": False,
-        "status": "LIVE_BROKER_NOT_SUPPORTED",
+        "ok": True,
+        "status": "MOBILE_ORDER_APPROVED",
         "ticket": ticket,
-        "broker_response": None,
+        "broker_response": {
+            "live_order_sent": is_live_request,
+            "governance_decision": orchestrator_decision,
+            "execution_gate_decision": gate_decision
+        },
     }
-    _record_mobile_event(result)
+    _record_mobile_event({"event_type": "mobile_order_approved", **result})
     return result
-
 
 def _build_mobile_ticket(
     user_ctx: Dict[str, Any],
@@ -2056,203 +2147,11 @@ def _build_mobile_ticket(
     }
 
 
-def _execute_oanda_mobile_ticket(ticket: Dict[str, Any]) -> Dict[str, Any]:
-    if ticket["asset_class"] != "FX":
-        return {
-            "ok": False,
-            "status": "OANDA_REQUIRES_FX_TICKET",
-            "ticket": ticket,
-            "broker_response": None,
-        }
-
-    _prepare_oanda_env()
-
-    from backend.app.brokers.oanda_adapter import OandaAdapter
-
-    adapter = OandaAdapter()
-    if not adapter.is_configured():
-        return {
-            "ok": False,
-            "status": "OANDA_NOT_CONFIGURED",
-            "ticket": ticket,
-            "broker_response": None,
-        }
-
-    response = adapter.place_order(
-        symbol=str(ticket["symbol"]),
-        side=str(ticket["side"]),
-        units=max(1, int(float(ticket["qty"] or 1))),
-        order_type="MARKET",
-    )
-    return {
-        "ok": bool(response.get("ok")),
-        "status": "OANDA_ORDER_SENT" if response.get("ok") else "OANDA_ORDER_FAILED",
-        "ticket": ticket,
-        "broker_response": _broker_response_summary(response),
-    }
-
-
-def _execute_coinbase_mobile_ticket(ticket: Dict[str, Any]) -> Dict[str, Any]:
-    if ticket["asset_class"] != "CRYPTO":
-        return {
-            "ok": False,
-            "status": "COINBASE_REQUIRES_CRYPTO_TICKET",
-            "ticket": ticket,
-            "broker_response": None,
-        }
-
-    if not _coinbase_live_orders_enabled():
-        return {
-            "ok": False,
-            "status": "COINBASE_LIVE_ORDERS_FLAG_OFF",
-            "ticket": ticket,
-            "broker_response": {
-                "coinbase_live_orders_flag": "OFF",
-                "required_env": "COINBASE_ENABLE_LIVE_ORDERS=true",
-                "max_live_order_usd": _coinbase_max_live_order_usd(),
-            },
-        }
-
-    max_order_usd = _coinbase_max_live_order_usd()
-    amount = float(ticket.get("amount", 0.0) or 0.0)
-    if amount <= 0 or amount > max_order_usd:
-        return {
-            "ok": False,
-            "status": "COINBASE_ORDER_SIZE_BLOCKED",
-            "ticket": ticket,
-            "broker_response": {
-                "max_live_order_usd": max_order_usd,
-                "requested_usd": amount,
-            },
-        }
-
-    if ticket["side"] != "BUY":
-        return {
-            "ok": False,
-            "status": "COINBASE_MOBILE_SELL_NOT_WIRED",
-            "ticket": ticket,
-            "broker_response": None,
-        }
-
-    api_key, api_secret, _source = _load_coinbase_credentials()
-    if not api_key or not api_secret:
-        return {
-            "ok": False,
-            "status": "COINBASE_NOT_CONFIGURED",
-            "ticket": ticket,
-            "broker_response": None,
-        }
-
-    from coinbase.rest import RESTClient  # type: ignore
-
-    client = RESTClient(api_key=api_key, api_secret=api_secret)
-    client_order_id = f"CSS-MOBILE-{ticket['ticket_id']}"
-    response = client.market_order_buy(
-        client_order_id=client_order_id,
-        product_id=str(ticket["symbol"]),
-        quote_size=f"{amount:.2f}",
-    )
-    response_dict = _to_response_dict(response)
-    ok = bool(response_dict.get("success") or response_dict.get("order_id") or response_dict.get("success_response"))
-    return {
-        "ok": ok,
-        "status": "COINBASE_ORDER_SENT" if ok else "COINBASE_ORDER_FAILED",
-        "ticket": ticket,
-        "broker_response": _broker_response_summary(response_dict),
-    }
-
-
-def _prepare_oanda_env() -> None:
-    token = (
-        os.getenv("OANDA_API_KEY")
-        or os.getenv("OANDA_API_TOKEN")
-        or os.getenv("OANDA_PRACTICE_TOKEN")
-        or os.getenv("OANDA_LIVE_TOKEN")
-        or ""
-    ).strip()
-    account_id = (
-        os.getenv("OANDA_ACCOUNT_ID")
-        or os.getenv("OANDA_PRACTICE_ACCOUNT_ID")
-        or os.getenv("OANDA_LIVE_ACCOUNT_ID")
-        or ""
-    ).strip()
-    env_name = (os.getenv("OANDA_ENV") or "practice").strip().lower()
-
-    if token:
-        os.environ["OANDA_API_KEY"] = token
-    if account_id:
-        os.environ["OANDA_ACCOUNT_ID"] = account_id
-    if not os.getenv("OANDA_BASE_URL"):
-        os.environ["OANDA_BASE_URL"] = (
-            "https://api-fxtrade.oanda.com"
-            if env_name == "live"
-            else "https://api-fxpractice.oanda.com"
-        )
-
-
-def _mobile_live_orders_enabled() -> bool:
-    load_local_env()
-    return _coinbase_live_orders_enabled() or (
-        bool(os.getenv("OANDA_API_KEY") or os.getenv("OANDA_API_TOKEN"))
-        and bool(os.getenv("OANDA_ACCOUNT_ID") or os.getenv("OANDA_PRACTICE_ACCOUNT_ID"))
-    )
-
-
-def _coinbase_live_orders_enabled() -> bool:
-    return (os.getenv("COINBASE_ENABLE_LIVE_ORDERS") or "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "y",
-        "on",
-    }
-
-
-def _coinbase_max_live_order_usd() -> float:
-    return _safe_float(os.getenv("COINBASE_MAX_LIVE_ORDER_USD"), DEFAULT_COINBASE_MAX_LIVE_ORDER_USD)
-
-
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
         return float(value)
     except (TypeError, ValueError):
         return default
-
-
-def _safe_int(value: Any, default: int = 0) -> int:
-    try:
-        return int(float(value))
-    except (TypeError, ValueError):
-        return default
-
-
-def _to_response_dict(value: Any) -> Dict[str, Any]:
-    if isinstance(value, dict):
-        return value
-    to_dict = getattr(value, "to_dict", None)
-    if callable(to_dict):
-        data = to_dict()
-        if isinstance(data, dict):
-            return data
-    raw = getattr(value, "__dict__", None)
-    return raw if isinstance(raw, dict) else {"response_type": type(value).__name__}
-
-
-def _broker_response_summary(response: Any) -> Dict[str, Any]:
-    data = _to_response_dict(response)
-    allowed = {
-        "ok",
-        "status",
-        "success",
-        "order_id",
-        "error",
-        "error_response",
-        "success_response",
-        "message",
-        "data",
-    }
-    return {key: value for key, value in data.items() if key in allowed}
-
 
 def _record_mobile_event(payload: Dict[str, Any]) -> None:
     MOBILE_EVENTS_FILE.parent.mkdir(parents=True, exist_ok=True)

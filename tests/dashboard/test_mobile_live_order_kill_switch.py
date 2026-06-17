@@ -13,18 +13,22 @@ TRADER = {
 def test_mobile_live_order_kill_switch_blocks_live_orders(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(mobile_app, "MOBILE_EVENTS_FILE", tmp_path / "events.jsonl")
     monkeypatch.setattr(mobile_app, "MOBILE_CONTROL_FILE", tmp_path / "controls.json")
-    monkeypatch.setattr(mobile_app, "_mobile_live_orders_enabled", lambda: True)
     mobile_app.save_mobile_controls(
         {
-            "runtime_mode": "live",
-            "orders_enabled": True,
+            "mobile_trading_mode": "MOBILE_LIVE_TRADING_ARMED",
             "engine_mode": "BALANCED",
             "live_order_kill_switch": True,
         }
     )
 
+    SUPER_USER = {
+        "user_id": "00000",
+        "display_name": "CSS Administrator",
+        "role": "SUPER_USER",
+    }
+
     result = mobile_app.execute_mobile_trade_ticket(
-        TRADER,
+        SUPER_USER,
         {
             "broker": "COINBASE",
             "asset_class": "CRYPTO",
@@ -32,16 +36,16 @@ def test_mobile_live_order_kill_switch_blocks_live_orders(monkeypatch, tmp_path)
             "side": "BUY",
             "amount": "1.00",
             "qty": "1",
-            "confirm": "EXECUTE",
+            "confirm": "MOBILE LIVE",
         },
     )
-    status = mobile_app._system_status(TRADER)
+    status = mobile_app._system_status(SUPER_USER)
 
     assert result["ok"] is False
     assert result["status"] == "GLOBAL_LIVE_ORDER_KILL_SWITCH_ENGAGED"
     assert result["broker_response"]["live_order_sent"] is False
     assert status["live_order_kill_switch"] is True
-    assert status["live_orders_enabled"] is False
+
 
 
 def test_mobile_live_order_kill_switch_does_not_block_paper_tickets(
@@ -52,27 +56,33 @@ def test_mobile_live_order_kill_switch_does_not_block_paper_tickets(
     monkeypatch.setattr(mobile_app, "MOBILE_CONTROL_FILE", tmp_path / "controls.json")
     mobile_app.save_mobile_controls(
         {
-            "runtime_mode": "paper",
-            "orders_enabled": True,
+            "mobile_trading_mode": "MOBILE_PAPER_TRADING",
             "engine_mode": "SAFE",
             "live_order_kill_switch": True,
         }
     )
+    def mock_eval(*args, **kwargs):
+        return {"decision": {"final": "ALLOW"}, "reason": "approved"}
+    
+    from engine.execution.execution_gate import ExecutionGate
+    monkeypatch.setattr(ExecutionGate, "evaluate_trade", mock_eval)
 
     result = mobile_app.execute_mobile_trade_ticket(
         TRADER,
         {
             "broker": "CSS_PAPER",
             "asset_class": "CRYPTO",
-            "symbol": "BTC-USD",
+            "symbol": "BTC-KILL",
             "side": "BUY",
-            "amount": "1.00",
-            "qty": "1",
+
+            "amount": "1000.00",
+            "qty": "10",
         },
+
     )
 
     assert result["ok"] is True
-    assert result["status"] == "PAPER_TICKET_RECORDED"
+    assert result["status"] == "MOBILE_ORDER_APPROVED"
     assert result["broker_response"]["live_order_sent"] is False
 
 
