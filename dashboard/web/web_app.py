@@ -131,7 +131,7 @@ def _dashboard_page() -> str:
   <title>CSS Institutional Web Dashboard</title>
   <style>{_css()}</style>
 </head>
-<body>
+<body><div style="background-color:#ffebee;color:#b71c1c;text-align:center;padding:8px;font-weight:bold;font-size:0.85em;border-bottom:1px solid #b71c1c;" aria-label="Risk Warning">Trading involves substantial risk. Loss of capital may occur. Past performance does not guarantee future results.</div>
   <main class="shell">
     <header class="topbar">
       <div class="brand-lockup">
@@ -505,7 +505,7 @@ def _positions_page() -> str:
   <title>CSS Professional Positions</title>
   <style>{_css()}</style>
 </head>
-<body>
+<body><div style="background-color:#ffebee;color:#b71c1c;text-align:center;padding:8px;font-weight:bold;font-size:0.85em;border-bottom:1px solid #b71c1c;" aria-label="Risk Warning">Trading involves substantial risk. Loss of capital may occur. Past performance does not guarantee future results.</div>
   <main class="shell">
     <header class="topbar">
       <div class="brand-lockup">
@@ -727,7 +727,7 @@ def _execution_page() -> str:
   <title>CSS Execution History</title>
   <style>{_css()}</style>
 </head>
-<body>
+<body><div style="background-color:#ffebee;color:#b71c1c;text-align:center;padding:8px;font-weight:bold;font-size:0.85em;border-bottom:1px solid #b71c1c;" aria-label="Risk Warning">Trading involves substantial risk. Loss of capital may occur. Past performance does not guarantee future results.</div>
   <main class="shell">
     <header class="topbar">
       <div class="brand-lockup">
@@ -928,7 +928,7 @@ def _risk_governance_page() -> str:
   <title>CSS Risk & Governance Center</title>
   <style>{_css()}</style>
 </head>
-<body>
+<body><div style="background-color:#ffebee;color:#b71c1c;text-align:center;padding:8px;font-weight:bold;font-size:0.85em;border-bottom:1px solid #b71c1c;" aria-label="Risk Warning">Trading involves substantial risk. Loss of capital may occur. Past performance does not guarantee future results.</div>
   <main class="shell">
     <header class="topbar">
       <div class="brand-lockup">
@@ -1127,7 +1127,7 @@ def _market_opportunities_page() -> str:
   <title>CSS Market & Opportunity Center</title>
   <style>{_css()}</style>
 </head>
-<body>
+<body><div style="background-color:#ffebee;color:#b71c1c;text-align:center;padding:8px;font-weight:bold;font-size:0.85em;border-bottom:1px solid #b71c1c;" aria-label="Risk Warning">Trading involves substantial risk. Loss of capital may occur. Past performance does not guarantee future results.</div>
   <main class="shell">
     <header class="topbar">
       <div class="brand-lockup">
@@ -1318,7 +1318,7 @@ def _broker_page() -> str:
   <title>CSS Broker Control Center</title>
   <style>{_css()}</style>
 </head>
-<body>
+<body><div style="background-color:#ffebee;color:#b71c1c;text-align:center;padding:8px;font-weight:bold;font-size:0.85em;border-bottom:1px solid #b71c1c;" aria-label="Risk Warning">Trading involves substantial risk. Loss of capital may occur. Past performance does not guarantee future results.</div>
   <main class="shell">
     <header class="topbar">
       <div class="brand-lockup">

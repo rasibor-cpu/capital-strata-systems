@@ -340,6 +340,28 @@ async def controls_submit(request: Request):
         )
 
     form = await _read_form(request)
+    if form.get("mobile_trading_mode") == "MOBILE_LIVE_TRADING_ARMED" and form.get("legal_acceptance") != "on":
+        return HTMLResponse(
+            _controls_page(
+                user_ctx,
+                message="Live trading blocked. You must explicitly acknowledge the live capital warning.",
+                status="error",
+            ),
+            status_code=400,
+        )
+        
+    if form.get("mobile_trading_mode") == "MOBILE_LIVE_TRADING_ARMED" and form.get("legal_acceptance") == "on":
+        audit_event = {
+            "event_type": "LEGAL_ACCEPTANCE",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "user_id": str(user_ctx.get("user_id")),
+            "role": str(user_ctx.get("role")),
+            "version": "v1.0",
+            "session_id": str(session.get("session_id", "MOBILE-SESSION"))
+        }
+        with open(PROJECT_ROOT / "artifacts" / "legal_acceptance_audit.jsonl", "a") as f:
+            f.write(json.dumps(audit_event) + "\n")
+
     controls = _update_mobile_controls(form)
     return HTMLResponse(
         _controls_page(
@@ -705,6 +727,9 @@ def _top_nav(user_ctx: Dict[str, Any], active: str) -> str:
 
 def _header(title: str, user_ctx: Dict[str, Any], active: str) -> str:
     return f"""
+      <div style="background-color:#ffebee;color:#b71c1c;text-align:center;padding:8px;font-weight:bold;font-size:0.85em;border-bottom:1px solid #b71c1c;" aria-label="Risk Warning">
+        Trading involves substantial risk. Loss of capital may occur. Past performance does not guarantee future results.
+      </div>
       <header class="mobile-topbar">
         <div>
           <p class="eyebrow">Capital Strata Systems</p>
@@ -1433,6 +1458,19 @@ def _controls_page(
                 <option value="MOBILE_PAPER_TRADING"{_selected("MOBILE_PAPER_TRADING", mobile_mode)}>PAPER TRADING</option>
                 <option value="MOBILE_LIVE_TRADING_ARMED"{_selected("MOBILE_LIVE_TRADING_ARMED", mobile_mode)}>LIVE TRADING ARMED</option>
               </select>
+
+              <div id="live-warning-modal" style="display:none; border:2px solid red; padding: 10px; margin: 10px 0; background: #ffebee; color: #b71c1c;">
+                <strong>LIVE CAPITAL WARNING: Real capital may be lost. Orders executed in LIVE mode may result in financial loss.</strong>
+                <label style="display:block; margin-top:10px;"><input type="checkbox" id="legal_acceptance" name="legal_acceptance" value="on"> I explicitly acknowledge and accept these risks.</label>
+              </div>
+              <script>
+                document.getElementById('mobile_trading_mode').addEventListener('change', function() {{
+                  document.getElementById('live-warning-modal').style.display = this.value === 'MOBILE_LIVE_TRADING_ARMED' ? 'block' : 'none';
+                }});
+                if(document.getElementById('mobile_trading_mode').value === 'MOBILE_LIVE_TRADING_ARMED') {{
+                  document.getElementById('live-warning-modal').style.display = 'block';
+                }}
+              </script>
 
               <label for="live_order_kill_switch">Live Order Kill Switch</label>
               <select id="live_order_kill_switch" name="live_order_kill_switch"{disabled}>
