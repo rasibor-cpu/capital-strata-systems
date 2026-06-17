@@ -1830,10 +1830,10 @@ def _trade_ticket_page(
         result_markup = _trade_result_markup(result, status)
 
     controls = load_mobile_controls()
-    system_mode = str(controls["runtime_mode"])
-    orders_enabled = bool(controls["orders_enabled"])
+    system_mode = str(controls.get("mobile_trading_mode", "MOBILE_READ_ONLY"))
+    orders_enabled = system_mode != "MOBILE_READ_ONLY"
     trade_allowed = _can_submit_trade(user_ctx)
-    live_flag = "READY" if _mobile_live_orders_enabled() else "OFF"
+    live_flag = "READY" if system_mode == "MOBILE_LIVE_TRADING_ARMED" else "OFF"
     if trade_allowed:
         trade_form_markup = f"""
           <section class="form-panel trade-form-panel" aria-label="Mobile trade ticket form">

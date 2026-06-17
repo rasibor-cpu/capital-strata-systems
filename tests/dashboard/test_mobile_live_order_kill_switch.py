@@ -67,12 +67,13 @@ def test_mobile_live_order_kill_switch_does_not_block_paper_tickets(
     from engine.execution.execution_gate import ExecutionGate
     monkeypatch.setattr(ExecutionGate, "evaluate_trade", mock_eval)
 
+    import uuid
     result = mobile_app.execute_mobile_trade_ticket(
         TRADER,
         {
             "broker": "CSS_PAPER",
             "asset_class": "CRYPTO",
-            "symbol": "BTC-KILL",
+            "symbol": f"BTC-KILL-{uuid.uuid4()}",
             "side": "BUY",
 
             "amount": "1000.00",
