@@ -2052,6 +2052,8 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
         from backend.intelligence.trade_decision_orchestrator import TradeDecisionOrchestrator
         from engine.execution.execution_gate import ExecutionGate
         from backend.app.persistence.services.trade_runtime_service import TradeRuntimeService
+        from backend.app.persistence.services.session_runtime_service import SessionRuntimeService
+        from backend.app.persistence.services.pnl_runtime_service import PnlRuntimeService
     except ImportError as e:
         result = {
             "ok": False,
@@ -2068,12 +2070,53 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
         broker_mode="live" if is_live_request else "paper",
     )
     
+    # 1. Canonical Session and Equity
+    session_svc = SessionRuntimeService()
+    active_sessions = session_svc.get_active_sessions()
+    if not active_sessions:
+        result = {"ok": False, "status": "NO_ACTIVE_SESSION", "ticket": ticket, "broker_response": {"error": "No active session"}}
+        _record_mobile_event({"event_type": "mobile_order_rejected", **result})
+        return result
+        
+    session_id = active_sessions[0]["session_id"]
+    pnl_svc = PnlRuntimeService()
+    pnl_snapshot = pnl_svc.get_latest_snapshot(session_id)
+    if not pnl_snapshot:
+        result = {"ok": False, "status": "MISSING_PNL_SNAPSHOT", "ticket": ticket, "broker_response": {"error": "Canonical PnL snapshot unavailable"}}
+        _record_mobile_event({"event_type": "mobile_order_rejected", **result})
+        return result
+        
+    equity = float(pnl_snapshot.get("equity", 0.0))
+    equity_peak = float(pnl_snapshot.get("equity_peak", 0.0))
+
+    # 2. Canonical Margin Snapshot
+    margin_snapshot = None
+    broker_mode_str = "LIVE" if is_live_request else "SIMULATED"
+    try:
+        if broker == "OANDA":
+            from engine.risk.oanda_margin_adapter import OandaMarginAdapter
+            margin_adapter = OandaMarginAdapter(mode=broker_mode_str)
+            margin_snapshot = margin_adapter.get_margin_snapshot()
+        elif broker == "COINBASE":
+            from engine.risk.coinbase_margin_adapter import CoinbaseMarginAdapter
+            margin_adapter = CoinbaseMarginAdapter(mode=broker_mode_str)
+            margin_snapshot = margin_adapter.get_margin_snapshot()
+    except Exception:
+        pass
+        
+    if not margin_snapshot:
+        result = {"ok": False, "status": "MARGIN_SNAPSHOT_UNAVAILABLE", "ticket": ticket, "broker_response": {"error": "Failed to retrieve canonical margin state"}}
+        _record_mobile_event({"event_type": "mobile_order_rejected", **result})
+        return result
+
+    # 3. Canonical Market Data
+    # Fail closed if authoritative values are unavailable (no synthetic values)
     market_data = {
         "symbol": ticket["symbol"],
         "asset_class": ticket["asset_class"],
-        "expected_value": 0.05,
-        "cost": 0.01,
-        "probability": 0.8,
+        "expected_value": None,
+        "cost": None,
+        "probability": None,
         "engine_mode": ticket["engine_mode"]
     }
     
@@ -2095,17 +2138,17 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
         side=ticket["side"],
         notional=ticket["amount"],
         stop_distance_pct=0.02,
-        equity=10000.0,
-        equity_peak=10000.0,
-        regime_persistence=1.0,
+        equity=equity,
+        equity_peak=equity_peak,
+        regime_persistence=None,
         policy="core",
-        volatility_state="MEDIUM",
-        regime_state="NORMAL",
-        expected_move_bps=50.0,
-        fee_bps=1.0,
-        spread_bps=1.0,
-        slippage_bps=1.0,
-        margin_snapshot=None,
+        volatility_state=None,
+        regime_state=None,
+        expected_move_bps=None,
+        fee_bps=None,
+        spread_bps=None,
+        slippage_bps=None,
+        margin_snapshot=margin_snapshot,
         broker_mode="live" if is_live_request else "paper"
     )
 
