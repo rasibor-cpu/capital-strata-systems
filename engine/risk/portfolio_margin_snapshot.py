@@ -9,3 +9,4 @@ class PortfolioMarginSnapshot:
     portfolio_margin_available: float
     portfolio_risk_state: MarginState
     broker_count: int
+    timestamp: str = ""
