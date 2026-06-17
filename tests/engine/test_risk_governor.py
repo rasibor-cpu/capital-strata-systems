@@ -5,7 +5,7 @@ import logging
 from engine.execution.execution_gate import ExecutionGate
 from backend.app.risk.anti_bleed_guard import AntiBleedGuard
 from engine.risk.risk_governor import RiskGovernor
-from engine.risk.margin_engine import MarginEngine
+from engine.risk.margin_snapshot import MarginSnapshot, MarginState
 
 
 class StaticEquityAuthority:
@@ -189,10 +189,19 @@ def test_execution_gate_marks_precomputed_risk_governor_path(tmp_path) -> None:
         fee_bps=1.0,
         spread_bps=1.0,
         slippage_bps=1.0,
-        margin_snapshot=MarginEngine().calculate(
-            required_margin=0.0,
-            available_margin=10000.0,
-            margin_source="SIMULATED",
+        margin_snapshot=MarginSnapshot(
+            broker="TEST",
+            account_id="123",
+            timestamp="2026-06-17T00:00:00Z",
+            equity=10000.0,
+            cash=10000.0,
+            buying_power=5000.0,
+            maintenance_margin=2500.0,
+            initial_margin=5000.0,
+            margin_used=0.0,
+            margin_available=10000.0,
+            margin_ratio=0.0,
+            margin_state=MarginState.NORMAL
         ),
         broker_mode="PAPER",
     )

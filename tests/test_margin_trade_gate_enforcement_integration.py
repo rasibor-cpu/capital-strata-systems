@@ -4,7 +4,7 @@ from typing import Any
 
 from backend.app.risk.anti_bleed_guard import AntiBleedGuard
 from engine.execution.execution_gate import ExecutionGate
-from engine.risk.margin_engine import MarginEngine
+from engine.risk.margin_snapshot import MarginSnapshot, MarginState
 from engine.risk.margin_trade_gate import MarginTradeGateDecision
 
 
@@ -15,7 +15,7 @@ class RecordingMarginTradeGate:
             allowed=True,
             decision="ALLOW",
             reason="test margin allows",
-            margin_state="GREEN",
+            margin_state="NORMAL",
             escalation_state="NORMAL",
             margin_utilization_pct=10.0,
         )
@@ -32,14 +32,21 @@ class RecordingMarginTradeGate:
 
 def _margin_snapshot(
     *,
-    required_margin: float = 0.0,
-    available_margin: float = 10000.0,
-    margin_source: str = "SIMULATED",
+    margin_state: MarginState = MarginState.NORMAL,
 ):
-    return MarginEngine().calculate(
-        required_margin=required_margin,
-        available_margin=available_margin,
-        margin_source=margin_source,
+    return MarginSnapshot(
+        broker="TEST",
+        account_id="123",
+        timestamp="2026-06-17T00:00:00Z",
+        equity=10000.0,
+        cash=10000.0,
+        buying_power=5000.0,
+        maintenance_margin=2500.0,
+        initial_margin=5000.0,
+        margin_used=0.0,
+        margin_available=10000.0,
+        margin_ratio=0.0,
+        margin_state=margin_state
     )
 
 
@@ -108,9 +115,7 @@ def test_margin_orange_blocks_before_risk_governor(tmp_path) -> None:
     ).evaluate_trade(
         **_gate_request(
             margin_snapshot=_margin_snapshot(
-                required_margin=7000.0,
-                available_margin=10000.0,
-                margin_source="LIVE",
+                margin_state=MarginState.RESTRICTED,
             ),
             broker_mode="LIVE",
         )
@@ -118,8 +123,7 @@ def test_margin_orange_blocks_before_risk_governor(tmp_path) -> None:
 
     assert result["decision"]["final"] == "BLOCK"
     assert result["reason"].startswith("margin_trade_gate:RESTRICT_NEW_RISK")
-    assert result["debug"]["margin_trade_gate"]["margin_state"] == "ORANGE"
-    assert result["debug"]["margin_trade_gate"]["escalation_state"] == "RESTRICT_NEW_RISK"
+    assert result["debug"]["margin_trade_gate"]["margin_state"] == "RESTRICTED"
     assert "riskgov_path" not in result["debug"]
 
 
@@ -132,7 +136,7 @@ def test_missing_margin_snapshot_fails_closed(tmp_path) -> None:
     ).evaluate_trade(**_gate_request(margin_snapshot=None))
 
     assert result["decision"]["final"] == "BLOCK"
-    assert result["reason"] == "margin_trade_gate:BLOCK:missing_margin_snapshot"
+    assert result["reason"] == "margin_trade_gate:BLOCK:MARGIN_SNAPSHOT_UNAVAILABLE"
     assert result["debug"]["margin_trade_gate"]["control"] == "MarginTradeGate"
     assert "riskgov_path" not in result["debug"]
 
@@ -146,16 +150,14 @@ def test_live_unknown_margin_state_fails_closed(tmp_path) -> None:
     ).evaluate_trade(
         **_gate_request(
             margin_snapshot=_margin_snapshot(
-                required_margin=1000.0,
-                available_margin=0.0,
-                margin_source="LIVE",
+                margin_state="UNKNOWN",
             ),
             broker_mode="LIVE",
         )
     )
 
     assert result["decision"]["final"] == "BLOCK"
-    assert result["reason"].startswith("margin_trade_gate:BLOCK:Fail-closed")
+    assert result["reason"].startswith("margin_trade_gate:BLOCK:invalid_snapshot")
     assert result["debug"]["margin_trade_gate"]["margin_state"] == "UNKNOWN"
 
 
@@ -163,10 +165,10 @@ def test_margin_block_reason_is_auditable(tmp_path) -> None:
     margin_gate = RecordingMarginTradeGate(
         MarginTradeGateDecision(
             allowed=False,
-            decision="DEFENSIVE_ONLY",
-            reason="test margin defensive-only block",
-            margin_state="RED",
-            escalation_state="DEFENSIVE_ONLY",
+            decision="RESTRICT_NEW_RISK",
+            reason="test margin restricted block",
+            margin_state="RESTRICTED",
+            escalation_state="UNKNOWN",
             margin_utilization_pct=85.0,
         )
     )
@@ -180,13 +182,13 @@ def test_margin_block_reason_is_auditable(tmp_path) -> None:
     ).evaluate_trade(**_gate_request())
 
     assert result["decision"]["final"] == "BLOCK"
-    assert result["reason"] == "margin_trade_gate:DEFENSIVE_ONLY:test margin defensive-only block"
+    assert result["reason"] == "margin_trade_gate:RESTRICT_NEW_RISK:test margin restricted block"
     assert result["debug"]["margin_trade_gate"] == {
         "allowed": False,
-        "decision": "DEFENSIVE_ONLY",
-        "reason": "test margin defensive-only block",
-        "margin_state": "RED",
-        "escalation_state": "DEFENSIVE_ONLY",
+        "decision": "RESTRICT_NEW_RISK",
+        "reason": "test margin restricted block",
+        "margin_state": "RESTRICTED",
+        "escalation_state": "UNKNOWN",
         "margin_utilization_pct": 85.0,
         "control": "MarginTradeGate",
     }
