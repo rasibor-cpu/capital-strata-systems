@@ -103,5 +103,5 @@ def test_mobile_live_trade_routes_to_execution_gate(monkeypatch, tmp_path):
         },
     )
     assert result["ok"] is False
-    assert result["status"] == "EXECUTION_GATE_REJECTED"
+    assert result["status"] == "ORCHESTRATOR_GATE_REJECTED"
 
