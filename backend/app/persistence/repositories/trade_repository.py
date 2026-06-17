@@ -150,6 +150,21 @@ class TradeRepository(BaseRepository):
 
         return [dict(row) for row in rows]
 
+    def get_all_session_trades(
+        self,
+        session_id: str,
+    ) -> list[dict[str, Any]]:
+        rows = self.fetch_all(
+            """
+            SELECT *
+            FROM trades
+            WHERE session_id = ?
+            ORDER BY opened_at DESC
+            """,
+            (session_id,),
+        )
+        return [dict(row) for row in rows]
+
     def trade_exists(
         self,
         session_id: str,

@@ -43,6 +43,9 @@ from dashboard.runtime.trade_replay_harness import replay_mobile_trade_event_fil
 from dashboard.runtime.dashboard_hydration_coordinator import DashboardHydrationCoordinator
 from dashboard.runtime.runtime_bootstrap import DashboardRuntimeBootstrap
 from engine.execution.live_order_kill_switch import evaluate_live_order_kill_switch
+from backend.app.persistence.services.session_runtime_service import SessionRuntimeService
+from backend.app.persistence.services.pnl_runtime_service import PnlRuntimeService
+from backend.app.persistence.services.trade_runtime_service import TradeRuntimeService
 
 
 SESSION_COOKIE = "css_mobile_session"
@@ -245,6 +248,15 @@ async def logout(request: Request):
     response = RedirectResponse("/login", status_code=303)
     response.delete_cookie(SESSION_COOKIE)
     return response
+
+
+@app.get("/trade-status", response_class=HTMLResponse)
+async def trade_status_screen(request: Request):
+    session = _get_session(request)
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+
+    return HTMLResponse(_trade_status_page(session["user_ctx"], session))
 
 
 @app.get("/api/status")
@@ -671,6 +683,7 @@ def _top_nav(user_ctx: Dict[str, Any], active: str) -> str:
         ("opportunities", "Opportunities", "/opportunities"),
         ("market", "Market", "/market"),
         ("broker", "Broker", "/broker"),
+        ("trade-status", "Trade Status", "/trade-status"),
     ):
         if active != key:
             links.append(
@@ -2732,3 +2745,99 @@ pre {
   }
 }
 """
+
+
+def _trade_status_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
+    load_local_env()
+    
+    active_sessions = SessionRuntimeService().get_active_sessions()
+    
+    if not active_sessions:
+        return _page(
+            "Trade Status",
+            f'''
+            <main class="dashboard-shell">
+              {_header("Trade Status Summary", user_ctx, "trade-status")}
+              {_identity_strip(user_ctx, "Status: Disconnected")}
+              <section class="data-panel" aria-label="Disconnected Status">
+                <h2>Ledger Data</h2>
+                <div class="alert error">DATA UNAVAILABLE: No active CSS runtime session found. Cannot load canonical state.</div>
+              </section>
+            </main>
+            '''
+        )
+        
+    session_id = active_sessions[0]["session_id"]
+    snapshot = PnlRuntimeService().get_latest_snapshot(session_id)
+    trades = TradeRuntimeService().get_all_session_trades(session_id)
+    
+    if not snapshot:
+        snapshot = {}
+        
+    trades_html = ""
+    for t in trades:
+        tid = html.escape(str(t.get("trade_id", "UNKNOWN")))
+        sym = html.escape(str(t.get("symbol", "N/A")))
+        side = html.escape(str(t.get("direction", "N/A")))
+        asset_class = html.escape(str(t.get("asset_class", "N/A")))
+        status = html.escape(str(t.get("status", "UNKNOWN")).upper())
+        qty = html.escape(str(t.get("quantity", "0.0")))
+        entry = html.escape(str(t.get("entry_price", "0.0")))
+        current = html.escape(str(t.get("current_price", "0.0")))
+        pnl = html.escape(str(t.get("realized_pnl", "0.0")))
+        gate = html.escape(str(t.get("gate_decision", "N/A")))
+        broker = html.escape(str(t.get("broker_name", "UNKNOWN")))
+        tstamp = html.escape(str(t.get("opened_at", "")))
+        
+        trades_html += f'''
+        <tr class="trade-row">
+          <td><span class="muted">{tstamp[:19] if tstamp else ''}</span><br>{tid[:8]}</td>
+          <td><strong>{sym}</strong><br>{side} {qty} {asset_class}</td>
+          <td>{entry} / {current}<br><span class="muted">{broker}</span></td>
+          <td>{status} / {gate}<br>{pnl}</td>
+        </tr>
+        '''
+        
+    if not trades_html:
+        trades_html = '<tr><td colspan="4" class="muted center">No canonical trades recorded for this session.</td></tr>'
+
+    return _page(
+        "Trade Status",
+        f'''
+        <main class="dashboard-shell">
+          {_header("Trade Status Summary", user_ctx, "trade-status")}
+          {_identity_strip(user_ctx, "Status: Canonical")}
+          <section class="metric-grid" aria-label="Account Balances">
+            <article><strong>Account balance</strong><span>{snapshot.get("account_balance", "DATA UNAVAILABLE")}</span></article>
+            <article><strong>Cash</strong><span>{snapshot.get("available_cash", "DATA UNAVAILABLE")}</span></article>
+            <article><strong>Buying power</strong><span>{snapshot.get("buying_power", "DATA UNAVAILABLE")}</span></article>
+            <article><strong>Equity</strong><span>{snapshot.get("equity", "DATA UNAVAILABLE")}</span></article>
+            <article><strong>Open PnL</strong><span>{snapshot.get("unrealized_pnl", "DATA UNAVAILABLE")}</span></article>
+            <article><strong>Realized PnL</strong><span>{snapshot.get("realized_pnl", "DATA UNAVAILABLE")}</span></article>
+            <article><strong>Total PnL</strong><span>{snapshot.get("net_pnl", "DATA UNAVAILABLE")}</span></article>
+            <article><strong>Open trades</strong><span>{snapshot.get("open_positions", "DATA UNAVAILABLE")}</span></article>
+            <article><strong>Closed trades</strong><span>{snapshot.get("closed_positions", "DATA UNAVAILABLE")}</span></article>
+            <article><strong>Pending/rejected orders</strong><span>{snapshot.get("pending_orders", "DATA UNAVAILABLE")} / {snapshot.get("rejected_orders", "DATA UNAVAILABLE")}</span></article>
+          </section>
+          
+          <section class="data-panel" aria-label="Trade List">
+            <h2>Canonical Trade Ledger</h2>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Time / ID</th>
+                    <th>Asset / Side</th>
+                    <th>Entry / Current / Broker</th>
+                    <th>Status / Gate / PnL</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {trades_html}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </main>
+        ''',
+    )
