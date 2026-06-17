@@ -1,31 +1,32 @@
-"""
-Capital Strata Systems
-Phase 97C
-
-Coinbase Margin Adapter
-"""
-
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any, Callable
+from dataclasses import dataclass
 
-from engine.risk.broker_margin_contract import (
-    BrokerMarginProvider,
-    BrokerMarginSnapshot,
-)
+from engine.risk.broker_margin_contract import BrokerMarginProvider
+from engine.risk.margin_snapshot import MarginSnapshot
+from engine.risk.margin_state import MarginState
 
+@dataclass(frozen=True)
+class LegacyCompatibleMarginSnapshot(MarginSnapshot):
+    # Legacy fields mapping
+    required_margin: float = 0.0
+    available_margin: float = 0.0
+    free_margin: float = 0.0
+    margin_utilization_pct: float = 0.0
+    margin_source: str = "LIVE"
+    broker_name: str = "COINBASE"
 
 class CoinbaseMarginAdapter(BrokerMarginProvider):
     """
-    Coinbase margin adapter.
-
+    Coinbase canonical margin adapter.
+    
     Coinbase spot defaults to non-margin unless live broker data clearly
-    reports margin or leverage fields.
+    reports margin or leverage fields. Missing margin defaults safely to spot 
+    (NORMAL state, zero margin used).
 
-    No execution logic.
-    No trade-gate integration.
-    Deterministic simulated fallback is preserved for all LIVE failures.
+    No execution logic. Read-only.
     """
 
     def __init__(
@@ -43,12 +44,12 @@ class CoinbaseMarginAdapter(BrokerMarginProvider):
         self.adapter_factory = adapter_factory
         self.last_note = "SIMULATED_MARGIN_SNAPSHOT"
 
-    def get_margin_snapshot(self) -> BrokerMarginSnapshot:
+    def get_margin_snapshot(self) -> MarginSnapshot:
         if self.mode == "LIVE":
             return self._get_live_margin_snapshot()
         return self._simulated_snapshot()
 
-    def _get_live_margin_snapshot(self) -> BrokerMarginSnapshot:
+    def _get_live_margin_snapshot(self) -> MarginSnapshot:
         try:
             adapter = self._build_coinbase_adapter()
             if adapter is None:
@@ -73,7 +74,6 @@ class CoinbaseMarginAdapter(BrokerMarginProvider):
 
         try:
             from backend.app.brokers.broker_bootstrap import initialize_broker
-
             return initialize_broker("coinbase", mode="live")
         except Exception as exc:
             self.last_note = f"LIVE_FALLBACK_ADAPTER_INIT_ERROR_{str(exc)[:80]}"
@@ -102,10 +102,11 @@ class CoinbaseMarginAdapter(BrokerMarginProvider):
         *,
         payload: Any,
         account_id: str,
-    ) -> BrokerMarginSnapshot:
+    ) -> MarginSnapshot:
         plain = self._to_plain(payload)
 
-        required = self._extract_first_float(
+        # 1. Parse Required Inputs
+        margin_used_raw = self._extract_first_float(
             plain,
             (
                 "margin_used",
@@ -116,7 +117,8 @@ class CoinbaseMarginAdapter(BrokerMarginProvider):
                 "initialMargin",
             ),
         )
-        available = self._extract_first_float(
+        
+        balance_raw = self._extract_first_float(
             plain,
             (
                 "available_margin",
@@ -129,7 +131,8 @@ class CoinbaseMarginAdapter(BrokerMarginProvider):
                 "available_balance",
             ),
         )
-        free = self._extract_first_float(
+
+        buying_power_raw = self._extract_first_float(
             plain,
             (
                 "free_margin",
@@ -141,49 +144,111 @@ class CoinbaseMarginAdapter(BrokerMarginProvider):
             ),
         )
 
-        if required is None:
-            required = 0.0
-        if available is None:
-            available = 0.0
-        if free is None:
-            free = available - required
+        if margin_used_raw is None:
+            margin_used_raw = 0.0
+        if balance_raw is None:
+            balance_raw = 0.0
+        if buying_power_raw is None:
+            buying_power_raw = balance_raw - margin_used_raw
 
-        utilization = 0.0
-        if available > 0:
-            utilization = (required / available) * 100.0
+        # 2. Canonical mapping calculations
+        equity = balance_raw
+        cash = balance_raw
+        buying_power = buying_power_raw
+        maintenance_margin = margin_used_raw
+        initial_margin = margin_used_raw
+        margin_used = margin_used_raw
+        margin_available = buying_power_raw
 
-        return BrokerMarginSnapshot(
-            broker_name="COINBASE",
+        if equity > 0:
+            margin_ratio = margin_used / equity
+            margin_utilization_pct = margin_ratio * 100.0
+        else:
+            margin_ratio = 0.0
+            margin_utilization_pct = 0.0
+
+        # 3. Canonical margin state classification
+        if margin_ratio >= 1.0:
+            margin_state = MarginState.LIQUIDATION_RISK
+        elif margin_ratio >= 0.85:
+            margin_state = MarginState.CRITICAL
+        elif margin_ratio >= 0.70:
+            margin_state = MarginState.RESTRICTED
+        elif margin_ratio >= 0.50:
+            margin_state = MarginState.WARNING
+        else:
+            # Safely classifies as NORMAL for spot accounts or low margin use
+            margin_state = MarginState.NORMAL
+
+        return LegacyCompatibleMarginSnapshot(
+            broker="COINBASE",
             account_id=account_id or self.account_id,
-            required_margin=round(required, 2),
-            available_margin=round(available, 2),
-            free_margin=round(free, 2),
-            margin_utilization_pct=round(utilization, 2),
+            timestamp=self._timestamp(),
+            equity=round(equity, 2),
+            cash=round(cash, 2),
+            buying_power=round(buying_power, 2),
+            maintenance_margin=round(maintenance_margin, 2),
+            initial_margin=round(initial_margin, 2),
+            margin_used=round(margin_used, 2),
+            margin_available=round(margin_available, 2),
+            margin_ratio=round(margin_ratio, 4),
+            margin_state=margin_state,
+            # Legacy Fields
+            required_margin=round(margin_used, 2),
+            available_margin=round(equity, 2),
+            free_margin=round(buying_power, 2),
+            margin_utilization_pct=round(margin_utilization_pct, 2),
             margin_source="LIVE",
-            timestamp=self._timestamp(),
+            broker_name="COINBASE"
         )
 
-    def _simulated_snapshot(self) -> BrokerMarginSnapshot:
+    def _simulated_snapshot(self) -> MarginSnapshot:
         free_margin = self.available_margin - self.required_margin
+        equity = self.available_margin
+        cash = self.available_margin
+        margin_used = self.required_margin
 
-        utilization = 0.0
-        if self.available_margin > 0:
-            utilization = (
-                self.required_margin / self.available_margin
-            ) * 100.0
+        if equity > 0:
+            margin_ratio = margin_used / equity
+            margin_utilization_pct = margin_ratio * 100.0
+        else:
+            margin_ratio = 0.0
+            margin_utilization_pct = 0.0
 
-        return BrokerMarginSnapshot(
-            broker_name="COINBASE",
+        if margin_ratio >= 1.0:
+            margin_state = MarginState.LIQUIDATION_RISK
+        elif margin_ratio >= 0.85:
+            margin_state = MarginState.CRITICAL
+        elif margin_ratio >= 0.70:
+            margin_state = MarginState.RESTRICTED
+        elif margin_ratio >= 0.50:
+            margin_state = MarginState.WARNING
+        else:
+            margin_state = MarginState.NORMAL
+
+        return LegacyCompatibleMarginSnapshot(
+            broker="COINBASE",
             account_id=self.account_id,
-            required_margin=round(self.required_margin, 2),
-            available_margin=round(self.available_margin, 2),
-            free_margin=round(free_margin, 2),
-            margin_utilization_pct=round(utilization, 2),
-            margin_source="SIMULATED",
             timestamp=self._timestamp(),
+            equity=round(equity, 2),
+            cash=round(cash, 2),
+            buying_power=round(free_margin, 2),
+            maintenance_margin=round(margin_used, 2),
+            initial_margin=round(margin_used, 2),
+            margin_used=round(margin_used, 2),
+            margin_available=round(free_margin, 2),
+            margin_ratio=round(margin_ratio, 4),
+            margin_state=margin_state,
+            # Legacy Fields
+            required_margin=round(margin_used, 2),
+            available_margin=round(equity, 2),
+            free_margin=round(free_margin, 2),
+            margin_utilization_pct=round(margin_utilization_pct, 2),
+            margin_source="SIMULATED",
+            broker_name="COINBASE"
         )
 
-    def _fallback_snapshot(self, note: str) -> BrokerMarginSnapshot:
+    def _fallback_snapshot(self, note: str) -> MarginSnapshot:
         self.last_note = note
         return self._simulated_snapshot()
 
@@ -229,7 +294,6 @@ class CoinbaseMarginAdapter(BrokerMarginProvider):
                 if key in value:
                     return self._coerce_amount(value.get(key))
             return None
-
         try:
             return float(value)
         except Exception:
@@ -238,16 +302,13 @@ class CoinbaseMarginAdapter(BrokerMarginProvider):
     def _to_plain(self, obj: Any) -> Any:
         if obj is None:
             return None
-
         if isinstance(obj, (dict, list, str, int, float, bool)):
             return obj
-
         if hasattr(obj, "to_dict"):
             try:
                 return obj.to_dict()
             except Exception:
                 pass
-
         if hasattr(obj, "__dict__"):
             try:
                 return {
@@ -257,7 +318,6 @@ class CoinbaseMarginAdapter(BrokerMarginProvider):
                 }
             except Exception:
                 pass
-
         return obj
 
     def _normalize_mode(self, mode: str) -> str:
