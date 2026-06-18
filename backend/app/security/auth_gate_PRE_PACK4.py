@@ -1,3 +1,8 @@
+# LEGACY AUTHENTICATION BACKUP - NON-CANONICAL.
+# ARP-011 quarantine marker: this PRE_PACK4 authentication backup is not the
+# current runtime authentication authority. Current backend/app security flows
+# use backend/app/security/auth_gate.py and related active security modules.
+
 """
 Authoritative authentication gate for REA Capital Trading Engine.
 

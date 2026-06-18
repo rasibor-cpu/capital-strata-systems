@@ -37,8 +37,7 @@ def test_mobile_audit_page_renders_filtered_redacted_events(monkeypatch, tmp_pat
     monkeypatch.setattr(mobile_app, "MOBILE_CONTROL_FILE", tmp_path / "controls.json")
     mobile_app.save_mobile_controls(
         {
-            "runtime_mode": "live",
-            "orders_enabled": True,
+            "mobile_trading_mode": "MOBILE_LIVE_TRADING_ARMED",
             "engine_mode": "BALANCED",
             "live_order_kill_switch": True,
         }
@@ -53,7 +52,7 @@ def test_mobile_audit_page_renders_filtered_redacted_events(monkeypatch, tmp_pat
             "side": "BUY",
             "amount": "1.00",
             "qty": "1",
-            "confirm": "EXECUTE",
+            "confirm": "MOBILE LIVE",
         },
     )
     page = mobile_app._audit_page(

@@ -1,4 +1,3 @@
-
 """
 Capital Strata Systems (CSS)
 Broker Bootstrap
@@ -10,19 +9,20 @@ during system startup.
 
 Flow
 ----
-1. User selects broker (Coinbase, OANDA, Alpaca, etc)
-2. Credentials are loaded
-3. Required SDK dependencies are installed
-4. Adapter instance is created
-5. Adapter is returned to the trading engine
+1. User selects broker.
+2. Credentials are loaded.
+3. Required SDK dependencies are checked.
+4. Adapter instance is created.
+5. Adapter is returned to the trading engine.
 
 PCNRASS SAFE VERSION
 --------------------
-- Preserves existing bootstrap flow
-- Preserves governance behavior
-- Preserves OANDA behavior
-- Adds Coinbase env credential compatibility
-- Fail-closed design maintained
+- Preserves existing bootstrap flow.
+- Preserves governance behavior.
+- Preserves OANDA behavior.
+- Supports Coinbase CDP JSON credential files.
+- Does not pass raw Coinbase private-key text as a file path.
+- Fail-closed design maintained.
 """
 
 from typing import Any, Dict
@@ -34,24 +34,13 @@ from .install_utils import ensure_broker_dependencies
 
 class BrokerBootstrapError(Exception):
     """Raised when broker initialization fails."""
+
     pass
 
 
 def initialize_broker(broker_name: str, mode: str = "paper"):
     """
     Initialize a broker adapter.
-
-    Parameters
-    ----------
-    broker_name : str
-        Name of broker (coinbase, oanda, alpaca)
-
-    mode : str
-        'paper' or 'live'
-
-    Returns
-    -------
-    adapter instance
     """
 
     broker_name = broker_name.lower()
@@ -59,7 +48,6 @@ def initialize_broker(broker_name: str, mode: str = "paper"):
     print(f"[BROKER BOOTSTRAP] Initializing broker: {broker_name}")
     print(f"[BROKER BOOTSTRAP] Mode: {mode}")
 
-    # Ensure required dependencies are installed
     dependency_status = ensure_broker_dependencies(broker_name)
 
     if not dependency_status.get("ok"):
@@ -68,15 +56,13 @@ def initialize_broker(broker_name: str, mode: str = "paper"):
             f"{broker_name}: {dependency_status.get('package')}"
         )
 
-    # Load credentials
-    creds = load_credentials(broker_name)
+    creds = load_credentials(broker_name, mode=mode)
 
     if creds is None:
         raise BrokerBootstrapError(
             f"No credentials found for broker: {broker_name}"
         )
 
-    # Get adapter class from registry
     adapter_cls = get_adapter(broker_name)
 
     if adapter_cls is None:
@@ -84,7 +70,6 @@ def initialize_broker(broker_name: str, mode: str = "paper"):
             f"No adapter registered for broker: {broker_name}"
         )
 
-    # Instantiate adapter safely
     adapter = _instantiate_adapter(
         adapter_cls=adapter_cls,
         broker_name=broker_name,
@@ -92,7 +77,6 @@ def initialize_broker(broker_name: str, mode: str = "paper"):
         mode=mode,
     )
 
-    # Connect to broker
     connect = getattr(adapter, "connect", None)
 
     if callable(connect):
@@ -122,7 +106,6 @@ def _instantiate_adapter(
     """
 
     if broker_name == "coinbase":
-
         api_key_name = str(
             creds.get("api_key_name")
             or creds.get("name")
@@ -133,11 +116,8 @@ def _instantiate_adapter(
         )
 
         api_private_key_path = str(
-            creds.get("api_private_key_path")
-            or creds.get("private_key_path")
-            or creds.get("COINBASE_CDP_PRIVATE_KEY_PATH")
-            or creds.get("COINBASE_PRIVATE_KEY_PATH")
-            or creds.get("COINBASE_PRIVATE_KEY")
+            creds.get("COINBASE_KEY_JSON_PATH")
+            or creds.get("COINBASE_KEY_FILE")
             or ""
         )
 

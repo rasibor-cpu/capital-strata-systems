@@ -99,26 +99,20 @@ def _round_trip_snapshot(cost_engine=None):
     return snapshot
 
 
+from engine.ledger.pnl_snapshot_adapter import CanonicalPnLSnapshotContract
+
 def _dashboard_summary_from_snapshot(snapshot):
-    position_state = PositionStateBuilder().build(
-        {
-            "positions": [
-                {
-                    "symbol": snapshot.symbol,
-                    "asset_class": "CRYPTO",
-                    "side": "LONG",
-                    "qty": snapshot.meta["qty"],
-                    "entry_price": snapshot.meta["avg_cost"],
-                    "current_price": 125.0,
-                    "realized_pnl": str(snapshot.realized_pnl),
-                    "unrealized_pnl": str(snapshot.unrealized_pnl),
-                }
-            ]
-        }
-    )
+    contract = CanonicalPnLSnapshotContract(
+        realized_pnl=snapshot.realized_pnl,
+        unrealized_pnl=snapshot.unrealized_pnl,
+        net_pnl=snapshot.realized_pnl + snapshot.unrealized_pnl,
+        equity=Decimal("1000.0") + snapshot.realized_pnl + snapshot.unrealized_pnl,
+        peak_equity=Decimal("1000.0") + snapshot.realized_pnl + snapshot.unrealized_pnl,
+    ).to_runtime_dict()
+
     dashboard_summary = PnLSummaryBuilder().build(
         account_state={"equity": 1000.0},
-        position_state=position_state,
+        position_state=contract,
     )
 
     assert dashboard_summary["realized_pnl"] == float(snapshot.realized_pnl)

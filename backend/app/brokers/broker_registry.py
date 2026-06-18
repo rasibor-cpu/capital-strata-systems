@@ -101,7 +101,7 @@ def get_adapter(broker_name: str) -> Type[object]:
 
         return OandaAdapter
 
-    raise KeyError(
+    raise NotImplementedError(
         f"No adapter class is available for broker '{broker_name}'. "
         "The broker is registered but not executable in this runtime."
     )

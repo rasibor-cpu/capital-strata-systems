@@ -2,14 +2,14 @@ import os
 import time
 import threading
 
-from alpaca.data.live import CryptoDataStream
-
-
-API_KEY = os.environ["ALPACA_API_KEY_ID"]
-SECRET_KEY = os.environ["ALPACA_SECRET_KEY"]
 
 def main():
-    stream = CryptoDataStream(API_KEY, SECRET_KEY)
+    from alpaca.data.live import CryptoDataStream
+
+    api_key = os.environ["ALPACA_API_KEY_ID"]
+    secret_key = os.environ["ALPACA_SECRET_KEY"]
+
+    stream = CryptoDataStream(api_key, secret_key)
 
     async def on_trade(t):
         # t typically has: symbol, price, size, timestamp

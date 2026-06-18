@@ -1,0 +1,79 @@
+PHASE 75/76 – LIVE BROKER BALANCE AUTHORITY AUDIT
+
+Findings:
+
+1. RealBalanceEngine
+Location:
+backend/app/accounting/real_balance_engine.py
+
+Role:
+Active broker balance normalizer.
+
+Behavior:
+- Fetches OANDA account summary through adapter.get_account_summary().
+- Extracts OANDA NAV/balance through adapter.extract_balance_nav().
+- Fetches Coinbase accounts through get_accounts() or list_accounts().
+- Falls back to direct balance methods where available.
+- Returns zero balance on unsupported broker, missing adapter, failed response, missing accounts, zero account values, or exceptions.
+
+Governance Classification:
+ACTIVE.
+FAIL-CLOSED.
+NO ORDER EXECUTION.
+
+2. CapitalDeploymentGovernor
+Location:
+scripts/css_live_dashboard.py
+
+Role:
+Live/paper capital authority.
+
+Behavior:
+- Paper mode uses simulated/test capital.
+- Live mode calls RealBalanceEngine.
+- set_live_mode() refreshes real broker balance.
+- set_paper_mode() returns to simulated capital.
+- pcnrass_activate_capital_source() selects the active capital source after broker initialization.
+
+3. R11 Live Capital Hard Lock
+Location:
+scripts/css_live_dashboard.py
+
+Behavior:
+If selected broker mode is live and real_balance <= 0:
+- prints LIVE CAPITAL BLOCKED
+- reason=NO_REAL_BALANCE
+- halts live trading
+
+Conclusion:
+Current evidence supports the following authority chain:
+
+Trade Candidate
+    →
+CSSUnifiedTradeGate
+    →
+R14F Profitability Gate
+    →
+Position Registration
+    →
+CapitalDeploymentGovernor
+    →
+RealBalanceEngine
+    →
+Broker Real Balance
+    →
+R11 Live Capital Hard Lock
+    →
+Broker Execution
+
+Governance Conclusion:
+Live broker execution is guarded by real balance authority.
+RealBalanceEngine is fail-closed.
+CapitalDeploymentGovernor is the dashboard capital authority.
+R11 hard lock blocks live execution when real broker balance is unavailable or zero.
+
+Open Follow-Up:
+Trace RBAC live execution authority and broker-specific live gates:
+- CoinbaseLiveOrderGate
+- OANDA live execution guard
+- access_control.can_execute_live_trading()

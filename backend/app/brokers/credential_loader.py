@@ -1,4 +1,3 @@
-
 """
 Credential loading helpers for CSS broker bootstrap.
 
@@ -9,6 +8,8 @@ Missing or malformed files fail closed.
 PCNRASS update:
 - Preserve existing registry-file loading.
 - Add safe .env fallback for Coinbase and OANDA.
+- Add Coinbase JSON path compatibility for COINBASE_KEY_JSON_PATH,
+  COINBASE_KEY_JSON, and COINBASE_KEY_FILE.
 - Do not print secrets.
 - Do not bypass governance gates.
 """
@@ -70,37 +71,100 @@ def _load_env_style_file(path: str) -> Dict[str, Any]:
     return credentials
 
 
+def _load_coinbase_json_credentials(path: str) -> Optional[Dict[str, Any]]:
+    if not path:
+        return None
+
+    normalized_path = str(path).strip().strip('"')
+    if not normalized_path or not os.path.exists(normalized_path):
+        return None
+
+    try:
+        payload = _load_json_file(normalized_path)
+    except CredentialLoadError:
+        return None
+
+    key_name = (
+        payload.get("name")
+        or payload.get("key_name")
+        or payload.get("apiKey")
+        or payload.get("key")
+    )
+    private_key = (
+        payload.get("privateKey")
+        or payload.get("private_key")
+        or payload.get("apiSecret")
+        or payload.get("secret")
+    )
+
+    if not key_name or not private_key:
+        return None
+
+    return {
+        "name": str(key_name),
+        "key_name": str(key_name),
+        "api_key_name": str(key_name),
+        "privateKey": str(private_key),
+        "private_key": str(private_key),
+        "COINBASE_CDP_KEY_NAME": str(key_name),
+        "COINBASE_KEY_NAME": str(key_name),
+        "COINBASE_CDP_PRIVATE_KEY": str(private_key),
+        "COINBASE_PRIVATE_KEY": str(private_key),
+        "COINBASE_KEY_FILE": normalized_path,
+        "COINBASE_KEY_JSON_PATH": normalized_path,
+    }
+
+
 def _env_present(*names: str) -> bool:
     return any(bool(os.getenv(name)) for name in names)
 
 
-def _load_coinbase_env_credentials() -> Optional[Dict[str, Any]]:
+def _load_coinbase_env_credentials(mode: str) -> Optional[Dict[str, Any]]:
     load_dotenv()
 
-    key_name = os.getenv("COINBASE_CDP_KEY_NAME") or os.getenv("COINBASE_KEY_NAME")
-    private_key_path = (
-        os.getenv("COINBASE_CDP_PRIVATE_KEY_PATH")
-        or os.getenv("COINBASE_PRIVATE_KEY_PATH")
-        or os.getenv("COINBASE_PRIVATE_KEY")
+    key_file = (
+        os.getenv("COINBASE_KEY_JSON_PATH")
+        or os.getenv("COINBASE_KEY_JSON")
+        or os.getenv("COINBASE_KEY_FILE")
     )
-    key_file = os.getenv("COINBASE_KEY_FILE")
 
-    if not key_name and not private_key_path and not key_file:
+    if key_file:
+        json_credentials = _load_coinbase_json_credentials(key_file)
+        if json_credentials:
+            json_credentials["COINBASE_ENABLE_LIVE_ORDERS"] = os.getenv(
+                "COINBASE_ENABLE_LIVE_ORDERS", "false"
+            )
+            return json_credentials
+
+    key_name = os.getenv("COINBASE_CDP_KEY_NAME") or os.getenv("COINBASE_KEY_NAME")
+    private_key = (
+        os.getenv("COINBASE_CDP_PRIVATE_KEY")
+        or os.getenv("COINBASE_PRIVATE_KEY")
+        or os.getenv("COINBASE_CDP_PRIVATE_KEY_PATH")
+        or os.getenv("COINBASE_PRIVATE_KEY_PATH")
+    )
+
+    if not key_name and not private_key and not key_file:
         return None
 
     credentials: Dict[str, Any] = {}
 
     if key_name:
+        credentials["name"] = key_name
+        credentials["key_name"] = key_name
+        credentials["api_key_name"] = key_name
         credentials["COINBASE_CDP_KEY_NAME"] = key_name
         credentials["COINBASE_KEY_NAME"] = key_name
 
-    if private_key_path:
-        credentials["COINBASE_CDP_PRIVATE_KEY_PATH"] = private_key_path
-        credentials["COINBASE_PRIVATE_KEY_PATH"] = private_key_path
-        credentials["COINBASE_PRIVATE_KEY"] = private_key_path
+    if private_key:
+        credentials["privateKey"] = private_key
+        credentials["private_key"] = private_key
+        credentials["COINBASE_CDP_PRIVATE_KEY"] = private_key
+        credentials["COINBASE_PRIVATE_KEY"] = private_key
 
     if key_file:
         credentials["COINBASE_KEY_FILE"] = key_file
+        credentials["COINBASE_KEY_JSON_PATH"] = key_file
 
     credentials["COINBASE_ENABLE_LIVE_ORDERS"] = os.getenv(
         "COINBASE_ENABLE_LIVE_ORDERS", "false"
@@ -109,7 +173,7 @@ def _load_coinbase_env_credentials() -> Optional[Dict[str, Any]]:
     return credentials if credentials else None
 
 
-def _load_oanda_env_credentials() -> Optional[Dict[str, Any]]:
+def _load_oanda_env_credentials(mode: str) -> Optional[Dict[str, Any]]:
     load_dotenv()
 
     token = (
@@ -117,8 +181,13 @@ def _load_oanda_env_credentials() -> Optional[Dict[str, Any]]:
         or os.getenv("OANDA_ACCESS_TOKEN")
         or os.getenv("OANDA_TOKEN")
     )
-    account_id = os.getenv("OANDA_ACCOUNT_ID") or os.getenv("OANDA_PRACTICE_ACCOUNT_ID")
-    env = os.getenv("OANDA_ENV", "practice")
+    
+    if mode == "live":
+        account_id = os.getenv("OANDA_ACCOUNT_ID")
+        env = "live"
+    else:
+        account_id = os.getenv("OANDA_PRACTICE_ACCOUNT_ID") or os.getenv("OANDA_ACCOUNT_ID")
+        env = "practice"
 
     if not token and not account_id:
         return None
@@ -142,20 +211,21 @@ def _load_oanda_env_credentials() -> Optional[Dict[str, Any]]:
     return credentials if credentials else None
 
 
-def _load_env_fallback_credentials(broker_name: str) -> Optional[Dict[str, Any]]:
-    broker = broker_name.strip().lower()
-
+def _load_env_fallback_credentials(broker_name: str, mode: str) -> Optional[Dict[str, Any]]:
+    broker = broker_name.lower()
+    
     if broker == "coinbase":
-        return _load_coinbase_env_credentials()
+        return _load_coinbase_env_credentials(mode)
 
     if broker == "oanda":
-        return _load_oanda_env_credentials()
+        return _load_oanda_env_credentials(mode)
 
     return None
 
 
 def load_credentials_for_broker(
     broker_name: str,
+    mode: str = "paper",
     base_dir: str = ".",
 ) -> Dict[str, Any]:
     spec = get_broker_spec(broker_name)
@@ -166,7 +236,7 @@ def load_credentials_for_broker(
             return _load_json_file(credential_path)
         return _load_env_style_file(credential_path)
     except CredentialLoadError:
-        env_credentials = _load_env_fallback_credentials(broker_name)
+        env_credentials = _load_env_fallback_credentials(broker_name, mode)
         if env_credentials:
             return env_credentials
         raise
@@ -174,10 +244,11 @@ def load_credentials_for_broker(
 
 def load_credentials(
     broker_name: str,
+    mode: str = "paper",
     base_dir: str = ".",
 ) -> Optional[Dict[str, Any]]:
     try:
-        return load_credentials_for_broker(broker_name, base_dir=base_dir)
+        return load_credentials_for_broker(broker_name, mode=mode, base_dir=base_dir)
     except CredentialLoadError:
         return None
 
@@ -190,6 +261,6 @@ def credential_file_exists(
     credential_path = os.path.join(base_dir, spec.credential_file)
 
     if os.path.exists(credential_path):
+       # Otherwise check env fallback
         return True
-
-    return _load_env_fallback_credentials(broker_name) is not None
+    return _load_env_fallback_credentials(broker_name, "paper") is not None

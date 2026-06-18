@@ -1,0 +1,12 @@
+Run ID: PHASE103A-CONTROLLED-PAPER-RUN
+Paper trade authority: PositionBook only; no broker submit_order invoked
+Gate final decision: ALLOW
+Paper entry: CREATED
+{
+  "PHASE103A_EUR_USD": {
+    "entry_price": 1.105,
+    "opened_step": 1,
+    "side": "BUY",
+    "size": 904.9773755656108
+  }
+}

@@ -17,13 +17,17 @@ Notes:
 from __future__ import annotations
 
 from collections import deque
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Dict, Optional, Deque
+import logging
 import os
 import statistics
 import time
 
+from engine.decision_builder import GateInputs
 from engine.execution.execution_gate import ExecutionGate
+from engine.gates_registry import get_configured_gates
+from engine.information.stock_alerts import generate_stock_alerts
 from engine.performance.pnl_tracker import PnLTracker
 from engine.strategy.behaviour_mapper import get_profile_for_behaviour
 from engine.strategy.signal_engine import SignalEngine
@@ -32,6 +36,7 @@ from engine.portfolio.portfolio_capital_controller import (
     PortfolioCapitalController,
     TradeProposal,
 )
+from engine.risk.margin_engine import MarginEngine
 
 # Optional audit spine (fail-safe import)
 try:
@@ -63,9 +68,14 @@ MAX_R_PER_BAR = _env_float("CSS_MAX_R_PER_BAR", 3.0)
 
 # Baseline sizing proxy for stress tests (override via env, e.g. 0.07 / 0.08 / 0.09)
 BASELINE_NOTIONAL_PCT = _env_float("CSS_BASELINE_NOTIONAL_PCT", 0.08)
+ANTI_BLEED_FEE_BPS = _env_float("CSS_ANTI_BLEED_FEE_BPS", 1.0)
+ANTI_BLEED_SPREAD_BPS = _env_float("CSS_ANTI_BLEED_SPREAD_BPS", 1.0)
+ANTI_BLEED_SLIPPAGE_BPS = _env_float("CSS_ANTI_BLEED_SLIPPAGE_BPS", 1.0)
 
 # Correlation window (rolling returns length)
 CORR_WINDOW = int(_env_float("CSS_CORR_WINDOW", 50))
+
+LOGGER = logging.getLogger(__name__)
 
 
 class EngineLoop:
@@ -74,6 +84,8 @@ class EngineLoop:
         self.signal_engine = SignalEngine(self.profile)
 
         self.execution_gate = ExecutionGate()
+        self.regime_gate = get_configured_gates()["regime_gate"]
+        self.margin_engine = MarginEngine()
         self.pnl_tracker = PnLTracker(starting_equity=float(starting_equity))
         self.position_book = PositionBook()
         self.pcc = PortfolioCapitalController()
@@ -86,6 +98,7 @@ class EngineLoop:
 
         # Per-instrument last mark (used for exposure valuation)
         self.last_price_by_instrument: Dict[str, float] = {}
+        self.bars_seen_by_instrument: Dict[str, int] = {}
 
         # Rolling returns storage for correlation governance
         self.return_history: Dict[str, Deque[float]] = {}
@@ -100,11 +113,16 @@ class EngineLoop:
         # Diagnostics
         self.total_signals = 0
         self.regime_flat_blocks = 0
+        self.regime_gate_blocks = 0
         self.threshold_blocks = 0
         self.gate_blocks = 0
         self.pcc_blocks = 0
         self.trade_count = 0
         self.exit_count = 0
+        self.diagnostics: Dict[str, Any] = {}
+        self.regime_gate_records: list[Dict[str, Any]] = []
+        self.stock_alert_rules: list[Any] = []
+        self.stock_alert_records: list[Dict[str, Any]] = []
 
         # Asset class registry (default FX)
         self.asset_class_map: Dict[str, str] = {}
@@ -267,6 +285,140 @@ class EngineLoop:
             # fail-silent
             return
 
+    def _regime_bars_5m(self, instrument: str) -> Optional[int]:
+        bars = self.bars_seen_by_instrument.get(instrument)
+        if isinstance(bars, int) and bars >= 0:
+            return bars
+
+        window = self.price_windows.get(instrument)
+        try:
+            window_bars = len(window)  # type: ignore[arg-type]
+        except TypeError:
+            return None
+        return int(window_bars) if window_bars >= 0 else None
+
+    def _build_regime_gate_inputs(self, *, instrument: str, price: float) -> GateInputs:
+        snapshot: Dict[str, Any] = {
+            "instrument": str(instrument),
+            "price": float(price),
+        }
+        bars_5m = self._regime_bars_5m(instrument)
+        if bars_5m is not None:
+            snapshot["bars_5m"] = bars_5m
+
+        return GateInputs(
+            instrument=str(instrument),
+            snapshot=snapshot,
+            volatility={},
+            liquidity={"spread_bps": float(ANTI_BLEED_SPREAD_BPS)},
+            slippage={},
+            risk={},
+        )
+
+    def _evaluate_regime_gate(self, *, instrument: str, price: float) -> Dict[str, str]:
+        inputs = self._build_regime_gate_inputs(
+            instrument=instrument,
+            price=float(price),
+        )
+
+        try:
+            decision = self.regime_gate(inputs)
+        except Exception as exc:
+            return self._record_regime_gate_decision(
+                instrument=instrument,
+                bars_5m=inputs.snapshot.get("bars_5m"),
+                decision="BLOCK",
+                reason=f"regime_gate_exception:{type(exc).__name__}",
+            )
+
+        if not isinstance(decision, dict):
+            return self._record_regime_gate_decision(
+                instrument=instrument,
+                bars_5m=inputs.snapshot.get("bars_5m"),
+                decision="BLOCK",
+                reason="regime_gate_invalid_response",
+            )
+
+        return self._record_regime_gate_decision(
+            instrument=instrument,
+            bars_5m=inputs.snapshot.get("bars_5m"),
+            decision=str(decision.get("decision", "BLOCK")).upper(),
+            reason=str(decision.get("reason", "regime_gate_rejected")),
+        )
+
+    def _record_regime_gate_decision(
+        self,
+        *,
+        instrument: str,
+        bars_5m: Any,
+        decision: str,
+        reason: str,
+    ) -> Dict[str, str]:
+        normalized_decision = str(decision or "BLOCK").upper()
+        normalized_reason = str(reason or "regime_gate_rejected")
+        record: Dict[str, Any] = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "instrument": str(instrument),
+            "gate_name": "regime_gate",
+            "decision": normalized_decision,
+            "reason": normalized_reason,
+            "bars_5m": bars_5m,
+        }
+
+        self.diagnostics["regime_gate"] = record
+        self.regime_gate_records.append(record)
+
+        if normalized_decision == "ALLOW":
+            LOGGER.info(
+                "[REGIME GATE PASS] instrument=%s gate=%s",
+                record["instrument"],
+                record["gate_name"],
+            )
+        else:
+            LOGGER.info(
+                "[REGIME GATE BLOCK] instrument=%s gate=%s reason=%s",
+                record["instrument"],
+                record["gate_name"],
+                record["reason"],
+            )
+
+        return {"decision": normalized_decision, "reason": normalized_reason}
+
+    def _evaluate_stock_alerts(
+        self,
+        *,
+        instrument: str,
+        price: float,
+        previous_price: float | None,
+    ) -> list[Dict[str, Any]]:
+        if not self.stock_alert_rules:
+            self.diagnostics.setdefault("stock_alerts", [])
+            return []
+
+        snapshot = {
+            "instrument": str(instrument),
+            "symbol": str(instrument),
+            "price": float(price),
+            "previous_price": previous_price,
+            "source_timestamp": datetime.now(UTC).isoformat(),
+        }
+
+        try:
+            alerts = generate_stock_alerts(snapshot, self.stock_alert_rules)
+        except Exception as exc:
+            self.diagnostics["stock_alerts_error"] = type(exc).__name__
+            self.diagnostics.setdefault("stock_alerts", [])
+            LOGGER.warning(
+                "Stock alert evaluation failed; instrument=%s error=%s",
+                instrument,
+                type(exc).__name__,
+            )
+            return []
+
+        self.stock_alert_records.extend(alerts)
+        self.diagnostics["stock_alerts"] = list(self.stock_alert_records)
+        return alerts
+
     # ----------------------------------------------------
     # Main loop
     # ----------------------------------------------------
@@ -276,6 +428,9 @@ class EngineLoop:
 
         # Update mark price cache (critical for PCC exposure valuation)
         self.last_price_by_instrument[instrument] = float(price)
+        self.bars_seen_by_instrument[instrument] = (
+            int(self.bars_seen_by_instrument.get(instrument, 0)) + 1
+        )
 
         # Ensure rolling MA window exists
         if instrument not in self.price_windows:
@@ -294,6 +449,11 @@ class EngineLoop:
         self._update_returns(instrument, float(price))
 
         prev_price = float(self.prev_price_by_instrument[instrument])
+        self._evaluate_stock_alerts(
+            instrument=instrument,
+            price=float(price),
+            previous_price=float(prev_price),
+        )
         moving_avg = sum(self.price_windows[instrument]) / len(self.price_windows[instrument])
 
         signal = self.signal_engine.generate(
@@ -344,7 +504,23 @@ class EngineLoop:
             self.prev_price_by_instrument[instrument] = float(price)
             return
 
-        # 4) ExecutionGate (instrument-level governance + sizing)
+        # 4) RegimeGate (pre-ExecutionGate market regime safety)
+        regime_decision = self._evaluate_regime_gate(
+            instrument=instrument,
+            price=float(price),
+        )
+        if str(regime_decision.get("decision", "")).upper() != "ALLOW":
+            self.regime_gate_blocks += 1
+            self.prev_price_by_instrument[instrument] = float(price)
+            return
+
+        # 5) ExecutionGate (instrument-level governance + sizing)
+        margin_snapshot = self.margin_engine.calculate(
+            required_margin=0.0,
+            available_margin=equity,
+            margin_source="SIMULATED",
+        )
+
         decision = self.execution_gate.evaluate_trade(
             instrument=instrument,
             side=signal.direction,
@@ -353,6 +529,12 @@ class EngineLoop:
             equity=equity,
             equity_peak=self.equity_peak,
             regime_persistence=float(DEFAULT_REGIME_PERSISTENCE),
+            expected_move_bps=signal_strength * 100.0,
+            fee_bps=float(ANTI_BLEED_FEE_BPS),
+            spread_bps=float(ANTI_BLEED_SPREAD_BPS),
+            slippage_bps=float(ANTI_BLEED_SLIPPAGE_BPS),
+            margin_snapshot=margin_snapshot,
+            broker_mode="PAPER",
         )
 
         if str(decision.get("decision", {}).get("final", "")).upper() != "ALLOW":
@@ -367,7 +549,7 @@ class EngineLoop:
             self.prev_price_by_instrument[instrument] = float(price)
             return
 
-        # 5) PCC (portfolio-level governance + correlation throttle input)
+        # 6) PCC (portfolio-level governance + correlation throttle input)
         asset_class = self._asset_class(instrument)
         avg_corr = self._avg_abs_corr_vs_open(instrument=instrument, asset_class=asset_class)
 
@@ -416,7 +598,7 @@ class EngineLoop:
             self.prev_price_by_instrument[instrument] = float(price)
             return
 
-        # 6) Open position (qty such that qty * price = notional)
+        # 7) Open position (qty such that qty * price = notional)
         qty = float(final_notional) / float(price)
 
         self.position_book.open_position(
@@ -441,6 +623,7 @@ class EngineLoop:
             "behaviour": self.behaviour,
             "total_signals": self.total_signals,
             "regime_flat_blocks": self.regime_flat_blocks,
+            "regime_gate_blocks": self.regime_gate_blocks,
             "threshold_blocks": self.threshold_blocks,
             "gate_blocks": self.gate_blocks,
             "pcc_blocks": self.pcc_blocks,
@@ -453,4 +636,5 @@ class EngineLoop:
             "open_positions": len(self.position_book.positions),
             "baseline_notional_pct": float(BASELINE_NOTIONAL_PCT),
             "corr_window": int(self.correlation_window),
+            "diagnostics": dict(self.diagnostics),
         }

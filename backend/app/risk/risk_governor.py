@@ -1,3 +1,9 @@
+# LEGACY RISK GOVERNOR - NON-CANONICAL.
+# ARP-011 quarantine marker: the canonical execution RiskGovernor is
+# engine/risk/risk_governor.py. This nested backend app copy is retained for
+# historical compatibility and must not be treated as the active execution risk
+# authority.
+
 """
 Risk Governor – REA Capital
 Hard execution controls

@@ -1,5 +1,8 @@
 from typing import Any
 
+from backend.app.persistence.repositories.legal_acceptance_repository import (
+    LegalAcceptanceRepository,
+)
 from backend.app.persistence.repositories.pnl_snapshot_repository import (
     PnlSnapshotRepository,
 )
@@ -9,6 +12,7 @@ from backend.app.persistence.repositories.session_repository import (
 from backend.app.persistence.repositories.trade_repository import (
     TradeRepository,
 )
+from backend.app.persistence.migrations.runner import run_migrations
 
 
 class PersistenceService:
@@ -26,10 +30,14 @@ class PersistenceService:
     """
 
     def __init__(self) -> None:
+        run_migrations()
         self.sessions = SessionRepository()
         self.trades = TradeRepository()
         self.pnl_snapshots = (
             PnlSnapshotRepository()
+        )
+        self.legal_acceptances = (
+            LegalAcceptanceRepository()
         )
 
     def healthcheck(self) -> dict[str, Any]:
@@ -44,5 +52,6 @@ class PersistenceService:
                 "sessions": True,
                 "trades": True,
                 "pnl_snapshots": True,
+                "legal_acceptances": True,
             },
         }

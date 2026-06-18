@@ -1,0 +1,27 @@
+CSS PROFITABILITY AUTHORITY FINDING
+
+STATUS:
+R14F is the active runtime pre-position profitability blocker.
+
+KEY FINDING:
+ProfitabilityGuard is imported and instantiated in backend\intelligence\trade_decision_orchestrator.py, but current evidence shows it is not called by the active orchestrator.
+
+ACTIVE BLOCKER:
+scripts\css_live_dashboard.py
+css_profitability_allows()
+
+ACTIVE FORMULA:
+composite = signal_score + (probability * 5.0)
+
+BALANCED THRESHOLDS:
+FUTURES / OPTIONS = 15.8
+CRYPTO = 15.5
+FX = 14.9
+
+GOVERNANCE CONCLUSION:
+R14F is currently the execution-blocking profitability authority.
+ProfitabilityGuard appears dormant or legacy until proven otherwise.
+
+RECOMMENDATION:
+Do not change profitability code yet.
+First create a formal authority alignment task to decide whether R14F should remain canonical or be migrated into a backend profitability authority.

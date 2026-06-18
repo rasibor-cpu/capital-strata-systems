@@ -1,0 +1,34 @@
+ARP-008 Targeted Safety Suite Summary
+Generated: 2026-06-13T18:21:39.5463243-04:00
+
+Risk Tests Command:
+.venv\Scripts\python.exe -m pytest tests\engine\test_risk_governor.py -q
+
+........                                                                 [100%]
+============================== warnings summary ===============================
+tests/engine/test_risk_governor.py::test_execution_gate_marks_precomputed_risk_governor_path
+  C:\rasib\source\capital-strata-systems\backend\app\risk\anti_bleed_guard.py:58: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+8 passed, 1 warning in 4.88s
+
+Captured Evidence Results:
+--- 04_antibleed_tests.txt ---
+============================== warnings summary ===============================
+  C:\rasib\source\capital-strata-systems\backend\app\risk\anti_bleed_guard.py:58: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+5 passed, 1 warning in 0.56s
+--- 05_live_toggle_live_arm_tests.txt ---
+12 passed in 1.29s
+--- 06_margin_trade_gate_tests.txt ---
+============================== warnings summary ===============================
+  C:\rasib\source\capital-strata-systems\backend\app\risk\anti_bleed_guard.py:58: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+15 passed, 6 warnings in 0.77s
+--- 07_security_tests.txt ---
+8 passed in 10.98s
+--- 08_governance_legal_acceptance_tests.txt ---
+8 passed in 0.48s
+
+RISK_TEST_EXIT_CODE 0

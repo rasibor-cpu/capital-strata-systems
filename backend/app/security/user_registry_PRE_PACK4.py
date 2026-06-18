@@ -1,3 +1,10 @@
+"""LEGACY USER REGISTRY BACKUP - NON-CANONICAL.
+
+ARP-011 quarantine marker: this PRE_PACK4 user-registry backup is not the
+current runtime user registry authority. Current backend/app security flows use
+backend/app/security/user_registry.py and related active security modules.
+"""
+
 # backend/app/security/user_registry.py
 
 import hashlib

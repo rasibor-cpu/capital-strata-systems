@@ -55,13 +55,11 @@ def test_mobile_controls_report_runtime_mode_and_order_gate_consistently(
     tmp_path,
 ) -> None:
     monkeypatch.setattr(mobile_app, "MOBILE_CONTROL_FILE", tmp_path / "controls.json")
-    monkeypatch.setattr(mobile_app, "_mobile_live_orders_enabled", lambda: True)
-
     controls = mobile_app.save_mobile_controls(
         {
-            "runtime_mode": "live",
-            "orders_enabled": True,
+            "mobile_trading_mode": "MOBILE_LIVE_TRADING_ARMED",
             "engine_mode": "BALANCED",
+            "live_order_kill_switch": False,
         }
     )
     status = mobile_app._system_status(
@@ -72,7 +70,6 @@ def test_mobile_controls_report_runtime_mode_and_order_gate_consistently(
         }
     )
 
-    assert controls["runtime_mode"] == "live"
     assert controls["orders_enabled"] is True
     assert controls["engine_mode"] == "BALANCED"
     assert status["runtime_mode"] == "live"

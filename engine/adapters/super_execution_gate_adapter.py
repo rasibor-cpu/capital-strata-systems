@@ -53,6 +53,12 @@ class MarketContext:
     # Optional fields used by rebalance:
     regime_state: str = "NORMAL"
     volatility_state: str = "MEDIUM"
+    expected_move_bps: Optional[float] = None
+    fee_bps: Optional[float] = None
+    spread_bps: Optional[float] = None
+    slippage_bps: Optional[float] = None
+    margin_snapshot: Any = None
+    broker_mode: str = "PAPER"
 
 
 # -------------------------
@@ -132,6 +138,12 @@ class SuperExecutionGateAdapter:
 
         volatility_state = _get(market_ctx, "volatility_state", "MEDIUM") or "MEDIUM"
         regime_state = _get(market_ctx, "regime_state", "NORMAL") or "NORMAL"
+        expected_move_bps = _get(market_ctx, "expected_move_bps", None)
+        fee_bps = _get(market_ctx, "fee_bps", None)
+        spread_bps = _get(market_ctx, "spread_bps", None)
+        slippage_bps = _get(market_ctx, "slippage_bps", None)
+        margin_snapshot = _get(market_ctx, "margin_snapshot", None)
+        broker_mode = _get(market_ctx, "broker_mode", "PAPER") or "PAPER"
 
         # Call the gate (flat interface)
         return self._gate.evaluate_trade(
@@ -148,4 +160,10 @@ class SuperExecutionGateAdapter:
             rebalance_target_weights=rebalance_target_weights,
             volatility_state=volatility_state,
             regime_state=regime_state,
+            expected_move_bps=expected_move_bps,
+            fee_bps=fee_bps,
+            spread_bps=spread_bps,
+            slippage_bps=slippage_bps,
+            margin_snapshot=margin_snapshot,
+            broker_mode=str(broker_mode),
         )

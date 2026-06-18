@@ -1,0 +1,35 @@
+PHASE 74 EXECUTION BYPASS AUDIT
+
+Finding:
+The active dashboard execution path contains both:
+
+- CSSUnifiedTradeGate approval
+- Coinbase place_market_buy execution
+
+Evidence:
+
+1620 class CSSUnifiedTradeGate
+1663 css_unified_trade_gate.approve_trade(...)
+3475 gate_ok, gate_reason = approve_trade_before_register(...)
+2270 coinbase.place_market_buy(...)
+
+Conclusion:
+
+Current evidence supports:
+
+R14F
+    →
+CSSUnifiedTradeGate
+    →
+Dashboard Approval Bridge
+    →
+Coinbase Execution Surface
+
+No execution bypass has been proven.
+
+Legacy execution paths remain present:
+- PortfolioRiskGovernor
+- css_trading_engine_before_range_upgrade.py
+- coinbase_executor.create_order()
+
+These should remain classified as LEGACY until runtime tracing proves active use.

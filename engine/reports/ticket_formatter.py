@@ -67,7 +67,10 @@ def format_trade_ticket(r: ExecutionReport) -> str:
         "",
     ]
 
-    return "\n".join(lines)from engine.domain.executions import ExecutionReport
+    return "\n".join(lines)
+
+
+from engine.domain.executions import ExecutionReport
 
 
 def _safe(v) -> str:

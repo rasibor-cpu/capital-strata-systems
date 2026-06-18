@@ -2,6 +2,9 @@
 CSS-GEMINI INSTITUTIONAL COMMAND CENTER
 Merged: High-Density UI + SSoT Audit Trail + Session Context
 """
+import sys
+sys.exit("NON-CANONICAL RETIREMENT CANDIDATE: Use scripts/css_live_dashboard.py instead.")
+
 import os
 import time
 import json

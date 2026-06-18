@@ -2,11 +2,13 @@
 
 import hashlib
 import json
+import logging
 import os
 from dataclasses import dataclass
 from typing import Dict
 
 USER_STORE = os.path.join("data", "users.json")
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -37,6 +39,18 @@ def _save_users(users: Dict[str, dict]) -> None:
         json.dump(users, f, indent=2)
 
 
+def load_users() -> Dict[str, dict]:
+    return _load_users()
+
+
+def get_user(user_id: int) -> UserRecord | None:
+    users = _load_users()
+    record = users.get(str(user_id))
+    if record is None:
+        return None
+    return UserRecord(**record)
+
+
 def authenticate(user_id: int, password: str) -> UserRecord:
     users = _load_users()
     key = str(user_id)
@@ -51,7 +65,7 @@ def authenticate(user_id: int, password: str) -> UserRecord:
     return UserRecord(**record)
 
 
-def change_password(user_id: int, new_password: str) -> None:
+def change_password(user_id: int, new_password: str) -> bool:
     if len(new_password) < 6:
         raise RuntimeError("PASSWORD_POLICY_VIOLATION: min_length=6")
 
@@ -64,6 +78,54 @@ def change_password(user_id: int, new_password: str) -> None:
     users[key]["password_hash"] = _hash_password(new_password)
     users[key]["must_change_password"] = False
     _save_users(users)
+    return True
+
+
+def reset_password(
+    user_id: int,
+    temporary_password: str,
+    *,
+    authorized_by_role: str,
+    require_change: bool = True,
+) -> bool:
+    if str(authorized_by_role or "").strip().upper() not in {
+        "ADMIN",
+        "SUPERUSER",
+        "SUPER_USER",
+    }:
+        LOGGER.warning(
+            "PASSWORD_RESET_BLOCKED | user_id=%s | reason=unauthorized_role",
+            user_id,
+        )
+        raise PermissionError("PASSWORD_RESET_FORBIDDEN")
+
+    if len(temporary_password) < 6:
+        LOGGER.warning(
+            "PASSWORD_RESET_BLOCKED | user_id=%s | reason=password_policy",
+            user_id,
+        )
+        raise RuntimeError("PASSWORD_POLICY_VIOLATION: min_length=6")
+
+    users = _load_users()
+    key = str(user_id)
+
+    if key not in users:
+        LOGGER.warning(
+            "PASSWORD_RESET_BLOCKED | user_id=%s | reason=unknown_user",
+            user_id,
+        )
+        raise RuntimeError("AUTH_FAIL: unknown user")
+
+    users[key]["password_hash"] = _hash_password(temporary_password)
+    users[key]["must_change_password"] = bool(require_change)
+    _save_users(users)
+    LOGGER.info(
+        "PASSWORD_RESET_COMPLETED | user_id=%s | authorized_by_role=%s | require_change=%s",
+        user_id,
+        str(authorized_by_role or "").strip().upper(),
+        bool(require_change),
+    )
+    return True
 
 
 def create_user(

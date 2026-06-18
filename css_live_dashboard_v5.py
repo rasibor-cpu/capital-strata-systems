@@ -1,4 +1,20 @@
+"""NON-CANONICAL RETIREMENT CANDIDATE.
+
+ARP-011 quarantine marker: this root dashboard is not the current CSS
+dashboard authority. Use scripts/css_live_dashboard.py for the canonical live
+dashboard path. This file is retained only for historical audit traceability.
+"""
+
 from __future__ import annotations
+
+_RETIREMENT_CANDIDATE_MESSAGE = (
+    "css_live_dashboard_v5.py is a non-canonical retirement candidate. "
+    "Use scripts/css_live_dashboard.py for the canonical CSS live dashboard."
+)
+
+if __name__ == "__main__":
+    raise SystemExit(_RETIREMENT_CANDIDATE_MESSAGE)
+
 import sys, time, random, json
 from datetime import datetime
 from pathlib import Path

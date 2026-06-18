@@ -136,8 +136,8 @@ def test_mobile_pages_render_within_html_budget(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(mobile_app, "MOBILE_EVENTS_FILE", tmp_path / "events.jsonl")
     monkeypatch.setattr(mobile_app, "MOBILE_CONTROL_FILE", tmp_path / "controls.json")
     monkeypatch.setattr(mobile_app, "load_local_env", lambda: None)
-    monkeypatch.setattr(mobile_app, "_mobile_live_orders_enabled", lambda: False)
-
+    
+    mobile_app.save_mobile_controls({"mobile_trading_mode": "MOBILE_LIVE_TRADING_ARMED"})
     user_ctx = {
         "user_id": "00017",
         "display_name": "CSS Trader",

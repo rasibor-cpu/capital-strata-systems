@@ -1,0 +1,57 @@
+Run ID: PHASE103A-CONTROLLED-PAPER-RUN
+ExecutionGate Mode: PAPER
+Broker Execution: NOT INVOKED
+AntiBleedGuard State File: isolated inside certification evidence folder
+ExecutionGate stdout:
+<none>
+ExecutionGate stderr:
+ExecutionGate volatility sizing fallback invoked; instrument=PHASE103A_EUR_USD base_notional=1000.0 volatility_state=MEDIUM error=VolatilityPositionSizer.size() missing 1 required positional argument: 'price'
+RiskGovernor.validate_trade lower-information adapter path used; risk_pct and requested_notional must already include upstream execution context scaling
+ExecutionGate decision:
+{
+  "debug": {
+    "anti_bleed_guard": {
+      "approved": true,
+      "control": "AntiBleedGuard",
+      "cooldown_active": false,
+      "cooldown_until": null,
+      "expected_move_bps": 66.67309214024333,
+      "minimum_required_net_edge_bps": 25.0,
+      "net_edge_bps": 63.67309214024333,
+      "reason": "approved",
+      "side": "BUY",
+      "symbol": "PHASE103A_EUR_USD",
+      "timestamp": "2026-06-14T01:47:21.760257",
+      "total_cost_bps": 3.0,
+      "trade_size": 1000.0
+    },
+    "governor_response": {
+      "adjusted": false,
+      "equity_risk": 1475.0,
+      "ok": true,
+      "reason": "ok_input_fallback",
+      "recommended_notional": 1000.0,
+      "requested_notional": 1000.0,
+      "risk_pct": 0.014750000000000001,
+      "status": "APPROVED"
+    },
+    "margin_trade_gate": {
+      "allowed": true,
+      "control": "MarginTradeGate",
+      "decision": "ALLOW",
+      "escalation_state": "NORMAL",
+      "margin_state": "GREEN",
+      "margin_utilization_pct": 0.0,
+      "reason": "PAPER simulated margin GREEN/NORMAL allows new risk."
+    },
+    "risk_pct": 0.014750000000000001,
+    "riskgov_path": "validate_trade_precomputed_risk_pct",
+    "scaled_notional": 1000.0,
+    "vol_scaled_notional": 1000.0,
+    "vol_size_error": "VolatilityPositionSizer.size() missing 1 required positional argument: 'price'"
+  },
+  "decision": {
+    "final": "ALLOW"
+  },
+  "reason": "approved"
+}

@@ -41,7 +41,7 @@ def evaluate_exit_signal(position: dict) -> str:
 
 
 # === R14F PRE-POSITION PROFITABILITY GATE ===
-def css_profitability_threshold(mode: str) -> float:
+def _legacy_css_profitability_threshold(mode: str) -> float:
     return {
         "SAFE": 17.5,
         "CONSERVATIVE": 16.5,
@@ -51,14 +51,23 @@ def css_profitability_threshold(mode: str) -> float:
     }.get(str(mode).upper(), 15.8)
 
 
-def css_profitability_allows(symbol: str, asset_class: str, sig: float, prob: float) -> tuple[bool, float, float]:
+def _legacy_css_profitability_allows(symbol: str, asset_class: str, sig: float, prob: float) -> tuple[bool, float, float]:
     """
     Uses existing dashboard signal score and probability before creating a position.
     Score remains compatible with current sig scale.
     """
     signal_score = float(sig or 0.0)
     probability = float(prob or 0.0)
-    threshold = css_profitability_threshold(ENGINE_MODE)
+    threshold = _legacy_css_profitability_threshold(ENGINE_MODE)
+
+    # R14F asset-aware tuning:
+    # Preserve the base mode threshold for FUTURES/OPTIONS.
+    # Slightly relax FX/CRYPTO so near-miss opportunities can enter controlled testing.
+    asset_key = str(asset_class or "").upper()
+    if asset_key == "CRYPTO":
+        threshold -= 0.30
+    elif asset_key == "FX":
+        threshold -= 0.90
 
     composite = signal_score + (probability * 5.0)
 
@@ -80,7 +89,7 @@ def css_profitability_allows(symbol: str, asset_class: str, sig: float, prob: fl
 
 
 # === R13C GLOBAL MODE DOMINANCE ===
-def enforce_mode_dominance():
+def _legacy_enforce_mode_dominance():
     global SELECTED_BROKER_MODE
 
     if str(GLOBAL_BROKER_MODE).lower() == "live":
@@ -91,7 +100,7 @@ def enforce_mode_dominance():
 
 
 # === R13 EXECUTION BOUNDARY ENFORCEMENT ===
-def enforce_execution_boundary():
+def _legacy_enforce_execution_boundary():
     mode = str(SELECTED_BROKER_MODE).lower()
 
     if mode == "live":
@@ -169,6 +178,433 @@ from pathlib import Path
 from typing import Any, Optional
 
 from dotenv import load_dotenv
+
+OPTION_GREEK_FIELDS = ("delta", "gamma", "theta", "vega", "rho")
+VALID_GREEKS_SOURCES = {"BROKER", "MARKET_DATA", "BLACK_SCHOLES", "UNKNOWN"}
+PORTFOLIO_GREEK_FIELDS = {
+    "delta": "net_delta",
+    "gamma": "net_gamma",
+    "theta": "net_theta",
+    "vega": "net_vega",
+    "rho": "net_rho",
+}
+SUPPORTED_OPTIONS_STRATEGIES = {"LONG_CALL", "LONG_PUT", "UNKNOWN_OPTIONS_STRATEGY"}
+FUTURE_OPTIONS_STRATEGY_PLACEHOLDERS = {
+    "COVERED_CALL",
+    "CASH_SECURED_PUT",
+    "BULL_CALL_SPREAD",
+    "BEAR_CALL_SPREAD",
+    "BULL_PUT_SPREAD",
+    "BEAR_PUT_SPREAD",
+    "IRON_CONDOR",
+    "IRON_BUTTERFLY",
+    "STRADDLE",
+    "STRANGLE",
+    "CALENDAR_SPREAD",
+    "DIAGONAL_SPREAD",
+}
+OPTION_STRATEGY_FIELDS = ("options_strategy", "strategy_family", "strategy_confidence")
+
+
+def default_option_greeks() -> dict[str, Any]:
+    return {
+        "delta": None,
+        "gamma": None,
+        "theta": None,
+        "vega": None,
+        "rho": None,
+        "greeks_source": "UNKNOWN",
+    }
+
+
+def normalize_option_greeks(greeks: dict[str, Any] | None = None) -> dict[str, Any]:
+    raw = greeks or {}
+    source = str(raw.get("greeks_source", "UNKNOWN") or "UNKNOWN").upper()
+    if source not in VALID_GREEKS_SOURCES:
+        source = "UNKNOWN"
+
+    normalized = default_option_greeks()
+    normalized["greeks_source"] = source
+
+    if source == "UNKNOWN":
+        return normalized
+
+    for field in OPTION_GREEK_FIELDS:
+        normalized[field] = raw.get(field)
+    return normalized
+
+
+def attach_default_greeks_to_option_position(position: dict[str, Any]) -> dict[str, Any]:
+    if str(position.get("asset_class", "")).upper() != "OPTIONS":
+        return position
+
+    position.update(normalize_option_greeks(position))
+    return position
+
+
+def parse_option_symbol(symbol: str) -> dict[str, Any]:
+    parts = str(symbol or "").strip().upper().split("-")
+    if len(parts) < 2:
+        return {"underlying": None, "option_type": None, "strike": None}
+
+    option_type = parts[1]
+    if option_type not in {"C", "P"}:
+        option_type = None
+
+    return {
+        "underlying": parts[0] or None,
+        "option_type": option_type,
+        "strike": parts[2] if len(parts) >= 3 and parts[2] else None,
+    }
+
+
+def classify_option_strategy(position_or_symbol: dict[str, Any] | str) -> dict[str, str]:
+    symbol = (
+        position_or_symbol.get("symbol", "")
+        if isinstance(position_or_symbol, dict)
+        else position_or_symbol
+    )
+    parsed = parse_option_symbol(str(symbol))
+
+    if parsed["option_type"] == "C":
+        return {
+            "options_strategy": "LONG_CALL",
+            "strategy_family": "SINGLE_LEG",
+            "strategy_confidence": "HIGH",
+        }
+    if parsed["option_type"] == "P":
+        return {
+            "options_strategy": "LONG_PUT",
+            "strategy_family": "SINGLE_LEG",
+            "strategy_confidence": "HIGH",
+        }
+
+    return {
+        "options_strategy": "UNKNOWN_OPTIONS_STRATEGY",
+        "strategy_family": "UNKNOWN",
+        "strategy_confidence": "LOW",
+    }
+
+
+def attach_option_strategy_to_position(position: dict[str, Any]) -> dict[str, Any]:
+    if str(position.get("asset_class", "")).upper() != "OPTIONS":
+        return position
+
+    position.update(classify_option_strategy(position))
+    return position
+
+
+def portfolio_greeks_from_positions(positions: list[dict[str, Any]] | None) -> dict[str, Any]:
+    totals = {field: 0.0 for field in OPTION_GREEK_FIELDS}
+    has_numeric = {field: False for field in OPTION_GREEK_FIELDS}
+    contributing_sources: set[str] = set()
+
+    for position in positions or []:
+        if str(position.get("asset_class", "")).upper() != "OPTIONS":
+            continue
+        if position.get("forced_exit"):
+            continue
+
+        source = str(position.get("greeks_source", "UNKNOWN") or "UNKNOWN").upper()
+        if source not in VALID_GREEKS_SOURCES:
+            source = "UNKNOWN"
+
+        position_contributed = False
+        for field in OPTION_GREEK_FIELDS:
+            value = position.get(field)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                continue
+
+            totals[field] += float(value)
+            has_numeric[field] = True
+            position_contributed = True
+
+        if position_contributed:
+            contributing_sources.add(source)
+
+    portfolio = {
+        net_field: (totals[field] if has_numeric[field] else None)
+        for field, net_field in PORTFOLIO_GREEK_FIELDS.items()
+    }
+
+    if not any(has_numeric.values()):
+        portfolio["greeks_source"] = "UNKNOWN"
+    elif len(contributing_sources) > 1:
+        portfolio["greeks_source"] = "MIXED"
+    else:
+        portfolio["greeks_source"] = next(iter(contributing_sources), "UNKNOWN")
+
+    return portfolio
+
+
+def format_greeks_dashboard_value(value: Any) -> str:
+    if isinstance(value, bool) or value is None:
+        return "UNKNOWN"
+    if isinstance(value, (int, float)):
+        return f"{float(value):.4f}"
+    text = str(value).strip()
+    return text if text else "UNKNOWN"
+
+
+def option_position_greeks_dashboard_lines(positions: list[dict[str, Any]] | None) -> list[str]:
+    lines = ["=== OPTIONS POSITION GREEKS ==="]
+    options_positions = [
+        position
+        for position in positions or []
+        if str(position.get("asset_class", "")).upper() == "OPTIONS"
+        and not position.get("forced_exit")
+    ]
+
+    if not options_positions:
+        lines.append("No open OPTIONS positions.")
+        lines.append("=== END OPTIONS POSITION GREEKS ===")
+        return lines
+
+    for position in options_positions:
+        source = str(position.get("greeks_source", "UNKNOWN") or "UNKNOWN").upper()
+        if source not in VALID_GREEKS_SOURCES:
+            source = "UNKNOWN"
+
+        lines.append(
+            f"{position.get('position_id', 'UNKNOWN')} {position.get('symbol', 'UNKNOWN')} | "
+            f"Delta {format_greeks_dashboard_value(position.get('delta'))} | "
+            f"Gamma {format_greeks_dashboard_value(position.get('gamma'))} | "
+            f"Theta {format_greeks_dashboard_value(position.get('theta'))} | "
+            f"Vega {format_greeks_dashboard_value(position.get('vega'))} | "
+            f"Rho {format_greeks_dashboard_value(position.get('rho'))} | "
+            f"Greeks Source {source}"
+        )
+
+    lines.append("=== END OPTIONS POSITION GREEKS ===")
+    return lines
+
+
+def portfolio_greeks_dashboard_lines(positions: list[dict[str, Any]] | None) -> list[str]:
+    portfolio = portfolio_greeks_from_positions(positions)
+    source = str(portfolio.get("greeks_source", "UNKNOWN") or "UNKNOWN").upper()
+
+    return [
+        "=== PORTFOLIO GREEKS ===",
+        (
+            f"Net Delta {format_greeks_dashboard_value(portfolio.get('net_delta'))} | "
+            f"Net Gamma {format_greeks_dashboard_value(portfolio.get('net_gamma'))} | "
+            f"Net Theta {format_greeks_dashboard_value(portfolio.get('net_theta'))} | "
+            f"Net Vega {format_greeks_dashboard_value(portfolio.get('net_vega'))} | "
+            f"Net Rho {format_greeks_dashboard_value(portfolio.get('net_rho'))} | "
+            f"Greeks Source {source}"
+        ),
+        "=== END PORTFOLIO GREEKS ===",
+    ]
+
+
+def _format_margin_dashboard_value(value: Any, suffix: str = "") -> str:
+    try:
+        return f"{float(value):.2f}{suffix}"
+    except Exception:
+        return f"UNKNOWN{suffix}"
+
+
+def _margin_dashboard_mode_is_live(broker_mode: str) -> bool:
+    return str(broker_mode or "").strip().lower() == "live"
+
+
+def _margin_dashboard_adapter_for_context(
+    selected_broker: str,
+    broker_mode: str,
+):
+    from engine.risk.coinbase_margin_adapter import CoinbaseMarginAdapter
+    from engine.risk.oanda_margin_adapter import OandaMarginAdapter
+
+    broker = str(selected_broker or "NONE").strip().upper()
+    mode = "LIVE" if _margin_dashboard_mode_is_live(broker_mode) else "SIMULATED"
+
+    if broker == "OANDA":
+        return OandaMarginAdapter(mode=mode), "OANDA"
+    if broker == "COINBASE":
+        return CoinbaseMarginAdapter(mode=mode), "COINBASE"
+
+    return CoinbaseMarginAdapter(mode="SIMULATED"), broker or "NONE"
+
+
+def margin_dashboard_lines(
+    selected_broker: str | None = None,
+    selected_broker_mode: str | None = None,
+) -> list[str]:
+    try:
+        from engine.risk.margin_engine import MarginEngine
+        from engine.risk.margin_trade_gate import MarginTradeGate
+
+        broker = str(
+            selected_broker
+            if selected_broker is not None
+            else globals().get("SELECTED_BROKER", "NONE")
+        ).strip().upper()
+        broker_mode = str(
+            selected_broker_mode
+            if selected_broker_mode is not None
+            else globals().get("SELECTED_BROKER_MODE", "paper")
+        ).strip()
+
+        adapter, display_broker = _margin_dashboard_adapter_for_context(
+            broker,
+            broker_mode,
+        )
+        broker_snapshot = adapter.get_margin_snapshot()
+        margin_snapshot = MarginEngine().calculate(
+            required_margin=broker_snapshot.required_margin,
+            available_margin=broker_snapshot.available_margin,
+            margin_source=broker_snapshot.margin_source,
+        )
+        gate_decision = MarginTradeGate().evaluate(
+            margin_snapshot,
+            broker_mode=broker_mode,
+        )
+
+        return [
+            "=== MARGIN DASHBOARD ===",
+            f"Margin Source: {broker_snapshot.margin_source}",
+            f"Broker: {display_broker}",
+            f"Broker Mode: {broker_mode.upper() if broker_mode else 'UNKNOWN'}",
+            f"Required Margin: {_format_margin_dashboard_value(broker_snapshot.required_margin)}",
+            f"Available Margin: {_format_margin_dashboard_value(broker_snapshot.available_margin)}",
+            f"Free Margin: {_format_margin_dashboard_value(broker_snapshot.free_margin)}",
+            f"Utilization %: {_format_margin_dashboard_value(margin_snapshot.margin_utilization_pct, '%')}",
+            f"Margin State: {str(margin_snapshot.margin_state.value)}",
+            f"Escalation State: {str(margin_snapshot.escalation_state.value)}",
+            f"Trade Gate Decision: {gate_decision.decision}",
+            f"Trade Gate Allowed: {str(gate_decision.allowed).upper()}",
+            f"Trade Gate Reason: {gate_decision.reason}",
+            "=== END MARGIN DASHBOARD ===",
+        ]
+    except Exception as exc:
+        return [
+            "=== MARGIN DASHBOARD ===",
+            "Margin Status: UNAVAILABLE",
+            f"Reason: {str(exc)[:120]}",
+            "=== END MARGIN DASHBOARD ===",
+        ]
+
+
+def _format_canonical_pnl_dashboard_value(value: Any) -> str:
+    try:
+        return f"{float(value):+.4f}"
+    except Exception:
+        return "UNKNOWN"
+
+
+def canonical_pnl_dashboard_lines(
+    *,
+    ledger_store: Any | None = None,
+    dashboard_summary: dict[str, Any] | None = None,
+    canonical_summary: dict[str, Any] | None = None,
+    starting_equity: Any = 0,
+    peak_equity: Any | None = None,
+    max_drawdown: Any | None = None,
+    asset_class_by_symbol: dict[str, str] | None = None,
+    company_id: str | None = None,
+    branch_id: str | None = None,
+    department_id: str | None = None,
+    user_id: str | None = None,
+) -> list[str]:
+    """
+    CANONICAL_PNL_DIAGNOSTIC: display-only comparison helper.
+
+    This helper is intentionally not wired into live dashboard rendering yet.
+    Existing MTM/accounting dashboard PnL remains the active dashboard
+    authority while canonical ledger-backed PnL parity is proven.
+    """
+    try:
+        from engine.ledger import CANONICAL_PNL_SOURCE
+
+        if canonical_summary is None:
+            if ledger_store is None:
+                return [
+                    "=== CANONICAL PNL DIAGNOSTIC ===",
+                    "Canonical PnL Status: UNAVAILABLE",
+                    "Reason: canonical ledger snapshot unavailable",
+                    "=== END CANONICAL PNL DIAGNOSTIC ===",
+                ]
+
+            from engine.ledger.pnl_snapshot_adapter import (
+                build_pnl_snapshot_contract,
+            )
+
+            canonical_summary = build_pnl_snapshot_contract(
+                ledger_store,
+                starting_equity=starting_equity,
+                peak_equity=peak_equity,
+                max_drawdown=max_drawdown,
+                asset_class_by_symbol=asset_class_by_symbol,
+                company_id=company_id,
+                branch_id=branch_id,
+                department_id=department_id,
+                user_id=user_id,
+            ).to_runtime_dict()
+
+        lines = [
+            "=== CANONICAL PNL DIAGNOSTIC ===",
+            "Canonical PnL Status: AVAILABLE",
+            f"Source: {canonical_summary.get('source', CANONICAL_PNL_SOURCE)}",
+            (
+                "Canonical Realized PnL: "
+                f"{_format_canonical_pnl_dashboard_value(canonical_summary.get('realized_pnl'))}"
+            ),
+            (
+                "Canonical Unrealized PnL: "
+                f"{_format_canonical_pnl_dashboard_value(canonical_summary.get('unrealized_pnl'))}"
+            ),
+            (
+                "Canonical Net PnL: "
+                f"{_format_canonical_pnl_dashboard_value(canonical_summary.get('net_pnl'))}"
+            ),
+            (
+                "Canonical Equity: "
+                f"{_format_canonical_pnl_dashboard_value(canonical_summary.get('equity'))}"
+            ),
+            (
+                "Canonical Peak Equity: "
+                f"{_format_canonical_pnl_dashboard_value(canonical_summary.get('peak_equity'))}"
+            ),
+            (
+                "Canonical Current Drawdown: "
+                f"{_format_canonical_pnl_dashboard_value(canonical_summary.get('current_drawdown'))}"
+            ),
+            (
+                "Canonical Max Drawdown: "
+                f"{_format_canonical_pnl_dashboard_value(canonical_summary.get('max_drawdown'))}"
+            ),
+            f"Canonical Open Positions: {int(canonical_summary.get('open_positions', 0) or 0)}",
+            f"Canonical Closed Positions: {int(canonical_summary.get('closed_positions', 0) or 0)}",
+        ]
+
+        if dashboard_summary is not None:
+            from dashboard.runtime.summary_builders.pnl_parity_check import (
+                compare_pnl_summary_parity,
+            )
+
+            parity = compare_pnl_summary_parity(
+                dashboard_summary,
+                canonical_summary,
+            )
+            lines.extend(
+                [
+                    f"PnL Parity: {'MATCH' if parity['matches'] else 'MISMATCH'}",
+                    f"Realized Diff: {_format_canonical_pnl_dashboard_value(parity['field_diffs'].get('realized_pnl'))}",
+                    f"Unrealized Diff: {_format_canonical_pnl_dashboard_value(parity['field_diffs'].get('unrealized_pnl'))}",
+                    f"Net Diff: {_format_canonical_pnl_dashboard_value(parity['field_diffs'].get('net_pnl'))}",
+                ]
+            )
+
+        lines.append("=== END CANONICAL PNL DIAGNOSTIC ===")
+        return lines
+    except Exception as exc:
+        return [
+            "=== CANONICAL PNL DIAGNOSTIC ===",
+            "Canonical PnL Status: UNAVAILABLE",
+            f"Reason: {str(exc)[:120]}",
+            "=== END CANONICAL PNL DIAGNOSTIC ===",
+        ]
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -331,12 +767,7 @@ except ModuleNotFoundError:
             return None
 
 
-try:
-    from backend.app.security.auth_gate import await_login_ready_state
-except ModuleNotFoundError:
-    def await_login_ready_state():
-        print("[SAFE FALLBACK AUTH] auth_gate unavailable; using local OPERATOR diagnostic context.")
-        raise Exception("AUTHENTICATION_REQUIRED_NO_FALLBACK_ALLOWED")
+from dashboard.auth.css_sign_on import await_login_ready_state
 
 
 class _PermissionResult:
@@ -538,6 +969,12 @@ SESSION_IDLE_TIMEOUT_SECONDS = int(os.getenv("CSS_SESSION_IDLE_TIMEOUT_SECONDS",
 SESSION_MAX_SECONDS = int(os.getenv("CSS_SESSION_MAX_SECONDS", "28800") or 28800)
 
 MAX_PAPER_OPEN_POSITIONS = 10
+
+PAPER_PROFIT_TARGET_FLOATING = 0.25
+PAPER_PROFIT_TARGET_MIN_AGE_CYCLES = 2
+
+CLOSED_TRADE_LEDGER_PATH = Path("audit_logs") / "closed_trades.jsonl"
+CLOSED_TRADE_LEDGER_MARKER = "CLOSED_TRADE_LEDGER"
 MAX_OPEN_PER_CYCLE = 8
 DEFENSIVE_REDUCTION_PER_CYCLE = 2
 
@@ -1305,279 +1742,8 @@ def close_active_session(reason: str, extra: Optional[dict[str, Any]] = None) ->
 # Policy:
 # - Initial super user: 00000
 # - Initial password: 123456
-# - Force password change on first login
-# - Force password change every 30 calendar days
-# - Persist latest successful login under artifacts/css_auth_session.json
-USERS_FILE = PROJECT_ROOT / "data" / "users.json"
-SESSION_AUTH_FILE = ARTIFACTS_DIR / "css_auth_session.json"
-PASSWORD_MAX_AGE_DAYS = 30
-
-
-CSS_AUTH_PANEL_WIDTH = 72
-
-
-def _css_panel_border(char: str = "=") -> str:
-    return char * CSS_AUTH_PANEL_WIDTH
-
-
-def _css_panel_line(label: str = "", value: str = "") -> str:
-    content_width = CSS_AUTH_PANEL_WIDTH - 4
-
-    if not label and not value:
-        return f"| {' ' * content_width} |"
-
-    if value:
-        text = f"{label}: {value}"
-    else:
-        text = label
-
-    return f"| {text[:content_width].ljust(content_width)} |"
-
-
-def render_css_sign_in_screen() -> None:
-    print()
-    print(_css_panel_border("="))
-    print(_css_panel_line("CAPITAL STRATA SYSTEMS"))
-    print(_css_panel_line("Governance Runtime Access"))
-    print(_css_panel_border("-"))
-    print(_css_panel_line("Authentication", "required"))
-    print(_css_panel_line("Session Policy", f"{SESSION_IDLE_TIMEOUT_SECONDS // 60}m idle / {SESSION_MAX_SECONDS // 60}m max"))
-    print(_css_panel_line("Default Runtime", "paper-first, governance-gated"))
-    print(_css_panel_line("Initial Admin ID", "00000"))
-    print(_css_panel_border("="))
-    print()
-
-
-def render_css_auth_status(title: str, message: str) -> None:
-    print()
-    print(_css_panel_border("-"))
-    print(_css_panel_line(title, message))
-    print(_css_panel_border("-"))
-    print()
-
-
-def css_auth_input(prompt_label: str) -> str:
-    return input(f"CSS AUTH | {prompt_label}: ")
-
-
-def css_auth_secret(prompt_label: str) -> str:
-    return masked_password_input(f"CSS AUTH | {prompt_label}: ")
-
-
-
-# ===== PCNRASS MASKED PASSWORD INPUT =====
-def masked_password_input(prompt: str = "CSS LOGIN | password: ") -> str:
-    try:
-        import msvcrt
-
-        print(prompt, end="", flush=True)
-        password_chars = []
-
-        while True:
-            ch = msvcrt.getwch()
-
-            if ch in ("\r", "\n"):
-                print()
-                break
-
-            if ch in ("\b", "\x7f"):
-                if password_chars:
-                    password_chars.pop()
-                    print("\b \b", end="", flush=True)
-                continue
-
-            if ch in ("\x00", "\xe0"):
-                try:
-                    msvcrt.getwch()
-                except Exception:
-                    pass
-                continue
-
-            password_chars.append(ch)
-            print("*", end="", flush=True)
-
-        return "".join(password_chars)
-
-    except Exception:
-        return getpass.getpass(prompt)
-
-
-def _css_hash_password(password: str) -> str:
-    return hashlib.sha256(str(password).encode("utf-8")).hexdigest()
-
-
-def _css_load_users() -> dict[str, Any]:
-    USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
-
-    if not USERS_FILE.exists():
-        USERS_FILE.write_text(json.dumps({
-            "00000": {
-                "user_id": "00000",
-                "display_name": "CSS Administrator",
-                "role": "SUPER_USER",
-                "unit_code": "CORE",
-                "home_branch": "HQ",
-                "password_hash": _css_hash_password("123456"),
-                "must_change_password": True,
-                "last_password_change": None
-            }
-        }, indent=2), encoding="utf-8")
-
-    with open(USERS_FILE, "r", encoding="utf-8") as f:
-        users = json.load(f)
-
-    # Ensure super-user exists and is reset only when absent, not after user changes password.
-    if "00000" not in users:
-        users["00000"] = {
-            "user_id": "00000",
-            "display_name": "CSS Administrator",
-            "role": "SUPER_USER",
-            "unit_code": "CORE",
-            "home_branch": "HQ",
-            "password_hash": _css_hash_password("123456"),
-            "must_change_password": True,
-            "last_password_change": None
-        }
-        _css_save_users(users)
-
-    # Normalize user_id values to five-character strings.
-    changed = False
-    for key, rec in list(users.items()):
-        if isinstance(rec, dict):
-            normalized = str(rec.get("user_id", key)).zfill(5)
-            if rec.get("user_id") != normalized:
-                rec["user_id"] = normalized
-                changed = True
-    if changed:
-        _css_save_users(users)
-
-    return users
-
-
-def _css_save_users(users: dict[str, Any]) -> None:
-    USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    USERS_FILE.write_text(json.dumps(users, indent=2), encoding="utf-8")
-
-
-def _css_password_expired(user_record: dict[str, Any]) -> bool:
-    if bool(user_record.get("must_change_password", False)):
-        return True
-
-    last_change = user_record.get("last_password_change")
-    if not last_change:
-        return True
-
-    try:
-        last_dt = datetime.fromisoformat(str(last_change))
-    except Exception:
-        return True
-
-    return datetime.now() - last_dt >= timedelta(days=PASSWORD_MAX_AGE_DAYS)
-
-
-def _css_force_password_change(users: dict[str, Any], user_key: str) -> None:
-    render_css_auth_status(
-        "PASSWORD CHANGE REQUIRED",
-        "Initial or expired password must be changed now",
-    )
-
-    while True:
-        new_password = css_auth_secret("new password").strip()
-        confirm_password = css_auth_secret("confirm password").strip()
-
-        if not new_password:
-            render_css_auth_status("PASSWORD ERROR", "Password cannot be blank")
-            continue
-
-        if len(new_password) < 6:
-            render_css_auth_status(
-                "PASSWORD ERROR",
-                "Password must be at least 6 characters",
-            )
-            continue
-
-        if new_password == "123456":
-            render_css_auth_status(
-                "PASSWORD ERROR",
-                "New password cannot remain the initial default password",
-            )
-            continue
-
-        if new_password != confirm_password:
-            render_css_auth_status("PASSWORD ERROR", "Passwords do not match")
-            continue
-
-        users[user_key]["password_hash"] = _css_hash_password(new_password)
-        users[user_key]["must_change_password"] = False
-        users[user_key]["last_password_change"] = datetime.now().isoformat(timespec="seconds")
-        _css_save_users(users)
-        render_css_auth_status("PASSWORD UPDATED", "Password changed successfully")
-        return
-
-
-def _css_persist_login_session(user_ctx: dict[str, Any]) -> None:
-    SESSION_AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
-    SESSION_AUTH_FILE.write_text(json.dumps({
-        "user_id": user_ctx.get("user_id"),
-        "display_name": user_ctx.get("display_name"),
-        "role": user_ctx.get("role"),
-        "unit_code": user_ctx.get("unit_code"),
-        "home_branch": user_ctx.get("home_branch"),
-        "last_login": datetime.now().isoformat(timespec="seconds"),
-        "login_persistence": True
-    }, indent=2), encoding="utf-8")
-
-
-def await_login_ready_state():
-    users = _css_load_users()
-    render_css_sign_in_screen()
-
-    while True:
-        user_id = css_auth_input("user id").strip().zfill(5)
-
-        user_record = users.get(user_id)
-        if not user_record:
-            render_css_auth_status("AUTH FAILED", "INVALID_USER_ID")
-            continue
-
-        password = css_auth_secret("password")
-        expected_hash = str(user_record.get("password_hash", "")).strip()
-        supplied_hash = _css_hash_password(password)
-
-        if supplied_hash != expected_hash:
-            render_css_auth_status("AUTH FAILED", "AUTH_FAILED")
-            continue
-
-        if _css_password_expired(user_record):
-            _css_force_password_change(users, user_id)
-            users = _css_load_users()
-            user_record = users[user_id]
-
-        ctx = {
-            "user_id": str(user_record.get("user_id", user_id)).zfill(5),
-            "display_name": user_record.get("display_name", "CSS User"),
-            "role": user_record.get("role", "VIEWER"),
-            "unit_code": user_record.get("unit_code", "CORE"),
-            "home_branch": user_record.get("home_branch", "HQ"),
-        }
-
-        _css_persist_login_session(ctx)
-        render_css_auth_status(
-            "AUTH SUCCESS",
-            f"{ctx['display_name']} | role={ctx['role']}",
-        )
-        return ctx
-
-
-# === PCNRASS GRAPHICAL SIGN-ON BRIDGE ===
-# Authentication remains first; this delegates the screen and password policy
-# to the dashboard auth module without touching trading, PnL, broker, or risk logic.
-try:
-    from dashboard.auth.css_sign_on import await_login_ready_state as _pcnrass_await_login_ready_state
-except Exception as _pcnrass_sign_on_import_error:
-    raise RuntimeError("CSS_SIGN_ON_SCREEN_UNAVAILABLE") from _pcnrass_sign_on_import_error
-
-await_login_ready_state = _pcnrass_await_login_ready_state
+# Duplicate auth authority removed in Phase 113A
+# Using canonical dashboard.auth.css_sign_on import defined at top of file.
 
 
 SESSION_USER_CTX = authenticate_startup_user()
@@ -1585,6 +1751,26 @@ SESSION_USER_CTX = authenticate_startup_user()
 GLOBAL_BROKER_MODE = select_global_broker_mode()
 
 BROKER_EXECUTION_ARMED, SELECTED_BROKER, SELECTED_BROKER_MODE = select_broker_execution_config()
+
+import sys
+from backend.app.security.environment_validator import validate_startup_security_environment, EnvironmentValidationError
+
+print("\n=== SECURITY STATUS ===")
+try:
+    sec_status = validate_startup_security_environment(SELECTED_BROKER, SELECTED_BROKER_MODE)
+    print(f"ENVIRONMENT VALID: {'YES' if sec_status['ENVIRONMENT_VALID'] else 'NO'}")
+    print(f"BROKER CONFIG VALID: {'YES' if sec_status['BROKER_CONFIG_VALID'] else 'NO'}")
+    print(f"LIVE/PRACTICE CONSISTENT: {'YES' if sec_status['LIVE_PRACTICE_CONSISTENT'] else 'NO'}")
+    print(f"SECRET VALIDATION PASSED: {'YES' if sec_status['SECRET_VALIDATION_PASSED'] else 'NO'}")
+    print("=======================\n")
+except EnvironmentValidationError as e:
+    print(f"ENVIRONMENT VALID: NO")
+    print(f"BROKER CONFIG VALID: NO")
+    print(f"LIVE/PRACTICE CONSISTENT: NO")
+    print(f"SECRET VALIDATION PASSED: NO")
+    print(f"[FATAL SECURITY ERROR] {str(e)}")
+    print("=======================\n")
+    sys.exit(1)
 
 ENGINE_MODE = select_engine_mode()
 print(f"[ENGINE MODE SELECTED] {ENGINE_MODE}")
@@ -1599,52 +1785,114 @@ record_startup_configuration(
     engine_mode=ENGINE_MODE,
 )
 
+_IN_FLIGHT_ORDERS = set()
+
+def register_in_flight_order(order_id: str) -> None:
+    _IN_FLIGHT_ORDERS.add(order_id)
+
+def clear_in_flight_order(order_id: str) -> None:
+    _IN_FLIGHT_ORDERS.discard(order_id)
+
+def has_in_flight_orders() -> bool:
+    return len(_IN_FLIGHT_ORDERS) > 0
+
+_DIVERGENCE_STATE = {
+    "first_detected": None,
+    "count": 0,
+    "type": None,
+    "last_simulation": None,
+    "confirmed_count": 0,
+    "pending_count": 0
+}
+
+def simulate_auto_flatten(divergences: list[tuple[str, str]]) -> None:
+    global _CSS_SESSION_LOCK, _DIVERGENCE_STATE
+    if not is_session_locked():
+        lock_session("PENDING_AUTO_FLATTEN")
+    else:
+        # Override the reason if it was locked by the generic RECONCILIATION_DIVERGENCE
+        if _CSS_SESSION_LOCK.get("reason") == "RECONCILIATION_DIVERGENCE":
+            _CSS_SESSION_LOCK["reason"] = "PENDING_AUTO_FLATTEN"
+
+    for cat, det in divergences:
+        if cat in {"ORPHAN_BROKER_POSITION", "BROKER_POSITION_MISMATCH"}:
+            symbol = "UNKNOWN"
+            broker_units = 0.0
+            ledger_units = 0.0
+            
+            try:
+                if isinstance(det, dict):
+                    symbol = det.get("symbol", "UNKNOWN")
+                    b_data = det.get("broker_data", {})
+                    # Handle OANDA specific format or plain units
+                    if isinstance(b_data, dict):
+                        if "units" in b_data:
+                            broker_units = float(b_data["units"])
+                        elif "long" in b_data and "units" in b_data["long"]:
+                            broker_units += float(b_data["long"]["units"])
+                        elif "short" in b_data and "units" in b_data["short"]:
+                            broker_units += float(b_data["short"]["units"])
+                    
+                    l_data = det.get("local_data", {})
+                    if isinstance(l_data, dict):
+                        ledger_units = float(l_data.get("quantity", 0.0))
+            except Exception:
+                pass
+            
+            delta = broker_units - ledger_units
+            action = "SELL" if delta > 0 else "BUY"
+            action_qty = abs(delta)
+
+            sim_output = (
+                f"[AUTO-FLATTEN SIMULATION]\n"
+                f"symbol={symbol}\n"
+                f"broker_units={broker_units}\n"
+                f"ledger_units={ledger_units}\n"
+                f"delta={delta}\n"
+                f"proposed_action={action} {action_qty}\n"
+                f"status=SIMULATED_ONLY"
+            )
+            print(sim_output)
+            _DIVERGENCE_STATE["last_simulation"] = sim_output
+            _DIVERGENCE_STATE["pending_count"] += 1
+            
+            repair_engine.create_record(cat, sim_output)
+            if repair_engine.records:
+                last_record = repair_engine.records[-1]
+                last_record["status"] = "AUTO_FLATTEN_SIMULATED"
+                repair_engine.save_records()
+
 
 
 # === R7 PCNRASS UNIFIED TRADE GATE ===
-class CSSUnifiedTradeGate:
-    """
-    Single pre-position authority for paper and broker-routed trade openings.
-    This does not replace broker-specific live gates; it sits before any
-    position registration so blocked trades do not enter MTM/PnL state.
-    """
-
-    def approve_trade(self, *, candidate: dict, session: dict, role_profile: dict) -> dict:
-        symbol = str(candidate.get("symbol", "UNKNOWN"))
-        asset_class = str(candidate.get("asset_class", "UNKNOWN")).upper()
-
-        if not isinstance(session, dict) or not session.get("session_id"):
-            return {"approved": False, "reason": "NO_VALID_SESSION"}
-
-        if not session.get("session_status", {}).get("active", True):
-            return {"approved": False, "reason": "SESSION_NOT_ACTIVE"}
-
-        if is_session_locked():
-            return {"approved": False, "reason": "SESSION_LOCKED_DEFENSIVE_MODE"}
-
-        if asset_class not in {"CRYPTO", "FX", "FUTURES", "OPTIONS"}:
-            return {"approved": False, "reason": f"UNSUPPORTED_ASSET_CLASS_{asset_class}"}
-
-        broker_mode = str(candidate.get("broker_mode", "paper")).lower()
-        if broker_mode == "live":
-            if not role_profile.get("can_use_live_broker_mode", False):
-                return {"approved": False, "reason": "RBAC_BLOCKED_LIVE_MODE"}
-            if not role_profile.get("can_execute_live_trading", False):
-                return {"approved": False, "reason": "RBAC_BLOCKED_LIVE_EXECUTION"}
-        else:
-            if not role_profile.get("can_execute_paper_trading", False):
-                return {"approved": False, "reason": "RBAC_BLOCKED_PAPER_EXECUTION"}
-
-        if ENGINE_MODE == "SAFE" and broker_mode == "live":
-            return {"approved": False, "reason": "SAFE_MODE_BLOCKS_LIVE_EXECUTION"}
-
-        return {"approved": True, "reason": "UNIFIED_GATE_APPROVED"}
+from backend.governance.css_gate_dashboard_adapter import CSSGateDashboardAdapter
+from backend.governance.css_unified_trade_gate import CSSUnifiedTradeGate as BackendCSSUnifiedTradeGate
 
 
-css_unified_trade_gate = CSSUnifiedTradeGate()
+css_unified_trade_gate = CSSGateDashboardAdapter(
+    BackendCSSUnifiedTradeGate()
+)
+
+
+def _dashboard_portfolio_state_for_gate() -> dict[str, int]:
+    try:
+        counts = mtm_engine.count_open_positions_by_asset()
+    except Exception:
+        counts = {}
+
+    return {
+        "crypto": int(counts.get("CRYPTO", counts.get("crypto", 0)) or 0),
+        "fx": int(counts.get("FX", counts.get("fx", 0)) or 0),
+        "futures": int(counts.get("FUTURES", counts.get("futures", 0)) or 0),
+        "options": int(counts.get("OPTIONS", counts.get("options", 0)) or 0),
+    }
 
 
 def approve_trade_before_register(asset_class: str, symbol: str, sig: float, prob: float) -> tuple[bool, str]:
+    session = SESSION_USER_CTX
+    role_profile = SESSION_USER_CTX.get("role_profile", {})
+    portfolio_state = _dashboard_portfolio_state_for_gate()
+
     decision = css_unified_trade_gate.approve_trade(
         candidate={
             "asset_class": asset_class,
@@ -1654,9 +1902,12 @@ def approve_trade_before_register(asset_class: str, symbol: str, sig: float, pro
             "selected_broker": SELECTED_BROKER,
             "broker_mode": SELECTED_BROKER_MODE,
             "engine_mode": ENGINE_MODE,
+            "is_session_locked": is_session_locked(),
         },
-        session=SESSION_USER_CTX,
-        role_profile=SESSION_USER_CTX.get("role_profile", {}),
+        session=session,
+        role_profile=role_profile,
+        portfolio_state=portfolio_state,
+        engine_mode=ENGINE_MODE,
     )
 
     if not decision.get("approved", False):
@@ -1923,6 +2174,8 @@ def pcnrass_activate_capital_source() -> None:
             )
 
     # === R11 CAPITAL HARD LOCK ===
+pcnrass_activate_capital_source()
+
 if str(SELECTED_BROKER_MODE).lower() == "live":
     real_balance = float(getattr(capital_governor, "real_balance", 0.0) or 0.0)
 
@@ -1945,9 +2198,8 @@ print(
 )
 
 
-enforce_mode_dominance()
-pcnrass_activate_capital_source()
-enforce_execution_boundary()
+_legacy_enforce_mode_dominance()
+_legacy_enforce_execution_boundary()
 
 
 # === PCNRASS PHASE 2 BROKER ISOLATION + REAL PRICE HELPERS ===
@@ -1975,6 +2227,14 @@ def pcnrass_get_reference_price(symbol: str, fallback: float = 100.0) -> float:
             pass
     return float(fallback)
 
+def resolve_expected_fx_price(symbol: str) -> float | None:
+    try:
+        px = price_feed.get_price(symbol)
+        if px is not None and float(px) > 0:
+            return float(px)
+    except Exception:
+        pass
+    return None
 
 def pcnrass_wait_for_next_cycle(cycle: int) -> bool:
     response = input(f"\n[PCNRASS PAUSE] Cycle {cycle} complete. Press ENTER for next cycle, or type Q to quit: ").strip().lower()
@@ -2004,7 +2264,48 @@ def oanda_has_open_trade() -> bool:
     return False
 
 
-def attempt_oanda_fx_execution(symbol: str) -> tuple[bool, str]:
+def perform_post_trade_verification(trade_id: str, symbol: str, expected_units: str) -> None:
+    global RECONCILIATION_STATUS
+    try:
+        resp = oanda.get_open_trades()
+        if not resp.get("ok"):
+            RECONCILIATION_STATUS = "MISMATCH"
+            lock_session("POST_TRADE_VERIFICATION_API_ERROR")
+            print(f"[POST-TRADE VERIFICATION ERROR] Failed to fetch open trades: {resp.get('error')}")
+            return
+
+        trades = resp.get("data", {}).get("trades", [])
+        trade_found = None
+        for t in trades:
+            if str(t.get("id")) == str(trade_id):
+                trade_found = t
+                break
+
+        if not trade_found:
+            RECONCILIATION_STATUS = "MISMATCH"
+            lock_session("POST_TRADE_VERIFICATION_MISSING_TRADE")
+            print(f"[POST-TRADE VERIFICATION FAILED] Trade {trade_id} missing on broker.")
+            return
+
+        instr = trade_found.get("instrument")
+        current_units = trade_found.get("currentUnits")
+        if instr != symbol or str(current_units) != str(expected_units):
+            RECONCILIATION_STATUS = "MISMATCH"
+            lock_session("POST_TRADE_VERIFICATION_MISMATCH")
+            print(f"[POST-TRADE VERIFICATION FAILED] Trade {trade_id} mismatch. Expected {symbol} {expected_units}, got {instr} {current_units}")
+            return
+
+        print(f"[POST-TRADE VERIFICATION OK] Trade {trade_id} confirmed on broker.")
+
+    except Exception as e:
+        RECONCILIATION_STATUS = "MISMATCH"
+        lock_session("POST_TRADE_VERIFICATION_ERROR")
+        print(f"[POST-TRADE VERIFICATION EXCEPTION] {e}")
+
+
+OANDA_MAX_SLIPPAGE = 0.0050
+
+def attempt_oanda_fx_execution(symbol: str, expected_price: float | None = None) -> tuple[bool, str, str | None, float | None, str | None, float | None]:
     role_profile = SESSION_USER_CTX.get("role_profile", {})
 
     def _audit(allowed: bool, reason: str) -> None:
@@ -2035,53 +2336,81 @@ def attempt_oanda_fx_execution(symbol: str) -> tuple[bool, str]:
 
     if is_session_locked():
         _audit(False, "SESSION_LOCKED_DEFENSIVE_MODE")
-        return False, "SESSION_LOCKED_DEFENSIVE_MODE"
+        return False, "SESSION_LOCKED_DEFENSIVE_MODE", None, None, None, None
+
+    if expected_price is None or expected_price <= 0:
+        _audit(False, "OANDA_BLOCKED_MISSING_EXPECTED_PRICE")
+        return False, "OANDA_BLOCKED_MISSING_EXPECTED_PRICE", None, None, None, None
 
     if not BROKER_EXECUTION_ARMED:
         _audit(False, "BROKER_DISABLED_BY_GLOBAL_SWITCH")
-        return False, "BROKER_DISABLED_BY_GLOBAL_SWITCH"
+        return False, "BROKER_DISABLED_BY_GLOBAL_SWITCH", None, None, None, None
 
     if not role_profile.get("can_execute_paper_trading", False):
         _audit(False, "RBAC_BLOCKED_PAPER_EXECUTION")
-        return False, "RBAC_BLOCKED_PAPER_EXECUTION"
+        return False, "RBAC_BLOCKED_PAPER_EXECUTION", None, None, None, None
 
     if SELECTED_BROKER != "OANDA":
         reason = f"BROKER_NOT_SELECTED_FOR_OANDA_{SELECTED_BROKER}"
         _audit(False, reason)
-        return False, reason
+        return False, reason, None, None, None, None
 
     if ENGINE_MODE == "SAFE":
         _audit(False, "OANDA_BLOCKED_SAFE_MODE")
-        return False, "OANDA_BLOCKED_SAFE_MODE"
+        return False, "OANDA_BLOCKED_SAFE_MODE", None, None, None, None
 
     if symbol not in FX_SYMBOLS:
         _audit(False, "OANDA_BLOCKED_NOT_FX")
-        return False, "OANDA_BLOCKED_NOT_FX"
+        return False, "OANDA_BLOCKED_NOT_FX", None, None, None, None
 
     if oanda_has_open_trade():
         _audit(False, "OANDA_BLOCKED_OPEN_TRADE")
-        return False, "OANDA_BLOCKED_OPEN_TRADE"
+        return False, "OANDA_BLOCKED_OPEN_TRADE", None, None, None, None
 
     try:
+        price_bound_val = str(expected_price + OANDA_MAX_SLIPPAGE) if expected_price is not None else None
         response = oanda.place_order(
             symbol=symbol,
             side="BUY",
             units=FX_LIVE_UNITS,
             order_type="MARKET",
+            price_bound=price_bound_val,
         )
 
         if response.get("ok"):
             _audit(True, "OANDA_ORDER_OK")
-            return True, "OANDA_ORDER_OK"
+            data = response.get("data", {})
+            fill_txn = data.get("orderFillTransaction", {})
+            trade_opened = fill_txn.get("tradeOpened", {})
+            trade_id = trade_opened.get("tradeID")
+            price_str = fill_txn.get("price")
+            fill_price = float(price_str) if price_str else None
+            execution_time = fill_txn.get("time")
 
-        reason = f"OANDA_ORDER_FAIL_{response.get('status', 'NA')}"
+            slippage = None
+            if fill_price is not None and expected_price is not None:
+                slippage = fill_price - expected_price
+                print(f"[{symbol} SLIPPAGE AUDIT] Expected: {expected_price:.4f}, Actual: {fill_price:.4f}, Slippage: {slippage:.4f}")
+
+            return True, "OANDA_ORDER_OK", trade_id, fill_price, execution_time, slippage
+
+        # If OANDA rejects it due to price bound, fail closed.
+        resp_status = response.get("status")
+        resp_str = str(response)
+        if resp_status == 400 and "PRICE_BOUND" in resp_str:
+            lock_session("OANDA_SLIPPAGE_REJECTION")
+            reason = "OANDA_ORDER_FAIL_PRICE_BOUND_EXCEEDED"
+            _audit(False, reason)
+            return False, reason, None, None, None, None
+
+        reason = f"OANDA_ORDER_FAIL_{resp_status}"
         _audit(False, reason)
-        return False, reason
+        return False, reason, None, None, None, None
 
     except Exception as e:
         reason = f"OANDA_ERROR_{str(e)[:40]}"
         _audit(False, reason)
-        return False, reason
+        return False, reason, None, None, None, None
 
 
 def coinbase_live_orders_enabled() -> bool:
@@ -2473,6 +2802,10 @@ class MarkToMarketEngine:
             "session_id": SESSION_USER_CTX.get("session_id"),
         }
 
+        attach_default_greeks_to_option_position(position)
+        strategy_attacher = globals().get("attach_option_strategy_to_position")
+        if callable(strategy_attacher):
+            strategy_attacher(position)
         self.positions.append(position)
         return position
 
@@ -2619,10 +2952,303 @@ def pnl_dict_for_asset(asset_class: str) -> dict:
     raise ValueError(f"Unsupported asset class: {asset_class}")
 
 
+def current_realized_pnl_maps_by_asset_category() -> dict[str, dict]:
+    maps = {
+        "CRYPTO": crypto_pnl,
+        "FX": fx_pnl,
+        "OPTIONS": options_pnl,
+        "FUTURES": futures_pnl,
+    }
+
+    extra_maps = globals().get("asset_category_realized_pnl_maps", {})
+    if isinstance(extra_maps, dict):
+        for category, pnl_map in extra_maps.items():
+            if isinstance(pnl_map, dict):
+                maps[normalize_asset_category(category)] = pnl_map
+
+    return maps
+
+
+def normalize_asset_category(value: Any) -> str:
+    category = str(value or "UNKNOWN").strip().upper()
+    return category or "UNKNOWN"
+
+
+def _safe_dashboard_float(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def aggregate_pnl_by_asset_category(
+    *,
+    realized_pnl_maps: dict[str, dict] | None,
+    positions: list[dict] | None,
+) -> list[dict[str, float | str | int]]:
+    """
+    Display-only PnL aggregation by asset category.
+
+    Realized PnL comes from the current dashboard realized PnL maps.
+    Unrealized PnL comes from active position floating/unrealized values.
+    The category set is dynamic so future asset classes appear without UI
+    redesign when upstream state supplies those categories.
+    """
+
+    categories: dict[str, dict[str, float | str | int]] = {}
+
+    def row_for(category_value: Any) -> dict[str, float | str | int]:
+        category = normalize_asset_category(category_value)
+        if category not in categories:
+            categories[category] = {
+                "asset_category": category,
+                "open_positions": 0,
+                "realized_pnl": 0.0,
+                "unrealized_pnl": 0.0,
+                "total_pnl": 0.0,
+            }
+        return categories[category]
+
+    for category, pnl_map in (realized_pnl_maps or {}).items():
+        row = row_for(category)
+        if isinstance(pnl_map, dict):
+            row["realized_pnl"] = _safe_dashboard_float(row["realized_pnl"]) + sum(
+                _safe_dashboard_float(value)
+                for value in pnl_map.values()
+            )
+
+    for pos in positions or []:
+        if not isinstance(pos, dict) or pos.get("forced_exit"):
+            continue
+
+        row = row_for(pos.get("asset_class", "UNKNOWN"))
+        row["open_positions"] = int(row["open_positions"]) + 1
+        row["unrealized_pnl"] = _safe_dashboard_float(row["unrealized_pnl"]) + _safe_dashboard_float(
+            pos.get("unrealized_pnl", pos.get("floating", 0.0))
+        )
+
+    for row in categories.values():
+        realized = round(_safe_dashboard_float(row["realized_pnl"]), 4)
+        unrealized = round(_safe_dashboard_float(row["unrealized_pnl"]), 4)
+        row["realized_pnl"] = realized
+        row["unrealized_pnl"] = unrealized
+        row["total_pnl"] = round(realized + unrealized, 4)
+
+    return sorted(
+        categories.values(),
+        key=lambda item: str(item["asset_category"]),
+    )
+
+
+def pnl_by_asset_category_dashboard_lines(
+    category_rows: list[dict[str, Any]],
+) -> list[str]:
+    lines = ["=== PNL BY ASSET CATEGORY ==="]
+
+    if not category_rows:
+        lines.append("No asset-category PnL available.")
+        lines.append("=== END PNL BY ASSET CATEGORY ===")
+        return lines
+
+    realized_total = 0.0
+    unrealized_total = 0.0
+
+    for row in category_rows:
+        category = normalize_asset_category(row.get("asset_category", "UNKNOWN"))
+        open_positions = int(row.get("open_positions", 0) or 0)
+        realized = _safe_dashboard_float(row.get("realized_pnl", 0.0))
+        unrealized = _safe_dashboard_float(row.get("unrealized_pnl", 0.0))
+        total = _safe_dashboard_float(row.get("total_pnl", realized + unrealized))
+        realized_total += realized
+        unrealized_total += unrealized
+        lines.append(
+            f"{category:<12} Open {open_positions:<3} | "
+            f"Realized {realized:+.4f} | "
+            f"Unrealized {unrealized:+.4f} | "
+            f"Total {total:+.4f}"
+        )
+
+    lines.append("--------------------------------")
+    lines.append(
+        f"{'TOTAL':<12} Realized {realized_total:+.4f} | "
+        f"Unrealized {unrealized_total:+.4f} | "
+        f"Total {(realized_total + unrealized_total):+.4f}"
+    )
+    lines.append("=== END PNL BY ASSET CATEGORY ===")
+    return lines
+
+
+
+
+
+def append_closed_trade_ledger(pos: dict, reason: str, realized: float) -> None:
+    """CLOSED_TRADE_LEDGER: append one durable JSONL record for dashboard paper exits."""
+    try:
+        CLOSED_TRADE_LEDGER_PATH.parent.mkdir(parents=True, exist_ok=True)
+        ctx = globals().get("SESSION_USER_CTX") or {}
+        record = {
+            "marker": CLOSED_TRADE_LEDGER_MARKER,
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "symbol": str(pos.get("symbol", "")),
+            "asset_class": str(pos.get("asset_class", "")),
+            "exit_reason": str(reason),
+            "realized_pnl": float(realized),
+            "floating_at_exit": float(pos.get("floating", 0.0)),
+            "engine_mode": str(globals().get("ENGINE_MODE", "")),
+            "broker_mode": str(globals().get("SELECTED_BROKER_MODE", "")),
+            "selected_broker": str(globals().get("SELECTED_BROKER", "")),
+            "cycle": int(globals().get("cycle", 0) or 0),
+            "session_id": str(ctx.get("session_id", "")),
+            "user_id": str(ctx.get("user_id", "")),
+        }
+        if str(pos.get("asset_class", "")).upper() == "OPTIONS" and any(
+            key in pos for key in (*OPTION_GREEK_FIELDS, "greeks_source")
+        ):
+            record.update(normalize_option_greeks(pos))
+        if str(pos.get("asset_class", "")).upper() == "OPTIONS":
+            for key in globals().get("OPTION_STRATEGY_FIELDS", ()):
+                if key in pos:
+                    record[key] = str(pos.get(key, ""))
+
+        with CLOSED_TRADE_LEDGER_PATH.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, sort_keys=True) + "\n")
+    except Exception as exc:
+        print(f"[CLOSED_TRADE_LEDGER WARN] {exc}")
+
+
+
+def should_take_dashboard_paper_profit(pos: dict) -> bool:
+    if str(GLOBAL_BROKER_MODE).strip().lower() == "live":
+        return False
+    if str(SELECTED_BROKER_MODE).strip().lower() == "live":
+        return False
+    if pos.get("forced_exit"):
+        return False
+    if int(pos.get("age_cycles", 0)) < PAPER_PROFIT_TARGET_MIN_AGE_CYCLES:
+        return False
+    return float(pos.get("floating", 0.0)) > PAPER_PROFIT_TARGET_FLOATING
+
+
 
 # =========================
 # R17 EXIT EXECUTION LAYER
 # =========================
+
+def render_trade_dashboard_summary() -> None:
+    """TRADE_DASHBOARD_SUMMARY: dynamic display-only cycle summary; no trading decisions."""
+    try:
+        active_positions = [p for p in mtm_engine.positions if not p.get("forced_exit")]
+
+        pnl_maps = current_realized_pnl_maps_by_asset_category()
+
+        asset_classes = sorted(
+            set(pnl_maps.keys())
+            | {str(p.get("asset_class", "UNKNOWN") or "UNKNOWN") for p in active_positions}
+        )
+
+        asset_rows = []
+        realized_total = 0.0
+        floating_total = 0.0
+
+        for asset in asset_classes:
+            realized = sum(float(v) for v in pnl_maps.get(asset, {}).values())
+            floating = sum(
+                float(pos.get("floating", 0.0))
+                for pos in active_positions
+                if str(pos.get("asset_class", "UNKNOWN") or "UNKNOWN") == asset
+            )
+            count = sum(
+                1
+                for pos in active_positions
+                if str(pos.get("asset_class", "UNKNOWN") or "UNKNOWN") == asset
+            )
+            total = realized + floating
+            realized_total += realized
+            floating_total += floating
+            asset_rows.append((asset, count, realized, floating, total))
+
+        pnl_category_rows = aggregate_pnl_by_asset_category(
+            realized_pnl_maps=pnl_maps,
+            positions=active_positions,
+        )
+
+        position_limit = globals().get("adaptive_position_limit", None)
+        if position_limit is None:
+            position_limit = globals().get("ADAPTIVE_POSITION_LIMIT", None)
+        if position_limit is None:
+            position_limit = globals().get("MAX_PAPER_OPEN_POSITIONS", "N/A")
+
+        tracker_value = globals().get("tracker_equity", None)
+        if tracker_value is None:
+            tracker_value = globals().get("TRACKER_EQUITY", None)
+
+        peak_value = globals().get("peak_equity", None)
+        if peak_value is None:
+            peak_value = globals().get("PEAK_EQUITY", None)
+
+        drawdown_value = globals().get("drawdown_pct", None)
+        if drawdown_value is None:
+            drawdown_value = globals().get("DRAWDOWN_PCT", None)
+
+        ledger_exists = CLOSED_TRADE_LEDGER_PATH.exists() if "CLOSED_TRADE_LEDGER_PATH" in globals() else False
+
+        print("")
+        print("=== TRADE DASHBOARD SUMMARY ===")
+        print(f"Cycle: {globals().get('cycle', 'N/A')}")
+        print(f"Engine Mode: {globals().get('ENGINE_MODE', 'N/A')}")
+        print(f"Broker: {globals().get('SELECTED_BROKER', 'N/A')}")
+        print(f"Broker Mode: {globals().get('SELECTED_BROKER_MODE', 'N/A')}")
+        print(f"Open Positions: {len(active_positions)} / {position_limit}")
+
+        print("")
+        print("=== OPEN POSITIONS BY ASSET CLASS ===")
+        for asset, count, _realized, _floating, _total in asset_rows:
+            print(f"{asset:<10} {count}")
+        print(f"{'TOTAL':<10} {len(active_positions)}")
+        print("=== END OPEN POSITIONS BY ASSET CLASS ===")
+
+        print("")
+        for line in pnl_by_asset_category_dashboard_lines(pnl_category_rows):
+            print(line)
+
+        print("")
+        for line in option_position_greeks_dashboard_lines(active_positions):
+            print(line)
+
+        print("")
+        for line in portfolio_greeks_dashboard_lines(active_positions):
+            print(line)
+
+        print("")
+        for line in margin_dashboard_lines(
+            selected_broker=globals().get("SELECTED_BROKER", "NONE"),
+            selected_broker_mode=globals().get("SELECTED_BROKER_MODE", "paper"),
+        ):
+            print(line)
+
+        print("")
+        if tracker_value is None:
+            print("Tracker Equity: N/A")
+        else:
+            print(f"Tracker Equity: {float(tracker_value):+.4f}")
+
+        if peak_value is None:
+            print("Peak Equity: N/A")
+        else:
+            print(f"Peak Equity: {float(peak_value):+.4f}")
+
+        if drawdown_value is None:
+            print("Drawdown: N/A")
+        else:
+            print(f"Drawdown: {float(drawdown_value):.4f}%")
+
+        print(f"Last Trade: {globals().get('last_trade', 'NONE')}")
+        print(f"Closed Trade Ledger: {'YES' if ledger_exists else 'NO'}")
+        print("=== END TRADE DASHBOARD SUMMARY ===\n")
+    except Exception as exc:
+        print(f"[TRADE_DASHBOARD_SUMMARY WARN] {exc}")
+
+
 def r17_execute_exit(pos, observer_symbol, observer_price, reason):
     """
     Institutional exit execution pipeline:
@@ -2662,6 +3288,7 @@ def book_position_exit(pos: dict, reason: str) -> None:
         return
 
     realized = round(pos["floating"], 4)
+    append_closed_trade_ledger(pos, reason, realized)
 
     # === TRACKER UPDATE ===
     try:
@@ -2891,8 +3518,196 @@ def pnl_divergence_warning(
     return None
 
 
+import uuid
+
+class RepairEngine:
+    def __init__(self):
+        self.records_file = ARTIFACTS_DIR / "css_repair_records.json"
+        self.records: list[dict] = self.load_records()
+
+    def load_records(self) -> list[dict]:
+        if self.records_file.exists():
+            try:
+                with open(self.records_file, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                return []
+        return []
+
+    def save_records(self) -> None:
+        with open(self.records_file, "w", encoding="utf-8") as f:
+            json.dump(self.records, f, indent=2)
+
+    def create_record(self, category: str, details: dict) -> str:
+        record_id = f"REP-{str(uuid.uuid4())[:8]}"
+        record = {
+            "record_id": record_id,
+            "category": category,
+            "status": "OPEN",
+            "details": details,
+            "created_at": datetime.utcnow().isoformat(),
+            "resolution_note": ""
+        }
+        self.records.append(record)
+        self.save_records()
+        print(f"[REPAIR RECORD CREATED] {record_id}: {category}")
+        return record_id
+
+    def resolve_record(self, record_id: str, resolution_category: str, note: str) -> bool:
+        for record in self.records:
+            if record["record_id"] == record_id:
+                record["status"] = "REPAIRED"
+                record["resolution_note"] = f"[{resolution_category}] {note}"
+                self.save_records()
+                print(f"[REPAIR RESOLVED] {record_id} via {resolution_category}")
+                return True
+        return False
+
+    def has_open_records(self) -> bool:
+        return any(r["status"] in {"OPEN", "INVESTIGATING"} for r in self.records)
+
+repair_engine = RepairEngine()
+
+RECONCILIATION_STATUS = "HEALTHY"
+
+def detect_divergences(local_positions: list[dict], broker_positions: list[dict]) -> list[tuple[str, dict]]:
+    divergences = []
+    
+    local_map = {p["symbol"]: p for p in local_positions if p.get("asset_class") == "FX" and not p.get("forced_exit")}
+    broker_map = {p.get("instrument"): p for p in broker_positions}
+
+    local_symbols = set(local_map.keys())
+    broker_symbols = set(broker_map.keys())
+
+    for sym in broker_symbols - local_symbols:
+        divergences.append(("ORPHAN_BROKER_POSITION", {"symbol": sym, "broker_data": broker_map[sym]}))
+
+    for sym in local_symbols - broker_symbols:
+        divergences.append(("GHOST_LOCAL_POSITION", {"symbol": sym, "local_data": local_map[sym]}))
+
+    for sym in local_symbols.intersection(broker_symbols):
+        local_units = float(local_map[sym].get("quantity", 0))
+        broker_units = float(broker_map[sym].get("units", 0)) # Assuming long vs short units might be signed or absolute depending on format. In OANDA, it's typically 'long.units' or 'short.units'. Let's just pass raw for now.
+        
+        # OANDA positions actually return 'long' and 'short' dicts. The previous code didn't parse units deeply, it just counted.
+        # Let's handle OANDA format carefully. OANDA gives: "long": {"units": "0", ...}, "short": {"units": "-1000", ...}
+        # But even if we don't deeply parse, we can log the entire object.
+        # To avoid false positive unit mismatches right now without complex OANDA parsing, 
+        # we will only flag BROKER_POSITION_MISMATCH if we add specific unit comparison later, or we can check simple presence.
+        pass
+
+    return divergences
+
+
+def perform_startup_reconciliation() -> None:
+    global RECONCILIATION_STATUS
+    if SELECTED_BROKER != "OANDA" or not BROKER_EXECUTION_ARMED:
+        return
+
+    try:
+        resp = oanda.get_open_positions()
+        if not resp.get("ok"):
+            RECONCILIATION_STATUS = "MISMATCH"
+            lock_session("RECONCILIATION_API_ERROR")
+            print("[RECONCILIATION API ERROR] Failed to fetch open positions from OANDA.")
+            return
+
+        broker_positions = resp.get("data", {}).get("positions", [])
+        local_positions = mtm_engine.positions
+
+        divergences = detect_divergences(local_positions, broker_positions)
+        
+        if divergences:
+            RECONCILIATION_STATUS = "MISMATCH"
+            lock_session("RECONCILIATION_DIVERGENCE")
+            print(f"[RECONCILIATION FAILED] {len(divergences)} divergences detected.")
+            for cat, det in divergences:
+                repair_engine.create_record(cat, det)
+        else:
+            print("[RECONCILIATION OK] Local and Broker state in parity.")
+
+    except Exception as e:
+        RECONCILIATION_STATUS = "MISMATCH"
+        lock_session("RECONCILIATION_ERROR")
+        print(f"[RECONCILIATION ERROR] Failed to query broker: {e}")
+
+
+def perform_continuous_reconciliation() -> None:
+    global RECONCILIATION_STATUS
+    if SELECTED_BROKER != "OANDA" or not BROKER_EXECUTION_ARMED:
+        return
+
+    # Phase 117E: Broker Health Check
+    if getattr(oanda, "health_state", "GREEN") == "RED":
+        RECONCILIATION_STATUS = "MISMATCH"
+        lock_session("BROKER_HEALTH_RED")
+        print("[BROKER HEALTH RED] Consecutive broker failures exceeded threshold. Locking session.")
+        return
+
+    try:
+        resp = oanda.get_open_positions()
+        if not resp.get("ok"):
+            RECONCILIATION_STATUS = "MISMATCH"
+            lock_session("CONTINUOUS_RECONCILIATION_API_ERROR")
+            print("[CONTINUOUS RECONCILIATION API ERROR] Failed to fetch open positions from OANDA.")
+            return
+
+        broker_positions = resp.get("data", {}).get("positions", [])
+        local_positions = mtm_engine.positions
+
+        divergences = detect_divergences(local_positions, broker_positions)
+
+        if divergences:
+            RECONCILIATION_STATUS = "MISMATCH"
+            lock_session("RECONCILIATION_DIVERGENCE")
+            print(f"[CONTINUOUS RECONCILIATION FAILED] {len(divergences)} divergences detected.")
+            
+            if has_in_flight_orders():
+                print("[CONTINUOUS RECONCILIATION] In-flight orders exist. Suppressing auto-flatten logic.")
+                _DIVERGENCE_STATE["count"] = 0
+                _DIVERGENCE_STATE["type"] = None
+                for cat, det in divergences:
+                    repair_engine.create_record(cat, det)
+            else:
+                cat_types = [d[0] for d in divergences]
+                primary_cat = cat_types[0] if cat_types else None
+                
+                if _DIVERGENCE_STATE["type"] == primary_cat:
+                    _DIVERGENCE_STATE["count"] += 1
+                else:
+                    import time
+                    _DIVERGENCE_STATE["first_detected"] = time.time()
+                    _DIVERGENCE_STATE["count"] = 1
+                    _DIVERGENCE_STATE["type"] = primary_cat
+                
+                for cat, det in divergences:
+                    if cat in {"ORPHAN_BROKER_POSITION", "BROKER_POSITION_MISMATCH"}:
+                        if _DIVERGENCE_STATE["count"] >= 2:
+                            _DIVERGENCE_STATE["confirmed_count"] += 1
+                            simulate_auto_flatten([(cat, det)])
+                        else:
+                            repair_engine.create_record(cat, det)
+                    else:
+                        repair_engine.create_record(cat, det)
+        else:
+            print("[CONTINUOUS RECONCILIATION OK] Local and Broker state in parity.")
+            _DIVERGENCE_STATE["count"] = 0
+            _DIVERGENCE_STATE["type"] = None
+
+    except Exception as e:
+        RECONCILIATION_STATUS = "MISMATCH"
+        lock_session("CONTINUOUS_RECONCILIATION_ERROR")
+        print(f"[CONTINUOUS RECONCILIATION ERROR] Failed to query broker: {e}")
+
+
+perform_startup_reconciliation()
+
+
 try:
     while True:
+        if os.getenv("CSS_TEST_MODE"):
+            break
+
         cycle += 1
         current_status = enforce_active_session(cycle, last_trade)
 
@@ -2904,6 +3719,9 @@ try:
                 "active": False,
                 "defensive_mode_active": True,
             }
+
+        if cycle % 5 == 0 and not is_session_locked():
+            perform_continuous_reconciliation()
 
         print(f"=== Cycle {cycle} | {datetime.now()} ===")
 
@@ -2924,72 +3742,54 @@ try:
             observer_price = 100.0 + float(pos["floating"])
             pnl_observer.update_market_price(observer_symbol, observer_price)
 
-            # =========================
-            
-            # =========================
-            # R15B ENHANCED EXIT ENGINE
-            # =========================
+            if should_take_dashboard_paper_profit(pos):
+                print(
+                    f"[R17 PAPER EXIT] asset={pos.get('asset_class', 'UNKNOWN')} "
+                    f"reason=profit_target floating={float(pos.get('floating', 0.0)):+.4f}"
+                )
+                r17_execute_exit(pos, observer_symbol, observer_price, "TAKE_PROFIT")
+                continue
 
             profile = r15b_profile()
 
-            # Convert floating PnL to %
             entry_price = float(pos.get("entry_price", 100.0))
             pnl_pct = pos["floating"] / max(entry_price, 1e-6)
 
             sig = float(pos.get("signal_score", 0.0))
             prob = float(pos.get("prob_positive", 0.0))
 
-            # =========================
-            # EARLY WEAK TRADE CUT
-            # =========================
             if pnl_pct <= profile["sl"] * 0.7 and sig < 11.5:
                 r17_execute_exit(pos, observer_symbol, observer_price, "FAST_STOP")
 
-            # =========================
-            # STANDARD STOP
-            # =========================
             elif pnl_pct <= profile["sl"]:
                 r17_execute_exit(pos, observer_symbol, observer_price, "STOP")
 
-            # =========================
-            # TAKE PROFIT / RUNNER LOGIC
-            # =========================
             elif pnl_pct >= profile["tp"]:
                 if sig >= 13.5 and prob >= 0.70:
-                    # strong trade → let run
                     pos["age_cycles"] = max(0, pos["age_cycles"] - 3)
                     print(f"[R15B RUNNER] {pos['symbol']} strong signal extended")
 
                 elif sig >= 12.5 and prob >= 0.66:
-                    # medium trade → slight extension
                     pos["age_cycles"] = max(0, pos["age_cycles"] - 2)
                     print(f"[R15B EXTEND] {pos['symbol']} moderate extension")
 
                 else:
-                    # weak profit → take it
                     r17_execute_exit(pos, observer_symbol, observer_price, "TAKE_PROFIT")
 
-            # =========================
-            # TIME EXIT (WEAK ONLY)
             if pos.get('forced_exit', False):
-                continue  # R16A guard: prevent dual exit execution
-            # =========================
+                continue
             elif pos["age_cycles"] >= exit_profile["max_age"]:
                 if sig >= 12.0 and prob >= 0.65:
                     pos["age_cycles"] = max(0, pos["age_cycles"] - 2)
                 else:
                     r17_execute_exit(pos, observer_symbol, observer_price, "TIME_EXIT")
 
-            # =========================
-            # Cut weak losers earlier than the standard stop.
             if pos["floating"] <= exit_profile["stop_loss"] * 0.8:
                 r17_execute_exit(pos, observer_symbol, observer_price, "FAST_STOP")
 
-            # Normal stop for losses that exceed the formal stop threshold.
             elif pos["floating"] <= exit_profile["stop_loss"]:
                 r17_execute_exit(pos, observer_symbol, observer_price, "STOP")
 
-            # Let strong winners run instead of clipping them too early.
             elif pos["floating"] >= exit_profile["take_profit"]:
                 if pos["signal_score"] >= 13.0 and pos["prob_positive"] >= 0.70:
                     pos["age_cycles"] = max(0, pos["age_cycles"] - 3)
@@ -2998,7 +3798,6 @@ try:
                 else:
                     r17_execute_exit(pos, observer_symbol, observer_price, "TAKE_PROFIT")
 
-            # Time-exit only weak trades; strong trades get more runway.
             elif pos["age_cycles"] >= exit_profile["max_age"]:
                 if pos["signal_score"] >= 11.5 and pos["prob_positive"] >= 0.64:
                     pos["age_cycles"] = max(0, pos["age_cycles"] - 2)
@@ -3027,9 +3826,6 @@ try:
         observer_equity = pnl_observer.equity()
         observer_balance = pnl_observer.current_balance
 
-        # ============================================================
-        # PCNRASS PNL UNIFICATION
-        # ============================================================
         authoritative_realized = mtm_realized
         authoritative_unrealized = mtm_unrealized
         authoritative_equity_pnl = round(authoritative_realized + authoritative_unrealized, 4)
@@ -3049,17 +3845,23 @@ try:
 
         try:
             pnl_tracker.current_equity = authoritative_live_equity
-            pnl_tracker.peak_equity = max(
-                float(getattr(pnl_tracker, "peak_equity", pnl_tracker.starting_equity)),
-                authoritative_live_equity,
-            )
-            if float(getattr(pnl_tracker, "peak_equity", 0.0)) > 0:
-                pnl_tracker.max_drawdown = max(
-                    float(getattr(pnl_tracker, "max_drawdown", 0.0)),
-                    (
-                        float(pnl_tracker.peak_equity) - authoritative_live_equity
-                    ) / float(pnl_tracker.peak_equity),
+
+            if str(SELECTED_BROKER_MODE).lower() == "live" and authoritative_live_equity > 0:
+                pnl_tracker.starting_equity = authoritative_live_equity
+                pnl_tracker.peak_equity = authoritative_live_equity
+                pnl_tracker.max_drawdown = 0.0
+            else:
+                pnl_tracker.peak_equity = max(
+                    float(getattr(pnl_tracker, "peak_equity", pnl_tracker.starting_equity)),
+                    authoritative_live_equity,
                 )
+                if float(getattr(pnl_tracker, "peak_equity", 0.0)) > 0:
+                    pnl_tracker.max_drawdown = max(
+                        float(getattr(pnl_tracker, "max_drawdown", 0.0)),
+                        (
+                            float(pnl_tracker.peak_equity) - authoritative_live_equity
+                        ) / float(pnl_tracker.peak_equity),
+                    )
         except Exception as e:
             print(f"[TRACKER ALIGN WARN] {e}")
 
@@ -3133,9 +3935,31 @@ try:
             print("COINBASE CONNECTED: NO")
 
         print("--- BROKER EXECUTION CONTROL ---")
-        print(f"BROKER EXECUTION: {broker_execution_status_label()}")
-        print(f"SELECTED BROKER: {selected_broker_status_label()}")
-        print(f"BROKER MODE: {SELECTED_BROKER_MODE}")
+        labels = []
+        labels.append("=========================")
+        labels.append(f"BROKER EXECUTION : {broker_execution_status_label()}")
+        labels.append(f"SELECTED BROKER  : {selected_broker_status_label()}")
+        labels.append(f"BROKER MODE      : {SELECTED_BROKER_MODE}")
+        labels.append(f"BROKER HEALTH    : {getattr(oanda, 'health_state', 'GREEN')}")
+        
+        # Phase 118D-1 Auto-Flatten Simulation Mode
+        labels.append("")
+        labels.append("=== AUTO FLATTEN STATUS ===")
+        labels.append("Simulation Enabled: YES")
+        labels.append(f"Confirmed Divergences: {_DIVERGENCE_STATE['confirmed_count']}")
+        labels.append(f"Pending Simulations: {_DIVERGENCE_STATE['pending_count']}")
+        
+        last_sim = _DIVERGENCE_STATE.get("last_simulation")
+        if last_sim:
+            sim_lines = last_sim.split("\n")
+            labels.append("Last Simulation Result:")
+            for line in sim_lines:
+                labels.append(f"  {line}")
+        else:
+            labels.append("Last Simulation Result: None")
+            
+        labels.append("=========================")
+        for l in labels: print(l)
         print(f"EXECUTION SCOPE: {active_execution_scope_label()}")
 
         print("--- LIVE EXECUTION SUMMARY ---")
@@ -3160,22 +3984,17 @@ try:
                 f"unrealized_gap={observer_gap_unrealized:.6f}"
             )
 
-        print(
-            f"CRYPTO REALIZED: {sum(crypto_pnl.values()):+.4f} | "
-            f"FLOATING: {display_by_asset['CRYPTO']:+.4f}"
-        )
-        print(
-            f"FX REALIZED: {sum(fx_pnl.values()):+.4f} | "
-            f"FLOATING: {display_by_asset['FX']:+.4f}"
-        )
-        print(
-            f"OPTIONS REALIZED: {sum(options_pnl.values()):+.4f} | "
-            f"FLOATING: {display_by_asset['OPTIONS']:+.4f}"
-        )
-        print(
-            f"FUTURES REALIZED: {sum(futures_pnl.values()):+.4f} | "
-            f"FLOATING: {display_by_asset['FUTURES']:+.4f}"
-        )
+        for line in pnl_by_asset_category_dashboard_lines(
+            aggregate_pnl_by_asset_category(
+                realized_pnl_maps=current_realized_pnl_maps_by_asset_category(),
+                positions=[
+                    pos
+                    for pos in mtm_engine.positions
+                    if not pos.get("forced_exit")
+                ],
+            )
+        ):
+            print(line)
 
         open_counts_by_asset = mtm_engine.count_open_positions_by_asset()
 
@@ -3305,7 +4124,7 @@ try:
                         last_trade = f"{symbol} UNIFIED_GATE_BLOCKED {gate_reason}"
                         continue
 
-                    r14f_ok, r14f_score, r14f_threshold = css_profitability_allows(
+                    r14f_ok, r14f_score, r14f_threshold = _legacy_css_profitability_allows(
                         symbol=symbol,
                         asset_class=asset_class,
                         sig=sig,
@@ -3340,7 +4159,16 @@ try:
                     if position.get("broker_tested"):
                         if asset_class == "FX" and SELECTED_BROKER == "OANDA":
                             live_fx_funded_this_cycle += 1
-                            ok, broker_msg = attempt_oanda_fx_execution(symbol)
+                            resolved_expected_price = resolve_expected_fx_price(symbol)
+                            ok, broker_msg, t_id, f_price, e_time, slippage = attempt_oanda_fx_execution(symbol, expected_price=resolved_expected_price)
+
+                            if ok and t_id:
+                                position["broker_expected_price"] = resolved_expected_price
+                                position["broker_trade_id"] = t_id
+                                position["broker_fill_price"] = f_price
+                                position["broker_execution_time"] = e_time
+                                position["broker_slippage"] = slippage
+                                perform_post_trade_verification(t_id, symbol, FX_LIVE_UNITS)
 
                         elif asset_class == "CRYPTO" and SELECTED_BROKER == "COINBASE":
                             live_crypto_funded_this_cycle += 1
@@ -3426,6 +4254,8 @@ try:
 
         except Exception as e:
             print(f"[NEW PNL ERROR] {e}")
+
+        render_trade_dashboard_summary()
 
         if not pcnrass_wait_for_next_cycle(cycle):
 

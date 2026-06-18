@@ -27,12 +27,14 @@ class AntiBleedGuard:
         cooldown_minutes: int = 10,
         max_trades_per_symbol_per_cycle: int = 1,
         dev_force_allow: bool = False,
+        state_file: str = STATE_FILE,
     ):
         self.minimum_required_net_edge_bps = minimum_required_net_edge_bps
         self.minimum_profitable_trade_size = minimum_profitable_trade_size
         self.cooldown_minutes = cooldown_minutes
         self.max_trades_per_symbol_per_cycle = max_trades_per_symbol_per_cycle
         self.dev_force_allow = dev_force_allow
+        self.state_file = state_file
 
         self.state = self._load_state()
 
@@ -146,19 +148,21 @@ class AntiBleedGuard:
     # -----------------------------
 
     def _load_state(self) -> Dict[str, Any]:
-        if not os.path.exists(STATE_FILE):
+        if not os.path.exists(self.state_file):
             return {}
 
         try:
-            with open(STATE_FILE, "r") as f:
+            with open(self.state_file, "r") as f:
                 return json.load(f)
         except Exception:
             return {}
 
     def _save_state(self):
-        os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+        state_dir = os.path.dirname(self.state_file)
+        if state_dir:
+            os.makedirs(state_dir, exist_ok=True)
 
-        with open(STATE_FILE, "w") as f:
+        with open(self.state_file, "w") as f:
             json.dump(self.state, f, indent=2)
 
     # -----------------------------

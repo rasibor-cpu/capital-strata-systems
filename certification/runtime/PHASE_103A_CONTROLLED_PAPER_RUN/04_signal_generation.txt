@@ -1,0 +1,14 @@
+Run ID: PHASE103A-CONTROLLED-PAPER-RUN
+Profile: AGGRESSIVE
+Asset classes scanned: FX
+Regime detection output: TREND signal style from SignalEngine composite strength
+Signal observed:
+{
+  "direction": "BUY",
+  "instrument": "PHASE103A_EUR_USD",
+  "moving_avg": 1.095,
+  "price_now": 1.105,
+  "price_prev": 1.1,
+  "strength": 0.6667309214024333,
+  "style": "TREND"
+}

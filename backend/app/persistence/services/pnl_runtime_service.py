@@ -1,4 +1,3 @@
-from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
@@ -37,25 +36,40 @@ class PnlRuntimeService:
         unrealized_pnl: Decimal,
         realized_pnl: Decimal,
         open_positions: int,
+        account_id: str | None = None,
+        available_cash: Decimal | None = None,
+        winning_positions: int = 0,
+        losing_positions: int = 0,
+        snapshot_reason: str | None = None,
         payload_json: str | None = None,
     ) -> None:
+        del buying_power, payload_json
 
-        snapshot_time = (
-            datetime.utcnow().isoformat()
+        resolved_account_id = (
+            str(account_id).strip()
+            if account_id is not None and str(account_id).strip()
+            else f"{broker_name.upper()}-{broker_mode.upper()}"
+        )
+
+        resolved_available_cash = (
+            available_cash
+            if available_cash is not None
+            else cash_balance
         )
 
         self.persistence.pnl_snapshots.create_snapshot(
             session_id=session_id,
+            account_id=resolved_account_id,
             broker_name=broker_name,
             broker_mode=broker_mode,
-            snapshot_time=snapshot_time,
-            equity=equity,
-            cash_balance=cash_balance,
-            buying_power=buying_power,
-            unrealized_pnl=unrealized_pnl,
             realized_pnl=realized_pnl,
+            unrealized_pnl=unrealized_pnl,
+            equity=equity,
+            available_cash=resolved_available_cash,
             open_positions=open_positions,
-            payload_json=payload_json,
+            winning_positions=int(winning_positions),
+            losing_positions=int(losing_positions),
+            snapshot_reason=snapshot_reason,
         )
 
     def get_latest_snapshot(

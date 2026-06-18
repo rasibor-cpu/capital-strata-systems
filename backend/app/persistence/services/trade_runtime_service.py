@@ -100,6 +100,16 @@ class TradeRuntimeService:
             .get_open_trades(session_id)
         )
 
+    def get_all_session_trades(
+        self,
+        session_id: str,
+    ) -> list[dict[str, Any]]:
+
+        return (
+            self.persistence.trades
+            .get_all_session_trades(session_id)
+        )
+
     def trade_exists(
         self,
         session_id: str,
