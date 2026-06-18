@@ -2209,8 +2209,6 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
         from backend.intelligence.trade_decision_orchestrator import TradeDecisionOrchestrator
         from engine.execution.execution_gate import ExecutionGate
         from backend.app.persistence.services.trade_runtime_service import TradeRuntimeService
-        from backend.app.persistence.services.session_runtime_service import SessionRuntimeService
-        from backend.app.persistence.services.pnl_runtime_service import PnlRuntimeService
     except ImportError as e:
         result = {
             "ok": False,

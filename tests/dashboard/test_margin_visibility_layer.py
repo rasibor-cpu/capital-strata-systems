@@ -9,6 +9,23 @@ from dashboard.runtime.dashboard_state import DashboardState
 from engine.risk.margin_snapshot import MarginSnapshot, MarginState
 from engine.risk.oanda_margin_adapter import OandaMarginAdapter
 
+def find_endpoint(routes, target_path, current_prefix=""):
+    for r in routes:
+        r_path = getattr(r, "path", "")
+        # Remove trailing slash from prefix if r_path starts with slash to avoid double slash
+        if current_prefix.endswith("/") and r_path.startswith("/"):
+            full_path = current_prefix[:-1] + r_path
+        else:
+            full_path = current_prefix + r_path
+            
+        if hasattr(r, "endpoint") and full_path == target_path:
+            return r.endpoint
+        if hasattr(r, "routes"):
+            found = find_endpoint(r.routes, target_path, full_path)
+            if found:
+                return found
+    raise ValueError(f"Route {target_path} not found")
+
 
 class MockDashboardStateProvider:
     def __call__(self) -> DashboardState:
@@ -37,7 +54,7 @@ def test_web_margin_visibility_renders():
 
 def test_web_margin_snapshot_api_returns_data(monkeypatch):
     app = web_app.create_app(MockDashboardStateProvider())
-    margin_api = next(r.endpoint for r in app.routes if r.path == "/api/v1/margin-snapshot")
+    margin_api = find_endpoint(app.routes, "/api/v1/margin-snapshot")
     
     def mock_get_snapshot(self):
         return MarginSnapshot(
@@ -65,7 +82,7 @@ def test_web_margin_snapshot_api_returns_data(monkeypatch):
 
 def test_web_margin_snapshot_api_unavailable(monkeypatch):
     app = web_app.create_app(UnavailableMockDashboardStateProvider())
-    margin_api = next(r.endpoint for r in app.routes if r.path == "/api/v1/margin-snapshot")
+    margin_api = find_endpoint(app.routes, "/api/v1/margin-snapshot")
     
     data = asyncio.run(margin_api())
     assert data["ok"] is False
@@ -105,7 +122,7 @@ def test_mobile_margin_api_returns_data(monkeypatch):
         )
     monkeypatch.setattr(OandaMarginAdapter, "get_margin_snapshot", mock_get_snapshot)
     
-    margin_api = next(r.endpoint for r in mobile_app.app.routes if r.path == "/api/margin-snapshot")
+    margin_api = find_endpoint(mobile_app.app.routes, "/api/margin-snapshot")
     response = asyncio.run(margin_api(None))
     import json
     data = json.loads(response.body.decode('utf-8'))
@@ -124,7 +141,7 @@ def test_mobile_margin_api_unavailable(monkeypatch):
     monkeypatch.setattr(mobile_app, "_get_session", mock_get_session)
     monkeypatch.setattr(mobile_app, "_mobile_dashboard_payload", mock_payload)
     
-    margin_api = next(r.endpoint for r in mobile_app.app.routes if r.path == "/api/margin-snapshot")
+    margin_api = find_endpoint(mobile_app.app.routes, "/api/margin-snapshot")
     response = asyncio.run(margin_api(None))
     import json
     data = json.loads(response.body.decode('utf-8'))
