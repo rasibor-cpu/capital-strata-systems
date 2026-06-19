@@ -706,6 +706,22 @@ except ModuleNotFoundError:
     AlertEventType = _FallbackAlertEventType
 
 
+try:
+    from backend.runtime.runtime_supervisor import RuntimeSupervisor
+    runtime_supervisor = RuntimeSupervisor()
+    runtime_supervisor.start_watchdog()
+except ModuleNotFoundError:
+    class _FallbackRuntimeSupervisor:
+        def start_watchdog(self): pass
+        def stop_watchdog(self): pass
+        def record_cycle(self, *args, **kwargs): pass
+        def record_error(self, *args, **kwargs): pass
+        def record_broker_disconnect(self, *args, **kwargs): pass
+        def record_recovery_attempt(self, *args, **kwargs): pass
+        def get_stats(self): return {}
+    runtime_supervisor = _FallbackRuntimeSupervisor()
+
+
 # === PCNRASS SAFE INFRASTRUCTURE IMPORT COMPATIBILITY ===
 # These fallbacks prevent dashboard startup failure when a branch is missing
 # optional governance/broker/security modules. Existing modules are used when present.
@@ -3430,6 +3446,7 @@ def print_oanda_broker_status() -> None:
                 f"status={summary.get('status')} "
                 f"error={summary.get('error')}"
             )
+            runtime_supervisor.record_broker_disconnect("OANDA", f"{summary.get('status')} {summary.get('error')}")
             get_alert_service().dispatch_alert(
                 AlertEventType.BROKER_CONNECTION_FAILURE,
                 f"OANDA Connection Error: {summary.get('status')} {summary.get('error')}",
@@ -3450,6 +3467,7 @@ def print_oanda_broker_status() -> None:
 
     except Exception as e:
         print(f"OANDA ERROR: {str(e)[:60]}")
+        runtime_supervisor.record_broker_disconnect("OANDA", str(e)[:60])
         get_alert_service().dispatch_alert(
             AlertEventType.BROKER_CONNECTION_FAILURE,
             f"OANDA Connection Exception: {str(e)[:60]}",
@@ -3496,6 +3514,7 @@ def print_coinbase_broker_status() -> None:
             print(f"COINBASE AUTH MODE: {mode}")
 
             if not ok:
+                runtime_supervisor.record_broker_disconnect("COINBASE", "ping_live_auth failed or returned not OK")
                 get_alert_service().dispatch_alert(
                     AlertEventType.BROKER_CONNECTION_FAILURE,
                     "Coinbase ping_live_auth failed or returned not OK",
@@ -3512,6 +3531,7 @@ def print_coinbase_broker_status() -> None:
 
     except Exception as e:
         print(f"COINBASE ERROR: {str(e)[:60]}")
+        runtime_supervisor.record_broker_disconnect("COINBASE", str(e)[:60])
         get_alert_service().dispatch_alert(
             AlertEventType.BROKER_CONNECTION_FAILURE,
             f"Coinbase Connection Exception: {str(e)[:60]}",
@@ -3779,6 +3799,7 @@ try:
             break
 
         cycle += 1
+        
         current_status = enforce_active_session(cycle, last_trade)
 
         if not is_session_locked():
@@ -3794,6 +3815,7 @@ try:
             perform_continuous_reconciliation()
 
         print(f"=== Cycle {cycle} | {datetime.now()} ===")
+
 
         exit_profile = MODE_EXIT_PROFILE.get(
             ENGINE_MODE,
@@ -4322,7 +4344,21 @@ try:
             print(f"PEAK EQUITY: {tracker_snapshot['peak_equity']:+.4f}")
             print(f"DRAWDOWN: {tracker_snapshot['current_drawdown']:.4%}")
 
+            runtime_supervisor.record_cycle(
+                equity=tracker_snapshot['current_equity'],
+                broker_mode=str(SELECTED_BROKER_MODE),
+                engine_mode=str(ENGINE_MODE)
+            )
+            
+            stats = runtime_supervisor.get_stats()
+            print("--- RUNTIME SUPERVISOR ---")
+            print(f"UPTIME: {stats.get('uptime_seconds', 0)}s | CYCLES: {stats.get('cycles_completed', 0)}")
+            print(f"RECOVERIES: {stats.get('recovery_attempts', 0)} | ALERTS: {stats.get('alerts_generated', 0)}")
+            print(f"DISCONNECTS: {stats.get('broker_disconnects', 0)} | ERRORS: {stats.get('runtime_errors', 0)}")
+
+
         except Exception as e:
+            runtime_supervisor.record_error(str(e))
             print(f"[NEW PNL ERROR] {e}")
 
         render_trade_dashboard_summary()

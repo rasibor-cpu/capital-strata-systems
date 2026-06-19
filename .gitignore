@@ -52,6 +52,7 @@ feeds/
 data_fx/
 live_tick_*.json
 runlog.txt
+runtime_supervisor.json
 
 # --- Governance generated reports ---
 governance/reports/
