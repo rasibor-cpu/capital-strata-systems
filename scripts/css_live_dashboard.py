@@ -2289,6 +2289,13 @@ def resolve_expected_fx_price(symbol: str) -> float | None:
     return None
 
 def pcnrass_wait_for_next_cycle(cycle: int) -> bool:
+    auto_cycle = os.getenv("CSS_AUTO_CYCLE", "").lower() in {"true", "1", "yes"}
+    if auto_cycle:
+        sleep_secs = int(os.getenv("CSS_CYCLE_SLEEP_SECONDS", "60"))
+        print(f"\n[AUTO CYCLE MODE] enabled interval={sleep_secs}s")
+        time.sleep(sleep_secs)
+        return True
+
     response = input(f"\n[PCNRASS PAUSE] Cycle {cycle} complete. Press ENTER for next cycle, or type Q to quit: ").strip().lower()
     return response not in {"q", "quit", "exit", "stop"}
 
