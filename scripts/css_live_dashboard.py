@@ -685,6 +685,27 @@ from backend.app.accounting.pnl_engine import (
 )
 from engine.performance.pnl_tracker import PnLTracker
 
+try:
+    from engine.information.alerts import get_alert_service, AlertEventType
+except ModuleNotFoundError:
+    class _FallbackAlertEventType:
+        PROFIT_TARGET_REACHED = "PROFIT_TARGET_REACHED"
+        DRAWDOWN_BREACHED = "DRAWDOWN_BREACHED"
+        LIVE_MODE_ARMED = "LIVE_MODE_ARMED"
+        BROKER_CONNECTION_FAILURE = "BROKER_CONNECTION_FAILURE"
+        TRADE_BLOCKED = "TRADE_BLOCKED"
+        EMERGENCY_SHUTDOWN = "EMERGENCY_SHUTDOWN"
+        INFO = "INFO"
+
+    class _FallbackAlertService:
+        def dispatch_alert(self, *args, **kwargs): pass
+
+    def get_alert_service():
+        return _FallbackAlertService()
+
+    AlertEventType = _FallbackAlertEventType
+
+
 # === PCNRASS SAFE INFRASTRUCTURE IMPORT COMPATIBILITY ===
 # These fallbacks prevent dashboard startup failure when a branch is missing
 # optional governance/broker/security modules. Existing modules are used when present.
@@ -1369,6 +1390,11 @@ def touch_active_session() -> dict[str, Any]:
 
 
 def activate_defensive_expiry_mode(reason: str, cycle: int, last_trade: str) -> dict[str, Any]:
+    get_alert_service().dispatch_alert(
+        AlertEventType.EMERGENCY_SHUTDOWN,
+        f"Defensive expiry mode activated: {reason}",
+        {"cycle": cycle, "last_trade": last_trade}
+    )
     lock_session(reason)
 
     lock_state = get_session_lock_state()
@@ -1912,6 +1938,11 @@ def approve_trade_before_register(asset_class: str, symbol: str, sig: float, pro
 
     if not decision.get("approved", False):
         try:
+            get_alert_service().dispatch_alert(
+                AlertEventType.TRADE_BLOCKED,
+                f"Trade blocked by unified gate: {asset_class} {symbol} ({decision.get('reason')})",
+                {"asset": asset_class, "symbol": symbol, "reason": decision.get("reason")}
+            )
             audit_ledger.record(
                 "unified_trade_gate_reject",
                 str(SESSION_USER_CTX.get("user_id")),
@@ -2077,6 +2108,11 @@ class CapitalDeploymentGovernor:
 
     def set_live_mode(self) -> None:
         self.paper_mode = False
+        get_alert_service().dispatch_alert(
+            AlertEventType.LIVE_MODE_ARMED,
+            "Capital Governor armed for LIVE mode execution",
+            {"capital_source": self.capital_source_label()}
+        )
         self.refresh_real_balance()
 
     def set_paper_mode(self) -> None:
@@ -2883,6 +2919,11 @@ def can_open_position(
         current_dd = float(getattr(pnl_tracker, "max_drawdown", 0.0))
         if current_dd >= 0.05:
             print(f"[R16B BLOCK] Drawdown limit reached: {current_dd:.2%}")
+            get_alert_service().dispatch_alert(
+                AlertEventType.DRAWDOWN_BREACHED,
+                f"Drawdown limit reached: {current_dd:.2%}",
+                {"current_dd": current_dd, "threshold": 0.05}
+            )
             return False, "DRAWDOWN_LIMIT"
     except Exception:
         pass
@@ -3261,6 +3302,13 @@ def r17_execute_exit(pos, observer_symbol, observer_price, reason):
         # 1. Book exit (authoritative)
         book_position_exit(pos, reason)
 
+        if reason == "TAKE_PROFIT":
+            get_alert_service().dispatch_alert(
+                AlertEventType.PROFIT_TARGET_REACHED,
+                f"Profit target reached for {observer_symbol} at price {observer_price}",
+                {"symbol": observer_symbol, "price": observer_price, "reason": reason}
+            )
+
         # 2. Close observer position (PnL)
         try:
             pnl_observer.close_position(observer_symbol, observer_price)
@@ -3382,6 +3430,11 @@ def print_oanda_broker_status() -> None:
                 f"status={summary.get('status')} "
                 f"error={summary.get('error')}"
             )
+            get_alert_service().dispatch_alert(
+                AlertEventType.BROKER_CONNECTION_FAILURE,
+                f"OANDA Connection Error: {summary.get('status')} {summary.get('error')}",
+                {"broker": "OANDA", "status": summary.get("status"), "error": summary.get("error")}
+            )
             print(f"OANDA BASE URL: {resolved_base or 'NOT SET'}")
             print("OANDA OPEN TRADES: ERR")
             return
@@ -3397,6 +3450,11 @@ def print_oanda_broker_status() -> None:
 
     except Exception as e:
         print(f"OANDA ERROR: {str(e)[:60]}")
+        get_alert_service().dispatch_alert(
+            AlertEventType.BROKER_CONNECTION_FAILURE,
+            f"OANDA Connection Exception: {str(e)[:60]}",
+            {"broker": "OANDA", "error": str(e)[:60]}
+        )
         print(f"OANDA BASE URL: {resolved_base or 'NOT SET'}")
         print("OANDA OPEN TRADES: ERR")
 
@@ -3437,6 +3495,13 @@ def print_coinbase_broker_status() -> None:
             print(f"COINBASE CONNECTED: {'YES' if ok else 'ERROR'}")
             print(f"COINBASE AUTH MODE: {mode}")
 
+            if not ok:
+                get_alert_service().dispatch_alert(
+                    AlertEventType.BROKER_CONNECTION_FAILURE,
+                    "Coinbase ping_live_auth failed or returned not OK",
+                    {"broker": "COINBASE", "ping": ping}
+                )
+
             if isinstance(ping, dict) and "account_count" in ping:
                 print(f"COINBASE ACCOUNT COUNT: {ping.get('account_count')}")
 
@@ -3446,7 +3511,12 @@ def print_coinbase_broker_status() -> None:
         print(f"COINBASE CONNECTED: {'YES' if configured else 'NO'}")
 
     except Exception as e:
-        print(f"COINBASE ERROR: {str(e)[:80]}")
+        print(f"COINBASE ERROR: {str(e)[:60]}")
+        get_alert_service().dispatch_alert(
+            AlertEventType.BROKER_CONNECTION_FAILURE,
+            f"Coinbase Connection Exception: {str(e)[:60]}",
+            {"broker": "COINBASE", "error": str(e)[:60]}
+        )
 
 
 def broker_execution_status_label() -> str:

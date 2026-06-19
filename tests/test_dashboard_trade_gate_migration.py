@@ -94,6 +94,8 @@ def _dashboard_gate_namespace(*, session_locked=False, role_profile=None, gate=N
         "is_session_locked": lambda: session_locked,
         "audit_ledger": AuditLedgerRecorder(),
         "css_unified_trade_gate": gate or RecordingDashboardGate(),
+        "get_alert_service": lambda: SimpleNamespace(dispatch_alert=lambda *args, **kwargs: None),
+        "AlertEventType": SimpleNamespace(TRADE_BLOCKED="TRADE_BLOCKED"),
     }
     exec(compile(module, str(DASHBOARD_PATH), "exec"), namespace)
     return namespace
