@@ -83,6 +83,58 @@ class TradeRuntimeService:
             datetime.utcnow().isoformat()
         )
 
+        try:
+            trade_record = self.persistence.trades.get_trade(trade_id)
+            if trade_record:
+                from analytics.trade_outcome_ledger import TradeOutcomeLedger, TradeOutcome
+                import json
+
+                opened_at = trade_record.get("opened_at", closed_at)
+                try:
+                    t_entry = datetime.fromisoformat(opened_at.replace("Z", "+00:00"))
+                    t_exit = datetime.fromisoformat(closed_at.replace("Z", "+00:00"))
+                    holding_seconds = (t_exit - t_entry).total_seconds()
+                except Exception:
+                    holding_seconds = 0.0
+
+                pnl_val = float(realized_pnl)
+                win_loss = "WIN" if pnl_val > 0 else ("LOSS" if pnl_val < 0 else "BREAK_EVEN")
+
+                entry_reason = "UNKNOWN"
+                asset_class = "UNKNOWN"
+                raw = trade_record.get("raw_payload_json")
+                if raw:
+                    try:
+                        payload = json.loads(raw)
+                        entry_reason = payload.get("reason", "UNKNOWN")
+                        asset_class = payload.get("asset_class", "UNKNOWN")
+                    except Exception:
+                        pass
+                
+                symbol = trade_record.get("symbol", "UNKNOWN")
+
+                outcome = TradeOutcome(
+                    trade_id=trade_id,
+                    asset_class=asset_class,
+                    symbol=symbol,
+                    entry_timestamp=opened_at,
+                    exit_timestamp=closed_at,
+                    holding_seconds=holding_seconds,
+                    entry_reason=entry_reason,
+                    exit_reason="ACCOUNTING_CLOSE",
+                    entry_price=float(trade_record.get("entry_price", 0.0)),
+                    exit_price=float(exit_price),
+                    quantity=float(trade_record.get("quantity", 0.0)),
+                    realized_pnl=pnl_val,
+                    max_favorable_excursion=0.0,
+                    max_adverse_excursion=0.0,
+                    win_loss=win_loss
+                )
+                TradeOutcomeLedger().append_trade(outcome)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Phase 126B Analytics Capture Failed: {e}")
+
         self.persistence.trades.close_trade(
             trade_id=trade_id,
             exit_price=exit_price,
