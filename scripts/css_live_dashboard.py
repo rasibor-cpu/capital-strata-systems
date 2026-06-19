@@ -3799,6 +3799,7 @@ def perform_continuous_reconciliation() -> None:
 
 perform_startup_reconciliation()
 
+_SESSION_QUIET_MODE_ACTIVATED = False
 
 try:
     while True:
@@ -4149,6 +4150,20 @@ try:
                 )
             else:
                 print("[DEFENSIVE MODE] New trade creation blocked. Managing existing positions only.")
+        elif max_remaining <= 0:
+            if not _SESSION_QUIET_MODE_ACTIVATED:
+                _SESSION_QUIET_MODE_ACTIVATED = True
+                print("[SESSION EXPIRED QUIET MODE] Trading attempts paused until re-authentication.")
+                try:
+                    get_alert_service().dispatch_alert(
+                        AlertEventType.INFO,
+                        "Session Expired Quiet Mode activated. Trading paused.",
+                        {"cycle": cycle}
+                    )
+                except Exception:
+                    pass
+            else:
+                print("[SESSION EXPIRED QUIET MODE] Trading attempts paused until re-authentication.")
         elif mtm_engine.count_open_positions() < hard_position_limit():
             if not role_profile.get("can_execute_paper_trading", False):
                 print("[RBAC] New position generation blocked for current role.")
