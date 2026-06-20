@@ -23,7 +23,11 @@ class TradeOutcome:
     max_favorable_excursion: float
     max_adverse_excursion: float
     win_loss: str
-
+    side: str = "UNKNOWN"
+    amount_traded: float = 0.0
+    cumulative_account_balance: float = 0.0
+    engine_mode: str = "UNKNOWN"
+    broker_mode: str = "UNKNOWN"
 
 class TradeOutcomeLedger:
     def __init__(self, file_path: Optional[Path] = None):

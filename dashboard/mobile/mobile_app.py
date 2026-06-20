@@ -455,6 +455,15 @@ async def trade_ticket_screen(request: Request):
     return HTMLResponse(_trade_ticket_page(session["user_ctx"]))
 
 
+@app.get("/trade-summary", response_class=HTMLResponse)
+async def trade_summary_screen(request: Request):
+    session = _get_session(request)
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+
+    return HTMLResponse(_trade_summary_page(session["user_ctx"], session))
+
+
 @app.post("/trade", response_class=HTMLResponse)
 async def trade_ticket_submit(request: Request):
     session = _get_session(request)
@@ -777,6 +786,7 @@ def _top_nav(user_ctx: Dict[str, Any], active: str) -> str:
         ("market", "Market", "/market"),
         ("broker", "Broker", "/broker"),
         ("trade-status", "Trade Status", "/trade-status"),
+        ("trade-summary", "Trade Summary", "/trade-summary"),
     
         ("margin", "Margin", "/margin"),):
         if active != key:
@@ -981,6 +991,64 @@ def _mobile_dashboard_payload(
         **_mobile_runtime_payloads(user_ctx, session)
     )
     return state.to_dict()
+
+
+def _trade_summary_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
+    try:
+        from analytics.trade_outcome_ledger import TradeOutcomeLedger
+        trades = TradeOutcomeLedger().list_trades()
+        # newest first
+        trades = sorted(trades, key=lambda t: t.exit_timestamp, reverse=True)[:20]
+    except Exception:
+        trades = []
+
+    if not trades:
+        content = '<div class="card"><p class="muted">No closed trades recorded yet.</p></div>'
+    else:
+        cards = []
+        for t in trades:
+            pnl = t.realized_pnl
+            if pnl > 0:
+                pnl_class = "pnl-green"
+                pnl_str = f"+{pnl:.2f}"
+            elif pnl < 0:
+                pnl_class = "pnl-red"
+                pnl_str = f"{pnl:.2f}"
+            else:
+                pnl_class = "muted"
+                pnl_str = "0.00"
+
+            cards.append(f"""
+            <div class="card" style="margin-bottom: 1rem; padding: 1rem; border: 1px solid #ccc; border-radius: 4px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                    <strong>{html.escape(t.symbol)}</strong>
+                    <span class="{pnl_class}"><strong>{pnl_str}</strong></span>
+                </div>
+                <div style="font-size: 0.9em; line-height: 1.4;">
+                    <div><span class="muted">Date:</span> {html.escape(t.exit_timestamp)}</div>
+                    <div><span class="muted">Class:</span> {html.escape(t.asset_class)}</div>
+                    <div><span class="muted">Side:</span> {html.escape(getattr(t, 'side', 'UNKNOWN'))}</div>
+                    <div><span class="muted">Qty:</span> {getattr(t, 'quantity', 0.0)}</div>
+                    <div><span class="muted">Amt Traded:</span> {getattr(t, 'amount_traded', 0.0):.2f}</div>
+                    <div><span class="muted">W/L:</span> {html.escape(t.win_loss)}</div>
+                    <div><span class="muted">Cum Bal:</span> {getattr(t, 'cumulative_account_balance', 0.0):.2f}</div>
+                    <div><span class="muted">Exit Reason:</span> {html.escape(t.exit_reason)}</div>
+                </div>
+            </div>
+            """)
+        content = "".join(cards)
+
+    return _page(
+        "CSS Trade Summary",
+        f"""
+        <main class="dashboard-shell">
+          {_header("CSS Trade Summary", user_ctx, "trade-summary")}
+          <section class="metric-grid" aria-label="Trade Summary" style="display: block;">
+            {content}
+          </section>
+        </main>
+        """
+    )
 
 
 def _mobile_runtime_payloads(

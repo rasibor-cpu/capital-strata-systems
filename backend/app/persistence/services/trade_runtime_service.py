@@ -111,7 +111,53 @@ class TradeRuntimeService:
                     except Exception:
                         pass
                 
-                symbol = trade_record.get("symbol", "UNKNOWN")
+                symbol = trade_record.get("symbol", "UNKNOWN").upper()
+
+                # Infer asset_class
+                if asset_class == "UNKNOWN":
+                    if any(x in symbol for x in ["BTC", "ETH", "SOL", "ADA", "DOGE"]):
+                        asset_class = "CRYPTO"
+                    elif any(x in symbol for x in ["EUR_", "USD_", "GBP_", "JPY", "CAD", "AUD", "NZD", "CHF"]):
+                        asset_class = "FX"
+                    elif any(x in symbol for x in ["GC", "CL", "ES", "NQ", "YM", "ZB", "ZN"]):
+                        asset_class = "FUTURES"
+                    elif "-C-" in symbol or "-P-" in symbol:
+                        asset_class = "OPTIONS"
+
+                # Infer side
+                raw_side = trade_record.get("direction", "UNKNOWN").upper()
+                if raw_side in ["LONG", "BUY", "CALL"]:
+                    inferred_side = "BUY"
+                elif raw_side in ["SHORT", "SELL", "PUT"]:
+                    inferred_side = "SELL"
+                else:
+                    inferred_side = "UNKNOWN"
+
+                entry_price_val = float(trade_record.get("entry_price", 0.0))
+                quantity_val = float(trade_record.get("quantity", 0.0))
+                amount_traded = entry_price_val * quantity_val
+
+                broker_mode = trade_record.get("broker_mode", "UNKNOWN")
+                
+                engine_mode = "UNKNOWN"
+                if raw:
+                    try:
+                        payload = json.loads(raw)
+                        engine_mode = payload.get("engine_mode", "UNKNOWN")
+                    except Exception:
+                        pass
+                
+                # Fetch recent snapshot for balance if possible
+                try:
+                    from backend.app.persistence.services.pnl_runtime_service import PnlRuntimeService
+                    pnl_svc = PnlRuntimeService()
+                    snapshots = pnl_svc.get_snapshots_by_session(trade_record.get("session_id", ""))
+                    if snapshots:
+                        cumulative_account_balance = float(snapshots[-1].get("cumulative_account_balance", 0.0))
+                    else:
+                        cumulative_account_balance = 0.0
+                except Exception:
+                    cumulative_account_balance = 0.0
 
                 outcome = TradeOutcome(
                     trade_id=trade_id,
@@ -122,13 +168,18 @@ class TradeRuntimeService:
                     holding_seconds=holding_seconds,
                     entry_reason=entry_reason,
                     exit_reason="ACCOUNTING_CLOSE",
-                    entry_price=float(trade_record.get("entry_price", 0.0)),
+                    entry_price=entry_price_val,
                     exit_price=float(exit_price),
-                    quantity=float(trade_record.get("quantity", 0.0)),
+                    quantity=quantity_val,
                     realized_pnl=pnl_val,
                     max_favorable_excursion=0.0,
                     max_adverse_excursion=0.0,
-                    win_loss=win_loss
+                    win_loss=win_loss,
+                    side=inferred_side,
+                    amount_traded=amount_traded,
+                    cumulative_account_balance=cumulative_account_balance,
+                    engine_mode=engine_mode,
+                    broker_mode=broker_mode
                 )
                 TradeOutcomeLedger().append_trade(outcome)
         except Exception as e:
