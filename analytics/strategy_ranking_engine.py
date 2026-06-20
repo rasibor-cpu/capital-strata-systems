@@ -90,3 +90,34 @@ class StrategyRankingEngine:
             "by_asset_class": self.rank_by_asset_class(),
             "by_symbol": self.rank_by_symbol(),
         }
+
+def print_strategy_ranking_dashboard() -> None:
+    try:
+        engine = StrategyRankingEngine()
+        rankings = engine.summarize_rankings()
+
+        print("\n=== STRATEGY RANKINGS ===")
+
+        def print_section(title: str, groups: Dict[str, Any]):
+            print(f"\n{title}:")
+            if not groups:
+                print("  * None")
+                return
+                
+            # sort by net_realized_pnl descending
+            sorted_groups = sorted(groups.items(), key=lambda x: x[1].get('net_realized_pnl', 0), reverse=True)
+            
+            # top 5 only
+            for group_name, stats in sorted_groups[:5]:
+                print(f"  * {group_name} [{stats.get('rank', 'UNKNOWN')}]")
+                print(f"      Trades:    {stats.get('trade_count', 0)}")
+                print(f"      Win Rate:  {stats.get('win_rate', 0) * 100:.2f}%")
+                print(f"      Net PnL:   {stats.get('net_realized_pnl', 0):+.4f}")
+                print(f"      Profit F:  {stats.get('profit_factor', 0)}")
+
+        print_section("Entry Reason Rankings", rankings.get("by_entry_reason", {}))
+        print_section("Asset Class Rankings", rankings.get("by_asset_class", {}))
+        print_section("Symbol Rankings", rankings.get("by_symbol", {}))
+
+    except Exception as e:
+        print(f"[STRATEGY RANKING WARN] {e}")

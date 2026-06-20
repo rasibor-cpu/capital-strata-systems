@@ -3316,6 +3316,14 @@ def render_trade_dashboard_summary() -> None:
         except Exception as analytics_exc:
             print(f"[PROFITABILITY ANALYTICS WARN] {analytics_exc}")
         # --- END PHASE 126C ---
+        
+        # --- PHASE 126E: STRATEGY RANKINGS ---
+        try:
+            from analytics.strategy_ranking_engine import print_strategy_ranking_dashboard
+            print_strategy_ranking_dashboard()
+        except Exception as strategy_exc:
+            print(f"[STRATEGY RANKING WARN] {strategy_exc}")
+        # --- END PHASE 126E ---
 
         print("=== END TRADE DASHBOARD SUMMARY ===\n")
     except Exception as exc:
