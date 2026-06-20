@@ -3308,6 +3308,15 @@ def render_trade_dashboard_summary() -> None:
 
         print(f"Last Trade: {globals().get('last_trade', 'NONE')}")
         print(f"Closed Trade Ledger: {'YES' if ledger_exists else 'NO'}")
+        
+        # --- PHASE 126C: PROFITABILITY ANALYTICS ---
+        try:
+            from analytics.trade_outcome_ledger import print_profitability_dashboard
+            print_profitability_dashboard()
+        except Exception as analytics_exc:
+            print(f"[PROFITABILITY ANALYTICS WARN] {analytics_exc}")
+        # --- END PHASE 126C ---
+
         print("=== END TRADE DASHBOARD SUMMARY ===\n")
     except Exception as exc:
         print(f"[TRADE_DASHBOARD_SUMMARY WARN] {exc}")

@@ -14,8 +14,8 @@ def ledger(temp_ledger_file):
 def test_empty_ledger_works(ledger):
     assert ledger.list_trades() == []
     summary = ledger.summarize()
-    assert summary["total_trades"] == 0
-    assert summary["win_rate"] == 0.0
+    assert summary["overall"]["total_trades"] == 0
+    assert summary["overall"]["win_rate"] == 0.0
 
 def test_append_trade_works(ledger):
     outcome = TradeOutcome(
@@ -92,7 +92,7 @@ def test_summary_math_works(ledger):
     ledger.append_trade(t2)
     ledger.append_trade(t3)
     
-    summary = ledger.summarize()
+    summary = ledger.summarize()["overall"]
     assert summary["total_trades"] == 3
     assert summary["winning_trades"] == 2
     assert summary["losing_trades"] == 1

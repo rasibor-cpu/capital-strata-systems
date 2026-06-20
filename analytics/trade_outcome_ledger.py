@@ -87,31 +87,102 @@ class TradeOutcomeLedger:
     def summarize(self) -> Dict[str, Any]:
         trades = self.list_trades()
         
-        total_trades = len(trades)
-        winning_trades = sum(1 for t in trades if t.realized_pnl > 0)
-        losing_trades = sum(1 for t in trades if t.realized_pnl < 0)
-        
-        net_realized_pnl = sum(t.realized_pnl for t in trades)
-        
-        gross_profit = sum(t.realized_pnl for t in trades if t.realized_pnl > 0)
-        gross_loss = abs(sum(t.realized_pnl for t in trades if t.realized_pnl < 0))
-        
-        win_rate = winning_trades / total_trades if total_trades > 0 else 0.0
-        average_win = gross_profit / winning_trades if winning_trades > 0 else 0.0
-        average_loss = gross_loss / losing_trades if losing_trades > 0 else 0.0
-        
-        if gross_loss > 0:
-            profit_factor = gross_profit / gross_loss
-        else:
-            profit_factor = float('inf') if gross_profit > 0 else 0.0
+        def compute_stats(trade_subset):
+            total = len(trade_subset)
+            wins = sum(1 for t in trade_subset if t.realized_pnl > 0)
+            losses = sum(1 for t in trade_subset if t.realized_pnl < 0)
+            net_pnl = sum(t.realized_pnl for t in trade_subset)
+            gross_prof = sum(t.realized_pnl for t in trade_subset if t.realized_pnl > 0)
+            gross_loss = abs(sum(t.realized_pnl for t in trade_subset if t.realized_pnl < 0))
             
+            w_rate = wins / total if total > 0 else 0.0
+            avg_win = gross_prof / wins if wins > 0 else 0.0
+            avg_loss = gross_loss / losses if losses > 0 else 0.0
+            
+            if gross_loss > 0:
+                pf = gross_prof / gross_loss
+            else:
+                pf = float('inf') if gross_prof > 0 else 0.0
+                
+            return {
+                "total_trades": total,
+                "winning_trades": wins,
+                "losing_trades": losses,
+                "win_rate": round(w_rate, 4),
+                "net_realized_pnl": round(net_pnl, 4),
+                "average_win": round(avg_win, 4),
+                "average_loss": round(avg_loss, 4),
+                "profit_factor": round(pf, 4) if pf != float('inf') else "inf",
+            }
+
+        overall_stats = compute_stats(trades)
+        
+        # By Asset Class
+        asset_classes = ["FX", "CRYPTO", "FUTURES", "OPTIONS"]
+        by_asset_class = {}
+        for ac in asset_classes:
+            subset = [t for t in trades if t.asset_class == ac]
+            by_asset_class[ac] = compute_stats(subset)
+            
+        # Top 5 Winning/Losing Symbols
+        symbol_pnl = {}
+        for t in trades:
+            symbol_pnl[t.symbol] = symbol_pnl.get(t.symbol, 0.0) + t.realized_pnl
+            
+        sorted_symbols = sorted(symbol_pnl.items(), key=lambda x: x[1])
+        top_losing = [{"symbol": k, "pnl": round(v, 4)} for k, v in sorted_symbols[:5] if v < 0]
+        top_winning = [{"symbol": k, "pnl": round(v, 4)} for k, v in reversed(sorted_symbols) if v > 0][:5]
+
         return {
-            "total_trades": total_trades,
-            "winning_trades": winning_trades,
-            "losing_trades": losing_trades,
-            "win_rate": round(win_rate, 4),
-            "net_realized_pnl": round(net_realized_pnl, 4),
-            "average_win": round(average_win, 4),
-            "average_loss": round(average_loss, 4),
-            "profit_factor": round(profit_factor, 4) if profit_factor != float('inf') else "inf",
+            "overall": overall_stats,
+            "by_asset_class": by_asset_class,
+            "top_winning_symbols": top_winning,
+            "top_losing_symbols": top_losing
         }
+
+
+def print_profitability_dashboard() -> None:
+    try:
+        ledger = TradeOutcomeLedger()
+        summary = ledger.summarize()
+        overall = summary.get("overall", {})
+        by_asset = summary.get("by_asset_class", {})
+        top_winning = summary.get("top_winning_symbols", [])
+        top_losing = summary.get("top_losing_symbols", [])
+
+        print("\n=== PROFITABILITY ANALYTICS ===")
+        print("Overall:")
+        print(f"  * Total Trades:   {overall.get('total_trades', 0)}")
+        print(f"  * Winning Trades: {overall.get('winning_trades', 0)}")
+        print(f"  * Losing Trades:  {overall.get('losing_trades', 0)}")
+        print(f"  * Win Rate %:     {overall.get('win_rate', 0) * 100:.2f}%")
+        print(f"  * Net Realized PnL: {overall.get('net_realized_pnl', 0):+.4f}")
+        print(f"  * Average Win:    {overall.get('average_win', 0):.4f}")
+        print(f"  * Average Loss:   {overall.get('average_loss', 0):.4f}")
+        print(f"  * Profit Factor:  {overall.get('profit_factor', 0)}")
+
+        print("\nBy Asset Class:")
+        for ac in ["FX", "CRYPTO", "FUTURES", "OPTIONS"]:
+            ac_stat = by_asset.get(ac, {})
+            print(f"  * {ac}:")
+            print(f"      Trades:   {ac_stat.get('total_trades', 0)}")
+            print(f"      Win Rate: {ac_stat.get('win_rate', 0) * 100:.2f}%")
+            print(f"      Net PnL:  {ac_stat.get('net_realized_pnl', 0):+.4f}")
+
+        print("\nTop 5 Winning Symbols:")
+        if top_winning:
+            for item in top_winning:
+                print(f"  * {item['symbol']}: {item['pnl']:+.4f}")
+        else:
+            print("  * None")
+
+        print("\nTop 5 Losing Symbols:")
+        if top_losing:
+            for item in top_losing:
+                print(f"  * {item['symbol']}: {item['pnl']:+.4f}")
+        else:
+            print("  * None")
+            
+    except Exception as analytics_exc:
+        print(f"[PROFITABILITY ANALYTICS WARN] {analytics_exc}")
+
