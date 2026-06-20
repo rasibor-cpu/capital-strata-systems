@@ -2328,9 +2328,31 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
         pass
         
     if not margin_snapshot:
-        result = {"ok": False, "status": "MARGIN_SNAPSHOT_UNAVAILABLE", "ticket": ticket, "broker_response": {"error": "Failed to retrieve canonical margin state"}}
-        _record_mobile_event({"event_type": "mobile_order_rejected", **result})
-        return result
+        if not is_live_request:
+            from engine.risk.margin_state import MarginState
+            class PaperFallbackMarginSnapshot:
+                def __init__(self):
+                    self.margin_source = "SIMULATED"
+                    self.broker_mode = "PAPER"
+                    self.margin_state = MarginState.NORMAL
+                    self.available_margin = 10000.00
+                    self.required_margin = 0.00
+                    self.utilization_pct = 0.00
+                    self.trade_gate_allowed = True
+                    self.reason = "PAPER_SIMULATED_MARGIN_FALLBACK"
+                    self.buying_power = 10000.00
+                    self.margin_ratio = 0.00
+                    self.broker_name = broker
+            margin_snapshot = PaperFallbackMarginSnapshot()
+            _record_mobile_event({
+                "event_type": "mobile_margin_fallback",
+                "reason": "PAPER_SIMULATED_MARGIN_FALLBACK",
+                "margin_source": "SIMULATED"
+            })
+        else:
+            result = {"ok": False, "status": "MARGIN_SNAPSHOT_UNAVAILABLE", "ticket": ticket, "broker_response": {"error": "Failed to retrieve canonical margin state"}}
+            _record_mobile_event({"event_type": "mobile_order_rejected", **result})
+            return result
 
     # 3. Canonical Market Data
     # Fail closed if authoritative values are unavailable (no synthetic values)
