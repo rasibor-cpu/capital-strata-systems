@@ -2365,6 +2365,20 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
         "engine_mode": ticket["engine_mode"]
     }
     
+    if not is_live_request:
+        market_data.update({
+            "expected_value": 1.0,
+            "signal_score": 1.0,
+            "probability": 0.51,
+            "confidence": 0.51,
+            "validation_source": "MOBILE_PAPER_TEST_DEFAULTS"
+        })
+        _record_mobile_event({
+            "event_type": "mobile_expected_value_fallback",
+            "reason": "MOBILE_PAPER_EXPECTED_VALUE_FALLBACK",
+            "validation_source": "MOBILE_PAPER_TEST_DEFAULTS"
+        })
+    
     orchestrator_decision = orchestrator.evaluate_trade(market_data)
     
     if not orchestrator_decision.get("filters", {}).get("governance_approved", False):
