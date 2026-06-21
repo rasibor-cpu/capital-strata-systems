@@ -622,7 +622,36 @@ price_feed = get_price_feed()
 # This repo currently uses backend.app.accounting.pnl_engine.
 # Keep old dashboard behavior by providing a local Portfolio/Position compatibility layer
 # if the old module path is unavailable.
+# --- CSS Runtime Alert Service (Phase 113Y-2) ---
+css_runtime_alert_service = None
+try:
+    from backend.monitoring.css_alert_service import CSSAlertService
+    from backend.monitoring.css_alert_models import AlertSeverity
+    css_runtime_alert_service = CSSAlertService()
+except Exception as alert_init_e:
+    print(f"[ALERT SERVICE INIT WARN] {alert_init_e}")
 
+def _safe_emit_alert(method_name: str, *args, **kwargs):
+    if not css_runtime_alert_service:
+        return
+    try:
+        method = getattr(css_runtime_alert_service, method_name, None)
+        if method:
+            meta = kwargs.get("metadata", {})
+            if "key" in meta: del meta["key"]
+            meta.update({
+                "component": "css_live_dashboard",
+                "engine_mode": str(ENGINE_MODE),
+                "broker_mode": str(SELECTED_BROKER_MODE)
+            })
+            kwargs["metadata"] = meta
+            if "source" not in kwargs:
+                kwargs["source"] = "css_live_dashboard"
+            method(*args, **kwargs)
+    except Exception as e:
+        print(f"[ALERT EMISSION WARN] {e}")
+
+# === PCNRASS SAFE PNL IMPORT COMPATIBILITY ===
 try:
     from backend.app.pnl.pnl_engine import Portfolio, Position  # legacy path
 except ModuleNotFoundError:
@@ -2989,6 +3018,7 @@ if saved_state and RESUME_PREVIOUS_SESSION:
         "[RECOVERY] Realized PnL restored because CSS_RESUME_SESSION=true; stale open positions not reloaded. "
         "Cycle counter reset."
     )
+    _safe_emit_alert("emit_system_alert", severity=AlertSeverity.INFO, message="CSS Runtime Recovered/Resumed from previous state", metadata={"cycle_counter_reset": True})
 elif saved_state and not RESUME_PREVIOUS_SESSION:
     print("[RECOVERY IGNORED] Previous realized PnL was not restored. Fresh session active. Set CSS_RESUME_SESSION=true to resume.")
 
@@ -3819,6 +3849,7 @@ perform_startup_reconciliation()
 _SESSION_QUIET_MODE_ACTIVATED = False
 
 try:
+    _safe_emit_alert("emit_engine_alert", severity=AlertSeverity.INFO, message="CSS Runtime Engine Started", metadata={"broker_armed": BROKER_EXECUTION_ARMED})
     while True:
         if os.getenv("CSS_TEST_MODE"):
             break
@@ -3838,6 +3869,9 @@ try:
 
         if cycle % 5 == 0 and not is_session_locked():
             perform_continuous_reconciliation()
+
+        if cycle % 60 == 0:
+            _safe_emit_alert("heartbeat", metadata={"cycle": cycle, "open_positions": mtm_engine.count_open_positions()})
 
         print(f"=== Cycle {cycle} | {datetime.now()} ===")
 
@@ -4412,6 +4446,7 @@ try:
 
 except KeyboardInterrupt:
     print("[SESSION STOPPED] Keyboard interrupt received.")
+    _safe_emit_alert("emit_engine_alert", severity=AlertSeverity.INFO, message="CSS Runtime Engine Stopped Normally (KeyboardInterrupt)", metadata={"cycle": cycle})
     close_active_session(
         "keyboard_interrupt",
         extra={
@@ -4428,6 +4463,7 @@ except SystemExit:
 
 except Exception as e:
     print(f"[FATAL ERROR] {str(e)[:200]}")
+    _safe_emit_alert("emit_engine_alert", severity=AlertSeverity.CRITICAL, message=f"Runtime Exception: {str(e)[:200]}", metadata={"exception": type(e).__name__, "cycle": cycle})
     close_active_session(
         "runtime_error",
         extra={
@@ -4442,6 +4478,7 @@ except Exception as e:
     raise
 
 finally:
+    _safe_emit_alert("emit_system_alert", severity=AlertSeverity.INFO, message="CSS Controlled Shutdown Initiated", metadata={"cycle": cycle})
     close_active_session(
         "normal_shutdown",
         extra={
