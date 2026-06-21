@@ -1,0 +1,17 @@
+{
+  "name": "CSS Mobile Launcher",
+  "short_name": "CSS Launch",
+  "description": "One-click mobile launcher for Capital Strata Systems.",
+  "start_url": "/launcher/",
+  "display": "standalone",
+  "background_color": "#121212",
+  "theme_color": "#2196f3",
+  "icons": [
+    {
+      "src": "/static/css_launcher_icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

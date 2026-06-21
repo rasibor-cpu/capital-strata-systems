@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>{{ title }}</title>
+    <link rel="manifest" href="/static/css_launcher_manifest.json">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #121212;
+            color: #ffffff;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .header img {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 10px;
+        }
+        .status-card {
+            background-color: #1e1e1e;
+            border-radius: 12px;
+            padding: 20px;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            margin-bottom: 20px;
+        }
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+        .status-label {
+            color: #aaaaaa;
+        }
+        .status-value {
+            font-weight: bold;
+        }
+        .status-ONLINE { color: #4caf50; }
+        .status-OFFLINE { color: #f44336; }
+        .status-DEGRADED { color: #ff9800; }
+        .status-RUNNING { color: #4caf50; }
+        
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 15px;
+            text-align: center;
+            background-color: #2196f3;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            box-sizing: border-box;
+            border: none;
+        }
+        .btn:disabled {
+            background-color: #555555;
+            color: #888888;
+        }
+        .alert-item {
+            border-left: 3px solid #555;
+            padding-left: 10px;
+            margin-bottom: 10px;
+            font-size: 12px;
+        }
+        .alert-severity-CRITICAL { border-color: #f44336; }
+        .alert-severity-WARNING { border-color: #ff9800; }
+        .alert-severity-INFO { border-color: #2196f3; }
+        
+        .instructions {
+            background-color: #2a2a2a;
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 14px;
+            line-height: 1.5;
+            color: #dddddd;
+            border-left: 4px solid #f44336;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <img src="/static/css_launcher_icon.svg" alt="CSS Icon">
+        <h2>{{ title }}</h2>
+        <div style="font-size: 12px; color: #888;">v{{ version }}</div>
+    </div>
+
+    <div class="status-card">
+        <div class="status-row">
+            <span class="status-label">Backend Status</span>
+            <span class="status-value status-{{ status }}">{{ status }}</span>
+        </div>
+        
+        {% if status == 'OFFLINE' %}
+        <div class="instructions">
+            <strong>CSS backend unavailable</strong><br><br>
+            Please start CSS from Laptop1:<br>
+            <code>python scripts/css_live_dashboard.py</code>
+        </div>
+        {% else %}
+        <div class="status-row">
+            <span class="status-label">Supervisor Status</span>
+            <span class="status-value status-{{ supervisor.status }}">{{ supervisor.status }}</span>
+        </div>
+        <div class="status-row">
+            <span class="status-label">Last Heartbeat</span>
+            <span class="status-value">{{ supervisor.last_heartbeat }}</span>
+        </div>
+        <div class="status-row">
+            <span class="status-label">Restarts</span>
+            <span class="status-value">{{ supervisor.restart_count }}</span>
+        </div>
+        {% endif %}
+    </div>
+
+    {% if status == 'ONLINE' %}
+    <div style="width: 100%; max-width: 400px; margin-bottom: 20px;">
+        <a href="/mobile" class="btn">Open Dashboard</a>
+    </div>
+
+    <div class="status-card">
+        <h3 style="margin-top: 0; font-size: 16px; border-bottom: 1px solid #444; padding-bottom: 10px;">Recent Alerts</h3>
+        {% if recent_alerts %}
+            {% for alert in recent_alerts %}
+            <div class="alert-item alert-severity-{{ alert.severity }}">
+                <div style="color: #888; font-size: 10px;">{{ alert.timestamp }}</div>
+                <div><strong>{{ alert.alert_type }}:</strong> {{ alert.message }}</div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div style="color: #888; font-size: 12px; text-align: center;">No recent alerts found.</div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+</body>
+</html>
