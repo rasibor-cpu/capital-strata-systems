@@ -624,10 +624,13 @@ price_feed = get_price_feed()
 # if the old module path is unavailable.
 # --- CSS Runtime Alert Service (Phase 113Y-2) ---
 css_runtime_alert_service = None
+css_supervisor = None
 try:
     from backend.monitoring.css_alert_service import CSSAlertService
     from backend.monitoring.css_alert_models import AlertSeverity
+    from backend.runtime.css_runtime_supervisor import CSSRuntimeSupervisor
     css_runtime_alert_service = CSSAlertService()
+    css_supervisor = CSSRuntimeSupervisor(alert_service=css_runtime_alert_service)
 except Exception as alert_init_e:
     print(f"[ALERT SERVICE INIT WARN] {alert_init_e}")
 
@@ -3023,6 +3026,8 @@ if saved_state and RESUME_PREVIOUS_SESSION:
         "Cycle counter reset."
     )
     _safe_emit_alert("emit_system_alert", severity=AlertSeverity.INFO, message="CSS Runtime Recovered/Resumed from previous state", metadata={"cycle_counter_reset": True})
+    if css_supervisor:
+        css_supervisor.record_restart("RESUME_PREVIOUS_SESSION")
 elif saved_state and not RESUME_PREVIOUS_SESSION:
     print("[RECOVERY IGNORED] Previous realized PnL was not restored. Fresh session active. Set CSS_RESUME_SESSION=true to resume.")
 
@@ -3854,6 +3859,8 @@ perform_startup_reconciliation()
 _SESSION_QUIET_MODE_ACTIVATED = False
 
 try:
+    if css_supervisor:
+        css_supervisor.start()
     _safe_emit_alert("emit_engine_alert", severity=AlertSeverity.INFO, message="CSS Runtime Engine Started", metadata={"broker_armed": BROKER_EXECUTION_ARMED})
     while True:
         if os.getenv("CSS_TEST_MODE"):
@@ -3877,6 +3884,9 @@ try:
 
         if cycle % 60 == 0:
             _safe_emit_alert("heartbeat", metadata={"cycle": cycle, "open_positions": mtm_engine.count_open_positions()})
+            if css_supervisor:
+                css_supervisor.heartbeat()
+                css_supervisor.check_stale_heartbeat()
 
         print(f"=== Cycle {cycle} | {datetime.now()} ===")
 
@@ -4471,6 +4481,8 @@ except SystemExit:
 
 except Exception as e:
     print(f"[FATAL ERROR] {str(e)[:200]}")
+    if css_supervisor:
+        css_supervisor.record_failure(str(e)[:200])
     _safe_emit_alert("emit_engine_alert", severity=AlertSeverity.CRITICAL, message=f"Runtime Exception: {str(e)[:200]}", metadata={"exception": type(e).__name__, "cycle": cycle})
     close_active_session(
         "runtime_error",
@@ -4486,6 +4498,8 @@ except Exception as e:
     raise
 
 finally:
+    if css_supervisor:
+        css_supervisor.stop()
     _safe_emit_alert("emit_system_alert", severity=AlertSeverity.INFO, message="CSS Controlled Shutdown Initiated", metadata={"cycle": cycle})
     close_active_session(
         "normal_shutdown",

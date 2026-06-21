@@ -68,6 +68,19 @@ class CSSRuntimeSupervisor:
         self.last_heartbeat_at = datetime.now(timezone.utc).isoformat()
         self._persist_state()
 
+    def check_stale_heartbeat(self, stale_threshold_seconds: int = 300) -> bool:
+        if not self.last_heartbeat_at:
+            return False
+        last_dt = datetime.fromisoformat(self.last_heartbeat_at)
+        now_dt = datetime.now(timezone.utc)
+        if (now_dt - last_dt).total_seconds() > stale_threshold_seconds:
+            # We don't record_failure in an infinite loop. We just emit and return.
+            if self.status != "FAILED" and self.status != "DEGRADED":
+                self.record_failure("Heartbeat stale")
+            self._safe_emit("Heartbeat stale detected", AlertSeverity.CRITICAL)
+            return True
+        return False
+
     def record_failure(self, reason: str):
         self.failure_count += 1
         self.last_failure = reason
