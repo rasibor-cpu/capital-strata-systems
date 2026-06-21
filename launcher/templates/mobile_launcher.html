@@ -87,6 +87,12 @@
             line-height: 1.5;
             color: #dddddd;
             border-left: 4px solid #f44336;
+            margin-bottom: 20px;
+        }
+        
+        .install-guide {
+            border-left: 4px solid #2196f3;
+            margin-top: 20px;
         }
     </style>
 </head>
@@ -128,7 +134,8 @@
 
     {% if status == 'ONLINE' %}
     <div style="width: 100%; max-width: 400px; margin-bottom: 20px;">
-        <a href="/mobile" class="btn">Open Dashboard</a>
+        <button onclick="window.location.reload();" class="btn" style="background-color: #444; margin-bottom: 10px;">Refresh Status</button>
+        <a href="{{ dashboard_url }}" class="btn">Open Dashboard</a>
     </div>
 
     <div class="status-card">
@@ -145,6 +152,14 @@
         {% endif %}
     </div>
     {% endif %}
+
+    <div class="instructions install-guide" style="width: 100%; max-width: 370px; margin-top: 30px;">
+        <strong>Android Install Guide</strong><br><br>
+        To install this launcher to your Home Screen:<br>
+        1. Tap the <strong>three dots</strong> (menu) in Chrome.<br>
+        2. Select <strong>Add to Home screen</strong>.<br>
+        3. Confirm to add the CSS Launch icon.
+    </div>
 
 </body>
 </html>

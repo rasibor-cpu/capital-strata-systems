@@ -101,3 +101,51 @@ def test_launcher_does_not_expose_secrets(launcher_temp_dir):
     assert "token" not in context_str
     assert "secret" not in context_str
     assert "key" not in context_str
+
+def test_malformed_state_handled_safely(launcher_temp_dir):
+    os.makedirs(os.path.dirname(LauncherConfig.SUPERVISOR_STATE_FILE), exist_ok=True)
+    with open(LauncherConfig.SUPERVISOR_STATE_FILE, "w") as f:
+        f.write("{ INVALID JSON ]")
+    
+    summary = get_supervisor_summary()
+    assert summary["status"] == "ERROR"
+    assert "Expecting property name" in summary["message"] or "decode" in summary["message"].lower()
+
+from fastapi.testclient import TestClient
+from launcher.css_mobile_launcher import app
+
+client = TestClient(app)
+
+def test_launcher_routes_load(launcher_temp_dir):
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert LauncherConfig.TITLE in response.text
+    
+    response = client.get("/mobile-launcher")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+
+def test_launcher_manifest_and_icon_routes():
+    response = client.get("/manifest.json")
+    assert response.status_code == 200
+    assert response.json()["name"] == "CSS Mobile Launcher"
+    
+    response = client.get("/static/css_launcher_icon.svg")
+    assert response.status_code == 200
+    assert "image/svg+xml" in response.headers["content-type"]
+
+def test_launcher_health_and_status_routes(launcher_temp_dir):
+    response = client.get("/health")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "healthy"
+    assert data["service"] == "css_mobile_launcher"
+    
+    response = client.get("/status")
+    assert response.status_code == 200
+    data = response.json()
+    assert "backend_available" in data
+    assert "supervisor_status" in data
+    assert "alert_summary" in data
+    assert "dashboard_url" in data
