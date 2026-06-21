@@ -130,6 +130,11 @@ def test_launcher_routes_load(launcher_temp_dir):
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
     assert LauncherConfig.TITLE in response.text
+    
+    response = client.get("/mobile")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert LauncherConfig.TITLE in response.text
 
 def test_launcher_manifest_and_icon_routes():
     response = client.get("/manifest.json")
