@@ -125,13 +125,25 @@ def test_launcher_routes_load(launcher_temp_dir):
     response = client.get("/mobile-launcher")
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
+    
+    response = client.get("/launcher/")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert LauncherConfig.TITLE in response.text
 
 def test_launcher_manifest_and_icon_routes():
     response = client.get("/manifest.json")
     assert response.status_code == 200
-    assert response.json()["name"] == "CSS Mobile Launcher"
+    data = response.json()
+    assert data["name"] == "CSS Mobile Launcher"
+    assert data["start_url"] == "/mobile-launcher"
+    assert data["scope"] == "/"
     
     response = client.get("/static/css_launcher_icon.svg")
+    assert response.status_code == 200
+    assert "image/svg+xml" in response.headers["content-type"]
+
+    response = client.get("/favicon.ico")
     assert response.status_code == 200
     assert "image/svg+xml" in response.headers["content-type"]
 

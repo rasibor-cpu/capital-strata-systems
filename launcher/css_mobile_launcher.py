@@ -82,6 +82,7 @@ async def launcher_home(request: Request):
     return templates.TemplateResponse("mobile_launcher.html", context)
 
 @launcher_router.get("/mobile-launcher", response_class=HTMLResponse)
+@launcher_router.get("/launcher/", response_class=HTMLResponse)
 async def launcher_home_alias(request: Request):
     context = build_launcher_context()
     context["request"] = request
@@ -111,6 +112,10 @@ async def status_check():
 @launcher_router.get("/manifest.json")
 async def get_manifest():
     return FileResponse(os.path.join(os.path.dirname(__file__), "static", "css_launcher_manifest.json"))
+
+@launcher_router.get("/favicon.ico")
+async def get_favicon():
+    return FileResponse(os.path.join(os.path.dirname(__file__), "static", "css_launcher_icon.svg"), media_type="image/svg+xml")
 
 app.include_router(launcher_router)
 
