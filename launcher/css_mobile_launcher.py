@@ -61,6 +61,133 @@ def get_mobile_launcher_status() -> str:
         return "ONLINE"
     return "OFFLINE"
 
+def get_runtime_summary() -> Dict[str, Any]:
+    state_file = LauncherConfig.SESSION_STATE_FILE
+    summary = {
+        "runtime_mode": "UNKNOWN",
+        "current_cycle": 0,
+        "last_update": "None"
+    }
+    try:
+        if os.path.exists(state_file):
+            with open(state_file, "r") as f:
+                state = json.load(f)
+                session = state.get("session", {})
+                summary["runtime_mode"] = session.get("engine_mode", "UNKNOWN")
+                summary["current_cycle"] = session.get("cycle_number", 0)
+                summary["last_update"] = state.get("last_updated", session.get("start_time", "None"))
+    except Exception:
+        pass
+    
+    supervisor = get_supervisor_summary()
+    summary["supervisor_status"] = supervisor.get("status", "UNKNOWN")
+    summary["last_heartbeat"] = supervisor.get("last_heartbeat", "None")
+    summary["restart_count"] = supervisor.get("restart_count", 0)
+    summary["failure_count"] = supervisor.get("failure_count", 0)
+    summary["status"] = get_mobile_launcher_status()
+    
+    return summary
+
+def get_account_summary() -> Dict[str, Any]:
+    state_file = LauncherConfig.ACCOUNT_STATE_FILE
+    summary = {
+        "cash": 0.0,
+        "equity": 0.0,
+        "buying_power": 0.0,
+        "open_pnl": 0.0,
+        "realized_pnl": 0.0,
+        "total_pnl": 0.0
+    }
+    try:
+        if os.path.exists(state_file):
+            with open(state_file, "r") as f:
+                state = json.load(f)
+                summary["cash"] = state.get("account_balance", 0.0)
+                summary["equity"] = state.get("total_equity", state.get("account_balance", 0.0))
+                summary["buying_power"] = state.get("buying_power", summary["cash"])
+                summary["realized_pnl"] = state.get("lifetime_realized_pnl", 0.0)
+                # In absence of full PnL snapshot, we estimate or use available data
+                summary["open_pnl"] = state.get("unrealized_pnl", 0.0)
+                summary["total_pnl"] = summary["realized_pnl"] + summary["open_pnl"]
+    except Exception:
+        pass
+    return summary
+
+def get_trade_summary() -> Dict[str, Any]:
+    summary = {
+        "open_trades_count": 0,
+        "closed_trades_count": 0,
+        "pending_orders_count": 0,
+        "recent_activity": []
+    }
+    
+    try:
+        if os.path.exists(LauncherConfig.SESSION_STATE_FILE):
+            with open(LauncherConfig.SESSION_STATE_FILE, "r") as f:
+                state = json.load(f)
+                assets = state.get("assets", {})
+                # Count assets with non-zero balance as open trades
+                open_trades = [k for k, v in assets.items() if isinstance(v, (int, float)) and v > 0]
+                summary["open_trades_count"] = len(open_trades)
+    except Exception:
+        pass
+        
+    try:
+        if os.path.exists(LauncherConfig.CLOSED_TRADE_LEDGER_PATH):
+            with open(LauncherConfig.CLOSED_TRADE_LEDGER_PATH, "r") as f:
+                lines = f.readlines()
+                summary["closed_trades_count"] = len(lines)
+                
+                # Get last 5 trades
+                recent = []
+                for line in reversed(lines[-5:]):
+                    try:
+                        recent.append(json.loads(line))
+                    except Exception:
+                        pass
+                summary["recent_activity"] = recent
+    except Exception:
+        pass
+        
+    return summary
+
+def get_engine_summary() -> Dict[str, Any]:
+    state_file = LauncherConfig.SESSION_STATE_FILE
+    summary = {
+        "engine_mode": "UNKNOWN",
+        "current_strategy": "NONE",
+        "trade_gate_status": "UNKNOWN",
+        "runtime_readiness": "OFFLINE"
+    }
+    try:
+        if os.path.exists(state_file):
+            with open(state_file, "r") as f:
+                state = json.load(f)
+                session = state.get("session", {})
+                summary["engine_mode"] = session.get("engine_mode", "UNKNOWN")
+                summary["current_strategy"] = session.get("strategy", "DEFAULT")
+                summary["trade_gate_status"] = "OPEN" if session.get("engine_mode") == "LIVE" else "SIMULATED"
+                summary["runtime_readiness"] = "ONLINE"
+    except Exception:
+        pass
+    return summary
+
+def build_mobile_dashboard_context() -> Dict[str, Any]:
+    return {
+        "title": "CSS Mobile Dashboard",
+        "version": LauncherConfig.VERSION,
+        "runtime": get_runtime_summary(),
+        "account": get_account_summary(),
+        "trade": get_trade_summary(),
+        "alerts": get_alert_summary(),
+        "engine": get_engine_summary(),
+        "health": {
+            "backend_available": get_mobile_launcher_status() == "ONLINE",
+            "supervisor_status": get_supervisor_summary().get("status", "UNKNOWN"),
+            "dashboard_status": "ONLINE"
+        }
+    }
+
 def build_launcher_context() -> Dict[str, Any]:
     status = get_mobile_launcher_status()
     supervisor = get_supervisor_summary()
@@ -83,11 +210,17 @@ async def launcher_home(request: Request):
 
 @launcher_router.get("/mobile-launcher", response_class=HTMLResponse)
 @launcher_router.get("/launcher/", response_class=HTMLResponse)
-@launcher_router.get("/mobile", response_class=HTMLResponse)
 async def launcher_home_alias(request: Request):
     context = build_launcher_context()
     context["request"] = request
     return templates.TemplateResponse("mobile_launcher.html", context)
+
+@launcher_router.get("/mobile-dashboard", response_class=HTMLResponse)
+@launcher_router.get("/mobile", response_class=HTMLResponse)
+async def mobile_dashboard(request: Request):
+    context = build_mobile_dashboard_context()
+    context["request"] = request
+    return templates.TemplateResponse("mobile_dashboard.html", context)
 
 @launcher_router.get("/health")
 async def health_check():
