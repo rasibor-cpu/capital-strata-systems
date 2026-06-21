@@ -1435,10 +1435,11 @@ def touch_active_session() -> dict[str, Any]:
 
 
 def activate_defensive_expiry_mode(reason: str, cycle: int, last_trade: str) -> dict[str, Any]:
-    get_alert_service().dispatch_alert(
-        AlertEventType.EMERGENCY_SHUTDOWN,
-        f"Defensive expiry mode activated: {reason}",
-        {"cycle": cycle, "last_trade": last_trade}
+    _safe_emit_alert(
+        "emit_system_alert",
+        severity=AlertSeverity.CRITICAL,
+        message=f"Defensive expiry mode activated: {reason}",
+        metadata={"cycle": cycle, "last_trade": last_trade}
     )
     lock_session(reason)
 
@@ -1983,10 +1984,11 @@ def approve_trade_before_register(asset_class: str, symbol: str, sig: float, pro
 
     if not decision.get("approved", False):
         try:
-            get_alert_service().dispatch_alert(
-                AlertEventType.TRADE_BLOCKED,
-                f"Trade blocked by unified gate: {asset_class} {symbol} ({decision.get('reason')})",
-                {"asset": asset_class, "symbol": symbol, "reason": decision.get("reason")}
+            _safe_emit_alert(
+                "emit_risk_alert",
+                severity=AlertSeverity.WARNING,
+                message=f"Trade blocked by unified gate: {asset_class} {symbol} ({decision.get('reason')})",
+                metadata={"asset": asset_class, "symbol": symbol, "reason": decision.get("reason")}
             )
             audit_ledger.record(
                 "unified_trade_gate_reject",
@@ -2153,10 +2155,11 @@ class CapitalDeploymentGovernor:
 
     def set_live_mode(self) -> None:
         self.paper_mode = False
-        get_alert_service().dispatch_alert(
-            AlertEventType.LIVE_MODE_ARMED,
-            "Capital Governor armed for LIVE mode execution",
-            {"capital_source": self.capital_source_label()}
+        _safe_emit_alert(
+            "emit_risk_alert",
+            severity=AlertSeverity.INFO,
+            message="Capital Governor armed for LIVE mode execution",
+            metadata={"capital_source": self.capital_source_label()}
         )
         self.refresh_real_balance()
 
@@ -2971,10 +2974,11 @@ def can_open_position(
         current_dd = float(getattr(pnl_tracker, "max_drawdown", 0.0))
         if current_dd >= 0.05:
             print(f"[R16B BLOCK] Drawdown limit reached: {current_dd:.2%}")
-            get_alert_service().dispatch_alert(
-                AlertEventType.DRAWDOWN_BREACHED,
-                f"Drawdown limit reached: {current_dd:.2%}",
-                {"current_dd": current_dd, "threshold": 0.05}
+            _safe_emit_alert(
+                "emit_risk_alert",
+                severity=AlertSeverity.CRITICAL,
+                message=f"Drawdown limit reached: {current_dd:.2%}",
+                metadata={"current_dd": current_dd, "threshold": 0.05}
             )
             return False, "DRAWDOWN_LIMIT"
     except Exception:
@@ -3373,10 +3377,11 @@ def r17_execute_exit(pos, observer_symbol, observer_price, reason):
         book_position_exit(pos, reason)
 
         if reason == "TAKE_PROFIT":
-            get_alert_service().dispatch_alert(
-                AlertEventType.PROFIT_TARGET_REACHED,
-                f"Profit target reached for {observer_symbol} at price {observer_price}",
-                {"symbol": observer_symbol, "price": observer_price, "reason": reason}
+            _safe_emit_alert(
+                "emit_trade_alert",
+                severity=AlertSeverity.INFO,
+                message=f"Profit target reached for {observer_symbol} at price {observer_price}",
+                metadata={"symbol": observer_symbol, "price": observer_price, "reason": reason}
             )
 
         # 2. Close observer position (PnL)
@@ -3420,6 +3425,7 @@ def book_position_exit(pos: dict, reason: str) -> None:
 
     pos["forced_exit"] = True
     pos["exit_reason"] = reason
+    _safe_emit_alert("emit_trade_alert", severity=AlertSeverity.INFO, message=f"Trade Closed: {pos['symbol']} ({reason})", metadata={"symbol": pos["symbol"], "reason": reason, "realized": realized})
 
     cluster_risk_governor.release_cluster_slot(pos["cluster_name"])
 
@@ -3435,6 +3441,7 @@ def book_position_exit(pos: dict, reason: str) -> None:
     cluster_amplifier.record_cluster_win(pos["symbol"], realized)
 
     if reason in {"STOP", "FAST_STOP"}:
+        _safe_emit_alert("emit_trade_alert", severity=AlertSeverity.WARNING, message=f"Loss threshold reached for {pos['symbol']}", metadata={"symbol": pos["symbol"], "reason": reason, "realized": realized})
         locked_profit_ledger.record_forced_exit(pos["position_id"], realized)
     elif reason == "TAKE_PROFIT":
         locked_profit_ledger.record_priority_exit()
@@ -3501,10 +3508,11 @@ def print_oanda_broker_status() -> None:
                 f"error={summary.get('error')}"
             )
             runtime_supervisor.record_broker_disconnect("OANDA", f"{summary.get('status')} {summary.get('error')}")
-            get_alert_service().dispatch_alert(
-                AlertEventType.BROKER_CONNECTION_FAILURE,
-                f"OANDA Connection Error: {summary.get('status')} {summary.get('error')}",
-                {"broker": "OANDA", "status": summary.get("status"), "error": summary.get("error")}
+            _safe_emit_alert(
+                "emit_broker_alert",
+                severity=AlertSeverity.CRITICAL,
+                message=f"OANDA Connection Error: {summary.get('status')} {summary.get('error')}",
+                metadata={"broker": "OANDA", "status": summary.get("status"), "error": summary.get("error")}
             )
             print(f"OANDA BASE URL: {resolved_base or 'NOT SET'}")
             print("OANDA OPEN TRADES: ERR")
@@ -3522,13 +3530,11 @@ def print_oanda_broker_status() -> None:
     except Exception as e:
         print(f"OANDA ERROR: {str(e)[:60]}")
         runtime_supervisor.record_broker_disconnect("OANDA", str(e)[:60])
-        get_alert_service().dispatch_alert(
-            AlertEventType.BROKER_CONNECTION_FAILURE,
-            f"OANDA Connection Exception: {str(e)[:60]}",
-            {"broker": "OANDA", "error": str(e)[:60]}
-        )
+        _safe_emit_alert("emit_broker_alert", severity=AlertSeverity.CRITICAL, message=f"OANDA Connection Exception: {str(e)[:60]}", metadata={"broker": "OANDA", "error": str(e)[:60]})
         print(f"OANDA BASE URL: {resolved_base or 'NOT SET'}")
         print("OANDA OPEN TRADES: ERR")
+    else:
+        _safe_emit_alert("emit_broker_alert", severity=AlertSeverity.INFO, message="OANDA Broker Connected Successfully", metadata={"broker": "OANDA"})
 
 
 def print_coinbase_broker_status() -> None:
@@ -3569,10 +3575,11 @@ def print_coinbase_broker_status() -> None:
 
             if not ok:
                 runtime_supervisor.record_broker_disconnect("COINBASE", "ping_live_auth failed or returned not OK")
-                get_alert_service().dispatch_alert(
-                    AlertEventType.BROKER_CONNECTION_FAILURE,
-                    "Coinbase ping_live_auth failed or returned not OK",
-                    {"broker": "COINBASE", "ping": ping}
+                _safe_emit_alert(
+                    "emit_broker_alert",
+                    severity=AlertSeverity.CRITICAL,
+                    message="Coinbase ping_live_auth failed or returned not OK",
+                    metadata={"broker": "COINBASE", "ping": ping}
                 )
 
             if isinstance(ping, dict) and "account_count" in ping:
@@ -3582,15 +3589,13 @@ def print_coinbase_broker_status() -> None:
 
         configured = bool(coinbase.is_configured()) if hasattr(coinbase, "is_configured") else True
         print(f"COINBASE CONNECTED: {'YES' if configured else 'NO'}")
+        if configured:
+            _safe_emit_alert("emit_broker_alert", severity=AlertSeverity.INFO, message="COINBASE Broker Connected Successfully", metadata={"broker": "COINBASE"})
 
     except Exception as e:
         print(f"COINBASE ERROR: {str(e)[:60]}")
         runtime_supervisor.record_broker_disconnect("COINBASE", str(e)[:60])
-        get_alert_service().dispatch_alert(
-            AlertEventType.BROKER_CONNECTION_FAILURE,
-            f"Coinbase Connection Exception: {str(e)[:60]}",
-            {"broker": "COINBASE", "error": str(e)[:60]}
-        )
+        _safe_emit_alert("emit_broker_alert", severity=AlertSeverity.CRITICAL, message=f"Coinbase Connection Exception: {str(e)[:60]}", metadata={"broker": "COINBASE", "error": str(e)[:60]})
 
 
 def broker_execution_status_label() -> str:
@@ -4206,10 +4211,11 @@ try:
                 _SESSION_QUIET_MODE_ACTIVATED = True
                 print("[SESSION EXPIRED QUIET MODE] Trading attempts paused until re-authentication.")
                 try:
-                    get_alert_service().dispatch_alert(
-                        AlertEventType.INFO,
-                        "Session Expired Quiet Mode activated. Trading paused.",
-                        {"cycle": cycle}
+                    _safe_emit_alert(
+                        "emit_system_alert",
+                        severity=AlertSeverity.WARNING,
+                        message="Session Expired Quiet Mode activated. Trading paused.",
+                        metadata={"cycle": cycle}
                     )
                 except Exception:
                     pass
@@ -4364,8 +4370,10 @@ try:
 
                     else:
                         last_trade = f"{symbol} PAPER_OPENED"
+                        _safe_emit_alert("emit_trade_alert", severity=AlertSeverity.INFO, message=f"Paper Trade Opened: {symbol}", metadata={"symbol": symbol, "asset_class": asset_class})
                         print(f"[{asset_class} PAPER OPENED] {symbol}")
         else:
+            _safe_emit_alert("emit_risk_alert", severity=AlertSeverity.WARNING, message="Capital Governor restriction: hard open-position cap reached")
             print("[SIGNAL GENERATION PAUSED] hard open-position cap reached")
 
 
