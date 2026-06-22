@@ -1108,6 +1108,65 @@ def _mobile_charts_html() -> str:
     return html_out
 
 
+def _runtime_heartbeat_html() -> str:
+    artifacts_dir = os.path.join(os.getcwd(), "artifacts")
+    latest_mtime = 0.0
+    
+    for filename in [
+        "css_session_state_pcnrass.json",
+        "css_account_state_pcnrass.json",
+        "css_session_recovery.json",
+        "css_account_state_pcnrass_BACKUP.json"
+    ]:
+        path = os.path.join(artifacts_dir, filename)
+        if os.path.exists(path):
+            mtime = os.path.getmtime(path)
+            if mtime > latest_mtime:
+                latest_mtime = mtime
+                
+    import time
+    from datetime import datetime
+    now = time.time()
+    if latest_mtime > 0:
+        age_seconds = int(now - latest_mtime)
+        if age_seconds < 60:
+            status = "ACTIVE"
+            status_class = "success"
+        else:
+            status = "STALE"
+            status_class = "warning"
+        
+        if age_seconds < 60:
+            age_str = f"{age_seconds}s ago"
+        elif age_seconds < 3600:
+            age_str = f"{age_seconds // 60}m ago"
+        else:
+            age_str = f"{age_seconds // 3600}h {age_seconds % 3600 // 60}m ago"
+            
+        heartbeat_msg = f"Last heartbeat: {age_str}"
+    else:
+        status = "OFFLINE"
+        status_class = "error"
+        heartbeat_msg = "No runtime artifacts found"
+        
+    refresh_time = datetime.now().strftime("%H:%M:%S")
+    
+    return f'''
+    <section class="metric-grid" aria-label="Runtime Heartbeat" style="margin-bottom: 12px;">
+      <article style="border-left: 4px solid var(--{status_class}); padding-left: 8px;">
+        <strong>Runtime Heartbeat</strong>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+            <span style="font-weight: bold; color: var(--{status_class});">{status}</span>
+            <span style="font-size: 11px; color: var(--muted);">{heartbeat_msg}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line);">
+            <span style="font-size: 11px; color: var(--muted);">Page updated: {refresh_time}</span>
+            <button onclick="window.location.reload();" style="font-size: 11px; padding: 4px 12px; background: var(--panel); color: var(--teal); border: 1px solid var(--teal); border-radius: 4px; cursor: pointer; font-weight: bold;">Refresh</button>
+        </div>
+      </article>
+    </section>
+    '''
+
 def _dashboard_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
     dashboard_text = _mobile_dashboard_text(user_ctx, session)
     dashboard_payload = _mobile_dashboard_payload(user_ctx, session)
@@ -1122,6 +1181,7 @@ def _dashboard_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
         <main class="dashboard-shell">
           {_header("Dashboard", user_ctx, "dashboard")}
           {_identity_strip(user_ctx, "Mobile Role Access")}
+          {_runtime_heartbeat_html()}
 
           <section class="metric-grid" aria-label="Dashboard summary">
             <article><strong>System</strong><span>{system_mode}</span></article>
@@ -1140,6 +1200,7 @@ def _dashboard_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
           </section>
         </main>
         """,
+        meta_refresh=30
     )
 
 
@@ -1209,11 +1270,13 @@ def _trade_summary_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> st
         f"""
         <main class="dashboard-shell">
           {_header("CSS Trade Summary", user_ctx, "trade-summary")}
+          {_runtime_heartbeat_html()}
           <section class="metric-grid" aria-label="Trade Summary" style="display: block;">
             {content}
           </section>
         </main>
-        """
+        """,
+        meta_refresh=30
     )
 
 
@@ -1403,6 +1466,7 @@ def _positions_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
         <main class="dashboard-shell">
           {_header("Positions", user_ctx, "positions")}
           {_identity_strip(user_ctx, "Position Inventory")}
+          {_runtime_heartbeat_html()}
           <section class="metric-grid" aria-label="Position summary">
             <article><strong>Total Open</strong><span>{html.escape(str(open_positions.get("total", 0)))}</span></article>
             <article><strong>Crypto</strong><span>{html.escape(str(by_asset.get("CRYPTO", 0)))}</span></article>
@@ -1420,6 +1484,7 @@ def _positions_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
           </section>
         </main>
         """,
+        meta_refresh=30
     )
 
 
@@ -1435,6 +1500,7 @@ def _history_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
         <main class="dashboard-shell">
           {_header("Trade / Execution History", user_ctx, "history")}
           {_identity_strip(user_ctx, "Audit Trail")}
+          {_runtime_heartbeat_html()}
           <section class="metric-grid" aria-label="History summary">
             <article><strong>Visible Events</strong><span>{len(events)}</span></article>
             <article><strong>Audit Source</strong><span>JSONL</span></article>
@@ -1452,6 +1518,7 @@ def _history_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
           </section>
         </main>
         """,
+        meta_refresh=30
     )
 
 
@@ -1469,6 +1536,7 @@ def _risk_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
         <main class="dashboard-shell">
           {_header("Risk Control Center", user_ctx, "risk")}
           {_identity_strip(user_ctx, "Risk Oversight")}
+          {_runtime_heartbeat_html()}
           <section class="metric-grid" aria-label="Risk control center">
             <article><strong>Risk State</strong><span>{html.escape(str(risk.get("risk_state", "NORMAL")))}</span></article>
             <article><strong>Gate</strong><span>{html.escape(str(risk.get("gate_status", "OPEN")))}</span></article>
@@ -1485,6 +1553,7 @@ def _risk_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
           </section>
         </main>
         """,
+        meta_refresh=30
     )
 
 
@@ -1508,6 +1577,7 @@ def _governance_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
         <main class="dashboard-shell">
           {_header("Governance Center", user_ctx, "governance")}
           {_identity_strip(user_ctx, "Authority And Audit")}
+          {_runtime_heartbeat_html()}
           <section class="metric-grid" aria-label="Governance center">
             <article><strong>Governance</strong><span>{_yes_no(governance.get("governance_enabled"))}</span></article>
             <article><strong>Session Locked</strong><span>{_yes_no(governance.get("session_locked"))}</span></article>
@@ -1522,6 +1592,7 @@ def _governance_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
           </section>
         </main>
         """,
+        meta_refresh=30
     )
 
 
@@ -1535,6 +1606,7 @@ def _opportunities_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> st
         <main class="dashboard-shell">
           {_header("Opportunity Monitor", user_ctx, "opportunities")}
           {_identity_strip(user_ctx, "Monitor Only")}
+          {_runtime_heartbeat_html()}
           <section class="data-panel" aria-label="Opportunity monitor">
             <h2>Opportunity Monitor</h2>
             <p class="muted">This screen is observational. Trade execution remains governed by CSS tickets, role authority, order controls, and broker gates.</p>
@@ -1547,6 +1619,7 @@ def _opportunities_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> st
           </section>
         </main>
         """,
+        meta_refresh=30
     )
 
 
@@ -1559,6 +1632,7 @@ def _market_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
         <main class="dashboard-shell">
           {_header("Market Regime Panel", user_ctx, "market")}
           {_identity_strip(user_ctx, "Regime And Microstructure")}
+          {_runtime_heartbeat_html()}
           <section class="metric-grid" aria-label="Market regime panel">
             <article><strong>Trend</strong><span>{html.escape(str(market.get("trend_state", "UNKNOWN")))}</span></article>
             <article><strong>Volatility</strong><span>{html.escape(str(market.get("volatility_state", "UNKNOWN")))}</span></article>
@@ -1583,6 +1657,7 @@ def _market_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
           </section>
         </main>
         """,
+        meta_refresh=30
     )
 
 
@@ -1604,6 +1679,7 @@ def _broker_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
         <main class="dashboard-shell">
           {_header("Broker Control Panel", user_ctx, "broker")}
           {_identity_strip(user_ctx, "Broker Readiness")}
+          {_runtime_heartbeat_html()}
           <section class="metric-grid" aria-label="Broker control panel">
             <article><strong>Selected</strong><span>{html.escape(str(broker.get("selected_broker", "MOBILE")))}</span></article>
             <article><strong>Mode</strong><span>{html.escape(str(status["runtime_mode"]).title())}</span></article>
@@ -1620,6 +1696,7 @@ def _broker_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
           </section>
         </main>
         """,
+        meta_refresh=30
     )
 
 
@@ -1631,6 +1708,7 @@ def _margin_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
         <main class="dashboard-shell">
           {_header("Margin Visibility", user_ctx, "margin")}
           {_identity_strip(user_ctx, "Margin Read-Only")}
+          {_runtime_heartbeat_html()}
           
           <section class="data-panel" aria-label="Margin Snapshot">
             <h2 id="margin-state-header">State PENDING</h2>
@@ -1704,7 +1782,8 @@ def _margin_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
           document.querySelector("[data-refresh-margin]").addEventListener("click", refreshMargin);
           refreshMargin().catch(() => undefined);
         </script>
-        """
+        """,
+        meta_refresh=30
     )
 
 
@@ -1734,6 +1813,7 @@ def _audit_page(
         <main class="dashboard-shell">
           {_header("Audit Trail Viewer", user_ctx, "audit")}
           {_identity_strip(user_ctx, "Read Only Audit")}
+          {_runtime_heartbeat_html()}
 
           <section class="metric-grid" aria-label="Audit summary">
             <article><strong>Visible Events</strong><span>{summary["event_count"]}</span></article>
@@ -1774,6 +1854,7 @@ def _audit_page(
           </section>
         </main>
         """,
+        meta_refresh=30
     )
 
 
@@ -1837,6 +1918,7 @@ def _controls_page(
         <main class="dashboard-shell">
           {_header("System Controls", user_ctx, "controls")}
           {_identity_strip(user_ctx, "Control Authority" if can_manage else "View Only")}
+          {_runtime_heartbeat_html()}
           {_status_markup(message, status)}
 
           <section class="form-panel trade-form-panel" aria-label="Mobile runtime controls">
@@ -1887,6 +1969,7 @@ def _controls_page(
           </section>
         </main>
         """,
+        meta_refresh=30
     )
 
 
@@ -1914,6 +1997,7 @@ def _users_page(
         <main class="dashboard-shell">
           {_header("Users", user_ctx, "users")}
           {_identity_strip(user_ctx, "SUPER_USER Administration")}
+          {_runtime_heartbeat_html()}
           {_status_markup(message, status)}
 
           <section class="data-panel" aria-label="CSS users">
@@ -1958,6 +2042,7 @@ def _users_page(
           </section>
         </main>
         """,
+        meta_refresh=30
     )
 
 
@@ -2177,6 +2262,7 @@ def _access_denied_page(user_ctx: Dict[str, Any], message: str) -> str:
           {_status_markup(message, "error")}
         </main>
         """,
+        meta_refresh=30
     )
 
 
@@ -2337,6 +2423,7 @@ def _trade_ticket_page(
         <main class="dashboard-shell">
           {_header("Trade Ticket", user_ctx, "trade")}
           {_identity_strip(user_ctx, f"Broker Gate {live_flag}")}
+          {_runtime_heartbeat_html()}
 
           {_trade_readiness_panel(user_ctx)}
 
@@ -2354,6 +2441,7 @@ def _trade_ticket_page(
           {_recent_tickets_panel()}
         </main>
         """,
+        meta_refresh=30
     )
 
 
@@ -2700,14 +2788,15 @@ def _status_markup(message: str, status: str) -> str:
     return f'<p class="status {safe_status}">{safe_message}</p>'
 
 
-def _page(title: str, body: str) -> str:
+def _page(title: str, body: str, meta_refresh: int = 0) -> str:
     safe_title = html.escape(title)
+    refresh_tag = f'\n  <meta http-equiv="refresh" content="{meta_refresh}">' if meta_refresh > 0 else ""
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#10202a">
+  <meta name="theme-color" content="#10202a">{refresh_tag}
   <title>CSS - {safe_title}</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <style>{_css()}</style>
@@ -3316,6 +3405,7 @@ def _alerts_page(user_ctx: Dict[str, Any]) -> str:
         <main class="dashboard-shell">
           {_header("Alert Centre", user_ctx, "alerts")}
           {_identity_strip(user_ctx, "Read Only Access")}
+          {_runtime_heartbeat_html()}
           
           <section class="metric-grid" aria-label="Alerts Summary">
             <article><strong>Total Alerts</strong><span>{len(alerts)}</span></article>
@@ -3328,7 +3418,8 @@ def _alerts_page(user_ctx: Dict[str, Any]) -> str:
             {alerts_html}
           </section>
         </main>
-        '''
+        ''',
+        meta_refresh=30
     )
 
 
@@ -3372,7 +3463,8 @@ def _trade_status_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str
                 <div class="alert error">DATA UNAVAILABLE: No active CSS runtime session found. Cannot load canonical state.</div>
               </section>
             </main>
-            '''
+            ''',
+            meta_refresh=30
         )
 
     snapshot = {}
@@ -3455,6 +3547,7 @@ def _trade_status_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str
         <main class="dashboard-shell">
           {_header("Trade Status Summary", user_ctx, "trade-status")}
           {_identity_strip(user_ctx, "Status: Canonical")}
+          {_runtime_heartbeat_html()}
           <section class="metric-grid" aria-label="Account Balances">
             <article><strong>Account balance</strong><span>{snapshot.get("account_balance", "DATA UNAVAILABLE")}</span></article>
             <article><strong>Cash</strong><span>{snapshot.get("available_cash", "DATA UNAVAILABLE")}</span></article>
