@@ -234,21 +234,18 @@ def build_launcher_context() -> Dict[str, Any]:
 @launcher_router.get("/", response_class=HTMLResponse)
 async def launcher_home(request: Request):
     context = build_launcher_context()
-    context["request"] = request
     return templates.TemplateResponse(request, "mobile_launcher.html", context)
 
 @launcher_router.get("/mobile-launcher", response_class=HTMLResponse)
 @launcher_router.get("/launcher/", response_class=HTMLResponse)
 async def launcher_home_alias(request: Request):
     context = build_launcher_context()
-    context["request"] = request
     return templates.TemplateResponse(request, "mobile_launcher.html", context)
 
 @launcher_router.get("/mobile-dashboard", response_class=HTMLResponse)
 @launcher_router.get("/mobile", response_class=HTMLResponse)
 async def mobile_dashboard(request: Request):
     context = build_mobile_dashboard_context()
-    context["request"] = request
     return templates.TemplateResponse(request, "mobile_dashboard.html", context)
 
 @launcher_router.get("/health")
