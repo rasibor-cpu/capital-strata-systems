@@ -70,7 +70,23 @@ def main() -> None:
     # Micro trade
     order = OrderRequest(symbol="EUR_USD", side="BUY", units=1, order_type="MARKET")
     print("Placing DEMO micro trade (EUR_USD, BUY 1 unit)...")
-    result = adapter.place_order(order=order)
+    result = adapter.place_order(
+        order=order,
+        # ── Live firewall parameters ──────────────────────────────────────────
+        # This runner is PRACTICE-ONLY (OANDA_ENV=practice asserted above).
+        # broker_mode="paper" is intentional: the firewall will block at
+        # condition 2 unless live mode is explicitly selected, which this
+        # runner never does. This documents the practice-only constraint in code.
+        broker_mode="paper",
+        broker_execution_armed=armed,
+        governance_approved=False,  # no governance approval pathway in demo runner
+        controls={},
+        user_context={
+            "user_id": "demo_guarded_runner",
+            "role": "SUPER_USER",
+            "role_profile": {"can_execute_live_trading": False},  # practice only
+        },
+    )
 
     print("\nORDER RESULT")
     print("-" * 40)

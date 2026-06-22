@@ -2469,6 +2469,21 @@ def attempt_oanda_fx_execution(symbol: str, expected_price: float | None = None)
             units=FX_LIVE_UNITS,
             order_type="MARKET",
             price_bound=price_bound_val,
+            # ── Live firewall parameters ──────────────────────────────────────
+            # broker_mode: SELECTED_BROKER_MODE is the operator-confirmed mode
+            # (paper or live) already validated by select_broker_execution_config().
+            broker_mode=str(SELECTED_BROKER_MODE).lower(),
+            # broker_execution_armed: BROKER_EXECUTION_ARMED global, set at startup
+            # by the operator arming sequence and verified by the check above.
+            broker_execution_armed=BROKER_EXECUTION_ARMED,
+            # governance_approved: role_profile.can_execute_live_trading has already
+            # been checked for live mode; grant approval only when that flag is set.
+            governance_approved=role_profile.get("can_execute_live_trading", False),
+            # controls: no mobile controls artifact sourced in this code path; the
+            # kill-switch is enforced via env var (CSS_LIVE_ORDER_KILL_SWITCH).
+            controls={},
+            # user_context: SESSION_USER_CTX holds the authenticated operator session.
+            user_context=SESSION_USER_CTX,
         )
 
         if response.get("ok"):

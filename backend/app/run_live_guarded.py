@@ -232,8 +232,27 @@ def main() -> None:
     print(f"Placing LIVE micro trade ({instrument}, {side} {units} unit)...\n")
 
     try:
-        req = OrderRequest(instrument=instrument, side=side, units=units)
-        order_result = oanda.place_order(req)
+        req = OrderRequest(symbol=instrument, side=side, units=units)
+        order_result = oanda.place_order(
+            order=req,
+            # ── Live firewall parameters ──────────────────────────────────────
+            # broker_mode: CS_MODE is already asserted == "live" above.
+            broker_mode="live",
+            # broker_execution_armed: EXECUTION_ARMED env var, already read and
+            # verified True to reach this branch.
+            broker_execution_armed=EXECUTION_ARMED,
+            # governance_approved: RiskGovernor decision is ALLOW (verified above).
+            governance_approved=True,
+            # controls: no mobile controls file in the guarded runner; pass empty
+            # dict so the kill-switch checks run against env vars only.
+            controls={},
+            # user_context: guarded runner executes as the privileged live operator.
+            user_context={
+                "user_id": "live_guarded_runner",
+                "role": "SUPER_USER",
+                "role_profile": {"can_execute_live_trading": True},
+            },
+        )
     except Exception as e:
         _abort(f"OANDA place_order failed: {e}")
 
