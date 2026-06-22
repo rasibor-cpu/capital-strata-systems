@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="refresh" content="30">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>{{ title }}</title>
     <link rel="manifest" href="/manifest.json">
@@ -157,9 +158,20 @@
 
     {% if health.backend_available == false %}
     <div class="offline-banner">
-        System Offline - Displaying Last Known State
+        System Offline - Displaying Last Known State<br><span style='font-size: 12px; font-weight: normal;'>DATA UNAVAILABLE: Core runtime artifacts not found.</span>
     </div>
     {% endif %}
+
+    
+    <div class="card" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px;">
+        <span style="font-weight: 600;">System Heartbeat</span>
+        <span class="badge 
+            {% if staleness == 'ACTIVE' %}badge-success
+            {% elif staleness == 'STALE' %}badge-warning
+            {% else %}badge-danger{% endif %}">
+            {{ staleness }}
+        </span>
+    </div>
 
     <!-- RUNTIME SECTION -->
     <div class="card">
@@ -289,6 +301,33 @@
                 <div class="stat-value">{{ engine.runtime_readiness }}</div>
             </div>
         </div>
+    </div>
+
+    
+    <!-- CHARTS SECTION -->
+    <div class="card">
+        <div class="card-header">Live Analytics</div>
+        {% if not chart_data.has_data %}
+            <div style="color: var(--text-secondary); text-align: center; padding: 12px 0; font-size: 14px;">
+                Chart unavailable: insufficient runtime history
+            </div>
+        {% else %}
+            <div style="margin-bottom: 16px;">
+                <div class="stat-label">Asset Allocation</div>
+                <div style="height: 12px; border-radius: 6px; background-color: var(--border-color); display: flex; overflow: hidden; margin-top: 8px;">
+                    <div style="background-color: var(--success); width: {{ (chart_data.cash / (chart_data.equity or 1)) * 100 }}%;"></div>
+                    {% for symbol, value in chart_data.assets.items() %}
+                        {% if value > 0 %}
+                        <div style="background-color: var(--primary-color); width: {{ (value / (chart_data.equity or 1)) * 100 }}%; border-left: 1px solid var(--bg-color);"></div>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+                <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+                    <span>Cash</span>
+                    <span>Positions</span>
+                </div>
+            </div>
+        {% endif %}
     </div>
 
     <!-- ALERTS SECTION -->
