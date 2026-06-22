@@ -13,6 +13,7 @@ TRADER = {
 
 def test_trade_status_page_renders_with_no_session(monkeypatch):
     monkeypatch.setattr(mobile_app, "load_local_env", lambda: None)
+    monkeypatch.setattr(mobile_app, "_safe_load_artifact", lambda *args, **kwargs: None)
     monkeypatch.setattr(SessionRuntimeService, "get_active_sessions", lambda *args, **kwargs: [])
     # If no session, it should render "DATA UNAVAILABLE" and no fake data.
     html = mobile_app._trade_status_page(TRADER, {"created": 1.0})
@@ -23,6 +24,7 @@ def test_trade_status_page_renders_with_no_session(monkeypatch):
 
 def test_trade_status_page_renders_with_canonical_data(monkeypatch):
     monkeypatch.setattr(mobile_app, "load_local_env", lambda: None)
+    monkeypatch.setattr(mobile_app, "_safe_load_artifact", lambda *args, **kwargs: None)
     # Mock services to return canonical data
     def mock_get_active_sessions(*args, **kwargs):
         return [{"session_id": "fake-session-123"}]

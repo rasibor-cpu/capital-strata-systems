@@ -104,6 +104,7 @@ def test_mobile_margin_api_returns_data(monkeypatch):
     
     monkeypatch.setattr(mobile_app, "_get_session", mock_get_session)
     monkeypatch.setattr(mobile_app, "_mobile_dashboard_payload", mock_payload)
+    monkeypatch.setattr(mobile_app, "_safe_load_artifact", lambda *args, **kwargs: None)
     
     def mock_get_snapshot(self):
         return MarginSnapshot(

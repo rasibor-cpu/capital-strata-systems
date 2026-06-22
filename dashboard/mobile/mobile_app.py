@@ -246,16 +246,52 @@ async def margin_api(request: Request):
         pass
 
     user_ctx = session["user_ctx"]
+    
+    # Attempt to resolve broker from canonical JSON artifacts
+    broker_raw = ""
+    for filename in [
+        "css_account_state_pcnrass.json",
+        "css_account_state_pcnrass_BACKUP.json",
+        "css_session_state_pcnrass.json",
+        "css_session_recovery.json"
+    ]:
+        data = _safe_load_artifact(filename)
+        if data:
+            keys = ["broker", "broker_id", "broker_name", "selected_broker", "active_broker", "execution_broker"]
+            for k in keys:
+                if k in data and data[k]:
+                    broker_raw = str(data[k]).strip()
+                    break
+            if not broker_raw and isinstance(data.get("broker_summary"), dict):
+                for k in keys:
+                    if k in data["broker_summary"] and data["broker_summary"][k]:
+                        broker_raw = str(data["broker_summary"][k]).strip()
+                        break
+            if broker_raw:
+                break
+    
+    # Fallback to existing environment/config logic
     try:
         payload = _mobile_dashboard_payload(user_ctx, session)
         def _m(v):
             return v if isinstance(v, dict) else {}
         broker_summary = _m(payload.get("broker_summary"))
-        broker = str(broker_summary.get("selected_broker", "NONE")).upper()
         mode = str(broker_summary.get("broker_mode", "SIMULATED")).upper()
+        if not broker_raw:
+            broker_raw = str(broker_summary.get("selected_broker", "NONE")).strip()
     except Exception:
-        broker = "NONE"
         mode = "SIMULATED"
+        if not broker_raw:
+            broker_raw = "NONE"
+
+    # Normalize broker value safely
+    broker_raw_upper = broker_raw.upper()
+    if "OANDA" in broker_raw_upper:
+        broker = "OANDA"
+    elif "COINBASE" in broker_raw_upper:
+        broker = "COINBASE"
+    else:
+        broker = "NONE"
     
     snapshot = None
     try:
@@ -328,6 +364,14 @@ async def trade_status_screen(request: Request):
         return RedirectResponse("/login", status_code=303)
 
     return HTMLResponse(_trade_status_page(session["user_ctx"], session))
+
+@app.get("/alerts", response_class=HTMLResponse)
+async def alerts_screen(request: Request):
+    session = _get_session(request)
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+
+    return HTMLResponse(_alerts_page(session["user_ctx"]))
 
 
 @app.get("/api/status")
@@ -787,7 +831,7 @@ def _top_nav(user_ctx: Dict[str, Any], active: str) -> str:
         ("broker", "Broker", "/broker"),
         ("trade-status", "Trade Status", "/trade-status"),
         ("trade-summary", "Trade Summary", "/trade-summary"),
-    
+        ("alerts", "Alert Centre", "/alerts"),
         ("margin", "Margin", "/margin"),):
         if active != key:
             links.append(
@@ -943,6 +987,127 @@ def _password_change_page(message: str = "", status: str = "info") -> str:
     )
 
 
+def _mobile_charts_html() -> str:
+    session_state = _safe_load_artifact("css_session_state_pcnrass.json") or _safe_load_artifact("css_session_recovery.json") or {}
+    account_state = _safe_load_artifact("css_account_state_pcnrass.json") or _safe_load_artifact("css_account_state_pcnrass_BACKUP.json") or {}
+    
+    path = os.path.join(os.getcwd(), "audit_logs", "closed_trades.jsonl")
+    trades = []
+    if os.path.exists(path):
+        try:
+            with open(path, "r") as f:
+                for line in f:
+                    if line.strip():
+                        trades.append(json.loads(line))
+        except Exception:
+            pass
+
+    # Extract open positions from session or account state
+    positions = account_state.get("positions", [])
+    if not positions and "open_trades" in session_state:
+        positions = session_state["open_trades"]
+    if not isinstance(positions, list):
+        positions = []
+        
+    if not trades and not positions:
+        return '''
+        <section class="data-panel" aria-label="Runtime Charts">
+          <h2>Runtime Charts</h2>
+          <div class="alert warning">Chart unavailable: insufficient runtime history</div>
+        </section>
+        '''
+
+    html_out = '''
+    <section class="data-panel" aria-label="Runtime Charts">
+      <h2>Runtime Charts</h2>
+    '''
+
+    charts_rendered = 0
+
+    if trades:
+        pnl = 0.0
+        pnl_points = [0.0]
+        for t in trades:
+            try:
+                val = float(t.get("realized_pnl", 0))
+                pnl += val
+                pnl_points.append(pnl)
+            except Exception:
+                pass
+        
+        if len(pnl_points) > 1:
+            min_pnl = min(pnl_points)
+            max_pnl = max(pnl_points)
+            range_pnl = max_pnl - min_pnl if max_pnl > min_pnl else 1
+            
+            bars_html = ""
+            for p in pnl_points[-30:]: 
+                height = ((p - min_pnl) / range_pnl) * 100
+                color = "#1d8a8a" if p >= 0 else "#c9861a"
+                bars_html += f'<div style="flex: 1; margin: 0 1px; background: {color}; height: {height}%; min-height: 2px;"></div>'
+                
+            html_out += f'''
+            <div style="margin-bottom: 24px;">
+                <h3 style="font-size: 14px; margin-bottom: 8px;">Cumulative PnL Trend</h3>
+                <div style="display: flex; align-items: flex-end; height: 100px; padding: 8px; background: #0b141a; border-radius: 4px; border: 1px solid #1a2a35;">
+                    {bars_html}
+                </div>
+            </div>
+            '''
+            charts_rendered += 1
+
+    if positions:
+        total_exposure = 0.0
+        allocations = []
+        for pos in positions:
+            try:
+                # support different possible schemas
+                val = abs(float(pos.get("market_value", pos.get("notional_value", pos.get("current_value", pos.get("entry_price", 0))))))
+                qty = abs(float(pos.get("quantity", pos.get("size", 1))))
+                if "market_value" not in pos and "notional_value" not in pos:
+                    val = val * qty
+                if val > 0:
+                    total_exposure += val
+                    sym = pos.get("symbol", pos.get("asset", "UNKNOWN"))
+                    allocations.append({"symbol": sym, "val": val})
+            except Exception:
+                pass
+                
+        if total_exposure > 0:
+            alloc_html = ""
+            colors = ["#1d8a8a", "#c9861a", "#2e5a88", "#883a2e", "#4a8a1d"]
+            for i, alloc in enumerate(sorted(allocations, key=lambda x: x["val"], reverse=True)):
+                pct = (alloc["val"] / total_exposure) * 100
+                color = colors[i % len(colors)]
+                alloc_html += f'''
+                <div style="margin-bottom: 8px;">
+                    <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
+                        <span>{html.escape(str(alloc["symbol"]))}</span>
+                        <span>{pct:.1f}%</span>
+                    </div>
+                    <div style="width: 100%; background: #1a2a35; height: 8px; border-radius: 4px; overflow: hidden;">
+                        <div style="width: {pct}%; background: {color}; height: 100%;"></div>
+                    </div>
+                </div>
+                '''
+                
+            html_out += f'''
+            <div>
+                <h3 style="font-size: 14px; margin-bottom: 8px;">Asset Allocation / Exposure</h3>
+                <div style="padding: 12px; background: #0b141a; border-radius: 4px; border: 1px solid #1a2a35;">
+                    {alloc_html}
+                </div>
+            </div>
+            '''
+            charts_rendered += 1
+            
+    if charts_rendered == 0:
+        html_out += '<div class="alert warning">Chart unavailable: insufficient runtime history</div>'
+
+    html_out += "</section>"
+    return html_out
+
+
 def _dashboard_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
     dashboard_text = _mobile_dashboard_text(user_ctx, session)
     dashboard_payload = _mobile_dashboard_payload(user_ctx, session)
@@ -966,6 +1131,7 @@ def _dashboard_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
           </section>
 
           {_account_summary_cards(dashboard_payload)}
+          {_mobile_charts_html()}
           {_command_center_panel(user_ctx)}
           {_recent_tickets_panel()}
 
@@ -3086,13 +3252,115 @@ pre {
 }
 """
 
+def _get_alert_summary() -> List[Dict[str, Any]]:
+    alerts_dir = os.path.join(os.getcwd(), "runtime", "alerts")
+    if not os.path.exists(alerts_dir):
+        return []
+        
+    try:
+        files = [f for f in os.listdir(alerts_dir) if f.endswith(".json")]
+        files.sort(reverse=True)
+        recent_files = files[:100] # show up to 100 on the dedicated page
+        
+        alerts = []
+        for file in recent_files:
+            try:
+                with open(os.path.join(alerts_dir, file), "r") as f:
+                    alerts.append(json.load(f))
+            except Exception:
+                pass
+        return alerts
+    except Exception:
+        return []
+
+def _alerts_page(user_ctx: Dict[str, Any]) -> str:
+    load_local_env()
+    alerts = _get_alert_summary()
+    
+    if not alerts:
+        alerts_html = '<div class="alert success" style="margin-top: 16px;">No recent alerts found. The system is operating normally.</div>'
+        latest_timestamp = "N/A"
+    else:
+        alerts_html = ""
+        latest_timestamp = alerts[0].get("timestamp", "UNKNOWN")[:19]
+        for alert in alerts:
+            severity = html.escape(str(alert.get("severity", "INFO")))
+            timestamp = html.escape(str(alert.get("timestamp", "UNKNOWN"))[:19])
+            message = html.escape(str(alert.get("message", "No message provided")))
+            source = html.escape(str(alert.get("source", "UNKNOWN")))
+            alert_type = html.escape(str(alert.get("alert_type", "GENERAL")))
+            
+            # Use color coding similar to launcher
+            color_class = "info"
+            if severity == "CRITICAL":
+                color_class = "error"
+            elif severity == "WARNING":
+                color_class = "warning"
+                
+            alerts_html += f'''
+            <div class="alert {color_class}" style="margin-bottom: 12px; display: block; border-left: 4px solid currentColor;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 12px;">
+                    <strong>{severity}</strong>
+                    <span>{timestamp}</span>
+                </div>
+                <div style="font-size: 14px; margin-bottom: 4px;">{message}</div>
+                <div style="font-size: 11px; opacity: 0.8;">
+                    Source: {source} | Type: {alert_type}
+                </div>
+            </div>
+            '''
+            
+    return _page(
+        "Alert Centre",
+        f'''
+        <main class="dashboard-shell">
+          {_header("Alert Centre", user_ctx, "alerts")}
+          {_identity_strip(user_ctx, "Read Only Access")}
+          
+          <section class="metric-grid" aria-label="Alerts Summary">
+            <article><strong>Total Alerts</strong><span>{len(alerts)}</span></article>
+            <article><strong>Latest Alert</strong><span>{latest_timestamp}</span></article>
+            <article><strong>Directory Status</strong><span>{"Active" if os.path.exists(os.path.join(os.getcwd(), "runtime", "alerts")) else "Missing"}</span></article>
+          </section>
+          
+          <section class="data-panel" aria-label="Recent Alerts">
+            <h2>System Alerts</h2>
+            {alerts_html}
+          </section>
+        </main>
+        '''
+    )
+
+
+def _safe_load_artifact(filename: str) -> Optional[Dict[str, Any]]:
+    path = os.path.join(os.getcwd(), "artifacts", filename)
+    if os.path.exists(path):
+        try:
+            with open(path, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return None
 
 def _trade_status_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
     load_local_env()
     
-    active_sessions = SessionRuntimeService().get_active_sessions()
-    
-    if not active_sessions:
+    # 2. Attempt to read canonical JSON artifacts
+    session_state = _safe_load_artifact("css_session_state_pcnrass.json") or _safe_load_artifact("css_session_recovery.json")
+    account_state = _safe_load_artifact("css_account_state_pcnrass.json") or _safe_load_artifact("css_account_state_pcnrass_BACKUP.json")
+
+    has_json_artifacts = bool(session_state) or bool(account_state)
+
+    # 3. Fall back to SQLite lookup if JSON artifacts are missing
+    active_sessions = []
+    if not has_json_artifacts:
+        try:
+            active_sessions = SessionRuntimeService().get_active_sessions()
+        except Exception:
+            pass
+
+    # 4. Preserve fail-closed behavior
+    if not has_json_artifacts and not active_sessions:
         return _page(
             "Trade Status",
             f'''
@@ -3106,10 +3374,50 @@ def _trade_status_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str
             </main>
             '''
         )
-        
-    session_id = active_sessions[0]["session_id"]
-    snapshot = PnlRuntimeService().get_latest_snapshot(session_id)
-    trades = TradeRuntimeService().get_all_session_trades(session_id)
+
+    snapshot = {}
+    trades = []
+    
+    if has_json_artifacts:
+        session_id = session_state.get("session", {}).get("session_id", "UNKNOWN") if session_state else "UNKNOWN"
+        if account_state:
+            net_pnl = float(account_state.get("lifetime_realized_pnl", 0.0)) + float(account_state.get("unrealized_pnl", 0.0))
+            snapshot = {
+                "account_balance": account_state.get("account_balance", "0.0"),
+                "available_cash": account_state.get("account_balance", "0.0"),
+                "buying_power": account_state.get("buying_power", "0.0"),
+                "equity": account_state.get("total_equity", account_state.get("account_balance", "0.0")),
+                "unrealized_pnl": account_state.get("unrealized_pnl", "0.0"),
+                "realized_pnl": account_state.get("lifetime_realized_pnl", "0.0"),
+                "net_pnl": str(net_pnl),
+                "open_positions": account_state.get("open_positions_count", "0"),
+                "closed_positions": account_state.get("closed_positions_count", "0"),
+                "pending_orders": "0",
+                "rejected_orders": "0"
+            }
+            
+        try:
+            ledger_path = os.path.join(os.getcwd(), "audit_logs", "closed_trades.jsonl")
+            if os.path.exists(ledger_path):
+                with open(ledger_path, "r") as f:
+                    for line in f:
+                        trades.append(json.loads(line))
+        except Exception:
+            pass
+            
+        try:
+            db_trades = TradeRuntimeService().get_all_session_trades(session_id)
+            if db_trades:
+                trades.extend(db_trades)
+        except Exception:
+            pass
+            
+    else:
+        session_id = active_sessions[0]["session_id"]
+        db_snapshot = PnlRuntimeService().get_latest_snapshot(session_id)
+        if db_snapshot:
+            snapshot = db_snapshot
+        trades = TradeRuntimeService().get_all_session_trades(session_id)
     
     if not snapshot:
         snapshot = {}
