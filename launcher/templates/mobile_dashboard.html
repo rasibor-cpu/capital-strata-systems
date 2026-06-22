@@ -8,64 +8,139 @@
     <link rel="manifest" href="/manifest.json">
     <style>
         :root {
-            --bg-color: #0f172a;
-            --surface-color: #1e293b;
+            --bg-color: #070909;
+            --surface-color: #101312;
+            --surface-2: #151917;
             --primary-color: #3b82f6;
-            --text-primary: #f8fafc;
-            --text-secondary: #94a3b8;
-            --success: #10b981;
-            --warning: #f59e0b;
-            --danger: #ef4444;
-            --border-color: #334155;
+            --text-primary: #edf3ee;
+            --text-secondary: #9aa8a0;
+            --text-dim: #6f7d75;
+            --success: #40d67d;
+            --success-soft: rgba(64, 214, 125, 0.14);
+            --success-border: rgba(64, 214, 125, 0.44);
+            --warning: #e6b84b;
+            --warning-soft: rgba(230, 184, 75, 0.14);
+            --warning-border: rgba(230, 184, 75, 0.46);
+            --danger: #ef6b62;
+            --danger-soft: rgba(239, 107, 98, 0.14);
+            --danger-border: rgba(239, 107, 98, 0.5);
+            --border-color: #27302c;
+            --border-strong: #3d4a43;
+            --radius: 8px;
+            /* pause banner */
+            --paused-bg: rgba(230, 184, 75, 0.18);
+            --paused-border: rgba(230, 184, 75, 0.55);
         }
+
+        * { box-sizing: border-box; }
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             background-color: var(--bg-color);
             color: var(--text-primary);
             margin: 0;
-            padding: 16px;
-            padding-bottom: 32px;
+            padding: 0 12px 90px;
             line-height: 1.5;
+            font-size: 14px;
+            max-width: 520px;
+            margin-left: auto;
+            margin-right: auto;
         }
 
-        .header {
+        /* ── HEADER ── */
+        .mobile-header {
+            padding: 14px 0 10px;
+            display: grid;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .mobile-title h1 {
+            margin: 0;
+            font-size: 20px;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+        .mobile-title p {
+            margin: 4px 0 0;
+            color: var(--text-secondary);
+            font-size: 12px;
+        }
+        .status-strip {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+        .pill {
+            min-height: 26px;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 999px;
+            color: var(--text-secondary);
+            background: #0d110f;
+            font-size: 12px;
+        }
+        .pill strong { color: var(--text-primary); font-weight: 700; }
+        .pill.good   { color: var(--success); border-color: var(--success-border); background: var(--success-soft); }
+        .pill.warn   { color: var(--warning); border-color: var(--warning-border); background: var(--warning-soft); }
+        .pill.bad    { color: var(--danger);  border-color: var(--danger-border);  background: var(--danger-soft);  }
+
+        /* ── OFFLINE BANNER ── */
+        .offline-banner {
+            background-color: var(--danger-soft);
+            border: 1px solid var(--danger-border);
+            color: var(--danger);
+            padding: 10px 12px;
+            border-radius: var(--radius);
+            margin-bottom: 12px;
             text-align: center;
-            margin-bottom: 24px;
-        }
-
-        h1 {
-            font-size: 24px;
             font-weight: 600;
-            margin: 0 0 8px 0;
+            font-size: 13px;
         }
 
+        /* ── HEARTBEAT STRIP ── */
+        .heartbeat-strip {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 14px;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            background: var(--surface-color);
+            margin-bottom: 12px;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        /* ── BADGE ── */
         .badge {
             display: inline-block;
-            padding: 4px 8px;
+            padding: 3px 8px;
             border-radius: 4px;
-            font-size: 12px;
-            font-weight: 600;
+            font-size: 11px;
+            font-weight: 700;
             text-transform: uppercase;
+            letter-spacing: 0.3px;
         }
+        .badge-success { background-color: var(--success-soft);  color: var(--success); border: 1px solid var(--success-border); }
+        .badge-warning { background-color: var(--warning-soft);  color: var(--warning); border: 1px solid var(--warning-border); }
+        .badge-danger  { background-color: var(--danger-soft);   color: var(--danger);  border: 1px solid var(--danger-border);  }
+        .badge-info    { background-color: rgba(59,130,246,0.15); color: #60a5fa;        border: 1px solid rgba(59,130,246,0.4); }
 
-        .badge-success { background-color: rgba(16, 185, 129, 0.2); color: var(--success); }
-        .badge-warning { background-color: rgba(245, 158, 11, 0.2); color: var(--warning); }
-        .badge-danger { background-color: rgba(239, 68, 68, 0.2); color: var(--danger); }
-        .badge-info { background-color: rgba(59, 130, 246, 0.2); color: var(--primary-color); }
-
+        /* ── CARD ── */
         .card {
             background-color: var(--surface-color);
             border: 1px solid var(--border-color);
-            border-radius: 12px;
-            padding: 16px;
-            margin-bottom: 16px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
+            padding: 14px;
+            margin-bottom: 12px;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.3);
         }
-
         .card-header {
-            font-size: 18px;
-            font-weight: 600;
+            font-size: 15px;
+            font-weight: 700;
             margin-bottom: 12px;
             padding-bottom: 8px;
             border-bottom: 1px solid var(--border-color);
@@ -74,292 +149,685 @@
             align-items: center;
         }
 
+        /* ── STAT GRID ── */
         .stat-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 12px;
+            gap: 10px;
         }
-
         .stat-item {
-            background-color: rgba(0,0,0,0.2);
-            padding: 12px;
-            border-radius: 8px;
+            background-color: var(--surface-2);
+            border: 1px solid var(--border-color);
+            padding: 10px;
+            border-radius: 6px;
         }
-
         .stat-label {
-            font-size: 12px;
+            font-size: 11px;
             color: var(--text-secondary);
             margin-bottom: 4px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
-
-        .stat-value {
-            font-size: 18px;
-            font-weight: 600;
-        }
-
+        .stat-value { font-size: 17px; font-weight: 700; }
         .text-success { color: var(--success); }
-        .text-danger { color: var(--danger); }
+        .text-danger  { color: var(--danger); }
 
+        /* ── LIST ITEM ── */
         .list-item {
-            padding: 12px 0;
+            padding: 10px 0;
             border-bottom: 1px solid var(--border-color);
         }
+        .list-item:last-child { border-bottom: none; padding-bottom: 0; }
 
-        .list-item:last-child {
-            border-bottom: none;
-            padding-bottom: 0;
+        /* ── STATUS ROW ── */
+        .status-row {
+            display: grid;
+            grid-template-columns: 130px 1fr;
+            gap: 8px;
+            min-height: 26px;
+            align-items: center;
+            border-bottom: 1px solid var(--border-color);
+            padding: 6px 0;
+            font-size: 13px;
         }
+        .status-row:last-child { border-bottom: none; }
+        .status-row span:first-child { color: var(--text-secondary); }
 
+        /* ── BUTTONS ── */
         .button {
             display: block;
             width: 100%;
             background-color: var(--primary-color);
             color: white;
             text-align: center;
-            padding: 14px 0;
-            border-radius: 8px;
-            font-weight: 600;
-            font-size: 16px;
+            padding: 13px 0;
+            border-radius: var(--radius);
+            font-weight: 700;
+            font-size: 15px;
             text-decoration: none;
-            margin-top: 24px;
+            margin-top: 16px;
             border: none;
+            cursor: pointer;
         }
-        
         .button-secondary {
             background-color: transparent;
-            border: 1px solid var(--border-color);
+            border: 1px solid var(--border-strong);
             color: var(--text-primary);
         }
+        .button:active { opacity: 0.85; }
 
-        .button:active {
-            opacity: 0.9;
+        /* ── SCREENS ── */
+        .screen { display: none; }
+        .screen.active { display: block; }
+
+        /* ── BOTTOM NAV ── */
+        .bottom-nav {
+            position: fixed;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 4px;
+            padding: 6px 8px;
+            border-top: 1px solid var(--border-strong);
+            background: #090c0b;
+            z-index: 100;
         }
-        
-        .offline-banner {
-            background-color: rgba(239, 68, 68, 0.1);
-            border: 1px solid var(--danger);
-            color: var(--danger);
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 16px;
-            text-align: center;
+        .bottom-nav button {
+            min-height: 48px;
+            padding: 5px 2px;
+            font-size: 11px;
             font-weight: 600;
+            border: 1px solid var(--border-strong);
+            border-radius: 6px;
+            color: var(--text-secondary);
+            background: #111512;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 3px;
+            line-height: 1.2;
+        }
+        .bottom-nav button:hover { border-color: #60a5fa; color: #60a5fa; }
+        .bottom-nav button.active {
+            color: var(--success);
+            border-color: var(--success-border);
+            background: var(--success-soft);
+        }
+        .nav-icon { font-size: 16px; }
+
+        /* ── ALLOCATION BAR ── */
+        .alloc-bar {
+            height: 10px;
+            border-radius: 999px;
+            background-color: var(--border-color);
+            display: flex;
+            overflow: hidden;
+            margin: 8px 0 4px;
+        }
+
+        /* ── EMPTY STATE ── */
+        .empty-state {
+            color: var(--text-secondary);
+            text-align: center;
+            padding: 16px 0;
+            font-size: 13px;
+        }
+
+        /* ── PAUSE BANNER ── */
+        .pause-banner {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 10px 14px;
+            border: 1px solid var(--warning-border);
+            border-radius: var(--radius);
+            background: var(--warning-soft);
+            margin-bottom: 12px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--warning);
+        }
+        .pause-banner span { flex: 1; }
+
+        /* ── PAUSE CONTROL CARD ── */
+        .pause-control-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 12px;
+        }
+        .pause-btn {
+            min-height: 52px;
+            font-size: 14px;
+            font-weight: 700;
+            border-radius: var(--radius);
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+        .pause-btn:active { opacity: 0.82; }
+        .btn-pause {
+            background: var(--warning-soft);
+            border: 1px solid var(--warning-border);
+            color: var(--warning);
+        }
+        .btn-resume {
+            background: var(--success-soft);
+            border: 1px solid var(--success-border);
+            color: var(--success);
+        }
+        .btn-pause:disabled, .btn-resume:disabled {
+            opacity: 0.38;
+            cursor: not-allowed;
         }
     </style>
 </head>
 <body>
 
-    <div class="header">
-        <h1>{{ title }}</h1>
-        <p style="color: var(--text-secondary); font-size: 14px;">v{{ version }} | Read-Only View</p>
+    <!-- HEADER -->
+    <div class="mobile-header">
+        <div class="mobile-title">
+            <h1>{{ title }}</h1>
+            <p>v{{ version }} &nbsp;|&nbsp; Read-Only View</p>
+        </div>
+        <div class="status-strip">
+            <span class="pill {% if health.backend_available %}good{% else %}bad{% endif %}">
+                Backend&nbsp;<strong>{% if health.backend_available %}ONLINE{% else %}OFFLINE{% endif %}</strong>
+            </span>
+            <span class="pill {% if staleness == 'ACTIVE' %}good{% elif staleness == 'STALE' %}warn{% else %}bad{% endif %}">
+                Heartbeat&nbsp;<strong>{{ staleness }}</strong>
+            </span>
+            <span class="pill {% if runtime.supervisor_status in ('RUNNING', 'DEGRADED') %}good{% else %}warn{% endif %}">
+                Supervisor&nbsp;<strong>{{ runtime.supervisor_status }}</strong>
+            </span>
+            <span class="pill {% if pause_state.trading_paused %}warn{% else %}good{% endif %}">
+                Trading&nbsp;<strong>{% if pause_state.trading_paused %}PAUSED{% else %}ACTIVE{% endif %}</strong>
+            </span>
+        </div>
     </div>
 
-    {% if health.backend_available == false %}
-    <div class="offline-banner">
-        System Offline - Displaying Last Known State<br><span style='font-size: 12px; font-weight: normal;'>DATA UNAVAILABLE: Core runtime artifacts not found.</span>
+    <!-- PAUSE BANNER (only shown when paused) -->
+    {% if pause_state.trading_paused %}
+    <div class="pause-banner" role="alert" aria-live="polite">
+        <span>⏸ Trading is PAUSED &mdash; {{ pause_state.timestamp[:19] if pause_state.timestamp else '' }}</span>
+        <span style="font-size:11px; opacity:0.75;">src: {{ pause_state.source }}</span>
     </div>
     {% endif %}
 
-    
-    <div class="card" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px;">
-        <span style="font-weight: 600;">System Heartbeat</span>
-        <span class="badge 
-            {% if staleness == 'ACTIVE' %}badge-success
-            {% elif staleness == 'STALE' %}badge-warning
-            {% else %}badge-danger{% endif %}">
-            {{ staleness }}
-        </span>
+    {% if health.backend_available == false %}
+    <div class="offline-banner">
+        System Offline — Displaying Last Known State<br>
+        <span style="font-size: 12px; font-weight: normal;">DATA UNAVAILABLE: Core runtime artifacts not found.</span>
     </div>
+    {% endif %}
 
-    <!-- RUNTIME SECTION -->
-    <div class="card">
-        <div class="card-header">
-            Runtime Status
-            {% if health.backend_available %}
-                <span class="badge badge-success">ONLINE</span>
-            {% else %}
-                <span class="badge badge-danger">OFFLINE</span>
-            {% endif %}
-        </div>
-        <div class="stat-grid">
-            <div class="stat-item">
-                <div class="stat-label">Mode</div>
-                <div class="stat-value">{{ runtime.runtime_mode }}</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">Current Cycle</div>
-                <div class="stat-value">{{ runtime.current_cycle }}</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">Supervisor</div>
-                <div class="stat-value">{{ runtime.supervisor_status }}</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">Restart / Fail</div>
-                <div class="stat-value">{{ runtime.restart_count }} / {{ runtime.failure_count }}</div>
-            </div>
-        </div>
-        <div style="margin-top: 12px; font-size: 12px; color: var(--text-secondary);">
-            Last Update: {{ runtime.last_update }}<br>
-            Last Heartbeat: {{ runtime.last_heartbeat }}
-        </div>
-    </div>
+    <!-- ══════════════════════════════════════════════
+         TAB: HOME
+         ══════════════════════════════════════════════ -->
+    <div id="screen-home" class="screen active">
 
-    <!-- ACCOUNT SECTION -->
-    <div class="card">
-        <div class="card-header">Account</div>
-        <div class="stat-grid">
-            <div class="stat-item">
-                <div class="stat-label">Equity</div>
-                <div class="stat-value">${{ "%.2f"|format(account.equity) }}</div>
+        <!-- Heartbeat card -->
+        <div class="heartbeat-strip">
+            <span>System Heartbeat</span>
+            <span class="badge
+                {% if staleness == 'ACTIVE' %}badge-success
+                {% elif staleness == 'STALE' %}badge-warning
+                {% else %}badge-danger{% endif %}">
+                {{ staleness }}
+            </span>
+        </div>
+
+        <!-- Runtime status -->
+        <div class="card">
+            <div class="card-header">
+                Runtime Status
+                {% if health.backend_available %}
+                    <span class="badge badge-success">ONLINE</span>
+                {% else %}
+                    <span class="badge badge-danger">OFFLINE</span>
+                {% endif %}
             </div>
-            <div class="stat-item">
-                <div class="stat-label">Cash</div>
-                <div class="stat-value">${{ "%.2f"|format(account.cash) }}</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">Buying Power</div>
-                <div class="stat-value">${{ "%.2f"|format(account.buying_power) }}</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">Total PnL</div>
-                <div class="stat-value {% if account.total_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
-                    ${{ "%.2f"|format(account.total_pnl) }}
+            <div class="stat-grid">
+                <div class="stat-item">
+                    <div class="stat-label">Mode</div>
+                    <div class="stat-value">{{ runtime.runtime_mode }}</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Cycle</div>
+                    <div class="stat-value">{{ runtime.current_cycle }}</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Restart / Fail</div>
+                    <div class="stat-value">{{ runtime.restart_count }} / {{ runtime.failure_count }}</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Readiness</div>
+                    <div class="stat-value">{{ engine.runtime_readiness }}</div>
                 </div>
             </div>
-            <div class="stat-item">
-                <div class="stat-label">Open PnL</div>
-                <div class="stat-value {% if account.open_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
-                    ${{ "%.2f"|format(account.open_pnl) }}
-                </div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">Realized PnL</div>
-                <div class="stat-value {% if account.realized_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
-                    ${{ "%.2f"|format(account.realized_pnl) }}
-                </div>
+            <div style="margin-top: 10px; font-size: 12px; color: var(--text-secondary);">
+                Last Update: {{ runtime.last_update }}<br>
+                Last Heartbeat: {{ runtime.last_heartbeat }}
             </div>
         </div>
-    </div>
 
-    <!-- TRADE SECTION -->
-    <div class="card">
-        <div class="card-header">Trade Activity</div>
-        <div class="stat-grid">
-            <div class="stat-item">
-                <div class="stat-label">Open Trades</div>
-                <div class="stat-value">{{ trade.open_trades_count }}</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">Closed Trades</div>
-                <div class="stat-value">{{ trade.closed_trades_count }}</div>
-            </div>
-        </div>
-        
-        {% if trade.recent_activity %}
-        <div style="margin-top: 16px;">
-            <div class="stat-label">Recent Activity</div>
-            {% for item in trade.recent_activity %}
-                <div class="list-item" style="font-size: 14px;">
-                    <span style="font-family: monospace;">{{ item.get('symbol', 'UNKNOWN') }}</span>
-                    <span style="float: right;" class="{% if item.get('realized', 0) >= 0 %}text-success{% else %}text-danger{% endif %}">
-                        ${{ "%.2f"|format(item.get('realized', 0)) }}
-                    </span>
-                    <div style="font-size: 12px; color: var(--text-secondary);">
-                        {{ item.get('reason', 'closed') }} | {{ item.get('timestamp', '')[:19] }}
+        <!-- Account summary -->
+        <div class="card">
+            <div class="card-header">Account Summary</div>
+            <div class="stat-grid">
+                <div class="stat-item">
+                    <div class="stat-label">Equity</div>
+                    <div class="stat-value">${{ "%.2f"|format(account.equity) }}</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Cash</div>
+                    <div class="stat-value">${{ "%.2f"|format(account.cash) }}</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Total PnL</div>
+                    <div class="stat-value {% if account.total_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
+                        ${{ "%.2f"|format(account.total_pnl) }}
                     </div>
                 </div>
-            {% endfor %}
+                <div class="stat-item">
+                    <div class="stat-label">Open Trades</div>
+                    <div class="stat-value">{{ trade.open_trades_count }}</div>
+                </div>
+            </div>
         </div>
-        {% endif %}
-    </div>
 
-    <!-- ENGINE SECTION -->
-    <div class="card">
-        <div class="card-header">Engine Configuration</div>
-        <div class="stat-grid">
-            <div class="stat-item">
-                <div class="stat-label">Strategy</div>
-                <div class="stat-value">{{ engine.current_strategy }}</div>
+    </div><!-- /screen-home -->
+
+    <!-- ══════════════════════════════════════════════
+         TAB: POSITIONS
+         ══════════════════════════════════════════════ -->
+    <div id="screen-positions" class="screen">
+
+        <div class="card">
+            <div class="card-header">Account</div>
+            <div class="stat-grid">
+                <div class="stat-item">
+                    <div class="stat-label">Equity</div>
+                    <div class="stat-value">${{ "%.2f"|format(account.equity) }}</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Cash</div>
+                    <div class="stat-value">${{ "%.2f"|format(account.cash) }}</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Buying Power</div>
+                    <div class="stat-value">${{ "%.2f"|format(account.buying_power) }}</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Total PnL</div>
+                    <div class="stat-value {% if account.total_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
+                        ${{ "%.2f"|format(account.total_pnl) }}
+                    </div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Open PnL</div>
+                    <div class="stat-value {% if account.open_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
+                        ${{ "%.2f"|format(account.open_pnl) }}
+                    </div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Realized PnL</div>
+                    <div class="stat-value {% if account.realized_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
+                        ${{ "%.2f"|format(account.realized_pnl) }}
+                    </div>
+                </div>
             </div>
-            <div class="stat-item">
-                <div class="stat-label">Trade Gate</div>
-                <div class="stat-value">{{ engine.trade_gate_status }}</div>
+        </div>
+
+        <!-- Live Analytics / Allocation bar -->
+        <div class="card">
+            <div class="card-header">Live Analytics</div>
+            {% if not chart_data.has_data %}
+                <div class="empty-state">Chart unavailable: insufficient runtime history</div>
+            {% else %}
+                <div>
+                    <div class="stat-label">Asset Allocation</div>
+                    <div class="alloc-bar">
+                        <div style="background-color: var(--success); width: {{ (chart_data.cash / (chart_data.equity or 1)) * 100 }}%;"></div>
+                        {% for symbol, value in chart_data.assets.items() %}
+                            {% if value > 0 %}
+                            <div style="background-color: var(--primary-color); width: {{ (value / (chart_data.equity or 1)) * 100 }}%; border-left: 1px solid var(--bg-color);"></div>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-secondary);">
+                        <span>Cash</span><span>Positions</span>
+                    </div>
+                    {% if chart_data.assets %}
+                    <div style="margin-top: 12px;">
+                        {% for symbol, value in chart_data.assets.items() %}
+                        <div class="status-row">
+                            <span style="font-family: monospace;">{{ symbol }}</span>
+                            <strong>${{ "%.2f"|format(value) }}</strong>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+            {% endif %}
+        </div>
+
+    </div><!-- /screen-positions -->
+
+    <!-- ══════════════════════════════════════════════
+         TAB: EXECUTION
+         ══════════════════════════════════════════════ -->
+    <div id="screen-execution" class="screen">
+
+        <div class="card">
+            <div class="card-header">Trade Activity</div>
+            <div class="stat-grid">
+                <div class="stat-item">
+                    <div class="stat-label">Open Trades</div>
+                    <div class="stat-value">{{ trade.open_trades_count }}</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Closed Trades</div>
+                    <div class="stat-value">{{ trade.closed_trades_count }}</div>
+                </div>
             </div>
-            <div class="stat-item">
-                <div class="stat-label">Engine Mode</div>
-                <div class="stat-value">
+
+            {% if trade.recent_activity %}
+            <div style="margin-top: 14px;">
+                <div class="stat-label" style="margin-bottom: 8px;">Recent Activity</div>
+                {% for item in trade.recent_activity %}
+                    <div class="list-item" style="font-size: 13px;">
+                        <span style="font-family: monospace; font-weight: 600;">{{ item.get('symbol', 'UNKNOWN') }}</span>
+                        <span style="float: right;" class="{% if item.get('realized', 0) >= 0 %}text-success{% else %}text-danger{% endif %}">
+                            ${{ "%.2f"|format(item.get('realized', 0)) }}
+                        </span>
+                        <div style="font-size: 12px; color: var(--text-secondary); clear: both;">
+                            {{ item.get('reason', 'closed') }} | {{ item.get('timestamp', '')[:19] }}
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+            {% else %}
+                <div class="empty-state" style="margin-top: 12px;">No recent closed trades.</div>
+            {% endif %}
+        </div>
+
+        <div class="card">
+            <div class="card-header">Engine Configuration</div>
+            <div class="stat-grid">
+                <div class="stat-item">
+                    <div class="stat-label">Strategy</div>
+                    <div class="stat-value">{{ engine.current_strategy }}</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Trade Gate</div>
+                    <div class="stat-value">{{ engine.trade_gate_status }}</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Engine Mode</div>
+                    <div class="stat-value">
+                        <span class="badge {% if engine.engine_mode == 'LIVE' %}badge-danger{% else %}badge-info{% endif %}">
+                            {{ engine.engine_mode }}
+                        </span>
+                    </div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Readiness</div>
+                    <div class="stat-value">{{ engine.runtime_readiness }}</div>
+                </div>
+            </div>
+        </div>
+
+    </div><!-- /screen-execution -->
+
+    <!-- ══════════════════════════════════════════════
+         TAB: RISK
+         ══════════════════════════════════════════════ -->
+    <div id="screen-risk" class="screen">
+
+        <div class="card">
+            <div class="card-header">
+                Runtime Status
+                {% if health.backend_available %}
+                    <span class="badge badge-success">ONLINE</span>
+                {% else %}
+                    <span class="badge badge-danger">OFFLINE</span>
+                {% endif %}
+            </div>
+            <div class="status-row"><span>Mode</span><strong>{{ runtime.runtime_mode }}</strong></div>
+            <div class="status-row"><span>Supervisor</span><strong>{{ runtime.supervisor_status }}</strong></div>
+            <div class="status-row"><span>Restart / Fail</span><strong>{{ runtime.restart_count }} / {{ runtime.failure_count }}</strong></div>
+            <div class="status-row"><span>Heartbeat</span><strong>{{ runtime.last_heartbeat }}</strong></div>
+            <div class="status-row"><span>Last Update</span><strong style="font-size:12px;">{{ runtime.last_update }}</strong></div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">Engine Risk Gate</div>
+            <div class="status-row"><span>Engine Mode</span>
+                <strong>
                     <span class="badge {% if engine.engine_mode == 'LIVE' %}badge-danger{% else %}badge-info{% endif %}">
                         {{ engine.engine_mode }}
                     </span>
-                </div>
+                </strong>
             </div>
-            <div class="stat-item">
-                <div class="stat-label">Readiness</div>
-                <div class="stat-value">{{ engine.runtime_readiness }}</div>
+            <div class="status-row"><span>Trade Gate</span><strong>{{ engine.trade_gate_status }}</strong></div>
+            <div class="status-row"><span>Strategy</span><strong>{{ engine.current_strategy }}</strong></div>
+            <div class="status-row"><span>Readiness</span><strong>{{ engine.runtime_readiness }}</strong></div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">Exposure Snapshot</div>
+            <div class="status-row"><span>Equity</span><strong>${{ "%.2f"|format(account.equity) }}</strong></div>
+            <div class="status-row"><span>Cash</span><strong>${{ "%.2f"|format(account.cash) }}</strong></div>
+            <div class="status-row"><span>Buying Power</span><strong>${{ "%.2f"|format(account.buying_power) }}</strong></div>
+            <div class="status-row"><span>Open PnL</span>
+                <strong class="{% if account.open_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
+                    ${{ "%.2f"|format(account.open_pnl) }}
+                </strong>
+            </div>
+            <div class="status-row"><span>Realized PnL</span>
+                <strong class="{% if account.realized_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
+                    ${{ "%.2f"|format(account.realized_pnl) }}
+                </strong>
             </div>
         </div>
-    </div>
 
-    
-    <!-- CHARTS SECTION -->
-    <div class="card">
-        <div class="card-header">Live Analytics</div>
-        {% if not chart_data.has_data %}
-            <div style="color: var(--text-secondary); text-align: center; padding: 12px 0; font-size: 14px;">
-                Chart unavailable: insufficient runtime history
+        <!-- ── PAUSE / RESUME CONTROLS ── -->
+        <div class="card" id="pause-control-card">
+            <div class="card-header">
+                Trading Controls
+                <span class="badge {% if pause_state.trading_paused %}badge-warning{% else %}badge-success{% endif %}">
+                    {% if pause_state.trading_paused %}PAUSED{% else %}ACTIVE{% endif %}
+                </span>
             </div>
-        {% else %}
-            <div style="margin-bottom: 16px;">
-                <div class="stat-label">Asset Allocation</div>
-                <div style="height: 12px; border-radius: 6px; background-color: var(--border-color); display: flex; overflow: hidden; margin-top: 8px;">
-                    <div style="background-color: var(--success); width: {{ (chart_data.cash / (chart_data.equity or 1)) * 100 }}%;"></div>
-                    {% for symbol, value in chart_data.assets.items() %}
-                        {% if value > 0 %}
-                        <div style="background-color: var(--primary-color); width: {{ (value / (chart_data.equity or 1)) * 100 }}%; border-left: 1px solid var(--bg-color);"></div>
-                        {% endif %}
-                    {% endfor %}
-                </div>
-                <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
-                    <span>Cash</span>
-                    <span>Positions</span>
-                </div>
-            </div>
-        {% endif %}
-    </div>
 
-    <!-- ALERTS SECTION -->
-    <div class="card">
-        <div class="card-header">Recent Alerts</div>
-        {% if alerts %}
-            {% for alert in alerts %}
-            <div class="list-item">
-                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-                    <span class="badge 
-                        {% if alert.severity == 'CRITICAL' %}badge-danger
-                        {% elif alert.severity == 'WARNING' %}badge-warning
-                        {% else %}badge-info{% endif %}">
-                        {{ alert.severity }}
+            <div class="status-row">
+                <span>Current State</span>
+                <strong>{% if pause_state.trading_paused %}PAUSED{% else %}ACTIVE{% endif %}</strong>
+            </div>
+            {% if pause_state.timestamp %}
+            <div class="status-row">
+                <span>Last Changed</span>
+                <strong style="font-size:11px;">{{ pause_state.timestamp[:19] }}</strong>
+            </div>
+            {% endif %}
+            {% if pause_state.reason %}
+            <div class="status-row">
+                <span>Reason</span>
+                <strong>{{ pause_state.reason }}</strong>
+            </div>
+            {% endif %}
+
+            <p style="font-size:12px; color:var(--text-secondary); margin:12px 0 4px;">
+                Pause writes <code>trading_paused: true</code> to the controls artifact.
+                No broker calls. No orders. Fully reversible.
+            </p>
+
+            <div class="pause-control-grid">
+                <!-- PAUSE -->
+                <form id="pause-form" action="/mobile/control/pause" method="post" onsubmit="return confirmAction('pause')">
+                    <button type="submit"
+                            class="pause-btn btn-pause"
+                            id="btn-pause"
+                            {% if pause_state.trading_paused %}disabled aria-disabled="true"{% endif %}>
+                        ⏸ Pause Trading
+                    </button>
+                </form>
+
+                <!-- RESUME -->
+                <form id="resume-form" action="/mobile/control/resume" method="post" onsubmit="return confirmAction('resume')">
+                    <button type="submit"
+                            class="pause-btn btn-resume"
+                            id="btn-resume"
+                            {% if not pause_state.trading_paused %}disabled aria-disabled="true"{% endif %}>
+                        ▶ Resume Trading
+                    </button>
+                </form>
+            </div>
+        </div>
+
+    </div><!-- /screen-risk -->
+
+    <!-- ══════════════════════════════════════════════
+         TAB: ALERTS
+         ══════════════════════════════════════════════ -->
+    <div id="screen-alerts" class="screen">
+
+        <div class="card">
+            <div class="card-header">
+                Alert Centre
+                {% if alerts %}
+                    <span class="badge badge-warning">{{ alerts|length }}</span>
+                {% else %}
+                    <span class="badge badge-success">CLEAR</span>
+                {% endif %}
+            </div>
+            {% if alerts %}
+                {% for alert in alerts %}
+                <div class="list-item">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                        <span class="badge
+                            {% if alert.severity == 'CRITICAL' %}badge-danger
+                            {% elif alert.severity == 'WARNING' %}badge-warning
+                            {% else %}badge-info{% endif %}">
+                            {{ alert.severity }}
+                        </span>
+                        <span style="font-size: 11px; color: var(--text-secondary);">{{ alert.timestamp[:19] }}</span>
+                    </div>
+                    <div style="font-weight: 700; font-size: 14px; margin-bottom: 3px;">{{ alert.message }}</div>
+                    <div style="font-size: 12px; color: var(--text-secondary);">
+                        Source: {{ alert.source }} &nbsp;|&nbsp; Type: {{ alert.alert_type }}
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="empty-state">No recent alerts. System clear.</div>
+            {% endif %}
+        </div>
+
+        <div class="card">
+            <div class="card-header">System Health</div>
+            <div class="status-row">
+                <span>Backend</span>
+                <strong>
+                    <span class="badge {% if health.backend_available %}badge-success{% else %}badge-danger{% endif %}">
+                        {% if health.backend_available %}ONLINE{% else %}OFFLINE{% endif %}
                     </span>
-                    <span style="font-size: 12px; color: var(--text-secondary);">{{ alert.timestamp[:19] }}</span>
-                </div>
-                <div style="font-weight: 600; font-size: 14px;">{{ alert.message }}</div>
-                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
-                    Source: {{ alert.source }} | Type: {{ alert.alert_type }}
-                </div>
+                </strong>
             </div>
-            {% endfor %}
-        {% else %}
-            <div style="color: var(--text-secondary); text-align: center; padding: 12px 0; font-size: 14px;">
-                No recent alerts.
+            <div class="status-row">
+                <span>Heartbeat</span>
+                <strong>
+                    <span class="badge
+                        {% if staleness == 'ACTIVE' %}badge-success
+                        {% elif staleness == 'STALE' %}badge-warning
+                        {% else %}badge-danger{% endif %}">
+                        {{ staleness }}
+                    </span>
+                </strong>
             </div>
-        {% endif %}
-    </div>
+            <div class="status-row"><span>Supervisor</span><strong>{{ health.supervisor_status }}</strong></div>
+            <div class="status-row"><span>Dashboard</span><strong>{{ health.dashboard_status }}</strong></div>
+        </div>
 
-    <button class="button" onclick="window.location.reload()">Refresh Data</button>
-    <a href="/launcher/" class="button button-secondary">Back to Launcher Home</a>
+        <button class="button" onclick="window.location.reload()">Refresh Data</button>
+        <a href="/launcher/" class="button button-secondary" style="display:block; text-align:center; margin-top:10px;">Back to Launcher Home</a>
+
+    </div><!-- /screen-alerts -->
+
+    <!-- ══════════════════════════════════════════════
+         BOTTOM NAVIGATION
+         ══════════════════════════════════════════════ -->
+    <nav class="bottom-nav" aria-label="Mobile Dashboard Screens">
+        <button type="button" class="active" data-screen="home" id="nav-home">
+            <span class="nav-icon">🏠</span>Home
+        </button>
+        <button type="button" data-screen="positions" id="nav-positions">
+            <span class="nav-icon">📊</span>Positions
+        </button>
+        <button type="button" data-screen="execution" id="nav-execution">
+            <span class="nav-icon">⚡</span>Execution
+        </button>
+        <button type="button" data-screen="risk" id="nav-risk">
+            <span class="nav-icon">🛡</span>Risk
+        </button>
+        <button type="button" data-screen="alerts" id="nav-alerts">
+            <span class="nav-icon">🔔</span>Alerts
+        </button>
+    </nav>
+
+    <script>
+    (function () {
+        "use strict";
+        var activeScreen = "home";
+
+        function showScreen(name) {
+            document.querySelectorAll(".screen").forEach(function (el) {
+                el.classList.remove("active");
+            });
+            document.querySelectorAll("[data-screen]").forEach(function (btn) {
+                btn.classList.remove("active");
+            });
+            var screen = document.getElementById("screen-" + name);
+            var btn    = document.querySelector("[data-screen='" + name + "']");
+            if (screen) screen.classList.add("active");
+            if (btn)    btn.classList.add("active");
+            activeScreen = name;
+        }
+
+        document.addEventListener("DOMContentLoaded", function () {
+            document.querySelectorAll("[data-screen]").forEach(function (btn) {
+                btn.addEventListener("click", function () {
+                    showScreen(btn.getAttribute("data-screen"));
+                });
+            });
+            // Activate tab from URL hash — handles redirect back from /mobile#risk
+            var validScreens = ["home", "positions", "execution", "risk", "alerts"];
+            var hash = window.location.hash.replace("#", "");
+            if (hash && validScreens.indexOf(hash) !== -1) {
+                showScreen(hash);
+            }
+        });
+    }());
+
+    function confirmAction(action) {
+        var messages = {
+            pause:  "Pause Trading?\n\nThis will write trading_paused=true to the controls artifact.\n" +
+                    "No broker calls are made. The action is fully reversible.",
+            resume: "Resume Trading?\n\nThis will write trading_paused=false to the controls artifact.\n" +
+                    "Ensure the backend is ready before resuming."
+        };
+        return window.confirm(messages[action] || "Confirm action?");
+    }
+    </script>
 
 </body>
 </html>

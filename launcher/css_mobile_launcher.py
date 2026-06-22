@@ -3,7 +3,7 @@ import json
 import datetime
 from typing import Dict, Any, List
 from fastapi import APIRouter, Request, FastAPI
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from launcher.css_launcher_config import LauncherConfig
@@ -25,6 +25,81 @@ def _safe_load_artifact(filename: str) -> Dict[str, Any]:
         except Exception:
             pass
     return {}
+
+
+# ── PAUSE / RESUME CONTROL ARTIFACT ─────────────────────────────────────────
+
+MOBILE_CONTROLS_FILE = os.path.join(LauncherConfig.ARTIFACTS_DIR, "css_mobile_controls.json")
+
+
+def get_pause_state() -> Dict[str, Any]:
+    """Read current trading_paused flag from the controls artifact.
+
+    Returns a dict with at minimum:
+        trading_paused (bool)
+        source (str)
+        timestamp (str)
+    Defaults to not-paused when the file is absent or unreadable.
+    """
+    try:
+        if os.path.exists(MOBILE_CONTROLS_FILE):
+            with open(MOBILE_CONTROLS_FILE, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            if isinstance(data, dict):
+                return {
+                    "trading_paused": bool(data.get("trading_paused", False)),
+                    "source": str(data.get("source", "unknown")),
+                    "timestamp": str(data.get("timestamp", "")),
+                    "reason": str(data.get("reason", "")),
+                }
+    except Exception:
+        pass
+    return {
+        "trading_paused": False,
+        "source": "default",
+        "timestamp": "",
+        "reason": "",
+    }
+
+
+def write_pause_state(paused: bool, reason: str) -> Dict[str, Any]:
+    """Merge trading_paused into the controls artifact and return the new state.
+
+    Only writes the four launcher-controlled keys; all other existing keys in
+    the file are preserved so the full mobile_app.py controls stack is not
+    disturbed.
+    """
+    # Read existing controls to preserve any keys written by mobile_app.py
+    existing: Dict[str, Any] = {}
+    try:
+        if os.path.exists(MOBILE_CONTROLS_FILE):
+            with open(MOBILE_CONTROLS_FILE, "r", encoding="utf-8") as fh:
+                existing = json.load(fh)
+            if not isinstance(existing, dict):
+                existing = {}
+    except Exception:
+        existing = {}
+
+    now = datetime.datetime.utcnow().isoformat() + "Z"
+    existing.update(
+        {
+            "trading_paused": paused,
+            "source": "mobile_launcher",
+            "timestamp": now,
+            "reason": reason,
+        }
+    )
+
+    os.makedirs(os.path.dirname(MOBILE_CONTROLS_FILE), exist_ok=True)
+    with open(MOBILE_CONTROLS_FILE, "w", encoding="utf-8") as fh:
+        json.dump(existing, fh, indent=2)
+
+    return {
+        "trading_paused": paused,
+        "source": "mobile_launcher",
+        "timestamp": now,
+        "reason": reason,
+    }
 
 def get_supervisor_summary() -> Dict[str, Any]:
     state_file = LauncherConfig.SUPERVISOR_STATE_FILE
@@ -210,6 +285,7 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "engine": get_engine_summary(),
         "staleness": staleness,
         "chart_data": chart_data,
+        "pause_state": get_pause_state(),
         "health": {
             "backend_available": get_mobile_launcher_status() == "ONLINE",
             "supervisor_status": get_supervisor_summary().get("status", "UNKNOWN"),
@@ -276,6 +352,55 @@ async def get_manifest():
 @launcher_router.get("/favicon.ico")
 async def get_favicon():
     return FileResponse(os.path.join(os.path.dirname(__file__), "static", "css_launcher_icon.svg"), media_type="image/svg+xml")
+
+
+# ── PAUSE / RESUME ROUTES ────────────────────────────────────────────────────
+
+_BROWSER_REDIRECT_TARGET = "/mobile#risk"
+
+
+def _wants_json(request: Request) -> bool:
+    """Return True when the client explicitly requests JSON (API / XHR call).
+
+    Browser form submissions send no Accept header or a wildcard; they expect
+    a redirect, not a JSON body.  Only return True when the caller signals JSON
+    intent via a recognised header.
+    """
+    accept = request.headers.get("accept", "")
+    xhr    = request.headers.get("x-requested-with", "")
+    return "application/json" in accept or xhr.lower() == "xmlhttprequest"
+
+
+@launcher_router.post("/mobile/control/pause")
+async def mobile_control_pause(request: Request):
+    """Write trading_paused=true to the controls artifact.
+
+    - Browser form POST  → 303 redirect to /mobile#risk (Risk tab auto-opens)
+    - API / XHR caller   → JSON {ok, trading_paused, timestamp}
+    Safe: only mutates the pause flag. No broker calls. No secrets.
+    """
+    state = write_pause_state(paused=True, reason="mobile_user_pause")
+    if _wants_json(request):
+        return JSONResponse(
+            {"ok": True, "trading_paused": state["trading_paused"], "timestamp": state["timestamp"]}
+        )
+    return RedirectResponse(_BROWSER_REDIRECT_TARGET, status_code=303)
+
+
+@launcher_router.post("/mobile/control/resume")
+async def mobile_control_resume(request: Request):
+    """Write trading_paused=false to the controls artifact.
+
+    - Browser form POST  → 303 redirect to /mobile#risk (Risk tab auto-opens)
+    - API / XHR caller   → JSON {ok, trading_paused, timestamp}
+    Safe: only mutates the pause flag. No broker calls. No secrets.
+    """
+    state = write_pause_state(paused=False, reason="mobile_user_resume")
+    if _wants_json(request):
+        return JSONResponse(
+            {"ok": True, "trading_paused": state["trading_paused"], "timestamp": state["timestamp"]}
+        )
+    return RedirectResponse(_BROWSER_REDIRECT_TARGET, status_code=303)
 
 app.include_router(launcher_router)
 
