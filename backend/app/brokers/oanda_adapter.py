@@ -11,6 +11,23 @@ Goals:
     - place_order(...)
     - close_trade(...)
     - close_position(...)
+
+Live Firewall (hardened):
+    place_order() calls _evaluate_live_firewall() which requires ALL of:
+      1. OANDA_ENABLE_LIVE_TRADING == "1"
+      2. broker_mode == "live"
+      3. broker_execution_armed == True
+      4. governance_approved == True
+      5. kill switch NOT active (CSS_LIVE_ORDER_KILL_SWITCH + controls)
+      6. runtime NOT paused (trading_paused in controls)
+      7. user authorized for live execution (live_toggle)
+      8. no fail-closed condition (margin_rejection_lock, health RED)
+
+    Any missing condition blocks execution, logs the denial reason, and
+    returns an explicit firewall-denied result. Never silently continues.
+
+    close_trade() and close_position() are NOT blocked — closures reduce
+    risk and must remain executable regardless of firewall state.
 """
 
 from __future__ import annotations
@@ -19,10 +36,14 @@ import os
 import json
 import time
 import logging
-from dataclasses import dataclass
-from typing import Any, Dict, Optional, List
+from dataclasses import dataclass, field
+from typing import Any, Dict, Mapping, Optional, List
 
 import requests
+
+from engine.execution.live_order_kill_switch import evaluate_live_order_kill_switch
+from backend.app.security.live_toggle import is_live_execution_authorized
+from backend.app.observability.audit_context import get_audit_user
 
 
 @dataclass(frozen=True)
@@ -39,6 +60,20 @@ class OrderRequest:
     side: str = "BUY"
     units: int = 1
     order_type: str = "MARKET"
+
+
+@dataclass(frozen=True)
+class OandaLiveFirewallDecision:
+    """
+    Result of the OANDA live execution firewall evaluation.
+
+    allowed=True only when every condition passed.
+    denied_reason is set whenever allowed=False.
+    audit_log contains per-condition pass/fail detail for logging.
+    """
+    allowed: bool
+    denied_reason: str = ""
+    audit_log: Dict[str, Any] = field(default_factory=dict)
 
 
 class OandaAdapter:
@@ -162,8 +197,156 @@ class OandaAdapter:
     # -------------------------
     # trade/order endpoints
     # -------------------------
-    def _allow_live_order_execution(self) -> bool:
-        return self.allow_live_trades
+
+    def _evaluate_live_firewall(
+        self,
+        *,
+        broker_mode: str = "",
+        broker_execution_armed: bool = False,
+        governance_approved: bool = False,
+        controls: Optional[Mapping[str, Any]] = None,
+        user_context: Optional[Mapping[str, Any]] = None,
+    ) -> OandaLiveFirewallDecision:
+        """
+        Evaluate all 8 required conditions for live order execution.
+
+        Conditions checked in order (first failure blocks immediately):
+          1. OANDA_ENABLE_LIVE_TRADING env var == "1"
+          2. broker_mode == "live"
+          3. broker_execution_armed == True
+          4. governance_approved == True
+          5. kill switch NOT active
+          6. runtime NOT paused
+          7. user authorized for live execution
+          8. no fail-closed condition (margin lock / health RED)
+
+        Returns OandaLiveFirewallDecision(allowed=False, denied_reason=...) on
+        any failure. Never raises — always returns a decision.
+        """
+        audit: Dict[str, Any] = {}
+
+        # ── Condition 1: env-var firewall ────────────────────────────────────
+        env_enabled = self.allow_live_trades
+        audit["oanda_enable_live_trading"] = env_enabled
+        if not env_enabled:
+            return OandaLiveFirewallDecision(
+                allowed=False,
+                denied_reason="firewall_condition_1_failed:OANDA_ENABLE_LIVE_TRADING_not_set",
+                audit_log=audit,
+            )
+
+        # ── Condition 2: live broker mode selected ────────────────────────────
+        mode_normalised = str(broker_mode or "").strip().lower()
+        audit["broker_mode"] = mode_normalised
+        if mode_normalised != "live":
+            return OandaLiveFirewallDecision(
+                allowed=False,
+                denied_reason=f"firewall_condition_2_failed:broker_mode_not_live:{mode_normalised}",
+                audit_log=audit,
+            )
+
+        # ── Condition 3: broker execution armed ──────────────────────────────
+        audit["broker_execution_armed"] = broker_execution_armed
+        if not broker_execution_armed:
+            return OandaLiveFirewallDecision(
+                allowed=False,
+                denied_reason="firewall_condition_3_failed:broker_execution_not_armed",
+                audit_log=audit,
+            )
+
+        # ── Condition 4: governance approved ─────────────────────────────────
+        audit["governance_approved"] = governance_approved
+        if not governance_approved:
+            return OandaLiveFirewallDecision(
+                allowed=False,
+                denied_reason="firewall_condition_4_failed:governance_not_approved",
+                audit_log=audit,
+            )
+
+        # ── Condition 5: kill switch not active ──────────────────────────────
+        try:
+            ks_decision = evaluate_live_order_kill_switch(controls=controls or {})
+            audit["kill_switch_blocked"] = ks_decision.blocked
+            audit["kill_switch_reason"] = ks_decision.reason
+            if ks_decision.blocked:
+                return OandaLiveFirewallDecision(
+                    allowed=False,
+                    denied_reason=f"firewall_condition_5_failed:kill_switch_active:{ks_decision.reason}",
+                    audit_log=audit,
+                )
+        except Exception as exc:
+            audit["kill_switch_error"] = str(exc)
+            return OandaLiveFirewallDecision(
+                allowed=False,
+                denied_reason=f"firewall_condition_5_failed:kill_switch_evaluation_error:{exc}",
+                audit_log=audit,
+            )
+
+        # ── Condition 6: runtime not paused ──────────────────────────────────
+        active_controls = controls or {}
+        trading_paused = str(active_controls.get("trading_paused", "false")).strip().lower()
+        runtime_paused = str(active_controls.get("runtime_paused", "false")).strip().lower()
+        paused = trading_paused in ("true", "1", "yes", "on") or runtime_paused in ("true", "1", "yes", "on")
+        audit["trading_paused"] = trading_paused
+        audit["runtime_paused"] = runtime_paused
+        if paused:
+            return OandaLiveFirewallDecision(
+                allowed=False,
+                denied_reason="firewall_condition_6_failed:runtime_paused",
+                audit_log=audit,
+            )
+
+        # ── Condition 7: user authorized for live execution ───────────────────
+        try:
+            # Build user context from audit thread-local if not explicitly supplied
+            resolved_user_ctx: Optional[Mapping[str, Any]] = user_context
+            if resolved_user_ctx is None:
+                audit_user = get_audit_user()
+                if audit_user is not None:
+                    resolved_user_ctx = {
+                        "user_id": str(audit_user.user_id),
+                        "role": audit_user.role,
+                        "role_profile": {"can_execute_live_trading": True}
+                        if str(audit_user.role).upper() == "SUPER_USER"
+                        else {},
+                    }
+
+            authorized, auth_reason, _ = is_live_execution_authorized(resolved_user_ctx)
+            audit["user_authorized"] = authorized
+            audit["auth_reason"] = auth_reason
+            if not authorized:
+                return OandaLiveFirewallDecision(
+                    allowed=False,
+                    denied_reason=f"firewall_condition_7_failed:user_not_authorized:{auth_reason}",
+                    audit_log=audit,
+                )
+        except Exception as exc:
+            audit["auth_error"] = str(exc)
+            return OandaLiveFirewallDecision(
+                allowed=False,
+                denied_reason=f"firewall_condition_7_failed:auth_evaluation_error:{exc}",
+                audit_log=audit,
+            )
+
+        # ── Condition 8: no fail-closed conditions ────────────────────────────
+        audit["margin_rejection_lock"] = self.margin_rejection_lock
+        audit["health_state"] = self.health_state
+        if self.margin_rejection_lock:
+            return OandaLiveFirewallDecision(
+                allowed=False,
+                denied_reason="firewall_condition_8_failed:margin_rejection_lock_active",
+                audit_log=audit,
+            )
+        if self.health_state == "RED":
+            return OandaLiveFirewallDecision(
+                allowed=False,
+                denied_reason="firewall_condition_8_failed:adapter_health_RED",
+                audit_log=audit,
+            )
+
+        # ── All conditions passed ─────────────────────────────────────────────
+        audit["firewall_result"] = "ALLOWED"
+        return OandaLiveFirewallDecision(allowed=True, denied_reason="", audit_log=audit)
 
     def place_order(
         self,
@@ -173,11 +356,21 @@ class OandaAdapter:
         units: int = 1,
         order_type: str = "MARKET",
         price_bound: Optional[str] = None,
+        # ── Firewall parameters ───────────────────────────────────────────────
+        broker_mode: str = "",
+        broker_execution_armed: bool = False,
+        governance_approved: bool = False,
+        controls: Optional[Mapping[str, Any]] = None,
+        user_context: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Accept either:
           - place_order(OrderRequest(...))
           - place_order(symbol="EUR_USD", units=1, side="BUY")
+
+        Live execution requires ALL firewall conditions to pass.
+        Denial is always logged with the specific reason.
+        Practice/paper paths are unaffected — they are not routed here.
         """
         if order is not None:
             symbol = order.symbol
@@ -189,8 +382,28 @@ class OandaAdapter:
         if not symbol_final:
             return {"ok": False, "status": None, "data": None, "error": "missing_symbol"}
 
-        if not self._allow_live_order_execution():
-            return {"ok": False, "status": None, "data": None, "error": "live_execution_blocked_by_firewall"}
+        # ── Live firewall: all 8 conditions evaluated atomically ──────────────
+        firewall = self._evaluate_live_firewall(
+            broker_mode=broker_mode,
+            broker_execution_armed=broker_execution_armed,
+            governance_approved=governance_approved,
+            controls=controls,
+            user_context=user_context,
+        )
+
+        if not firewall.allowed:
+            logging.warning(
+                "[OANDA FIREWALL] Live order DENIED. reason=%s symbol=%s audit=%s",
+                firewall.denied_reason,
+                symbol_final,
+                firewall.audit_log,
+            )
+            return {
+                "ok": False,
+                "status": None,
+                "data": None,
+                "error": f"live_firewall_denied:{firewall.denied_reason}",
+            }
 
         side_u = (side or "BUY").upper().strip()
         if side_u not in ("BUY", "SELL"):
@@ -215,10 +428,14 @@ class OandaAdapter:
                 "positionFill": "DEFAULT",
             }
         }
-        
+
         if price_bound is not None:
             payload["order"]["priceBound"] = str(price_bound)
 
+        logging.info(
+            "[OANDA FIREWALL] Live order ALLOWED. symbol=%s side=%s units=%s",
+            symbol_final, side_u, signed_units,
+        )
         return self._request_json("POST", f"v3/accounts/{self.account_id}/orders", payload)
 
     def close_trade(self, trade_id: str) -> Dict[str, Any]:

@@ -78,14 +78,21 @@ def test_missing_credentials_fails_closed(mock_load_dotenv):
 @mock.patch("backend.app.brokers.credential_loader.load_dotenv")
 @mock.patch.dict(os.environ, {"OANDA_ENABLE_LIVE_TRADING": "0", "OANDA_API_KEY": "fake_key", "OANDA_ACCOUNT_ID": "fake_id", "OANDA_BASE_URL": "http://fake"})
 def test_oanda_adapter_paper_mode_enforces_live_trading_firewall(mock_load_dotenv):
-    # Prove that even with credentials, if live trading flag is off, it fails closed internally
+    # Prove that even with credentials, if live trading flag is off, the firewall blocks.
+    # _allow_live_order_execution() was replaced by _evaluate_live_firewall() in the
+    # OANDA live firewall hardening patch. The new API provides per-condition audit trails.
     adapter = OandaAdapter()
     assert adapter.is_configured() is True
-    assert adapter._allow_live_order_execution() is False
-    
+    assert adapter.allow_live_trades is False  # env var gate still present as attribute
+
+    firewall = adapter._evaluate_live_firewall()
+    assert firewall.allowed is False
+    assert "condition_1" in firewall.denied_reason  # blocks at OANDA_ENABLE_LIVE_TRADING
+
     order_result = adapter.place_order(symbol="EUR_USD", units=10, side="BUY")
     assert order_result["ok"] is False
-    assert order_result["error"] == "live_execution_blocked_by_firewall"
+    assert order_result["error"].startswith("live_firewall_denied:")
+    assert "condition_1" in order_result["error"]
 
 
 @mock.patch("backend.app.brokers.credential_loader.load_dotenv")

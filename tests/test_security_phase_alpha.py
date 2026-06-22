@@ -74,7 +74,10 @@ def test_oanda_firewall_blocks_live_orders_without_env(monkeypatch):
     response = adapter.place_order(symbol="EUR_USD", side="BUY", units=1)
 
     assert response["ok"] is False
-    assert response["error"] == "live_execution_blocked_by_firewall"
+    # OANDA live firewall hardening: error now includes condition number and reason
+    assert response["error"].startswith("live_firewall_denied:")
+    assert "condition_1" in response["error"]
+    assert "OANDA_ENABLE_LIVE_TRADING_not_set" in response["error"]
 
 
 def test_oanda_firewall_allows_live_orders_when_enabled(monkeypatch):
@@ -82,13 +85,27 @@ def test_oanda_firewall_allows_live_orders_when_enabled(monkeypatch):
     monkeypatch.setenv("OANDA_ACCOUNT_ID", "123")
     monkeypatch.setenv("OANDA_BASE_URL", "https://api-fxpractice.oanda.com")
     monkeypatch.setenv("OANDA_ENABLE_LIVE_TRADING", "1")
+    # Hardened firewall requires live arm + confirm env vars for user authorization
+    monkeypatch.setenv("REA_ENGINE_MODE", "LIVE")
+    monkeypatch.setenv("REA_LIVE_ARM", "1")
+    monkeypatch.setenv("REA_CONFIRM_LIVE", "YES")
+    monkeypatch.delenv("CSS_LIVE_ORDER_KILL_SWITCH", raising=False)
 
     from backend.app.brokers.oanda_adapter import OandaAdapter
 
     adapter = OandaAdapter()
     monkeypatch.setattr(adapter, "_request_json", lambda *args, **kwargs: {"ok": True, "status": 200, "data": {}, "error": None})
 
-    response = adapter.place_order(symbol="EUR_USD", side="BUY", units=1)
+    response = adapter.place_order(
+        symbol="EUR_USD",
+        side="BUY",
+        units=1,
+        broker_mode="live",
+        broker_execution_armed=True,
+        governance_approved=True,
+        controls={"trading_paused": "false", "runtime_paused": "false"},
+        user_context={"user_id": "99999", "role": "SUPER_USER", "role_profile": {"can_execute_live_trading": True}},
+    )
 
     assert response["ok"] is True
 
