@@ -1666,6 +1666,59 @@ def _broker_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
     dashboard_payload = _mobile_dashboard_payload(user_ctx, session)
     broker = _mapping(dashboard_payload.get("broker_summary"))
     reconciliation = build_broker_reconciliation_payload(dashboard_payload)
+    reconciliation_summary = _mapping(reconciliation.get("summary"))
+    reconciliation_visibility = _mapping(
+        reconciliation.get("dashboard_visibility")
+    )
+    reconciliation_status = str(
+        reconciliation_visibility.get(
+            "status",
+            reconciliation.get("status", "UNKNOWN"),
+        )
+    )
+    escalation_level = str(
+        reconciliation_visibility.get(
+            "escalation_level",
+            reconciliation.get("escalation_level", "UNKNOWN"),
+        )
+    )
+    recommended_runtime_mode = str(
+        reconciliation_visibility.get(
+            "recommended_runtime_mode",
+            reconciliation.get("recommended_runtime_mode", "UNKNOWN"),
+        )
+    )
+    safe_degradation_required = bool(
+        reconciliation_visibility.get(
+            "safe_degradation_required",
+            reconciliation.get("safe_degradation_required", False),
+        )
+    )
+    finding_count = reconciliation_summary.get("finding_count", 0)
+    css_position_count = reconciliation_summary.get("css_position_count", 0)
+    broker_position_count = reconciliation_summary.get("broker_position_count", 0)
+    generated_utc = html.escape(str(reconciliation.get("generated_utc", "UNKNOWN"))[:19])
+
+    findings_raw = reconciliation.get("findings", [])
+    findings_html = ""
+    if isinstance(findings_raw, list) and findings_raw:
+        for finding in findings_raw[:8]:
+            finding_map = _mapping(finding)
+            finding_code = html.escape(str(finding_map.get("code", "UNKNOWN")))
+            finding_severity = html.escape(str(finding_map.get("severity", "UNKNOWN")).upper())
+            finding_field = html.escape(str(finding_map.get("field", "UNKNOWN")))
+            finding_message = html.escape(str(finding_map.get("message", "No detail provided")))
+            findings_html += f"""
+              <div class="ops-row">
+                <span>{finding_code}</span>
+                <span>{finding_severity}</span>
+                <span>{finding_field}</span>
+                <span>{finding_message}</span>
+              </div>
+            """
+    else:
+        findings_html = '<div class="ops-row"><span>No reconciliation findings.</span></div>'
+
     status = _system_status(user_ctx)
     controls_link = (
         '<a class="button-link" href="/controls">Open Controls</a>'
@@ -1680,15 +1733,34 @@ def _broker_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
           {_header("Broker Control Panel", user_ctx, "broker")}
           {_identity_strip(user_ctx, "Broker Readiness")}
           {_runtime_heartbeat_html()}
+
           <section class="metric-grid" aria-label="Broker control panel">
             <article><strong>Selected</strong><span>{html.escape(str(broker.get("selected_broker", "MOBILE")))}</span></article>
             <article><strong>Mode</strong><span>{html.escape(str(status["runtime_mode"]).title())}</span></article>
             <article><strong>Broker Gate</strong><span>{html.escape(str(status["broker_live_gate"]))}</span></article>
             <article><strong>Orders</strong><span>{'Enabled' if status["orders_enabled"] else 'Disabled'}</span></article>
             <article><strong>Live Trading</strong><span>{_yes_no(status["broker_live_ready"])}</span></article>
-            <article><strong>Reconciliation</strong><span>{html.escape(str(reconciliation.get("status", "UNKNOWN")))}</span></article>
-            <article><strong>Safe Downgrade</strong><span>{_yes_no(reconciliation.get("safe_degradation_required"))}</span></article>
+            <article><strong>Reconciliation</strong><span>{html.escape(reconciliation_status)}</span></article>
+            <article><strong>Escalation</strong><span>{html.escape(escalation_level)}</span></article>
+            <article><strong>Safe Downgrade</strong><span>{_yes_no(safe_degradation_required)}</span></article>
+            <article><strong>Recommended Mode</strong><span>{html.escape(recommended_runtime_mode.title())}</span></article>
+            <article><strong>CSS Positions</strong><span>{html.escape(str(css_position_count))}</span></article>
+            <article><strong>Broker Positions</strong><span>{html.escape(str(broker_position_count))}</span></article>
+            <article><strong>Findings</strong><span>{html.escape(str(finding_count))}</span></article>
+            <article><strong>Generated</strong><span>{generated_utc}</span></article>
           </section>
+
+          <section class="data-panel" aria-label="Broker reconciliation details">
+            <h2>Broker Reconciliation Detail</h2>
+            <p class="muted">Read-only comparison of CSS dashboard state against broker account and position snapshots. Secrets are redacted before display.</p>
+            <div class="ops-table">
+              <div class="ops-row ops-head">
+                <span>Code</span><span>Severity</span><span>Field</span><span>Message</span>
+              </div>
+              {findings_html}
+            </div>
+          </section>
+
           <section class="data-panel" aria-label="Broker controls">
             <h2>Broker Controls</h2>
             <p class="muted">Broker secrets are never displayed. Live orders still require CSS live mode, order enablement, broker readiness, role authority, and explicit EXECUTE confirmation.</p>
