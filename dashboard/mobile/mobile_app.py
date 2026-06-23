@@ -3365,40 +3365,96 @@ def _get_alert_summary() -> List[Dict[str, Any]]:
 def _alerts_page(user_ctx: Dict[str, Any]) -> str:
     load_local_env()
     alerts = _get_alert_summary()
-    
+
+    severity_counts = {
+        "INFO": 0,
+        "WARNING": 0,
+        "CRITICAL": 0,
+    }
+
+    for alert in alerts:
+        severity_key = str(alert.get("severity", "INFO")).upper()
+        if severity_key not in severity_counts:
+            severity_key = "INFO"
+        severity_counts[severity_key] += 1
+
+    latest_timestamp = "N/A"
+    if alerts:
+        latest_timestamp = str(alerts[0].get("timestamp", "UNKNOWN"))[:19]
+
+    alerts_dir = os.path.join(os.getcwd(), "runtime", "alerts")
+    directory_status = "Active" if os.path.exists(alerts_dir) else "Missing"
+
     if not alerts:
-        alerts_html = '<div class="alert success" style="margin-top: 16px;">No recent alerts found. The system is operating normally.</div>'
-        latest_timestamp = "N/A"
+        alerts_html = (
+            '<div class="alert success" style="margin-top: 16px;">'
+            'No recent alerts found. The system is operating normally.'
+            '</div>'
+        )
     else:
         alerts_html = ""
-        latest_timestamp = alerts[0].get("timestamp", "UNKNOWN")[:19]
         for alert in alerts:
-            severity = html.escape(str(alert.get("severity", "INFO")))
+            raw_severity = str(alert.get("severity", "INFO")).upper()
+            severity_key = raw_severity if raw_severity in severity_counts else "INFO"
+
+            severity = html.escape(severity_key)
             timestamp = html.escape(str(alert.get("timestamp", "UNKNOWN"))[:19])
             message = html.escape(str(alert.get("message", "No message provided")))
             source = html.escape(str(alert.get("source", "UNKNOWN")))
-            alert_type = html.escape(str(alert.get("alert_type", "GENERAL")))
-            
-            # Use color coding similar to launcher
+            alert_type = html.escape(str(alert.get("alert_type", "GENERAL")).upper())
+
+            metadata = alert.get("metadata", {})
+            metadata_summary = ""
+            if isinstance(metadata, dict):
+                reason = metadata.get("reason")
+                failure_count = metadata.get("failure_count")
+                if reason or failure_count is not None:
+                    pieces = []
+                    if reason:
+                        pieces.append(f"Reason: {html.escape(str(reason))}")
+                    if failure_count is not None:
+                        pieces.append(f"Failure Count: {html.escape(str(failure_count))}")
+                    metadata_summary = " | ".join(pieces)
+
             color_class = "info"
-            if severity == "CRITICAL":
+            if severity_key == "CRITICAL":
                 color_class = "error"
-            elif severity == "WARNING":
+            elif severity_key == "WARNING":
                 color_class = "warning"
-                
+            elif severity_key == "INFO":
+                color_class = "success"
+
+            metadata_html = ""
+            if metadata_summary:
+                metadata_html = f'''
+                <div style="font-size: 11px; opacity: 0.8; margin-top: 4px;">
+                    {metadata_summary}
+                </div>
+                '''
+
             alerts_html += f'''
-            <div class="alert {color_class}" style="margin-bottom: 12px; display: block; border-left: 4px solid currentColor;">
-                <div style="display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 12px;">
+            <div class="alert {color_class} css-alert-card" data-severity="{severity}" style="margin-bottom: 12px; display: block; border-left: 4px solid currentColor;">
+                <div style="display: flex; justify-content: space-between; gap: 10px; margin-bottom: 4px; font-size: 12px;">
                     <strong>{severity}</strong>
                     <span>{timestamp}</span>
                 </div>
-                <div style="font-size: 14px; margin-bottom: 4px;">{message}</div>
+                <div style="font-size: 14px; margin-bottom: 4px; font-weight: 600;">{message}</div>
                 <div style="font-size: 11px; opacity: 0.8;">
                     Source: {source} | Type: {alert_type}
                 </div>
+                {metadata_html}
             </div>
             '''
-            
+
+    filter_controls = f'''
+    <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px;">
+      <button type="button" onclick="filterAlerts('ALL')" class="button-link">ALL ({len(alerts)})</button>
+      <button type="button" onclick="filterAlerts('CRITICAL')" class="button-link quiet">CRITICAL ({severity_counts['CRITICAL']})</button>
+      <button type="button" onclick="filterAlerts('WARNING')" class="button-link quiet">WARNING ({severity_counts['WARNING']})</button>
+      <button type="button" onclick="filterAlerts('INFO')" class="button-link quiet">INFO ({severity_counts['INFO']})</button>
+    </div>
+    '''
+
     return _page(
         "Alert Centre",
         f'''
@@ -3406,22 +3462,48 @@ def _alerts_page(user_ctx: Dict[str, Any]) -> str:
           {_header("Alert Centre", user_ctx, "alerts")}
           {_identity_strip(user_ctx, "Read Only Access")}
           {_runtime_heartbeat_html()}
-          
+
           <section class="metric-grid" aria-label="Alerts Summary">
             <article><strong>Total Alerts</strong><span>{len(alerts)}</span></article>
-            <article><strong>Latest Alert</strong><span>{latest_timestamp}</span></article>
-            <article><strong>Directory Status</strong><span>{"Active" if os.path.exists(os.path.join(os.getcwd(), "runtime", "alerts")) else "Missing"}</span></article>
+            <article><strong>Critical</strong><span>{severity_counts["CRITICAL"]}</span></article>
+            <article><strong>Warnings</strong><span>{severity_counts["WARNING"]}</span></article>
+            <article><strong>Info</strong><span>{severity_counts["INFO"]}</span></article>
+            <article><strong>Latest Alert</strong><span>{html.escape(latest_timestamp)}</span></article>
+            <article><strong>Directory Status</strong><span>{html.escape(directory_status)}</span></article>
           </section>
-          
+
           <section class="data-panel" aria-label="Recent Alerts">
-            <h2>System Alerts</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px;">
+              <h2>System Alerts</h2>
+              <button type="button" onclick="window.location.reload();" class="button-link quiet">Refresh</button>
+            </div>
+            <p class="muted">Auto-refreshes every 30 seconds. Use filters to isolate operational severity.</p>
+            {filter_controls}
+            <div id="css-alert-filter-label" class="muted" style="margin-bottom: 10px;">Showing all alerts</div>
             {alerts_html}
           </section>
         </main>
+        <script>
+          function filterAlerts(severity) {{
+            const cards = document.querySelectorAll('.css-alert-card');
+            const label = document.getElementById('css-alert-filter-label');
+            let shown = 0;
+            cards.forEach((card) => {{
+              const cardSeverity = card.getAttribute('data-severity');
+              const visible = severity === 'ALL' || cardSeverity === severity;
+              card.style.display = visible ? 'block' : 'none';
+              if (visible) shown += 1;
+            }});
+            if (label) {{
+              label.textContent = severity === 'ALL'
+                ? `Showing all alerts (${{shown}})`
+                : `Showing ${{severity}} alerts (${{shown}})`;
+            }}
+          }}
+        </script>
         ''',
-        meta_refresh=30
+        meta_refresh=30,
     )
-
 
 def _safe_load_artifact(filename: str) -> Optional[Dict[str, Any]]:
     path = os.path.join(os.getcwd(), "artifacts", filename)
