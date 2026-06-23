@@ -136,8 +136,16 @@ def create_app(
         title="Capital Strata Systems Dashboard Runtime API",
         version="0.1.0",
     )
-    app.include_router(create_dashboard_state_router(state_provider))
-    app.include_router(create_ws_router(state_provider))
+
+    dashboard_router = create_dashboard_state_router(state_provider)
+    ws_router = create_ws_router(state_provider)
+
+    for route in dashboard_router.routes:
+        app.router.routes.append(route)
+
+    for route in ws_router.routes:
+        app.router.routes.append(route)
+
     return app
 
 
