@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -29,6 +28,10 @@ ENGINE_MODE_PROBABILITY_THRESHOLD = {
 SESSION_TIMEOUT_SECONDS = 3600
 
 
+def normalize_asset_class(asset_class: Any) -> str:
+    return str(asset_class or "").strip().lower()
+
+
 @dataclass
 class GateDecision:
     approved: bool
@@ -53,9 +56,6 @@ class CSSUnifiedTradeGate:
 
         now = time.time()
 
-        # --------------------------------------------------
-        # 0. FAIL-CLOSED CANDIDATE VALIDATION (B1)
-        # --------------------------------------------------
         valid, reason = self._validate_candidate(candidate)
         if not valid:
             return self._reject(
@@ -65,9 +65,6 @@ class CSSUnifiedTradeGate:
                 candidate,
             )
 
-        # --------------------------------------------------
-        # 1. SESSION VALIDATION
-        # --------------------------------------------------
         valid, reason = self._validate_session(
             session,
             now,
@@ -81,9 +78,6 @@ class CSSUnifiedTradeGate:
                 candidate,
             )
 
-        # --------------------------------------------------
-        # 2. ROLE VALIDATION
-        # --------------------------------------------------
         role = session.get("role")
 
         if not self._check_role(role):
@@ -94,9 +88,6 @@ class CSSUnifiedTradeGate:
                 candidate,
             )
 
-        # --------------------------------------------------
-        # 3. PORTFOLIO STATE VALIDATION
-        # --------------------------------------------------
         if not portfolio_state:
             return self._reject(
                 "portfolio state unavailable",
@@ -105,13 +96,10 @@ class CSSUnifiedTradeGate:
                 candidate,
             )
 
-        asset_class = str(
+        asset_class = normalize_asset_class(
             candidate.get("asset_class", "")
-        ).strip().lower()
+        )
 
-        # --------------------------------------------------
-        # 4. POSITION LIMIT CHECK
-        # --------------------------------------------------
         if not self._check_position_limits(
             asset_class,
             portfolio_state,
@@ -123,9 +111,6 @@ class CSSUnifiedTradeGate:
                 candidate,
             )
 
-        # --------------------------------------------------
-        # 4B. PROP TRADING GOVERNANCE
-        # --------------------------------------------------
         prop_state = build_default_prop_state()
 
         prop_result = self.prop_governor.evaluate(
@@ -140,9 +125,6 @@ class CSSUnifiedTradeGate:
                 candidate,
             )
 
-        # --------------------------------------------------
-        # 5. SAFE EXTRACTION
-        # --------------------------------------------------
         expected_value = float(
             candidate.get("expected_value")
         )
@@ -155,9 +137,6 @@ class CSSUnifiedTradeGate:
             candidate.get("probability")
         )
 
-        # --------------------------------------------------
-        # 6. EDGE VALIDATION
-        # --------------------------------------------------
         if cost >= expected_value:
             return self._reject(
                 "cost exceeds edge",
@@ -181,9 +160,6 @@ class CSSUnifiedTradeGate:
                 candidate,
             )
 
-        # --------------------------------------------------
-        # 7. APPROVAL
-        # --------------------------------------------------
         approval_reason = (
             f"approved: prob={probability:.3f} "
             f">= {threshold:.3f}, "
@@ -206,17 +182,10 @@ class CSSUnifiedTradeGate:
             },
         )
 
-    # ======================================================
-    # INTERNAL HELPERS
-    # ======================================================
-
     def _validate_candidate(
         self,
         candidate: Dict[str, Any],
     ) -> Tuple[bool, str]:
-        """
-        FAIL-CLOSED validation
-        """
 
         if not candidate:
             return False, "no candidate"
@@ -232,9 +201,9 @@ class CSSUnifiedTradeGate:
             if field not in candidate:
                 return False, f"missing {field}"
 
-        asset_class = str(
+        asset_class = normalize_asset_class(
             candidate.get("asset_class", "")
-        ).strip().lower()
+        )
 
         if asset_class not in MAX_POSITIONS_BY_ASSET:
             return False, "unrecognized asset class"
@@ -316,21 +285,36 @@ class CSSUnifiedTradeGate:
         portfolio_state: Dict[str, Any],
     ) -> bool:
 
-        asset_class = str(
-            asset_class or ""
-        ).strip().lower()
+        asset_class = normalize_asset_class(asset_class)
 
         limits = MAX_POSITIONS_BY_ASSET.get(
             asset_class,
             0,
         )
 
-        current = portfolio_state.get(
+        current = self._current_positions_for_asset_class(
             asset_class,
-            0,
+            portfolio_state,
         )
 
         return current < limits
+
+    def _current_positions_for_asset_class(
+        self,
+        asset_class: str,
+        portfolio_state: Dict[str, Any],
+    ) -> int:
+
+        normalized_asset_class = normalize_asset_class(asset_class)
+        current = 0
+
+        for key, value in (portfolio_state or {}).items():
+            if normalize_asset_class(key) != normalized_asset_class:
+                continue
+
+            current += int(value or 0)
+
+        return current
 
     def evaluate(
         self,
@@ -357,7 +341,7 @@ class CSSUnifiedTradeGate:
             timestamp=timestamp,
             details={
                 "asset_class": (
-                    candidate.get("asset_class")
+                    normalize_asset_class(candidate.get("asset_class"))
                     if candidate
                     else None
                 ),
@@ -368,4 +352,3 @@ class CSSUnifiedTradeGate:
                 ),
             },
         )
-
