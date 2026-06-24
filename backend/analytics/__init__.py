@@ -1,5 +1,6 @@
 """Read-only analytics engines for profitability and signal edge observability."""
 
+from .capital_allocation_engine import CapitalAllocationEngine, CapitalAllocationEngineError
 from .cost_reality_engine import CostRealityEngine
 from .profitability_ranking_engine import ProfitabilityRankingEngine, ProfitabilityRankingEngineError
 from .signal_quality_engine import SignalQualityEngine
@@ -14,6 +15,8 @@ from .trade_outcome_repository import (
 )
 
 __all__ = [
+    "CapitalAllocationEngine",
+    "CapitalAllocationEngineError",
     "CostRealityEngine",
     "ProfitabilityRankingEngine",
     "ProfitabilityRankingEngineError",
