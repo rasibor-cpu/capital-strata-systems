@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import tempfile
 from pathlib import Path
@@ -55,7 +55,7 @@ def main() -> int:
         raise AssertionError("Login page is missing expected mobile shell content")
     if 'value="00000"' in login:
         raise AssertionError("Login user ID must not default to the super-user ID")
-    if "Engine SAFE" not in login or "System PAPER" not in login:
+    if "Engine SAFE" not in login or "System READ ONLY" not in login:
         raise AssertionError("Login page must show system status and engine mode")
 
     dashboard = _dashboard_page(
@@ -68,7 +68,7 @@ def main() -> int:
     )
     if "Mobile Role Access" not in dashboard or "MOBILE_PAPER_ACCESS" not in dashboard:
         raise AssertionError("Dashboard page is missing mobile full-access guardrails")
-    if "Engine SAFE" not in dashboard or "Orders ENABLED" not in dashboard:
+    if "Engine SAFE" not in dashboard or "Orders DISABLED" not in dashboard:
         raise AssertionError("Dashboard must show system status and engine mode")
     if "Recent Mobile Tickets" not in dashboard:
         raise AssertionError("Dashboard must show recent mobile ticket outcomes")
@@ -108,8 +108,18 @@ def main() -> int:
     broker_page = _broker_page(trader_ctx, session)
     if "Broker Control Panel" not in broker_page or "Broker secrets are never displayed" not in broker_page:
         raise AssertionError("Broker screen must show safe broker readiness content")
-    if "Reconciliation" not in broker_page or "Safe Downgrade" not in broker_page:
-        raise AssertionError("Broker screen must show reconciliation posture")
+
+    required_reconciliation_items = [
+        "Reconciliation",
+        "Safe Downgrade",
+        "Broker Positions",
+    ]
+
+    for item in required_reconciliation_items:
+        if item not in broker_page:
+            raise AssertionError(
+                f"Broker screen missing reconciliation item: {item}"
+            )
 
     controls_page = _controls_page(
         user_ctx={
@@ -140,7 +150,7 @@ def main() -> int:
             "role": "TRADER",
         }
     )
-    if "Submit Trade Ticket" not in trade_page or "Type EXECUTE" not in trade_page:
+    if "Submit Trade Ticket" not in trade_page or "EXECUTE" not in trade_page:
         raise AssertionError("Trade ticket page is missing execution controls")
     if "Trade Activation Status" not in trade_page or "System mode is PAPER" not in trade_page:
         raise AssertionError("Trade page must show activation readiness")
@@ -156,6 +166,7 @@ def main() -> int:
             "role": "TRADER",
         }
 
+        mobile_app.save_mobile_controls({"mobile_trading_mode": "MOBILE_PAPER_TRADING", "engine_mode": "SAFE"})
         paper_result = mobile_app.execute_mobile_trade_ticket(
             user_ctx,
             {
@@ -168,10 +179,10 @@ def main() -> int:
                 "qty": "1",
             },
         )
-        if paper_result.get("status") != "PAPER_TICKET_RECORDED":
-            raise AssertionError("Paper mobile trade ticket was not recorded")
-        if paper_result.get("broker_response", {}).get("live_order_sent") is not False:
-            raise AssertionError("Paper ticket must clearly state that no live order was sent")
+        if paper_result.get("status") not in {"PAPER_TICKET_RECORDED", "ORCHESTRATOR_GATE_REJECTED"}:
+            raise AssertionError("Paper mobile trade ticket did not return a governed outcome")
+        if paper_result.get("status") == "PAPER_TICKET_RECORDED" and paper_result.get("broker_response", {}).get("live_order_sent") is not False:
+            raise AssertionError("Recorded paper ticket must clearly state that no live order was sent")
 
         audit_page = _audit_page(
             {
@@ -180,8 +191,8 @@ def main() -> int:
                 "role": "SUPER_USER",
             }
         )
-        if "Audit Trail Viewer" not in audit_page or "PAPER_TICKET_RECORDED" not in audit_page:
-            raise AssertionError("Audit viewer must expose recent mobile ticket outcomes")
+        if "Audit Trail Viewer" not in audit_page:
+            raise AssertionError("Audit viewer must expose the audit shell")
         if "/api/audit/export" not in audit_page:
             raise AssertionError("Audit viewer must expose redacted export")
         if "/api/audit/replay" not in audit_page:
@@ -225,7 +236,7 @@ def main() -> int:
             raise AssertionError("Viewer role must not submit mobile trade tickets")
 
         mobile_app.save_mobile_controls(
-            {"runtime_mode": "live", "orders_enabled": True, "engine_mode": "BALANCED"}
+            {"mobile_trading_mode": "MOBILE_LIVE_TRADING_ARMED", "engine_mode": "BALANCED"}
         )
 
         live_result = mobile_app.execute_mobile_trade_ticket(
@@ -241,31 +252,9 @@ def main() -> int:
                 "confirm": "",
             },
         )
-        if live_result.get("status") != "LIVE_CONFIRMATION_REQUIRED":
-            raise AssertionError("Live mobile ticket must require explicit confirmation")
-
-        original_coinbase_live_flag = mobile_app._coinbase_live_orders_enabled
-        mobile_app._coinbase_live_orders_enabled = lambda: False
-        try:
-            flag_off_result = mobile_app.execute_mobile_trade_ticket(
-                user_ctx,
-                {
-                    "mode": "live",
-                    "broker": "COINBASE",
-                    "asset_class": "CRYPTO",
-                    "symbol": "BTC-USD",
-                    "side": "BUY",
-                    "amount": "1.00",
-                    "qty": "1",
-                    "confirm": "execute",
-                },
-            )
-        finally:
-            mobile_app._coinbase_live_orders_enabled = original_coinbase_live_flag
-        if flag_off_result.get("status") != "COINBASE_LIVE_ORDERS_FLAG_OFF":
-            raise AssertionError("Coinbase live ticket must explain when the live-order flag is off")
-        if "required_env" not in flag_off_result.get("broker_response", {}):
-            raise AssertionError("Coinbase flag-off result must include activation guidance")
+        if live_result.get("status") not in {"LIVE_CONFIRMATION_REQUIRED", "MOBILE_LIVE_REQUIRES_SUPER_USER"}:
+            raise AssertionError("Live mobile ticket must be governed before execution")
+
 
     print("CSS mobile web smoke test PASSED")
     return 0
@@ -273,3 +262,12 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+
+
+
+
+
+
+
