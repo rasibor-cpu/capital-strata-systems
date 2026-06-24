@@ -73,6 +73,9 @@ def build_option_symbol(
     else:
         strike_text = str(strike_value)
 
+    if not expiry_value or expiry_value.upper() == "TBD":
+        return f"{normalized_underlying}-{type_code}-{strike_text}"
+
     return f"{normalized_underlying}-{type_code}-{strike_text}-{expiry_value}"
 
 
