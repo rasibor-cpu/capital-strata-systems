@@ -227,7 +227,7 @@
             right: 0;
             bottom: 0;
             display: grid;
-            grid-template-columns: repeat(5, minmax(0, 1fr));
+            grid-template-columns: repeat(6, minmax(0, 1fr));
             gap: 4px;
             padding: 6px 8px;
             border-top: 1px solid var(--border-strong);
@@ -376,7 +376,7 @@
     <div class="mobile-header">
         <div class="mobile-title">
             <h1>{{ title }}</h1>
-            <p>v{{ version }} &nbsp;|&nbsp; Read-Only View</p>
+            <p>v{{ version }} &nbsp;|&nbsp; Operations + Paper Trade</p>
         </div>
         <div class="status-strip">
             <span class="pill {% if health.backend_available %}good{% else %}bad{% endif %}">
@@ -685,6 +685,70 @@
 
     </div><!-- /screen-execution -->
 
+
+    <!-- ══════════════════════════════════════════════
+         TAB: TRADE
+         ══════════════════════════════════════════════ -->
+    <div id="screen-trade" class="screen">
+
+        <div class="card" id="mobile-paper-trade-tab-ticket">
+            <div class="card-header">
+                Paper Trade Ticket
+                <span class="badge badge-warning">PAPER ONLY</span>
+            </div>
+
+            <div class="paper-only-warning">
+                PAPER TRADING ONLY — request artifact only. No broker calls. No live execution.
+            </div>
+
+            <form action="/mobile/trade/paper" method="post" onsubmit="return confirmPaperTradeRequest()">
+                <input type="hidden" name="paper_only" value="true">
+                <input type="hidden" name="broker_mode" value="paper">
+                <input type="hidden" name="broker_execution_allowed" value="false">
+
+                <div class="trade-ticket-grid">
+                    <label>
+                        Symbol
+                        <input name="symbol" type="text" placeholder="BTC-USD" required autocomplete="off">
+                    </label>
+
+                    <label>
+                        Asset Class
+                        <select name="asset_class" required>
+                            <option value="">Select asset class</option>
+                            <option value="CRYPTO">CRYPTO</option>
+                            <option value="FX">FX</option>
+                            <option value="OPTIONS">OPTIONS</option>
+                            <option value="FUTURES">FUTURES</option>
+                        </select>
+                    </label>
+
+                    <label>
+                        Side
+                        <select name="side" required>
+                            <option value="BUY">BUY</option>
+                            <option value="SELL">SELL</option>
+                        </select>
+                    </label>
+
+                    <label>
+                        Quantity
+                        <input name="quantity" type="number" min="0.00000001" step="any" placeholder="1" required>
+                    </label>
+                </div>
+
+                <div style="margin-top:12px; font-size:12px; color:var(--text-secondary);">
+                    Broker Mode: <strong>PAPER</strong><br>
+                    Paper Only: <strong>TRUE</strong><br>
+                    Output: <code>artifacts/css_mobile_trade_requests.jsonl</code>
+                </div>
+
+                <button type="submit" class="button">Submit Paper Trade Request</button>
+            </form>
+        </div>
+
+    </div><!-- /screen-trade -->
+
     <!-- ══════════════════════════════════════════════
          TAB: RISK
          ══════════════════════════════════════════════ -->
@@ -873,6 +937,9 @@
         <button type="button" data-screen="execution" id="nav-execution">
             <span class="nav-icon">⚡</span>Execution
         </button>
+        <button type="button" data-screen="trade" id="nav-trade">
+            <span class="nav-icon">💳</span>Trade
+        </button>
         <button type="button" data-screen="risk" id="nav-risk">
             <span class="nav-icon">🛡</span>Risk
         </button>
@@ -907,7 +974,7 @@
                 });
             });
             // Activate tab from URL hash — handles redirect back from /mobile#risk
-            var validScreens = ["home", "positions", "execution", "risk", "alerts"];
+            var validScreens = ["home", "positions", "execution", "trade", "risk", "alerts"];
             var hash = window.location.hash.replace("#", "");
             if (hash && validScreens.indexOf(hash) !== -1) {
                 showScreen(hash);

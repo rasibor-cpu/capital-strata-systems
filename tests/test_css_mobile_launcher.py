@@ -617,3 +617,13 @@ def test_mobile_dashboard_exposes_paper_trade_ticket(launcher_temp_dir):
     assert "PAPER TRADING ONLY" in response.text
     assert "/mobile/trade/paper" in response.text
 
+def test_mobile_dashboard_exposes_trade_tab_navigation(launcher_temp_dir):
+    response = client.get("/mobile")
+    assert response.status_code == 200
+    assert 'id="nav-trade"' in response.text
+    assert 'data-screen="trade"' in response.text
+    assert 'id="screen-trade"' in response.text
+    assert "Paper Trade Ticket" in response.text
+    assert "PAPER TRADING ONLY" in response.text
+    assert "/mobile/trade/paper" in response.text
+
