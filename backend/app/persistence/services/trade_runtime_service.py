@@ -1,9 +1,15 @@
+import json
+import logging
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
 from backend.app.persistence.services.persistence_service import (
     PersistenceService,
+)
+from backend.execution.canonical_trade_lifecycle import (
+    CanonicalTradeLifecycle,
+    CanonicalTradeLifecycleError,
 )
 
 
@@ -23,8 +29,9 @@ class TradeRuntimeService:
     - no broker execution logic
     """
 
-    def __init__(self) -> None:
+    def __init__(self, canonical_lifecycle: CanonicalTradeLifecycle | None = None) -> None:
         self.persistence = PersistenceService()
+        self.canonical_lifecycle = canonical_lifecycle or CanonicalTradeLifecycle()
 
     def open_trade(
         self,
@@ -79,112 +86,32 @@ class TradeRuntimeService:
         realized_pnl: Decimal,
     ) -> None:
 
-        closed_at = (
-            datetime.utcnow().isoformat()
-        )
+        closed_at = datetime.utcnow().isoformat()
+
+        trade_record = self.persistence.trades.get_trade(trade_id)
+        if not trade_record:
+            self.persistence.trades.close_trade(
+                trade_id=trade_id,
+                exit_price=exit_price,
+                realized_pnl=realized_pnl,
+                closed_at=closed_at,
+            )
+            return
 
         try:
-            trade_record = self.persistence.trades.get_trade(trade_id)
-            if trade_record:
-                from analytics.trade_outcome_ledger import TradeOutcomeLedger, TradeOutcome
-                import json
-
-                opened_at = trade_record.get("opened_at", closed_at)
-                try:
-                    t_entry = datetime.fromisoformat(opened_at.replace("Z", "+00:00"))
-                    t_exit = datetime.fromisoformat(closed_at.replace("Z", "+00:00"))
-                    holding_seconds = (t_exit - t_entry).total_seconds()
-                except Exception:
-                    holding_seconds = 0.0
-
-                pnl_val = float(realized_pnl)
-                win_loss = "WIN" if pnl_val > 0 else ("LOSS" if pnl_val < 0 else "BREAK_EVEN")
-
-                entry_reason = "UNKNOWN"
-                asset_class = "UNKNOWN"
-                raw = trade_record.get("raw_payload_json")
-                if raw:
-                    try:
-                        payload = json.loads(raw)
-                        entry_reason = payload.get("reason", "UNKNOWN")
-                        asset_class = payload.get("asset_class", "UNKNOWN")
-                    except Exception:
-                        pass
-                
-                symbol = trade_record.get("symbol", "UNKNOWN").upper()
-
-                # Infer asset_class
-                if asset_class == "UNKNOWN":
-                    if any(x in symbol for x in ["BTC", "ETH", "SOL", "ADA", "DOGE"]):
-                        asset_class = "CRYPTO"
-                    elif any(x in symbol for x in ["EUR_", "USD_", "GBP_", "JPY", "CAD", "AUD", "NZD", "CHF"]):
-                        asset_class = "FX"
-                    elif any(x in symbol for x in ["GC", "CL", "ES", "NQ", "YM", "ZB", "ZN"]):
-                        asset_class = "FUTURES"
-                    elif "-C-" in symbol or "-P-" in symbol:
-                        asset_class = "OPTIONS"
-
-                # Infer side
-                raw_side = trade_record.get("direction", "UNKNOWN").upper()
-                if raw_side in ["LONG", "BUY", "CALL"]:
-                    inferred_side = "BUY"
-                elif raw_side in ["SHORT", "SELL", "PUT"]:
-                    inferred_side = "SELL"
-                else:
-                    inferred_side = "UNKNOWN"
-
-                entry_price_val = float(trade_record.get("entry_price", 0.0))
-                quantity_val = float(trade_record.get("quantity", 0.0))
-                amount_traded = entry_price_val * quantity_val
-
-                broker_mode = trade_record.get("broker_mode", "UNKNOWN")
-                
-                engine_mode = "UNKNOWN"
-                if raw:
-                    try:
-                        payload = json.loads(raw)
-                        engine_mode = payload.get("engine_mode", "UNKNOWN")
-                    except Exception:
-                        pass
-                
-                # Fetch recent snapshot for balance if possible
-                try:
-                    from backend.app.persistence.services.pnl_runtime_service import PnlRuntimeService
-                    pnl_svc = PnlRuntimeService()
-                    snapshots = pnl_svc.get_snapshots_by_session(trade_record.get("session_id", ""))
-                    if snapshots:
-                        cumulative_account_balance = float(snapshots[-1].get("cumulative_account_balance", 0.0))
-                    else:
-                        cumulative_account_balance = 0.0
-                except Exception:
-                    cumulative_account_balance = 0.0
-
-                outcome = TradeOutcome(
-                    trade_id=trade_id,
-                    asset_class=asset_class,
-                    symbol=symbol,
-                    entry_timestamp=opened_at,
-                    exit_timestamp=closed_at,
-                    holding_seconds=holding_seconds,
-                    entry_reason=entry_reason,
-                    exit_reason="ACCOUNTING_CLOSE",
-                    entry_price=entry_price_val,
-                    exit_price=float(exit_price),
-                    quantity=quantity_val,
-                    realized_pnl=pnl_val,
-                    max_favorable_excursion=0.0,
-                    max_adverse_excursion=0.0,
-                    win_loss=win_loss,
-                    side=inferred_side,
-                    amount_traded=amount_traded,
-                    cumulative_account_balance=cumulative_account_balance,
-                    engine_mode=engine_mode,
-                    broker_mode=broker_mode
-                )
-                TradeOutcomeLedger().append_trade(outcome)
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).error(f"Phase 126B Analytics Capture Failed: {e}")
+            payload = self._build_canonical_close_payload(
+                trade_id=trade_id,
+                trade_record=trade_record,
+                closed_at=closed_at,
+                exit_price=exit_price,
+                realized_pnl=realized_pnl,
+            )
+            self.canonical_lifecycle.persist_closed_trade_outcome(payload)
+        except CanonicalTradeLifecycleError:
+            raise
+        except Exception as exc:
+            logging.getLogger(__name__).error("Canonical trade lifecycle persistence failed: %s", exc)
+            raise
 
         self.persistence.trades.close_trade(
             trade_id=trade_id,
@@ -192,6 +119,59 @@ class TradeRuntimeService:
             realized_pnl=realized_pnl,
             closed_at=closed_at,
         )
+
+    def _build_canonical_close_payload(
+        self,
+        *,
+        trade_id: str,
+        trade_record: dict[str, Any],
+        closed_at: str,
+        exit_price: Decimal,
+        realized_pnl: Decimal,
+    ) -> dict[str, Any]:
+        opened_at = str(trade_record.get("opened_at") or closed_at)
+        try:
+            t_entry = datetime.fromisoformat(opened_at.replace("Z", "+00:00"))
+            t_exit = datetime.fromisoformat(closed_at.replace("Z", "+00:00"))
+            holding_seconds = (t_exit - t_entry).total_seconds()
+        except Exception:
+            holding_seconds = 0.0
+
+        raw_payload: dict[str, Any] = {}
+        raw_payload_json = trade_record.get("raw_payload_json")
+        if isinstance(raw_payload_json, str) and raw_payload_json:
+            try:
+                raw_payload = json.loads(raw_payload_json)
+            except Exception:
+                raw_payload = {}
+
+        asset_class = str(raw_payload.get("asset_class") or raw_payload.get("asset") or "UNKNOWN")
+        if asset_class == "UNKNOWN":
+            symbol = str(trade_record.get("symbol", "UNKNOWN")).upper()
+            if any(token in symbol for token in ["BTC", "ETH", "SOL", "ADA", "DOGE"]):
+                asset_class = "CRYPTO"
+            elif any(token in symbol for token in ["EUR_", "USD_", "GBP_", "JPY", "CAD", "AUD", "NZD", "CHF"]):
+                asset_class = "FX"
+            elif any(token in symbol for token in ["GC", "CL", "ES", "NQ", "YM", "ZB", "ZN"]):
+                asset_class = "FUTURES"
+            elif "-C-" in symbol or "-P-" in symbol:
+                asset_class = "OPTIONS"
+
+        return {
+            "trade_id": str(trade_id),
+            "timestamp_open": opened_at,
+            "timestamp_close": closed_at,
+            "symbol": str(trade_record.get("symbol", "UNKNOWN")).upper(),
+            "asset_class": asset_class,
+            "entry_price": float(trade_record.get("entry_price", 0.0)),
+            "exit_price": float(exit_price),
+            "quantity": float(trade_record.get("quantity", 0.0)),
+            "realized_pnl": float(realized_pnl),
+            "holding_duration_seconds": float(holding_seconds),
+            "strategy_id": str(raw_payload.get("strategy_id") or raw_payload.get("strategy") or "UNKNOWN").strip(),
+            "market_regime": str(raw_payload.get("market_regime") or raw_payload.get("regime") or "UNKNOWN").strip(),
+            "broker": str(trade_record.get("broker_name") or trade_record.get("broker") or "UNKNOWN").strip(),
+        }
 
     def get_open_trades(
         self,
