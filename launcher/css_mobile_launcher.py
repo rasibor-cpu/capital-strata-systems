@@ -103,21 +103,38 @@ def write_pause_state(paused: bool, reason: str) -> Dict[str, Any]:
 
 def get_supervisor_summary() -> Dict[str, Any]:
     state_file = LauncherConfig.SUPERVISOR_STATE_FILE
+
     if not os.path.exists(state_file):
-        return {"status": "UNKNOWN", "last_heartbeat": "None", "message": "Supervisor state missing"}
-    
+        return {
+            "status": "UNKNOWN",
+            "last_heartbeat": "None",
+            "message": "Supervisor state missing",
+        }
+
     try:
         with open(state_file, "r") as f:
             state = json.load(f)
-            
+
+        heartbeat = (
+            state.get("last_heartbeat")
+            or state.get("last_heartbeat_at")
+            or "None"
+        )
+
         return {
             "status": state.get("status", "UNKNOWN"),
-            "last_heartbeat": state.get("last_heartbeat", "None"),
+            "last_heartbeat": heartbeat,
             "failure_count": state.get("failure_count", 0),
-            "restart_count": state.get("restart_count", 0)
+            "restart_count": state.get("restart_count", 0),
         }
+
     except Exception as e:
-        return {"status": "ERROR", "last_heartbeat": "None", "message": str(e)}
+        return {
+            "status": "ERROR",
+            "last_heartbeat": "None",
+            "message": str(e),
+        }
+
 
 def get_alert_summary() -> List[Dict[str, Any]]:
     alerts_dir = LauncherConfig.ALERTS_DIR
