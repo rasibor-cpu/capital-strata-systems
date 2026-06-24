@@ -4,6 +4,7 @@ from .adaptive_position_sizing import AdaptivePositionSizingEngine, AdaptivePosi
 from .capital_allocation_engine import CapitalAllocationEngine, CapitalAllocationEngineError
 from .cost_reality_engine import CostRealityEngine
 from .profitability_ranking_engine import ProfitabilityRankingEngine, ProfitabilityRankingEngineError
+from .portfolio_optimization_engine import PortfolioOptimizationEngine, PortfolioOptimizationError
 from .signal_quality_engine import SignalQualityEngine
 from .strategy_promotion_engine import StrategyPromotionEngine, StrategyPromotionError
 from .trade_outcome_analytics_engine import TradeOutcomeAnalyticsEngine
@@ -32,6 +33,8 @@ __all__ = [
     "TradeOutcomeRepositoryError",
     "build_trade_outcome_analytics_adapter",
     "persist_completed_trade_outcome",
+    "PortfolioOptimizationEngine",
+    "PortfolioOptimizationError",
     "StrategyPromotionEngine",
     "StrategyPromotionError",
 ]
