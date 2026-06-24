@@ -328,6 +328,46 @@
             opacity: 0.38;
             cursor: not-allowed;
         }
+
+
+        /* ── MOBILE PAPER TRADE TICKET ── */
+        .trade-ticket-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .trade-ticket-grid label {
+            display: grid;
+            gap: 5px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .trade-ticket-grid input,
+        .trade-ticket-grid select {
+            width: 100%;
+            min-height: 42px;
+            border-radius: 6px;
+            border: 1px solid var(--border-strong);
+            background: var(--surface-2);
+            color: var(--text-primary);
+            padding: 8px 10px;
+            font-size: 15px;
+        }
+        .paper-only-warning {
+            margin-top: 10px;
+            padding: 9px 10px;
+            border-radius: var(--radius);
+            border: 1px solid var(--warning-border);
+            background: var(--warning-soft);
+            color: var(--warning);
+            font-size: 12px;
+            font-weight: 700;
+            text-align: center;
+        }
+
     </style>
 </head>
 <body>
@@ -586,6 +626,63 @@
             </div>
         </div>
 
+
+        <div class="card" id="mobile-paper-trade-ticket">
+            <div class="card-header">
+                Mobile Trade Ticket
+                <span class="badge badge-warning">PAPER ONLY</span>
+            </div>
+
+            <div class="paper-only-warning">
+                PAPER TRADING ONLY — No broker calls. No live execution.
+            </div>
+
+            <form action="/mobile/trade/paper" method="post" onsubmit="return confirmPaperTradeRequest()">
+                <input type="hidden" name="paper_only" value="true">
+                <input type="hidden" name="broker_mode" value="paper">
+                <input type="hidden" name="broker_execution_allowed" value="false">
+
+                <div class="trade-ticket-grid">
+                    <label>
+                        Symbol
+                        <input name="symbol" type="text" placeholder="BTC-USD" required autocomplete="off">
+                    </label>
+
+                    <label>
+                        Asset Class
+                        <select name="asset_class" required>
+                            <option value="">Select asset class</option>
+                            <option value="CRYPTO">CRYPTO</option>
+                            <option value="FX">FX</option>
+                            <option value="OPTIONS">OPTIONS</option>
+                            <option value="FUTURES">FUTURES</option>
+                        </select>
+                    </label>
+
+                    <label>
+                        Side
+                        <select name="side" required>
+                            <option value="BUY">BUY</option>
+                            <option value="SELL">SELL</option>
+                        </select>
+                    </label>
+
+                    <label>
+                        Quantity
+                        <input name="quantity" type="number" min="0.00000001" step="any" placeholder="1" required>
+                    </label>
+                </div>
+
+                <div style="margin-top:12px; font-size:12px; color:var(--text-secondary);">
+                    Broker Mode: <strong>PAPER</strong><br>
+                    Paper Only: <strong>TRUE</strong><br>
+                    Status: request will be written to <code>artifacts/css_mobile_trade_requests.jsonl</code>.
+                </div>
+
+                <button type="submit" class="button">Submit Paper Trade Request</button>
+            </form>
+        </div>
+
     </div><!-- /screen-execution -->
 
     <!-- ══════════════════════════════════════════════
@@ -817,6 +914,13 @@
             }
         });
     }());
+
+    function confirmPaperTradeRequest() {
+        return window.confirm(
+            "Submit PAPER trade request?\n\n" +
+            "This writes a request artifact only. No broker calls are made. No live orders are placed."
+        );
+    }
 
     function confirmAction(action) {
         var messages = {

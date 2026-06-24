@@ -1,6 +1,7 @@
 import os
 import json
 import datetime
+from urllib.parse import parse_qs
 from typing import Dict, Any, List
 from fastapi import APIRouter, Request, FastAPI
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse
@@ -100,6 +101,101 @@ def write_pause_state(paused: bool, reason: str) -> Dict[str, Any]:
         "timestamp": now,
         "reason": reason,
     }
+
+
+
+# ── MOBILE PAPER TRADE REQUESTS ─────────────────────────────────────────────
+
+MOBILE_TRADE_REQUESTS_FILE = os.path.join(
+    LauncherConfig.ARTIFACTS_DIR,
+    "css_mobile_trade_requests.jsonl",
+)
+
+_VALID_MOBILE_TRADE_SIDES = {"BUY", "SELL"}
+_FALSE_VALUES = {"false", "0", "no", "n", "off"}
+_TRUE_VALUES = {"true", "1", "yes", "y", "on"}
+
+
+def _current_trade_requests_file() -> str:
+    return MOBILE_TRADE_REQUESTS_FILE
+
+
+async def _read_mobile_trade_payload(request: Request) -> Dict[str, Any]:
+    """Read JSON or urlencoded form payload without requiring broker access."""
+    content_type = request.headers.get("content-type", "").lower()
+
+    if "application/json" in content_type:
+        data = await request.json()
+        return data if isinstance(data, dict) else {}
+
+    raw_body = (await request.body()).decode("utf-8", errors="ignore")
+    parsed = parse_qs(raw_body, keep_blank_values=True)
+    return {key: values[-1] if values else "" for key, values in parsed.items()}
+
+
+def _coerce_mobile_trade_quantity(value: Any) -> float:
+    try:
+        quantity = float(value)
+    except (TypeError, ValueError):
+        raise ValueError("quantity must be numeric")
+
+    if quantity <= 0:
+        raise ValueError("quantity must be greater than zero")
+
+    return quantity
+
+
+def validate_mobile_paper_trade_request(payload: Dict[str, Any]) -> Dict[str, Any]:
+    symbol = str(payload.get("symbol", "")).strip().upper()
+    asset_class = str(payload.get("asset_class", "")).strip().upper()
+    side = str(payload.get("side", "")).strip().upper()
+    broker_mode = str(payload.get("broker_mode", "paper")).strip().lower()
+    paper_only = str(payload.get("paper_only", "true")).strip().lower()
+    broker_execution_allowed = str(
+        payload.get("broker_execution_allowed", "false")
+    ).strip().lower()
+
+    if not symbol:
+        raise ValueError("symbol is required")
+
+    if not asset_class:
+        raise ValueError("asset_class is required")
+
+    if side not in _VALID_MOBILE_TRADE_SIDES:
+        raise ValueError("side must be BUY or SELL")
+
+    quantity = _coerce_mobile_trade_quantity(payload.get("quantity"))
+
+    if broker_mode == "live":
+        raise ValueError("live mode is not allowed for mobile paper trade requests")
+
+    if paper_only in _FALSE_VALUES:
+        raise ValueError("paper_only must remain true")
+
+    if broker_execution_allowed in _TRUE_VALUES:
+        raise ValueError("broker execution is not allowed from mobile paper trade requests")
+
+    return {
+        "timestamp_utc": datetime.datetime.utcnow().isoformat() + "Z",
+        "source": "mobile_dashboard",
+        "paper_only": True,
+        "symbol": symbol,
+        "asset_class": asset_class,
+        "side": side,
+        "quantity": quantity,
+        "status": "REQUESTED",
+    }
+
+
+def write_mobile_paper_trade_request(payload: Dict[str, Any]) -> Dict[str, Any]:
+    request_record = validate_mobile_paper_trade_request(payload)
+    path = _current_trade_requests_file()
+
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(request_record, sort_keys=True) + "\n")
+
+    return request_record
 
 def get_supervisor_summary() -> Dict[str, Any]:
     state_file = LauncherConfig.SUPERVISOR_STATE_FILE
@@ -386,6 +482,35 @@ def _wants_json(request: Request) -> bool:
     accept = request.headers.get("accept", "")
     xhr    = request.headers.get("x-requested-with", "")
     return "application/json" in accept or xhr.lower() == "xmlhttprequest"
+
+
+
+
+@launcher_router.post("/mobile/trade/paper")
+async def mobile_trade_paper(request: Request):
+    """Record a validated paper-only mobile trade request.
+
+    This endpoint intentionally writes an artifact only. It does not call broker
+    APIs, does not place orders, and does not enable live execution.
+    """
+    try:
+        payload = await _read_mobile_trade_payload(request)
+        trade_request = write_mobile_paper_trade_request(payload)
+    except ValueError as exc:
+        return JSONResponse(
+            {"ok": False, "error": str(exc)},
+            status_code=400,
+        )
+    except Exception as exc:
+        return JSONResponse(
+            {"ok": False, "error": f"request failed: {exc}"},
+            status_code=500,
+        )
+
+    if _wants_json(request):
+        return JSONResponse({"ok": True, "trade_request": trade_request})
+
+    return RedirectResponse("/mobile#execution", status_code=303)
 
 
 @launcher_router.post("/mobile/control/pause")

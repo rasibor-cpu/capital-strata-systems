@@ -11,6 +11,7 @@ from launcher.css_mobile_launcher import (
     build_launcher_context,
     get_pause_state,
     write_pause_state,
+    write_mobile_paper_trade_request,
     _wants_json,
 )
 
@@ -436,3 +437,183 @@ def test_xhr_header_returns_json_not_redirect(launcher_temp_dir):
         assert data["trading_paused"] is True
     finally:
         mod.MOBILE_CONTROLS_FILE = orig
+
+# ────────────────────────────────────────────────────────────────
+# MOBILE PAPER TRADE REQUEST TESTS
+# ────────────────────────────────────────────────────────────────
+
+def _set_mobile_trade_requests_file(tmp_path):
+    import launcher.css_mobile_launcher as mod
+    orig = mod.MOBILE_TRADE_REQUESTS_FILE
+    path = os.path.join(tmp_path, "artifacts", "css_mobile_trade_requests.jsonl")
+    mod.MOBILE_TRADE_REQUESTS_FILE = path
+    return mod, orig, path
+
+
+def test_mobile_paper_trade_request_success_writes_artifact(launcher_temp_dir):
+    mod, orig, trade_path = _set_mobile_trade_requests_file(launcher_temp_dir)
+    try:
+        response = client.post(
+            "/mobile/trade/paper",
+            headers={"Accept": "application/json"},
+            data={
+                "symbol": "btc-usd",
+                "asset_class": "crypto",
+                "side": "buy",
+                "quantity": "1",
+                "paper_only": "true",
+                "broker_mode": "paper",
+                "broker_execution_allowed": "false",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["ok"] is True
+        request_record = data["trade_request"]
+        assert request_record["source"] == "mobile_dashboard"
+        assert request_record["paper_only"] is True
+        assert request_record["symbol"] == "BTC-USD"
+        assert request_record["asset_class"] == "CRYPTO"
+        assert request_record["side"] == "BUY"
+        assert request_record["quantity"] == 1.0
+        assert request_record["status"] == "REQUESTED"
+        assert os.path.exists(trade_path)
+
+        with open(trade_path) as fh:
+            rows = [json.loads(line) for line in fh if line.strip()]
+        assert len(rows) == 1
+        assert rows[0]["symbol"] == "BTC-USD"
+    finally:
+        mod.MOBILE_TRADE_REQUESTS_FILE = orig
+
+
+def test_mobile_paper_trade_rejects_invalid_side(launcher_temp_dir):
+    mod, orig, trade_path = _set_mobile_trade_requests_file(launcher_temp_dir)
+    try:
+        response = client.post(
+            "/mobile/trade/paper",
+            headers={"Accept": "application/json"},
+            data={"symbol": "BTC-USD", "asset_class": "CRYPTO", "side": "HOLD", "quantity": "1"},
+        )
+        assert response.status_code == 400
+        assert response.json()["ok"] is False
+        assert not os.path.exists(trade_path)
+    finally:
+        mod.MOBILE_TRADE_REQUESTS_FILE = orig
+
+
+def test_mobile_paper_trade_rejects_blank_symbol(launcher_temp_dir):
+    mod, orig, trade_path = _set_mobile_trade_requests_file(launcher_temp_dir)
+    try:
+        response = client.post(
+            "/mobile/trade/paper",
+            headers={"Accept": "application/json"},
+            data={"symbol": "   ", "asset_class": "CRYPTO", "side": "BUY", "quantity": "1"},
+        )
+        assert response.status_code == 400
+        assert response.json()["ok"] is False
+        assert not os.path.exists(trade_path)
+    finally:
+        mod.MOBILE_TRADE_REQUESTS_FILE = orig
+
+
+def test_mobile_paper_trade_rejects_quantity_lte_zero(launcher_temp_dir):
+    mod, orig, trade_path = _set_mobile_trade_requests_file(launcher_temp_dir)
+    try:
+        response = client.post(
+            "/mobile/trade/paper",
+            headers={"Accept": "application/json"},
+            data={"symbol": "BTC-USD", "asset_class": "CRYPTO", "side": "BUY", "quantity": "0"},
+        )
+        assert response.status_code == 400
+        assert response.json()["ok"] is False
+        assert not os.path.exists(trade_path)
+    finally:
+        mod.MOBILE_TRADE_REQUESTS_FILE = orig
+
+
+def test_mobile_paper_trade_rejects_missing_asset_class(launcher_temp_dir):
+    mod, orig, trade_path = _set_mobile_trade_requests_file(launcher_temp_dir)
+    try:
+        response = client.post(
+            "/mobile/trade/paper",
+            headers={"Accept": "application/json"},
+            data={"symbol": "BTC-USD", "asset_class": "", "side": "BUY", "quantity": "1"},
+        )
+        assert response.status_code == 400
+        assert response.json()["ok"] is False
+        assert not os.path.exists(trade_path)
+    finally:
+        mod.MOBILE_TRADE_REQUESTS_FILE = orig
+
+
+def test_mobile_paper_trade_rejects_live_or_broker_execution_request(launcher_temp_dir):
+    mod, orig, trade_path = _set_mobile_trade_requests_file(launcher_temp_dir)
+    try:
+        live_response = client.post(
+            "/mobile/trade/paper",
+            headers={"Accept": "application/json"},
+            data={
+                "symbol": "BTC-USD",
+                "asset_class": "CRYPTO",
+                "side": "BUY",
+                "quantity": "1",
+                "broker_mode": "live",
+            },
+        )
+        assert live_response.status_code == 400
+
+        broker_response = client.post(
+            "/mobile/trade/paper",
+            headers={"Accept": "application/json"},
+            data={
+                "symbol": "BTC-USD",
+                "asset_class": "CRYPTO",
+                "side": "BUY",
+                "quantity": "1",
+                "broker_execution_allowed": "true",
+            },
+        )
+        assert broker_response.status_code == 400
+        assert not os.path.exists(trade_path)
+    finally:
+        mod.MOBILE_TRADE_REQUESTS_FILE = orig
+
+
+def test_mobile_paper_trade_artifact_append_behavior(launcher_temp_dir):
+    mod, orig, trade_path = _set_mobile_trade_requests_file(launcher_temp_dir)
+    try:
+        for symbol in ("BTC-USD", "ETH-USD"):
+            response = client.post(
+                "/mobile/trade/paper",
+                headers={"Accept": "application/json"},
+                data={
+                    "symbol": symbol,
+                    "asset_class": "CRYPTO",
+                    "side": "BUY",
+                    "quantity": "1",
+                    "paper_only": "true",
+                    "broker_mode": "paper",
+                    "broker_execution_allowed": "false",
+                },
+            )
+            assert response.status_code == 200
+
+        with open(trade_path) as fh:
+            rows = [json.loads(line) for line in fh if line.strip()]
+
+        assert len(rows) == 2
+        assert [row["symbol"] for row in rows] == ["BTC-USD", "ETH-USD"]
+        assert all(row["status"] == "REQUESTED" for row in rows)
+    finally:
+        mod.MOBILE_TRADE_REQUESTS_FILE = orig
+
+
+def test_mobile_dashboard_exposes_paper_trade_ticket(launcher_temp_dir):
+    response = client.get("/mobile")
+    assert response.status_code == 200
+    assert "Mobile Trade Ticket" in response.text
+    assert "PAPER TRADING ONLY" in response.text
+    assert "/mobile/trade/paper" in response.text
+
