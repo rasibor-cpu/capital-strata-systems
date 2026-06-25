@@ -25,6 +25,7 @@ from dashboard.runtime.ws_bridge import (
     build_heartbeat_ws_message,
     build_initial_ws_message,
 )
+from dashboard.web.web_app import _dashboard_page
 
 
 def _collect_paths(routes) -> set[str]:
@@ -91,6 +92,8 @@ def test_frontend_payload_schema_integrity_and_size() -> None:
     assert payload["sections"]["execution"]["recent_trades"][0]["symbol"] == "BTC-USD"
     assert payload["sections"]["opportunities"]["count"] == 2
     assert payload["sections"]["opportunities"]["items"][0]["status"] == "MONITOR_ONLY"
+    assert "portfolio_summary" in payload["sections"]
+    assert "portfolio_greeks" in payload["sections"]
 
 
 def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
@@ -130,7 +133,82 @@ def test_missing_fields_use_frontend_safe_defaults() -> None:
     assert payload["sections"]["governance"]["audit_enabled"] is True
     assert payload["sections"]["market"]["trend_state"] == "UNKNOWN"
     assert payload["sections"]["execution"]["execution_state"] == "IDLE"
+    assert payload["sections"]["portfolio_summary"]["portfolio_status"] == "NO_POSITIONS"
+    assert payload["sections"]["portfolio_summary"]["total_exposure"] == 0.0
+    assert payload["sections"]["portfolio_greeks"]["greeks_status"] == "NO_OPTIONS"
+    assert payload["sections"]["portfolio_greeks"]["net_delta"] == 0.0
     assert json.dumps(payload)
+
+
+def test_no_options_returns_greeks_zeroes_and_no_options_status() -> None:
+    payloads = build_smoke_payloads()
+    payloads["positions_payload"] = {
+        "positions": [
+            {
+                "symbol": "BTC-USD",
+                "asset_class": "CRYPTO",
+                "side": "LONG",
+                "qty": 0.1,
+                "entry_price": 60000.0,
+                "current_price": 61000.0,
+                "unrealized_pnl": 100.0,
+                "realized_pnl": 0.0,
+            }
+        ]
+    }
+    state = DashboardHydrationCoordinator().hydrate(**payloads)
+    payload = build_frontend_payload(state)
+    greeks = payload["sections"]["portfolio_greeks"]
+
+    assert greeks["greeks_status"] == "NO_OPTIONS"
+    assert greeks["delta"] == 0.0
+    assert greeks["net_delta"] == 0.0
+    assert greeks["options_exposure"] == 0.0
+
+
+def test_source_failure_returns_source_unavailable(monkeypatch) -> None:
+    from dashboard.runtime import frontend_contract as fc
+
+    class _BrokenCorrelationEngine:
+        def analyze_portfolio(self, positions):
+            raise fc.PortfolioCorrelationEngineError("boom")
+
+    monkeypatch.setattr(fc, "PortfolioCorrelationEngine", _BrokenCorrelationEngine)
+
+    payload = build_frontend_payload(
+        {
+            "account_summary": {
+                "cash_balance": 100000.0,
+                "total_equity": 100000.0,
+                "buying_power": 100000.0,
+            },
+            "pnl_summary": {"total_exposure": 1200.0},
+            "position_state": {
+                "positions": [
+                    {
+                        "symbol": "EUR_USD",
+                        "asset_class": "FX",
+                        "side": "LONG",
+                        "exposure": 1200.0,
+                    }
+                ]
+            },
+        }
+    )
+    summary = payload["sections"]["portfolio_summary"]
+    assert summary["portfolio_status"] == "SOURCE_UNAVAILABLE"
+    assert summary["source"] == "SOURCE_UNAVAILABLE"
+
+    payload_bad_greeks = build_frontend_payload(
+        {
+            "position_state": {
+                "positions": "BAD_PAYLOAD_SHAPE",
+            }
+        }
+    )
+    greeks = payload_bad_greeks["sections"]["portfolio_greeks"]
+    assert greeks["greeks_status"] == "SOURCE_UNAVAILABLE"
+    assert greeks["source"] == "SOURCE_UNAVAILABLE"
 
 
 def test_websocket_snapshot_delta_and_heartbeat_payloads_are_stable() -> None:
@@ -155,3 +233,9 @@ def test_websocket_snapshot_delta_and_heartbeat_payloads_are_stable() -> None:
     assert json.dumps(initial)
     assert json.dumps(delta)
     assert json.dumps(heartbeat)
+
+
+def test_dashboard_html_renders_portfolio_health_and_greeks_status() -> None:
+    html = _dashboard_page()
+    assert "Portfolio Health" in html
+    assert "Greeks Status" in html

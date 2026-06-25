@@ -83,6 +83,8 @@ def test_frontend_payload_generation_stays_fast_and_compact() -> None:
     assert payload["source_metadata"]["frontend_safe"] is True
     assert payload["source_metadata"]["secrets_redacted"] is True
     assert "sections" in payload
+    assert "portfolio_summary" in payload["sections"]
+    assert "portfolio_greeks" in payload["sections"]
 
 
 def test_websocket_delta_generation_is_incremental_and_compact() -> None:

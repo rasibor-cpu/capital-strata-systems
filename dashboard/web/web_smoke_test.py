@@ -63,6 +63,10 @@ def main() -> int:
         "Institutional Web Dashboard",
         "Account Overview",
         "Live Positions",
+        "Portfolio Summary",
+        "Portfolio Greeks",
+        "Portfolio Health",
+        "Greeks Status",
         "Risk Control Center",
         "Governance Center",
         "Market Regime Panel",
@@ -177,6 +181,10 @@ def main() -> int:
         raise AssertionError("Web dashboard provider must expose demo account payload")
     if sections.get("positions", {}).get("total") != 2:
         raise AssertionError("Web dashboard provider must expose demo positions")
+    if "portfolio_summary" not in sections:
+        raise AssertionError("Web dashboard provider must expose portfolio summary section")
+    if "portfolio_greeks" not in sections:
+        raise AssertionError("Web dashboard provider must expose portfolio greeks section")
     if sections.get("trade", {}).get("count", 0) <= 0:
         raise AssertionError("Web trade center must expose canonical universe rows")
     position_items = sections.get("positions", {}).get("items", [])
@@ -198,6 +206,10 @@ def main() -> int:
         raise AssertionError("Web broker center must expose selected broker")
     if sections.get("broker", {}).get("broker_mode") != "paper":
         raise AssertionError("Web broker center must expose broker mode")
+    if sections.get("portfolio_summary", {}).get("portfolio_health") not in {"STABLE", "WATCH", "DEFENSIVE", "SOURCE_UNAVAILABLE"}:
+        raise AssertionError("Web dashboard portfolio summary must expose portfolio health")
+    if sections.get("portfolio_greeks", {}).get("greeks_status") not in {"OK", "NO_OPTIONS", "SOURCE_UNAVAILABLE"}:
+        raise AssertionError("Web dashboard portfolio greeks must expose greeks status")
     if sections.get("execution", {}).get("execution_state") != "READY":
         raise AssertionError("Web dashboard provider must expose demo execution state")
     recent_trades = sections.get("execution", {}).get("recent_trades", [])

@@ -167,6 +167,8 @@ def _dashboard_page() -> str:
             "account_summary",
             "pnl_summary",
             "positions",
+        "portfolio_summary",
+        "portfolio_greeks",
             "risk",
             "governance",
             "market",
@@ -308,6 +310,33 @@ def _dashboard_page() -> str:
       </article>
     </section>
 
+    <section class="metric-band" aria-label="Portfolio and Greeks overview">
+      <article>
+        <strong>Portfolio Health</strong>
+        <span data-value="portfolio_summary.portfolio_health">STABLE</span>
+      </article>
+      <article>
+        <strong>Total Exposure</strong>
+        <span data-value="portfolio_summary.total_exposure">$0.00</span>
+      </article>
+      <article>
+        <strong>Available Capital</strong>
+        <span data-value="portfolio_summary.available_capital">$0.00</span>
+      </article>
+      <article>
+        <strong>Portfolio Delta</strong>
+        <span data-value="portfolio_greeks.net_delta">0.00</span>
+      </article>
+      <article>
+        <strong>Portfolio Gamma</strong>
+        <span data-value="portfolio_greeks.net_gamma">0.00</span>
+      </article>
+      <article>
+        <strong>Greeks Status</strong>
+        <span data-value="portfolio_greeks.greeks_status">NO_OPTIONS</span>
+      </article>
+    </section>
+
     <section class="dashboard-grid" aria-label="Institutional dashboard panels">
       <article class="panel wide" data-panel="account_summary">
         <div class="panel-head">
@@ -330,6 +359,50 @@ def _dashboard_page() -> str:
           <span data-value="positions.total">0</span>
         </div>
         <div class="table" id="positions-table"></div>
+      </article>
+
+      <article class="panel" data-panel="portfolio_summary">
+        <div class="panel-head">
+          <h2>Portfolio Summary</h2>
+          <span data-value="portfolio_summary.portfolio_status">NO_POSITIONS</span>
+        </div>
+        <div class="kv-grid two">
+          <div><strong>Total Exposure</strong><span data-value="portfolio_summary.total_exposure">$0.00</span></div>
+          <div><strong>Cash</strong><span data-value="portfolio_summary.cash">$0.00</span></div>
+          <div><strong>Equity</strong><span data-value="portfolio_summary.equity">$0.00</span></div>
+          <div><strong>Available Capital</strong><span data-value="portfolio_summary.available_capital">$0.00</span></div>
+          <div><strong>Allocated Capital</strong><span data-value="portfolio_summary.allocated_capital">$0.00</span></div>
+          <div><strong>Reserved Capital</strong><span data-value="portfolio_summary.reserved_capital">$0.00</span></div>
+          <div><strong>Diversification Score</strong><span data-value="portfolio_summary.diversification_score">0.00</span></div>
+          <div><strong>Risk Score</strong><span data-value="portfolio_summary.risk_score">0.00</span></div>
+          <div><strong>Capital Efficiency</strong><span data-value="portfolio_summary.capital_efficiency">0.00%</span></div>
+          <div><strong>Correlation Score</strong><span data-value="portfolio_summary.correlation_score">0.00</span></div>
+          <div><strong>Concentration Score</strong><span data-value="portfolio_summary.concentration_score">0.00</span></div>
+          <div><strong>Portfolio Health</strong><span data-value="portfolio_summary.portfolio_health">STABLE</span></div>
+        </div>
+      </article>
+
+      <article class="panel" data-panel="portfolio_greeks">
+        <div class="panel-head">
+          <h2>Portfolio Greeks</h2>
+          <span data-value="portfolio_greeks.greeks_status">NO_OPTIONS</span>
+        </div>
+        <div class="kv-grid two">
+          <div><strong>Delta</strong><span data-value="portfolio_greeks.delta">0.00</span></div>
+          <div><strong>Gamma</strong><span data-value="portfolio_greeks.gamma">0.00</span></div>
+          <div><strong>Theta</strong><span data-value="portfolio_greeks.theta">0.00</span></div>
+          <div><strong>Vega</strong><span data-value="portfolio_greeks.vega">0.00</span></div>
+          <div><strong>Rho</strong><span data-value="portfolio_greeks.rho">0.00</span></div>
+          <div><strong>Net Delta</strong><span data-value="portfolio_greeks.net_delta">0.00</span></div>
+          <div><strong>Net Gamma</strong><span data-value="portfolio_greeks.net_gamma">0.00</span></div>
+          <div><strong>Net Theta</strong><span data-value="portfolio_greeks.net_theta">0.00</span></div>
+          <div><strong>Net Vega</strong><span data-value="portfolio_greeks.net_vega">0.00</span></div>
+          <div><strong>Net Rho</strong><span data-value="portfolio_greeks.net_rho">0.00</span></div>
+          <div><strong>Options Exposure</strong><span data-value="portfolio_greeks.options_exposure">$0.00</span></div>
+          <div><strong>Underlying Exposure</strong><span data-value="portfolio_greeks.underlying_exposure">$0.00</span></div>
+          <div><strong>Hedge Ratio</strong><span data-value="portfolio_greeks.hedge_ratio">0.00</span></div>
+          <div><strong>Source</strong><span data-value="portfolio_greeks.source">position_state</span></div>
+        </div>
       </article>
 
       <article class="panel" data-panel="risk">
@@ -432,10 +505,10 @@ def _dashboard_page() -> str:
     }}
 
     function formatField(path, value) {{
-      if (["cash_balance", "total_equity", "buying_power", "margin_used", "available_margin", "net_pnl", "total_exposure", "daily_loss_limit", "total_execution_cost"].some((key) => path.endsWith(key))) {{
+      if (["cash_balance", "total_equity", "buying_power", "margin_used", "available_margin", "net_pnl", "total_exposure", "daily_loss_limit", "total_execution_cost", "cash", "equity", "available_capital", "allocated_capital", "reserved_capital", "options_exposure", "underlying_exposure"].some((key) => path.endsWith(key))) {{
         return money(value);
       }}
-      if (["win_rate_pct", "exposure_utilization_pct", "current_drawdown_pct"].some((key) => path.endsWith(key))) {{
+      if (["win_rate_pct", "exposure_utilization_pct", "current_drawdown_pct", "capital_efficiency"].some((key) => path.endsWith(key))) {{
         return pct(value);
       }}
       if (value === true) return "YES";

@@ -27,6 +27,8 @@ class FrontendPayloadValidator:
         "trade",
         "positions",
         "pnl_summary",
+        "portfolio_summary",
+        "portfolio_greeks",
         "risk",
         "governance",
         "market",
@@ -34,6 +36,7 @@ class FrontendPayloadValidator:
         "opportunities",
         "broker",
         "broker_reconciliation",
+        "analytics",
     ]
 
     def validate(self, payload: Dict[str, Any]) -> bool:

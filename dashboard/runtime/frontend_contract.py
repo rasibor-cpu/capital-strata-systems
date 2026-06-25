@@ -15,6 +15,10 @@ from dashboard.runtime.dashboard_state import (
 from dashboard.runtime.broker_balance_reconciliation import (
     build_broker_reconciliation_payload,
 )
+from backend.analytics.portfolio_correlation_engine import (
+    PortfolioCorrelationEngine,
+    PortfolioCorrelationEngineError,
+)
 
 try:
     from backend.scanner.unified_market_scanner import UnifiedMarketScanner
@@ -33,6 +37,8 @@ FRONTEND_SECTIONS = (
     "trade",
     "positions",
     "pnl_summary",
+    "portfolio_summary",
+    "portfolio_greeks",
     "risk",
     "governance",
     "market",
@@ -125,6 +131,8 @@ def build_frontend_payload(
             "trade": trade(dashboard_payload),
             "positions": positions(dashboard_payload),
             "pnl_summary": pnl_summary(dashboard_payload),
+            "portfolio_summary": portfolio_summary(dashboard_payload),
+            "portfolio_greeks": portfolio_greeks(dashboard_payload),
             "risk": risk(dashboard_payload),
             "governance": governance(dashboard_payload),
             "market": market(dashboard_payload),
@@ -163,8 +171,10 @@ def trade(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         str(symbol).upper() for symbol in _list(position_state.get("active_symbols"))
     }
 
+    universe_rows = _universe_rows_for_trade(opportunities_by_symbol)
+
     rows: list[dict[str, Any]] = []
-    for item in _get_canonical_universe_rows():
+    for item in universe_rows:
         symbol = str(item.get("symbol", "UNKNOWN")).upper()
         opportunity = opportunities_by_symbol.get(symbol, {})
 
@@ -193,6 +203,27 @@ def trade(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         "asset_classes": asset_classes,
         "items": rows,
     }
+
+
+def _universe_rows_for_trade(opportunities_by_symbol: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]:
+    if opportunities_by_symbol:
+        rows: list[dict[str, Any]] = []
+        for symbol in sorted(opportunities_by_symbol.keys()):
+            row = _mapping(opportunities_by_symbol.get(symbol))
+            rows.append(
+                {
+                    "symbol": symbol,
+                    "asset_class": str(row.get("asset_class", "UNKNOWN")).upper(),
+                    "price": _number(row.get("price")),
+                    "vwap": _number(row.get("vwap")),
+                    "vwap_dev": _number(row.get("vwap_dev")),
+                    "spread_bps": _number(row.get("spread_bps")),
+                }
+            )
+        if rows:
+            return rows
+
+    return _get_canonical_universe_rows()
 
 
 def _get_canonical_universe_rows() -> list[dict[str, Any]]:
@@ -325,6 +356,155 @@ def pnl_summary(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         "loser_count": _integer(pnl.get("loser_count")),
         "win_rate_pct": _number(pnl.get("win_rate_pct")),
         "account_equity": _number(pnl.get("account_equity")),
+    }
+
+
+def portfolio_summary(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
+    account = _mapping(dashboard_payload.get("account_summary"))
+    pnl = _mapping(dashboard_payload.get("pnl_summary"))
+    positions_state = _mapping(dashboard_payload.get("position_state"))
+
+    cash = _number(account.get("cash_balance"))
+    equity = _number(account.get("total_equity"))
+    buying_power = _number(account.get("buying_power"))
+    margin_used = _number(account.get("margin_used"))
+    total_exposure = _number(pnl.get("total_exposure", positions_state.get("total_exposure")))
+
+    available_capital = buying_power if buying_power > 0 else max(cash - total_exposure, 0.0)
+    allocated_capital = max(total_exposure, margin_used)
+    reserved_capital = max(equity - available_capital - allocated_capital, 0.0)
+
+    positions = _normalized_positions_for_correlation(positions_state)
+    concentration_score = 0.0
+    correlation_score = 0.0
+    portfolio_status = "NO_POSITIONS"
+    source = "dashboard.runtime.frontend_contract"
+
+    try:
+        if positions:
+            correlation = PortfolioCorrelationEngine().analyze_portfolio(positions)
+            concentration_score = _number(correlation.get("concentration_score"))
+            correlation_score = _number(correlation.get("correlation_score"))
+            portfolio_status = "OK"
+            source = "backend.analytics.portfolio_correlation_engine"
+    except (PortfolioCorrelationEngineError, ValueError, TypeError):
+        portfolio_status = "SOURCE_UNAVAILABLE"
+        source = "SOURCE_UNAVAILABLE"
+        concentration_score = 0.0
+        correlation_score = 0.0
+
+    diversification_score = max(0.0, min(1.0, 1.0 - concentration_score))
+    risk_score = max(0.0, min(1.0, (concentration_score + correlation_score) / 2.0))
+    capital_efficiency = (allocated_capital / equity) if equity > 0 else 0.0
+
+    if portfolio_status == "SOURCE_UNAVAILABLE":
+        portfolio_health = "SOURCE_UNAVAILABLE"
+    elif risk_score <= 0.35:
+        portfolio_health = "STABLE"
+    elif risk_score <= 0.65:
+        portfolio_health = "WATCH"
+    else:
+        portfolio_health = "DEFENSIVE"
+
+    return {
+        "total_exposure": round(total_exposure, 8),
+        "cash": round(cash, 8),
+        "equity": round(equity, 8),
+        "available_capital": round(available_capital, 8),
+        "allocated_capital": round(allocated_capital, 8),
+        "reserved_capital": round(reserved_capital, 8),
+        "diversification_score": round(diversification_score, 8),
+        "portfolio_health": portfolio_health,
+        "risk_score": round(risk_score, 8),
+        "capital_efficiency": round(capital_efficiency, 8),
+        "correlation_score": round(correlation_score, 8),
+        "concentration_score": round(concentration_score, 8),
+        "portfolio_status": portfolio_status,
+        "last_updated": datetime.now(timezone.utc).isoformat(),
+        "source": source,
+    }
+
+
+def portfolio_greeks(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
+    positions_state = _mapping(dashboard_payload.get("position_state"))
+    raw_positions = positions_state.get("positions")
+    positions = _list(raw_positions)
+    underlying_exposure = 0.0
+    options_exposure = 0.0
+    net = {
+        "delta": 0.0,
+        "gamma": 0.0,
+        "theta": 0.0,
+        "vega": 0.0,
+        "rho": 0.0,
+    }
+
+    try:
+        if raw_positions is not None and not isinstance(raw_positions, list):
+            raise ValueError("positions must be a list")
+
+        source_set: set[str] = set()
+        option_count = 0
+        for raw in positions:
+            row = _mapping(raw)
+            asset_class = str(row.get("asset_class", "UNKNOWN")).strip().upper()
+            exposure = _number(row.get("exposure", _number(row.get("qty")) * _number(row.get("current_price"))))
+
+            if asset_class == "OPTIONS":
+                option_count += 1
+                options_exposure += abs(exposure)
+                for greek in ("delta", "gamma", "theta", "vega", "rho"):
+                    value = row.get(greek)
+                    if value is None:
+                        continue
+                    net[greek] += _number(value)
+
+                source_value = str(row.get("greeks_source", "")).strip().upper()
+                if source_value and source_value != "UNKNOWN":
+                    source_set.add(source_value)
+            else:
+                underlying_exposure += abs(exposure)
+
+        if option_count == 0:
+            greeks_status = "NO_OPTIONS"
+            source = "position_state"
+        else:
+            greeks_status = "OK"
+            source = "MIXED" if len(source_set) > 1 else (next(iter(source_set)) if source_set else "UNKNOWN")
+
+    except Exception:
+        greeks_status = "SOURCE_UNAVAILABLE"
+        source = "SOURCE_UNAVAILABLE"
+        option_count = 0
+        options_exposure = 0.0
+        underlying_exposure = 0.0
+        net = {
+            "delta": 0.0,
+            "gamma": 0.0,
+            "theta": 0.0,
+            "vega": 0.0,
+            "rho": 0.0,
+        }
+
+    hedge_ratio = abs(net["delta"]) / underlying_exposure if underlying_exposure > 0 else 0.0
+
+    return {
+        "delta": round(net["delta"], 8),
+        "gamma": round(net["gamma"], 8),
+        "theta": round(net["theta"], 8),
+        "vega": round(net["vega"], 8),
+        "rho": round(net["rho"], 8),
+        "net_delta": round(net["delta"], 8),
+        "net_gamma": round(net["gamma"], 8),
+        "net_theta": round(net["theta"], 8),
+        "net_vega": round(net["vega"], 8),
+        "net_rho": round(net["rho"], 8),
+        "options_exposure": round(options_exposure, 8),
+        "underlying_exposure": round(underlying_exposure, 8),
+        "hedge_ratio": round(hedge_ratio, 8),
+        "greeks_status": greeks_status,
+        "last_updated": datetime.now(timezone.utc).isoformat(),
+        "source": source,
     }
 
 
@@ -620,6 +800,26 @@ def _list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
+def _normalized_positions_for_correlation(position_state: Mapping[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for raw in _list(position_state.get("positions")):
+        item = _mapping(raw)
+        symbol = str(item.get("symbol") or "").strip()
+        if not symbol:
+            continue
+
+        exposure = _number(item.get("exposure", _number(item.get("qty")) * _number(item.get("current_price"))))
+        rows.append(
+            {
+                "symbol": symbol,
+                "asset_class": str(item.get("asset_class", "UNKNOWN")),
+                "side": str(item.get("side", "UNKNOWN")),
+                "exposure_value": exposure,
+            }
+        )
+    return rows
+
+
 def _number(value: Any, default: float = 0.0) -> float:
     try:
         if value is None:
@@ -719,6 +919,8 @@ __all__ = [
     "governance",
     "market",
     "opportunities",
+    "portfolio_summary",
+    "portfolio_greeks",
     "pnl_summary",
     "positions",
     "risk",
