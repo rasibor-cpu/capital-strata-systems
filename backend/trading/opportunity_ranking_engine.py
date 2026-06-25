@@ -9,6 +9,10 @@ from backend.intelligence.intelligence_orchestrator import (
     IntelligenceDecisionError,
     IntelligenceOrchestrator,
 )
+from backend.trading.autonomous_opportunity_intelligence_engine import (
+    AutonomousOpportunityIntelligenceEngine,
+    AutonomousOpportunityIntelligenceEngineError,
+)
 from backend.trading.instrument_universe import InstrumentUniverse, InstrumentUniverseError
 
 
@@ -25,13 +29,28 @@ class RankedOpportunity:
     broker: str
     action: str
     confidence: float
+    calibrated_confidence_percent: float
     opportunity_score: float
+    weighted_intelligence_score: float
     market_regime: str
+    regime_confidence: float
+    regime_stability: float
     selected_strategy: str
     signal_strength: float
     expected_reward: float
     expected_risk: float
+    expected_holding_time: str
+    expected_reward_risk: float
+    risk_level: str
     risk_score: float
+    liquidity_rating: str
+    liquidity_score: float
+    cross_asset_confidence: float
+    correlation_score: float
+    confirmation_score: float
+    session_name: str
+    session_confidence_adjustment: float
+    rationale: str
     allocation: dict[str, Any]
     position_size: dict[str, Any]
     portfolio_risk: float
@@ -41,6 +60,7 @@ class RankedOpportunity:
     status: str
     reason: str
     diagnostics: dict[str, Any]
+    explainability: dict[str, Any]
     last_updated: str
 
     def to_dict(self) -> dict[str, Any]:
@@ -58,10 +78,14 @@ class OpportunityRankingEngine:
         instrument_universe: InstrumentUniverse | None = None,
         intelligence_orchestrator: IntelligenceOrchestrator | None = None,
         unified_trade_gate: CSSUnifiedTradeGate | None = None,
+        autonomous_intelligence_engine: AutonomousOpportunityIntelligenceEngine | None = None,
+        historical_learning_records: list[Mapping[str, Any]] | None = None,
     ) -> None:
         self.instrument_universe = instrument_universe or InstrumentUniverse()
         self.intelligence_orchestrator = intelligence_orchestrator or IntelligenceOrchestrator()
         self.unified_trade_gate = unified_trade_gate or CSSUnifiedTradeGate()
+        self.autonomous_intelligence_engine = autonomous_intelligence_engine or AutonomousOpportunityIntelligenceEngine()
+        self.historical_learning_records = list(historical_learning_records or [])
 
     def rank_all(self, *, include_blocked: bool = True) -> list[dict[str, Any]]:
         instruments = self.instrument_universe.all_instruments()
@@ -159,6 +183,11 @@ class OpportunityRankingEngine:
 
         candidate = self._candidate_for_instrument(instrument)
         decision = self._safe_decide(candidate)
+        intelligence = self._safe_intelligence_analyze(
+            instrument=instrument,
+            candidate=candidate,
+            decision=decision,
+        )
 
         confidence = float(decision.get("confidence", 0.0) or 0.0)
         signal_strength = float(decision.get("signal_strength", 0.0) or 0.0)
@@ -185,6 +214,10 @@ class OpportunityRankingEngine:
             gate_approved=gate_approved,
         )
 
+        weighted_score = float(
+            intelligence.get("ranking_v2", {}).get("weighted_score", 0.0) or 0.0
+        )
+
         score = self._score(
             confidence=confidence,
             signal_strength=signal_strength,
@@ -197,6 +230,7 @@ class OpportunityRankingEngine:
             tradable=tradable,
             paper_supported=paper_supported,
             action=action,
+            weighted_intelligence_score=weighted_score,
         )
 
         risk_score = self._risk_score(
@@ -209,6 +243,14 @@ class OpportunityRankingEngine:
         status = str(instrument.get("status") or "UNKNOWN").strip().upper() or "UNKNOWN"
         reason = self._resolve_reason(action=action, gate_result=gate_result, entry_decision=entry_decision)
 
+        ranking_v2 = intelligence.get("ranking_v2", {})
+        regime_confirmation = intelligence.get("regime_confirmation", {})
+        liquidity = intelligence.get("liquidity", {})
+        cross_asset = intelligence.get("cross_asset", {})
+        session_awareness = intelligence.get("session_awareness", {})
+        confidence_calibration = intelligence.get("confidence_calibration", {})
+        explainability = intelligence.get("explainability", {})
+
         return RankedOpportunity(
             rank=0,
             symbol=symbol,
@@ -217,13 +259,31 @@ class OpportunityRankingEngine:
             broker=broker,
             action=action,
             confidence=round(confidence, 8),
+            calibrated_confidence_percent=round(
+                float(confidence_calibration.get("calibrated_confidence_percent", confidence * 100.0) or 0.0),
+                8,
+            ),
             opportunity_score=round(score, 8),
+            weighted_intelligence_score=round(weighted_score, 8),
             market_regime=market_regime,
+            regime_confidence=round(float(regime_confirmation.get("confidence", 0.0) or 0.0), 8),
+            regime_stability=round(float(regime_confirmation.get("regime_stability", 0.0) or 0.0), 8),
             selected_strategy=selected_strategy,
             signal_strength=round(signal_strength, 8),
             expected_reward=round(expected_reward, 8),
             expected_risk=round(expected_risk, 8),
+            expected_holding_time=str(ranking_v2.get("expected_holding_time") or "UNKNOWN"),
+            expected_reward_risk=round(float(ranking_v2.get("expected_reward_risk", 0.0) or 0.0), 8),
+            risk_level=str(ranking_v2.get("risk_level") or "UNKNOWN"),
             risk_score=round(risk_score, 8),
+            liquidity_rating=str(liquidity.get("liquidity_rating") or "UNKNOWN"),
+            liquidity_score=round(float(liquidity.get("liquidity_score", 0.0) or 0.0), 8),
+            cross_asset_confidence=round(float(cross_asset.get("cross_asset_confidence", 0.0) or 0.0), 8),
+            correlation_score=round(float(cross_asset.get("correlation_score", 0.0) or 0.0), 8),
+            confirmation_score=round(float(cross_asset.get("confirmation_score", 0.0) or 0.0), 8),
+            session_name=str(session_awareness.get("session") or "UNKNOWN"),
+            session_confidence_adjustment=round(float(session_awareness.get("confidence_adjustment", 1.0) or 1.0), 8),
+            rationale=str(explainability.get("why_selected") or reason),
             allocation=dict(decision.get("allocation") or {}),
             position_size=dict(decision.get("position_size") or {}),
             portfolio_risk=round(portfolio_risk, 8),
@@ -234,12 +294,85 @@ class OpportunityRankingEngine:
             reason=reason,
             diagnostics={
                 "decision": decision,
+                "intelligence": intelligence,
                 "gate": gate_result,
                 "concentration_score": round(concentration_score, 8),
                 "strategy_score": round(strategy_score, 8),
             },
+            explainability=dict(explainability),
             last_updated=datetime.now(timezone.utc).isoformat(),
         )
+
+    def _safe_intelligence_analyze(
+        self,
+        *,
+        instrument: Mapping[str, Any],
+        candidate: Mapping[str, Any],
+        decision: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        try:
+            return self.autonomous_intelligence_engine.analyze(
+                instrument=instrument,
+                candidate=candidate,
+                decision=decision,
+                historical_records=self.historical_learning_records,
+            )
+        except AutonomousOpportunityIntelligenceEngineError:
+            return self._fallback_intelligence_payload("autonomous_intelligence_error")
+        except Exception:
+            return self._fallback_intelligence_payload("autonomous_intelligence_exception")
+
+    @staticmethod
+    def _fallback_intelligence_payload(error_code: str) -> dict[str, Any]:
+        return {
+            "multi_timeframe": {"normalized_score": 0.0, "volatility_score": 0.0, "timeframes": {}},
+            "regime_confirmation": {
+                "primary_regime": "UNKNOWN",
+                "confidence": 0.0,
+                "regime_stability": 0.0,
+                "votes": {},
+            },
+            "cross_asset": {
+                "group": "NONE",
+                "cross_asset_confidence": 0.0,
+                "correlation_score": 0.0,
+                "confirmation_score": 0.0,
+            },
+            "liquidity": {
+                "liquidity_rating": "UNKNOWN",
+                "liquidity_score": 0.0,
+                "eligible": False,
+                "decision_hint": "REJECT",
+            },
+            "session_awareness": {
+                "session": "UNKNOWN",
+                "overlap": False,
+                "holiday_or_weekend": False,
+                "confidence_adjustment": 1.0,
+            },
+            "confidence_calibration": {
+                "calibrated_confidence": 0.0,
+                "calibrated_confidence_percent": 0.0,
+                "learning_feedback_score": 0.0,
+            },
+            "ranking_v2": {
+                "weighted_score": 0.0,
+                "weighted_score_percent": 0.0,
+                "risk_level": "HIGH",
+                "expected_holding_time": "UNKNOWN",
+                "expected_reward_risk": 0.0,
+                "weights": {},
+            },
+            "explainability": {
+                "why_selected": "Intelligence unavailable.",
+                "why_rejected": "Fail-closed fallback used.",
+                "supporting_indicators": {},
+                "historical_confidence": 0.0,
+                "alternative_strategy": "default",
+                "alternative_timeframe": "1H",
+                "error": error_code,
+            },
+        }
 
     def _safe_decide(self, candidate: Mapping[str, Any]) -> dict[str, Any]:
         try:
@@ -421,6 +554,7 @@ class OpportunityRankingEngine:
         tradable: bool,
         paper_supported: bool,
         action: str,
+        weighted_intelligence_score: float,
     ) -> float:
         conf = max(0.0, min(1.0, confidence))
         signal = max(0.0, min(1.0, signal_strength))
@@ -444,6 +578,7 @@ class OpportunityRankingEngine:
             - (p_risk * 10.0)
             - (concentration * 8.0)
             + (strategy * 8.0)
+            + (max(0.0, min(1.0, weighted_intelligence_score)) * 22.0)
             + (8.0 if tradable else -12.0)
             + (5.0 if paper_supported else 0.0)
         )
@@ -478,13 +613,28 @@ class OpportunityRankingEngine:
                     broker=item.broker,
                     action=item.action,
                     confidence=item.confidence,
+                    calibrated_confidence_percent=item.calibrated_confidence_percent,
                     opportunity_score=item.opportunity_score,
+                    weighted_intelligence_score=item.weighted_intelligence_score,
                     market_regime=item.market_regime,
+                    regime_confidence=item.regime_confidence,
+                    regime_stability=item.regime_stability,
                     selected_strategy=item.selected_strategy,
                     signal_strength=item.signal_strength,
                     expected_reward=item.expected_reward,
                     expected_risk=item.expected_risk,
+                    expected_holding_time=item.expected_holding_time,
+                    expected_reward_risk=item.expected_reward_risk,
+                    risk_level=item.risk_level,
                     risk_score=item.risk_score,
+                    liquidity_rating=item.liquidity_rating,
+                    liquidity_score=item.liquidity_score,
+                    cross_asset_confidence=item.cross_asset_confidence,
+                    correlation_score=item.correlation_score,
+                    confirmation_score=item.confirmation_score,
+                    session_name=item.session_name,
+                    session_confidence_adjustment=item.session_confidence_adjustment,
+                    rationale=item.rationale,
                     allocation=item.allocation,
                     position_size=item.position_size,
                     portfolio_risk=item.portfolio_risk,
@@ -494,6 +644,7 @@ class OpportunityRankingEngine:
                     status=item.status,
                     reason=item.reason,
                     diagnostics=item.diagnostics,
+                    explainability=item.explainability,
                     last_updated=item.last_updated,
                 )
             )

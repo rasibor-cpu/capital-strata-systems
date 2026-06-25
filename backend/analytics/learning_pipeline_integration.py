@@ -150,6 +150,23 @@ class LearningPipelineIntegration:
             "trade_context": context,
             "regime_history": regime_history,
             "strategy_memory": strategy_memory,
+            "intelligence_snapshot": {
+                "instrument": payload["symbol"],
+                "setup": payload["strategy_id"],
+                "regime": regime,
+                "indicators": {
+                    "volatility": payload["volatility"],
+                    "trend_strength": payload["trend_strength"],
+                    "confidence": payload["confidence"],
+                },
+                "decision": str(decision.get("decision") or decision.get("entry_decision") or "UNKNOWN"),
+                "outcome": "WIN" if win else "LOSS",
+                "pnl": payload["realized_pnl"],
+                "mfe": float(completed_trade.get("mfe", completed_trade.get("max_favorable_excursion", 0.0)) or 0.0),
+                "mae": float(completed_trade.get("mae", completed_trade.get("max_adverse_excursion", 0.0)) or 0.0),
+                "holding_time_seconds": payload["holding_duration_seconds"],
+                "reason_for_exit": str(completed_trade.get("reason_for_exit") or "UNSPECIFIED").strip() or "UNSPECIFIED",
+            },
         }
 
     @staticmethod

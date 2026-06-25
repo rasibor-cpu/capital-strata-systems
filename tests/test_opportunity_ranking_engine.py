@@ -204,3 +204,25 @@ def test_explain_opportunity_returns_diagnostics(ranked_engine: OpportunityRanki
     payload = ranked_engine.explain_opportunity("BTC-USD")
     assert payload["symbol"] == "BTC-USD"
     assert "diagnostics" in payload
+
+
+def test_ranking_v2_fields_and_explainability_present(ranked_engine: OpportunityRankingEngine) -> None:
+    rows = ranked_engine.rank_all()
+    first = rows[0]
+
+    assert "weighted_intelligence_score" in first
+    assert "regime_confidence" in first
+    assert "regime_stability" in first
+    assert "liquidity_rating" in first
+    assert "liquidity_score" in first
+    assert "cross_asset_confidence" in first
+    assert "correlation_score" in first
+    assert "confirmation_score" in first
+    assert "session_name" in first
+    assert "session_confidence_adjustment" in first
+    assert "calibrated_confidence_percent" in first
+    assert "expected_holding_time" in first
+    assert "expected_reward_risk" in first
+    assert "risk_level" in first
+    assert "explainability" in first
+    assert "why_selected" in first["explainability"]

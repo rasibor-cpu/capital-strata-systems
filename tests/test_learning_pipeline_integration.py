@@ -60,6 +60,10 @@ def test_completed_trade_writes_all_learning_targets(tmp_path) -> None:
     assert result["trade_context"]["trade_id"] == "t-1"
     assert result["regime_history"]["regime"] == "TRENDING"
     assert result["strategy_memory"]["trade_id"] == "t-1"
+    assert result["intelligence_snapshot"]["instrument"] == "EUR/USD"
+    assert "mfe" in result["intelligence_snapshot"]
+    assert "mae" in result["intelligence_snapshot"]
+    assert "reason_for_exit" in result["intelligence_snapshot"]
 
 
 def test_duplicate_completed_trade_fails_closed(tmp_path) -> None:
