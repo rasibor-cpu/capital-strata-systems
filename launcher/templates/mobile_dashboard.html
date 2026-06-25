@@ -356,6 +356,31 @@
             padding: 8px 10px;
             font-size: 15px;
         }
+        .instrument-selector-wrap {
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 10px;
+            background: #0f1412;
+            margin-top: 6px;
+            margin-bottom: 4px;
+        }
+        .instrument-filters {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .instrument-search {
+            grid-column: 1 / -1;
+        }
+        .instrument-status {
+            margin-top: 8px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .instrument-status strong {
+            color: var(--text-primary);
+        }
         .paper-only-warning {
             margin-top: 10px;
             padding: 9px 10px;
@@ -642,20 +667,47 @@
                 <input type="hidden" name="broker_mode" value="paper">
                 <input type="hidden" name="broker_execution_allowed" value="false">
 
+                <div class="instrument-selector-wrap instrument-selector-container"
+                     data-symbol-id="exec-symbol"
+                     data-asset-id="exec-asset-class"
+                     data-status-id="exec-instrument-status">
+                    <div class="stat-label" style="margin-bottom:8px;">Instrument Universe Selector</div>
+                    <div class="instrument-filters">
+                        <select class="instrument-asset-filter" aria-label="Filter by asset class">
+                            <option value="">All Asset Classes</option>
+                            {% for asset in instrument_universe.asset_classes %}
+                            <option value="{{ asset }}">{{ asset }}</option>
+                            {% endfor %}
+                        </select>
+                        <select class="instrument-broker-filter" aria-label="Filter by broker">
+                            <option value="">All Brokers</option>
+                            {% for broker in instrument_universe.brokers %}
+                            <option value="{{ broker }}">{{ broker|upper }}</option>
+                            {% endfor %}
+                        </select>
+                        <input class="instrument-search" type="text" placeholder="Search symbol or name" aria-label="Search instruments">
+                        <select class="instrument-select" aria-label="Select tradable instrument">
+                            <option value="">Select instrument</option>
+                        </select>
+                    </div>
+                    <div class="instrument-status" id="exec-instrument-status">No instrument selected.</div>
+                </div>
+
                 <div class="trade-ticket-grid">
                     <label>
                         Symbol
-                        <input name="symbol" type="text" placeholder="BTC-USD" required autocomplete="off">
+                        <input id="exec-symbol" name="symbol" type="text" placeholder="BTC-USD" required autocomplete="off">
                     </label>
 
                     <label>
                         Asset Class
-                        <select name="asset_class" required>
+                        <select id="exec-asset-class" name="asset_class" required>
                             <option value="">Select asset class</option>
                             <option value="CRYPTO">CRYPTO</option>
                             <option value="FX">FX</option>
                             <option value="OPTIONS">OPTIONS</option>
                             <option value="FUTURES">FUTURES</option>
+                            <option value="EQUITIES">EQUITIES</option>
                         </select>
                     </label>
 
@@ -706,20 +758,47 @@
                 <input type="hidden" name="broker_mode" value="paper">
                 <input type="hidden" name="broker_execution_allowed" value="false">
 
+                <div class="instrument-selector-wrap instrument-selector-container"
+                     data-symbol-id="trade-symbol"
+                     data-asset-id="trade-asset-class"
+                     data-status-id="trade-instrument-status">
+                    <div class="stat-label" style="margin-bottom:8px;">Instrument Universe Selector</div>
+                    <div class="instrument-filters">
+                        <select class="instrument-asset-filter" aria-label="Filter by asset class">
+                            <option value="">All Asset Classes</option>
+                            {% for asset in instrument_universe.asset_classes %}
+                            <option value="{{ asset }}">{{ asset }}</option>
+                            {% endfor %}
+                        </select>
+                        <select class="instrument-broker-filter" aria-label="Filter by broker">
+                            <option value="">All Brokers</option>
+                            {% for broker in instrument_universe.brokers %}
+                            <option value="{{ broker }}">{{ broker|upper }}</option>
+                            {% endfor %}
+                        </select>
+                        <input class="instrument-search" type="text" placeholder="Search symbol or name" aria-label="Search instruments">
+                        <select class="instrument-select" aria-label="Select tradable instrument">
+                            <option value="">Select instrument</option>
+                        </select>
+                    </div>
+                    <div class="instrument-status" id="trade-instrument-status">No instrument selected.</div>
+                </div>
+
                 <div class="trade-ticket-grid">
                     <label>
                         Symbol
-                        <input name="symbol" type="text" placeholder="BTC-USD" required autocomplete="off">
+                        <input id="trade-symbol" name="symbol" type="text" placeholder="BTC-USD" required autocomplete="off">
                     </label>
 
                     <label>
                         Asset Class
-                        <select name="asset_class" required>
+                        <select id="trade-asset-class" name="asset_class" required>
                             <option value="">Select asset class</option>
                             <option value="CRYPTO">CRYPTO</option>
                             <option value="FX">FX</option>
                             <option value="OPTIONS">OPTIONS</option>
                             <option value="FUTURES">FUTURES</option>
+                            <option value="EQUITIES">EQUITIES</option>
                         </select>
                     </label>
 
@@ -951,6 +1030,7 @@
     <script>
     (function () {
         "use strict";
+        var instrumentFeed = {{ instrument_universe | tojson }};
         var activeScreen = "home";
 
         function showScreen(name) {
@@ -979,8 +1059,108 @@
             if (hash && validScreens.indexOf(hash) !== -1) {
                 showScreen(hash);
             }
+
+            setupInstrumentSelectors(instrumentFeed || {});
         });
     }());
+
+    function setupInstrumentSelectors(feed) {
+        var all = Array.isArray(feed.all_instruments) ? feed.all_instruments : [];
+
+        function buildStatusText(item) {
+            if (!item) {
+                return "No instrument selected.";
+            }
+            return (
+                "Symbol: <strong>" + item.symbol + "</strong> | " +
+                "Asset: <strong>" + item.asset_class + "</strong> | " +
+                "Broker: <strong>" + (item.broker || "n/a").toUpperCase() + "</strong> | " +
+                "Tradable: <strong>" + (item.tradable ? "YES" : "NO") + "</strong> | " +
+                "Paper: <strong>" + (item.paper_supported ? "YES" : "NO") + "</strong> | " +
+                "Live: <strong>" + (item.live_supported ? "YES" : "NO") + "</strong> | " +
+                "Status: <strong>" + (item.status || "UNKNOWN") + "</strong>"
+            );
+        }
+
+        function normalize(value) {
+            return String(value || "").trim().toUpperCase();
+        }
+
+        document.querySelectorAll(".instrument-selector-container").forEach(function (container) {
+            var symbolInput = document.getElementById(container.getAttribute("data-symbol-id"));
+            var assetInput = document.getElementById(container.getAttribute("data-asset-id"));
+            var statusNode = document.getElementById(container.getAttribute("data-status-id"));
+            var assetFilter = container.querySelector(".instrument-asset-filter");
+            var brokerFilter = container.querySelector(".instrument-broker-filter");
+            var searchInput = container.querySelector(".instrument-search");
+            var selectInput = container.querySelector(".instrument-select");
+
+            if (!symbolInput || !assetInput || !statusNode || !assetFilter || !brokerFilter || !searchInput || !selectInput) {
+                return;
+            }
+
+            function filteredRows() {
+                var wantedAsset = normalize(assetFilter.value);
+                var wantedBroker = String(brokerFilter.value || "").trim().toLowerCase();
+                var search = String(searchInput.value || "").trim().toLowerCase();
+
+                return all.filter(function (item) {
+                    var byAsset = !wantedAsset || normalize(item.asset_class) === wantedAsset;
+                    var byBroker = !wantedBroker || String(item.broker || "").toLowerCase() === wantedBroker;
+                    var haystack = (String(item.symbol || "") + " " + String(item.display_name || "")).toLowerCase();
+                    var bySearch = !search || haystack.indexOf(search) !== -1;
+                    return byAsset && byBroker && bySearch;
+                });
+            }
+
+            function renderOptions() {
+                var rows = filteredRows();
+                var current = selectInput.value;
+
+                selectInput.innerHTML = "";
+                var placeholder = document.createElement("option");
+                placeholder.value = "";
+                placeholder.textContent = rows.length ? "Select instrument" : "No instruments match filters";
+                selectInput.appendChild(placeholder);
+
+                rows.forEach(function (item) {
+                    var option = document.createElement("option");
+                    option.value = item.symbol;
+                    option.textContent = item.symbol + " | " + item.asset_class + " | " + (item.status || "UNKNOWN");
+                    selectInput.appendChild(option);
+                });
+
+                if (current) {
+                    selectInput.value = current;
+                }
+            }
+
+            function onSelectionChanged() {
+                var symbol = String(selectInput.value || "");
+                var selected = all.find(function (item) {
+                    return String(item.symbol || "") === symbol;
+                });
+
+                if (!selected) {
+                    statusNode.innerHTML = buildStatusText(null);
+                    return;
+                }
+
+                // Selection only pre-fills trade ticket fields. It does not execute trades.
+                symbolInput.value = selected.symbol;
+                assetInput.value = selected.asset_class;
+                statusNode.innerHTML = buildStatusText(selected);
+            }
+
+            assetFilter.addEventListener("change", renderOptions);
+            brokerFilter.addEventListener("change", renderOptions);
+            searchInput.addEventListener("input", renderOptions);
+            selectInput.addEventListener("change", onSelectionChanged);
+
+            renderOptions();
+            statusNode.innerHTML = buildStatusText(null);
+        });
+    }
 
     function confirmPaperTradeRequest() {
         return window.confirm(

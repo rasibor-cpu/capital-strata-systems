@@ -13,6 +13,10 @@ from backend.monitoring.alert_repository import (
     AlertCentreCompatibilityAdapter,
     AlertRepositoryError,
 )
+from backend.trading.instrument_universe import (
+    InstrumentUniverse,
+    InstrumentUniverseError,
+)
 import uvicorn
 
 app = FastAPI(title=LauncherConfig.TITLE, version=LauncherConfig.VERSION)
@@ -350,6 +354,29 @@ def get_engine_summary() -> Dict[str, Any]:
     }
     return summary
 
+
+def get_trade_tab_instrument_feed() -> Dict[str, Any]:
+    try:
+        return InstrumentUniverse().build_feed()
+    except InstrumentUniverseError:
+        return {
+            "all_instruments": [],
+            "asset_classes": [],
+            "brokers": [],
+            "instruments_by_asset_class": {},
+            "instruments_by_broker": {},
+            "tradable_paper_instruments": [],
+        }
+    except Exception:
+        return {
+            "all_instruments": [],
+            "asset_classes": [],
+            "brokers": [],
+            "instruments_by_asset_class": {},
+            "instruments_by_broker": {},
+            "tradable_paper_instruments": [],
+        }
+
 def build_mobile_dashboard_context() -> Dict[str, Any]:
     # Calculate heartbeat / staleness
     artifacts = [
@@ -415,6 +442,7 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "staleness": staleness,
         "chart_data": chart_data,
         "pause_state": get_pause_state(),
+        "instrument_universe": get_trade_tab_instrument_feed(),
         "health": {
             "backend_available": get_mobile_launcher_status() == "ONLINE",
             "supervisor_status": get_supervisor_summary().get("status", "UNKNOWN"),
@@ -473,6 +501,11 @@ async def status_check():
         "dashboard_url": LauncherConfig.DASHBOARD_URL,
         "readiness": status
     }
+
+
+@launcher_router.get("/mobile/instruments")
+async def mobile_instrument_feed():
+    return get_trade_tab_instrument_feed()
 
 @launcher_router.get("/manifest.json")
 async def get_manifest():
