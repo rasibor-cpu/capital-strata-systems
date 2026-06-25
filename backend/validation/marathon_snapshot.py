@@ -23,6 +23,9 @@ class MarathonCyclePlan:
     portfolio_exposure: float = 0.0
     cycle_duration_seconds: float = 0.0
     replay_history: tuple[Mapping[str, Any], ...] = field(default_factory=tuple)
+    optimization_summary: dict[str, Any] = field(default_factory=dict)
+    learning_feedback_summary: dict[str, Any] = field(default_factory=dict)
+    portfolio_optimization_summary: dict[str, Any] = field(default_factory=dict)
 
     @staticmethod
     def from_mapping(payload: Mapping[str, Any]) -> "MarathonCyclePlan":
@@ -50,6 +53,18 @@ class MarathonCyclePlan:
         if not isinstance(replay_history, tuple):
             replay_history = tuple(replay_history)
 
+        optimization_summary = payload.get("optimization_summary", {})
+        if not isinstance(optimization_summary, Mapping):
+            optimization_summary = {}
+
+        learning_feedback_summary = payload.get("learning_feedback_summary", {})
+        if not isinstance(learning_feedback_summary, Mapping):
+            learning_feedback_summary = {}
+
+        portfolio_optimization_summary = payload.get("portfolio_optimization_summary", {})
+        if not isinstance(portfolio_optimization_summary, Mapping):
+            portfolio_optimization_summary = {}
+
         return MarathonCyclePlan(
             timestamp=str(payload["timestamp"]).strip(),
             paper_balance=float(payload["paper_balance"]),
@@ -68,6 +83,9 @@ class MarathonCyclePlan:
             portfolio_exposure=float(payload.get("portfolio_exposure", 0.0)),
             cycle_duration_seconds=float(payload.get("cycle_duration_seconds", 0.0)),
             replay_history=tuple(replay_history),
+            optimization_summary=dict(optimization_summary),
+            learning_feedback_summary=dict(learning_feedback_summary),
+            portfolio_optimization_summary=dict(portfolio_optimization_summary),
         )
 
 
@@ -101,6 +119,9 @@ class MarathonSnapshot:
     cycle_duration_seconds: float = 0.0
     drawdown: float = 0.0
     canonical_decision: dict[str, Any] = field(default_factory=dict)
+    optimization_summary: dict[str, Any] = field(default_factory=dict)
+    learning_feedback_summary: dict[str, Any] = field(default_factory=dict)
+    portfolio_optimization_summary: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

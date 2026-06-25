@@ -264,6 +264,9 @@ class MarathonRunner:
             cycle_duration_seconds=plan.cycle_duration_seconds,
             drawdown=max(0.0, plan.equity - plan.paper_balance),
             canonical_decision=latest_canonical,
+            optimization_summary=dict(plan.optimization_summary),
+            learning_feedback_summary=dict(plan.learning_feedback_summary),
+            portfolio_optimization_summary=dict(plan.portfolio_optimization_summary),
         )
 
     def _build_replay_summary(self, replay_history: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
@@ -368,6 +371,9 @@ class MarathonRunner:
             "portfolio_exposure": 0.0,
             "cycle_duration_seconds": self.cycle_interval_seconds,
             "replay_history": (),
+            "optimization_summary": {},
+            "learning_feedback_summary": {},
+            "portfolio_optimization_summary": {},
         }
 
     def _paper_mode_enabled_from_config(self) -> bool:

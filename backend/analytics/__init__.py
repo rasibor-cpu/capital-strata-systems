@@ -3,10 +3,12 @@
 from .adaptive_position_sizing import AdaptivePositionSizingEngine, AdaptivePositionSizingError
 from .adaptive_calibration_engine import AdaptiveCalibrationEngine, AdaptiveCalibrationEngineError
 from .adaptive_threshold_calibration_engine import AdaptiveThresholdCalibrationEngine, AdaptiveThresholdCalibrationEngineError
+from .autonomous_profitability_program import AutonomousProfitabilityProgram, AutonomousProfitabilityProgramError
 from .autonomous_learning_controller import AutonomousLearningController, AutonomousLearningControllerError
 from .dynamic_position_optimizer import DynamicPositionOptimizer, DynamicPositionOptimizerError
 from .improvement_recommendation_engine import ImprovementRecommendationEngine, ImprovementRecommendationEngineError
 from .closed_loop_learning_engine import ClosedLoopLearningEngine, ClosedLoopLearningEngineError
+from .continuous_learning_feedback import ContinuousLearningFeedback, ContinuousLearningFeedbackError
 from .capital_allocation_engine import CapitalAllocationEngine, CapitalAllocationEngineError
 from .concentration_guard import ConcentrationGuard, ConcentrationGuardError
 from .cost_reality_engine import CostRealityEngine
@@ -51,6 +53,8 @@ __all__ = [
     "AdaptiveCalibrationEngineError",
     "AdaptiveThresholdCalibrationEngine",
     "AdaptiveThresholdCalibrationEngineError",
+    "AutonomousProfitabilityProgram",
+    "AutonomousProfitabilityProgramError",
     "AutonomousLearningController",
     "AutonomousLearningControllerError",
     "DynamicPositionOptimizer",
@@ -59,6 +63,8 @@ __all__ = [
     "ImprovementRecommendationEngineError",
     "ClosedLoopLearningEngine",
     "ClosedLoopLearningEngineError",
+    "ContinuousLearningFeedback",
+    "ContinuousLearningFeedbackError",
     "CapitalAllocationEngine",
     "CapitalAllocationEngineError",
     "ConcentrationGuard",

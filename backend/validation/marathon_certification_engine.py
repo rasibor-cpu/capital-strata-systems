@@ -11,6 +11,7 @@ class MarathonCertificationEngineError(RuntimeError):
 @dataclass(frozen=True)
 class MarathonCertificationDecision:
     status: str
+    go_no_go: str
     warnings: tuple[str, ...]
     failures: tuple[str, ...]
     evidence_used: dict[str, Any]
@@ -59,6 +60,12 @@ class MarathonCertificationEngine:
         recovery_rate = self._float(runtime_statistics.get("recovery_rate", 0.0))
         max_drawdown = self._float(evidence_summary.get("max_drawdown", evidence_summary.get("maximum_drawdown", 0.0)))
         trade_count = int(runtime_statistics.get("trade_count", evidence_summary.get("trade_count", 0)) or 0)
+        learning_confidence_raw = runtime_statistics.get("learning_confidence", evidence_summary.get("learning_confidence"))
+        learning_confidence = self._float(learning_confidence_raw) if learning_confidence_raw is not None else 0.0
+        execution_health = str(runtime_statistics.get("execution_health", evidence_summary.get("execution_health", "UNKNOWN"))).upper()
+        profitability_health = str(runtime_statistics.get("profitability_health", evidence_summary.get("profitability_health", "UNKNOWN"))).upper()
+        portfolio_health = str(runtime_statistics.get("portfolio_health", evidence_summary.get("portfolio_health", "UNKNOWN"))).upper()
+        optimization_health = str(runtime_statistics.get("optimization_health", evidence_summary.get("optimization_health", "UNKNOWN"))).upper()
 
         if cycle_count < self.minimum_cycles:
             failures.append("minimum_cycles")
@@ -78,6 +85,22 @@ class MarathonCertificationEngine:
             failures.append("drawdown_excessive")
         if trade_count <= 0:
             failures.append("trade_count")
+        if learning_confidence_raw is not None and learning_confidence < 0.40:
+            warnings.append("learning_confidence_low")
+
+        severe_runtime = execution_health in {"FAILED", "BLOCKED", "UNHEALTHY"}
+        severe_profitability = profitability_health in {"FAILED", "UNHEALTHY"}
+        severe_portfolio = portfolio_health in {"FAILED", "UNHEALTHY", "UNSTABLE"}
+        severe_optimization = optimization_health in {"FAILED", "UNHEALTHY", "UNSTABLE"}
+
+        if severe_runtime:
+            failures.append("execution_health")
+        if severe_profitability:
+            failures.append("profitability_health")
+        if severe_portfolio:
+            failures.append("portfolio_health")
+        if severe_optimization:
+            failures.append("optimization_health")
 
         if failures:
             status = "FAIL"
@@ -86,8 +109,16 @@ class MarathonCertificationEngine:
         else:
             status = "PASS"
 
+        if failures:
+            go_no_go = "NO_GO"
+        elif warnings:
+            go_no_go = "CONDITIONAL_GO"
+        else:
+            go_no_go = "GO"
+
         decision = MarathonCertificationDecision(
             status=status,
+            go_no_go=go_no_go,
             warnings=tuple(sorted(set(warnings))),
             failures=tuple(sorted(set(failures))),
             evidence_used={
@@ -99,6 +130,11 @@ class MarathonCertificationEngine:
                 "recovery_rate": round(recovery_rate, 8),
                 "max_drawdown": round(max_drawdown, 8),
                 "trade_count": trade_count,
+                "learning_confidence": round(learning_confidence, 8),
+                "execution_health": execution_health,
+                "profitability_health": profitability_health,
+                "portfolio_health": portfolio_health,
+                "optimization_health": optimization_health,
             },
         )
         return decision.to_dict()

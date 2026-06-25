@@ -12,6 +12,7 @@ def test_certification_pass() -> None:
     )
 
     assert result["status"] == "PASS"
+    assert result["go_no_go"] == "GO"
 
 
 def test_certification_pass_with_warnings() -> None:
@@ -23,6 +24,7 @@ def test_certification_pass_with_warnings() -> None:
     )
 
     assert result["status"] == "PASS_WITH_WARNINGS"
+    assert result["go_no_go"] == "CONDITIONAL_GO"
 
 
 def test_certification_fail() -> None:
@@ -34,3 +36,4 @@ def test_certification_fail() -> None:
     )
 
     assert result["status"] == "FAIL"
+    assert result["go_no_go"] == "NO_GO"
