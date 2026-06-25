@@ -2,7 +2,9 @@
 
 from .adaptive_position_sizing import AdaptivePositionSizingEngine, AdaptivePositionSizingError
 from .capital_allocation_engine import CapitalAllocationEngine, CapitalAllocationEngineError
+from .concentration_guard import ConcentrationGuard, ConcentrationGuardError
 from .cost_reality_engine import CostRealityEngine
+from .portfolio_correlation_engine import PortfolioCorrelationEngine, PortfolioCorrelationEngineError
 from .profitability_ranking_engine import ProfitabilityRankingEngine, ProfitabilityRankingEngineError
 from .portfolio_optimization_engine import PortfolioOptimizationEngine, PortfolioOptimizationError
 from .signal_quality_engine import SignalQualityEngine
@@ -22,6 +24,8 @@ __all__ = [
     "AdaptivePositionSizingError",
     "CapitalAllocationEngine",
     "CapitalAllocationEngineError",
+    "ConcentrationGuard",
+    "ConcentrationGuardError",
     "CostRealityEngine",
     "ProfitabilityRankingEngine",
     "ProfitabilityRankingEngineError",
@@ -35,6 +39,8 @@ __all__ = [
     "persist_completed_trade_outcome",
     "PortfolioOptimizationEngine",
     "PortfolioOptimizationError",
+    "PortfolioCorrelationEngine",
+    "PortfolioCorrelationEngineError",
     "StrategyPromotionEngine",
     "StrategyPromotionError",
 ]
