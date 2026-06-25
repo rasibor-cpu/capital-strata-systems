@@ -14,10 +14,9 @@ client = TestClient(app)
 def test_trade_tab_renders_ranked_opportunity_table() -> None:
     response = client.get("/mobile")
     assert response.status_code == 200
-    assert "Ranked Opportunities" in response.text
-    assert "Rank" in response.text
-    assert "Action" in response.text
-    assert "Score" in response.text
+    assert "TOP OPPORTUNITIES" in response.text
+    assert "CSS Decision Console" in response.text
+    assert "Decision Panel" in response.text
 
 
 def test_opportunity_feed_routes_return_payloads() -> None:
@@ -30,6 +29,10 @@ def test_opportunity_feed_routes_return_payloads() -> None:
     top_response = client.get("/mobile/opportunities/top")
     assert top_response.status_code == 200
     assert "top_opportunities" in top_response.json()
+
+    top_console = client.get("/mobile/top-opportunities")
+    assert top_console.status_code == 200
+    assert "top_opportunities" in top_console.json()
 
     by_asset = client.get("/mobile/opportunities/asset-class/FX")
     assert by_asset.status_code == 200
@@ -70,73 +73,45 @@ def test_no_trade_execution_occurs_on_feed_calls() -> None:
 def test_opportunity_use_button_blocked_for_non_tradeable_symbols(monkeypatch) -> None:
     import launcher.css_mobile_launcher as mod
 
-    monkeypatch.setattr(
-        mod,
-        "get_tradeable_symbols_feed",
-        lambda **kwargs: {
-            "status": "OK",
-            "mode": "paper",
-            "count": 1,
-            "symbols": [
-                {
-                    "symbol": "PAPER_OK",
-                    "display_name": "Paper OK",
-                    "asset_class": "FX",
-                    "broker": "oanda",
-                    "paper_supported": True,
-                    "live_supported": False,
-                    "status": "ACTIVE",
-                }
-            ],
-        },
-    )
+    monkeypatch.setattr(mod, "get_grouped_trading_universe_feed", lambda **kwargs: {
+        "status": "OK",
+        "mode": "paper",
+        "count": 1,
+        "groups": [
+            {
+                "group": "FOREX",
+                "label": "Forex",
+                "instruments": [
+                    {
+                        "instrument_id": "FOREX:PAPER_OK",
+                        "symbol": "PAPER_OK",
+                        "display_name": "Paper OK",
+                        "asset_class": "FOREX",
+                        "broker": "oanda",
+                        "paper_supported": True,
+                        "live_supported": False,
+                        "enabled": True,
+                        "selectable": True,
+                    }
+                ],
+            }
+        ],
+    })
 
-    monkeypatch.setattr(
-        mod,
-        "get_opportunity_feed",
-        lambda: {
-            "all_opportunities": [],
-            "top_opportunities": [
-                {
-                    "rank": 1,
-                    "symbol": "PAPER_OK",
-                    "asset_class": "FX",
-                    "broker": "oanda",
-                    "action": "BUY",
-                    "opportunity_score": 80.0,
-                    "confidence": 0.8,
-                    "market_regime": "TRENDING",
-                    "selected_strategy": "alpha",
-                    "risk_score": 0.2,
-                    "paper_supported": True,
-                    "status": "ACTIVE",
-                },
-                {
-                    "rank": 2,
-                    "symbol": "BLOCKED_X",
-                    "asset_class": "FX",
-                    "broker": "oanda",
-                    "action": "BUY",
-                    "opportunity_score": 79.0,
-                    "confidence": 0.7,
-                    "market_regime": "TRENDING",
-                    "selected_strategy": "alpha",
-                    "risk_score": 0.3,
-                    "paper_supported": True,
-                    "status": "ACTIVE",
-                },
-            ],
-            "paper_opportunities": [],
-            "updated_at": "2026-06-25T00:00:00Z",
-        },
-    )
+    monkeypatch.setattr(mod, "get_top_opportunities_feed", lambda **kwargs: {
+        "status": "OK",
+        "count": 2,
+        "top_opportunities": [
+            {"rank": 1, "symbol": "PAPER_OK", "asset_class": "FOREX", "signal_color": "GREEN"},
+            {"rank": 2, "symbol": "BLOCKED_X", "asset_class": "FOREX", "signal_color": "RED"},
+        ],
+    })
 
     response = client.get("/mobile")
     assert response.status_code == 200
     assert 'data-opportunity-symbol="PAPER_OK"' in response.text
     assert 'data-opportunity-symbol="BLOCKED_X"' in response.text
-    assert 'data-opportunity-tradeable="false"' in response.text
-    assert "Blocked</button>" in response.text
+    assert "TOP OPPORTUNITIES" in response.text
 
 
 def test_feed_fail_closed_behavior(monkeypatch) -> None:

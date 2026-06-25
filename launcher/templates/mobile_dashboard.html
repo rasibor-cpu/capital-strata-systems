@@ -416,6 +416,62 @@
             border-color: #60a5fa;
             color: #60a5fa;
         }
+        .decision-console-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .mode-pill {
+            border: 1px solid var(--border-strong);
+            border-radius: 999px;
+            padding: 3px 9px;
+            font-size: 11px;
+            font-weight: 700;
+            color: #93c5fd;
+            background: rgba(59, 130, 246, 0.12);
+        }
+        .decision-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        .decision-item {
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 8px;
+            background: var(--surface-2);
+        }
+        .decision-item .label {
+            color: var(--text-secondary);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+        }
+        .decision-item .value {
+            font-size: 13px;
+            font-weight: 700;
+            margin-top: 2px;
+        }
+        .star-btn {
+            border: 1px solid var(--border-strong);
+            border-radius: 5px;
+            background: #111512;
+            color: var(--warning);
+            padding: 2px 6px;
+            font-size: 12px;
+            cursor: pointer;
+            margin-left: 6px;
+        }
+        .star-btn.active {
+            background: rgba(230, 184, 75, 0.18);
+            border-color: var(--warning-border);
+        }
+        .signal-green { color: var(--success); font-weight: 700; }
+        .signal-amber { color: var(--warning); font-weight: 700; }
+        .signal-red { color: var(--danger); font-weight: 700; }
+        .disabled-option { color: var(--text-dim); }
         .paper-only-warning {
             margin-top: 10px;
             padding: 9px 10px;
@@ -784,79 +840,79 @@
          TAB: TRADE
          ══════════════════════════════════════════════ -->
     <div id="screen-trade" class="screen">
-
-        <div class="card" id="trade-opportunity-ranking">
+        <div class="card" id="top-opportunities-card">
             <div class="card-header">
-                Ranked Opportunities
-                <span class="badge badge-info">TOP {{ opportunity_feed.top_opportunities|length }}</span>
+                TOP OPPORTUNITIES
+                <span class="badge badge-info">TOP {{ top_opportunities.count }}</span>
             </div>
             <div style="font-size:12px; color:var(--text-secondary); margin-bottom:8px;">
-                Select an opportunity to prefill the trade ticket. Selection does not execute trades.
+                Click any opportunity to populate the selector. This never executes a trade.
             </div>
-            {% if opportunity_feed.top_opportunities %}
-            <div class="opportunity-table-wrap">
-                <table class="opportunity-table" aria-label="Ranked trade opportunities">
-                    <thead>
-                        <tr>
-                            <th>Rank</th>
-                            <th>Symbol</th>
-                            <th>Asset Class</th>
-                            <th>Broker</th>
-                            <th>Action</th>
-                            <th>Score</th>
-                            <th>Confidence</th>
-                            <th>Regime</th>
-                            <th>Strategy</th>
-                            <th>Risk</th>
-                            <th>Paper</th>
-                            <th>Status</th>
-                            <th>Select</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for row in opportunity_feed.top_opportunities %}
-                        <tr>
-                            <td>{{ row.rank }}</td>
-                            <td style="font-family:monospace; font-weight:700;">{{ row.symbol }}</td>
-                            <td>{{ row.asset_class }}</td>
-                            <td>{{ row.broker|upper }}</td>
-                            <td>{{ row.action }}</td>
-                            <td>{{ "%.2f"|format(row.opportunity_score) }}</td>
-                            <td>{{ "%.2f"|format(row.confidence) }}</td>
-                            <td>{{ row.market_regime }}</td>
-                            <td>{{ row.selected_strategy }}</td>
-                            <td>{{ "%.2f"|format(row.risk_score) }}</td>
-                            <td>{% if row.paper_supported %}YES{% else %}NO{% endif %}</td>
-                            <td>{{ row.status }}</td>
-                            <td>
-                                {% set can_use = row.symbol in tradeable_symbol_lookup %}
-                                <button
-                                    type="button"
-                                    class="opportunity-select-btn"
-                                    data-opportunity-symbol="{{ row.symbol }}"
-                                    data-opportunity-asset="{{ row.asset_class }}"
-                                    data-opportunity-tradeable="{% if can_use %}true{% else %}false{% endif %}"
-                                    {% if not can_use %}disabled title="Not tradeable in current mode"{% endif %}
-                                >{% if can_use %}Use{% else %}Blocked{% endif %}</button>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+            <div id="top-opportunity-list" style="display:flex; flex-wrap:wrap; gap:8px;">
+                {% for row in top_opportunities.top_opportunities %}
+                {% set color_class = 'badge-success' if row.signal_color == 'GREEN' else ('badge-warning' if row.signal_color == 'AMBER' else 'badge-danger') %}
+                <button
+                    type="button"
+                    class="opportunity-select-btn {{ color_class }}"
+                    data-opportunity-symbol="{{ row.symbol }}"
+                    data-opportunity-asset="{{ row.asset_class }}"
+                    style="min-width:108px;"
+                >{{ row.symbol }} · {{ row.signal_color }}</button>
+                {% endfor %}
             </div>
-            {% else %}
-                <div class="empty-state">No ranked opportunities available right now.</div>
-            {% endif %}
         </div>
 
-        <div class="card" id="mobile-paper-trade-tab-ticket">
+        <div class="card" id="trade-decision-console">
             <div class="card-header">
-                Paper Trade Ticket
-                <span class="badge badge-warning">PAPER ONLY</span>
+                CSS Decision Console
+                <span class="badge {% if mode_badge == 'LIVE MODE' %}badge-danger{% else %}badge-warning{% endif %}" id="trade-mode-badge">{{ mode_badge }}</span>
             </div>
 
             <div class="paper-only-warning">
-                PAPER TRADING ONLY — request artifact only. No broker calls. No live execution.
+                Selector-only workflow. No execution on selection. Trade request still requires explicit submit.
+            </div>
+
+            <div class="instrument-selector-wrap" style="margin-top:10px;">
+                <div class="stat-label" style="margin-bottom:8px;">Canonical Trading Universe</div>
+                <div class="instrument-filters">
+                    <input id="trade-search-input" class="instrument-search" type="text" placeholder="Search symbol (e.g. btc, eur)" aria-label="Search canonical universe">
+                    <div style="display:flex; gap:8px; grid-column: 1 / -1;">
+                        <select id="decision-instrument-select" class="instrument-select" aria-label="Canonical instrument selector">
+                            <option value="">Select canonical instrument</option>
+                            {% for group in canonical_grouped_universe.groups %}
+                            <optgroup label="{{ group.label }}">
+                                {% for item in group.instruments %}
+                                <option value="{{ item.instrument_id }}" {% if not item.selectable %}disabled{% endif %}>
+                                    {{ item.symbol }}{% if not item.selectable %} (UNAVAILABLE){% endif %}
+                                </option>
+                                {% endfor %}
+                            </optgroup>
+                            {% endfor %}
+                        </select>
+                        <button type="button" id="toggle-favorite-btn" class="opportunity-select-btn" title="Toggle favorite">★</button>
+                    </div>
+                </div>
+                <div class="instrument-status" id="trade-instrument-status">No instrument selected.</div>
+            </div>
+
+            <div class="card" style="margin-top:10px;">
+                <div class="card-header">Decision Panel</div>
+                <div class="status-row"><span>Current Market Regime</span><strong id="dp-market-regime">{{ opportunity_summary.decision_panel.current_market_regime if opportunity_summary.status == 'OK' else 'UNKNOWN' }}</strong></div>
+                <div class="status-row"><span>Recommended Strategy</span><strong id="dp-strategy">{{ opportunity_summary.decision_panel.recommended_strategy if opportunity_summary.status == 'OK' else 'default' }}</strong></div>
+                <div class="status-row"><span>Opportunity Score</span><strong id="dp-score">{{ opportunity_summary.decision_panel.opportunity_score if opportunity_summary.status == 'OK' else 0 }}</strong></div>
+                <div class="status-row"><span>Confidence %</span><strong id="dp-confidence">{{ opportunity_summary.decision_panel.confidence_percent if opportunity_summary.status == 'OK' else 0 }}</strong></div>
+                <div class="status-row"><span>Expected Direction</span><strong id="dp-direction">{{ opportunity_summary.decision_panel.expected_direction if opportunity_summary.status == 'OK' else 'FLAT' }}</strong></div>
+                <div class="status-row"><span>Risk Rating</span><strong id="dp-risk-rating">{{ opportunity_summary.decision_panel.risk_rating if opportunity_summary.status == 'OK' else 'UNKNOWN' }}</strong></div>
+                <div class="status-row"><span>Portfolio Concentration</span><strong id="dp-concentration">{{ opportunity_summary.decision_panel.portfolio_concentration if opportunity_summary.status == 'OK' else 0 }}</strong></div>
+                <div class="status-row"><span>Execution Status</span><strong id="dp-execution-status">{{ opportunity_summary.decision_panel.execution_status if opportunity_summary.status == 'OK' else 'NOT_APPROVED' }}</strong></div>
+                <div class="status-row"><span>Paper/Live Availability</span><strong id="dp-availability">{% if opportunity_summary.status == 'OK' %}P:{{ 'YES' if opportunity_summary.decision_panel.paper_live_availability.paper_supported else 'NO' }} L:{{ 'YES' if opportunity_summary.decision_panel.paper_live_availability.live_supported else 'NO' }}{% else %}P:NO L:NO{% endif %}</strong></div>
+                <div class="status-row"><span>Broker</span><strong id="dp-broker">{{ opportunity_summary.decision_panel.broker if opportunity_summary.status == 'OK' else 'unknown' }}</strong></div>
+                <div class="status-row"><span>Last Update</span><strong id="dp-last-update" style="font-size:11px;">{{ opportunity_summary.decision_panel.last_update if opportunity_summary.status == 'OK' else 'N/A' }}</strong></div>
+            </div>
+
+            <div class="card" style="margin-top:10px;">
+                <div class="card-header">Engine Outputs (Read-Only)</div>
+                <pre id="decision-engine-outputs" style="white-space:pre-wrap; font-size:11px; color:var(--text-secondary);">{{ opportunity_summary.engine_outputs | tojson(indent=2) if opportunity_summary.status == 'OK' else '{}' }}</pre>
             </div>
 
             <form action="/mobile/trade/paper" method="post" onsubmit="return confirmPaperTradeRequest()">
@@ -864,55 +920,15 @@
                 <input type="hidden" name="broker_mode" value="paper">
                 <input type="hidden" name="broker_execution_allowed" value="false">
 
-                <div class="instrument-selector-wrap instrument-selector-container"
-                     data-symbol-id="trade-symbol"
-                     data-asset-id="trade-asset-class"
-                     data-status-id="trade-instrument-status">
-                    <div class="stat-label" style="margin-bottom:8px;">Instrument Universe Selector</div>
-                    <div class="instrument-filters">
-                        <select class="instrument-asset-filter" aria-label="Filter by asset class">
-                            <option value="">All Asset Classes</option>
-                            {% for asset in tradeable_symbols.symbols|map(attribute='asset_class')|unique|sort %}
-                            <option value="{{ asset }}">{{ asset }}</option>
-                            {% endfor %}
-                        </select>
-                        <select class="instrument-broker-filter" aria-label="Filter by broker">
-                            <option value="">All Brokers</option>
-                            {% for broker in tradeable_symbols.symbols|map(attribute='broker')|unique|sort %}
-                            <option value="{{ broker }}">{{ broker|upper }}</option>
-                            {% endfor %}
-                        </select>
-                        <input class="instrument-search" type="text" placeholder="Search symbol or name" aria-label="Search instruments">
-                        <select class="instrument-select" aria-label="Select tradable instrument">
-                            {% if tradeable_symbols.symbols %}
-                            <option value="">Select instrument</option>
-                            {% for row in tradeable_symbols.symbols %}
-                            <option value="{{ row.symbol }}">{{ row.symbol }} | {{ row.asset_class }} | {{ row.status }}</option>
-                            {% endfor %}
-                            {% else %}
-                            <option value="">NO TRADEABLE SYMBOLS AVAILABLE</option>
-                            {% endif %}
-                        </select>
-                    </div>
-                    <div class="instrument-status" id="trade-instrument-status">No instrument selected.</div>
-                </div>
-
                 <div class="trade-ticket-grid">
                     <label>
                         Symbol
-                        <input id="trade-symbol" name="symbol" type="text" placeholder="BTC-USD" required autocomplete="off">
+                        <input id="trade-symbol" name="symbol" type="text" required autocomplete="off" readonly>
                     </label>
 
                     <label>
                         Asset Class
-                        <select id="trade-asset-class" name="asset_class" required>
-                            <option value="">Select asset class</option>
-                            <option value="CRYPTO">CRYPTO</option>
-                            <option value="FX">FX</option>
-                            <option value="OPTIONS">OPTIONS</option>
-                            <option value="FUTURES">FUTURES</option>
-                            <option value="EQUITIES">EQUITIES</option>
-                        </select>
+                        <input id="trade-asset-class" name="asset_class" type="text" required readonly>
                     </label>
 
                     <label>
@@ -930,7 +946,7 @@
                 </div>
 
                 <div style="margin-top:12px; font-size:12px; color:var(--text-secondary);">
-                    Broker Mode: <strong>PAPER</strong><br>
+                    Mode: <strong id="trade-mode-inline">{{ mode_badge }}</strong><br>
                     Paper Only: <strong>TRUE</strong><br>
                     Output: <code>artifacts/css_mobile_trade_requests.jsonl</code>
                 </div>
@@ -1143,7 +1159,8 @@
     <script>
     (function () {
         "use strict";
-        var tradeableSymbolsFeed = {{ tradeable_symbols | tojson }};
+        var groupedUniverse = {{ canonical_grouped_universe | tojson }};
+        var topOpportunities = {{ top_opportunities | tojson }};
         var activeScreen = "home";
 
         function showScreen(name) {
@@ -1211,86 +1228,113 @@
                 var symbol = String(btn.getAttribute("data-opportunity-symbol") || "").trim();
                 var asset = String(btn.getAttribute("data-opportunity-asset") || "").trim();
                 var tradeableAttr = String(btn.getAttribute("data-opportunity-tradeable") || "").toLowerCase();
-                if (!symbol || !asset) {
+                setupDecisionConsole(groupedUniverse || {}, topOpportunities || {});
+
+                fetch("/mobile/trading-universe/grouped")
                     return;
                 }
-
+                            throw new Error("canonical grouped universe unavailable");
                 if (tradeableAttr === "false" || !isTradeableSymbol(symbol)) {
                     return;
                 }
-
-                // Selection only pre-fills fields. Order submission still requires explicit user submit and existing gates.
-                symbolInput.value = symbol;
+                    .then(function (latestGrouped) {
+                        setupDecisionConsole(latestGrouped || groupedUniverse || {}, topOpportunities || {});
                 assetInput.value = asset;
                 window.location.hash = "#trade";
-            });
-        });
+                        setupDecisionConsole(groupedUniverse || {}, topOpportunities || {});
     }
 
     function setupInstrumentSelectors(feed) {
         var all = Array.isArray(feed.symbols) ? feed.symbols : [];
+        function setupDecisionConsole(groupedFeed, topFeed) {
+            var selectInput = document.getElementById("decision-instrument-select");
+            var searchInput = document.getElementById("trade-search-input");
+            var statusNode = document.getElementById("trade-instrument-status");
+            var symbolInput = document.getElementById("trade-symbol");
+            var assetInput = document.getElementById("trade-asset-class");
+            var favoriteBtn = document.getElementById("toggle-favorite-btn");
+            var opportunityButtons = document.querySelectorAll(".opportunity-select-btn");
 
-        function buildStatusText(item) {
-            if (!item) {
-                return "No instrument selected.";
-            }
-            return (
-                "Symbol: <strong>" + item.symbol + "</strong> | " +
-                "Asset: <strong>" + item.asset_class + "</strong> | " +
-                "Broker: <strong>" + (item.broker || "n/a").toUpperCase() + "</strong> | " +
-                "Tradable: <strong>" + (item.tradable ? "YES" : "NO") + "</strong> | " +
-                "Paper: <strong>" + (item.paper_supported ? "YES" : "NO") + "</strong> | " +
-                "Live: <strong>" + (item.live_supported ? "YES" : "NO") + "</strong> | " +
-                "Status: <strong>" + (item.status || "UNKNOWN") + "</strong>"
-            );
-        }
-
-        function normalize(value) {
-            return String(value || "").trim().toUpperCase();
-        }
-
-        document.querySelectorAll(".instrument-selector-container").forEach(function (container) {
-            var symbolInput = document.getElementById(container.getAttribute("data-symbol-id"));
-            var assetInput = document.getElementById(container.getAttribute("data-asset-id"));
-            var statusNode = document.getElementById(container.getAttribute("data-status-id"));
-            var assetFilter = container.querySelector(".instrument-asset-filter");
-            var brokerFilter = container.querySelector(".instrument-broker-filter");
-            var searchInput = container.querySelector(".instrument-search");
-            var selectInput = container.querySelector(".instrument-select");
-
-            if (!symbolInput || !assetInput || !statusNode || !assetFilter || !brokerFilter || !searchInput || !selectInput) {
+            if (!selectInput || !searchInput || !statusNode || !symbolInput || !assetInput) {
                 return;
             }
 
-            function filteredRows() {
-                var wantedAsset = normalize(assetFilter.value);
-                var wantedBroker = String(brokerFilter.value || "").trim().toLowerCase();
-                var search = String(searchInput.value || "").trim().toLowerCase();
-
-                return all.filter(function (item) {
-                    var byAsset = !wantedAsset || normalize(item.asset_class) === wantedAsset;
-                    var byBroker = !wantedBroker || String(item.broker || "").toLowerCase() === wantedBroker;
-                    var haystack = (String(item.symbol || "") + " " + String(item.display_name || "")).toLowerCase();
-                    var bySearch = !search || haystack.indexOf(search) !== -1;
-                    return byAsset && byBroker && bySearch;
+            var groups = Array.isArray(groupedFeed && groupedFeed.groups) ? groupedFeed.groups : [];
+            var allRows = [];
+            groups.forEach(function (group) {
+                var items = Array.isArray(group && group.instruments) ? group.instruments : [];
+                items.forEach(function (item) {
+                    allRows.push(item);
                 });
+            });
+
+            var favorites = loadFavorites();
+
+            function loadFavorites() {
+                try {
+                    var raw = window.localStorage.getItem("css_trade_favorites") || "[]";
+                    var parsed = JSON.parse(raw);
+                    return Array.isArray(parsed) ? parsed : [];
+                } catch (err) {
+                    return [];
+                }
             }
 
-            function renderOptions() {
-                var rows = filteredRows();
-                var current = selectInput.value;
+            function saveFavorites(rows) {
+                try {
+                    window.localStorage.setItem("css_trade_favorites", JSON.stringify(rows));
+                } catch (err) {
+                    // Ignore storage failures and continue with non-persistent favorites.
+                }
+            }
 
+            function buildOption(item) {
+                var opt = document.createElement("option");
+                opt.value = item.instrument_id;
+                opt.textContent = item.symbol + (item.selectable ? "" : " (UNAVAILABLE)");
+                if (!item.selectable) {
+                    opt.disabled = true;
+                }
+                return opt;
+            }
+
+            function renderGroupedOptions(searchText) {
+                var query = String(searchText || "").trim().toLowerCase();
+                var current = selectInput.value;
                 selectInput.innerHTML = "";
+
                 var placeholder = document.createElement("option");
                 placeholder.value = "";
-                placeholder.textContent = rows.length ? "Select instrument" : "NO TRADEABLE SYMBOLS AVAILABLE";
+                placeholder.textContent = "Select canonical instrument";
                 selectInput.appendChild(placeholder);
 
-                rows.forEach(function (item) {
-                    var option = document.createElement("option");
-                    option.value = item.symbol;
-                    option.textContent = item.symbol + " | " + item.asset_class + " | " + (item.status || "UNKNOWN");
-                    selectInput.appendChild(option);
+                if (favorites.length) {
+                    var favGroup = document.createElement("optgroup");
+                    favGroup.label = "Favorites";
+                    allRows.filter(function (item) {
+                        return favorites.indexOf(item.symbol) >= 0;
+                    }).forEach(function (item) {
+                        if (!query || (item.symbol + " " + item.display_name).toLowerCase().indexOf(query) >= 0) {
+                            favGroup.appendChild(buildOption(item));
+                        }
+                    });
+                    if (favGroup.children.length > 0) {
+                        selectInput.appendChild(favGroup);
+                    }
+                }
+
+                groups.forEach(function (group) {
+                    var optgroup = document.createElement("optgroup");
+                    optgroup.label = group.label || group.group;
+                    (group.instruments || []).forEach(function (item) {
+                        var haystack = (String(item.symbol || "") + " " + String(item.display_name || "")).toLowerCase();
+                        if (!query || haystack.indexOf(query) >= 0) {
+                            optgroup.appendChild(buildOption(item));
+                        }
+                    });
+                    if (optgroup.children.length > 0) {
+                        selectInput.appendChild(optgroup);
+                    }
                 });
 
                 if (current) {
@@ -1298,50 +1342,138 @@
                 }
             }
 
-            function onSelectionChanged() {
-                var symbol = String(selectInput.value || "");
-                var selected = all.find(function (item) {
-                    return String(item.symbol || "") === symbol;
-                });
+            function renderDecisionPanel(summary) {
+                var panel = summary && summary.decision_panel ? summary.decision_panel : {};
+                function setText(id, value) {
+                    var node = document.getElementById(id);
+                    if (node) {
+                        node.textContent = String(value == null ? "" : value);
+                    }
+                }
+                setText("dp-market-regime", panel.current_market_regime || "UNKNOWN");
+                setText("dp-strategy", panel.recommended_strategy || "default");
+                setText("dp-score", panel.opportunity_score || 0);
+                setText("dp-confidence", panel.confidence_percent || 0);
+                setText("dp-direction", panel.expected_direction || "FLAT");
+                setText("dp-risk-rating", panel.risk_rating || "UNKNOWN");
+                setText("dp-concentration", panel.portfolio_concentration || 0);
+                setText("dp-execution-status", panel.execution_status || "NOT_APPROVED");
 
-                if (!selected) {
-                    statusNode.innerHTML = buildStatusText(null);
+                var availability = "P:NO L:NO";
+                if (panel.paper_live_availability) {
+                    availability = "P:" + (panel.paper_live_availability.paper_supported ? "YES" : "NO") + " L:" + (panel.paper_live_availability.live_supported ? "YES" : "NO");
+                }
+                setText("dp-availability", availability);
+                setText("dp-broker", panel.broker || "unknown");
+                setText("dp-last-update", panel.last_update || "N/A");
+
+                var outputs = document.getElementById("decision-engine-outputs");
+                if (outputs) {
+                    outputs.textContent = JSON.stringify(summary.engine_outputs || {}, null, 2);
+                }
+            }
+
+            function loadSummaryForSelection(item) {
+                if (!item) {
+                    statusNode.textContent = "No instrument selected.";
                     return;
                 }
 
-                // Selection only pre-fills trade ticket fields. It does not execute trades.
-                symbolInput.value = selected.symbol;
-                assetInput.value = selected.asset_class;
-                statusNode.innerHTML = buildStatusText(selected);
+                symbolInput.value = item.symbol;
+                assetInput.value = item.asset_class;
+
+                if (!item.selectable) {
+                    statusNode.textContent = "Unavailable: " + String(item.unavailable_reason || "not selectable");
+                    return;
+                }
+
+                statusNode.textContent = "Loading decision summary for " + item.symbol + "...";
+                fetch("/mobile/opportunity-summary/" + encodeURIComponent(item.symbol))
+                    .then(function (response) {
+                        if (!response.ok) {
+                            throw new Error("summary unavailable");
+                        }
+                        return response.json();
+                    })
+                    .then(function (summary) {
+                        renderDecisionPanel(summary || {});
+                        statusNode.textContent = "Selected " + item.symbol + " | " + item.asset_class + " | " + String(item.broker || "").toUpperCase();
+                    })
+                    .catch(function () {
+                        statusNode.textContent = "Unable to refresh decision summary for " + item.symbol;
+                    });
             }
 
-            assetFilter.addEventListener("change", renderOptions);
-            brokerFilter.addEventListener("change", renderOptions);
-            searchInput.addEventListener("input", renderOptions);
-            selectInput.addEventListener("change", onSelectionChanged);
+            function selectedItem() {
+                var selectedId = String(selectInput.value || "");
+                return allRows.find(function (item) {
+                    return String(item.instrument_id || "") === selectedId;
+                }) || null;
+            }
 
-            renderOptions();
-            statusNode.innerHTML = buildStatusText(null);
-        });
-    }
+            selectInput.addEventListener("change", function () {
+                loadSummaryForSelection(selectedItem());
+                updateFavoriteButton();
+            });
 
-    function confirmPaperTradeRequest() {
-        return window.confirm(
-            "Submit PAPER trade request?\n\n" +
-            "This writes a request artifact only. No broker calls are made. No live orders are placed."
-        );
-    }
+            searchInput.addEventListener("input", function () {
+                renderGroupedOptions(searchInput.value);
+            });
 
-    function confirmAction(action) {
-        var messages = {
-            pause:  "Pause Trading?\n\nThis will write trading_paused=true to the controls artifact.\n" +
-                    "No broker calls are made. The action is fully reversible.",
-            resume: "Resume Trading?\n\nThis will write trading_paused=false to the controls artifact.\n" +
-                    "Ensure the backend is ready before resuming."
-        };
-        return window.confirm(messages[action] || "Confirm action?");
-    }
-    </script>
+            function updateFavoriteButton() {
+                if (!favoriteBtn) {
+                    return;
+                }
+                var item = selectedItem();
+                if (!item) {
+                    favoriteBtn.classList.remove("active");
+                    return;
+                }
+                if (favorites.indexOf(item.symbol) >= 0) {
+                    favoriteBtn.classList.add("active");
+                } else {
+                    favoriteBtn.classList.remove("active");
+                }
+            }
 
-</body>
-</html>
+            if (favoriteBtn) {
+                favoriteBtn.addEventListener("click", function () {
+                    var item = selectedItem();
+                    if (!item) {
+                        return;
+                    }
+                    if (favorites.indexOf(item.symbol) >= 0) {
+                        favorites = favorites.filter(function (symbol) { return symbol !== item.symbol; });
+                    } else {
+                        favorites.push(item.symbol);
+                    }
+                    saveFavorites(favorites);
+                    renderGroupedOptions(searchInput.value);
+                    selectInput.value = item.instrument_id;
+                    updateFavoriteButton();
+                });
+            }
+
+            opportunityButtons.forEach(function (btn) {
+                btn.addEventListener("click", function () {
+                    var symbol = String(btn.getAttribute("data-opportunity-symbol") || "").trim().toUpperCase();
+                    var matched = allRows.find(function (item) {
+                        return String(item.symbol || "").toUpperCase() === symbol;
+                    });
+                    if (!matched) {
+                        return;
+                    }
+                    if (!matched.selectable) {
+                        statusNode.textContent = "Unavailable: " + String(matched.unavailable_reason || "not selectable");
+                        return;
+                    }
+                    selectInput.value = matched.instrument_id;
+                    loadSummaryForSelection(matched);
+                    updateFavoriteButton();
+                    window.location.hash = "#trade";
+                });
+            });
+
+            renderGroupedOptions("");
+            updateFavoriteButton();
+        }

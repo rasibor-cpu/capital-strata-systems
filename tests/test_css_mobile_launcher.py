@@ -623,9 +623,9 @@ def test_mobile_dashboard_exposes_trade_tab_navigation(launcher_temp_dir):
     assert 'id="nav-trade"' in response.text
     assert 'data-screen="trade"' in response.text
     assert 'id="screen-trade"' in response.text
-    assert "Paper Trade Ticket" in response.text
-    assert "Instrument Universe Selector" in response.text
-    assert "Ranked Opportunities" in response.text
+    assert "CSS Decision Console" in response.text
+    assert "Canonical Trading Universe" in response.text
+    assert "TOP OPPORTUNITIES" in response.text
     assert "PAPER TRADING ONLY" in response.text
     assert "/mobile/trade/paper" in response.text
 
@@ -644,6 +644,38 @@ def test_mobile_opportunity_routes_return_json(launcher_temp_dir):
     response_asset = client.get("/mobile/opportunities/asset-class/FX")
     assert response_asset.status_code == 200
     assert response_asset.json()["asset_class"] == "FX"
+
+
+def test_mobile_trading_universe_routes_return_json(launcher_temp_dir):
+    response = client.get("/mobile/trading-universe")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "OK"
+    assert "instruments" in payload
+
+    grouped = client.get("/mobile/trading-universe/grouped")
+    assert grouped.status_code == 200
+    grouped_payload = grouped.json()
+    assert grouped_payload["status"] == "OK"
+    assert "groups" in grouped_payload
+
+
+def test_mobile_top_opportunities_route_returns_json(launcher_temp_dir):
+    response = client.get("/mobile/top-opportunities")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "OK"
+    assert "top_opportunities" in payload
+
+
+def test_mobile_opportunity_summary_route_returns_decision_panel(launcher_temp_dir):
+    response = client.get("/mobile/opportunity-summary/BTC-USD")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] in {"OK", "ERROR"}
+    if payload["status"] == "OK":
+        assert "decision_panel" in payload
+        assert "engine_outputs" in payload
 
 
 def test_mobile_tradeable_symbols_route_shape_and_filters(launcher_temp_dir, monkeypatch):

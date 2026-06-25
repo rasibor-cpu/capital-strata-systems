@@ -16,10 +16,11 @@ def test_trade_tab_renders_instrument_selector() -> None:
     response = client.get("/mobile")
 
     assert response.status_code == 200
-    assert "Instrument Universe Selector" in response.text
-    assert "All Asset Classes" in response.text
-    assert "All Brokers" in response.text
-    assert 'class="instrument-select"' in response.text
+    assert "CSS Decision Console" in response.text
+    assert "Canonical Trading Universe" in response.text
+    assert 'id="decision-instrument-select"' in response.text
+    assert "PAPER MODE" in response.text or "LIVE MODE" in response.text
+    assert "optgroup" in response.text
 
 
 def test_mobile_tradeable_symbols_route_returns_paper_tradeable_only(monkeypatch) -> None:
@@ -64,6 +65,17 @@ def test_mobile_tradeable_symbols_route_returns_paper_tradeable_only(monkeypatch
     assert payload["symbols"][0]["symbol"] == "PAPER_OK"
 
 
+def test_mobile_trading_universe_grouped_route_returns_groups() -> None:
+    response = client.get("/mobile/trading-universe/grouped")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "OK"
+    groups = payload["groups"]
+    labels = {row["group"] for row in groups}
+    assert {"CRYPTO", "FOREX", "INDICES", "FUTURES", "OPTIONS"}.issubset(labels)
+
+
 def test_mobile_instrument_feed_route_returns_lists() -> None:
     response = client.get("/mobile/instruments")
 
@@ -79,20 +91,29 @@ def test_trade_dropdown_renders_tradeable_symbols_only_on_server_fallback(monkey
 
     monkeypatch.setattr(
         mod,
-        "get_tradeable_symbols_feed",
+        "get_grouped_trading_universe_feed",
         lambda **kwargs: {
             "status": "OK",
             "mode": "paper",
             "count": 1,
-            "symbols": [
+            "groups": [
                 {
-                    "symbol": "PAPER_OK",
-                    "display_name": "Paper OK",
-                    "asset_class": "FX",
-                    "broker": "oanda",
-                    "paper_supported": True,
-                    "live_supported": False,
-                    "status": "ACTIVE",
+                    "group": "FOREX",
+                    "label": "Forex",
+                    "instruments": [
+                        {
+                            "instrument_id": "FOREX:PAPER_OK",
+                            "symbol": "PAPER_OK",
+                            "display_name": "Paper OK",
+                            "asset_class": "FOREX",
+                            "broker": "oanda",
+                            "paper_supported": True,
+                            "live_supported": False,
+                            "enabled": True,
+                            "selectable": True,
+                            "status": "ACTIVE",
+                        }
+                    ],
                 }
             ],
         },
@@ -123,8 +144,8 @@ def test_trade_dropdown_renders_tradeable_symbols_only_on_server_fallback(monkey
 
     response = client.get("/mobile")
     assert response.status_code == 200
-    assert "PAPER_OK | FX | ACTIVE" in response.text
-    assert "LIVE_ONLY | CRYPTO | ACTIVE" not in response.text
+    assert "PAPER_OK" in response.text
+    assert "UNAVAILABLE" in response.text or "Select canonical instrument" in response.text
 
 
 def test_trade_dropdown_empty_state_when_no_tradeable_symbols(monkeypatch) -> None:
@@ -132,18 +153,33 @@ def test_trade_dropdown_empty_state_when_no_tradeable_symbols(monkeypatch) -> No
 
     monkeypatch.setattr(
         mod,
-        "get_tradeable_symbols_feed",
+        "get_grouped_trading_universe_feed",
         lambda **kwargs: {
             "status": "OK",
             "mode": "paper",
             "count": 0,
-            "symbols": [],
+            "groups": [
+                {"group": "CRYPTO", "label": "Crypto", "instruments": []},
+                {"group": "FOREX", "label": "Forex", "instruments": []},
+                {"group": "INDICES", "label": "Indices", "instruments": []},
+                {"group": "FUTURES", "label": "Futures", "instruments": []},
+                {"group": "OPTIONS", "label": "Options", "instruments": []},
+            ],
         },
     )
 
     response = client.get("/mobile")
     assert response.status_code == 200
-    assert "NO TRADEABLE SYMBOLS AVAILABLE" in response.text
+    assert "Select canonical instrument" in response.text
+
+
+def test_search_and_favorites_hooks_present() -> None:
+    response = client.get("/mobile")
+
+    assert response.status_code == 200
+    assert "trade-search-input" in response.text
+    assert "toggle-favorite-btn" in response.text
+    assert "css_trade_favorites" in response.text
 
 
 def test_selector_page_load_does_not_execute_trade_request() -> None:

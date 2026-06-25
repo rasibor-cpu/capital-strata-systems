@@ -21,6 +21,20 @@ from backend.trading.opportunity_ranking_engine import (
     OpportunityRankingEngine,
     OpportunityRankingEngineError,
 )
+from backend.trading.canonical_trading_universe import (
+    CanonicalTradingUniverse,
+    CanonicalTradingUniverseError,
+)
+from backend.intelligence.intelligence_orchestrator import (
+    IntelligenceOrchestrator,
+    IntelligenceDecisionError,
+)
+from backend.analytics.portfolio_correlation_engine import PortfolioCorrelationEngine
+from backend.analytics.concentration_guard import ConcentrationGuard
+from backend.analytics.strategy_intelligence_engine import StrategyIntelligenceEngine
+from backend.analytics.strategy_memory_repository import StrategyMemoryRepository
+from backend.analytics.market_regime_engine import MarketRegimeEngine
+from backend.analytics.adaptive_exit_engine import AdaptiveExitEngine
 import uvicorn
 
 app = FastAPI(title=LauncherConfig.TITLE, version=LauncherConfig.VERSION)
@@ -430,6 +444,271 @@ def get_tradeable_symbols_feed(
     }
 
 
+def _mode_badge() -> str:
+    return "LIVE MODE" if _default_trade_mode() == "live" else "PAPER MODE"
+
+
+def get_trading_universe_feed(*, mode: Optional[str] = None) -> Dict[str, Any]:
+    normalized_mode = _normalize_trade_mode(mode) if mode else _default_trade_mode()
+    try:
+        rows = CanonicalTradingUniverse().all_instruments(mode=normalized_mode)
+    except CanonicalTradingUniverseError:
+        rows = []
+    except Exception:
+        rows = []
+
+    return {
+        "status": "OK",
+        "mode": normalized_mode,
+        "mode_label": "LIVE MODE" if normalized_mode == "live" else "PAPER MODE",
+        "count": len(rows),
+        "instruments": rows,
+    }
+
+
+def get_grouped_trading_universe_feed(*, mode: Optional[str] = None) -> Dict[str, Any]:
+    normalized_mode = _normalize_trade_mode(mode) if mode else _default_trade_mode()
+    try:
+        grouped = CanonicalTradingUniverse().grouped(mode=normalized_mode)
+    except CanonicalTradingUniverseError:
+        grouped = {"CRYPTO": [], "FOREX": [], "INDICES": [], "FUTURES": [], "OPTIONS": []}
+    except Exception:
+        grouped = {"CRYPTO": [], "FOREX": [], "INDICES": [], "FUTURES": [], "OPTIONS": []}
+
+    groups = [
+        {
+            "group": group,
+            "label": group.title(),
+            "instruments": rows,
+        }
+        for group, rows in grouped.items()
+    ]
+    count = sum(len(g.get("instruments", [])) for g in groups)
+
+    return {
+        "status": "OK",
+        "mode": normalized_mode,
+        "mode_label": "LIVE MODE" if normalized_mode == "live" else "PAPER MODE",
+        "count": count,
+        "groups": groups,
+    }
+
+
+def _sample_candles(base_price: float) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for idx in range(20):
+        drift = 1.0 + ((idx - 10) * 0.0005)
+        open_px = base_price * drift
+        close_px = base_price * (drift + 0.0008)
+        high_px = max(open_px, close_px) * 1.0015
+        low_px = min(open_px, close_px) * 0.9985
+        rows.append(
+            {
+                "open": round(open_px, 8),
+                "high": round(high_px, 8),
+                "low": round(low_px, 8),
+                "close": round(close_px, 8),
+                "volume": float(1000 + idx * 20),
+            }
+        )
+    return rows
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, tuple):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, set):
+        return sorted([_json_safe(item) for item in value], key=lambda item: str(item))
+    return value
+
+
+def _price_for_symbol(symbol: str) -> float:
+    digest = sum(ord(ch) for ch in str(symbol or "").upper())
+    return round(50.0 + (digest % 175), 6)
+
+
+def _candidate_for_summary(symbol: str, asset_class: str, strategy: str) -> Dict[str, Any]:
+    price = _price_for_symbol(symbol)
+    return {
+        "trade_id": f"summary-{symbol}",
+        "symbol": symbol,
+        "asset_class": asset_class,
+        "direction": "BUY",
+        "strategy": strategy,
+        "current_price": price,
+        "market_snapshot": {
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "candles": _sample_candles(price),
+        },
+        "portfolio_snapshot": {
+            "available_capital": 100000.0,
+            "positions": [
+                {"symbol": "SPY", "asset_class": "INDICES", "market_value": 12000.0, "side": "LONG"},
+                {"symbol": "EUR_USD", "asset_class": "FOREX", "market_value": 8000.0, "side": "LONG"},
+            ],
+        },
+    }
+
+
+def get_top_opportunities_feed(*, limit: int = 10) -> Dict[str, Any]:
+    try:
+        rows = OpportunityRankingEngine().top_opportunities(limit=limit)
+    except OpportunityRankingEngineError:
+        rows = []
+    except Exception:
+        rows = []
+
+    def _color(row: Dict[str, Any]) -> str:
+        score = float(row.get("opportunity_score", 0.0) or 0.0)
+        confidence = float(row.get("confidence", 0.0) or 0.0)
+        if score >= 70 and confidence >= 0.65:
+            return "GREEN"
+        if score >= 45 and confidence >= 0.45:
+            return "AMBER"
+        return "RED"
+
+    decorated = []
+    for index, row in enumerate(rows[:limit], start=1):
+        entry = dict(row)
+        entry["rank"] = int(row.get("rank") or index)
+        entry["signal_color"] = _color(row)
+        decorated.append(entry)
+
+    return {
+        "status": "OK",
+        "count": len(decorated),
+        "top_opportunities": decorated,
+        "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
+    }
+
+
+def get_opportunity_summary(symbol: str) -> Dict[str, Any]:
+    normalized_symbol = str(symbol or "").strip().upper()
+    if not normalized_symbol:
+        return {
+            "status": "ERROR",
+            "symbol": "",
+            "message": "symbol is required",
+        }
+
+    mode = _default_trade_mode()
+    universe = CanonicalTradingUniverse()
+    instrument = universe.by_symbol(normalized_symbol, mode=mode)
+    if not instrument:
+        return {
+            "status": "ERROR",
+            "symbol": normalized_symbol,
+            "message": "instrument not found in canonical universe",
+        }
+
+    strategy = str(instrument.get("default_strategy") or "alpha")
+    asset_class = str(instrument.get("asset_class") or "UNKNOWN")
+    candidate = _candidate_for_summary(normalized_symbol, asset_class, strategy)
+    candles = list(candidate["market_snapshot"]["candles"])
+    positions = list(candidate["portfolio_snapshot"]["positions"])
+
+    regime_payload: Dict[str, Any] = {}
+    strategy_payload: Dict[str, Any] = {}
+    correlation_payload: Dict[str, Any] = {}
+    concentration_payload: Dict[str, Any] = {}
+    adaptive_exit_payload: Dict[str, Any] = {}
+    intelligence_payload: Dict[str, Any] = {}
+    ranking_payload: Dict[str, Any] = {}
+
+    try:
+        regime_payload = MarketRegimeEngine().analyze_market(candles)
+    except Exception:
+        regime_payload = {"market_regime": "UNKNOWN", "confidence": 0.0}
+
+    try:
+        repo = StrategyMemoryRepository(os.path.join(LauncherConfig.ARTIFACTS_DIR, "strategy_memory.json"))
+        repo.create_storage()
+        strategy_payload = {
+            "best_strategy_for_symbol": StrategyIntelligenceEngine(repository=repo).best_strategy_for_symbol(normalized_symbol)
+        }
+    except Exception:
+        strategy_payload = {"best_strategy_for_symbol": None}
+
+    try:
+        correlation_payload = PortfolioCorrelationEngine().analyze_portfolio(positions)
+    except Exception:
+        correlation_payload = {"concentration_score": 0.0, "correlation_score": 0.0}
+
+    try:
+        concentration_payload = ConcentrationGuard().evaluate(positions)
+    except Exception:
+        concentration_payload = {"risk_score": 1.0, "recommendation": "BLOCK"}
+
+    try:
+        adaptive_exit_payload = AdaptiveExitEngine().recommend_exit(
+            open_trade_context={
+                "trade_id": f"summary-{normalized_symbol}",
+                "symbol": normalized_symbol,
+                "entry_price": candidate["current_price"],
+            },
+            market_regime=str(regime_payload.get("market_regime") or "UNKNOWN"),
+            strategy_memory_summary={},
+            current_unrealized_pnl=0.0,
+            holding_duration=180.0,
+            volatility=float(regime_payload.get("volatility", 0.0) or 0.0),
+            trend_strength=float(regime_payload.get("trend_strength", 0.0) or 0.0),
+        )
+    except Exception:
+        adaptive_exit_payload = {"action": "HOLD", "confidence": 0.0}
+
+    try:
+        intelligence_payload = IntelligenceOrchestrator().decide(candidate).to_dict()
+    except IntelligenceDecisionError:
+        intelligence_payload = {"decision": "BLOCK", "confidence": 0.0, "execution_status": "NOT_APPROVED"}
+    except Exception:
+        intelligence_payload = {"decision": "BLOCK", "confidence": 0.0, "execution_status": "NOT_APPROVED"}
+
+    try:
+        ranking_payload = OpportunityRankingEngine().explain_opportunity(normalized_symbol)
+    except Exception:
+        ranking_payload = {}
+
+    opportunity = ranking_payload.get("opportunity", {}) if isinstance(ranking_payload, dict) else {}
+    confidence = float(opportunity.get("confidence", intelligence_payload.get("confidence", 0.0)) or 0.0)
+    score = float(opportunity.get("opportunity_score", 0.0) or 0.0)
+
+    return {
+        "status": "OK",
+        "symbol": normalized_symbol,
+        "mode": mode,
+        "mode_label": "LIVE MODE" if mode == "live" else "PAPER MODE",
+        "decision_panel": {
+            "current_market_regime": str(regime_payload.get("market_regime") or opportunity.get("market_regime") or "UNKNOWN"),
+            "recommended_strategy": str(opportunity.get("selected_strategy") or instrument.get("default_strategy") or "default"),
+            "opportunity_score": round(score, 4),
+            "confidence_percent": round(confidence * 100.0, 2),
+            "expected_direction": str(intelligence_payload.get("learning_context", {}).get("features", {}).get("direction", regime_payload.get("direction", "FLAT"))).upper(),
+            "risk_rating": str(instrument.get("risk_profile") or "balanced").upper(),
+            "portfolio_concentration": round(float(correlation_payload.get("concentration_score", 0.0) or 0.0), 6),
+            "execution_status": str(intelligence_payload.get("execution_status") or "NOT_APPROVED"),
+            "paper_live_availability": {
+                "paper_supported": bool(instrument.get("paper_supported", False)),
+                "live_supported": bool(instrument.get("live_supported", False)),
+            },
+            "broker": str(instrument.get("broker") or "unknown"),
+            "last_update": datetime.datetime.utcnow().isoformat() + "Z",
+        },
+        "engine_outputs": {
+            "OpportunityRankingEngine": _json_safe(ranking_payload),
+            "IntelligenceOrchestrator": _json_safe(intelligence_payload),
+            "PortfolioCorrelationEngine": _json_safe(correlation_payload),
+            "ConcentrationGuard": _json_safe(concentration_payload),
+            "StrategyIntelligenceEngine": _json_safe(strategy_payload),
+            "MarketRegimeEngine": _json_safe(regime_payload),
+            "AdaptiveExitEngine": _json_safe(adaptive_exit_payload),
+        },
+    }
+
+
 def _opportunity_alert_repo() -> AlertRepository:
     return AlertRepository(storage_dir=LauncherConfig.ALERTS_DIR)
 
@@ -599,6 +878,22 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
     }
 
     tradeable_symbols_feed = get_tradeable_symbols_feed()
+    grouped_universe_feed = get_grouped_trading_universe_feed()
+    top_opportunities = get_top_opportunities_feed(limit=10)
+    default_summary_symbol = ""
+    for group in grouped_universe_feed.get("groups", []):
+        for item in group.get("instruments", []):
+            if bool(item.get("selectable", False)):
+                default_summary_symbol = str(item.get("symbol") or "")
+                break
+        if default_summary_symbol:
+            break
+
+    opportunity_summary = get_opportunity_summary(default_summary_symbol) if default_summary_symbol else {
+        "status": "ERROR",
+        "symbol": "",
+        "message": "No selectable instruments",
+    }
 
     return {
         "title": "CSS Mobile Dashboard",
@@ -614,6 +909,11 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "instrument_universe": get_trade_tab_instrument_feed(),
         "tradeable_symbols": tradeable_symbols_feed,
         "tradeable_symbol_lookup": [row.get("symbol") for row in tradeable_symbols_feed.get("symbols", [])],
+        "canonical_trading_universe": get_trading_universe_feed(),
+        "canonical_grouped_universe": grouped_universe_feed,
+        "mode_badge": _mode_badge(),
+        "top_opportunities": top_opportunities,
+        "opportunity_summary": opportunity_summary,
         "opportunity_feed": get_opportunity_feed(),
         "health": {
             "backend_available": get_mobile_launcher_status() == "ONLINE",
@@ -687,6 +987,26 @@ async def mobile_tradeable_symbols_feed(
     broker: Optional[str] = None,
 ):
     return get_tradeable_symbols_feed(mode=mode, asset_class=asset_class, broker=broker)
+
+
+@launcher_router.get("/mobile/trading-universe")
+async def mobile_trading_universe(mode: Optional[str] = None):
+    return get_trading_universe_feed(mode=mode)
+
+
+@launcher_router.get("/mobile/trading-universe/grouped")
+async def mobile_trading_universe_grouped(mode: Optional[str] = None):
+    return get_grouped_trading_universe_feed(mode=mode)
+
+
+@launcher_router.get("/mobile/opportunity-summary/{symbol}")
+async def mobile_opportunity_summary(symbol: str):
+    return get_opportunity_summary(symbol)
+
+
+@launcher_router.get("/mobile/top-opportunities")
+async def mobile_top_opportunities():
+    return get_top_opportunities_feed(limit=10)
 
 
 @launcher_router.get("/mobile/opportunities")
