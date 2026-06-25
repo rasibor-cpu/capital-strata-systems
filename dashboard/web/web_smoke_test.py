@@ -8,14 +8,31 @@ from dashboard.web.web_app import (
     _market_opportunities_page,
     _positions_page,
     _risk_governance_page,
+    _trade_page,
     create_app,
     demo_dashboard_state_provider,
 )
 
 
+def _collect_paths(routes) -> set[str]:
+    collected: set[str] = set()
+    for route in routes:
+        path = getattr(route, "path", None)
+        if isinstance(path, str) and path:
+            collected.add(path)
+        nested = getattr(route, "routes", None)
+        if nested:
+            collected |= _collect_paths(nested)
+        original_router = getattr(route, "original_router", None)
+        original_routes = getattr(original_router, "routes", None)
+        if original_routes:
+            collected |= _collect_paths(original_routes)
+    return collected
+
+
 def main() -> int:
     app = create_app()
-    routes = {getattr(route, "path", "") for route in app.routes}
+    routes = _collect_paths(app.routes)
     required_routes = {
         "/",
         "/broker",
@@ -23,6 +40,7 @@ def main() -> int:
         "/execution",
         "/market-opportunities",
         "/positions",
+        "/trade",
         "/risk-governance",
         "/health",
         "/api/v1/dashboard-state",
@@ -55,6 +73,7 @@ def main() -> int:
         'href="/execution"',
         'href="/market-opportunities"',
         'href="/positions"',
+        'href="/trade"',
         'href="/risk-governance"',
         "/api/v1/frontend-state",
         "/ws/v1/dashboard-state",
@@ -76,6 +95,20 @@ def main() -> int:
     for expected in expected_positions_markup:
         if expected not in positions_markup:
             raise AssertionError(f"Web positions markup missing: {expected}")
+
+    trade_markup = _trade_page()
+    expected_trade_markup = [
+        "CSS Trade Universe",
+        "Trade Universe",
+        "Canonical Market Universe Grid",
+        "Search symbol",
+        "Watchlist only",
+        "Canonical market universe source",
+        "/api/v1/frontend-state",
+    ]
+    for expected in expected_trade_markup:
+        if expected not in trade_markup:
+            raise AssertionError(f"Web trade markup missing: {expected}")
 
     execution_markup = _execution_page()
     expected_execution_markup = [
@@ -144,6 +177,8 @@ def main() -> int:
         raise AssertionError("Web dashboard provider must expose demo account payload")
     if sections.get("positions", {}).get("total") != 2:
         raise AssertionError("Web dashboard provider must expose demo positions")
+    if sections.get("trade", {}).get("count", 0) <= 0:
+        raise AssertionError("Web trade center must expose canonical universe rows")
     position_items = sections.get("positions", {}).get("items", [])
     if len(position_items) != 2:
         raise AssertionError("Web positions contract must expose detailed rows")

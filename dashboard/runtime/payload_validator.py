@@ -24,6 +24,7 @@ class FrontendPayloadValidator:
 
     REQUIRED_SECTIONS = [
         "account_summary",
+        "trade",
         "positions",
         "pnl_summary",
         "risk",

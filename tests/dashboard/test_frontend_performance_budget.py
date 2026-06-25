@@ -28,6 +28,7 @@ from dashboard.web.web_app import (
     _market_opportunities_page,
     _positions_page,
     _risk_governance_page,
+    _trade_page,
 )
 
 
@@ -117,6 +118,7 @@ def test_web_pages_render_within_html_budget() -> None:
     web_pages: dict[str, Callable[[], str]] = {
         "dashboard": _dashboard_page,
         "positions": _positions_page,
+        "trade": _trade_page,
         "execution": _execution_page,
         "risk_governance": _risk_governance_page,
         "market_opportunities": _market_opportunities_page,

@@ -27,6 +27,22 @@ from dashboard.runtime.ws_bridge import (
 )
 
 
+def _collect_paths(routes) -> set[str]:
+    collected: set[str] = set()
+    for route in routes:
+        path = getattr(route, "path", None)
+        if isinstance(path, str) and path:
+            collected.add(path)
+        nested = getattr(route, "routes", None)
+        if nested:
+            collected |= _collect_paths(nested)
+        original_router = getattr(route, "original_router", None)
+        original_routes = getattr(original_router, "routes", None)
+        if original_routes:
+            collected |= _collect_paths(original_routes)
+    return collected
+
+
 def test_dashboard_state_to_dict_is_json_safe_and_redacted() -> None:
     state = DashboardState(session_id="TEST-SESSION", user_id="00017")
     state.last_scan_results["account_summary"] = {
@@ -80,7 +96,7 @@ def test_frontend_payload_schema_integrity_and_size() -> None:
 def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
     state = DashboardHydrationCoordinator().hydrate(**build_smoke_payloads())
     app = create_app(lambda: state)
-    routes = {getattr(route, "path", "") for route in app.routes}
+    routes = _collect_paths(app.routes)
 
     required_routes = {
         "/api/v1/dashboard-state",

@@ -52,6 +52,10 @@ def create_app(
     async def positions() -> HTMLResponse:
         return HTMLResponse(_positions_page())
 
+    @app.get("/trade", response_class=HTMLResponse)
+    async def trade() -> HTMLResponse:
+      return HTMLResponse(_trade_page())
+
     @app.get("/execution", response_class=HTMLResponse)
     async def execution() -> HTMLResponse:
         return HTMLResponse(_execution_page())
@@ -133,6 +137,7 @@ def _app_nav(active: str) -> str:
     links = [
         ("dashboard", "/dashboard", "Dashboard"),
         ("positions", "/positions", "Positions"),
+      ("trade", "/trade", "Trade"),
         ("execution", "/execution", "Execution"),
         ("risk_governance", "/risk-governance", "Risk & Governance"),
         ("market_opportunities", "/market-opportunities", "Market"),
@@ -1167,6 +1172,260 @@ refreshRiskGovernance().catch(() => undefined);
 """
 
 
+def _trade_page() -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111820">
+  <title>CSS Trade Universe</title>
+  <style>{_css()}</style>
+</head>
+<body><div style="background-color:#ffebee;color:#b71c1c;text-align:center;padding:8px;font-weight:bold;font-size:0.85em;border-bottom:1px solid #b71c1c;" aria-label="Risk Warning">Trading involves substantial risk. Loss of capital may occur. Past performance does not guarantee future results.</div>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">CSS</div>
+        <div>
+          <p class="eyebrow">Capital Strata Systems</p>
+          <h1>Trade Universe</h1>
+        </div>
+      </div>
+      <section class="status-strip" aria-label="System status">
+        <span id="trade-mode">System PAPER</span>
+        <span id="trade-engine">Engine SAFE</span>
+        <span id="trade-session">Session pending</span>
+        <span id="trade-updated">Snapshot pending</span>
+      </section>
+    </header>
+    {_app_nav("trade")}
+
+    <section class="control-row trade-controls" aria-label="Trade universe controls">
+      <button type="button" data-refresh-trade>Refresh</button>
+      <input type="search" id="trade-search" placeholder="Search symbol" aria-label="Search symbol">
+      <select id="trade-asset-filter" aria-label="Filter by asset class">
+        <option value="ALL">All assets</option>
+      </select>
+      <select id="trade-sort" aria-label="Sort universe">
+        <option value="symbol_asc">Symbol A-Z</option>
+        <option value="symbol_desc">Symbol Z-A</option>
+        <option value="price_desc">Price high-low</option>
+        <option value="price_asc">Price low-high</option>
+        <option value="spread_asc">Spread low-high</option>
+        <option value="spread_desc">Spread high-low</option>
+      </select>
+      <label class="watch-only-toggle"><input type="checkbox" id="trade-watch-only"> Watchlist only</label>
+      <span>Canonical market universe source</span>
+      <span>Read-only trade data layer</span>
+    </section>
+
+    <section class="metric-band" aria-label="Trade universe metrics">
+      <article>
+        <strong>Universe Count</strong>
+        <span id="trade-universe-count">0</span>
+      </article>
+      <article>
+        <strong>Visible Rows</strong>
+        <span id="trade-visible-count">0</span>
+      </article>
+      <article>
+        <strong>Watchlist</strong>
+        <span id="trade-watch-count">0</span>
+      </article>
+      <article>
+        <strong>In Position</strong>
+        <span id="trade-in-position-count">0</span>
+      </article>
+      <article>
+        <strong>Universe Source</strong>
+        <span id="trade-source">UNKNOWN</span>
+      </article>
+      <article>
+        <strong>Asset Classes</strong>
+        <span id="trade-asset-count">0</span>
+      </article>
+    </section>
+
+    <section class="trade-workspace">
+      <article class="panel trade-main">
+        <div class="panel-head">
+          <h2>Canonical Market Universe Grid</h2>
+          <span id="trade-grid-badge">0 ROWS</span>
+        </div>
+        <div class="trade-table" id="trade-universe-table"></div>
+      </article>
+    </section>
+  </main>
+
+  <script>{_trade_script()}</script>
+</body>
+</html>"""
+
+
+def _trade_script() -> str:
+    return """
+const tradeState = { payload: null, sections: {}, rows: [] };
+const WATCHLIST_KEY = "css.trade.watchlist.v1";
+
+function numberValue(value) {
+  return Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 6 });
+}
+
+function signed(value) {
+  const n = Number(value || 0);
+  return `${n >= 0 ? "+" : ""}${n.toFixed(4)}`;
+}
+
+function getWatchlist() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(WATCHLIST_KEY) || "[]");
+    return new Set(Array.isArray(parsed) ? parsed.map((v) => String(v).toUpperCase()) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveWatchlist(set) {
+  localStorage.setItem(WATCHLIST_KEY, JSON.stringify(Array.from(set).sort()));
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\\"": "&quot;",
+    "'": "&#39;"
+  }[char]));
+}
+
+function currentRows() {
+  const search = String(document.getElementById("trade-search").value || "").trim().toUpperCase();
+  const asset = String(document.getElementById("trade-asset-filter").value || "ALL");
+  const sort = String(document.getElementById("trade-sort").value || "symbol_asc");
+  const watchOnly = document.getElementById("trade-watch-only").checked;
+  const watchlist = getWatchlist();
+
+  let rows = [...tradeState.rows];
+  if (search) {
+    rows = rows.filter((row) => String(row.symbol || "").toUpperCase().includes(search));
+  }
+  if (asset !== "ALL") {
+    rows = rows.filter((row) => String(row.asset_class || "") === asset);
+  }
+  if (watchOnly) {
+    rows = rows.filter((row) => watchlist.has(String(row.symbol || "").toUpperCase()));
+  }
+
+  const cmpNum = (a, b, key, asc = true) => asc ? Number(a[key] || 0) - Number(b[key] || 0) : Number(b[key] || 0) - Number(a[key] || 0);
+  const cmpStr = (a, b, key, asc = true) => asc ? String(a[key] || "").localeCompare(String(b[key] || "")) : String(b[key] || "").localeCompare(String(a[key] || ""));
+
+  if (sort === "symbol_asc") rows.sort((a, b) => cmpStr(a, b, "symbol", true));
+  if (sort === "symbol_desc") rows.sort((a, b) => cmpStr(a, b, "symbol", false));
+  if (sort === "price_asc") rows.sort((a, b) => cmpNum(a, b, "price", true));
+  if (sort === "price_desc") rows.sort((a, b) => cmpNum(a, b, "price", false));
+  if (sort === "spread_asc") rows.sort((a, b) => cmpNum(a, b, "spread_bps", true));
+  if (sort === "spread_desc") rows.sort((a, b) => cmpNum(a, b, "spread_bps", false));
+
+  return rows;
+}
+
+function renderTradeUniverse() {
+  const universe = tradeState.sections.trade || {};
+  const allRows = tradeState.rows;
+  const rows = currentRows();
+  const watchlist = getWatchlist();
+  const target = document.getElementById("trade-universe-table");
+
+  document.getElementById("trade-universe-count").textContent = String(allRows.length);
+  document.getElementById("trade-visible-count").textContent = String(rows.length);
+  document.getElementById("trade-watch-count").textContent = String(watchlist.size);
+  document.getElementById("trade-in-position-count").textContent = String(allRows.filter((row) => Boolean(row.in_position)).length);
+  document.getElementById("trade-source").textContent = String(universe.source || "UNKNOWN");
+  document.getElementById("trade-asset-count").textContent = String((universe.asset_classes || []).length);
+  document.getElementById("trade-grid-badge").textContent = `${rows.length} ROWS`;
+
+  if (!rows.length) {
+    target.innerHTML = `<div class="empty-state">No symbols match current filters</div>`;
+    return;
+  }
+
+  target.innerHTML = `
+    <div class="trade-row trade-head">
+      <span>Watch</span><span>Symbol</span><span>Asset</span><span>Price</span><span>VWAP</span><span>VWAP Dev</span><span>Spread (bps)</span><span>Signal</span><span>Status</span><span>Position</span>
+    </div>
+    ${rows.map((row) => {
+      const symbol = String(row.symbol || "UNKNOWN").toUpperCase();
+      const watched = watchlist.has(symbol);
+      return `
+        <div class="trade-row">
+          <span><button type="button" class="watch-btn ${watched ? "on" : "off"}" data-watch-symbol="${escapeHtml(symbol)}">${watched ? "WATCHED" : "WATCH"}</button></span>
+          <span>${escapeHtml(symbol)}</span>
+          <span>${escapeHtml(row.asset_class || "UNKNOWN")}</span>
+          <span>${numberValue(row.price)}</span>
+          <span>${numberValue(row.vwap)}</span>
+          <span class="${Number(row.vwap_dev || 0) >= 0 ? "positive" : "negative"}">${signed(row.vwap_dev)}</span>
+          <span>${numberValue(row.spread_bps)}</span>
+          <span>${escapeHtml(row.signal || "WATCH")}</span>
+          <span>${escapeHtml(row.status || "MONITOR_ONLY")}</span>
+          <span>${row.in_position ? "OPEN" : "FLAT"}</span>
+        </div>
+      `;
+    }).join("")}
+  `;
+
+  target.querySelectorAll("[data-watch-symbol]").forEach((node) => {
+    node.addEventListener("click", () => {
+      const symbol = String(node.getAttribute("data-watch-symbol") || "").toUpperCase();
+      const updated = getWatchlist();
+      if (updated.has(symbol)) updated.delete(symbol);
+      else updated.add(symbol);
+      saveWatchlist(updated);
+      renderTradeUniverse();
+    });
+  });
+}
+
+function syncAssetFilter() {
+  const select = document.getElementById("trade-asset-filter");
+  const current = String(select.value || "ALL");
+  const classes = (tradeState.sections.trade?.asset_classes || []);
+  select.innerHTML = `<option value="ALL">All assets</option>${classes.map((asset) => `<option value="${escapeHtml(asset)}">${escapeHtml(asset)}</option>`).join("")}`;
+  if (["ALL", ...classes].includes(current)) {
+    select.value = current;
+  }
+}
+
+function renderTradeSnapshot(payload) {
+  tradeState.payload = payload;
+  tradeState.sections = payload.sections || {};
+  tradeState.rows = Array.isArray(tradeState.sections.trade?.items) ? tradeState.sections.trade.items : [];
+  const session = payload.session || {};
+
+  document.getElementById("trade-mode").textContent = `System ${String(payload.resolved_mode || "paper").toUpperCase()}`;
+  document.getElementById("trade-engine").textContent = `Engine ${session.engine_mode || "SAFE"}`;
+  document.getElementById("trade-session").textContent = `Session ${payload.session_id || session.session_id || "pending"}`;
+  document.getElementById("trade-updated").textContent = `Updated ${tradeState.sections.trade?.generated_at || payload.generated_at || "pending"}`;
+
+  syncAssetFilter();
+  renderTradeUniverse();
+}
+
+async function refreshTrade() {
+  const response = await fetch("/api/v1/frontend-state", { cache: "no-store" });
+  renderTradeSnapshot(await response.json());
+}
+
+document.querySelector("[data-refresh-trade]").addEventListener("click", refreshTrade);
+document.getElementById("trade-search").addEventListener("input", renderTradeUniverse);
+document.getElementById("trade-asset-filter").addEventListener("change", renderTradeUniverse);
+document.getElementById("trade-sort").addEventListener("change", renderTradeUniverse);
+document.getElementById("trade-watch-only").addEventListener("change", renderTradeUniverse);
+refreshTrade().catch(() => undefined);
+"""
+
+
 def _market_opportunities_page() -> str:
     return f"""<!doctype html>
 <html lang="en">
@@ -1927,6 +2186,11 @@ button {
   grid-template-columns: minmax(0, 1.6fr) minmax(320px, 0.8fr);
   gap: 12px;
 }
+.trade-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
 .execution-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1.65fr) minmax(320px, 0.75fr);
@@ -1949,6 +2213,9 @@ button {
 }
 .positions-main {
   min-height: 520px;
+}
+.trade-main {
+  min-height: 560px;
 }
 .execution-main {
   min-height: 520px;
@@ -1987,10 +2254,32 @@ button {
   min-height: 0;
 }
 .position-table,
+.trade-table,
 .execution-table,
 .opportunity-table,
 .summary-table {
   overflow-x: auto;
+}
+.trade-controls input,
+.trade-controls select {
+  min-height: 36px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  padding: 7px 10px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.watch-only-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 700;
 }
 .position-row {
   display: grid;
@@ -2002,6 +2291,21 @@ button {
   align-items: center;
 }
 .position-head {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  font-weight: 800;
+}
+.trade-row {
+  display: grid;
+  grid-template-columns: 90px 110px 100px 110px 110px 110px 110px 90px 170px 85px;
+  gap: 8px;
+  min-width: 1180px;
+  border-bottom: 1px solid var(--line);
+  padding: 10px 0;
+  align-items: center;
+}
+.trade-head {
   color: var(--muted);
   font-size: 12px;
   text-transform: uppercase;
@@ -2038,11 +2342,29 @@ button {
   font-weight: 800;
 }
 .position-row span,
+.trade-row span,
 .execution-row span,
 .opportunity-row span,
 .summary-row span {
   overflow-wrap: anywhere;
   font-weight: 700;
+}
+.watch-btn {
+  min-height: 28px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--ink);
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 800;
+}
+.watch-btn.on {
+  border-color: rgba(112, 184, 112, 0.5);
+  color: var(--ok);
+}
+.watch-btn.off {
+  border-color: rgba(223, 91, 82, 0.5);
+  color: var(--danger);
 }
 .side-badge {
   display: inline-flex;
@@ -2103,6 +2425,7 @@ button {
 @media (max-width: 1120px) {
   .metric-band,
   .dashboard-grid,
+  .trade-workspace,
   .positions-workspace,
   .execution-workspace,
   .risk-governance-workspace,
@@ -2116,6 +2439,7 @@ button {
   .topbar { align-items: flex-start; flex-direction: column; }
   .metric-band,
   .dashboard-grid,
+  .trade-workspace,
   .positions-workspace,
   .execution-workspace,
   .risk-governance-workspace,

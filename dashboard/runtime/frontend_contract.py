@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
+import time
 from typing import Any
 
 from dashboard.runtime.dashboard_state import (
@@ -15,6 +16,11 @@ from dashboard.runtime.broker_balance_reconciliation import (
     build_broker_reconciliation_payload,
 )
 
+try:
+    from backend.scanner.unified_market_scanner import UnifiedMarketScanner
+except Exception:
+    UnifiedMarketScanner = None
+
 
 FRONTEND_CONTRACT_VERSION = "1.0.0"
 FRONTEND_CONTRACT_SCHEMA = "css.frontend.contract.v1"
@@ -24,6 +30,7 @@ CONTRACT_VERSION = FRONTEND_CONTRACT_VERSION
 CONTRACT_TIMESTAMP = "2026-05-08T00:00:00Z"
 FRONTEND_SECTIONS = (
     "account_summary",
+    "trade",
     "positions",
     "pnl_summary",
     "risk",
@@ -35,6 +42,12 @@ FRONTEND_SECTIONS = (
     "broker_reconciliation",
     "analytics",
 )
+
+_TRADE_UNIVERSE_CACHE: dict[str, Any] = {
+    "updated_at": 0.0,
+    "items": [],
+}
+_TRADE_UNIVERSE_CACHE_TTL_SECONDS = 5.0
 
 
 @dataclass(frozen=True)
@@ -109,6 +122,7 @@ def build_frontend_payload(
         "resolved_mode": str(dashboard_payload.get("resolved_mode", "paper")),
         "sections": {
             "account_summary": account_summary(dashboard_payload),
+            "trade": trade(dashboard_payload),
             "positions": positions(dashboard_payload),
             "pnl_summary": pnl_summary(dashboard_payload),
             "risk": risk(dashboard_payload),
@@ -137,6 +151,103 @@ def account_summary(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         "broker": str(account.get("broker", "NONE")),
         "account_mode": str(account.get("account_mode", "paper")),
     }
+
+
+def trade(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
+    opportunities_by_symbol = {
+        str(_mapping(item).get("symbol", "")).upper(): _mapping(item)
+        for item in _list(dashboard_payload.get("opportunities"))
+    }
+    position_state = _mapping(dashboard_payload.get("position_state"))
+    active_symbols = {
+        str(symbol).upper() for symbol in _list(position_state.get("active_symbols"))
+    }
+
+    rows: list[dict[str, Any]] = []
+    for item in _get_canonical_universe_rows():
+        symbol = str(item.get("symbol", "UNKNOWN")).upper()
+        opportunity = opportunities_by_symbol.get(symbol, {})
+
+        rows.append(
+            {
+                "symbol": symbol,
+                "asset_class": str(item.get("asset_class", "UNKNOWN")),
+                "price": _number(item.get("price")),
+                "vwap": _number(item.get("vwap")),
+                "vwap_dev": _number(item.get("vwap_dev")),
+                "spread_bps": _number(item.get("spread_bps")),
+                "signal": str(opportunity.get("signal", "WATCH")),
+                "status": str(opportunity.get("status", "MONITOR_ONLY")),
+                "in_position": symbol in active_symbols,
+            }
+        )
+
+    asset_classes = sorted(
+        {str(row.get("asset_class", "UNKNOWN")) for row in rows}
+    )
+
+    return {
+        "source": "backend.scanner.unified_market_scanner.UnifiedMarketScanner",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "count": len(rows),
+        "asset_classes": asset_classes,
+        "items": rows,
+    }
+
+
+def _get_canonical_universe_rows() -> list[dict[str, Any]]:
+    now = time.time()
+    cache_age = now - float(_TRADE_UNIVERSE_CACHE.get("updated_at", 0.0))
+    if cache_age < _TRADE_UNIVERSE_CACHE_TTL_SECONDS:
+        return list(_TRADE_UNIVERSE_CACHE.get("items", []))
+
+    rows: list[dict[str, Any]] = []
+    if UnifiedMarketScanner is not None:
+        try:
+            scan_rows = UnifiedMarketScanner().scan()
+            for item in _list(scan_rows):
+                mapped = _mapping(item)
+                symbol = str(mapped.get("symbol", "")).strip().upper()
+                if not symbol:
+                    continue
+                rows.append(
+                    {
+                        "symbol": symbol,
+                        "asset_class": str(mapped.get("asset_class", "UNKNOWN")).upper(),
+                        "price": _number(mapped.get("price")),
+                        "vwap": _number(mapped.get("vwap")),
+                        "vwap_dev": _number(mapped.get("vwap_dev")),
+                        "spread_bps": _number(mapped.get("spread_bps")),
+                    }
+                )
+        except Exception:
+            rows = []
+
+    if not rows:
+        rows = [
+            {"symbol": "BTC-USD", "asset_class": "CRYPTO", "price": 0.0, "vwap": 0.0, "vwap_dev": 0.0, "spread_bps": 0.0},
+            {"symbol": "ETH-USD", "asset_class": "CRYPTO", "price": 0.0, "vwap": 0.0, "vwap_dev": 0.0, "spread_bps": 0.0},
+            {"symbol": "SOL-USD", "asset_class": "CRYPTO", "price": 0.0, "vwap": 0.0, "vwap_dev": 0.0, "spread_bps": 0.0},
+            {"symbol": "EUR_USD", "asset_class": "FX", "price": 0.0, "vwap": 0.0, "vwap_dev": 0.0, "spread_bps": 0.0},
+            {"symbol": "GBP_USD", "asset_class": "FX", "price": 0.0, "vwap": 0.0, "vwap_dev": 0.0, "spread_bps": 0.0},
+            {"symbol": "USD_JPY", "asset_class": "FX", "price": 0.0, "vwap": 0.0, "vwap_dev": 0.0, "spread_bps": 0.0},
+            {"symbol": "ES", "asset_class": "FUTURES", "price": 0.0, "vwap": 0.0, "vwap_dev": 0.0, "spread_bps": 0.0},
+            {"symbol": "NQ", "asset_class": "FUTURES", "price": 0.0, "vwap": 0.0, "vwap_dev": 0.0, "spread_bps": 0.0},
+            {"symbol": "CL", "asset_class": "FUTURES", "price": 0.0, "vwap": 0.0, "vwap_dev": 0.0, "spread_bps": 0.0},
+        ]
+
+    deduped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        deduped[str(row.get("symbol", "")).upper()] = row
+
+    canonical_rows = sorted(
+        deduped.values(),
+        key=lambda row: (str(row.get("asset_class", "")), str(row.get("symbol", ""))),
+    )
+
+    _TRADE_UNIVERSE_CACHE["updated_at"] = now
+    _TRADE_UNIVERSE_CACHE["items"] = canonical_rows
+    return list(canonical_rows)
 
 
 def positions(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -603,6 +714,7 @@ __all__ = [
     "build_frontend_payload",
     "build_section_payload",
     "build_websocket_delta",
+    "trade",
     "execution",
     "governance",
     "market",
