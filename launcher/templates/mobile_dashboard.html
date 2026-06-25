@@ -381,6 +381,41 @@
         .instrument-status strong {
             color: var(--text-primary);
         }
+        .opportunity-table-wrap {
+            overflow-x: auto;
+            margin-top: 10px;
+        }
+        .opportunity-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        .opportunity-table th,
+        .opportunity-table td {
+            border-bottom: 1px solid var(--border-color);
+            padding: 6px 5px;
+            text-align: left;
+            white-space: nowrap;
+        }
+        .opportunity-table th {
+            color: var(--text-secondary);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+        }
+        .opportunity-select-btn {
+            border: 1px solid var(--border-strong);
+            background: #141a17;
+            color: var(--text-primary);
+            border-radius: 6px;
+            padding: 5px 7px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+        .opportunity-select-btn:hover {
+            border-color: #60a5fa;
+            color: #60a5fa;
+        }
         .paper-only-warning {
             margin-top: 10px;
             padding: 9px 10px;
@@ -743,6 +778,67 @@
          ══════════════════════════════════════════════ -->
     <div id="screen-trade" class="screen">
 
+        <div class="card" id="trade-opportunity-ranking">
+            <div class="card-header">
+                Ranked Opportunities
+                <span class="badge badge-info">TOP {{ opportunity_feed.top_opportunities|length }}</span>
+            </div>
+            <div style="font-size:12px; color:var(--text-secondary); margin-bottom:8px;">
+                Select an opportunity to prefill the trade ticket. Selection does not execute trades.
+            </div>
+            {% if opportunity_feed.top_opportunities %}
+            <div class="opportunity-table-wrap">
+                <table class="opportunity-table" aria-label="Ranked trade opportunities">
+                    <thead>
+                        <tr>
+                            <th>Rank</th>
+                            <th>Symbol</th>
+                            <th>Asset Class</th>
+                            <th>Broker</th>
+                            <th>Action</th>
+                            <th>Score</th>
+                            <th>Confidence</th>
+                            <th>Regime</th>
+                            <th>Strategy</th>
+                            <th>Risk</th>
+                            <th>Paper</th>
+                            <th>Status</th>
+                            <th>Select</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in opportunity_feed.top_opportunities %}
+                        <tr>
+                            <td>{{ row.rank }}</td>
+                            <td style="font-family:monospace; font-weight:700;">{{ row.symbol }}</td>
+                            <td>{{ row.asset_class }}</td>
+                            <td>{{ row.broker|upper }}</td>
+                            <td>{{ row.action }}</td>
+                            <td>{{ "%.2f"|format(row.opportunity_score) }}</td>
+                            <td>{{ "%.2f"|format(row.confidence) }}</td>
+                            <td>{{ row.market_regime }}</td>
+                            <td>{{ row.selected_strategy }}</td>
+                            <td>{{ "%.2f"|format(row.risk_score) }}</td>
+                            <td>{% if row.paper_supported %}YES{% else %}NO{% endif %}</td>
+                            <td>{{ row.status }}</td>
+                            <td>
+                                <button
+                                    type="button"
+                                    class="opportunity-select-btn"
+                                    data-opportunity-symbol="{{ row.symbol }}"
+                                    data-opportunity-asset="{{ row.asset_class }}"
+                                >Use</button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+                <div class="empty-state">No ranked opportunities available right now.</div>
+            {% endif %}
+        </div>
+
         <div class="card" id="mobile-paper-trade-tab-ticket">
             <div class="card-header">
                 Paper Trade Ticket
@@ -1061,8 +1157,32 @@
             }
 
             setupInstrumentSelectors(instrumentFeed || {});
+            setupOpportunitySelection();
         });
     }());
+
+    function setupOpportunitySelection() {
+        var symbolInput = document.getElementById("trade-symbol");
+        var assetInput = document.getElementById("trade-asset-class");
+        if (!symbolInput || !assetInput) {
+            return;
+        }
+
+        document.querySelectorAll(".opportunity-select-btn").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+                var symbol = String(btn.getAttribute("data-opportunity-symbol") || "").trim();
+                var asset = String(btn.getAttribute("data-opportunity-asset") || "").trim();
+                if (!symbol || !asset) {
+                    return;
+                }
+
+                // Selection only pre-fills fields. Order submission still requires explicit user submit and existing gates.
+                symbolInput.value = symbol;
+                assetInput.value = asset;
+                window.location.hash = "#trade";
+            });
+        });
+    }
 
     function setupInstrumentSelectors(feed) {
         var all = Array.isArray(feed.all_instruments) ? feed.all_instruments : [];

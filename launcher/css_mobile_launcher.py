@@ -17,6 +17,10 @@ from backend.trading.instrument_universe import (
     InstrumentUniverse,
     InstrumentUniverseError,
 )
+from backend.trading.opportunity_ranking_engine import (
+    OpportunityRankingEngine,
+    OpportunityRankingEngineError,
+)
 import uvicorn
 
 app = FastAPI(title=LauncherConfig.TITLE, version=LauncherConfig.VERSION)
@@ -367,6 +371,112 @@ def get_trade_tab_instrument_feed() -> Dict[str, Any]:
             "instruments_by_broker": {},
             "tradable_paper_instruments": [],
         }
+
+
+def _opportunity_alert_repo() -> AlertRepository:
+    return AlertRepository(storage_dir=LauncherConfig.ALERTS_DIR)
+
+
+def _emit_opportunity_warning(event_type: str, message: str, details: Dict[str, Any], dedupe_key: str) -> None:
+    try:
+        _opportunity_alert_repo().persist_alert(
+            {
+                "severity": "WARNING",
+                "event_type": event_type,
+                "source": "opportunity_ranking_feed",
+                "message": message,
+                "details": details,
+                "dedupe_key": dedupe_key,
+            }
+        )
+    except Exception:
+        pass
+
+
+def get_opportunity_feed() -> Dict[str, Any]:
+    try:
+        engine = OpportunityRankingEngine()
+        all_rows = engine.rank_all(include_blocked=True)
+        top_rows = engine.top_opportunities(limit=10)
+        paper_rows = engine.paper_opportunities(limit=10)
+        all_top_sample = all_rows[:10]
+
+        if not all_rows:
+            _emit_opportunity_warning(
+                event_type="DATA_UNAVAILABLE",
+                message="No tradable opportunities available",
+                details={"reason": "empty_ranking"},
+                dedupe_key="OPPORTUNITY_EMPTY_FEED",
+            )
+
+        if all_top_sample and all(str(row.get("action") or "").upper() == "BLOCK" for row in all_top_sample):
+            _emit_opportunity_warning(
+                event_type="RISK_GATE_BLOCK",
+                message="All top opportunities are currently blocked",
+                details={"top_count": len(all_top_sample)},
+                dedupe_key="OPPORTUNITY_TOP_BLOCKED",
+            )
+
+        low_confidence = [row for row in top_rows if float(row.get("confidence", 0.0) or 0.0) < 0.40]
+        if low_confidence:
+            _emit_opportunity_warning(
+                event_type="DATA_UNAVAILABLE",
+                message="Opportunity confidence below threshold",
+                details={"count": len(low_confidence), "threshold": 0.40},
+                dedupe_key="OPPORTUNITY_LOW_CONFIDENCE",
+            )
+
+        if all_rows:
+            now = datetime.datetime.now(datetime.timezone.utc)
+            stale_count = 0
+            for row in all_rows[:10]:
+                value = str(row.get("last_updated") or "").strip()
+                try:
+                    parsed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+                    if (now - parsed).total_seconds() > 300:
+                        stale_count += 1
+                except Exception:
+                    stale_count += 1
+            if stale_count == min(10, len(all_rows)):
+                _emit_opportunity_warning(
+                    event_type="HEARTBEAT_STALE",
+                    message="Opportunity ranking feed is stale",
+                    details={"sample_size": min(10, len(all_rows))},
+                    dedupe_key="OPPORTUNITY_FEED_STALE",
+                )
+
+        return {
+            "all_opportunities": all_rows,
+            "top_opportunities": top_rows,
+            "paper_opportunities": paper_rows,
+            "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
+        }
+    except OpportunityRankingEngineError:
+        _emit_opportunity_warning(
+            event_type="DATA_UNAVAILABLE",
+            message="No tradable opportunities available",
+            details={"reason": "ranking_engine_error"},
+            dedupe_key="OPPORTUNITY_EMPTY_FEED",
+        )
+        return {
+            "all_opportunities": [],
+            "top_opportunities": [],
+            "paper_opportunities": [],
+            "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
+        }
+    except Exception:
+        _emit_opportunity_warning(
+            event_type="DATA_UNAVAILABLE",
+            message="No tradable opportunities available",
+            details={"reason": "ranking_feed_exception"},
+            dedupe_key="OPPORTUNITY_EMPTY_FEED",
+        )
+        return {
+            "all_opportunities": [],
+            "top_opportunities": [],
+            "paper_opportunities": [],
+            "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
+        }
     except Exception:
         return {
             "all_instruments": [],
@@ -443,6 +553,7 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "chart_data": chart_data,
         "pause_state": get_pause_state(),
         "instrument_universe": get_trade_tab_instrument_feed(),
+        "opportunity_feed": get_opportunity_feed(),
         "health": {
             "backend_available": get_mobile_launcher_status() == "ONLINE",
             "supervisor_status": get_supervisor_summary().get("status", "UNKNOWN"),
@@ -506,6 +617,34 @@ async def status_check():
 @launcher_router.get("/mobile/instruments")
 async def mobile_instrument_feed():
     return get_trade_tab_instrument_feed()
+
+
+@launcher_router.get("/mobile/opportunities")
+async def mobile_opportunity_feed():
+    return get_opportunity_feed()
+
+
+@launcher_router.get("/mobile/opportunities/top")
+async def mobile_top_opportunity_feed():
+    feed = get_opportunity_feed()
+    return {
+        "top_opportunities": feed.get("top_opportunities", []),
+        "updated_at": feed.get("updated_at"),
+    }
+
+
+@launcher_router.get("/mobile/opportunities/asset-class/{asset_class}")
+async def mobile_opportunity_feed_by_asset_class(asset_class: str):
+    try:
+        rows = OpportunityRankingEngine().rank_by_asset_class(asset_class)
+    except OpportunityRankingEngineError:
+        rows = []
+
+    return {
+        "asset_class": str(asset_class or "").strip().upper(),
+        "opportunities": rows,
+        "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
+    }
 
 @launcher_router.get("/manifest.json")
 async def get_manifest():

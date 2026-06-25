@@ -625,6 +625,45 @@ def test_mobile_dashboard_exposes_trade_tab_navigation(launcher_temp_dir):
     assert 'id="screen-trade"' in response.text
     assert "Paper Trade Ticket" in response.text
     assert "Instrument Universe Selector" in response.text
+    assert "Ranked Opportunities" in response.text
     assert "PAPER TRADING ONLY" in response.text
     assert "/mobile/trade/paper" in response.text
+
+
+def test_mobile_opportunity_routes_return_json(launcher_temp_dir):
+    response = client.get("/mobile/opportunities")
+    assert response.status_code == 200
+    body = response.json()
+    assert "all_opportunities" in body
+    assert "top_opportunities" in body
+
+    response_top = client.get("/mobile/opportunities/top")
+    assert response_top.status_code == 200
+    assert "top_opportunities" in response_top.json()
+
+    response_asset = client.get("/mobile/opportunities/asset-class/FX")
+    assert response_asset.status_code == 200
+    assert response_asset.json()["asset_class"] == "FX"
+
+
+def test_opportunity_alert_generated_when_no_opportunities(launcher_temp_dir, monkeypatch):
+    import launcher.css_mobile_launcher as mod
+
+    class _EmptyEngine:
+        def rank_all(self, include_blocked=True):
+            return []
+
+        def top_opportunities(self, limit=10):
+            return []
+
+        def paper_opportunities(self, limit=10):
+            return []
+
+    monkeypatch.setattr(mod, "OpportunityRankingEngine", _EmptyEngine)
+
+    feed = mod.get_opportunity_feed()
+    assert feed["all_opportunities"] == []
+
+    alerts = mod.get_alert_summary()
+    assert any("No tradable opportunities available" in str(item.get("message", "")) for item in alerts)
 
