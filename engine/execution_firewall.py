@@ -20,10 +20,19 @@ from __future__ import annotations
 import os
 from typing import Dict, Any
 from datetime import datetime, timezone
+from dataclasses import dataclass
 
 
 class ExecutionFirewallError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class FirewallDecision:
+    allowed: bool
+    mode: str
+    reason: str
+    audit: Dict[str, Any]
 
 
 def _env_flag(name: str) -> bool:
@@ -97,3 +106,29 @@ def evaluate_firewall(
     # Unknown mode
     result["reason"] = f"firewall: unknown engine mode '{engine_mode}'"
     return result
+
+
+def check_execution_firewall(
+    *,
+    decision_allows_execution: bool,
+    engine_run_id: str,
+    engine_mode: str | None = None,
+    override_confirm_1: bool | None = None,
+    override_confirm_2: bool | None = None,
+) -> FirewallDecision:
+    """Compatibility wrapper for older callers expecting object attributes."""
+
+    mode = str(engine_mode or os.getenv("ENGINE_MODE", "TEST")).strip().upper() or "TEST"
+    payload = evaluate_firewall(
+        decision_allows_execution=decision_allows_execution,
+        engine_mode=mode,
+        engine_run_id=engine_run_id,
+        override_confirm_1=override_confirm_1,
+        override_confirm_2=override_confirm_2,
+    )
+    return FirewallDecision(
+        allowed=bool(payload.get("allowed", False)),
+        mode=str(payload.get("mode", mode)),
+        reason=str(payload.get("reason", "firewall: unknown")),
+        audit=dict(payload.get("audit") or {}),
+    )
