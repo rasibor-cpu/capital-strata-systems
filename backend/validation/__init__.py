@@ -5,6 +5,8 @@ from .marathon_runner import MarathonRunResult, MarathonRunner, MarathonRunnerEr
 from .marathon_report import MarathonReadinessReport, build_marathon_readiness_report
 from .marathon_snapshot import MarathonCyclePlan, MarathonSnapshot
 from .marathon_statistics import MarathonStatistics, build_marathon_statistics
+from .live_readiness_gate import LiveReadinessGate, LiveReadinessGateError
+from .live_readiness_report import LiveReadinessReport
 from .historical_replay_engine import HistoricalReplayEngine, HistoricalReplayEngineError
 from .replay_models import (
     HistoricalCompletedTrade,
@@ -33,6 +35,9 @@ __all__ = [
     "MarathonReadinessReport",
     "MarathonRunner",
     "MarathonRunnerError",
+    "LiveReadinessGate",
+    "LiveReadinessGateError",
+    "LiveReadinessReport",
     "MarathonSnapshot",
     "MarathonStatistics",
     "ReplayDecision",

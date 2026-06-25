@@ -1,12 +1,15 @@
 """Read-only analytics engines for profitability and signal edge observability."""
 
 from .adaptive_position_sizing import AdaptivePositionSizingEngine, AdaptivePositionSizingError
+from .adaptive_calibration_engine import AdaptiveCalibrationEngine, AdaptiveCalibrationEngineError
 from .closed_loop_learning_engine import ClosedLoopLearningEngine, ClosedLoopLearningEngineError
 from .capital_allocation_engine import CapitalAllocationEngine, CapitalAllocationEngineError
 from .concentration_guard import ConcentrationGuard, ConcentrationGuardError
 from .cost_reality_engine import CostRealityEngine
 from .dynamic_acceptance_engine import DynamicAcceptanceEngine, DynamicAcceptanceEngineError
 from .execution_selection_engine import ExecutionSelectionEngine, ExecutionSelectionEngineError
+from .performance_analytics_engine import PerformanceAnalyticsEngine, PerformanceAnalyticsEngineError
+from .performance_reporting_engine import PerformanceReportingEngine, PerformanceReportingEngineError
 from .opportunity_ranking_engine import OpportunityRankingEngine, OpportunityRankingEngineError
 from .portfolio_correlation_engine import PortfolioCorrelationEngine, PortfolioCorrelationEngineError
 from .profitability_ranking_engine import ProfitabilityRankingEngine, ProfitabilityRankingEngineError
@@ -28,6 +31,8 @@ from .trade_outcome_repository import (
 __all__ = [
     "AdaptivePositionSizingEngine",
     "AdaptivePositionSizingError",
+    "AdaptiveCalibrationEngine",
+    "AdaptiveCalibrationEngineError",
     "ClosedLoopLearningEngine",
     "ClosedLoopLearningEngineError",
     "CapitalAllocationEngine",
@@ -39,6 +44,10 @@ __all__ = [
     "DynamicAcceptanceEngineError",
     "ExecutionSelectionEngine",
     "ExecutionSelectionEngineError",
+    "PerformanceAnalyticsEngine",
+    "PerformanceAnalyticsEngineError",
+    "PerformanceReportingEngine",
+    "PerformanceReportingEngineError",
     "OpportunityRankingEngine",
     "OpportunityRankingEngineError",
     "ProfitabilityRankingEngine",
