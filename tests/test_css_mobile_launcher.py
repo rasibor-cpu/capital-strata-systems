@@ -744,6 +744,15 @@ def test_mobile_portfolio_summary_route_returns_recommendation(launcher_temp_dir
     if payload["status"] == "OK":
         assert "summary" in payload
         assert "recommendation" in payload
+        assert "strategy_evolution" in payload
+
+
+def test_mobile_strategy_evolution_route_returns_recommendation(launcher_temp_dir):
+    response = client.get("/mobile/strategy-evolution")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] in {"OK", "INSUFFICIENT_DATA", "ERROR"}
+    assert "recommended_strategy_weights" in payload
 
 
 def test_mobile_trade_tab_renders_portfolio_summary_panel(launcher_temp_dir):
@@ -752,6 +761,8 @@ def test_mobile_trade_tab_renders_portfolio_summary_panel(launcher_temp_dir):
     html = response.text
     assert "Portfolio Summary" in html
     assert 'id="portfolio-summary-card"' in html
+    assert "Strategy Evolution" in html
+    assert 'id="strategy-evolution-card"' in html
 
 
 def test_mobile_tradeable_symbols_route_shape_and_filters(launcher_temp_dir, monkeypatch):

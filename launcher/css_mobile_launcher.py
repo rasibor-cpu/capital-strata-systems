@@ -39,6 +39,11 @@ from backend.analytics.autonomous_portfolio_manager import (
     AutonomousPortfolioManager,
     AutonomousPortfolioManagerError,
 )
+from backend.analytics.strategy_evolution_engine import (
+    StrategyEvolutionEngine,
+    StrategyEvolutionEngineError,
+)
+from backend.analytics.trade_outcome_repository import TradeOutcomeRepository
 import uvicorn
 
 app = FastAPI(title=LauncherConfig.TITLE, version=LauncherConfig.VERSION)
@@ -1009,9 +1014,16 @@ def get_opportunity_feed() -> Dict[str, Any]:
 def get_portfolio_summary_feed() -> Dict[str, Any]:
     account = get_account_summary()
     opportunity_feed = get_opportunity_feed()
+    strategy_evolution = get_strategy_evolution_feed()
 
     opportunities = list(opportunity_feed.get("top_opportunities", []))
     positions = list(account.get("positions", [])) if isinstance(account, dict) else []
+    learning_records = _load_completed_trade_learning_records()
+    recommended_strategy_weights = (
+        strategy_evolution.get("recommended_strategy_weights", {})
+        if isinstance(strategy_evolution, dict)
+        else {}
+    )
 
     equity = float(account.get("equity", account.get("cash", 0.0)) or 0.0)
     cash = float(account.get("cash", 0.0) or 0.0)
@@ -1024,7 +1036,8 @@ def get_portfolio_summary_feed() -> Dict[str, Any]:
             total_capital=max(1.0, equity),
             available_capital=max(0.0, cash),
             reserved_capital=max(0.0, reserved),
-            learning_records=[],
+            learning_records=learning_records,
+            strategy_weight_recommendations=recommended_strategy_weights,
         )
     except AutonomousPortfolioManagerError as exc:
         return {
@@ -1064,6 +1077,116 @@ def get_portfolio_summary_feed() -> Dict[str, Any]:
             "portfolio_health": health,
         },
         "recommendation": recommendation,
+        "strategy_evolution": strategy_evolution,
+        "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
+    }
+
+
+def _normalize_completed_trade_row(raw: Dict[str, Any], *, fallback_idx: int) -> Dict[str, Any] | None:
+    strategy_id = str(raw.get("strategy_id") or raw.get("strategy") or "").strip()
+    if not strategy_id:
+        return None
+
+    return {
+        "trade_id": str(raw.get("trade_id") or f"learning-{fallback_idx}"),
+        "timestamp_open": str(raw.get("timestamp_open") or raw.get("opened_at") or datetime.datetime.utcnow().isoformat() + "Z"),
+        "timestamp_close": str(raw.get("timestamp_close") or raw.get("closed_at") or datetime.datetime.utcnow().isoformat() + "Z"),
+        "symbol": str(raw.get("symbol") or "UNKNOWN").strip().upper() or "UNKNOWN",
+        "asset_class": str(raw.get("asset_class") or "UNKNOWN").strip().upper() or "UNKNOWN",
+        "entry_price": float(raw.get("entry_price", 0.0) or 0.0),
+        "exit_price": float(raw.get("exit_price", 0.0) or 0.0),
+        "quantity": float(raw.get("quantity", raw.get("size", 0.0)) or 0.0),
+        "realized_pnl": float(raw.get("realized_pnl", raw.get("pnl", 0.0)) or 0.0),
+        "holding_duration_seconds": float(raw.get("holding_duration_seconds", raw.get("duration_seconds", 0.0)) or 0.0),
+        "strategy_id": strategy_id,
+        "market_regime": str(raw.get("market_regime") or "UNKNOWN").strip().upper() or "UNKNOWN",
+        "broker": str(raw.get("broker") or "paper").strip().lower() or "paper",
+    }
+
+
+def _load_completed_trade_learning_records() -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+
+    outcomes_path = os.path.join(LauncherConfig.ARTIFACTS_DIR, "trade_outcomes.json")
+    if os.path.exists(outcomes_path):
+        try:
+            with open(outcomes_path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            if isinstance(payload, list):
+                for idx, raw in enumerate(payload):
+                    if isinstance(raw, dict):
+                        normalized = _normalize_completed_trade_row(raw, fallback_idx=idx)
+                        if normalized is not None:
+                            rows.append(normalized)
+        except Exception:
+            pass
+
+    if os.path.exists(LauncherConfig.CLOSED_TRADE_LEDGER_PATH):
+        try:
+            with open(LauncherConfig.CLOSED_TRADE_LEDGER_PATH, "r", encoding="utf-8") as handle:
+                for idx, line in enumerate(handle):
+                    text = line.strip()
+                    if not text:
+                        continue
+                    try:
+                        raw = json.loads(text)
+                    except Exception:
+                        continue
+                    if isinstance(raw, dict):
+                        normalized = _normalize_completed_trade_row(raw, fallback_idx=100000 + idx)
+                        if normalized is not None:
+                            rows.append(normalized)
+        except Exception:
+            pass
+
+    deduped: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        deduped[row["trade_id"]] = row
+    return [deduped[key] for key in sorted(deduped.keys())]
+
+
+def get_strategy_evolution_feed() -> Dict[str, Any]:
+    learning_records = _load_completed_trade_learning_records()
+
+    repository_path = os.path.join(LauncherConfig.ARTIFACTS_DIR, "trade_outcomes.json")
+    repository = TradeOutcomeRepository(repository_path)
+    try:
+        repository.create_storage()
+    except Exception:
+        # Continue with in-memory records only; recommendation remains fail-closed by engine status.
+        pass
+
+    try:
+        evolution = StrategyEvolutionEngine(repository=repository, minimum_history=20).evolve(
+            completed_trades=learning_records,
+        )
+    except StrategyEvolutionEngineError as exc:
+        return {
+            "status": "ERROR",
+            "message": str(exc),
+            "top_strategies": [],
+            "declining_strategies": [],
+            "promotions": [],
+            "retirements": [],
+            "recommended_strategy_weights": {},
+            "explainability": [],
+            "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
+        }
+    except Exception:
+        return {
+            "status": "ERROR",
+            "message": "strategy_evolution_exception",
+            "top_strategies": [],
+            "declining_strategies": [],
+            "promotions": [],
+            "retirements": [],
+            "recommended_strategy_weights": {},
+            "explainability": [],
+            "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
+        }
+
+    return {
+        **evolution,
         "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
     }
 
@@ -1144,6 +1267,7 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         opportunity_summary=opportunity_summary,
     )
     portfolio_summary = get_portfolio_summary_feed()
+    strategy_evolution = get_strategy_evolution_feed()
 
     return {
         "title": "CSS Mobile Dashboard",
@@ -1165,6 +1289,7 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "top_opportunities": top_opportunities,
         "opportunity_summary": opportunity_summary,
         "portfolio_summary": portfolio_summary,
+        "strategy_evolution": strategy_evolution,
         "trade_ticket_defaults": trade_ticket_defaults,
         "ticket_asset_classes": ["CRYPTO", "FOREX", "INDICES", "FUTURES", "OPTIONS"],
         "opportunity_feed": get_opportunity_feed(),
@@ -1293,6 +1418,11 @@ async def mobile_opportunity_feed_by_asset_class(asset_class: str):
 @launcher_router.get("/mobile/portfolio-summary")
 async def mobile_portfolio_summary():
     return get_portfolio_summary_feed()
+
+
+@launcher_router.get("/mobile/strategy-evolution")
+async def mobile_strategy_evolution():
+    return get_strategy_evolution_feed()
 
 @launcher_router.get("/manifest.json")
 async def get_manifest():

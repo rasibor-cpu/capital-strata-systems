@@ -887,6 +887,35 @@
             {% endif %}
         </div>
 
+        <div class="card" id="strategy-evolution-card">
+            <div class="card-header">
+                Strategy Evolution
+                {% if strategy_evolution.status == 'OK' %}
+                <span class="badge badge-info">ACTIVE</span>
+                {% elif strategy_evolution.status == 'INSUFFICIENT_DATA' %}
+                <span class="badge badge-warning">INSUFFICIENT_DATA</span>
+                {% else %}
+                <span class="badge badge-danger">UNAVAILABLE</span>
+                {% endif %}
+            </div>
+            {% if strategy_evolution.status == 'OK' %}
+            <div class="status-row"><span>Top Strategies</span><strong id="se-top-count">{{ strategy_evolution.top_strategies|length }}</strong></div>
+            <div class="status-row"><span>Declining Strategies</span><strong id="se-declining-count">{{ strategy_evolution.declining_strategies|length }}</strong></div>
+            <div class="status-row"><span>Promotions</span><strong id="se-promotion-count">{{ strategy_evolution.promotions|length }}</strong></div>
+            <div class="status-row"><span>Retirements</span><strong id="se-retirement-count">{{ strategy_evolution.retirements|length }}</strong></div>
+            <div style="margin-top:8px; font-size:12px; color:var(--text-secondary);">Recommended Allocations</div>
+            <pre id="se-weights" style="white-space:pre-wrap; font-size:11px; color:var(--text-secondary);">{{ strategy_evolution.recommended_strategy_weights | tojson(indent=2) }}</pre>
+            <div style="margin-top:8px; font-size:12px; color:var(--text-secondary);">Top Strategies (Score / Confidence / Trend)</div>
+            <pre id="se-top" style="white-space:pre-wrap; font-size:11px; color:var(--text-secondary);">{{ strategy_evolution.top_strategies | tojson(indent=2) }}</pre>
+            <div style="margin-top:8px; font-size:12px; color:var(--text-secondary);">Declining Strategies</div>
+            <pre id="se-declining" style="white-space:pre-wrap; font-size:11px; color:var(--text-secondary);">{{ strategy_evolution.declining_strategies | tojson(indent=2) }}</pre>
+            {% elif strategy_evolution.status == 'INSUFFICIENT_DATA' %}
+            <div class="empty-state">Strategy evolution requires at least {{ strategy_evolution.minimum_history }} completed trades.</div>
+            {% else %}
+            <div class="empty-state">Strategy evolution recommendation unavailable.</div>
+            {% endif %}
+        </div>
+
         <div class="card" id="trade-decision-console">
             <div class="card-header">
                 CSS Decision Console

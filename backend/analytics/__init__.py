@@ -32,6 +32,7 @@ from .regime_parameter_profiles import RegimeParameterProfiles, RegimeParameterP
 from .strategy_promotion_manager import StrategyPromotionManager, StrategyPromotionManagerError
 from .strategy_league_table import StrategyLeagueTable, StrategyLeagueTableError
 from .strategy_promotion_engine import StrategyPromotionEngine, StrategyPromotionError
+from .strategy_evolution_engine import StrategyEvolutionEngine, StrategyEvolutionEngineError
 from .autonomous_portfolio_manager import AutonomousPortfolioManager, AutonomousPortfolioManagerError
 from .trade_explanation_repository import TradeExplanationRepository, TradeExplanationRepositoryError
 from .trade_forensics_engine import TradeForensicsEngine, TradeForensicsEngineError
@@ -122,6 +123,8 @@ __all__ = [
     "PortfolioCorrelationEngineError",
     "StrategyPromotionEngine",
     "StrategyPromotionError",
+    "StrategyEvolutionEngine",
+    "StrategyEvolutionEngineError",
     "TradeExplanationRepository",
     "TradeExplanationRepositoryError",
     "TradeForensicsEngine",

@@ -39,6 +39,7 @@ class AutonomousPortfolioManager:
         available_capital: float,
         reserved_capital: float,
         learning_records: Sequence[Mapping[str, Any]] | None = None,
+        strategy_weight_recommendations: Mapping[str, float] | None = None,
     ) -> dict[str, Any]:
         self._validate_inputs(
             opportunities=opportunities,
@@ -52,7 +53,13 @@ class AutonomousPortfolioManager:
         positions_list = [dict(row) for row in current_positions]
         learning_rows = [dict(row) for row in (learning_records or [])]
 
-        ranking_rows = self._ranking_rows(opportunities_list)
+        strategy_weight_map = {
+            str(key).strip().lower(): float(value)
+            for key, value in dict(strategy_weight_recommendations or {}).items()
+            if str(key).strip()
+        }
+
+        ranking_rows = self._ranking_rows(opportunities_list, strategy_weight_map)
         allocation_rows = self.allocation_engine.allocate(
             ranking_rows,
             available_capital=float(available_capital),
@@ -117,8 +124,11 @@ class AutonomousPortfolioManager:
             },
             "portfolio_allocation": {
                 "per_asset": self._per_asset_allocation(allocation_rows, opportunities_list),
-                "per_strategy": self._per_strategy_allocation(opportunities_list),
+                "per_strategy": self._per_strategy_allocation(opportunities_list, strategy_weight_map),
                 "per_regime": self._per_regime_allocation(opportunities_list),
+                "recommended_strategy_weights": {
+                    key: round(float(value), 8) for key, value in sorted(strategy_weight_map.items())
+                },
                 "recommended_allocation_percentages": self._recommended_allocation_percentages(allocation_rows),
             },
             "dynamic_position_sizing": {
@@ -179,16 +189,22 @@ class AutonomousPortfolioManager:
             raise AutonomousPortfolioManagerError("available_capital + reserved_capital exceeds total_capital")
 
     @staticmethod
-    def _ranking_rows(opportunities: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    def _ranking_rows(
+        opportunities: Sequence[Mapping[str, Any]],
+        strategy_weight_map: Mapping[str, float],
+    ) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         for idx, item in enumerate(opportunities, start=1):
             symbol = str(item.get("symbol") or "").strip().upper()
             if not symbol:
                 continue
+            strategy = str(item.get("selected_strategy") or "default").strip().lower() or "default"
+            weight = max(0.0, min(1.0, float(strategy_weight_map.get(strategy, 0.0) or 0.0)))
+            score_multiplier = 1.0 if not strategy_weight_map else (0.5 + weight)
             rows.append(
                 {
                     "symbol": symbol,
-                    "score": float(item.get("opportunity_score", item.get("weighted_intelligence_score", 0.0)) or 0.0),
+                    "score": float(item.get("opportunity_score", item.get("weighted_intelligence_score", 0.0)) or 0.0) * score_multiplier,
                     "trade_count": int(item.get("trade_count", max(1, 10 - idx)) or 1),
                     "realized_pnl": float(item.get("realized_pnl", 0.0) or 0.0),
                 }
@@ -437,7 +453,18 @@ class AutonomousPortfolioManager:
         return {key: round(by_asset[key], 8) for key in sorted(by_asset.keys())}
 
     @staticmethod
-    def _per_strategy_allocation(opportunities: Sequence[Mapping[str, Any]]) -> dict[str, float]:
+    def _per_strategy_allocation(
+        opportunities: Sequence[Mapping[str, Any]],
+        strategy_weight_map: Mapping[str, float],
+    ) -> dict[str, float]:
+        if strategy_weight_map:
+            total_weight = sum(max(0.0, float(value)) for value in strategy_weight_map.values())
+            if total_weight > 0:
+                return {
+                    key: round(max(0.0, float(value)) / total_weight, 8)
+                    for key, value in sorted(strategy_weight_map.items())
+                }
+
         by_strategy: dict[str, float] = {}
         for row in opportunities:
             strategy = str(row.get("selected_strategy") or "default").strip().lower() or "default"

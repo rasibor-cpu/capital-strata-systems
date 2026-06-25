@@ -19,6 +19,7 @@ def test_trade_tab_renders_instrument_selector() -> None:
     assert "CSS Decision Console" in response.text
     assert "Canonical Trading Universe" in response.text
     assert "Portfolio Summary" in response.text
+    assert "Strategy Evolution" in response.text
     assert 'id="decision-instrument-select"' in response.text
     assert "PAPER MODE" in response.text or "LIVE MODE" in response.text
     assert "optgroup" in response.text
