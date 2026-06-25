@@ -192,6 +192,7 @@ def test_mobile_dashboard_helpers_malformed_json_handled_safely(launcher_temp_di
     context = build_mobile_dashboard_context()
     assert context["runtime"]["runtime_mode"] == "UNKNOWN"
     assert context["account"]["cash"] == 0.0
+    assert "portfolio_summary" in context
 
 def test_launcher_manifest_and_icon_routes():
     response = client.get("/manifest.json")
@@ -733,6 +734,24 @@ def test_mobile_opportunity_summary_exposes_explicit_futures_metadata(launcher_t
     assert panel["expiry_source"] == "canonical_futures_contract_metadata"
     assert panel["contract_months"] == ["2026H", "2026M", "2026U", "2026Z"]
     assert panel["contract_metadata_status"] == "EXPLICIT"
+
+
+def test_mobile_portfolio_summary_route_returns_recommendation(launcher_temp_dir):
+    response = client.get("/mobile/portfolio-summary")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] in {"OK", "ERROR"}
+    if payload["status"] == "OK":
+        assert "summary" in payload
+        assert "recommendation" in payload
+
+
+def test_mobile_trade_tab_renders_portfolio_summary_panel(launcher_temp_dir):
+    response = client.get("/mobile")
+    assert response.status_code == 200
+    html = response.text
+    assert "Portfolio Summary" in html
+    assert 'id="portfolio-summary-card"' in html
 
 
 def test_mobile_tradeable_symbols_route_shape_and_filters(launcher_temp_dir, monkeypatch):

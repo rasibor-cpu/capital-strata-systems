@@ -35,6 +35,10 @@ from backend.analytics.strategy_intelligence_engine import StrategyIntelligenceE
 from backend.analytics.strategy_memory_repository import StrategyMemoryRepository
 from backend.analytics.market_regime_engine import MarketRegimeEngine
 from backend.analytics.adaptive_exit_engine import AdaptiveExitEngine
+from backend.analytics.autonomous_portfolio_manager import (
+    AutonomousPortfolioManager,
+    AutonomousPortfolioManagerError,
+)
 import uvicorn
 
 app = FastAPI(title=LauncherConfig.TITLE, version=LauncherConfig.VERSION)
@@ -1001,6 +1005,68 @@ def get_opportunity_feed() -> Dict[str, Any]:
             "tradable_paper_instruments": [],
         }
 
+
+def get_portfolio_summary_feed() -> Dict[str, Any]:
+    account = get_account_summary()
+    opportunity_feed = get_opportunity_feed()
+
+    opportunities = list(opportunity_feed.get("top_opportunities", []))
+    positions = list(account.get("positions", [])) if isinstance(account, dict) else []
+
+    equity = float(account.get("equity", account.get("cash", 0.0)) or 0.0)
+    cash = float(account.get("cash", 0.0) or 0.0)
+    reserved = max(0.0, equity - cash)
+
+    try:
+        recommendation = AutonomousPortfolioManager().recommend(
+            opportunities=opportunities,
+            current_positions=positions,
+            total_capital=max(1.0, equity),
+            available_capital=max(0.0, cash),
+            reserved_capital=max(0.0, reserved),
+            learning_records=[],
+        )
+    except AutonomousPortfolioManagerError as exc:
+        return {
+            "status": "ERROR",
+            "message": str(exc),
+            "summary": {},
+        }
+    except Exception:
+        return {
+            "status": "ERROR",
+            "message": "portfolio_summary_exception",
+            "summary": {},
+        }
+
+    current_allocation = recommendation.get("correlation", {}).get("summary", {}).get("by_asset_class", {})
+    recommended_allocation = recommendation.get("portfolio_allocation", {}).get("recommended_allocation_percentages", [])
+    diversification_score = float(recommendation.get("diversification", {}).get("diversification_score", 0.0) or 0.0)
+    expected_risk = float(recommendation.get("expected_model", {}).get("expected_risk", 0.0) or 0.0)
+
+    risk_score = max(0.0, min(1.0, expected_risk))
+    if diversification_score >= 0.7 and risk_score <= 0.4:
+        health = "HEALTHY"
+    elif diversification_score >= 0.5 and risk_score <= 0.6:
+        health = "BALANCED"
+    else:
+        health = "CAUTION"
+
+    return {
+        "status": "OK",
+        "summary": {
+            "current_allocation": current_allocation,
+            "recommended_allocation": recommended_allocation,
+            "cash": cash,
+            "exposure": float(recommendation.get("correlation", {}).get("summary", {}).get("total_exposure", 0.0) or 0.0),
+            "diversification": diversification_score,
+            "risk_score": risk_score,
+            "portfolio_health": health,
+        },
+        "recommendation": recommendation,
+        "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
+    }
+
 def build_mobile_dashboard_context() -> Dict[str, Any]:
     # Calculate heartbeat / staleness
     artifacts = [
@@ -1077,6 +1143,7 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         top_opportunities=top_opportunities,
         opportunity_summary=opportunity_summary,
     )
+    portfolio_summary = get_portfolio_summary_feed()
 
     return {
         "title": "CSS Mobile Dashboard",
@@ -1097,6 +1164,7 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "mode_badge": _mode_badge(),
         "top_opportunities": top_opportunities,
         "opportunity_summary": opportunity_summary,
+        "portfolio_summary": portfolio_summary,
         "trade_ticket_defaults": trade_ticket_defaults,
         "ticket_asset_classes": ["CRYPTO", "FOREX", "INDICES", "FUTURES", "OPTIONS"],
         "opportunity_feed": get_opportunity_feed(),
@@ -1220,6 +1288,11 @@ async def mobile_opportunity_feed_by_asset_class(asset_class: str):
         "opportunities": rows,
         "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
     }
+
+
+@launcher_router.get("/mobile/portfolio-summary")
+async def mobile_portfolio_summary():
+    return get_portfolio_summary_feed()
 
 @launcher_router.get("/manifest.json")
 async def get_manifest():

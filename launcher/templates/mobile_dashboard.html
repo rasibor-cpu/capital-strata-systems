@@ -863,6 +863,30 @@
             </div>
         </div>
 
+        <div class="card" id="portfolio-summary-card">
+            <div class="card-header">
+                Portfolio Summary
+                {% if portfolio_summary.status == 'OK' %}
+                <span class="badge badge-info">{{ portfolio_summary.summary.portfolio_health }}</span>
+                {% else %}
+                <span class="badge badge-danger">UNAVAILABLE</span>
+                {% endif %}
+            </div>
+            {% if portfolio_summary.status == 'OK' %}
+            <div class="status-row"><span>Cash</span><strong id="ps-cash">{{ portfolio_summary.summary.cash }}</strong></div>
+            <div class="status-row"><span>Exposure</span><strong id="ps-exposure">{{ portfolio_summary.summary.exposure }}</strong></div>
+            <div class="status-row"><span>Diversification</span><strong id="ps-diversification">{{ portfolio_summary.summary.diversification }}</strong></div>
+            <div class="status-row"><span>Risk Score</span><strong id="ps-risk-score">{{ portfolio_summary.summary.risk_score }}</strong></div>
+            <div class="status-row"><span>Portfolio Health</span><strong id="ps-health">{{ portfolio_summary.summary.portfolio_health }}</strong></div>
+            <div style="margin-top:8px; font-size:12px; color:var(--text-secondary);">Current Allocation</div>
+            <pre id="ps-current-allocation" style="white-space:pre-wrap; font-size:11px; color:var(--text-secondary);">{{ portfolio_summary.summary.current_allocation | tojson(indent=2) }}</pre>
+            <div style="margin-top:8px; font-size:12px; color:var(--text-secondary);">Recommended Allocation</div>
+            <pre id="ps-recommended-allocation" style="white-space:pre-wrap; font-size:11px; color:var(--text-secondary);">{{ portfolio_summary.summary.recommended_allocation | tojson(indent=2) }}</pre>
+            {% else %}
+            <div class="empty-state">Portfolio recommendation unavailable.</div>
+            {% endif %}
+        </div>
+
         <div class="card" id="trade-decision-console">
             <div class="card-header">
                 CSS Decision Console
