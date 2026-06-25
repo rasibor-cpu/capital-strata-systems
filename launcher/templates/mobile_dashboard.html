@@ -906,6 +906,9 @@
                 <div class="status-row"><span>Risk Rating</span><strong id="dp-risk-rating">{{ opportunity_summary.decision_panel.risk_rating if opportunity_summary.status == 'OK' else 'UNKNOWN' }}</strong></div>
                 <div class="status-row"><span>Portfolio Concentration</span><strong id="dp-concentration">{{ opportunity_summary.decision_panel.portfolio_concentration if opportunity_summary.status == 'OK' else 0 }}</strong></div>
                 <div class="status-row"><span>Execution Status</span><strong id="dp-execution-status">{{ opportunity_summary.decision_panel.execution_status if opportunity_summary.status == 'OK' else 'NOT_APPROVED' }}</strong></div>
+                <div class="status-row"><span>Tenor Source</span><strong id="dp-tenor-source">{{ opportunity_summary.decision_panel.expiry_source if opportunity_summary.status == 'OK' else 'N/A' }}</strong></div>
+                <div class="status-row"><span>Default Tenor</span><strong id="dp-default-tenor">{{ opportunity_summary.decision_panel.default_tenor if opportunity_summary.status == 'OK' else 'N/A' }}</strong></div>
+                <div class="status-row"><span>Contract Metadata Status</span><strong id="dp-contract-metadata-status">{{ opportunity_summary.decision_panel.contract_metadata_status if opportunity_summary.status == 'OK' else 'UNKNOWN' }}</strong></div>
                 <div class="status-row"><span>Paper/Live Availability</span><strong id="dp-availability">{% if opportunity_summary.status == 'OK' %}P:{{ 'YES' if opportunity_summary.decision_panel.paper_live_availability.paper_supported else 'NO' }} L:{{ 'YES' if opportunity_summary.decision_panel.paper_live_availability.live_supported else 'NO' }}{% else %}P:NO L:NO{% endif %}</strong></div>
                 <div class="status-row"><span>Broker</span><strong id="dp-broker">{{ opportunity_summary.decision_panel.broker if opportunity_summary.status == 'OK' else 'unknown' }}</strong></div>
                 <div class="status-row"><span>Last Update</span><strong id="dp-last-update" style="font-size:11px;">{{ opportunity_summary.decision_panel.last_update if opportunity_summary.status == 'OK' else 'N/A' }}</strong></div>
@@ -955,7 +958,13 @@
                     <label id="trade-tenor-wrap" {% if not trade_ticket_defaults.tenor_required %}style="display:none;"{% endif %}>
                         Tenor / Expiry
                         <select id="trade-tenor" name="tenor" {% if trade_ticket_defaults.tenor_required %}required{% else %}disabled{% endif %}>
-                            <option value="{{ trade_ticket_defaults.tenor if trade_ticket_defaults.tenor else 'FRONT' }}">{{ trade_ticket_defaults.tenor if trade_ticket_defaults.tenor else 'FRONT' }}</option>
+                            {% if trade_ticket_defaults.tenor_options %}
+                                {% for tenor_option in trade_ticket_defaults.tenor_options %}
+                                <option value="{{ tenor_option }}" {% if trade_ticket_defaults.tenor == tenor_option %}selected{% endif %}>{{ tenor_option }}</option>
+                                {% endfor %}
+                            {% else %}
+                                <option value="{{ trade_ticket_defaults.tenor if trade_ticket_defaults.tenor else '' }}">{{ trade_ticket_defaults.tenor if trade_ticket_defaults.tenor else 'N/A' }}</option>
+                            {% endif %}
                         </select>
                     </label>
 
@@ -1253,6 +1262,9 @@
             setText("dp-risk-rating", panel.risk_rating || "UNKNOWN");
             setText("dp-concentration", panel.portfolio_concentration || 0);
             setText("dp-execution-status", panel.execution_status || "NOT_APPROVED");
+            setText("dp-tenor-source", panel.expiry_source || "N/A");
+            setText("dp-default-tenor", panel.default_tenor || "N/A");
+            setText("dp-contract-metadata-status", panel.contract_metadata_status || "UNKNOWN");
 
             var availability = "P:NO L:NO";
             if (panel.paper_live_availability) {
@@ -1354,19 +1366,42 @@
                 }) || null;
             }
 
-            function applyTenor(assetClass, suggestedTenor) {
+            function applyTenor(assetClass, tenorOptions, defaultTenor) {
                 var normalized = normalizeText(assetClass);
                 var required = normalized === "OPTIONS" || normalized === "FUTURES";
                 tenorWrap.style.display = required ? "" : "none";
                 tenorSelect.disabled = !required;
                 tenorSelect.required = required;
-
-                var defaultTenor = suggestedTenor || (normalized === "OPTIONS" ? "NEXT_MONTH" : (normalized === "FUTURES" ? "FRONT" : ""));
                 tenorSelect.innerHTML = "";
-                var option = document.createElement("option");
-                option.value = defaultTenor || "";
-                option.textContent = defaultTenor || "N/A";
-                tenorSelect.appendChild(option);
+
+                if (!required) {
+                    return;
+                }
+
+                var options = Array.isArray(tenorOptions) ? tenorOptions.slice() : [];
+                var fallbackDefault = normalized === "OPTIONS" ? "NEXT_MONTH" : "FRONT";
+                var selectedTenor = String(defaultTenor || "");
+
+                if (!options.length) {
+                    options = [fallbackDefault];
+                }
+                if (!selectedTenor) {
+                    selectedTenor = String(options[0] || fallbackDefault);
+                }
+
+                options.forEach(function (value) {
+                    var option = document.createElement("option");
+                    option.value = String(value || "");
+                    option.textContent = String(value || "");
+                    if (String(value || "") === selectedTenor) {
+                        option.selected = true;
+                    }
+                    tenorSelect.appendChild(option);
+                });
+
+                if (!tenorSelect.value && tenorSelect.options.length > 0) {
+                    tenorSelect.value = tenorSelect.options[0].value;
+                }
             }
 
             function refreshSummary(opts) {
@@ -1382,7 +1417,7 @@
                     if (statusNode) {
                         statusNode.textContent = "Unavailable: " + String(row.unavailable_reason || "not selectable");
                     }
-                    applyTenor(row.asset_class, "");
+                    applyTenor(row.asset_class, row.tenor_options || [], row.default_tenor || "");
                     return;
                 }
 
@@ -1390,7 +1425,8 @@
                     statusNode.textContent = "Loading decision summary for " + row.symbol + "...";
                 }
 
-                fetch("/mobile/opportunity-summary/" + encodeURIComponent(row.symbol))
+                var summaryUrl = "/mobile/opportunity-summary/" + encodeURIComponent(row.symbol) + "?asset_class=" + encodeURIComponent(row.asset_class || "");
+                fetch(summaryUrl)
                     .then(function (response) {
                         if (!response.ok) {
                             throw new Error("summary unavailable");
@@ -1407,7 +1443,7 @@
                         }
                         sideSelect.value = side;
 
-                        applyTenor(row.asset_class, panel.suggested_tenor);
+                        applyTenor(row.asset_class, panel.tenor_options || [], panel.default_tenor || panel.suggested_tenor || "");
                         priceInput.value = panel.suggested_price == null ? "" : String(panel.suggested_price);
                         quantityInput.value = String(panel.suggested_quantity || panel.minimum_order_size || 1);
                         if (priceStatus) {
@@ -1418,7 +1454,7 @@
                         }
                     })
                     .catch(function () {
-                        applyTenor(row.asset_class, "");
+                        applyTenor(row.asset_class, row.tenor_options || [], row.default_tenor || "");
                         if (priceStatus) {
                             priceStatus.textContent = "MARKET";
                         }

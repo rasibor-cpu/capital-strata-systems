@@ -238,6 +238,16 @@ def test_tenor_visibility_and_price_quantity_prefill_hooks_present() -> None:
     assert 'id="trade-quantity"' in html
 
 
+def test_decision_panel_displays_tenor_metadata_fields() -> None:
+    response = client.get("/mobile")
+    assert response.status_code == 200
+    html = response.text
+
+    assert 'id="dp-tenor-source"' in html
+    assert 'id="dp-default-tenor"' in html
+    assert 'id="dp-contract-metadata-status"' in html
+
+
 def test_symbol_filter_and_selection_update_hooks_present() -> None:
     response = client.get("/mobile")
     assert response.status_code == 200
@@ -245,6 +255,8 @@ def test_symbol_filter_and_selection_update_hooks_present() -> None:
     assert "rowsForAsset" in html
     assert "assetSelect.addEventListener(\"change\"" in html
     assert "symbolSelect.addEventListener(\"change\"" in html
+    assert "panel.tenor_options" in html
+    assert "panel.default_tenor" in html
 
 
 def test_selector_page_load_does_not_execute_trade_request() -> None:

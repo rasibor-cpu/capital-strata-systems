@@ -124,6 +124,8 @@ def test_use_opportunity_populates_all_six_ticket_fields_hooks() -> None:
     assert "symbolSelect.value = symbol;" in html
     assert "refreshSummary({ side:" in html
     assert "applyTenor(" in html
+    assert "panel.tenor_options" in html
+    assert "panel.default_tenor" in html
     assert "priceInput.value" in html
     assert "quantityInput.value" in html
 

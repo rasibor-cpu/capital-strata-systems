@@ -611,7 +611,7 @@ def get_top_opportunities_feed(*, limit: int = 10) -> Dict[str, Any]:
     }
 
 
-def get_opportunity_summary(symbol: str) -> Dict[str, Any]:
+def get_opportunity_summary(symbol: str, *, asset_class: str | None = None) -> Dict[str, Any]:
     normalized_symbol = str(symbol or "").strip().upper()
     if not normalized_symbol:
         return {
@@ -622,7 +622,12 @@ def get_opportunity_summary(symbol: str) -> Dict[str, Any]:
 
     mode = _default_trade_mode()
     universe = CanonicalTradingUniverse()
-    instrument = universe.by_symbol(normalized_symbol, mode=mode)
+    requested_asset_class = str(asset_class or "").strip().upper()
+    instrument = universe.by_symbol(
+        normalized_symbol,
+        asset_class=requested_asset_class or None,
+        mode=mode,
+    )
     if not instrument:
         return {
             "status": "ERROR",
@@ -715,6 +720,37 @@ def get_opportunity_summary(symbol: str) -> Dict[str, Any]:
     if suggested_quantity <= 0:
         suggested_quantity = minimum_size
 
+    tenor_options: list[str] = []
+    default_tenor = ""
+    expiry_source = str(instrument.get("expiry_source") or "")
+    option_types = list(instrument.get("option_types") or [])
+    strike_policy = str(instrument.get("strike_policy") or "")
+    contract_months = list(instrument.get("supported_contract_months") or [])
+    contract_metadata_status = "NOT_APPLICABLE"
+
+    if asset_class == "OPTIONS":
+        tenor_options = list(instrument.get("supported_expiries") or [])
+        default_tenor = str(instrument.get("default_expiry") or "")
+        contract_metadata_status = "EXPLICIT" if tenor_options and default_tenor else "MISSING"
+        if not tenor_options:
+            tenor_options = ["NEXT_MONTH"]
+            if not default_tenor:
+                default_tenor = "NEXT_MONTH"
+            expiry_source = expiry_source or "metadata_fallback"
+            contract_metadata_status = "FALLBACK"
+    elif asset_class == "FUTURES":
+        tenor_options = list(instrument.get("supported_contract_months") or [])
+        default_tenor = str(instrument.get("default_contract") or "")
+        contract_metadata_status = "EXPLICIT" if tenor_options and default_tenor else "MISSING"
+        if not tenor_options:
+            tenor_options = ["FRONT"]
+            if not default_tenor:
+                default_tenor = "FRONT"
+            expiry_source = expiry_source or "metadata_fallback"
+            contract_metadata_status = "FALLBACK"
+    else:
+        contract_metadata_status = "NOT_APPLICABLE"
+
     return {
         "status": "OK",
         "symbol": normalized_symbol,
@@ -727,7 +763,14 @@ def get_opportunity_summary(symbol: str) -> Dict[str, Any]:
             "confidence_percent": round(confidence * 100.0, 2),
             "expected_direction": str(intelligence_payload.get("learning_context", {}).get("features", {}).get("direction", regime_payload.get("direction", "FLAT"))).upper(),
             "suggested_side": suggested_side,
-            "suggested_tenor": _default_tenor(asset_class),
+            "tenor_options": tenor_options,
+            "default_tenor": default_tenor,
+            "suggested_tenor": default_tenor,
+            "expiry_source": expiry_source,
+            "option_types": option_types,
+            "strike_policy": strike_policy,
+            "contract_months": contract_months,
+            "contract_metadata_status": contract_metadata_status,
             "suggested_price": round(suggested_price, 8) if suggested_price > 0 else None,
             "price_source": "canonical_snapshot" if suggested_price > 0 else "UNAVAILABLE",
             "suggested_quantity": round(max(minimum_size, suggested_quantity), 8),
@@ -796,7 +839,21 @@ def build_trade_ticket_defaults(
         if first_action in {"BUY", "SELL"}:
             suggested_side = first_action
 
-    tenor = str(summary_panel.get("suggested_tenor") or _default_tenor(default_asset))
+    tenor_options = list(summary_panel.get("tenor_options") or [])
+    tenor = str(summary_panel.get("default_tenor") or summary_panel.get("suggested_tenor") or "")
+    expiry_source = str(summary_panel.get("expiry_source") or "")
+    contract_metadata_status = str(summary_panel.get("contract_metadata_status") or "UNKNOWN")
+
+    if default_asset in {"OPTIONS", "FUTURES"} and not tenor_options:
+        tenor_options = ["NEXT_MONTH"] if default_asset == "OPTIONS" else ["FRONT"]
+        if not tenor:
+            tenor = tenor_options[0]
+        if not expiry_source:
+            expiry_source = "metadata_fallback"
+        contract_metadata_status = "FALLBACK"
+
+    if tenor_options and not tenor:
+        tenor = str(tenor_options[0])
     suggested_price = summary_panel.get("suggested_price")
     price_value = ""
     price_status = "MARKET"
@@ -819,7 +876,10 @@ def build_trade_ticket_defaults(
         "symbol": default_symbol,
         "side": suggested_side,
         "tenor": tenor,
+        "tenor_options": tenor_options,
         "tenor_required": default_asset in {"OPTIONS", "FUTURES"},
+        "expiry_source": expiry_source,
+        "contract_metadata_status": contract_metadata_status,
         "price": price_value,
         "price_status": price_status,
         "quantity": quantity_value,
@@ -1125,8 +1185,8 @@ async def mobile_trading_universe_grouped(mode: Optional[str] = None):
 
 
 @launcher_router.get("/mobile/opportunity-summary/{symbol}")
-async def mobile_opportunity_summary(symbol: str):
-    return get_opportunity_summary(symbol)
+async def mobile_opportunity_summary(symbol: str, asset_class: Optional[str] = None):
+    return get_opportunity_summary(symbol, asset_class=asset_class)
 
 
 @launcher_router.get("/mobile/top-opportunities")

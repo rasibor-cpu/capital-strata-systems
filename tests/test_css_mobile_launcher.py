@@ -704,6 +704,37 @@ def test_mobile_opportunity_summary_route_returns_decision_panel(launcher_temp_d
         assert "engine_outputs" in payload
 
 
+def test_mobile_opportunity_summary_exposes_explicit_options_metadata(launcher_temp_dir):
+    response = client.get("/mobile/opportunity-summary/SPY?asset_class=OPTIONS")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "OK"
+
+    panel = payload["decision_panel"]
+    assert panel["tenor_options"] == ["2026-07-17", "2026-08-21", "2026-09-18"]
+    assert panel["default_tenor"] == "2026-07-17"
+    assert panel["suggested_tenor"] == "2026-07-17"
+    assert panel["expiry_source"] == "canonical_options_chain_metadata"
+    assert panel["option_types"] == ["CALL", "PUT"]
+    assert panel["strike_policy"] == "ATM_LADDER"
+    assert panel["contract_metadata_status"] == "EXPLICIT"
+
+
+def test_mobile_opportunity_summary_exposes_explicit_futures_metadata(launcher_temp_dir):
+    response = client.get("/mobile/opportunity-summary/ES?asset_class=FUTURES")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "OK"
+
+    panel = payload["decision_panel"]
+    assert panel["tenor_options"] == ["2026H", "2026M", "2026U", "2026Z"]
+    assert panel["default_tenor"] == "2026H"
+    assert panel["suggested_tenor"] == "2026H"
+    assert panel["expiry_source"] == "canonical_futures_contract_metadata"
+    assert panel["contract_months"] == ["2026H", "2026M", "2026U", "2026Z"]
+    assert panel["contract_metadata_status"] == "EXPLICIT"
+
+
 def test_mobile_tradeable_symbols_route_shape_and_filters(launcher_temp_dir, monkeypatch):
     import launcher.css_mobile_launcher as mod
     from types import SimpleNamespace

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -24,6 +24,18 @@ class CanonicalInstrument:
     minimum_confidence: float
     preferred_timeframes: list[str]
     tags: list[str]
+    supported_expiries: list[str] = field(default_factory=list)
+    default_expiry: str = ""
+    option_types: list[str] = field(default_factory=list)
+    supported_strikes: list[str] = field(default_factory=list)
+    strike_policy: str = ""
+    contract_style: str = ""
+    supported_contract_months: list[str] = field(default_factory=list)
+    default_contract: str = ""
+    roll_policy: str = ""
+    contract_size: float = 0.0
+    tick_value: float = 0.0
+    expiry_source: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -114,11 +126,18 @@ class CanonicalTradingUniverse:
 
         payload = item.to_dict()
         min_order_size = self._min_order_size(item)
+        tenor_options: list[str] = []
         default_tenor = ""
+        metadata_status = "NOT_APPLICABLE"
+
         if item.asset_class == "OPTIONS":
-            default_tenor = "NEXT_MONTH"
+            tenor_options = list(item.supported_expiries)
+            default_tenor = str(item.default_expiry or "")
+            metadata_status = "EXPLICIT" if tenor_options and default_tenor else "MISSING"
         elif item.asset_class == "FUTURES":
-            default_tenor = "FRONT"
+            tenor_options = list(item.supported_contract_months)
+            default_tenor = str(item.default_contract or "")
+            metadata_status = "EXPLICIT" if tenor_options and default_tenor else "MISSING"
         payload.update(
             {
                 "mode": mode,
@@ -127,6 +146,8 @@ class CanonicalTradingUniverse:
                 "instrument_id": f"{item.asset_class}:{item.symbol}",
                 "min_order_size": min_order_size,
                 "default_tenor": default_tenor,
+                "tenor_options": tenor_options,
+                "metadata_status": metadata_status,
                 "last_updated": datetime.now(timezone.utc).isoformat(),
             }
         )
@@ -165,16 +186,16 @@ class CanonicalTradingUniverse:
             self._item("DIA", "SPDR Dow Jones ETF", "INDICES", "alpaca", True, False, True, 90, "index_reversion", "conservative", 0.57, ["15m", "1h", "1d"], ["index"]),
             self._item("IWM", "iShares Russell 2000 ETF", "INDICES", "alpaca", True, False, True, 89, "index_momentum", "aggressive", 0.62, ["15m", "1h", "1d"], ["index", "smallcap"]),
             # FUTURES
-            self._item("ES", "E-mini S&P 500", "FUTURES", "sim_futures", True, True, True, 100, "futures_trend", "balanced", 0.6, ["5m", "15m", "1h"], ["cme"]),
-            self._item("NQ", "E-mini Nasdaq 100", "FUTURES", "sim_futures", True, True, True, 98, "futures_trend", "aggressive", 0.63, ["5m", "15m", "1h"], ["cme"]),
-            self._item("YM", "E-mini Dow", "FUTURES", "sim_futures", True, True, True, 92, "futures_trend", "balanced", 0.6, ["5m", "15m", "1h"], ["cme"]),
-            self._item("RTY", "E-mini Russell 2000", "FUTURES", "sim_futures", True, True, True, 90, "futures_trend", "aggressive", 0.63, ["5m", "15m", "1h"], ["cme"]),
-            self._item("CL", "Crude Oil", "FUTURES", "sim_futures", True, True, True, 94, "commodity_breakout", "aggressive", 0.64, ["5m", "15m", "1h"], ["nymex"]),
-            self._item("GC", "Gold", "FUTURES", "sim_futures", True, True, True, 93, "commodity_reversion", "balanced", 0.61, ["5m", "15m", "1h"], ["comex"]),
-            self._item("SI", "Silver", "FUTURES", "sim_futures", True, True, True, 85, "commodity_breakout", "aggressive", 0.64, ["5m", "15m", "1h"], ["comex"]),
+            self._item("ES", "E-mini S&P 500", "FUTURES", "sim_futures", True, True, True, 100, "futures_trend", "balanced", 0.6, ["5m", "15m", "1h"], ["cme"], supported_contract_months=["2026H", "2026M", "2026U", "2026Z"], default_contract="2026H", roll_policy="ROLL_5D_BEFORE_EXPIRY", contract_size=50.0, tick_value=12.5, expiry_source="canonical_futures_contract_metadata"),
+            self._item("NQ", "E-mini Nasdaq 100", "FUTURES", "sim_futures", True, True, True, 98, "futures_trend", "aggressive", 0.63, ["5m", "15m", "1h"], ["cme"], supported_contract_months=["2026H", "2026M", "2026U", "2026Z"], default_contract="2026H", roll_policy="ROLL_5D_BEFORE_EXPIRY", contract_size=20.0, tick_value=5.0, expiry_source="canonical_futures_contract_metadata"),
+            self._item("YM", "E-mini Dow", "FUTURES", "sim_futures", True, True, True, 92, "futures_trend", "balanced", 0.6, ["5m", "15m", "1h"], ["cme"], supported_contract_months=["2026H", "2026M", "2026U", "2026Z"], default_contract="2026H", roll_policy="ROLL_5D_BEFORE_EXPIRY", contract_size=5.0, tick_value=5.0, expiry_source="canonical_futures_contract_metadata"),
+            self._item("RTY", "E-mini Russell 2000", "FUTURES", "sim_futures", True, True, True, 90, "futures_trend", "aggressive", 0.63, ["5m", "15m", "1h"], ["cme"], supported_contract_months=["2026H", "2026M", "2026U", "2026Z"], default_contract="2026H", roll_policy="ROLL_5D_BEFORE_EXPIRY", contract_size=50.0, tick_value=5.0, expiry_source="canonical_futures_contract_metadata"),
+            self._item("CL", "Crude Oil", "FUTURES", "sim_futures", True, True, True, 94, "commodity_breakout", "aggressive", 0.64, ["5m", "15m", "1h"], ["nymex"], supported_contract_months=["2026F", "2026G", "2026H", "2026J"], default_contract="2026F", roll_policy="ROLL_3D_BEFORE_EXPIRY", contract_size=1000.0, tick_value=10.0, expiry_source="canonical_futures_contract_metadata"),
+            self._item("GC", "Gold", "FUTURES", "sim_futures", True, True, True, 93, "commodity_reversion", "balanced", 0.61, ["5m", "15m", "1h"], ["comex"], supported_contract_months=["2026G", "2026J", "2026M", "2026Q"], default_contract="2026G", roll_policy="ROLL_5D_BEFORE_EXPIRY", contract_size=100.0, tick_value=10.0, expiry_source="canonical_futures_contract_metadata"),
+            self._item("SI", "Silver", "FUTURES", "sim_futures", True, True, True, 85, "commodity_breakout", "aggressive", 0.64, ["5m", "15m", "1h"], ["comex"], supported_contract_months=["2026H", "2026K", "2026N", "2026U"], default_contract="2026H", roll_policy="ROLL_5D_BEFORE_EXPIRY", contract_size=5000.0, tick_value=25.0, expiry_source="canonical_futures_contract_metadata"),
             # OPTIONS
-            self._item("SPY", "SPY Options Chain", "OPTIONS", "sim_options", True, False, True, 96, "volatility_structure", "balanced", 0.64, ["15m", "1h"], ["options", "index"]),
-            self._item("QQQ", "QQQ Options Chain", "OPTIONS", "sim_options", True, False, True, 95, "volatility_structure", "aggressive", 0.66, ["15m", "1h"], ["options", "tech"]),
+            self._item("SPY", "SPY Options Chain", "OPTIONS", "sim_options", True, False, True, 96, "volatility_structure", "balanced", 0.64, ["15m", "1h"], ["options", "index"], supported_expiries=["2026-07-17", "2026-08-21", "2026-09-18"], default_expiry="2026-07-17", option_types=["CALL", "PUT"], supported_strikes=["ATM-5", "ATM", "ATM+5"], strike_policy="ATM_LADDER", contract_style="AMERICAN", expiry_source="canonical_options_chain_metadata"),
+            self._item("QQQ", "QQQ Options Chain", "OPTIONS", "sim_options", True, False, True, 95, "volatility_structure", "aggressive", 0.66, ["15m", "1h"], ["options", "tech"], supported_expiries=["2026-07-17", "2026-08-21", "2026-09-18"], default_expiry="2026-07-17", option_types=["CALL", "PUT"], supported_strikes=["ATM-5", "ATM", "ATM+5"], strike_policy="ATM_LADDER", contract_style="AMERICAN", expiry_source="canonical_options_chain_metadata"),
         ]
 
     @staticmethod
@@ -192,6 +213,18 @@ class CanonicalTradingUniverse:
         minimum_confidence: float,
         preferred_timeframes: list[str],
         tags: list[str],
+        supported_expiries: list[str] | None = None,
+        default_expiry: str = "",
+        option_types: list[str] | None = None,
+        supported_strikes: list[str] | None = None,
+        strike_policy: str = "",
+        contract_style: str = "",
+        supported_contract_months: list[str] | None = None,
+        default_contract: str = "",
+        roll_policy: str = "",
+        contract_size: float = 0.0,
+        tick_value: float = 0.0,
+        expiry_source: str = "",
     ) -> CanonicalInstrument:
         return CanonicalInstrument(
             symbol=symbol,
@@ -207,4 +240,16 @@ class CanonicalTradingUniverse:
             minimum_confidence=float(minimum_confidence),
             preferred_timeframes=list(preferred_timeframes),
             tags=list(tags),
+            supported_expiries=list(supported_expiries or []),
+            default_expiry=default_expiry,
+            option_types=list(option_types or []),
+            supported_strikes=list(supported_strikes or []),
+            strike_policy=strike_policy,
+            contract_style=contract_style,
+            supported_contract_months=list(supported_contract_months or []),
+            default_contract=default_contract,
+            roll_policy=roll_policy,
+            contract_size=float(contract_size),
+            tick_value=float(tick_value),
+            expiry_source=expiry_source,
         )
