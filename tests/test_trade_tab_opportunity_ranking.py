@@ -67,6 +67,78 @@ def test_no_trade_execution_occurs_on_feed_calls() -> None:
             mod.MOBILE_TRADE_REQUESTS_FILE = orig
 
 
+def test_opportunity_use_button_blocked_for_non_tradeable_symbols(monkeypatch) -> None:
+    import launcher.css_mobile_launcher as mod
+
+    monkeypatch.setattr(
+        mod,
+        "get_tradeable_symbols_feed",
+        lambda **kwargs: {
+            "status": "OK",
+            "mode": "paper",
+            "count": 1,
+            "symbols": [
+                {
+                    "symbol": "PAPER_OK",
+                    "display_name": "Paper OK",
+                    "asset_class": "FX",
+                    "broker": "oanda",
+                    "paper_supported": True,
+                    "live_supported": False,
+                    "status": "ACTIVE",
+                }
+            ],
+        },
+    )
+
+    monkeypatch.setattr(
+        mod,
+        "get_opportunity_feed",
+        lambda: {
+            "all_opportunities": [],
+            "top_opportunities": [
+                {
+                    "rank": 1,
+                    "symbol": "PAPER_OK",
+                    "asset_class": "FX",
+                    "broker": "oanda",
+                    "action": "BUY",
+                    "opportunity_score": 80.0,
+                    "confidence": 0.8,
+                    "market_regime": "TRENDING",
+                    "selected_strategy": "alpha",
+                    "risk_score": 0.2,
+                    "paper_supported": True,
+                    "status": "ACTIVE",
+                },
+                {
+                    "rank": 2,
+                    "symbol": "BLOCKED_X",
+                    "asset_class": "FX",
+                    "broker": "oanda",
+                    "action": "BUY",
+                    "opportunity_score": 79.0,
+                    "confidence": 0.7,
+                    "market_regime": "TRENDING",
+                    "selected_strategy": "alpha",
+                    "risk_score": 0.3,
+                    "paper_supported": True,
+                    "status": "ACTIVE",
+                },
+            ],
+            "paper_opportunities": [],
+            "updated_at": "2026-06-25T00:00:00Z",
+        },
+    )
+
+    response = client.get("/mobile")
+    assert response.status_code == 200
+    assert 'data-opportunity-symbol="PAPER_OK"' in response.text
+    assert 'data-opportunity-symbol="BLOCKED_X"' in response.text
+    assert 'data-opportunity-tradeable="false"' in response.text
+    assert "Blocked</button>" in response.text
+
+
 def test_feed_fail_closed_behavior(monkeypatch) -> None:
     import launcher.css_mobile_launcher as mod
 

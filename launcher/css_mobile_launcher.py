@@ -2,7 +2,7 @@ import os
 import json
 import datetime
 from urllib.parse import parse_qs
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, Request, FastAPI
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -373,6 +373,63 @@ def get_trade_tab_instrument_feed() -> Dict[str, Any]:
         }
 
 
+def _normalize_trade_mode(value: Optional[str]) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"live"}:
+        return "live"
+    if normalized in {"paper", "practice", "sim", "simulated", "sandbox", "safe"}:
+        return "paper"
+    return "paper"
+
+
+def _default_trade_mode() -> str:
+    runtime_mode = str(get_runtime_summary().get("runtime_mode") or "").strip().upper()
+    return "live" if runtime_mode == "LIVE" else "paper"
+
+
+def get_tradeable_symbols_feed(
+    *,
+    mode: Optional[str] = None,
+    asset_class: Optional[str] = None,
+    broker: Optional[str] = None,
+) -> Dict[str, Any]:
+    requested_mode = _normalize_trade_mode(mode) if mode is not None else _default_trade_mode()
+    normalized_mode = _normalize_trade_mode(requested_mode)
+    normalized_asset_class = str(asset_class or "").strip().upper() or None
+    normalized_broker = str(broker or "").strip().lower() or None
+
+    try:
+        symbol_rows = InstrumentUniverse().tradeable_symbols(
+            mode=normalized_mode,
+            asset_class=normalized_asset_class,
+            broker=normalized_broker,
+        )
+    except InstrumentUniverseError:
+        symbol_rows = []
+    except Exception:
+        symbol_rows = []
+
+    symbols = [
+        {
+            "symbol": row.symbol,
+            "display_name": row.display_name,
+            "asset_class": row.asset_class,
+            "broker": row.broker,
+            "paper_supported": row.paper_supported,
+            "live_supported": row.live_supported,
+            "status": row.status,
+        }
+        for row in symbol_rows
+    ]
+
+    return {
+        "status": "OK",
+        "mode": normalized_mode,
+        "count": len(symbols),
+        "symbols": symbols,
+    }
+
+
 def _opportunity_alert_repo() -> AlertRepository:
     return AlertRepository(storage_dir=LauncherConfig.ALERTS_DIR)
 
@@ -541,6 +598,8 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "assets": assets_parsed
     }
 
+    tradeable_symbols_feed = get_tradeable_symbols_feed()
+
     return {
         "title": "CSS Mobile Dashboard",
         "version": LauncherConfig.VERSION,
@@ -553,6 +612,8 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "chart_data": chart_data,
         "pause_state": get_pause_state(),
         "instrument_universe": get_trade_tab_instrument_feed(),
+        "tradeable_symbols": tradeable_symbols_feed,
+        "tradeable_symbol_lookup": [row.get("symbol") for row in tradeable_symbols_feed.get("symbols", [])],
         "opportunity_feed": get_opportunity_feed(),
         "health": {
             "backend_available": get_mobile_launcher_status() == "ONLINE",
@@ -617,6 +678,15 @@ async def status_check():
 @launcher_router.get("/mobile/instruments")
 async def mobile_instrument_feed():
     return get_trade_tab_instrument_feed()
+
+
+@launcher_router.get("/mobile/tradeable-symbols")
+async def mobile_tradeable_symbols_feed(
+    mode: Optional[str] = None,
+    asset_class: Optional[str] = None,
+    broker: Optional[str] = None,
+):
+    return get_tradeable_symbols_feed(mode=mode, asset_class=asset_class, broker=broker)
 
 
 @launcher_router.get("/mobile/opportunities")

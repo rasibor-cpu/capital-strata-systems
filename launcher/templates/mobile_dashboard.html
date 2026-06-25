@@ -710,19 +710,26 @@
                     <div class="instrument-filters">
                         <select class="instrument-asset-filter" aria-label="Filter by asset class">
                             <option value="">All Asset Classes</option>
-                            {% for asset in instrument_universe.asset_classes %}
+                            {% for asset in tradeable_symbols.symbols|map(attribute='asset_class')|unique|sort %}
                             <option value="{{ asset }}">{{ asset }}</option>
                             {% endfor %}
                         </select>
                         <select class="instrument-broker-filter" aria-label="Filter by broker">
                             <option value="">All Brokers</option>
-                            {% for broker in instrument_universe.brokers %}
+                            {% for broker in tradeable_symbols.symbols|map(attribute='broker')|unique|sort %}
                             <option value="{{ broker }}">{{ broker|upper }}</option>
                             {% endfor %}
                         </select>
                         <input class="instrument-search" type="text" placeholder="Search symbol or name" aria-label="Search instruments">
                         <select class="instrument-select" aria-label="Select tradable instrument">
+                            {% if tradeable_symbols.symbols %}
                             <option value="">Select instrument</option>
+                            {% for row in tradeable_symbols.symbols %}
+                            <option value="{{ row.symbol }}">{{ row.symbol }} | {{ row.asset_class }} | {{ row.status }}</option>
+                            {% endfor %}
+                            {% else %}
+                            <option value="">NO TRADEABLE SYMBOLS AVAILABLE</option>
+                            {% endif %}
                         </select>
                     </div>
                     <div class="instrument-status" id="exec-instrument-status">No instrument selected.</div>
@@ -822,12 +829,15 @@
                             <td>{% if row.paper_supported %}YES{% else %}NO{% endif %}</td>
                             <td>{{ row.status }}</td>
                             <td>
+                                {% set can_use = row.symbol in tradeable_symbol_lookup %}
                                 <button
                                     type="button"
                                     class="opportunity-select-btn"
                                     data-opportunity-symbol="{{ row.symbol }}"
                                     data-opportunity-asset="{{ row.asset_class }}"
-                                >Use</button>
+                                    data-opportunity-tradeable="{% if can_use %}true{% else %}false{% endif %}"
+                                    {% if not can_use %}disabled title="Not tradeable in current mode"{% endif %}
+                                >{% if can_use %}Use{% else %}Blocked{% endif %}</button>
                             </td>
                         </tr>
                         {% endfor %}
@@ -862,19 +872,26 @@
                     <div class="instrument-filters">
                         <select class="instrument-asset-filter" aria-label="Filter by asset class">
                             <option value="">All Asset Classes</option>
-                            {% for asset in instrument_universe.asset_classes %}
+                            {% for asset in tradeable_symbols.symbols|map(attribute='asset_class')|unique|sort %}
                             <option value="{{ asset }}">{{ asset }}</option>
                             {% endfor %}
                         </select>
                         <select class="instrument-broker-filter" aria-label="Filter by broker">
                             <option value="">All Brokers</option>
-                            {% for broker in instrument_universe.brokers %}
+                            {% for broker in tradeable_symbols.symbols|map(attribute='broker')|unique|sort %}
                             <option value="{{ broker }}">{{ broker|upper }}</option>
                             {% endfor %}
                         </select>
                         <input class="instrument-search" type="text" placeholder="Search symbol or name" aria-label="Search instruments">
                         <select class="instrument-select" aria-label="Select tradable instrument">
+                            {% if tradeable_symbols.symbols %}
                             <option value="">Select instrument</option>
+                            {% for row in tradeable_symbols.symbols %}
+                            <option value="{{ row.symbol }}">{{ row.symbol }} | {{ row.asset_class }} | {{ row.status }}</option>
+                            {% endfor %}
+                            {% else %}
+                            <option value="">NO TRADEABLE SYMBOLS AVAILABLE</option>
+                            {% endif %}
                         </select>
                     </div>
                     <div class="instrument-status" id="trade-instrument-status">No instrument selected.</div>
@@ -1126,7 +1143,7 @@
     <script>
     (function () {
         "use strict";
-        var instrumentFeed = {{ instrument_universe | tojson }};
+        var tradeableSymbolsFeed = {{ tradeable_symbols | tojson }};
         var activeScreen = "home";
 
         function showScreen(name) {
@@ -1156,23 +1173,49 @@
                 showScreen(hash);
             }
 
-            setupInstrumentSelectors(instrumentFeed || {});
-            setupOpportunitySelection();
+            fetch("/mobile/tradeable-symbols")
+                .then(function (response) {
+                    if (!response.ok) {
+                        throw new Error("tradeable symbols feed unavailable");
+                    }
+                    return response.json();
+                })
+                .then(function (latestFeed) {
+                    setupInstrumentSelectors(latestFeed || {});
+                    setupOpportunitySelection(latestFeed || {});
+                })
+                .catch(function () {
+                    setupInstrumentSelectors(tradeableSymbolsFeed || {});
+                    setupOpportunitySelection(tradeableSymbolsFeed || {});
+                });
         });
     }());
 
-    function setupOpportunitySelection() {
+    function setupOpportunitySelection(feed) {
         var symbolInput = document.getElementById("trade-symbol");
         var assetInput = document.getElementById("trade-asset-class");
+        var allowed = Array.isArray(feed && feed.symbols) ? feed.symbols : [];
         if (!symbolInput || !assetInput) {
             return;
+        }
+
+        function isTradeableSymbol(symbol) {
+            var normalized = String(symbol || "").trim().toUpperCase();
+            return allowed.some(function (item) {
+                return String(item.symbol || "").trim().toUpperCase() === normalized;
+            });
         }
 
         document.querySelectorAll(".opportunity-select-btn").forEach(function (btn) {
             btn.addEventListener("click", function () {
                 var symbol = String(btn.getAttribute("data-opportunity-symbol") || "").trim();
                 var asset = String(btn.getAttribute("data-opportunity-asset") || "").trim();
+                var tradeableAttr = String(btn.getAttribute("data-opportunity-tradeable") || "").toLowerCase();
                 if (!symbol || !asset) {
+                    return;
+                }
+
+                if (tradeableAttr === "false" || !isTradeableSymbol(symbol)) {
                     return;
                 }
 
@@ -1185,7 +1228,7 @@
     }
 
     function setupInstrumentSelectors(feed) {
-        var all = Array.isArray(feed.all_instruments) ? feed.all_instruments : [];
+        var all = Array.isArray(feed.symbols) ? feed.symbols : [];
 
         function buildStatusText(item) {
             if (!item) {
@@ -1240,7 +1283,7 @@
                 selectInput.innerHTML = "";
                 var placeholder = document.createElement("option");
                 placeholder.value = "";
-                placeholder.textContent = rows.length ? "Select instrument" : "No instruments match filters";
+                placeholder.textContent = rows.length ? "Select instrument" : "NO TRADEABLE SYMBOLS AVAILABLE";
                 selectInput.appendChild(placeholder);
 
                 rows.forEach(function (item) {

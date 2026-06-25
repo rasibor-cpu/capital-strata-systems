@@ -109,6 +109,34 @@ class InstrumentUniverse:
             if item.tradable and item.paper_supported
         ]
 
+    def tradeable_symbols(
+        self,
+        mode: str = "paper",
+        asset_class: str | None = None,
+        broker: str | None = None,
+    ) -> list[TradableInstrument]:
+        mode_value = self._normalize_mode(mode)
+        wanted_asset = str(asset_class or "").strip().upper()
+        wanted_broker = str(broker or "").strip().lower()
+
+        if wanted_asset and wanted_asset not in self._SUPPORTED_ASSET_CLASSES:
+            raise InstrumentUniverseError(f"unsupported asset class: {asset_class}")
+
+        rows: list[TradableInstrument] = []
+        for item in self._instruments:
+            if not self._is_tradeable_for_mode(item=item, mode=mode_value):
+                continue
+
+            if wanted_asset and item.asset_class != wanted_asset:
+                continue
+
+            if wanted_broker and item.broker.lower() != wanted_broker:
+                continue
+
+            rows.append(item)
+
+        return sorted(rows, key=lambda row: (row.asset_class, row.broker, row.symbol))
+
     def build_feed(self) -> dict[str, Any]:
         all_rows = self.all_instruments()
         brokers = sorted({row["broker"] for row in all_rows})
@@ -128,6 +156,35 @@ class InstrumentUniverse:
             },
             "tradable_paper_instruments": self.tradable_paper_instruments(),
         }
+
+    @staticmethod
+    def _normalize_mode(mode: str) -> str:
+        normalized = str(mode or "paper").strip().lower()
+        if normalized in {"paper", "practice", "sim", "simulated", "sandbox", "safe"}:
+            return "paper"
+        if normalized == "live":
+            return "live"
+        raise InstrumentUniverseError(f"unsupported mode: {mode}")
+
+    @staticmethod
+    def _is_tradeable_for_mode(*, item: TradableInstrument, mode: str) -> bool:
+        status = str(item.status or "").strip().upper()
+        metadata = item.metadata if isinstance(item.metadata, Mapping) else {}
+        fail_closed_discovery = bool(metadata.get("fail_closed", False))
+
+        if fail_closed_discovery:
+            return False
+
+        if status not in {"ACTIVE", "PAPER_ACTIVE"}:
+            return False
+
+        if not item.tradable:
+            return False
+
+        if mode == "paper":
+            return bool(item.paper_supported)
+
+        return bool(item.live_supported)
 
     def _discover_option_contracts(self, now: str) -> Iterable[TradableInstrument]:
         from backend.app.options.options_contract_registry import SUPPORTED_OPTION_UNDERLYINGS, build_option_symbol

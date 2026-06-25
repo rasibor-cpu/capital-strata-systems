@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from backend.trading.instrument_universe import InstrumentUniverse, InstrumentUniverseError
+from backend.trading.instrument_universe import InstrumentUniverse, InstrumentUniverseError, TradableInstrument
 
 
 def test_registry_returns_instruments() -> None:
@@ -69,3 +69,111 @@ def test_feed_contains_all_required_views() -> None:
     assert "instruments_by_asset_class" in feed
     assert "instruments_by_broker" in feed
     assert "tradable_paper_instruments" in feed
+
+
+def test_universe_can_include_non_tradeable_entries() -> None:
+    universe = InstrumentUniverse()
+    all_rows = universe.all_instruments()
+
+    assert any(bool(row.get("tradable")) is False for row in all_rows)
+
+
+def test_tradeable_symbols_paper_excludes_non_tradeable_and_live_only() -> None:
+    universe = InstrumentUniverse()
+    now = "2026-06-25T00:00:00Z"
+    universe._instruments = [
+        TradableInstrument(
+            symbol="PAPER_OK",
+            display_name="Paper OK",
+            asset_class="FX",
+            broker="oanda",
+            tradable=True,
+            paper_supported=True,
+            live_supported=False,
+            exchange="OANDA",
+            currency="USD",
+            min_order_size=1.0,
+            max_order_size=1000.0,
+            tick_size=0.0001,
+            last_updated=now,
+            status="ACTIVE",
+            metadata={},
+        ),
+        TradableInstrument(
+            symbol="NON_TRADEABLE",
+            display_name="Non Tradeable",
+            asset_class="FX",
+            broker="oanda",
+            tradable=False,
+            paper_supported=True,
+            live_supported=False,
+            exchange="OANDA",
+            currency="USD",
+            min_order_size=1.0,
+            max_order_size=1000.0,
+            tick_size=0.0001,
+            last_updated=now,
+            status="ACTIVE",
+            metadata={},
+        ),
+        TradableInstrument(
+            symbol="LIVE_ONLY",
+            display_name="Live Only",
+            asset_class="CRYPTO",
+            broker="coinbase",
+            tradable=True,
+            paper_supported=False,
+            live_supported=True,
+            exchange="COINBASE",
+            currency="USD",
+            min_order_size=0.001,
+            max_order_size=1000.0,
+            tick_size=0.01,
+            last_updated=now,
+            status="ACTIVE",
+            metadata={},
+        ),
+        TradableInstrument(
+            symbol="FAIL_CLOSED",
+            display_name="Fail Closed",
+            asset_class="FX",
+            broker="oanda",
+            tradable=True,
+            paper_supported=True,
+            live_supported=True,
+            exchange="OANDA",
+            currency="USD",
+            min_order_size=1.0,
+            max_order_size=1000.0,
+            tick_size=0.0001,
+            last_updated=now,
+            status="ACTIVE",
+            metadata={"fail_closed": True},
+        ),
+        TradableInstrument(
+            symbol="PAPER_ACTIVE_OK",
+            display_name="Paper Active",
+            asset_class="FX",
+            broker="oanda",
+            tradable=True,
+            paper_supported=True,
+            live_supported=False,
+            exchange="OANDA",
+            currency="USD",
+            min_order_size=1.0,
+            max_order_size=1000.0,
+            tick_size=0.0001,
+            last_updated=now,
+            status="PAPER_ACTIVE",
+            metadata={},
+        ),
+    ]
+
+    rows = universe.tradeable_symbols(mode="paper")
+    symbols = {row.symbol for row in rows}
+
+    assert "PAPER_OK" in symbols
+    assert "PAPER_ACTIVE_OK" in symbols
+    assert "NON_TRADEABLE" not in symbols
+    assert "LIVE_ONLY" not in symbols
+    assert "FAIL_CLOSED" not in symbols

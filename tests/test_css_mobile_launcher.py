@@ -646,6 +646,49 @@ def test_mobile_opportunity_routes_return_json(launcher_temp_dir):
     assert response_asset.json()["asset_class"] == "FX"
 
 
+def test_mobile_tradeable_symbols_route_shape_and_filters(launcher_temp_dir, monkeypatch):
+    import launcher.css_mobile_launcher as mod
+    from types import SimpleNamespace
+
+    class _StubUniverse:
+        def tradeable_symbols(self, mode="paper", asset_class=None, broker=None):
+            rows = [
+                SimpleNamespace(
+                    symbol="EUR_USD",
+                    display_name="Euro / US Dollar",
+                    asset_class="FX",
+                    broker="oanda",
+                    paper_supported=True,
+                    live_supported=True,
+                    status="ACTIVE",
+                ),
+                SimpleNamespace(
+                    symbol="BTC-USD",
+                    display_name="Bitcoin / US Dollar",
+                    asset_class="CRYPTO",
+                    broker="coinbase",
+                    paper_supported=True,
+                    live_supported=True,
+                    status="ACTIVE",
+                ),
+            ]
+            if asset_class:
+                rows = [row for row in rows if row.asset_class == asset_class]
+            if broker:
+                rows = [row for row in rows if row.broker == broker]
+            return rows
+
+    monkeypatch.setattr(mod, "InstrumentUniverse", _StubUniverse)
+
+    response = client.get("/mobile/tradeable-symbols?mode=paper&asset_class=FX&broker=oanda")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "OK"
+    assert payload["mode"] == "paper"
+    assert payload["count"] == 1
+    assert payload["symbols"][0]["symbol"] == "EUR_USD"
+
+
 def test_opportunity_alert_generated_when_no_opportunities(launcher_temp_dir, monkeypatch):
     import launcher.css_mobile_launcher as mod
 
