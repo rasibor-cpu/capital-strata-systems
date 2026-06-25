@@ -111,7 +111,21 @@ def test_opportunity_use_button_blocked_for_non_tradeable_symbols(monkeypatch) -
     assert response.status_code == 200
     assert 'data-opportunity-symbol="PAPER_OK"' in response.text
     assert 'data-opportunity-symbol="BLOCKED_X"' in response.text
+    assert 'data-opportunity-action=' in response.text
     assert "TOP OPPORTUNITIES" in response.text
+
+
+def test_use_opportunity_populates_all_six_ticket_fields_hooks() -> None:
+    response = client.get("/mobile")
+    assert response.status_code == 200
+    html = response.text
+
+    assert "assetSelect.value = asset;" in html
+    assert "symbolSelect.value = symbol;" in html
+    assert "refreshSummary({ side:" in html
+    assert "applyTenor(" in html
+    assert "priceInput.value" in html
+    assert "quantityInput.value" in html
 
 
 def test_feed_fail_closed_behavior(monkeypatch) -> None:

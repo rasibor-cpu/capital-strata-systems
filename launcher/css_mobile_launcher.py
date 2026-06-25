@@ -531,6 +531,31 @@ def _price_for_symbol(symbol: str) -> float:
     return round(50.0 + (digest % 175), 6)
 
 
+def _minimum_order_size(asset_class: str, symbol: str) -> float:
+    normalized_asset = str(asset_class or "").strip().upper()
+    normalized_symbol = str(symbol or "").strip().upper()
+    if normalized_asset == "CRYPTO":
+        return 0.001
+    if normalized_asset == "FOREX":
+        return 1.0
+    if normalized_asset == "OPTIONS":
+        return 1.0
+    if normalized_asset == "FUTURES":
+        return 1.0
+    if normalized_symbol in {"SPY", "QQQ", "DIA", "IWM"}:
+        return 1.0
+    return 1.0
+
+
+def _default_tenor(asset_class: str) -> str:
+    normalized_asset = str(asset_class or "").strip().upper()
+    if normalized_asset == "OPTIONS":
+        return "NEXT_MONTH"
+    if normalized_asset == "FUTURES":
+        return "FRONT"
+    return ""
+
+
 def _candidate_for_summary(symbol: str, asset_class: str, strategy: str) -> Dict[str, Any]:
     price = _price_for_symbol(symbol)
     return {
@@ -675,6 +700,20 @@ def get_opportunity_summary(symbol: str) -> Dict[str, Any]:
     opportunity = ranking_payload.get("opportunity", {}) if isinstance(ranking_payload, dict) else {}
     confidence = float(opportunity.get("confidence", intelligence_payload.get("confidence", 0.0)) or 0.0)
     score = float(opportunity.get("opportunity_score", 0.0) or 0.0)
+    suggested_side = str(opportunity.get("action") or "").strip().upper()
+    if suggested_side not in {"BUY", "SELL"}:
+        expected_direction = str(
+            intelligence_payload.get("learning_context", {}).get("features", {}).get("direction", regime_payload.get("direction", "FLAT"))
+        ).strip().upper()
+        suggested_side = "SELL" if expected_direction == "DOWN" else "BUY"
+
+    suggested_price = float(candidate.get("current_price", 0.0) or 0.0)
+    suggested_quantity = float(
+        intelligence_payload.get("position_size", {}).get("recommended_position_size", 0.0) or 0.0
+    )
+    minimum_size = _minimum_order_size(asset_class, normalized_symbol)
+    if suggested_quantity <= 0:
+        suggested_quantity = minimum_size
 
     return {
         "status": "OK",
@@ -687,6 +726,12 @@ def get_opportunity_summary(symbol: str) -> Dict[str, Any]:
             "opportunity_score": round(score, 4),
             "confidence_percent": round(confidence * 100.0, 2),
             "expected_direction": str(intelligence_payload.get("learning_context", {}).get("features", {}).get("direction", regime_payload.get("direction", "FLAT"))).upper(),
+            "suggested_side": suggested_side,
+            "suggested_tenor": _default_tenor(asset_class),
+            "suggested_price": round(suggested_price, 8) if suggested_price > 0 else None,
+            "price_source": "canonical_snapshot" if suggested_price > 0 else "UNAVAILABLE",
+            "suggested_quantity": round(max(minimum_size, suggested_quantity), 8),
+            "minimum_order_size": minimum_size,
             "risk_rating": str(instrument.get("risk_profile") or "balanced").upper(),
             "portfolio_concentration": round(float(correlation_payload.get("concentration_score", 0.0) or 0.0), 6),
             "execution_status": str(intelligence_payload.get("execution_status") or "NOT_APPROVED"),
@@ -706,6 +751,79 @@ def get_opportunity_summary(symbol: str) -> Dict[str, Any]:
             "MarketRegimeEngine": _json_safe(regime_payload),
             "AdaptiveExitEngine": _json_safe(adaptive_exit_payload),
         },
+    }
+
+
+def build_trade_ticket_defaults(
+    *,
+    grouped_universe: Dict[str, Any],
+    top_opportunities: Dict[str, Any],
+    opportunity_summary: Dict[str, Any],
+) -> Dict[str, Any]:
+    groups = grouped_universe.get("groups", []) if isinstance(grouped_universe, dict) else []
+    selectable_rows: list[Dict[str, Any]] = []
+    for group in groups:
+        for row in group.get("instruments", []):
+            if bool(row.get("selectable", False)):
+                selectable_rows.append(row)
+
+    first = selectable_rows[0] if selectable_rows else {}
+    default_asset = str(first.get("asset_class") or "CRYPTO")
+    default_symbol = str(first.get("symbol") or "")
+
+    if isinstance(opportunity_summary, dict) and opportunity_summary.get("status") == "OK":
+        summary_symbol = str(opportunity_summary.get("symbol") or "").strip().upper()
+        matched = next(
+            (
+                row
+                for row in selectable_rows
+                if str(row.get("symbol") or "").strip().upper() == summary_symbol
+            ),
+            None,
+        )
+        if matched:
+            default_asset = str(matched.get("asset_class") or default_asset)
+            default_symbol = str(matched.get("symbol") or default_symbol)
+
+    summary_panel = opportunity_summary.get("decision_panel", {}) if isinstance(opportunity_summary, dict) else {}
+    suggested_side = str(summary_panel.get("suggested_side") or "BUY").upper()
+    if suggested_side not in {"BUY", "SELL"}:
+        suggested_side = "BUY"
+
+    top_rows = top_opportunities.get("top_opportunities", []) if isinstance(top_opportunities, dict) else []
+    if top_rows and suggested_side == "BUY":
+        first_action = str(top_rows[0].get("action") or "").strip().upper()
+        if first_action in {"BUY", "SELL"}:
+            suggested_side = first_action
+
+    tenor = str(summary_panel.get("suggested_tenor") or _default_tenor(default_asset))
+    suggested_price = summary_panel.get("suggested_price")
+    price_value = ""
+    price_status = "MARKET"
+    if suggested_price is not None:
+        price_value = str(suggested_price)
+        price_status = str(summary_panel.get("price_source") or "snapshot")
+
+    quantity_value = summary_panel.get("suggested_quantity")
+    if quantity_value in (None, 0, 0.0, ""):
+        quantity_value = _minimum_order_size(default_asset, default_symbol)
+
+    symbols_for_asset = [
+        row
+        for row in selectable_rows
+        if str(row.get("asset_class") or "").upper() == str(default_asset).upper()
+    ]
+
+    return {
+        "asset_class": default_asset,
+        "symbol": default_symbol,
+        "side": suggested_side,
+        "tenor": tenor,
+        "tenor_required": default_asset in {"OPTIONS", "FUTURES"},
+        "price": price_value,
+        "price_status": price_status,
+        "quantity": quantity_value,
+        "symbols_for_asset": symbols_for_asset,
     }
 
 
@@ -894,6 +1012,11 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "symbol": "",
         "message": "No selectable instruments",
     }
+    trade_ticket_defaults = build_trade_ticket_defaults(
+        grouped_universe=grouped_universe_feed,
+        top_opportunities=top_opportunities,
+        opportunity_summary=opportunity_summary,
+    )
 
     return {
         "title": "CSS Mobile Dashboard",
@@ -914,6 +1037,8 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "mode_badge": _mode_badge(),
         "top_opportunities": top_opportunities,
         "opportunity_summary": opportunity_summary,
+        "trade_ticket_defaults": trade_ticket_defaults,
+        "ticket_asset_classes": ["CRYPTO", "FOREX", "INDICES", "FUTURES", "OPTIONS"],
         "opportunity_feed": get_opportunity_feed(),
         "health": {
             "backend_available": get_mobile_launcher_status() == "ONLINE",

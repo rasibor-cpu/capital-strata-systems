@@ -630,6 +630,32 @@ def test_mobile_dashboard_exposes_trade_tab_navigation(launcher_temp_dir):
     assert "/mobile/trade/paper" in response.text
 
 
+def test_trade_tab_ticket_layout_and_mode_visibility(launcher_temp_dir):
+    response = client.get("/mobile")
+    assert response.status_code == 200
+    html = response.text
+
+    assert 'id="trade-asset-class"' in html
+    assert 'id="trade-symbol"' in html
+    assert 'id="trade-side"' in html
+    assert 'id="trade-tenor"' in html
+    assert 'id="trade-price"' in html
+    assert 'id="trade-quantity"' in html
+    assert "PAPER MODE" in html or "LIVE MODE" in html
+
+
+def test_trade_tab_render_does_not_execute_trade_request(launcher_temp_dir):
+    import launcher.css_mobile_launcher as mod
+
+    mod_ref, orig, trade_path = _set_mobile_trade_requests_file(launcher_temp_dir)
+    try:
+        response = client.get("/mobile")
+        assert response.status_code == 200
+        assert not os.path.exists(trade_path)
+    finally:
+        mod_ref.MOBILE_TRADE_REQUESTS_FILE = orig
+
+
 def test_mobile_opportunity_routes_return_json(launcher_temp_dir):
     response = client.get("/mobile/opportunities")
     assert response.status_code == 200

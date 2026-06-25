@@ -182,6 +182,71 @@ def test_search_and_favorites_hooks_present() -> None:
     assert "css_trade_favorites" in response.text
 
 
+def test_trade_ticket_field_order_and_presence() -> None:
+    response = client.get("/mobile")
+    assert response.status_code == 200
+
+    html = response.text
+    asset_idx = html.find('id="trade-asset-class"')
+    symbol_idx = html.find('id="trade-symbol"')
+    side_idx = html.find('id="trade-side"')
+    tenor_idx = html.find('id="trade-tenor"')
+    price_idx = html.find('id="trade-price"')
+    qty_idx = html.find('id="trade-quantity"')
+
+    assert -1 not in {asset_idx, symbol_idx, side_idx, tenor_idx, price_idx, qty_idx}
+    assert asset_idx < symbol_idx < side_idx < tenor_idx < price_idx < qty_idx
+
+
+def test_asset_class_dropdown_is_first_selector_and_has_expected_options() -> None:
+    response = client.get("/mobile")
+    assert response.status_code == 200
+    html = response.text
+
+    assert 'id="trade-asset-class"' in html
+    for value in ("CRYPTO", "FOREX", "INDICES", "FUTURES", "OPTIONS"):
+        assert f'value="{value}"' in html
+
+
+def test_symbol_dropdown_is_second_and_prepopulated() -> None:
+    response = client.get("/mobile")
+    assert response.status_code == 200
+    html = response.text
+    assert 'id="trade-symbol"' in html
+    assert "NO TRADEABLE SYMBOLS AVAILABLE" in html or "<option value=\"" in html
+
+
+def test_side_dropdown_contains_buy_sell() -> None:
+    response = client.get("/mobile")
+    assert response.status_code == 200
+    html = response.text
+    assert 'id="trade-side"' in html
+    assert '<option value="BUY"' in html
+    assert '<option value="SELL"' in html
+
+
+def test_tenor_visibility_and_price_quantity_prefill_hooks_present() -> None:
+    response = client.get("/mobile")
+    assert response.status_code == 200
+    html = response.text
+
+    assert 'id="trade-tenor-wrap"' in html
+    assert 'id="trade-tenor"' in html
+    assert "NEXT_MONTH" in html or "FRONT" in html
+    assert 'id="trade-price"' in html
+    assert 'id="trade-price-status"' in html
+    assert 'id="trade-quantity"' in html
+
+
+def test_symbol_filter_and_selection_update_hooks_present() -> None:
+    response = client.get("/mobile")
+    assert response.status_code == 200
+    html = response.text
+    assert "rowsForAsset" in html
+    assert "assetSelect.addEventListener(\"change\"" in html
+    assert "symbolSelect.addEventListener(\"change\"" in html
+
+
 def test_selector_page_load_does_not_execute_trade_request() -> None:
     import launcher.css_mobile_launcher as mod
 

@@ -113,16 +113,30 @@ class CanonicalTradingUniverse:
             unavailable_reason = f"Unavailable in {mode.upper()} mode"
 
         payload = item.to_dict()
+        min_order_size = self._min_order_size(item)
+        default_tenor = ""
+        if item.asset_class == "OPTIONS":
+            default_tenor = "NEXT_MONTH"
+        elif item.asset_class == "FUTURES":
+            default_tenor = "FRONT"
         payload.update(
             {
                 "mode": mode,
                 "selectable": selectable,
                 "unavailable_reason": unavailable_reason,
                 "instrument_id": f"{item.asset_class}:{item.symbol}",
+                "min_order_size": min_order_size,
+                "default_tenor": default_tenor,
                 "last_updated": datetime.now(timezone.utc).isoformat(),
             }
         )
         return payload
+
+    @staticmethod
+    def _min_order_size(item: CanonicalInstrument) -> float:
+        if item.asset_class == "CRYPTO":
+            return 0.001
+        return 1.0
 
     def _build_registry(self) -> list[CanonicalInstrument]:
         return [
