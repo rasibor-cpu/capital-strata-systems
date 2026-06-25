@@ -8,6 +8,11 @@ from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, Redirect
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from launcher.css_launcher_config import LauncherConfig
+from backend.monitoring.alert_repository import (
+    AlertRepository,
+    AlertCentreCompatibilityAdapter,
+    AlertRepositoryError,
+)
 import uvicorn
 
 app = FastAPI(title=LauncherConfig.TITLE, version=LauncherConfig.VERSION)
@@ -233,6 +238,17 @@ def get_supervisor_summary() -> Dict[str, Any]:
 
 
 def get_alert_summary() -> List[Dict[str, Any]]:
+    try:
+        repository = AlertRepository(storage_dir=LauncherConfig.ALERTS_DIR)
+        adapter = AlertCentreCompatibilityAdapter(repository)
+        payload = adapter.build_payload(limit=5)
+        if payload:
+            return payload
+    except AlertRepositoryError:
+        pass
+    except Exception:
+        pass
+
     alerts_dir = LauncherConfig.ALERTS_DIR
     if not os.path.exists(alerts_dir):
         return []

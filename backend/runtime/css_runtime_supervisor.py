@@ -7,6 +7,7 @@ from typing import Dict, Any, Optional
 
 from backend.monitoring.css_alert_models import AlertSeverity
 from backend.monitoring.css_alert_service import CSSAlertService
+from backend.monitoring.alert_bridge import CanonicalAlertBridge
 
 BASE_RESTART_DELAY_SECONDS: float = 5.0
 MAX_RESTART_DELAY_SECONDS: float = 120.0
@@ -18,6 +19,7 @@ class CSSRuntimeSupervisor:
         state_dir: str = "runtime/supervisor",
         max_restart_limit: int = 3,
         alert_service: Optional[CSSAlertService] = None,
+        canonical_alert_bridge: Optional[CanonicalAlertBridge] = None,
     ):
         self.supervisor_id = str(uuid.uuid4())
         self.state_dir = state_dir
@@ -27,6 +29,7 @@ class CSSRuntimeSupervisor:
         )
         self.max_restart_limit = max_restart_limit
         self.alert_service = alert_service or CSSAlertService()
+        self.canonical_alert_bridge = canonical_alert_bridge or CanonicalAlertBridge()
 
         self.started_at: Optional[str] = None
         self.stopped_at: Optional[str] = None
@@ -105,6 +108,22 @@ class CSSRuntimeSupervisor:
                 "Heartbeat stale detected",
                 AlertSeverity.CRITICAL,
             )
+
+            try:
+                self.canonical_alert_bridge.record_heartbeat_stale(
+                    source="css_runtime_supervisor",
+                    message="Heartbeat stale detected",
+                    details={
+                        "stale_threshold_seconds": int(stale_threshold_seconds),
+                        "last_heartbeat_at": self.last_heartbeat_at,
+                    },
+                    dedupe_key=(
+                        f"HEARTBEAT_STALE:css_runtime_supervisor:"
+                        f"{self.last_heartbeat_at}"
+                    ),
+                )
+            except Exception:
+                pass
             return True
 
         return False
@@ -128,6 +147,23 @@ class CSSRuntimeSupervisor:
                 "failure_count": self.failure_count,
             },
         )
+
+        try:
+            self.canonical_alert_bridge.record_runtime_failure(
+                source="css_runtime_supervisor",
+                message=f"Runtime failure: {reason}",
+                details={
+                    "reason": reason,
+                    "failure_count": self.failure_count,
+                    "status": self.status,
+                },
+                dedupe_key=(
+                    f"RUNTIME_FAILURE:css_runtime_supervisor:{reason}:"
+                    f"{self.failure_count}"
+                ),
+            )
+        except Exception:
+            pass
 
     def should_restart(self) -> bool:
         if self.status in ("FAILED", "DEGRADED"):
@@ -208,6 +244,23 @@ class CSSRuntimeSupervisor:
                 "failure_count": self.failure_count,
             },
         )
+
+        try:
+            self.canonical_alert_bridge.record_supervisor_recovery(
+                source="css_runtime_supervisor",
+                message=msg,
+                details={
+                    "service_name": service_name,
+                    "attempt": int(attempt),
+                    "restart_count": self.restart_count,
+                },
+                dedupe_key=(
+                    f"SUPERVISOR_RECOVERY:css_runtime_supervisor:"
+                    f"{service_name}:{attempt}"
+                ),
+            )
+        except Exception:
+            pass
 
     def record_restart_exhausted(self, service_name: str):
         msg = (

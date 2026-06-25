@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 from engine.information.alerts import get_alert_service, AlertEventType
+from backend.monitoring.alert_bridge import CanonicalAlertBridge
 
 logger = logging.getLogger(__name__)
 
@@ -22,12 +23,14 @@ class RuntimeSupervisor:
         state_file: str | Path = DEFAULT_STATE_FILE,
         heartbeat_timeout_seconds: int = 600,
         broker_disconnect_alert_threshold: int = 3,
-        alert_service=None
+        alert_service=None,
+        canonical_alert_bridge: Optional[CanonicalAlertBridge] = None,
     ):
         self.state_file = Path(state_file)
         self.heartbeat_timeout_seconds = heartbeat_timeout_seconds
         self.broker_disconnect_alert_threshold = broker_disconnect_alert_threshold
         self.alert_service = alert_service or get_alert_service()
+        self.canonical_alert_bridge = canonical_alert_bridge or CanonicalAlertBridge()
 
         self._lock = threading.RLock()
         self.state: Dict[str, Any] = {
@@ -117,6 +120,21 @@ class RuntimeSupervisor:
                         AlertEventType.ENGINE_HEARTBEAT_LOST,
                         f"Engine heartbeat lost! Last seen {int(elapsed)} seconds ago."
                     )
+                    try:
+                        self.canonical_alert_bridge.record_heartbeat_stale(
+                            source="runtime_supervisor",
+                            message=f"Engine heartbeat stale ({int(elapsed)} seconds)",
+                            details={
+                                "elapsed_seconds": int(elapsed),
+                                "heartbeat_timeout_seconds": int(self.heartbeat_timeout_seconds),
+                            },
+                            dedupe_key=(
+                                f"HEARTBEAT_STALE:runtime_supervisor:"
+                                f"{int(elapsed)}:{int(self.heartbeat_timeout_seconds)}"
+                            ),
+                        )
+                    except Exception:
+                        pass
                     self._heartbeat_alert_fired = True
 
     def _dispatch_alert(self, event_type: AlertEventType, message: str, context: Optional[Dict[str, Any]] = None) -> None:
@@ -151,7 +169,24 @@ class RuntimeSupervisor:
         try:
             with self._lock:
                 self.state["runtime_errors"] += 1
+                runtime_errors = int(self.state["runtime_errors"])
                 self._save_state()
+
+            try:
+                self.canonical_alert_bridge.record_runtime_failure(
+                    source="runtime_supervisor",
+                    message=f"Runtime error: {error_message}",
+                    details={
+                        "error_message": str(error_message),
+                        "runtime_errors": runtime_errors,
+                    },
+                    dedupe_key=(
+                        f"RUNTIME_FAILURE:runtime_supervisor:"
+                        f"{error_message}:{runtime_errors}"
+                    ),
+                )
+            except Exception:
+                pass
         except Exception as e:
             logger.error(f"RuntimeSupervisor record_error failed: {e}")
 
@@ -168,6 +203,24 @@ class RuntimeSupervisor:
                     f"Repeated broker disconnects ({current_disconnects}): {broker_name} {message}",
                     {"broker": broker_name, "disconnects": current_disconnects}
                 )
+                try:
+                    self.canonical_alert_bridge.record_broker_disconnect(
+                        source="runtime_supervisor",
+                        message=(
+                            f"Repeated broker disconnects ({current_disconnects}): "
+                            f"{broker_name} {message}"
+                        ),
+                        details={
+                            "broker": str(broker_name),
+                            "disconnects": int(current_disconnects),
+                        },
+                        dedupe_key=(
+                            f"BROKER_DISCONNECT:runtime_supervisor:"
+                            f"{broker_name}:{current_disconnects}"
+                        ),
+                    )
+                except Exception:
+                    pass
         except Exception as e:
             logger.error(f"RuntimeSupervisor record_broker_disconnect failed: {e}")
 
@@ -182,6 +235,19 @@ class RuntimeSupervisor:
                 f"Runtime recovery attempt: {context_message}",
                 {"context": context_message}
             )
+
+            try:
+                self.canonical_alert_bridge.record_supervisor_recovery(
+                    source="runtime_supervisor",
+                    message=f"Runtime recovery attempt: {context_message}",
+                    details={"context": str(context_message)},
+                    dedupe_key=(
+                        f"SUPERVISOR_RECOVERY:runtime_supervisor:{context_message}:"
+                        f"{self.state.get('recovery_attempts', 0)}"
+                    ),
+                )
+            except Exception:
+                pass
         except Exception as e:
             logger.error(f"RuntimeSupervisor record_recovery_attempt failed: {e}")
 
