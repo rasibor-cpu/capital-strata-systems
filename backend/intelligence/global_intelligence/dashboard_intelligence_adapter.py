@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from .intelligence_state_manager import IntelligenceStateManager
@@ -31,7 +32,11 @@ def _serialize_event(event: Any) -> dict:
         }
 
 
-def build_dashboard_intelligence_payload(state_manager: IntelligenceStateManager) -> dict:
+def build_dashboard_intelligence_payload(
+    state_manager: IntelligenceStateManager,
+    *,
+    canonical_decision: dict[str, Any] | None = None,
+) -> dict:
     default_payload = {
         "current_regime": "NORMAL",
         "governance_response": {},
@@ -40,6 +45,7 @@ def build_dashboard_intelligence_payload(state_manager: IntelligenceStateManager
         "highest_severity": "LOW",
         "average_confidence": 0.0,
         "gie_status": "OK",
+        "decision_state": _default_decision_state(),
     }
 
     if state_manager is None:
@@ -66,6 +72,57 @@ def build_dashboard_intelligence_payload(state_manager: IntelligenceStateManager
             "highest_severity": highest_severity,
             "average_confidence": round(average_confidence, 2),
             "gie_status": "OK",
+            "decision_state": _decision_state(canonical_decision),
         }
     except Exception:
         return {**default_payload, "gie_status": "ERROR"}
+
+
+def _default_decision_state() -> dict[str, Any]:
+    return {
+        "current_market_regime": "UNKNOWN",
+        "selected_strategy": "",
+        "confidence_score": 0.0,
+        "signal_strength": 0.0,
+        "portfolio_risk": 0.0,
+        "allocation": 0.0,
+        "position_size": 0.0,
+        "current_decision": "UNKNOWN",
+        "decision_age_seconds": 0.0,
+        "learning_confidence": 0.0,
+        "last_strategy_outcome": "",
+    }
+
+
+def _decision_state(canonical_decision: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(canonical_decision, dict):
+        return _default_decision_state()
+
+    timestamp = str(canonical_decision.get("timestamp") or "").strip()
+    decision_age_seconds = 0.0
+    if timestamp:
+        try:
+            then = datetime.fromisoformat(timestamp)
+            if then.tzinfo is None:
+                then = then.replace(tzinfo=timezone.utc)
+            decision_age_seconds = max(0.0, (datetime.now(timezone.utc) - then).total_seconds())
+        except Exception:
+            decision_age_seconds = 0.0
+
+    allocation_payload = canonical_decision.get("allocation", {})
+    position_payload = canonical_decision.get("position_size", {})
+    learning_context = canonical_decision.get("learning_context", {})
+
+    return {
+        "current_market_regime": str(canonical_decision.get("market_regime") or "UNKNOWN"),
+        "selected_strategy": str(canonical_decision.get("selected_strategy") or ""),
+        "confidence_score": float(canonical_decision.get("confidence", 0.0) or 0.0),
+        "signal_strength": float(canonical_decision.get("signal_strength", 0.0) or 0.0),
+        "portfolio_risk": float(canonical_decision.get("portfolio_risk", 0.0) or 0.0),
+        "allocation": float((allocation_payload or {}).get("allocation_amount", 0.0) or 0.0),
+        "position_size": float((position_payload or {}).get("recommended_position_size", 0.0) or 0.0),
+        "current_decision": str(canonical_decision.get("entry_decision") or "UNKNOWN"),
+        "decision_age_seconds": round(decision_age_seconds, 8),
+        "learning_confidence": float((learning_context or {}).get("confidence", 0.0) or 0.0),
+        "last_strategy_outcome": str((learning_context or {}).get("last_strategy_outcome") or ""),
+    }

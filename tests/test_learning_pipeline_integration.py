@@ -100,3 +100,21 @@ def test_strategy_memory_receives_pnl_and_win_flag(tmp_path) -> None:
     assert gain["strategy_memory"]["win"] is True
     assert loss["strategy_memory"]["realized_pnl"] == -3.0
     assert loss["strategy_memory"]["win"] is False
+
+
+def test_completed_trade_uses_canonical_decision_fields(tmp_path) -> None:
+    integration = _integration(tmp_path)
+
+    result = integration.write_completed_trade(
+        _completed_trade("t-canonical", regime="RANGING"),
+        canonical_decision={
+            "market_regime": "TRENDING",
+            "selected_strategy": "canonical_alpha",
+            "confidence": 0.91,
+        },
+    )
+
+    assert result["canonical_decision"]["selected_strategy"] == "canonical_alpha"
+    assert result["trade_outcome"]["market_regime"] == "TRENDING"
+    assert result["trade_outcome"]["strategy_id"] == "canonical_alpha"
+    assert result["strategy_memory"]["confidence"] == 0.91

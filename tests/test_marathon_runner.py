@@ -52,6 +52,27 @@ class FakeReplayEngine:
                 decision="ALLOW",
                 exit_plan={"action": "HOLD"},
                 diagnostics={"source": "fake"},
+                canonical_decision={
+                    "timestamp": "2026-06-24T12:00:00+00:00",
+                    "asset_class": "EQUITY",
+                    "symbol": "AAPL",
+                    "market_regime": "TRENDING",
+                    "selected_strategy": "alpha",
+                    "signal_strength": 0.84,
+                    "confidence": 0.9,
+                    "portfolio_risk": 0.1,
+                    "concentration_score": 0.2,
+                    "allocation": {"allocation_amount": 1000.0, "allocation_weight": 0.1},
+                    "position_size": {"recommended_position_size": 100.0},
+                    "entry_decision": "ALLOW",
+                    "exit_plan": {"action": "HOLD"},
+                    "expected_reward": 150.0,
+                    "expected_risk": 80.0,
+                    "approval_reason": "all_intelligence_gates_passed",
+                    "rejection_reason": "",
+                    "execution_status": "APPROVED",
+                    "learning_context": {"learning_version": "v1", "confidence": 0.9},
+                },
             )
         ]
         return ReplayRunResult(
@@ -136,6 +157,13 @@ def test_startup_and_snapshot_generation(tmp_path) -> None:
     assert len(result.snapshots) == 1
     assert result.snapshots[0].paper_balance == 100000.0
     assert result.snapshots[0].approved_trades == 1
+    assert result.snapshots[0].confidence == 0.9
+    assert result.snapshots[0].signal_strength == 0.84
+    assert result.snapshots[0].allocation == 1000.0
+    assert result.snapshots[0].position_size == 100.0
+    assert result.snapshots[0].execution_status == "APPROVED"
+    assert result.snapshots[0].learning_version == "v1"
+    assert result.snapshots[0].canonical_decision["selected_strategy"] == "alpha"
     assert result.certification_report.go_no_go == "GO"
 
 

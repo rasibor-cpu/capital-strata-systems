@@ -128,3 +128,33 @@ def test_alert_centre_compatibility_adapter(tmp_path: Path) -> None:
     assert len(payload) == 1
     assert payload[0]["severity"] == "CRITICAL"
     assert payload[0]["message"] == "Risk gate blocked"
+
+
+def test_persist_decision_alerts_conditions(tmp_path: Path) -> None:
+    repo = AlertRepository(storage_dir=str(tmp_path))
+    canonical = {
+        "symbol": "EURUSD",
+        "selected_strategy": "alpha",
+        "market_regime": "RANGING",
+        "entry_decision": "REDUCE_SIZE",
+        "confidence": 0.3,
+        "concentration_score": 0.8,
+        "exit_plan": {"action": "REDUCE"},
+        "learning_context": {"confidence": 0.2},
+    }
+    previous = {"market_regime": "TRENDING"}
+
+    emitted = repo.persist_decision_alerts(
+        canonical,
+        previous_decision=previous,
+        rejection_streak=4,
+        confidence_threshold=0.45,
+        learning_confidence_threshold=0.5,
+        concentration_limit=0.7,
+    )
+
+    assert len(emitted) >= 5
+    event_types = {row["event_type"] for row in emitted}
+    assert "TRADE_REJECTED" in event_types
+    assert "RISK_GATE_BLOCK" in event_types
+    assert "DATA_UNAVAILABLE" in event_types

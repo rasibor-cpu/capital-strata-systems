@@ -205,6 +205,8 @@ def test_single_replay() -> None:
     assert decisions[0].market_regime == "TRENDING"
     assert decisions[0].selected_strategy == "alpha"
     assert decisions[0].decision == "ALLOW"
+    assert decisions[0].canonical_decision["entry_decision"] == decisions[0].decision
+    assert decisions[0].canonical_decision["confidence"] == decisions[0].confidence
 
 
 def test_multiple_replay() -> None:
@@ -214,6 +216,7 @@ def test_multiple_replay() -> None:
     assert len(decisions) == 2
     assert [decision.selected_strategy for decision in decisions] == ["alpha", "beta"]
     assert [decision.symbol for decision in decisions] == ["AAPL", "MSFT"]
+    assert all(isinstance(decision.canonical_decision, dict) for decision in decisions)
 
 
 def test_deterministic_replay() -> None:

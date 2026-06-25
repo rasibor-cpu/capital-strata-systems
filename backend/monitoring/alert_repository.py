@@ -108,6 +108,139 @@ class AlertRepository:
 
         return False
 
+    def persist_decision_alerts(
+        self,
+        canonical_decision: dict[str, Any],
+        *,
+        previous_decision: dict[str, Any] | None = None,
+        rejection_streak: int = 0,
+        confidence_threshold: float = 0.45,
+        learning_confidence_threshold: float = 0.5,
+        concentration_limit: float = 0.7,
+    ) -> list[dict[str, Any]]:
+        if not isinstance(canonical_decision, dict):
+            raise AlertRepositoryError("canonical_decision must be a dictionary")
+
+        emitted: list[dict[str, Any]] = []
+        symbol = str(canonical_decision.get("symbol") or "UNKNOWN").strip().upper() or "UNKNOWN"
+        strategy = str(canonical_decision.get("selected_strategy") or "UNKNOWN").strip() or "UNKNOWN"
+        market_regime = str(canonical_decision.get("market_regime") or "UNKNOWN").strip().upper() or "UNKNOWN"
+        decision = str(canonical_decision.get("entry_decision") or "UNKNOWN").strip().upper() or "UNKNOWN"
+        confidence = float(canonical_decision.get("confidence", 0.0) or 0.0)
+        concentration_score = float(canonical_decision.get("concentration_score", 0.0) or 0.0)
+        learning_confidence = float((canonical_decision.get("learning_context") or {}).get("confidence", confidence) or 0.0)
+        exit_action = str((canonical_decision.get("exit_plan") or {}).get("action") or "HOLD").strip().upper() or "HOLD"
+
+        if confidence < confidence_threshold:
+            emitted.append(
+                self.persist_alert(
+                    {
+                        "severity": "WARNING",
+                        "event_type": "TRADE_REJECTED",
+                        "source": "canonical_decision",
+                        "message": f"Strategy confidence low for {strategy} on {symbol}",
+                        "details": {
+                            "confidence": confidence,
+                            "threshold": confidence_threshold,
+                            "strategy": strategy,
+                            "symbol": symbol,
+                        },
+                        "dedupe_key": f"DECISION_CONFIDENCE_LOW:{symbol}:{strategy}:{market_regime}",
+                    }
+                )
+            )
+
+        if isinstance(previous_decision, dict):
+            previous_regime = str(previous_decision.get("market_regime") or "").strip().upper()
+            if previous_regime and previous_regime != market_regime:
+                emitted.append(
+                    self.persist_alert(
+                        {
+                            "severity": "INFO",
+                            "event_type": "DATA_UNAVAILABLE",
+                            "source": "canonical_decision",
+                            "message": f"Market regime changed from {previous_regime} to {market_regime}",
+                            "details": {
+                                "previous_regime": previous_regime,
+                                "current_regime": market_regime,
+                                "symbol": symbol,
+                            },
+                            "dedupe_key": f"REGIME_CHANGE:{symbol}:{previous_regime}:{market_regime}",
+                        }
+                    )
+                )
+
+        if decision != "ALLOW" and rejection_streak >= 3:
+            emitted.append(
+                self.persist_alert(
+                    {
+                        "severity": "WARNING",
+                        "event_type": "TRADE_REJECTED",
+                        "source": "canonical_decision",
+                        "message": f"Repeated trade rejections detected for {symbol}",
+                        "details": {
+                            "entry_decision": decision,
+                            "rejection_streak": int(rejection_streak),
+                        },
+                        "dedupe_key": f"REPEATED_REJECTIONS:{symbol}:{rejection_streak}",
+                    }
+                )
+            )
+
+        if learning_confidence < learning_confidence_threshold:
+            emitted.append(
+                self.persist_alert(
+                    {
+                        "severity": "WARNING",
+                        "event_type": "DATA_UNAVAILABLE",
+                        "source": "canonical_decision",
+                        "message": f"Learning confidence degraded for {symbol}",
+                        "details": {
+                            "learning_confidence": learning_confidence,
+                            "threshold": learning_confidence_threshold,
+                        },
+                        "dedupe_key": f"LEARNING_CONFIDENCE_LOW:{symbol}:{strategy}",
+                    }
+                )
+            )
+
+        if concentration_score > concentration_limit:
+            emitted.append(
+                self.persist_alert(
+                    {
+                        "severity": "CRITICAL",
+                        "event_type": "RISK_GATE_BLOCK",
+                        "source": "canonical_decision",
+                        "message": f"Portfolio concentration exceeded for {symbol}",
+                        "details": {
+                            "concentration_score": concentration_score,
+                            "limit": concentration_limit,
+                            "symbol": symbol,
+                        },
+                        "dedupe_key": f"CONCENTRATION_LIMIT:{symbol}:{strategy}:{market_regime}",
+                    }
+                )
+            )
+
+        if exit_action in {"STOP_LOSS", "REDUCE", "TAKE_PROFIT"}:
+            emitted.append(
+                self.persist_alert(
+                    {
+                        "severity": "WARNING",
+                        "event_type": "TRADE_REJECTED",
+                        "source": "canonical_decision",
+                        "message": f"Adaptive exit override active ({exit_action}) for {symbol}",
+                        "details": {
+                            "exit_action": exit_action,
+                            "entry_decision": decision,
+                        },
+                        "dedupe_key": f"ADAPTIVE_EXIT_OVERRIDE:{symbol}:{exit_action}",
+                    }
+                )
+            )
+
+        return emitted
+
     def _normalize_payload(self, payload: dict[str, Any], require_existing: bool = False) -> dict[str, Any]:
         if not isinstance(payload, dict):
             raise AlertRepositoryError("Alert payload must be a dictionary")

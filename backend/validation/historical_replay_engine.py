@@ -96,6 +96,7 @@ class HistoricalReplayEngine:
             }
 
             orchestration_result = self.orchestrator.decide(effective_candidate)
+            canonical_decision = orchestration_result.to_dict()
             decisions.append(
                 ReplayDecision(
                     timestamp=record.timestamp,
@@ -105,8 +106,8 @@ class HistoricalReplayEngine:
                     allocation=orchestration_result.allocation,
                     position_size=orchestration_result.position_size,
                     risk_score=orchestration_result.portfolio_risk,
-                    confidence=orchestration_result.overall_confidence,
-                    decision=orchestration_result.decision,
+                    confidence=orchestration_result.confidence,
+                    decision=orchestration_result.entry_decision,
                     exit_plan=orchestration_result.exit_plan,
                     diagnostics={
                         **orchestration_result.diagnostics,
@@ -115,6 +116,7 @@ class HistoricalReplayEngine:
                         "historical_market_event": record.market_event.__dict__,
                         "completed_trade": record.completed_trade.__dict__ if record.completed_trade else None,
                     },
+                    canonical_decision=canonical_decision,
                 )
             )
 

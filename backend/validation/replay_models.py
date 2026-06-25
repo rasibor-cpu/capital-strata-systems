@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Mapping
 
 
@@ -254,6 +254,7 @@ class ReplayDecision:
     decision: str
     exit_plan: dict[str, Any]
     diagnostics: dict[str, Any]
+    canonical_decision: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

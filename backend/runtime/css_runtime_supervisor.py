@@ -37,6 +37,8 @@ class CSSRuntimeSupervisor:
         self.failure_count: int = 0
         self.restart_count: int = 0
         self.last_failure: Optional[str] = None
+        self.last_canonical_decision: Optional[Dict[str, Any]] = None
+        self.last_decision_at: Optional[str] = None
         self.status: str = "STOPPED"
 
         self._ensure_state_dir()
@@ -88,6 +90,13 @@ class CSSRuntimeSupervisor:
 
     def heartbeat(self):
         self.last_heartbeat_at = datetime.now(timezone.utc).isoformat()
+        self._persist_state()
+
+    def record_canonical_decision(self, canonical_decision: Dict[str, Any]) -> None:
+        if not isinstance(canonical_decision, dict):
+            return
+        self.last_canonical_decision = dict(canonical_decision)
+        self.last_decision_at = datetime.now(timezone.utc).isoformat()
         self._persist_state()
 
     def check_stale_heartbeat(
@@ -293,6 +302,8 @@ class CSSRuntimeSupervisor:
             "failure_count": self.failure_count,
             "restart_count": self.restart_count,
             "last_failure": self.last_failure,
+            "last_canonical_decision": self.last_canonical_decision,
+            "last_decision_at": self.last_decision_at,
             "status": self.status,
             "max_restart_limit": self.max_restart_limit,
         }

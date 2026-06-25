@@ -222,6 +222,19 @@ class MarathonRunner:
         replay_summary: dict[str, Any],
         uptime_seconds: float,
     ) -> MarathonSnapshot:
+        latest_canonical = self._latest_canonical_decision(replay_summary)
+        allocation = self._safe_float(
+            latest_canonical.get("allocation", {}).get("allocation_amount")
+            if isinstance(latest_canonical.get("allocation"), Mapping)
+            else 0.0,
+            0.0,
+        )
+        position_size = self._safe_float(
+            latest_canonical.get("position_size", {}).get("recommended_position_size")
+            if isinstance(latest_canonical.get("position_size"), Mapping)
+            else 0.0,
+            0.0,
+        )
         return MarathonSnapshot(
             timestamp=plan.timestamp,
             uptime_seconds=round(float(uptime_seconds), 8),
@@ -236,12 +249,21 @@ class MarathonRunner:
             alerts=plan.alerts,
             recoveries=plan.recoveries,
             heartbeat_status=plan.heartbeat_status,
-            decision=self._dominant_value(replay_summary.get("decision_distribution", {}), default="UNKNOWN"),
-            selected_strategy=self._dominant_value(replay_summary.get("strategy_distribution", {}), default=""),
-            market_regime=self._dominant_value(replay_summary.get("regime_distribution", {}), default="UNKNOWN"),
+            decision=str(latest_canonical.get("entry_decision") or self._dominant_value(replay_summary.get("decision_distribution", {}), default="UNKNOWN")),
+            selected_strategy=str(latest_canonical.get("selected_strategy") or self._dominant_value(replay_summary.get("strategy_distribution", {}), default="")),
+            market_regime=str(latest_canonical.get("market_regime") or self._dominant_value(replay_summary.get("regime_distribution", {}), default="UNKNOWN")),
+            confidence=self._safe_float(latest_canonical.get("confidence"), 0.0),
+            signal_strength=self._safe_float(latest_canonical.get("signal_strength"), 0.0),
+            allocation=allocation,
+            position_size=position_size,
+            expected_reward=self._safe_float(latest_canonical.get("expected_reward"), 0.0),
+            expected_risk=self._safe_float(latest_canonical.get("expected_risk"), 0.0),
+            execution_status=str(latest_canonical.get("execution_status") or "UNKNOWN"),
+            learning_version=str((latest_canonical.get("learning_context") or {}).get("learning_version") or ""),
             portfolio_exposure=plan.portfolio_exposure,
             cycle_duration_seconds=plan.cycle_duration_seconds,
             drawdown=max(0.0, plan.equity - plan.paper_balance),
+            canonical_decision=latest_canonical,
         )
 
     def _build_replay_summary(self, replay_history: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
@@ -255,6 +277,7 @@ class MarathonRunner:
                 "strategy_distribution": {},
                 "regime_distribution": {},
                 "decision_distribution": {},
+                "decisions": [],
             }
 
         result = self.replay_engine.replay_with_statistics(replay_history)
@@ -391,3 +414,25 @@ class MarathonRunner:
             "strategy_distribution": {key: strategy_counts[key] for key in sorted(strategy_counts.keys())},
             "regime_distribution": {key: regime_counts[key] for key in sorted(regime_counts.keys())},
         }
+
+    @staticmethod
+    def _latest_canonical_decision(replay_summary: Mapping[str, Any]) -> dict[str, Any]:
+        decisions = replay_summary.get("decisions", []) if isinstance(replay_summary, Mapping) else []
+        if not isinstance(decisions, list) or not decisions:
+            return {}
+        last = decisions[-1]
+        if not isinstance(last, Mapping):
+            return {}
+        canonical = last.get("canonical_decision")
+        if isinstance(canonical, Mapping):
+            return dict(canonical)
+        return {}
+
+    @staticmethod
+    def _safe_float(value: Any, default: float = 0.0) -> float:
+        try:
+            if value is None:
+                return default
+            return float(value)
+        except (TypeError, ValueError):
+            return default

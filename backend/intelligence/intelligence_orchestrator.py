@@ -17,13 +17,26 @@ class IntelligenceDecisionError(RuntimeError):
 
 @dataclass(frozen=True)
 class IntelligenceDecision:
+    timestamp: str
+    asset_class: str
+    symbol: str
     market_regime: str
+    selected_strategy: str
+    signal_strength: float
+    confidence: float
     strategy_score: float
     allocation: dict[str, Any]
     position_size: dict[str, Any]
     portfolio_risk: float
     concentration_score: float
+    entry_decision: str
     exit_plan: dict[str, Any]
+    expected_reward: float
+    expected_risk: float
+    approval_reason: str
+    rejection_reason: str
+    execution_status: str
+    learning_context: dict[str, Any]
     overall_confidence: float
     decision: str
     diagnostics: dict[str, Any]
@@ -168,6 +181,27 @@ class IntelligenceOrchestrator:
                 overall_confidence=overall_confidence,
             )
 
+            expected_reward, expected_risk = self._expected_risk_reward(
+                current_price=candidate["current_price"],
+                position_size=recommended_position_size,
+                exit_plan=exit_plan,
+            )
+            approval_reason, rejection_reason = self._decision_reasons(decision)
+            execution_status = "APPROVED" if decision == "ALLOW" else "NOT_APPROVED"
+            normalized_signal_strength = round(max(0.0, min(1.0, strategy_score)), 8)
+            normalized_confidence = round(max(0.0, min(1.0, overall_confidence)), 8)
+
+            learning_context = {
+                "learning_version": "v1",
+                "confidence": normalized_confidence,
+                "strategy": candidate["strategy"],
+                "market_regime": market_regime,
+                "features": {
+                    "volatility": volatility,
+                    "trend_strength": trend_strength,
+                },
+            }
+
             diagnostics = {
                 "candidate": candidate["diagnostics"],
                 "market_features": market_features,
@@ -180,14 +214,27 @@ class IntelligenceOrchestrator:
             }
 
             result = IntelligenceDecision(
+                timestamp=self._resolve_timestamp(candidate["market_snapshot"]),
+                asset_class=candidate["asset_class"],
+                symbol=candidate["symbol"],
                 market_regime=market_regime,
-                strategy_score=round(max(0.0, min(1.0, strategy_score)), 8),
+                selected_strategy=candidate["strategy"],
+                signal_strength=normalized_signal_strength,
+                confidence=normalized_confidence,
+                strategy_score=normalized_signal_strength,
                 allocation=allocation,
                 position_size=position_size,
                 portfolio_risk=round(max(0.0, min(1.0, portfolio_risk)), 8),
                 concentration_score=round(max(0.0, min(1.0, concentration_score)), 8),
+                entry_decision=decision,
                 exit_plan=exit_plan,
-                overall_confidence=round(max(0.0, min(1.0, overall_confidence)), 8),
+                expected_reward=expected_reward,
+                expected_risk=expected_risk,
+                approval_reason=approval_reason,
+                rejection_reason=rejection_reason,
+                execution_status=execution_status,
+                learning_context=learning_context,
+                overall_confidence=normalized_confidence,
                 decision=decision,
                 diagnostics=diagnostics,
             )
@@ -495,3 +542,38 @@ class IntelligenceOrchestrator:
             return float(value)
         except Exception:
             return default
+
+    @staticmethod
+    def _resolve_timestamp(market_snapshot: Any) -> str:
+        if isinstance(market_snapshot, Mapping):
+            value = str(market_snapshot.get("timestamp") or "").strip()
+            if value:
+                return value
+        return "1970-01-01T00:00:00+00:00"
+
+    @staticmethod
+    def _expected_risk_reward(
+        *,
+        current_price: float,
+        position_size: float,
+        exit_plan: Mapping[str, Any],
+    ) -> tuple[float, float]:
+        take_profit = IntelligenceOrchestrator._safe_float(exit_plan.get("recommended_take_profit"), current_price)
+        stop = IntelligenceOrchestrator._safe_float(exit_plan.get("recommended_stop"), current_price)
+        reward_per_unit = max(0.0, take_profit - current_price)
+        risk_per_unit = max(0.0, current_price - stop)
+        expected_reward = round(reward_per_unit * max(0.0, position_size), 8)
+        expected_risk = round(risk_per_unit * max(0.0, position_size), 8)
+        return expected_reward, expected_risk
+
+    @staticmethod
+    def _decision_reasons(decision: str) -> tuple[str, str]:
+        if decision == "ALLOW":
+            return "all_intelligence_gates_passed", ""
+        if decision == "REDUCE_SIZE":
+            return "", "risk_or_exit_constraints_triggered"
+        if decision == "DEFER":
+            return "", "insufficient_confidence_or_unknown_regime"
+        if decision == "BLOCK":
+            return "", "risk_controls_blocked_entry"
+        return "", "unknown_decision"

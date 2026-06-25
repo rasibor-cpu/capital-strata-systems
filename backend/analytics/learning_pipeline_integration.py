@@ -52,8 +52,19 @@ class LearningPipelineIntegration:
         self.regime_history_repository = regime_history_repository
         self.strategy_memory_repository = strategy_memory_repository
 
-    def write_completed_trade(self, completed_trade: Mapping[str, Any]) -> dict[str, Any]:
+    def write_completed_trade(
+        self,
+        completed_trade: Mapping[str, Any],
+        *,
+        canonical_decision: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
         payload = self._validate_completed_trade(completed_trade)
+
+        decision = dict(canonical_decision or {})
+        if decision:
+            payload["market_regime"] = str(decision.get("market_regime") or payload.get("market_regime") or "").strip()
+            payload["strategy_id"] = str(decision.get("selected_strategy") or payload["strategy_id"]).strip()
+            payload["confidence"] = float(decision.get("confidence", payload["confidence"]))
 
         regime = str(payload.get("market_regime") or "").strip().upper() or "UNKNOWN"
         if regime not in self._SUPPORTED_REGIMES:
@@ -134,6 +145,7 @@ class LearningPipelineIntegration:
             raise LearningPipelineIntegrationError(f"Strategy memory write failed: {exc}") from exc
 
         return {
+            "canonical_decision": decision,
             "trade_outcome": outcome,
             "trade_context": context,
             "regime_history": regime_history,

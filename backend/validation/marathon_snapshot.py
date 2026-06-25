@@ -89,9 +89,18 @@ class MarathonSnapshot:
     decision: str = "UNKNOWN"
     selected_strategy: str = ""
     market_regime: str = "UNKNOWN"
+    confidence: float = 0.0
+    signal_strength: float = 0.0
+    allocation: float = 0.0
+    position_size: float = 0.0
+    expected_reward: float = 0.0
+    expected_risk: float = 0.0
+    execution_status: str = "UNKNOWN"
+    learning_version: str = ""
     portfolio_exposure: float = 0.0
     cycle_duration_seconds: float = 0.0
     drawdown: float = 0.0
+    canonical_decision: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
