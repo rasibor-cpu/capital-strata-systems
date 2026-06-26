@@ -920,6 +920,7 @@ STATE_FILE = ARTIFACTS_DIR / "css_session_recovery.json"
 # ===== PCNRASS SESSION + ACCOUNT + ASSET BALANCE MODEL =====
 ACCOUNT_STATE_FILE = ARTIFACTS_DIR / "css_account_state_pcnrass.json"
 SESSION_STATE_FILE = ARTIFACTS_DIR / "css_session_state_pcnrass.json"
+MOBILE_CONTROLS_FILE = ARTIFACTS_DIR / "css_mobile_controls.json"
 
 def _pcnrass_read_json(path, default):
     try:
@@ -2347,18 +2348,71 @@ def resolve_expected_fx_price(symbol: str) -> float | None:
         pass
     return None
 
+def pcnrass_read_mobile_controls() -> dict:
+    controls = _pcnrass_read_json(MOBILE_CONTROLS_FILE, {})
+    if not isinstance(controls, dict):
+        controls = {}
+
+    cycle_mode = str(controls.get("cycle_mode") or os.getenv("CSS_CYCLE_MODE", "")).strip().lower()
+    if cycle_mode not in {"manual", "continuous"}:
+        cycle_mode = "continuous" if os.getenv("CSS_AUTO_CYCLE", "").lower() in {"true", "1", "yes"} else "manual"
+
+    try:
+        interval = int(controls.get("cycle_interval_seconds") or os.getenv("CSS_CYCLE_SLEEP_SECONDS", "60"))
+    except Exception:
+        interval = 60
+
+    interval = max(5, min(interval, 600))
+
+    return {
+        "trading_paused": bool(controls.get("trading_paused", False)),
+        "cycle_mode": cycle_mode,
+        "cycle_interval_seconds": interval,
+        "source": str(controls.get("source", "runtime_default")),
+        "timestamp": str(controls.get("timestamp", "")),
+        "reason": str(controls.get("reason", "")),
+    }
+
+
 def pcnrass_wait_for_next_cycle(cycle: int) -> bool:
-    auto_cycle = os.getenv("CSS_AUTO_CYCLE", "").lower() in {"true", "1", "yes"}
-    if auto_cycle:
-        sleep_secs = int(os.getenv("CSS_CYCLE_SLEEP_SECONDS", "60"))
-        print(f"\n[AUTO CYCLE MODE] enabled interval={sleep_secs}s")
-        time.sleep(sleep_secs)
+    while True:
+        controls = pcnrass_read_mobile_controls()
+
+        if controls["trading_paused"]:
+            print(
+                f"\n[MOBILE CONTROL PAUSED] Cycle {cycle} paused "
+                f"reason={controls.get('reason', '')}. Waiting for resume..."
+            )
+            time.sleep(5)
+            continue
+
+        if controls["cycle_mode"] == "continuous":
+            sleep_secs = int(controls["cycle_interval_seconds"])
+            print(f"\n[AUTO CYCLE MODE] enabled interval={sleep_secs}s source={controls.get('source', '')}")
+            time.sleep(sleep_secs)
+            return True
+
+        response = input(
+            f"\n[PCNRASS PAUSE] Cycle {cycle} complete. "
+            "Press ENTER for next cycle, type C for continuous, or type Q to quit: "
+        ).strip().lower()
+
+        if response in {"q", "quit", "exit", "stop"}:
+            return False
+
+        if response in {"c", "continuous", "auto"}:
+            controls = pcnrass_read_mobile_controls()
+            controls["cycle_mode"] = "continuous"
+            controls["cycle_interval_seconds"] = int(controls.get("cycle_interval_seconds", 60))
+            controls["trading_paused"] = False
+            controls["source"] = "runtime_keyboard"
+            controls["reason"] = "operator_selected_continuous"
+            controls["timestamp"] = datetime.datetime.utcnow().isoformat() + "Z"
+            _pcnrass_write_json(MOBILE_CONTROLS_FILE, controls)
+            print("[CYCLE MODE SELECTED] CONTINUOUS")
+            continue
+
         return True
-
-    response = input(f"\n[PCNRASS PAUSE] Cycle {cycle} complete. Press ENTER for next cycle, or type Q to quit: ").strip().lower()
-    return response not in {"q", "quit", "exit", "stop"}
-
-
 
 def is_oanda_practice_mode() -> bool:
     base_url = os.getenv("OANDA_BASE_URL", "")
