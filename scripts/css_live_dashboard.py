@@ -1726,6 +1726,29 @@ def select_engine_mode() -> str:
     return requested_mode
 
 
+def select_cycle_mode() -> None:
+    print("=== CSS CYCLE CONTINUATION MODE ===")
+    print("1. MANUAL / press ENTER after each cycle (default)")
+    print("2. CONTINUOUS / automatically advance cycles")
+
+    choice = input("Enter cycle mode (1-2) [default=1]: ").strip() or "1"
+
+    if choice != "2":
+        os.environ["CSS_AUTO_CYCLE"] = "false"
+        print("[CYCLE MODE SELECTED] MANUAL")
+        return
+
+    interval_raw = input("Enter seconds between cycles [default=60]: ").strip() or "60"
+    try:
+        interval = max(5, int(interval_raw))
+    except ValueError:
+        interval = 60
+
+    os.environ["CSS_AUTO_CYCLE"] = "true"
+    os.environ["CSS_CYCLE_SLEEP_SECONDS"] = str(interval)
+    print(f"[CYCLE MODE SELECTED] CONTINUOUS interval={interval}s")
+
+
 def safe_load_runtime_asset(symbol: str) -> bool:
     try:
         with contextlib.redirect_stdout(io.StringIO()):
@@ -1848,6 +1871,7 @@ except EnvironmentValidationError as e:
     sys.exit(1)
 
 ENGINE_MODE = select_engine_mode()
+select_cycle_mode()
 print(f"[ENGINE MODE SELECTED] {ENGINE_MODE}")
 
 

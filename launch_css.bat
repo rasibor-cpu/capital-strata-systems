@@ -14,6 +14,6 @@ set "PYTHONPATH=%REPO_ROOT%"
 cd /d "%REPO_ROOT%"
 
 :: Launch the runtime launcher
-python -m launcher.css_runtime_launcher
+.venv\Scripts\python.exe -m launcher.css_runtime_launcher
 
 endlocal

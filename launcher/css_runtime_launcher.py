@@ -20,24 +20,73 @@ def is_port_in_use(port: int) -> bool:
         return s.connect_ex(('127.0.0.1', port)) == 0
 
 def check_environment() -> bool:
-    # 1. Verify files exist
+    print("=== CSS ENVIRONMENT CHECK ===")
+
+    checks_ok = True
+
+    expected_python = os.path.join(REPO_ROOT, ".venv", "Scripts", "python.exe")
+    actual_python = os.path.abspath(sys.executable)
+
+    if os.path.exists(expected_python):
+        if os.path.normcase(actual_python) == os.path.normcase(expected_python):
+            print("Virtual Environment . PASS")
+        else:
+            print("Virtual Environment . FAIL")
+            print(f"ERROR: CSS must be launched with: {expected_python}")
+            print(f"ERROR: Current Python is:       {actual_python}")
+            checks_ok = False
+    else:
+        print("Virtual Environment . FAIL")
+        print(f"ERROR: Missing virtual environment Python: {expected_python}")
+        checks_ok = False
+
     runtime_script = os.path.join(REPO_ROOT, "scripts", "css_live_dashboard.py")
     mobile_launcher = os.path.join(REPO_ROOT, "launcher", "css_mobile_launcher.py")
+    required_files = [
+        ("Runtime Script", runtime_script),
+        ("Mobile Launcher", mobile_launcher),
+    ]
 
-    if not os.path.exists(runtime_script):
-        print(f"ERROR: Runtime script not found: {runtime_script}")
-        return False
+    for label, file_path in required_files:
+        if os.path.exists(file_path):
+            print(f"{label:<20} PASS")
+        else:
+            print(f"{label:<20} FAIL")
+            print(f"ERROR: Missing required file: {file_path}")
+            checks_ok = False
 
-    if not os.path.exists(mobile_launcher):
-        print(f"ERROR: Mobile launcher not found: {mobile_launcher}")
-        return False
+    required_imports = [
+        ("python-dotenv", "dotenv"),
+        ("fastapi", "fastapi"),
+        ("uvicorn", "uvicorn"),
+        ("jinja2", "jinja2"),
+        ("pydantic", "pydantic"),
+        ("requests", "requests"),
+    ]
 
-    # 2. Verify port
+    for label, module_name in required_imports:
+        try:
+            __import__(module_name)
+            print(f"{label:<20} PASS")
+        except Exception as exc:
+            print(f"{label:<20} FAIL")
+            print(f"ERROR: Could not import {module_name}: {exc}")
+            checks_ok = False
+
     if is_port_in_use(LauncherConfig.PORT):
+        print(f"Port {LauncherConfig.PORT:<15} FAIL")
         print(f"ERROR: Port {LauncherConfig.PORT} is already in use.")
-        return False
+        checks_ok = False
+    else:
+        print(f"Port {LauncherConfig.PORT:<15} PASS")
 
-    return True
+    if checks_ok:
+        print("ENVIRONMENT READY")
+    else:
+        print("ENVIRONMENT CHECK FAILED")
+
+    print("=============================")
+    return checks_ok
 
 def output_stream_reader(stream, service_name):
     """Read output stream and print it prefixing with service name."""

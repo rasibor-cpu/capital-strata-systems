@@ -1,17 +1,24 @@
 {
   "name": "CSS Mobile Launcher",
-  "short_name": "CSS Launch",
-  "description": "One-click mobile launcher for Capital Strata Systems.",
+  "short_name": "CSS",
+  "description": "Capital Strata Systems - Autonomous Multi-Asset Trading Platform",
   "start_url": "/mobile-launcher",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#121212",
-  "theme_color": "#2196f3",
+  "orientation": "portrait",
+  "background_color": "#0B1220",
+  "theme_color": "#0B1220",
   "icons": [
     {
-      "src": "/static/css_launcher_icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "/static/branding/css_pwa_icon_192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/branding/css_pwa_icon_512.png",
+      "sizes": "512x512",
+      "type": "image/png",
       "purpose": "any maskable"
     }
   ]
