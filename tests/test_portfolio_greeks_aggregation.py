@@ -40,7 +40,7 @@ def _load_dashboard_greeks_helpers():
     return namespace
 
 
-def test_empty_positions_returns_unknown_none_portfolio_greeks():
+def test_empty_positions_returns_unavailable_none_portfolio_greeks():
     ns = _load_dashboard_greeks_helpers()
 
     assert ns["portfolio_greeks_from_positions"]([]) == {
@@ -49,7 +49,9 @@ def test_empty_positions_returns_unknown_none_portfolio_greeks():
         "net_theta": None,
         "net_vega": None,
         "net_rho": None,
-        "greeks_source": "UNKNOWN",
+        "greeks_source": "UNAVAILABLE",
+        "greeks_status": "UNAVAILABLE",
+        "greeks_reason": "NO_OPTION_GREEKS_AVAILABLE",
     }
 
 
@@ -68,7 +70,8 @@ def test_non_options_positions_are_ignored():
     assert result["net_theta"] is None
     assert result["net_vega"] is None
     assert result["net_rho"] is None
-    assert result["greeks_source"] == "UNKNOWN"
+    assert result["greeks_source"] == "UNAVAILABLE"
+    assert result["greeks_status"] == "UNAVAILABLE"
 
 
 def test_options_positions_with_numeric_greeks_aggregate_correctly():
@@ -101,6 +104,7 @@ def test_options_positions_with_numeric_greeks_aggregate_correctly():
     assert result["net_theta"] == pytest.approx(-0.25)
     assert result["net_vega"] == pytest.approx(2.0)
     assert result["net_rho"] == pytest.approx(0.07)
+    assert result["greeks_status"] == "RESOLVED"
 
 
 def test_none_greeks_are_ignored():
@@ -151,7 +155,8 @@ def test_forced_exit_options_positions_are_ignored():
 
     assert result["net_delta"] is None
     assert result["net_gamma"] is None
-    assert result["greeks_source"] == "UNKNOWN"
+    assert result["greeks_source"] == "UNAVAILABLE"
+    assert result["greeks_status"] == "UNAVAILABLE"
 
 
 def test_mixed_valid_sources_produce_mixed_source():
@@ -165,6 +170,7 @@ def test_mixed_valid_sources_produce_mixed_source():
 
     assert result["net_delta"] == pytest.approx(0.25)
     assert result["greeks_source"] == "MIXED"
+    assert result["greeks_status"] == "PARTIAL"
 
 
 def test_single_valid_source_is_preserved():
@@ -179,6 +185,7 @@ def test_single_valid_source_is_preserved():
     assert result["net_delta"] == 0.10
     assert result["net_gamma"] == 0.02
     assert result["greeks_source"] == "BLACK_SCHOLES"
+    assert result["greeks_status"] == "RESOLVED"
 
 
 def test_invalid_or_missing_source_normalizes_safely():
@@ -192,4 +199,5 @@ def test_invalid_or_missing_source_normalizes_safely():
 
     assert result["net_delta"] == 0.10
     assert result["net_gamma"] == 0.02
-    assert result["greeks_source"] == "UNKNOWN"
+    assert result["greeks_source"] == "UNAVAILABLE"
+    assert result["greeks_status"] == "PARTIAL"

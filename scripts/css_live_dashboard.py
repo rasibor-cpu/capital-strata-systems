@@ -180,7 +180,13 @@ from typing import Any, Optional
 from dotenv import load_dotenv
 
 OPTION_GREEK_FIELDS = ("delta", "gamma", "theta", "vega", "rho")
-VALID_GREEKS_SOURCES = {"BROKER", "MARKET_DATA", "BLACK_SCHOLES", "UNKNOWN"}
+VALID_GREEKS_SOURCES = {
+    "BROKER",
+    "MARKET_DATA",
+    "BLACK_SCHOLES",
+    "PAPER_MODEL_FALLBACK",
+    "UNAVAILABLE",
+}
 PORTFOLIO_GREEK_FIELDS = {
     "delta": "net_delta",
     "gamma": "net_gamma",
@@ -213,24 +219,42 @@ def default_option_greeks() -> dict[str, Any]:
         "theta": None,
         "vega": None,
         "rho": None,
-        "greeks_source": "UNKNOWN",
+        "greeks_source": "UNAVAILABLE",
+        "greeks_status": "UNAVAILABLE",
+        "greeks_reason": "NO_CANONICAL_GREEKS",
     }
 
 
 def normalize_option_greeks(greeks: dict[str, Any] | None = None) -> dict[str, Any]:
     raw = greeks or {}
-    source = str(raw.get("greeks_source", "UNKNOWN") or "UNKNOWN").upper()
+    source = str(raw.get("greeks_source", "UNAVAILABLE") or "UNAVAILABLE").upper()
     if source not in VALID_GREEKS_SOURCES:
-        source = "UNKNOWN"
+        source = "UNAVAILABLE"
 
     normalized = default_option_greeks()
     normalized["greeks_source"] = source
+    normalized["greeks_status"] = str(
+        raw.get("greeks_status", normalized["greeks_status"]) or normalized["greeks_status"]
+    ).upper()
+    normalized["greeks_reason"] = str(
+        raw.get("greeks_reason", normalized["greeks_reason"]) or normalized["greeks_reason"]
+    ).upper()
 
-    if source == "UNKNOWN":
-        return normalized
-
+    numeric_count = 0
     for field in OPTION_GREEK_FIELDS:
-        normalized[field] = raw.get(field)
+        value = raw.get(field)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        normalized[field] = float(value)
+        numeric_count += 1
+
+    if numeric_count > 0:
+        if source == "UNAVAILABLE":
+            normalized["greeks_status"] = "PARTIAL"
+            normalized["greeks_reason"] = "GREEKS_VALUES_PRESENT_SOURCE_UNAVAILABLE"
+        else:
+            normalized["greeks_status"] = "RESOLVED"
+            normalized["greeks_reason"] = "CANONICAL_GREEKS_AVAILABLE"
     return normalized
 
 
@@ -238,7 +262,68 @@ def attach_default_greeks_to_option_position(position: dict[str, Any]) -> dict[s
     if str(position.get("asset_class", "")).upper() != "OPTIONS":
         return position
 
-    position.update(normalize_option_greeks(position))
+    normalized = normalize_option_greeks(position)
+    if normalized.get("greeks_status") != "RESOLVED":
+        symbol = str(position.get("symbol", "") or "").strip().upper()
+        parts = symbol.split("-")
+        option_type = parts[1] if len(parts) >= 2 else ""
+        strike_value = None
+        if len(parts) >= 3:
+            try:
+                strike_value = float(parts[2])
+            except Exception:
+                strike_value = None
+
+        broker_mode = str(position.get("broker_mode", "paper") or "paper").strip().lower()
+        is_paper_mode = broker_mode != "live"
+        if option_type in {"C", "P"} and is_paper_mode:
+            try:
+                spot = float(
+                    position.get("mark_price")
+                    or position.get("current_price")
+                    or position.get("entry_price")
+                    or strike_value
+                    or 100.0
+                )
+            except Exception:
+                spot = float(strike_value or 100.0)
+
+            if strike_value is not None and strike_value > 0:
+                moneyness = (spot - strike_value) / strike_value
+            else:
+                moneyness = 0.0
+
+            bounded = max(-1.0, min(1.0, moneyness))
+            call_delta = max(0.05, min(0.95, 0.50 + 0.35 * bounded))
+            if option_type == "C":
+                delta = call_delta
+                rho = max(0.001, 0.010 + 0.005 * bounded)
+            else:
+                delta = call_delta - 1.0
+                rho = min(-0.001, -0.010 + 0.005 * bounded)
+
+            gamma = max(0.005, 0.025 - 0.015 * abs(bounded))
+            theta = -max(0.002, 0.010 + 0.012 * abs(bounded))
+            vega = max(0.010, 0.090 - 0.050 * abs(bounded))
+
+            normalized.update(
+                {
+                    "delta": round(delta, 6),
+                    "gamma": round(gamma, 6),
+                    "theta": round(theta, 6),
+                    "vega": round(vega, 6),
+                    "rho": round(rho, 6),
+                    "greeks_source": "PAPER_MODEL_FALLBACK",
+                    "greeks_status": "MODEL_FALLBACK",
+                    "greeks_reason": "PAPER_OPTION_SYNTHETIC_MODEL",
+                }
+            )
+        else:
+            normalized["greeks_source"] = "UNAVAILABLE"
+            normalized["greeks_status"] = "UNAVAILABLE"
+            normalized["greeks_reason"] = "NON_CANONICAL_OPTION_SYMBOL"
+
+    position.update(normalized)
     return position
 
 
@@ -305,9 +390,9 @@ def portfolio_greeks_from_positions(positions: list[dict[str, Any]] | None) -> d
         if position.get("forced_exit"):
             continue
 
-        source = str(position.get("greeks_source", "UNKNOWN") or "UNKNOWN").upper()
+        source = str(position.get("greeks_source", "UNAVAILABLE") or "UNAVAILABLE").upper()
         if source not in VALID_GREEKS_SOURCES:
-            source = "UNKNOWN"
+            source = "UNAVAILABLE"
 
         position_contributed = False
         for field in OPTION_GREEK_FIELDS:
@@ -328,22 +413,32 @@ def portfolio_greeks_from_positions(positions: list[dict[str, Any]] | None) -> d
     }
 
     if not any(has_numeric.values()):
-        portfolio["greeks_source"] = "UNKNOWN"
+        portfolio["greeks_source"] = "UNAVAILABLE"
+        portfolio["greeks_status"] = "UNAVAILABLE"
+        portfolio["greeks_reason"] = "NO_OPTION_GREEKS_AVAILABLE"
     elif len(contributing_sources) > 1:
         portfolio["greeks_source"] = "MIXED"
+        portfolio["greeks_status"] = "PARTIAL"
+        portfolio["greeks_reason"] = "MULTI_SOURCE_AGGREGATION"
     else:
-        portfolio["greeks_source"] = next(iter(contributing_sources), "UNKNOWN")
+        portfolio["greeks_source"] = next(iter(contributing_sources), "UNAVAILABLE")
+        if portfolio["greeks_source"] == "UNAVAILABLE":
+            portfolio["greeks_status"] = "PARTIAL"
+            portfolio["greeks_reason"] = "NUMERIC_GREEKS_SOURCE_UNAVAILABLE"
+        else:
+            portfolio["greeks_status"] = "RESOLVED"
+            portfolio["greeks_reason"] = "KNOWN_OPTION_GREEKS_AGGREGATED"
 
     return portfolio
 
 
 def format_greeks_dashboard_value(value: Any) -> str:
     if isinstance(value, bool) or value is None:
-        return "UNKNOWN"
+        return "N/A"
     if isinstance(value, (int, float)):
         return f"{float(value):.4f}"
     text = str(value).strip()
-    return text if text else "UNKNOWN"
+    return text if text else "N/A"
 
 
 def option_position_greeks_dashboard_lines(positions: list[dict[str, Any]] | None) -> list[str]:
@@ -361,9 +456,11 @@ def option_position_greeks_dashboard_lines(positions: list[dict[str, Any]] | Non
         return lines
 
     for position in options_positions:
-        source = str(position.get("greeks_source", "UNKNOWN") or "UNKNOWN").upper()
+        source = str(position.get("greeks_source", "UNAVAILABLE") or "UNAVAILABLE").upper()
         if source not in VALID_GREEKS_SOURCES:
-            source = "UNKNOWN"
+            source = "UNAVAILABLE"
+        status = str(position.get("greeks_status", "UNAVAILABLE") or "UNAVAILABLE").upper()
+        reason = str(position.get("greeks_reason", "NONE") or "NONE").upper()
 
         lines.append(
             f"{position.get('position_id', 'UNKNOWN')} {position.get('symbol', 'UNKNOWN')} | "
@@ -372,7 +469,9 @@ def option_position_greeks_dashboard_lines(positions: list[dict[str, Any]] | Non
             f"Theta {format_greeks_dashboard_value(position.get('theta'))} | "
             f"Vega {format_greeks_dashboard_value(position.get('vega'))} | "
             f"Rho {format_greeks_dashboard_value(position.get('rho'))} | "
-            f"Greeks Source {source}"
+            f"Greeks Source {source} | "
+            f"Greeks Status {status} | "
+            f"Greeks Reason {reason}"
         )
 
     lines.append("=== END OPTIONS POSITION GREEKS ===")
@@ -381,7 +480,9 @@ def option_position_greeks_dashboard_lines(positions: list[dict[str, Any]] | Non
 
 def portfolio_greeks_dashboard_lines(positions: list[dict[str, Any]] | None) -> list[str]:
     portfolio = portfolio_greeks_from_positions(positions)
-    source = str(portfolio.get("greeks_source", "UNKNOWN") or "UNKNOWN").upper()
+    source = str(portfolio.get("greeks_source", "UNAVAILABLE") or "UNAVAILABLE").upper()
+    status = str(portfolio.get("greeks_status", "UNAVAILABLE") or "UNAVAILABLE").upper()
+    reason = str(portfolio.get("greeks_reason", "NONE") or "NONE").upper()
 
     return [
         "=== PORTFOLIO GREEKS ===",
@@ -391,7 +492,9 @@ def portfolio_greeks_dashboard_lines(positions: list[dict[str, Any]] | None) -> 
             f"Net Theta {format_greeks_dashboard_value(portfolio.get('net_theta'))} | "
             f"Net Vega {format_greeks_dashboard_value(portfolio.get('net_vega'))} | "
             f"Net Rho {format_greeks_dashboard_value(portfolio.get('net_rho'))} | "
-            f"Greeks Source {source}"
+            f"Greeks Source {source} | "
+            f"Greeks Status {status} | "
+            f"Greeks Reason {reason}"
         ),
         "=== END PORTFOLIO GREEKS ===",
     ]
@@ -2300,7 +2403,7 @@ if str(SELECTED_BROKER_MODE).lower() == "live":
 
         print("[SYSTEM HALT] Live trading disabled until real broker balance is loaded.")
         
-        # HARD STOP — prevent fake execution
+        # HARD STOP â€” prevent fake execution
         import sys
         sys.exit(1)
 
@@ -2547,7 +2650,7 @@ def attempt_oanda_fx_execution(symbol: str, expected_price: float | None = None)
             units=FX_LIVE_UNITS,
             order_type="MARKET",
             price_bound=price_bound_val,
-            # ── Live firewall parameters ──────────────────────────────────────
+            # â”€â”€ Live firewall parameters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             # broker_mode: SELECTED_BROKER_MODE is the operator-confirmed mode
             # (paper or live) already validated by select_broker_execution_config().
             broker_mode=str(SELECTED_BROKER_MODE).lower(),
@@ -4628,3 +4731,4 @@ def finalize_account_session() -> None:
 
     except Exception as e:
         print(f"[ACCOUNT SETTLEMENT ERROR] {e}")
+

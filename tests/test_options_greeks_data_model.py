@@ -75,7 +75,7 @@ def _load_dashboard_slice(tmp_path):
     return namespace
 
 
-def test_default_greeks_are_unknown_none_values(tmp_path):
+def test_default_greeks_are_unavailable_none_values(tmp_path):
     ns = _load_dashboard_slice(tmp_path)
 
     assert ns["default_option_greeks"]() == {
@@ -84,17 +84,20 @@ def test_default_greeks_are_unknown_none_values(tmp_path):
         "theta": None,
         "vega": None,
         "rho": None,
-        "greeks_source": "UNKNOWN",
+        "greeks_source": "UNAVAILABLE",
+        "greeks_status": "UNAVAILABLE",
+        "greeks_reason": "NO_CANONICAL_GREEKS",
     }
 
 
-def test_invalid_greeks_source_normalizes_to_unknown(tmp_path):
+def test_invalid_greeks_source_normalizes_to_unavailable(tmp_path):
     ns = _load_dashboard_slice(tmp_path)
 
     normalized = ns["normalize_option_greeks"]({"delta": 0.5, "greeks_source": "BAD"})
 
-    assert normalized["greeks_source"] == "UNKNOWN"
-    assert normalized["delta"] is None
+    assert normalized["greeks_source"] == "UNAVAILABLE"
+    assert normalized["delta"] == 0.5
+    assert normalized["greeks_status"] == "PARTIAL"
 
 
 def test_valid_greeks_source_is_preserved(tmp_path):
@@ -104,6 +107,7 @@ def test_valid_greeks_source_is_preserved(tmp_path):
 
     assert normalized["greeks_source"] == "BROKER"
     assert normalized["delta"] == 0.5
+    assert normalized["greeks_status"] == "RESOLVED"
 
 
 def test_options_register_position_receives_greeks(tmp_path):
@@ -112,8 +116,9 @@ def test_options_register_position_receives_greeks(tmp_path):
 
     position = engine.register_position("OPTIONS", "SPY-C", 12.0, 0.7)
 
-    assert position["greeks_source"] == "UNKNOWN"
-    assert all(position[field] is None for field in ("delta", "gamma", "theta", "vega", "rho"))
+    assert position["greeks_source"] in {"PAPER_MODEL_FALLBACK", "UNAVAILABLE"}
+    assert "greeks_status" in position
+    assert "greeks_reason" in position
 
 
 def test_non_options_register_position_do_not_receive_greeks(tmp_path):
@@ -133,8 +138,9 @@ def test_legacy_options_position_missing_greeks_normalizes_safely(tmp_path):
 
     normalized = ns["attach_default_greeks_to_option_position"](position)
 
-    assert normalized["greeks_source"] == "UNKNOWN"
-    assert all(normalized[field] is None for field in ("delta", "gamma", "theta", "vega", "rho"))
+    assert normalized["greeks_source"] in {"PAPER_MODEL_FALLBACK", "UNAVAILABLE"}
+    assert "greeks_status" in normalized
+    assert "greeks_reason" in normalized
 
 
 def test_closed_trade_ledger_preserves_options_greeks_when_present(tmp_path):

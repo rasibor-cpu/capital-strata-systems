@@ -67,19 +67,21 @@ def _load_dashboard_display_helpers(tmp_path=None, positions=None):
     return namespace
 
 
-def test_unknown_greeks_render_as_unknown(tmp_path):
+def test_unknown_greeks_render_as_unavailable(tmp_path):
     ns = _load_dashboard_display_helpers(tmp_path)
     lines = ns["option_position_greeks_dashboard_lines"](
         [{"asset_class": "OPTIONS", "position_id": "POS-1", "symbol": "SPY-C"}]
     )
 
     rendered = "\n".join(lines)
-    assert "Delta UNKNOWN" in rendered
-    assert "Gamma UNKNOWN" in rendered
-    assert "Theta UNKNOWN" in rendered
-    assert "Vega UNKNOWN" in rendered
-    assert "Rho UNKNOWN" in rendered
-    assert "Greeks Source UNKNOWN" in rendered
+    assert "Delta N/A" in rendered
+    assert "Gamma N/A" in rendered
+    assert "Theta N/A" in rendered
+    assert "Vega N/A" in rendered
+    assert "Rho N/A" in rendered
+    assert "Greeks Source PAPER_MODEL_FALLBACK" in rendered or "Greeks Source UNAVAILABLE" in rendered
+    assert "Greeks Status" in rendered
+    assert "Greeks Reason" in rendered
     assert "0.00" not in rendered
 
 
@@ -108,6 +110,7 @@ def test_numeric_greeks_render_correctly(tmp_path):
     assert "Vega 0.1100" in rendered
     assert "Rho 0.0100" in rendered
     assert "Greeks Source MARKET_DATA" in rendered
+    assert "Greeks Status" in rendered
 
 
 def test_portfolio_greeks_render_correctly(tmp_path):
@@ -123,9 +126,10 @@ def test_portfolio_greeks_render_correctly(tmp_path):
     assert "Net Delta 0.2500" in rendered
     assert "Net Gamma 0.1000" in rendered
     assert "Net Theta -0.0400" in rendered
-    assert "Net Vega UNKNOWN" in rendered
-    assert "Net Rho UNKNOWN" in rendered
+    assert "Net Vega N/A" in rendered
+    assert "Net Rho N/A" in rendered
     assert "Greeks Source BROKER" in rendered
+    assert "Greeks Status RESOLVED" in rendered
 
 
 def test_non_options_positions_do_not_display_position_greeks(tmp_path):

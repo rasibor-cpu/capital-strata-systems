@@ -538,6 +538,67 @@
             flex-wrap: wrap;
             margin-top: 6px;
         }
+        .quick-nav {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .quick-nav button {
+            min-height: 38px;
+            border-radius: 6px;
+            border: 1px solid var(--border-strong);
+            background: #101312;
+            color: var(--text-secondary);
+            font-size: 11px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .quick-nav button:hover {
+            color: #60a5fa;
+            border-color: #60a5fa;
+        }
+        .loading-indicator {
+            margin-bottom: 10px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            border: 1px dashed var(--border-strong);
+            border-radius: 6px;
+            padding: 7px 9px;
+        }
+        .alert-controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        .alert-controls input,
+        .alert-controls select {
+            width: 100%;
+            min-height: 36px;
+            border-radius: 6px;
+            border: 1px solid var(--border-strong);
+            background: var(--surface-2);
+            color: var(--text-primary);
+            padding: 6px 8px;
+            font-size: 12px;
+        }
+        .alert-ack-btn {
+            margin-top: 8px;
+            border: 1px solid var(--border-strong);
+            border-radius: 6px;
+            background: #101312;
+            color: var(--text-secondary);
+            font-size: 11px;
+            font-weight: 700;
+            padding: 6px 8px;
+            cursor: pointer;
+        }
+        .alert-ack-btn.acknowledged {
+            border-color: var(--success-border);
+            background: var(--success-soft);
+            color: var(--success);
+        }
         .decision-console-header {
             display: flex;
             justify-content: space-between;
@@ -695,6 +756,13 @@
 
     <div id="mobile-network-warning-banner" class="network-banner" aria-live="polite"></div>
     <div id="mobile-reconnect-banner" class="network-banner" aria-live="polite"></div>
+    <div id="mobile-loading-indicator" class="loading-indicator">Loading operational intelligence...</div>
+    <div class="quick-nav" aria-label="Quick Operations Navigation">
+        <button type="button" data-quick-screen="home" id="quick-nav-runtime">Runtime</button>
+        <button type="button" data-quick-screen="trade" id="quick-nav-trade">Trade</button>
+        <button type="button" data-quick-screen="positions" id="quick-nav-portfolio">Portfolio</button>
+        <button type="button" data-quick-screen="alerts" id="quick-nav-alerts">Alerts</button>
+    </div>
 
     <!-- ══════════════════════════════════════════════
          TAB: HOME
@@ -751,6 +819,14 @@
             <div class="status-row"><span>Provider Health</span><strong><span id="provider-health-badge" class="badge badge-info">UNKNOWN</span></strong></div>
             <div class="status-row"><span>Runtime Latency</span><strong id="runtime-latency-ms">N/A</strong></div>
             <div class="status-row"><span>Connection</span><strong><span id="connection-status-badge" class="connection-badge">CHECKING</span></strong></div>
+        </div>
+
+        <div class="card" id="performance-dashboard-card">
+            <div class="card-header">Performance Dashboard</div>
+            <div class="status-row"><span>Cycle Execution Time</span><strong id="perf-cycle-exec-time">N/A</strong></div>
+            <div class="status-row"><span>API/Feed Response Time</span><strong id="perf-api-response-time">N/A</strong></div>
+            <div class="status-row"><span>Feed Update Rate</span><strong id="perf-feed-update-rate">N/A</strong></div>
+            <div class="status-row"><span>Provider Summary</span><strong id="perf-provider-summary">UNKNOWN</strong></div>
         </div>
 
         <!-- Account summary -->
@@ -852,6 +928,14 @@
                     {% endif %}
                 </div>
             {% endif %}
+        </div>
+
+        <div class="card" id="portfolio-analytics-card">
+            <div class="card-header">Portfolio Analytics</div>
+            <div class="status-row"><span>Exposure by Asset Class</span><strong id="pa-exposure-by-asset">N/A</strong></div>
+            <div class="status-row"><span>Open Position Distribution</span><strong id="pa-open-distribution">N/A</strong></div>
+            <div class="status-row"><span>PnL Trend</span><strong id="pa-pnl-trend">N/A</strong></div>
+            <div class="status-row"><span>Risk/Concentration</span><strong id="pa-risk-concentration">N/A</strong></div>
         </div>
 
     </div><!-- /screen-positions -->
@@ -1427,10 +1511,27 @@
                     <span class="badge badge-success">CLEAR</span>
                 {% endif %}
             </div>
+            <div class="alert-controls">
+                <input id="alert-filter-input" type="text" placeholder="Search alerts">
+                <select id="alert-filter-severity">
+                    <option value="ALL">All Severities</option>
+                    <option value="CRITICAL">Critical</option>
+                    <option value="WARNING">Warning</option>
+                    <option value="INFO">Info</option>
+                </select>
+                <select id="alert-filter-source">
+                    <option value="ALL">All Sources</option>
+                    {% for alert in alerts|unique(attribute='source') %}
+                    <option value="{{ alert.source if alert.source else 'UNKNOWN' }}">{{ alert.source if alert.source else 'UNKNOWN' }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="status-row"><span>Grouped by Severity</span><strong id="alert-group-severity">N/A</strong></div>
+            <div class="status-row"><span>Grouped by Source</span><strong id="alert-group-source">N/A</strong></div>
             {% if alerts %}
                 {% for alert in alerts %}
                 <div class="list-item">
-                    <details class="alert-details" id="alert-item-{{ loop.index }}">
+                    <details class="alert-details" id="alert-item-{{ loop.index }}" data-alert-severity="{{ alert.severity if alert.severity else 'INFO' }}" data-alert-source="{{ alert.source if alert.source else 'UNKNOWN' }}" data-alert-message="{{ alert.message if alert.message else '' }}">
                         <summary class="alert-summary">
                             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
                                 <span class="badge
@@ -1455,6 +1556,7 @@
                             <div>Message Details</div>
                             <pre style="white-space:pre-wrap; font-size:11px; color:var(--text-secondary);">{{ alert | tojson(indent=2) }}</pre>
                         </div>
+                        <button type="button" class="alert-ack-btn" data-alert-ack-key="{{ alert.timestamp if alert.timestamp else loop.index }}::{{ alert.source if alert.source else 'UNKNOWN' }}::{{ alert.severity if alert.severity else 'INFO' }}">Mark Acknowledged</button>
                     </details>
                 </div>
                 {% endfor %}
@@ -1522,8 +1624,15 @@
         "use strict";
         var groupedUniverse = {{ canonical_grouped_universe | tojson }};
         var topOpportunities = {{ top_opportunities | tojson }};
+        var chartData = {{ chart_data | tojson }};
+        var accountSnapshot = {{ account | tojson }};
+        var tradeSnapshot = {{ trade | tojson }};
+        var portfolioSummarySnapshot = {{ portfolio_summary | tojson }};
+        var runtimeSnapshot = {{ runtime | tojson }};
+        var alertsSnapshot = {{ alerts | tojson }};
         var tradeTicketFeedData = null;
         var tradeTicketSymbolLookup = {};
+        var lastApiResponseMs = null;
 
         function formatMoney(value) {
             var number = Number(value);
@@ -1595,6 +1704,167 @@
             applyFreshnessPill("runtime-stale-indicator", state);
             applyFreshnessPill("ps-stale-indicator", state);
             applyFreshnessPill("api-feed-freshness", state);
+        }
+
+        function setLoadingIndicator(message) {
+            var node = document.getElementById("mobile-loading-indicator");
+            if (!node) {
+                return;
+            }
+            node.textContent = message;
+        }
+
+        function renderPerformanceDashboard() {
+            var lastUpdate = runtimeSnapshot && runtimeSnapshot.last_update;
+            var cycleAge = timestampAgeSeconds(lastUpdate);
+            if (cycleAge == null || cycleAge < 0) {
+                setText("perf-cycle-exec-time", "N/A");
+            } else {
+                setText("perf-cycle-exec-time", cycleAge + " s (age proxy)");
+            }
+
+            if (typeof lastApiResponseMs === "number") {
+                setText("perf-api-response-time", lastApiResponseMs + " ms");
+            } else {
+                setText("perf-api-response-time", "N/A");
+            }
+
+            var freshness = document.getElementById("api-feed-freshness");
+            var state = freshness ? freshness.textContent : "N/A";
+            if (state === "ACTIVE") {
+                setText("perf-feed-update-rate", "Near real-time");
+            } else if (state === "STALE") {
+                setText("perf-feed-update-rate", "Delayed");
+            } else {
+                setText("perf-feed-update-rate", "Unknown");
+            }
+
+            var providerBadge = document.getElementById("provider-health-badge");
+            var providerText = providerBadge ? providerBadge.textContent : "UNKNOWN";
+            var errorCount = Array.isArray(tradeTicketFeedData && tradeTicketFeedData.errors) ? tradeTicketFeedData.errors.length : 0;
+            setText("perf-provider-summary", providerText + " | errors=" + errorCount);
+        }
+
+        function renderPortfolioAnalytics() {
+            var assets = chartData && chartData.assets ? chartData.assets : {};
+            var exposureEntries = Object.keys(assets).map(function (symbol) {
+                return symbol + ":" + Number(assets[symbol] || 0).toFixed(2);
+            });
+            setText("pa-exposure-by-asset", exposureEntries.length ? exposureEntries.join(" | ") : "N/A");
+
+            var openCount = Number((tradeSnapshot && tradeSnapshot.open_trades_count) || 0);
+            var closedCount = Number((tradeSnapshot && tradeSnapshot.closed_trades_count) || 0);
+            setText("pa-open-distribution", "Open " + openCount + " | Closed " + closedCount);
+
+            var totalPnl = Number((accountSnapshot && accountSnapshot.total_pnl) || 0);
+            var openPnl = Number((accountSnapshot && accountSnapshot.open_pnl) || 0);
+            var realizedPnl = Number((accountSnapshot && accountSnapshot.realized_pnl) || 0);
+            var trend = totalPnl > 0 ? "UP" : (totalPnl < 0 ? "DOWN" : "FLAT");
+            setText("pa-pnl-trend", trend + " | total=" + totalPnl.toFixed(2) + " | open=" + openPnl.toFixed(2) + " | realized=" + realizedPnl.toFixed(2));
+
+            var riskScore = Number((portfolioSummarySnapshot && portfolioSummarySnapshot.summary && portfolioSummarySnapshot.summary.risk_score) || 0);
+            var concentration = Number((portfolioSummarySnapshot && portfolioSummarySnapshot.summary && portfolioSummarySnapshot.summary.diversification) || 0);
+            setText("pa-risk-concentration", "Risk=" + riskScore.toFixed(3) + " | Diversification=" + concentration.toFixed(3));
+        }
+
+        function renderAlertGrouping() {
+            var details = Array.prototype.slice.call(document.querySelectorAll(".alert-details"));
+            if (!details.length) {
+                setText("alert-group-severity", "No active alerts");
+                setText("alert-group-source", "No active alerts");
+                return;
+            }
+
+            var severityCounts = {};
+            var sourceCounts = {};
+            details.forEach(function (detail) {
+                var sev = String(detail.getAttribute("data-alert-severity") || "INFO").toUpperCase();
+                var src = String(detail.getAttribute("data-alert-source") || "UNKNOWN").toUpperCase();
+                severityCounts[sev] = (severityCounts[sev] || 0) + 1;
+                sourceCounts[src] = (sourceCounts[src] || 0) + 1;
+            });
+
+            var sevText = Object.keys(severityCounts).sort().map(function (k) { return k + ":" + severityCounts[k]; }).join(" | ");
+            var srcText = Object.keys(sourceCounts).sort().map(function (k) { return k + ":" + sourceCounts[k]; }).join(" | ");
+            setText("alert-group-severity", sevText || "N/A");
+            setText("alert-group-source", srcText || "N/A");
+        }
+
+        function setupAlertFiltering() {
+            var input = document.getElementById("alert-filter-input");
+            var sev = document.getElementById("alert-filter-severity");
+            var src = document.getElementById("alert-filter-source");
+            var details = Array.prototype.slice.call(document.querySelectorAll(".alert-details"));
+            if (!details.length) {
+                return;
+            }
+
+            function applyFilters() {
+                var query = String(input && input.value ? input.value : "").trim().toLowerCase();
+                var wantedSev = String(sev && sev.value ? sev.value : "ALL").toUpperCase();
+                var wantedSrc = String(src && src.value ? src.value : "ALL").toUpperCase();
+                details.forEach(function (detail) {
+                    var message = String(detail.getAttribute("data-alert-message") || "").toLowerCase();
+                    var severity = String(detail.getAttribute("data-alert-severity") || "INFO").toUpperCase();
+                    var source = String(detail.getAttribute("data-alert-source") || "UNKNOWN").toUpperCase();
+                    var visible = true;
+                    if (query && message.indexOf(query) < 0) {
+                        visible = false;
+                    }
+                    if (wantedSev !== "ALL" && severity !== wantedSev) {
+                        visible = false;
+                    }
+                    if (wantedSrc !== "ALL" && source !== wantedSrc) {
+                        visible = false;
+                    }
+                    var row = detail.closest(".list-item");
+                    if (row) {
+                        row.style.display = visible ? "" : "none";
+                    }
+                });
+            }
+
+            if (input) {
+                input.addEventListener("input", applyFilters);
+            }
+            if (sev) {
+                sev.addEventListener("change", applyFilters);
+            }
+            if (src) {
+                src.addEventListener("change", applyFilters);
+            }
+            applyFilters();
+        }
+
+        function setupAlertAcknowledgement() {
+            var storageKey = "css_alert_ack_state";
+            var acked = {};
+            try {
+                acked = JSON.parse(window.localStorage.getItem(storageKey) || "{}");
+            } catch (err) {
+                acked = {};
+            }
+
+            document.querySelectorAll(".alert-ack-btn").forEach(function (btn) {
+                var key = String(btn.getAttribute("data-alert-ack-key") || "");
+                if (acked[key]) {
+                    btn.classList.add("acknowledged");
+                    btn.textContent = "Acknowledged";
+                }
+                btn.addEventListener("click", function () {
+                    if (!key) {
+                        return;
+                    }
+                    acked[key] = true;
+                    try {
+                        window.localStorage.setItem(storageKey, JSON.stringify(acked));
+                    } catch (err) {
+                        // ignore storage failures
+                    }
+                    btn.classList.add("acknowledged");
+                    btn.textContent = "Acknowledged";
+                });
+            });
         }
 
         function formatTimestamp(value) {
@@ -1780,9 +2050,13 @@
             setText("tt-paper-live-mode", paperLiveMode);
             setText("tt-engine-mode", engineMode);
             setText("tt-symbol-count", Array.isArray(availableSymbols) ? availableSymbols.length : symbols.length);
+            runtimeSnapshot = runtime;
+            accountSnapshot = account;
             updateHeartbeatAge(runtime.last_heartbeat);
             updateProviderHealth(status, tradeTicketFeedData.errors || []);
             updateRefreshDisplays(canonicalTimestamp);
+            renderPerformanceDashboard();
+            renderPortfolioAnalytics();
 
             var degradedWarning = document.getElementById("tt-degraded-warning");
             if (degradedWarning) {
@@ -1800,6 +2074,7 @@
 
         function fetchTradeTicketData() {
             var start = (window.performance && window.performance.now) ? window.performance.now() : Date.now();
+            setLoadingIndicator("Loading operational intelligence...");
             fetch("/mobile/trade-ticket-data")
                 .then(function (response) {
                     if (!response.ok) {
@@ -1809,10 +2084,12 @@
                 })
                 .then(function (payload) {
                     var end = (window.performance && window.performance.now) ? window.performance.now() : Date.now();
-                    setText("runtime-latency-ms", Math.max(0, Math.round(end - start)) + " ms");
+                    lastApiResponseMs = Math.max(0, Math.round(end - start));
+                    setText("runtime-latency-ms", lastApiResponseMs + " ms");
                     updateConnectionStatus(true);
                     showNetworkBanner("reconnect", "Connection restored. Auto-reconnected and refreshed.");
                     renderTradeTicketData(payload || {});
+                    setLoadingIndicator("Operational intelligence loaded.");
                 })
                 .catch(function () {
                     setStatusBadge("NETWORK");
@@ -1823,6 +2100,7 @@
                     setText("runtime-latency-ms", "N/A");
                     updateConnectionStatus(false);
                     showNetworkBanner("offline", "Offline/network warning: feed updates paused. Waiting for reconnection...");
+                    setLoadingIndicator("Operational intelligence offline. Waiting for reconnection...");
                 });
         }
 
@@ -2275,6 +2553,11 @@
                     showScreen(btn.getAttribute("data-screen"));
                 });
             });
+            document.querySelectorAll("[data-quick-screen]").forEach(function (btn) {
+                btn.addEventListener("click", function () {
+                    showScreen(btn.getAttribute("data-quick-screen"));
+                });
+            });
 
             var validScreens = ["home", "positions", "execution", "trade", "risk", "alerts"];
             var hash = window.location.hash.replace("#", "");
@@ -2297,6 +2580,11 @@
             setupTradeTicket(groupedUniverse || {}, topOpportunities || {});
             fetchTradeTicketData();
             applyAlertTimestampFormatting();
+            setupAlertFiltering();
+            setupAlertAcknowledgement();
+            renderAlertGrouping();
+            renderPortfolioAnalytics();
+            renderPerformanceDashboard();
             updateConnectionStatus(Boolean(window.navigator && window.navigator.onLine !== false));
 
             fetch("/mobile/trading-universe/grouped")

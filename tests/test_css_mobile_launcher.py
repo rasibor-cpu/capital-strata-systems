@@ -751,6 +751,55 @@ def test_mobile_resilience_banners_and_state_hooks_present(launcher_temp_dir):
     assert "window.addEventListener(\"online\"" in html
 
 
+def test_mobile_performance_dashboard_section_present(launcher_temp_dir):
+    response = client.get("/mobile")
+    assert response.status_code == 200
+    html = response.text
+
+    assert 'id="performance-dashboard-card"' in html
+    assert 'id="perf-cycle-exec-time"' in html
+    assert 'id="perf-api-response-time"' in html
+    assert 'id="perf-feed-update-rate"' in html
+    assert 'id="perf-provider-summary"' in html
+
+
+def test_mobile_portfolio_analytics_section_present(launcher_temp_dir):
+    response = client.get("/mobile")
+    assert response.status_code == 200
+    html = response.text
+
+    assert 'id="portfolio-analytics-card"' in html
+    assert 'id="pa-exposure-by-asset"' in html
+    assert 'id="pa-open-distribution"' in html
+    assert 'id="pa-pnl-trend"' in html
+    assert 'id="pa-risk-concentration"' in html
+
+
+def test_alert_intelligence_controls_present(launcher_temp_dir):
+    response = client.get("/mobile")
+    assert response.status_code == 200
+    html = response.text
+
+    assert 'id="alert-filter-input"' in html
+    assert 'id="alert-filter-severity"' in html
+    assert 'id="alert-filter-source"' in html
+    assert 'id="alert-group-severity"' in html
+    assert 'id="alert-group-source"' in html
+    assert "data-alert-ack-key" in html or "No alerts in the current window" in html
+
+
+def test_operator_productivity_quick_nav_and_loading_present(launcher_temp_dir):
+    response = client.get("/mobile")
+    assert response.status_code == 200
+    html = response.text
+
+    assert 'id="mobile-loading-indicator"' in html
+    assert 'id="quick-nav-runtime"' in html
+    assert 'id="quick-nav-trade"' in html
+    assert 'id="quick-nav-portfolio"' in html
+    assert 'id="quick-nav-alerts"' in html
+
+
 def test_trade_tab_render_does_not_execute_trade_request(launcher_temp_dir):
     import launcher.css_mobile_launcher as mod
 
