@@ -514,6 +514,21 @@
             color: var(--text-secondary);
             background: #111512;
         }
+        .advanced-panel {
+            margin-top: 10px;
+            border: 1px dashed var(--border-strong);
+            border-radius: 6px;
+            padding: 8px;
+            background: #0f1412;
+        }
+        .advanced-panel summary {
+            cursor: pointer;
+            color: var(--text-secondary);
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+        }
 
     </style>
 </head>
@@ -1030,7 +1045,11 @@
 
             <div class="card" style="margin-top:10px;">
                 <div class="card-header">Engine Outputs (Read-Only)</div>
-                <pre id="decision-engine-outputs" style="white-space:pre-wrap; font-size:11px; color:var(--text-secondary);">{{ opportunity_summary.engine_outputs | tojson(indent=2) if opportunity_summary.status == 'OK' else '{}' }}</pre>
+                <div style="font-size:12px; color:var(--text-secondary);">Diagnostics are available in Advanced to keep mobile view readable.</div>
+                <details id="trade-diagnostics-advanced" class="advanced-panel">
+                    <summary>Advanced Diagnostics JSON</summary>
+                    <pre id="decision-engine-outputs" style="white-space:pre-wrap; font-size:11px; color:var(--text-secondary);">{{ opportunity_summary.engine_outputs | tojson(indent=2) if opportunity_summary.status == 'OK' else '{}' }}</pre>
+                </details>
             </div>
 
             <form action="/mobile/trade/paper" method="post" onsubmit="return confirmPaperTradeRequest()">
@@ -1329,6 +1348,11 @@
             node.textContent = String(value == null ? "" : value);
         }
 
+        function hasValue(value) {
+            var cleaned = String(value == null ? "" : value).trim().toLowerCase();
+            return cleaned !== "" && cleaned !== "none" && cleaned !== "null" && cleaned !== "unknown" && cleaned !== "n/a" && cleaned !== "na";
+        }
+
         function setStatusBadge(status) {
             var badge = document.getElementById("tt-status-badge");
             if (!badge) {
@@ -1395,17 +1419,23 @@
             var account = (tradeTicketFeedData && tradeTicketFeedData.account) || {};
             var runtime = (tradeTicketFeedData && tradeTicketFeedData.runtime) || {};
             var broker = (tradeTicketFeedData && tradeTicketFeedData.broker) || {};
+            var mode = (tradeTicketFeedData && tradeTicketFeedData.mode) || {};
+            var engine = (tradeTicketFeedData && tradeTicketFeedData.engine) || {};
             var symbols = Array.isArray(tradeTicketFeedData && tradeTicketFeedData.symbols) ? tradeTicketFeedData.symbols : [];
             var availableSymbols = Array.isArray(tradeTicketFeedData && tradeTicketFeedData.available_symbols) ? tradeTicketFeedData.available_symbols : [];
 
+            var canonicalTimestamp = hasValue(tradeTicketFeedData.timestamp) ? tradeTicketFeedData.timestamp : "N/A";
+            var paperLiveMode = hasValue(mode.paper_live) ? String(mode.paper_live).toLowerCase() : "paper";
+            var engineMode = hasValue(mode.engine) ? String(mode.engine) : (hasValue(engine.engine_mode) ? String(engine.engine_mode) : "PAPER");
+
             setStatusBadge(status);
-            setText("tt-timestamp", tradeTicketFeedData.timestamp || "N/A");
+            setText("tt-timestamp", canonicalTimestamp);
             setText("tt-account-cash", formatMoney(account.cash));
             setText("tt-account-buying-power", formatMoney(account.buying_power));
             setText("tt-account-equity", formatMoney(account.equity));
             setText("tt-broker-selected", broker.selected || "unknown");
-            setText("tt-paper-live-mode", String(runtime.runtime_mode || "UNKNOWN").toUpperCase());
-            setText("tt-engine-mode", String(runtime.runtime_mode || "UNKNOWN").toUpperCase());
+            setText("tt-paper-live-mode", paperLiveMode);
+            setText("tt-engine-mode", engineMode);
             setText("tt-symbol-count", Array.isArray(availableSymbols) ? availableSymbols.length : symbols.length);
 
             var degradedWarning = document.getElementById("tt-degraded-warning");

@@ -963,3 +963,74 @@ def test_mobile_trade_ticket_data_provider_failure_returns_degraded(launcher_tem
     assert first_error["error_type"] == "RuntimeError"
     assert first_error["message"] == "provider unavailable"
 
+
+def test_mobile_trade_ticket_data_timestamp_skips_none_literal(launcher_temp_dir, monkeypatch):
+    import launcher.css_mobile_launcher as mod
+
+    grouped_ts = "2026-06-26T14:22:00Z"
+
+    monkeypatch.setattr(
+        mod,
+        "get_tradeable_symbols_feed",
+        lambda: {"status": "OK", "mode": "paper", "timestamp": "None", "symbols": []},
+    )
+    monkeypatch.setattr(
+        mod,
+        "get_grouped_trading_universe_feed",
+        lambda: {"status": "OK", "mode": "paper", "updated_at": grouped_ts, "groups": []},
+    )
+    monkeypatch.setattr(mod, "get_account_summary", lambda: {"cash": 0.0, "buying_power": 0.0, "equity": 0.0})
+    monkeypatch.setattr(mod, "get_runtime_summary", lambda: {"runtime_mode": "UNKNOWN", "status": "ONLINE"})
+    monkeypatch.setattr(mod, "get_engine_summary", lambda: {"engine_mode": "UNKNOWN", "trade_gate_status": "SIMULATED"})
+    monkeypatch.setattr(mod, "get_pause_state", lambda: {"trading_paused": False, "timestamp": ""})
+
+    response = client.get("/mobile/trade-ticket-data")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["timestamp"] == grouped_ts
+
+
+def test_mobile_trade_ticket_data_resolves_paper_live_and_engine_mode(launcher_temp_dir, monkeypatch):
+    import launcher.css_mobile_launcher as mod
+
+    monkeypatch.setattr(
+        mod,
+        "get_tradeable_symbols_feed",
+        lambda: {
+            "status": "OK",
+            "mode": "paper",
+            "symbols": [
+                {
+                    "symbol": "EUR_USD",
+                    "asset_class": "FX",
+                    "broker": "oanda",
+                    "status": "ACTIVE",
+                    "min_order_size": 1.0,
+                    "max_order_size": 100000.0,
+                    "tick_size": 0.0001,
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(mod, "get_grouped_trading_universe_feed", lambda: {"status": "OK", "mode": "paper", "groups": []})
+    monkeypatch.setattr(mod, "get_account_summary", lambda: {"cash": 100.0, "buying_power": 200.0, "equity": 150.0})
+    monkeypatch.setattr(mod, "get_runtime_summary", lambda: {"runtime_mode": "BALANCED", "status": "ONLINE"})
+    monkeypatch.setattr(mod, "get_engine_summary", lambda: {"engine_mode": "UNKNOWN", "trade_gate_status": "SIMULATED"})
+    monkeypatch.setattr(mod, "get_pause_state", lambda: {"trading_paused": False})
+
+    response = client.get("/mobile/trade-ticket-data")
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["mode"]["paper_live"] == "paper"
+    assert payload["mode"]["engine"] == "BALANCED"
+    assert payload["engine"]["engine_mode"] == "BALANCED"
+
+
+def test_trade_tab_has_collapsible_advanced_diagnostics_section(launcher_temp_dir):
+    response = client.get("/mobile")
+    assert response.status_code == 200
+    html = response.text
+    assert 'id="trade-diagnostics-advanced"' in html
+    assert "Advanced Diagnostics JSON" in html
+

@@ -497,8 +497,10 @@ def _first_timestamp(payload: Any) -> str:
         return ""
     for field in _CANONICAL_TIMESTAMP_FIELDS:
         value = payload.get(field)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if cleaned and cleaned.lower() not in {"none", "null", "unknown", "n/a", "na"}:
+                return cleaned
     return ""
 
 
@@ -611,6 +613,21 @@ def get_mobile_trade_ticket_data() -> Dict[str, Any]:
             selected_broker = broker_value
             break
 
+    paper_live_mode = _normalize_trade_mode(symbol_feed.get("mode")) if isinstance(symbol_feed, dict) else "paper"
+    if paper_live_mode not in {"paper", "live"}:
+        paper_live_mode = _normalize_trade_mode(grouped_feed.get("mode")) if isinstance(grouped_feed, dict) else "paper"
+    if paper_live_mode not in {"paper", "live"}:
+        paper_live_mode = _default_trade_mode()
+
+    raw_engine_mode = ""
+    if isinstance(engine, dict):
+        raw_engine_mode = str(engine.get("engine_mode") or "").strip()
+    if not raw_engine_mode or raw_engine_mode.upper() in {"UNKNOWN", "NONE", "NULL", "N/A", "NA"}:
+        if isinstance(runtime, dict):
+            raw_engine_mode = str(runtime.get("runtime_mode") or "").strip()
+    if not raw_engine_mode or raw_engine_mode.upper() in {"UNKNOWN", "NONE", "NULL", "N/A", "NA"}:
+        raw_engine_mode = paper_live_mode.upper()
+
     canonical_timestamp = _canonical_timestamp(
         [
             symbol_feed,
@@ -641,6 +658,10 @@ def get_mobile_trade_ticket_data() -> Dict[str, Any]:
         "available_symbols": available_symbols,
         "account": account,
         "runtime": runtime,
+        "mode": {
+            "paper_live": paper_live_mode,
+            "engine": raw_engine_mode,
+        },
         "broker": {
             "selected": selected_broker,
             "execution_capabilities": {
@@ -648,6 +669,10 @@ def get_mobile_trade_ticket_data() -> Dict[str, Any]:
                 "mobile_endpoint_is_read_only": True,
                 "mobile_execution_authorized": False,
             },
+        },
+        "engine": {
+            **(engine if isinstance(engine, dict) else {}),
+            "engine_mode": raw_engine_mode,
         },
         "permissions": {
             "read_only": True,
