@@ -416,6 +416,66 @@
             border-color: #60a5fa;
             color: #60a5fa;
         }
+        .opportunity-meta {
+            display: grid;
+            gap: 3px;
+            margin-top: 4px;
+            font-size: 10px;
+            color: var(--text-secondary);
+            text-align: left;
+        }
+        .opportunity-title {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 6px;
+            font-weight: 700;
+            font-size: 11px;
+        }
+        .validation-message {
+            margin-top: 8px;
+            padding: 8px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 700;
+            display: none;
+        }
+        .validation-message.error {
+            color: var(--danger);
+            border: 1px solid var(--danger-border);
+            background: var(--danger-soft);
+            display: block;
+        }
+        .validation-message.info {
+            color: var(--text-secondary);
+            border: 1px solid var(--border-strong);
+            background: #0f1412;
+            display: block;
+        }
+        .data-freshness-pill {
+            border-radius: 999px;
+            padding: 3px 8px;
+            font-size: 11px;
+            font-weight: 700;
+            border: 1px solid var(--border-strong);
+            background: #101312;
+            color: var(--text-secondary);
+        }
+        .data-freshness-pill.active {
+            color: var(--success);
+            border-color: var(--success-border);
+            background: var(--success-soft);
+        }
+        .data-freshness-pill.stale {
+            color: var(--warning);
+            border-color: var(--warning-border);
+            background: var(--warning-soft);
+        }
+        .data-freshness-pill.missing {
+            color: var(--danger);
+            border-color: var(--danger-border);
+            background: var(--danger-soft);
+        }
         .decision-console-header {
             display: flex;
             justify-content: space-between;
@@ -619,6 +679,8 @@
                 Last Update: {{ runtime.last_update }}<br>
                 Last Heartbeat: {{ runtime.last_heartbeat }}
             </div>
+            <div class="status-row" style="margin-top:8px;"><span>Last Refresh</span><strong id="runtime-last-refresh">Pending...</strong></div>
+            <div class="status-row"><span>Data Freshness</span><strong><span id="runtime-stale-indicator" class="data-freshness-pill">CHECKING</span></strong></div>
         </div>
 
         <!-- Account summary -->
@@ -892,6 +954,8 @@
                 <span class="badge badge-info" id="tt-status-badge">LOADING</span>
             </div>
             <div class="status-row"><span>Timestamp</span><strong id="tt-timestamp">Loading...</strong></div>
+            <div class="status-row"><span>Last Refresh</span><strong id="tt-last-refresh-local">Pending...</strong></div>
+            <div class="status-row"><span>Feed Freshness</span><strong><span id="tt-freshness-pill" class="data-freshness-pill">CHECKING</span></strong></div>
             <div class="status-row"><span>Cash</span><strong id="tt-account-cash">-</strong></div>
             <div class="status-row"><span>Buying Power</span><strong id="tt-account-buying-power">-</strong></div>
             <div class="status-row"><span>Equity</span><strong id="tt-account-equity">-</strong></div>
@@ -927,14 +991,33 @@
             <div id="top-opportunity-list" style="display:flex; flex-wrap:wrap; gap:8px;">
                 {% for row in top_opportunities.top_opportunities %}
                 {% set color_class = 'badge-success' if row.signal_color == 'GREEN' else ('badge-warning' if row.signal_color == 'AMBER' else 'badge-danger') %}
+                {% set confidence_pct = ((row.confidence or 0) * 100) %}
+                {% set regime = row.market_regime if row.market_regime else 'UNKNOWN' %}
+                {% set risk_rating = row.risk_rating if row.risk_rating else row.signal_color %}
+                {% set execution_state = row.execution_status if row.execution_status else ('DEFER' if (row.action or '') == 'BLOCK' else 'NOT_APPROVED') %}
                 <button
                     type="button"
                     class="opportunity-select-btn {{ color_class }}"
                     data-opportunity-symbol="{{ row.symbol }}"
                     data-opportunity-asset="{{ row.asset_class }}"
                     data-opportunity-action="{{ row.action if row.action else 'BUY' }}"
+                    data-opportunity-confidence="{{ '%.2f'|format(confidence_pct) }}"
+                    data-opportunity-regime="{{ regime }}"
+                    data-opportunity-risk="{{ risk_rating }}"
+                    data-opportunity-execution-status="{{ execution_state }}"
                     style="min-width:108px;"
-                >{{ row.symbol }} · {{ row.signal_color }}</button>
+                >
+                    <div class="opportunity-title">
+                        <span>{{ row.symbol }}</span>
+                        <span class="badge {{ color_class }}">{{ row.signal_color }}</span>
+                    </div>
+                    <div class="opportunity-meta">
+                        <span>Risk: {{ risk_rating }}</span>
+                        <span>Confidence: {{ '%.1f'|format(confidence_pct) }}%</span>
+                        <span>Regime: {{ regime }}</span>
+                        <span>Execution: {{ execution_state }}</span>
+                    </div>
+                </button>
                 {% endfor %}
             </div>
         </div>
@@ -961,6 +1044,8 @@
             {% else %}
             <div class="empty-state">Portfolio recommendation unavailable.</div>
             {% endif %}
+            <div class="status-row"><span>Last Refresh</span><strong id="ps-last-refresh">Pending...</strong></div>
+            <div class="status-row"><span>Data Freshness</span><strong><span id="ps-stale-indicator" class="data-freshness-pill">CHECKING</span></strong></div>
         </div>
 
         <div class="card" id="strategy-evolution-card">
@@ -1043,6 +1128,28 @@
                 <div class="status-row"><span>Last Update</span><strong id="dp-last-update" style="font-size:11px;">{{ opportunity_summary.decision_panel.last_update if opportunity_summary.status == 'OK' else 'N/A' }}</strong></div>
             </div>
 
+            <div class="card" id="decision-diagnostics-cards" style="margin-top:10px;">
+                <div class="card-header">Decision Snapshot</div>
+                <div class="decision-grid">
+                    <div class="decision-item">
+                        <div class="label">Risk Badge</div>
+                        <div class="value"><span id="diag-risk-badge" class="badge badge-info">UNKNOWN</span></div>
+                    </div>
+                    <div class="decision-item">
+                        <div class="label">Confidence</div>
+                        <div class="value" id="diag-confidence-display">0%</div>
+                    </div>
+                    <div class="decision-item">
+                        <div class="label">Regime</div>
+                        <div class="value" id="diag-regime-display">UNKNOWN</div>
+                    </div>
+                    <div class="decision-item">
+                        <div class="label">Execution</div>
+                        <div class="value"><span id="diag-execution-status" class="badge badge-warning">NOT_APPROVED</span></div>
+                    </div>
+                </div>
+            </div>
+
             <div class="card" style="margin-top:10px;">
                 <div class="card-header">Engine Outputs (Read-Only)</div>
                 <div style="font-size:12px; color:var(--text-secondary);">Diagnostics are available in Advanced to keep mobile view readable.</div>
@@ -1052,7 +1159,7 @@
                 </details>
             </div>
 
-            <form action="/mobile/trade/paper" method="post" onsubmit="return confirmPaperTradeRequest()">
+            <form id="trade-ticket-form" action="/mobile/trade/paper" method="post">
                 <input type="hidden" name="paper_only" value="true">
                 <input type="hidden" name="broker_mode" value="paper">
                 <input type="hidden" name="broker_execution_allowed" value="false">
@@ -1115,9 +1222,12 @@
                 <div style="margin-top:12px; font-size:12px; color:var(--text-secondary);">
                     Mode: <strong id="trade-mode-inline">{{ mode_badge }}</strong><br>
                     Price Source: <strong id="trade-price-status">{{ trade_ticket_defaults.price_status }}</strong><br>
+                    Tick Size: <strong id="trade-tick-size-inline">N/A</strong><br>
                     Paper Only: <strong>TRUE</strong><br>
                     Output: <code>artifacts/css_mobile_trade_requests.jsonl</code>
                 </div>
+
+                <div id="trade-validation-message" class="validation-message info">Validation ready: symbol and quantity will be checked before submit.</div>
 
                 <button type="submit" class="button">Submit Paper Trade Request</button>
             </form>
@@ -1353,6 +1463,73 @@
             return cleaned !== "" && cleaned !== "none" && cleaned !== "null" && cleaned !== "unknown" && cleaned !== "n/a" && cleaned !== "na";
         }
 
+        function timestampAgeSeconds(value) {
+            if (!hasValue(value)) {
+                return null;
+            }
+            var parsed = Date.parse(String(value));
+            if (!isFinite(parsed)) {
+                return null;
+            }
+            return Math.floor((Date.now() - parsed) / 1000);
+        }
+
+        function freshnessState(value) {
+            var age = timestampAgeSeconds(value);
+            if (age == null || age < 0) {
+                return "MISSING";
+            }
+            if (age > 180) {
+                return "STALE";
+            }
+            return "ACTIVE";
+        }
+
+        function applyFreshnessPill(id, state) {
+            var node = document.getElementById(id);
+            if (!node) {
+                return;
+            }
+            node.textContent = state;
+            node.classList.remove("active", "stale", "missing");
+            if (state === "ACTIVE") {
+                node.classList.add("active");
+            } else if (state === "STALE") {
+                node.classList.add("stale");
+            } else {
+                node.classList.add("missing");
+            }
+        }
+
+        function updateRefreshDisplays(sourceTimestamp) {
+            var nowText = new Date().toISOString();
+            setText("tt-last-refresh-local", nowText);
+            setText("runtime-last-refresh", nowText);
+            setText("ps-last-refresh", nowText);
+
+            var state = freshnessState(sourceTimestamp);
+            applyFreshnessPill("tt-freshness-pill", state);
+            applyFreshnessPill("runtime-stale-indicator", state);
+            applyFreshnessPill("ps-stale-indicator", state);
+        }
+
+        function setBadgeVariant(id, level) {
+            var node = document.getElementById(id);
+            if (!node) {
+                return;
+            }
+            node.classList.remove("badge-success", "badge-warning", "badge-danger", "badge-info");
+            if (level === "success") {
+                node.classList.add("badge-success");
+            } else if (level === "warning") {
+                node.classList.add("badge-warning");
+            } else if (level === "danger") {
+                node.classList.add("badge-danger");
+            } else {
+                node.classList.add("badge-info");
+            }
+        }
+
         function setStatusBadge(status) {
             var badge = document.getElementById("tt-status-badge");
             if (!badge) {
@@ -1371,12 +1548,16 @@
 
         function updateSelectedSymbolLimits() {
             var symbolSelect = document.getElementById("trade-symbol");
+            var tickInline = document.getElementById("trade-tick-size-inline");
             var symbol = normalizeText(symbolSelect ? symbolSelect.value : "");
             var row = tradeTicketSymbolLookup[symbol] || null;
 
             setText("tt-min-order-size", row && row.min_order_size != null ? row.min_order_size : "N/A");
             setText("tt-max-order-size", row && row.max_order_size != null ? row.max_order_size : "N/A");
             setText("tt-tick-size", row && row.tick_size != null ? row.tick_size : "N/A");
+            if (tickInline) {
+                tickInline.textContent = row && row.tick_size != null ? String(row.tick_size) : "N/A";
+            }
         }
 
         function renderTradeTicketSymbols(symbols, availableSymbols) {
@@ -1437,6 +1618,7 @@
             setText("tt-paper-live-mode", paperLiveMode);
             setText("tt-engine-mode", engineMode);
             setText("tt-symbol-count", Array.isArray(availableSymbols) ? availableSymbols.length : symbols.length);
+            updateRefreshDisplays(canonicalTimestamp);
 
             var degradedWarning = document.getElementById("tt-degraded-warning");
             if (degradedWarning) {
@@ -1549,6 +1731,29 @@
             setText("dp-broker", panel.broker || "unknown");
             setText("dp-last-update", panel.last_update || "N/A");
 
+            var riskValue = String(panel.risk_rating || "UNKNOWN").toUpperCase();
+            setText("diag-risk-badge", riskValue);
+            if (riskValue === "LOW" || riskValue === "GREEN") {
+                setBadgeVariant("diag-risk-badge", "success");
+            } else if (riskValue === "HIGH" || riskValue === "RED") {
+                setBadgeVariant("diag-risk-badge", "danger");
+            } else {
+                setBadgeVariant("diag-risk-badge", "warning");
+            }
+
+            setText("diag-confidence-display", String(panel.confidence_percent || 0) + "%");
+            setText("diag-regime-display", panel.current_market_regime || "UNKNOWN");
+
+            var executionState = String(panel.execution_status || "NOT_APPROVED").toUpperCase();
+            setText("diag-execution-status", executionState);
+            if (executionState === "APPROVED") {
+                setBadgeVariant("diag-execution-status", "success");
+            } else if (executionState === "DEFER" || executionState === "PENDING") {
+                setBadgeVariant("diag-execution-status", "warning");
+            } else {
+                setBadgeVariant("diag-execution-status", "danger");
+            }
+
             var outputs = document.getElementById("decision-engine-outputs");
             if (outputs) {
                 outputs.textContent = JSON.stringify(summary.engine_outputs || {}, null, 2);
@@ -1567,6 +1772,8 @@
             var statusNode = document.getElementById("trade-instrument-status");
             var searchInput = document.getElementById("trade-search-input");
             var favoriteBtn = document.getElementById("toggle-favorite-btn");
+            var tradeForm = document.getElementById("trade-ticket-form");
+            var validationMessage = document.getElementById("trade-validation-message");
 
             if (!assetSelect || !symbolSelect || !sideSelect || !tenorWrap || !tenorSelect || !priceInput || !quantityInput) {
                 return;
@@ -1727,6 +1934,7 @@
                         if (statusNode) {
                             statusNode.textContent = "Selected " + row.symbol + " | " + row.asset_class + " | " + String(row.broker || "").toUpperCase();
                         }
+                        validateTradeTicketInputs();
                     })
                     .catch(function () {
                         applyTenor(row.asset_class, row.tenor_options || [], row.default_tenor || "");
@@ -1738,7 +1946,52 @@
                         if (statusNode) {
                             statusNode.textContent = "Unable to refresh decision summary for " + row.symbol;
                         }
+                        validateTradeTicketInputs();
                     });
+            }
+
+            function setValidationMessage(text, kind) {
+                if (!validationMessage) {
+                    return;
+                }
+                validationMessage.textContent = text;
+                validationMessage.classList.remove("error", "info");
+                validationMessage.classList.add(kind === "error" ? "error" : "info");
+            }
+
+            function validateTradeTicketInputs() {
+                var symbol = String(symbolSelect && symbolSelect.value ? symbolSelect.value : "").trim();
+                var rawQuantity = String(quantityInput && quantityInput.value ? quantityInput.value : "").trim();
+                if (!symbol) {
+                    setValidationMessage("Symbol is required.", "error");
+                    return false;
+                }
+                if (!rawQuantity) {
+                    setValidationMessage("Quantity is required.", "error");
+                    return false;
+                }
+                var quantity = Number(rawQuantity);
+                if (!isFinite(quantity)) {
+                    setValidationMessage("Quantity must be numeric.", "error");
+                    return false;
+                }
+
+                var lookup = tradeTicketSymbolLookup[normalizeText(symbol)] || null;
+                var minSize = lookup && isFinite(Number(lookup.min_order_size)) ? Number(lookup.min_order_size) : null;
+                var maxSize = lookup && isFinite(Number(lookup.max_order_size)) ? Number(lookup.max_order_size) : null;
+
+                if (minSize != null && quantity < minSize) {
+                    setValidationMessage("Quantity must be >= min order size (" + minSize + ").", "error");
+                    return false;
+                }
+                if (maxSize != null && quantity > maxSize) {
+                    setValidationMessage("Quantity must be <= max order size (" + maxSize + ").", "error");
+                    return false;
+                }
+
+                var tickText = lookup && lookup.tick_size != null ? String(lookup.tick_size) : "N/A";
+                setValidationMessage("Validation OK. Tick size: " + tickText + ".", "info");
+                return true;
             }
 
             function updateFavoriteButton() {
@@ -1761,11 +2014,17 @@
                 renderSymbolOptions();
                 refreshSummary();
                 updateFavoriteButton();
+                validateTradeTicketInputs();
             });
 
             symbolSelect.addEventListener("change", function () {
                 refreshSummary();
                 updateFavoriteButton();
+                validateTradeTicketInputs();
+            });
+
+            quantityInput.addEventListener("input", function () {
+                validateTradeTicketInputs();
             });
 
             if (searchInput) {
@@ -1817,6 +2076,19 @@
             renderSymbolOptions();
             refreshSummary();
             updateFavoriteButton();
+            validateTradeTicketInputs();
+
+            if (tradeForm) {
+                tradeForm.addEventListener("submit", function (event) {
+                    if (!validateTradeTicketInputs()) {
+                        event.preventDefault();
+                        return;
+                    }
+                    if (!confirmPaperTradeRequest()) {
+                        event.preventDefault();
+                    }
+                });
+            }
         }
 
         document.addEventListener("DOMContentLoaded", function () {

@@ -665,6 +665,56 @@ def test_trade_tab_wired_to_trade_ticket_data_feed(launcher_temp_dir):
     assert 'id="tt-network-warning"' in html
 
 
+def test_trade_ticket_validation_ui_present(launcher_temp_dir):
+    response = client.get("/mobile")
+    assert response.status_code == 200
+    html = response.text
+
+    assert 'id="trade-ticket-form"' in html
+    assert 'id="trade-validation-message"' in html
+    assert 'id="trade-tick-size-inline"' in html
+    assert "Quantity must be >= min order size" in html
+    assert "Quantity must be <= max order size" in html
+
+
+def test_trade_decision_snapshot_cards_present(launcher_temp_dir):
+    response = client.get("/mobile")
+    assert response.status_code == 200
+    html = response.text
+
+    assert 'id="decision-diagnostics-cards"' in html
+    assert 'id="diag-risk-badge"' in html
+    assert 'id="diag-confidence-display"' in html
+    assert 'id="diag-regime-display"' in html
+    assert 'id="diag-execution-status"' in html
+    assert "Advanced Diagnostics JSON" in html
+
+
+def test_trade_opportunity_ui_metadata_present(launcher_temp_dir):
+    response = client.get("/mobile")
+    assert response.status_code == 200
+    html = response.text
+
+    assert "Risk:" in html
+    assert "Confidence:" in html
+    assert "Regime:" in html
+    assert "Execution:" in html
+    assert ("NOT_APPROVED" in html) or ("DEFER" in html)
+
+
+def test_runtime_and_portfolio_freshness_indicators_present(launcher_temp_dir):
+    response = client.get("/mobile")
+    assert response.status_code == 200
+    html = response.text
+
+    assert 'id="tt-last-refresh-local"' in html
+    assert 'id="tt-freshness-pill"' in html
+    assert 'id="runtime-last-refresh"' in html
+    assert 'id="runtime-stale-indicator"' in html
+    assert 'id="ps-last-refresh"' in html
+    assert 'id="ps-stale-indicator"' in html
+
+
 def test_trade_tab_render_does_not_execute_trade_request(launcher_temp_dir):
     import launcher.css_mobile_launcher as mod
 
