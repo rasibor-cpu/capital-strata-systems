@@ -18,7 +18,7 @@ def test_empty_ledger():
 
 def test_insufficient_sample():
     mock_ledger = MagicMock()
-    # 3 trades -> < 5, should be INSUFFICIENT_SAMPLE
+    # 3 trades -> < 5, lifecycle recommendation remains WATCH
     t = TradeOutcome("1", "FX", "EUR_USD", "", "", 0.0, "SIGNAL_A", "", 1.0, 1.1, 1.0, 10.0, 0.0, 0.0, "WIN")
     mock_ledger.list_trades.return_value = [t, t, t]
     
@@ -27,12 +27,13 @@ def test_insufficient_sample():
     
     assert "SIGNAL_A" in res
     assert res["SIGNAL_A"]["trade_count"] == 3
-    assert res["SIGNAL_A"]["rank"] == "INSUFFICIENT_SAMPLE"
+    assert res["SIGNAL_A"]["lifecycle_recommendation"] == "WATCH"
+    assert res["SIGNAL_A"]["rank"] == "WATCHLIST"
 
 def test_winning_strategy_group():
     mock_ledger = MagicMock()
     t_win = TradeOutcome("1", "FX", "EUR_USD", "", "", 0.0, "SIGNAL_A", "", 1.0, 1.1, 1.0, 10.0, 0.0, 0.0, "WIN")
-    # 5 trades -> >= 5, should be PROMOTE_CANDIDATE
+    # 5 trades -> >= 5, lifecycle recommendation should promote
     mock_ledger.list_trades.return_value = [t_win] * 5
     
     engine = StrategyRankingEngine(ledger=mock_ledger)
@@ -40,6 +41,7 @@ def test_winning_strategy_group():
     
     assert "SIGNAL_A" in res
     assert res["SIGNAL_A"]["trade_count"] == 5
+    assert res["SIGNAL_A"]["lifecycle_recommendation"] == "PROMOTE"
     assert res["SIGNAL_A"]["rank"] == "PROMOTE_CANDIDATE"
 
 def test_losing_strategy_group():
@@ -52,6 +54,7 @@ def test_losing_strategy_group():
     
     assert "SIGNAL_A" in res
     assert res["SIGNAL_A"]["trade_count"] == 5
+    assert res["SIGNAL_A"]["lifecycle_recommendation"] == "DEMOTE"
     assert res["SIGNAL_A"]["rank"] == "DEMOTE_CANDIDATE"
 
 def test_mixed_asset_class_ranking():

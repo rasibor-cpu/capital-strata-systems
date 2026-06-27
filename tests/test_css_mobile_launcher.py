@@ -51,8 +51,8 @@ def launcher_temp_dir():
 
 def test_missing_supervisor_state_handled_safely(launcher_temp_dir):
     summary = get_supervisor_summary()
-    assert summary["status"] == "UNKNOWN"
-    assert summary["last_heartbeat"] == "None"
+    assert summary["status"] == "OFFLINE"
+    assert summary["last_heartbeat"] == "N/A"
     assert summary["message"] == "Supervisor state missing"
     
     status = get_mobile_launcher_status()
@@ -166,7 +166,7 @@ def test_mobile_dashboard_helpers_missing_files_handled_safely(launcher_temp_dir
     )
     # Ensure missing files don't crash
     runtime = get_runtime_summary()
-    assert runtime["runtime_mode"] == "UNKNOWN"
+    assert runtime["runtime_mode"] == "PAPER"
     
     account = get_account_summary()
     assert account["cash"] == 0.0
@@ -175,7 +175,7 @@ def test_mobile_dashboard_helpers_missing_files_handled_safely(launcher_temp_dir
     assert trade["open_trades_count"] == 0
     
     engine = get_engine_summary()
-    assert engine["engine_mode"] == "UNKNOWN"
+    assert engine["engine_mode"] == "PAPER"
     
     context = build_mobile_dashboard_context()
     assert "runtime" in context
@@ -190,7 +190,7 @@ def test_mobile_dashboard_helpers_malformed_json_handled_safely(launcher_temp_di
         f.write("{ invalid }")
     
     context = build_mobile_dashboard_context()
-    assert context["runtime"]["runtime_mode"] == "UNKNOWN"
+    assert context["runtime"]["runtime_mode"] == "PAPER"
     assert context["account"]["cash"] == 0.0
     assert "portfolio_summary" in context
 
@@ -1087,7 +1087,7 @@ def test_mobile_trade_ticket_data_provider_failure_returns_degraded(launcher_tem
 
     assert payload["status"] == "DEGRADED"
     assert payload["symbols"] == []
-    assert payload["runtime"]["runtime_mode"] == "UNKNOWN"
+    assert payload["runtime"]["runtime_mode"] == "PAPER"
     assert payload["account"]["cash"] == 0.0
     assert payload["account"]["buying_power"] == 0.0
     assert payload["account"]["equity"] == 0.0

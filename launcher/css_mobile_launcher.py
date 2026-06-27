@@ -238,8 +238,8 @@ def get_supervisor_summary() -> Dict[str, Any]:
 
     if not os.path.exists(state_file):
         return {
-            "status": "UNKNOWN",
-            "last_heartbeat": "None",
+            "status": "OFFLINE",
+            "last_heartbeat": "N/A",
             "message": "Supervisor state missing",
         }
 
@@ -250,12 +250,12 @@ def get_supervisor_summary() -> Dict[str, Any]:
         heartbeat = (
             state.get("last_heartbeat")
             or state.get("last_heartbeat_at")
-            or "None"
+            or ""
         )
 
         return {
-            "status": state.get("status", "UNKNOWN"),
-            "last_heartbeat": heartbeat,
+            "status": _clean_text(state.get("status"), fallback="OFFLINE").upper(),
+            "last_heartbeat": _clean_text(heartbeat, fallback="N/A"),
             "failure_count": state.get("failure_count", 0),
             "restart_count": state.get("restart_count", 0),
         }
@@ -263,7 +263,7 @@ def get_supervisor_summary() -> Dict[str, Any]:
     except Exception as e:
         return {
             "status": "ERROR",
-            "last_heartbeat": "None",
+            "last_heartbeat": "N/A",
             "message": str(e),
         }
 
@@ -309,15 +309,17 @@ def get_mobile_launcher_status() -> str:
 
 def get_runtime_summary() -> Dict[str, Any]:
     session = _safe_load_artifact("css_session_state_pcnrass.json").get("session", {}) or _safe_load_artifact("css_session_recovery.json").get("session", {})
+    runtime_mode = _clean_text(session.get("engine_mode"), fallback="PAPER").upper()
+    last_update = _clean_text(session.get("start_time"), fallback=datetime.datetime.utcnow().isoformat() + "Z")
     summary = {
-        "runtime_mode": session.get("engine_mode", "UNKNOWN"),
+        "runtime_mode": runtime_mode,
         "current_cycle": session.get("cycle_number", 0),
-        "last_update": session.get("start_time", "None")
+        "last_update": last_update,
     }
     
     supervisor = get_supervisor_summary()
-    summary["supervisor_status"] = supervisor.get("status", "UNKNOWN")
-    summary["last_heartbeat"] = supervisor.get("last_heartbeat", "None")
+    summary["supervisor_status"] = _clean_text(supervisor.get("status"), fallback="OFFLINE").upper()
+    summary["last_heartbeat"] = _clean_text(supervisor.get("last_heartbeat"), fallback="N/A")
     summary["restart_count"] = supervisor.get("restart_count", 0)
     summary["failure_count"] = supervisor.get("failure_count", 0)
     summary["status"] = get_mobile_launcher_status()
@@ -372,11 +374,12 @@ def get_trade_summary() -> Dict[str, Any]:
 def get_engine_summary() -> Dict[str, Any]:
     state = _safe_load_artifact("css_session_state_pcnrass.json") or _safe_load_artifact("css_session_recovery.json")
     session = state.get("session", {})
+    engine_mode = _clean_text(session.get("engine_mode"), fallback=get_runtime_summary().get("runtime_mode", "PAPER")).upper()
     
     summary = {
-        "engine_mode": session.get("engine_mode", "UNKNOWN"),
+        "engine_mode": engine_mode,
         "current_strategy": session.get("strategy", "DEFAULT"),
-        "trade_gate_status": "OPEN" if session.get("engine_mode") == "LIVE" else "SIMULATED",
+        "trade_gate_status": "OPEN" if engine_mode == "LIVE" else "SIMULATED",
         "runtime_readiness": "ONLINE" if session else "OFFLINE"
     }
     return summary
@@ -465,6 +468,15 @@ _CANONICAL_TIMESTAMP_FIELDS = (
     "last_heartbeat",
 )
 
+_UNKNOWN_TEXT_VALUES = {"", "none", "null", "unknown", "n/a", "na"}
+
+
+def _clean_text(value: Any, *, fallback: str) -> str:
+    cleaned = str(value or "").strip()
+    if cleaned.lower() in _UNKNOWN_TEXT_VALUES:
+        return fallback
+    return cleaned
+
 
 def _provider_error(provider: str, exc: Exception) -> Dict[str, Any]:
     return {
@@ -530,17 +542,17 @@ def get_mobile_trade_ticket_data() -> Dict[str, Any]:
         "total_pnl": 0.0,
     }
     runtime_fallback = {
-        "runtime_mode": "UNKNOWN",
+        "runtime_mode": "PAPER",
         "current_cycle": 0,
-        "last_update": "None",
-        "supervisor_status": "UNKNOWN",
-        "last_heartbeat": "None",
+        "last_update": datetime.datetime.utcnow().isoformat() + "Z",
+        "supervisor_status": "OFFLINE",
+        "last_heartbeat": "N/A",
         "restart_count": 0,
         "failure_count": 0,
         "status": "OFFLINE",
     }
     engine_fallback = {
-        "engine_mode": "UNKNOWN",
+        "engine_mode": "PAPER",
         "current_strategy": "DEFAULT",
         "trade_gate_status": "SIMULATED",
         "runtime_readiness": "OFFLINE",
@@ -606,7 +618,7 @@ def get_mobile_trade_ticket_data() -> Dict[str, Any]:
         if isinstance(item, dict) and str(item.get("symbol") or "").strip()
     ]
 
-    selected_broker = "unknown"
+    selected_broker = "simulated"
     for item in symbols:
         broker_value = str(item.get("broker") or "").strip().lower() if isinstance(item, dict) else ""
         if broker_value:
@@ -1319,19 +1331,50 @@ def _normalize_completed_trade_row(raw: Dict[str, Any], *, fallback_idx: int) ->
     if not strategy_id:
         return None
 
+    symbol = _clean_text(raw.get("symbol"), fallback="SYMBOL_UNSPECIFIED").upper()
+    asset_class = _clean_text(raw.get("asset_class"), fallback="ASSET_CLASS_UNSPECIFIED").upper()
+    market_regime = _clean_text(raw.get("market_regime"), fallback="REGIME_UNSPECIFIED").upper()
+    entry_reason = _clean_text(
+        raw.get("entry_reason") or raw.get("entry_signal") or strategy_id,
+        fallback="ENTRY_REASON_UNSPECIFIED",
+    ).upper()
+    entry_confidence = float(raw.get("entry_confidence", raw.get("confidence", raw.get("prob_positive", 0.0))) or 0.0)
+    opportunity_score = float(raw.get("opportunity_score", raw.get("signal_score", 0.0)) or 0.0)
+    signal_score = float(raw.get("signal_score", opportunity_score) or 0.0)
+    prob_positive = float(raw.get("prob_positive", entry_confidence) or 0.0)
+
+    intelligence_payload = raw.get("entry_intelligence") if isinstance(raw.get("entry_intelligence"), dict) else {}
+    normalized_intelligence = {
+        "entry_reason": entry_reason,
+        "opportunity_score": opportunity_score,
+        "entry_confidence": entry_confidence,
+        "signal_score": signal_score,
+        "prob_positive": prob_positive,
+        "market_regime": market_regime,
+        "strategy_id": strategy_id,
+        "open_gate_reason": _clean_text(intelligence_payload.get("open_gate_reason"), fallback="N/A"),
+        "unified_gate_reason": _clean_text(intelligence_payload.get("unified_gate_reason"), fallback="N/A"),
+    }
+
     return {
         "trade_id": str(raw.get("trade_id") or f"learning-{fallback_idx}"),
         "timestamp_open": str(raw.get("timestamp_open") or raw.get("opened_at") or datetime.datetime.utcnow().isoformat() + "Z"),
         "timestamp_close": str(raw.get("timestamp_close") or raw.get("closed_at") or datetime.datetime.utcnow().isoformat() + "Z"),
-        "symbol": str(raw.get("symbol") or "UNKNOWN").strip().upper() or "UNKNOWN",
-        "asset_class": str(raw.get("asset_class") or "UNKNOWN").strip().upper() or "UNKNOWN",
+        "symbol": symbol,
+        "asset_class": asset_class,
         "entry_price": float(raw.get("entry_price", 0.0) or 0.0),
         "exit_price": float(raw.get("exit_price", 0.0) or 0.0),
         "quantity": float(raw.get("quantity", raw.get("size", 0.0)) or 0.0),
         "realized_pnl": float(raw.get("realized_pnl", raw.get("pnl", 0.0)) or 0.0),
         "holding_duration_seconds": float(raw.get("holding_duration_seconds", raw.get("duration_seconds", 0.0)) or 0.0),
         "strategy_id": strategy_id,
-        "market_regime": str(raw.get("market_regime") or "UNKNOWN").strip().upper() or "UNKNOWN",
+        "entry_reason": entry_reason,
+        "entry_confidence": entry_confidence,
+        "opportunity_score": opportunity_score,
+        "signal_score": signal_score,
+        "prob_positive": prob_positive,
+        "entry_intelligence": normalized_intelligence,
+        "market_regime": market_regime,
         "broker": str(raw.get("broker") or "paper").strip().lower() or "paper",
     }
 
@@ -1527,7 +1570,7 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "opportunity_feed": get_opportunity_feed(),
         "health": {
             "backend_available": get_mobile_launcher_status() == "ONLINE",
-            "supervisor_status": get_supervisor_summary().get("status", "UNKNOWN"),
+            "supervisor_status": _clean_text(get_supervisor_summary().get("status"), fallback="OFFLINE").upper(),
             "dashboard_status": "ONLINE"
         }
     }
