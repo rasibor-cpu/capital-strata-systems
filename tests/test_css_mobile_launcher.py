@@ -829,3 +829,117 @@ def test_opportunity_alert_generated_when_no_opportunities(launcher_temp_dir, mo
     alerts = mod.get_alert_summary()
     assert any("No tradable opportunities available" in str(item.get("message", "")) for item in alerts)
 
+
+def test_mobile_trade_ticket_data_happy_path_uses_provider_timestamp(launcher_temp_dir, monkeypatch):
+    import launcher.css_mobile_launcher as mod
+
+    provider_timestamp = "2026-06-26T10:11:12Z"
+
+    monkeypatch.setattr(
+        mod,
+        "get_tradeable_symbols_feed",
+        lambda: {
+            "status": "OK",
+            "timestamp": provider_timestamp,
+            "symbols": [
+                {
+                    "symbol": "EUR_USD",
+                    "display_name": "Euro / US Dollar",
+                    "asset_class": "FX",
+                    "broker": "oanda",
+                    "paper_supported": True,
+                    "live_supported": True,
+                    "status": "ACTIVE",
+                    "min_order_size": 1.0,
+                    "max_order_size": 100000.0,
+                    "tick_size": 0.0001,
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        mod,
+        "get_grouped_trading_universe_feed",
+        lambda: {"status": "OK", "groups": []},
+    )
+    monkeypatch.setattr(
+        mod,
+        "get_account_summary",
+        lambda: {"cash": 1000.0, "buying_power": 2000.0, "equity": 1500.0},
+    )
+    monkeypatch.setattr(
+        mod,
+        "get_runtime_summary",
+        lambda: {"runtime_mode": "PAPER", "status": "ONLINE", "updated_at": "2026-06-26T09:00:00Z"},
+    )
+    monkeypatch.setattr(
+        mod,
+        "get_engine_summary",
+        lambda: {"trade_gate_status": "OPEN", "engine_mode": "PAPER"},
+    )
+    monkeypatch.setattr(
+        mod,
+        "get_pause_state",
+        lambda: {"trading_paused": False, "timestamp": "2026-06-26T09:05:00Z"},
+    )
+
+    response = client.get("/mobile/trade-ticket-data")
+    assert response.status_code == 200
+    payload = response.json()
+
+    for key in (
+        "status",
+        "timestamp",
+        "symbols",
+        "available_symbols",
+        "account",
+        "runtime",
+        "broker",
+        "permissions",
+        "limits",
+        "errors",
+    ):
+        assert key in payload
+
+    assert payload["status"] == "OK"
+    assert payload["timestamp"] == provider_timestamp
+    assert payload["account"]["cash"] == 1000.0
+    assert payload["account"]["buying_power"] == 2000.0
+    assert payload["account"]["equity"] == 1500.0
+    assert payload["broker"]["selected"] == "oanda"
+    assert "execution_capabilities" in payload["broker"]
+    assert payload["permissions"]["read_only"] is True
+    assert payload["permissions"]["mobile_order_submission_enabled"] is False
+    assert payload["permissions"]["endpoint_authorizes_execution"] is False
+
+
+def test_mobile_trade_ticket_data_provider_failure_returns_degraded(launcher_temp_dir, monkeypatch):
+    import launcher.css_mobile_launcher as mod
+
+    def _raise_provider_unavailable(*args, **kwargs):
+        raise RuntimeError("provider unavailable")
+
+    monkeypatch.setattr(mod, "get_tradeable_symbols_feed", _raise_provider_unavailable)
+    monkeypatch.setattr(mod, "get_grouped_trading_universe_feed", _raise_provider_unavailable)
+    monkeypatch.setattr(mod, "get_account_summary", _raise_provider_unavailable)
+    monkeypatch.setattr(mod, "get_runtime_summary", _raise_provider_unavailable)
+    monkeypatch.setattr(mod, "get_engine_summary", _raise_provider_unavailable)
+    monkeypatch.setattr(mod, "get_pause_state", _raise_provider_unavailable)
+
+    response = client.get("/mobile/trade-ticket-data")
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["status"] == "DEGRADED"
+    assert payload["symbols"] == []
+    assert payload["runtime"]["runtime_mode"] == "UNKNOWN"
+    assert payload["account"]["cash"] == 0.0
+    assert payload["account"]["buying_power"] == 0.0
+    assert payload["account"]["equity"] == 0.0
+    assert isinstance(payload["errors"], list)
+    assert len(payload["errors"]) >= 1
+    first_error = payload["errors"][0]
+    assert "provider" in first_error
+    assert first_error["error_type"] == "RuntimeError"
+    assert first_error["message"] == "provider unavailable"
+

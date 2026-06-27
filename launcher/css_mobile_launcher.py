@@ -441,6 +441,9 @@ def get_tradeable_symbols_feed(
             "paper_supported": row.paper_supported,
             "live_supported": row.live_supported,
             "status": row.status,
+            "min_order_size": getattr(row, "min_order_size", None),
+            "max_order_size": getattr(row, "max_order_size", None),
+            "tick_size": getattr(row, "tick_size", None),
         }
         for row in symbol_rows
     ]
@@ -450,6 +453,210 @@ def get_tradeable_symbols_feed(
         "mode": normalized_mode,
         "count": len(symbols),
         "symbols": symbols,
+    }
+
+
+_CANONICAL_TIMESTAMP_FIELDS = (
+    "timestamp",
+    "updated_at",
+    "generated_at",
+    "last_update",
+    "last_updated",
+    "last_heartbeat",
+)
+
+
+def _provider_error(provider: str, exc: Exception) -> Dict[str, Any]:
+    return {
+        "provider": provider,
+        "error_type": exc.__class__.__name__,
+        "message": str(exc),
+    }
+
+
+def _safe_provider_call(
+    provider: str,
+    fn,
+    fallback: Dict[str, Any],
+) -> tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    try:
+        payload = fn()
+        if isinstance(payload, dict):
+            return payload, None
+        return fallback, {
+            "provider": provider,
+            "error_type": "TypeError",
+            "message": "provider did not return a dict",
+        }
+    except Exception as exc:
+        return fallback, _provider_error(provider, exc)
+
+
+def _first_timestamp(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    for field in _CANONICAL_TIMESTAMP_FIELDS:
+        value = payload.get(field)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _canonical_timestamp(payloads: List[Dict[str, Any]]) -> str:
+    for payload in payloads:
+        value = _first_timestamp(payload)
+        if value:
+            return value
+    return datetime.datetime.utcnow().isoformat() + "Z"
+
+
+def get_mobile_trade_ticket_data() -> Dict[str, Any]:
+    symbol_fallback = {"status": "ERROR", "mode": "paper", "count": 0, "symbols": []}
+    grouped_fallback = {
+        "status": "ERROR",
+        "mode": "paper",
+        "mode_label": "PAPER MODE",
+        "count": 0,
+        "groups": [],
+    }
+    account_fallback = {
+        "cash": 0.0,
+        "equity": 0.0,
+        "buying_power": 0.0,
+        "open_pnl": 0.0,
+        "realized_pnl": 0.0,
+        "total_pnl": 0.0,
+    }
+    runtime_fallback = {
+        "runtime_mode": "UNKNOWN",
+        "current_cycle": 0,
+        "last_update": "None",
+        "supervisor_status": "UNKNOWN",
+        "last_heartbeat": "None",
+        "restart_count": 0,
+        "failure_count": 0,
+        "status": "OFFLINE",
+    }
+    engine_fallback = {
+        "engine_mode": "UNKNOWN",
+        "current_strategy": "DEFAULT",
+        "trade_gate_status": "SIMULATED",
+        "runtime_readiness": "OFFLINE",
+    }
+    pause_fallback = {
+        "trading_paused": False,
+        "source": "default",
+        "timestamp": "",
+        "reason": "",
+    }
+
+    symbol_feed, symbol_error = _safe_provider_call(
+        "get_tradeable_symbols_feed",
+        get_tradeable_symbols_feed,
+        symbol_fallback,
+    )
+    grouped_feed, grouped_error = _safe_provider_call(
+        "get_grouped_trading_universe_feed",
+        get_grouped_trading_universe_feed,
+        grouped_fallback,
+    )
+    account, account_error = _safe_provider_call(
+        "get_account_summary",
+        get_account_summary,
+        account_fallback,
+    )
+    runtime, runtime_error = _safe_provider_call(
+        "get_runtime_summary",
+        get_runtime_summary,
+        runtime_fallback,
+    )
+    engine, engine_error = _safe_provider_call(
+        "get_engine_summary",
+        get_engine_summary,
+        engine_fallback,
+    )
+    pause_state, pause_error = _safe_provider_call(
+        "get_pause_state",
+        get_pause_state,
+        pause_fallback,
+    )
+
+    errors = [
+        err
+        for err in (
+            symbol_error,
+            grouped_error,
+            account_error,
+            runtime_error,
+            engine_error,
+            pause_error,
+        )
+        if err is not None
+    ]
+
+    symbols = list(symbol_feed.get("symbols", [])) if isinstance(symbol_feed, dict) else []
+    if not isinstance(symbols, list):
+        symbols = []
+
+    available_symbols = [
+        str(item.get("symbol") or "")
+        for item in symbols
+        if isinstance(item, dict) and str(item.get("symbol") or "").strip()
+    ]
+
+    selected_broker = "unknown"
+    for item in symbols:
+        broker_value = str(item.get("broker") or "").strip().lower() if isinstance(item, dict) else ""
+        if broker_value:
+            selected_broker = broker_value
+            break
+
+    canonical_timestamp = _canonical_timestamp(
+        [
+            symbol_feed,
+            grouped_feed,
+            account,
+            runtime,
+            engine,
+            pause_state,
+        ]
+    )
+
+    limits = {
+        "per_symbol": [
+            {
+                "symbol": item.get("symbol"),
+                "min_order_size": item.get("min_order_size"),
+                "max_order_size": item.get("max_order_size"),
+            }
+            for item in symbols
+            if isinstance(item, dict)
+        ]
+    }
+
+    return {
+        "status": "DEGRADED" if errors else "OK",
+        "timestamp": canonical_timestamp,
+        "symbols": symbols,
+        "available_symbols": available_symbols,
+        "account": account,
+        "runtime": runtime,
+        "broker": {
+            "selected": selected_broker,
+            "execution_capabilities": {
+                "provider_reported_execution_available": bool(engine.get("trade_gate_status") == "OPEN") if isinstance(engine, dict) else False,
+                "mobile_endpoint_is_read_only": True,
+                "mobile_execution_authorized": False,
+            },
+        },
+        "permissions": {
+            "read_only": True,
+            "mobile_order_submission_enabled": False,
+            "endpoint_authorizes_execution": False,
+            "requires_unified_trade_gate": True,
+        },
+        "limits": limits,
+        "errors": errors,
     }
 
 
@@ -1375,6 +1582,11 @@ async def mobile_trading_universe(mode: Optional[str] = None):
 @launcher_router.get("/mobile/trading-universe/grouped")
 async def mobile_trading_universe_grouped(mode: Optional[str] = None):
     return get_grouped_trading_universe_feed(mode=mode)
+
+
+@launcher_router.get("/mobile/trade-ticket-data")
+async def mobile_trade_ticket_data():
+    return get_mobile_trade_ticket_data()
 
 
 @launcher_router.get("/mobile/opportunity-summary/{symbol}")
