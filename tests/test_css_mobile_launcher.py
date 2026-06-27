@@ -715,6 +715,42 @@ def test_runtime_and_portfolio_freshness_indicators_present(launcher_temp_dir):
     assert 'id="ps-stale-indicator"' in html
 
 
+def test_runtime_telemetry_fields_present(launcher_temp_dir):
+    response = client.get("/mobile")
+    assert response.status_code == 200
+    html = response.text
+
+    assert 'id="runtime-heartbeat-age"' in html
+    assert 'id="api-feed-freshness"' in html
+    assert 'id="provider-health-badge"' in html
+    assert 'id="runtime-latency-ms"' in html
+    assert 'id="connection-status-badge"' in html
+
+
+def test_alert_center_refinements_present(launcher_temp_dir):
+    response = client.get("/mobile")
+    assert response.status_code == 200
+    html = response.text
+
+    assert "Alert Centre" in html
+    assert "alert-details" in html or "No alerts in the current window" in html
+    assert "SUBSYSTEM:" in html or "No alerts in the current window" in html
+    assert "SOURCE:" in html or "No alerts in the current window" in html
+    assert "js-alert-ts" in html or "No alerts in the current window" in html
+
+
+def test_mobile_resilience_banners_and_state_hooks_present(launcher_temp_dir):
+    response = client.get("/mobile")
+    assert response.status_code == 200
+    html = response.text
+
+    assert 'id="mobile-network-warning-banner"' in html
+    assert 'id="mobile-reconnect-banner"' in html
+    assert "css_mobile_active_screen" in html
+    assert "window.addEventListener(\"offline\"" in html
+    assert "window.addEventListener(\"online\"" in html
+
+
 def test_trade_tab_render_does_not_execute_trade_request(launcher_temp_dir):
     import launcher.css_mobile_launcher as mod
 

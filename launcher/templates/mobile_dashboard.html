@@ -476,6 +476,68 @@
             border-color: var(--danger-border);
             background: var(--danger-soft);
         }
+        .connection-badge {
+            border-radius: 999px;
+            padding: 3px 8px;
+            font-size: 11px;
+            font-weight: 700;
+            border: 1px solid var(--border-strong);
+            background: #101312;
+            color: var(--text-secondary);
+        }
+        .connection-badge.online {
+            color: var(--success);
+            border-color: var(--success-border);
+            background: var(--success-soft);
+        }
+        .connection-badge.offline {
+            color: var(--danger);
+            border-color: var(--danger-border);
+            background: var(--danger-soft);
+        }
+        .network-banner {
+            margin-bottom: 12px;
+            padding: 9px 10px;
+            border-radius: var(--radius);
+            font-size: 12px;
+            font-weight: 700;
+            display: none;
+        }
+        .network-banner.offline {
+            display: block;
+            color: var(--danger);
+            border: 1px solid var(--danger-border);
+            background: var(--danger-soft);
+        }
+        .network-banner.reconnect {
+            display: block;
+            color: var(--success);
+            border: 1px solid var(--success-border);
+            background: var(--success-soft);
+        }
+        .alert-summary {
+            list-style: none;
+            cursor: pointer;
+            display: grid;
+            gap: 6px;
+        }
+        .alert-summary::-webkit-details-marker {
+            display: none;
+        }
+        .alert-meta {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 6px;
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+        .alert-tags {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-top: 6px;
+        }
         .decision-console-header {
             display: flex;
             justify-content: space-between;
@@ -631,6 +693,9 @@
     </div>
     {% endif %}
 
+    <div id="mobile-network-warning-banner" class="network-banner" aria-live="polite"></div>
+    <div id="mobile-reconnect-banner" class="network-banner" aria-live="polite"></div>
+
     <!-- ══════════════════════════════════════════════
          TAB: HOME
          ══════════════════════════════════════════════ -->
@@ -681,6 +746,11 @@
             </div>
             <div class="status-row" style="margin-top:8px;"><span>Last Refresh</span><strong id="runtime-last-refresh">Pending...</strong></div>
             <div class="status-row"><span>Data Freshness</span><strong><span id="runtime-stale-indicator" class="data-freshness-pill">CHECKING</span></strong></div>
+            <div class="status-row"><span>Heartbeat Age</span><strong id="runtime-heartbeat-age">N/A</strong></div>
+            <div class="status-row"><span>API/Feed Freshness</span><strong><span id="api-feed-freshness" class="data-freshness-pill">CHECKING</span></strong></div>
+            <div class="status-row"><span>Provider Health</span><strong><span id="provider-health-badge" class="badge badge-info">UNKNOWN</span></strong></div>
+            <div class="status-row"><span>Runtime Latency</span><strong id="runtime-latency-ms">N/A</strong></div>
+            <div class="status-row"><span>Connection</span><strong><span id="connection-status-badge" class="connection-badge">CHECKING</span></strong></div>
         </div>
 
         <!-- Account summary -->
@@ -1360,23 +1430,36 @@
             {% if alerts %}
                 {% for alert in alerts %}
                 <div class="list-item">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                        <span class="badge
-                            {% if alert.severity == 'CRITICAL' %}badge-danger
-                            {% elif alert.severity == 'WARNING' %}badge-warning
-                            {% else %}badge-info{% endif %}">
-                            {{ alert.severity }}
-                        </span>
-                        <span style="font-size: 11px; color: var(--text-secondary);">{{ alert.timestamp[:19] }}</span>
-                    </div>
-                    <div style="font-weight: 700; font-size: 14px; margin-bottom: 3px;">{{ alert.message }}</div>
-                    <div style="font-size: 12px; color: var(--text-secondary);">
-                        Source: {{ alert.source }} &nbsp;|&nbsp; Type: {{ alert.alert_type }}
-                    </div>
+                    <details class="alert-details" id="alert-item-{{ loop.index }}">
+                        <summary class="alert-summary">
+                            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                                <span class="badge
+                                    {% if alert.severity == 'CRITICAL' %}badge-danger
+                                    {% elif alert.severity == 'WARNING' %}badge-warning
+                                    {% else %}badge-info{% endif %}">
+                                    {{ alert.severity }}
+                                </span>
+                                <span class="js-alert-ts" data-ts="{{ alert.timestamp }}" style="font-size:11px; color:var(--text-secondary);">{{ alert.timestamp[:19] if alert.timestamp else 'N/A' }}</span>
+                            </div>
+                            <div style="font-weight:700; font-size:14px;">{{ alert.message }}</div>
+                            <div class="alert-tags">
+                                <span class="badge badge-info">SUBSYSTEM: {{ alert.alert_type if alert.alert_type else 'GENERAL' }}</span>
+                                <span class="badge badge-info">SOURCE: {{ alert.source if alert.source else 'UNKNOWN' }}</span>
+                            </div>
+                        </summary>
+                        <div class="alert-meta">
+                            <span>Timestamp: <strong class="js-alert-ts" data-ts="{{ alert.timestamp }}">{{ alert.timestamp[:19] if alert.timestamp else 'N/A' }}</strong></span>
+                            <span>Severity: <strong>{{ alert.severity }}</strong></span>
+                        </div>
+                        <div style="margin-top:8px; font-size:12px; color:var(--text-secondary);">
+                            <div>Message Details</div>
+                            <pre style="white-space:pre-wrap; font-size:11px; color:var(--text-secondary);">{{ alert | tojson(indent=2) }}</pre>
+                        </div>
+                    </details>
                 </div>
                 {% endfor %}
             {% else %}
-                <div class="empty-state">No recent alerts. System clear.</div>
+                <div class="empty-state">No alerts in the current window. Monitoring active and system clear.</div>
             {% endif %}
         </div>
 
@@ -1511,6 +1594,85 @@
             applyFreshnessPill("tt-freshness-pill", state);
             applyFreshnessPill("runtime-stale-indicator", state);
             applyFreshnessPill("ps-stale-indicator", state);
+            applyFreshnessPill("api-feed-freshness", state);
+        }
+
+        function formatTimestamp(value) {
+            if (!hasValue(value)) {
+                return "N/A";
+            }
+            var parsed = Date.parse(String(value));
+            if (!isFinite(parsed)) {
+                return String(value);
+            }
+            return new Date(parsed).toLocaleString();
+        }
+
+        function updateHeartbeatAge(value) {
+            var age = timestampAgeSeconds(value);
+            if (age == null || age < 0) {
+                setText("runtime-heartbeat-age", "N/A");
+                return;
+            }
+            setText("runtime-heartbeat-age", age + "s");
+        }
+
+        function updateProviderHealth(status, errors) {
+            var badge = document.getElementById("provider-health-badge");
+            if (!badge) {
+                return;
+            }
+            var errorCount = Array.isArray(errors) ? errors.length : 0;
+            var normalized = String(status || "UNKNOWN").toUpperCase();
+            if (normalized === "OK" && errorCount === 0) {
+                badge.textContent = "HEALTHY";
+                setBadgeVariant("provider-health-badge", "success");
+            } else if (normalized === "DEGRADED") {
+                badge.textContent = "DEGRADED";
+                setBadgeVariant("provider-health-badge", "warning");
+            } else {
+                badge.textContent = "UNAVAILABLE";
+                setBadgeVariant("provider-health-badge", "danger");
+            }
+        }
+
+        function updateConnectionStatus(isOnline) {
+            var badge = document.getElementById("connection-status-badge");
+            if (!badge) {
+                return;
+            }
+            badge.classList.remove("online", "offline");
+            if (isOnline) {
+                badge.textContent = "ONLINE";
+                badge.classList.add("online");
+            } else {
+                badge.textContent = "OFFLINE";
+                badge.classList.add("offline");
+            }
+        }
+
+        function showNetworkBanner(kind, message) {
+            var offline = document.getElementById("mobile-network-warning-banner");
+            var reconnect = document.getElementById("mobile-reconnect-banner");
+            if (!offline || !reconnect) {
+                return;
+            }
+            offline.className = "network-banner";
+            reconnect.className = "network-banner";
+            if (kind === "offline") {
+                offline.textContent = message;
+                offline.classList.add("offline");
+            } else if (kind === "reconnect") {
+                reconnect.textContent = message;
+                reconnect.classList.add("reconnect");
+            }
+        }
+
+        function applyAlertTimestampFormatting() {
+            document.querySelectorAll(".js-alert-ts").forEach(function (node) {
+                var value = node.getAttribute("data-ts");
+                node.textContent = formatTimestamp(value);
+            });
         }
 
         function setBadgeVariant(id, level) {
@@ -1618,6 +1780,8 @@
             setText("tt-paper-live-mode", paperLiveMode);
             setText("tt-engine-mode", engineMode);
             setText("tt-symbol-count", Array.isArray(availableSymbols) ? availableSymbols.length : symbols.length);
+            updateHeartbeatAge(runtime.last_heartbeat);
+            updateProviderHealth(status, tradeTicketFeedData.errors || []);
             updateRefreshDisplays(canonicalTimestamp);
 
             var degradedWarning = document.getElementById("tt-degraded-warning");
@@ -1635,6 +1799,7 @@
         }
 
         function fetchTradeTicketData() {
+            var start = (window.performance && window.performance.now) ? window.performance.now() : Date.now();
             fetch("/mobile/trade-ticket-data")
                 .then(function (response) {
                     if (!response.ok) {
@@ -1643,6 +1808,10 @@
                     return response.json();
                 })
                 .then(function (payload) {
+                    var end = (window.performance && window.performance.now) ? window.performance.now() : Date.now();
+                    setText("runtime-latency-ms", Math.max(0, Math.round(end - start)) + " ms");
+                    updateConnectionStatus(true);
+                    showNetworkBanner("reconnect", "Connection restored. Auto-reconnected and refreshed.");
                     renderTradeTicketData(payload || {});
                 })
                 .catch(function () {
@@ -1651,6 +1820,9 @@
                     if (networkWarning) {
                         networkWarning.style.display = "block";
                     }
+                    setText("runtime-latency-ms", "N/A");
+                    updateConnectionStatus(false);
+                    showNetworkBanner("offline", "Offline/network warning: feed updates paused. Waiting for reconnection...");
                 });
         }
 
@@ -1665,6 +1837,12 @@
             var btn = document.querySelector("[data-screen='" + name + "']");
             if (screen) screen.classList.add("active");
             if (btn) btn.classList.add("active");
+            try {
+                window.sessionStorage.setItem("css_mobile_active_screen", name);
+            } catch (err) {
+                // ignore storage failures
+            }
+            window.location.hash = "#" + name;
         }
 
         function normalizeText(value) {
@@ -2100,8 +2278,15 @@
 
             var validScreens = ["home", "positions", "execution", "trade", "risk", "alerts"];
             var hash = window.location.hash.replace("#", "");
-            if (hash && validScreens.indexOf(hash) !== -1) {
-                showScreen(hash);
+            var saved = "";
+            try {
+                saved = window.sessionStorage.getItem("css_mobile_active_screen") || "";
+            } catch (err) {
+                saved = "";
+            }
+            var initialScreen = (hash && validScreens.indexOf(hash) !== -1) ? hash : ((saved && validScreens.indexOf(saved) !== -1) ? saved : "home");
+            if (initialScreen) {
+                showScreen(initialScreen);
             }
 
             var symbolSelect = document.getElementById("trade-symbol");
@@ -2111,6 +2296,8 @@
 
             setupTradeTicket(groupedUniverse || {}, topOpportunities || {});
             fetchTradeTicketData();
+            applyAlertTimestampFormatting();
+            updateConnectionStatus(Boolean(window.navigator && window.navigator.onLine !== false));
 
             fetch("/mobile/trading-universe/grouped")
                 .then(function (response) {
@@ -2125,6 +2312,16 @@
                 .catch(function () {
                     setupTradeTicket(groupedUniverse || {}, topOpportunities || {});
                 });
+
+            window.addEventListener("offline", function () {
+                updateConnectionStatus(false);
+                showNetworkBanner("offline", "Offline/network warning: feed updates paused. Waiting for reconnection...");
+            });
+            window.addEventListener("online", function () {
+                updateConnectionStatus(true);
+                showNetworkBanner("reconnect", "Connection restored. Auto-reconnected and refreshing feed...");
+                fetchTradeTicketData();
+            });
         });
     }());
 
