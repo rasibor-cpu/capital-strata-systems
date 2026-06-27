@@ -645,6 +645,26 @@ def test_trade_tab_ticket_layout_and_mode_visibility(launcher_temp_dir):
     assert "PAPER MODE" in html or "LIVE MODE" in html
 
 
+def test_trade_tab_wired_to_trade_ticket_data_feed(launcher_temp_dir):
+    response = client.get("/mobile")
+    assert response.status_code == 200
+    html = response.text
+
+    assert 'id="trade-ticket-data-card"' in html
+    assert "/mobile/trade-ticket-data" in html
+    assert 'id="tt-account-cash"' in html
+    assert 'id="tt-account-buying-power"' in html
+    assert 'id="tt-account-equity"' in html
+    assert 'id="tt-broker-selected"' in html
+    assert 'id="tt-paper-live-mode"' in html
+    assert 'id="tt-engine-mode"' in html
+    assert 'id="tt-min-order-size"' in html
+    assert 'id="tt-max-order-size"' in html
+    assert 'id="tt-tick-size"' in html
+    assert 'id="tt-degraded-warning"' in html
+    assert 'id="tt-network-warning"' in html
+
+
 def test_trade_tab_render_does_not_execute_trade_request(launcher_temp_dir):
     import launcher.css_mobile_launcher as mod
 

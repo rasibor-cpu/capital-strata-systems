@@ -483,6 +483,37 @@
             font-weight: 700;
             text-align: center;
         }
+        .feed-warning {
+            margin-top: 8px;
+            padding: 8px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 700;
+        }
+        .feed-warning.degraded {
+            color: var(--warning);
+            border: 1px solid var(--warning-border);
+            background: var(--warning-soft);
+        }
+        .feed-warning.network {
+            color: var(--danger);
+            border: 1px solid var(--danger-border);
+            background: var(--danger-soft);
+        }
+        .symbol-chip-wrap {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 8px;
+        }
+        .symbol-chip {
+            border: 1px solid var(--border-strong);
+            border-radius: 999px;
+            padding: 3px 8px;
+            font-size: 11px;
+            color: var(--text-secondary);
+            background: #111512;
+        }
 
     </style>
 </head>
@@ -840,6 +871,36 @@
          TAB: TRADE
          ══════════════════════════════════════════════ -->
     <div id="screen-trade" class="screen">
+        <div class="card" id="trade-ticket-data-card">
+            <div class="card-header">
+                Trade Ticket Data Feed
+                <span class="badge badge-info" id="tt-status-badge">LOADING</span>
+            </div>
+            <div class="status-row"><span>Timestamp</span><strong id="tt-timestamp">Loading...</strong></div>
+            <div class="status-row"><span>Cash</span><strong id="tt-account-cash">-</strong></div>
+            <div class="status-row"><span>Buying Power</span><strong id="tt-account-buying-power">-</strong></div>
+            <div class="status-row"><span>Equity</span><strong id="tt-account-equity">-</strong></div>
+            <div class="status-row"><span>Broker</span><strong id="tt-broker-selected">-</strong></div>
+            <div class="status-row"><span>Paper/Live Mode</span><strong id="tt-paper-live-mode">-</strong></div>
+            <div class="status-row"><span>Engine Mode</span><strong id="tt-engine-mode">{{ engine.engine_mode }}</strong></div>
+            <div class="status-row"><span>Min Order Size</span><strong id="tt-min-order-size">N/A</strong></div>
+            <div class="status-row"><span>Max Order Size</span><strong id="tt-max-order-size">N/A</strong></div>
+            <div class="status-row"><span>Tick Size</span><strong id="tt-tick-size">N/A</strong></div>
+            <div class="status-row"><span>Symbols</span><strong id="tt-symbol-count">0</strong></div>
+
+            <div id="tt-degraded-warning" class="feed-warning degraded" style="display:none;">
+                DEGRADED DATA: provider fallback in use. Values may be partial.
+            </div>
+            <div id="tt-network-warning" class="feed-warning network" style="display:none;">
+                NETWORK WARNING: unable to load /mobile/trade-ticket-data.
+            </div>
+
+            <div style="margin-top:8px; font-size:12px; color:var(--text-secondary);">
+                Dynamic symbols from /mobile/trade-ticket-data:
+            </div>
+            <div id="tt-symbol-preview" class="symbol-chip-wrap"></div>
+        </div>
+
         <div class="card" id="top-opportunities-card">
             <div class="card-header">
                 TOP OPPORTUNITIES
@@ -1249,6 +1310,137 @@
         "use strict";
         var groupedUniverse = {{ canonical_grouped_universe | tojson }};
         var topOpportunities = {{ top_opportunities | tojson }};
+        var tradeTicketFeedData = null;
+        var tradeTicketSymbolLookup = {};
+
+        function formatMoney(value) {
+            var number = Number(value);
+            if (!isFinite(number)) {
+                return "-";
+            }
+            return "$" + number.toFixed(2);
+        }
+
+        function setText(id, value) {
+            var node = document.getElementById(id);
+            if (!node) {
+                return;
+            }
+            node.textContent = String(value == null ? "" : value);
+        }
+
+        function setStatusBadge(status) {
+            var badge = document.getElementById("tt-status-badge");
+            if (!badge) {
+                return;
+            }
+            badge.textContent = String(status || "UNKNOWN").toUpperCase();
+            badge.classList.remove("badge-info", "badge-warning", "badge-danger", "badge-success");
+            if (status === "OK") {
+                badge.classList.add("badge-success");
+            } else if (status === "DEGRADED") {
+                badge.classList.add("badge-warning");
+            } else {
+                badge.classList.add("badge-danger");
+            }
+        }
+
+        function updateSelectedSymbolLimits() {
+            var symbolSelect = document.getElementById("trade-symbol");
+            var symbol = normalizeText(symbolSelect ? symbolSelect.value : "");
+            var row = tradeTicketSymbolLookup[symbol] || null;
+
+            setText("tt-min-order-size", row && row.min_order_size != null ? row.min_order_size : "N/A");
+            setText("tt-max-order-size", row && row.max_order_size != null ? row.max_order_size : "N/A");
+            setText("tt-tick-size", row && row.tick_size != null ? row.tick_size : "N/A");
+        }
+
+        function renderTradeTicketSymbols(symbols, availableSymbols) {
+            var holder = document.getElementById("tt-symbol-preview");
+            if (!holder) {
+                return;
+            }
+            holder.innerHTML = "";
+
+            tradeTicketSymbolLookup = {};
+            (Array.isArray(symbols) ? symbols : []).forEach(function (item) {
+                if (item && item.symbol) {
+                    tradeTicketSymbolLookup[normalizeText(item.symbol)] = item;
+                }
+            });
+
+            var displaySymbols = Array.isArray(availableSymbols) && availableSymbols.length
+                ? availableSymbols
+                : (Array.isArray(symbols) ? symbols.map(function (row) { return row && row.symbol; }).filter(Boolean) : []);
+
+            if (!displaySymbols.length) {
+                var empty = document.createElement("span");
+                empty.className = "symbol-chip";
+                empty.textContent = "NO SYMBOLS";
+                holder.appendChild(empty);
+                return;
+            }
+
+            displaySymbols.slice(0, 24).forEach(function (symbol) {
+                var chip = document.createElement("span");
+                chip.className = "symbol-chip";
+                chip.textContent = String(symbol || "");
+                holder.appendChild(chip);
+            });
+        }
+
+        function renderTradeTicketData(payload) {
+            tradeTicketFeedData = payload || {};
+            var status = String((tradeTicketFeedData && tradeTicketFeedData.status) || "UNKNOWN").toUpperCase();
+            var account = (tradeTicketFeedData && tradeTicketFeedData.account) || {};
+            var runtime = (tradeTicketFeedData && tradeTicketFeedData.runtime) || {};
+            var broker = (tradeTicketFeedData && tradeTicketFeedData.broker) || {};
+            var symbols = Array.isArray(tradeTicketFeedData && tradeTicketFeedData.symbols) ? tradeTicketFeedData.symbols : [];
+            var availableSymbols = Array.isArray(tradeTicketFeedData && tradeTicketFeedData.available_symbols) ? tradeTicketFeedData.available_symbols : [];
+
+            setStatusBadge(status);
+            setText("tt-timestamp", tradeTicketFeedData.timestamp || "N/A");
+            setText("tt-account-cash", formatMoney(account.cash));
+            setText("tt-account-buying-power", formatMoney(account.buying_power));
+            setText("tt-account-equity", formatMoney(account.equity));
+            setText("tt-broker-selected", broker.selected || "unknown");
+            setText("tt-paper-live-mode", String(runtime.runtime_mode || "UNKNOWN").toUpperCase());
+            setText("tt-engine-mode", String(runtime.runtime_mode || "UNKNOWN").toUpperCase());
+            setText("tt-symbol-count", Array.isArray(availableSymbols) ? availableSymbols.length : symbols.length);
+
+            var degradedWarning = document.getElementById("tt-degraded-warning");
+            if (degradedWarning) {
+                degradedWarning.style.display = status === "DEGRADED" ? "block" : "none";
+            }
+
+            var networkWarning = document.getElementById("tt-network-warning");
+            if (networkWarning) {
+                networkWarning.style.display = "none";
+            }
+
+            renderTradeTicketSymbols(symbols, availableSymbols);
+            updateSelectedSymbolLimits();
+        }
+
+        function fetchTradeTicketData() {
+            fetch("/mobile/trade-ticket-data")
+                .then(function (response) {
+                    if (!response.ok) {
+                        throw new Error("trade ticket feed unavailable");
+                    }
+                    return response.json();
+                })
+                .then(function (payload) {
+                    renderTradeTicketData(payload || {});
+                })
+                .catch(function () {
+                    setStatusBadge("NETWORK");
+                    var networkWarning = document.getElementById("tt-network-warning");
+                    if (networkWarning) {
+                        networkWarning.style.display = "block";
+                    }
+                });
+        }
 
         function showScreen(name) {
             document.querySelectorAll(".screen").forEach(function (el) {
@@ -1610,7 +1802,13 @@
                 showScreen(hash);
             }
 
+            var symbolSelect = document.getElementById("trade-symbol");
+            if (symbolSelect) {
+                symbolSelect.addEventListener("change", updateSelectedSymbolLimits);
+            }
+
             setupTradeTicket(groupedUniverse || {}, topOpportunities || {});
+            fetchTradeTicketData();
 
             fetch("/mobile/trading-universe/grouped")
                 .then(function (response) {
