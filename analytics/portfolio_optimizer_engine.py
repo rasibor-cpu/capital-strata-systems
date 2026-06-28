@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Iterable
+from typing import Any, Iterable
 
 from analytics.portfolio_optimizer import (
     PortfolioAllocationPlan,
@@ -22,6 +22,9 @@ class PortfolioOptimizerEngine:
     Level 3:
         Market-regime-aware allocation using deterministic strategy
         label matching.
+
+    Level 4:
+        Confidence-weighted allocation using strategy payloads.
 
     This engine recommends allocations only. It does not authorize
     trade execution. Downstream governance remains responsible for
@@ -119,7 +122,10 @@ class PortfolioOptimizerEngine:
         weights = self._regime_weights(ids, regime)
 
         if profile != "BALANCED":
-            profile_weights = self._profile_weights(len(ids), self._PROFILE_TOP_WEIGHT.get(profile, 1.0))
+            profile_weights = self._profile_weights(
+                len(ids),
+                self._PROFILE_TOP_WEIGHT.get(profile, 1.0),
+            )
             weights = [
                 round(regime_weight * profile_weight, 8)
                 for regime_weight, profile_weight in zip(weights, profile_weights)
@@ -134,6 +140,64 @@ class PortfolioOptimizerEngine:
             rationale=f"Market-regime-aware allocation: {regime}",
         )
 
+    def build_confidence_weighted_plan(
+        self,
+        strategies: Iterable[dict[str, Any]],
+        *,
+        total_capital: float,
+        market_regime: str = "UNKNOWN",
+        risk_profile: str = "BALANCED",
+    ) -> PortfolioAllocationPlan:
+        parsed = self._parse_strategy_payloads(strategies)
+        ids = [item["strategy_id"] for item in parsed]
+        regime = self._normalize_label(market_regime, fallback="UNKNOWN")
+        profile = self._normalize_label(risk_profile, fallback="BALANCED")
+
+        if not ids:
+            return self._build_plan_from_weights(
+                [],
+                [],
+                total_capital=total_capital,
+                market_regime=regime,
+                risk_profile=profile,
+                rationale="Confidence-weighted allocation",
+            )
+
+        confidence_weights = [item["confidence"] for item in parsed]
+        regime_weights = self._regime_weights(ids, regime)
+        weights = [
+            round(confidence * regime_weight, 8)
+            for confidence, regime_weight in zip(confidence_weights, regime_weights)
+        ]
+
+        if profile != "BALANCED":
+            profile_weights = self._profile_weights(
+                len(ids),
+                self._PROFILE_TOP_WEIGHT.get(profile, 1.0),
+            )
+            weights = [
+                round(weight * profile_weight, 8)
+                for weight, profile_weight in zip(weights, profile_weights)
+            ]
+
+        plan = self._build_plan_from_weights(
+            ids,
+            weights,
+            total_capital=total_capital,
+            market_regime=regime,
+            risk_profile=profile,
+            rationale="Confidence-weighted allocation",
+        )
+
+        confidence_lookup = {
+            item["strategy_id"]: item["confidence"]
+            for item in parsed
+        }
+        for allocation in plan.allocations:
+            allocation.confidence = confidence_lookup.get(allocation.strategy_id, 1.0)
+
+        return plan
+
     @staticmethod
     def _clean_strategy_ids(strategy_ids: Iterable[str]) -> list[str]:
         return [str(s).strip() for s in strategy_ids if str(s).strip()]
@@ -142,6 +206,41 @@ class PortfolioOptimizerEngine:
     def _normalize_label(value: str, *, fallback: str) -> str:
         text = str(value or "").strip().upper().replace("-", "_").replace(" ", "_")
         return text or fallback
+
+    @staticmethod
+    def _safe_confidence(value: Any) -> float:
+        try:
+            confidence = float(value)
+        except (TypeError, ValueError):
+            return 1.0
+
+        if confidence <= 0:
+            return 1.0
+
+        return min(confidence, 1.0)
+
+    def _parse_strategy_payloads(
+        self,
+        strategies: Iterable[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        parsed: list[dict[str, Any]] = []
+
+        for strategy in strategies:
+            if not isinstance(strategy, dict):
+                continue
+
+            strategy_id = str(strategy.get("strategy_id") or strategy.get("strategy") or "").strip()
+            if not strategy_id:
+                continue
+
+            parsed.append(
+                {
+                    "strategy_id": strategy_id,
+                    "confidence": self._safe_confidence(strategy.get("confidence", 1.0)),
+                }
+            )
+
+        return parsed
 
     @staticmethod
     def _profile_weights(count: int, top_weight: float) -> list[float]:
@@ -196,6 +295,10 @@ class PortfolioOptimizerEngine:
             return plan
 
         total_weight = sum(weights)
+        if total_weight <= 0:
+            weights = [1.0 for _ in strategy_ids]
+            total_weight = sum(weights)
+
         allocated_percent = 0.0
         allocated_amount = 0.0
 
