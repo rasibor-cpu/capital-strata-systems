@@ -89,3 +89,11 @@ class EventSubscriptionManager:
         ]
         for etype in event_types:
             self.event_bus.unsubscribe(etype, service.handle_event)
+
+    def wire_metrics_service(self, service) -> None:
+        """Subscribe MetricsService to wildcard to monitor all event telemetry."""
+        self.event_bus.subscribe("*", service.handle_event)
+
+    def unwire_metrics_service(self, service) -> None:
+        """Unsubscribe MetricsService from wildcard."""
+        self.event_bus.unsubscribe("*", service.handle_event)
