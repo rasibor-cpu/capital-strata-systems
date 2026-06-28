@@ -1465,6 +1465,57 @@ def get_strategy_evolution_feed() -> Dict[str, Any]:
         "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
     }
 
+
+def get_portfolio_allocation_feed() -> Dict[str, Any]:
+    audit_dir = os.path.join(LauncherConfig.ARTIFACTS_DIR, "portfolio_audit")
+    try:
+        if not os.path.isdir(audit_dir):
+            return {
+                "status": "UNAVAILABLE",
+                "message": "No portfolio allocation audit directory",
+                "allocations": [],
+                "diversification_metrics": {},
+            }
+
+        files = [
+            os.path.join(audit_dir, name)
+            for name in os.listdir(audit_dir)
+            if name.startswith("portfolio_allocation_") and name.endswith(".json")
+        ]
+        if not files:
+            return {
+                "status": "UNAVAILABLE",
+                "message": "No portfolio allocation audit records",
+                "allocations": [],
+                "diversification_metrics": {},
+            }
+
+        latest = max(files, key=os.path.getmtime)
+        with open(latest, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        return {
+            "status": "OK",
+            "source_file": os.path.basename(latest),
+            "generated_at": data.get("generated_at", ""),
+            "market_regime": data.get("market_regime", "UNKNOWN"),
+            "risk_profile": data.get("risk_profile", "UNKNOWN"),
+            "total_capital": data.get("total_capital", 0.0),
+            "validation_status": data.get("validation_status", "PENDING"),
+            "allocations": data.get("allocations", []),
+            "diversification_metrics": data.get("diversification_metrics", {}),
+            "total_allocated_percent": data.get("total_allocated_percent", 0.0),
+            "total_allocated_amount": data.get("total_allocated_amount", 0.0),
+        }
+    except Exception as exc:
+        return {
+            "status": "ERROR",
+            "message": str(exc),
+            "allocations": [],
+            "diversification_metrics": {},
+        }
+
+
 def build_mobile_dashboard_context() -> Dict[str, Any]:
     # Calculate heartbeat / staleness
     artifacts = [
@@ -1565,6 +1616,7 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "opportunity_summary": opportunity_summary,
         "portfolio_summary": portfolio_summary,
         "strategy_evolution": strategy_evolution,
+        "portfolio_allocation": get_portfolio_allocation_feed(),
         "trade_ticket_defaults": trade_ticket_defaults,
         "ticket_asset_classes": ["CRYPTO", "FOREX", "INDICES", "FUTURES", "OPTIONS"],
         "opportunity_feed": get_opportunity_feed(),

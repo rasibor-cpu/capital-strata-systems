@@ -1231,6 +1231,34 @@
             {% endif %}
         </div>
 
+
+        <div class="card" id="portfolio-allocation-card">
+            <div class="card-header">
+                Portfolio Allocation Plan
+                {% if portfolio_allocation.status == 'OK' %}
+                <span class="badge badge-info">AUDITED</span>
+                {% elif portfolio_allocation.status == 'ERROR' %}
+                <span class="badge badge-danger">ERROR</span>
+                {% else %}
+                <span class="badge badge-warning">UNAVAILABLE</span>
+                {% endif %}
+            </div>
+            {% if portfolio_allocation.status == 'OK' %}
+            <div class="status-row"><span>Risk Profile</span><strong id="pa-risk-profile">{{ portfolio_allocation.risk_profile }}</strong></div>
+            <div class="status-row"><span>Market Regime</span><strong id="pa-market-regime">{{ portfolio_allocation.market_regime }}</strong></div>
+            <div class="status-row"><span>Total Capital</span><strong id="pa-total-capital">{{ portfolio_allocation.total_capital }}</strong></div>
+            <div class="status-row"><span>Allocated</span><strong id="pa-total-allocated">{{ portfolio_allocation.total_allocated_percent }}% / {{ portfolio_allocation.total_allocated_amount }}</strong></div>
+            <div class="status-row"><span>Validation</span><strong id="pa-validation-status">{{ portfolio_allocation.validation_status }}</strong></div>
+            <div class="status-row"><span>Generated</span><strong id="pa-generated-at">{{ portfolio_allocation.generated_at }}</strong></div>
+            <div style="margin-top:8px; font-size:12px; color:var(--text-secondary);">Allocations</div>
+            <pre id="pa-allocations" style="white-space:pre-wrap; font-size:11px; color:var(--text-secondary);">{{ portfolio_allocation.allocations | tojson(indent=2) }}</pre>
+            <div style="margin-top:8px; font-size:12px; color:var(--text-secondary);">Diversification Metrics</div>
+            <pre id="pa-diversification" style="white-space:pre-wrap; font-size:11px; color:var(--text-secondary);">{{ portfolio_allocation.diversification_metrics | tojson(indent=2) }}</pre>
+            {% else %}
+            <div class="empty-state">Portfolio allocation audit unavailable.</div>
+            {% endif %}
+        </div>
+
         <div class="card" id="trade-decision-console">
             <div class="card-header">
                 CSS Decision Console

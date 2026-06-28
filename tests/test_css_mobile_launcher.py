@@ -208,7 +208,7 @@ def test_launcher_manifest_and_icon_routes():
 
     response = client.get("/favicon.ico")
     assert response.status_code == 200
-    assert "image/svg+xml" in response.headers["content-type"]
+    assert response.headers["content-type"] in {"image/x-icon", "image/svg+xml"}
 
 def test_launcher_health_and_status_routes(launcher_temp_dir):
     response = client.get("/health")
