@@ -11,13 +11,17 @@ from analytics.portfolio_optimizer import (
 
 class PortfolioOptimizerEngine:
     """
-    Phase 129B Portfolio Optimizer Engine.
+    Phase 129B/129C Portfolio Optimizer Engine.
 
     Level 1:
         Deterministic equal-weight allocation.
 
     Level 2:
         Risk-profile-aware allocation using ordered strategy IDs.
+
+    Level 3:
+        Market-regime-aware allocation using deterministic strategy
+        label matching.
 
     This engine recommends allocations only. It does not authorize
     trade execution. Downstream governance remains responsible for
@@ -30,6 +34,15 @@ class PortfolioOptimizerEngine:
         "BALANCED": 1.00,
         "GROWTH": 1.35,
         "OPPORTUNISTIC": 1.60,
+    }
+
+    _REGIME_KEYWORDS = {
+        "TRENDING": ("trend", "momentum", "breakout"),
+        "RANGE": ("mean", "reversion", "range", "carry"),
+        "RANGE_BOUND": ("mean", "reversion", "range", "carry"),
+        "VOLATILE": ("defensive", "hedge", "volatility", "cash"),
+        "RISK_OFF": ("defensive", "hedge", "cash"),
+        "RISK_ON": ("growth", "momentum", "trend"),
     }
 
     def build_equal_weight_plan(
@@ -59,7 +72,7 @@ class PortfolioOptimizerEngine:
         risk_profile: str = "BALANCED",
     ) -> PortfolioAllocationPlan:
         ids = self._clean_strategy_ids(strategy_ids)
-        profile = str(risk_profile or "BALANCED").strip().upper()
+        profile = self._normalize_label(risk_profile, fallback="BALANCED")
 
         if profile == "BALANCED":
             return self.build_equal_weight_plan(
@@ -81,9 +94,54 @@ class PortfolioOptimizerEngine:
             rationale=f"Risk-profile-aware allocation: {profile}",
         )
 
+    def build_market_regime_plan(
+        self,
+        strategy_ids: Iterable[str],
+        *,
+        total_capital: float,
+        market_regime: str = "UNKNOWN",
+        risk_profile: str = "BALANCED",
+    ) -> PortfolioAllocationPlan:
+        ids = self._clean_strategy_ids(strategy_ids)
+        regime = self._normalize_label(market_regime, fallback="UNKNOWN")
+        profile = self._normalize_label(risk_profile, fallback="BALANCED")
+
+        if not ids:
+            return self._build_plan_from_weights(
+                ids,
+                [],
+                total_capital=total_capital,
+                market_regime=regime,
+                risk_profile=profile,
+                rationale=f"Market-regime-aware allocation: {regime}",
+            )
+
+        weights = self._regime_weights(ids, regime)
+
+        if profile != "BALANCED":
+            profile_weights = self._profile_weights(len(ids), self._PROFILE_TOP_WEIGHT.get(profile, 1.0))
+            weights = [
+                round(regime_weight * profile_weight, 8)
+                for regime_weight, profile_weight in zip(weights, profile_weights)
+            ]
+
+        return self._build_plan_from_weights(
+            ids,
+            weights,
+            total_capital=total_capital,
+            market_regime=regime,
+            risk_profile=profile,
+            rationale=f"Market-regime-aware allocation: {regime}",
+        )
+
     @staticmethod
     def _clean_strategy_ids(strategy_ids: Iterable[str]) -> list[str]:
         return [str(s).strip() for s in strategy_ids if str(s).strip()]
+
+    @staticmethod
+    def _normalize_label(value: str, *, fallback: str) -> str:
+        text = str(value or "").strip().upper().replace("-", "_").replace(" ", "_")
+        return text or fallback
 
     @staticmethod
     def _profile_weights(count: int, top_weight: float) -> list[float]:
@@ -98,6 +156,24 @@ class PortfolioOptimizerEngine:
 
         step = (top_weight - 1.0) / max(count - 1, 1)
         return [round(top_weight - (i * step), 8) for i in range(count)]
+
+    def _regime_weights(self, strategy_ids: list[str], market_regime: str) -> list[float]:
+        keywords = self._REGIME_KEYWORDS.get(market_regime)
+        if not keywords:
+            return [1.0 for _ in strategy_ids]
+
+        weights: list[float] = []
+        for strategy_id in strategy_ids:
+            label = strategy_id.lower()
+            matched = any(keyword in label for keyword in keywords)
+            if matched:
+                weights.append(1.35)
+            elif market_regime in {"VOLATILE", "RISK_OFF"}:
+                weights.append(0.90)
+            else:
+                weights.append(1.0)
+
+        return weights
 
     def _build_plan_from_weights(
         self,
