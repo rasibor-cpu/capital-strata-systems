@@ -1,0 +1,97 @@
+"""
+Reporting Service for CSS Reporting Framework
+
+Orchestrates template generation, file archiving, manifest index logging,
+and job schedules.
+"""
+
+import time
+from typing import Optional
+from dataclasses import dataclass
+from backend.events.event_models import Event
+from backend.reporting.report_generator import ReportGenerator
+from backend.reporting.report_archive import ReportArchive
+from backend.reporting.report_history import ReportHistory
+from backend.reporting.report_scheduler import ReportScheduler
+
+@dataclass(frozen=True)
+class ReportingConfig:
+    """
+    Configuration dataclass for the Reporting Service.
+    
+    Responsibility: Store parameters governing report generations.
+    Dependencies: None.
+    Thread-safety: Immutable dataclass, safe.
+    Integration: Read by ReportingService.
+    """
+    default_source: str = "reporting_service"
+
+class ReportingService:
+    """
+    Primary service orchestrating reporting tasks.
+    Supports dependency injection and manages report generation flows.
+    
+    Responsibility: Orchestrate template generation, file archiving, history manifest indexing, and job schedules.
+    Dependencies: ReportingConfig, ReportGenerator, ReportArchive, ReportHistory, ReportScheduler
+    Thread-safety: Synchronization should be handled by caller or sub-components.
+    Integration: Interface invoked by scheduler tasks or execution logs.
+    """
+    def __init__(
+        self,
+        config: ReportingConfig,
+        generator: ReportGenerator,
+        archive: ReportArchive,
+        history: ReportHistory,
+        scheduler: ReportScheduler
+    ):
+        self.config = config
+        self.generator = generator
+        self.archive = archive
+        self.history = history
+        self.scheduler = scheduler
+
+    def create_report(self, report_type: str, title: str, context: dict, metadata: dict = None) -> Event:
+        """
+        Render templates and package it as a canonical report Event.
+        Archives report details to disk and indexes to the manifest log.
+        """
+        event = self.generator.generate(
+            report_type=report_type,
+            title=title,
+            context=context,
+            metadata=metadata
+        )
+        
+        event.source = self.config.default_source
+        
+        # Archive individual file
+        self.archive.append(event)
+        
+        # Index to manifest
+        self.history.append(event)
+        
+        return event
+
+    def process_schedule(self, current_time: Optional[float] = None) -> int:
+        """
+        Poll scheduled tasks and generate reports due for execution.
+        """
+        if current_time is None:
+            current_time = time.time()
+            
+        due_jobs = self.scheduler.get_due_jobs(current_time)
+        for job in due_jobs:
+            context = job.context_generator()
+            # Append timestamp context for templates
+            if "timestamp" not in context:
+                context["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(current_time))
+            
+            self.create_report(
+                report_type=job.report_type,
+                title=job.title,
+                context=context,
+                metadata={"job_id": job.job_id}
+            )
+            self.scheduler.trigger_job(job.job_id, current_time)
+            
+        return len(due_jobs)
