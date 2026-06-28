@@ -105,3 +105,21 @@ class OperationsService:
         logger.info(f"Diagnostics complete. Status: {new_status} | Score: {health_score:.1f}")
         return state_event
 
+    def handle_event(self, event: Event) -> None:
+        """Passive event bus subscriber callback for Operations Control Centre."""
+        try:
+            # Log to operational timeline if it is a system status, trade outcome, or critical warning event
+            if event.category == "SYSTEM" or event.severity in ("WARNING", "CRITICAL"):
+                self.record_timeline_event(
+                    event_type=event.event_type,
+                    severity=event.severity,
+                    message=f"Event Bus Logged: {event.event_type} - {event.source}",
+                    details=event.payload
+                )
+            # Accumulate runtime stats
+            self.statistics.increment("messages")
+            if event.severity == "CRITICAL":
+                self.statistics.increment("errors")
+        except Exception as e:
+            logger.error(f"Error in OperationsService handle_event: {e}")
+

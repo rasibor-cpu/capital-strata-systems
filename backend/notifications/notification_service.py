@@ -164,3 +164,12 @@ class NotificationService:
             self.notify(event)
         return len(due_events)
 
+    def handle_event(self, event: Event) -> None:
+        """Passive event bus subscriber callback."""
+        try:
+            # If event contains custom template payload, or if it is WARNING/CRITICAL, queue it
+            if event.severity in ("WARNING", "CRITICAL") or "delivery_channels" in event.payload:
+                self.notify(event)
+        except Exception as e:
+            logger.error(f"Error in NotificationService handle_event: {e}")
+

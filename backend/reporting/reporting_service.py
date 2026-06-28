@@ -42,6 +42,8 @@ class ReportingService:
         self.archive = archive
         self.history = history
         self.scheduler = scheduler
+        import threading
+        self._ingest_lock = threading.RLock()
 
     def create_report(self, report_type: str, title: str, context: dict, metadata: dict = None) -> Event:
         """
@@ -90,4 +92,17 @@ class ReportingService:
             self.scheduler.trigger_job(job.job_id, current_time)
             
         return len(due_jobs)
+
+    def handle_event(self, event: Event) -> None:
+        """Passive event bus subscriber callback for reporting framework."""
+        try:
+            from backend.common.persistence import load_json, save_json
+            buffer_file = "artifacts/reports/ingested_events.json"
+            data = load_json(buffer_file, self._ingest_lock)
+            if not isinstance(data, list):
+                data = []
+            data.append(event.to_dict())
+            save_json(buffer_file, data, self._ingest_lock)
+        except Exception as e:
+            logger.error(f"Error in ReportingService handle_event: {e}")
 

@@ -13,12 +13,16 @@ from backend.events.event_bus import EventBus
 from backend.events.event_store import EventStore
 from backend.events.event_filters import EventFilter
 from backend.events.event_replay import EventReplay
+from backend.events.event_subscription_manager import EventSubscriptionManager
+from backend.events.visibility_layer import EventVisibilityLayer
 
 # Instantiate default singletons for CSS-wide usage
 _default_metrics = EventMetrics()
 _default_store = EventStore(metrics=_default_metrics)
 _default_bus = EventBus(metrics=_default_metrics)
 _default_replay = EventReplay(_default_store)
+_default_subscription_manager = EventSubscriptionManager(_default_bus)
+_default_visibility_layer = EventVisibilityLayer()
 
 # Auto-subscribe default store to receive and write all published events to JSONL
 _default_bus.subscribe("*", _default_store.append)
@@ -38,6 +42,14 @@ def get_default_metrics() -> EventMetrics:
 def get_default_replay() -> EventReplay:
     """Get the default EventReplay singleton."""
     return _default_replay
+
+def get_default_subscription_manager() -> EventSubscriptionManager:
+    """Get the default EventSubscriptionManager singleton."""
+    return _default_subscription_manager
+
+def get_default_visibility_layer() -> EventVisibilityLayer:
+    """Get the default EventVisibilityLayer singleton."""
+    return _default_visibility_layer
 
 # Convenience package-level APIs targeting the default singleton instances
 def publish(event: Event) -> int:
