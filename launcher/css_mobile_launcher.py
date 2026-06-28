@@ -1706,11 +1706,50 @@ async def mobile_strategy_evolution():
 
 @launcher_router.get("/manifest.json")
 async def get_manifest():
-    return FileResponse(os.path.join(os.path.dirname(__file__), "static", "css_launcher_manifest.json"))
+    return FileResponse(
+        os.path.join(os.path.dirname(__file__), "static", "css_launcher_manifest.json"),
+        media_type="application/manifest+json",
+    )
+
 
 @launcher_router.get("/favicon.ico")
 async def get_favicon():
-    return FileResponse(os.path.join(os.path.dirname(__file__), "static", "css_launcher_icon.svg"), media_type="image/svg+xml")
+    favicon_path = os.path.join(os.path.dirname(__file__), "..", "assets", "branding", "css.ico")
+    if os.path.exists(favicon_path):
+        return FileResponse(favicon_path, media_type="image/x-icon")
+
+    return FileResponse(
+        os.path.join(os.path.dirname(__file__), "static", "css_launcher_icon.svg"),
+        media_type="image/svg+xml",
+    )
+
+
+@launcher_router.get("/static/css_pwa_icon_192.png")
+async def css_pwa_icon_192():
+    return FileResponse(
+        os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "assets",
+            "branding",
+            "css_pwa_icon_192.png",
+        ),
+        media_type="image/png",
+    )
+
+
+@launcher_router.get("/static/css_pwa_icon_512.png")
+async def css_pwa_icon_512():
+    return FileResponse(
+        os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "assets",
+            "branding",
+            "css_pwa_icon_512.png",
+        ),
+        media_type="image/png",
+    )
 
 
 # ── PAUSE / RESUME ROUTES ────────────────────────────────────────────────────
