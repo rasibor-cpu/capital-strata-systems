@@ -6,8 +6,10 @@ system state persistence, and timeline history log appending.
 """
 
 from typing import Optional
-from dataclasses import dataclass
 from backend.events.event_models import Event
+from backend.common.configuration import OperationsConfig
+from backend.common.exceptions import ValidationException
+from backend.common.logger import get_logger
 from backend.operations.operations_models import (
     create_state_event,
     create_timeline_event,
@@ -17,17 +19,7 @@ from backend.operations.operational_state_manager import OperationalStateManager
 from backend.operations.operational_timeline import OperationalTimeline
 from backend.operations.runtime_statistics import RuntimeStatistics
 
-@dataclass(frozen=True)
-class OperationsConfig:
-    """
-    Configuration parameters for the Operations service.
-    
-    Responsibility: Store parameters governing operations checks.
-    Dependencies: None.
-    Thread-safety: Immutable dataclass, safe.
-    Integration: Read by OperationsService.
-    """
-    default_source: str = "operations_service"
+logger = get_logger("css.operations.service")
 
 class OperationsService:
     """
@@ -47,6 +39,7 @@ class OperationsService:
         timeline: OperationalTimeline,
         statistics: RuntimeStatistics
     ):
+        config.validate()
         self.config = config
         self.monitor = monitor
         self.state_manager = state_manager
@@ -62,6 +55,7 @@ class OperationsService:
             details=details
         )
         event.source = self.config.default_source
+        event.validate()
         self.timeline.append(event)
         return event
 
@@ -94,6 +88,7 @@ class OperationsService:
             component_states=component_states
         )
         state_event.source = self.config.default_source
+        state_event.validate()
 
         # Persist updated state
         self.state_manager.append(state_event)
@@ -107,4 +102,6 @@ class OperationsService:
                 details={"old_status": old_status, "new_status": new_status, "health_score": health_score}
             )
 
+        logger.info(f"Diagnostics complete. Status: {new_status} | Score: {health_score:.1f}")
         return state_event
+

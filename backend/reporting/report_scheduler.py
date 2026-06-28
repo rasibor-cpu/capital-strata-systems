@@ -2,9 +2,11 @@
 Report Scheduler for CSS Reporting Framework
 
 Tracks scheduled report generation tasks and determines due jobs.
+Thread-safe.
 """
 
 import time
+import threading
 from dataclasses import dataclass
 from typing import List, Callable, Dict, Any
 
@@ -31,11 +33,12 @@ class ReportScheduler:
     
     Responsibility: Determine when reports are due to generate.
     Dependencies: ScheduledReportJob
-    Thread-safety: Not thread-safe (should be synchronized by caller).
+    Thread-safety: Fully synchronized via threading.RLock.
     Integration: Polled by ReportingService.
     """
     def __init__(self):
         self._jobs: List[ScheduledReportJob] = []
+        self._lock = threading.RLock()
 
     def schedule_job(
         self,
@@ -46,16 +49,17 @@ class ReportScheduler:
         interval_seconds: float
     ) -> None:
         """Add a report generation job to the schedule list."""
-        self._jobs.append(
-            ScheduledReportJob(
-                job_id=job_id,
-                report_type=report_type.upper(),
-                title=title,
-                context_generator=context_generator,
-                interval_seconds=interval_seconds,
-                last_run=time.time()
+        with self._lock:
+            self._jobs.append(
+                ScheduledReportJob(
+                    job_id=job_id,
+                    report_type=report_type.upper(),
+                    title=title,
+                    context_generator=context_generator,
+                    interval_seconds=interval_seconds,
+                    last_run=time.time()
+                )
             )
-        )
 
     def get_due_jobs(self, current_time: float = None) -> List[ScheduledReportJob]:
         """Collect all jobs that are due based on elapsed time."""
@@ -63,17 +67,19 @@ class ReportScheduler:
             current_time = time.time()
         
         due = []
-        for job in self._jobs:
-            if current_time - job.last_run >= job.interval_seconds:
-                due.append(job)
+        with self._lock:
+            for job in self._jobs:
+                if current_time - job.last_run >= job.interval_seconds:
+                    due.append(job)
         return due
 
     def trigger_job(self, job_id: str, current_time: float = None) -> bool:
         """Mark a job as executed at current time."""
         if current_time is None:
             current_time = time.time()
-        for job in self._jobs:
-            if job.job_id == job_id:
-                job.last_run = current_time
-                return True
+        with self._lock:
+            for job in self._jobs:
+                if job.job_id == job_id:
+                    job.last_run = current_time
+                    return True
         return False

@@ -7,24 +7,16 @@ and job schedules.
 
 import time
 from typing import Optional
-from dataclasses import dataclass
 from backend.events.event_models import Event
+from backend.common.configuration import ReportingConfig
+from backend.common.exceptions import ValidationException
+from backend.common.logger import get_logger
 from backend.reporting.report_generator import ReportGenerator
 from backend.reporting.report_archive import ReportArchive
 from backend.reporting.report_history import ReportHistory
 from backend.reporting.report_scheduler import ReportScheduler
 
-@dataclass(frozen=True)
-class ReportingConfig:
-    """
-    Configuration dataclass for the Reporting Service.
-    
-    Responsibility: Store parameters governing report generations.
-    Dependencies: None.
-    Thread-safety: Immutable dataclass, safe.
-    Integration: Read by ReportingService.
-    """
-    default_source: str = "reporting_service"
+logger = get_logger("css.reporting.service")
 
 class ReportingService:
     """
@@ -44,6 +36,7 @@ class ReportingService:
         history: ReportHistory,
         scheduler: ReportScheduler
     ):
+        config.validate()
         self.config = config
         self.generator = generator
         self.archive = archive
@@ -63,6 +56,7 @@ class ReportingService:
         )
         
         event.source = self.config.default_source
+        event.validate()
         
         # Archive individual file
         self.archive.append(event)
@@ -70,6 +64,7 @@ class ReportingService:
         # Index to manifest
         self.history.append(event)
         
+        logger.info(f"Report '{title}' ({report_type}) created and archived successfully.")
         return event
 
     def process_schedule(self, current_time: Optional[float] = None) -> int:
@@ -95,3 +90,4 @@ class ReportingService:
             self.scheduler.trigger_job(job.job_id, current_time)
             
         return len(due_jobs)
+

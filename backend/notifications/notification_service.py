@@ -5,9 +5,12 @@ Integrates templates, preferences, delivery routing, persistent queues,
 and scheduling into a unified service interface.
 """
 
+import threading
 from typing import Dict, List, Optional
-from dataclasses import dataclass, field
 from backend.events.event_models import Event
+from backend.common.configuration import NotificationConfig
+from backend.common.exceptions import ValidationException
+from backend.common.logger import get_logger
 from backend.notifications.notification_models import (
     get_notification_channels,
     get_notification_retry_count,
@@ -22,18 +25,7 @@ from backend.notifications.notification_templates import NotificationTemplates
 from backend.notifications.notification_scheduler import NotificationScheduler
 from backend.notifications.notification_preferences import UserPreferences
 
-@dataclass(frozen=True)
-class NotificationConfig:
-    """
-    Configuration parameters for the Notification Framework.
-    
-    Responsibility: Consolidate notification settings.
-    Dependencies: None.
-    Thread-safety: Immutable dataclass, safe.
-    Integration: Read by NotificationService.
-    """
-    max_retries: int = 3
-    default_channels: List[str] = field(default_factory=lambda: ["email", "desktop"])
+logger = get_logger("css.notifications.service")
 
 class NotificationService:
     """
@@ -42,7 +34,7 @@ class NotificationService:
     
     Responsibility: Orchestrate preference filtering, routing, scheduling, queueing, and history tracking.
     Dependencies: NotificationConfig, NotificationQueue, NotificationHistory, NotificationDeliveryRouter, NotificationTemplates, NotificationScheduler
-    Thread-safety: Service operations should be synchronized externally or rely on locked sub-components.
+    Thread-safety: Fully thread-safe operations on preferences and relies on locked sub-components.
     Integration: Exposes standard APIs for trading engines, risk monitors, and administrative scripts.
     """
     def __init__(
@@ -54,6 +46,7 @@ class NotificationService:
         templates: NotificationTemplates,
         scheduler: NotificationScheduler
     ):
+        config.validate()
         self.config = config
         self.queue = queue
         self.history = history
@@ -61,14 +54,17 @@ class NotificationService:
         self.templates = templates
         self.scheduler = scheduler
         self._preferences: Dict[str, UserPreferences] = {}
+        self._pref_lock = threading.Lock()
 
     def set_user_preferences(self, user_id: str, prefs: UserPreferences) -> None:
         """Assign preferences configuration for a specific user ID."""
-        self._preferences[user_id] = prefs
+        with self._pref_lock:
+            self._preferences[user_id] = prefs
 
     def get_user_preferences(self, user_id: str) -> UserPreferences:
         """Retrieve preferences configuration for a user ID, falling back to defaults."""
-        return self._preferences.get(user_id, UserPreferences(user_id=user_id))
+        with self._pref_lock:
+            return self._preferences.get(user_id, UserPreferences(user_id=user_id))
 
     def notify(self, event: Event) -> bool:
         """
@@ -76,6 +72,7 @@ class NotificationService:
         Checks user preferences. Routes to registered channel providers.
         Saves outcome to delivery history. If failed, appends to persistent retry queue.
         """
+        event.validate()
         user_id = event.user_id or "system"
         prefs = self.get_user_preferences(user_id)
 
@@ -83,6 +80,7 @@ class NotificationService:
         if not prefs.should_deliver(event.severity, event.timestamp):
             set_notification_status(event, "FILTERED")
             self.history.append(event)
+            logger.info(f"Notification event {event.event_id} filtered for user {user_id}")
             return False
 
         channels = get_notification_channels(event)
@@ -165,3 +163,4 @@ class NotificationService:
         for event in due_events:
             self.notify(event)
         return len(due_events)
+

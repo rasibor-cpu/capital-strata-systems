@@ -55,12 +55,19 @@ service = NotificationService(
 service.notify(event)
 ```
 
-## 4. Persistent Formats
+## 4. Persistent Formats and Hardening (EWP-1A)
 
-Standard persistence APIs are used (`load()`, `save()`, `append()`, `clear()`).
+Standard persistence APIs are used (`load()`, `save()`, `append()`, `clear()`) which utilize the thread-safe persistence helper library (`backend/common/persistence`).
 
-* **Queue File:** `artifacts/notifications/css_notification_queue.json`
-* **History File:** `artifacts/notifications/css_notification_history.json`
+### Shared Enterprise Standards
+* **Serialization Standard:** Reuses `JSONSerializable` mixin:
+  - `to_dict()` and `from_dict(data)`
+  - `to_json()` and `from_json(json_str)`
+* **Schema Versioning:** Every notification record written contains `schema_version` (default `"1.0.0"`), checked via `validate_schema_version()`.
+* **Input Validation:** Enforced via `validate_required_fields()` and `validate_field_type()`. If required values are malformed or missing, `ValidationException` is raised.
+* **Logging System:** Employs the centralized `CSSLogger` (`get_logger("css.notifications.service")`).
+* **Exception Hierarchy:** Inherits from standard CSS base exception:
+  - `CSSException` -> `NotificationException`, `ValidationException`, `PersistenceException`, `ConfigurationException`
 
 ## 5. Verification
 
