@@ -43,10 +43,60 @@ class GateDecision:
 
 class CSSUnifiedTradeGate:
 
-    def __init__(self) -> None:
+    def __init__(self, event_bus: Optional[Any] = None) -> None:
         self.prop_governor = PropTradingGovernor()
+        self.event_bus = event_bus
+
+    def _safe_publish_event(
+        self,
+        event_type: str,
+        severity: str,
+        category: str,
+        payload: Dict[str, Any],
+    ) -> None:
+        if not self.event_bus:
+            return
+        try:
+            from backend.events.event_models import Event
+            event = Event(
+                event_type=event_type,
+                severity=severity,
+                category=category,
+                source="css_unified_trade_gate",
+                payload=payload,
+            )
+            self.event_bus.publish(event)
+        except Exception:
+            pass
 
     def approve_trade(
+        self,
+        candidate: Dict[str, Any],
+        session: Dict[str, Any],
+        portfolio_state: Dict[str, Any],
+        engine_mode: str,
+    ) -> GateDecision:
+        decision = self._approve_trade_internal(candidate, session, portfolio_state, engine_mode)
+        
+        event_type = "TRADE_APPROVED" if decision.approved else "TRADE_REJECTED"
+        severity = "INFO" if decision.approved else "WARNING"
+        payload = {
+            "approved": decision.approved,
+            "reason": decision.reason,
+            "engine_mode": decision.engine_mode,
+            "timestamp": decision.timestamp,
+            "details": decision.details,
+            "candidate": candidate,
+        }
+        self._safe_publish_event(
+            event_type=event_type,
+            severity=severity,
+            category="TRADING",
+            payload=payload
+        )
+        return decision
+
+    def _approve_trade_internal(
         self,
         candidate: Dict[str, Any],
         session: Dict[str, Any],

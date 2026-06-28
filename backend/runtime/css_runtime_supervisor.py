@@ -1,4 +1,4 @@
-﻿import json
+import json
 import math
 import uuid
 import os
@@ -20,6 +20,7 @@ class CSSRuntimeSupervisor:
         max_restart_limit: int = 3,
         alert_service: Optional[CSSAlertService] = None,
         canonical_alert_bridge: Optional[CanonicalAlertBridge] = None,
+        event_bus: Optional[Any] = None,
     ):
         self.supervisor_id = str(uuid.uuid4())
         self.state_dir = state_dir
@@ -30,6 +31,7 @@ class CSSRuntimeSupervisor:
         self.max_restart_limit = max_restart_limit
         self.alert_service = alert_service or CSSAlertService()
         self.canonical_alert_bridge = canonical_alert_bridge or CanonicalAlertBridge()
+        self.event_bus = event_bus
 
         self.started_at: Optional[str] = None
         self.stopped_at: Optional[str] = None
@@ -75,18 +77,52 @@ class CSSRuntimeSupervisor:
         except Exception:
             pass
 
+    def _safe_publish_event(
+        self,
+        event_type: str,
+        severity: str,
+        category: str,
+        payload: Dict[str, Any],
+    ) -> None:
+        if not self.event_bus:
+            return
+        try:
+            from backend.events.event_models import Event
+            event = Event(
+                event_type=event_type,
+                severity=severity,
+                category=category,
+                source="css_runtime_supervisor",
+                payload=payload,
+            )
+            self.event_bus.publish(event)
+        except Exception:
+            pass
+
     def start(self):
         self.status = "RUNNING"
         self.started_at = datetime.now(timezone.utc).isoformat()
         self.stopped_at = None
         self._persist_state()
         self._safe_emit("Supervisor started", AlertSeverity.INFO)
+        self._safe_publish_event(
+            event_type="RUNTIME_STARTED",
+            severity="INFO",
+            category="SYSTEM",
+            payload={"supervisor_id": self.supervisor_id, "started_at": self.started_at}
+        )
 
     def stop(self):
         self.status = "STOPPED"
         self.stopped_at = datetime.now(timezone.utc).isoformat()
         self._persist_state()
         self._safe_emit("Supervisor stopped", AlertSeverity.INFO)
+        self._safe_publish_event(
+            event_type="RUNTIME_STOPPED",
+            severity="INFO",
+            category="SYSTEM",
+            payload={"supervisor_id": self.supervisor_id, "stopped_at": self.stopped_at}
+        )
 
     def heartbeat(self):
         self.last_heartbeat_at = datetime.now(timezone.utc).isoformat()
@@ -116,6 +152,17 @@ class CSSRuntimeSupervisor:
             self._safe_emit(
                 "Heartbeat stale detected",
                 AlertSeverity.CRITICAL,
+            )
+            self._safe_publish_event(
+                event_type="HEARTBEAT_LOST",
+                severity="CRITICAL",
+                category="SYSTEM",
+                payload={
+                    "supervisor_id": self.supervisor_id,
+                    "last_heartbeat_at": self.last_heartbeat_at,
+                    "stale_threshold_seconds": stale_threshold_seconds,
+                    "elapsed_seconds": (now_dt - last_dt).total_seconds(),
+                }
             )
 
             try:
@@ -228,6 +275,18 @@ class CSSRuntimeSupervisor:
                 "backoff_seconds": delay_seconds,
             },
         )
+        self._safe_publish_event(
+            event_type="RECOVERY_STARTED",
+            severity="WARNING",
+            category="SYSTEM",
+            payload={
+                "supervisor_id": self.supervisor_id,
+                "service_name": service_name,
+                "attempt": attempt,
+                "max_restart_limit": self.max_restart_limit,
+                "delay_seconds": delay_seconds,
+            }
+        )
 
     def record_restart_success(
         self,
@@ -270,6 +329,18 @@ class CSSRuntimeSupervisor:
             )
         except Exception:
             pass
+
+        self._safe_publish_event(
+            event_type="RECOVERY_COMPLETE",
+            severity="INFO",
+            category="SYSTEM",
+            payload={
+                "supervisor_id": self.supervisor_id,
+                "service_name": service_name,
+                "attempt": attempt,
+                "restart_count": self.restart_count,
+            }
+        )
 
     def record_restart_exhausted(self, service_name: str):
         msg = (
