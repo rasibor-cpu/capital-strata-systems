@@ -1,6 +1,7 @@
 import os
 import json
 import datetime
+import time
 from urllib.parse import parse_qs
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, Request, FastAPI
@@ -13,6 +14,9 @@ from backend.monitoring.alert_repository import (
     AlertCentreCompatibilityAdapter,
     AlertRepositoryError,
 )
+from backend.monitoring.runtime_health_aggregator import RuntimeHealthAggregator
+from backend.monitoring.runtime_performance_monitor import RuntimePerformanceMonitor
+from backend.monitoring.session_validation_engine import SessionValidationEngine
 from backend.trading.instrument_universe import (
     InstrumentUniverse,
     InstrumentUniverseError,
@@ -48,6 +52,7 @@ from backend.portfolio.adaptive_portfolio_manager import AdaptivePortfolioManage
 from backend.portfolio.advisory_consistency_checker import AdvisoryConsistencyChecker
 from backend.portfolio.advisory_history_store import AdvisoryHistoryStore
 from backend.portfolio.capital_rotation_engine import CapitalRotationEngine
+from backend.portfolio.confidence_calibration_engine import ConfidenceCalibrationEngine
 from backend.portfolio.decision_validation_engine import DecisionValidationEngine
 from backend.portfolio.explainability_engine import ExplainabilityEngine
 from backend.portfolio.market_regime_intelligence import MarketRegimeIntelligence
@@ -56,6 +61,8 @@ from backend.portfolio.portfolio_decision_orchestrator import DecisionPackageSto
 from backend.portfolio.portfolio_risk_committee import PortfolioRiskCommittee
 from backend.portfolio.portfolio_intelligence_engine import PortfolioIntelligenceEngine
 from backend.portfolio.quantitative_metrics_engine import QuantitativeMetricsEngine
+from backend.portfolio.recommendation_drift_analyzer import RecommendationDriftAnalyzer
+from backend.portfolio.recommendation_evaluator import RecommendationEvaluator
 from backend.portfolio.recommendation_tracker import RecommendationTracker
 from backend.portfolio.regime_aware_allocation import RegimeAwareAllocationEngine
 from backend.portfolio.strategy_attribution_engine import StrategyAttributionEngine
@@ -573,6 +580,43 @@ def get_recommendation_tracker_feed() -> Dict[str, Any]:
     return RecommendationTracker(_portfolio_learning_storage_dir()).summary()
 
 
+def _load_recommendation_evaluation_history() -> List[Dict[str, Any]]:
+    paths = [
+        os.path.join(_portfolio_learning_storage_dir(), "recommendation_tracker.json"),
+        os.path.join(_portfolio_learning_storage_dir(), "advisory_history.json"),
+        os.path.join(_portfolio_learning_storage_dir(), "portfolio_decision_packages.json"),
+    ]
+    for path in paths:
+        try:
+            if not os.path.exists(path):
+                continue
+            with open(path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            if isinstance(payload, list):
+                rows = [row for row in payload if isinstance(row, dict)]
+                if rows:
+                    return rows
+        except Exception:
+            continue
+    return []
+
+
+def get_recommendation_evaluation_feed(history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    records = history if history is not None else _load_recommendation_evaluation_history()
+    return RecommendationEvaluator().evaluate(records)
+
+
+def get_confidence_calibration_feed(history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    records = history if history is not None else _load_recommendation_evaluation_history()
+    evaluated_records = RecommendationEvaluator._evaluable_rows(records)
+    return ConfidenceCalibrationEngine().analyze(evaluated_records if evaluated_records else records)
+
+
+def get_recommendation_drift_feed(history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    records = history if history is not None else _load_recommendation_evaluation_history()
+    return RecommendationDriftAnalyzer().analyze(records)
+
+
 def get_advisory_history_feed() -> Dict[str, Any]:
     store = AdvisoryHistoryStore(_portfolio_learning_storage_dir())
     summary = store.summarize()
@@ -638,19 +682,34 @@ def get_advisory_consistency_feed(inputs: Optional[Dict[str, Any]] = None) -> Di
     )
 
 
-def get_portfolio_decision_feed(persist: bool = True) -> Dict[str, Any]:
-    inputs = _portfolio_decision_inputs()
+def get_portfolio_decision_feed(inputs: Optional[Dict[str, Any]] = None, persist: bool = False) -> Dict[str, Any]:
+    inputs = inputs or _portfolio_decision_inputs()
     decision = PortfolioDecisionOrchestrator().orchestrate(inputs)
     if persist:
         DecisionPackageStore(_portfolio_learning_storage_dir()).append(decision)
     return decision
 
 
-def get_decision_validation_feed(decision: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def record_portfolio_decision(package: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    decision_package = package or get_portfolio_decision_feed(persist=False)
+    result = DecisionPackageStore(_portfolio_learning_storage_dir()).append(decision_package)
+    return {
+        "status": result.get("status", "DATA UNAVAILABLE"),
+        "recorded": result.get("status") == "OK",
+        "decision": result.get("record", decision_package),
+        "count": result.get("count", 0),
+        "advisory_only": True,
+    }
+
+
+def get_decision_validation_feed(
+    decision: Optional[Dict[str, Any]] = None,
+    policy_profile: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     decision_package = decision or get_portfolio_decision_feed(persist=False)
     return DecisionValidationEngine().validate(
         decision_package=decision_package,
-        policy_profile=get_policy_profile_feed(),
+        policy_profile=policy_profile or get_policy_profile_feed(),
         supervisor_state=get_supervisor_summary(),
         risk_committee=decision_package.get("risk_committee", {}) if isinstance(decision_package, dict) else {},
     )
@@ -660,8 +719,9 @@ def get_explainability_feed(
     decision: Optional[Dict[str, Any]] = None,
     validation: Optional[Dict[str, Any]] = None,
     consistency: Optional[Dict[str, Any]] = None,
+    inputs: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    inputs = _portfolio_decision_inputs()
+    inputs = inputs or _portfolio_decision_inputs()
     decision_package = decision or PortfolioDecisionOrchestrator().orchestrate(inputs)
     validation_payload = validation or get_decision_validation_feed(decision_package)
     consistency_payload = consistency or get_advisory_consistency_feed(inputs)
@@ -674,6 +734,84 @@ def get_explainability_feed(
         policy_profile=inputs.get("policy_profile"),
         validation=validation_payload,
         consistency=consistency_payload,
+    )
+
+
+def _artifact_status_snapshot() -> Dict[str, Any]:
+    now = time.time()
+    names = [
+        "css_session_state_pcnrass.json",
+        "css_account_state_pcnrass.json",
+        "css_session_recovery.json",
+        "css_account_state_pcnrass_BACKUP.json",
+    ]
+    snapshot: Dict[str, Any] = {}
+    latest_mtime = 0.0
+    for name in names:
+        path = os.path.join(LauncherConfig.ARTIFACTS_DIR, name)
+        if os.path.exists(path):
+            mtime = os.path.getmtime(path)
+            latest_mtime = max(latest_mtime, mtime)
+            age = max(0.0, now - mtime)
+            snapshot[name] = {"age_seconds": age, "stale_after_seconds": 300, "stale": age > 300}
+        else:
+            snapshot[name] = {"age_seconds": None, "stale_after_seconds": 300, "stale": True}
+    snapshot["dashboard_stale"] = (now - latest_mtime) > 300 if latest_mtime else True
+    snapshot["persistence_health"] = "OK"
+    return snapshot
+
+
+def get_runtime_performance_feed(
+    dashboard_latency_ms: Optional[float] = None,
+    pipeline_latency_ms: Optional[float] = None,
+    api_latency_ms: Optional[float] = None,
+) -> Dict[str, Any]:
+    telemetry = {
+        "pipeline_latency_ms": pipeline_latency_ms if pipeline_latency_ms is not None else 0.0,
+        "dashboard_latency_ms": dashboard_latency_ms if dashboard_latency_ms is not None else 0.0,
+        "api_endpoint_latency_ms": [api_latency_ms] if api_latency_ms is not None else [],
+        "json_persistence_latency_ms": [],
+        "artifact_reads": 4,
+        "artifact_writes": 0,
+        "cache_hits": 1 if pipeline_latency_ms is not None else 0,
+        "cache_misses": 1,
+        "execution_times_ms": [
+            value for value in [dashboard_latency_ms, pipeline_latency_ms, api_latency_ms] if value is not None
+        ],
+    }
+    return RuntimePerformanceMonitor().evaluate(telemetry)
+
+
+def get_session_validation_feed(portfolio_decision: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    session_state = _safe_load_artifact("css_session_state_pcnrass.json") or _safe_load_artifact("css_session_recovery.json")
+    decision = portfolio_decision or get_portfolio_decision_feed(persist=False)
+    advisory_status = {
+        "stale_advisory_package": bool(decision.get("missing_inputs")) if isinstance(decision, dict) else True,
+        "persistence_health": "OK",
+        "recommendations": [decision.get("portfolio_recommendation")] if isinstance(decision, dict) else [],
+        "policy_consistency": not bool(decision.get("conflicting_signals")) if isinstance(decision, dict) else False,
+    }
+    return SessionValidationEngine().validate(
+        session_state=session_state,
+        supervisor_state=get_supervisor_summary(),
+        artifact_status=_artifact_status_snapshot(),
+        advisory_status=advisory_status,
+    )
+
+
+def get_runtime_health_feed(
+    performance: Optional[Dict[str, Any]] = None,
+    session_validation: Optional[Dict[str, Any]] = None,
+    portfolio_decision: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    decision = portfolio_decision or get_portfolio_decision_feed(persist=False)
+    perf = performance or get_runtime_performance_feed()
+    session = session_validation or get_session_validation_feed(decision)
+    return RuntimeHealthAggregator().aggregate(
+        performance=perf,
+        session_validation=session,
+        supervisor_status=get_supervisor_summary(),
+        portfolio_decision=decision,
     )
 
 
@@ -1823,6 +1961,7 @@ def get_portfolio_allocation_feed() -> Dict[str, Any]:
 
 
 def build_mobile_dashboard_context() -> Dict[str, Any]:
+    dashboard_started = time.perf_counter()
     # Calculate heartbeat / staleness
     artifacts = [
         "css_session_state_pcnrass.json",
@@ -1899,31 +2038,44 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         opportunity_summary=opportunity_summary,
     )
     portfolio_summary = get_portfolio_summary_feed()
-    portfolio_intelligence = get_portfolio_intelligence_feed()
-    capital_rotation = get_capital_rotation_feed(portfolio_intelligence)
-    strategy_attribution = get_strategy_attribution_feed()
-    regime_allocation = get_regime_aware_allocation_feed(capital_rotation)
-    adaptive_portfolio = get_adaptive_portfolio_feed(portfolio_intelligence, capital_rotation)
-    portfolio_risk_committee = get_portfolio_risk_committee_feed(
-        portfolio_intelligence=portfolio_intelligence,
-        capital_rotation=capital_rotation,
-        adaptive_portfolio=adaptive_portfolio,
-        attribution=strategy_attribution,
-        regime_allocation=regime_allocation,
-    )
-    quantitative_metrics = get_quantitative_metrics_feed()
-    market_regime_intelligence = get_market_regime_intelligence_feed(quantitative_metrics)
-    policy_profile = get_policy_profile_feed()
-    recommendation_tracker = get_recommendation_tracker_feed()
+    pipeline_started = time.perf_counter()
+    decision_inputs = _portfolio_decision_inputs()
+    pipeline_latency_ms = (time.perf_counter() - pipeline_started) * 1000.0
+    portfolio_intelligence = decision_inputs["portfolio_intelligence"]
+    capital_rotation = decision_inputs["capital_rotation"]
+    strategy_attribution = decision_inputs["strategy_attribution"]
+    regime_allocation = decision_inputs["regime_allocation"]
+    adaptive_portfolio = decision_inputs["adaptive_portfolio"]
+    portfolio_risk_committee = decision_inputs["risk_committee"]
+    quantitative_metrics = decision_inputs["quantitative_metrics"]
+    market_regime_intelligence = decision_inputs["market_regime_intelligence"]
+    policy_profile = decision_inputs["policy_profile"]
+    recommendation_tracker = decision_inputs["recommendation_tracker"]
     advisory_history = get_advisory_history_feed()
-    portfolio_decision = get_portfolio_decision_feed()
-    decision_validation = get_decision_validation_feed(portfolio_decision)
-    advisory_consistency = get_advisory_consistency_feed()
+    portfolio_decision = get_portfolio_decision_feed(inputs=decision_inputs, persist=False)
+    decision_validation = get_decision_validation_feed(portfolio_decision, policy_profile=policy_profile)
+    advisory_consistency = get_advisory_consistency_feed(decision_inputs)
     explainability = get_explainability_feed(
         decision=portfolio_decision,
         validation=decision_validation,
         consistency=advisory_consistency,
+        inputs=decision_inputs,
     )
+    dashboard_latency_ms = (time.perf_counter() - dashboard_started) * 1000.0
+    runtime_performance = get_runtime_performance_feed(
+        dashboard_latency_ms=dashboard_latency_ms,
+        pipeline_latency_ms=pipeline_latency_ms,
+    )
+    session_validation = get_session_validation_feed(portfolio_decision)
+    runtime_health = get_runtime_health_feed(
+        performance=runtime_performance,
+        session_validation=session_validation,
+        portfolio_decision=portfolio_decision,
+    )
+    recommendation_history = _load_recommendation_evaluation_history()
+    recommendation_evaluation = get_recommendation_evaluation_feed(recommendation_history)
+    confidence_calibration = get_confidence_calibration_feed(recommendation_history)
+    recommendation_drift = get_recommendation_drift_feed(recommendation_history)
     strategy_evolution = get_strategy_evolution_feed()
 
     return {
@@ -1961,6 +2113,12 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "decision_validation": decision_validation,
         "advisory_consistency": advisory_consistency,
         "explainability": explainability,
+        "runtime_performance": runtime_performance,
+        "session_validation": session_validation,
+        "runtime_health": runtime_health,
+        "recommendation_evaluation": recommendation_evaluation,
+        "confidence_calibration": confidence_calibration,
+        "recommendation_drift": recommendation_drift,
         "strategy_evolution": strategy_evolution,
         "portfolio_allocation": get_portfolio_allocation_feed(),
         "trade_ticket_defaults": trade_ticket_defaults,
@@ -2170,9 +2328,36 @@ async def api_recommendation_tracker():
     return get_recommendation_tracker_feed()
 
 
+@launcher_router.get("/api/recommendation-evaluation")
+async def api_recommendation_evaluation():
+    return get_recommendation_evaluation_feed()
+
+
+@launcher_router.get("/api/confidence-calibration")
+async def api_confidence_calibration():
+    return get_confidence_calibration_feed()
+
+
+@launcher_router.get("/api/recommendation-drift")
+async def api_recommendation_drift():
+    return get_recommendation_drift_feed()
+
+
 @launcher_router.get("/api/portfolio-decision")
 async def api_portfolio_decision():
-    return get_portfolio_decision_feed()
+    return get_portfolio_decision_feed(persist=False)
+
+
+@launcher_router.post("/api/portfolio-decision/record")
+async def api_portfolio_decision_record(request: Request):
+    package = None
+    try:
+        payload = await request.json()
+        if isinstance(payload, dict) and payload.get("portfolio_recommendation"):
+            package = payload
+    except Exception:
+        package = None
+    return record_portfolio_decision(package)
 
 
 @launcher_router.get("/api/decision-validation")
@@ -2192,6 +2377,31 @@ async def api_explainability():
 @launcher_router.get("/api/advisory-consistency")
 async def api_advisory_consistency():
     return get_advisory_consistency_feed()
+
+
+@launcher_router.get("/api/runtime-performance")
+async def api_runtime_performance():
+    started = time.perf_counter()
+    latency_ms = (time.perf_counter() - started) * 1000.0
+    return get_runtime_performance_feed(api_latency_ms=latency_ms)
+
+
+@launcher_router.get("/api/session-validation")
+async def api_session_validation():
+    decision = get_portfolio_decision_feed(persist=False)
+    return get_session_validation_feed(decision)
+
+
+@launcher_router.get("/api/runtime-health")
+async def api_runtime_health():
+    decision = get_portfolio_decision_feed(persist=False)
+    performance = get_runtime_performance_feed()
+    session = get_session_validation_feed(decision)
+    return get_runtime_health_feed(
+        performance=performance,
+        session_validation=session,
+        portfolio_decision=decision,
+    )
 
 
 @launcher_router.get("/mobile/strategy-evolution")

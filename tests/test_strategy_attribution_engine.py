@@ -34,6 +34,8 @@ def test_strategy_attribution_summarizes_groups_and_winners() -> None:
     result = StrategyAttributionEngine().analyze(trades)
 
     assert result["status"] == "OK"
+    assert result["advisory_only"] is True
+    assert result["execution_allowed"] is False
     assert result["recommendation"] == "EXPAND_WINNERS"
     assert result["strategy_attribution"]["TREND"]["trade_count"] == 2
     assert result["asset_class_attribution"]["EQUITIES"]["total_pnl"] == 200.0
@@ -57,5 +59,7 @@ def test_strategy_attribution_empty_history_is_safe() -> None:
     result = StrategyAttributionEngine().analyze([])
 
     assert result["status"] == "DATA UNAVAILABLE"
+    assert result["advisory_only"] is True
+    assert result["execution_allowed"] is False
     assert result["recommendation"] == "MAINTAIN"
     assert result["strategy_attribution"] == {}

@@ -21,10 +21,11 @@ def test_regime_aware_allocation_high_volatility_is_defensive() -> None:
 def test_regime_aware_allocation_trending_can_shift_from_cash() -> None:
     result = RegimeAwareAllocationEngine().adjust(
         {"EQUITIES": 45.0, "FX": 35.0, "CASH": 20.0},
-        {"detected_regime": "TRENDING", "max_drawdown": 0.02, "risk_status": "GREEN"},
+        {"detected_regime": "TRENDING_UP", "max_drawdown": 0.02, "risk_status": "GREEN"},
     )
 
     allocations = result["regime_adjusted_allocations"]
+    assert result["detected_regime"] == "TRENDING_UP"
     assert result["allocation_bias"] == "GROWTH"
     assert allocations["CASH"] == 15.0
     assert round(sum(allocations.values()), 2) == 100.0

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from backend.portfolio.constants import RECOMMENDATION_ORDER
+from backend.portfolio.utils import safe_float
+
 
 class DecisionValidationEngineError(RuntimeError):
     """Fail-closed exception for portfolio decision validation."""
@@ -10,13 +13,7 @@ class DecisionValidationEngineError(RuntimeError):
 class DecisionValidationEngine:
     """Validate advisory recommendations against policy and governance signals."""
 
-    ORDER = {
-        "PAUSE_NEW_TRADES": 0,
-        "REDUCE_RISK": 1,
-        "MAINTAIN": 2,
-        "REBALANCE": 2,
-        "INCREASE_RISK": 3,
-    }
+    ORDER = RECOMMENDATION_ORDER
 
     def validate(
         self,
@@ -44,22 +41,22 @@ class DecisionValidationEngine:
         health = health if isinstance(health, Mapping) else {}
         metrics = health.get("metrics", {})
         metrics = metrics if isinstance(metrics, Mapping) else {}
-        drawdown = self._float(metrics.get("max_drawdown"))
+        drawdown = safe_float(metrics.get("max_drawdown"))
         concentration = max(
-            self._float(metrics.get("largest_symbol_concentration")),
-            self._float(metrics.get("largest_asset_class_concentration")),
+            safe_float(metrics.get("largest_symbol_concentration")),
+            safe_float(metrics.get("largest_asset_class_concentration")),
         )
-        if drawdown > self._float(policy.get("max_drawdown_tolerance")):
+        if drawdown > safe_float(policy.get("max_drawdown_tolerance")):
             violations.append("drawdown_exceeds_policy")
-        if concentration > self._float(policy.get("concentration_limit")):
+        if concentration > safe_float(policy.get("concentration_limit")):
             violations.append("concentration_exceeds_policy")
 
         rotation = decision_package.get("capital_rotation", {})
         rotation = rotation if isinstance(rotation, Mapping) else {}
         allocations = rotation.get("target_allocations", {})
         if isinstance(allocations, Mapping):
-            cash = self._float(allocations.get("CASH"))
-            if cash < self._float(policy.get("minimum_cash_reserve")):
+            cash = safe_float(allocations.get("CASH"))
+            if cash < safe_float(policy.get("minimum_cash_reserve")):
                 warnings.append("cash_reserve_below_policy")
 
         committee = risk_committee if isinstance(risk_committee, Mapping) else decision_package.get("risk_committee", {})
@@ -96,13 +93,6 @@ class DecisionValidationEngine:
             "recommendation": final_recommendation,
             "advisory_only": True,
         }
-
-    @staticmethod
-    def _float(value: Any) -> float:
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return 0.0
 
     @staticmethod
     def _fail(reason: str) -> dict[str, Any]:

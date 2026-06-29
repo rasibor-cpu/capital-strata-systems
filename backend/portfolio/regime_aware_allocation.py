@@ -2,6 +2,19 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from backend.portfolio.constants import (
+    CANONICAL_REGIMES,
+    LEGACY_REGIME_ALIASES,
+    REGIME_CORRELATION_STRESS,
+    REGIME_HIGH_VOLATILITY,
+    REGIME_LOW_VOLATILITY,
+    REGIME_RANGING,
+    REGIME_TRENDING_DOWN,
+    REGIME_TRENDING_UP,
+    REGIME_UNKNOWN,
+)
+from backend.portfolio.utils import normalize_allocations, safe_float
+
 
 class RegimeAwareAllocationError(RuntimeError):
     """Fail-closed exception for regime-aware allocation analysis."""
@@ -20,33 +33,45 @@ class RegimeAwareAllocationEngine:
         if not isinstance(base_allocations, Mapping) or not base_allocations:
             return self._fail_closed("base_allocations_unavailable")
 
-        base = self._normalize_allocations(base_allocations)
+        base = normalize_allocations(base_allocations)
         if not base:
             return self._fail_closed("base_allocations_invalid")
 
         context = regime_context if isinstance(regime_context, Mapping) else {}
-        regime = str(context.get("detected_regime", context.get("market_regime", "UNKNOWN"))).strip().upper()
-        if regime not in {"TRENDING", "RANGING", "HIGH_VOLATILITY", "LOW_VOLATILITY"}:
-            regime = "UNKNOWN"
+        regime = self._canonical_regime(context.get("detected_regime", context.get("market_regime", REGIME_UNKNOWN)))
 
-        drawdown = self._float(context.get("max_drawdown", context.get("drawdown", 0.0)))
+        drawdown = safe_float(context.get("max_drawdown", context.get("drawdown", 0.0)))
         downside_ok = drawdown <= 0.08 and str(context.get("risk_status", "GREEN")).upper() != "RED"
         adjusted = dict(base)
         reasons: list[str] = []
 
-        if regime == "HIGH_VOLATILITY":
+        if regime == REGIME_HIGH_VOLATILITY:
             adjusted = self._shift_to_cash(adjusted, 15.0)
             adjusted = self._reduce_high_risk(adjusted, 0.80)
             bias = "DEFENSIVE"
             reasons.append("High volatility increases defensive reserve and reduces high-risk classes.")
-        elif regime == "TRENDING" and downside_ok:
+        elif regime == REGIME_CORRELATION_STRESS:
+            adjusted = self._shift_to_cash(adjusted, 15.0)
+            adjusted = self._reduce_high_risk(adjusted, 0.75)
+            bias = "DEFENSIVE"
+            reasons.append("Correlation stress increases defensive reserve and reduces high-risk classes.")
+        elif regime == REGIME_TRENDING_DOWN:
+            adjusted = self._shift_to_cash(adjusted, 12.5)
+            adjusted = self._reduce_high_risk(adjusted, 0.85)
+            bias = "DEFENSIVE"
+            reasons.append("Trending down regime requires defensive allocation posture.")
+        elif regime == REGIME_TRENDING_UP and downside_ok:
             adjusted = self._shift_from_cash(adjusted, 5.0)
             bias = "GROWTH"
-            reasons.append("Trending regime with acceptable downside supports selective risk-on allocation.")
-        elif regime == "LOW_VOLATILITY":
+            reasons.append("Trending up regime with acceptable downside supports selective risk-on allocation.")
+        elif regime == REGIME_TRENDING_UP:
+            adjusted = self._shift_to_cash(adjusted, 5.0)
+            bias = "BALANCED"
+            reasons.append("Trending up regime has unacceptable downside metrics, so allocation remains cautious.")
+        elif regime == REGIME_LOW_VOLATILITY:
             bias = "BALANCED"
             reasons.append("Low volatility supports balanced allocation posture.")
-        elif regime == "RANGING":
+        elif regime == REGIME_RANGING:
             adjusted = self._shift_to_cash(adjusted, 5.0)
             bias = "BALANCED"
             reasons.append("Ranging regime keeps modest defensive reserve.")
@@ -55,7 +80,7 @@ class RegimeAwareAllocationEngine:
             bias = "DEFENSIVE"
             reasons.append("Unknown regime remains conservative.")
 
-        adjusted = self._normalize_allocations(adjusted)
+        adjusted = normalize_allocations(adjusted)
         return {
             "status": "OK",
             "base_allocations": base,
@@ -65,6 +90,12 @@ class RegimeAwareAllocationEngine:
             "reasons": reasons,
             "advisory_only": True,
         }
+
+    @staticmethod
+    def _canonical_regime(value: Any) -> str:
+        regime = str(value or REGIME_UNKNOWN).strip().upper()
+        regime = LEGACY_REGIME_ALIASES.get(regime, regime)
+        return regime if regime in CANONICAL_REGIMES else REGIME_UNKNOWN
 
     def _shift_to_cash(self, allocations: dict[str, float], shift: float) -> dict[str, float]:
         adjusted = dict(allocations)
@@ -106,44 +137,12 @@ class RegimeAwareAllocationEngine:
         return adjusted
 
     @staticmethod
-    def _normalize_allocations(values: Mapping[str, Any]) -> dict[str, float]:
-        rows = []
-        for key, value in values.items():
-            name = str(key or "").strip().upper()
-            if not name:
-                continue
-            weight = max(0.0, RegimeAwareAllocationEngine._float(value))
-            rows.append({"name": name, "weight": weight})
-        total = sum(row["weight"] for row in rows)
-        if total <= 0.0:
-            return {}
-
-        basis_rows = []
-        allocated = 0
-        for row in sorted(rows, key=lambda item: item["name"]):
-            exact = (row["weight"] / total) * 10000.0
-            whole = int(exact)
-            allocated += whole
-            basis_rows.append({"name": row["name"], "basis_points": whole, "remainder": exact - whole})
-        remaining = 10000 - allocated
-        for row in sorted(basis_rows, key=lambda item: (-item["remainder"], item["name"]))[:remaining]:
-            row["basis_points"] += 1
-        return {row["name"]: round(row["basis_points"] / 100.0, 2) for row in sorted(basis_rows, key=lambda item: item["name"])}
-
-    @staticmethod
-    def _float(value: Any) -> float:
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return 0.0
-
-    @staticmethod
     def _fail_closed(reason: str) -> dict[str, Any]:
         return {
             "status": "DATA UNAVAILABLE",
             "base_allocations": {"CASH": 100.0},
             "regime_adjusted_allocations": {"CASH": 100.0},
-            "detected_regime": "UNKNOWN",
+            "detected_regime": REGIME_UNKNOWN,
             "allocation_bias": "DEFENSIVE",
             "reasons": [reason],
             "advisory_only": True,

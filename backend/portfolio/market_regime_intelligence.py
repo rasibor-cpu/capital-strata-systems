@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Mapping
 
+from backend.portfolio.constants import (
+    REGIME_CORRELATION_STRESS,
+    REGIME_HIGH_VOLATILITY,
+    REGIME_LOW_VOLATILITY,
+    REGIME_RANGING,
+    REGIME_TRENDING_DOWN,
+    REGIME_TRENDING_UP,
+    REGIME_UNKNOWN,
+)
 from backend.portfolio.quantitative_metrics_engine import QuantitativeMetricsEngine
+from backend.portfolio.utils import safe_series
 
 
 class MarketRegimeIntelligenceError(RuntimeError):
@@ -19,14 +29,14 @@ class MarketRegimeIntelligence:
         volatility: Iterable[Any] | None = None,
         correlation_matrix: Mapping[str, Mapping[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        return_series = QuantitativeMetricsEngine._series(returns)
+        return_series = safe_series(returns)
         if len(return_series) < 3:
-            price_series = QuantitativeMetricsEngine._series(prices)
+            price_series = safe_series(prices)
             return_series = self._returns_from_prices(price_series)
         if len(return_series) < 3:
             return self._unknown("return_series_insufficient")
 
-        volatility_series = QuantitativeMetricsEngine._series(volatility)
+        volatility_series = safe_series(volatility)
         realized_volatility = (
             sum(volatility_series) / len(volatility_series)
             if volatility_series
@@ -47,32 +57,32 @@ class MarketRegimeIntelligence:
 
         reasons: list[str] = []
         if correlation_state == "STRESS":
-            regime = "CORRELATION_STRESS"
+            regime = REGIME_CORRELATION_STRESS
             risk_bias = "DEFENSIVE"
             confidence = 85
             reasons.append("Average absolute correlation is stressed.")
         elif volatility_state == "HIGH":
-            regime = "HIGH_VOLATILITY"
+            regime = REGIME_HIGH_VOLATILITY
             risk_bias = "DEFENSIVE"
             confidence = 80
             reasons.append("Realized volatility is high.")
         elif trend_state == "UP":
-            regime = "TRENDING_UP"
+            regime = REGIME_TRENDING_UP
             risk_bias = "OPPORTUNISTIC"
             confidence = 75
             reasons.append("Returns show positive trend persistence.")
         elif trend_state == "DOWN":
-            regime = "TRENDING_DOWN"
+            regime = REGIME_TRENDING_DOWN
             risk_bias = "DEFENSIVE"
             confidence = 75
             reasons.append("Returns show negative trend persistence.")
         elif volatility_state == "LOW":
-            regime = "LOW_VOLATILITY"
+            regime = REGIME_LOW_VOLATILITY
             risk_bias = "BALANCED"
             confidence = 70
             reasons.append("Realized volatility is low.")
         else:
-            regime = "RANGING"
+            regime = REGIME_RANGING
             risk_bias = "BALANCED"
             confidence = 65
             reasons.append("Returns are range-bound without strong trend.")
@@ -121,11 +131,11 @@ class MarketRegimeIntelligence:
     def _unknown(reason: str) -> dict[str, Any]:
         return {
             "status": "DATA UNAVAILABLE",
-            "detected_regime": "UNKNOWN",
+            "detected_regime": REGIME_UNKNOWN,
             "confidence": 0,
-            "volatility_state": "UNKNOWN",
-            "trend_state": "UNKNOWN",
-            "correlation_state": "UNKNOWN",
+            "volatility_state": REGIME_UNKNOWN,
+            "trend_state": REGIME_UNKNOWN,
+            "correlation_state": REGIME_UNKNOWN,
             "risk_bias": "DEFENSIVE",
             "reasons": [reason],
             "advisory_only": True,

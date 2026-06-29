@@ -1035,6 +1035,54 @@
             {% endif %}
         </div>
 
+        <div class="card" id="operational-health-card">
+            <div class="card-header">
+                Operational Health
+                {% if runtime_health.status == 'OK' %}
+                <span class="badge badge-info" id="oh-status-badge">{{ runtime_health.runtime_health }}</span>
+                {% else %}
+                <span class="badge badge-warning" id="oh-status-badge">DATA UNAVAILABLE</span>
+                {% endif %}
+            </div>
+            {% if runtime_health.status == 'OK' %}
+            <div class="status-row"><span>Runtime Health</span><strong id="oh-runtime-health">{{ runtime_health.runtime_health }}</strong></div>
+            <div class="status-row"><span>Session Status</span><strong id="oh-session-status">{{ session_validation.session_status }}</strong></div>
+            <div class="status-row"><span>Pipeline Latency</span><strong id="oh-pipeline-latency">{{ runtime_performance.pipeline_latency_ms }}</strong></div>
+            <div class="status-row"><span>Dashboard Latency</span><strong id="oh-dashboard-latency">{{ runtime_performance.dashboard_latency_ms }}</strong></div>
+            <div class="status-row"><span>Cache Hit Rate</span><strong id="oh-cache-hit-rate">{{ runtime_performance.cache_hit_rate }}</strong></div>
+            <div class="status-row"><span>Heartbeat Age</span><strong id="oh-heartbeat-age">{{ session_validation.heartbeat_age }}</strong></div>
+            <div class="status-row"><span>Restart Count</span><strong id="oh-restart-count">{{ session_validation.restart_count }}</strong></div>
+            <div class="status-row"><span>Recovery Count</span><strong id="oh-recovery-count">{{ session_validation.recovery_count }}</strong></div>
+            <div class="status-row"><span>Memory Usage</span><strong id="oh-memory-usage">{{ runtime_performance.memory_usage | tojson }}</strong></div>
+            <div class="status-row"><span>CPU Usage</span><strong id="oh-cpu-usage">{{ runtime_performance.cpu_usage | tojson }}</strong></div>
+            <div class="status-row"><span>Overall Operational Health</span><strong id="oh-overall-health">{{ runtime_health.overall_operational_health }}</strong></div>
+            {% else %}
+            <div class="empty-state" id="operational-health-unavailable">DATA UNAVAILABLE</div>
+            {% endif %}
+        </div>
+
+        <div class="card" id="recommendation-evaluation-card">
+            <div class="card-header">
+                Recommendation Evaluation
+                {% if recommendation_evaluation.status == 'OK' %}
+                <span class="badge badge-info" id="re-status-badge">{{ confidence_calibration.calibration_status }}</span>
+                {% else %}
+                <span class="badge badge-warning" id="re-status-badge">DATA UNAVAILABLE</span>
+                {% endif %}
+            </div>
+            {% if recommendation_evaluation.status == 'OK' %}
+            <div class="status-row"><span>Recommendation Accuracy</span><strong id="re-accuracy">{{ recommendation_evaluation.overall_accuracy }}</strong></div>
+            <div class="status-row"><span>Calibration Score</span><strong id="re-calibration-score">{{ confidence_calibration.calibration_score }}</strong></div>
+            <div class="status-row"><span>Drift Score</span><strong id="re-drift-score">{{ recommendation_drift.drift_score }}</strong></div>
+            <div class="status-row"><span>Avoided Loss</span><strong id="re-avoided-loss">{{ recommendation_evaluation.avoided_loss }}</strong></div>
+            <div class="status-row"><span>Missed Opportunity</span><strong id="re-missed-opportunity">{{ recommendation_evaluation.missed_opportunity }}</strong></div>
+            <div class="status-row"><span>Recommendation Stability</span><strong id="re-stability">{{ recommendation_drift.recommendation_stability }}</strong></div>
+            <div class="status-row"><span>Evaluation Confidence</span><strong id="re-evaluation-confidence">{{ recommendation_evaluation.recommendation_effectiveness }}</strong></div>
+            {% else %}
+            <div class="empty-state" id="recommendation-evaluation-unavailable">DATA UNAVAILABLE</div>
+            {% endif %}
+        </div>
+
     </div><!-- /screen-positions -->
 
     <!-- ══════════════════════════════════════════════

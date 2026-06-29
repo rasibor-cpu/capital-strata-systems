@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from backend.portfolio.constants import RECOMMENDATION_ORDER
+
 
 class AdvisoryConsistencyCheckerError(RuntimeError):
     """Fail-closed exception for advisory consistency checks."""
@@ -10,13 +12,7 @@ class AdvisoryConsistencyCheckerError(RuntimeError):
 class AdvisoryConsistencyChecker:
     """Detect conflicting advisory recommendations without execution authority."""
 
-    ORDER = {
-        "PAUSE_NEW_TRADES": 0,
-        "REDUCE_RISK": 1,
-        "MAINTAIN": 2,
-        "REBALANCE": 2,
-        "INCREASE_RISK": 3,
-    }
+    ORDER = RECOMMENDATION_ORDER
 
     def check(
         self,

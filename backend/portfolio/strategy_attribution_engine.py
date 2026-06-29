@@ -52,6 +52,8 @@ class StrategyAttributionEngine:
 
         return {
             "status": "OK",
+            "advisory_only": True,
+            "execution_allowed": False,
             "strategy_attribution": strategy,
             "asset_class_attribution": asset_class,
             "symbol_attribution": symbol,
@@ -133,6 +135,8 @@ class StrategyAttributionEngine:
     def _empty(reason: str) -> dict[str, Any]:
         return {
             "status": "DATA UNAVAILABLE",
+            "advisory_only": True,
+            "execution_allowed": False,
             "strategy_attribution": {},
             "asset_class_attribution": {},
             "symbol_attribution": {},

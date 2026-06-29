@@ -3,6 +3,8 @@ from __future__ import annotations
 import math
 from typing import Any, Iterable, Mapping
 
+from backend.portfolio.utils import safe_series
+
 
 class QuantitativeMetricsEngineError(RuntimeError):
     """Fail-closed exception for quantitative metric analysis."""
@@ -76,17 +78,7 @@ class QuantitativeMetricsEngine:
 
     @staticmethod
     def _series(values: Iterable[Any] | None) -> list[float]:
-        if values is None or isinstance(values, (str, bytes)):
-            return []
-        try:
-            result = []
-            for value in values:
-                numeric = float(value)
-                if math.isfinite(numeric):
-                    result.append(numeric)
-            return result
-        except (TypeError, ValueError):
-            return []
+        return safe_series(values)
 
     def _asset_series(self, asset_returns: Mapping[str, Iterable[Any]] | None) -> dict[str, list[float]]:
         if not isinstance(asset_returns, Mapping):
