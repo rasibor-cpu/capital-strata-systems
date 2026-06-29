@@ -986,6 +986,55 @@
             {% endif %}
         </div>
 
+        <div class="card" id="quantitative-intelligence-card">
+            <div class="card-header">
+                Quantitative Intelligence / Learning
+                {% if quantitative_metrics.status == 'OK' and market_regime_intelligence.status == 'OK' %}
+                <span class="badge badge-info" id="qi-status-badge">{{ market_regime_intelligence.detected_regime }}</span>
+                {% else %}
+                <span class="badge badge-warning" id="qi-status-badge">DATA UNAVAILABLE</span>
+                {% endif %}
+            </div>
+            {% if quantitative_metrics.status == 'OK' and market_regime_intelligence.status == 'OK' %}
+            <div class="status-row"><span>Detected Regime</span><strong id="qi-detected-regime">{{ market_regime_intelligence.detected_regime }}</strong></div>
+            <div class="status-row"><span>Rolling Sharpe</span><strong id="qi-rolling-sharpe">{{ quantitative_metrics.metrics.rolling_sharpe }}</strong></div>
+            <div class="status-row"><span>Rolling Sortino</span><strong id="qi-rolling-sortino">{{ quantitative_metrics.metrics.rolling_sortino }}</strong></div>
+            <div class="status-row"><span>Max Drawdown</span><strong id="qi-max-drawdown">{{ quantitative_metrics.metrics.max_drawdown }}</strong></div>
+            <div class="status-row"><span>Volatility</span><strong id="qi-volatility">{{ quantitative_metrics.metrics.volatility }}</strong></div>
+            <div class="status-row"><span>Correlation Stress</span><strong id="qi-correlation-state">{{ market_regime_intelligence.correlation_state }}</strong></div>
+            <div class="status-row"><span>Policy Profile</span><strong id="qi-policy-profile">{{ policy_profile.active_profile }}</strong></div>
+            <div style="margin-top:8px; font-size:12px; color:var(--text-secondary);">Recommendation Tracking</div>
+            <pre id="qi-recommendation-tracker" style="white-space:pre-wrap; font-size:11px; color:var(--text-secondary);">{{ recommendation_tracker | tojson(indent=2) }}</pre>
+            <div style="margin-top:8px; font-size:12px; color:var(--text-secondary);">Advisory History</div>
+            <pre id="qi-advisory-history" style="white-space:pre-wrap; font-size:11px; color:var(--text-secondary);">{{ advisory_history.summary | tojson(indent=2) }}</pre>
+            {% else %}
+            <div class="empty-state" id="quantitative-intelligence-unavailable">DATA UNAVAILABLE</div>
+            {% endif %}
+        </div>
+
+        <div class="card" id="portfolio-decision-card">
+            <div class="card-header">
+                Portfolio Decision Summary
+                {% if portfolio_decision.advisory_only %}
+                <span class="badge badge-info" id="pd-status-badge">{{ portfolio_decision.overall_status }}</span>
+                {% else %}
+                <span class="badge badge-warning" id="pd-status-badge">DATA UNAVAILABLE</span>
+                {% endif %}
+            </div>
+            {% if portfolio_decision.advisory_only %}
+            <div class="status-row"><span>Recommendation</span><strong id="pd-recommendation">{{ portfolio_decision.portfolio_recommendation }}</strong></div>
+            <div class="status-row"><span>Decision Confidence</span><strong id="pd-confidence">{{ portfolio_decision.confidence }}</strong></div>
+            <div class="status-row"><span>Validation Status</span><strong id="pd-validation-status">{{ decision_validation.validation_status }}</strong></div>
+            <div class="status-row"><span>Consistency Status</span><strong id="pd-consistency-status">{{ advisory_consistency.consistent }}</strong></div>
+            <div class="status-row"><span>Policy Profile</span><strong id="pd-policy-profile">{{ portfolio_decision.policy_profile }}</strong></div>
+            <div class="status-row"><span>Conflict Count</span><strong id="pd-conflict-count">{{ portfolio_decision.conflicting_signals|length }}</strong></div>
+            <div style="margin-top:8px; font-size:12px; color:var(--text-secondary);">Primary Explanation</div>
+            <pre id="pd-primary-explanation" style="white-space:pre-wrap; font-size:11px; color:var(--text-secondary);">{{ explainability.primary_explanation }}</pre>
+            {% else %}
+            <div class="empty-state" id="portfolio-decision-unavailable">DATA UNAVAILABLE</div>
+            {% endif %}
+        </div>
+
     </div><!-- /screen-positions -->
 
     <!-- ══════════════════════════════════════════════

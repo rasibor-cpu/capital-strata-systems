@@ -45,9 +45,18 @@ from backend.analytics.strategy_evolution_engine import (
 )
 from backend.analytics.trade_outcome_repository import TradeOutcomeRepository
 from backend.portfolio.adaptive_portfolio_manager import AdaptivePortfolioManager
+from backend.portfolio.advisory_consistency_checker import AdvisoryConsistencyChecker
+from backend.portfolio.advisory_history_store import AdvisoryHistoryStore
 from backend.portfolio.capital_rotation_engine import CapitalRotationEngine
+from backend.portfolio.decision_validation_engine import DecisionValidationEngine
+from backend.portfolio.explainability_engine import ExplainabilityEngine
+from backend.portfolio.market_regime_intelligence import MarketRegimeIntelligence
+from backend.portfolio.policy_profile_engine import PolicyProfileEngine
+from backend.portfolio.portfolio_decision_orchestrator import DecisionPackageStore, PortfolioDecisionOrchestrator
 from backend.portfolio.portfolio_risk_committee import PortfolioRiskCommittee
 from backend.portfolio.portfolio_intelligence_engine import PortfolioIntelligenceEngine
+from backend.portfolio.quantitative_metrics_engine import QuantitativeMetricsEngine
+from backend.portfolio.recommendation_tracker import RecommendationTracker
 from backend.portfolio.regime_aware_allocation import RegimeAwareAllocationEngine
 from backend.portfolio.strategy_attribution_engine import StrategyAttributionEngine
 import uvicorn
@@ -502,6 +511,169 @@ def get_portfolio_risk_committee_feed(
         attribution=attribution_payload,
         regime_allocation=regime_payload,
         supervisor_flags=get_supervisor_summary(),
+    )
+
+
+def _portfolio_learning_storage_dir() -> str:
+    return os.path.join(LauncherConfig.ARTIFACTS_DIR, "portfolio")
+
+
+def _load_quantitative_return_inputs() -> Dict[str, Any]:
+    records = _load_completed_trade_learning_records()
+    portfolio_returns: List[float] = []
+    benchmark_returns: List[float] = []
+    asset_returns: Dict[str, List[float]] = {}
+    for row in records:
+        try:
+            realized_pnl = float(row.get("realized_pnl", row.get("pnl", 0.0)) or 0.0)
+        except (TypeError, ValueError):
+            continue
+        normalized_return = realized_pnl / 10000.0
+        portfolio_returns.append(normalized_return)
+        if row.get("benchmark_return") is not None:
+            try:
+                benchmark_returns.append(float(row.get("benchmark_return")))
+            except (TypeError, ValueError):
+                pass
+        asset_class = _clean_text(row.get("asset_class"), fallback="ASSET_CLASS_UNSPECIFIED").upper()
+        asset_returns.setdefault(asset_class, []).append(normalized_return)
+    return {
+        "portfolio_returns": portfolio_returns,
+        "benchmark_returns": benchmark_returns,
+        "asset_returns": asset_returns,
+    }
+
+
+def get_quantitative_metrics_feed() -> Dict[str, Any]:
+    inputs = _load_quantitative_return_inputs()
+    return QuantitativeMetricsEngine().compute(
+        portfolio_returns=inputs["portfolio_returns"],
+        benchmark_returns=inputs["benchmark_returns"],
+        asset_returns=inputs["asset_returns"],
+    )
+
+
+def get_market_regime_intelligence_feed(quantitative_metrics: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    metrics_payload = quantitative_metrics or get_quantitative_metrics_feed()
+    inputs = _load_quantitative_return_inputs()
+    correlation_matrix = metrics_payload.get("correlation_matrix", {}) if isinstance(metrics_payload, dict) else {}
+    return MarketRegimeIntelligence().detect(
+        returns=inputs["portfolio_returns"],
+        correlation_matrix=correlation_matrix,
+    )
+
+
+def get_policy_profile_feed() -> Dict[str, Any]:
+    payload = _safe_load_artifact("css_policy_profile.json")
+    profile_name = payload.get("profile") or payload.get("active_profile") or os.environ.get("CSS_POLICY_PROFILE")
+    return PolicyProfileEngine().get_profile(profile_name)
+
+
+def get_recommendation_tracker_feed() -> Dict[str, Any]:
+    return RecommendationTracker(_portfolio_learning_storage_dir()).summary()
+
+
+def get_advisory_history_feed() -> Dict[str, Any]:
+    store = AdvisoryHistoryStore(_portfolio_learning_storage_dir())
+    summary = store.summarize()
+    recent = store.list_recent(limit=5)
+    return {
+        "status": "OK",
+        "summary": summary,
+        "recent_decisions": recent.get("decisions", []),
+        "advisory_only": True,
+    }
+
+
+def _portfolio_decision_inputs() -> Dict[str, Any]:
+    portfolio_intelligence = get_portfolio_intelligence_feed()
+    capital_rotation = get_capital_rotation_feed(portfolio_intelligence)
+    strategy_attribution = get_strategy_attribution_feed()
+    regime_allocation = get_regime_aware_allocation_feed(capital_rotation)
+    adaptive_portfolio = get_adaptive_portfolio_feed(portfolio_intelligence, capital_rotation)
+    risk_committee = get_portfolio_risk_committee_feed(
+        portfolio_intelligence=portfolio_intelligence,
+        capital_rotation=capital_rotation,
+        adaptive_portfolio=adaptive_portfolio,
+        attribution=strategy_attribution,
+        regime_allocation=regime_allocation,
+    )
+    quantitative_metrics = get_quantitative_metrics_feed()
+    market_regime_intelligence = get_market_regime_intelligence_feed(quantitative_metrics)
+    policy_profile = get_policy_profile_feed()
+    recommendation_tracker = get_recommendation_tracker_feed()
+    consistency = AdvisoryConsistencyChecker().check(
+        adaptive_portfolio=adaptive_portfolio,
+        capital_rotation=capital_rotation,
+        risk_committee=risk_committee,
+        policy_profile=policy_profile,
+        market_regime=market_regime_intelligence,
+    )
+    return {
+        "portfolio_intelligence": portfolio_intelligence,
+        "capital_rotation": capital_rotation,
+        "adaptive_portfolio": adaptive_portfolio,
+        "strategy_attribution": strategy_attribution,
+        "regime_allocation": regime_allocation,
+        "risk_committee": risk_committee,
+        "quantitative_metrics": quantitative_metrics,
+        "market_regime_intelligence": market_regime_intelligence,
+        "policy_profile": policy_profile,
+        "recommendation_tracker": recommendation_tracker,
+        "conflicting_signals": consistency.get("conflicts", []),
+        "consistency": consistency,
+    }
+
+
+def get_advisory_consistency_feed(inputs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    payload = inputs or _portfolio_decision_inputs()
+    if payload.get("consistency"):
+        return payload["consistency"]
+    return AdvisoryConsistencyChecker().check(
+        adaptive_portfolio=payload.get("adaptive_portfolio"),
+        capital_rotation=payload.get("capital_rotation"),
+        risk_committee=payload.get("risk_committee"),
+        policy_profile=payload.get("policy_profile"),
+        market_regime=payload.get("market_regime_intelligence"),
+    )
+
+
+def get_portfolio_decision_feed(persist: bool = True) -> Dict[str, Any]:
+    inputs = _portfolio_decision_inputs()
+    decision = PortfolioDecisionOrchestrator().orchestrate(inputs)
+    if persist:
+        DecisionPackageStore(_portfolio_learning_storage_dir()).append(decision)
+    return decision
+
+
+def get_decision_validation_feed(decision: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    decision_package = decision or get_portfolio_decision_feed(persist=False)
+    return DecisionValidationEngine().validate(
+        decision_package=decision_package,
+        policy_profile=get_policy_profile_feed(),
+        supervisor_state=get_supervisor_summary(),
+        risk_committee=decision_package.get("risk_committee", {}) if isinstance(decision_package, dict) else {},
+    )
+
+
+def get_explainability_feed(
+    decision: Optional[Dict[str, Any]] = None,
+    validation: Optional[Dict[str, Any]] = None,
+    consistency: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    inputs = _portfolio_decision_inputs()
+    decision_package = decision or PortfolioDecisionOrchestrator().orchestrate(inputs)
+    validation_payload = validation or get_decision_validation_feed(decision_package)
+    consistency_payload = consistency or get_advisory_consistency_feed(inputs)
+    return ExplainabilityEngine().explain(
+        portfolio_intelligence=inputs.get("portfolio_intelligence"),
+        adaptive_portfolio=inputs.get("adaptive_portfolio"),
+        risk_committee=inputs.get("risk_committee"),
+        quantitative_metrics=inputs.get("quantitative_metrics"),
+        market_regime=inputs.get("market_regime_intelligence"),
+        policy_profile=inputs.get("policy_profile"),
+        validation=validation_payload,
+        consistency=consistency_payload,
     )
 
 
@@ -1739,6 +1911,19 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         attribution=strategy_attribution,
         regime_allocation=regime_allocation,
     )
+    quantitative_metrics = get_quantitative_metrics_feed()
+    market_regime_intelligence = get_market_regime_intelligence_feed(quantitative_metrics)
+    policy_profile = get_policy_profile_feed()
+    recommendation_tracker = get_recommendation_tracker_feed()
+    advisory_history = get_advisory_history_feed()
+    portfolio_decision = get_portfolio_decision_feed()
+    decision_validation = get_decision_validation_feed(portfolio_decision)
+    advisory_consistency = get_advisory_consistency_feed()
+    explainability = get_explainability_feed(
+        decision=portfolio_decision,
+        validation=decision_validation,
+        consistency=advisory_consistency,
+    )
     strategy_evolution = get_strategy_evolution_feed()
 
     return {
@@ -1767,6 +1952,15 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "regime_allocation": regime_allocation,
         "adaptive_portfolio": adaptive_portfolio,
         "portfolio_risk_committee": portfolio_risk_committee,
+        "quantitative_metrics": quantitative_metrics,
+        "market_regime_intelligence": market_regime_intelligence,
+        "policy_profile": policy_profile,
+        "recommendation_tracker": recommendation_tracker,
+        "advisory_history": advisory_history,
+        "portfolio_decision": portfolio_decision,
+        "decision_validation": decision_validation,
+        "advisory_consistency": advisory_consistency,
+        "explainability": explainability,
         "strategy_evolution": strategy_evolution,
         "portfolio_allocation": get_portfolio_allocation_feed(),
         "trade_ticket_defaults": trade_ticket_defaults,
@@ -1948,6 +2142,56 @@ async def api_portfolio_risk_committee():
         attribution=attribution,
         regime_allocation=regime_allocation,
     )
+
+
+@launcher_router.get("/api/quantitative-metrics")
+async def api_quantitative_metrics():
+    return get_quantitative_metrics_feed()
+
+
+@launcher_router.get("/api/market-regime-intelligence")
+async def api_market_regime_intelligence():
+    quantitative_metrics = get_quantitative_metrics_feed()
+    return get_market_regime_intelligence_feed(quantitative_metrics)
+
+
+@launcher_router.get("/api/policy-profile")
+async def api_policy_profile():
+    return get_policy_profile_feed()
+
+
+@launcher_router.get("/api/advisory-history")
+async def api_advisory_history():
+    return get_advisory_history_feed()
+
+
+@launcher_router.get("/api/recommendation-tracker")
+async def api_recommendation_tracker():
+    return get_recommendation_tracker_feed()
+
+
+@launcher_router.get("/api/portfolio-decision")
+async def api_portfolio_decision():
+    return get_portfolio_decision_feed()
+
+
+@launcher_router.get("/api/decision-validation")
+async def api_decision_validation():
+    decision = get_portfolio_decision_feed(persist=False)
+    return get_decision_validation_feed(decision)
+
+
+@launcher_router.get("/api/explainability")
+async def api_explainability():
+    decision = get_portfolio_decision_feed(persist=False)
+    validation = get_decision_validation_feed(decision)
+    consistency = get_advisory_consistency_feed()
+    return get_explainability_feed(decision=decision, validation=validation, consistency=consistency)
+
+
+@launcher_router.get("/api/advisory-consistency")
+async def api_advisory_consistency():
+    return get_advisory_consistency_feed()
 
 
 @launcher_router.get("/mobile/strategy-evolution")
