@@ -1035,6 +1035,28 @@
             {% endif %}
         </div>
 
+        <div class="card" id="runtime-advisory-card">
+            <div class="card-header">
+                Runtime Advisory Integration
+                {% if runtime_advisory_snapshot.snapshot_status == 'OK' %}
+                <span class="badge badge-info" id="rai-status-badge">{{ runtime_advisory_snapshot.snapshot_status }}</span>
+                {% else %}
+                <span class="badge badge-warning" id="rai-status-badge">{{ runtime_advisory_snapshot.snapshot_status if runtime_advisory_snapshot.snapshot_status else 'DATA UNAVAILABLE' }}</span>
+                {% endif %}
+            </div>
+            {% if runtime_advisory_snapshot.advisory_only %}
+            <div class="status-row"><span>Runtime Portfolio State</span><strong id="rai-runtime-state-status">{{ runtime_portfolio_state.status }}</strong></div>
+            <div class="status-row"><span>Advisory Snapshot</span><strong id="rai-snapshot-status">{{ runtime_advisory_snapshot.snapshot_status }}</strong></div>
+            <div class="status-row"><span>Available Components</span><strong id="rai-available-components">{{ runtime_advisory_snapshot.available_components|length }}</strong></div>
+            <div class="status-row"><span>Missing Components</span><strong id="rai-missing-components">{{ runtime_advisory_snapshot.missing_components|length }}</strong></div>
+            <div class="status-row"><span>Portfolio Decision Status</span><strong id="rai-portfolio-decision-status">{{ portfolio_decision.overall_status }}</strong></div>
+            <div style="margin-top:8px; font-size:12px; color:var(--text-secondary);">Missing Input Reasons</div>
+            <pre id="rai-missing-input-reasons" style="white-space:pre-wrap; font-size:11px; color:var(--text-secondary);">{{ runtime_advisory_snapshot.missing_input_reasons | tojson }}</pre>
+            {% else %}
+            <div class="empty-state" id="runtime-advisory-unavailable">DATA UNAVAILABLE</div>
+            {% endif %}
+        </div>
+
         <div class="card" id="operational-health-card">
             <div class="card-header">
                 Operational Health

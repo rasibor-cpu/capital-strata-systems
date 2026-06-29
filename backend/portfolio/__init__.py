@@ -63,6 +63,11 @@ from backend.portfolio.regime_aware_allocation import (
     RegimeAwareAllocationEngine,
     RegimeAwareAllocationError,
 )
+from backend.portfolio.runtime_advisory_snapshot import RuntimeAdvisorySnapshot, RuntimeAdvisorySnapshotError
+from backend.portfolio.runtime_portfolio_state_builder import (
+    RuntimePortfolioStateBuilder,
+    RuntimePortfolioStateBuilderError,
+)
 from backend.portfolio.strategy_attribution_engine import (
     StrategyAttributionEngine,
     StrategyAttributionEngineError,
@@ -114,6 +119,10 @@ __all__ = [
     "RECOMMENDATION_ORDER",
     "RegimeAwareAllocationEngine",
     "RegimeAwareAllocationError",
+    "RuntimeAdvisorySnapshot",
+    "RuntimeAdvisorySnapshotError",
+    "RuntimePortfolioStateBuilder",
+    "RuntimePortfolioStateBuilderError",
     "StrategyAttributionEngine",
     "StrategyAttributionEngineError",
     "advisory_response",

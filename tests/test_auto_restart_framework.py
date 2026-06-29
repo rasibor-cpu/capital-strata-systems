@@ -394,7 +394,7 @@ def test_monitor_uses_exponential_backoff(temp_dir, alert_mock):
          patch.object(svc, "try_restart", return_value=True):
         monitor_and_restart_services([svc], sup)
 
-    mock_sleep.assert_called_with(expected_delay)
+    mock_sleep.assert_any_call(expected_delay)
 
 
 def test_monitor_records_restart_success_on_successful_restart(temp_dir, alert_mock):

@@ -19,6 +19,7 @@ class ValidationReadinessEngine:
         operational_telemetry: Mapping[str, Any] | None = None,
         stale_artifacts: Iterable[Any] | None = None,
         recent_errors: Iterable[Any] | None = None,
+        runtime_advisory_snapshot: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         blockers: list[str] = []
         warnings: list[str] = []
@@ -28,6 +29,9 @@ class ValidationReadinessEngine:
         session_status = self._status(session_validation, "session_status")
         decision_status = self._status(portfolio_decision, "overall_status", "status")
         telemetry_status = self._status(operational_telemetry, "overall_status", "status")
+        snapshot_status = self._status(runtime_advisory_snapshot, "snapshot_status") if isinstance(runtime_advisory_snapshot, Mapping) else None
+        missing_inputs = self._missing_inputs(portfolio_decision)
+        missing_components = self._missing_components(runtime_advisory_snapshot)
         stale_count = self._count(stale_artifacts)
         error_count = self._count(recent_errors)
 
@@ -47,10 +51,26 @@ class ValidationReadinessEngine:
 
         if decision_status in {"RED", "FAILED", "FAIL", "DATA UNAVAILABLE"}:
             blockers.append("portfolio_decision_not_green")
-            actions.append("Restore portfolio decision advisory health before validation.")
+            if missing_inputs:
+                blockers.append("portfolio_advisory_inputs_missing")
+                actions.append("Populate runtime-derived advisory inputs before validation readiness can pass.")
+            else:
+                blockers.append("portfolio_decision_risk_red")
+                actions.append("Review genuine portfolio risk RED status before validation.")
         elif decision_status in {"AMBER", "WARNING", "DEGRADED"}:
             warnings.append("portfolio_decision_degraded")
             actions.append("Record portfolio decision degradation in validation notes.")
+
+        if snapshot_status == "PARTIAL":
+            warnings.append("runtime_advisory_snapshot_partial")
+            actions.append("Review missing advisory snapshot components before extended validation.")
+        elif snapshot_status == "DATA UNAVAILABLE":
+            blockers.append("runtime_advisory_snapshot_unavailable")
+            actions.append("Build a runtime advisory snapshot before extended validation.")
+
+        if missing_components:
+            warnings.append("runtime_advisory_components_missing")
+            actions.append("Resolve missing advisory components: " + ", ".join(missing_components) + ".")
 
         if telemetry_status in {"RED", "FAILED", "FAIL"}:
             blockers.append("operational_telemetry_red")
@@ -115,3 +135,25 @@ class ValidationReadinessEngine:
     @staticmethod
     def _confidence(blocker_count: int, warning_count: int) -> int:
         return max(0, min(100, 100 - (blocker_count * 25) - (warning_count * 10)))
+
+    @staticmethod
+    def _missing_inputs(portfolio_decision: Mapping[str, Any] | None) -> list[str]:
+        if not isinstance(portfolio_decision, Mapping):
+            return []
+        values = portfolio_decision.get("missing_inputs", [])
+        if isinstance(values, str):
+            return [values]
+        if isinstance(values, list):
+            return [str(item) for item in values if str(item).strip()]
+        return []
+
+    @staticmethod
+    def _missing_components(runtime_advisory_snapshot: Mapping[str, Any] | None) -> list[str]:
+        if not isinstance(runtime_advisory_snapshot, Mapping):
+            return []
+        values = runtime_advisory_snapshot.get("missing_components", [])
+        if isinstance(values, str):
+            return [values]
+        if isinstance(values, list):
+            return [str(item) for item in values if str(item).strip()]
+        return []

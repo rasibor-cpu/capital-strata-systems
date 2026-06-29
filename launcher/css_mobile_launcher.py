@@ -65,6 +65,8 @@ from backend.portfolio.recommendation_drift_analyzer import RecommendationDriftA
 from backend.portfolio.recommendation_evaluator import RecommendationEvaluator
 from backend.portfolio.recommendation_tracker import RecommendationTracker
 from backend.portfolio.regime_aware_allocation import RegimeAwareAllocationEngine
+from backend.portfolio.runtime_advisory_snapshot import RuntimeAdvisorySnapshot
+from backend.portfolio.runtime_portfolio_state_builder import RuntimePortfolioStateBuilder
 from backend.portfolio.strategy_attribution_engine import StrategyAttributionEngine
 from backend.validation.session_checkpoint_store import SessionCheckpointStore
 from backend.validation.validation_readiness_engine import ValidationReadinessEngine
@@ -405,43 +407,38 @@ def _load_portfolio_positions() -> List[Dict[str, Any]]:
     return positions if isinstance(positions, list) else []
 
 
-def get_portfolio_intelligence_feed() -> Dict[str, Any]:
-    positions = _load_portfolio_positions()
-    account = get_account_summary()
-    exposure = 0.0
-    for row in positions:
-        if not isinstance(row, dict):
-            continue
-        try:
-            value = row.get("market_value", row.get("notional_value", row.get("current_value", row.get("value"))))
-            if value is None:
-                value = float(row.get("quantity", row.get("size", 0.0)) or 0.0) * float(row.get("current_price", row.get("entry_price", row.get("price", 1.0))) or 1.0)
-            exposure += abs(float(value or 0.0))
-        except Exception:
-            pass
+def get_runtime_portfolio_state_feed() -> Dict[str, Any]:
+    return RuntimePortfolioStateBuilder(
+        artifacts_dir=LauncherConfig.ARTIFACTS_DIR,
+        account_state_path=LauncherConfig.ACCOUNT_STATE_FILE,
+        session_state_path=LauncherConfig.SESSION_STATE_FILE,
+        closed_trade_ledger_path=LauncherConfig.CLOSED_TRADE_LEDGER_PATH,
+        supervisor_state_path=LauncherConfig.SUPERVISOR_STATE_FILE,
+    ).build()
 
-    equity = float(account.get("equity", account.get("cash", 0.0)) or 0.0)
-    capital_efficiency = exposure / equity if equity > 0 else 0.0
-    metrics = {
-        "max_drawdown": 0.0,
-        "sortino": 1.0,
-        "capital_efficiency": capital_efficiency,
-        "correlation_score": 0.0,
-    }
+
+def get_portfolio_intelligence_feed(runtime_state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    state = runtime_state or get_runtime_portfolio_state_feed()
+    positions = state.get("positions", []) if isinstance(state, dict) else _load_portfolio_positions()
+    metrics = state.get("performance_metrics", {}) if isinstance(state, dict) else {}
     return PortfolioIntelligenceEngine().analyze(positions, metrics)
 
 
-def get_capital_rotation_feed(portfolio_intelligence: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def get_capital_rotation_feed(
+    portfolio_intelligence: Optional[Dict[str, Any]] = None,
+    runtime_state: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     intelligence = portfolio_intelligence or get_portfolio_intelligence_feed()
     if intelligence.get("status") != "OK":
         return CapitalRotationEngine().recommend([], intelligence)
 
     by_asset = intelligence.get("by_asset_class", {}) if isinstance(intelligence, dict) else {}
     metrics = intelligence.get("metrics", {}) if isinstance(intelligence, dict) else {}
+    allocations = runtime_state.get("asset_allocations", {}) if isinstance(runtime_state, dict) else {}
     candidates = [
         {
             "asset_class": asset_class,
-            "current_allocation": percent,
+            "current_allocation": allocations.get(asset_class, percent) if isinstance(allocations, dict) else percent,
             "expected_return": 0.0,
             "drawdown": metrics.get("max_drawdown", 0.0),
             "sortino": metrics.get("sortino", 0.0),
@@ -454,8 +451,9 @@ def get_capital_rotation_feed(portfolio_intelligence: Optional[Dict[str, Any]] =
     return CapitalRotationEngine().recommend(candidates, intelligence)
 
 
-def get_strategy_attribution_feed() -> Dict[str, Any]:
-    return StrategyAttributionEngine().analyze(_load_completed_trade_learning_records())
+def get_strategy_attribution_feed(runtime_state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    trades = runtime_state.get("trades", []) if isinstance(runtime_state, dict) else _load_completed_trade_learning_records()
+    return StrategyAttributionEngine().analyze(trades)
 
 
 def _load_regime_context() -> Dict[str, Any]:
@@ -489,13 +487,16 @@ def _adaptive_risk_context() -> Dict[str, Any]:
 def get_adaptive_portfolio_feed(
     portfolio_intelligence: Optional[Dict[str, Any]] = None,
     capital_rotation: Optional[Dict[str, Any]] = None,
+    runtime_state: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    intelligence = portfolio_intelligence or get_portfolio_intelligence_feed()
-    rotation = capital_rotation or get_capital_rotation_feed(intelligence)
+    state = runtime_state or get_runtime_portfolio_state_feed()
+    intelligence = portfolio_intelligence or get_portfolio_intelligence_feed(state)
+    rotation = capital_rotation or get_capital_rotation_feed(intelligence, state)
+    supervisor = state.get("supervisor", {}) if isinstance(state, dict) and state.get("supervisor") else get_supervisor_summary()
     return AdaptivePortfolioManager().evaluate(
         portfolio_intelligence=intelligence,
         capital_rotation=rotation,
-        supervisor_state=get_supervisor_summary(),
+        supervisor_state=supervisor,
         risk_context=_adaptive_risk_context(),
         governance_context={"status": "GREEN", "critical_flags": []},
     )
@@ -507,11 +508,13 @@ def get_portfolio_risk_committee_feed(
     adaptive_portfolio: Optional[Dict[str, Any]] = None,
     attribution: Optional[Dict[str, Any]] = None,
     regime_allocation: Optional[Dict[str, Any]] = None,
+    runtime_state: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    intelligence = portfolio_intelligence or get_portfolio_intelligence_feed()
-    rotation = capital_rotation or get_capital_rotation_feed(intelligence)
-    adaptive = adaptive_portfolio or get_adaptive_portfolio_feed(intelligence, rotation)
-    attribution_payload = attribution or get_strategy_attribution_feed()
+    state = runtime_state or get_runtime_portfolio_state_feed()
+    intelligence = portfolio_intelligence or get_portfolio_intelligence_feed(state)
+    rotation = capital_rotation or get_capital_rotation_feed(intelligence, state)
+    adaptive = adaptive_portfolio or get_adaptive_portfolio_feed(intelligence, rotation, state)
+    attribution_payload = attribution or get_strategy_attribution_feed(state)
     regime_payload = regime_allocation or get_regime_aware_allocation_feed(rotation)
     return PortfolioRiskCommittee().review(
         portfolio_intelligence=intelligence,
@@ -519,7 +522,7 @@ def get_portfolio_risk_committee_feed(
         adaptive_portfolio=adaptive,
         attribution=attribution_payload,
         regime_allocation=regime_payload,
-        supervisor_flags=get_supervisor_summary(),
+        supervisor_flags=state.get("supervisor", {}) if isinstance(state, dict) and state.get("supervisor") else get_supervisor_summary(),
     )
 
 
@@ -527,8 +530,8 @@ def _portfolio_learning_storage_dir() -> str:
     return os.path.join(LauncherConfig.ARTIFACTS_DIR, "portfolio")
 
 
-def _load_quantitative_return_inputs() -> Dict[str, Any]:
-    records = _load_completed_trade_learning_records()
+def _load_quantitative_return_inputs(runtime_state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    records = runtime_state.get("trades", []) if isinstance(runtime_state, dict) else _load_completed_trade_learning_records()
     portfolio_returns: List[float] = []
     benchmark_returns: List[float] = []
     asset_returns: Dict[str, List[float]] = {}
@@ -553,8 +556,8 @@ def _load_quantitative_return_inputs() -> Dict[str, Any]:
     }
 
 
-def get_quantitative_metrics_feed() -> Dict[str, Any]:
-    inputs = _load_quantitative_return_inputs()
+def get_quantitative_metrics_feed(runtime_state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    inputs = _load_quantitative_return_inputs(runtime_state)
     return QuantitativeMetricsEngine().compute(
         portfolio_returns=inputs["portfolio_returns"],
         benchmark_returns=inputs["benchmark_returns"],
@@ -562,9 +565,12 @@ def get_quantitative_metrics_feed() -> Dict[str, Any]:
     )
 
 
-def get_market_regime_intelligence_feed(quantitative_metrics: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    metrics_payload = quantitative_metrics or get_quantitative_metrics_feed()
-    inputs = _load_quantitative_return_inputs()
+def get_market_regime_intelligence_feed(
+    quantitative_metrics: Optional[Dict[str, Any]] = None,
+    runtime_state: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    metrics_payload = quantitative_metrics or get_quantitative_metrics_feed(runtime_state)
+    inputs = _load_quantitative_return_inputs(runtime_state)
     correlation_matrix = metrics_payload.get("correlation_matrix", {}) if isinstance(metrics_payload, dict) else {}
     return MarketRegimeIntelligence().detect(
         returns=inputs["portfolio_returns"],
@@ -632,20 +638,22 @@ def get_advisory_history_feed() -> Dict[str, Any]:
 
 
 def _portfolio_decision_inputs() -> Dict[str, Any]:
-    portfolio_intelligence = get_portfolio_intelligence_feed()
-    capital_rotation = get_capital_rotation_feed(portfolio_intelligence)
-    strategy_attribution = get_strategy_attribution_feed()
+    runtime_state = get_runtime_portfolio_state_feed()
+    portfolio_intelligence = get_portfolio_intelligence_feed(runtime_state)
+    capital_rotation = get_capital_rotation_feed(portfolio_intelligence, runtime_state)
+    strategy_attribution = get_strategy_attribution_feed(runtime_state)
     regime_allocation = get_regime_aware_allocation_feed(capital_rotation)
-    adaptive_portfolio = get_adaptive_portfolio_feed(portfolio_intelligence, capital_rotation)
+    adaptive_portfolio = get_adaptive_portfolio_feed(portfolio_intelligence, capital_rotation, runtime_state)
     risk_committee = get_portfolio_risk_committee_feed(
         portfolio_intelligence=portfolio_intelligence,
         capital_rotation=capital_rotation,
         adaptive_portfolio=adaptive_portfolio,
         attribution=strategy_attribution,
         regime_allocation=regime_allocation,
+        runtime_state=runtime_state,
     )
-    quantitative_metrics = get_quantitative_metrics_feed()
-    market_regime_intelligence = get_market_regime_intelligence_feed(quantitative_metrics)
+    quantitative_metrics = get_quantitative_metrics_feed(runtime_state)
+    market_regime_intelligence = get_market_regime_intelligence_feed(quantitative_metrics, runtime_state)
     policy_profile = get_policy_profile_feed()
     recommendation_tracker = get_recommendation_tracker_feed()
     consistency = AdvisoryConsistencyChecker().check(
@@ -656,6 +664,7 @@ def _portfolio_decision_inputs() -> Dict[str, Any]:
         market_regime=market_regime_intelligence,
     )
     return {
+        "runtime_portfolio_state": runtime_state,
         "portfolio_intelligence": portfolio_intelligence,
         "capital_rotation": capital_rotation,
         "adaptive_portfolio": adaptive_portfolio,
@@ -690,6 +699,19 @@ def get_portfolio_decision_feed(inputs: Optional[Dict[str, Any]] = None, persist
     if persist:
         DecisionPackageStore(_portfolio_learning_storage_dir()).append(decision)
     return decision
+
+
+def get_runtime_advisory_snapshot_feed(
+    inputs: Optional[Dict[str, Any]] = None,
+    portfolio_decision: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    payload = inputs or _portfolio_decision_inputs()
+    decision = portfolio_decision or PortfolioDecisionOrchestrator().orchestrate(payload)
+    return RuntimeAdvisorySnapshot().build(
+        runtime_state=payload.get("runtime_portfolio_state"),
+        advisory_components=payload,
+        portfolio_decision=decision,
+    )
 
 
 def record_portfolio_decision(package: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -830,8 +852,10 @@ def get_validation_readiness_feed(
     session_validation: Optional[Dict[str, Any]] = None,
     portfolio_decision: Optional[Dict[str, Any]] = None,
     runtime_performance: Optional[Dict[str, Any]] = None,
+    runtime_advisory_snapshot: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     decision = portfolio_decision or get_portfolio_decision_feed(persist=False)
+    snapshot = runtime_advisory_snapshot or get_runtime_advisory_snapshot_feed(portfolio_decision=decision)
     performance = runtime_performance or get_runtime_performance_feed()
     session = session_validation or get_session_validation_feed(decision)
     health = runtime_health or get_runtime_health_feed(
@@ -849,6 +873,7 @@ def get_validation_readiness_feed(
         operational_telemetry=performance,
         stale_artifacts=stale_artifacts,
         recent_errors=recent_errors,
+        runtime_advisory_snapshot=snapshot,
     )
 
 
@@ -2101,8 +2126,21 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
     market_regime_intelligence = decision_inputs["market_regime_intelligence"]
     policy_profile = decision_inputs["policy_profile"]
     recommendation_tracker = decision_inputs["recommendation_tracker"]
+    runtime_portfolio_state = decision_inputs.get(
+        "runtime_portfolio_state",
+        {
+            "status": "DATA UNAVAILABLE",
+            "reasons": ["runtime_portfolio_state_unavailable"],
+            "advisory_only": True,
+            "execution_allowed": False,
+        },
+    )
     advisory_history = get_advisory_history_feed()
     portfolio_decision = get_portfolio_decision_feed(inputs=decision_inputs, persist=False)
+    runtime_advisory_snapshot = get_runtime_advisory_snapshot_feed(
+        inputs=decision_inputs,
+        portfolio_decision=portfolio_decision,
+    )
     decision_validation = get_decision_validation_feed(portfolio_decision, policy_profile=policy_profile)
     advisory_consistency = get_advisory_consistency_feed(decision_inputs)
     explainability = get_explainability_feed(
@@ -2131,6 +2169,7 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         session_validation=session_validation,
         portfolio_decision=portfolio_decision,
         runtime_performance=runtime_performance,
+        runtime_advisory_snapshot=runtime_advisory_snapshot,
     )
     paper_validation_summary = get_paper_validation_summary_feed()
     strategy_evolution = get_strategy_evolution_feed()
@@ -2165,6 +2204,8 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "market_regime_intelligence": market_regime_intelligence,
         "policy_profile": policy_profile,
         "recommendation_tracker": recommendation_tracker,
+        "runtime_portfolio_state": runtime_portfolio_state,
+        "runtime_advisory_snapshot": runtime_advisory_snapshot,
         "advisory_history": advisory_history,
         "portfolio_decision": portfolio_decision,
         "decision_validation": decision_validation,
@@ -2402,9 +2443,22 @@ async def api_recommendation_drift():
     return get_recommendation_drift_feed()
 
 
+@launcher_router.get("/api/runtime-portfolio-state")
+async def api_runtime_portfolio_state():
+    return get_runtime_portfolio_state_feed()
+
+
+@launcher_router.get("/api/runtime-advisory-snapshot")
+async def api_runtime_advisory_snapshot():
+    inputs = _portfolio_decision_inputs()
+    decision = get_portfolio_decision_feed(inputs=inputs, persist=False)
+    return get_runtime_advisory_snapshot_feed(inputs=inputs, portfolio_decision=decision)
+
+
 @launcher_router.get("/api/portfolio-decision")
 async def api_portfolio_decision():
-    return get_portfolio_decision_feed(persist=False)
+    inputs = _portfolio_decision_inputs()
+    return get_portfolio_decision_feed(inputs=inputs, persist=False)
 
 
 @launcher_router.post("/api/portfolio-decision/record")
@@ -2453,7 +2507,8 @@ async def api_session_validation():
 
 @launcher_router.get("/api/runtime-health")
 async def api_runtime_health():
-    decision = get_portfolio_decision_feed(persist=False)
+    inputs = _portfolio_decision_inputs()
+    decision = get_portfolio_decision_feed(inputs=inputs, persist=False)
     performance = get_runtime_performance_feed()
     session = get_session_validation_feed(decision)
     return get_runtime_health_feed(
@@ -2465,7 +2520,9 @@ async def api_runtime_health():
 
 @launcher_router.get("/api/validation-readiness")
 async def api_validation_readiness():
-    decision = get_portfolio_decision_feed(persist=False)
+    inputs = _portfolio_decision_inputs()
+    decision = get_portfolio_decision_feed(inputs=inputs, persist=False)
+    snapshot = get_runtime_advisory_snapshot_feed(inputs=inputs, portfolio_decision=decision)
     performance = get_runtime_performance_feed()
     session = get_session_validation_feed(decision)
     health = get_runtime_health_feed(
@@ -2478,6 +2535,7 @@ async def api_validation_readiness():
         session_validation=session,
         portfolio_decision=decision,
         runtime_performance=performance,
+        runtime_advisory_snapshot=snapshot,
     )
 
 

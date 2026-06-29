@@ -88,6 +88,7 @@ class PortfolioDecisionOrchestrator:
             "conflicting_signals": sorted(set(str(item) for item in conflicts)),
             "missing_inputs": [],
             "advisory_only": True,
+            "execution_allowed": False,
         }
         return package
 
@@ -114,6 +115,7 @@ class PortfolioDecisionOrchestrator:
             "conflicting_signals": [],
             "missing_inputs": sorted(set(missing_inputs)),
             "advisory_only": True,
+            "execution_allowed": False,
         }
         return package
 
