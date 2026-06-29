@@ -13,6 +13,8 @@ from .live_readiness_gate import LiveReadinessGate, LiveReadinessGateError
 from .live_readiness_report import LiveReadinessReport
 from .marathon_summary_report import MarathonSummaryReport, MarathonSummaryReportError
 from .historical_replay_engine import HistoricalReplayEngine, HistoricalReplayEngineError
+from .endurance_validation import EnduranceValidationEngine, EnduranceValidationError, EnduranceValidationResult
+from .rc1_readiness import RC1ReadinessEvaluator, RC1ReadinessError, RC1ReadinessResult
 from .replay_models import (
     HistoricalCompletedTrade,
     HistoricalMarketEvent,
@@ -29,6 +31,9 @@ __all__ = [
     "HistoricalReplayEngineError",
     "HistoricalReplayRecord",
     "HistoricalTradeCandidate",
+    "EnduranceValidationEngine",
+    "EnduranceValidationError",
+    "EnduranceValidationResult",
     "MarathonCertificationReport",
     "MarathonCertifier",
     "MarathonCertificationDecision",
@@ -58,6 +63,9 @@ __all__ = [
     "MarathonSummaryReportError",
     "ReplayDecision",
     "ReplayRunResult",
+    "RC1ReadinessEvaluator",
+    "RC1ReadinessError",
+    "RC1ReadinessResult",
     "build_marathon_readiness_report",
     "build_marathon_statistics",
     "ReplayStatistics",
