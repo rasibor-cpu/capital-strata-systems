@@ -12,14 +12,49 @@ class DashboardService:
     Main Service for Executive Operations Platform.
     Exposes read-only operational summaries, dashboard telemetry, and alert tracking.
     """
-    def __init__(self, read_model: DashboardReadModel, intelligence_service: Any = None):
+    def __init__(
+        self,
+        read_model: DashboardReadModel,
+        intelligence_service: Any = None,
+        certification_engine: Any = None
+    ):
         self.read_model = read_model
         self.intelligence_service = intelligence_service
+        self.certification_engine = certification_engine
         self.summary_builder = ExecutiveSummaryBuilder(read_model)
 
     def get_executive_summary(self) -> Dict[str, Any]:
         """Aggregate high-level summary overview indicators."""
         return self.summary_builder.build_summary()
+
+    def get_executive_readiness_view(self) -> Dict[str, Any]:
+        """Expose read-only production certification status for the executive dashboard."""
+        return self.get_certification_readiness_view()
+
+    def get_certification_readiness_view(self) -> Dict[str, Any]:
+        """Expose the certification dashboard section without recalculating readiness."""
+        if not self.certification_engine:
+            return {
+                "overall_readiness_score": 0.0,
+                "certification_status": "WARNING",
+                "critical_findings_count": 0,
+                "warning_count": 1,
+                "information_count": 0,
+                "last_certification_time": None,
+            }
+
+        if hasattr(self.certification_engine, "get_dashboard_section"):
+            return self.certification_engine.get_dashboard_section()
+
+        checks = self.certification_engine.run_production_checks()
+        return {
+            "overall_readiness_score": checks.get("overall_readiness_score", 0.0),
+            "certification_status": checks.get("certification_status", checks.get("deployment_recommendation", "WARNING")),
+            "critical_findings_count": len(checks.get("critical_findings", [])),
+            "warning_count": len(checks.get("warnings", [])),
+            "information_count": len(checks.get("informational_findings", checks.get("info_findings", []))),
+            "last_certification_time": checks.get("generated_at"),
+        }
 
     def get_trading_intelligence_view(self) -> Dict[str, Any]:
         """Expose Trading Intelligence metrics and communications health indicators."""

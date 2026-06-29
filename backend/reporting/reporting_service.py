@@ -6,7 +6,7 @@ and job schedules.
 """
 
 import time
-from typing import Optional
+from typing import Any, Optional
 from backend.events.event_models import Event
 from backend.common.configuration import ReportingConfig
 from backend.common.exceptions import ValidationException

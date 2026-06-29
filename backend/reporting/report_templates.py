@@ -22,7 +22,11 @@ class ReportTemplates:
             "MONTHLY": "Monthly Performance Analysis\nMonth: {month}\nStarting Equity: {starting_equity}\nEnding Equity: {ending_equity}\nReturn: {total_return}%\n",
             "RUNTIME": "System Runtime Diagnostics\nUptime: {uptime_seconds}s\nMemory Usage: {memory_mb} MB\nCPU Load: {cpu_percent}%\nAlerts Logged: {alerts_count}\n",
             "PORTFOLIO": "Portfolio Exposure Report\nTotal Value: {total_value}\nAsset Allocations: {allocations}\nFree Margin: {free_margin}\nLeverage: {leverage}\n",
-            "RISK": "Risk Limit Integrity Audit\nActive Limit Checks: {checks_run}\nBreaches: {breaches_count}\nMax Exposure: {max_exposure}\n"
+            "RISK": "Risk Limit Integrity Audit\nActive Limit Checks: {checks_run}\nBreaches: {breaches_count}\nMax Exposure: {max_exposure}\n",
+            "DEPLOYMENT_READINESS": "Deployment Readiness Certification\nReadiness Score: {readiness_score}\nRecommendation: {recommendation}\nFindings: {findings_count}\n",
+            "PRODUCTION_READINESS": "Production Readiness Report\nGenerated: {generated_at}\nReadiness Score: {readiness_score}\nCertification Status: {certification_status}\nCritical Findings: {critical_findings_count}\nWarnings: {warning_count}\nInformation: {information_count}\n\nCritical Findings\n{critical_findings}\n\nWarnings\n{warnings}\n\nInformational Findings\n{informational_findings}\n\nRecommended Actions\n{recommended_actions}\n",
+            "DEPLOYMENT_CHECKLIST": "Deployment Checklist Report\nGenerated: {generated_at}\nCertification Status: {certification_status}\nReadiness Score: {readiness_score}\n\nChecklist\n{deployment_checklist}\n\nRecommended Actions\n{recommended_actions}\n",
+            "CERTIFICATION": "Certification Report\nGenerated: {generated_at}\nStatus: {status}\nReadiness Score: {readiness_score}\nCritical Findings: {critical_findings_count}\nWarnings: {warning_count}\nInformation: {information_count}\n\nRecommended Actions\n{recommended_actions}\n"
         }
 
     def render(self, report_type: str, context: Dict[str, Any]) -> str:
