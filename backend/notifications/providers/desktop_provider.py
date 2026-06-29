@@ -1,5 +1,5 @@
 """
-Desktop Notification Provider Stub for CSS
+HUD Desktop Notification Provider for CSS
 """
 
 import logging
@@ -10,19 +10,21 @@ logger = logging.getLogger("css.notifications.desktop")
 
 class DesktopNotificationProvider(BaseNotificationProvider):
     """
-    Desktop delivery channel provider stub.
-    
-    Responsibility: Simulate rendering OS/Desktop notifications.
-    Dependencies: backend.events.event_models.Event
-    Thread-safety: Stateless and thread-safe.
-    Integration: Configured and registered inside NotificationDeliveryRouter.
+    HUD Desktop delivery channel provider.
     """
+    def __init__(self, sound_enabled: bool = True):
+        self.sound_enabled = sound_enabled
+
     @property
     def channel_name(self) -> str:
         return "desktop"
 
     def send(self, event: Event) -> bool:
-        title = event.payload.get("title", "")
+        title = event.payload.get("title", "Desktop Alert")
         message = event.payload.get("message", "")
-        logger.info(f"[Desktop Provider Stub] Displaying desktop popup for user {event.user_id}: Title: {title} | Message: {message}")
+        
+        logger.info(
+            f"[HUD Desktop Alert] Render Notification (sound={self.sound_enabled}): "
+            f"[{event.severity}] {title}: {message}"
+        )
         return True

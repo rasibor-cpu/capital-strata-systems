@@ -96,6 +96,13 @@ class NotificationService:
                 success = self.router.deliver_channel(channel, event)
                 if not success:
                     all_successful = False
+                    # Escalation Rule: if email fails, escalate to SMS
+                    if channel == "email" and "sms" not in channels and prefs.is_channel_enabled("sms"):
+                        logger.warning(f"Email delivery failed for event {event.event_id}. Escalating to SMS channel.")
+                        sms_success = self.router.deliver_channel("sms", event)
+                        if sms_success:
+                            logger.info(f"Escalation delivery of {event.event_id} via SMS successful.")
+                            all_successful = True
 
         if not attempted:
             set_notification_status(event, "FILTERED_NO_CHANNELS")
@@ -167,8 +174,22 @@ class NotificationService:
     def handle_event(self, event: Event) -> None:
         """Passive event bus subscriber callback."""
         try:
-            # If event contains custom template payload, or if it is WARNING/CRITICAL, queue it
-            if event.severity in ("WARNING", "CRITICAL") or "delivery_channels" in event.payload:
+            if event.event_type == "REPORT_GENERATED":
+                from backend.notifications.notification_models import create_notification_event
+                title = event.payload.get("title", "Report Generated")
+                report_type = event.payload.get("report_type", "UNKNOWN")
+                message = f"Report '{title}' ({report_type}) is ready for review."
+                notif = create_notification_event(
+                    severity="INFO",
+                    category="REPORTING",
+                    title=title,
+                    message=message,
+                    user_id=event.user_id or "system",
+                    delivery_channels=["email", "desktop"],
+                    source="reporting_delivery"
+                )
+                self.notify(notif)
+            elif event.severity in ("WARNING", "CRITICAL") or "delivery_channels" in event.payload:
                 self.notify(event)
         except Exception as e:
             logger.error(f"Error in NotificationService handle_event: {e}")

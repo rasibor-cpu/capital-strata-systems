@@ -12,13 +12,54 @@ class DashboardService:
     Main Service for Executive Operations Platform.
     Exposes read-only operational summaries, dashboard telemetry, and alert tracking.
     """
-    def __init__(self, read_model: DashboardReadModel):
+    def __init__(self, read_model: DashboardReadModel, intelligence_service: Any = None):
         self.read_model = read_model
+        self.intelligence_service = intelligence_service
         self.summary_builder = ExecutiveSummaryBuilder(read_model)
 
     def get_executive_summary(self) -> Dict[str, Any]:
         """Aggregate high-level summary overview indicators."""
         return self.summary_builder.build_summary()
+
+    def get_trading_intelligence_view(self) -> Dict[str, Any]:
+        """Expose Trading Intelligence metrics and communications health indicators."""
+        if not self.intelligence_service:
+            return {
+                "market_regime": "UNKNOWN",
+                "trading_confidence": 0.0,
+                "strategy_performance": {},
+                "portfolio_health": {},
+                "top_recommendations": [],
+                "delivery_status": {},
+                "communication_health": 100.0
+            }
+            
+        report = self.intelligence_service.get_trading_intelligence_report()
+        health = self.read_model.get_enterprise_health()
+        
+        # Get delivery status counts
+        notif_history = self.read_model.notification_service.history.load()
+        queued = self.read_model.notification_service.queue.load()
+        
+        delivery_status = {
+            "queued": len(queued),
+            "delivered": len([n for n in notif_history if n.payload.get("delivery_status") == "SENT"]),
+            "failed": len([n for n in notif_history if n.payload.get("delivery_status") == "FAILED"])
+        }
+        
+        return {
+            "market_regime": report["market_regime"],
+            "trading_confidence": report["advisory_confidence_score"],
+            "strategy_performance": {
+                "win_loss": report["win_loss_statistics"],
+                "drawdowns": report["drawdown_trends"],
+                "asset_performance": report["asset_class_performance"]
+            },
+            "portfolio_health": report["portfolio_concentration"],
+            "top_recommendations": report["recommendations"],
+            "delivery_status": delivery_status,
+            "communication_health": health.get("notification_health", 100.0)
+        }
 
     def get_operational_command_centre_view(self) -> Dict[str, Any]:
         """Expose command centre health indexes, recovery states, and statistics."""

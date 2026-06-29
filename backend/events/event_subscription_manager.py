@@ -31,7 +31,8 @@ class EventSubscriptionManager:
             "RUNTIME_STOPPED",
             "HEARTBEAT_LOST",
             "RECOVERY_STARTED",
-            "RECOVERY_COMPLETE"
+            "RECOVERY_COMPLETE",
+            "REPORT_GENERATED"
         ]
         for etype in event_types:
             self.event_bus.subscribe(etype, service.handle_event)
@@ -45,7 +46,8 @@ class EventSubscriptionManager:
             "RUNTIME_STOPPED",
             "HEARTBEAT_LOST",
             "RECOVERY_STARTED",
-            "RECOVERY_COMPLETE"
+            "RECOVERY_COMPLETE",
+            "REPORT_GENERATED"
         ]
         for etype in event_types:
             self.event_bus.unsubscribe(etype, service.handle_event)

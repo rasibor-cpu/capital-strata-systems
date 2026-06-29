@@ -34,7 +34,8 @@ class ReportingService:
         generator: ReportGenerator,
         archive: ReportArchive,
         history: ReportHistory,
-        scheduler: ReportScheduler
+        scheduler: ReportScheduler,
+        event_bus: Optional[Any] = None
     ):
         config.validate()
         self.config = config
@@ -42,6 +43,7 @@ class ReportingService:
         self.archive = archive
         self.history = history
         self.scheduler = scheduler
+        self.event_bus = event_bus
         import threading
         self._ingest_lock = threading.RLock()
 
@@ -65,6 +67,12 @@ class ReportingService:
         
         # Index to manifest
         self.history.append(event)
+        
+        if self.event_bus:
+            try:
+                self.event_bus.publish(event)
+            except Exception:
+                pass
         
         logger.info(f"Report '{title}' ({report_type}) created and archived successfully.")
         return event
