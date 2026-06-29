@@ -938,6 +938,29 @@
             <div class="status-row"><span>Risk/Concentration</span><strong id="pa-risk-concentration">N/A</strong></div>
         </div>
 
+        <div class="card" id="portfolio-intelligence-card">
+            <div class="card-header">
+                Portfolio Intelligence
+                {% if portfolio_intelligence.status == 'OK' %}
+                <span class="badge badge-info" id="pi-status-badge">{{ portfolio_intelligence.portfolio_status }}</span>
+                {% else %}
+                <span class="badge badge-warning" id="pi-status-badge">DATA UNAVAILABLE</span>
+                {% endif %}
+            </div>
+            {% if portfolio_intelligence.status == 'OK' %}
+            <div class="status-row"><span>Score</span><strong id="pi-score">{{ portfolio_intelligence.intelligence_score }}</strong></div>
+            <div class="status-row"><span>Recommendation</span><strong id="pi-recommendation">{{ portfolio_intelligence.recommendation }}</strong></div>
+            <div class="status-row"><span>Drawdown</span><strong id="pi-drawdown">{{ portfolio_intelligence.metrics.max_drawdown }}</strong></div>
+            <div class="status-row"><span>Sortino</span><strong id="pi-sortino">{{ portfolio_intelligence.metrics.sortino }}</strong></div>
+            <div class="status-row"><span>Efficiency</span><strong id="pi-efficiency">{{ portfolio_intelligence.metrics.capital_efficiency }}</strong></div>
+            <div class="status-row"><span>Correlation</span><strong id="pi-correlation">{{ portfolio_intelligence.metrics.correlation_score }}</strong></div>
+            <div style="margin-top:8px; font-size:12px; color:var(--text-secondary);">Capital Rotation</div>
+            <pre id="capital-rotation-targets" style="white-space:pre-wrap; font-size:11px; color:var(--text-secondary);">{{ capital_rotation.target_allocations | tojson(indent=2) }}</pre>
+            {% else %}
+            <div class="empty-state" id="portfolio-intelligence-unavailable">DATA UNAVAILABLE</div>
+            {% endif %}
+        </div>
+
     </div><!-- /screen-positions -->
 
     <!-- ══════════════════════════════════════════════

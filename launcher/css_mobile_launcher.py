@@ -44,6 +44,8 @@ from backend.analytics.strategy_evolution_engine import (
     StrategyEvolutionEngineError,
 )
 from backend.analytics.trade_outcome_repository import TradeOutcomeRepository
+from backend.portfolio.capital_rotation_engine import CapitalRotationEngine
+from backend.portfolio.portfolio_intelligence_engine import PortfolioIntelligenceEngine
 import uvicorn
 
 app = FastAPI(title=LauncherConfig.TITLE, version=LauncherConfig.VERSION)
@@ -370,6 +372,64 @@ def get_trade_summary() -> Dict[str, Any]:
         pass
         
     return summary
+
+
+def _load_portfolio_positions() -> List[Dict[str, Any]]:
+    session_state = _safe_load_artifact("css_session_state_pcnrass.json") or _safe_load_artifact("css_session_recovery.json")
+    account_state = _safe_load_artifact("css_account_state_pcnrass.json") or _safe_load_artifact("css_account_state_pcnrass_BACKUP.json")
+    positions = account_state.get("positions", [])
+    if not positions and "open_trades" in session_state:
+        positions = session_state["open_trades"]
+    return positions if isinstance(positions, list) else []
+
+
+def get_portfolio_intelligence_feed() -> Dict[str, Any]:
+    positions = _load_portfolio_positions()
+    account = get_account_summary()
+    exposure = 0.0
+    for row in positions:
+        if not isinstance(row, dict):
+            continue
+        try:
+            value = row.get("market_value", row.get("notional_value", row.get("current_value", row.get("value"))))
+            if value is None:
+                value = float(row.get("quantity", row.get("size", 0.0)) or 0.0) * float(row.get("current_price", row.get("entry_price", row.get("price", 1.0))) or 1.0)
+            exposure += abs(float(value or 0.0))
+        except Exception:
+            pass
+
+    equity = float(account.get("equity", account.get("cash", 0.0)) or 0.0)
+    capital_efficiency = exposure / equity if equity > 0 else 0.0
+    metrics = {
+        "max_drawdown": 0.0,
+        "sortino": 1.0,
+        "capital_efficiency": capital_efficiency,
+        "correlation_score": 0.0,
+    }
+    return PortfolioIntelligenceEngine().analyze(positions, metrics)
+
+
+def get_capital_rotation_feed(portfolio_intelligence: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    intelligence = portfolio_intelligence or get_portfolio_intelligence_feed()
+    if intelligence.get("status") != "OK":
+        return CapitalRotationEngine().recommend([], intelligence)
+
+    by_asset = intelligence.get("by_asset_class", {}) if isinstance(intelligence, dict) else {}
+    metrics = intelligence.get("metrics", {}) if isinstance(intelligence, dict) else {}
+    candidates = [
+        {
+            "asset_class": asset_class,
+            "current_allocation": percent,
+            "expected_return": 0.0,
+            "drawdown": metrics.get("max_drawdown", 0.0),
+            "sortino": metrics.get("sortino", 0.0),
+            "capital_efficiency": metrics.get("capital_efficiency", 0.0),
+            "concentration": metrics.get("largest_asset_class_concentration", 0.0),
+            "correlation": metrics.get("correlation_score", 0.0),
+        }
+        for asset_class, percent in sorted(by_asset.items())
+    ]
+    return CapitalRotationEngine().recommend(candidates, intelligence)
 
 def get_engine_summary() -> Dict[str, Any]:
     state = _safe_load_artifact("css_session_state_pcnrass.json") or _safe_load_artifact("css_session_recovery.json")
@@ -1593,6 +1653,8 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         opportunity_summary=opportunity_summary,
     )
     portfolio_summary = get_portfolio_summary_feed()
+    portfolio_intelligence = get_portfolio_intelligence_feed()
+    capital_rotation = get_capital_rotation_feed(portfolio_intelligence)
     strategy_evolution = get_strategy_evolution_feed()
 
     return {
@@ -1615,6 +1677,8 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "top_opportunities": top_opportunities,
         "opportunity_summary": opportunity_summary,
         "portfolio_summary": portfolio_summary,
+        "portfolio_intelligence": portfolio_intelligence,
+        "capital_rotation": capital_rotation,
         "strategy_evolution": strategy_evolution,
         "portfolio_allocation": get_portfolio_allocation_feed(),
         "trade_ticket_defaults": trade_ticket_defaults,
@@ -1750,6 +1814,17 @@ async def mobile_opportunity_feed_by_asset_class(asset_class: str):
 @launcher_router.get("/mobile/portfolio-summary")
 async def mobile_portfolio_summary():
     return get_portfolio_summary_feed()
+
+
+@launcher_router.get("/api/portfolio-intelligence")
+async def api_portfolio_intelligence():
+    return get_portfolio_intelligence_feed()
+
+
+@launcher_router.get("/api/capital-rotation")
+async def api_capital_rotation():
+    intelligence = get_portfolio_intelligence_feed()
+    return get_capital_rotation_feed(intelligence)
 
 
 @launcher_router.get("/mobile/strategy-evolution")
