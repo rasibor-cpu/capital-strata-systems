@@ -961,6 +961,31 @@
             {% endif %}
         </div>
 
+        <div class="card" id="adaptive-portfolio-card">
+            <div class="card-header">
+                Adaptive Portfolio / Risk Committee
+                {% if adaptive_portfolio.status == 'OK' and portfolio_risk_committee.status == 'OK' %}
+                <span class="badge badge-info" id="ap-status-badge">{{ portfolio_risk_committee.committee_status }}</span>
+                {% else %}
+                <span class="badge badge-warning" id="ap-status-badge">DATA UNAVAILABLE</span>
+                {% endif %}
+            </div>
+            {% if adaptive_portfolio.status == 'OK' and portfolio_risk_committee.status == 'OK' %}
+            <div class="status-row"><span>Adaptive Recommendation</span><strong id="ap-recommendation">{{ adaptive_portfolio.adaptive_recommendation }}</strong></div>
+            <div class="status-row"><span>Risk Committee Status</span><strong id="ap-committee-status">{{ adaptive_portfolio.risk_committee_status }}</strong></div>
+            <div class="status-row"><span>Committee Decision</span><strong id="ap-committee-decision">{{ portfolio_risk_committee.committee_decision }}</strong></div>
+            <div class="status-row"><span>Confidence</span><strong id="ap-confidence">{{ portfolio_risk_committee.confidence }}</strong></div>
+            <div class="status-row"><span>Capital Rotation Action</span><strong id="ap-capital-rotation-action">{{ adaptive_portfolio.capital_rotation_action }}</strong></div>
+            <div class="status-row"><span>Detected Regime</span><strong id="ap-detected-regime">{{ regime_allocation.detected_regime }}</strong></div>
+            <div style="margin-top:8px; font-size:12px; color:var(--text-secondary);">Top Contributors</div>
+            <pre id="ap-top-contributors" style="white-space:pre-wrap; font-size:11px; color:var(--text-secondary);">{{ strategy_attribution.top_contributors | tojson(indent=2) }}</pre>
+            <div style="margin-top:8px; font-size:12px; color:var(--text-secondary);">Top Detractors</div>
+            <pre id="ap-top-detractors" style="white-space:pre-wrap; font-size:11px; color:var(--text-secondary);">{{ strategy_attribution.top_detractors | tojson(indent=2) }}</pre>
+            {% else %}
+            <div class="empty-state" id="adaptive-portfolio-unavailable">DATA UNAVAILABLE</div>
+            {% endif %}
+        </div>
+
     </div><!-- /screen-positions -->
 
     <!-- ══════════════════════════════════════════════

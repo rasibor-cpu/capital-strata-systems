@@ -44,8 +44,12 @@ from backend.analytics.strategy_evolution_engine import (
     StrategyEvolutionEngineError,
 )
 from backend.analytics.trade_outcome_repository import TradeOutcomeRepository
+from backend.portfolio.adaptive_portfolio_manager import AdaptivePortfolioManager
 from backend.portfolio.capital_rotation_engine import CapitalRotationEngine
+from backend.portfolio.portfolio_risk_committee import PortfolioRiskCommittee
 from backend.portfolio.portfolio_intelligence_engine import PortfolioIntelligenceEngine
+from backend.portfolio.regime_aware_allocation import RegimeAwareAllocationEngine
+from backend.portfolio.strategy_attribution_engine import StrategyAttributionEngine
 import uvicorn
 
 app = FastAPI(title=LauncherConfig.TITLE, version=LauncherConfig.VERSION)
@@ -430,6 +434,76 @@ def get_capital_rotation_feed(portfolio_intelligence: Optional[Dict[str, Any]] =
         for asset_class, percent in sorted(by_asset.items())
     ]
     return CapitalRotationEngine().recommend(candidates, intelligence)
+
+
+def get_strategy_attribution_feed() -> Dict[str, Any]:
+    return StrategyAttributionEngine().analyze(_load_completed_trade_learning_records())
+
+
+def _load_regime_context() -> Dict[str, Any]:
+    session_state = _safe_load_artifact("css_session_state_pcnrass.json") or _safe_load_artifact("css_session_recovery.json")
+    session = session_state.get("session", {}) if isinstance(session_state.get("session"), dict) else session_state
+    regime_state = _safe_load_artifact("css_market_regime_state.json")
+    context = dict(regime_state) if isinstance(regime_state, dict) else {}
+    if isinstance(session, dict):
+        context.setdefault("detected_regime", session.get("market_regime", session.get("detected_regime", "UNKNOWN")))
+        context.setdefault("risk_status", session.get("risk_status", "GREEN"))
+    return context
+
+
+def get_regime_aware_allocation_feed(capital_rotation: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    rotation = capital_rotation or get_capital_rotation_feed()
+    target_allocations = rotation.get("target_allocations", {}) if isinstance(rotation, dict) else {}
+    return RegimeAwareAllocationEngine().adjust(target_allocations, _load_regime_context())
+
+
+def _adaptive_risk_context() -> Dict[str, Any]:
+    pause_state = get_pause_state()
+    if pause_state.get("trading_paused") is True:
+        return {
+            "status": "RED",
+            "critical_flags": ["PAUSE_NEW_TRADES"],
+            "reason": pause_state.get("reason", "mobile_pause_control"),
+        }
+    return {"status": "GREEN", "critical_flags": []}
+
+
+def get_adaptive_portfolio_feed(
+    portfolio_intelligence: Optional[Dict[str, Any]] = None,
+    capital_rotation: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    intelligence = portfolio_intelligence or get_portfolio_intelligence_feed()
+    rotation = capital_rotation or get_capital_rotation_feed(intelligence)
+    return AdaptivePortfolioManager().evaluate(
+        portfolio_intelligence=intelligence,
+        capital_rotation=rotation,
+        supervisor_state=get_supervisor_summary(),
+        risk_context=_adaptive_risk_context(),
+        governance_context={"status": "GREEN", "critical_flags": []},
+    )
+
+
+def get_portfolio_risk_committee_feed(
+    portfolio_intelligence: Optional[Dict[str, Any]] = None,
+    capital_rotation: Optional[Dict[str, Any]] = None,
+    adaptive_portfolio: Optional[Dict[str, Any]] = None,
+    attribution: Optional[Dict[str, Any]] = None,
+    regime_allocation: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    intelligence = portfolio_intelligence or get_portfolio_intelligence_feed()
+    rotation = capital_rotation or get_capital_rotation_feed(intelligence)
+    adaptive = adaptive_portfolio or get_adaptive_portfolio_feed(intelligence, rotation)
+    attribution_payload = attribution or get_strategy_attribution_feed()
+    regime_payload = regime_allocation or get_regime_aware_allocation_feed(rotation)
+    return PortfolioRiskCommittee().review(
+        portfolio_intelligence=intelligence,
+        capital_rotation=rotation,
+        adaptive_portfolio=adaptive,
+        attribution=attribution_payload,
+        regime_allocation=regime_payload,
+        supervisor_flags=get_supervisor_summary(),
+    )
+
 
 def get_engine_summary() -> Dict[str, Any]:
     state = _safe_load_artifact("css_session_state_pcnrass.json") or _safe_load_artifact("css_session_recovery.json")
@@ -1655,6 +1729,16 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
     portfolio_summary = get_portfolio_summary_feed()
     portfolio_intelligence = get_portfolio_intelligence_feed()
     capital_rotation = get_capital_rotation_feed(portfolio_intelligence)
+    strategy_attribution = get_strategy_attribution_feed()
+    regime_allocation = get_regime_aware_allocation_feed(capital_rotation)
+    adaptive_portfolio = get_adaptive_portfolio_feed(portfolio_intelligence, capital_rotation)
+    portfolio_risk_committee = get_portfolio_risk_committee_feed(
+        portfolio_intelligence=portfolio_intelligence,
+        capital_rotation=capital_rotation,
+        adaptive_portfolio=adaptive_portfolio,
+        attribution=strategy_attribution,
+        regime_allocation=regime_allocation,
+    )
     strategy_evolution = get_strategy_evolution_feed()
 
     return {
@@ -1679,6 +1763,10 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "portfolio_summary": portfolio_summary,
         "portfolio_intelligence": portfolio_intelligence,
         "capital_rotation": capital_rotation,
+        "strategy_attribution": strategy_attribution,
+        "regime_allocation": regime_allocation,
+        "adaptive_portfolio": adaptive_portfolio,
+        "portfolio_risk_committee": portfolio_risk_committee,
         "strategy_evolution": strategy_evolution,
         "portfolio_allocation": get_portfolio_allocation_feed(),
         "trade_ticket_defaults": trade_ticket_defaults,
@@ -1825,6 +1913,41 @@ async def api_portfolio_intelligence():
 async def api_capital_rotation():
     intelligence = get_portfolio_intelligence_feed()
     return get_capital_rotation_feed(intelligence)
+
+
+@launcher_router.get("/api/adaptive-portfolio")
+async def api_adaptive_portfolio():
+    intelligence = get_portfolio_intelligence_feed()
+    rotation = get_capital_rotation_feed(intelligence)
+    return get_adaptive_portfolio_feed(intelligence, rotation)
+
+
+@launcher_router.get("/api/strategy-attribution")
+async def api_strategy_attribution():
+    return get_strategy_attribution_feed()
+
+
+@launcher_router.get("/api/regime-aware-allocation")
+async def api_regime_aware_allocation():
+    intelligence = get_portfolio_intelligence_feed()
+    rotation = get_capital_rotation_feed(intelligence)
+    return get_regime_aware_allocation_feed(rotation)
+
+
+@launcher_router.get("/api/portfolio-risk-committee")
+async def api_portfolio_risk_committee():
+    intelligence = get_portfolio_intelligence_feed()
+    rotation = get_capital_rotation_feed(intelligence)
+    attribution = get_strategy_attribution_feed()
+    regime_allocation = get_regime_aware_allocation_feed(rotation)
+    adaptive = get_adaptive_portfolio_feed(intelligence, rotation)
+    return get_portfolio_risk_committee_feed(
+        portfolio_intelligence=intelligence,
+        capital_rotation=rotation,
+        adaptive_portfolio=adaptive,
+        attribution=attribution,
+        regime_allocation=regime_allocation,
+    )
 
 
 @launcher_router.get("/mobile/strategy-evolution")
