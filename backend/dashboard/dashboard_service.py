@@ -16,11 +16,13 @@ class DashboardService:
         self,
         read_model: DashboardReadModel,
         intelligence_service: Any = None,
-        certification_engine: Any = None
+        certification_engine: Any = None,
+        optimization_service: Any = None
     ):
         self.read_model = read_model
         self.intelligence_service = intelligence_service
         self.certification_engine = certification_engine
+        self.optimization_service = optimization_service
         self.summary_builder = ExecutiveSummaryBuilder(read_model)
 
     def get_executive_summary(self) -> Dict[str, Any]:
@@ -54,6 +56,32 @@ class DashboardService:
             "warning_count": len(checks.get("warnings", [])),
             "information_count": len(checks.get("informational_findings", checks.get("info_findings", []))),
             "last_certification_time": checks.get("generated_at"),
+        }
+
+    def get_optimization_advisory_view(self) -> Dict[str, Any]:
+        """Expose advisory optimization recommendations for dashboard review."""
+        if not self.optimization_service:
+            return {
+                "advisory_only": True,
+                "execution_allowed": False,
+                "overall_recommendations": [],
+                "parameter_tuning": {},
+                "allocation_tuning": {},
+                "confidence_threshold": None,
+                "risk_tuning": {},
+                "gap_recommendations": [],
+            }
+
+        optimizations = self.optimization_service.get_optimizations()
+        return {
+            "advisory_only": True,
+            "execution_allowed": False,
+            "overall_recommendations": optimizations.get("overall_recommendations", []),
+            "parameter_tuning": optimizations.get("parameter_tuning", {}),
+            "allocation_tuning": optimizations.get("allocation_tuning", {}),
+            "confidence_threshold": optimizations.get("confidence_threshold"),
+            "risk_tuning": optimizations.get("risk_tuning", {}),
+            "gap_recommendations": optimizations.get("gap_recommendations", []),
         }
 
     def get_trading_intelligence_view(self) -> Dict[str, Any]:

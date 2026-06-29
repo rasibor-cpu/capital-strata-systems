@@ -26,6 +26,10 @@ class ReportTemplates:
             "DEPLOYMENT_READINESS": "Deployment Readiness Certification\nReadiness Score: {readiness_score}\nRecommendation: {recommendation}\nFindings: {findings_count}\n",
             "PRODUCTION_READINESS": "Production Readiness Report\nGenerated: {generated_at}\nReadiness Score: {readiness_score}\nCertification Status: {certification_status}\nCritical Findings: {critical_findings_count}\nWarnings: {warning_count}\nInformation: {information_count}\n\nCritical Findings\n{critical_findings}\n\nWarnings\n{warnings}\n\nInformational Findings\n{informational_findings}\n\nRecommended Actions\n{recommended_actions}\n",
             "DEPLOYMENT_CHECKLIST": "Deployment Checklist Report\nGenerated: {generated_at}\nCertification Status: {certification_status}\nReadiness Score: {readiness_score}\n\nChecklist\n{deployment_checklist}\n\nRecommended Actions\n{recommended_actions}\n",
+            "OPTIMIZATION": "Trading Parameter Optimization Advice\nRecommended Leverage: {recommended_leverage}\nRecommended Risk Multiplier: {recommended_risk_multiplier}\n",
+            "DAILY_PAPER_TRADING": "Daily Paper Trading Summary\nSessions Run: {sessions_count}\nTrades Simulated: {trades_count}\nPnL Simulated: {simulated_pnl}\n",
+            "WEEKLY_PAPER_TRADING": "Weekly Paper Trading Consolidation\nSessions Run: {sessions_count}\nTrades Simulated: {trades_count}\nConsistency Ratio: {consistency_ratio}\n",
+            "RISK_OPTIMIZATION": "Risk Optimization Guidelines\nMax Suggested Drawdown: {suggested_drawdown}\nExposure Cap: {exposure_cap}\n",
             "CERTIFICATION": "Certification Report\nGenerated: {generated_at}\nStatus: {status}\nReadiness Score: {readiness_score}\nCritical Findings: {critical_findings_count}\nWarnings: {warning_count}\nInformation: {information_count}\n\nRecommended Actions\n{recommended_actions}\n"
         }
 
