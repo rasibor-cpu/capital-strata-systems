@@ -1083,6 +1083,37 @@
             {% endif %}
         </div>
 
+        <div class="card" id="paper-validation-card">
+            <div class="card-header">
+                Paper Validation
+                {% if validation_readiness.status == 'OK' %}
+                <span class="badge badge-info" id="pv-readiness-badge">{{ validation_readiness.readiness_status }}</span>
+                {% else %}
+                <span class="badge badge-warning" id="pv-readiness-badge">DATA UNAVAILABLE</span>
+                {% endif %}
+            </div>
+            {% if validation_readiness.status == 'OK' %}
+            <div class="status-row"><span>Readiness Status</span><strong id="pv-readiness-status">{{ validation_readiness.readiness_status }}</strong></div>
+            <div class="status-row"><span>Validation Status</span><strong id="pv-validation-status">{{ paper_validation_summary.final_validation_status if paper_validation_summary.status == 'OK' else 'DATA UNAVAILABLE' }}</strong></div>
+            {% if paper_validation_summary.status == 'OK' %}
+            <div class="status-row"><span>Session Duration</span><strong id="pv-session-duration">{{ paper_validation_summary.duration }}</strong></div>
+            <div class="status-row"><span>Cycle Count</span><strong id="pv-cycle-count">{{ paper_validation_summary.cycle_count }}</strong></div>
+            <div class="status-row"><span>Restart Count</span><strong id="pv-restart-count">{{ paper_validation_summary.restart_count }}</strong></div>
+            <div class="status-row"><span>Recovery Count</span><strong id="pv-recovery-count">{{ paper_validation_summary.recovery_count }}</strong></div>
+            <div class="status-row"><span>Alert Count</span><strong id="pv-alert-count">{{ paper_validation_summary.alert_count }}</strong></div>
+            <div class="status-row"><span>Error Count</span><strong id="pv-error-count">{{ paper_validation_summary.error_count }}</strong></div>
+            <div class="status-row"><span>Recommendation Stability</span><strong id="pv-recommendation-stability">{{ paper_validation_summary.recommendation_stability }}</strong></div>
+            <div class="status-row"><span>Latency Summary</span><strong id="pv-latency-summary">AVG {{ paper_validation_summary.average_pipeline_latency }} / PEAK {{ paper_validation_summary.peak_pipeline_latency }}</strong></div>
+            {% else %}
+            <div class="empty-state" id="paper-validation-unavailable">DATA UNAVAILABLE</div>
+            {% endif %}
+            <div class="status-row"><span>Blockers</span><strong id="pv-blockers">{{ validation_readiness.blockers|length }}</strong></div>
+            <div class="status-row"><span>Warnings</span><strong id="pv-warnings">{{ validation_readiness.warnings|length }}</strong></div>
+            {% else %}
+            <div class="empty-state" id="paper-validation-readiness-unavailable">DATA UNAVAILABLE</div>
+            {% endif %}
+        </div>
+
     </div><!-- /screen-positions -->
 
     <!-- ══════════════════════════════════════════════

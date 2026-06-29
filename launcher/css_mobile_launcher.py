@@ -66,6 +66,8 @@ from backend.portfolio.recommendation_evaluator import RecommendationEvaluator
 from backend.portfolio.recommendation_tracker import RecommendationTracker
 from backend.portfolio.regime_aware_allocation import RegimeAwareAllocationEngine
 from backend.portfolio.strategy_attribution_engine import StrategyAttributionEngine
+from backend.validation.session_checkpoint_store import SessionCheckpointStore
+from backend.validation.validation_readiness_engine import ValidationReadinessEngine
 import uvicorn
 
 app = FastAPI(title=LauncherConfig.TITLE, version=LauncherConfig.VERSION)
@@ -813,6 +815,54 @@ def get_runtime_health_feed(
         supervisor_status=get_supervisor_summary(),
         portfolio_decision=decision,
     )
+
+
+def _paper_validation_storage_dir() -> str:
+    return os.path.join(LauncherConfig.ARTIFACTS_DIR, "validation")
+
+
+def _paper_validation_store() -> SessionCheckpointStore:
+    return SessionCheckpointStore(_paper_validation_storage_dir())
+
+
+def get_validation_readiness_feed(
+    runtime_health: Optional[Dict[str, Any]] = None,
+    session_validation: Optional[Dict[str, Any]] = None,
+    portfolio_decision: Optional[Dict[str, Any]] = None,
+    runtime_performance: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    decision = portfolio_decision or get_portfolio_decision_feed(persist=False)
+    performance = runtime_performance or get_runtime_performance_feed()
+    session = session_validation or get_session_validation_feed(decision)
+    health = runtime_health or get_runtime_health_feed(
+        performance=performance,
+        session_validation=session,
+        portfolio_decision=decision,
+    )
+    stale_artifacts = session.get("stale_artifacts", []) if isinstance(session, dict) else []
+    alerts = get_alert_summary()
+    recent_errors = alerts.get("errors", []) if isinstance(alerts, dict) else []
+    return ValidationReadinessEngine().evaluate(
+        runtime_health=health,
+        session_validation=session,
+        portfolio_decision=decision,
+        operational_telemetry=performance,
+        stale_artifacts=stale_artifacts,
+        recent_errors=recent_errors,
+    )
+
+
+def get_paper_validation_summary_feed() -> Dict[str, Any]:
+    return _paper_validation_store().summarize_session()
+
+
+def get_paper_validation_checkpoints_feed() -> Dict[str, Any]:
+    return _paper_validation_store().list_checkpoints()
+
+
+def record_paper_validation_checkpoint(checkpoint: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    payload = dict(checkpoint or {})
+    return _paper_validation_store().append_checkpoint(payload)
 
 
 def get_engine_summary() -> Dict[str, Any]:
@@ -2076,6 +2126,13 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
     recommendation_evaluation = get_recommendation_evaluation_feed(recommendation_history)
     confidence_calibration = get_confidence_calibration_feed(recommendation_history)
     recommendation_drift = get_recommendation_drift_feed(recommendation_history)
+    validation_readiness = get_validation_readiness_feed(
+        runtime_health=runtime_health,
+        session_validation=session_validation,
+        portfolio_decision=portfolio_decision,
+        runtime_performance=runtime_performance,
+    )
+    paper_validation_summary = get_paper_validation_summary_feed()
     strategy_evolution = get_strategy_evolution_feed()
 
     return {
@@ -2119,6 +2176,8 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "recommendation_evaluation": recommendation_evaluation,
         "confidence_calibration": confidence_calibration,
         "recommendation_drift": recommendation_drift,
+        "validation_readiness": validation_readiness,
+        "paper_validation_summary": paper_validation_summary,
         "strategy_evolution": strategy_evolution,
         "portfolio_allocation": get_portfolio_allocation_feed(),
         "trade_ticket_defaults": trade_ticket_defaults,
@@ -2402,6 +2461,46 @@ async def api_runtime_health():
         session_validation=session,
         portfolio_decision=decision,
     )
+
+
+@launcher_router.get("/api/validation-readiness")
+async def api_validation_readiness():
+    decision = get_portfolio_decision_feed(persist=False)
+    performance = get_runtime_performance_feed()
+    session = get_session_validation_feed(decision)
+    health = get_runtime_health_feed(
+        performance=performance,
+        session_validation=session,
+        portfolio_decision=decision,
+    )
+    return get_validation_readiness_feed(
+        runtime_health=health,
+        session_validation=session,
+        portfolio_decision=decision,
+        runtime_performance=performance,
+    )
+
+
+@launcher_router.get("/api/paper-validation-summary")
+async def api_paper_validation_summary():
+    return get_paper_validation_summary_feed()
+
+
+@launcher_router.get("/api/paper-validation-checkpoints")
+async def api_paper_validation_checkpoints():
+    return get_paper_validation_checkpoints_feed()
+
+
+@launcher_router.post("/api/paper-validation-checkpoint/record")
+async def api_paper_validation_checkpoint_record(request: Request):
+    payload: Dict[str, Any] = {}
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            payload = body
+    except Exception:
+        payload = {}
+    return record_paper_validation_checkpoint(payload)
 
 
 @launcher_router.get("/mobile/strategy-evolution")
