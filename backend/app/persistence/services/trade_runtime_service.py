@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -54,7 +54,7 @@ class TradeRuntimeService:
     ) -> None:
 
         opened_at = (
-            datetime.utcnow().isoformat()
+            datetime.now(timezone.utc).isoformat()
         )
 
         self.persistence.trades.create_trade(
@@ -91,7 +91,7 @@ class TradeRuntimeService:
         realized_pnl: Decimal,
     ) -> None:
 
-        closed_at = datetime.utcnow().isoformat()
+        closed_at = datetime.now(timezone.utc).isoformat()
 
         trade_record = None
         try:

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from backend.app.persistence.services.persistence_service import (
@@ -35,7 +35,7 @@ class SessionRuntimeService:
         session_id = str(uuid4())
 
         started_at = (
-            datetime.utcnow().isoformat()
+            datetime.now(timezone.utc).isoformat()
         )
 
         self.persistence.sessions.create_session(
@@ -81,7 +81,7 @@ class SessionRuntimeService:
     ) -> None:
 
         ended_at = (
-            datetime.utcnow().isoformat()
+            datetime.now(timezone.utc).isoformat()
         )
 
         self.persistence.sessions.close_session(
