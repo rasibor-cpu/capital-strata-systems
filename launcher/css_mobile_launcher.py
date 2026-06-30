@@ -1020,7 +1020,12 @@ def get_runtime_artifact_freshness_feed(refresh: bool = False) -> Dict[str, Any]
 
 
 def get_runtime_session_continuity_feed() -> Dict[str, Any]:
-    session_state = _safe_load_artifact("css_session_state_pcnrass.json") or _safe_load_artifact("css_session_recovery.json")
+    session_state = _safe_load_artifact("css_session_state_pcnrass.json")
+    recovery_state = _safe_load_artifact("css_session_recovery.json")
+    if isinstance(recovery_state, dict) and isinstance(recovery_state.get("session_user_ctx"), dict):
+        session_state = recovery_state
+    elif not session_state:
+        session_state = recovery_state
     return RuntimeSessionContinuityMonitor(session_state_path=LauncherConfig.SESSION_STATE_FILE).evaluate(session_state)
 
 
