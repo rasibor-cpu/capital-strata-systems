@@ -34,6 +34,17 @@ class RuntimeArtifactFreshnessManager:
         "portfolio_decision",
         "validation_summary",
     }
+    DEFAULT_THRESHOLDS = {
+        "account_state": 300.0,
+        "session_state": 300.0,
+        "supervisor_state": 120.0,
+        "closed_trade_ledger": 300.0,
+        "portfolio_snapshot": 300.0,
+        "runtime_portfolio_state": 300.0,
+        "runtime_advisory_snapshot": 300.0,
+        "portfolio_decision": 300.0,
+        "validation_summary": 300.0,
+    }
 
     def __init__(
         self,
@@ -44,6 +55,7 @@ class RuntimeArtifactFreshnessManager:
         supervisor_state_path: str | Path | None = None,
         closed_trade_ledger_path: str | Path | None = None,
         stale_after_seconds: float = 300.0,
+        thresholds: Mapping[str, float] | None = None,
     ) -> None:
         root = Path(artifacts_dir)
         self.artifacts_dir = root
@@ -59,6 +71,9 @@ class RuntimeArtifactFreshnessManager:
             "validation_summary": root / "validation_summary.json",
         }
         self.stale_after_seconds = float(stale_after_seconds)
+        configured = dict(self.DEFAULT_THRESHOLDS)
+        configured.update({str(key): float(value) for key, value in (thresholds or {}).items()})
+        self.thresholds = configured
 
     def evaluate(
         self,
@@ -90,6 +105,8 @@ class RuntimeArtifactFreshnessManager:
                 warnings.append(warning)
                 if name in {"session_state", "supervisor_state"}:
                     blockers.append(warning)
+            elif status == "AGING":
+                warnings.append(f"aging_{name}")
             elif status == "NO_RECENT_TRADES":
                 warnings.append("no_recent_closed_trades")
 
@@ -123,23 +140,33 @@ class RuntimeArtifactFreshnessManager:
     def _artifact_state(self, name: str, path: Path, now: datetime, runtime_active: bool) -> dict[str, Any]:
         exists = path.exists()
         age = max(0.0, now.timestamp() - path.stat().st_mtime) if exists else None
-        stale = age is None or age > self.stale_after_seconds
+        threshold = float(self.thresholds.get(name, self.stale_after_seconds))
+        stale = age is None or age > threshold
         freshness = "FRESH"
         if not exists:
             freshness = "MISSING"
         elif name == "closed_trade_ledger" and stale and runtime_active:
             freshness = "NO_RECENT_TRADES"
             stale = False
+        elif age is not None and age > threshold:
+            freshness = "STALE"
+        elif age is not None and age > (threshold * 0.5):
+            freshness = "AGING"
         elif stale:
             freshness = "STALE"
+        percentage = self._freshness_percentage(age, threshold, freshness)
         return {
             "path": str(path),
             "exists": exists,
             "critical": name in self.CRITICAL,
             "optional": name in self.OPTIONAL,
             "age_seconds": round(age, 6) if age is not None else None,
-            "stale_after_seconds": self.stale_after_seconds,
+            "seconds_old": round(age, 6) if age is not None else None,
+            "stale_after_seconds": threshold,
+            "threshold": threshold,
             "freshness": freshness,
+            "status": freshness,
+            "freshness_percentage": percentage,
             "stale": stale,
         }
 
@@ -176,3 +203,13 @@ class RuntimeArtifactFreshnessManager:
             "validation_summary": "stale_validation_summary",
             "closed_trade_ledger": "stale_closed_trade_ledger",
         }.get(name, f"stale_{name}")
+
+    @staticmethod
+    def _freshness_percentage(age: float | None, threshold: float, status: str) -> float:
+        if status == "MISSING":
+            return 0.0
+        if status == "NO_RECENT_TRADES":
+            return 100.0
+        if age is None or threshold <= 0:
+            return 0.0
+        return round(max(0.0, min(100.0, 100.0 - (age / threshold * 100.0))), 6)

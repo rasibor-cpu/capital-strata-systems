@@ -22,11 +22,18 @@ class RuntimeHealthAggregator:
         runtime_portfolio_state: Mapping[str, Any] | None = None,
         artifact_freshness: Mapping[str, Any] | None = None,
         session_continuity: Mapping[str, Any] | None = None,
+        canonical_artifacts: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         if not isinstance(performance, Mapping):
             return self._unavailable("performance_unavailable")
         if not isinstance(session_validation, Mapping):
             return self._unavailable("session_validation_unavailable")
+
+        if isinstance(canonical_artifacts, Mapping):
+            portfolio_decision = portfolio_decision or self._canonical_payload(canonical_artifacts, "portfolio_decision")
+            runtime_portfolio_state = runtime_portfolio_state or self._canonical_payload(canonical_artifacts, "runtime_portfolio_state")
+            artifact_freshness = artifact_freshness or self._canonical_payload(canonical_artifacts, "artifact_freshness")
+            session_continuity = session_continuity or self._canonical_payload(canonical_artifacts, "session_continuity")
 
         supervisor = supervisor_status if isinstance(supervisor_status, Mapping) else {}
         decision = portfolio_decision if isinstance(portfolio_decision, Mapping) else {}
@@ -176,3 +183,15 @@ class RuntimeHealthAggregator:
         if isinstance(values, list):
             return [str(item) for item in values if str(item).strip()]
         return []
+
+    @staticmethod
+    def _canonical_payload(payloads: Mapping[str, Any], name: str) -> Mapping[str, Any] | None:
+        payload = payloads.get(name)
+        if isinstance(payload, Mapping):
+            return payload
+        artifacts = payloads.get("artifacts")
+        if isinstance(artifacts, Mapping):
+            payload = artifacts.get(name)
+            if isinstance(payload, Mapping):
+                return payload
+        return None

@@ -16,6 +16,7 @@ from backend.monitoring.alert_repository import (
 )
 from backend.monitoring.runtime_health_aggregator import RuntimeHealthAggregator
 from backend.monitoring.runtime_performance_monitor import RuntimePerformanceMonitor
+from backend.monitoring.runtime_health_trend import RuntimeHealthTrend
 from backend.monitoring.session_validation_engine import SessionValidationEngine
 from backend.trading.instrument_universe import (
     InstrumentUniverse,
@@ -69,9 +70,14 @@ from backend.portfolio.runtime_advisory_snapshot import RuntimeAdvisorySnapshot
 from backend.portfolio.runtime_portfolio_state_builder import RuntimePortfolioStateBuilder
 from backend.portfolio.strategy_attribution_engine import StrategyAttributionEngine
 from backend.runtime.runtime_artifact_freshness import RuntimeArtifactFreshnessManager
+from backend.runtime.runtime_artifact_publisher import RuntimeArtifactPublisher
 from backend.runtime.runtime_portfolio_lifecycle import RuntimePortfolioLifecycle
 from backend.runtime.runtime_session_continuity import RuntimeSessionContinuityMonitor
+from backend.validation.continuous_validation_monitor import ContinuousValidationMonitor
+from backend.validation.long_duration_validation import LongDurationValidation
+from backend.validation.runtime_validation_metrics import RuntimeValidationMetrics
 from backend.validation.session_checkpoint_store import SessionCheckpointStore
+from backend.validation.validation_confidence_engine import ValidationConfidenceEngine
 from backend.validation.validation_readiness_engine import ValidationReadinessEngine
 import uvicorn
 
@@ -1027,6 +1033,175 @@ def get_runtime_session_continuity_feed() -> Dict[str, Any]:
     elif not session_state:
         session_state = recovery_state
     return RuntimeSessionContinuityMonitor(session_state_path=LauncherConfig.SESSION_STATE_FILE).evaluate(session_state)
+
+
+def publish_runtime_artifacts(
+    *,
+    inputs: Optional[Dict[str, Any]] = None,
+    portfolio_decision: Optional[Dict[str, Any]] = None,
+    runtime_advisory_snapshot: Optional[Dict[str, Any]] = None,
+    validation_summary: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    payload = inputs or _portfolio_decision_inputs()
+    decision = portfolio_decision or get_portfolio_decision_feed(inputs=payload, persist=False)
+    snapshot = runtime_advisory_snapshot or get_runtime_advisory_snapshot_feed(inputs=payload, portfolio_decision=decision)
+    validation = validation_summary or _safe_load_artifact("validation_summary.json")
+    return RuntimeArtifactPublisher(
+        artifacts_dir=LauncherConfig.ARTIFACTS_DIR,
+        account_state_path=LauncherConfig.ACCOUNT_STATE_FILE,
+        session_state_path=LauncherConfig.SESSION_STATE_FILE,
+        closed_trade_ledger_path=LauncherConfig.CLOSED_TRADE_LEDGER_PATH,
+        supervisor_state_path=LauncherConfig.SUPERVISOR_STATE_FILE,
+    ).publish(
+        runtime_cycle=get_runtime_summary().get("current_cycle", 0),
+        runtime_portfolio_state=payload.get("runtime_portfolio_state"),
+        runtime_advisory_snapshot=snapshot,
+        portfolio_decision=decision,
+        validation_summary=validation if validation else None,
+    )
+
+
+def get_runtime_validation_monitor_feed(
+    runtime_health: Optional[Dict[str, Any]] = None,
+    validation_readiness: Optional[Dict[str, Any]] = None,
+    session_continuity: Optional[Dict[str, Any]] = None,
+    artifact_freshness: Optional[Dict[str, Any]] = None,
+    portfolio_lifecycle: Optional[Dict[str, Any]] = None,
+    portfolio_decision: Optional[Dict[str, Any]] = None,
+    advisory_snapshot: Optional[Dict[str, Any]] = None,
+    persist: bool = False,
+) -> Dict[str, Any]:
+    decision = portfolio_decision or get_portfolio_decision_feed(persist=False)
+    freshness = artifact_freshness or get_runtime_artifact_freshness_feed(refresh=False)
+    continuity = session_continuity or get_runtime_session_continuity_feed()
+    health = runtime_health or get_runtime_health_feed(portfolio_decision=decision, artifact_freshness=freshness, session_continuity=continuity)
+    readiness = validation_readiness or get_validation_readiness_feed(
+        runtime_health=health,
+        portfolio_decision=decision,
+        artifact_freshness=freshness,
+        session_continuity=continuity,
+    )
+    lifecycle = portfolio_lifecycle or _safe_load_artifact(os.path.join("portfolio", "runtime_portfolio_lifecycle.json")) or {}
+    snapshot = advisory_snapshot or _safe_load_artifact("runtime_advisory_snapshot.json")
+    return ContinuousValidationMonitor(artifacts_dir=LauncherConfig.ARTIFACTS_DIR).evaluate(
+        runtime_health=health,
+        validation_readiness=readiness,
+        session_continuity=continuity,
+        artifact_freshness=freshness,
+        supervisor_state=get_supervisor_summary(),
+        portfolio_lifecycle=lifecycle,
+        portfolio_decision=decision,
+        advisory_snapshot=snapshot,
+        persist=persist,
+    )
+
+
+def _validation_events_from_artifacts() -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for filename in ("runtime_validation_monitor.json", "runtime_validation_metrics.json", "long_duration_validation.json"):
+        payload = _safe_load_artifact(filename)
+        if payload:
+            rows.append(payload)
+    checkpoints = get_paper_validation_checkpoints_feed()
+    for row in checkpoints.get("checkpoints", []) if isinstance(checkpoints, dict) else []:
+        if isinstance(row, dict):
+            rows.append(row)
+    return rows
+
+
+def get_runtime_validation_metrics_feed(
+    runtime_health: Optional[Dict[str, Any]] = None,
+    runtime_performance: Optional[Dict[str, Any]] = None,
+    session_validation: Optional[Dict[str, Any]] = None,
+    persist: bool = False,
+) -> Dict[str, Any]:
+    performance = runtime_performance or get_runtime_performance_feed()
+    session = session_validation or get_session_validation_feed()
+    health = runtime_health or get_runtime_health_feed(performance=performance, session_validation=session)
+    return RuntimeValidationMetrics(artifacts_dir=LauncherConfig.ARTIFACTS_DIR).calculate(
+        runtime_health=health,
+        performance=performance,
+        session_validation=session,
+        artifact_publisher=_safe_load_artifact("runtime_artifact_publisher.json"),
+        validation_events=_validation_events_from_artifacts(),
+        persist=persist,
+    )
+
+
+def get_runtime_health_trend_feed(
+    runtime_health: Optional[Dict[str, Any]] = None,
+    validation_readiness: Optional[Dict[str, Any]] = None,
+    artifact_freshness: Optional[Dict[str, Any]] = None,
+    session_continuity: Optional[Dict[str, Any]] = None,
+    portfolio_decision: Optional[Dict[str, Any]] = None,
+    portfolio_lifecycle: Optional[Dict[str, Any]] = None,
+    persist: bool = False,
+) -> Dict[str, Any]:
+    decision = portfolio_decision or get_portfolio_decision_feed(persist=False)
+    freshness = artifact_freshness or get_runtime_artifact_freshness_feed(refresh=False)
+    continuity = session_continuity or get_runtime_session_continuity_feed()
+    health = runtime_health or get_runtime_health_feed(portfolio_decision=decision, artifact_freshness=freshness, session_continuity=continuity)
+    readiness = validation_readiness or get_validation_readiness_feed(
+        runtime_health=health,
+        portfolio_decision=decision,
+        artifact_freshness=freshness,
+        session_continuity=continuity,
+    )
+    lifecycle = portfolio_lifecycle or _safe_load_artifact(os.path.join("portfolio", "runtime_portfolio_lifecycle.json")) or {}
+    return RuntimeHealthTrend(artifacts_dir=LauncherConfig.ARTIFACTS_DIR).evaluate(
+        runtime_health=health,
+        validation_readiness=readiness,
+        artifact_freshness=freshness,
+        session_continuity=continuity,
+        portfolio_decision=decision,
+        portfolio_lifecycle=lifecycle,
+        persist=persist,
+    )
+
+
+def get_validation_confidence_feed(
+    runtime_health: Optional[Dict[str, Any]] = None,
+    validation_readiness: Optional[Dict[str, Any]] = None,
+    artifact_freshness: Optional[Dict[str, Any]] = None,
+    session_continuity: Optional[Dict[str, Any]] = None,
+    portfolio_decision: Optional[Dict[str, Any]] = None,
+    runtime_health_trend: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    decision = portfolio_decision or get_portfolio_decision_feed(persist=False)
+    freshness = artifact_freshness or get_runtime_artifact_freshness_feed(refresh=False)
+    continuity = session_continuity or get_runtime_session_continuity_feed()
+    health = runtime_health or get_runtime_health_feed(portfolio_decision=decision, artifact_freshness=freshness, session_continuity=continuity)
+    readiness = validation_readiness or get_validation_readiness_feed(
+        runtime_health=health,
+        portfolio_decision=decision,
+        artifact_freshness=freshness,
+        session_continuity=continuity,
+    )
+    trend = runtime_health_trend or get_runtime_health_trend_feed(
+        runtime_health=health,
+        validation_readiness=readiness,
+        artifact_freshness=freshness,
+        session_continuity=continuity,
+        portfolio_decision=decision,
+    )
+    return ValidationConfidenceEngine().evaluate(
+        runtime_health=health,
+        validation_readiness=readiness,
+        artifact_freshness=freshness,
+        supervisor_stability=get_supervisor_summary(),
+        session_continuity=continuity,
+        recommendation_stability=get_recommendation_drift_feed(),
+        portfolio_decision=decision,
+        runtime_health_trend=trend,
+    )
+
+
+def get_long_duration_validation_feed(persist: bool = False) -> Dict[str, Any]:
+    return LongDurationValidation(artifacts_dir=LauncherConfig.ARTIFACTS_DIR).summarize(
+        events=_validation_events_from_artifacts(),
+        paper_performance=get_trade_summary(),
+        persist=persist,
+    )
 
 
 def get_paper_validation_summary_feed() -> Dict[str, Any]:
@@ -2338,6 +2513,40 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         persist=False,
     )
     paper_validation_summary = get_paper_validation_summary_feed()
+    runtime_validation_monitor = get_runtime_validation_monitor_feed(
+        runtime_health=runtime_health,
+        validation_readiness=validation_readiness,
+        session_continuity=runtime_session_continuity,
+        artifact_freshness=runtime_artifact_freshness,
+        portfolio_lifecycle=runtime_portfolio_lifecycle,
+        portfolio_decision=portfolio_decision,
+        advisory_snapshot=runtime_advisory_snapshot,
+        persist=False,
+    )
+    runtime_validation_metrics = get_runtime_validation_metrics_feed(
+        runtime_health=runtime_health,
+        runtime_performance=runtime_performance,
+        session_validation=session_validation,
+        persist=False,
+    )
+    runtime_health_trend = get_runtime_health_trend_feed(
+        runtime_health=runtime_health,
+        validation_readiness=validation_readiness,
+        artifact_freshness=runtime_artifact_freshness,
+        session_continuity=runtime_session_continuity,
+        portfolio_decision=portfolio_decision,
+        portfolio_lifecycle=runtime_portfolio_lifecycle,
+        persist=False,
+    )
+    validation_confidence = get_validation_confidence_feed(
+        runtime_health=runtime_health,
+        validation_readiness=validation_readiness,
+        artifact_freshness=runtime_artifact_freshness,
+        session_continuity=runtime_session_continuity,
+        portfolio_decision=portfolio_decision,
+        runtime_health_trend=runtime_health_trend,
+    )
+    long_duration_validation = get_long_duration_validation_feed(persist=False)
     strategy_evolution = get_strategy_evolution_feed()
 
     return {
@@ -2388,6 +2597,11 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "recommendation_drift": recommendation_drift,
         "validation_readiness": validation_readiness,
         "paper_validation_summary": paper_validation_summary,
+        "runtime_validation_monitor": runtime_validation_monitor,
+        "runtime_validation_metrics": runtime_validation_metrics,
+        "runtime_health_trend": runtime_health_trend,
+        "validation_confidence": validation_confidence,
+        "long_duration_validation": long_duration_validation,
         "strategy_evolution": strategy_evolution,
         "portfolio_allocation": get_portfolio_allocation_feed(),
         "trade_ticket_defaults": trade_ticket_defaults,
@@ -2805,6 +3019,98 @@ async def api_paper_validation_checkpoint_record(request: Request):
     except Exception:
         payload = {}
     return record_paper_validation_checkpoint(payload)
+
+
+@launcher_router.get("/api/runtime-validation-monitor")
+async def api_runtime_validation_monitor():
+    try:
+        return get_runtime_validation_monitor_feed(persist=False)
+    except Exception as exc:
+        return JSONResponse(
+            {
+                "status": "DATA UNAVAILABLE",
+                "validation_state": "RED",
+                "warnings": [f"runtime_validation_monitor_error:{_clean_text(exc, fallback='unknown_error')}"],
+                "blockers": ["runtime_validation_monitor_unavailable"],
+                "advisory_only": True,
+                "execution_allowed": False,
+            },
+            status_code=200,
+        )
+
+
+@launcher_router.get("/api/runtime-validation-metrics")
+async def api_runtime_validation_metrics():
+    try:
+        return get_runtime_validation_metrics_feed(persist=False)
+    except Exception as exc:
+        return JSONResponse(
+            {
+                "status": "DATA UNAVAILABLE",
+                "runtime_uptime": 0,
+                "runtime_cycles": 0,
+                "artifact_write_success_rate": 0.0,
+                "artifact_write_failures": 0,
+                "warnings": [f"runtime_validation_metrics_error:{_clean_text(exc, fallback='unknown_error')}"],
+                "advisory_only": True,
+                "execution_allowed": False,
+            },
+            status_code=200,
+        )
+
+
+@launcher_router.get("/api/runtime-health-trend")
+async def api_runtime_health_trend():
+    try:
+        return get_runtime_health_trend_feed(persist=False)
+    except Exception as exc:
+        return JSONResponse(
+            {
+                "status": "DATA UNAVAILABLE",
+                "current": {},
+                "trends": {},
+                "warnings": [f"runtime_health_trend_error:{_clean_text(exc, fallback='unknown_error')}"],
+                "advisory_only": True,
+                "execution_allowed": False,
+            },
+            status_code=200,
+        )
+
+
+@launcher_router.get("/api/validation-confidence")
+async def api_validation_confidence():
+    try:
+        return get_validation_confidence_feed()
+    except Exception as exc:
+        return JSONResponse(
+            {
+                "status": "DATA UNAVAILABLE",
+                "confidence_score": 0,
+                "confidence_grade": "FAIL_CLOSED",
+                "confidence_reason": f"validation_confidence_error:{_clean_text(exc, fallback='unknown_error')}",
+                "advisory_only": True,
+                "execution_allowed": False,
+            },
+            status_code=200,
+        )
+
+
+@launcher_router.get("/api/long-duration-validation")
+async def api_long_duration_validation():
+    try:
+        return get_long_duration_validation_feed(persist=False)
+    except Exception as exc:
+        return JSONResponse(
+            {
+                "status": "DATA UNAVAILABLE",
+                "windows": {},
+                "warnings": [f"long_duration_validation_error:{_clean_text(exc, fallback='unknown_error')}"],
+                "advisory_only": True,
+                "paper_validation_only": True,
+                "execution_allowed": False,
+            },
+            status_code=200,
+        )
 
 
 @launcher_router.get("/mobile/strategy-evolution")

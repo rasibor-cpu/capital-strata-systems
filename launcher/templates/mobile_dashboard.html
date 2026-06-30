@@ -1194,6 +1194,33 @@
             {% endif %}
         </div>
 
+        <div class="card" id="continuous-validation-card">
+            <div class="card-header">
+                Continuous Validation
+                {% if runtime_validation_monitor.status == 'OK' %}
+                <span class="badge badge-info" id="cv-status-badge">{{ runtime_validation_monitor.validation_state }}</span>
+                {% else %}
+                <span class="badge badge-warning" id="cv-status-badge">DATA UNAVAILABLE</span>
+                {% endif %}
+            </div>
+            {% if runtime_validation_monitor.status == 'OK' %}
+            <div class="status-row"><span>Validation Status</span><strong id="cv-validation-status">{{ runtime_validation_monitor.validation_state }}</strong></div>
+            <div class="status-row"><span>Validation Confidence</span><strong id="cv-confidence">{{ validation_confidence.confidence_score if validation_confidence.status == 'OK' else 'DATA UNAVAILABLE' }}</strong></div>
+            <div class="status-row"><span>Confidence Grade</span><strong id="cv-confidence-grade">{{ validation_confidence.confidence_grade if validation_confidence.status == 'OK' else 'DATA UNAVAILABLE' }}</strong></div>
+            <div class="status-row"><span>Runtime Health Trend</span><strong id="cv-health-trend">{{ runtime_health_trend.trends['1h'].statuses.runtime_health if runtime_health_trend.status == 'OK' and runtime_health_trend.trends['1h'] else 'DATA UNAVAILABLE' }}</strong></div>
+            <div class="status-row"><span>Session Continuity</span><strong id="cv-session-continuity">{{ runtime_validation_monitor.session_continuity }}</strong></div>
+            <div class="status-row"><span>Artifact Health</span><strong id="cv-artifact-health">{{ runtime_validation_monitor.artifact_freshness }}</strong></div>
+            <div class="status-row"><span>Runtime Uptime</span><strong id="cv-runtime-uptime">{{ runtime_validation_metrics.runtime_uptime if runtime_validation_metrics.status == 'OK' else 'DATA UNAVAILABLE' }}</strong></div>
+            <div class="status-row"><span>Validation Duration</span><strong id="cv-validation-duration">{{ long_duration_validation.windows['6h'].uptime if long_duration_validation.status == 'OK' and long_duration_validation.windows['6h'] else 'DATA UNAVAILABLE' }}</strong></div>
+            <div class="status-row"><span>Last Refresh</span><strong id="cv-last-refresh">{{ runtime_validation_monitor.timestamp }}</strong></div>
+            <div class="status-row"><span>Recommendation Stability</span><strong id="cv-recommendation-stability">{{ runtime_validation_metrics.recommendation_stability_trend if runtime_validation_metrics.status == 'OK' else 'DATA UNAVAILABLE' }}</strong></div>
+            <div class="status-row"><span>Runtime Validation Metrics</span><strong id="cv-runtime-metrics">Cycles {{ runtime_validation_metrics.runtime_cycles if runtime_validation_metrics.status == 'OK' else 'DATA UNAVAILABLE' }}</strong></div>
+            <div class="status-row"><span>Long Duration Samples</span><strong id="cv-long-duration-samples">{{ long_duration_validation.windows['24h'].sample_count if long_duration_validation.status == 'OK' and long_duration_validation.windows['24h'] else 'DATA UNAVAILABLE' }}</strong></div>
+            {% else %}
+            <div class="empty-state" id="continuous-validation-unavailable">DATA UNAVAILABLE</div>
+            {% endif %}
+        </div>
+
     </div><!-- /screen-positions -->
 
     <!-- ══════════════════════════════════════════════

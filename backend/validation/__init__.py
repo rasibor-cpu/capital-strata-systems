@@ -25,11 +25,17 @@ from .replay_models import (
 )
 from .replay_statistics import ReplayStatistics, build_replay_statistics
 from .continuous_paper_validation import ContinuousPaperValidation, ContinuousPaperValidationError
+from .continuous_validation_monitor import ContinuousValidationMonitor, ContinuousValidationMonitorError
+from .long_duration_validation import LongDurationValidation, LongDurationValidationError
+from .runtime_validation_metrics import RuntimeValidationMetrics, RuntimeValidationMetricsError
 from .session_checkpoint_store import SessionCheckpointStore, SessionCheckpointStoreError
+from .validation_confidence_engine import ValidationConfidenceEngine, ValidationConfidenceEngineError
 from .validation_readiness_engine import ValidationReadinessEngine, ValidationReadinessEngineError
 __all__ = [
     "ContinuousPaperValidation",
     "ContinuousPaperValidationError",
+    "ContinuousValidationMonitor",
+    "ContinuousValidationMonitorError",
     "HistoricalCompletedTrade",
     "HistoricalMarketEvent",
     "HistoricalReplayEngine",
@@ -62,6 +68,8 @@ __all__ = [
     "LiveReadinessGate",
     "LiveReadinessGateError",
     "LiveReadinessReport",
+    "LongDurationValidation",
+    "LongDurationValidationError",
     "MarathonSnapshot",
     "MarathonStatistics",
     "MarathonSummaryReport",
@@ -71,12 +79,16 @@ __all__ = [
     "RC1ReadinessEvaluator",
     "RC1ReadinessError",
     "RC1ReadinessResult",
+    "RuntimeValidationMetrics",
+    "RuntimeValidationMetricsError",
     "build_marathon_readiness_report",
     "build_marathon_statistics",
     "ReplayStatistics",
     "build_replay_statistics",
     "SessionCheckpointStore",
     "SessionCheckpointStoreError",
+    "ValidationConfidenceEngine",
+    "ValidationConfidenceEngineError",
     "ValidationReadinessEngine",
     "ValidationReadinessEngineError",
 ]
