@@ -30,8 +30,10 @@ class RegimeAwareAllocationEngine:
         base_allocations: Mapping[str, Any] | None,
         regime_context: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        if not isinstance(base_allocations, Mapping) or not base_allocations:
+        if base_allocations is None or not isinstance(base_allocations, Mapping):
             return self._fail_closed("base_allocations_unavailable")
+        if not base_allocations:
+            return self._limited_no_allocations(regime_context)
 
         base = normalize_allocations(base_allocations)
         if not base:
@@ -145,5 +147,18 @@ class RegimeAwareAllocationEngine:
             "detected_regime": REGIME_UNKNOWN,
             "allocation_bias": "DEFENSIVE",
             "reasons": [reason],
+            "advisory_only": True,
+        }
+
+    def _limited_no_allocations(self, regime_context: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        context = regime_context if isinstance(regime_context, Mapping) else {}
+        regime = self._canonical_regime(context.get("detected_regime", context.get("market_regime", REGIME_UNKNOWN)))
+        return {
+            "status": "LIMITED",
+            "base_allocations": {},
+            "regime_adjusted_allocations": {},
+            "detected_regime": regime,
+            "allocation_bias": "NO_PORTFOLIO",
+            "reasons": ["No current exposure."],
             "advisory_only": True,
         }

@@ -56,10 +56,19 @@ def test_portfolio_intelligence_healthy_portfolio_is_explainable() -> None:
 
 
 def test_portfolio_intelligence_fails_closed_when_data_unavailable() -> None:
-    result = PortfolioIntelligenceEngine().analyze([], {})
+    result = PortfolioIntelligenceEngine().analyze(None, {})
 
     assert result["status"] == "DATA UNAVAILABLE"
     assert result["advisory_only"] is True
     assert result["execution_allowed"] is False
     assert result["recommendation"] == "NO_ACTION"
     assert result["intelligence_score"] == 0.0
+
+
+def test_portfolio_intelligence_returns_limited_for_no_current_exposure() -> None:
+    result = PortfolioIntelligenceEngine().analyze([], {})
+
+    assert result["status"] == "LIMITED"
+    assert result["portfolio_status"] == "NO_PORTFOLIO"
+    assert result["recommendation"] == "HOLD_CURRENT"
+    assert result["execution_allowed"] is False

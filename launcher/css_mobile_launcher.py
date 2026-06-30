@@ -68,6 +68,7 @@ from backend.portfolio.regime_aware_allocation import RegimeAwareAllocationEngin
 from backend.portfolio.runtime_advisory_snapshot import RuntimeAdvisorySnapshot
 from backend.portfolio.runtime_portfolio_state_builder import RuntimePortfolioStateBuilder
 from backend.portfolio.strategy_attribution_engine import StrategyAttributionEngine
+from backend.runtime.runtime_portfolio_lifecycle import RuntimePortfolioLifecycle
 from backend.validation.session_checkpoint_store import SessionCheckpointStore
 from backend.validation.validation_readiness_engine import ValidationReadinessEngine
 import uvicorn
@@ -453,6 +454,21 @@ def get_capital_rotation_feed(
 
 def get_strategy_attribution_feed(runtime_state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     trades = runtime_state.get("trades", []) if isinstance(runtime_state, dict) else _load_completed_trade_learning_records()
+    if not trades and isinstance(runtime_state, dict) and runtime_state.get("portfolio_state") == "NO_PORTFOLIO":
+        return {
+            "status": "LIMITED",
+            "advisory_only": True,
+            "execution_allowed": False,
+            "strategy_attribution": {},
+            "asset_class_attribution": {},
+            "symbol_attribution": {},
+            "regime_attribution": {},
+            "time_bucket_attribution": {},
+            "top_contributors": [],
+            "top_detractors": [],
+            "recommendation": "MAINTAIN",
+            "reasons": ["No current exposure."],
+        }
     return StrategyAttributionEngine().analyze(trades)
 
 
@@ -558,6 +574,24 @@ def _load_quantitative_return_inputs(runtime_state: Optional[Dict[str, Any]] = N
 
 def get_quantitative_metrics_feed(runtime_state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     inputs = _load_quantitative_return_inputs(runtime_state)
+    if (
+        isinstance(runtime_state, dict)
+        and runtime_state.get("portfolio_state") == "NO_PORTFOLIO"
+        and not inputs["portfolio_returns"]
+    ):
+        return {
+            "status": "LIMITED",
+            "metrics": {
+                "rolling_sharpe": None,
+                "rolling_sortino": None,
+                "max_drawdown": 0.0,
+                "volatility": 0.0,
+            },
+            "correlation_matrix": {},
+            "sample_size": 0,
+            "reasons": ["No current exposure."],
+            "advisory_only": True,
+        }
     return QuantitativeMetricsEngine().compute(
         portfolio_returns=inputs["portfolio_returns"],
         benchmark_returns=inputs["benchmark_returns"],
@@ -572,6 +606,23 @@ def get_market_regime_intelligence_feed(
     metrics_payload = quantitative_metrics or get_quantitative_metrics_feed(runtime_state)
     inputs = _load_quantitative_return_inputs(runtime_state)
     correlation_matrix = metrics_payload.get("correlation_matrix", {}) if isinstance(metrics_payload, dict) else {}
+    if (
+        isinstance(runtime_state, dict)
+        and runtime_state.get("portfolio_state") == "NO_PORTFOLIO"
+        and not inputs["portfolio_returns"]
+    ):
+        context = _load_regime_context()
+        return {
+            "status": "LIMITED",
+            "detected_regime": str(context.get("detected_regime", context.get("market_regime", "UNKNOWN"))).upper(),
+            "confidence": 50,
+            "volatility_state": "UNKNOWN",
+            "trend_state": "UNKNOWN",
+            "correlation_state": "UNKNOWN",
+            "risk_bias": "BALANCED",
+            "reasons": ["No current exposure."],
+            "advisory_only": True,
+        }
     return MarketRegimeIntelligence().detect(
         returns=inputs["portfolio_returns"],
         correlation_matrix=correlation_matrix,
@@ -714,6 +765,23 @@ def get_runtime_advisory_snapshot_feed(
     )
 
 
+def get_runtime_portfolio_lifecycle_feed(
+    inputs: Optional[Dict[str, Any]] = None,
+    portfolio_decision: Optional[Dict[str, Any]] = None,
+    runtime_advisory_snapshot: Optional[Dict[str, Any]] = None,
+    persist: bool = False,
+) -> Dict[str, Any]:
+    payload = inputs or _portfolio_decision_inputs()
+    decision = portfolio_decision or PortfolioDecisionOrchestrator().orchestrate(payload)
+    snapshot = runtime_advisory_snapshot or get_runtime_advisory_snapshot_feed(payload, decision)
+    return RuntimePortfolioLifecycle(LauncherConfig.ARTIFACTS_DIR).refresh(
+        runtime_state=payload.get("runtime_portfolio_state"),
+        advisory_snapshot=snapshot,
+        portfolio_decision=decision,
+        persist=persist,
+    )
+
+
 def record_portfolio_decision(package: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     decision_package = package or get_portfolio_decision_feed(persist=False)
     result = DecisionPackageStore(_portfolio_learning_storage_dir()).append(decision_package)
@@ -827,8 +895,10 @@ def get_runtime_health_feed(
     performance: Optional[Dict[str, Any]] = None,
     session_validation: Optional[Dict[str, Any]] = None,
     portfolio_decision: Optional[Dict[str, Any]] = None,
+    runtime_portfolio_state: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     decision = portfolio_decision or get_portfolio_decision_feed(persist=False)
+    state = runtime_portfolio_state or get_runtime_portfolio_state_feed()
     perf = performance or get_runtime_performance_feed()
     session = session_validation or get_session_validation_feed(decision)
     return RuntimeHealthAggregator().aggregate(
@@ -836,6 +906,7 @@ def get_runtime_health_feed(
         session_validation=session,
         supervisor_status=get_supervisor_summary(),
         portfolio_decision=decision,
+        runtime_portfolio_state=state,
     )
 
 
@@ -853,8 +924,10 @@ def get_validation_readiness_feed(
     portfolio_decision: Optional[Dict[str, Any]] = None,
     runtime_performance: Optional[Dict[str, Any]] = None,
     runtime_advisory_snapshot: Optional[Dict[str, Any]] = None,
+    runtime_portfolio_state: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     decision = portfolio_decision or get_portfolio_decision_feed(persist=False)
+    state = runtime_portfolio_state or get_runtime_portfolio_state_feed()
     snapshot = runtime_advisory_snapshot or get_runtime_advisory_snapshot_feed(portfolio_decision=decision)
     performance = runtime_performance or get_runtime_performance_feed()
     session = session_validation or get_session_validation_feed(decision)
@@ -862,6 +935,7 @@ def get_validation_readiness_feed(
         performance=performance,
         session_validation=session,
         portfolio_decision=decision,
+        runtime_portfolio_state=state,
     )
     stale_artifacts = session.get("stale_artifacts", []) if isinstance(session, dict) else []
     alerts = get_alert_summary()
@@ -874,6 +948,7 @@ def get_validation_readiness_feed(
         stale_artifacts=stale_artifacts,
         recent_errors=recent_errors,
         runtime_advisory_snapshot=snapshot,
+        runtime_portfolio_state=state,
     )
 
 
@@ -2159,6 +2234,7 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         performance=runtime_performance,
         session_validation=session_validation,
         portfolio_decision=portfolio_decision,
+        runtime_portfolio_state=runtime_portfolio_state,
     )
     recommendation_history = _load_recommendation_evaluation_history()
     recommendation_evaluation = get_recommendation_evaluation_feed(recommendation_history)
@@ -2170,6 +2246,13 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         portfolio_decision=portfolio_decision,
         runtime_performance=runtime_performance,
         runtime_advisory_snapshot=runtime_advisory_snapshot,
+        runtime_portfolio_state=runtime_portfolio_state,
+    )
+    runtime_portfolio_lifecycle = get_runtime_portfolio_lifecycle_feed(
+        inputs=decision_inputs,
+        portfolio_decision=portfolio_decision,
+        runtime_advisory_snapshot=runtime_advisory_snapshot,
+        persist=False,
     )
     paper_validation_summary = get_paper_validation_summary_feed()
     strategy_evolution = get_strategy_evolution_feed()
@@ -2205,6 +2288,7 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "policy_profile": policy_profile,
         "recommendation_tracker": recommendation_tracker,
         "runtime_portfolio_state": runtime_portfolio_state,
+        "runtime_portfolio_lifecycle": runtime_portfolio_lifecycle,
         "runtime_advisory_snapshot": runtime_advisory_snapshot,
         "advisory_history": advisory_history,
         "portfolio_decision": portfolio_decision,
@@ -2448,6 +2532,19 @@ async def api_runtime_portfolio_state():
     return get_runtime_portfolio_state_feed()
 
 
+@launcher_router.get("/api/runtime-portfolio-lifecycle")
+async def api_runtime_portfolio_lifecycle():
+    inputs = _portfolio_decision_inputs()
+    decision = get_portfolio_decision_feed(inputs=inputs, persist=False)
+    snapshot = get_runtime_advisory_snapshot_feed(inputs=inputs, portfolio_decision=decision)
+    return get_runtime_portfolio_lifecycle_feed(
+        inputs=inputs,
+        portfolio_decision=decision,
+        runtime_advisory_snapshot=snapshot,
+        persist=False,
+    )
+
+
 @launcher_router.get("/api/runtime-advisory-snapshot")
 async def api_runtime_advisory_snapshot():
     inputs = _portfolio_decision_inputs()
@@ -2515,6 +2612,7 @@ async def api_runtime_health():
         performance=performance,
         session_validation=session,
         portfolio_decision=decision,
+        runtime_portfolio_state=inputs.get("runtime_portfolio_state"),
     )
 
 
@@ -2536,6 +2634,7 @@ async def api_validation_readiness():
         portfolio_decision=decision,
         runtime_performance=performance,
         runtime_advisory_snapshot=snapshot,
+        runtime_portfolio_state=inputs.get("runtime_portfolio_state"),
     )
 
 

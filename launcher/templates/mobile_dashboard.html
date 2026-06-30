@@ -941,13 +941,13 @@
         <div class="card" id="portfolio-intelligence-card">
             <div class="card-header">
                 Portfolio Intelligence
-                {% if portfolio_intelligence.status == 'OK' %}
+                {% if portfolio_intelligence.status in ('OK', 'LIMITED') %}
                 <span class="badge badge-info" id="pi-status-badge">{{ portfolio_intelligence.portfolio_status }}</span>
                 {% else %}
                 <span class="badge badge-warning" id="pi-status-badge">DATA UNAVAILABLE</span>
                 {% endif %}
             </div>
-            {% if portfolio_intelligence.status == 'OK' %}
+            {% if portfolio_intelligence.status in ('OK', 'LIMITED') %}
             <div class="status-row"><span>Score</span><strong id="pi-score">{{ portfolio_intelligence.intelligence_score }}</strong></div>
             <div class="status-row"><span>Recommendation</span><strong id="pi-recommendation">{{ portfolio_intelligence.recommendation }}</strong></div>
             <div class="status-row"><span>Drawdown</span><strong id="pi-drawdown">{{ portfolio_intelligence.metrics.max_drawdown }}</strong></div>
@@ -964,13 +964,13 @@
         <div class="card" id="adaptive-portfolio-card">
             <div class="card-header">
                 Adaptive Portfolio / Risk Committee
-                {% if adaptive_portfolio.status == 'OK' and portfolio_risk_committee.status == 'OK' %}
+                {% if adaptive_portfolio.status in ('OK', 'LIMITED') and portfolio_risk_committee.status == 'OK' %}
                 <span class="badge badge-info" id="ap-status-badge">{{ portfolio_risk_committee.committee_status }}</span>
                 {% else %}
                 <span class="badge badge-warning" id="ap-status-badge">DATA UNAVAILABLE</span>
                 {% endif %}
             </div>
-            {% if adaptive_portfolio.status == 'OK' and portfolio_risk_committee.status == 'OK' %}
+            {% if adaptive_portfolio.status in ('OK', 'LIMITED') and portfolio_risk_committee.status == 'OK' %}
             <div class="status-row"><span>Adaptive Recommendation</span><strong id="ap-recommendation">{{ adaptive_portfolio.adaptive_recommendation }}</strong></div>
             <div class="status-row"><span>Risk Committee Status</span><strong id="ap-committee-status">{{ adaptive_portfolio.risk_committee_status }}</strong></div>
             <div class="status-row"><span>Committee Decision</span><strong id="ap-committee-decision">{{ portfolio_risk_committee.committee_decision }}</strong></div>
@@ -1057,6 +1057,29 @@
             {% endif %}
         </div>
 
+        <div class="card" id="runtime-portfolio-card">
+            <div class="card-header">
+                Runtime Portfolio
+                {% if runtime_portfolio_lifecycle.status == 'OK' %}
+                <span class="badge badge-info" id="rp-status-badge">{{ runtime_portfolio_lifecycle.portfolio_state }}</span>
+                {% else %}
+                <span class="badge badge-warning" id="rp-status-badge">DATA UNAVAILABLE</span>
+                {% endif %}
+            </div>
+            {% if runtime_portfolio_lifecycle.advisory_only %}
+            <div class="status-row"><span>Portfolio State</span><strong id="rp-portfolio-state">{{ runtime_portfolio_lifecycle.portfolio_state }}</strong></div>
+            <div class="status-row"><span>Exposure</span><strong id="rp-exposure">{{ runtime_portfolio_lifecycle.exposure.total_exposure if runtime_portfolio_lifecycle.exposure else 'DATA UNAVAILABLE' }}</strong></div>
+            <div class="status-row"><span>Open Positions</span><strong id="rp-open-positions">{{ runtime_portfolio_lifecycle.open_position_count }}</strong></div>
+            <div class="status-row"><span>Current Allocation</span><strong id="rp-current-allocation">{{ runtime_portfolio_lifecycle.allocations | tojson }}</strong></div>
+            <div class="status-row"><span>Portfolio Status</span><strong id="rp-portfolio-status">{{ portfolio_intelligence.portfolio_status if portfolio_intelligence.portfolio_status else 'DATA UNAVAILABLE' }}</strong></div>
+            <div class="status-row"><span>Lifecycle Status</span><strong id="rp-lifecycle-status">{{ runtime_portfolio_lifecycle.lifecycle_status }}</strong></div>
+            <div class="status-row"><span>Artifact Freshness</span><strong id="rp-artifact-freshness">{{ runtime_portfolio_lifecycle.artifact_freshness | tojson }}</strong></div>
+            <div class="status-row"><span>Runtime Age</span><strong id="rp-runtime-age">{{ session_validation.session_duration if session_validation.session_duration else 'DATA UNAVAILABLE' }}</strong></div>
+            {% else %}
+            <div class="empty-state" id="runtime-portfolio-unavailable">DATA UNAVAILABLE</div>
+            {% endif %}
+        </div>
+
         <div class="card" id="operational-health-card">
             <div class="card-header">
                 Operational Health
@@ -1078,6 +1101,7 @@
             <div class="status-row"><span>Memory Usage</span><strong id="oh-memory-usage">{{ runtime_performance.memory_usage | tojson }}</strong></div>
             <div class="status-row"><span>CPU Usage</span><strong id="oh-cpu-usage">{{ runtime_performance.cpu_usage | tojson }}</strong></div>
             <div class="status-row"><span>Overall Operational Health</span><strong id="oh-overall-health">{{ runtime_health.overall_operational_health }}</strong></div>
+            <div class="status-row"><span>Portfolio Lifecycle</span><strong id="oh-portfolio-lifecycle">{{ runtime_health.portfolio_lifecycle_state }}</strong></div>
             {% else %}
             <div class="empty-state" id="operational-health-unavailable">DATA UNAVAILABLE</div>
             {% endif %}

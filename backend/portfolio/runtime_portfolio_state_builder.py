@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from backend.portfolio.runtime_exposure_builder import RuntimeExposureBuilder
 from backend.portfolio.utils import normalize_allocations, safe_float
 
 
@@ -44,7 +45,9 @@ class RuntimePortfolioStateBuilder:
             reasons.append("account_state_unavailable")
         if not session:
             reasons.append("session_state_unavailable")
-        if not positions:
+        if account and session and not positions:
+            reasons.append("no_current_exposure")
+        elif not positions:
             reasons.append("positions_unavailable")
 
         staleness = self._staleness(
@@ -59,14 +62,18 @@ class RuntimePortfolioStateBuilder:
         if stale_artifacts:
             reasons.append("stale_runtime_artifacts")
 
-        sufficient = bool(account and session and positions)
+        exposure = RuntimeExposureBuilder().build(positions)
+        broken = bool(not account or not session)
+        portfolio_state = self._portfolio_state(broken, positions, exposure)
         return {
-            "status": "OK" if sufficient else "DATA UNAVAILABLE",
+            "status": "DATA UNAVAILABLE" if broken else "OK",
+            "portfolio_state": portfolio_state,
             "account": self._account_summary(account),
             "positions": positions,
             "trades": trades,
             "performance_metrics": self._performance_metrics(account, positions, trades),
             "asset_allocations": self._asset_allocations(positions),
+            "exposure": exposure,
             "strategy_metrics": self._strategy_metrics(trades),
             "market_data": self._market_data(session, trades),
             "supervisor": supervisor if isinstance(supervisor, dict) else {},
@@ -75,6 +82,16 @@ class RuntimePortfolioStateBuilder:
             "advisory_only": True,
             "execution_allowed": False,
         }
+
+    @staticmethod
+    def _portfolio_state(broken: bool, positions: list[dict[str, Any]], exposure: Mapping[str, Any]) -> str:
+        if broken:
+            return "BROKEN_PIPELINE"
+        if not positions:
+            return "NO_PORTFOLIO"
+        if str(exposure.get("status", "")).upper() == "OK":
+            return "ACTIVE_PORTFOLIO"
+        return "PARTIAL_PORTFOLIO"
 
     def _read_json(self, path: Path | None, name: str, reasons: list[str]) -> dict[str, Any]:
         if path is None:

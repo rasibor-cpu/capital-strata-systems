@@ -43,7 +43,7 @@ class CapitalRotationEngine:
             )
 
         if not rows:
-            return self._unavailable("no_candidate_allocations")
+            return self._limited_no_candidates()
 
         defensive_multiplier = 0.85
         if isinstance(portfolio_intelligence, Mapping):
@@ -123,4 +123,17 @@ class CapitalRotationEngine:
             "total_allocation": 100.0,
             "recommendation": "NO_ACTION",
             "explainability": [message],
+        }
+
+    @staticmethod
+    def _limited_no_candidates() -> dict[str, Any]:
+        return {
+            "status": "LIMITED",
+            "advisory_only": True,
+            "execution_allowed": False,
+            "candidate_allocations": [],
+            "target_allocations": {},
+            "total_allocation": 0.0,
+            "recommendation": "HOLD_CURRENT",
+            "explainability": ["No current exposure."],
         }

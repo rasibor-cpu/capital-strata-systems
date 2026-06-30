@@ -36,12 +36,16 @@ class RuntimeAdvisorySnapshot:
         components = advisory_components if isinstance(advisory_components, Mapping) else {}
         component_statuses: dict[str, str] = {}
         available: list[str] = []
+        limited: list[str] = []
         missing: list[str] = []
         for name in self.REQUIRED_COMPONENTS:
             status = self._status(components.get(name))
             component_statuses[name] = status
             if status == "OK":
                 available.append(name)
+            elif status == "LIMITED":
+                available.append(name)
+                limited.append(name)
             else:
                 missing.append(name)
 
@@ -59,6 +63,7 @@ class RuntimeAdvisorySnapshot:
             "runtime_state_status": runtime_status,
             "portfolio_decision_status": decision_status,
             "available_components": sorted(available),
+            "limited_components": sorted(limited),
             "missing_components": sorted(missing),
             "component_statuses": component_statuses,
             "missing_input_reasons": self._missing_reasons(runtime_state, components, portfolio_decision),

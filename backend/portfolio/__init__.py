@@ -41,6 +41,7 @@ from backend.portfolio.portfolio_intelligence_engine import (
     PortfolioIntelligenceEngine,
     PortfolioIntelligenceEngineError,
 )
+from backend.portfolio.open_position_registry import OpenPositionRegistry, OpenPositionRegistryError
 from backend.portfolio.market_regime_intelligence import (
     MarketRegimeIntelligence,
     MarketRegimeIntelligenceError,
@@ -64,6 +65,7 @@ from backend.portfolio.regime_aware_allocation import (
     RegimeAwareAllocationError,
 )
 from backend.portfolio.runtime_advisory_snapshot import RuntimeAdvisorySnapshot, RuntimeAdvisorySnapshotError
+from backend.portfolio.runtime_exposure_builder import RuntimeExposureBuilder, RuntimeExposureBuilderError
 from backend.portfolio.runtime_portfolio_state_builder import (
     RuntimePortfolioStateBuilder,
     RuntimePortfolioStateBuilderError,
@@ -101,6 +103,8 @@ __all__ = [
     "PortfolioDecisionOrchestratorError",
     "PortfolioIntelligenceEngine",
     "PortfolioIntelligenceEngineError",
+    "OpenPositionRegistry",
+    "OpenPositionRegistryError",
     "QuantitativeMetricsEngine",
     "QuantitativeMetricsEngineError",
     "RecommendationTracker",
@@ -121,6 +125,8 @@ __all__ = [
     "RegimeAwareAllocationError",
     "RuntimeAdvisorySnapshot",
     "RuntimeAdvisorySnapshotError",
+    "RuntimeExposureBuilder",
+    "RuntimeExposureBuilderError",
     "RuntimePortfolioStateBuilder",
     "RuntimePortfolioStateBuilderError",
     "StrategyAttributionEngine",

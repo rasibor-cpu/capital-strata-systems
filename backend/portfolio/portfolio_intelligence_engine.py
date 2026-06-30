@@ -32,7 +32,7 @@ class PortfolioIntelligenceEngine:
 
         records = [row for row in records if row["exposure"] > 0.0]
         if not records:
-            return self._unavailable("no_open_portfolio_exposure")
+            return self._limited_no_exposure()
 
         metrics = dict(performance_metrics or {})
         total_exposure = sum(row["exposure"] for row in records)
@@ -182,6 +182,32 @@ class PortfolioIntelligenceEngine:
             "metrics": {},
             "penalties": {},
             "explainability": [message],
+            "by_asset_class": {},
+            "by_symbol": {},
+        }
+
+    @staticmethod
+    def _limited_no_exposure() -> dict[str, Any]:
+        return {
+            "status": "LIMITED",
+            "advisory_only": True,
+            "execution_allowed": False,
+            "portfolio_status": "NO_PORTFOLIO",
+            "intelligence_score": 50.0,
+            "recommendation": "HOLD_CURRENT",
+            "metrics": {
+                "total_exposure": 0.0,
+                "asset_class_count": 0,
+                "symbol_count": 0,
+                "largest_symbol_concentration": 0.0,
+                "largest_asset_class_concentration": 0.0,
+                "correlation_score": 0.0,
+                "max_drawdown": 0.0,
+                "sortino": 0.0,
+                "capital_efficiency": 0.0,
+            },
+            "penalties": {},
+            "explainability": ["No current exposure."],
             "by_asset_class": {},
             "by_symbol": {},
         }

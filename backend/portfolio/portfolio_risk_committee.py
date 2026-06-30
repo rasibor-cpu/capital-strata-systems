@@ -62,6 +62,19 @@ class PortfolioRiskCommittee:
                 "advisory_only": True,
             }
 
+        if any(str(payload.get("status", "OK")).upper() == "LIMITED" for payload in inputs.values()):
+            return {
+                "status": "OK",
+                "committee_decision": "AWAIT_PORTFOLIO_BUILD",
+                "committee_status": "GREEN",
+                "confidence": min(70, int(adaptive_portfolio.get("confidence", 60) or 60)),
+                "summary": "Runtime portfolio is connected with no current exposure; advisory posture is hold current.",
+                "approvals": ["No current exposure is not a runtime defect."],
+                "concerns": [],
+                "required_actions": ["Continue advisory monitoring until portfolio exposure is present."],
+                "advisory_only": True,
+            }
+
         confidence = int(adaptive_portfolio.get("confidence", 50) or 50)
         if pi_status == "HEALTHY":
             approvals.append("Portfolio intelligence is healthy.")

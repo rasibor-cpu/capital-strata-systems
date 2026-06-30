@@ -38,12 +38,14 @@ class AdaptivePortfolioManager:
         pi_status = str(portfolio_intelligence.get("status", "")).upper()
         cr_status = str(capital_rotation.get("status", "")).upper()
         supervisor_status = str(supervisor_state.get("status", "")).upper()
+        if supervisor_status in {"", "OFFLINE", "ERROR", "FAILED", "RED", "HALTED", "PAUSED"}:
+            return self._fail_closed(f"supervisor_status_{supervisor_status or 'missing'}")
+        if "LIMITED" in {pi_status, cr_status}:
+            return self._limited_no_exposure(portfolio_intelligence, capital_rotation)
         if pi_status != "OK":
             return self._fail_closed("portfolio_intelligence_not_ok")
         if cr_status != "OK":
             return self._fail_closed("capital_rotation_not_ok")
-        if supervisor_status in {"", "OFFLINE", "ERROR", "FAILED", "RED", "HALTED", "PAUSED"}:
-            return self._fail_closed(f"supervisor_status_{supervisor_status or 'missing'}")
 
         health_score = self._bounded(portfolio_intelligence.get("intelligence_score"), 0.0, 100.0)
         portfolio_status = str(portfolio_intelligence.get("portfolio_status", "")).upper()
@@ -186,5 +188,32 @@ class AdaptivePortfolioManager:
             "primary_drivers": [],
             "risk_flags": [reason],
             "recommended_actions": ["Do not increase risk until portfolio evidence is available and valid."],
+            "advisory_only": True,
+        }
+
+    @staticmethod
+    def _limited_no_exposure(
+        portfolio_intelligence: Mapping[str, Any],
+        capital_rotation: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        reasons: list[str] = []
+        for payload in (portfolio_intelligence, capital_rotation):
+            for key in ("explainability", "reasons"):
+                values = payload.get(key, [])
+                if isinstance(values, str):
+                    values = [values]
+                if isinstance(values, list):
+                    reasons.extend(str(item) for item in values if str(item).strip())
+        return {
+            "status": "LIMITED",
+            "adaptive_recommendation": "AWAIT_PORTFOLIO_BUILD",
+            "confidence": 60,
+            "portfolio_health_score": portfolio_intelligence.get("intelligence_score", 50.0),
+            "capital_rotation_action": "HOLD_CURRENT",
+            "risk_committee_status": "GREEN",
+            "primary_drivers": ["Runtime is connected but there is no current exposure."],
+            "risk_flags": [],
+            "recommended_actions": ["Continue paper/advisory monitoring until positions are present."],
+            "reasons": sorted(set(reasons or ["No current exposure."])),
             "advisory_only": True,
         }
