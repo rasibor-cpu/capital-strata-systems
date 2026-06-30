@@ -20,6 +20,7 @@ class ValidationReadinessEngine:
         stale_artifacts: Iterable[Any] | None = None,
         recent_errors: Iterable[Any] | None = None,
         runtime_advisory_snapshot: Mapping[str, Any] | None = None,
+        runtime_portfolio_state: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         blockers: list[str] = []
         warnings: list[str] = []
@@ -32,8 +33,18 @@ class ValidationReadinessEngine:
         snapshot_status = self._status(runtime_advisory_snapshot, "snapshot_status") if isinstance(runtime_advisory_snapshot, Mapping) else None
         missing_inputs = self._missing_inputs(portfolio_decision)
         missing_components = self._missing_components(runtime_advisory_snapshot)
+        lifecycle_state = self._portfolio_lifecycle_state(runtime_portfolio_state, runtime_advisory_snapshot)
         stale_count = self._count(stale_artifacts)
         error_count = self._count(recent_errors)
+        stale_warnings = self._stale_warning_names(stale_artifacts, runtime_portfolio_state)
+
+        if lifecycle_state == "NO_PORTFOLIO":
+            warnings.append("portfolio_lifecycle_no_portfolio")
+            actions.append("Continue startup validation; no current exposure is not a software defect.")
+        for warning in stale_warnings:
+            warnings.append(warning)
+            if warning == "stale_account_state":
+                actions.append("Refresh account state artifact before extended validation.")
 
         if runtime_status in {"RED", "FAILED", "FAIL", "STOPPED", "DATA UNAVAILABLE"}:
             blockers.append("runtime_health_not_green")
@@ -49,26 +60,32 @@ class ValidationReadinessEngine:
             warnings.append("session_validation_degraded")
             actions.append("Continue only with explicit monitoring of session warnings.")
 
-        if decision_status in {"RED", "FAILED", "FAIL", "DATA UNAVAILABLE"}:
+        if lifecycle_state == "BROKEN_PIPELINE":
             blockers.append("portfolio_decision_not_green")
-            if missing_inputs:
-                blockers.append("portfolio_advisory_inputs_missing")
-                actions.append("Populate runtime-derived advisory inputs before validation readiness can pass.")
-            else:
-                blockers.append("portfolio_decision_risk_red")
-                actions.append("Review genuine portfolio risk RED status before validation.")
+            blockers.append("portfolio_pipeline_broken")
+            actions.append("Restore runtime portfolio pipeline connectivity before validation.")
+        elif decision_status in {"RED", "FAILED", "FAIL", "DATA UNAVAILABLE"}:
+            if lifecycle_state != "NO_PORTFOLIO":
+                blockers.append("portfolio_decision_not_green")
+                if missing_inputs:
+                    blockers.append("portfolio_advisory_inputs_missing")
+                    actions.append("Populate runtime-derived advisory inputs before validation readiness can pass.")
+                else:
+                    blockers.append("portfolio_decision_risk_red")
+                    actions.append("Review genuine portfolio risk RED status before validation.")
         elif decision_status in {"AMBER", "WARNING", "DEGRADED"}:
             warnings.append("portfolio_decision_degraded")
             actions.append("Record portfolio decision degradation in validation notes.")
 
         if snapshot_status == "PARTIAL":
-            warnings.append("runtime_advisory_snapshot_partial")
-            actions.append("Review missing advisory snapshot components before extended validation.")
+            if lifecycle_state != "NO_PORTFOLIO":
+                warnings.append("runtime_advisory_snapshot_partial")
+                actions.append("Review missing advisory snapshot components before extended validation.")
         elif snapshot_status == "DATA UNAVAILABLE":
             blockers.append("runtime_advisory_snapshot_unavailable")
             actions.append("Build a runtime advisory snapshot before extended validation.")
 
-        if missing_components:
+        if missing_components and lifecycle_state != "NO_PORTFOLIO":
             warnings.append("runtime_advisory_components_missing")
             actions.append("Resolve missing advisory components: " + ", ".join(missing_components) + ".")
 
@@ -78,7 +95,7 @@ class ValidationReadinessEngine:
         elif telemetry_status in {"AMBER", "WARNING", "DEGRADED"}:
             warnings.append("operational_telemetry_degraded")
 
-        if stale_count >= 3:
+        if stale_count >= 3 and not (stale_count == len(stale_warnings) == 1):
             blockers.append("stale_artifacts_exceed_limit")
             actions.append("Refresh stale validation artifacts before starting.")
         elif stale_count > 0:
@@ -108,6 +125,7 @@ class ValidationReadinessEngine:
             "blockers": sorted(set(blockers)),
             "warnings": sorted(set(warnings)),
             "recommended_actions": list(dict.fromkeys(actions)),
+            "portfolio_lifecycle_state": lifecycle_state,
             "advisory_only": True,
             "paper_validation_only": True,
             "execution_allowed": False,
@@ -157,3 +175,44 @@ class ValidationReadinessEngine:
         if isinstance(values, list):
             return [str(item) for item in values if str(item).strip()]
         return []
+
+    @staticmethod
+    def _portfolio_lifecycle_state(
+        runtime_portfolio_state: Mapping[str, Any] | None,
+        runtime_advisory_snapshot: Mapping[str, Any] | None,
+    ) -> str:
+        if isinstance(runtime_portfolio_state, Mapping):
+            state = str(runtime_portfolio_state.get("portfolio_state", "")).upper()
+            if state in {"NO_PORTFOLIO", "PARTIAL_PORTFOLIO", "ACTIVE_PORTFOLIO", "BROKEN_PIPELINE"}:
+                return state
+            if str(runtime_portfolio_state.get("status", "")).upper() == "DATA UNAVAILABLE":
+                return "BROKEN_PIPELINE"
+        if isinstance(runtime_advisory_snapshot, Mapping):
+            status = str(runtime_advisory_snapshot.get("snapshot_status", "")).upper()
+            if status == "DATA UNAVAILABLE":
+                return "BROKEN_PIPELINE"
+            if status == "PARTIAL":
+                return "PARTIAL_PORTFOLIO"
+        return "ACTIVE_PORTFOLIO"
+
+    @staticmethod
+    def _stale_warning_names(
+        stale_artifacts: Iterable[Any] | None,
+        runtime_portfolio_state: Mapping[str, Any] | None,
+    ) -> list[str]:
+        warnings: list[str] = []
+        if stale_artifacts is not None and not isinstance(stale_artifacts, (str, bytes)):
+            try:
+                for item in stale_artifacts:
+                    text = str(item).lower()
+                    if "account_state" in text or "css_account_state" in text:
+                        warnings.append("stale_account_state")
+            except TypeError:
+                pass
+        if isinstance(runtime_portfolio_state, Mapping):
+            staleness = runtime_portfolio_state.get("staleness", {})
+            if isinstance(staleness, Mapping):
+                account = staleness.get("account_state")
+                if isinstance(account, Mapping) and account.get("stale") is True:
+                    warnings.append("stale_account_state")
+        return sorted(set(warnings))

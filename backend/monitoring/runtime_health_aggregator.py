@@ -19,6 +19,7 @@ class RuntimeHealthAggregator:
         session_validation: Mapping[str, Any] | None,
         supervisor_status: Mapping[str, Any] | None = None,
         portfolio_decision: Mapping[str, Any] | None = None,
+        runtime_portfolio_state: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         if not isinstance(performance, Mapping):
             return self._unavailable("performance_unavailable")
@@ -27,12 +28,18 @@ class RuntimeHealthAggregator:
 
         supervisor = supervisor_status if isinstance(supervisor_status, Mapping) else {}
         decision = portfolio_decision if isinstance(portfolio_decision, Mapping) else {}
+        portfolio_state = self._portfolio_lifecycle_state(runtime_portfolio_state)
+        warnings = self._portfolio_warnings(runtime_portfolio_state)
         statuses = [
             str(performance.get("overall_status", "RED")).upper(),
             str(session_validation.get("session_status", "RED")).upper(),
             self._supervisor_health(supervisor),
             str(decision.get("overall_status", "RED" if not decision else "GREEN")).upper(),
         ]
+        if portfolio_state == "BROKEN_PIPELINE":
+            statuses.append("RED")
+        elif warnings:
+            statuses.append("AMBER")
         overall = max(statuses, key=lambda item: self.ORDER.get(item, 2))
 
         recommendation = "Runtime health is acceptable for advisory monitoring."
@@ -49,6 +56,8 @@ class RuntimeHealthAggregator:
             "session_status": session_validation.get("session_status"),
             "supervisor_status": supervisor.get("status", "UNKNOWN"),
             "portfolio_decision_status": decision.get("overall_status", "UNKNOWN"),
+            "portfolio_lifecycle_state": portfolio_state,
+            "warnings": warnings,
             "pipeline_latency_ms": performance.get("pipeline_latency_ms"),
             "dashboard_latency_ms": performance.get("dashboard_latency_ms"),
             "cache_hit_rate": performance.get("cache_hit_rate"),
@@ -72,6 +81,29 @@ class RuntimeHealthAggregator:
         return "RED"
 
     @staticmethod
+    def _portfolio_lifecycle_state(runtime_portfolio_state: Mapping[str, Any] | None) -> str:
+        if not isinstance(runtime_portfolio_state, Mapping):
+            return "UNKNOWN"
+        state = str(runtime_portfolio_state.get("portfolio_state", "")).upper()
+        if state in {"NO_PORTFOLIO", "PARTIAL_PORTFOLIO", "ACTIVE_PORTFOLIO", "BROKEN_PIPELINE"}:
+            return state
+        if str(runtime_portfolio_state.get("status", "")).upper() == "DATA UNAVAILABLE":
+            return "BROKEN_PIPELINE"
+        return "UNKNOWN"
+
+    @staticmethod
+    def _portfolio_warnings(runtime_portfolio_state: Mapping[str, Any] | None) -> list[str]:
+        if not isinstance(runtime_portfolio_state, Mapping):
+            return []
+        warnings: list[str] = []
+        staleness = runtime_portfolio_state.get("staleness", {})
+        if isinstance(staleness, Mapping):
+            account = staleness.get("account_state")
+            if isinstance(account, Mapping) and account.get("stale") is True:
+                warnings.append("stale_account_state")
+        return sorted(set(warnings))
+
+    @staticmethod
     def _unavailable(reason: str) -> dict[str, Any]:
         return {
             "status": "DATA UNAVAILABLE",
@@ -81,6 +113,8 @@ class RuntimeHealthAggregator:
             "session_status": "RED",
             "supervisor_status": "UNKNOWN",
             "portfolio_decision_status": "UNKNOWN",
+            "portfolio_lifecycle_state": "BROKEN_PIPELINE",
+            "warnings": [reason],
             "pipeline_latency_ms": None,
             "dashboard_latency_ms": None,
             "cache_hit_rate": 0.0,

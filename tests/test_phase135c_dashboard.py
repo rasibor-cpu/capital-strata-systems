@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -43,12 +45,24 @@ def launcher_temp_dir():
 
 
 def _write_zero_position_runtime() -> None:
+    now = datetime.now(timezone.utc).isoformat()
     with open(LauncherConfig.ACCOUNT_STATE_FILE, "w", encoding="utf-8") as handle:
         json.dump({"account_balance": 100000.0, "total_equity": 100000.0, "positions": []}, handle)
     with open(LauncherConfig.SESSION_STATE_FILE, "w", encoding="utf-8") as handle:
-        json.dump({"session": {"engine_mode": "PAPER", "market_regime": "RANGING", "risk_status": "GREEN"}}, handle)
+        json.dump(
+            {
+                "session": {
+                    "engine_mode": "PAPER",
+                    "market_regime": "RANGING",
+                    "risk_status": "GREEN",
+                    "start_time": now,
+                    "last_heartbeat": now,
+                }
+            },
+            handle,
+        )
     with open(LauncherConfig.SUPERVISOR_STATE_FILE, "w", encoding="utf-8") as handle:
-        json.dump({"status": "RUNNING", "restart_count": 0}, handle)
+        json.dump({"status": "RUNNING", "last_heartbeat": now, "restart_count": 0}, handle)
 
 
 def test_phase135c_runtime_portfolio_apis_report_no_portfolio_without_false_red(launcher_temp_dir) -> None:
@@ -67,6 +81,46 @@ def test_phase135c_runtime_portfolio_apis_report_no_portfolio_without_false_red(
     assert lifecycle["portfolio_state"] == "NO_PORTFOLIO"
     assert snapshot["snapshot_status"] == "OK"
     assert "portfolio_intelligence" in snapshot["limited_components"]
+
+
+def test_phase135c_runtime_health_and_readiness_endpoints_return_safe_json_for_no_portfolio(launcher_temp_dir) -> None:
+    _write_zero_position_runtime()
+
+    health_response = client.get("/api/runtime-health")
+    readiness_response = client.get("/api/validation-readiness")
+    health = health_response.json()
+    readiness = readiness_response.json()
+
+    assert health_response.status_code == 200
+    assert readiness_response.status_code == 200
+    assert health["status"] == "OK"
+    assert health["runtime_health"] in {"GREEN", "AMBER"}
+    assert health["portfolio_lifecycle_state"] == "NO_PORTFOLIO"
+    assert health["advisory_only"] is True
+    assert health["execution_allowed"] is False
+    assert readiness["status"] == "OK"
+    assert readiness["readiness_status"] in {"READY_WITH_CAUTION", "NOT_READY"}
+    assert readiness["portfolio_lifecycle_state"] == "NO_PORTFOLIO"
+    assert "portfolio_lifecycle_no_portfolio" in readiness["warnings"]
+    assert readiness["execution_allowed"] is False
+
+
+def test_phase135c_stale_account_state_endpoint_warning_without_500(launcher_temp_dir) -> None:
+    _write_zero_position_runtime()
+    old = time.time() - 600
+    os.utime(LauncherConfig.ACCOUNT_STATE_FILE, (old, old))
+
+    health_response = client.get("/api/runtime-health")
+    readiness_response = client.get("/api/validation-readiness")
+    health = health_response.json()
+    readiness = readiness_response.json()
+
+    assert health_response.status_code == 200
+    assert readiness_response.status_code == 200
+    assert health["runtime_health"] == "AMBER"
+    assert "stale_account_state" in health["warnings"]
+    assert readiness["readiness_status"] in {"READY_WITH_CAUTION", "NOT_READY"}
+    assert "stale_account_state" in readiness["warnings"]
 
 
 def test_phase135c_lifecycle_get_endpoint_has_no_persistence_side_effects(launcher_temp_dir) -> None:

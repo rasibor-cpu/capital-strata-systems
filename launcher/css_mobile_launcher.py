@@ -831,15 +831,17 @@ def get_explainability_feed(
 
 def _artifact_status_snapshot() -> Dict[str, Any]:
     now = time.time()
-    names = [
+    required_names = [
         "css_session_state_pcnrass.json",
         "css_account_state_pcnrass.json",
+    ]
+    optional_names = [
         "css_session_recovery.json",
         "css_account_state_pcnrass_BACKUP.json",
     ]
     snapshot: Dict[str, Any] = {}
     latest_mtime = 0.0
-    for name in names:
+    for name in required_names + optional_names:
         path = os.path.join(LauncherConfig.ARTIFACTS_DIR, name)
         if os.path.exists(path):
             mtime = os.path.getmtime(path)
@@ -847,7 +849,12 @@ def _artifact_status_snapshot() -> Dict[str, Any]:
             age = max(0.0, now - mtime)
             snapshot[name] = {"age_seconds": age, "stale_after_seconds": 300, "stale": age > 300}
         else:
-            snapshot[name] = {"age_seconds": None, "stale_after_seconds": 300, "stale": True}
+            snapshot[name] = {
+                "age_seconds": None,
+                "stale_after_seconds": 300,
+                "stale": name in required_names,
+                "optional": name in optional_names,
+            }
     snapshot["dashboard_stale"] = (now - latest_mtime) > 300 if latest_mtime else True
     snapshot["persistence_health"] = "OK"
     return snapshot
@@ -908,6 +915,46 @@ def get_runtime_health_feed(
         portfolio_decision=decision,
         runtime_portfolio_state=state,
     )
+
+
+def _safe_runtime_health_error(reason: Any) -> Dict[str, Any]:
+    return {
+        "status": "DATA UNAVAILABLE",
+        "runtime_health": "AMBER",
+        "overall_operational_health": "AMBER",
+        "performance_status": "DATA UNAVAILABLE",
+        "session_status": "DATA UNAVAILABLE",
+        "supervisor_status": "UNKNOWN",
+        "portfolio_decision_status": "UNKNOWN",
+        "portfolio_lifecycle_state": "UNKNOWN",
+        "warnings": [f"runtime_health_endpoint_error:{_clean_text(reason, fallback='unknown_error')}"],
+        "pipeline_latency_ms": None,
+        "dashboard_latency_ms": None,
+        "cache_hit_rate": 0.0,
+        "heartbeat_age": None,
+        "restart_count": 0,
+        "recovery_count": 0,
+        "memory_usage": None,
+        "cpu_usage": None,
+        "recommendation": "Runtime health endpoint recovered with advisory-only degraded status.",
+        "advisory_only": True,
+        "execution_allowed": False,
+    }
+
+
+def _safe_validation_readiness_error(reason: Any) -> Dict[str, Any]:
+    return {
+        "status": "OK",
+        "readiness_status": "NOT_READY",
+        "confidence": 0,
+        "blockers": ["validation_readiness_endpoint_error"],
+        "warnings": [],
+        "recommended_actions": [f"Review validation readiness endpoint error: {_clean_text(reason, fallback='unknown_error')}."],
+        "portfolio_lifecycle_state": "UNKNOWN",
+        "advisory_only": True,
+        "paper_validation_only": True,
+        "execution_allowed": False,
+    }
 
 
 def _paper_validation_storage_dir() -> str:
@@ -2604,38 +2651,45 @@ async def api_session_validation():
 
 @launcher_router.get("/api/runtime-health")
 async def api_runtime_health():
-    inputs = _portfolio_decision_inputs()
-    decision = get_portfolio_decision_feed(inputs=inputs, persist=False)
-    performance = get_runtime_performance_feed()
-    session = get_session_validation_feed(decision)
-    return get_runtime_health_feed(
-        performance=performance,
-        session_validation=session,
-        portfolio_decision=decision,
-        runtime_portfolio_state=inputs.get("runtime_portfolio_state"),
-    )
+    try:
+        inputs = _portfolio_decision_inputs()
+        decision = get_portfolio_decision_feed(inputs=inputs, persist=False)
+        performance = get_runtime_performance_feed()
+        session = get_session_validation_feed(decision)
+        return get_runtime_health_feed(
+            performance=performance,
+            session_validation=session,
+            portfolio_decision=decision,
+            runtime_portfolio_state=inputs.get("runtime_portfolio_state"),
+        )
+    except Exception as exc:
+        return JSONResponse(_safe_runtime_health_error(exc), status_code=200)
 
 
 @launcher_router.get("/api/validation-readiness")
 async def api_validation_readiness():
-    inputs = _portfolio_decision_inputs()
-    decision = get_portfolio_decision_feed(inputs=inputs, persist=False)
-    snapshot = get_runtime_advisory_snapshot_feed(inputs=inputs, portfolio_decision=decision)
-    performance = get_runtime_performance_feed()
-    session = get_session_validation_feed(decision)
-    health = get_runtime_health_feed(
-        performance=performance,
-        session_validation=session,
-        portfolio_decision=decision,
-    )
-    return get_validation_readiness_feed(
-        runtime_health=health,
-        session_validation=session,
-        portfolio_decision=decision,
-        runtime_performance=performance,
-        runtime_advisory_snapshot=snapshot,
-        runtime_portfolio_state=inputs.get("runtime_portfolio_state"),
-    )
+    try:
+        inputs = _portfolio_decision_inputs()
+        decision = get_portfolio_decision_feed(inputs=inputs, persist=False)
+        snapshot = get_runtime_advisory_snapshot_feed(inputs=inputs, portfolio_decision=decision)
+        performance = get_runtime_performance_feed()
+        session = get_session_validation_feed(decision)
+        health = get_runtime_health_feed(
+            performance=performance,
+            session_validation=session,
+            portfolio_decision=decision,
+            runtime_portfolio_state=inputs.get("runtime_portfolio_state"),
+        )
+        return get_validation_readiness_feed(
+            runtime_health=health,
+            session_validation=session,
+            portfolio_decision=decision,
+            runtime_performance=performance,
+            runtime_advisory_snapshot=snapshot,
+            runtime_portfolio_state=inputs.get("runtime_portfolio_state"),
+        )
+    except Exception as exc:
+        return JSONResponse(_safe_validation_readiness_error(exc), status_code=200)
 
 
 @launcher_router.get("/api/paper-validation-summary")

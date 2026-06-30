@@ -39,7 +39,12 @@ class AdvisoryConsistencyChecker:
             conflicts.append("adaptive_increase_conflicts_with_defensive_regime")
         if rotation_recommendation == "ROTATE_CAPITAL" and committee_decision == "PAUSE_NEW_TRADES":
             conflicts.append("capital_rotation_conflicts_with_committee_pause")
-        if policy_ceiling and self.ORDER.get(adaptive_recommendation, 2) > self.ORDER.get(policy_ceiling, 0):
+        neutral_startup_recommendations = {"AWAIT_PORTFOLIO_BUILD", "HOLD_CURRENT"}
+        if (
+            adaptive_recommendation not in neutral_startup_recommendations
+            and policy_ceiling
+            and self.ORDER.get(adaptive_recommendation, 2) > self.ORDER.get(policy_ceiling, 0)
+        ):
             conflicts.append("adaptive_recommendation_exceeds_policy_ceiling")
 
         consistent = not conflicts
