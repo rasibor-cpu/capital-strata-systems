@@ -20,6 +20,8 @@ class RuntimeHealthAggregator:
         supervisor_status: Mapping[str, Any] | None = None,
         portfolio_decision: Mapping[str, Any] | None = None,
         runtime_portfolio_state: Mapping[str, Any] | None = None,
+        artifact_freshness: Mapping[str, Any] | None = None,
+        session_continuity: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         if not isinstance(performance, Mapping):
             return self._unavailable("performance_unavailable")
@@ -30,6 +32,11 @@ class RuntimeHealthAggregator:
         decision = portfolio_decision if isinstance(portfolio_decision, Mapping) else {}
         portfolio_state = self._portfolio_lifecycle_state(runtime_portfolio_state)
         warnings = self._portfolio_warnings(runtime_portfolio_state)
+        artifact = artifact_freshness if isinstance(artifact_freshness, Mapping) else {}
+        continuity = session_continuity if isinstance(session_continuity, Mapping) else {}
+        artifact_warnings = self._list_values(artifact.get("warnings", []))
+        warnings.extend(artifact_warnings)
+        warnings.extend(self._list_values(continuity.get("warnings", [])))
         statuses = [
             str(performance.get("overall_status", "RED")).upper(),
             str(session_validation.get("session_status", "RED")).upper(),
@@ -38,7 +45,15 @@ class RuntimeHealthAggregator:
         ]
         if portfolio_state == "BROKEN_PIPELINE":
             statuses.append("RED")
-        elif warnings:
+        artifact_status = str(artifact.get("freshness_status", "")).upper()
+        if artifact_status in {"AMBER", "RED"}:
+            statuses.append(artifact_status)
+        continuity_status = str(continuity.get("session_continuity_status", "")).upper()
+        if continuity_status in {"EXPIRED", "REAUTH_REQUIRED", "UNKNOWN"}:
+            statuses.append("RED")
+        elif continuity_status == "EXPIRING_SOON":
+            statuses.append("AMBER")
+        elif [item for item in warnings if item != "no_recent_closed_trades"]:
             statuses.append("AMBER")
         overall = max(statuses, key=lambda item: self.ORDER.get(item, 2))
 
@@ -57,7 +72,15 @@ class RuntimeHealthAggregator:
             "supervisor_status": supervisor.get("status", "UNKNOWN"),
             "portfolio_decision_status": decision.get("overall_status", "UNKNOWN"),
             "portfolio_lifecycle_state": portfolio_state,
-            "warnings": warnings,
+            "artifact_freshness_status": artifact.get("freshness_status", "UNKNOWN"),
+            "stale_artifacts": artifact.get("stale_artifacts", []),
+            "refreshed_artifacts": artifact.get("refreshed_artifacts", []),
+            "ledger_freshness": self._artifact_field(artifact, "closed_trade_ledger", "freshness"),
+            "account_state_freshness": self._artifact_field(artifact, "account_state", "freshness"),
+            "session_continuity_status": continuity.get("session_continuity_status", "UNKNOWN"),
+            "quiet_mode_active": bool(continuity.get("quiet_mode_active", False)),
+            "reauth_required": bool(continuity.get("reauth_required", False)),
+            "warnings": sorted(set(warnings)),
             "pipeline_latency_ms": performance.get("pipeline_latency_ms"),
             "dashboard_latency_ms": performance.get("dashboard_latency_ms"),
             "cache_hit_rate": performance.get("cache_hit_rate"),
@@ -114,6 +137,14 @@ class RuntimeHealthAggregator:
             "supervisor_status": "UNKNOWN",
             "portfolio_decision_status": "UNKNOWN",
             "portfolio_lifecycle_state": "BROKEN_PIPELINE",
+            "artifact_freshness_status": "UNKNOWN",
+            "stale_artifacts": [],
+            "refreshed_artifacts": [],
+            "ledger_freshness": "UNKNOWN",
+            "account_state_freshness": "UNKNOWN",
+            "session_continuity_status": "UNKNOWN",
+            "quiet_mode_active": False,
+            "reauth_required": False,
             "warnings": [reason],
             "pipeline_latency_ms": None,
             "dashboard_latency_ms": None,
@@ -127,3 +158,21 @@ class RuntimeHealthAggregator:
             "advisory_only": True,
             "execution_allowed": False,
         }
+
+    @staticmethod
+    def _artifact_field(artifact_freshness: Mapping[str, Any], artifact_name: str, field: str) -> Any:
+        artifacts = artifact_freshness.get("artifacts", {})
+        if not isinstance(artifacts, Mapping):
+            return "UNKNOWN"
+        artifact = artifacts.get(artifact_name, {})
+        if not isinstance(artifact, Mapping):
+            return "UNKNOWN"
+        return artifact.get(field, "UNKNOWN")
+
+    @staticmethod
+    def _list_values(values: Any) -> list[str]:
+        if isinstance(values, str):
+            return [values]
+        if isinstance(values, list):
+            return [str(item) for item in values if str(item).strip()]
+        return []

@@ -68,7 +68,9 @@ from backend.portfolio.regime_aware_allocation import RegimeAwareAllocationEngin
 from backend.portfolio.runtime_advisory_snapshot import RuntimeAdvisorySnapshot
 from backend.portfolio.runtime_portfolio_state_builder import RuntimePortfolioStateBuilder
 from backend.portfolio.strategy_attribution_engine import StrategyAttributionEngine
+from backend.runtime.runtime_artifact_freshness import RuntimeArtifactFreshnessManager
 from backend.runtime.runtime_portfolio_lifecycle import RuntimePortfolioLifecycle
+from backend.runtime.runtime_session_continuity import RuntimeSessionContinuityMonitor
 from backend.validation.session_checkpoint_store import SessionCheckpointStore
 from backend.validation.validation_readiness_engine import ValidationReadinessEngine
 import uvicorn
@@ -903,6 +905,8 @@ def get_runtime_health_feed(
     session_validation: Optional[Dict[str, Any]] = None,
     portfolio_decision: Optional[Dict[str, Any]] = None,
     runtime_portfolio_state: Optional[Dict[str, Any]] = None,
+    artifact_freshness: Optional[Dict[str, Any]] = None,
+    session_continuity: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     decision = portfolio_decision or get_portfolio_decision_feed(persist=False)
     state = runtime_portfolio_state or get_runtime_portfolio_state_feed()
@@ -914,6 +918,8 @@ def get_runtime_health_feed(
         supervisor_status=get_supervisor_summary(),
         portfolio_decision=decision,
         runtime_portfolio_state=state,
+        artifact_freshness=artifact_freshness,
+        session_continuity=session_continuity,
     )
 
 
@@ -972,6 +978,8 @@ def get_validation_readiness_feed(
     runtime_performance: Optional[Dict[str, Any]] = None,
     runtime_advisory_snapshot: Optional[Dict[str, Any]] = None,
     runtime_portfolio_state: Optional[Dict[str, Any]] = None,
+    artifact_freshness: Optional[Dict[str, Any]] = None,
+    session_continuity: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     decision = portfolio_decision or get_portfolio_decision_feed(persist=False)
     state = runtime_portfolio_state or get_runtime_portfolio_state_feed()
@@ -996,7 +1004,24 @@ def get_validation_readiness_feed(
         recent_errors=recent_errors,
         runtime_advisory_snapshot=snapshot,
         runtime_portfolio_state=state,
+        artifact_freshness=artifact_freshness,
+        session_continuity=session_continuity,
     )
+
+
+def get_runtime_artifact_freshness_feed(refresh: bool = False) -> Dict[str, Any]:
+    return RuntimeArtifactFreshnessManager(
+        artifacts_dir=LauncherConfig.ARTIFACTS_DIR,
+        account_state_path=LauncherConfig.ACCOUNT_STATE_FILE,
+        session_state_path=LauncherConfig.SESSION_STATE_FILE,
+        supervisor_state_path=LauncherConfig.SUPERVISOR_STATE_FILE,
+        closed_trade_ledger_path=LauncherConfig.CLOSED_TRADE_LEDGER_PATH,
+    ).evaluate(refresh=refresh)
+
+
+def get_runtime_session_continuity_feed() -> Dict[str, Any]:
+    session_state = _safe_load_artifact("css_session_state_pcnrass.json") or _safe_load_artifact("css_session_recovery.json")
+    return RuntimeSessionContinuityMonitor(session_state_path=LauncherConfig.SESSION_STATE_FILE).evaluate(session_state)
 
 
 def get_paper_validation_summary_feed() -> Dict[str, Any]:
@@ -2277,11 +2302,15 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         pipeline_latency_ms=pipeline_latency_ms,
     )
     session_validation = get_session_validation_feed(portfolio_decision)
+    runtime_artifact_freshness = get_runtime_artifact_freshness_feed(refresh=False)
+    runtime_session_continuity = get_runtime_session_continuity_feed()
     runtime_health = get_runtime_health_feed(
         performance=runtime_performance,
         session_validation=session_validation,
         portfolio_decision=portfolio_decision,
         runtime_portfolio_state=runtime_portfolio_state,
+        artifact_freshness=runtime_artifact_freshness,
+        session_continuity=runtime_session_continuity,
     )
     recommendation_history = _load_recommendation_evaluation_history()
     recommendation_evaluation = get_recommendation_evaluation_feed(recommendation_history)
@@ -2294,6 +2323,8 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         runtime_performance=runtime_performance,
         runtime_advisory_snapshot=runtime_advisory_snapshot,
         runtime_portfolio_state=runtime_portfolio_state,
+        artifact_freshness=runtime_artifact_freshness,
+        session_continuity=runtime_session_continuity,
     )
     runtime_portfolio_lifecycle = get_runtime_portfolio_lifecycle_feed(
         inputs=decision_inputs,
@@ -2344,6 +2375,8 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "explainability": explainability,
         "runtime_performance": runtime_performance,
         "session_validation": session_validation,
+        "runtime_artifact_freshness": runtime_artifact_freshness,
+        "runtime_session_continuity": runtime_session_continuity,
         "runtime_health": runtime_health,
         "recommendation_evaluation": recommendation_evaluation,
         "confidence_calibration": confidence_calibration,
@@ -2643,6 +2676,51 @@ async def api_runtime_performance():
     return get_runtime_performance_feed(api_latency_ms=latency_ms)
 
 
+@launcher_router.get("/api/runtime-artifact-freshness")
+async def api_runtime_artifact_freshness():
+    try:
+        return get_runtime_artifact_freshness_feed(refresh=False)
+    except Exception as exc:
+        return JSONResponse(
+            {
+                "freshness_status": "RED",
+                "runtime_active": False,
+                "artifacts": {},
+                "stale_artifacts": [],
+                "refreshed_artifacts": [],
+                "warnings": [f"runtime_artifact_freshness_error:{_clean_text(exc, fallback='unknown_error')}"],
+                "blockers": ["runtime_artifact_freshness_unavailable"],
+                "advisory_only": True,
+                "execution_allowed": False,
+            },
+            status_code=200,
+        )
+
+
+@launcher_router.get("/api/runtime-session-continuity")
+async def api_runtime_session_continuity():
+    try:
+        return get_runtime_session_continuity_feed()
+    except Exception as exc:
+        return JSONResponse(
+            {
+                "session_continuity_status": "UNKNOWN",
+                "session_age_seconds": None,
+                "max_session_seconds": None,
+                "seconds_until_expiry": None,
+                "quiet_mode_active": False,
+                "can_paper_execute": False,
+                "can_live_execute": False,
+                "reauth_required": True,
+                "recommended_actions": [f"Review session continuity error: {_clean_text(exc, fallback='unknown_error')}."],
+                "warnings": ["runtime_session_continuity_unavailable"],
+                "advisory_only": True,
+                "execution_allowed": False,
+            },
+            status_code=200,
+        )
+
+
 @launcher_router.get("/api/session-validation")
 async def api_session_validation():
     decision = get_portfolio_decision_feed(persist=False)
@@ -2656,11 +2734,15 @@ async def api_runtime_health():
         decision = get_portfolio_decision_feed(inputs=inputs, persist=False)
         performance = get_runtime_performance_feed()
         session = get_session_validation_feed(decision)
+        artifact_freshness = get_runtime_artifact_freshness_feed(refresh=False)
+        session_continuity = get_runtime_session_continuity_feed()
         return get_runtime_health_feed(
             performance=performance,
             session_validation=session,
             portfolio_decision=decision,
             runtime_portfolio_state=inputs.get("runtime_portfolio_state"),
+            artifact_freshness=artifact_freshness,
+            session_continuity=session_continuity,
         )
     except Exception as exc:
         return JSONResponse(_safe_runtime_health_error(exc), status_code=200)
@@ -2674,11 +2756,15 @@ async def api_validation_readiness():
         snapshot = get_runtime_advisory_snapshot_feed(inputs=inputs, portfolio_decision=decision)
         performance = get_runtime_performance_feed()
         session = get_session_validation_feed(decision)
+        artifact_freshness = get_runtime_artifact_freshness_feed(refresh=False)
+        session_continuity = get_runtime_session_continuity_feed()
         health = get_runtime_health_feed(
             performance=performance,
             session_validation=session,
             portfolio_decision=decision,
             runtime_portfolio_state=inputs.get("runtime_portfolio_state"),
+            artifact_freshness=artifact_freshness,
+            session_continuity=session_continuity,
         )
         return get_validation_readiness_feed(
             runtime_health=health,
@@ -2687,6 +2773,8 @@ async def api_validation_readiness():
             runtime_performance=performance,
             runtime_advisory_snapshot=snapshot,
             runtime_portfolio_state=inputs.get("runtime_portfolio_state"),
+            artifact_freshness=artifact_freshness,
+            session_continuity=session_continuity,
         )
     except Exception as exc:
         return JSONResponse(_safe_validation_readiness_error(exc), status_code=200)

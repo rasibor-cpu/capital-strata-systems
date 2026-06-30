@@ -21,6 +21,8 @@ class ValidationReadinessEngine:
         recent_errors: Iterable[Any] | None = None,
         runtime_advisory_snapshot: Mapping[str, Any] | None = None,
         runtime_portfolio_state: Mapping[str, Any] | None = None,
+        artifact_freshness: Mapping[str, Any] | None = None,
+        session_continuity: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         blockers: list[str] = []
         warnings: list[str] = []
@@ -37,6 +39,8 @@ class ValidationReadinessEngine:
         stale_count = self._count(stale_artifacts)
         error_count = self._count(recent_errors)
         stale_warnings = self._stale_warning_names(stale_artifacts, runtime_portfolio_state)
+        stale_warnings.extend(self._list_values((artifact_freshness or {}).get("warnings", [])) if isinstance(artifact_freshness, Mapping) else [])
+        continuity_warnings = self._list_values((session_continuity or {}).get("warnings", [])) if isinstance(session_continuity, Mapping) else []
 
         if lifecycle_state == "NO_PORTFOLIO":
             warnings.append("portfolio_lifecycle_no_portfolio")
@@ -45,6 +49,19 @@ class ValidationReadinessEngine:
             warnings.append(warning)
             if warning == "stale_account_state":
                 actions.append("Refresh account state artifact before extended validation.")
+            elif warning == "no_recent_closed_trades":
+                actions.append("Closed trade ledger has no recent trades; continue monitoring if runtime is otherwise healthy.")
+
+        for warning in continuity_warnings:
+            warnings.append(warning)
+            if warning == "session_expiring_soon":
+                actions.append("Plan operator re-authentication before max session age is reached.")
+
+        if isinstance(session_continuity, Mapping):
+            continuity_status = str(session_continuity.get("session_continuity_status", "")).upper()
+            if continuity_status in {"EXPIRED", "REAUTH_REQUIRED", "UNKNOWN"} or session_continuity.get("reauth_required") is True:
+                blockers.append("session_reauthentication_required")
+                actions.append("Re-authenticate through the existing login flow before continuing paper validation.")
 
         if runtime_status in {"RED", "FAILED", "FAIL", "STOPPED", "DATA UNAVAILABLE"}:
             blockers.append("runtime_health_not_green")
@@ -216,3 +233,11 @@ class ValidationReadinessEngine:
                 if isinstance(account, Mapping) and account.get("stale") is True:
                     warnings.append("stale_account_state")
         return sorted(set(warnings))
+
+    @staticmethod
+    def _list_values(values: Any) -> list[str]:
+        if isinstance(values, str):
+            return [values]
+        if isinstance(values, list):
+            return [str(item) for item in values if str(item).strip()]
+        return []

@@ -1074,6 +1074,9 @@
             <div class="status-row"><span>Portfolio Status</span><strong id="rp-portfolio-status">{{ portfolio_intelligence.portfolio_status if portfolio_intelligence.portfolio_status else 'DATA UNAVAILABLE' }}</strong></div>
             <div class="status-row"><span>Lifecycle Status</span><strong id="rp-lifecycle-status">{{ runtime_portfolio_lifecycle.lifecycle_status }}</strong></div>
             <div class="status-row"><span>Artifact Freshness</span><strong id="rp-artifact-freshness">{{ runtime_portfolio_lifecycle.artifact_freshness | tojson }}</strong></div>
+            <div class="status-row"><span>Freshness Status</span><strong id="rp-freshness-status">{{ runtime_artifact_freshness.freshness_status }}</strong></div>
+            <div class="status-row"><span>Account Freshness</span><strong id="rp-account-freshness">{{ runtime_artifact_freshness.artifacts.account_state.freshness if runtime_artifact_freshness.artifacts.account_state else 'DATA UNAVAILABLE' }}</strong></div>
+            <div class="status-row"><span>Ledger Freshness</span><strong id="rp-ledger-freshness">{{ runtime_artifact_freshness.artifacts.closed_trade_ledger.freshness if runtime_artifact_freshness.artifacts.closed_trade_ledger else 'DATA UNAVAILABLE' }}</strong></div>
             <div class="status-row"><span>Runtime Age</span><strong id="rp-runtime-age">{{ session_validation.session_duration if session_validation.session_duration else 'DATA UNAVAILABLE' }}</strong></div>
             {% else %}
             <div class="empty-state" id="runtime-portfolio-unavailable">DATA UNAVAILABLE</div>
@@ -1102,8 +1105,39 @@
             <div class="status-row"><span>CPU Usage</span><strong id="oh-cpu-usage">{{ runtime_performance.cpu_usage | tojson }}</strong></div>
             <div class="status-row"><span>Overall Operational Health</span><strong id="oh-overall-health">{{ runtime_health.overall_operational_health }}</strong></div>
             <div class="status-row"><span>Portfolio Lifecycle</span><strong id="oh-portfolio-lifecycle">{{ runtime_health.portfolio_lifecycle_state }}</strong></div>
+            <div class="status-row"><span>Artifact Freshness</span><strong id="oh-artifact-freshness-status">{{ runtime_health.artifact_freshness_status }}</strong></div>
+            <div class="status-row"><span>Stale Artifacts</span><strong id="oh-stale-artifacts">{{ runtime_health.stale_artifacts | length }}</strong></div>
+            <div class="status-row"><span>Refreshed Artifacts</span><strong id="oh-refreshed-artifacts">{{ runtime_health.refreshed_artifacts | length }}</strong></div>
+            <div class="status-row"><span>No Recent Trades</span><strong id="oh-ledger-freshness">{{ runtime_health.ledger_freshness }}</strong></div>
+            <div class="status-row"><span>Session Continuity</span><strong id="oh-session-continuity">{{ runtime_health.session_continuity_status }}</strong></div>
+            <div class="status-row"><span>Quiet Mode</span><strong id="oh-quiet-mode">{{ runtime_health.quiet_mode_active }}</strong></div>
             {% else %}
             <div class="empty-state" id="operational-health-unavailable">DATA UNAVAILABLE</div>
+            {% endif %}
+        </div>
+
+        <div class="card" id="session-continuity-card">
+            <div class="card-header">
+                Session Continuity
+                {% if runtime_session_continuity.advisory_only %}
+                <span class="badge badge-info" id="sc-status-badge">{{ runtime_session_continuity.session_continuity_status }}</span>
+                {% else %}
+                <span class="badge badge-warning" id="sc-status-badge">DATA UNAVAILABLE</span>
+                {% endif %}
+            </div>
+            {% if runtime_session_continuity.advisory_only %}
+            <div class="status-row"><span>Status</span><strong id="sc-status">{{ runtime_session_continuity.session_continuity_status }}</strong></div>
+            <div class="status-row"><span>Session Age</span><strong id="sc-session-age">{{ runtime_session_continuity.session_age_seconds }}</strong></div>
+            <div class="status-row"><span>Max Session Age</span><strong id="sc-max-session-age">{{ runtime_session_continuity.max_session_seconds }}</strong></div>
+            <div class="status-row"><span>Seconds Until Expiry</span><strong id="sc-seconds-until-expiry">{{ runtime_session_continuity.seconds_until_expiry }}</strong></div>
+            <div class="status-row"><span>Quiet Mode Active</span><strong id="sc-quiet-mode">{{ runtime_session_continuity.quiet_mode_active }}</strong></div>
+            <div class="status-row"><span>Reauth Required</span><strong id="sc-reauth-required">{{ runtime_session_continuity.reauth_required }}</strong></div>
+            <div class="status-row"><span>Can Paper Execute</span><strong id="sc-can-paper-execute">{{ runtime_session_continuity.can_paper_execute }}</strong></div>
+            <div class="status-row"><span>Can Live Execute</span><strong id="sc-can-live-execute">{{ runtime_session_continuity.can_live_execute }}</strong></div>
+            <div style="margin-top:8px; font-size:12px; color:var(--text-secondary);">Recommended Actions</div>
+            <pre id="sc-recommended-actions" style="white-space:pre-wrap; font-size:11px; color:var(--text-secondary);">{{ runtime_session_continuity.recommended_actions | tojson }}</pre>
+            {% else %}
+            <div class="empty-state" id="session-continuity-unavailable">DATA UNAVAILABLE</div>
             {% endif %}
         </div>
 
