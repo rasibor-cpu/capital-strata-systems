@@ -64,7 +64,10 @@ def test_session_continuity_expiring_soon_warning() -> None:
 
 
 def test_session_continuity_expired_requires_reauth() -> None:
-    result = RuntimeSessionContinuityMonitor().evaluate(_session(3700), now=NOW)
+    result = RuntimeSessionContinuityMonitor().evaluate(
+        _session(3700, engine_mode="LIVE", broker_mode="live"),
+        now=NOW,
+    )
 
     assert result["session_continuity_status"] == "EXPIRED"
     assert result["reauth_required"] is True
@@ -97,6 +100,8 @@ def test_session_continuity_maps_role_profile_permissions() -> None:
     payload = _canonical_session(
         3700,
         role_profile={"can_execute_paper_trading": True, "can_execute_live_trading": True},
+        engine_mode="LIVE",
+        broker_mode="live",
     )
 
     result = RuntimeSessionContinuityMonitor().evaluate(payload, now=NOW)

@@ -86,6 +86,7 @@ from backend.runtime.runtime_artifact_freshness import RuntimeArtifactFreshnessM
 from backend.runtime.runtime_artifact_publisher import RuntimeArtifactPublisher
 from backend.runtime.runtime_portfolio_lifecycle import RuntimePortfolioLifecycle
 from backend.runtime.runtime_session_continuity import RuntimeSessionContinuityMonitor
+from backend.runtime.session_renewal import SessionRenewalManager
 from backend.validation.continuous_validation_monitor import ContinuousValidationMonitor
 from backend.validation.long_duration_validation import LongDurationValidation
 from backend.validation.runtime_validation_metrics import RuntimeValidationMetrics
@@ -1277,6 +1278,19 @@ def get_runtime_session_continuity_feed() -> Dict[str, Any]:
     elif not session_state:
         session_state = recovery_state
     return RuntimeSessionContinuityMonitor(session_state_path=LauncherConfig.SESSION_STATE_FILE).evaluate(session_state)
+
+
+def get_session_renewal_status_feed() -> Dict[str, Any]:
+    session_state = _safe_load_artifact("css_session_state_pcnrass.json")
+    recovery_state = _safe_load_artifact("css_session_recovery.json")
+    if isinstance(recovery_state, dict) and isinstance(recovery_state.get("session_user_ctx"), dict):
+        session_state = recovery_state
+    elif not session_state:
+        session_state = recovery_state
+    return SessionRenewalManager(session_state_path=LauncherConfig.SESSION_STATE_FILE).evaluate(
+        session_state,
+        persist=False,
+    )
 
 
 def publish_runtime_artifacts(
@@ -3339,6 +3353,34 @@ async def api_runtime_session_continuity():
                 "reauth_required": True,
                 "recommended_actions": [f"Review session continuity error: {_clean_text(exc, fallback='unknown_error')}."],
                 "warnings": ["runtime_session_continuity_unavailable"],
+                "advisory_only": True,
+                "execution_allowed": False,
+            },
+            status_code=200,
+        )
+
+
+@launcher_router.get("/api/session-renewal-status")
+async def api_session_renewal_status():
+    try:
+        return get_session_renewal_status_feed()
+    except Exception as exc:
+        return JSONResponse(
+            {
+                "status": "DATA UNAVAILABLE",
+                "session_renewal_mode": "UNKNOWN",
+                "last_session_renewal_at": None,
+                "session_renewal_count": 0,
+                "session_renewal_reason": None,
+                "continuous_paper_runtime_enabled": False,
+                "current_session_age_seconds": None,
+                "max_session_seconds": None,
+                "renewal_count": 0,
+                "renewal_mode": "UNKNOWN",
+                "renewal_allowed": False,
+                "next_expiry_or_renewal_time": None,
+                "live_renewal_blocked": True,
+                "warnings": [f"session_renewal_status_error:{_clean_text(exc, fallback='unknown_error')}"],
                 "advisory_only": True,
                 "execution_allowed": False,
             },

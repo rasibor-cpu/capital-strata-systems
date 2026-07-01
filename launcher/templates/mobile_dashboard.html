@@ -1156,6 +1156,11 @@
             <div class="status-row"><span>Status</span><strong id="sc-status">{{ runtime_session_continuity.session_continuity_status }}</strong></div>
             <div class="status-row"><span>Session Age</span><strong id="sc-session-age">{{ runtime_session_continuity.session_age_seconds }}</strong></div>
             <div class="status-row"><span>Max Session Age</span><strong id="sc-max-session-age">{{ runtime_session_continuity.max_session_seconds }}</strong></div>
+            <div class="status-row"><span>Renewal Count</span><strong id="sc-renewal-count">{{ runtime_session_continuity.renewal_count }}</strong></div>
+            <div class="status-row"><span>Renewal Mode</span><strong id="sc-renewal-mode">{{ runtime_session_continuity.renewal_mode }}</strong></div>
+            <div class="status-row"><span>Renewal Allowed</span><strong id="sc-renewal-allowed">{{ runtime_session_continuity.renewal_allowed }}</strong></div>
+            <div class="status-row"><span>Next Expiry/Renewal</span><strong id="sc-next-renewal">{{ runtime_session_continuity.next_expiry_or_renewal_time }}</strong></div>
+            <div class="status-row"><span>Live Renewal Blocked</span><strong id="sc-live-renewal-blocked">{{ runtime_session_continuity.live_renewal_blocked }}</strong></div>
             <div class="status-row"><span>Seconds Until Expiry</span><strong id="sc-seconds-until-expiry">{{ runtime_session_continuity.seconds_until_expiry }}</strong></div>
             <div class="status-row"><span>Quiet Mode Active</span><strong id="sc-quiet-mode">{{ runtime_session_continuity.quiet_mode_active }}</strong></div>
             <div class="status-row"><span>Reauth Required</span><strong id="sc-reauth-required">{{ runtime_session_continuity.reauth_required }}</strong></div>

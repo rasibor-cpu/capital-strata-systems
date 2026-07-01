@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from backend.runtime.session_renewal import SessionRenewalManager
+
 
 class RuntimeSessionContinuityError(RuntimeError):
     """Fail-closed exception for runtime session continuity checks."""
@@ -19,6 +21,7 @@ class RuntimeSessionContinuityMonitor:
 
     def __init__(self, *, session_state_path: str | Path | None = None) -> None:
         self.session_state_path = Path(session_state_path) if session_state_path else None
+        self.session_renewal = SessionRenewalManager(session_state_path=self.session_state_path)
 
     def evaluate(
         self,
@@ -42,6 +45,12 @@ class RuntimeSessionContinuityMonitor:
         seconds_until_idle = idle_timeout - idle_age if idle_timeout is not None and idle_age is not None else None
         idle_expired = seconds_until_idle is not None and seconds_until_idle <= 0
         quiet_mode = self._quiet_mode(session)
+        renewal = self.session_renewal.evaluate(
+            payload,
+            now=now_dt,
+            persist=self.session_state_path is not None,
+        )
+        paper_session_renewed = bool(renewal.get("renewed"))
         explicitly_resumed = str(session.get("session_continuity_status", session.get("auth_status", ""))).upper() == "RESUMED"
         session_active = bool(session.get("active", True))
         role_profile = session.get("role_profile", {})
@@ -72,6 +81,12 @@ class RuntimeSessionContinuityMonitor:
             reauth_required = True
             warnings.append("quiet_mode_active")
             actions.append("Re-authenticate through the existing login flow to resume paper validation.")
+        elif paper_session_renewed:
+            status = "ACTIVE"
+            reauth_required = False
+            age = renewal.get("current_session_age_seconds")
+            seconds_until = renewal.get("seconds_until_expiry")
+            actions.append("Paper session max-age was automatically renewed for broker-disabled paper validation.")
         elif seconds_until is not None and seconds_until <= 0:
             status = "EXPIRED"
             reauth_required = True
@@ -111,6 +126,17 @@ class RuntimeSessionContinuityMonitor:
             "warnings": sorted(set(warnings)),
             "advisory_only": True,
             "execution_allowed": False,
+            "session_renewal_mode": renewal.get("session_renewal_mode"),
+            "last_session_renewal_at": renewal.get("last_session_renewal_at"),
+            "session_renewal_count": renewal.get("session_renewal_count", 0),
+            "session_renewal_reason": renewal.get("session_renewal_reason"),
+            "continuous_paper_runtime_enabled": renewal.get("continuous_paper_runtime_enabled", False),
+            "renewal_count": renewal.get("renewal_count", 0),
+            "renewal_mode": renewal.get("renewal_mode"),
+            "renewal_allowed": renewal.get("renewal_allowed", False),
+            "next_expiry_or_renewal_time": renewal.get("next_expiry_or_renewal_time"),
+            "live_renewal_blocked": renewal.get("live_renewal_blocked", False),
+            "broker_execution_enabled": renewal.get("broker_execution_enabled", False),
         }
 
     @staticmethod
@@ -224,4 +250,15 @@ class RuntimeSessionContinuityMonitor:
             "warnings": [reason],
             "advisory_only": True,
             "execution_allowed": False,
+            "session_renewal_mode": "UNKNOWN",
+            "last_session_renewal_at": None,
+            "session_renewal_count": 0,
+            "session_renewal_reason": None,
+            "continuous_paper_runtime_enabled": False,
+            "renewal_count": 0,
+            "renewal_mode": "UNKNOWN",
+            "renewal_allowed": False,
+            "next_expiry_or_renewal_time": None,
+            "live_renewal_blocked": True,
+            "broker_execution_enabled": False,
         }
