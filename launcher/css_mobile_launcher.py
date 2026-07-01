@@ -37,6 +37,7 @@ from backend.intelligence.intelligence_orchestrator import (
 from backend.market_intelligence.fundamental_analysis_engine import FundamentalAnalysisEngine
 from backend.market_intelligence.multi_factor_signal_synthesizer import MultiFactorSignalSynthesizer
 from backend.market_intelligence.quantitative_alpha_engine import QuantitativeAlphaEngine
+from backend.market_intelligence.regime_aware_weighting_engine import RegimeAwareWeightingEngine
 from backend.market_intelligence.sentiment_intelligence_engine import SentimentIntelligenceEngine
 from backend.market_intelligence.technical_analysis_engine import TechnicalAnalysisEngine
 from backend.analytics.portfolio_correlation_engine import PortfolioCorrelationEngine
@@ -766,6 +767,30 @@ def get_quantitative_alpha_feed(runtime_state: Optional[Dict[str, Any]] = None) 
     )
 
 
+def get_regime_aware_weighting_feed(
+    *,
+    runtime_state: Optional[Dict[str, Any]] = None,
+    market_regime: Optional[Dict[str, Any]] = None,
+    portfolio_lifecycle: Optional[Dict[str, Any]] = None,
+    technical: Optional[Dict[str, Any]] = None,
+    fundamental: Optional[Dict[str, Any]] = None,
+    sentiment: Optional[Dict[str, Any]] = None,
+    quantitative: Optional[Dict[str, Any]] = None,
+    policy_profile: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    state = runtime_state or get_runtime_portfolio_state_feed()
+    regime = market_regime or get_market_regime_intelligence_feed(runtime_state=state)
+    return RegimeAwareWeightingEngine().evaluate(
+        market_regime=regime,
+        portfolio_lifecycle=portfolio_lifecycle or state,
+        technical=technical or get_technical_analysis_feed(state),
+        fundamental=fundamental or get_fundamental_analysis_feed(state),
+        sentiment=sentiment or get_sentiment_intelligence_feed(runtime_state=state),
+        quantitative=quantitative or get_quantitative_alpha_feed(state),
+        policy_profile=policy_profile or get_policy_profile_feed(),
+    )
+
+
 def get_multi_factor_signal_feed(
     *,
     runtime_state: Optional[Dict[str, Any]] = None,
@@ -775,6 +800,8 @@ def get_multi_factor_signal_feed(
     sentiment: Optional[Dict[str, Any]] = None,
     quantitative: Optional[Dict[str, Any]] = None,
     market_regime: Optional[Dict[str, Any]] = None,
+    regime_weights: Optional[Dict[str, Any]] = None,
+    policy_profile: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     state = runtime_state or get_runtime_portfolio_state_feed()
     tech = technical or get_technical_analysis_feed(state)
@@ -782,6 +809,15 @@ def get_multi_factor_signal_feed(
     sent = sentiment or get_sentiment_intelligence_feed(portfolio_decision, state)
     quant = quantitative or get_quantitative_alpha_feed(state)
     regime = market_regime or get_market_regime_intelligence_feed(runtime_state=state)
+    weights = regime_weights or get_regime_aware_weighting_feed(
+        runtime_state=state,
+        market_regime=regime,
+        technical=tech,
+        fundamental=fund,
+        sentiment=sent,
+        quantitative=quant,
+        policy_profile=policy_profile,
+    )
     return MultiFactorSignalSynthesizer().synthesize(
         technical=tech,
         fundamental=fund,
@@ -789,6 +825,7 @@ def get_multi_factor_signal_feed(
         quantitative=quant,
         market_regime=regime,
         portfolio_decision=portfolio_decision,
+        regime_weights=weights,
     )
 
 
@@ -827,6 +864,15 @@ def _portfolio_decision_inputs() -> Dict[str, Any]:
     fundamental_analysis = get_fundamental_analysis_feed(runtime_state)
     sentiment_intelligence = get_sentiment_intelligence_feed(runtime_state=runtime_state)
     quantitative_alpha = get_quantitative_alpha_feed(runtime_state)
+    regime_aware_weighting = get_regime_aware_weighting_feed(
+        runtime_state=runtime_state,
+        market_regime=market_regime_intelligence,
+        technical=technical_analysis,
+        fundamental=fundamental_analysis,
+        sentiment=sentiment_intelligence,
+        quantitative=quantitative_alpha,
+        policy_profile=policy_profile,
+    )
     multi_factor_signal = get_multi_factor_signal_feed(
         runtime_state=runtime_state,
         technical=technical_analysis,
@@ -834,6 +880,8 @@ def _portfolio_decision_inputs() -> Dict[str, Any]:
         sentiment=sentiment_intelligence,
         quantitative=quantitative_alpha,
         market_regime=market_regime_intelligence,
+        regime_weights=regime_aware_weighting,
+        policy_profile=policy_profile,
     )
     consistency = AdvisoryConsistencyChecker().check(
         adaptive_portfolio=adaptive_portfolio,
@@ -858,6 +906,7 @@ def _portfolio_decision_inputs() -> Dict[str, Any]:
         "fundamental_analysis": fundamental_analysis,
         "sentiment_intelligence": sentiment_intelligence,
         "quantitative_alpha": quantitative_alpha,
+        "regime_aware_weighting": regime_aware_weighting,
         "multi_factor_signal": multi_factor_signal,
         "conflicting_signals": consistency.get("conflicts", []),
         "consistency": consistency,
@@ -2603,6 +2652,7 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
     fundamental_analysis = decision_inputs.get("fundamental_analysis", {})
     sentiment_intelligence = decision_inputs.get("sentiment_intelligence", {})
     quantitative_alpha = decision_inputs.get("quantitative_alpha", {})
+    regime_aware_weighting = decision_inputs.get("regime_aware_weighting", {})
     multi_factor_signal = decision_inputs.get("multi_factor_signal", {})
     runtime_portfolio_state = decision_inputs.get(
         "runtime_portfolio_state",
@@ -2736,6 +2786,7 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "fundamental_analysis": fundamental_analysis,
         "sentiment_intelligence": sentiment_intelligence,
         "quantitative_alpha": quantitative_alpha,
+        "regime_aware_weighting": regime_aware_weighting,
         "multi_factor_signal": multi_factor_signal,
         "runtime_portfolio_state": runtime_portfolio_state,
         "runtime_portfolio_lifecycle": runtime_portfolio_lifecycle,
@@ -2972,6 +3023,24 @@ async def api_sentiment_intelligence():
 @launcher_router.get("/api/quantitative-alpha")
 async def api_quantitative_alpha():
     return get_quantitative_alpha_feed()
+
+
+@launcher_router.get("/api/regime-aware-weighting")
+async def api_regime_aware_weighting():
+    state = get_runtime_portfolio_state_feed()
+    technical = get_technical_analysis_feed(state)
+    fundamental = get_fundamental_analysis_feed(state)
+    sentiment = get_sentiment_intelligence_feed(runtime_state=state)
+    quantitative = get_quantitative_alpha_feed(state)
+    regime = get_market_regime_intelligence_feed(runtime_state=state)
+    return get_regime_aware_weighting_feed(
+        runtime_state=state,
+        market_regime=regime,
+        technical=technical,
+        fundamental=fundamental,
+        sentiment=sentiment,
+        quantitative=quantitative,
+    )
 
 
 @launcher_router.get("/api/multi-factor-signal")

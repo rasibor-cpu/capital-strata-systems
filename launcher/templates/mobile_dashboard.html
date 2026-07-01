@@ -1028,6 +1028,10 @@
             <div class="status-row"><span>Quantitative Alpha</span><strong id="mi-quant-alpha-signal">{{ quantitative_alpha.quantitative_signal if quantitative_alpha.quantitative_signal else 'DATA UNAVAILABLE' }}</strong></div>
             <div class="status-row"><span>Multi-Factor Score</span><strong id="mi-score">{{ multi_factor_signal.multi_factor_score if multi_factor_signal.multi_factor_score is not none else 'DATA UNAVAILABLE' }}</strong></div>
             <div class="status-row"><span>Multi-Factor Confidence</span><strong id="mi-confidence">{{ multi_factor_signal.confidence if multi_factor_signal.confidence is not none else 'DATA UNAVAILABLE' }}</strong></div>
+            <div class="status-row"><span>Regime Weights</span><strong id="mi-regime-weights">{{ multi_factor_signal.regime_weights | tojson }}</strong></div>
+            <div class="status-row"><span>Confidence Adjustment</span><strong id="mi-confidence-adjustment">{{ multi_factor_signal.weighting_confidence_adjustment if multi_factor_signal.weighting_confidence_adjustment is not none else 'DATA UNAVAILABLE' }}</strong></div>
+            <div style="margin-top:8px; font-size:12px; color:var(--text-secondary);">Weighting Reasons</div>
+            <pre id="mi-weighting-reasons" style="white-space:pre-wrap; font-size:11px; color:var(--text-secondary);">{{ multi_factor_signal.weighting_reasons | tojson }}</pre>
             <div style="margin-top:8px; font-size:12px; color:var(--text-secondary);">Reasons</div>
             <pre id="mi-reasons" style="white-space:pre-wrap; font-size:11px; color:var(--text-secondary);">{{ multi_factor_signal.reasons | tojson }}</pre>
             {% else %}
