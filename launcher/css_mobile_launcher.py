@@ -1165,9 +1165,11 @@ def get_validation_confidence_feed(
     artifact_freshness: Optional[Dict[str, Any]] = None,
     session_continuity: Optional[Dict[str, Any]] = None,
     portfolio_decision: Optional[Dict[str, Any]] = None,
+    advisory_snapshot: Optional[Dict[str, Any]] = None,
     runtime_health_trend: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     decision = portfolio_decision or _safe_load_artifact("portfolio_decision.json") or get_portfolio_decision_feed(persist=False)
+    snapshot = advisory_snapshot or _safe_load_artifact("runtime_advisory_snapshot.json")
     freshness = artifact_freshness or get_runtime_artifact_freshness_feed(refresh=False)
     continuity = session_continuity or get_runtime_session_continuity_feed()
     health = runtime_health or get_runtime_health_feed(portfolio_decision=decision, artifact_freshness=freshness, session_continuity=continuity)
@@ -1192,6 +1194,7 @@ def get_validation_confidence_feed(
         session_continuity=continuity,
         recommendation_stability=get_recommendation_drift_feed(),
         portfolio_decision=decision,
+        advisory_snapshot=snapshot,
         runtime_health_trend=trend,
     )
 
@@ -2560,6 +2563,7 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         artifact_freshness=runtime_artifact_freshness,
         session_continuity=runtime_session_continuity,
         portfolio_decision=portfolio_decision,
+        advisory_snapshot=runtime_advisory_snapshot,
         runtime_health_trend=runtime_health_trend,
     )
     long_duration_validation = get_long_duration_validation_feed(persist=False)

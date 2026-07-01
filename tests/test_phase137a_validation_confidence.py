@@ -9,6 +9,7 @@ def _confidence(**overrides):
         "supervisor_stability": {"restart_count": 0, "recovery_count": 0},
         "session_continuity": {"session_continuity_status": "ACTIVE"},
         "portfolio_decision": {"overall_status": "GREEN"},
+        "advisory_snapshot": {"snapshot_status": "OK", "missing_components": []},
         "runtime_health_trend": {"trends": {"1h": {"degradation_count": 0}}},
     }
     payload.update(overrides)

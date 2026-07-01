@@ -21,6 +21,7 @@ class ValidationConfidenceEngine:
         session_continuity: Mapping[str, Any] | None = None,
         recommendation_stability: Mapping[str, Any] | None = None,
         portfolio_decision: Mapping[str, Any] | None = None,
+        advisory_snapshot: Mapping[str, Any] | None = None,
         runtime_health_trend: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         score = 100
@@ -35,7 +36,9 @@ class ValidationConfidenceEngine:
             reasons.append("validation_not_ready")
         score -= self._penalty(self._status(artifact_freshness, "freshness_status"), reasons, "artifact_freshness")
         score -= self._penalty(self._session_status(session_continuity), reasons, "session_continuity")
-        score -= self._penalty(self._status(portfolio_decision, "overall_status", "status"), reasons, "portfolio_decision")
+        score -= self._penalty(self._decision_status(portfolio_decision), reasons, "portfolio_decision")
+        if isinstance(advisory_snapshot, Mapping):
+            score -= self._penalty(self._snapshot_status(advisory_snapshot), reasons, "runtime_advisory_snapshot")
 
         restarts = self._number(supervisor_stability, "restart_count")
         recoveries = self._number(supervisor_stability, "recovery_count")
@@ -82,6 +85,38 @@ class ValidationConfidenceEngine:
     def _session_status(payload: Mapping[str, Any] | None) -> str:
         status = ValidationConfidenceEngine._status(payload, "session_continuity_status")
         return {"ACTIVE": "GREEN", "RESUMED": "GREEN", "EXPIRING_SOON": "AMBER", "EXPIRED": "RED", "REAUTH_REQUIRED": "RED"}.get(status, status)
+
+    @staticmethod
+    def _decision_status(payload: Mapping[str, Any] | None) -> str:
+        status = ValidationConfidenceEngine._status(
+            payload,
+            "overall_status",
+            "portfolio_decision_status",
+            "status",
+            "decision_status",
+        )
+        if status in {"OK", "PASS", "READY"}:
+            return "GREEN"
+        return status
+
+    @staticmethod
+    def _snapshot_status(payload: Mapping[str, Any] | None) -> str:
+        if not isinstance(payload, Mapping):
+            return "UNKNOWN"
+        status = ValidationConfidenceEngine._status(
+            payload,
+            "snapshot_status",
+            "status",
+            "runtime_state_status",
+            "portfolio_decision_status",
+        )
+        missing = payload.get("missing_components", [])
+        if isinstance(missing, str):
+            missing = [missing]
+        missing_count = len([item for item in missing if str(item).strip()]) if isinstance(missing, list) else 0
+        if status in {"OK", "GREEN"} and missing_count == 0:
+            return "GREEN"
+        return status
 
     @staticmethod
     def _penalty(status: str, reasons: list[str], name: str) -> int:

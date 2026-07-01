@@ -34,13 +34,17 @@ class ContinuousValidationMonitor:
         persist: bool = False,
     ) -> dict[str, Any]:
         ts = timestamp or datetime.now(timezone.utc).isoformat()
+        decision = portfolio_decision if isinstance(portfolio_decision, Mapping) else self._read_artifact("portfolio_decision.json")
+        snapshot = advisory_snapshot if isinstance(advisory_snapshot, Mapping) else self._read_artifact("runtime_advisory_snapshot.json")
+        decision_status = self._decision_status(decision)
+        snapshot_status = self._snapshot_status(snapshot)
         statuses = [
             self._runtime_status(runtime_health),
             self._readiness_status(validation_readiness),
             self._session_status(session_continuity),
             self._freshness_status(artifact_freshness),
             self._supervisor_status(supervisor_state),
-            self._portfolio_status(portfolio_lifecycle, portfolio_decision, advisory_snapshot),
+            self._portfolio_status(portfolio_lifecycle, decision, snapshot),
         ]
         validation_state = max(statuses, key=lambda item: self.ORDER.get(item, 2))
         warnings = self._list_values((runtime_health or {}).get("warnings", []))
@@ -48,6 +52,8 @@ class ContinuousValidationMonitor:
         warnings.extend(self._list_values((session_continuity or {}).get("warnings", [])))
         warnings.extend(self._list_values((artifact_freshness or {}).get("warnings", [])))
         blockers = self._list_values((validation_readiness or {}).get("blockers", []))
+        warnings = self._stabilize_advisory_warnings(warnings, decision_status, snapshot_status)
+        blockers = self._stabilize_advisory_warnings(blockers, decision_status, snapshot_status)
         if validation_state == "RED" and not blockers:
             blockers.append("continuous_validation_red")
 
@@ -58,8 +64,8 @@ class ContinuousValidationMonitor:
             "validation_readiness": self._value(validation_readiness, "readiness_status"),
             "session_continuity": self._value(session_continuity, "session_continuity_status"),
             "artifact_freshness": self._value(artifact_freshness, "freshness_status"),
-            "portfolio_decision_status": self._value(portfolio_decision, "overall_status", "status"),
-            "advisory_snapshot_status": self._value(advisory_snapshot, "snapshot_status", "status"),
+            "portfolio_decision_status": decision_status,
+            "advisory_snapshot_status": snapshot_status,
             "warnings": sorted(set(warnings)),
             "blockers": sorted(set(blockers)),
             "recommendation": self._recommendation(validation_state),
@@ -115,13 +121,65 @@ class ContinuousValidationMonitor:
         snapshot: Mapping[str, Any] | None,
     ) -> str:
         life = str(ContinuousValidationMonitor._value(lifecycle, "portfolio_state", "lifecycle_status", default="UNKNOWN")).upper()
-        decision_status = str(ContinuousValidationMonitor._value(decision, "overall_status", "status", default="RED")).upper()
-        snapshot_status = str(ContinuousValidationMonitor._value(snapshot, "snapshot_status", "status", default="DATA UNAVAILABLE")).upper()
+        decision_status = ContinuousValidationMonitor._decision_status(decision)
+        snapshot_status = ContinuousValidationMonitor._snapshot_status(snapshot)
         if life == "BROKEN_PIPELINE" or decision_status in {"RED", "FAIL", "FAILED", "DATA UNAVAILABLE"}:
             return "RED"
-        if snapshot_status in {"PARTIAL", "LIMITED"} or decision_status in {"AMBER", "WARNING", "DEGRADED"}:
+        if snapshot_status in {"PARTIAL", "LIMITED", "AMBER", "WARNING", "DEGRADED"} or decision_status in {"AMBER", "WARNING", "DEGRADED"}:
             return "AMBER"
         return "GREEN"
+
+    @staticmethod
+    def _decision_status(decision: Mapping[str, Any] | None) -> str:
+        status = str(
+            ContinuousValidationMonitor._value(
+                decision,
+                "overall_status",
+                "portfolio_decision_status",
+                "status",
+                "decision_status",
+                default="DATA UNAVAILABLE",
+            )
+        ).upper()
+        if status in {"OK", "PASS", "READY"}:
+            return "GREEN"
+        return status
+
+    @staticmethod
+    def _snapshot_status(snapshot: Mapping[str, Any] | None) -> str:
+        if not isinstance(snapshot, Mapping):
+            return "DATA UNAVAILABLE"
+        status = str(
+            ContinuousValidationMonitor._value(
+                snapshot,
+                "snapshot_status",
+                "status",
+                "runtime_state_status",
+                "portfolio_decision_status",
+                default="DATA UNAVAILABLE",
+            )
+        ).upper()
+        missing = snapshot.get("missing_components", [])
+        if isinstance(missing, str):
+            missing = [missing]
+        missing_count = len([item for item in missing if str(item).strip()]) if isinstance(missing, list) else 0
+        if status in {"OK", "GREEN"} and missing_count == 0:
+            return "OK"
+        return status
+
+    @staticmethod
+    def _stabilize_advisory_warnings(values: list[str], decision_status: str, snapshot_status: str) -> list[str]:
+        result: list[str] = []
+        decision_green = decision_status == "GREEN"
+        snapshot_ok = snapshot_status in {"OK", "GREEN"}
+        for value in values:
+            text = str(value)
+            if decision_green and text in {"portfolio_decision_not_green", "portfolio_decision_unavailable"}:
+                continue
+            if snapshot_ok and text in {"runtime_advisory_snapshot_unavailable", "runtime_advisory_components_missing", "runtime_advisory_snapshot_partial"}:
+                continue
+            result.append(text)
+        return result
 
     @staticmethod
     def _value(payload: Mapping[str, Any] | None, *keys: str, default: Any = "UNKNOWN") -> Any:
@@ -148,6 +206,18 @@ class ContinuousValidationMonitor:
         if status == "AMBER":
             return "Continuous paper validation can continue with operator review."
         return "Pause validation progression until blockers are resolved."
+
+    def _read_artifact(self, filename: str) -> dict[str, Any]:
+        if self.artifacts_dir is None:
+            return {}
+        path = self.artifacts_dir / filename
+        if not path.exists():
+            return {}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+        return payload if isinstance(payload, dict) else {}
 
     def _persist(self, payload: Mapping[str, Any]) -> None:
         if self.artifacts_dir is None:
