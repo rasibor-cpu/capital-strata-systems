@@ -1012,6 +1012,29 @@
             {% endif %}
         </div>
 
+        <div class="card" id="market-intelligence-card">
+            <div class="card-header">
+                Market Intelligence
+                {% if multi_factor_signal.advisory_only %}
+                <span class="badge badge-info" id="mi-status-badge">{{ multi_factor_signal.multi_factor_signal }}</span>
+                {% else %}
+                <span class="badge badge-warning" id="mi-status-badge">DATA UNAVAILABLE</span>
+                {% endif %}
+            </div>
+            {% if multi_factor_signal.advisory_only %}
+            <div class="status-row"><span>Technical Signal</span><strong id="mi-technical-signal">{{ technical_analysis.technical_signal if technical_analysis.technical_signal else 'DATA UNAVAILABLE' }}</strong></div>
+            <div class="status-row"><span>Fundamental Signal</span><strong id="mi-fundamental-signal">{{ fundamental_analysis.fundamental_signal if fundamental_analysis.fundamental_signal else 'DATA UNAVAILABLE' }}</strong></div>
+            <div class="status-row"><span>Sentiment Signal</span><strong id="mi-sentiment-signal">{{ sentiment_intelligence.sentiment_signal if sentiment_intelligence.sentiment_signal else 'DATA UNAVAILABLE' }}</strong></div>
+            <div class="status-row"><span>Quantitative Alpha</span><strong id="mi-quant-alpha-signal">{{ quantitative_alpha.quantitative_signal if quantitative_alpha.quantitative_signal else 'DATA UNAVAILABLE' }}</strong></div>
+            <div class="status-row"><span>Multi-Factor Score</span><strong id="mi-score">{{ multi_factor_signal.multi_factor_score if multi_factor_signal.multi_factor_score is not none else 'DATA UNAVAILABLE' }}</strong></div>
+            <div class="status-row"><span>Multi-Factor Confidence</span><strong id="mi-confidence">{{ multi_factor_signal.confidence if multi_factor_signal.confidence is not none else 'DATA UNAVAILABLE' }}</strong></div>
+            <div style="margin-top:8px; font-size:12px; color:var(--text-secondary);">Reasons</div>
+            <pre id="mi-reasons" style="white-space:pre-wrap; font-size:11px; color:var(--text-secondary);">{{ multi_factor_signal.reasons | tojson }}</pre>
+            {% else %}
+            <div class="empty-state" id="market-intelligence-unavailable">DATA UNAVAILABLE</div>
+            {% endif %}
+        </div>
+
         <div class="card" id="portfolio-decision-card">
             <div class="card-header">
                 Portfolio Decision Summary

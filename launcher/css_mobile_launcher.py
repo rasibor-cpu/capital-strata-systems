@@ -34,6 +34,11 @@ from backend.intelligence.intelligence_orchestrator import (
     IntelligenceOrchestrator,
     IntelligenceDecisionError,
 )
+from backend.market_intelligence.fundamental_analysis_engine import FundamentalAnalysisEngine
+from backend.market_intelligence.multi_factor_signal_synthesizer import MultiFactorSignalSynthesizer
+from backend.market_intelligence.quantitative_alpha_engine import QuantitativeAlphaEngine
+from backend.market_intelligence.sentiment_intelligence_engine import SentimentIntelligenceEngine
+from backend.market_intelligence.technical_analysis_engine import TechnicalAnalysisEngine
 from backend.analytics.portfolio_correlation_engine import PortfolioCorrelationEngine
 from backend.analytics.concentration_guard import ConcentrationGuard
 from backend.analytics.strategy_intelligence_engine import StrategyIntelligenceEngine
@@ -684,6 +689,109 @@ def get_recommendation_drift_feed(history: Optional[List[Dict[str, Any]]] = None
     return RecommendationDriftAnalyzer().analyze(records)
 
 
+def get_technical_analysis_feed(runtime_state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    state = runtime_state or get_runtime_portfolio_state_feed()
+    market_data = state.get("market_data", {}) if isinstance(state, dict) else {}
+    trades = state.get("trades", []) if isinstance(state, dict) else []
+    prices = market_data.get("price_history", []) if isinstance(market_data, dict) else []
+    if not prices and isinstance(trades, list):
+        prices = [
+            row.get("current_price", row.get("exit_price", row.get("price")))
+            for row in trades
+            if isinstance(row, dict) and row.get("current_price", row.get("exit_price", row.get("price"))) is not None
+        ]
+    returns = market_data.get("returns", []) if isinstance(market_data, dict) else []
+    metrics = state.get("performance_metrics", {}) if isinstance(state, dict) else {}
+    return TechnicalAnalysisEngine().analyze(
+        price_history=prices,
+        returns=returns,
+        volatility=metrics.get("volatility") if isinstance(metrics, dict) else None,
+        trend_data=market_data if isinstance(market_data, dict) else {},
+    )
+
+
+def get_fundamental_analysis_feed(runtime_state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    state = runtime_state or get_runtime_portfolio_state_feed()
+    positions = state.get("positions", []) if isinstance(state, dict) else []
+    first = positions[0] if isinstance(positions, list) and positions and isinstance(positions[0], dict) else {}
+    market_data = state.get("market_data", {}) if isinstance(state, dict) else {}
+    metadata = {
+        **(market_data if isinstance(market_data, dict) else {}),
+        **first,
+    }
+    if "asset_class" not in metadata and isinstance(state, dict):
+        allocations = state.get("asset_allocations", {})
+        if isinstance(allocations, dict) and allocations:
+            metadata["asset_class"] = next(iter(allocations.keys()))
+    return FundamentalAnalysisEngine().evaluate(metadata)
+
+
+def get_sentiment_intelligence_feed(
+    decision: Optional[Dict[str, Any]] = None,
+    runtime_state: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    state = runtime_state or get_runtime_portfolio_state_feed()
+    market_data = state.get("market_data", {}) if isinstance(state, dict) else {}
+    return SentimentIntelligenceEngine().analyze(
+        alerts=get_alert_summary(),
+        recommendation_history=_load_recommendation_evaluation_history(),
+        runtime_warnings=(decision or {}).get("conflicting_signals", []) if isinstance(decision, dict) else [],
+        strategy_confidence_history=[],
+        market_regime=market_data.get("market_regime") if isinstance(market_data, dict) else None,
+    )
+
+
+def get_quantitative_alpha_feed(runtime_state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    state = runtime_state or get_runtime_portfolio_state_feed()
+    trades = state.get("trades", []) if isinstance(state, dict) else []
+    metrics = state.get("performance_metrics", {}) if isinstance(state, dict) else {}
+    returns = metrics.get("portfolio_returns", []) if isinstance(metrics, dict) else []
+    asset_pnl: Dict[str, float] = {}
+    for row in trades if isinstance(trades, list) else []:
+        if not isinstance(row, dict):
+            continue
+        asset = str(row.get("asset_class", "UNKNOWN")).upper()
+        try:
+            asset_pnl[asset] = asset_pnl.get(asset, 0.0) + float(row.get("realized_pnl", row.get("pnl", 0.0)) or 0.0)
+        except (TypeError, ValueError):
+            continue
+    return QuantitativeAlphaEngine().evaluate(
+        returns=returns,
+        win_loss_history=trades,
+        asset_class_pnl=asset_pnl,
+        trade_expectancy=metrics.get("expectancy") if isinstance(metrics, dict) else None,
+        volatility=metrics.get("volatility") if isinstance(metrics, dict) else None,
+        drawdown=metrics.get("max_drawdown") if isinstance(metrics, dict) else None,
+        trend_stability=metrics.get("trend_stability") if isinstance(metrics, dict) else None,
+    )
+
+
+def get_multi_factor_signal_feed(
+    *,
+    runtime_state: Optional[Dict[str, Any]] = None,
+    portfolio_decision: Optional[Dict[str, Any]] = None,
+    technical: Optional[Dict[str, Any]] = None,
+    fundamental: Optional[Dict[str, Any]] = None,
+    sentiment: Optional[Dict[str, Any]] = None,
+    quantitative: Optional[Dict[str, Any]] = None,
+    market_regime: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    state = runtime_state or get_runtime_portfolio_state_feed()
+    tech = technical or get_technical_analysis_feed(state)
+    fund = fundamental or get_fundamental_analysis_feed(state)
+    sent = sentiment or get_sentiment_intelligence_feed(portfolio_decision, state)
+    quant = quantitative or get_quantitative_alpha_feed(state)
+    regime = market_regime or get_market_regime_intelligence_feed(runtime_state=state)
+    return MultiFactorSignalSynthesizer().synthesize(
+        technical=tech,
+        fundamental=fund,
+        sentiment=sent,
+        quantitative=quant,
+        market_regime=regime,
+        portfolio_decision=portfolio_decision,
+    )
+
+
 def get_advisory_history_feed() -> Dict[str, Any]:
     store = AdvisoryHistoryStore(_portfolio_learning_storage_dir())
     summary = store.summarize()
@@ -715,6 +823,18 @@ def _portfolio_decision_inputs() -> Dict[str, Any]:
     market_regime_intelligence = get_market_regime_intelligence_feed(quantitative_metrics, runtime_state)
     policy_profile = get_policy_profile_feed()
     recommendation_tracker = get_recommendation_tracker_feed()
+    technical_analysis = get_technical_analysis_feed(runtime_state)
+    fundamental_analysis = get_fundamental_analysis_feed(runtime_state)
+    sentiment_intelligence = get_sentiment_intelligence_feed(runtime_state=runtime_state)
+    quantitative_alpha = get_quantitative_alpha_feed(runtime_state)
+    multi_factor_signal = get_multi_factor_signal_feed(
+        runtime_state=runtime_state,
+        technical=technical_analysis,
+        fundamental=fundamental_analysis,
+        sentiment=sentiment_intelligence,
+        quantitative=quantitative_alpha,
+        market_regime=market_regime_intelligence,
+    )
     consistency = AdvisoryConsistencyChecker().check(
         adaptive_portfolio=adaptive_portfolio,
         capital_rotation=capital_rotation,
@@ -734,6 +854,11 @@ def _portfolio_decision_inputs() -> Dict[str, Any]:
         "market_regime_intelligence": market_regime_intelligence,
         "policy_profile": policy_profile,
         "recommendation_tracker": recommendation_tracker,
+        "technical_analysis": technical_analysis,
+        "fundamental_analysis": fundamental_analysis,
+        "sentiment_intelligence": sentiment_intelligence,
+        "quantitative_alpha": quantitative_alpha,
+        "multi_factor_signal": multi_factor_signal,
         "conflicting_signals": consistency.get("conflicts", []),
         "consistency": consistency,
     }
@@ -1166,6 +1291,7 @@ def get_validation_confidence_feed(
     session_continuity: Optional[Dict[str, Any]] = None,
     portfolio_decision: Optional[Dict[str, Any]] = None,
     advisory_snapshot: Optional[Dict[str, Any]] = None,
+    market_intelligence: Optional[Dict[str, Any]] = None,
     runtime_health_trend: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     decision = portfolio_decision or _safe_load_artifact("portfolio_decision.json") or get_portfolio_decision_feed(persist=False)
@@ -1195,6 +1321,7 @@ def get_validation_confidence_feed(
         recommendation_stability=get_recommendation_drift_feed(),
         portfolio_decision=decision,
         advisory_snapshot=snapshot,
+        market_intelligence=market_intelligence or (decision.get("multi_factor_signal") if isinstance(decision, dict) else None),
         runtime_health_trend=trend,
     )
 
@@ -2472,6 +2599,11 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
     market_regime_intelligence = decision_inputs["market_regime_intelligence"]
     policy_profile = decision_inputs["policy_profile"]
     recommendation_tracker = decision_inputs["recommendation_tracker"]
+    technical_analysis = decision_inputs.get("technical_analysis", {})
+    fundamental_analysis = decision_inputs.get("fundamental_analysis", {})
+    sentiment_intelligence = decision_inputs.get("sentiment_intelligence", {})
+    quantitative_alpha = decision_inputs.get("quantitative_alpha", {})
+    multi_factor_signal = decision_inputs.get("multi_factor_signal", {})
     runtime_portfolio_state = decision_inputs.get(
         "runtime_portfolio_state",
         {
@@ -2564,6 +2696,7 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         session_continuity=runtime_session_continuity,
         portfolio_decision=portfolio_decision,
         advisory_snapshot=runtime_advisory_snapshot,
+        market_intelligence=multi_factor_signal,
         runtime_health_trend=runtime_health_trend,
     )
     long_duration_validation = get_long_duration_validation_feed(persist=False)
@@ -2599,6 +2732,11 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "market_regime_intelligence": market_regime_intelligence,
         "policy_profile": policy_profile,
         "recommendation_tracker": recommendation_tracker,
+        "technical_analysis": technical_analysis,
+        "fundamental_analysis": fundamental_analysis,
+        "sentiment_intelligence": sentiment_intelligence,
+        "quantitative_alpha": quantitative_alpha,
+        "multi_factor_signal": multi_factor_signal,
         "runtime_portfolio_state": runtime_portfolio_state,
         "runtime_portfolio_lifecycle": runtime_portfolio_lifecycle,
         "runtime_advisory_snapshot": runtime_advisory_snapshot,
@@ -2814,6 +2952,32 @@ async def api_quantitative_metrics():
 async def api_market_regime_intelligence():
     quantitative_metrics = get_quantitative_metrics_feed()
     return get_market_regime_intelligence_feed(quantitative_metrics)
+
+
+@launcher_router.get("/api/technical-analysis")
+async def api_technical_analysis():
+    return get_technical_analysis_feed()
+
+
+@launcher_router.get("/api/fundamental-analysis")
+async def api_fundamental_analysis():
+    return get_fundamental_analysis_feed()
+
+
+@launcher_router.get("/api/sentiment-intelligence")
+async def api_sentiment_intelligence():
+    return get_sentiment_intelligence_feed()
+
+
+@launcher_router.get("/api/quantitative-alpha")
+async def api_quantitative_alpha():
+    return get_quantitative_alpha_feed()
+
+
+@launcher_router.get("/api/multi-factor-signal")
+async def api_multi_factor_signal():
+    state = get_runtime_portfolio_state_feed()
+    return get_multi_factor_signal_feed(runtime_state=state)
 
 
 @launcher_router.get("/api/policy-profile")

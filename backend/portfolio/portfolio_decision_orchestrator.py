@@ -44,6 +44,7 @@ class PortfolioDecisionOrchestrator:
         policy = inputs.get("policy_profile", {}) if isinstance(inputs.get("policy_profile"), Mapping) else {}
         market_regime = inputs.get("market_regime_intelligence", {}) if isinstance(inputs.get("market_regime_intelligence"), Mapping) else {}
         quantitative = inputs.get("quantitative_metrics", {}) if isinstance(inputs.get("quantitative_metrics"), Mapping) else {}
+        multi_factor = inputs.get("multi_factor_signal", {}) if isinstance(inputs.get("multi_factor_signal"), Mapping) else {}
 
         if missing:
             return self._fail_closed(missing, timestamp=timestamp, inputs=inputs)
@@ -68,6 +69,12 @@ class PortfolioDecisionOrchestrator:
             f"Policy profile is {policy.get('active_profile', 'UNKNOWN')}.",
             f"Market regime is {market_regime.get('detected_regime', 'UNKNOWN')}.",
         ]
+        if multi_factor:
+            explanation.append(
+                "Multi-factor market intelligence is "
+                f"{multi_factor.get('multi_factor_signal', 'DATA_UNAVAILABLE')} "
+                f"with score {multi_factor.get('multi_factor_score', 'DATA UNAVAILABLE')}."
+            )
         conflicts = inputs.get("conflicting_signals", [])
         conflicts = conflicts if isinstance(conflicts, list) else []
 
@@ -84,6 +91,7 @@ class PortfolioDecisionOrchestrator:
             "capital_rotation": inputs.get("capital_rotation", {}),
             "risk_committee": committee,
             "quantitative_summary": self._quantitative_summary(quantitative),
+            "multi_factor_signal": multi_factor,
             "explanation": explanation,
             "conflicting_signals": sorted(set(str(item) for item in conflicts)),
             "missing_inputs": [],

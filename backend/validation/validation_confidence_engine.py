@@ -22,6 +22,7 @@ class ValidationConfidenceEngine:
         recommendation_stability: Mapping[str, Any] | None = None,
         portfolio_decision: Mapping[str, Any] | None = None,
         advisory_snapshot: Mapping[str, Any] | None = None,
+        market_intelligence: Mapping[str, Any] | None = None,
         runtime_health_trend: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         score = 100
@@ -39,6 +40,8 @@ class ValidationConfidenceEngine:
         score -= self._penalty(self._decision_status(portfolio_decision), reasons, "portfolio_decision")
         if isinstance(advisory_snapshot, Mapping):
             score -= self._penalty(self._snapshot_status(advisory_snapshot), reasons, "runtime_advisory_snapshot")
+        if isinstance(market_intelligence, Mapping):
+            score -= self._market_intelligence_penalty(market_intelligence, reasons)
 
         restarts = self._number(supervisor_stability, "restart_count")
         recoveries = self._number(supervisor_stability, "recovery_count")
@@ -130,6 +133,21 @@ class ValidationConfidenceEngine:
             return 20
         reasons.append(f"{name}_red_or_unknown")
         return 35
+
+    @staticmethod
+    def _market_intelligence_penalty(payload: Mapping[str, Any], reasons: list[str]) -> int:
+        status = str(payload.get("status", "UNKNOWN")).upper()
+        signal = str(payload.get("multi_factor_signal", "DATA_UNAVAILABLE")).upper()
+        if status == "DATA UNAVAILABLE" or signal == "DATA_UNAVAILABLE":
+            reasons.append("market_intelligence_unavailable")
+            return 10
+        if signal in {"STRONG_NEGATIVE", "NEGATIVE"}:
+            reasons.append("market_intelligence_negative")
+            return 10
+        if status == "PARTIAL":
+            reasons.append("market_intelligence_partial")
+            return 5
+        return 0
 
     @staticmethod
     def _number(payload: Mapping[str, Any] | None, key: str) -> float:
