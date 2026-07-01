@@ -1190,6 +1190,32 @@
             {% endif %}
         </div>
 
+        <div class="card" id="learning-optimization-card">
+            <div class="card-header">
+                Learning & Optimization
+                {% if engine_health_learning.advisory_only %}
+                <span class="badge badge-info" id="lo-status-badge">{{ engine_health_learning.learning_health_status }}</span>
+                {% else %}
+                <span class="badge badge-warning" id="lo-status-badge">DATA UNAVAILABLE</span>
+                {% endif %}
+            </div>
+            {% if engine_health_learning.advisory_only %}
+            <div class="status-row"><span>Factor Performance</span><strong id="lo-factor-performance-status">{{ factor_performance_learning.status }}</strong></div>
+            <div class="status-row"><span>Factor Attribution</span><strong id="lo-factor-attribution-status">{{ factor_attribution_learning.status }}</strong></div>
+            <div class="status-row"><span>Rolling Reliability</span><strong id="lo-rolling-reliability-status">{{ rolling_reliability_learning.reliability_status if rolling_reliability_learning.reliability_status else 'DATA UNAVAILABLE' }}</strong></div>
+            <div class="status-row"><span>Regime Learning</span><strong id="lo-regime-learning-status">{{ regime_learning.status }}</strong></div>
+            <div class="status-row"><span>Adaptive Weight Strength</span><strong id="lo-adaptive-weight-strength">{{ adaptive_weight_recommendations.recommendation_strength if adaptive_weight_recommendations.recommendation_strength else 'DATA UNAVAILABLE' }}</strong></div>
+            <div class="status-row"><span>Calibration Bias</span><strong id="lo-calibration-bias">{{ confidence_calibration_learning.calibration_bias if confidence_calibration_learning.calibration_bias else 'DATA UNAVAILABLE' }}</strong></div>
+            <div class="status-row"><span>Recommended Weights</span><strong id="lo-recommended-weights">{{ adaptive_weight_recommendations.recommended_weights | tojson }}</strong></div>
+            <div class="status-row"><span>Learning Blockers</span><strong id="lo-blockers">{{ engine_health_learning.blockers | length }}</strong></div>
+            <div class="status-row"><span>Learning Warnings</span><strong id="lo-warnings">{{ engine_health_learning.warnings | length }}</strong></div>
+            <div style="margin-top:8px; font-size:12px; color:var(--text-secondary);">Recommended Actions</div>
+            <pre id="lo-recommended-actions" style="white-space:pre-wrap; font-size:11px; color:var(--text-secondary);">{{ adaptive_weight_recommendations.recommended_actions | tojson }}</pre>
+            {% else %}
+            <div class="empty-state" id="learning-optimization-unavailable">DATA UNAVAILABLE</div>
+            {% endif %}
+        </div>
+
         <div class="card" id="paper-validation-card">
             <div class="card-header">
                 Paper Validation

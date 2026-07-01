@@ -40,6 +40,13 @@ from backend.market_intelligence.quantitative_alpha_engine import QuantitativeAl
 from backend.market_intelligence.regime_aware_weighting_engine import RegimeAwareWeightingEngine
 from backend.market_intelligence.sentiment_intelligence_engine import SentimentIntelligenceEngine
 from backend.market_intelligence.technical_analysis_engine import TechnicalAnalysisEngine
+from backend.learning.adaptive_weight_recommendations import AdaptiveWeightRecommendationEngine
+from backend.learning.confidence_calibration_learning import ConfidenceCalibrationLearningEngine
+from backend.learning.engine_health_learning import EngineHealthLearningEngine
+from backend.learning.factor_attribution import FactorAttributionEngine
+from backend.learning.factor_performance import FactorPerformanceEngine
+from backend.learning.regime_learning import RegimeLearningEngine
+from backend.learning.rolling_reliability import RollingReliabilityEngine
 from backend.analytics.portfolio_correlation_engine import PortfolioCorrelationEngine
 from backend.analytics.concentration_guard import ConcentrationGuard
 from backend.analytics.strategy_intelligence_engine import StrategyIntelligenceEngine
@@ -688,6 +695,69 @@ def get_confidence_calibration_feed(history: Optional[List[Dict[str, Any]]] = No
 def get_recommendation_drift_feed(history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     records = history if history is not None else _load_recommendation_evaluation_history()
     return RecommendationDriftAnalyzer().analyze(records)
+
+
+def _load_phase139a_learning_history() -> List[Dict[str, Any]]:
+    records = _load_recommendation_evaluation_history()
+    if records:
+        return records
+    return _load_completed_trade_learning_records()
+
+
+def get_factor_performance_learning_feed(history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    records = history if history is not None else _load_phase139a_learning_history()
+    return FactorPerformanceEngine().analyze(records)
+
+
+def get_factor_attribution_learning_feed(history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    records = history if history is not None else _load_phase139a_learning_history()
+    return FactorAttributionEngine().attribute(records)
+
+
+def get_rolling_reliability_learning_feed(history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    records = history if history is not None else _load_phase139a_learning_history()
+    return RollingReliabilityEngine().evaluate(records)
+
+
+def get_regime_learning_feed(history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    records = history if history is not None else _load_phase139a_learning_history()
+    return RegimeLearningEngine().analyze(records)
+
+
+def get_adaptive_weight_recommendations_feed(
+    *,
+    factor_performance: Optional[Dict[str, Any]] = None,
+    rolling_reliability: Optional[Dict[str, Any]] = None,
+    regime_learning: Optional[Dict[str, Any]] = None,
+    current_weights: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    weights_payload = current_weights or get_regime_aware_weighting_feed()
+    weights = weights_payload.get("weights", {}) if isinstance(weights_payload, dict) else {}
+    performance = factor_performance or get_factor_performance_learning_feed()
+    reliability = rolling_reliability or get_rolling_reliability_learning_feed()
+    regimes = regime_learning or get_regime_learning_feed()
+    return AdaptiveWeightRecommendationEngine().recommend(
+        factor_performance=performance,
+        rolling_reliability=reliability,
+        regime_learning=regimes,
+        current_weights=weights,
+    )
+
+
+def get_confidence_calibration_learning_feed(history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    records = history if history is not None else _load_phase139a_learning_history()
+    return ConfidenceCalibrationLearningEngine().analyze(records)
+
+
+def get_engine_health_learning_feed(packages: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    payload = packages or {
+        "factor_performance": get_factor_performance_learning_feed(),
+        "factor_attribution": get_factor_attribution_learning_feed(),
+        "rolling_reliability": get_rolling_reliability_learning_feed(),
+        "regime_learning": get_regime_learning_feed(),
+        "confidence_calibration_learning": get_confidence_calibration_learning_feed(),
+    }
+    return EngineHealthLearningEngine().evaluate(payload)
 
 
 def get_technical_analysis_feed(runtime_state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -2697,6 +2767,28 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
     recommendation_evaluation = get_recommendation_evaluation_feed(recommendation_history)
     confidence_calibration = get_confidence_calibration_feed(recommendation_history)
     recommendation_drift = get_recommendation_drift_feed(recommendation_history)
+    learning_history = recommendation_history if recommendation_history else _load_phase139a_learning_history()
+    factor_performance_learning = get_factor_performance_learning_feed(learning_history)
+    factor_attribution_learning = get_factor_attribution_learning_feed(learning_history)
+    rolling_reliability_learning = get_rolling_reliability_learning_feed(learning_history)
+    regime_learning = get_regime_learning_feed(learning_history)
+    adaptive_weight_recommendations = get_adaptive_weight_recommendations_feed(
+        factor_performance=factor_performance_learning,
+        rolling_reliability=rolling_reliability_learning,
+        regime_learning=regime_learning,
+        current_weights=regime_aware_weighting,
+    )
+    confidence_calibration_learning = get_confidence_calibration_learning_feed(learning_history)
+    engine_health_learning = get_engine_health_learning_feed(
+        {
+            "factor_performance": factor_performance_learning,
+            "factor_attribution": factor_attribution_learning,
+            "rolling_reliability": rolling_reliability_learning,
+            "regime_learning": regime_learning,
+            "adaptive_weight_recommendations": adaptive_weight_recommendations,
+            "confidence_calibration_learning": confidence_calibration_learning,
+        }
+    )
     validation_readiness = get_validation_readiness_feed(
         runtime_health=runtime_health,
         session_validation=session_validation,
@@ -2804,6 +2896,13 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "recommendation_evaluation": recommendation_evaluation,
         "confidence_calibration": confidence_calibration,
         "recommendation_drift": recommendation_drift,
+        "factor_performance_learning": factor_performance_learning,
+        "factor_attribution_learning": factor_attribution_learning,
+        "rolling_reliability_learning": rolling_reliability_learning,
+        "regime_learning": regime_learning,
+        "adaptive_weight_recommendations": adaptive_weight_recommendations,
+        "confidence_calibration_learning": confidence_calibration_learning,
+        "engine_health_learning": engine_health_learning,
         "validation_readiness": validation_readiness,
         "paper_validation_summary": paper_validation_summary,
         "runtime_validation_monitor": runtime_validation_monitor,
@@ -3077,6 +3176,60 @@ async def api_confidence_calibration():
 @launcher_router.get("/api/recommendation-drift")
 async def api_recommendation_drift():
     return get_recommendation_drift_feed()
+
+
+@launcher_router.get("/api/factor-performance")
+async def api_factor_performance():
+    return get_factor_performance_learning_feed()
+
+
+@launcher_router.get("/api/factor-attribution")
+async def api_factor_attribution():
+    return get_factor_attribution_learning_feed()
+
+
+@launcher_router.get("/api/rolling-reliability")
+async def api_rolling_reliability():
+    return get_rolling_reliability_learning_feed()
+
+
+@launcher_router.get("/api/regime-learning")
+async def api_regime_learning():
+    return get_regime_learning_feed()
+
+
+@launcher_router.get("/api/adaptive-weight-recommendations")
+async def api_adaptive_weight_recommendations():
+    return get_adaptive_weight_recommendations_feed()
+
+
+@launcher_router.get("/api/confidence-calibration-learning")
+async def api_confidence_calibration_learning():
+    return get_confidence_calibration_learning_feed()
+
+
+@launcher_router.get("/api/engine-health-learning")
+async def api_engine_health_learning():
+    performance = get_factor_performance_learning_feed()
+    attribution = get_factor_attribution_learning_feed()
+    reliability = get_rolling_reliability_learning_feed()
+    regimes = get_regime_learning_feed()
+    calibration = get_confidence_calibration_learning_feed()
+    recommendations = get_adaptive_weight_recommendations_feed(
+        factor_performance=performance,
+        rolling_reliability=reliability,
+        regime_learning=regimes,
+    )
+    return get_engine_health_learning_feed(
+        {
+            "factor_performance": performance,
+            "factor_attribution": attribution,
+            "rolling_reliability": reliability,
+            "regime_learning": regimes,
+            "adaptive_weight_recommendations": recommendations,
+            "confidence_calibration_learning": calibration,
+        }
+    )
 
 
 @launcher_router.get("/api/runtime-portfolio-state")
