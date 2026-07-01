@@ -40,6 +40,7 @@ class RuntimeArtifactFreshnessManager:
         "supervisor_state": 120.0,
         "closed_trade_ledger": 300.0,
         "portfolio_snapshot": 300.0,
+        "portfolio_state": 300.0,
         "runtime_portfolio_state": 300.0,
         "runtime_advisory_snapshot": 300.0,
         "portfolio_decision": 300.0,
@@ -116,6 +117,9 @@ class RuntimeArtifactFreshnessManager:
                     refreshed_artifacts.append(name)
                 except OSError:
                     warnings.append(f"refresh_failed_{name}")
+
+        if "runtime_portfolio_state" in artifacts:
+            artifacts["portfolio_state"] = dict(artifacts["runtime_portfolio_state"])
 
         material_warnings = [item for item in warnings if item != "no_recent_closed_trades"]
         if blockers:

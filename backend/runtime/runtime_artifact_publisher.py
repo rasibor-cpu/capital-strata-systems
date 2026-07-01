@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,6 +38,8 @@ class RuntimeArtifactPublisher:
         self,
         *,
         runtime_cycle: int | None = None,
+        account_state: Mapping[str, Any] | None = None,
+        session_state: Mapping[str, Any] | None = None,
         runtime_portfolio_state: Mapping[str, Any] | None = None,
         runtime_advisory_snapshot: Mapping[str, Any] | None = None,
         portfolio_decision: Mapping[str, Any] | None = None,
@@ -45,6 +48,8 @@ class RuntimeArtifactPublisher:
         advisory_snapshot_builder: Callable[[], Mapping[str, Any]] | None = None,
         portfolio_decision_builder: Callable[[], Mapping[str, Any]] | None = None,
         validation_summary_builder: Callable[[], Mapping[str, Any]] | None = None,
+        session_id: str | None = None,
+        runtime_version: str | None = None,
         timestamp: str | None = None,
     ) -> dict[str, Any]:
         ts = timestamp or datetime.now(timezone.utc).isoformat()
@@ -57,10 +62,14 @@ class RuntimeArtifactPublisher:
         advisory = self._payload_or_builder(runtime_advisory_snapshot, advisory_snapshot_builder, warnings, "runtime_advisory_snapshot")
         summary = self._payload_or_builder(validation_summary, validation_summary_builder, warnings, "validation_summary")
         snapshot = dict(portfolio_snapshot) if isinstance(portfolio_snapshot, Mapping) else self._portfolio_snapshot(state)
-        account = self._account_artifact(state)
+        account = dict(account_state) if isinstance(account_state, Mapping) else self._account_artifact(state)
+        session = dict(session_state) if isinstance(session_state, Mapping) else self._session_artifact()
+        sid = session_id or self._session_id(session) or self._session_id(account) or self._session_id(state)
+        version = runtime_version or str(os.getenv("CSS_RUNTIME_VERSION") or os.getenv("CSS_VERSION") or "")
 
         artifacts = {
             "css_account_state_pcnrass.json": account,
+            "css_session_state_pcnrass.json": session,
             "runtime_portfolio_state.json": state,
             "runtime_advisory_snapshot.json": advisory,
             "portfolio_snapshot.json": snapshot,
@@ -69,7 +78,14 @@ class RuntimeArtifactPublisher:
         }
 
         for filename, payload in artifacts.items():
-            canonical = self._canonical(payload, runtime_cycle=cycle, timestamp=ts, source_module="RuntimeArtifactPublisher")
+            canonical = self._canonical(
+                payload,
+                runtime_cycle=cycle,
+                timestamp=ts,
+                source_module="RuntimeArtifactPublisher",
+                session_id=sid,
+                runtime_version=version or None,
+            )
             try:
                 self.artifacts_dir.mkdir(parents=True, exist_ok=True)
                 path = self.artifacts_dir / filename
@@ -87,6 +103,9 @@ class RuntimeArtifactPublisher:
             "warnings": sorted(set(warnings)),
             "runtime_cycle": cycle,
             "timestamp": ts,
+            "generated_at": ts,
+            "session_id": sid,
+            "runtime_version": version or None,
             "schema_version": self.SCHEMA_VERSION,
             "advisory_only": True,
             "execution_allowed": False,
@@ -145,6 +164,12 @@ class RuntimeArtifactPublisher:
         summary = runtime_state.get("account", {}) if isinstance(runtime_state, Mapping) else {}
         return dict(summary) if isinstance(summary, Mapping) else self._unavailable("account_state_unavailable")
 
+    def _session_artifact(self) -> dict[str, Any]:
+        session = self._read_json(self.session_state_path)
+        if session:
+            return session
+        return self._unavailable("session_state_unavailable")
+
     @staticmethod
     def _portfolio_snapshot(runtime_state: Mapping[str, Any]) -> dict[str, Any]:
         account = runtime_state.get("account", {}) if isinstance(runtime_state, Mapping) else {}
@@ -174,12 +199,17 @@ class RuntimeArtifactPublisher:
         runtime_cycle: int,
         timestamp: str,
         source_module: str,
+        session_id: str | None,
+        runtime_version: str | None,
     ) -> dict[str, Any]:
         result = dict(payload)
         result.update(
             {
                 "timestamp": result.get("timestamp") or timestamp,
+                "generated_at": timestamp,
                 "runtime_cycle": runtime_cycle,
+                "session_id": session_id,
+                "runtime_version": runtime_version,
                 "schema_version": cls.SCHEMA_VERSION,
                 "source_module": source_module,
                 "advisory_only": True,
@@ -187,6 +217,20 @@ class RuntimeArtifactPublisher:
             }
         )
         return result
+
+    @staticmethod
+    def _session_id(payload: Mapping[str, Any]) -> str | None:
+        for key in ("session_id", "id"):
+            value = payload.get(key)
+            if value:
+                return str(value)
+        nested = payload.get("session")
+        if isinstance(nested, Mapping):
+            for key in ("session_id", "id"):
+                value = nested.get(key)
+                if value:
+                    return str(value)
+        return None
 
     @staticmethod
     def _unavailable(reason: str) -> dict[str, Any]:

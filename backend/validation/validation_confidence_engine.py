@@ -28,7 +28,7 @@ class ValidationConfidenceEngine:
         score -= self._penalty(self._status(runtime_health, "runtime_health", "overall_operational_health"), reasons, "runtime_health")
         readiness = self._status(validation_readiness, "readiness_status")
         if readiness == "READY_WITH_CAUTION":
-            score -= 15
+            score -= 20
             reasons.append("validation_ready_with_caution")
         elif readiness != "READY":
             score -= 35
@@ -87,11 +87,14 @@ class ValidationConfidenceEngine:
     def _penalty(status: str, reasons: list[str], name: str) -> int:
         if status in {"GREEN", "OK"}:
             return 0
+        if status in {"AGING"}:
+            reasons.append(f"{name}_aging")
+            return 10
         if status in {"AMBER", "WARNING", "DEGRADED", "PARTIAL", "LIMITED"}:
             reasons.append(f"{name}_degraded")
-            return 15
+            return 20
         reasons.append(f"{name}_red_or_unknown")
-        return 30
+        return 35
 
     @staticmethod
     def _number(payload: Mapping[str, Any] | None, key: str) -> float:

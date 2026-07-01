@@ -44,6 +44,7 @@ class RuntimeHealthAggregator:
         artifact_warnings = self._list_values(artifact.get("warnings", []))
         warnings.extend(artifact_warnings)
         warnings.extend(self._list_values(continuity.get("warnings", [])))
+        warnings = self._stabilized_warnings(warnings, artifact)
         statuses = [
             str(performance.get("overall_status", "RED")).upper(),
             str(session_validation.get("session_status", "RED")).upper(),
@@ -183,6 +184,42 @@ class RuntimeHealthAggregator:
         if isinstance(values, list):
             return [str(item) for item in values if str(item).strip()]
         return []
+
+    @classmethod
+    def _stabilized_warnings(cls, warnings: list[str], artifact_freshness: Mapping[str, Any]) -> list[str]:
+        artifacts = artifact_freshness.get("artifacts", {}) if isinstance(artifact_freshness, Mapping) else {}
+        artifacts = artifacts if isinstance(artifacts, Mapping) else {}
+        optional_names = {
+            "closed_trade_ledger",
+            "portfolio_snapshot",
+            "runtime_portfolio_state",
+            "portfolio_state",
+            "runtime_advisory_snapshot",
+            "portfolio_decision",
+            "validation_summary",
+        }
+        result: list[str] = []
+        for warning in warnings:
+            if warning == "stale_account_state" and cls._artifact_status(artifacts, "account_state") in {"FRESH", "AGING"}:
+                continue
+            if warning.startswith("missing_"):
+                name = warning.removeprefix("missing_")
+                if name in optional_names and cls._artifact_exists(artifacts, name):
+                    continue
+            result.append(warning)
+        return result
+
+    @staticmethod
+    def _artifact_status(artifacts: Mapping[str, Any], name: str) -> str:
+        payload = artifacts.get(name)
+        if not isinstance(payload, Mapping):
+            return "UNKNOWN"
+        return str(payload.get("status", payload.get("freshness", "UNKNOWN"))).upper()
+
+    @staticmethod
+    def _artifact_exists(artifacts: Mapping[str, Any], name: str) -> bool:
+        payload = artifacts.get(name)
+        return isinstance(payload, Mapping) and payload.get("exists") is True and str(payload.get("status", payload.get("freshness", ""))).upper() != "MISSING"
 
     @staticmethod
     def _canonical_payload(payloads: Mapping[str, Any], name: str) -> Mapping[str, Any] | None:

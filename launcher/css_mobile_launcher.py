@@ -914,8 +914,8 @@ def get_runtime_health_feed(
     artifact_freshness: Optional[Dict[str, Any]] = None,
     session_continuity: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    decision = portfolio_decision or get_portfolio_decision_feed(persist=False)
-    state = runtime_portfolio_state or get_runtime_portfolio_state_feed()
+    decision = portfolio_decision or _safe_load_artifact("portfolio_decision.json") or get_portfolio_decision_feed(persist=False)
+    state = runtime_portfolio_state or _safe_load_artifact("runtime_portfolio_state.json") or get_runtime_portfolio_state_feed()
     perf = performance or get_runtime_performance_feed()
     session = session_validation or get_session_validation_feed(decision)
     return RuntimeHealthAggregator().aggregate(
@@ -987,9 +987,9 @@ def get_validation_readiness_feed(
     artifact_freshness: Optional[Dict[str, Any]] = None,
     session_continuity: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    decision = portfolio_decision or get_portfolio_decision_feed(persist=False)
-    state = runtime_portfolio_state or get_runtime_portfolio_state_feed()
-    snapshot = runtime_advisory_snapshot or get_runtime_advisory_snapshot_feed(portfolio_decision=decision)
+    decision = portfolio_decision or _safe_load_artifact("portfolio_decision.json") or get_portfolio_decision_feed(persist=False)
+    state = runtime_portfolio_state or _safe_load_artifact("runtime_portfolio_state.json") or get_runtime_portfolio_state_feed()
+    snapshot = runtime_advisory_snapshot or _safe_load_artifact("runtime_advisory_snapshot.json") or get_runtime_advisory_snapshot_feed(portfolio_decision=decision)
     performance = runtime_performance or get_runtime_performance_feed()
     session = session_validation or get_session_validation_feed(decision)
     health = runtime_health or get_runtime_health_feed(
@@ -1071,7 +1071,7 @@ def get_runtime_validation_monitor_feed(
     advisory_snapshot: Optional[Dict[str, Any]] = None,
     persist: bool = False,
 ) -> Dict[str, Any]:
-    decision = portfolio_decision or get_portfolio_decision_feed(persist=False)
+    decision = portfolio_decision or _safe_load_artifact("portfolio_decision.json") or get_portfolio_decision_feed(persist=False)
     freshness = artifact_freshness or get_runtime_artifact_freshness_feed(refresh=False)
     continuity = session_continuity or get_runtime_session_continuity_feed()
     health = runtime_health or get_runtime_health_feed(portfolio_decision=decision, artifact_freshness=freshness, session_continuity=continuity)
@@ -1137,7 +1137,7 @@ def get_runtime_health_trend_feed(
     portfolio_lifecycle: Optional[Dict[str, Any]] = None,
     persist: bool = False,
 ) -> Dict[str, Any]:
-    decision = portfolio_decision or get_portfolio_decision_feed(persist=False)
+    decision = portfolio_decision or _safe_load_artifact("portfolio_decision.json") or get_portfolio_decision_feed(persist=False)
     freshness = artifact_freshness or get_runtime_artifact_freshness_feed(refresh=False)
     continuity = session_continuity or get_runtime_session_continuity_feed()
     health = runtime_health or get_runtime_health_feed(portfolio_decision=decision, artifact_freshness=freshness, session_continuity=continuity)
@@ -1167,7 +1167,7 @@ def get_validation_confidence_feed(
     portfolio_decision: Optional[Dict[str, Any]] = None,
     runtime_health_trend: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    decision = portfolio_decision or get_portfolio_decision_feed(persist=False)
+    decision = portfolio_decision or _safe_load_artifact("portfolio_decision.json") or get_portfolio_decision_feed(persist=False)
     freshness = artifact_freshness or get_runtime_artifact_freshness_feed(refresh=False)
     continuity = session_continuity or get_runtime_session_continuity_feed()
     health = runtime_health or get_runtime_health_feed(portfolio_decision=decision, artifact_freshness=freshness, session_continuity=continuity)
@@ -1197,8 +1197,24 @@ def get_validation_confidence_feed(
 
 
 def get_long_duration_validation_feed(persist: bool = False) -> Dict[str, Any]:
+    monitor = _safe_load_artifact("runtime_validation_monitor.json")
+    metrics = _safe_load_artifact("runtime_validation_metrics.json")
+    confidence = _safe_load_artifact("validation_confidence.json")
+    current_sample = None
+    if monitor or metrics or confidence:
+        current_sample = {
+            "timestamp": monitor.get("timestamp") or metrics.get("timestamp") or confidence.get("timestamp"),
+            "runtime_health": monitor.get("runtime_health"),
+            "validation_confidence": confidence.get("confidence_score"),
+            "artifact_freshness": monitor.get("artifact_freshness"),
+            "session_continuity": monitor.get("session_continuity"),
+            "recommendation_stability": metrics.get("recommendation_stability_trend"),
+            "restart_count": metrics.get("restart_frequency", 0),
+            "runtime_uptime": metrics.get("runtime_uptime", 0),
+        }
     return LongDurationValidation(artifacts_dir=LauncherConfig.ARTIFACTS_DIR).summarize(
         events=_validation_events_from_artifacts(),
+        current_sample=current_sample,
         paper_performance=get_trade_summary(),
         persist=persist,
     )

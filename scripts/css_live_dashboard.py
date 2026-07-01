@@ -737,6 +737,11 @@ try:
 except Exception as alert_init_e:
     print(f"[ALERT SERVICE INIT WARN] {alert_init_e}")
 
+try:
+    from backend.runtime.runtime_artifact_publisher import RuntimeArtifactPublisher
+except Exception:
+    RuntimeArtifactPublisher = None
+
 def _safe_emit_alert(method_name: str, *args, **kwargs):
     if not css_runtime_alert_service:
         return
@@ -1094,6 +1099,90 @@ def pcnrass_close_session_to_account():
     )
     pcnrass_account_state["last_session_close"] = datetime.now().isoformat(timespec="seconds")
     _pcnrass_write_json(ACCOUNT_STATE_FILE, pcnrass_account_state)
+
+def pcnrass_publish_runtime_artifacts(cycle_number, supervisor_stats=None, tracker_snapshot=None):
+    if RuntimeArtifactPublisher is None:
+        return {
+            "status": "DATA UNAVAILABLE",
+            "warnings": ["runtime_artifact_publisher_unavailable"],
+            "advisory_only": True,
+            "execution_allowed": False,
+        }
+    try:
+        positions = []
+        if "mtm_engine" in globals():
+            positions = [dict(pos) for pos in getattr(mtm_engine, "positions", []) if not bool(pos.get("forced_exit"))]
+        session_payload = {
+            "session": {
+                **dict(pcnrass_session_state),
+                "cycle_number": int(cycle_number),
+                "runtime_cycle": int(cycle_number),
+                "engine_mode": str(globals().get("ENGINE_MODE", "PAPER")),
+                "broker_mode": str(globals().get("SELECTED_BROKER_MODE", "NONE")),
+            },
+            "assets": dict(pcnrass_asset_balances),
+            "account_balance_pending_close": pcnrass_session_state.get("session_equity"),
+        }
+        account_payload = {
+            **dict(pcnrass_account_state),
+            "total_equity": pcnrass_session_state.get("session_equity"),
+            "cash": pcnrass_account_state.get("account_balance"),
+            "buying_power": pcnrass_account_state.get("account_balance"),
+            "unrealized_pnl": pcnrass_session_state.get("session_unrealized_pnl"),
+            "realized_pnl": pcnrass_session_state.get("session_realized_pnl"),
+            "positions": positions,
+        }
+        realized = float(account_payload.get("realized_pnl", 0.0) or 0.0)
+        unrealized = float(account_payload.get("unrealized_pnl", 0.0) or 0.0)
+        runtime_state = {
+            "status": "OK",
+            "portfolio_state": "NO_PORTFOLIO" if not positions else "ACTIVE_PORTFOLIO",
+            "account": {
+                "cash": account_payload.get("cash", 0.0),
+                "equity": account_payload.get("total_equity", account_payload.get("account_balance", 0.0)),
+                "buying_power": account_payload.get("buying_power", account_payload.get("account_balance", 0.0)),
+                "open_pnl": account_payload.get("unrealized_pnl", 0.0),
+                "realized_pnl": account_payload.get("realized_pnl", 0.0),
+                "total_pnl": realized + unrealized,
+            },
+            "positions": positions,
+            "trades": [],
+            "asset_allocations": {},
+            "performance_metrics": tracker_snapshot if isinstance(tracker_snapshot, dict) else {},
+            "supervisor": supervisor_stats if isinstance(supervisor_stats, dict) else {},
+            "runtime_cycle": int(cycle_number),
+            "engine_mode": str(globals().get("ENGINE_MODE", "PAPER")),
+            "broker_mode": str(globals().get("SELECTED_BROKER_MODE", "NONE")),
+            "advisory_only": True,
+            "execution_allowed": False,
+        }
+        return RuntimeArtifactPublisher(
+            artifacts_dir=ARTIFACTS_DIR,
+            account_state_path=ACCOUNT_STATE_FILE,
+            session_state_path=SESSION_STATE_FILE,
+            closed_trade_ledger_path=CLOSED_TRADE_LEDGER_PATH,
+        ).publish(
+            runtime_cycle=int(cycle_number),
+            account_state=account_payload,
+            session_state=session_payload,
+            runtime_portfolio_state=runtime_state,
+            validation_summary={
+                "status": "OK",
+                "runtime_health": "GREEN" if supervisor_stats else "DATA UNAVAILABLE",
+                "recommendation": "Continue advisory-only paper runtime monitoring.",
+                "confidence": None,
+                "warnings": [],
+                "blockers": [],
+            },
+            session_id=str(pcnrass_session_state.get("session_id") or ""),
+        )
+    except Exception as exc:
+        return {
+            "status": "AMBER",
+            "warnings": [f"runtime_artifact_publish_failed:{str(exc)[:120]}"],
+            "advisory_only": True,
+            "execution_allowed": False,
+        }
 
 def pcnrass_print_balance_panel():
     print("--- PCNRASS CAPITAL BALANCES ---")
@@ -4643,6 +4732,13 @@ try:
             print(f"RECOVERIES: {stats.get('recovery_attempts', 0)} | ALERTS: {stats.get('alerts_generated', 0)}")
             print(f"DISCONNECTS: {stats.get('broker_disconnects', 0)} | ERRORS: {stats.get('runtime_errors', 0)}")
 
+            publish_result = pcnrass_publish_runtime_artifacts(
+                cycle,
+                supervisor_stats=stats,
+                tracker_snapshot=tracker_snapshot,
+            )
+            if publish_result.get("status") != "OK":
+                print(f"[RUNTIME ARTIFACT PUBLISH WARN] {publish_result.get('warnings', [])}")
 
         except Exception as e:
             runtime_supervisor.record_error(str(e))

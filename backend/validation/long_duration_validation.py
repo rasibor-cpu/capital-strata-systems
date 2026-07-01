@@ -29,6 +29,7 @@ class LongDurationValidation:
         self,
         *,
         events: Sequence[Mapping[str, Any]] | None = None,
+        current_sample: Mapping[str, Any] | None = None,
         paper_performance: Mapping[str, Any] | None = None,
         timestamp: str | None = None,
         persist: bool = False,
@@ -36,11 +37,20 @@ class LongDurationValidation:
         ts = timestamp or datetime.now(timezone.utc).isoformat()
         now = self._parse_time(ts) or datetime.now(timezone.utc)
         rows = [dict(item) for item in (events or []) if isinstance(item, Mapping)]
+        if persist:
+            rows = self._read_history() + rows
+        if isinstance(current_sample, Mapping):
+            sample = dict(current_sample)
+            sample.setdefault("timestamp", ts)
+            rows.append(sample)
+        rows = self._dedupe_rows(rows)
+        rows = self._prune(rows, now)
         windows = {name: self._window(rows, now, delta) for name, delta in self.WINDOWS.items()}
         payload = {
             "status": "OK",
             "timestamp": ts,
             "windows": windows,
+            "history_count": len(rows),
             "paper_performance_summary": dict(paper_performance) if isinstance(paper_performance, Mapping) else {},
             "advisory_only": True,
             "paper_validation_only": True,
@@ -48,18 +58,23 @@ class LongDurationValidation:
         }
         if persist:
             self._persist(payload)
+            self._persist_history(rows)
         return payload
 
     def _window(self, rows: list[dict[str, Any]], now: datetime, delta: timedelta) -> dict[str, Any]:
         start = now - delta
         window = [row for row in rows if (self._parse_time(row.get("timestamp")) or now) >= start]
-        uptime = sum(self._float(row.get("uptime_seconds", row.get("cycle_duration_seconds", 0.0))) for row in window)
+        uptime = sum(
+            self._float(row.get("runtime_uptime", row.get("uptime_seconds", row.get("cycle_duration_seconds", 0.0))))
+            for row in window
+        )
         return {
             "uptime": round(uptime, 6),
             "restart_count": int(sum(self._float(row.get("restart_count", 0)) for row in window)),
             "recovery_count": int(sum(self._float(row.get("recovery_count", 0)) for row in window)),
             "validation_degradations": len([row for row in window if str(row.get("validation_state", "")).upper() in {"AMBER", "RED"}]),
             "runtime_health_history": [row.get("runtime_health", "UNKNOWN") for row in window],
+            "validation_confidence_history": [row.get("validation_confidence", row.get("confidence_score", "UNKNOWN")) for row in window],
             "artifact_health_history": [row.get("artifact_freshness", "UNKNOWN") for row in window],
             "session_continuity_history": [row.get("session_continuity", "UNKNOWN") for row in window],
             "recommendation_stability_history": [row.get("recommendation_stability", "UNKNOWN") for row in window],
@@ -93,3 +108,41 @@ class LongDurationValidation:
             json.dumps(dict(payload), indent=2, sort_keys=True, default=str),
             encoding="utf-8",
         )
+
+    def _read_history(self) -> list[dict[str, Any]]:
+        if self.artifacts_dir is None:
+            return []
+        path = self.artifacts_dir / "long_duration_validation_history.json"
+        if not path.exists():
+            return []
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+        rows = payload.get("history", payload) if isinstance(payload, dict) else payload
+        return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+
+    def _persist_history(self, rows: list[dict[str, Any]]) -> None:
+        if self.artifacts_dir is None:
+            return
+        self.artifacts_dir.mkdir(parents=True, exist_ok=True)
+        (self.artifacts_dir / "long_duration_validation_history.json").write_text(
+            json.dumps({"history": rows}, indent=2, sort_keys=True, default=str),
+            encoding="utf-8",
+        )
+
+    def _prune(self, rows: list[dict[str, Any]], now: datetime) -> list[dict[str, Any]]:
+        cutoff = now - self.WINDOWS["7d"]
+        return [row for row in rows if (self._parse_time(row.get("timestamp")) or now) >= cutoff]
+
+    @staticmethod
+    def _dedupe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+        for row in rows:
+            key = (str(row.get("timestamp", "")), str(row.get("runtime_cycle", row.get("cycle", ""))))
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(row)
+        return result
