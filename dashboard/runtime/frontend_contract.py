@@ -44,10 +44,14 @@ FRONTEND_SECTIONS = (
     "market",
     "execution",
     "opportunities",
+    "trade_summary",
+    "session_command_centre",
     "broker",
     "broker_reconciliation",
     "analytics",
 )
+
+DATA_UNAVAILABLE = "DATA UNAVAILABLE"
 
 _TRADE_UNIVERSE_CACHE: dict[str, Any] = {
     "updated_at": 0.0,
@@ -138,6 +142,8 @@ def build_frontend_payload(
             "market": market(dashboard_payload),
             "execution": execution(dashboard_payload),
             "opportunities": opportunities(dashboard_payload),
+            "trade_summary": trade_summary(dashboard_payload),
+            "session_command_centre": session_command_centre(dashboard_payload),
             "broker": broker(dashboard_payload),
             "broker_reconciliation": broker_reconciliation(dashboard_payload),
             "analytics": analytics(dashboard_payload),
@@ -651,13 +657,32 @@ def opportunities(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(raw_opportunities, list):
         raw_opportunities = []
     items = [_opportunity_item(item) for item in raw_opportunities]
-    ranked_items = sorted(items, key=lambda row: _number(row.get("composite_score", row.get("score", 0.0))), reverse=True)
-    top = ranked_items[:3]
+    ranked_items = sorted(
+        items,
+        key=lambda row: _number(row.get("composite_score", row.get("score", 0.0))),
+        reverse=True,
+    )
+    green_items = [item for item in ranked_items if _opportunity_bucket(item) == "GREEN"]
+    amber_items = [item for item in ranked_items if _opportunity_bucket(item) == "AMBER"]
+    display_items = green_items if green_items else amber_items
+    display_state = "GREEN_APPROVED" if green_items else "AMBER_WATCH"
+    empty_state = ""
+    if not display_items:
+        display_state = "CAPITAL_PRESERVATION"
+        empty_state = "Capital preservation active: no risk-approved opportunities are available."
+
+    top = display_items[:3]
     avg_execution_quality = (sum(_number(row.get("execution_quality", 0.0)) for row in items) / len(items)) if items else 0.0
+    market_health = _market_health(dashboard_payload)
 
     return {
-        "items": items,
-        "count": len(raw_opportunities),
+        "items": display_items,
+        "count": len(display_items),
+        "raw_count": len(raw_opportunities),
+        "display_state": display_state,
+        "empty_state": empty_state,
+        "market_health": market_health,
+        "excluded_states": ["RED", "NOT_APPROVED"],
         "source": "DashboardState",
         "scoring_overview": {
             "top_ranked_symbols": [str(row.get("symbol", "UNKNOWN")) for row in top],
@@ -675,6 +700,13 @@ def opportunities(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
 def _opportunity_item(value: Any) -> dict[str, Any]:
     item = _mapping(value)
     scoring_summary = _mapping(item.get("scoring_summary"))
+    status = str(item.get("status", item.get("approval_state", "MONITOR_ONLY")))
+    explanation = str(
+        item.get(
+            "opportunity_explanation",
+            item.get("explanation", item.get("reason", item.get("note", ""))),
+        )
+    )
     return {
         "symbol": str(item.get("symbol", "UNKNOWN")),
         "asset_class": str(item.get("asset_class", "UNKNOWN")),
@@ -686,8 +718,194 @@ def _opportunity_item(value: Any) -> dict[str, Any]:
         "execution_quality": _number(scoring_summary.get("execution_quality", 0.0)),
         "survivability_score": _number(scoring_summary.get("survivability_score", 0.0)),
         "probability": _number(item.get("probability", item.get("prob", 0.0))),
-        "status": str(item.get("status", "MONITOR_ONLY")),
-        "reason": str(item.get("reason", item.get("note", ""))),
+        "status": status,
+        "risk_state": str(item.get("risk_state", item.get("risk_status", status))),
+        "approval_state": str(item.get("approval_state", status)),
+        "market_health": str(item.get("market_health", "")),
+        "opportunity_explanation": explanation,
+        "reason": explanation,
+    }
+
+
+def _opportunity_bucket(item: Mapping[str, Any]) -> str:
+    fields = {
+        str(item.get("status", "")),
+        str(item.get("risk_state", "")),
+        str(item.get("approval_state", "")),
+        str(item.get("signal", "")),
+    }
+    normalized = {field.strip().upper() for field in fields if field}
+    if normalized & {"RED", "NOT_APPROVED", "REJECTED", "BLOCKED", "DENIED"}:
+        return "RED"
+    if normalized & {"GREEN", "APPROVED", "APPROVE", "UNIFIED_GATE_APPROVED", "TRADE_APPROVED"}:
+        return "GREEN"
+    if normalized & {"AMBER", "WATCH", "NEAR_APPROVED", "MONITOR_ONLY", "CONFIRMED"}:
+        return "AMBER"
+    return "AMBER"
+
+
+def _market_health(dashboard_payload: Mapping[str, Any]) -> str:
+    market_payload = _mapping(dashboard_payload.get("market_summary"))
+    risk_payload = _mapping(dashboard_payload.get("risk_summary"))
+    states = {
+        str(market_payload.get("liquidity_state", "")).upper(),
+        str(market_payload.get("volatility_state", "")).upper(),
+        str(market_payload.get("spread_state", "")).upper(),
+        str(risk_payload.get("risk_state", "")).upper(),
+    }
+    if states & {"CRITICAL", "RED", "STRESSED", "WIDE", "BREACHED"}:
+        return "RED"
+    if states & {"AMBER", "WATCH", "ELEVATED", "HIGH", "DEFENSIVE"}:
+        return "AMBER"
+    if states & {"HEALTHY", "NORMAL", "TIGHT", "GREEN"}:
+        return "GREEN"
+    return DATA_UNAVAILABLE
+
+
+def trade_summary(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
+    account = _mapping(dashboard_payload.get("account_summary"))
+    pnl = _mapping(dashboard_payload.get("pnl_summary"))
+    positions_payload = positions(dashboard_payload)
+    execution_payload = execution(dashboard_payload)
+    broker_payload = broker(dashboard_payload)
+    session = _mapping(dashboard_payload.get("session"))
+
+    generated_at = str(
+        dashboard_payload.get("generated_at")
+        or dashboard_payload.get("timestamp")
+        or datetime.now(timezone.utc).isoformat()
+    )
+    mode = str(
+        dashboard_payload.get("resolved_mode")
+        or session.get("resolved_mode")
+        or dashboard_payload.get("live_or_paper")
+        or DATA_UNAVAILABLE
+    )
+    broker_name = _first_available(
+        account.get("broker"),
+        broker_payload.get("selected_broker"),
+        dashboard_payload.get("broker_mode"),
+    )
+    if str(broker_name).strip().upper() in {"NONE", "UNKNOWN", "N/A", "NA"}:
+        broker_name = DATA_UNAVAILABLE
+    unrealized_pnl = _first_available(pnl.get("unrealized_pnl"))
+    position_unrealized = sum(
+        _number(_mapping(row).get("unrealized_pnl"))
+        for row in _list(positions_payload.get("items"))
+    )
+    if _number(unrealized_pnl) == 0.0 and position_unrealized:
+        unrealized_pnl = round(position_unrealized, 8)
+
+    return {
+        "date_time": generated_at,
+        "mode": mode,
+        "broker": broker_name,
+        "engine_mode": _first_available(session.get("engine_mode"), dashboard_payload.get("engine_mode")),
+        "account_balance": _first_available(account.get("account_balance"), account.get("cash_balance")),
+        "equity": _first_available(account.get("equity"), account.get("total_equity"), pnl.get("account_equity")),
+        "open_positions": positions_payload.get("total", DATA_UNAVAILABLE),
+        "realized_pnl": _first_available(pnl.get("realized_pnl")),
+        "unrealized_pnl": unrealized_pnl,
+        "last_cycle": _first_available(session.get("cycle_number"), dashboard_payload.get("cycle_number")),
+        "last_update": generated_at,
+        "execution_status": _first_available(
+            execution_payload.get("execution_state"),
+            execution_payload.get("execution_status"),
+        ),
+        "data_status": "OK" if account else DATA_UNAVAILABLE,
+        "advisory_only": True,
+        "execution_allowed": False,
+    }
+
+
+def session_command_centre(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
+    summary = trade_summary(dashboard_payload)
+    opportunity = opportunities(dashboard_payload)
+    risk_payload = risk(dashboard_payload)
+    execution_payload = execution(dashboard_payload)
+    portfolio = portfolio_summary(dashboard_payload)
+    analytics_payload = analytics(dashboard_payload)
+    broker_payload = broker(dashboard_payload)
+    session = _mapping(dashboard_payload.get("session"))
+
+    trade_quality = _bounded_score(
+        (_number(analytics_payload.get("signal_quality")) * 60.0)
+        + (_number(execution_payload.get("accepted_trade_count")) * 5.0)
+        - (_number(execution_payload.get("rejected_trade_count")) * 7.5)
+    )
+    capital_efficiency = _bounded_score(_number(portfolio.get("capital_efficiency")) * 100.0)
+    engine_health = _engine_health_score(risk_payload, execution_payload, broker_payload)
+    market_health = str(opportunity.get("market_health", DATA_UNAVAILABLE))
+    narrative = _ai_market_narrative(market_health, opportunity, risk_payload)
+
+    navigation_links = [
+        {"label": "Dashboard", "href": "/dashboard"},
+        {"label": "Trade Summary", "href": "/trade-summary"},
+        {"label": "Opportunities", "href": "/market-opportunities"},
+        {"label": "Risk", "href": "/risk-governance"},
+        {"label": "Broker", "href": "/broker"},
+    ]
+    intelligence_cards = [
+        {"title": "Trade Quality Score", "value": trade_quality, "status": _score_status(trade_quality)},
+        {"title": "Capital Efficiency Score", "value": capital_efficiency, "status": _score_status(capital_efficiency)},
+        {"title": "Engine Health Score", "value": engine_health, "status": _score_status(engine_health)},
+        {"title": "AI Market Narrative", "value": narrative, "status": market_health},
+    ]
+
+    return {
+        "session_status": {
+            "session_id": _first_available(dashboard_payload.get("session_id"), session.get("session_id")),
+            "mode": summary["mode"],
+            "engine_mode": summary["engine_mode"],
+            "role": _first_available(session.get("role"), dashboard_payload.get("role")),
+            "last_update": summary["last_update"],
+        },
+        "account_summary": {
+            "account_balance": summary["account_balance"],
+            "equity": summary["equity"],
+            "realized_pnl": summary["realized_pnl"],
+            "unrealized_pnl": summary["unrealized_pnl"],
+        },
+        "trading_activity": {
+            "open_positions": summary["open_positions"],
+            "execution_status": summary["execution_status"],
+            "recent_trade_count": execution_payload.get("recent_trade_count", 0),
+        },
+        "risk_dashboard": {
+            "risk_state": risk_payload.get("risk_state", DATA_UNAVAILABLE),
+            "gate_status": risk_payload.get("gate_status", DATA_UNAVAILABLE),
+            "exposure_utilization_pct": risk_payload.get("exposure_utilization_pct", 0.0),
+        },
+        "opportunity_centre": {
+            "display_state": opportunity.get("display_state", DATA_UNAVAILABLE),
+            "market_health": market_health,
+            "count": opportunity.get("count", 0),
+            "top_symbols": opportunity.get("scoring_overview", {}).get("top_ranked_symbols", []),
+        },
+        "runtime_health": {
+            "broker_connected": broker_payload.get("connected", False),
+            "broker_readiness": broker_payload.get("readiness_status", DATA_UNAVAILABLE),
+            "execution_state": summary["execution_status"],
+        },
+        "intelligence_summary": {
+            "trade_quality_score": trade_quality,
+            "capital_efficiency_score": capital_efficiency,
+            "engine_health_score": engine_health,
+            "ai_market_narrative": narrative,
+        },
+        "daily_executive_summary": (
+            f"{summary['mode']} session with {summary['open_positions']} open positions; "
+            f"risk gate {risk_payload.get('gate_status', DATA_UNAVAILABLE)}; "
+            f"opportunity posture {opportunity.get('display_state', DATA_UNAVAILABLE)}."
+        ),
+        "navigation_links": navigation_links,
+        "intelligence_cards": intelligence_cards,
+        "trade_quality_score": trade_quality,
+        "capital_efficiency_score": capital_efficiency,
+        "engine_health_score": engine_health,
+        "ai_market_narrative": narrative,
+        "advisory_only": True,
+        "execution_allowed": False,
     }
 
 
@@ -829,6 +1047,60 @@ def _number(value: Any, default: float = 0.0) -> float:
         return float(default)
 
 
+def _first_available(*values: Any) -> Any:
+    for value in values:
+        if value not in (None, ""):
+            return value
+    return DATA_UNAVAILABLE
+
+
+def _bounded_score(value: Any) -> float:
+    return round(max(0.0, min(100.0, _number(value))), 2)
+
+
+def _score_status(score: float) -> str:
+    if score >= 75.0:
+        return "GREEN"
+    if score >= 45.0:
+        return "AMBER"
+    return "RED"
+
+
+def _engine_health_score(
+    risk_payload: Mapping[str, Any],
+    execution_payload: Mapping[str, Any],
+    broker_payload: Mapping[str, Any],
+) -> float:
+    score = 82.0
+    risk_state = str(risk_payload.get("risk_state", "")).upper()
+    gate_status = str(risk_payload.get("gate_status", "")).upper()
+    execution_state = str(execution_payload.get("execution_state", "")).upper()
+    if risk_state in {"RED", "CRITICAL", "BREACHED"}:
+        score -= 35.0
+    if gate_status in {"CLOSED", "BLOCKED", "REJECTING"}:
+        score -= 25.0
+    if execution_state in {"ERROR", "FAILED", "BLOCKED"}:
+        score -= 20.0
+    if broker_payload.get("connected") is True:
+        score += 8.0
+    return _bounded_score(score)
+
+
+def _ai_market_narrative(
+    market_health: str,
+    opportunity_payload: Mapping[str, Any],
+    risk_payload: Mapping[str, Any],
+) -> str:
+    display_state = str(opportunity_payload.get("display_state", DATA_UNAVAILABLE))
+    gate_status = str(risk_payload.get("gate_status", DATA_UNAVAILABLE))
+    if display_state == "CAPITAL_PRESERVATION":
+        return "Capital preservation posture: no risk-approved opportunities are being surfaced."
+    return (
+        f"Market health is {market_health}; opportunity posture is {display_state}; "
+        f"risk gate is {gate_status}. Display-only intelligence, no execution authority implied."
+    )
+
+
 def _integer(value: Any, default: int = 0) -> int:
     try:
         if value is None:
@@ -919,6 +1191,8 @@ __all__ = [
     "governance",
     "market",
     "opportunities",
+    "session_command_centre",
+    "trade_summary",
     "portfolio_summary",
     "portfolio_greeks",
     "pnl_summary",

@@ -34,6 +34,8 @@ class FrontendPayloadValidator:
         "market",
         "execution",
         "opportunities",
+        "trade_summary",
+        "session_command_centre",
         "broker",
         "broker_reconciliation",
         "analytics",

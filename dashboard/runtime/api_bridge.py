@@ -112,6 +112,20 @@ def create_dashboard_state_router(
             "opportunities",
         )
 
+    @router.get("/api/v1/trade-summary")
+    def read_trade_summary() -> dict[str, Any]:
+        return build_section_payload(
+            _state_from_provider(state_provider),
+            "trade_summary",
+        )
+
+    @router.get("/api/v1/session-command-centre")
+    def read_session_command_centre() -> dict[str, Any]:
+        return build_section_payload(
+            _state_from_provider(state_provider),
+            "session_command_centre",
+        )
+
     @router.get("/api/v1/broker")
     def read_broker() -> dict[str, Any]:
         return build_section_payload(

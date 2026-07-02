@@ -56,6 +56,14 @@ def create_app(
     async def trade() -> HTMLResponse:
       return HTMLResponse(_trade_page())
 
+    @app.get("/trade-summary", response_class=HTMLResponse)
+    async def trade_summary() -> HTMLResponse:
+        return HTMLResponse(_trade_summary_page())
+
+    @app.get("/session-command-centre", response_class=HTMLResponse)
+    async def session_command_centre() -> HTMLResponse:
+        return HTMLResponse(_session_command_centre_page())
+
     @app.get("/execution", response_class=HTMLResponse)
     async def execution() -> HTMLResponse:
         return HTMLResponse(_execution_page())
@@ -138,6 +146,8 @@ def _app_nav(active: str) -> str:
         ("dashboard", "/dashboard", "Dashboard"),
         ("positions", "/positions", "Positions"),
       ("trade", "/trade", "Trade"),
+        ("trade_summary", "/trade-summary", "Trade Summary"),
+        ("command_centre", "/session-command-centre", "Command Centre"),
         ("execution", "/execution", "Execution"),
         ("risk_governance", "/risk-governance", "Risk & Governance"),
         ("market_opportunities", "/market-opportunities", "Market"),
@@ -1560,6 +1570,10 @@ def _market_opportunities_page() -> str:
         <strong>Opportunities</strong>
         <span data-mo-value="opportunities.count">0</span>
       </article>
+      <article>
+        <strong>Market Health</strong>
+        <span data-mo-value="opportunities.market_health">DATA UNAVAILABLE</span>
+      </article>
     </section>
 
     <section class="market-opportunity-workspace">
@@ -1584,7 +1598,7 @@ def _market_opportunities_page() -> str:
 
       <article class="panel opportunity-main">
         <div class="panel-head">
-          <h2>Opportunity Monitor</h2>
+          <h2>Top Opportunities</h2>
           <span id="opportunity-count-badge">0 ITEMS</span>
         </div>
         <div class="opportunity-table" id="opportunity-table"></div>
@@ -1593,6 +1607,108 @@ def _market_opportunities_page() -> str:
   </main>
 
   <script>{_market_opportunities_script()}</script>
+</body>
+</html>"""
+
+
+def _trade_summary_page() -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>CSS Trade Summary</title>
+  <style>{_css()}</style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand-lockup"><div class="brand-mark">CSS</div><div><p class="eyebrow">Capital Strata Systems</p><h1>Trade Summary</h1></div></div>
+      <section class="status-strip"><span>Display Only</span><span>No order controls</span></section>
+    </header>
+    {_app_nav("trade_summary")}
+    <section class="metric-band" id="trade-summary-band" aria-label="Compact trade summary">
+      <article><strong>Date / Time</strong><span data-ts="date_time">DATA UNAVAILABLE</span></article>
+      <article><strong>Mode</strong><span data-ts="mode">DATA UNAVAILABLE</span></article>
+      <article><strong>Broker</strong><span data-ts="broker">DATA UNAVAILABLE</span></article>
+      <article><strong>Engine Mode</strong><span data-ts="engine_mode">DATA UNAVAILABLE</span></article>
+      <article><strong>Account Balance</strong><span data-ts="account_balance">DATA UNAVAILABLE</span></article>
+      <article><strong>Equity</strong><span data-ts="equity">DATA UNAVAILABLE</span></article>
+      <article><strong>Open Positions</strong><span data-ts="open_positions">DATA UNAVAILABLE</span></article>
+      <article><strong>Realized PnL</strong><span data-ts="realized_pnl">DATA UNAVAILABLE</span></article>
+      <article><strong>Unrealized PnL</strong><span data-ts="unrealized_pnl">DATA UNAVAILABLE</span></article>
+      <article><strong>Last Cycle / Update</strong><span data-ts="last_cycle">DATA UNAVAILABLE</span></article>
+      <article><strong>Execution Status</strong><span data-ts="execution_status">DATA UNAVAILABLE</span></article>
+    </section>
+  </main>
+  <script>
+    function show(v) {{ return v === null || v === undefined || v === "" ? "DATA UNAVAILABLE" : String(v); }}
+    fetch("/api/v1/trade-summary", {{cache:"no-store"}})
+      .then((r) => r.json())
+      .then((p) => {{
+        const data = p.data || {{}};
+        document.querySelectorAll("[data-ts]").forEach((node) => {{
+          node.textContent = show(data[node.getAttribute("data-ts")]);
+        }});
+        const cycle = document.querySelector('[data-ts="last_cycle"]');
+        if (cycle) cycle.textContent = `${{show(data.last_cycle)}} / ${{show(data.last_update)}}`;
+      }})
+      .catch(() => undefined);
+  </script>
+</body>
+</html>"""
+
+
+def _session_command_centre_page() -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>CSS Session Command Centre</title>
+  <style>{_css()}</style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand-lockup"><div class="brand-mark">CSS</div><div><p class="eyebrow">Capital Strata Systems</p><h1>Session Command Centre</h1></div></div>
+      <section class="status-strip"><span>Advanced Intelligence</span><span>Display Only</span></section>
+    </header>
+    {_app_nav("command_centre")}
+    <section class="metric-band" aria-label="Advanced intelligence scores">
+      <article><strong>Trade Quality Score</strong><span data-scc="trade_quality_score">0</span></article>
+      <article><strong>Capital Efficiency Score</strong><span data-scc="capital_efficiency_score">0</span></article>
+      <article><strong>Engine Health Score</strong><span data-scc="engine_health_score">0</span></article>
+      <article><strong>Opportunity Centre</strong><span data-scc="opportunity_centre.display_state">DATA UNAVAILABLE</span></article>
+      <article><strong>Runtime Health</strong><span data-scc="runtime_health.execution_state">DATA UNAVAILABLE</span></article>
+      <article><strong>AI Market Narrative</strong><span data-scc="ai_market_narrative">DATA UNAVAILABLE</span></article>
+    </section>
+    <section class="dashboard-grid">
+      <article class="panel wide"><div class="panel-head"><h2>Daily Executive Summary</h2><span>READ ONLY</span></div><p id="daily-executive-summary" class="panel-note">DATA UNAVAILABLE</p></article>
+      <article class="panel"><div class="panel-head"><h2>Navigation Links</h2><span id="nav-count">0</span></div><div id="scc-nav-links" class="symbol-cloud"></div></article>
+      <article class="panel"><div class="panel-head"><h2>Intelligence Cards</h2><span id="card-count">0</span></div><div id="scc-cards" class="compact-list"></div></article>
+    </section>
+  </main>
+  <script>
+    function pick(obj, path) {{ return path.split(".").reduce((acc, key) => acc && acc[key], obj); }}
+    function show(v) {{ return v === null || v === undefined || v === "" ? "DATA UNAVAILABLE" : String(v); }}
+    fetch("/api/v1/session-command-centre", {{cache:"no-store"}})
+      .then((r) => r.json())
+      .then((p) => {{
+        const data = p.data || {{}};
+        document.querySelectorAll("[data-scc]").forEach((node) => {{
+          node.textContent = show(pick(data, node.getAttribute("data-scc")));
+        }});
+        document.getElementById("daily-executive-summary").textContent = show(data.daily_executive_summary);
+        const links = data.navigation_links || [];
+        document.getElementById("nav-count").textContent = String(links.length);
+        document.getElementById("scc-nav-links").innerHTML = links.map((link) => `<span>${{show(link.label)}}</span>`).join("");
+        const cards = data.intelligence_cards || [];
+        document.getElementById("card-count").textContent = String(cards.length);
+        document.getElementById("scc-cards").innerHTML = cards.map((card) => `<li>${{show(card.title)}}: ${{show(card.value)}} (${{show(card.status)}})</li>`).join("");
+      }})
+      .catch(() => undefined);
+  </script>
 </body>
 </html>"""
 
@@ -1658,12 +1774,13 @@ function renderMarketOpportunitySnapshot(payload) {
 function renderOpportunities(items) {
   const target = document.getElementById("opportunity-table");
   if (!items.length) {
-    target.innerHTML = `<div class="empty-state">No active opportunities</div>`;
+    const emptyState = moState.sections.opportunities?.empty_state || "Capital preservation active: no risk-approved opportunities are available.";
+    target.innerHTML = `<div class="empty-state">${escapeHtml(emptyState)}</div>`;
     return;
   }
   target.innerHTML = `
     <div class="opportunity-row opportunity-head">
-      <span>Symbol</span><span>Asset</span><span>Side</span><span>Signal</span><span>Score</span><span>Probability</span><span>Status</span><span>Reason</span>
+      <span>Symbol</span><span>Asset</span><span>Side</span><span>Signal</span><span>Score</span><span>Probability</span><span>Status</span><span>Explanation</span>
     </div>
     ${items.map((item) => `
       <div class="opportunity-row">
@@ -1674,7 +1791,7 @@ function renderOpportunities(items) {
         <span>${numberValue(item.score)}</span>
         <span>${pct(item.probability)}</span>
         <span>${escapeHtml(item.status || "MONITOR_ONLY")}</span>
-        <span>${escapeHtml(item.reason || "")}</span>
+        <span>${escapeHtml(item.opportunity_explanation || item.reason || "")}</span>
       </div>
     `).join("")}
   `;

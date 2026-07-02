@@ -41,6 +41,7 @@ from dashboard.runtime.audit_trail_viewer import (
 )
 from dashboard.runtime.trade_replay_harness import replay_mobile_trade_event_file
 from dashboard.runtime.dashboard_hydration_coordinator import DashboardHydrationCoordinator
+from dashboard.runtime.frontend_contract import build_frontend_payload
 from dashboard.runtime.runtime_bootstrap import DashboardRuntimeBootstrap
 from engine.execution.live_order_kill_switch import evaluate_live_order_kill_switch
 from backend.app.persistence.services.session_runtime_service import SessionRuntimeService
@@ -159,6 +160,15 @@ async def dashboard(request: Request):
 
     user_ctx = session["user_ctx"]
     return HTMLResponse(_dashboard_page(user_ctx=user_ctx, session=session))
+
+
+@app.get("/session-command-centre", response_class=HTMLResponse)
+async def session_command_centre_screen(request: Request):
+    session = _get_session(request)
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+
+    return HTMLResponse(_session_command_centre_page(session["user_ctx"], session))
 
 
 @app.get("/positions", response_class=HTMLResponse)
@@ -391,6 +401,24 @@ async def status(request: Request):
             "live_orders_enabled": system_status["live_orders_enabled"],
         }
     )
+
+
+@app.get("/api/trade-summary")
+async def api_trade_summary(request: Request):
+    session = _get_session(request)
+    if not session:
+        return JSONResponse({"ok": False, "status": "AUTH_REQUIRED"}, status_code=401)
+    payload = build_frontend_payload(_mobile_dashboard_payload(session["user_ctx"], session))
+    return JSONResponse({"ok": True, "trade_summary": payload["sections"]["trade_summary"]})
+
+
+@app.get("/api/session-command-centre")
+async def api_session_command_centre(request: Request):
+    session = _get_session(request)
+    if not session:
+        return JSONResponse({"ok": False, "status": "AUTH_REQUIRED"}, status_code=401)
+    payload = build_frontend_payload(_mobile_dashboard_payload(session["user_ctx"], session))
+    return JSONResponse({"ok": True, "session_command_centre": payload["sections"]["session_command_centre"]})
 
 
 @app.get("/api/audit/export")
@@ -829,6 +857,7 @@ def _top_nav(user_ctx: Dict[str, Any], active: str) -> str:
         ("opportunities", "Opportunities", "/opportunities"),
         ("market", "Market", "/market"),
         ("broker", "Broker", "/broker"),
+        ("session-command-centre", "Command Centre", "/session-command-centre"),
         ("trade-status", "Trade Status", "/trade-status"),
         ("trade-summary", "Trade Summary", "/trade-summary"),
         ("alerts", "Alert Centre", "/alerts"),
@@ -1192,6 +1221,7 @@ def _dashboard_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
 
           {_account_summary_cards(dashboard_payload)}
           {_mobile_charts_html()}
+          {_session_command_centre_panel(user_ctx, session)}
           {_command_center_panel(user_ctx)}
           {_recent_tickets_panel()}
 
@@ -1201,6 +1231,80 @@ def _dashboard_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
         </main>
         """,
         meta_refresh=30
+    )
+
+
+def _session_command_centre_payload(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> Dict[str, Any]:
+    payload = build_frontend_payload(_mobile_dashboard_payload(user_ctx, session))
+    return _mapping(_mapping(payload.get("sections")).get("session_command_centre"))
+
+
+def _session_command_centre_panel(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
+    centre = _session_command_centre_payload(user_ctx, session)
+    cards = centre.get("intelligence_cards")
+    if not isinstance(cards, list):
+        cards = []
+    card_markup = "\n".join(
+        f"<article><strong>{html.escape(str(_mapping(card).get('title', 'Intelligence')))}</strong><span>{html.escape(str(_mapping(card).get('value', 'DATA UNAVAILABLE')))}</span></article>"
+        for card in cards
+    )
+    if not card_markup:
+        card_markup = '<article><strong>Advanced Intelligence</strong><span>DATA UNAVAILABLE</span></article>'
+    return f"""
+      <section class="data-panel" aria-label="Session Command Centre">
+        <h2>Session Command Centre</h2>
+        <p class="muted">{html.escape(str(centre.get("daily_executive_summary", "DATA UNAVAILABLE")))}</p>
+        <div class="metric-grid">
+          {card_markup}
+        </div>
+      </section>
+    """
+
+
+def _session_command_centre_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
+    centre = _session_command_centre_payload(user_ctx, session)
+    nav_links = centre.get("navigation_links")
+    if not isinstance(nav_links, list):
+        nav_links = []
+    nav_markup = "\n".join(
+        f"<a class=\"command-card\" href=\"{html.escape(str(_mapping(link).get('href', '#')))}\"><strong>{html.escape(str(_mapping(link).get('label', 'Link')))}</strong><span>Read-only navigation</span></a>"
+        for link in nav_links
+    )
+    cards = centre.get("intelligence_cards")
+    if not isinstance(cards, list):
+        cards = []
+    card_markup = "\n".join(
+        f"<article><strong>{html.escape(str(_mapping(card).get('title', 'Intelligence')))}</strong><span>{html.escape(str(_mapping(card).get('value', 'DATA UNAVAILABLE')))} / {html.escape(str(_mapping(card).get('status', 'UNKNOWN')))}</span></article>"
+        for card in cards
+    )
+    return _page(
+        "Session Command Centre",
+        f"""
+        <main class="dashboard-shell">
+          {_header("Session Command Centre", user_ctx, "session-command-centre")}
+          {_identity_strip(user_ctx, "Advanced Intelligence")}
+          {_runtime_heartbeat_html()}
+          <section class="metric-grid" aria-label="Advanced Intelligence">
+            <article><strong>Trade Quality Score</strong><span>{html.escape(str(centre.get("trade_quality_score", "DATA UNAVAILABLE")))}</span></article>
+            <article><strong>Capital Efficiency Score</strong><span>{html.escape(str(centre.get("capital_efficiency_score", "DATA UNAVAILABLE")))}</span></article>
+            <article><strong>Engine Health Score</strong><span>{html.escape(str(centre.get("engine_health_score", "DATA UNAVAILABLE")))}</span></article>
+            <article><strong>AI Market Narrative</strong><span>{html.escape(str(centre.get("ai_market_narrative", "DATA UNAVAILABLE")))}</span></article>
+          </section>
+          <section class="data-panel" aria-label="Daily Executive Summary">
+            <h2>Daily Executive Summary</h2>
+            <p>{html.escape(str(centre.get("daily_executive_summary", "DATA UNAVAILABLE")))}</p>
+          </section>
+          <section class="data-panel" aria-label="Intelligence Cards">
+            <h2>Intelligence Cards</h2>
+            <div class="metric-grid">{card_markup}</div>
+          </section>
+          <section class="data-panel" aria-label="Navigation Links">
+            <h2>Navigation Links</h2>
+            <div class="command-grid">{nav_markup}</div>
+          </section>
+        </main>
+        """,
+        meta_refresh=30,
     )
 
 
@@ -1221,49 +1325,31 @@ def _mobile_dashboard_payload(
 
 
 def _trade_summary_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
-    try:
-        from analytics.trade_outcome_ledger import TradeOutcomeLedger
-        trades = TradeOutcomeLedger().list_trades()
-        # newest first
-        trades = sorted(trades, key=lambda t: t.exit_timestamp, reverse=True)[:20]
-    except Exception:
-        trades = []
+    payload = build_frontend_payload(_mobile_dashboard_payload(user_ctx, session))
+    summary = _mapping(_mapping(payload.get("sections")).get("trade_summary"))
 
-    if not trades:
-        content = '<div class="card"><p class="muted">No closed trades recorded yet.</p></div>'
-    else:
-        cards = []
-        for t in trades:
-            pnl = t.realized_pnl
-            if pnl > 0:
-                pnl_class = "pnl-green"
-                pnl_str = f"+{pnl:.2f}"
-            elif pnl < 0:
-                pnl_class = "pnl-red"
-                pnl_str = f"{pnl:.2f}"
-            else:
-                pnl_class = "muted"
-                pnl_str = "0.00"
+    def field(label: str, key: str) -> str:
+        value = summary.get(key, "DATA UNAVAILABLE")
+        if value in (None, ""):
+            value = "DATA UNAVAILABLE"
+        return f"<article><strong>{html.escape(label)}</strong><span>{html.escape(str(value))}</span></article>"
 
-            cards.append(f"""
-            <div class="card" style="margin-bottom: 1rem; padding: 1rem; border: 1px solid #ccc; border-radius: 4px;">
-                <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                    <strong>{html.escape(t.symbol)}</strong>
-                    <span class="{pnl_class}"><strong>{pnl_str}</strong></span>
-                </div>
-                <div style="font-size: 0.9em; line-height: 1.4;">
-                    <div><span class="muted">Date:</span> {html.escape(t.exit_timestamp)}</div>
-                    <div><span class="muted">Class:</span> {html.escape(t.asset_class)}</div>
-                    <div><span class="muted">Side:</span> {html.escape(getattr(t, 'side', 'UNKNOWN'))}</div>
-                    <div><span class="muted">Qty:</span> {getattr(t, 'quantity', 0.0)}</div>
-                    <div><span class="muted">Amt Traded:</span> {getattr(t, 'amount_traded', 0.0):.2f}</div>
-                    <div><span class="muted">W/L:</span> {html.escape(t.win_loss)}</div>
-                    <div><span class="muted">Cum Bal:</span> {getattr(t, 'cumulative_account_balance', 0.0):.2f}</div>
-                    <div><span class="muted">Exit Reason:</span> {html.escape(t.exit_reason)}</div>
-                </div>
-            </div>
-            """)
-        content = "".join(cards)
+    content = "".join(
+        [
+            field("Date / Time", "date_time"),
+            field("Mode", "mode"),
+            field("Broker", "broker"),
+            field("Engine Mode", "engine_mode"),
+            field("Account Balance", "account_balance"),
+            field("Equity", "equity"),
+            field("Open Positions", "open_positions"),
+            field("Realized PnL", "realized_pnl"),
+            field("Unrealized PnL", "unrealized_pnl"),
+            field("Last Cycle", "last_cycle"),
+            field("Last Update", "last_update"),
+            field("Execution Status", "execution_status"),
+        ]
+    )
 
     return _page(
         "CSS Trade Summary",
@@ -1271,7 +1357,7 @@ def _trade_summary_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> st
         <main class="dashboard-shell">
           {_header("CSS Trade Summary", user_ctx, "trade-summary")}
           {_runtime_heartbeat_html()}
-          <section class="metric-grid" aria-label="Trade Summary" style="display: block;">
+          <section class="metric-grid" aria-label="Compact Trade Summary">
             {content}
           </section>
         </main>
@@ -1340,6 +1426,44 @@ def _mobile_runtime_payloads(
             "spread_state": "TIGHT",
             "execution_cost_state": "MOBILE_GOVERNED",
             "signal_confluence_state": "CONFIRMED",
+            "opportunities": [
+                {
+                    "symbol": "BTC-USD",
+                    "asset_class": "CRYPTO",
+                    "side": "BUY",
+                    "signal": "CONFIRMED",
+                    "score": 88.0,
+                    "probability": 0.72,
+                    "status": "GREEN",
+                    "approval_state": "APPROVED",
+                    "risk_state": "GREEN",
+                    "opportunity_explanation": "Approved paper-mode candidate; display only.",
+                },
+                {
+                    "symbol": "EUR_USD",
+                    "asset_class": "FX",
+                    "side": "WATCH",
+                    "signal": "WATCH",
+                    "score": 64.0,
+                    "probability": 0.58,
+                    "status": "AMBER",
+                    "approval_state": "NEAR_APPROVED",
+                    "risk_state": "AMBER",
+                    "opportunity_explanation": "Near-approved watch candidate; display only.",
+                },
+                {
+                    "symbol": "CL",
+                    "asset_class": "FUTURES",
+                    "side": "WATCH",
+                    "signal": "BLOCKED",
+                    "score": 20.0,
+                    "probability": 0.31,
+                    "status": "RED",
+                    "approval_state": "NOT_APPROVED",
+                    "risk_state": "RED",
+                    "opportunity_explanation": "Excluded by risk-aware display.",
+                },
+            ],
         },
         "governance_payload": {
             "governance_enabled": True,
@@ -1597,22 +1721,30 @@ def _governance_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
 
 
 def _opportunities_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
-    opportunities = _opportunity_rows(user_ctx, session)
-    rows = "\n".join(_opportunity_row_markup(item) for item in opportunities)
+    opportunity_payload = _opportunity_rows(user_ctx, session)
+    opportunities = opportunity_payload.get("items", [])
+    rows = "\n".join(_opportunity_row_markup(item) for item in opportunities if isinstance(item, dict))
+    if not rows:
+        rows = f'<div class="ops-row"><span>{html.escape(str(opportunity_payload.get("empty_state", "Capital preservation active: no risk-approved opportunities are available.")))}</span></div>'
 
     return _page(
         "Opportunities",
         f"""
         <main class="dashboard-shell">
-          {_header("Opportunity Monitor", user_ctx, "opportunities")}
+          {_header("Top Opportunities", user_ctx, "opportunities")}
           {_identity_strip(user_ctx, "Monitor Only")}
           {_runtime_heartbeat_html()}
+          <section class="metric-grid" aria-label="Opportunity health">
+            <article><strong>Market Health</strong><span>{html.escape(str(opportunity_payload.get("market_health", "DATA UNAVAILABLE")))}</span></article>
+            <article><strong>Display State</strong><span>{html.escape(str(opportunity_payload.get("display_state", "DATA UNAVAILABLE")))}</span></article>
+            <article><strong>Visible Opportunities</strong><span>{html.escape(str(opportunity_payload.get("count", 0)))}</span></article>
+          </section>
           <section class="data-panel" aria-label="Opportunity monitor">
-            <h2>Opportunity Monitor</h2>
+            <h2>Top Opportunities</h2>
             <p class="muted">This screen is observational. Trade execution remains governed by CSS tickets, role authority, order controls, and broker gates.</p>
             <div class="ops-table opportunity-table">
               <div class="ops-row ops-head">
-                <span>Symbol</span><span>Asset</span><span>Bias</span><span>State</span><span>Action</span>
+                <span>Symbol</span><span>Asset</span><span>Bias</span><span>Status</span><span>Explanation</span>
               </div>
               {rows}
             </div>
@@ -2226,31 +2358,9 @@ def _audit_row_markup(event: Any) -> str:
 def _opportunity_rows(
     user_ctx: Dict[str, Any],
     session: Dict[str, Any],
-) -> tuple[Dict[str, Any], ...]:
-    payloads = _mobile_runtime_payloads(user_ctx, session)
-    market = payloads["market_payload"]
-    positions = payloads["positions_payload"].get("positions", [])
-    rows = [
-        {
-            "symbol": position.get("symbol", "N/A"),
-            "asset_class": position.get("asset_class", "N/A"),
-            "bias": position.get("side", "N/A"),
-            "state": market.get("signal_confluence_state", "UNKNOWN"),
-            "action": "Monitor open exposure",
-        }
-        for position in positions
-        if isinstance(position, dict)
-    ]
-    rows.append(
-        {
-            "symbol": "CL",
-            "asset_class": "FUTURES",
-            "bias": "WATCH",
-            "state": market.get("execution_cost_state", "UNKNOWN"),
-            "action": "Await governed ticket",
-        }
-    )
-    return tuple(rows)
+) -> Dict[str, Any]:
+    payload = build_frontend_payload(_mobile_dashboard_payload(user_ctx, session))
+    return _mapping(_mapping(payload.get("sections")).get("opportunities"))
 
 
 def _opportunity_row_markup(item: Dict[str, Any]) -> str:
@@ -2258,9 +2368,9 @@ def _opportunity_row_markup(item: Dict[str, Any]) -> str:
       <div class="ops-row">
         <span>{html.escape(str(item.get("symbol", "N/A")))}</span>
         <span>{html.escape(str(item.get("asset_class", "N/A")))}</span>
-        <span>{html.escape(str(item.get("bias", "N/A")))}</span>
-        <span>{html.escape(str(item.get("state", "UNKNOWN")))}</span>
-        <span>{html.escape(str(item.get("action", "")))}</span>
+        <span>{html.escape(str(item.get("side", item.get("bias", "N/A"))))}</span>
+        <span>{html.escape(str(item.get("status", "UNKNOWN")))}</span>
+        <span>{html.escape(str(item.get("opportunity_explanation", item.get("reason", ""))))}</span>
       </div>
     """
 
