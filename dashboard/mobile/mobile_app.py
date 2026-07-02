@@ -1324,9 +1324,57 @@ def _mobile_dashboard_payload(
     return state.to_dict()
 
 
+def _format_trade_money(value: Any, *, signed: bool = False) -> str:
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return "DATA UNAVAILABLE"
+    prefix = "+" if signed and amount > 0 else ""
+    return f"{prefix}{amount:.2f}"
+
+
+def _closed_trade_summary_rows() -> str:
+    try:
+        from analytics.trade_outcome_ledger import TradeOutcomeLedger
+
+        trades = TradeOutcomeLedger().list_trades()
+    except Exception:
+        return '<tr><td colspan="7">DATA UNAVAILABLE: closed trade ledger could not be read.</td></tr>'
+
+    if not trades:
+        return '<tr><td colspan="7">No closed trades recorded yet</td></tr>'
+
+    rows = []
+    for trade in trades:
+        symbol = html.escape(str(getattr(trade, "symbol", "DATA UNAVAILABLE")))
+        asset_class = html.escape(str(getattr(trade, "asset_class", "DATA UNAVAILABLE")))
+        side = html.escape(str(getattr(trade, "side", "DATA UNAVAILABLE")))
+        quantity = html.escape(str(getattr(trade, "quantity", "DATA UNAVAILABLE")))
+        entry_price = html.escape(_format_trade_money(getattr(trade, "entry_price", None)))
+        exit_price = html.escape(_format_trade_money(getattr(trade, "exit_price", None)))
+        realized_pnl = html.escape(_format_trade_money(getattr(trade, "realized_pnl", None), signed=True))
+        account_balance = html.escape(_format_trade_money(getattr(trade, "cumulative_account_balance", None)))
+        exit_reason = html.escape(str(getattr(trade, "exit_reason", "DATA UNAVAILABLE")))
+        rows.append(
+            f"""
+            <tr>
+              <td>{symbol}</td>
+              <td>{asset_class}</td>
+              <td>{side}</td>
+              <td>{quantity}</td>
+              <td>{entry_price} / {exit_price}</td>
+              <td>{realized_pnl} / {account_balance}</td>
+              <td>{exit_reason}</td>
+            </tr>
+            """
+        )
+    return "".join(rows)
+
+
 def _trade_summary_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
     payload = build_frontend_payload(_mobile_dashboard_payload(user_ctx, session))
     summary = _mapping(_mapping(payload.get("sections")).get("trade_summary"))
+    closed_trade_rows = _closed_trade_summary_rows()
 
     def field(label: str, key: str) -> str:
         value = summary.get(key, "DATA UNAVAILABLE")
@@ -1359,6 +1407,27 @@ def _trade_summary_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> st
           {_runtime_heartbeat_html()}
           <section class="metric-grid" aria-label="Compact Trade Summary">
             {content}
+          </section>
+          <section class="data-panel" aria-label="Closed Trade Transactions">
+            <h2>Closed Trade Transactions</h2>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Symbol</th>
+                    <th>Asset Class</th>
+                    <th>Side</th>
+                    <th>Quantity</th>
+                    <th>Entry / Exit</th>
+                    <th>Realized PnL / Balance</th>
+                    <th>Exit Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {closed_trade_rows}
+                </tbody>
+              </table>
+            </div>
           </section>
         </main>
         """,

@@ -443,8 +443,11 @@ def _launcher_positions_for_frontend() -> List[Dict[str, Any]]:
     return rows
 
 
-def _launcher_opportunities_for_frontend(limit: int = 10) -> List[Dict[str, Any]]:
-    feed = get_top_opportunities_feed(limit=limit)
+def _launcher_opportunities_for_frontend(
+    limit: int = 10,
+    opportunity_feed: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
+    feed = opportunity_feed if isinstance(opportunity_feed, dict) else get_top_opportunities_feed(limit=limit)
     rows = feed.get("top_opportunities", []) if isinstance(feed, dict) else []
     result: List[Dict[str, Any]] = []
     for row in rows if isinstance(rows, list) else []:
@@ -485,12 +488,15 @@ def _launcher_opportunities_for_frontend(limit: int = 10) -> List[Dict[str, Any]
     return result
 
 
-def build_launcher_frontend_state() -> Dict[str, Any]:
+def build_launcher_frontend_state(
+    opportunity_feed: Optional[Dict[str, Any]] = None,
+    runtime_health_feed: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     runtime = get_runtime_summary()
     account = get_account_summary()
     trade = get_trade_summary()
     engine = get_engine_summary()
-    health = get_runtime_health_feed()
+    health = runtime_health_feed if isinstance(runtime_health_feed, dict) else get_runtime_health_feed()
     session_state = _safe_load_artifact("css_session_state_pcnrass.json") or _safe_load_artifact("css_session_recovery.json")
     session = session_state.get("session", {}) if isinstance(session_state.get("session"), dict) else session_state
     session = session if isinstance(session, dict) else {}
@@ -567,7 +573,7 @@ def build_launcher_frontend_state() -> Dict[str, Any]:
             "live_trading_enabled": False,
             "readiness_status": "BROKER_DISABLED",
         },
-        "opportunities": _launcher_opportunities_for_frontend(limit=10),
+        "opportunities": _launcher_opportunities_for_frontend(limit=10, opportunity_feed=opportunity_feed),
     }
     return build_frontend_payload(dashboard_payload)
 
@@ -3016,7 +3022,10 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
     )
     long_duration_validation = get_long_duration_validation_feed(persist=False)
     strategy_evolution = get_strategy_evolution_feed()
-    launcher_frontend_state = build_launcher_frontend_state()
+    launcher_frontend_state = build_launcher_frontend_state(
+        opportunity_feed=top_opportunities,
+        runtime_health_feed=runtime_health,
+    )
     launcher_sections = launcher_frontend_state.get("sections", {}) if isinstance(launcher_frontend_state, dict) else {}
 
     return {

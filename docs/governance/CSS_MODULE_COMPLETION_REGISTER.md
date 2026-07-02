@@ -1,0 +1,44 @@
+# CSS Module Completion Register
+
+## Runtime And Supervision
+
+Status: Engineering complete for Version 1.0 pre-live certification.
+
+Covered capabilities include runtime supervisor, recovery, heartbeat, artifact freshness, dashboard synchronization, API consistency, websocket synchronization, runtime health, runtime latency diagnostics, and recovery reporting. Live-mode operation remains gated by live authorization and broker validation.
+
+## Dashboard Ecosystem
+
+Status: Engineering complete for Version 1.0 pre-live certification.
+
+Covered interfaces include desktop, web, mobile, and launcher. Dashboard panels consume canonical runtime data where available and expose explicit unavailable states when data is not present. Display-only surfaces must not execute trades or enable live trading.
+
+## Adaptive Intelligence
+
+Status: Engineering complete for Version 1.0 pre-live certification.
+
+Covered modules include factor performance learning, factor attribution, rolling reliability, regime learning, confidence calibration, adaptive weight recommendations, engine health learning, portfolio learning, cross-asset learning, and strategy recommendation surfaces. All outputs are advisory and must not bypass execution governance.
+
+## Portfolio Management
+
+Status: Engineering complete for Version 1.0 pre-live certification.
+
+Covered modules include allocation, concentration, correlation, diversification, capital efficiency, exposure balancing, survivability, recommendation, risk budgeting, and portfolio governance. Portfolio recommendations remain governed and non-executing unless downstream gates authorize a trade.
+
+## Risk Governance
+
+Status: Engineering complete for Version 1.0 pre-live certification.
+
+Covered controls include Unified Trade Gate, Margin Gate, AntiBleedGuard, Capital Governor, position limits, exposure limits, daily loss controls, drawdown controls, recovery logic, broker governance, portfolio governance, and runtime governance.
+
+## Reporting
+
+Status: Engineering complete for Version 1.0 pre-live certification.
+
+Covered reports include executive summary, daily summary, weekly summary, monthly summary, session summary, portfolio report, risk report, runtime health report, adaptive intelligence report, performance attribution report, paper session certification report, engineering completion report, and pre-live readiness report.
+
+## Remaining Non-Engineering Work
+
+1. Live broker validation
+2. Live micro-pilot
+3. Production operational certification
+
