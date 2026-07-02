@@ -226,6 +226,39 @@ def test_launcher_health_and_status_routes(launcher_temp_dir):
     assert "dashboard_url" in data
 
 
+def test_launcher_port_8765_exposes_phase_140b_141_frontend_routes(launcher_temp_dir):
+    assert LauncherConfig.PORT == 8765
+
+    frontend = client.get("/api/v1/frontend-state")
+    assert frontend.status_code == 200
+    frontend_payload = frontend.json()
+    assert "trade_summary" in frontend_payload["sections"]
+    assert "session_command_centre" in frontend_payload["sections"]
+    assert "opportunities" in frontend_payload["sections"]
+
+    trade_summary = client.get("/api/v1/trade-summary")
+    assert trade_summary.status_code == 200
+    assert trade_summary.json()["section"] == "trade_summary"
+    assert trade_summary.json()["data"]["execution_allowed"] is False
+
+    command_center = client.get("/api/v1/session-command-center")
+    assert command_center.status_code == 200
+    assert command_center.json()["section"] == "session_command_centre"
+    assert command_center.json()["data"]["execution_allowed"] is False
+
+
+def test_launcher_mobile_dashboard_renders_phase_140b_141_panels(launcher_temp_dir):
+    response = client.get("/mobile")
+    assert response.status_code == 200
+    html = response.text
+
+    assert "Session Command Centre" in html
+    assert "Trade Summary" in html
+    assert "Market Health" in html
+    assert "Advanced Intelligence Cards" in html
+    assert "AI Market Narrative" in html
+
+
 # ────────────────────────────────────────────────────────────────
 # PAUSE / RESUME TESTS
 # ────────────────────────────────────────────────────────────────

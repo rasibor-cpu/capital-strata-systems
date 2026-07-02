@@ -854,6 +854,54 @@
             </div>
         </div>
 
+        <div class="card" id="phase140b-trade-summary-card">
+            <div class="card-header">
+                Trade Summary
+                <span class="badge badge-info">DISPLAY ONLY</span>
+            </div>
+            <div class="status-row"><span>Date / Time</span><strong>{{ phase140b_trade_summary.date_time | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>Mode</span><strong>{{ phase140b_trade_summary.mode | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>Broker</span><strong>{{ phase140b_trade_summary.broker | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>Engine Mode</span><strong>{{ phase140b_trade_summary.engine_mode | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>Account Balance</span><strong>{{ phase140b_trade_summary.account_balance | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>Equity</span><strong>{{ phase140b_trade_summary.equity | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>Open Positions</span><strong>{{ phase140b_trade_summary.open_positions | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>Realized / Unrealized PnL</span><strong>{{ phase140b_trade_summary.realized_pnl | default('DATA UNAVAILABLE') }} / {{ phase140b_trade_summary.unrealized_pnl | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>Last Cycle / Update</span><strong>{{ phase140b_trade_summary.last_cycle | default('DATA UNAVAILABLE') }} / {{ phase140b_trade_summary.last_update | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>Execution Status</span><strong>{{ phase140b_trade_summary.execution_status | default('DATA UNAVAILABLE') }}</strong></div>
+        </div>
+
+        <div class="card" id="phase141-session-command-centre-card">
+            <div class="card-header">
+                Session Command Centre
+                <span class="badge badge-info">READ ONLY</span>
+            </div>
+            <div class="stat-grid">
+                <div class="stat-item">
+                    <div class="stat-label">Trade Quality Score</div>
+                    <div class="stat-value">{{ phase141_session_command_center.trade_quality_score | default('DATA UNAVAILABLE') }}</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Capital Efficiency Score</div>
+                    <div class="stat-value">{{ phase141_session_command_center.capital_efficiency_score | default('DATA UNAVAILABLE') }}</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Engine Health Score</div>
+                    <div class="stat-value">{{ phase141_session_command_center.engine_health_score | default('DATA UNAVAILABLE') }}</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Market Health</div>
+                    <div class="stat-value">{{ phase140a_opportunities.market_health | default('DATA UNAVAILABLE') }}</div>
+                </div>
+            </div>
+            <div style="margin-top:8px; font-size:12px; color:var(--text-secondary);">Advanced Intelligence Cards</div>
+            {% for card in phase141_session_command_center.intelligence_cards | default([]) %}
+            <div class="status-row"><span>{{ card.title }}</span><strong>{{ card.value }} / {{ card.status }}</strong></div>
+            {% endfor %}
+            <div style="margin-top:8px; font-size:12px; color:var(--text-secondary);">AI Market Narrative</div>
+            <div class="empty-state">{{ phase141_session_command_center.ai_market_narrative | default('DATA UNAVAILABLE') }}</div>
+        </div>
+
     </div><!-- /screen-home -->
 
     <!-- ══════════════════════════════════════════════

@@ -93,6 +93,7 @@ from backend.validation.runtime_validation_metrics import RuntimeValidationMetri
 from backend.validation.session_checkpoint_store import SessionCheckpointStore
 from backend.validation.validation_confidence_engine import ValidationConfidenceEngine
 from backend.validation.validation_readiness_engine import ValidationReadinessEngine
+from dashboard.runtime.frontend_contract import build_frontend_payload
 import uvicorn
 
 app = FastAPI(title=LauncherConfig.TITLE, version=LauncherConfig.VERSION)
@@ -419,6 +420,164 @@ def get_trade_summary() -> Dict[str, Any]:
         pass
         
     return summary
+
+
+def _launcher_positions_for_frontend() -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for position in _load_portfolio_positions():
+        if not isinstance(position, dict):
+            continue
+        rows.append(
+            {
+                "symbol": str(position.get("symbol", position.get("asset", "UNKNOWN"))),
+                "asset_class": str(position.get("asset_class", position.get("asset_type", "UNKNOWN"))),
+                "side": str(position.get("side", position.get("direction", "UNKNOWN"))),
+                "qty": position.get("qty", position.get("quantity", position.get("size", 0))),
+                "entry_price": position.get("entry_price", position.get("average_entry_price", 0)),
+                "current_price": position.get("current_price", position.get("mark_price", position.get("price", 0))),
+                "exposure": position.get("exposure", position.get("market_value", position.get("notional_value", 0))),
+                "realized_pnl": position.get("realized_pnl", 0),
+                "unrealized_pnl": position.get("unrealized_pnl", position.get("open_pnl", 0)),
+            }
+        )
+    return rows
+
+
+def _launcher_opportunities_for_frontend(limit: int = 10) -> List[Dict[str, Any]]:
+    feed = get_top_opportunities_feed(limit=limit)
+    rows = feed.get("top_opportunities", []) if isinstance(feed, dict) else []
+    result: List[Dict[str, Any]] = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        signal_color = str(row.get("signal_color", row.get("status", "WATCH"))).upper()
+        action = str(row.get("action", row.get("side", "WATCH"))).upper()
+        if signal_color == "GREEN":
+            status = "GREEN"
+            approval_state = "APPROVED"
+        elif signal_color == "AMBER":
+            status = "AMBER"
+            approval_state = "NEAR_APPROVED"
+        else:
+            status = "RED"
+            approval_state = "NOT_APPROVED"
+        result.append(
+            {
+                "symbol": str(row.get("symbol", "UNKNOWN")),
+                "asset_class": str(row.get("asset_class", "UNKNOWN")),
+                "side": "WATCH" if action == "BLOCK" else (action if action in {"BUY", "SELL", "WATCH"} else "WATCH"),
+                "signal": signal_color,
+                "score": row.get("opportunity_score", row.get("score", 0.0)),
+                "composite_score": row.get("opportunity_score", row.get("score", 0.0)),
+                "probability": row.get("confidence", row.get("probability", 0.0)),
+                "status": status,
+                "approval_state": approval_state,
+                "risk_state": signal_color,
+                "market_health": signal_color,
+                "opportunity_explanation": str(
+                    row.get(
+                        "reason",
+                        row.get("selected_strategy", "Risk-aware launcher opportunity; display only."),
+                    )
+                ),
+            }
+        )
+    return result
+
+
+def build_launcher_frontend_state() -> Dict[str, Any]:
+    runtime = get_runtime_summary()
+    account = get_account_summary()
+    trade = get_trade_summary()
+    engine = get_engine_summary()
+    health = get_runtime_health_feed()
+    session_state = _safe_load_artifact("css_session_state_pcnrass.json") or _safe_load_artifact("css_session_recovery.json")
+    session = session_state.get("session", {}) if isinstance(session_state.get("session"), dict) else session_state
+    session = session if isinstance(session, dict) else {}
+    positions = _launcher_positions_for_frontend()
+    runtime_mode = str(runtime.get("runtime_mode", "PAPER")).lower()
+    broker = str(session.get("broker", session.get("selected_broker", "NONE")))
+    broker_mode = str(session.get("broker_mode", "paper")).lower()
+    if broker_mode not in {"live", "paper"}:
+        broker_mode = "paper"
+
+    dashboard_payload = {
+        "generated_at": datetime.datetime.utcnow().isoformat() + "Z",
+        "session_id": str(session.get("session_id", "LAUNCHER-SESSION")),
+        "cycle_number": runtime.get("current_cycle", 0),
+        "engine_mode": engine.get("engine_mode", runtime.get("runtime_mode", "PAPER")),
+        "live_or_paper": "live" if runtime_mode == "live" else "paper",
+        "resolved_mode": "live" if runtime_mode == "live" and broker_mode == "live" else "paper",
+        "broker_mode": broker_mode,
+        "session": {
+            "session_id": str(session.get("session_id", "LAUNCHER-SESSION")),
+            "cycle_number": runtime.get("current_cycle", 0),
+            "engine_mode": engine.get("engine_mode", runtime.get("runtime_mode", "PAPER")),
+            "live_or_paper": "live" if runtime_mode == "live" else "paper",
+            "resolved_mode": "live" if runtime_mode == "live" and broker_mode == "live" else "paper",
+            "role": str(session.get("role", "TRADER")),
+        },
+        "account_summary": {
+            "account_balance": account.get("cash", 0.0),
+            "cash_balance": account.get("cash", 0.0),
+            "total_equity": account.get("equity", 0.0),
+            "equity": account.get("equity", 0.0),
+            "buying_power": account.get("buying_power", 0.0),
+            "currency": "USD",
+            "broker": broker,
+            "account_mode": broker_mode,
+        },
+        "pnl_summary": {
+            "realized_pnl": account.get("realized_pnl", 0.0),
+            "unrealized_pnl": account.get("open_pnl", 0.0),
+            "net_pnl": account.get("total_pnl", 0.0),
+            "account_equity": account.get("equity", 0.0),
+        },
+        "position_state": {
+            "open_count": trade.get("open_trades_count", len(positions)),
+            "positions": positions,
+        },
+        "open_positions": {
+            "total": trade.get("open_trades_count", len(positions)),
+            "by_asset": {},
+        },
+        "risk_summary": {
+            "risk_state": str(health.get("overall_operational_health", "UNKNOWN")),
+            "gate_status": str(engine.get("trade_gate_status", "SIMULATED")),
+            "risk_limits_breached": health.get("warnings", []),
+        },
+        "execution_summary": {
+            "execution_state": str(engine.get("trade_gate_status", "SIMULATED")),
+            "accepted_trade_count": trade.get("closed_trades_count", 0),
+            "rejected_trade_count": 0,
+            "pending_trade_count": trade.get("pending_orders_count", 0),
+            "last_execution_event": str(health.get("recommendation", "")),
+        },
+        "market_summary": {
+            "liquidity_state": "HEALTHY" if health.get("runtime_health") in {"GREEN", "AMBER"} else "UNKNOWN",
+            "volatility_state": "NORMAL",
+            "spread_state": "TIGHT",
+            "regime_state": str(runtime.get("runtime_mode", "PAPER")),
+            "signal_confluence_state": "CONFIRMED",
+        },
+        "broker_summary": {
+            "selected_broker": broker,
+            "broker_mode": broker_mode,
+            "connected": False,
+            "live_trading_enabled": False,
+            "readiness_status": "BROKER_DISABLED",
+        },
+        "opportunities": _launcher_opportunities_for_frontend(limit=10),
+    }
+    return build_frontend_payload(dashboard_payload)
+
+
+def get_launcher_trade_summary_feed() -> Dict[str, Any]:
+    return build_launcher_frontend_state().get("sections", {}).get("trade_summary", {})
+
+
+def get_launcher_session_command_center_feed() -> Dict[str, Any]:
+    return build_launcher_frontend_state().get("sections", {}).get("session_command_centre", {})
 
 
 def _load_portfolio_positions() -> List[Dict[str, Any]]:
@@ -2857,6 +3016,8 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
     )
     long_duration_validation = get_long_duration_validation_feed(persist=False)
     strategy_evolution = get_strategy_evolution_feed()
+    launcher_frontend_state = build_launcher_frontend_state()
+    launcher_sections = launcher_frontend_state.get("sections", {}) if isinstance(launcher_frontend_state, dict) else {}
 
     return {
         "title": "CSS Mobile Dashboard",
@@ -2925,6 +3086,10 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "validation_confidence": validation_confidence,
         "long_duration_validation": long_duration_validation,
         "strategy_evolution": strategy_evolution,
+        "launcher_frontend_state": launcher_frontend_state,
+        "phase140b_trade_summary": launcher_sections.get("trade_summary", {}),
+        "phase141_session_command_center": launcher_sections.get("session_command_centre", {}),
+        "phase140a_opportunities": launcher_sections.get("opportunities", {}),
         "portfolio_allocation": get_portfolio_allocation_feed(),
         "trade_ticket_defaults": trade_ticket_defaults,
         "ticket_asset_classes": ["CRYPTO", "FOREX", "INDICES", "FUTURES", "OPTIONS"],
@@ -2986,6 +3151,32 @@ async def status_check():
         "alert_summary": alerts,
         "dashboard_url": LauncherConfig.DASHBOARD_URL,
         "readiness": status
+    }
+
+
+@launcher_router.get("/api/v1/frontend-state")
+async def launcher_frontend_state():
+    return build_launcher_frontend_state()
+
+
+@launcher_router.get("/api/v1/trade-summary")
+async def launcher_trade_summary():
+    return {
+        "section": "trade_summary",
+        "data": get_launcher_trade_summary_feed(),
+        "advisory_only": True,
+        "execution_allowed": False,
+    }
+
+
+@launcher_router.get("/api/v1/session-command-center")
+@launcher_router.get("/api/v1/session-command-centre")
+async def launcher_session_command_center():
+    return {
+        "section": "session_command_centre",
+        "data": get_launcher_session_command_center_feed(),
+        "advisory_only": True,
+        "execution_allowed": False,
     }
 
 
