@@ -31,6 +31,7 @@ from .runtime_validation_metrics import RuntimeValidationMetrics, RuntimeValidat
 from .session_checkpoint_store import SessionCheckpointStore, SessionCheckpointStoreError
 from .validation_confidence_engine import ValidationConfidenceEngine, ValidationConfidenceEngineError
 from .validation_readiness_engine import ValidationReadinessEngine, ValidationReadinessEngineError
+from .live_readiness_certification import LiveReadinessCertificationEngine, LiveReadinessCertificationEngineError, certify_live_readiness
 __all__ = [
     "ContinuousPaperValidation",
     "ContinuousPaperValidationError",
@@ -67,6 +68,8 @@ __all__ = [
     "MarathonRuntimeStatisticsError",
     "LiveReadinessGate",
     "LiveReadinessGateError",
+    "LiveReadinessCertificationEngine",
+    "LiveReadinessCertificationEngineError",
     "LiveReadinessReport",
     "LongDurationValidation",
     "LongDurationValidationError",
@@ -91,4 +94,5 @@ __all__ = [
     "ValidationConfidenceEngineError",
     "ValidationReadinessEngine",
     "ValidationReadinessEngineError",
+    "certify_live_readiness",
 ]

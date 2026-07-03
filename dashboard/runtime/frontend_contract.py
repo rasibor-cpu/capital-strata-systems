@@ -20,6 +20,9 @@ from backend.analytics.portfolio_correlation_engine import (
     PortfolioCorrelationEngineError,
 )
 from backend.runtime.live_micro_pilot_governor import live_micro_pilot_status
+from backend.validation.live_readiness_certification import (
+    live_readiness_certification_status,
+)
 
 try:
     from backend.scanner.unified_market_scanner import UnifiedMarketScanner
@@ -48,6 +51,7 @@ FRONTEND_SECTIONS = (
     "trade_summary",
     "session_command_centre",
     "live_micro_pilot",
+    "live_readiness_certification",
     "broker",
     "broker_reconciliation",
     "analytics",
@@ -147,6 +151,7 @@ def build_frontend_payload(
             "trade_summary": trade_summary(dashboard_payload),
             "session_command_centre": session_command_centre(dashboard_payload),
             "live_micro_pilot": live_micro_pilot(dashboard_payload),
+            "live_readiness_certification": live_readiness_certification(dashboard_payload),
             "broker": broker(dashboard_payload),
             "broker_reconciliation": broker_reconciliation(dashboard_payload),
             "analytics": analytics(dashboard_payload),
@@ -939,6 +944,43 @@ def live_micro_pilot(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     payload["execution_allowed"] = False
     payload["advisory_only"] = True
     return payload
+
+
+def live_readiness_certification(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
+    explicit_payload = _mapping(dashboard_payload.get("live_readiness_certification"))
+    if explicit_payload:
+        report = dict(explicit_payload)
+    else:
+        try:
+            report = live_readiness_certification_status()
+        except Exception as exc:
+            report = {
+                "overall_certification_decision": "NO GO",
+                "certification_status": "NO GO",
+                "go_no_go": "NO GO",
+                "readiness_score": 0.0,
+                "known_warnings": [],
+                "known_blockers": [f"live_readiness_certification_unavailable:{exc}"],
+                "software_version": DATA_UNAVAILABLE,
+                "commit": DATA_UNAVAILABLE,
+                "git_tag": DATA_UNAVAILABLE,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+    return {
+        "section_title": "Live Readiness Certification",
+        "live_readiness_score": _number(report.get("readiness_score")),
+        "certification_status": str(report.get("certification_status", report.get("overall_certification_decision", "NO GO"))),
+        "go_no_go": str(report.get("go_no_go", report.get("overall_certification_decision", "NO GO"))),
+        "warnings": _string_list(report.get("known_warnings")),
+        "blockers": _string_list(report.get("known_blockers")),
+        "software_version": str(report.get("software_version", DATA_UNAVAILABLE)),
+        "commit": str(report.get("commit", DATA_UNAVAILABLE)),
+        "engineering_tag": str(report.get("git_tag", DATA_UNAVAILABLE)),
+        "last_certification_time": str(report.get("timestamp", DATA_UNAVAILABLE)),
+        "report": report,
+        "execution_allowed": False,
+        "advisory_only": True,
+    }
 
 
 def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:

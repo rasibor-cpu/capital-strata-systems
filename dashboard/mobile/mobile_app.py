@@ -41,7 +41,10 @@ from dashboard.runtime.audit_trail_viewer import (
 )
 from dashboard.runtime.trade_replay_harness import replay_mobile_trade_event_file
 from dashboard.runtime.dashboard_hydration_coordinator import DashboardHydrationCoordinator
-from dashboard.runtime.frontend_contract import build_frontend_payload
+from dashboard.runtime.frontend_contract import (
+    build_frontend_payload,
+    live_readiness_certification as build_live_readiness_certification_section,
+)
 from dashboard.runtime.runtime_bootstrap import DashboardRuntimeBootstrap
 from engine.execution.live_order_kill_switch import evaluate_live_order_kill_switch
 from backend.app.persistence.services.session_runtime_service import SessionRuntimeService
@@ -435,6 +438,15 @@ async def api_live_micro_pilot_status(request: Request):
     return JSONResponse({"ok": True, "live_micro_pilot": payload["sections"]["live_micro_pilot"]})
 
 
+@app.get("/api/live-readiness-certification")
+async def api_live_readiness_certification(request: Request):
+    session = _get_session(request)
+    if not session:
+        return JSONResponse({"ok": False, "status": "AUTH_REQUIRED"}, status_code=401)
+    payload = build_frontend_payload(_mobile_dashboard_payload(session["user_ctx"], session))
+    return JSONResponse({"ok": True, "live_readiness_certification": payload["sections"]["live_readiness_certification"]})
+
+
 @app.post("/api/live-micro-pilot/configure")
 async def api_live_micro_pilot_configure(request: Request):
     session = _get_session(request)
@@ -611,6 +623,15 @@ async def live_micro_pilot_screen(request: Request):
         return RedirectResponse("/login", status_code=303)
 
     return HTMLResponse(_live_micro_pilot_page(session["user_ctx"], session))
+
+
+@app.get("/live-readiness-certification", response_class=HTMLResponse)
+async def live_readiness_certification_screen(request: Request):
+    session = _get_session(request)
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+
+    return HTMLResponse(_live_readiness_certification_page(session["user_ctx"], session))
 
 
 @app.post("/trade", response_class=HTMLResponse)
@@ -938,6 +959,7 @@ def _top_nav(user_ctx: Dict[str, Any], active: str) -> str:
         ("trade-status", "Trade Status", "/trade-status"),
         ("trade-summary", "Trade Summary", "/trade-summary"),
         ("live-micro-pilot", "Micro-Pilot", "/live-micro-pilot"),
+        ("live-readiness-certification", "Live Cert", "/live-readiness-certification"),
         ("alerts", "Alert Centre", "/alerts"),
         ("margin", "Margin", "/margin"),):
         if active != key:
@@ -1301,6 +1323,7 @@ def _dashboard_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
           {_mobile_charts_html()}
           {_session_command_centre_panel(user_ctx, session)}
           {_live_micro_pilot_panel(user_ctx, session)}
+          {_live_readiness_certification_panel_from_payload(dashboard_payload)}
           {_command_center_panel(user_ctx)}
           {_recent_tickets_panel()}
 
@@ -1455,6 +1478,76 @@ def _live_micro_pilot_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) ->
               <article><strong>Breach Action</strong><span>{html.escape(str(reporting.get("breach_action", "DATA UNAVAILABLE")))}</span></article>
               <article><strong>Broker Connectivity</strong><span>{html.escape(str(reporting.get("no_broker_connectivity_required", True)))}</span></article>
             </div>
+          </section>
+        </main>
+        """,
+        meta_refresh=30,
+    )
+
+
+def _live_readiness_certification_payload(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> Dict[str, Any]:
+    return _mapping(build_live_readiness_certification_section(_mobile_dashboard_payload(user_ctx, session)))
+
+
+def _live_readiness_certification_panel(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
+    certification = _live_readiness_certification_payload(user_ctx, session)
+    return _live_readiness_certification_panel_markup(certification)
+
+
+def _live_readiness_certification_panel_from_payload(dashboard_payload: Dict[str, Any]) -> str:
+    certification = _mapping(build_live_readiness_certification_section(dashboard_payload))
+    return _live_readiness_certification_panel_markup(certification)
+
+
+def _live_readiness_certification_panel_markup(certification: Dict[str, Any]) -> str:
+    return f"""
+      <section class="data-panel" aria-label="Live Readiness Certification">
+        <h2>Live Readiness Certification</h2>
+        <div class="metric-grid">
+          <article><strong>Readiness Score</strong><span>{html.escape(str(certification.get("live_readiness_score", "DATA UNAVAILABLE")))}</span></article>
+          <article><strong>Certification Status</strong><span>{html.escape(str(certification.get("certification_status", "DATA UNAVAILABLE")))}</span></article>
+          <article><strong>GO / NO-GO</strong><span>{html.escape(str(certification.get("go_no_go", "DATA UNAVAILABLE")))}</span></article>
+          <article><strong>Engineering Tag</strong><span>{html.escape(str(certification.get("engineering_tag", "DATA UNAVAILABLE")))}</span></article>
+          <article><strong>Commit</strong><span>{html.escape(str(certification.get("commit", "DATA UNAVAILABLE")))}</span></article>
+          <article><strong>Last Certification</strong><span>{html.escape(str(certification.get("last_certification_time", "DATA UNAVAILABLE")))}</span></article>
+        </div>
+      </section>
+    """
+
+
+def _live_readiness_certification_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
+    certification = _live_readiness_certification_payload(user_ctx, session)
+    warnings = certification.get("warnings")
+    blockers = certification.get("blockers")
+    if not isinstance(warnings, list):
+        warnings = []
+    if not isinstance(blockers, list):
+        blockers = []
+    warning_markup = "".join(f"<li>{html.escape(str(item))}</li>" for item in warnings) or "<li>None reported</li>"
+    blocker_markup = "".join(f"<li>{html.escape(str(item))}</li>" for item in blockers) or "<li>None reported</li>"
+    return _page(
+        "Live Readiness Certification",
+        f"""
+        <main class="dashboard-shell">
+          {_header("Live Readiness Certification", user_ctx, "live-readiness-certification")}
+          {_identity_strip(user_ctx, "Read-only GO/NO-GO validation")}
+          {_runtime_heartbeat_html()}
+          <section class="metric-grid" aria-label="Live Readiness Certification Summary">
+            <article><strong>Readiness Score</strong><span>{html.escape(str(certification.get("live_readiness_score", "DATA UNAVAILABLE")))}</span></article>
+            <article><strong>Certification Status</strong><span>{html.escape(str(certification.get("certification_status", "DATA UNAVAILABLE")))}</span></article>
+            <article><strong>GO / NO-GO</strong><span>{html.escape(str(certification.get("go_no_go", "DATA UNAVAILABLE")))}</span></article>
+            <article><strong>Software Version</strong><span>{html.escape(str(certification.get("software_version", "DATA UNAVAILABLE")))}</span></article>
+            <article><strong>Commit</strong><span>{html.escape(str(certification.get("commit", "DATA UNAVAILABLE")))}</span></article>
+            <article><strong>Engineering Tag</strong><span>{html.escape(str(certification.get("engineering_tag", "DATA UNAVAILABLE")))}</span></article>
+            <article><strong>Last Certification Time</strong><span>{html.escape(str(certification.get("last_certification_time", "DATA UNAVAILABLE")))}</span></article>
+          </section>
+          <section class="data-panel" aria-label="Known Warnings">
+            <h2>Warnings</h2>
+            <ul>{warning_markup}</ul>
+          </section>
+          <section class="data-panel" aria-label="Known Blockers">
+            <h2>Blockers</h2>
+            <ul>{blocker_markup}</ul>
           </section>
         </main>
         """,

@@ -918,6 +918,22 @@
             <div class="status-row"><span>Operator Controls</span><strong>{{ phase152a_live_micro_pilot.operator_controls | default('SUPER_USER_ONLY') }}</strong></div>
         </div>
 
+        <div class="card" id="phase152b-live-readiness-certification-card">
+            <div class="card-header">
+                Live Readiness Certification
+                <span class="badge badge-info">READ ONLY</span>
+            </div>
+            <div class="status-row"><span>Readiness Score</span><strong>{{ phase152b_live_readiness_certification.live_readiness_score | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>Certification Status</span><strong>{{ phase152b_live_readiness_certification.certification_status | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>GO / NO-GO</span><strong>{{ phase152b_live_readiness_certification.go_no_go | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>Warnings</span><strong>{{ phase152b_live_readiness_certification.warnings | default([]) | length }}</strong></div>
+            <div class="status-row"><span>Blockers</span><strong>{{ phase152b_live_readiness_certification.blockers | default([]) | length }}</strong></div>
+            <div class="status-row"><span>Software Version</span><strong>{{ phase152b_live_readiness_certification.software_version | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>Commit</span><strong>{{ phase152b_live_readiness_certification.commit | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>Engineering Tag</span><strong>{{ phase152b_live_readiness_certification.engineering_tag | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>Last Certification</span><strong>{{ phase152b_live_readiness_certification.last_certification_time | default('DATA UNAVAILABLE') }}</strong></div>
+        </div>
+
     </div><!-- /screen-home -->
 
     <!-- ══════════════════════════════════════════════

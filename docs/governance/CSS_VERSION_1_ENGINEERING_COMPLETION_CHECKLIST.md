@@ -57,3 +57,12 @@ The only remaining work before production deployment is:
 - [x] SUPER_USER plus `EXECUTE` confirmation is required for pilot configuration and arming.
 - [x] Dashboard, mobile, and launcher surfaces expose read-only pilot status.
 - [x] Live broker validation remains separate and is not certified by this checklist.
+
+## Phase 152B Live Readiness Certification
+
+- [x] Live Readiness Certification engine reports PASS/WARNING/FAIL per safety component.
+- [x] One canonical GO / GO WITH CONDITIONS / NO GO decision is produced.
+- [x] Phase 152A CAD 20 governor safety properties are explicitly verified.
+- [x] Certification report exposes warnings, blockers, commit, tag, and timestamp.
+- [x] Desktop, mobile, launcher, and API surfaces expose read-only certification status.
+- [x] Live broker validation remains a separate operational step.

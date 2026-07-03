@@ -133,6 +133,13 @@ def create_dashboard_state_router(
             "live_micro_pilot",
         )
 
+    @router.get("/api/v1/live-readiness-certification")
+    def read_live_readiness_certification() -> dict[str, Any]:
+        return build_section_payload(
+            _state_from_provider(state_provider),
+            "live_readiness_certification",
+        )
+
     @router.get("/api/v1/broker")
     def read_broker() -> dict[str, Any]:
         return build_section_payload(

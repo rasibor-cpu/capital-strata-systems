@@ -64,6 +64,10 @@ def create_app(
     async def session_command_centre() -> HTMLResponse:
         return HTMLResponse(_session_command_centre_page())
 
+    @app.get("/live-readiness-certification", response_class=HTMLResponse)
+    async def live_readiness_certification() -> HTMLResponse:
+        return HTMLResponse(_live_readiness_certification_page())
+
     @app.get("/execution", response_class=HTMLResponse)
     async def execution() -> HTMLResponse:
         return HTMLResponse(_execution_page())
@@ -148,6 +152,7 @@ def _app_nav(active: str) -> str:
       ("trade", "/trade", "Trade"),
         ("trade_summary", "/trade-summary", "Trade Summary"),
         ("command_centre", "/session-command-centre", "Command Centre"),
+        ("live_readiness_certification", "/live-readiness-certification", "Live Cert"),
         ("execution", "/execution", "Execution"),
         ("risk_governance", "/risk-governance", "Risk & Governance"),
         ("market_opportunities", "/market-opportunities", "Market"),
@@ -1706,6 +1711,59 @@ def _session_command_centre_page() -> str:
         const cards = data.intelligence_cards || [];
         document.getElementById("card-count").textContent = String(cards.length);
         document.getElementById("scc-cards").innerHTML = cards.map((card) => `<li>${{show(card.title)}}: ${{show(card.value)}} (${{show(card.status)}})</li>`).join("");
+      }})
+      .catch(() => undefined);
+  </script>
+</body>
+</html>"""
+
+
+def _live_readiness_certification_page() -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>CSS Live Readiness Certification</title>
+  <style>{_css()}</style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand-lockup"><div class="brand-mark">CSS</div><div><p class="eyebrow">Capital Strata Systems</p><h1>Live Readiness Certification</h1></div></div>
+      <section class="status-strip"><span>Read Only</span><span>No live execution</span></section>
+    </header>
+    {_app_nav("live_readiness_certification")}
+    <section class="metric-band" aria-label="Live readiness certification summary">
+      <article><strong>Live Readiness Score</strong><span data-lrc="live_readiness_score">DATA UNAVAILABLE</span></article>
+      <article><strong>Certification Status</strong><span data-lrc="certification_status">DATA UNAVAILABLE</span></article>
+      <article><strong>GO / NO-GO</strong><span data-lrc="go_no_go">DATA UNAVAILABLE</span></article>
+      <article><strong>Software Version</strong><span data-lrc="software_version">DATA UNAVAILABLE</span></article>
+      <article><strong>Commit</strong><span data-lrc="commit">DATA UNAVAILABLE</span></article>
+      <article><strong>Engineering Tag</strong><span data-lrc="engineering_tag">DATA UNAVAILABLE</span></article>
+      <article><strong>Last Certification Time</strong><span data-lrc="last_certification_time">DATA UNAVAILABLE</span></article>
+    </section>
+    <section class="dashboard-grid">
+      <article class="panel"><div class="panel-head"><h2>Warnings</h2><span id="lrc-warning-count">0</span></div><ul id="lrc-warnings" class="compact-list"></ul></article>
+      <article class="panel"><div class="panel-head"><h2>Blockers</h2><span id="lrc-blocker-count">0</span></div><ul id="lrc-blockers" class="compact-list"></ul></article>
+    </section>
+  </main>
+  <script>
+    function show(v) {{ return v === null || v === undefined || v === "" ? "DATA UNAVAILABLE" : String(v); }}
+    function row(v) {{ return `<li>${{show(v)}}</li>`; }}
+    fetch("/api/v1/live-readiness-certification", {{cache:"no-store"}})
+      .then((r) => r.json())
+      .then((p) => {{
+        const data = p.data || {{}};
+        document.querySelectorAll("[data-lrc]").forEach((node) => {{
+          node.textContent = show(data[node.getAttribute("data-lrc")]);
+        }});
+        const warnings = Array.isArray(data.warnings) ? data.warnings : [];
+        const blockers = Array.isArray(data.blockers) ? data.blockers : [];
+        document.getElementById("lrc-warning-count").textContent = String(warnings.length);
+        document.getElementById("lrc-blocker-count").textContent = String(blockers.length);
+        document.getElementById("lrc-warnings").innerHTML = warnings.map(row).join("") || "<li>None reported</li>";
+        document.getElementById("lrc-blockers").innerHTML = blockers.map(row).join("") || "<li>None reported</li>";
       }})
       .catch(() => undefined);
   </script>

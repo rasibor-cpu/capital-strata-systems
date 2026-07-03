@@ -57,3 +57,11 @@ Status: Engineering guardrail implemented for review.
 Phase 152A adds the fail-closed Live Micro-Pilot Capital Governor, CAD 20 maximum live test capital policy, SUPER_USER-only pilot controls, audit events, and read-only dashboard/API visibility.
 
 This register does not authorize live broker execution. Live broker validation, live micro-pilot rehearsal, and production operational certification remain separate.
+
+## Phase 152B Live Readiness Certification Register
+
+Status: Engineering certification layer implemented for review.
+
+Phase 152B adds the read-only Live Readiness Certification engine, PASS/WARNING/FAIL check matrix, canonical GO / GO WITH CONDITIONS / NO GO decision, structured report, Phase 152A governor verification, and dashboard/API visibility.
+
+This register does not authorize live broker execution. Live broker validation remains the next separate operational step.

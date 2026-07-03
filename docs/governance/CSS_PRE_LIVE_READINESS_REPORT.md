@@ -28,6 +28,12 @@ Phase 152A adds an engineering guardrail for a future controlled live micro-pilo
 
 Phase 152A does not authorize live trading. Live broker validation and operational certification remain separate required approvals.
 
+## Phase 152B Live Readiness Certification Addendum
+
+Phase 152B adds a read-only GO/NO-GO certification layer before first live broker validation. The engine validates required live safety components, reports PASS/WARNING/FAIL for each check, produces one canonical `GO`, `GO WITH CONDITIONS`, or `NO GO` decision, and exposes the result through desktop, mobile, launcher, and API surfaces.
+
+Phase 152B does not submit broker orders, enable live trading, or weaken broker permissions. A `GO` result is engineering certification for controlled CAD 20 broker validation review only; live broker validation and operational approval remain separate.
+
 ## Safety Controls Required For LIVE
 
 LIVE mode must continue to require Unified Trade Gate, Margin Gate, RBAC, Capital Governor, AntiBleedGuard, kill switches, emergency stops, broker validation, execution authorization, and configured broker controls.
