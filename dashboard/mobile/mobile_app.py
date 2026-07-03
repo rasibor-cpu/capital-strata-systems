@@ -47,6 +47,11 @@ from engine.execution.live_order_kill_switch import evaluate_live_order_kill_swi
 from backend.app.persistence.services.session_runtime_service import SessionRuntimeService
 from backend.app.persistence.services.pnl_runtime_service import PnlRuntimeService
 from backend.app.persistence.services.trade_runtime_service import TradeRuntimeService
+from backend.runtime.live_micro_pilot_governor import (
+    LiveMicroPilotAuthorizationError,
+    LiveMicroPilotConfigurationError,
+    LiveMicroPilotGovernor,
+)
 
 
 SESSION_COOKIE = "css_mobile_session"
@@ -421,6 +426,69 @@ async def api_session_command_centre(request: Request):
     return JSONResponse({"ok": True, "session_command_centre": payload["sections"]["session_command_centre"]})
 
 
+@app.get("/api/live-micro-pilot-status")
+async def api_live_micro_pilot_status(request: Request):
+    session = _get_session(request)
+    if not session:
+        return JSONResponse({"ok": False, "status": "AUTH_REQUIRED"}, status_code=401)
+    payload = build_frontend_payload(_mobile_dashboard_payload(session["user_ctx"], session))
+    return JSONResponse({"ok": True, "live_micro_pilot": payload["sections"]["live_micro_pilot"]})
+
+
+@app.post("/api/live-micro-pilot/configure")
+async def api_live_micro_pilot_configure(request: Request):
+    session = _get_session(request)
+    if not session:
+        return JSONResponse({"ok": False, "status": "AUTH_REQUIRED"}, status_code=401)
+    form = await _read_form(request)
+    try:
+        status = LiveMicroPilotGovernor().write_config(
+            form,
+            user_ctx=session["user_ctx"],
+            confirmation_word=form.get("confirmation_word", ""),
+        )
+    except LiveMicroPilotAuthorizationError as exc:
+        return JSONResponse({"ok": False, "status": "LIVE_MICRO_PILOT_AUTH_REQUIRED", "error": str(exc)}, status_code=403)
+    except LiveMicroPilotConfigurationError as exc:
+        return JSONResponse({"ok": False, "status": "LIVE_MICRO_PILOT_CONFIG_INVALID", "error": str(exc)}, status_code=400)
+    return JSONResponse({"ok": True, "live_micro_pilot": status})
+
+
+@app.post("/api/live-micro-pilot/arm")
+async def api_live_micro_pilot_arm(request: Request):
+    session = _get_session(request)
+    if not session:
+        return JSONResponse({"ok": False, "status": "AUTH_REQUIRED"}, status_code=401)
+    form = await _read_form(request)
+    try:
+        status = LiveMicroPilotGovernor().arm(
+            user_ctx=session["user_ctx"],
+            confirmation_word=form.get("confirmation_word", ""),
+        )
+    except LiveMicroPilotAuthorizationError as exc:
+        return JSONResponse({"ok": False, "status": "LIVE_MICRO_PILOT_AUTH_REQUIRED", "error": str(exc)}, status_code=403)
+    except LiveMicroPilotConfigurationError as exc:
+        return JSONResponse({"ok": False, "status": "LIVE_MICRO_PILOT_CONFIG_INVALID", "error": str(exc)}, status_code=400)
+    return JSONResponse({"ok": True, "live_micro_pilot": status})
+
+
+@app.post("/api/live-micro-pilot/disarm")
+async def api_live_micro_pilot_disarm(request: Request):
+    session = _get_session(request)
+    if not session:
+        return JSONResponse({"ok": False, "status": "AUTH_REQUIRED"}, status_code=401)
+    form = await _read_form(request)
+    try:
+        status = LiveMicroPilotGovernor().disarm(
+            user_ctx=session["user_ctx"],
+            confirmation_word=form.get("confirmation_word", ""),
+            reason="operator_disarmed",
+        )
+    except LiveMicroPilotAuthorizationError as exc:
+        return JSONResponse({"ok": False, "status": "LIVE_MICRO_PILOT_AUTH_REQUIRED", "error": str(exc)}, status_code=403)
+    return JSONResponse({"ok": True, "live_micro_pilot": status})
+
+
 @app.get("/api/audit/export")
 async def audit_export(request: Request):
     session = _get_session(request)
@@ -534,6 +602,15 @@ async def trade_summary_screen(request: Request):
         return RedirectResponse("/login", status_code=303)
 
     return HTMLResponse(_trade_summary_page(session["user_ctx"], session))
+
+
+@app.get("/live-micro-pilot", response_class=HTMLResponse)
+async def live_micro_pilot_screen(request: Request):
+    session = _get_session(request)
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+
+    return HTMLResponse(_live_micro_pilot_page(session["user_ctx"], session))
 
 
 @app.post("/trade", response_class=HTMLResponse)
@@ -860,6 +937,7 @@ def _top_nav(user_ctx: Dict[str, Any], active: str) -> str:
         ("session-command-centre", "Command Centre", "/session-command-centre"),
         ("trade-status", "Trade Status", "/trade-status"),
         ("trade-summary", "Trade Summary", "/trade-summary"),
+        ("live-micro-pilot", "Micro-Pilot", "/live-micro-pilot"),
         ("alerts", "Alert Centre", "/alerts"),
         ("margin", "Margin", "/margin"),):
         if active != key:
@@ -1222,6 +1300,7 @@ def _dashboard_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
           {_account_summary_cards(dashboard_payload)}
           {_mobile_charts_html()}
           {_session_command_centre_panel(user_ctx, session)}
+          {_live_micro_pilot_panel(user_ctx, session)}
           {_command_center_panel(user_ctx)}
           {_recent_tickets_panel()}
 
@@ -1301,6 +1380,81 @@ def _session_command_centre_page(user_ctx: Dict[str, Any], session: Dict[str, An
           <section class="data-panel" aria-label="Navigation Links">
             <h2>Navigation Links</h2>
             <div class="command-grid">{nav_markup}</div>
+          </section>
+        </main>
+        """,
+        meta_refresh=30,
+    )
+
+
+def _live_micro_pilot_payload(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> Dict[str, Any]:
+    payload = build_frontend_payload(_mobile_dashboard_payload(user_ctx, session))
+    return _mapping(_mapping(payload.get("sections")).get("live_micro_pilot"))
+
+
+def _live_micro_pilot_panel(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
+    pilot = _live_micro_pilot_payload(user_ctx, session)
+    return f"""
+      <section class="data-panel" aria-label="Live Micro-Pilot Status">
+        <h2>Live Micro-Pilot Status</h2>
+        <div class="metric-grid">
+          <article><strong>State</strong><span>{html.escape(str(pilot.get("pilot_state", "DATA UNAVAILABLE")))}</span></article>
+          <article><strong>Armed</strong><span>{html.escape(str(pilot.get("pilot_armed", False)))}</span></article>
+          <article><strong>Cap</strong><span>{html.escape(str(pilot.get("currency", "CAD")))} {html.escape(str(pilot.get("max_live_test_capital", "20.00")))}</span></article>
+          <article><strong>Remaining</strong><span>{html.escape(str(pilot.get("currency", "CAD")))} {html.escape(str(pilot.get("remaining_live_test_capacity", "DATA UNAVAILABLE")))}</span></article>
+          <article><strong>Positions</strong><span>{html.escape(str(pilot.get("open_live_positions", 0)))} / {html.escape(str(pilot.get("max_concurrent_positions", 1)))}</span></article>
+          <article><strong>Orders</strong><span>{html.escape(str(pilot.get("orders_used_this_session", 0)))} / {html.escape(str(pilot.get("max_orders_per_session", 10)))}</span></article>
+          <article><strong>Broker Guard</strong><span>{html.escape(str(pilot.get("broker_submission_guard", "REJECT_BEFORE_BROKER")))}</span></article>
+          <article><strong>Operator Controls</strong><span>{html.escape(str(pilot.get("operator_controls", "SUPER_USER_ONLY")))}</span></article>
+        </div>
+      </section>
+    """
+
+
+def _live_micro_pilot_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
+    pilot = _live_micro_pilot_payload(user_ctx, session)
+    reporting = _mapping(pilot.get("reporting"))
+    def field(label: str, key: str) -> str:
+        value = pilot.get(key, "DATA UNAVAILABLE")
+        return f"<article><strong>{html.escape(label)}</strong><span>{html.escape(str(value))}</span></article>"
+
+    content = "".join(
+        [
+            field("Pilot Enabled", "pilot_enabled"),
+            field("Pilot Armed", "pilot_armed"),
+            field("Pilot State", "pilot_state"),
+            field("Currency", "currency"),
+            field("Max Live Test Capital", "max_live_test_capital"),
+            field("Max Position Size", "max_position_size"),
+            field("Remaining Capacity", "remaining_live_test_capacity"),
+            field("Capital Deployed", "capital_deployed"),
+            field("Open Live Positions", "open_live_positions"),
+            field("Orders Used", "orders_used_this_session"),
+            field("Daily Loss Limit", "daily_loss_limit"),
+            field("Session Loss Limit", "session_loss_limit"),
+            field("Broker Submission Guard", "broker_submission_guard"),
+            field("Auto Flattening", "auto_flattening_enabled"),
+            field("Operator Controls", "operator_controls"),
+        ]
+    )
+    return _page(
+        "Live Micro-Pilot Status",
+        f"""
+        <main class="dashboard-shell">
+          {_header("Live Micro-Pilot Status", user_ctx, "live-micro-pilot")}
+          {_identity_strip(user_ctx, "Display-only pilot status")}
+          {_runtime_heartbeat_html()}
+          <section class="metric-grid" aria-label="Live Micro-Pilot Limits">
+            {content}
+          </section>
+          <section class="data-panel" aria-label="Live Micro-Pilot Reporting">
+            <h2>Reporting</h2>
+            <div class="metric-grid">
+              <article><strong>Cap Remaining</strong><span>{html.escape(str(reporting.get("cap_remaining", "DATA UNAVAILABLE")))}</span></article>
+              <article><strong>Orders Remaining</strong><span>{html.escape(str(reporting.get("orders_remaining", "DATA UNAVAILABLE")))}</span></article>
+              <article><strong>Breach Action</strong><span>{html.escape(str(reporting.get("breach_action", "DATA UNAVAILABLE")))}</span></article>
+              <article><strong>Broker Connectivity</strong><span>{html.escape(str(reporting.get("no_broker_connectivity_required", True)))}</span></article>
+            </div>
           </section>
         </main>
         """,
@@ -2926,6 +3080,35 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
         _record_mobile_event({"event_type": "mobile_order_rejected", **result})
         return result
 
+    live_micro_pilot_governor = LiveMicroPilotGovernor()
+    if is_live_request:
+        pilot_decision = live_micro_pilot_governor.evaluate_order(
+            {
+                "broker": broker,
+                "broker_mode": "live",
+                "mobile_trading_mode": mobile_mode,
+                "symbol": ticket["symbol"],
+                "side": ticket["side"],
+                "notional": ticket["amount"],
+                "asset_class": ticket["asset_class"],
+            },
+            daily_pnl=pnl_snapshot.get("daily_pnl", pnl_snapshot.get("realized_pnl", 0.0)),
+            session_pnl=pnl_snapshot.get("session_pnl", pnl_snapshot.get("realized_pnl", 0.0)),
+        )
+        if not pilot_decision.approved:
+            result = {
+                "ok": False,
+                "status": "LIVE_MICRO_PILOT_REJECTED",
+                "ticket": ticket,
+                "broker_response": {
+                    "live_order_sent": False,
+                    "reason": pilot_decision.reason,
+                    "pilot_status": pilot_decision.status,
+                },
+            }
+            _record_mobile_event({"event_type": "mobile_order_rejected", **result})
+            return result
+
     # Persist via TradeRuntimeService
     try:
         from decimal import Decimal
@@ -2943,6 +3126,17 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
             entry_price=Decimal("0.0"),
             raw_payload_json=json.dumps(ticket)
         )
+        if is_live_request:
+            live_micro_pilot_governor.record_order_submitted(
+                {
+                    "broker": broker,
+                    "broker_mode": "live",
+                    "symbol": ticket["symbol"],
+                    "side": ticket["side"],
+                    "notional": ticket["amount"],
+                    "mobile_trading_mode": mobile_mode,
+                }
+            )
     except Exception as e:
         result = {
             "ok": False,

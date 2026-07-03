@@ -13,7 +13,7 @@ The repository includes governed runtime, dashboard, adaptive intelligence, inst
 LIVE mode is not certified by this document. Live operation remains blocked until:
 
 1. Live broker validation is completed.
-2. Live micro-pilot is completed.
+2. Live micro-pilot broker validation and operator rehearsal are completed.
 3. Production operational certification is approved.
 
 ## Phase 151 Audit Integrity Addendum
@@ -21,6 +21,12 @@ LIVE mode is not certified by this document. Live operation remains blocked unti
 Phase 150 established engineering implementation completion. Phase 151 independently verifies audit findings and closes certification-integrity hardening before live broker validation.
 
 Phase 151 does not change the live operational boundary. Live broker validation, live micro-pilot, and production operational certification remain separate required steps.
+
+## Phase 152A Live Micro-Pilot Governor Addendum
+
+Phase 152A adds an engineering guardrail for a future controlled live micro-pilot. The governor defaults to disabled, fails closed when explicit configuration is missing, caps live test capital at CAD 20, rejects breaches before broker submission, audits operator and rejection events, and exposes read-only dashboard/API status.
+
+Phase 152A does not authorize live trading. Live broker validation and operational certification remain separate required approvals.
 
 ## Safety Controls Required For LIVE
 

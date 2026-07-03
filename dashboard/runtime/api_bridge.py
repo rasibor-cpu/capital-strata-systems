@@ -126,6 +126,13 @@ def create_dashboard_state_router(
             "session_command_centre",
         )
 
+    @router.get("/api/v1/live-micro-pilot-status")
+    def read_live_micro_pilot_status() -> dict[str, Any]:
+        return build_section_payload(
+            _state_from_provider(state_provider),
+            "live_micro_pilot",
+        )
+
     @router.get("/api/v1/broker")
     def read_broker() -> dict[str, Any]:
         return build_section_payload(

@@ -19,6 +19,7 @@ from backend.analytics.portfolio_correlation_engine import (
     PortfolioCorrelationEngine,
     PortfolioCorrelationEngineError,
 )
+from backend.runtime.live_micro_pilot_governor import live_micro_pilot_status
 
 try:
     from backend.scanner.unified_market_scanner import UnifiedMarketScanner
@@ -46,6 +47,7 @@ FRONTEND_SECTIONS = (
     "opportunities",
     "trade_summary",
     "session_command_centre",
+    "live_micro_pilot",
     "broker",
     "broker_reconciliation",
     "analytics",
@@ -144,6 +146,7 @@ def build_frontend_payload(
             "opportunities": opportunities(dashboard_payload),
             "trade_summary": trade_summary(dashboard_payload),
             "session_command_centre": session_command_centre(dashboard_payload),
+            "live_micro_pilot": live_micro_pilot(dashboard_payload),
             "broker": broker(dashboard_payload),
             "broker_reconciliation": broker_reconciliation(dashboard_payload),
             "analytics": analytics(dashboard_payload),
@@ -907,6 +910,35 @@ def session_command_centre(dashboard_payload: Mapping[str, Any]) -> dict[str, An
         "advisory_only": True,
         "execution_allowed": False,
     }
+
+
+def live_micro_pilot(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
+    explicit_payload = _mapping(dashboard_payload.get("live_micro_pilot"))
+    if explicit_payload:
+        payload = dict(explicit_payload)
+    else:
+        try:
+            payload = live_micro_pilot_status()
+        except Exception as exc:
+            payload = {
+                "section_title": "Live Micro-Pilot Status",
+                "pilot_enabled": False,
+                "pilot_armed": False,
+                "pilot_state": "FAIL_CLOSED",
+                "currency": "CAD",
+                "max_live_test_capital": "20.00",
+                "max_position_size": "20.00",
+                "remaining_live_test_capacity": "0.00",
+                "config_valid": False,
+                "config_error": str(exc),
+                "pilot_guard_enforced": True,
+                "broker_submission_guard": "REJECT_BEFORE_BROKER",
+                "auto_flattening_enabled": False,
+                "operator_controls": "SUPER_USER_ONLY",
+            }
+    payload["execution_allowed"] = False
+    payload["advisory_only"] = True
+    return payload
 
 
 def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:

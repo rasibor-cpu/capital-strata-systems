@@ -87,6 +87,7 @@ from backend.runtime.runtime_artifact_publisher import RuntimeArtifactPublisher
 from backend.runtime.runtime_portfolio_lifecycle import RuntimePortfolioLifecycle
 from backend.runtime.runtime_session_continuity import RuntimeSessionContinuityMonitor
 from backend.runtime.session_renewal import SessionRenewalManager
+from backend.runtime.live_micro_pilot_governor import live_micro_pilot_status
 from backend.validation.continuous_validation_monitor import ContinuousValidationMonitor
 from backend.validation.long_duration_validation import LongDurationValidation
 from backend.validation.runtime_validation_metrics import RuntimeValidationMetrics
@@ -586,6 +587,10 @@ def get_launcher_trade_summary_feed() -> Dict[str, Any]:
 
 def get_launcher_session_command_center_feed() -> Dict[str, Any]:
     return build_launcher_frontend_state().get("sections", {}).get("session_command_centre", {})
+
+
+def get_launcher_live_micro_pilot_feed() -> Dict[str, Any]:
+    return build_launcher_frontend_state().get("sections", {}).get("live_micro_pilot", live_micro_pilot_status())
 
 
 def _load_portfolio_positions() -> List[Dict[str, Any]]:
@@ -3101,6 +3106,7 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "phase140b_trade_summary": launcher_sections.get("trade_summary", {}),
         "phase141_session_command_center": launcher_sections.get("session_command_centre", {}),
         "phase140a_opportunities": launcher_sections.get("opportunities", {}),
+        "phase152a_live_micro_pilot": launcher_sections.get("live_micro_pilot", live_micro_pilot_status()),
         "portfolio_allocation": get_portfolio_allocation_feed(),
         "trade_ticket_defaults": trade_ticket_defaults,
         "ticket_asset_classes": ["CRYPTO", "FOREX", "INDICES", "FUTURES", "OPTIONS"],
@@ -3186,6 +3192,16 @@ async def launcher_session_command_center():
     return {
         "section": "session_command_centre",
         "data": get_launcher_session_command_center_feed(),
+        "advisory_only": True,
+        "execution_allowed": False,
+    }
+
+
+@launcher_router.get("/api/v1/live-micro-pilot-status")
+async def launcher_live_micro_pilot_status():
+    return {
+        "section": "live_micro_pilot",
+        "data": get_launcher_live_micro_pilot_feed(),
         "advisory_only": True,
         "execution_allowed": False,
     }

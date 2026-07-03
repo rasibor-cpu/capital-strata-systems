@@ -38,7 +38,7 @@
 The only remaining work before production deployment is:
 
 1. Live broker validation
-2. Live micro-pilot
+2. Live micro-pilot broker validation and operator rehearsal
 3. Production operational certification
 
 ## Phase 151 Audit Integrity
@@ -49,3 +49,11 @@ The only remaining work before production deployment is:
 - [x] Live mobile trade gate routing determinism is certified.
 - [x] Full-history secret scan runbook is documented for pre-live validation.
 - [x] Legacy/archive hygiene recommendations are documented without deleting archive folders.
+
+## Phase 152A Live Micro-Pilot Governor
+
+- [x] Live Micro-Pilot Capital Governor defaults are disabled and fail-closed.
+- [x] CAD 20 maximum live test capital and CAD 20 maximum position size are enforced.
+- [x] SUPER_USER plus `EXECUTE` confirmation is required for pilot configuration and arming.
+- [x] Dashboard, mobile, and launcher surfaces expose read-only pilot status.
+- [x] Live broker validation remains separate and is not certified by this checklist.

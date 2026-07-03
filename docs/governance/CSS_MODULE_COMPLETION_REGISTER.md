@@ -39,7 +39,7 @@ Covered reports include executive summary, daily summary, weekly summary, monthl
 ## Remaining Non-Engineering Work
 
 1. Live broker validation
-2. Live micro-pilot
+2. Live micro-pilot broker validation and operator rehearsal
 3. Production operational certification
 
 ## Phase 151 Certification Integrity Register
@@ -49,3 +49,11 @@ Status: Audit remediation complete for Version 1.0 review.
 Phase 151 confirms the autonomous supervisor contract is present on the current branch, strengthens live mobile trade gate verification, hardens AntiBleedGuard against production dev overrides, resolves launcher PWA icon routing, documents full-history secret scanning, and records archive hygiene recommendations.
 
 This register does not certify live broker operation. Live broker validation remains separate.
+
+## Phase 152A Live Micro-Pilot Governor Register
+
+Status: Engineering guardrail implemented for review.
+
+Phase 152A adds the fail-closed Live Micro-Pilot Capital Governor, CAD 20 maximum live test capital policy, SUPER_USER-only pilot controls, audit events, and read-only dashboard/API visibility.
+
+This register does not authorize live broker execution. Live broker validation, live micro-pilot rehearsal, and production operational certification remain separate.
