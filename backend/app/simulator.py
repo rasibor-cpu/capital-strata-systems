@@ -22,7 +22,7 @@ class Simulator:
     # If this file in your repo is longer, DO NOT truncate it.
     # Instead: keep your full existing class + methods, and only add the helpers below.
 
-def _utcnow() -> datetime:
+def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
@@ -46,7 +46,7 @@ def smoke_test() -> None:
         print(f"After loss {i+1}:", sim.risk_state())
 
     sim.cooldown_active = True
-    sim.cooldown_until = _utcnow()
+    sim.cooldown_until = _utc_now()
     print("Cooldown set:", sim.risk_state())
 
     print("SIMULATOR SMOKE TEST COMPLETE")

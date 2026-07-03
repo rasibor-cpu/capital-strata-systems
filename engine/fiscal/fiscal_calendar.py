@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -30,7 +30,11 @@ ALLOWED_ROLES = {"ADMIN", "SUPER_USER"}
 
 
 def _utc_today() -> date:
-    return datetime.utcnow().date()
+    return datetime.now(timezone.utc).date()
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
 
 def _load() -> Dict[str, Any]:
@@ -42,7 +46,7 @@ def _load() -> Dict[str, Any]:
             "fy_start_month": 1,
             "fy_start_day": 1,
             "active_fy_start_year": _utc_today().year,
-            "last_updated_utc": datetime.utcnow().isoformat(),
+            "last_updated_utc": _now_iso(),
             "updated_by_role": "SYSTEM_DEFAULT",
             "notes": "Defaulted to calendar year (Jan 1).",
         }
@@ -91,7 +95,7 @@ class FiscalCalendar:
         fy = FiscalCalendar.fiscal_year_for_date(today)
         cfg["active_fy_start_year"] = fy.start_date.year
 
-        cfg["last_updated_utc"] = datetime.utcnow().isoformat()
+        cfg["last_updated_utc"] = _now_iso()
         cfg["updated_by_role"] = role
         cfg["notes"] = notes
 
@@ -143,7 +147,7 @@ class FiscalCalendar:
 
         cfg = _load()
         cfg["active_fy_start_year"] = int(cfg.get("active_fy_start_year", _utc_today().year)) + 1
-        cfg["last_updated_utc"] = datetime.utcnow().isoformat()
+        cfg["last_updated_utc"] = _now_iso()
         cfg["updated_by_role"] = role
         cfg["notes"] = notes or "Auto-rollover after YEAR_END close."
 

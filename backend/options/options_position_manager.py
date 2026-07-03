@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 
 CONTRACT_MULTIPLIER = 100.0
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -115,7 +119,7 @@ class OptionsPositionManager:
             take_profit_price=take_profit_price,
             stop_loss_price=stop_loss_price,
             max_hold_cycles=max_hold_cycles,
-            opened_at=datetime.utcnow().isoformat(),
+            opened_at=_now_iso(),
             opened_cycle=current_cycle,
             confidence=confidence,
             tier=tier,
@@ -264,7 +268,7 @@ class OptionsPositionManager:
             **pos,
             "status": "CLOSED",
             "exit_price": exit_price,
-            "closed_at": datetime.utcnow().isoformat(),
+            "closed_at": _now_iso(),
             "closed_cycle": closed_cycle,
             "reason": reason,
             "pnl": pnl_value,

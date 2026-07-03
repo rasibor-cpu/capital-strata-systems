@@ -17,7 +17,7 @@ Back-valued definition:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Optional
 
 from postings.api import PostingStore
@@ -28,6 +28,10 @@ from engine.fiscal.fiscal_calendar import FiscalCalendar
 STORE = PostingStore()
 
 OVERRIDE_ROLES = {"ADMIN", "SUPER_USER"}
+
+
+def _utc_today() -> date:
+    return datetime.now(timezone.utc).date()
 
 
 @dataclass(frozen=True)
@@ -84,7 +88,7 @@ def assert_open_for_posting(
     actor_role = str(actor_role).strip().upper()
 
     exec_date = _parse_iso_date(execution_date, "execution_date")
-    ent_date = _parse_iso_date(entry_date, "entry_date") if entry_date else datetime.utcnow().date()
+    ent_date = _parse_iso_date(entry_date, "entry_date") if entry_date else _utc_today()
 
     ov = _normalize_override(override)
 

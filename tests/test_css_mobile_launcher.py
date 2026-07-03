@@ -210,6 +210,16 @@ def test_launcher_manifest_and_icon_routes():
     assert response.status_code == 200
     assert response.headers["content-type"] in {"image/x-icon", "image/svg+xml"}
 
+    response = client.get("/static/css_pwa_icon_192.png")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.content
+
+    response = client.get("/static/css_pwa_icon_512.png")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.content
+
 def test_launcher_health_and_status_routes(launcher_temp_dir):
     response = client.get("/health")
     assert response.status_code == 200

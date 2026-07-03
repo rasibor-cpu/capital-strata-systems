@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Dict, Optional, Tuple
 
@@ -10,6 +10,10 @@ from engine.ledger.ledger_store import LedgerStore
 
 ScopeKey = Tuple[str, str, str, str]  # company, branch, dept, user
 PosKey = Tuple[str, str, str, str, str, str]  # scope + symbol + currency
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 @dataclass
@@ -116,7 +120,7 @@ class PnLEngine:
         market_prices: dict[symbol] -> latest price (float).
         Unrealized P&L is computed only if price is provided.
         """
-        as_of = as_of or datetime.utcnow()
+        as_of = as_of or _utc_now()
         market_prices = market_prices or {}
 
         for key, st in self._state.items():

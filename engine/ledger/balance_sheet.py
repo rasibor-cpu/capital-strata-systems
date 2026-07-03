@@ -1,10 +1,14 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Dict, Optional, Tuple
 
 from engine.ledger.ledger_models import BalanceSheetSnapshot
 from engine.ledger.ledger_store import LedgerStore
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 @dataclass
@@ -42,7 +46,7 @@ class BalanceSheetEngine:
         Assets = Debits - Credits
         Liabilities/Equity = Credits - Debits
         """
-        as_of = as_of or datetime.utcnow()
+        as_of = as_of or _utc_now()
 
         totals_by_currency: Dict[str, AccountTotals] = {}
 

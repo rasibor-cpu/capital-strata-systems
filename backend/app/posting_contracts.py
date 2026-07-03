@@ -14,6 +14,10 @@ from typing import Dict, Any, Optional, List
 import datetime
 
 
+def _utc_now_compat() -> datetime.datetime:
+    return datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
+
+
 class TicketStatus(str, Enum):
     DRAFT = "draft"
     SUBMITTED = "submitted"
@@ -51,7 +55,7 @@ class PostingTicket:
     """
     ticket_id: str
     created_by: str
-    created_at: datetime.datetime = field(default_factory=datetime.datetime.utcnow)
+    created_at: datetime.datetime = field(default_factory=_utc_now_compat)
 
     status: TicketStatus = TicketStatus.DRAFT
     submitted_at: Optional[datetime.datetime] = None

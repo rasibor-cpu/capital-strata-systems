@@ -20,12 +20,16 @@ NOTE:
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Dict, Any, Optional
 
 
 # In-memory period registry (can later be persisted)
 _PERIODS: Dict[str, Dict[str, Any]] = {}
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
 
 # -----------------------------
@@ -60,7 +64,7 @@ def set_period_state(
         "period_type": period_type,
         "period_value": period_value,
         "state": state,
-        "closed_on": datetime.utcnow().isoformat(),
+        "closed_on": _now_iso(),
         "closed_by": user_id,
         "locked": state in ("CLOSED", "LOCKED"),
     }

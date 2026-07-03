@@ -19,12 +19,16 @@ Sub-account key:
 
 from dataclasses import dataclass, field
 from typing import Dict, Tuple, Optional, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 from .account_types import is_valid_account_type
 
 
 SubAccountKey = Tuple[str, str, str]  # (base_account_no, account_type_code, currency)
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
 
 @dataclass
@@ -33,7 +37,7 @@ class SubAccount:
     account_type_code: str
     currency: str
     balance: float = 0.0
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    created_at: str = field(default_factory=_now_iso)
     meta: Dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -118,7 +122,7 @@ def apply_delta(
 
     if meta:
         sa.meta.setdefault("updates", []).append(
-            {"at": datetime.utcnow().isoformat(), "delta": float(delta), "meta": meta}
+            {"at": _now_iso(), "delta": float(delta), "meta": meta}
         )
 
     return sa

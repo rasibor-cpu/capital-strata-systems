@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from typing import Dict, List
-from datetime import datetime
+from datetime import datetime, timezone
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class PositionManager:
@@ -46,7 +50,7 @@ class PositionManager:
             "stop_loss": float(stop_loss),
             "confidence": float(confidence),
             "regime": regime,
-            "opened_at": datetime.utcnow(),
+            "opened_at": _utc_now(),
 
             # trailing engine fields
             "peak_price_seen": float(entry_price),
@@ -183,7 +187,7 @@ class PositionManager:
             "confidence": pos["confidence"],
             "regime": pos["regime"],
             "opened_at": pos["opened_at"],
-            "closed_at": datetime.utcnow(),
+            "closed_at": _utc_now(),
         })
 
     # =========================

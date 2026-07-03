@@ -14,9 +14,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from collections import defaultdict
 import uuid
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 # ============================================================
@@ -74,7 +78,7 @@ class PnLTracker:
         timestamp: Optional[datetime] = None,
     ) -> None:
 
-        timestamp = timestamp or datetime.utcnow()
+        timestamp = timestamp or _utc_now()
 
         ledger = self.instrument_ledgers.setdefault(
             instrument, InstrumentLedger()

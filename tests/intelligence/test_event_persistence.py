@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from backend.intelligence.global_intelligence.event_models import (
     EventCategory,
@@ -13,7 +13,7 @@ def test_save_and_load_recent_events(tmp_path):
     persistence = EventPersistenceEngine(storage_path=str(storage_file))
     event = IntelligenceEvent(
         event_id="test-event-1",
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
         title="Test event",
         category=EventCategory.GEOPOLITICAL,
         severity=EventSeverity.MODERATE,
@@ -34,7 +34,7 @@ def test_archive_expired_events(tmp_path):
     persistence = EventPersistenceEngine(storage_path=str(storage_file))
     expired_event = IntelligenceEvent(
         event_id="expired-event-1",
-        timestamp=datetime.utcnow() - timedelta(days=2),
+        timestamp=datetime.now(timezone.utc) - timedelta(days=2),
         title="Expired event",
         category=EventCategory.REGULATORY,
         severity=EventSeverity.LOW,
@@ -43,7 +43,7 @@ def test_archive_expired_events(tmp_path):
         affected_assets=["BONDS"],
         description="This event is already expired.",
         active=False,
-        expiration_time=datetime.utcnow() - timedelta(days=1),
+        expiration_time=datetime.now(timezone.utc) - timedelta(days=1),
     )
 
     persistence.save_event(expired_event)

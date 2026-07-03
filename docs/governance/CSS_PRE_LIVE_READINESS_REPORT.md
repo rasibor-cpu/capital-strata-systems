@@ -16,6 +16,12 @@ LIVE mode is not certified by this document. Live operation remains blocked unti
 2. Live micro-pilot is completed.
 3. Production operational certification is approved.
 
+## Phase 151 Audit Integrity Addendum
+
+Phase 150 established engineering implementation completion. Phase 151 independently verifies audit findings and closes certification-integrity hardening before live broker validation.
+
+Phase 151 does not change the live operational boundary. Live broker validation, live micro-pilot, and production operational certification remain separate required steps.
+
 ## Safety Controls Required For LIVE
 
 LIVE mode must continue to require Unified Trade Gate, Margin Gate, RBAC, Capital Governor, AntiBleedGuard, kill switches, emergency stops, broker validation, execution authorization, and configured broker controls.
@@ -27,4 +33,3 @@ Dashboards and intelligence modules must never fabricate operational values. Mis
 ## Long-Duration Paper Readiness
 
 Long-duration readiness applies to paper-mode and broker-execution-disabled operation. The validated readiness targets are 24-hour, 48-hour, and 7-day paper sessions with recovery, supervisor stability, artifact integrity, runtime integrity, dashboard synchronization, reconciliation, resource utilization, and stale detection.
-

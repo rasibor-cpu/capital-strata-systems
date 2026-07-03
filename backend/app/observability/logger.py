@@ -15,8 +15,12 @@ import logging
 import os
 import sys
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
+
+
+def _now_iso_z() -> str:
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
 
 # -------------------------------------------------------------------
 # Engine Run Identity (one per process)
@@ -114,5 +118,5 @@ def log_startup_banner(logger: logging.Logger) -> None:
     adapter.info("REA CAPITAL TRADING ENGINE — STARTUP")
     adapter.info("ENGINE_RUN_ID=%s", ENGINE_RUN_ID)
     adapter.info("PID=%s", os.getpid())
-    adapter.info("START_TIME=%s", datetime.utcnow().isoformat() + "Z")
+    adapter.info("START_TIME=%s", _now_iso_z())
     adapter.info("========================================")

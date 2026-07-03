@@ -18,7 +18,7 @@ Design principles:
 from __future__ import annotations
 from dataclasses import dataclass, asdict
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 # In-memory store (process-local)
 _TICKETS: Dict[str, Dict[str, Any]] = {}
@@ -26,7 +26,7 @@ _TICKET_SEQ = 0
 
 
 def _now_iso() -> str:
-    return datetime.utcnow().isoformat()
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
 
 def _next_ticket_id() -> str:

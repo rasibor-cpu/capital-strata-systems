@@ -41,3 +41,11 @@ The only remaining work before production deployment is:
 2. Live micro-pilot
 3. Production operational certification
 
+## Phase 151 Audit Integrity
+
+- [x] Phase 150 engineering completion remains implementation-complete.
+- [x] Phase 151 verifies independent audit findings before live broker validation.
+- [x] AntiBleedGuard development override hardening is certified.
+- [x] Live mobile trade gate routing determinism is certified.
+- [x] Full-history secret scan runbook is documented for pre-live validation.
+- [x] Legacy/archive hygiene recommendations are documented without deleting archive folders.

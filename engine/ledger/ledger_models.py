@@ -1,8 +1,12 @@
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from decimal import Decimal
 import uuid
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 # =============================
@@ -25,7 +29,7 @@ class LedgerAccount:
     user_id: Optional[str] = None
 
     is_control_account: bool = False
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=_utc_now)
 
 
 @dataclass
@@ -42,7 +46,7 @@ class LedgerEntry:
     credit: Decimal = Decimal("0.00")
 
     currency: str = ""
-    value_date: datetime = field(default_factory=datetime.utcnow)
+    value_date: datetime = field(default_factory=_utc_now)
 
     # Linkage
     execution_id: Optional[str] = None
@@ -70,7 +74,7 @@ class LedgerTransaction:
     """
     ledger_txn_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     txn_type: str = ""  # EXECUTION / FEE / TAX / SETTLEMENT / ADJUSTMENT
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=_utc_now)
 
     execution_id: Optional[str] = None
     order_id: Optional[str] = None
@@ -94,7 +98,7 @@ class PositionLot:
     avg_cost: Decimal
     currency: str
 
-    opened_at: datetime = field(default_factory=datetime.utcnow)
+    opened_at: datetime = field(default_factory=_utc_now)
     execution_id: Optional[str] = None
     order_id: Optional[str] = None
 

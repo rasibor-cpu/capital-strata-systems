@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from engine.reporting.report_printer import print_report, list_reports
 from engine.reporting.report_integrity import attach_integrity_metadata
@@ -23,6 +23,10 @@ from engine.reporting.report_integrity import attach_integrity_metadata
 # ============================================================
 
 ALLOWED_ROLES = {"ADMIN", "SUPER_USER", "FINCON_REPORTING"}
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
 
 def _check_authority(user_role: str) -> None:
@@ -58,7 +62,7 @@ def list_available_reports(user_role: str) -> Dict[str, Any]:
     payload = {
         "available_reports": list_reports(),
         "role": user_role,
-        "generated_at": datetime.utcnow().isoformat(),
+        "generated_at": _now_iso(),
     }
 
     return attach_integrity_metadata(payload)
@@ -79,7 +83,7 @@ def generate_report(req: GlobalReportRequest) -> Dict[str, Any]:
 
     payload = {
         "report_name": req.report_name,
-        "generated_at": datetime.utcnow().isoformat(),
+        "generated_at": _now_iso(),
         "role": req.role,
         "content": result,
     }

@@ -1,10 +1,14 @@
 from decimal import Decimal
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from engine.domain.executions import ExecutionReport
 from engine.ledger.ledger_models import LedgerTransaction, LedgerEntry
 from engine.ledger.ledger_store import LedgerStore
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class PostingEngine:
@@ -24,7 +28,7 @@ class PostingEngine:
         Creates and stores a balanced LedgerTransaction for one ExecutionReport.
         """
         posting_ccy = (r.settlement_currency or r.currency) or "NA"
-        value_date = r.execution_date or datetime.utcnow()
+        value_date = r.execution_date or _utc_now()
 
         gross = Decimal(str(r.gross_amount or 0.0))
         comm = Decimal(str(r.brokerage_commission or 0.0))
@@ -39,7 +43,7 @@ class PostingEngine:
 
         txn = LedgerTransaction(
             txn_type="EXECUTION",
-            created_at=datetime.utcnow(),
+            created_at=_utc_now(),
             execution_id=r.execution_id,
             order_id=r.order_id,
         )

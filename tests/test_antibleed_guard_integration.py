@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from backend.app.risk.anti_bleed_guard import AntiBleedGuard
+import pytest
+
+from backend.app.risk.anti_bleed_guard import AntiBleedGuard, AntiBleedGuardConfigurationError
 from engine.execution.execution_gate import ExecutionGate
 from engine.risk.margin_snapshot import MarginSnapshot, MarginState
 
@@ -137,3 +139,29 @@ def test_antibleed_block_reason_is_auditable() -> None:
     assert result["debug"]["anti_bleed_guard"]["symbol"] == "EUR_USD"
     assert result["debug"]["anti_bleed_guard"]["net_edge_bps"] == 12.0
     assert result["debug"]["anti_bleed_guard"]["control"] == "AntiBleedGuard"
+
+
+def test_antibleed_dev_force_allow_is_blocked_in_production(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("CSS_ENV", "production")
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+
+    with pytest.raises(AntiBleedGuardConfigurationError):
+        AntiBleedGuard(dev_force_allow=True, state_file=str(tmp_path / "anti_bleed_state.json"))
+
+
+def test_antibleed_dev_force_allow_requires_explicit_test_environment(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("CSS_ENV", "test")
+
+    guard = AntiBleedGuard(dev_force_allow=True, state_file=str(tmp_path / "anti_bleed_state.json"))
+    result = guard.evaluate(
+        symbol="EUR_USD",
+        side="BUY",
+        trade_size=100.0,
+        expected_move_bps=1.0,
+        fee_bps=2.0,
+        spread_bps=2.0,
+        slippage_bps=2.0,
+    )
+
+    assert result["approved"] is True
+    assert result["reason"].startswith("DEV_OVERRIDE:")

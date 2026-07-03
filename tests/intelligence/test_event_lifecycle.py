@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from backend.intelligence.global_intelligence.event_lifecycle_manager import EventLifecycleManager
 from backend.intelligence.global_intelligence.event_models import (
@@ -11,7 +11,7 @@ from backend.intelligence.global_intelligence.event_models import (
 
 def test_event_lifecycle_transitions():
     manager = EventLifecycleManager()
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     event = IntelligenceEvent(
         event_id="event-lifecycle-1",
         timestamp=now - timedelta(days=2),
@@ -31,7 +31,7 @@ def test_event_lifecycle_transitions():
 
 def test_event_severity_downgrade_on_age():
     manager = EventLifecycleManager()
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     event = IntelligenceEvent(
         event_id="event-lifecycle-2",
         timestamp=now - timedelta(days=4),
@@ -51,7 +51,7 @@ def test_event_severity_downgrade_on_age():
 
 def test_expired_event_moves_to_expired_state():
     manager = EventLifecycleManager()
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     event = IntelligenceEvent(
         event_id="event-lifecycle-3",
         timestamp=now - timedelta(days=1),

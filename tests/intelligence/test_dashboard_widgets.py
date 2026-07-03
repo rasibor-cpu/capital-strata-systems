@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from backend.intelligence.global_intelligence.dashboard_intelligence_widgets import build_dashboard_widgets
 from backend.intelligence.global_intelligence.event_models import (
@@ -13,7 +13,7 @@ def test_build_dashboard_widgets_with_state():
     state_manager = IntelligenceStateManager()
     event = IntelligenceEvent(
         event_id="dashboard-1",
-        timestamp=datetime.utcnow() - timedelta(hours=1),
+        timestamp=datetime.now(timezone.utc) - timedelta(hours=1),
         title="Dashboard test event",
         category=EventCategory.GEOPOLITICAL,
         severity=EventSeverity.HIGH,

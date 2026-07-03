@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Optional
 
 
@@ -62,7 +62,7 @@ class OptionExpiryParserEngine:
         if parsed is None:
             return fallback_days
 
-        today = datetime.utcnow()
+        today = datetime.now(timezone.utc)
         delta = (parsed.date() - today.date()).days
 
         if delta <= 0:

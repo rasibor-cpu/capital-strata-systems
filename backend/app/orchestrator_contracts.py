@@ -7,9 +7,13 @@ Hard constraints:
 - prompt-only (no execution implied by these contracts)
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Any, Optional
 import datetime
+
+
+def _utc_now_compat() -> datetime.datetime:
+    return datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
 
 
 @dataclass
@@ -18,7 +22,7 @@ class ScreenRequest:
     action: str
     payload: Dict[str, Any]
     user_id: Optional[str] = None
-    timestamp: datetime.datetime = datetime.datetime.utcnow()
+    timestamp: datetime.datetime = field(default_factory=_utc_now_compat)
 
 
 @dataclass

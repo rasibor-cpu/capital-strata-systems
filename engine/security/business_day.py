@@ -11,10 +11,14 @@ Rules:
 """
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Optional
 
 from engine.security.audit_log import AuditLogger, AuditEventType
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
 
 @dataclass(frozen=True)
@@ -35,7 +39,7 @@ class BusinessDayManager:
         if business_date in self._days and self._days[business_date].is_closed:
             raise PermissionError("Cannot reopen a closed business day")
 
-        now = datetime.utcnow().isoformat()
+        now = _now_iso()
         state = BusinessDayState(
             business_date=business_date,
             opened_at_utc=now,
@@ -67,7 +71,7 @@ class BusinessDayManager:
         if state.is_closed:
             return state  # idempotent close
 
-        now = datetime.utcnow().isoformat()
+        now = _now_iso()
         closed = BusinessDayState(
             business_date=state.business_date,
             opened_at_utc=state.opened_at_utc,

@@ -2,11 +2,36 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional
 
 
 STATE_FILE = os.path.join("artifacts", "anti_bleed_state.json")
+LIVE_LIKE_ENVIRONMENTS = {"prod", "production", "live", "staging", "uat"}
+DEV_TEST_ENVIRONMENTS = {"dev", "development", "local", "test", "testing", "ci"}
+
+
+class AntiBleedGuardConfigurationError(RuntimeError):
+    """Raised when AntiBleedGuard is configured unsafely."""
+
+
+def _utc_now_compat() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _dev_force_allow_permitted() -> bool:
+    env_values = {
+        os.getenv("CSS_ENV", ""),
+        os.getenv("APP_ENV", ""),
+        os.getenv("ENV", ""),
+        os.getenv("PYTHON_ENV", ""),
+    }
+    normalized = {value.strip().lower() for value in env_values if value}
+    if normalized & LIVE_LIKE_ENVIRONMENTS:
+        return False
+    if normalized & DEV_TEST_ENVIRONMENTS:
+        return True
+    return bool(os.getenv("PYTEST_CURRENT_TEST"))
 
 
 class AntiBleedGuard:
@@ -33,6 +58,10 @@ class AntiBleedGuard:
         self.minimum_profitable_trade_size = minimum_profitable_trade_size
         self.cooldown_minutes = cooldown_minutes
         self.max_trades_per_symbol_per_cycle = max_trades_per_symbol_per_cycle
+        if dev_force_allow and not _dev_force_allow_permitted():
+            raise AntiBleedGuardConfigurationError(
+                "dev_force_allow=True is restricted to explicit development/test environments"
+            )
         self.dev_force_allow = dev_force_allow
         self.state_file = state_file
 
@@ -55,7 +84,7 @@ class AntiBleedGuard:
         total_cost_bps = fee_bps + spread_bps + slippage_bps
         net_edge_bps = expected_move_bps - total_cost_bps
 
-        now = datetime.utcnow()
+        now = _utc_now_compat()
 
         cooldown_active, cooldown_until = self._is_in_cooldown(symbol, now)
 

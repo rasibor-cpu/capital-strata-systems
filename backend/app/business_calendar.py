@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Set
 
 
@@ -45,7 +45,7 @@ def is_working_day(d: date, holidays: Set[str] | None = None) -> bool:
 
 
 def previous_working_day(ref: date | None = None) -> date:
-    ref = ref or datetime.utcnow().date()
+    ref = ref or datetime.now(timezone.utc).date()
     holidays = load_holidays()
 
     d = ref - timedelta(days=1)

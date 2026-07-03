@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, asdict
 from typing import Any, Dict, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import random
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 # ============================================================
@@ -112,7 +116,7 @@ class OptionsChainAdapter:
         """
 
         contracts: List[OptionContract] = []
-        today = datetime.utcnow()
+        today = _utc_now()
 
         strikes = [
             spot * 0.95,

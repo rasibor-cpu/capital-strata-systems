@@ -42,3 +42,10 @@ Covered reports include executive summary, daily summary, weekly summary, monthl
 2. Live micro-pilot
 3. Production operational certification
 
+## Phase 151 Certification Integrity Register
+
+Status: Audit remediation complete for Version 1.0 review.
+
+Phase 151 confirms the autonomous supervisor contract is present on the current branch, strengthens live mobile trade gate verification, hardens AntiBleedGuard against production dev overrides, resolves launcher PWA icon routing, documents full-history secret scanning, and records archive hygiene recommendations.
+
+This register does not certify live broker operation. Live broker validation remains separate.

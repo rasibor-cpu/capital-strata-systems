@@ -13,7 +13,11 @@ Responsibilities:
 - Enforce max concurrent trades
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+
+def _utc_now_compat() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class RiskGovernor:
@@ -33,7 +37,7 @@ class RiskGovernor:
         self.current_open_positions = count
 
     def can_trade(self):
-        now = datetime.utcnow()
+        now = _utc_now_compat()
 
         if self.cooldown_until and now < self.cooldown_until:
             return False, f"Cooldown active until {self.cooldown_until}"
@@ -56,5 +60,5 @@ class RiskGovernor:
             self.consecutive_losses = 0
 
         if self.consecutive_losses >= self.MAX_CONSECUTIVE_LOSSES:
-            self.cooldown_until = datetime.utcnow() + timedelta(hours=self.COOLDOWN_HOURS)
+            self.cooldown_until = _utc_now_compat() + timedelta(hours=self.COOLDOWN_HOURS)
             self.consecutive_losses = 0

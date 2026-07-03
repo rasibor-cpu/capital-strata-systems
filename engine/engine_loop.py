@@ -48,6 +48,14 @@ except Exception:  # pragma: no cover
     GovernanceAuditLogger = None  # type: ignore
     GovernanceDecisionRecord = None  # type: ignore
 
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _utc_iso_z() -> str:
+    return _utc_now().replace(tzinfo=None).isoformat() + "Z"
+
 MA_WINDOW = 20
 PIP_SCALE = 10000.0
 
@@ -357,7 +365,7 @@ class EngineLoop:
         normalized_decision = str(decision or "BLOCK").upper()
         normalized_reason = str(reason or "regime_gate_rejected")
         record: Dict[str, Any] = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": _utc_iso_z(),
             "instrument": str(instrument),
             "gate_name": "regime_gate",
             "decision": normalized_decision,
@@ -480,7 +488,7 @@ class EngineLoop:
                 instrument=instrument,
                 realized_pnl=float(realized_exit),
                 unrealized_pnl=0.0,
-                timestamp=datetime.utcnow(),
+                timestamp=_utc_now(),
             )
 
         # Update equity peak for governance

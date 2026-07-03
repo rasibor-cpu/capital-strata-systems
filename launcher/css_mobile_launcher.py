@@ -100,7 +100,9 @@ app = FastAPI(title=LauncherConfig.TITLE, version=LauncherConfig.VERSION)
 launcher_router = APIRouter()
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
 
-app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
+
+def _utc_iso_z() -> str:
+    return datetime.datetime.now(datetime.UTC).replace(tzinfo=None).isoformat() + "Z"
 
 
 def _safe_load_artifact(filename: str) -> Dict[str, Any]:
@@ -167,7 +169,7 @@ def write_pause_state(paused: bool, reason: str) -> Dict[str, Any]:
     except Exception:
         existing = {}
 
-    now = datetime.datetime.utcnow().isoformat() + "Z"
+    now = _utc_iso_z()
     existing.update(
         {
             "trading_paused": paused,
@@ -262,7 +264,7 @@ def validate_mobile_paper_trade_request(payload: Dict[str, Any]) -> Dict[str, An
         raise ValueError("broker execution is not allowed from mobile paper trade requests")
 
     return {
-        "timestamp_utc": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp_utc": _utc_iso_z(),
         "source": "mobile_dashboard",
         "paper_only": True,
         "symbol": symbol,
@@ -360,7 +362,7 @@ def get_mobile_launcher_status() -> str:
 def get_runtime_summary() -> Dict[str, Any]:
     session = _safe_load_artifact("css_session_state_pcnrass.json").get("session", {}) or _safe_load_artifact("css_session_recovery.json").get("session", {})
     runtime_mode = _clean_text(session.get("engine_mode"), fallback="PAPER").upper()
-    last_update = _clean_text(session.get("start_time"), fallback=datetime.datetime.utcnow().isoformat() + "Z")
+    last_update = _clean_text(session.get("start_time"), fallback=_utc_iso_z())
     summary = {
         "runtime_mode": runtime_mode,
         "current_cycle": session.get("cycle_number", 0),
@@ -508,7 +510,7 @@ def build_launcher_frontend_state(
         broker_mode = "paper"
 
     dashboard_payload = {
-        "generated_at": datetime.datetime.utcnow().isoformat() + "Z",
+        "generated_at": _utc_iso_z(),
         "session_id": str(session.get("session_id", "LAUNCHER-SESSION")),
         "cycle_number": runtime.get("current_cycle", 0),
         "engine_mode": engine.get("engine_mode", runtime.get("runtime_mode", "PAPER")),
@@ -1811,7 +1813,7 @@ def _canonical_timestamp(payloads: List[Dict[str, Any]]) -> str:
         value = _first_timestamp(payload)
         if value:
             return value
-    return datetime.datetime.utcnow().isoformat() + "Z"
+    return _utc_iso_z()
 
 
 def get_mobile_trade_ticket_data() -> Dict[str, Any]:
@@ -1834,7 +1836,7 @@ def get_mobile_trade_ticket_data() -> Dict[str, Any]:
     runtime_fallback = {
         "runtime_mode": "PAPER",
         "current_cycle": 0,
-        "last_update": datetime.datetime.utcnow().isoformat() + "Z",
+        "last_update": _utc_iso_z(),
         "supervisor_status": "OFFLINE",
         "last_heartbeat": "N/A",
         "restart_count": 0,
@@ -2150,7 +2152,7 @@ def get_top_opportunities_feed(*, limit: int = 10) -> Dict[str, Any]:
         "status": "OK",
         "count": len(decorated),
         "top_opportunities": decorated,
-        "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
+        "updated_at": _utc_iso_z(),
     }
 
 
@@ -2326,7 +2328,7 @@ def get_opportunity_summary(symbol: str, *, asset_class: str | None = None) -> D
                 "live_supported": bool(instrument.get("live_supported", False)),
             },
             "broker": str(instrument.get("broker") or "unknown"),
-            "last_update": datetime.datetime.utcnow().isoformat() + "Z",
+            "last_update": _utc_iso_z(),
         },
         "engine_outputs": {
             "OpportunityRankingEngine": _json_safe(ranking_payload),
@@ -2506,7 +2508,7 @@ def get_opportunity_feed() -> Dict[str, Any]:
             "all_opportunities": all_rows,
             "top_opportunities": top_rows,
             "paper_opportunities": paper_rows,
-            "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
+            "updated_at": _utc_iso_z(),
         }
     except OpportunityRankingEngineError:
         _emit_opportunity_warning(
@@ -2519,7 +2521,7 @@ def get_opportunity_feed() -> Dict[str, Any]:
             "all_opportunities": [],
             "top_opportunities": [],
             "paper_opportunities": [],
-            "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
+            "updated_at": _utc_iso_z(),
         }
     except Exception:
         _emit_opportunity_warning(
@@ -2532,7 +2534,7 @@ def get_opportunity_feed() -> Dict[str, Any]:
             "all_opportunities": [],
             "top_opportunities": [],
             "paper_opportunities": [],
-            "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
+            "updated_at": _utc_iso_z(),
         }
     except Exception:
         return {
@@ -2612,7 +2614,7 @@ def get_portfolio_summary_feed() -> Dict[str, Any]:
         },
         "recommendation": recommendation,
         "strategy_evolution": strategy_evolution,
-        "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
+        "updated_at": _utc_iso_z(),
     }
 
 
@@ -2648,8 +2650,8 @@ def _normalize_completed_trade_row(raw: Dict[str, Any], *, fallback_idx: int) ->
 
     return {
         "trade_id": str(raw.get("trade_id") or f"learning-{fallback_idx}"),
-        "timestamp_open": str(raw.get("timestamp_open") or raw.get("opened_at") or datetime.datetime.utcnow().isoformat() + "Z"),
-        "timestamp_close": str(raw.get("timestamp_close") or raw.get("closed_at") or datetime.datetime.utcnow().isoformat() + "Z"),
+        "timestamp_open": str(raw.get("timestamp_open") or raw.get("opened_at") or _utc_iso_z()),
+        "timestamp_close": str(raw.get("timestamp_close") or raw.get("closed_at") or _utc_iso_z()),
         "symbol": symbol,
         "asset_class": asset_class,
         "entry_price": float(raw.get("entry_price", 0.0) or 0.0),
@@ -2735,7 +2737,7 @@ def get_strategy_evolution_feed() -> Dict[str, Any]:
             "retirements": [],
             "recommended_strategy_weights": {},
             "explainability": [],
-            "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
+            "updated_at": _utc_iso_z(),
         }
     except Exception:
         return {
@@ -2747,12 +2749,12 @@ def get_strategy_evolution_feed() -> Dict[str, Any]:
             "retirements": [],
             "recommended_strategy_weights": {},
             "explainability": [],
-            "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
+            "updated_at": _utc_iso_z(),
         }
 
     return {
         **evolution,
-        "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
+        "updated_at": _utc_iso_z(),
     }
 
 
@@ -3146,7 +3148,7 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "css_mobile_launcher",
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
+        "timestamp": _utc_iso_z()
     }
 
 @launcher_router.get("/status")
@@ -3252,7 +3254,7 @@ async def mobile_opportunity_feed_by_asset_class(asset_class: str):
     return {
         "asset_class": str(asset_class or "").strip().upper(),
         "opportunities": rows,
-        "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
+        "updated_at": _utc_iso_z(),
     }
 
 
@@ -3891,6 +3893,7 @@ async def mobile_control_resume(request: Request):
     return RedirectResponse(_BROWSER_REDIRECT_TARGET, status_code=303)
 
 app.include_router(launcher_router)
+app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
 
 if __name__ == "__main__":
     uvicorn.run(app, host=LauncherConfig.HOST, port=LauncherConfig.PORT)

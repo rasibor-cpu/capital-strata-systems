@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Iterable
 
 from .event_models import IntelligenceEvent
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class IntelligenceHealthMonitor:
@@ -16,7 +20,7 @@ class IntelligenceHealthMonitor:
         ingestion_errors: int = 0,
         now: datetime | None = None,
     ) -> dict[str, object]:
-        now = now or datetime.utcnow()
+        now = now or _utc_now()
         events = list(events or [])
         issues: list[str] = []
 

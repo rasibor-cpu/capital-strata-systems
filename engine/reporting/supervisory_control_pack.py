@@ -84,7 +84,7 @@ def _is_working_day(d: date, holidays: Set[str]) -> bool:
 
 
 def previous_working_day(ref: Optional[date] = None) -> date:
-    ref = ref or datetime.utcnow().date()
+    ref = ref or datetime.now(timezone.utc).date()
     holidays = _load_holidays()
     d = ref - timedelta(days=1)
     while not _is_working_day(d, holidays):

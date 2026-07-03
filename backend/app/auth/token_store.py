@@ -17,7 +17,7 @@ from typing import Dict, Optional, Any, List
 from .auth_config import OTP_TTL_SECONDS
 
 
-def _utcnow() -> datetime:
+def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
@@ -61,7 +61,7 @@ class TokenStore:
 
         # 6-digit numeric; preserve leading zeros
         code = f"{secrets.randbelow(1_000_000):06d}"
-        expires = _utcnow() + timedelta(seconds=int(OTP_TTL_SECONDS))
+        expires = _utc_now() + timedelta(seconds=int(OTP_TTL_SECONDS))
         self._otp[username] = _OtpRecord(code=code, expires_at_utc=expires)
         return code
 
@@ -74,7 +74,7 @@ class TokenStore:
             return False
 
         # Expired?
-        if _utcnow() >= rec.expires_at_utc:
+        if _utc_now() >= rec.expires_at_utc:
             # burn it
             self._otp.pop(username, None)
             return False
@@ -90,7 +90,7 @@ class TokenStore:
         rec = self._otp.get(username)
         if rec is None:
             return None
-        remain = int((rec.expires_at_utc - _utcnow()).total_seconds())
+        remain = int((rec.expires_at_utc - _utc_now()).total_seconds())
         return max(0, remain)
 
     # -------------------------
@@ -101,7 +101,7 @@ class TokenStore:
         if not username:
             raise ValueError("username is required")
 
-        issued = _utcnow()
+        issued = _utc_now()
         expires = issued + timedelta(minutes=int(minutes))
         token = str(uuid.uuid4())
         self._sessions[token] = SessionInfo(
@@ -119,7 +119,7 @@ class TokenStore:
         info = self._sessions.get(token)
         if info is None:
             return None
-        if _utcnow() >= info.expires_at_utc:
+        if _utc_now() >= info.expires_at_utc:
             self._sessions.pop(token, None)
             return None
         return info

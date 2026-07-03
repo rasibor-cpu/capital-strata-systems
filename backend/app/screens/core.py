@@ -13,13 +13,17 @@ from typing import Dict, Any
 from ..screen_taxonomy import SCREEN_INDEX, list_screen_ids
 
 
+def _now_iso() -> str:
+    return datetime.datetime.now(datetime.UTC).replace(tzinfo=None).isoformat()
+
+
 def health_check_handler(registry_keys: Dict[str, bool]) -> Dict[str, Any]:
     """
     Returns a dict payload for health-check response.
     registry_keys: mapping of screen_id -> registered True/False (computed by main)
     """
     return {
-        "server_time": datetime.datetime.utcnow().isoformat(),
+        "server_time": _now_iso(),
         "engine_mode": "prompt-only",
         "execution_enabled": False,
         "registered_screens": sorted([k for k, v in registry_keys.items() if v]),

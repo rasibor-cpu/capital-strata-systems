@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Iterable
 
 from .event_models import EventState, EventSeverity, IntelligenceEvent
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class EventLifecycleManager:
@@ -17,7 +21,7 @@ class EventLifecycleManager:
         pass
 
     def get_event_age(self, event: IntelligenceEvent, now: datetime | None = None) -> timedelta:
-        now = now or datetime.utcnow()
+        now = now or _utc_now()
         age = now - event.timestamp if event.timestamp else timedelta(0)
         return max(age, timedelta(0))
 
@@ -34,7 +38,7 @@ class EventLifecycleManager:
             event.event_state = EventState.ARCHIVED
 
     def transition_event(self, event: IntelligenceEvent, now: datetime | None = None) -> None:
-        now = now or datetime.utcnow()
+        now = now or _utc_now()
         age = self.get_event_age(event, now)
 
         if event.expiration_time and now >= event.expiration_time:

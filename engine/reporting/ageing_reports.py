@@ -22,7 +22,7 @@ Buckets default:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Any, Dict, List, Tuple, Optional
 
 
@@ -40,7 +40,7 @@ def _as_of_date(filters: Dict[str, Any], as_of_date: Optional[str]) -> date:
     if isinstance(f, str) and f:
         return _parse_ymd(f)
     # default: today (UTC date)
-    return datetime.utcnow().date()
+    return datetime.now(timezone.utc).date()
 
 
 def _buckets(filters: Dict[str, Any]) -> List[Tuple[int, int]]:

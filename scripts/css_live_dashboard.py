@@ -173,11 +173,20 @@ import sys
 import time
 # PCNRASS: orchestrator bridge import deferred until after PROJECT_ROOT bootstrap
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
 from dotenv import load_dotenv
+
+
+def _utc_now_compat() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _utc_iso_z() -> str:
+    return _utc_now_compat().isoformat() + "Z"
+
 
 OPTION_GREEK_FIELDS = ("delta", "gamma", "theta", "vega", "rho")
 VALID_GREEKS_SOURCES = {
@@ -2599,7 +2608,7 @@ def pcnrass_wait_for_next_cycle(cycle: int) -> bool:
             controls["trading_paused"] = False
             controls["source"] = "runtime_keyboard"
             controls["reason"] = "operator_selected_continuous"
-            controls["timestamp"] = datetime.datetime.utcnow().isoformat() + "Z"
+            controls["timestamp"] = _utc_iso_z()
             _pcnrass_write_json(MOBILE_CONTROLS_FILE, controls)
             print("[CYCLE MODE SELECTED] CONTINUOUS")
             continue
@@ -3984,7 +3993,7 @@ class RepairEngine:
             "category": category,
             "status": "OPEN",
             "details": details,
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": _utc_now_compat().isoformat(),
             "resolution_note": ""
         }
         self.records.append(record)

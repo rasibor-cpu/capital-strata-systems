@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List
 import uuid
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
 
 @dataclass(frozen=True)
@@ -51,7 +55,7 @@ class ExecutionAuditLedger:
 
         record = ExecutionAuditRecord(
             record_id=str(uuid.uuid4()),
-            timestamp_utc=datetime.utcnow().isoformat(),
+            timestamp_utc=_now_iso(),
             asset_class=str(asset_class).upper(),
             symbol=str(symbol).upper(),
             mode=str(mode).lower(),

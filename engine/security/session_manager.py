@@ -10,11 +10,15 @@ Rules:
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict
 import uuid
 
 from engine.security.audit_log import AuditLogger, AuditEventType
+
+
+def _utc_now_compat() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 @dataclass(frozen=True)
@@ -39,7 +43,7 @@ class SessionManager:
         self._sessions: Dict[str, Session] = {}
 
     def login(self, *, user_id: str, business_date: str) -> Session:
-        now = datetime.utcnow()
+        now = _utc_now_compat()
         session = Session(
             session_id=str(uuid.uuid4()),
             user_id=user_id,
@@ -88,7 +92,7 @@ class SessionManager:
         if not session:
             raise PermissionError("Invalid or expired session")
 
-        if datetime.utcnow() > session.expires_at:
+        if _utc_now_compat() > session.expires_at:
             self.logout(session_id=session_id)
             raise PermissionError("Session expired")
 

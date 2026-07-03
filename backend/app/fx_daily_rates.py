@@ -29,11 +29,15 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
 
 
 DEFAULT_RATES_FILE = os.path.join(os.path.dirname(__file__), "data", "fx_daily_rates.json")
+
+
+def _utc_today_iso() -> str:
+    return datetime.now(timezone.utc).date().isoformat()
 
 
 @dataclass(frozen=True)
@@ -71,7 +75,7 @@ def _load_snapshot(path: str) -> Optional[FxRateSnapshot]:
 
         if not as_of:
             # best-effort fallback
-            as_of = datetime.utcnow().date().isoformat()
+            as_of = _utc_today_iso()
 
         return FxRateSnapshot(as_of=as_of, source=source, rates=rates)
     except Exception:

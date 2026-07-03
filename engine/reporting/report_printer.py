@@ -16,7 +16,7 @@ Central Report Registry (FinCon Grade)
 from __future__ import annotations
 
 from typing import Dict, Any, Callable, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 
@@ -27,6 +27,14 @@ from engine.reporting.ageing_reports import (
 
 # Existing SCP (already registered in your prior step)
 from engine.reporting.supervisory_control_pack import generate_scp_report
+
+
+def _now_iso_z() -> str:
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
+
+
+def _utc_today():
+    return datetime.now(timezone.utc).date()
 
 # NEW: Treasury instrument aggregates
 from engine.reporting.treasury_instrument_aggregate import generate_treasury_instrument_aggregate
@@ -123,7 +131,7 @@ def print_report(
         "\n\n"
         "Sign-off:\n"
         f"  Printed by : {role}\n"
-        f"  Generated  : {datetime.utcnow().isoformat()}Z\n"
+        f"  Generated  : {_now_iso_z()}\n"
     )
 
     return content + footer
@@ -141,7 +149,7 @@ def _ar_ageing_handler(**kwargs) -> str:
     if as_of:
         as_of_dt = datetime.strptime(as_of, "%Y-%m-%d").date()
     else:
-        as_of_dt = datetime.utcnow().date()
+        as_of_dt = _utc_today()
 
     data = compute_ageing(filters, as_of_dt)
     return format_ageing_report("AR AGEING REPORT", data)
@@ -155,7 +163,7 @@ def _ap_ageing_handler(**kwargs) -> str:
     if as_of:
         as_of_dt = datetime.strptime(as_of, "%Y-%m-%d").date()
     else:
-        as_of_dt = datetime.utcnow().date()
+        as_of_dt = _utc_today()
 
     data = compute_ageing(filters, as_of_dt)
     return format_ageing_report("AP AGEING REPORT", data)
@@ -169,7 +177,7 @@ def _gl_ageing_handler(**kwargs) -> str:
     if as_of:
         as_of_dt = datetime.strptime(as_of, "%Y-%m-%d").date()
     else:
-        as_of_dt = datetime.utcnow().date()
+        as_of_dt = _utc_today()
 
     data = compute_ageing(filters, as_of_dt)
     return format_ageing_report("GL AGEING REPORT", data)

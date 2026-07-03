@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from .event_models import GovernanceResponse, IntelligenceEvent, RegimeState
 from .governance_response_engine import build_governance_response
 from .regime_mutation_engine import determine_regime
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class IntelligenceStateManager:
@@ -18,7 +22,7 @@ class IntelligenceStateManager:
         self._events.append(event)
 
     def expire_events(self, now: datetime | None = None) -> None:
-        now = now or datetime.utcnow()
+        now = now or _utc_now()
         for event in self._events:
             if event.expiration_time is not None and event.expiration_time <= now:
                 event.active = False

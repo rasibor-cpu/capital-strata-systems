@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from backend.intelligence.global_intelligence.event_models import (
     EventCategory,
@@ -10,7 +10,7 @@ from backend.intelligence.global_intelligence.intelligence_health_monitor import
 
 def test_health_snapshot_reports_issues_for_invalid_event():
     monitor = IntelligenceHealthMonitor()
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     event = IntelligenceEvent(
         event_id="health-1",
         timestamp=now - timedelta(days=4),

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from backend.intelligence.global_intelligence.event_models import (
     EventCategory,
@@ -34,7 +34,7 @@ def test_route_classified_event_and_persistence():
     router = IntelligenceEventRouter(persistence_engine=persistence)
     event = IntelligenceEvent(
         event_id="router-1",
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
         title="Router test event",
         category=EventCategory.GEOPOLITICAL,
         severity=EventSeverity.LOW,

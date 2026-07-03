@@ -15,13 +15,17 @@ Design goals:
 """
 
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, Dict, Any, List
 import json
 import threading
 import uuid
 import os
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
 
 # ─────────────────────────────────────────────
@@ -98,7 +102,7 @@ class AuditLogger:
 
         evt = AuditEvent(
             event_id=str(uuid.uuid4()),
-            timestamp_utc=datetime.utcnow().isoformat(),
+            timestamp_utc=_now_iso(),
             event_type=event_type,
             user_id=user_id,
             role=role,

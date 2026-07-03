@@ -16,9 +16,13 @@ Design principles:
 """
 
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 from decimal import Decimal
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
 
 @dataclass(frozen=True)
@@ -70,7 +74,7 @@ class UserActivityLedger:
         meta: Optional[Dict] = None,
     ) -> None:
         rec = UserActivityRecord(
-            timestamp_utc=datetime.utcnow().isoformat(),
+            timestamp_utc=_now_iso(),
             business_date=business_date,
             user_id=user_id,
             session_id=session_id,
