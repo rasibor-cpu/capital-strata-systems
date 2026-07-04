@@ -50,6 +50,7 @@ runtime/
 backend/runtime/*
 !backend/runtime/live_micro_pilot_governor.py
 !backend/runtime/broker_startup_selection.py
+!backend/runtime/coinbase_readiness.py
 reporting_store/
 out/
 feeds/

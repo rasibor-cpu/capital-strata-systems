@@ -346,6 +346,8 @@ class LiveMicroPilotGovernor:
             "pilot_state": str(state_data.get("pilot_state", "ARMED" if armed else "DISARMED")),
             "currency": config.currency,
             "max_live_test_capital": _money_string(config.max_live_test_capital),
+            "canonical_live_capital_authority": "PHASE_152A_LIVE_MICRO_PILOT_GOVERNOR",
+            "canonical_live_pilot_limit_cad": _money_string(config.max_live_test_capital),
             "max_position_size": _money_string(config.max_position_size),
             "remaining_live_test_capacity": _money_string(remaining),
             "capital_deployed": _money_string(deployed),
@@ -379,6 +381,8 @@ class LiveMicroPilotGovernor:
                 "orders_remaining": max(0, config.max_orders_per_session - int(state_data.get("orders_used_this_session", 0) or 0)),
                 "breach_action": "REJECT_AND_AUDIT_AUTO_DISARM_IF_CONFIGURED",
                 "no_broker_connectivity_required": True,
+                "canonical_authority": "PHASE_152A_LIVE_MICRO_PILOT_GOVERNOR",
+                "legacy_broker_limits_are_secondary": True,
             },
         }
 

@@ -168,7 +168,11 @@ def broker_summary_from_artifacts(
         broker_readiness_status=broker_state.get("broker_readiness_status", broker_state.get("readiness_status", "")),
         readiness_reason=broker_state.get("readiness_reason", ""),
     )
-    return selection.as_dict()
+    summary = selection.as_dict()
+    for key, value in broker_state.items():
+        if key not in summary:
+            summary[key] = value
+    return summary
 
 
 def persist_broker_selection(
@@ -176,10 +180,11 @@ def persist_broker_selection(
     account_state_path: str | Path,
     session_state_path: str | Path,
     selection: BrokerStartupSelection,
+    broker_state_override: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     account_path = Path(account_state_path)
     session_path = Path(session_state_path)
-    broker_state = selection.as_dict()
+    broker_state = dict(broker_state_override) if isinstance(broker_state_override, Mapping) else selection.as_dict()
     account = _read_json(account_path)
     session_state = _read_json(session_path)
     session = session_state.get("session")

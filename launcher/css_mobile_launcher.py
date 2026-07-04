@@ -570,6 +570,16 @@ def build_launcher_frontend_state(
     broker_mode = str(broker_startup.get("broker_mode") or session.get("broker_mode", "paper")).lower()
     if broker_mode not in {"live", "paper"}:
         broker_mode = "paper"
+    credential_diagnostics = (
+        broker_startup.get("credential_diagnostics")
+        if isinstance(broker_startup.get("credential_diagnostics"), dict)
+        else {}
+    )
+    limit_reconciliation = (
+        broker_startup.get("limit_reconciliation")
+        if isinstance(broker_startup.get("limit_reconciliation"), dict)
+        else {}
+    )
 
     dashboard_payload = {
         "generated_at": _utc_iso_z(),
@@ -641,6 +651,25 @@ def build_launcher_frontend_state(
             "broker_execution_armed": bool(broker_startup.get("broker_execution_armed", False)),
             "broker_execution_status": str(broker_startup.get("broker_execution_status", "DISABLED")),
             "broker_connection_mode": str(broker_startup.get("broker_connection_mode", "PAPER_ONLY")),
+            "credential_diagnostics": dict(credential_diagnostics),
+            "coinbase_key_present": bool(credential_diagnostics.get("coinbase_key_present", False)),
+            "coinbase_private_key_present": bool(
+                credential_diagnostics.get("coinbase_private_key_present", False)
+                or credential_diagnostics.get("coinbase_key_file_present", False)
+            ),
+            "missing_credential_names": list(credential_diagnostics.get("missing_credentials", [])),
+            "credential_status": str(credential_diagnostics.get("credential_status", "DATA UNAVAILABLE")),
+            "auth_reason": str(broker_startup.get("auth_reason", broker_startup.get("readiness_reason", "no_live_order_permission"))),
+            "execution_scope": str(broker_startup.get("execution_scope", broker_startup.get("broker_connection_mode", "PAPER_ONLY"))),
+            "can_live_execute": bool(broker_startup.get("can_live_execute", False)),
+            "live_order_permission": bool(broker_startup.get("live_order_permission", False)),
+            "limit_reconciliation": dict(limit_reconciliation),
+            "canonical_live_capital_authority": str(
+                limit_reconciliation.get("canonical_authority", "PHASE_152A_LIVE_MICRO_PILOT_GOVERNOR")
+            ),
+            "canonical_live_pilot_limit_cad": str(limit_reconciliation.get("canonical_live_pilot_limit_cad", "20.00")),
+            "legacy_secondary_limit_label": str(limit_reconciliation.get("legacy_secondary_limit_label", "LEGACY_SECONDARY_LIMIT")),
+            "legacy_coinbase_max_live_order_usd": limit_reconciliation.get("legacy_coinbase_max_live_order_usd", "DATA UNAVAILABLE"),
             "live_trading_enabled": False,
             "readiness_status": str(broker_startup.get("broker_readiness_status", "BROKER_DISABLED")),
             "readiness_reasons": [str(broker_startup.get("readiness_reason", "no_live_order_permission"))],

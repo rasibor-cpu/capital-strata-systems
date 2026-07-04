@@ -107,8 +107,10 @@ def _legacy_enforce_execution_boundary():
         # Live mode must not use simulated paths
         if capital_governor.capital_source_label().upper() == "SIMULATED":
             print("[BOUNDARY VIOLATION] Live mode cannot use simulated capital")
-            import sys
-            sys.exit(1)
+            if BROKER_EXECUTION_ARMED:
+                import sys
+                sys.exit(1)
+            print("[LIVE READ-ONLY CONTINUE] Broker execution disabled; simulated capital cannot execute.")
 
     elif mode == "paper":
         # Paper mode must not attempt live execution
@@ -183,6 +185,14 @@ from backend.runtime.broker_startup_selection import (
     persist_broker_selection,
     startup_broker_from_choice,
     startup_broker_mode_from_choice,
+)
+from backend.runtime.coinbase_readiness import (
+    coinbase_credential_diagnostics,
+    coinbase_live_limit_reconciliation,
+    confirm_coinbase_live_read_only,
+    evaluate_coinbase_live_read_only,
+    merge_readiness_into_broker_state,
+    selection_with_coinbase_readiness,
 )
 
 
@@ -1115,6 +1125,15 @@ def pcnrass_close_session_to_account():
     pcnrass_account_state["last_session_close"] = datetime.now().isoformat(timespec="seconds")
     _pcnrass_write_json(ACCOUNT_STATE_FILE, pcnrass_account_state)
 
+def current_startup_broker_state() -> dict[str, Any]:
+    state = globals().get("STARTUP_BROKER_STATE")
+    if isinstance(state, dict):
+        return dict(state)
+    selection = globals().get("STARTUP_BROKER_SELECTION")
+    if hasattr(selection, "as_dict"):
+        return selection.as_dict()
+    return build_startup_broker_selection().as_dict()
+
 def pcnrass_publish_runtime_artifacts(cycle_number, supervisor_stats=None, tracker_snapshot=None):
     if RuntimeArtifactPublisher is None:
         return {
@@ -1138,9 +1157,7 @@ def pcnrass_publish_runtime_artifacts(cycle_number, supervisor_stats=None, track
                 "broker": str(globals().get("SELECTED_BROKER", "NONE")),
                 "broker_execution_armed": bool(globals().get("BROKER_EXECUTION_ARMED", False)),
                 "broker_execution_enabled": False,
-                "broker_state": globals().get("STARTUP_BROKER_SELECTION", build_startup_broker_selection()).as_dict()
-                if hasattr(globals().get("STARTUP_BROKER_SELECTION", None), "as_dict")
-                else build_startup_broker_selection().as_dict(),
+                "broker_state": current_startup_broker_state(),
             },
             "assets": dict(pcnrass_asset_balances),
             "account_balance_pending_close": pcnrass_session_state.get("session_equity"),
@@ -1157,9 +1174,7 @@ def pcnrass_publish_runtime_artifacts(cycle_number, supervisor_stats=None, track
             "broker_mode": str(globals().get("SELECTED_BROKER_MODE", "paper")),
             "broker_execution_armed": bool(globals().get("BROKER_EXECUTION_ARMED", False)),
             "broker_execution_enabled": False,
-            "broker_state": globals().get("STARTUP_BROKER_SELECTION", build_startup_broker_selection()).as_dict()
-            if hasattr(globals().get("STARTUP_BROKER_SELECTION", None), "as_dict")
-            else build_startup_broker_selection().as_dict(),
+            "broker_state": current_startup_broker_state(),
         }
         realized = float(account_payload.get("realized_pnl", 0.0) or 0.0)
         unrealized = float(account_payload.get("unrealized_pnl", 0.0) or 0.0)
@@ -1185,9 +1200,7 @@ def pcnrass_publish_runtime_artifacts(cycle_number, supervisor_stats=None, track
             "selected_broker": str(globals().get("SELECTED_BROKER", "NONE")),
             "broker_execution_armed": bool(globals().get("BROKER_EXECUTION_ARMED", False)),
             "broker_execution_enabled": False,
-            "broker_state": globals().get("STARTUP_BROKER_SELECTION", build_startup_broker_selection()).as_dict()
-            if hasattr(globals().get("STARTUP_BROKER_SELECTION", None), "as_dict")
-            else build_startup_broker_selection().as_dict(),
+            "broker_state": current_startup_broker_state(),
             "advisory_only": True,
             "execution_allowed": False,
         }
@@ -1729,8 +1742,16 @@ def select_global_broker_mode():
 
 
 
+COINBASE_LIVE_CONFIRMATION_STATUS: dict[str, Any] = {
+    "accepted": False,
+    "broker_mode": "paper",
+    "reason": "coinbase_live_confirmation_not_requested",
+    "required_confirmation": "LIVE",
+}
+
 
 def select_startup_broker_selection() -> tuple[str, str]:
+    global COINBASE_LIVE_CONFIRMATION_STATUS
     role = str(SESSION_USER_CTX.get("role", "VIEWER")).strip().upper()
     role_profile = SESSION_USER_CTX.get("role_profile", {})
 
@@ -1804,11 +1825,14 @@ def select_startup_broker_selection() -> tuple[str, str]:
             os.environ["OANDA_BASE_URL"] = "https://api-fxpractice.oanda.com"
 
     if broker_mode == "live":
-        confirm = input(
+        confirmation = input(
             f"Type LIVE to confirm {selected} LIVE read-only validation "
             "(broker execution remains separately disabled unless armed): "
         ).strip()
-        if confirm != "LIVE":
+        confirmation_status = confirm_coinbase_live_read_only(confirmation) if selected == "COINBASE" else {"accepted": confirmation == "LIVE", "reason": "live_confirmation_verified" if confirmation == "LIVE" else "live_confirmation_missing_or_invalid"}
+        if selected == "COINBASE":
+            COINBASE_LIVE_CONFIRMATION_STATUS = dict(confirmation_status)
+        if not confirmation_status.get("accepted", False):
             print(f"[{selected} LIVE CANCELLED] Falling back to paper mode")
             broker_mode = "paper"
 
@@ -1820,6 +1844,7 @@ def select_startup_broker_selection() -> tuple[str, str]:
             "selected_broker_mode": broker_mode,
             "read_only_validation_allowed": broker_mode == "live",
             "broker_execution_armed": False,
+            "live_confirmation_reason": COINBASE_LIVE_CONFIRMATION_STATUS.get("reason") if selected == "COINBASE" else None,
         },
     )
     print(f"[BROKER SELECTED] {selected} / mode={broker_mode} / execution=DISABLED")
@@ -2071,6 +2096,25 @@ STARTUP_BROKER_SELECTION = build_startup_broker_selection(
     broker_mode=SELECTED_BROKER_MODE,
     broker_execution_armed=BROKER_EXECUTION_ARMED,
 )
+COINBASE_READ_ONLY_STATUS = evaluate_coinbase_live_read_only(
+    STARTUP_BROKER_SELECTION,
+    legacy_limit_usd=COINBASE_MAX_LIVE_ORDER_USD,
+)
+if (
+    SELECTED_BROKER == "COINBASE"
+    and SELECTED_BROKER_MODE == "paper"
+    and COINBASE_LIVE_CONFIRMATION_STATUS.get("reason") == "coinbase_live_confirmation_missing_or_invalid"
+):
+    COINBASE_READ_ONLY_STATUS["auth_reason"] = str(COINBASE_LIVE_CONFIRMATION_STATUS["reason"])
+    COINBASE_READ_ONLY_STATUS["execution_scope"] = "PAPER_FALLBACK_AFTER_INVALID_LIVE_CONFIRMATION"
+STARTUP_BROKER_SELECTION = selection_with_coinbase_readiness(
+    STARTUP_BROKER_SELECTION,
+    COINBASE_READ_ONLY_STATUS,
+)
+STARTUP_BROKER_STATE = merge_readiness_into_broker_state(
+    STARTUP_BROKER_SELECTION,
+    COINBASE_READ_ONLY_STATUS,
+)
 try:
     pcnrass_session_state.update(
         {
@@ -2079,7 +2123,7 @@ try:
             "broker_mode": SELECTED_BROKER_MODE,
             "broker_execution_armed": BROKER_EXECUTION_ARMED,
             "broker_execution_enabled": False,
-            "broker_state": STARTUP_BROKER_SELECTION.as_dict(),
+            "broker_state": STARTUP_BROKER_STATE,
         }
     )
     pcnrass_account_state.update(
@@ -2088,13 +2132,14 @@ try:
             "broker_mode": SELECTED_BROKER_MODE,
             "broker_execution_armed": BROKER_EXECUTION_ARMED,
             "broker_execution_enabled": False,
-            "broker_state": STARTUP_BROKER_SELECTION.as_dict(),
+            "broker_state": STARTUP_BROKER_STATE,
         }
     )
     persist_broker_selection(
         account_state_path=ACCOUNT_STATE_FILE,
         session_state_path=SESSION_STATE_FILE,
         selection=STARTUP_BROKER_SELECTION,
+        broker_state_override=STARTUP_BROKER_STATE,
     )
 except Exception as exc:
     print(f"[BROKER STARTUP PERSIST WARN] {exc}")
@@ -2117,7 +2162,13 @@ except EnvironmentValidationError as e:
     print(f"SECRET VALIDATION PASSED: NO")
     print(f"[FATAL SECURITY ERROR] {str(e)}")
     print("=======================\n")
-    sys.exit(1)
+    if SELECTED_BROKER == "COINBASE" and SELECTED_BROKER_MODE == "live" and not BROKER_EXECUTION_ARMED:
+        print(
+            "[COINBASE READ-ONLY WARNING] Credential validation failed; "
+            "runtime remains read-only with broker execution disabled."
+        )
+    else:
+        sys.exit(1)
 
 ENGINE_MODE = select_engine_mode()
 select_cycle_mode()
@@ -2547,10 +2598,14 @@ if str(SELECTED_BROKER_MODE).lower() == "live":
         )
 
         print("[SYSTEM HALT] Live trading disabled until real broker balance is loaded.")
-        
-        # HARD STOP â€” prevent fake execution
-        import sys
-        sys.exit(1)
+        if BROKER_EXECUTION_ARMED:
+            # HARD STOP - prevent fake execution when broker execution is armed.
+            import sys
+            sys.exit(1)
+        print(
+            "[LIVE READ-ONLY CONTINUE] Broker execution disabled; "
+            "continuing for read-only validation only."
+        )
 
 print(
     f"[CAPITAL SOURCE ACTIVE] source={capital_governor.capital_source_label()} "
@@ -3886,28 +3941,53 @@ def print_oanda_broker_status() -> None:
 def print_coinbase_broker_status() -> None:
     print("--- COINBASE BROKER STATUS ---")
 
-    key_present = bool(
-        os.getenv("COINBASE_CDP_KEY_NAME")
-        or os.getenv("COINBASE_KEY_NAME")
-    )
+    readiness = globals().get("COINBASE_READ_ONLY_STATUS", {})
+    readiness = readiness if isinstance(readiness, dict) else {}
+    diagnostics = readiness.get("credential_diagnostics")
+    if not isinstance(diagnostics, dict):
+        diagnostics = coinbase_credential_diagnostics().as_dict()
+    limits = readiness.get("limit_reconciliation")
+    if not isinstance(limits, dict):
+        limits = coinbase_live_limit_reconciliation(legacy_limit_usd=COINBASE_MAX_LIVE_ORDER_USD)
+    key_present = bool(diagnostics.get("coinbase_key_present"))
     private_key_present = bool(
-        os.getenv("COINBASE_CDP_PRIVATE_KEY_PATH")
-        or os.getenv("COINBASE_PRIVATE_KEY")
+        diagnostics.get("coinbase_private_key_present")
+        or diagnostics.get("coinbase_key_file_present")
     )
+    connected = bool(readiness.get("broker_connected", coinbase is not None))
+    execution_scope = str(readiness.get("execution_scope", "PAPER_OR_NOT_SELECTED"))
+    auth_reason = str(readiness.get("auth_reason", "not_coinbase_live_read_only"))
+    if SELECTED_BROKER == "COINBASE" and SELECTED_BROKER_MODE == "live" and not BROKER_EXECUTION_ARMED:
+        display_mode = "live" if connected else "live-read-only"
+    elif SELECTED_BROKER == "COINBASE" and SELECTED_BROKER_MODE == "paper":
+        display_mode = f"paper fallback ({auth_reason})"
+    else:
+        display_mode = SELECTED_BROKER_MODE if SELECTED_BROKER == "COINBASE" else "N/A"
 
     print(f"COINBASE SELECTED: {'YES' if SELECTED_BROKER == 'COINBASE' else 'NO'}")
-    print(f"COINBASE MODE: {SELECTED_BROKER_MODE if SELECTED_BROKER == 'COINBASE' else 'N/A'}")
+    print(f"COINBASE MODE: {display_mode}")
     print(f"COINBASE KEY PRESENT: {'YES' if key_present else 'NO'}")
     print(f"COINBASE PRIVATE KEY PRESENT: {'YES' if private_key_present else 'NO'}")
+    print(f"COINBASE CONNECTED: {'YES' if connected else 'NO'}")
+    print(f"AUTH REASON: {auth_reason}")
+    print(f"BROKER EXECUTION: {'ARMED' if BROKER_EXECUTION_ARMED else 'DISABLED'}")
+    print(f"CAN LIVE EXECUTE: {'YES' if readiness.get('can_live_execute') else 'NO'}")
+    print(f"EXECUTION SCOPE: {execution_scope}")
     print(f"COINBASE LIVE ORDER FLAG: {'ON' if coinbase_live_orders_enabled() else 'OFF'}")
-    print(f"COINBASE MAX LIVE ORDER USD: ${COINBASE_MAX_LIVE_ORDER_USD:.2f}")
+    print(
+        "COINBASE LIVE LIMIT AUTHORITY: "
+        f"{limits.get('canonical_authority', 'PHASE_152A_LIVE_MICRO_PILOT_GOVERNOR')} "
+        f"CAD {limits.get('canonical_live_pilot_limit_cad', '20.00')}"
+    )
+    print(
+        "COINBASE LEGACY_SECONDARY_LIMIT USD: "
+        f"${float(limits.get('legacy_coinbase_max_live_order_usd', COINBASE_MAX_LIVE_ORDER_USD)):.2f}"
+    )
 
     if SELECTED_BROKER != "COINBASE":
-        print("COINBASE CONNECTED: NOT SELECTED")
         return
 
     if coinbase is None:
-        print("COINBASE CONNECTED: NO")
         return
 
     try:
@@ -3961,6 +4041,8 @@ def active_execution_scope_label() -> str:
         return "DEFENSIVE MODE / POSITION MANAGEMENT ONLY"
 
     if not BROKER_EXECUTION_ARMED:
+        if SELECTED_BROKER == "COINBASE" and SELECTED_BROKER_MODE == "live":
+            return "LIVE READ-ONLY VALIDATION / ORDERS BLOCKED"
         return "PAPER ONLY"
 
     if SELECTED_BROKER == "OANDA":

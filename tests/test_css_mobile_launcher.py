@@ -110,15 +110,22 @@ def test_icon_asset_exists():
     icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "launcher", "static", "css_launcher_icon.svg")
     assert os.path.exists(icon_path)
     
-def test_launcher_does_not_expose_secrets(launcher_temp_dir):
+def test_launcher_does_not_expose_secrets(launcher_temp_dir, monkeypatch):
+    monkeypatch.setenv("COINBASE_CDP_KEY_NAME", "organizations/css-secret-key")
+    monkeypatch.setenv("COINBASE_CDP_PRIVATE_KEY", "-----BEGIN PRIVATE KEY-----css-secret-private-----END PRIVATE KEY-----")
     context = build_launcher_context()
     context_str = json.dumps(context).lower()
-    
-    # Assert no obvious secrets are part of the context
-    assert "password" not in context_str
-    assert "token" not in context_str
-    assert "secret" not in context_str
-    assert "key" not in context_str
+
+    # Phase 153D intentionally exposes credential readiness labels such as
+    # coinbase_key_present, but never raw credential values or secret fields.
+    forbidden_secret_values = [
+        "organizations/css-secret-key",
+        "css-secret-private",
+        "begin private key",
+        "end private key",
+    ]
+    for value in forbidden_secret_values:
+        assert value not in context_str
 
 def test_malformed_state_handled_safely(launcher_temp_dir):
     os.makedirs(os.path.dirname(LauncherConfig.SUPERVISOR_STATE_FILE), exist_ok=True)

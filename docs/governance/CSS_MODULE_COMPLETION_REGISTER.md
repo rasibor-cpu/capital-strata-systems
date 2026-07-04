@@ -89,3 +89,11 @@ Status: Startup regression fix implemented for review.
 Phase 153C restores the canonical startup order, adds invalid/cancelled broker handling coverage, and verifies selected broker propagation through runtime artifacts and launcher frontend state.
 
 This register does not authorize live broker execution.
+
+## Phase 153D Coinbase Live Read-Only Credential Readiness Register
+
+Status: Read-only credential readiness implemented for review.
+
+Phase 153D adds Coinbase credential presence diagnostics, exact `LIVE` read-only confirmation handling, safe missing-credential reporting, read-only Coinbase validation status propagation, and dashboard/API visibility for canonical Phase 152A CAD 20 pilot authority versus the legacy Coinbase `LEGACY_SECONDARY_LIMIT`.
+
+This register does not authorize live broker execution. Broker execution remains disabled, Live Micro-Pilot remains disarmed by default, and broker orders remain blocked before submission.

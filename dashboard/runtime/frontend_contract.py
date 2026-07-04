@@ -985,6 +985,8 @@ def live_readiness_certification(dashboard_payload: Mapping[str, Any]) -> dict[s
 
 def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     broker_payload = _mapping(dashboard_payload.get("broker_summary"))
+    credential_diagnostics = _mapping(broker_payload.get("credential_diagnostics"))
+    limit_reconciliation = _mapping(broker_payload.get("limit_reconciliation"))
     return {
         "selected_broker": str(broker_payload.get("selected_broker", "NONE")),
         "broker_mode": str(broker_payload.get("broker_mode", "paper")),
@@ -1014,6 +1016,44 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         ),
         "readiness_reasons": _string_list(
             broker_payload.get("readiness_reasons")
+        ),
+        "credential_diagnostics": credential_diagnostics,
+        "coinbase_key_present": _boolean(
+            broker_payload.get("coinbase_key_present", credential_diagnostics.get("coinbase_key_present"))
+        ),
+        "coinbase_private_key_present": _boolean(
+            broker_payload.get(
+                "coinbase_private_key_present",
+                credential_diagnostics.get("coinbase_private_key_present")
+                or credential_diagnostics.get("coinbase_key_file_present"),
+            )
+        ),
+        "missing_credential_names": _string_list(
+            broker_payload.get("missing_credential_names", credential_diagnostics.get("missing_credentials"))
+        ),
+        "credential_status": str(
+            broker_payload.get("credential_status", credential_diagnostics.get("credential_status", DATA_UNAVAILABLE))
+        ),
+        "auth_reason": str(broker_payload.get("auth_reason", DATA_UNAVAILABLE)),
+        "execution_scope": str(broker_payload.get("execution_scope", broker_payload.get("broker_connection_mode", DATA_UNAVAILABLE))),
+        "can_live_execute": _boolean(broker_payload.get("can_live_execute")),
+        "live_order_permission": _boolean(broker_payload.get("live_order_permission")),
+        "limit_reconciliation": limit_reconciliation,
+        "canonical_live_capital_authority": str(
+            broker_payload.get(
+                "canonical_live_capital_authority",
+                limit_reconciliation.get("canonical_authority", "PHASE_152A_LIVE_MICRO_PILOT_GOVERNOR"),
+            )
+        ),
+        "canonical_live_pilot_limit_cad": str(
+            broker_payload.get("canonical_live_pilot_limit_cad", limit_reconciliation.get("canonical_live_pilot_limit_cad", "20.00"))
+        ),
+        "legacy_secondary_limit_label": str(
+            broker_payload.get("legacy_secondary_limit_label", limit_reconciliation.get("legacy_secondary_limit_label", "LEGACY_SECONDARY_LIMIT"))
+        ),
+        "legacy_coinbase_max_live_order_usd": broker_payload.get(
+            "legacy_coinbase_max_live_order_usd",
+            limit_reconciliation.get("legacy_coinbase_max_live_order_usd", DATA_UNAVAILABLE),
         ),
     }
 
