@@ -62,6 +62,12 @@ Phase 153E hardens the operator startup flow with a deterministic wizard order, 
 
 Phase 153E does not authorize live trading. Coinbase LIVE read-only validation remains broker-order-blocked by default; broker execution can only become armed after explicit operator selection, RBAC authorization, and the required confirmation phrases.
 
+## Phase 153F Operator Startup State Machine Addendum
+
+Phase 153F centralizes startup input handling in an explicit operator state machine. The state machine records auditable transitions, flushes pending stdin before confirmations, ignores buffered ENTER presses, supports cancellation commands from every state, enforces a startup timeout, and prevents runtime startup until the final `Y` confirmation.
+
+Phase 153F does not authorize live trading. It preserves Unified Trade Gate, Margin Gate, AntiBleedGuard, RBAC, Live Micro-Pilot Governor, kill switch, Live Readiness Certification, and broker execution controls.
+
 ## Safety Controls Required For LIVE
 
 LIVE mode must continue to require Unified Trade Gate, Margin Gate, RBAC, Capital Governor, AntiBleedGuard, kill switches, emergency stops, broker validation, execution authorization, and configured broker controls.

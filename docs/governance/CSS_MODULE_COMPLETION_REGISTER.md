@@ -105,3 +105,11 @@ Status: Startup workflow hardening implemented for review.
 Phase 153E adds a deterministic startup wizard contract, invalid-input retry behavior, exact `LIVE` and `ARM LIVE` confirmation checks, broker execution arming guards for selected broker `NONE`, paper/live environment conflict detection, final startup summary confirmation, and hardened broker validation display fields.
 
 This register does not authorize live broker execution. Live orders remain blocked by default, broker execution remains disabled unless all operator confirmations and RBAC checks pass, and the Phase 152A CAD 20 Governor remains the canonical live capital authority.
+
+## Phase 153F Operator Startup State Machine Register
+
+Status: Startup state machine implemented for review.
+
+Phase 153F replaces the startup prompt chain with an auditable operator startup state machine. It centralizes startup input handling, flushes pending stdin before confirmation prompts, ignores buffered ENTER presses, supports `Q` / `QUIT` / `EXIT` from every state, applies a configurable startup timeout, prevents silent LIVE-to-PAPER fallback, and requires final confirmation before runtime begins.
+
+This register does not authorize live broker execution. Existing live safety controls remain unchanged, and live orders remain blocked by default.
