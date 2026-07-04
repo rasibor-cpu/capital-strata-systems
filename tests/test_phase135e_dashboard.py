@@ -44,7 +44,15 @@ def launcher_temp_dir():
         ) = original
 
 
-def _write_runtime(*, age_seconds: int = 300, max_seconds: int = 86400, quiet: bool = False) -> None:
+def _write_runtime(
+    *,
+    age_seconds: int = 300,
+    max_seconds: int = 86400,
+    quiet: bool = False,
+    engine_mode: str = "PAPER",
+    broker_mode: str = "PAPER",
+    broker_execution_enabled: bool = False,
+) -> None:
     now = datetime.now(timezone.utc)
     start = (now - timedelta(seconds=age_seconds)).isoformat()
     now_text = now.isoformat()
@@ -56,7 +64,9 @@ def _write_runtime(*, age_seconds: int = 300, max_seconds: int = 86400, quiet: b
         json.dumps(
             {
                 "session": {
-                    "engine_mode": "PAPER",
+                    "engine_mode": engine_mode,
+                    "broker_mode": broker_mode,
+                    "broker_execution_enabled": broker_execution_enabled,
                     "start_time": start,
                     "last_heartbeat": now_text,
                     "max_session_seconds": max_seconds,
@@ -84,8 +94,15 @@ def test_phase135e_session_continuity_endpoint_safe_json(launcher_temp_dir) -> N
     assert payload["execution_allowed"] is False
 
 
-def test_phase135e_expired_session_endpoint_no_crash_and_blocks_readiness(launcher_temp_dir) -> None:
-    _write_runtime(age_seconds=3700, max_seconds=3600, quiet=True)
+def test_phase135e_expired_live_session_endpoint_no_crash_and_blocks_readiness(launcher_temp_dir) -> None:
+    _write_runtime(
+        age_seconds=3700,
+        max_seconds=3600,
+        quiet=True,
+        engine_mode="LIVE",
+        broker_mode="LIVE",
+        broker_execution_enabled=True,
+    )
 
     continuity = client.get("/api/runtime-session-continuity").json()
     readiness = client.get("/api/validation-readiness").json()

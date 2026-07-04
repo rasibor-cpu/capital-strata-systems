@@ -70,7 +70,7 @@ def test_no_trade_execution_occurs_on_feed_calls() -> None:
             mod.MOBILE_TRADE_REQUESTS_FILE = orig
 
 
-def test_opportunity_use_button_blocked_for_non_tradeable_symbols(monkeypatch) -> None:
+def test_opportunity_use_button_excludes_non_approved_top_opportunities(monkeypatch) -> None:
     import launcher.css_mobile_launcher as mod
 
     monkeypatch.setattr(mod, "get_grouped_trading_universe_feed", lambda **kwargs: {
@@ -98,19 +98,19 @@ def test_opportunity_use_button_blocked_for_non_tradeable_symbols(monkeypatch) -
         ],
     })
 
-    monkeypatch.setattr(mod, "get_top_opportunities_feed", lambda **kwargs: {
-        "status": "OK",
-        "count": 2,
-        "top_opportunities": [
-            {"rank": 1, "symbol": "PAPER_OK", "asset_class": "FOREX", "signal_color": "GREEN"},
-            {"rank": 2, "symbol": "BLOCKED_X", "asset_class": "FOREX", "signal_color": "RED"},
-        ],
-    })
+    class FakeOpportunityRankingEngine:
+        def top_opportunities(self, limit=10):
+            return [
+                {"rank": 1, "symbol": "PAPER_OK", "asset_class": "FOREX", "signal_color": "GREEN", "status": "APPROVED", "opportunity_score": 80, "confidence": 0.8},
+                {"rank": 2, "symbol": "BLOCKED_X", "asset_class": "FOREX", "signal_color": "RED", "status": "NOT_APPROVED", "opportunity_score": 99, "confidence": 0.9},
+            ]
+
+    monkeypatch.setattr(mod, "OpportunityRankingEngine", FakeOpportunityRankingEngine)
 
     response = client.get("/mobile")
     assert response.status_code == 200
     assert 'data-opportunity-symbol="PAPER_OK"' in response.text
-    assert 'data-opportunity-symbol="BLOCKED_X"' in response.text
+    assert 'data-opportunity-symbol="BLOCKED_X"' not in response.text
     assert 'data-opportunity-action=' in response.text
     assert "TOP OPPORTUNITIES" in response.text
 

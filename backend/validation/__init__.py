@@ -31,7 +31,12 @@ from .runtime_validation_metrics import RuntimeValidationMetrics, RuntimeValidat
 from .session_checkpoint_store import SessionCheckpointStore, SessionCheckpointStoreError
 from .validation_confidence_engine import ValidationConfidenceEngine, ValidationConfidenceEngineError
 from .validation_readiness_engine import ValidationReadinessEngine, ValidationReadinessEngineError
-from .live_readiness_certification import LiveReadinessCertificationEngine, LiveReadinessCertificationEngineError, certify_live_readiness
+from .live_readiness_certification import (
+    LiveReadinessCertificationEngine,
+    LiveReadinessCertificationEngineError,
+    certify_live_readiness,
+    live_readiness_blocker_diagnostics,
+)
 __all__ = [
     "ContinuousPaperValidation",
     "ContinuousPaperValidationError",
@@ -95,4 +100,5 @@ __all__ = [
     "ValidationReadinessEngine",
     "ValidationReadinessEngineError",
     "certify_live_readiness",
+    "live_readiness_blocker_diagnostics",
 ]

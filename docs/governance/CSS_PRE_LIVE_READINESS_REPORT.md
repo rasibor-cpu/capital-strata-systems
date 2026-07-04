@@ -34,6 +34,12 @@ Phase 152B adds a read-only GO/NO-GO certification layer before first live broke
 
 Phase 152B does not submit broker orders, enable live trading, or weaken broker permissions. A `GO` result is engineering certification for controlled CAD 20 broker validation review only; live broker validation and operational approval remain separate.
 
+## Phase 153A Pre-Live NO-GO Cleanup Addendum
+
+Phase 153A closes restart-time dashboard/reporting inconsistencies in heartbeat, artifact freshness, paper session continuity, top-opportunity filtering, and software metadata visibility. It also adds read-only blocker diagnostics that separate engineering/dashboard blockers from expected operational blockers before live broker validation.
+
+Phase 153A does not authorize live trading. A remaining `NO GO` is expected when true live broker validation evidence has not yet been collected.
+
 ## Safety Controls Required For LIVE
 
 LIVE mode must continue to require Unified Trade Gate, Margin Gate, RBAC, Capital Governor, AntiBleedGuard, kill switches, emergency stops, broker validation, execution authorization, and configured broker controls.

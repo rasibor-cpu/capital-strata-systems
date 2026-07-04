@@ -17,6 +17,9 @@ from dashboard.runtime.broker_balance_reconciliation import (
     build_broker_reconciliation_payload,
 )
 from dashboard.runtime.ws_bridge import create_ws_router
+from backend.validation.live_readiness_certification import (
+    live_readiness_blocker_diagnostics,
+)
 
 
 DashboardStateProvider = Callable[[], DashboardState]
@@ -139,6 +142,10 @@ def create_dashboard_state_router(
             _state_from_provider(state_provider),
             "live_readiness_certification",
         )
+
+    @router.get("/api/v1/live-readiness-blockers")
+    def read_live_readiness_blockers() -> dict[str, Any]:
+        return live_readiness_blocker_diagnostics()
 
     @router.get("/api/v1/broker")
     def read_broker() -> dict[str, Any]:

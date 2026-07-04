@@ -48,7 +48,6 @@ class SessionRenewalManager:
             and not live_mode_selected
             and broker_mode == "PAPER"
             and not broker_execution_enabled
-            and not quiet_mode
         )
         live_renewal_blocked = live_mode_selected or broker_execution_enabled
 
@@ -86,7 +85,7 @@ class SessionRenewalManager:
             blockers.append("live_mode_selected")
         if broker_execution_enabled:
             blockers.append("broker_execution_enabled")
-        if quiet_mode:
+        if quiet_mode and not renewal_allowed:
             blockers.append("quiet_mode_active")
         if not continuous_enabled:
             blockers.append("continuous_paper_runtime_disabled")

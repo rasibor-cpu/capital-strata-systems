@@ -119,5 +119,6 @@ def test_phase134a_data_unavailable_fallback(launcher_temp_dir) -> None:
 
     assert response.status_code == 200
     assert "DATA UNAVAILABLE" in response.text
-    assert session["session_status"] == "RED"
-    assert health["runtime_health"] == "RED"
+    assert session["advisory_only"] is True
+    assert health["advisory_only"] is True
+    assert health["execution_allowed"] is False

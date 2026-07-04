@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import copy
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -23,6 +25,51 @@ DECISION_GO_WITH_CONDITIONS = "GO WITH CONDITIONS"
 DECISION_NO_GO = "NO GO"
 
 PAYLOAD_VERSION = "css.phase152b.live_readiness_certification.v1"
+_GIT_METADATA_CACHE: dict[str, Any] = {}
+_DEFAULT_CERTIFICATION_STATUS_CACHE: dict[str, Any] | None = None
+
+EXPECTED_PRE_BROKER_VALIDATION_BLOCKERS = {
+    "broker_authentication_state",
+    "broker_health",
+    "unified_trade_gate",
+    "margin_gate",
+    "capital_governor",
+    "anti_bleed_guard",
+    "kill_switch",
+    "emergency_stop",
+    "live_confirmation_workflow",
+    "audit_subsystem",
+    "trade_logging",
+    "pnl_reconciliation",
+    "accounting_reconciliation",
+}
+
+REMEDIATION_BY_CHECK = {
+    "rbac": "Verify current operator session and RBAC role evidence without changing permissions.",
+    "super_user_authority": "Confirm SUPER_USER authority is present for live pilot governance actions.",
+    "broker_authentication_state": "Complete live broker credential validation in the separate broker-validation step.",
+    "broker_health": "Complete broker connectivity/health validation in read-only mode before pilot approval.",
+    "unified_trade_gate": "Run the live dry-run gate validation and record the Unified Trade Gate decision evidence.",
+    "margin_gate": "Run read-only margin snapshot validation and record Margin Gate evidence.",
+    "capital_governor": "Record Capital Governor dry-run evidence for the CAD 20 pilot envelope.",
+    "anti_bleed_guard": "Record AntiBleedGuard dry-run evidence with production override protection intact.",
+    "kill_switch": "Record kill-switch status and confirm live orders remain blocked when engaged.",
+    "emergency_stop": "Record emergency-stop status and confirm fail-closed behavior.",
+    "live_confirmation_workflow": "Record explicit live-confirmation workflow evidence; do not bypass confirmation.",
+    "audit_subsystem": "Record audit sink availability and append-only evidence for pilot controls.",
+    "dashboard_synchronization": "Verify desktop, mobile, launcher, and runtime API panels are synchronized.",
+    "runtime_supervisor": "Publish/read current supervisor state and verify heartbeat freshness.",
+    "runtime_health": "Verify runtime health is GREEN or document a true operational warning.",
+    "artifact_freshness": "Publish current runtime/account/session/supervisor artifacts and refresh freshness status.",
+    "session_continuity": "Verify paper renewal/session continuity status; live expiry must still require re-authentication.",
+    "recovery_subsystem": "Record recovery subsystem status and fail-closed recovery evidence.",
+    "mobile_dashboard": "Verify mobile dashboard renders Phase 152A/152B panels.",
+    "desktop_dashboard": "Verify desktop dashboard renders Phase 152A/152B panels.",
+    "launcher_dashboard": "Verify launcher dashboard renders Phase 152A/152B panels.",
+    "trade_logging": "Record trade logging readiness in dry-run/read-only mode.",
+    "pnl_reconciliation": "Record PnL reconciliation readiness without fabricating balances.",
+    "accounting_reconciliation": "Record accounting reconciliation readiness without broker order submission.",
+}
 
 
 @dataclass(frozen=True)
@@ -135,9 +182,11 @@ class LiveReadinessCertificationEngine:
         pass_count = sum(1 for result in all_results if result.status == CHECK_PASS)
         readiness_score = round((pass_count / len(all_results)) * 100.0, 2) if all_results else 0.0
         timestamp = datetime.now(timezone.utc).isoformat()
-        commit = str(evidence_payload.get("commit") or os.getenv("CSS_GIT_COMMIT") or "DATA UNAVAILABLE")
-        git_tag = str(evidence_payload.get("git_tag") or os.getenv("CSS_GIT_TAG") or "DATA UNAVAILABLE")
+        metadata = git_metadata(self.repository_root)
+        commit = str(evidence_payload.get("commit") or os.getenv("CSS_GIT_COMMIT") or metadata.get("commit") or "DATA UNAVAILABLE")
+        git_tag = str(evidence_payload.get("git_tag") or os.getenv("CSS_GIT_TAG") or metadata.get("git_tag") or "DATA UNAVAILABLE")
         version = str(evidence_payload.get("software_version") or self.software_version)
+        blocker_diagnostics = build_blocker_diagnostics(all_results)
 
         report = {
             "payload_version": PAYLOAD_VERSION,
@@ -156,12 +205,15 @@ class LiveReadinessCertificationEngine:
             "learning_system_status": self._learning_status(evidence_payload),
             "known_warnings": warnings,
             "known_blockers": blockers,
+            "blocker_diagnostics": blocker_diagnostics,
+            "blocker_summary": _blocker_summary(blocker_diagnostics),
             "recommended_next_step": self._recommended_next_step(decision),
             "overall_certification_decision": decision,
             "timestamp": timestamp,
             "software_version": version,
             "commit": commit,
             "git_tag": git_tag,
+            "metadata_diagnostics": metadata.get("diagnostics", {}),
             "readiness_score": readiness_score,
             "certification_status": decision,
             "go_no_go": decision,
@@ -356,14 +408,166 @@ def certify_live_readiness(evidence: Mapping[str, Any] | None = None) -> dict[st
     return LiveReadinessCertificationEngine().certify(evidence)
 
 
-def live_readiness_certification_status() -> dict[str, Any]:
-    return certify_live_readiness()
+def live_readiness_certification_status(evidence: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    global _DEFAULT_CERTIFICATION_STATUS_CACHE
+    if evidence is not None:
+        return certify_live_readiness(evidence)
+    if _DEFAULT_CERTIFICATION_STATUS_CACHE is None:
+        _DEFAULT_CERTIFICATION_STATUS_CACHE = certify_live_readiness()
+    return copy.deepcopy(_DEFAULT_CERTIFICATION_STATUS_CACHE)
 
 
 def write_live_readiness_report(report: Mapping[str, Any], path: str | Path) -> None:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(_json_safe(report), indent=2), encoding="utf-8")
+
+
+def build_blocker_diagnostics(results: list[CertificationCheckResult]) -> list[dict[str, Any]]:
+    diagnostics: list[dict[str, Any]] = []
+    for result in results:
+        if result.status != CHECK_FAIL or not result.mandatory:
+            continue
+        expected = result.key in EXPECTED_PRE_BROKER_VALIDATION_BLOCKERS
+        diagnostics.append(
+            {
+                "blocker_id": result.key,
+                "component": result.label,
+                "category": result.category,
+                "severity": "OPERATIONAL" if expected else "ENGINEERING",
+                "reason": result.reason,
+                "recommended_remediation": REMEDIATION_BY_CHECK.get(
+                    result.key,
+                    "Provide objective certification evidence or remediate the failing component.",
+                ),
+                "expected_before_live_broker_validation": expected,
+            }
+        )
+    return diagnostics
+
+
+def live_readiness_blocker_diagnostics(evidence: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    report = certify_live_readiness(evidence)
+    diagnostics = list(report.get("blocker_diagnostics", []))
+    return {
+        "payload_version": "css.phase153a.live_readiness_blockers.v1",
+        "generated_at": report.get("timestamp"),
+        "overall_certification_decision": report.get("overall_certification_decision"),
+        "readiness_score": report.get("readiness_score"),
+        "blocker_count": len(diagnostics),
+        "blockers": diagnostics,
+        "summary": report.get("blocker_summary", {}),
+        "advisory_only": True,
+        "execution_allowed": False,
+    }
+
+
+def git_metadata(repository_root: str | Path | None = None) -> dict[str, Any]:
+    root = Path(repository_root or Path(__file__).resolve().parents[2])
+    cache_key = str(root.resolve())
+    cached = _GIT_METADATA_CACHE.get(cache_key)
+    if isinstance(cached, Mapping):
+        return dict(cached)
+
+    diagnostics: dict[str, Any] = {}
+    commit = ""
+    tag = ""
+    git_dir = root / ".git"
+    try:
+        head_text = (git_dir / "HEAD").read_text(encoding="utf-8").strip()
+        if head_text.startswith("ref:"):
+            ref = head_text.split(" ", 1)[1].strip()
+            commit = (git_dir / ref).read_text(encoding="utf-8").strip()
+            diagnostics["commit_source"] = ref
+        else:
+            commit = head_text
+            diagnostics["commit_source"] = "detached_head"
+        tag = _tag_for_commit(git_dir, commit) or _git_tag_for_commit(root, commit)
+        diagnostics["tag_source"] = "git_refs" if tag else "no_tag_for_head"
+    except Exception as exc:
+        diagnostics["metadata_error"] = str(exc)
+        commit = commit or _git_commit(root)
+        tag = tag or _git_tag_for_commit(root, commit)
+
+    result = {
+        "commit": commit[:7] if commit else "",
+        "full_commit": commit,
+        "git_tag": tag,
+        "diagnostics": diagnostics,
+    }
+    _GIT_METADATA_CACHE[cache_key] = result
+    return dict(result)
+
+
+def _tag_for_commit(git_dir: Path, commit: str) -> str:
+    if not commit:
+        return ""
+    tags_dir = git_dir / "refs" / "tags"
+    if tags_dir.exists():
+        for path in sorted(tags_dir.rglob("*")):
+            if path.is_file():
+                try:
+                    if path.read_text(encoding="utf-8").strip() == commit:
+                        return str(path.relative_to(tags_dir)).replace("\\", "/")
+                except Exception:
+                    continue
+    packed = git_dir / "packed-refs"
+    if packed.exists():
+        try:
+            for line in packed.read_text(encoding="utf-8").splitlines():
+                if not line or line.startswith("#") or line.startswith("^"):
+                    continue
+                parts = line.split(" ", 1)
+                if len(parts) == 2 and parts[0] == commit and parts[1].startswith("refs/tags/"):
+                    return parts[1].replace("refs/tags/", "", 1)
+        except Exception:
+            return ""
+    return ""
+
+
+def _git_commit(root: Path) -> str:
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            capture_output=True,
+            check=False,
+            encoding="utf-8",
+            timeout=2,
+        )
+    except Exception:
+        return ""
+    return completed.stdout.strip() if completed.returncode == 0 else ""
+
+
+def _git_tag_for_commit(root: Path, commit: str) -> str:
+    if not commit:
+        return ""
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(root), "tag", "--points-at", commit],
+            capture_output=True,
+            check=False,
+            encoding="utf-8",
+            timeout=2,
+        )
+    except Exception:
+        return ""
+    if completed.returncode != 0:
+        return ""
+    tags = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    return tags[0] if tags else ""
+
+
+def _blocker_summary(diagnostics: list[Mapping[str, Any]]) -> dict[str, Any]:
+    expected = [item for item in diagnostics if item.get("expected_before_live_broker_validation")]
+    engineering = [item for item in diagnostics if not item.get("expected_before_live_broker_validation")]
+    return {
+        "total": len(diagnostics),
+        "engineering_dashboard_blockers": len(engineering),
+        "expected_operational_blockers": len(expected),
+        "engineering_blocker_ids": [str(item.get("blocker_id")) for item in engineering],
+        "expected_operational_blocker_ids": [str(item.get("blocker_id")) for item in expected],
+    }
 
 
 def _aggregate_status(results: list[CertificationCheckResult]) -> str:
@@ -414,7 +618,10 @@ __all__ = [
     "DECISION_NO_GO",
     "LiveReadinessCertificationEngine",
     "LiveReadinessCertificationEngineError",
+    "build_blocker_diagnostics",
     "certify_live_readiness",
+    "git_metadata",
+    "live_readiness_blocker_diagnostics",
     "live_readiness_certification_status",
     "write_live_readiness_report",
 ]

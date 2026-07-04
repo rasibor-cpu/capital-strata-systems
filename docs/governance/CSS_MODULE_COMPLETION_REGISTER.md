@@ -65,3 +65,11 @@ Status: Engineering certification layer implemented for review.
 Phase 152B adds the read-only Live Readiness Certification engine, PASS/WARNING/FAIL check matrix, canonical GO / GO WITH CONDITIONS / NO GO decision, structured report, Phase 152A governor verification, and dashboard/API visibility.
 
 This register does not authorize live broker execution. Live broker validation remains the next separate operational step.
+
+## Phase 153A Pre-Live NO-GO Blocker Cleanup Register
+
+Status: Engineering cleanup implemented for review.
+
+Phase 153A adds read-only blocker diagnostics, aligns launcher readiness evidence with current heartbeat/session/artifact state, refreshes missing critical artifacts after restart, restores accurate paper session continuity display, excludes RED/NOT_APPROVED top opportunities from the mobile trade page, and populates commit/tag metadata when available.
+
+This register does not authorize live broker execution. Remaining operational NO-GO blockers are expected until live broker validation evidence is collected.

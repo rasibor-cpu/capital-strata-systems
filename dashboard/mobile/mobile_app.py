@@ -1299,6 +1299,7 @@ def _runtime_heartbeat_html() -> str:
 def _dashboard_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
     dashboard_text = _mobile_dashboard_text(user_ctx, session)
     dashboard_payload = _mobile_dashboard_payload(user_ctx, session)
+    frontend_payload = build_frontend_payload(dashboard_payload)
     status = _system_status(user_ctx)
     system_mode = "Live" if status["system_live"] else "Paper"
     order_state = "Enabled" if status["orders_enabled"] else "Disabled"
@@ -1321,9 +1322,9 @@ def _dashboard_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
 
           {_account_summary_cards(dashboard_payload)}
           {_mobile_charts_html()}
-          {_session_command_centre_panel(user_ctx, session)}
-          {_live_micro_pilot_panel(user_ctx, session)}
-          {_live_readiness_certification_panel_from_payload(dashboard_payload)}
+          {_session_command_centre_panel(user_ctx, session, frontend_payload=frontend_payload)}
+          {_live_micro_pilot_panel(user_ctx, session, frontend_payload=frontend_payload)}
+          {_live_readiness_certification_panel_from_payload(dashboard_payload, frontend_payload=frontend_payload)}
           {_command_center_panel(user_ctx)}
           {_recent_tickets_panel()}
 
@@ -1336,13 +1337,30 @@ def _dashboard_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
     )
 
 
-def _session_command_centre_payload(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> Dict[str, Any]:
-    payload = build_frontend_payload(_mobile_dashboard_payload(user_ctx, session))
+def _session_command_centre_payload(
+    user_ctx: Dict[str, Any],
+    session: Dict[str, Any],
+    *,
+    dashboard_payload: Dict[str, Any] | None = None,
+    frontend_payload: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    payload = frontend_payload if frontend_payload is not None else build_frontend_payload(dashboard_payload or _mobile_dashboard_payload(user_ctx, session))
     return _mapping(_mapping(payload.get("sections")).get("session_command_centre"))
 
 
-def _session_command_centre_panel(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
-    centre = _session_command_centre_payload(user_ctx, session)
+def _session_command_centre_panel(
+    user_ctx: Dict[str, Any],
+    session: Dict[str, Any],
+    *,
+    dashboard_payload: Dict[str, Any] | None = None,
+    frontend_payload: Dict[str, Any] | None = None,
+) -> str:
+    centre = _session_command_centre_payload(
+        user_ctx,
+        session,
+        dashboard_payload=dashboard_payload,
+        frontend_payload=frontend_payload,
+    )
     cards = centre.get("intelligence_cards")
     if not isinstance(cards, list):
         cards = []
@@ -1410,13 +1428,30 @@ def _session_command_centre_page(user_ctx: Dict[str, Any], session: Dict[str, An
     )
 
 
-def _live_micro_pilot_payload(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> Dict[str, Any]:
-    payload = build_frontend_payload(_mobile_dashboard_payload(user_ctx, session))
+def _live_micro_pilot_payload(
+    user_ctx: Dict[str, Any],
+    session: Dict[str, Any],
+    *,
+    dashboard_payload: Dict[str, Any] | None = None,
+    frontend_payload: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    payload = frontend_payload if frontend_payload is not None else build_frontend_payload(dashboard_payload or _mobile_dashboard_payload(user_ctx, session))
     return _mapping(_mapping(payload.get("sections")).get("live_micro_pilot"))
 
 
-def _live_micro_pilot_panel(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
-    pilot = _live_micro_pilot_payload(user_ctx, session)
+def _live_micro_pilot_panel(
+    user_ctx: Dict[str, Any],
+    session: Dict[str, Any],
+    *,
+    dashboard_payload: Dict[str, Any] | None = None,
+    frontend_payload: Dict[str, Any] | None = None,
+) -> str:
+    pilot = _live_micro_pilot_payload(
+        user_ctx,
+        session,
+        dashboard_payload=dashboard_payload,
+        frontend_payload=frontend_payload,
+    )
     return f"""
       <section class="data-panel" aria-label="Live Micro-Pilot Status">
         <h2>Live Micro-Pilot Status</h2>
@@ -1494,8 +1529,15 @@ def _live_readiness_certification_panel(user_ctx: Dict[str, Any], session: Dict[
     return _live_readiness_certification_panel_markup(certification)
 
 
-def _live_readiness_certification_panel_from_payload(dashboard_payload: Dict[str, Any]) -> str:
-    certification = _mapping(build_live_readiness_certification_section(dashboard_payload))
+def _live_readiness_certification_panel_from_payload(
+    dashboard_payload: Dict[str, Any],
+    *,
+    frontend_payload: Dict[str, Any] | None = None,
+) -> str:
+    if frontend_payload is not None:
+        certification = _mapping(_mapping(frontend_payload.get("sections")).get("live_readiness_certification"))
+    else:
+        certification = _mapping(build_live_readiness_certification_section(dashboard_payload))
     return _live_readiness_certification_panel_markup(certification)
 
 

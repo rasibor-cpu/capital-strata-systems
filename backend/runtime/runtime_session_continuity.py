@@ -76,17 +76,17 @@ class RuntimeSessionContinuityMonitor:
             reauth_required = True
             warnings.append("session_inactive")
             actions.append("Re-authenticate through the existing login flow to resume paper validation.")
-        elif quiet_mode:
-            status = "REAUTH_REQUIRED"
-            reauth_required = True
-            warnings.append("quiet_mode_active")
-            actions.append("Re-authenticate through the existing login flow to resume paper validation.")
         elif paper_session_renewed:
             status = "ACTIVE"
             reauth_required = False
             age = renewal.get("current_session_age_seconds")
             seconds_until = renewal.get("seconds_until_expiry")
             actions.append("Paper session max-age was automatically renewed for broker-disabled paper validation.")
+        elif quiet_mode:
+            status = "REAUTH_REQUIRED"
+            reauth_required = True
+            warnings.append("quiet_mode_active")
+            actions.append("Re-authenticate through the existing login flow to resume paper validation.")
         elif seconds_until is not None and seconds_until <= 0:
             status = "EXPIRED"
             reauth_required = True
