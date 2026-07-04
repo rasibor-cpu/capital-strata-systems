@@ -56,6 +56,12 @@ Phase 153D adds Coinbase credential readiness diagnostics, exact `LIVE` confirma
 
 Phase 153D also reconciles live limit displays: Phase 152A CAD 20 Live Micro-Pilot Governor remains the canonical live capital authority, while the legacy Coinbase `$1.00` setting is labeled as `LEGACY_SECONDARY_LIMIT`. This phase does not authorize live trading or broker order submission.
 
+## Phase 153E Live Operator Workflow Hardening Addendum
+
+Phase 153E hardens the operator startup flow with a deterministic wizard order, exact confirmation retries, broker-selection enforcement, live arming confirmation via `ARM LIVE`, paper/live environment conflict handling, and a final startup summary before Cycle 1.
+
+Phase 153E does not authorize live trading. Coinbase LIVE read-only validation remains broker-order-blocked by default; broker execution can only become armed after explicit operator selection, RBAC authorization, and the required confirmation phrases.
+
 ## Safety Controls Required For LIVE
 
 LIVE mode must continue to require Unified Trade Gate, Margin Gate, RBAC, Capital Governor, AntiBleedGuard, kill switches, emergency stops, broker validation, execution authorization, and configured broker controls.

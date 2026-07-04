@@ -1034,6 +1034,13 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         "credential_status": str(
             broker_payload.get("credential_status", credential_diagnostics.get("credential_status", DATA_UNAVAILABLE))
         ),
+        "auth_status": str(broker_payload.get("auth_status", "NOT_TESTED")),
+        "connection_status": str(broker_payload.get("connection_status", "NOT_TESTED")),
+        "product_price_status": str(broker_payload.get("product_price_status", "NOT_TESTED")),
+        "balance_position_status": str(broker_payload.get("balance_position_status", "NOT_TESTED")),
+        "order_submission_status": str(broker_payload.get("order_submission_status", "DISABLED")),
+        "orders_sent_count": _integer(broker_payload.get("orders_sent_count", 0)),
+        "orders_blocked_count": _integer(broker_payload.get("orders_blocked_count", 0)),
         "auth_reason": str(broker_payload.get("auth_reason", DATA_UNAVAILABLE)),
         "execution_scope": str(broker_payload.get("execution_scope", broker_payload.get("broker_connection_mode", DATA_UNAVAILABLE))),
         "can_live_execute": _boolean(broker_payload.get("can_live_execute")),
@@ -1269,6 +1276,7 @@ def _is_sensitive_key(key: str) -> bool:
         "secrets_redacted",
         "credentials_redacted",
         "missing_credentials",
+        "credential_status",
     }
 
     if normalized in safe_metadata_keys:

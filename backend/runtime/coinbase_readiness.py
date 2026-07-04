@@ -178,6 +178,14 @@ def merge_readiness_into_broker_state(selection: BrokerStartupSelection, readine
             "can_live_execute": False,
             "live_order_permission": False,
             "execution_allowed": False,
+            "credential_status": str(readiness.get("credential_status", "")),
+            "auth_status": str(readiness.get("auth_status", "")),
+            "connection_status": str(readiness.get("connection_status", "")),
+            "product_price_status": str(readiness.get("product_price_status", "")),
+            "balance_position_status": str(readiness.get("balance_position_status", "")),
+            "order_submission_status": str(readiness.get("order_submission_status", "DISABLED")),
+            "orders_sent_count": int(readiness.get("orders_sent_count", 0) or 0),
+            "orders_blocked_count": int(readiness.get("orders_blocked_count", 0) or 0),
         }
     )
     return state

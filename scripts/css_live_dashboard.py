@@ -194,6 +194,21 @@ from backend.runtime.coinbase_readiness import (
     merge_readiness_into_broker_state,
     selection_with_coinbase_readiness,
 )
+from backend.runtime.live_operator_wizard import (
+    StartupWizardState,
+    broker_validation_display,
+    build_startup_summary,
+    choose_broker,
+    choose_broker_execution_arming,
+    choose_broker_mode,
+    choose_global_mode,
+    mark_authenticated,
+    paper_live_environment_conflict,
+    set_cycle_mode,
+    set_engine_mode,
+    startup_summary_confirmation,
+)
+from backend.runtime.live_micro_pilot_governor import live_micro_pilot_status
 
 
 def _utc_now_compat() -> datetime:
@@ -1727,18 +1742,22 @@ def enforce_active_session(cycle: int, last_trade: str) -> dict[str, Any]:
 
 
 def select_global_broker_mode():
+    global STARTUP_WIZARD_STATE
+    STARTUP_WIZARD_STATE = mark_authenticated(STARTUP_WIZARD_STATE).state
     print("=== GLOBAL BROKER MODE ===")
     print("1. PAPER / PRACTICE (default)")
     print("2. LIVE (real trading)")
 
-    choice = input("Enter mode (1-2) [default=1]: ").strip() or "1"
-
-    if choice == "2":
-        confirm = input("Type LIVE to confirm GLOBAL LIVE trading: ").strip()
-        if confirm.strip().upper() == "LIVE":
-            return "live"
-
-    return "paper"
+    while True:
+        choice = input("Enter mode (1-2) [default=1]: ").strip() or "1"
+        confirmation = ""
+        if choice == "2":
+            confirmation = input("Type LIVE to confirm GLOBAL LIVE trading: ").strip()
+        result = choose_global_mode(STARTUP_WIZARD_STATE, choice, confirmation)
+        if result.advanced:
+            STARTUP_WIZARD_STATE = result.state
+            return STARTUP_WIZARD_STATE.global_mode
+        print(result.error)
 
 
 
@@ -1748,93 +1767,124 @@ COINBASE_LIVE_CONFIRMATION_STATUS: dict[str, Any] = {
     "reason": "coinbase_live_confirmation_not_requested",
     "required_confirmation": "LIVE",
 }
+STARTUP_WIZARD_STATE = StartupWizardState()
 
 
 def select_startup_broker_selection() -> tuple[str, str]:
-    global COINBASE_LIVE_CONFIRMATION_STATUS
+    global COINBASE_LIVE_CONFIRMATION_STATUS, STARTUP_WIZARD_STATE
     role = str(SESSION_USER_CTX.get("role", "VIEWER")).strip().upper()
     role_profile = SESSION_USER_CTX.get("role_profile", {})
 
-    print("=== CSS STARTUP BROKER SELECTION ===")
-    print("1. NONE / PAPER ONLY")
-    print("2. COINBASE")
-    print("3. OANDA")
-    print("4. IBKR - not enabled in this runtime")
+    while True:
+        print("=== CSS STARTUP BROKER SELECTION ===")
+        print("1. NONE / PAPER ONLY")
+        print("2. COINBASE")
+        print("3. OANDA")
+        print("4. IBKR - not enabled in this runtime")
 
-    broker_choice = input("Enter broker choice (1-4) [default=1]: ").strip() or "1"
-    if broker_choice == "4":
-        print("[BROKER DISABLED] IBKR is not enabled in this runtime. Falling back to NONE / PAPER ONLY.")
+        broker_choice = input("Enter broker choice (1-4): ").strip()
+        broker_result = choose_broker(STARTUP_WIZARD_STATE, broker_choice, ibkr_supported=False)
+        if not broker_result.advanced:
+            print(broker_result.error)
+            continue
+        STARTUP_WIZARD_STATE = broker_result.state
+        selected = startup_broker_from_choice(broker_choice, ibkr_supported=False)
+        if selected == "NONE":
+            record_rbac_event(
+                "broker_selected",
+                SESSION_USER_CTX,
+                {"selected_broker": "NONE", "selected_broker_mode": "paper", "reason": "operator_selected_paper_only"},
+            )
+            return "NONE", "paper"
 
-    selected = startup_broker_from_choice(broker_choice, ibkr_supported=False)
-    if selected == "NONE":
-        record_rbac_event(
-            "broker_selected",
-            SESSION_USER_CTX,
-            {"selected_broker": "NONE", "selected_broker_mode": "paper", "reason": "operator_selected_paper_only"},
-        )
-        return "NONE", "paper"
+        if not role_profile.get("can_select_broker", False):
+            print(f"[RBAC] Broker selection denied for role {role}. Forced NONE / PAPER ONLY.")
+            record_rbac_event(
+                "broker_selection_denied",
+                SESSION_USER_CTX,
+                {
+                    "resource": "broker",
+                    "action": "select",
+                    "requested_broker": selected,
+                    "reason": "role_cannot_select_broker",
+                },
+            )
+            STARTUP_WIZARD_STATE = StartupWizardState(
+                authenticated=True,
+                global_mode=GLOBAL_BROKER_MODE,
+                selected_broker="NONE",
+                broker_mode="paper",
+                step="broker_execution_arming",
+            )
+            return "NONE", "paper"
 
-    if not role_profile.get("can_select_broker", False):
-        print(f"[RBAC] Broker selection denied for role {role}. Forced NONE / PAPER ONLY.")
-        record_rbac_event(
-            "broker_selection_denied",
-            SESSION_USER_CTX,
-            {
-                "resource": "broker",
-                "action": "select",
-                "requested_broker": selected,
-                "reason": "role_cannot_select_broker",
-            },
-        )
-        return "NONE", "paper"
+        broker_mode: str | None = None
+        while True:
+            print(f"=== {selected} BROKER MODE ===")
+            print("1. PAPER / PRACTICE / AUTH TEST")
+            print("2. LIVE / READ-ONLY VALIDATION")
+            default_mode_choice = "2" if str(GLOBAL_BROKER_MODE).lower() == "live" else "1"
+            mode_choice = input(f"Enter broker mode (1-2) [default={default_mode_choice}]: ").strip() or default_mode_choice
+            requested_mode = startup_broker_mode_from_choice(
+                mode_choice,
+                selected_broker=selected,
+                global_mode=GLOBAL_BROKER_MODE,
+            )
 
-    print(f"=== {selected} BROKER MODE ===")
-    print("1. PAPER / PRACTICE / AUTH TEST")
-    print("2. LIVE / READ-ONLY VALIDATION")
-    default_mode_choice = "2" if str(GLOBAL_BROKER_MODE).lower() == "live" else "1"
-    mode_choice = input(f"Enter broker mode (1-2) [default={default_mode_choice}]: ").strip() or default_mode_choice
-    broker_mode = startup_broker_mode_from_choice(
-        mode_choice,
-        selected_broker=selected,
-        global_mode=GLOBAL_BROKER_MODE,
-    )
+            if requested_mode == "live" and not role_profile.get("can_use_live_broker_mode", False):
+                print(f"[RBAC] {selected} live mode denied for role {role}. Choose a permitted mode.")
+                record_rbac_event(
+                    "broker_mode_denied",
+                    SESSION_USER_CTX,
+                    {
+                        "selected_broker": selected,
+                        "selected_broker_mode": "live",
+                        "reason": "role_cannot_use_live_broker_mode",
+                    },
+                )
+                continue
 
-    if broker_mode == "live" and not role_profile.get("can_use_live_broker_mode", False):
-        print(f"[RBAC] {selected} live mode denied for role {role}. Falling back to paper.")
-        record_rbac_event(
-            "broker_mode_denied",
-            SESSION_USER_CTX,
-            {
-                "selected_broker": selected,
-                "selected_broker_mode": "live",
-                "reason": "role_cannot_use_live_broker_mode",
-            },
-        )
-        broker_mode = "paper"
+            if requested_mode == "paper" and not role_profile.get("can_use_paper_broker_mode", False):
+                print(f"[RBAC] {selected} paper mode denied for role {role}. Return to broker selection.")
+                break
 
-    if broker_mode == "paper" and not role_profile.get("can_use_paper_broker_mode", False):
-        print(f"[RBAC] {selected} paper mode denied for role {role}. Forced NONE / PAPER ONLY.")
-        return "NONE", "paper"
-
-    if selected == "OANDA":
-        if broker_mode == "live":
-            os.environ["OANDA_ENV"] = "live"
-            os.environ["OANDA_BASE_URL"] = "https://api-fxtrade.oanda.com"
+            confirmation = ""
+            if requested_mode == "live":
+                confirmation = input(
+                    f"Type LIVE to confirm {selected} LIVE read-only validation "
+                    "(broker execution remains separately disabled unless armed): "
+                ).strip()
+            mode_result = choose_broker_mode(
+                STARTUP_WIZARD_STATE,
+                mode_choice,
+                confirmation=confirmation,
+                env=os.environ,
+            )
+            if not mode_result.advanced:
+                print(mode_result.error)
+                if "Paper mode cannot use LIVE broker credentials/environment." in mode_result.error:
+                    action = input("Choose 1 to return to broker setup or 2 to exit: ").strip()
+                    if action == "2":
+                        raise SystemExit(1)
+                    break
+                continue
+            STARTUP_WIZARD_STATE = mode_result.state
+            broker_mode = STARTUP_WIZARD_STATE.broker_mode
+            if selected == "COINBASE" and broker_mode == "live":
+                COINBASE_LIVE_CONFIRMATION_STATUS = confirm_coinbase_live_read_only(confirmation)
+            if selected == "OANDA":
+                if broker_mode == "live":
+                    os.environ["OANDA_ENV"] = "live"
+                    os.environ["OANDA_BASE_URL"] = "https://api-fxtrade.oanda.com"
+                else:
+                    os.environ["OANDA_ENV"] = "practice"
+                    os.environ["OANDA_BASE_URL"] = "https://api-fxpractice.oanda.com"
+            break
         else:
-            os.environ["OANDA_ENV"] = "practice"
-            os.environ["OANDA_BASE_URL"] = "https://api-fxpractice.oanda.com"
-
-    if broker_mode == "live":
-        confirmation = input(
-            f"Type LIVE to confirm {selected} LIVE read-only validation "
-            "(broker execution remains separately disabled unless armed): "
-        ).strip()
-        confirmation_status = confirm_coinbase_live_read_only(confirmation) if selected == "COINBASE" else {"accepted": confirmation == "LIVE", "reason": "live_confirmation_verified" if confirmation == "LIVE" else "live_confirmation_missing_or_invalid"}
-        if selected == "COINBASE":
-            COINBASE_LIVE_CONFIRMATION_STATUS = dict(confirmation_status)
-        if not confirmation_status.get("accepted", False):
-            print(f"[{selected} LIVE CANCELLED] Falling back to paper mode")
-            broker_mode = "paper"
+            continue
+        if broker_mode is None:
+            continue
+        break
 
     record_rbac_event(
         "broker_selected",
@@ -1852,63 +1902,84 @@ def select_startup_broker_selection() -> tuple[str, str]:
 
 
 def select_broker_execution_config(selected_broker: str, selected_broker_mode: str) -> tuple[bool, str, str]:
+    global STARTUP_WIZARD_STATE
     role = str(SESSION_USER_CTX.get("role", "VIEWER")).strip().upper()
     role_profile = SESSION_USER_CTX.get("role_profile", {})
 
-    print("=== CSS BROKER EXECUTION ARMING ===")
-    print("1. DISABLED / READ-ONLY VALIDATION")
-    print("2. ARMED / BROKER EXECUTION ALLOWED")
+    while True:
+        print("=== CSS BROKER EXECUTION ARMING ===")
+        print("1. DISABLED / READ-ONLY VALIDATION")
+        print("2. ARMED / BROKER EXECUTION ALLOWED")
 
-    armed_choice = input("Enter choice (1-2) [default=1]: ").strip() or "1"
+        armed_choice = input("Enter choice (1-2) [default=1]: ").strip() or "1"
+        arm_confirmation = ""
+        if armed_choice == "2" and selected_broker != "NONE" and str(selected_broker_mode).lower() == "live":
+            arm_confirmation = input("Type ARM LIVE to arm live broker execution: ").strip()
 
-    if armed_choice != "2":
-        print(f"[BROKER EXECUTION DISABLED] Selected broker preserved: {selected_broker} / mode={selected_broker_mode}")
-        record_rbac_event(
-            "broker_execution_disarmed",
-            SESSION_USER_CTX,
-            {
-                "resource": "broker",
-                "action": "disarm",
-                "reason": "operator_choice",
-                "selected_broker": selected_broker,
-                "selected_broker_mode": selected_broker_mode,
-            },
+        result = choose_broker_execution_arming(
+            STARTUP_WIZARD_STATE,
+            armed_choice,
+            arm_confirmation=arm_confirmation,
+            role_profile=role_profile,
         )
-        return False, selected_broker, selected_broker_mode
+        STARTUP_WIZARD_STATE = result.state
+        if not result.advanced and result.error:
+            print(result.error)
+            if "Broker execution cannot be armed because no broker is selected." in result.error:
+                return False, selected_broker, selected_broker_mode
+            continue
 
-    if not role_profile.get("can_arm_broker", False):
-        print(f"[RBAC] Broker arming denied for role {role}. Execution remains disabled.")
-        record_rbac_event(
-            "broker_arm_denied",
-            SESSION_USER_CTX,
-            {
-                "resource": "broker",
-                "action": "arm",
-                "reason": "role_cannot_arm_broker",
-                "selected_broker": selected_broker,
-                "selected_broker_mode": selected_broker_mode,
-            },
-        )
-        return False, selected_broker, selected_broker_mode
+        if armed_choice != "2" or not STARTUP_WIZARD_STATE.broker_execution_armed:
+            if result.error:
+                print(result.error)
+            print(f"[BROKER EXECUTION DISABLED] Selected broker preserved: {selected_broker} / mode={selected_broker_mode}")
+            record_rbac_event(
+                "broker_execution_disarmed",
+                SESSION_USER_CTX,
+                {
+                    "resource": "broker",
+                    "action": "disarm",
+                    "reason": "operator_choice_or_confirmation_failed",
+                    "selected_broker": selected_broker,
+                    "selected_broker_mode": selected_broker_mode,
+                },
+            )
+            return False, selected_broker, selected_broker_mode
 
-    if not role_profile.get("can_select_broker", False):
-        print(f"[RBAC] Broker selection denied for role {role}.")
-        record_rbac_event(
-            "broker_selection_denied",
-            SESSION_USER_CTX,
-            {
-                "resource": "broker",
-                "action": "select",
-                "reason": "role_cannot_select_broker",
-            },
-        )
-        return False, selected_broker, selected_broker_mode
+        if not role_profile.get("can_arm_broker", False):
+            print(f"[RBAC] Broker arming denied for role {role}. Execution remains disabled.")
+            record_rbac_event(
+                "broker_arm_denied",
+                SESSION_USER_CTX,
+                {
+                    "resource": "broker",
+                    "action": "arm",
+                    "reason": "role_cannot_arm_broker",
+                    "selected_broker": selected_broker,
+                    "selected_broker_mode": selected_broker_mode,
+                },
+            )
+            return False, selected_broker, selected_broker_mode
 
-    print(f"[BROKER EXECUTION ARMED] Selected broker: {selected_broker} / mode={selected_broker_mode}")
-    return True, selected_broker, selected_broker_mode
+        if not role_profile.get("can_select_broker", False):
+            print(f"[RBAC] Broker selection denied for role {role}.")
+            record_rbac_event(
+                "broker_selection_denied",
+                SESSION_USER_CTX,
+                {
+                    "resource": "broker",
+                    "action": "select",
+                    "reason": "role_cannot_select_broker",
+                },
+            )
+            return False, selected_broker, selected_broker_mode
+
+        print(f"[BROKER EXECUTION ARMED] Selected broker: {selected_broker} / mode={selected_broker_mode}")
+        return True, selected_broker, selected_broker_mode
 
 
 def select_engine_mode() -> str:
+    global STARTUP_WIZARD_STATE
     role = str(SESSION_USER_CTX.get("role", "VIEWER")).strip().upper()
     role_profile = SESSION_USER_CTX.get("role_profile", {})
     allowed_modes = list(role_profile.get("allowed_engine_modes", []))
@@ -1924,6 +1995,7 @@ def select_engine_mode() -> str:
                 "reason": "no_allowed_engine_modes",
             },
         )
+        STARTUP_WIZARD_STATE = set_engine_mode(STARTUP_WIZARD_STATE, "SAFE").state
         return "SAFE"
 
     print("=== CSS ENGINE MODE SELECTOR ===")
@@ -1931,8 +2003,12 @@ def select_engine_mode() -> str:
         marker = "" if value in allowed_modes else " [BLOCKED]"
         print(f"{key}. {value}{marker}")
 
-    choice = input("Enter choice (1-5) [default=3]: ").strip() or "3"
-    requested_mode = ENGINE_MODES.get(choice, "BALANCED")
+    while True:
+        choice = input("Enter choice (1-5) [default=3]: ").strip() or "3"
+        if choice in ENGINE_MODES:
+            break
+        print(f"INVALID INPUT\nExpected: 1, 2, 3, 4, or 5\nReceived: {choice}\nPlease try again.")
+    requested_mode = ENGINE_MODES[choice]
 
     if requested_mode not in allowed_modes:
         fallback_mode = "SAFE" if "SAFE" in allowed_modes else allowed_modes[0]
@@ -1949,6 +2025,7 @@ def select_engine_mode() -> str:
                 "reason": "role_cannot_select_requested_engine_mode",
             },
         )
+        STARTUP_WIZARD_STATE = set_engine_mode(STARTUP_WIZARD_STATE, fallback_mode).state
         return fallback_mode
 
     record_rbac_event(
@@ -1959,30 +2036,97 @@ def select_engine_mode() -> str:
             "selected_mode": requested_mode,
         },
     )
+    STARTUP_WIZARD_STATE = set_engine_mode(STARTUP_WIZARD_STATE, requested_mode).state
     return requested_mode
 
 
 def select_cycle_mode() -> None:
+    global STARTUP_WIZARD_STATE
     print("=== CSS CYCLE CONTINUATION MODE ===")
     print("1. MANUAL / press ENTER after each cycle (default)")
     print("2. CONTINUOUS / automatically advance cycles")
 
-    choice = input("Enter cycle mode (1-2) [default=1]: ").strip() or "1"
+    while True:
+        choice = input("Enter cycle mode (1-2) [default=1]: ").strip() or "1"
+        if choice in {"1", "2"}:
+            break
+        print(f"INVALID INPUT\nExpected: 1 or 2\nReceived: {choice}\nPlease try again.")
 
     if choice != "2":
         os.environ["CSS_AUTO_CYCLE"] = "false"
+        STARTUP_WIZARD_STATE = set_cycle_mode(STARTUP_WIZARD_STATE, "manual").state
         print("[CYCLE MODE SELECTED] MANUAL")
         return
 
-    interval_raw = input("Enter seconds between cycles [default=60]: ").strip() or "60"
-    try:
-        interval = max(5, int(interval_raw))
-    except ValueError:
-        interval = 60
+    while True:
+        interval_raw = input("Enter seconds between cycles [default=60]: ").strip() or "60"
+        try:
+            interval = max(5, int(interval_raw))
+            break
+        except ValueError:
+            print(f"INVALID INPUT\nExpected: integer seconds\nReceived: {interval_raw}\nPlease try again.")
 
     os.environ["CSS_AUTO_CYCLE"] = "true"
     os.environ["CSS_CYCLE_SLEEP_SECONDS"] = str(interval)
+    STARTUP_WIZARD_STATE = set_cycle_mode(STARTUP_WIZARD_STATE, "continuous", interval).state
     print(f"[CYCLE MODE SELECTED] CONTINUOUS interval={interval}s")
+
+
+def confirm_startup_summary_before_runtime() -> None:
+    global STARTUP_WIZARD_STATE
+    if os.getenv("CSS_TEST_MODE") == "1":
+        print("[STARTUP SUMMARY SKIPPED] CSS_TEST_MODE active")
+        return
+    readiness = globals().get("COINBASE_READ_ONLY_STATUS", {})
+    readiness = readiness if isinstance(readiness, dict) else {}
+    broker_status = broker_validation_display(
+        selected_broker=globals().get("SELECTED_BROKER", "NONE"),
+        broker_mode=globals().get("SELECTED_BROKER_MODE", "paper"),
+        readiness={
+            **readiness,
+            "broker_execution_armed": bool(globals().get("BROKER_EXECUTION_ARMED", False)),
+        },
+        env=os.environ,
+    )
+    try:
+        pilot_status = live_micro_pilot_status()
+    except Exception:
+        pilot_status = {
+            "pilot_state": "DISARMED",
+            "currency": "CAD",
+            "max_live_test_capital": "20.00",
+            "canonical_live_pilot_limit_cad": "20.00",
+        }
+    summary = build_startup_summary(
+        STARTUP_WIZARD_STATE,
+        broker_status=broker_status,
+        pilot_status=pilot_status,
+    )
+    while True:
+        print("=== CSS STARTUP SUMMARY ===")
+        print(f"GLOBAL MODE: {summary['global_mode']}")
+        print(f"SELECTED BROKER: {summary['selected_broker']}")
+        print(f"BROKER MODE: {summary['broker_mode']}")
+        print(f"BROKER CONNECTION STATUS: {summary['broker_connection_status']}")
+        print(f"BROKER AUTH STATUS: {summary['broker_auth_status']}")
+        print(f"BROKER EXECUTION STATUS: {summary['broker_execution_status']}")
+        print(f"LIVE MICRO-PILOT STATE: {summary['live_micro_pilot_state']}")
+        print(f"CANONICAL PILOT CAP: {summary['canonical_pilot_cap']}")
+        print(f"CAPITAL AUTHORITY: {summary['canonical_live_capital_authority']}")
+        print(f"ENGINE MODE: {summary['engine_mode']}")
+        print(f"CYCLE MODE: {summary['cycle_mode']}")
+        print(f"CAN LIVE EXECUTE: {'YES' if summary['can_live_execute'] else 'NO'}")
+        print(f"EXECUTION SCOPE: {summary['execution_scope']}")
+        answer = input("Start runtime cycle? Y = start runtime, N = restart wizard: ").strip()
+        decision = startup_summary_confirmation(STARTUP_WIZARD_STATE, answer)
+        STARTUP_WIZARD_STATE = decision.state
+        if decision.advanced:
+            print("[STARTUP CONFIRMED] Runtime cycle may start.")
+            return
+        if decision.state.restart_requested:
+            print("[STARTUP RESTART REQUESTED] Runtime not started. Restart launch_css.bat to rerun the wizard.")
+            raise SystemExit(0)
+        print(decision.error)
 
 
 def safe_load_runtime_asset(symbol: str) -> bool:
@@ -2100,6 +2244,16 @@ COINBASE_READ_ONLY_STATUS = evaluate_coinbase_live_read_only(
     STARTUP_BROKER_SELECTION,
     legacy_limit_usd=COINBASE_MAX_LIVE_ORDER_USD,
 )
+BROKER_VALIDATION_DISPLAY = broker_validation_display(
+    selected_broker=SELECTED_BROKER,
+    broker_mode=SELECTED_BROKER_MODE,
+    readiness={
+        **COINBASE_READ_ONLY_STATUS,
+        "broker_execution_armed": BROKER_EXECUTION_ARMED,
+    },
+    env=os.environ,
+)
+COINBASE_READ_ONLY_STATUS.update(BROKER_VALIDATION_DISPLAY)
 if (
     SELECTED_BROKER == "COINBASE"
     and SELECTED_BROKER_MODE == "paper"
@@ -2172,6 +2326,7 @@ except EnvironmentValidationError as e:
 
 ENGINE_MODE = select_engine_mode()
 select_cycle_mode()
+confirm_startup_summary_before_runtime()
 print(f"[ENGINE MODE SELECTED] {ENGINE_MODE}")
 
 
@@ -3970,6 +4125,12 @@ def print_coinbase_broker_status() -> None:
     print(f"COINBASE PRIVATE KEY PRESENT: {'YES' if private_key_present else 'NO'}")
     print(f"COINBASE CONNECTED: {'YES' if connected else 'NO'}")
     print(f"AUTH REASON: {auth_reason}")
+    print(f"CREDENTIAL STATUS: {readiness.get('credential_status', 'DATA UNAVAILABLE')}")
+    print(f"AUTH STATUS: {readiness.get('auth_status', 'NOT_TESTED')}")
+    print(f"CONNECTION STATUS: {readiness.get('connection_status', 'NOT_TESTED')}")
+    print(f"PRODUCT/PRICE STATUS: {readiness.get('product_price_status', 'NOT_TESTED')}")
+    print(f"BALANCE/POSITION STATUS: {readiness.get('balance_position_status', 'NOT_TESTED')}")
+    print(f"ORDER SUBMISSION STATUS: {readiness.get('order_submission_status', 'DISABLED')}")
     print(f"BROKER EXECUTION: {'ARMED' if BROKER_EXECUTION_ARMED else 'DISABLED'}")
     print(f"CAN LIVE EXECUTE: {'YES' if readiness.get('can_live_execute') else 'NO'}")
     print(f"EXECUTION SCOPE: {execution_scope}")

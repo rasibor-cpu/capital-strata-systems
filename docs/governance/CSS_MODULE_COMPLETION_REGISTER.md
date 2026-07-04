@@ -97,3 +97,11 @@ Status: Read-only credential readiness implemented for review.
 Phase 153D adds Coinbase credential presence diagnostics, exact `LIVE` read-only confirmation handling, safe missing-credential reporting, read-only Coinbase validation status propagation, and dashboard/API visibility for canonical Phase 152A CAD 20 pilot authority versus the legacy Coinbase `LEGACY_SECONDARY_LIMIT`.
 
 This register does not authorize live broker execution. Broker execution remains disabled, Live Micro-Pilot remains disarmed by default, and broker orders remain blocked before submission.
+
+## Phase 153E Live Operator Workflow Hardening Register
+
+Status: Startup workflow hardening implemented for review.
+
+Phase 153E adds a deterministic startup wizard contract, invalid-input retry behavior, exact `LIVE` and `ARM LIVE` confirmation checks, broker execution arming guards for selected broker `NONE`, paper/live environment conflict detection, final startup summary confirmation, and hardened broker validation display fields.
+
+This register does not authorize live broker execution. Live orders remain blocked by default, broker execution remains disabled unless all operator confirmations and RBAC checks pass, and the Phase 152A CAD 20 Governor remains the canonical live capital authority.
