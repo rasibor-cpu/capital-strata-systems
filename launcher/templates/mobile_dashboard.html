@@ -907,6 +907,11 @@
                 Live Micro-Pilot Status
                 <span class="badge badge-warning">GUARD ONLY</span>
             </div>
+            <div class="status-row"><span>Selected Broker</span><strong>{{ broker_startup.selected_broker | default('NONE') }}</strong></div>
+            <div class="status-row"><span>Broker Mode</span><strong>{{ broker_startup.broker_mode | default('paper') }}</strong></div>
+            <div class="status-row"><span>Broker Connected</span><strong>{{ broker_startup.broker_connected | default(false) }}</strong></div>
+            <div class="status-row"><span>Broker Health</span><strong>{{ broker_startup.broker_health | default('UNKNOWN') }}</strong></div>
+            <div class="status-row"><span>Broker Execution</span><strong>{{ broker_startup.broker_execution_status | default('DISABLED') }}</strong></div>
             <div class="status-row"><span>Pilot State</span><strong>{{ phase152a_live_micro_pilot.pilot_state | default('DATA UNAVAILABLE') }}</strong></div>
             <div class="status-row"><span>Armed</span><strong>{{ phase152a_live_micro_pilot.pilot_armed | default(false) }}</strong></div>
             <div class="status-row"><span>Currency / Cap</span><strong>{{ phase152a_live_micro_pilot.currency | default('CAD') }} {{ phase152a_live_micro_pilot.max_live_test_capital | default('20.00') }}</strong></div>

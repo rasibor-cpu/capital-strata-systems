@@ -213,8 +213,11 @@ def test_phase153a_git_metadata_populates_certification_commit_and_tag_when_avai
     assert metadata["commit"] != ""
     assert report["commit"] == metadata["commit"]
     assert report["commit"] != "DATA UNAVAILABLE"
-    assert report["git_tag"] != "DATA UNAVAILABLE"
     assert "metadata_diagnostics" in report
+    if metadata.get("git_tag"):
+        assert report["git_tag"] == metadata["git_tag"]
+    else:
+        assert report["metadata_diagnostics"].get("tag_source") == "no_tag_for_head"
 
 
 def test_phase153a_launcher_live_readiness_blockers_are_read_only(monkeypatch) -> None:

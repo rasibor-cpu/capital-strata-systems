@@ -40,6 +40,12 @@ Phase 153A closes restart-time dashboard/reporting inconsistencies in heartbeat,
 
 Phase 153A does not authorize live trading. A remaining `NO GO` is expected when true live broker validation evidence has not yet been collected.
 
+## Phase 153B Broker Selection Startup Gate Addendum
+
+Phase 153B adds an explicit startup broker selector before broker execution arming. Operators may select Coinbase LIVE read-only validation while leaving broker execution disabled, allowing authentication, balance, buying-power, position, quote, and market-data evidence to be collected without order permission.
+
+Phase 153B does not authorize live trading. Broker execution remains disabled unless separately armed, and Live Micro-Pilot remains disarmed by default.
+
 ## Safety Controls Required For LIVE
 
 LIVE mode must continue to require Unified Trade Gate, Margin Gate, RBAC, Capital Governor, AntiBleedGuard, kill switches, emergency stops, broker validation, execution authorization, and configured broker controls.

@@ -73,3 +73,11 @@ Status: Engineering cleanup implemented for review.
 Phase 153A adds read-only blocker diagnostics, aligns launcher readiness evidence with current heartbeat/session/artifact state, refreshes missing critical artifacts after restart, restores accurate paper session continuity display, excludes RED/NOT_APPROVED top opportunities from the mobile trade page, and populates commit/tag metadata when available.
 
 This register does not authorize live broker execution. Remaining operational NO-GO blockers are expected until live broker validation evidence is collected.
+
+## Phase 153B Broker Selection Startup Gate Register
+
+Status: Startup gate implemented for review.
+
+Phase 153B separates selected broker and broker mode from broker execution arming. Coinbase LIVE read-only validation can be selected and persisted to canonical artifacts while broker execution remains disabled and Live Micro-Pilot remains disarmed.
+
+This register does not authorize live broker execution. Read-only broker evidence may clear authentication/health blockers, but execution blockers remain until explicit operational approval and arming.

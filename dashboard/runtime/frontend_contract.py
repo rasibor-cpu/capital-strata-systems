@@ -989,6 +989,12 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         "selected_broker": str(broker_payload.get("selected_broker", "NONE")),
         "broker_mode": str(broker_payload.get("broker_mode", "paper")),
         "connected": _boolean(broker_payload.get("connected")),
+        "broker_connected": _boolean(broker_payload.get("broker_connected", broker_payload.get("connected"))),
+        "broker_authenticated": _boolean(broker_payload.get("broker_authenticated")),
+        "broker_health": str(broker_payload.get("broker_health", broker_payload.get("api_health", "UNKNOWN"))),
+        "broker_execution_armed": _boolean(broker_payload.get("broker_execution_armed")),
+        "broker_execution_status": str(broker_payload.get("broker_execution_status", "DISABLED")),
+        "broker_connection_mode": str(broker_payload.get("broker_connection_mode", "PAPER_ONLY")),
         "live_trading_enabled": _boolean(
             broker_payload.get("live_trading_enabled")
         ),

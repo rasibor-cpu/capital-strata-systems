@@ -87,6 +87,10 @@ from backend.runtime.runtime_artifact_publisher import RuntimeArtifactPublisher
 from backend.runtime.runtime_portfolio_lifecycle import RuntimePortfolioLifecycle
 from backend.runtime.runtime_session_continuity import RuntimeSessionContinuityMonitor
 from backend.runtime.session_renewal import SessionRenewalManager
+from backend.runtime.broker_startup_selection import (
+    broker_summary_from_artifacts,
+    live_readiness_broker_evidence,
+)
 from backend.runtime.live_micro_pilot_governor import live_micro_pilot_status
 from backend.validation.live_readiness_certification import (
     live_readiness_blocker_diagnostics,
@@ -440,6 +444,12 @@ def get_account_summary() -> Dict[str, Any]:
     }
     return summary
 
+
+def get_broker_startup_summary() -> Dict[str, Any]:
+    account_state = _safe_load_artifact("css_account_state_pcnrass.json") or _safe_load_artifact("css_account_state_pcnrass_BACKUP.json")
+    session_state = _safe_load_artifact("css_session_state_pcnrass.json") or _safe_load_artifact("css_session_recovery.json")
+    return broker_summary_from_artifacts(account_state, session_state)
+
 def get_trade_summary() -> Dict[str, Any]:
     summary = {
         "open_trades_count": 0,
@@ -555,8 +565,9 @@ def build_launcher_frontend_state(
     session = session if isinstance(session, dict) else {}
     positions = _launcher_positions_for_frontend()
     runtime_mode = str(runtime.get("runtime_mode", "PAPER")).lower()
-    broker = str(session.get("broker", session.get("selected_broker", "NONE")))
-    broker_mode = str(session.get("broker_mode", "paper")).lower()
+    broker_startup = get_broker_startup_summary()
+    broker = str(broker_startup.get("selected_broker") or session.get("broker", session.get("selected_broker", "NONE")))
+    broker_mode = str(broker_startup.get("broker_mode") or session.get("broker_mode", "paper")).lower()
     if broker_mode not in {"live", "paper"}:
         broker_mode = "paper"
 
@@ -622,9 +633,17 @@ def build_launcher_frontend_state(
         "broker_summary": {
             "selected_broker": broker,
             "broker_mode": broker_mode,
-            "connected": False,
+            "connected": bool(broker_startup.get("broker_connected", False)),
+            "broker_connected": bool(broker_startup.get("broker_connected", False)),
+            "broker_authenticated": bool(broker_startup.get("broker_authenticated", False)),
+            "broker_health": str(broker_startup.get("broker_health", "UNKNOWN")),
+            "api_health": str(broker_startup.get("broker_health", "UNKNOWN")),
+            "broker_execution_armed": bool(broker_startup.get("broker_execution_armed", False)),
+            "broker_execution_status": str(broker_startup.get("broker_execution_status", "DISABLED")),
+            "broker_connection_mode": str(broker_startup.get("broker_connection_mode", "PAPER_ONLY")),
             "live_trading_enabled": False,
-            "readiness_status": "BROKER_DISABLED",
+            "readiness_status": str(broker_startup.get("broker_readiness_status", "BROKER_DISABLED")),
+            "readiness_reasons": [str(broker_startup.get("readiness_reason", "no_live_order_permission"))],
         },
         "opportunities": _launcher_opportunities_for_frontend(limit=10, opportunity_feed=opportunity_feed),
         "live_readiness_certification": live_readiness_certification_status(live_readiness_evidence),
@@ -655,6 +674,7 @@ def get_launcher_live_readiness_blockers_feed() -> Dict[str, Any]:
     artifact_refresh = ensure_runtime_artifacts_current()
     artifact_freshness = artifact_refresh.get("freshness", get_runtime_artifact_freshness_feed(refresh=False))
     session_continuity = get_runtime_session_continuity_feed()
+    broker_startup = get_broker_startup_summary()
     runtime_health = get_runtime_health_feed(
         artifact_freshness=artifact_freshness,
         session_continuity=session_continuity,
@@ -673,6 +693,7 @@ def get_launcher_live_readiness_blockers_feed() -> Dict[str, Any]:
         artifact_freshness=artifact_freshness,
         session_continuity=session_continuity,
         staleness=str(heartbeat.get("staleness", "OFFLINE")),
+        broker_summary=broker_startup,
     )
     return live_readiness_blocker_diagnostics(evidence)
 
@@ -697,6 +718,7 @@ def build_live_readiness_evidence(
     artifact_freshness: Optional[Dict[str, Any]] = None,
     session_continuity: Optional[Dict[str, Any]] = None,
     staleness: Optional[str] = None,
+    broker_summary: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     health = runtime_health if isinstance(runtime_health, dict) else {}
     freshness = artifact_freshness if isinstance(artifact_freshness, dict) else {}
@@ -721,17 +743,22 @@ def build_live_readiness_evidence(
         pass_values={"GREEN"},
         warning_values={"AMBER"},
     )
+    broker_evidence = live_readiness_broker_evidence(broker_summary)
+    broker_checks = broker_evidence.get("checks", {}) if isinstance(broker_evidence, dict) else {}
+    checks = {
+        **broker_checks,
+        "dashboard_synchronization": {"status": "PASS", "reason": "dashboard_frontend_contract_sections_present"},
+        "mobile_dashboard": {"status": "PASS", "reason": "mobile_dashboard_phase152_panels_present"},
+        "desktop_dashboard": {"status": "PASS", "reason": "desktop_dashboard_phase152_panels_present"},
+        "launcher_dashboard": {"status": "PASS", "reason": "launcher_dashboard_phase152_panels_present"},
+        "runtime_supervisor": {"status": heartbeat_status, "reason": f"heartbeat_status_{str(staleness or 'UNKNOWN').lower()}"},
+        "runtime_health": {"status": runtime_status, "reason": f"runtime_health_{str(health.get('runtime_health', 'UNKNOWN')).lower()}"},
+        "artifact_freshness": {"status": freshness_status, "reason": f"artifact_freshness_{str(freshness.get('freshness_status', 'UNKNOWN')).lower()}"},
+        "session_continuity": {"status": continuity_status, "reason": f"session_continuity_{str(continuity.get('session_continuity_status', 'UNKNOWN')).lower()}"},
+    }
     return {
-        "checks": {
-            "dashboard_synchronization": {"status": "PASS", "reason": "dashboard_frontend_contract_sections_present"},
-            "mobile_dashboard": {"status": "PASS", "reason": "mobile_dashboard_phase152_panels_present"},
-            "desktop_dashboard": {"status": "PASS", "reason": "desktop_dashboard_phase152_panels_present"},
-            "launcher_dashboard": {"status": "PASS", "reason": "launcher_dashboard_phase152_panels_present"},
-            "runtime_supervisor": {"status": heartbeat_status, "reason": f"heartbeat_status_{str(staleness or 'UNKNOWN').lower()}"},
-            "runtime_health": {"status": runtime_status, "reason": f"runtime_health_{str(health.get('runtime_health', 'UNKNOWN')).lower()}"},
-            "artifact_freshness": {"status": freshness_status, "reason": f"artifact_freshness_{str(freshness.get('freshness_status', 'UNKNOWN')).lower()}"},
-            "session_continuity": {"status": continuity_status, "reason": f"session_continuity_{str(continuity.get('session_continuity_status', 'UNKNOWN')).lower()}"},
-        },
+        "checks": checks,
+        "broker_summary": dict(broker_summary or {}),
         "learning_system_status": {"status": "WARNING", "reason": "learning_evidence_not_required_for_pre_live_cleanup"},
     }
 
@@ -3169,6 +3196,7 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
     )
     runtime_artifact_freshness = artifact_refresh.get("freshness", get_runtime_artifact_freshness_feed(refresh=False))
     runtime_session_continuity = get_runtime_session_continuity_feed()
+    broker_startup = get_broker_startup_summary()
     runtime_health = get_runtime_health_feed(
         performance=runtime_performance,
         session_validation=session_validation,
@@ -3265,6 +3293,7 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
             artifact_freshness=runtime_artifact_freshness,
             session_continuity=runtime_session_continuity,
             staleness=staleness,
+            broker_summary=broker_startup,
         ),
     )
     launcher_sections = launcher_frontend_state.get("sections", {}) if isinstance(launcher_frontend_state, dict) else {}
@@ -3319,6 +3348,7 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "runtime_artifact_refresh": artifact_refresh,
         "runtime_session_continuity": runtime_session_continuity,
         "runtime_health": runtime_health,
+        "broker_startup": broker_startup,
         "recommendation_evaluation": recommendation_evaluation,
         "confidence_calibration": confidence_calibration,
         "recommendation_drift": recommendation_drift,
