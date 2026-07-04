@@ -181,6 +181,8 @@ from dotenv import load_dotenv
 from backend.runtime.broker_startup_selection import (
     build_startup_broker_selection,
     persist_broker_selection,
+    startup_broker_from_choice,
+    startup_broker_mode_from_choice,
 )
 
 
@@ -1741,9 +1743,8 @@ def select_startup_broker_selection() -> tuple[str, str]:
     broker_choice = input("Enter broker choice (1-4) [default=1]: ").strip() or "1"
     if broker_choice == "4":
         print("[BROKER DISABLED] IBKR is not enabled in this runtime. Falling back to NONE / PAPER ONLY.")
-        broker_choice = "1"
 
-    selected = {"1": "NONE", "2": "COINBASE", "3": "OANDA"}.get(broker_choice, "NONE")
+    selected = startup_broker_from_choice(broker_choice, ibkr_supported=False)
     if selected == "NONE":
         record_rbac_event(
             "broker_selected",
@@ -1771,7 +1772,11 @@ def select_startup_broker_selection() -> tuple[str, str]:
     print("2. LIVE / READ-ONLY VALIDATION")
     default_mode_choice = "2" if str(GLOBAL_BROKER_MODE).lower() == "live" else "1"
     mode_choice = input(f"Enter broker mode (1-2) [default={default_mode_choice}]: ").strip() or default_mode_choice
-    broker_mode = "live" if mode_choice == "2" else "paper"
+    broker_mode = startup_broker_mode_from_choice(
+        mode_choice,
+        selected_broker=selected,
+        global_mode=GLOBAL_BROKER_MODE,
+    )
 
     if broker_mode == "live" and not role_profile.get("can_use_live_broker_mode", False):
         print(f"[RBAC] {selected} live mode denied for role {role}. Falling back to paper.")

@@ -81,3 +81,11 @@ Status: Startup gate implemented for review.
 Phase 153B separates selected broker and broker mode from broker execution arming. Coinbase LIVE read-only validation can be selected and persisted to canonical artifacts while broker execution remains disabled and Live Micro-Pilot remains disarmed.
 
 This register does not authorize live broker execution. Read-only broker evidence may clear authentication/health blockers, but execution blockers remain until explicit operational approval and arming.
+
+## Phase 153C Broker Regression Startup Flow Register
+
+Status: Startup regression fix implemented for review.
+
+Phase 153C restores the canonical startup order, adds invalid/cancelled broker handling coverage, and verifies selected broker propagation through runtime artifacts and launcher frontend state.
+
+This register does not authorize live broker execution.

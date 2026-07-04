@@ -13,6 +13,15 @@ SUPPORTED_STARTUP_BROKERS = {
     "3": "OANDA",
 }
 
+CANONICAL_STARTUP_SEQUENCE = (
+    "authenticate_startup_user",
+    "select_global_broker_mode",
+    "select_startup_broker_selection",
+    "select_broker_execution_config",
+    "select_engine_mode",
+    "select_cycle_mode",
+)
+
 
 @dataclass(frozen=True)
 class BrokerStartupSelection:
@@ -58,6 +67,31 @@ def normalize_broker_mode(value: Any, *, selected_broker: str = "NONE") -> str:
     if selected_broker == "NONE":
         return "paper"
     return "live" if mode in {"live", "real", "production", "prod"} else "paper"
+
+
+def startup_broker_from_choice(choice: Any, *, ibkr_supported: bool = False) -> str:
+    normalized = str(choice or "1").strip()
+    if normalized == "4":
+        return "IBKR" if ibkr_supported else "NONE"
+    return SUPPORTED_STARTUP_BROKERS.get(normalized, "NONE")
+
+
+def startup_broker_mode_from_choice(choice: Any, *, selected_broker: str, global_mode: str = "paper") -> str:
+    broker = normalize_broker(selected_broker)
+    if broker == "NONE":
+        return "paper"
+    default_choice = "2" if str(global_mode or "").strip().lower() == "live" else "1"
+    normalized = str(choice or default_choice).strip()
+    return "live" if normalized == "2" else "paper"
+
+
+def cancelled_startup_selection(reason: str = "operator_cancelled") -> BrokerStartupSelection:
+    return build_startup_broker_selection(
+        selected_broker="NONE",
+        broker_mode="paper",
+        broker_execution_armed=False,
+        readiness_reason=reason,
+    )
 
 
 def build_startup_broker_selection(
@@ -243,11 +277,15 @@ def _utc_now() -> str:
 
 __all__ = [
     "BrokerStartupSelection",
+    "CANONICAL_STARTUP_SEQUENCE",
     "SUPPORTED_STARTUP_BROKERS",
     "broker_summary_from_artifacts",
     "build_startup_broker_selection",
+    "cancelled_startup_selection",
     "live_readiness_broker_evidence",
     "normalize_broker",
     "normalize_broker_mode",
     "persist_broker_selection",
+    "startup_broker_from_choice",
+    "startup_broker_mode_from_choice",
 ]

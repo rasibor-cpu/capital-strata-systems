@@ -46,6 +46,10 @@ Phase 153B adds an explicit startup broker selector before broker execution armi
 
 Phase 153B does not authorize live trading. Broker execution remains disabled unless separately armed, and Live Micro-Pilot remains disarmed by default.
 
+## Phase 153C Broker Startup Regression Addendum
+
+Phase 153C restores and tests the canonical startup sequence: authentication, global mode, broker selection, broker-specific mode, broker arming, engine mode, cycle mode, and runtime startup. It adds regression coverage to ensure broker selection cannot be skipped when execution remains disabled.
+
 ## Safety Controls Required For LIVE
 
 LIVE mode must continue to require Unified Trade Gate, Margin Gate, RBAC, Capital Governor, AntiBleedGuard, kill switches, emergency stops, broker validation, execution authorization, and configured broker controls.
