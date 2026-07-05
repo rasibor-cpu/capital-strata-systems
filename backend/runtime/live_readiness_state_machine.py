@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from backend.runtime.broker_readiness_framework import build_broker_readiness_snapshot
 
 LIVE_READINESS_STATES = (
     "UNCONFIGURED",
@@ -90,34 +91,31 @@ def publish_live_readiness_state(
 
 
 def _startup_diagnostics(data: Mapping[str, Any]) -> dict[str, Any]:
+    broker_readiness_source = data.get("broker_readiness") if isinstance(data.get("broker_readiness"), Mapping) else data
+    readiness = build_broker_readiness_snapshot(broker_readiness_source)
     diagnostics = data.get("credential_diagnostics") if isinstance(data.get("credential_diagnostics"), Mapping) else {}
     credential_status = str(
         data.get("credential_status")
         or diagnostics.get("credential_status")
         or "MISSING"
     ).strip().upper()
-    credentials = "PRESENT" if credential_status in {"PRESENT", "PASS", "READY"} else "MISSING"
+    credentials = "PRESENT" if readiness.credentials_present or credential_status in {"PRESENT", "PASS", "READY"} else "MISSING"
     operator_requested_live = _truthy(data.get("operator_requested_live", False))
-    execution_enabled = _truthy(data.get("execution_authority", data.get("execution_enabled", False)))
+    execution_enabled = readiness.execution_enabled
     can_live_execute = _truthy(data.get("can_live_execute", False)) and execution_enabled
-    authenticated = _truthy(data.get("broker_authenticated", data.get("authenticated", False)))
-    connected = _truthy(data.get("broker_connected", data.get("connected", False)))
-    products_loaded = _int(data.get("products_loaded", 0))
+    authenticated = readiness.authenticated
+    connected = readiness.connected
+    products_loaded = readiness.products_loaded
     market_data_status = str(data.get("market_data_status", data.get("product_price_status", "NOT_TESTED"))).strip().upper()
     account_status = str(data.get("balance_position_status", data.get("account_read_status", ""))).strip().upper()
-    account_loaded = (
-        _value_present(data.get("account_equity"))
-        or _value_present(data.get("cash"))
-        or _value_present(data.get("available_balance"))
-        or account_status in {"OK", "PASS", "READY", "AVAILABLE"}
-    )
-    market_ready = products_loaded > 0 and market_data_status in {"OK", "PASS", "READY", "AVAILABLE"}
+    account_loaded = readiness.account_loaded or account_status in {"OK", "PASS", "READY", "AVAILABLE"}
+    market_ready = readiness.market_data_ready or (products_loaded > 0 and market_data_status in {"OK", "PASS", "READY", "AVAILABLE"})
     timestamp = str(data.get("timestamp") or datetime.now(timezone.utc).isoformat())
     pilot_state = str(data.get("live_micro_pilot_state", data.get("pilot_state", "DISARMED")) or "DISARMED").upper()
     broker_guard = str(data.get("broker_guard", data.get("broker_submission_guard", "REJECT_BEFORE_BROKER")) or "REJECT_BEFORE_BROKER")
     return {
-        "broker": str(data.get("selected_broker", data.get("broker", "NONE")) or "NONE"),
-        "broker_mode": str(data.get("broker_mode", "paper") or "paper"),
+        "broker": readiness.broker_name,
+        "broker_mode": readiness.mode,
         "execution_scope": str(data.get("execution_scope", "PAPER_OR_NOT_SELECTED") or "PAPER_OR_NOT_SELECTED"),
         "operator_requested_live": operator_requested_live,
         "execution_enabled": execution_enabled,
@@ -134,7 +132,9 @@ def _startup_diagnostics(data: Mapping[str, Any]) -> dict[str, Any]:
         "account_loaded": account_loaded,
         "products_loaded": products_loaded,
         "broker_guard": broker_guard,
-        "broker_infrastructure_health": str(data.get("broker_health", "UNKNOWN")),
+        "broker_infrastructure_health": readiness.broker_health,
+        "broker_ready": bool(readiness.credentials_present and readiness.authenticated and readiness.connected and readiness.account_loaded and readiness.market_data_ready),
+        "readiness_score": readiness.readiness_score,
         "credential_status": credentials,
         "authentication_status": "AUTHENTICATED" if authenticated else str(data.get("auth_status", "NOT_AUTHENTICATED")),
         "connection_status": "CONNECTED" if connected else str(data.get("connection_status", "NOT_CONNECTED")),

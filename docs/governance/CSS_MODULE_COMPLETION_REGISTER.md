@@ -137,3 +137,11 @@ Status: Authority reconciliation implemented for review.
 Phase 153I adds `LiveExecutionAuthority`, which separates `operator_requested_live` from `execution_authority`. Operator `ARM LIVE` input records intent only and cannot set `CAN_LIVE_EXECUTE` or broker execution authority.
 
 This register does not authorize live broker execution. Execution authority remains false unless all credential, authentication, connection, account, market data, broker enablement, Live Micro-Pilot, Capital Governor, Unified Trade Gate, Margin Gate, AntiBleedGuard, RBAC, Kill Switch, and GO / NO GO conditions pass.
+
+## Phase 154A Multi-Broker Readiness Framework Register
+
+Status: Canonical multi-broker readiness framework implemented for review.
+
+Phase 154A adds `BrokerReadinessFramework` and `OandaLiveReadOnlyAdapter`. Coinbase and OANDA now publish the same readiness fields, and Live Execution Authority consumes that canonical readiness contract without broker-specific rules.
+
+This register does not authorize live broker execution. OANDA read-only validation exposes no write operations, and all broker execution remains governed by the canonical fail-closed authority path.

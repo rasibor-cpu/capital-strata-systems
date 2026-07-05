@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
 from backend.runtime.broker_startup_selection import BrokerStartupSelection, build_startup_broker_selection
+from backend.runtime.broker_readiness_framework import broker_readiness_payload, build_broker_readiness_snapshot
 from backend.runtime.coinbase_live_adapter import CoinbaseLiveReadOnlyAdapter, READ_ONLY_EXECUTION_SCOPE
 from backend.runtime.live_execution_authority import evaluate_live_execution_authority
 from backend.runtime.live_readiness_state_machine import evaluate_live_readiness_state
@@ -134,6 +135,17 @@ def evaluate_coinbase_live_read_only(
         "authority_reason": "Credentials Missing" if selection.operator_requested_live else "Operator Intent Missing",
         "live_authority_state": "BLOCKED",
     }
+    result["broker_readiness"] = broker_readiness_payload(
+        build_broker_readiness_snapshot(
+            {
+                **result,
+                "broker_name": result["selected_broker"],
+                "mode": result["broker_mode"],
+                "execution_supported": result["selected_broker"] in {"COINBASE", "OANDA"},
+                "execution_enabled": False,
+            }
+        )
+    )
 
     if selection.selected_broker != "COINBASE" or selection.broker_mode != "live":
         return _apply_readiness_state(result)
@@ -232,6 +244,10 @@ def merge_readiness_into_broker_state(selection: BrokerStartupSelection, readine
             "drawdown_reason": str(readiness.get("drawdown_reason", "Broker balance unavailable")),
             "live_micro_pilot_state": str(readiness.get("live_micro_pilot_state", "DISARMED")),
             "broker_guard": str(readiness.get("broker_guard", "REJECT_BEFORE_BROKER")),
+            "broker_readiness": dict(readiness.get("broker_readiness", {}))
+            if isinstance(readiness.get("broker_readiness"), Mapping)
+            else broker_readiness_payload(build_broker_readiness_snapshot(readiness)),
+            "readiness_score": readiness.get("readiness_score", _mapping(readiness.get("broker_readiness")).get("readiness_score", 0.0)),
             "readiness_state": str(readiness.get("readiness_state", "UNCONFIGURED")),
             "go_no_go": str(readiness.get("go_no_go", "NO GO")),
             "readiness_checklist": list(readiness.get("readiness_checklist", []))
@@ -278,6 +294,10 @@ def _apply_readiness_state(result: dict[str, Any]) -> dict[str, Any]:
 
 def _any_present(env: Mapping[str, Any], names: tuple[str, ...]) -> bool:
     return any(bool(str(env.get(name, "")).strip()) for name in names)
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _try_read(adapter: Any, method_names: tuple[str, ...]) -> Any:

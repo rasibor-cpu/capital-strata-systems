@@ -951,21 +951,18 @@ def live_readiness_certification(dashboard_payload: Mapping[str, Any]) -> dict[s
     if explicit_payload:
         report = dict(explicit_payload)
     else:
-        try:
-            report = live_readiness_certification_status()
-        except Exception as exc:
-            report = {
-                "overall_certification_decision": "NO GO",
-                "certification_status": "NO GO",
-                "go_no_go": "NO GO",
-                "readiness_score": 0.0,
-                "known_warnings": [],
-                "known_blockers": [f"live_readiness_certification_unavailable:{exc}"],
-                "software_version": DATA_UNAVAILABLE,
-                "commit": DATA_UNAVAILABLE,
-                "git_tag": DATA_UNAVAILABLE,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
+        report = {
+            "overall_certification_decision": "NO GO",
+            "certification_status": "NO GO",
+            "go_no_go": "NO GO",
+            "readiness_score": 0.0,
+            "known_warnings": [],
+            "known_blockers": ["live_readiness_certification_not_provided"],
+            "software_version": DATA_UNAVAILABLE,
+            "commit": DATA_UNAVAILABLE,
+            "git_tag": DATA_UNAVAILABLE,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
     return {
         "section_title": "Live Readiness Certification",
         "live_readiness_score": _number(report.get("readiness_score")),
@@ -987,6 +984,7 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     broker_payload = _mapping(dashboard_payload.get("broker_summary"))
     credential_diagnostics = _mapping(broker_payload.get("credential_diagnostics"))
     limit_reconciliation = _mapping(broker_payload.get("limit_reconciliation"))
+    broker_readiness = _mapping(broker_payload.get("broker_readiness"))
     return {
         "selected_broker": str(broker_payload.get("selected_broker", "NONE")),
         "broker_mode": str(broker_payload.get("broker_mode", "paper")),
@@ -997,6 +995,14 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         "broker_infrastructure_health": str(
             broker_payload.get("broker_infrastructure_health", broker_payload.get("broker_health", broker_payload.get("api_health", "UNKNOWN")))
         ),
+        "broker_ready": _boolean(broker_payload.get("broker_ready", broker_readiness.get("broker_ready"))),
+        "broker_readiness": broker_readiness,
+        "credentials_present": _boolean(broker_payload.get("credentials_present", broker_readiness.get("credentials_present"))),
+        "authenticated": _boolean(broker_payload.get("authenticated", broker_payload.get("broker_authenticated", broker_readiness.get("authenticated")))),
+        "account_loaded": _boolean(broker_payload.get("account_loaded", broker_readiness.get("account_loaded"))),
+        "market_data_ready": _boolean(broker_payload.get("market_data_ready", broker_readiness.get("market_data_ready"))),
+        "execution_supported": _boolean(broker_payload.get("execution_supported", broker_readiness.get("execution_supported"))),
+        "readiness_score": _number(broker_payload.get("readiness_score", broker_readiness.get("readiness_score"))),
         "broker_execution_armed": _boolean(broker_payload.get("broker_execution_armed")),
         "operator_requested_live": _boolean(broker_payload.get("operator_requested_live")),
         "execution_authority": _boolean(broker_payload.get("execution_authority")),

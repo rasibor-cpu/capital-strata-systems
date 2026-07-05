@@ -912,6 +912,14 @@
             <div class="status-row"><span>Broker Connected</span><strong>{{ broker_startup.broker_connected | default(false) }}</strong></div>
             <div class="status-row"><span>Broker Health</span><strong>{{ broker_startup.broker_health | default('UNKNOWN') }}</strong></div>
             <div class="status-row"><span>Broker Infrastructure</span><strong>{{ broker_startup.broker_infrastructure_health | default(broker_startup.broker_health | default('UNKNOWN')) }}</strong></div>
+            <div class="status-row"><span>Broker Ready</span><strong>{{ broker_startup.broker_ready | default(false) }}</strong></div>
+            <div class="status-row"><span>Credentials Present</span><strong>{{ broker_startup.credentials_present | default(false) }}</strong></div>
+            <div class="status-row"><span>Authenticated</span><strong>{{ broker_startup.authenticated | default(broker_startup.broker_authenticated | default(false)) }}</strong></div>
+            <div class="status-row"><span>Account Data</span><strong>{{ broker_startup.account_loaded | default(false) }}</strong></div>
+            <div class="status-row"><span>Market Data</span><strong>{{ broker_startup.market_data_ready | default(false) }}</strong></div>
+            <div class="status-row"><span>Execution Supported</span><strong>{{ broker_startup.execution_supported | default(false) }}</strong></div>
+            <div class="status-row"><span>Execution Enabled</span><strong>{{ broker_startup.broker_execution_enabled | default(false) }}</strong></div>
+            <div class="status-row"><span>Readiness Score</span><strong>{{ broker_startup.readiness_score | default('DATA UNAVAILABLE') }}</strong></div>
             <div class="status-row"><span>Broker Execution</span><strong>{{ broker_startup.broker_execution_status | default('DISABLED') }}</strong></div>
             <div class="status-row"><span>Operator Requested Live</span><strong>{{ broker_startup.operator_requested_live | default(false) }}</strong></div>
             <div class="status-row"><span>Execution Authority</span><strong>{{ broker_startup.execution_authority | default(false) }}</strong></div>

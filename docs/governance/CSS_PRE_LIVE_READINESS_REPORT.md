@@ -86,6 +86,12 @@ Phase 153I separates operator intent from execution authority. The operator phra
 
 Phase 153I does not authorize live trading. If any authority condition fails, `execution_authority = false`, `CAN_LIVE_EXECUTE = false`, and broker orders remain impossible.
 
+## Phase 154A Multi-Broker Readiness Framework Addendum
+
+Phase 154A introduces the canonical Broker Readiness Framework and OANDA LIVE read-only adapter. Coinbase and OANDA now publish the same readiness contract for credentials, authentication, connection, account data, market data, execution support, execution enablement, broker health, readiness score, and last sync.
+
+Phase 154A does not authorize live trading. Execution authority remains broker-independent and fail-closed; no broker-specific authority path may bypass Phase 152A CAD 20 Governor, Unified Trade Gate, Margin Gate, AntiBleedGuard, RBAC, Kill Switch, or Live Execution Authority.
+
 ## Safety Controls Required For LIVE
 
 LIVE mode must continue to require Unified Trade Gate, Margin Gate, RBAC, Capital Governor, AntiBleedGuard, kill switches, emergency stops, broker validation, execution authorization, and configured broker controls.

@@ -48,11 +48,13 @@ state/
 runtime/
 !backend/runtime/
 backend/runtime/*
+!backend/runtime/broker_readiness_framework.py
 !backend/runtime/live_micro_pilot_governor.py
 !backend/runtime/broker_startup_selection.py
 !backend/runtime/coinbase_readiness.py
 !backend/runtime/coinbase_live_adapter.py
 !backend/runtime/live_execution_authority.py
+!backend/runtime/oanda_live_read_only_adapter.py
 !backend/runtime/live_readiness_state_machine.py
 !backend/runtime/live_operator_wizard.py
 !backend/runtime/startup_state_machine.py

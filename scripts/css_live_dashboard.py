@@ -210,6 +210,7 @@ from backend.runtime.live_operator_wizard import (
 )
 from backend.runtime.live_micro_pilot_governor import live_micro_pilot_status
 from backend.runtime.live_readiness_state_machine import publish_live_readiness_state
+from backend.runtime.oanda_live_read_only_adapter import OandaLiveReadOnlyAdapter
 from backend.runtime.startup_summary import (
     build_live_startup_summary,
     format_live_startup_summary,
@@ -2128,6 +2129,23 @@ COINBASE_READ_ONLY_STATUS = evaluate_coinbase_live_read_only(
     STARTUP_BROKER_SELECTION,
     legacy_limit_usd=COINBASE_MAX_LIVE_ORDER_USD,
 )
+if SELECTED_BROKER == "OANDA" and SELECTED_BROKER_MODE == "live":
+    COINBASE_READ_ONLY_STATUS = OandaLiveReadOnlyAdapter(env=os.environ).sync()
+    COINBASE_READ_ONLY_STATUS.update(
+        {
+            "selected_broker": "OANDA",
+            "broker_mode": "live",
+            "execution_scope": "LIVE READ-ONLY VALIDATION",
+            "operator_requested_live": bool(getattr(STARTUP_WIZARD_STATE, "operator_requested_live", False)),
+            "execution_authority": False,
+            "authority_reason": COINBASE_READ_ONLY_STATUS.get("authority_reason", "Broker Execution Disabled"),
+            "live_authority_state": "BLOCKED",
+            "broker_execution_armed": False,
+            "broker_execution_enabled": False,
+            "broker_execution_status": "DISABLED",
+            "can_live_execute": False,
+        }
+    )
 BROKER_VALIDATION_DISPLAY = broker_validation_display(
     selected_broker=SELECTED_BROKER,
     broker_mode=SELECTED_BROKER_MODE,

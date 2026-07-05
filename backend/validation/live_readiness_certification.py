@@ -482,7 +482,7 @@ def git_metadata(repository_root: str | Path | None = None) -> dict[str, Any]:
         else:
             commit = head_text
             diagnostics["commit_source"] = "detached_head"
-        tag = _tag_for_commit(git_dir, commit) or _git_tag_for_commit(root, commit)
+        tag = _tag_for_commit(git_dir, commit)
         diagnostics["tag_source"] = "git_refs" if tag else "no_tag_for_head"
     except Exception as exc:
         diagnostics["metadata_error"] = str(exc)

@@ -133,6 +133,21 @@ def get_live_execution_authority_payload(
     }
 
 
+def get_broker_readiness_payload(
+    state_provider: DashboardStateProvider | None = None,
+) -> dict[str, Any]:
+    broker_payload = get_broker_read_only_status_payload(state_provider)
+    broker_data = broker_payload.get("data", {})
+    broker_data = broker_data if isinstance(broker_data, dict) else {}
+    return {
+        **broker_payload,
+        "section": "broker_readiness",
+        "data": broker_data.get("broker_readiness", {}),
+        "advisory_only": True,
+        "execution_allowed": False,
+    }
+
+
 def create_dashboard_state_router(
     state_provider: DashboardStateProvider | None = None,
 ) -> APIRouter:
@@ -236,6 +251,10 @@ def create_dashboard_state_router(
     def read_live_execution_authority() -> dict[str, Any]:
         return get_live_execution_authority_payload(state_provider)
 
+    @router.get("/api/v1/broker-readiness")
+    def read_broker_readiness() -> dict[str, Any]:
+        return get_broker_readiness_payload(state_provider)
+
     @router.get("/api/v1/broker-reconciliation")
     def read_broker_reconciliation() -> dict[str, Any]:
         return build_section_payload(
@@ -276,6 +295,7 @@ __all__ = [
     "create_dashboard_state_router",
     "default_dashboard_state_provider",
     "get_broker_read_only_status_payload",
+    "get_broker_readiness_payload",
     "get_broker_reconciliation_payload",
     "get_dashboard_state_payload",
     "get_frontend_payload",

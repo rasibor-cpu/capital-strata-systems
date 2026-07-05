@@ -580,6 +580,11 @@ def build_launcher_frontend_state(
         if isinstance(broker_startup.get("limit_reconciliation"), dict)
         else {}
     )
+    broker_readiness = (
+        broker_startup.get("broker_readiness")
+        if isinstance(broker_startup.get("broker_readiness"), dict)
+        else {}
+    )
 
     dashboard_payload = {
         "generated_at": _utc_iso_z(),
@@ -650,6 +655,16 @@ def build_launcher_frontend_state(
             "broker_infrastructure_health": str(
                 broker_startup.get("broker_infrastructure_health", broker_startup.get("broker_health", "UNKNOWN"))
             ),
+            "broker_ready": bool(broker_startup.get("broker_ready", broker_readiness.get("broker_ready", False))),
+            "broker_readiness": dict(broker_readiness),
+            "credentials_present": bool(broker_startup.get("credentials_present", broker_readiness.get("credentials_present", False))),
+            "authenticated": bool(
+                broker_startup.get("authenticated", broker_startup.get("broker_authenticated", broker_readiness.get("authenticated", False)))
+            ),
+            "account_loaded": bool(broker_startup.get("account_loaded", broker_readiness.get("account_loaded", False))),
+            "market_data_ready": bool(broker_startup.get("market_data_ready", broker_readiness.get("market_data_ready", False))),
+            "execution_supported": bool(broker_startup.get("execution_supported", broker_readiness.get("execution_supported", False))),
+            "readiness_score": broker_startup.get("readiness_score", broker_readiness.get("readiness_score", 0.0)),
             "api_health": str(broker_startup.get("broker_health", "UNKNOWN")),
             "broker_execution_armed": bool(broker_startup.get("broker_execution_armed", False)),
             "operator_requested_live": bool(broker_startup.get("operator_requested_live", False)),
@@ -779,6 +794,12 @@ def get_launcher_live_execution_authority_feed() -> Dict[str, Any]:
         "advisory_only": True,
         "execution_allowed": False,
     }
+
+
+def get_launcher_broker_readiness_feed() -> Dict[str, Any]:
+    broker = get_launcher_broker_read_only_status_feed()
+    readiness = broker.get("broker_readiness", {}) if isinstance(broker, dict) else {}
+    return dict(readiness) if isinstance(readiness, dict) else {}
 
 
 def get_launcher_live_readiness_blockers_feed() -> Dict[str, Any]:
@@ -3634,6 +3655,16 @@ async def launcher_live_execution_authority():
     return {
         "section": "live_execution_authority",
         "data": get_launcher_live_execution_authority_feed(),
+        "advisory_only": True,
+        "execution_allowed": False,
+    }
+
+
+@launcher_router.get("/api/v1/broker-readiness")
+async def launcher_broker_readiness():
+    return {
+        "section": "broker_readiness",
+        "data": get_launcher_broker_readiness_feed(),
         "advisory_only": True,
         "execution_allowed": False,
     }

@@ -7,6 +7,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from backend.runtime.broker_readiness_framework import (
+    broker_readiness_payload,
+    build_broker_readiness_snapshot,
+)
 from backend.runtime.live_execution_authority import evaluate_live_execution_authority
 from backend.runtime.live_readiness_state_machine import evaluate_live_readiness_state
 
@@ -223,6 +227,28 @@ class CoinbaseLiveReadOnlyAdapter:
             values.get(key) is not None
             for key in ("account_equity", "cash", "buying_power", "available_balance")
         )
+        broker_readiness = broker_readiness_payload(
+            build_broker_readiness_snapshot(
+                {
+                    "broker_name": "COINBASE",
+                    "mode": "live",
+                    "credential_status": "PRESENT" if self.credentials.ready else "MISSING",
+                    "authenticated": self.authenticated,
+                    "connected": self.connected,
+                    "account_loaded": has_balance,
+                    "market_data_ready": market_data_status in {"OK", "PASS", "READY", "AVAILABLE"} and int(products_loaded or 0) > 0,
+                    "products_loaded": int(products_loaded or 0),
+                    "broker_health": self.health,
+                    "execution_supported": True,
+                    "execution_enabled": False,
+                    "last_successful_sync": self.last_successful_sync,
+                    "account_balance": values.get("cash"),
+                    "equity": values.get("account_equity"),
+                    "buying_power": values.get("buying_power"),
+                    "authority_block_reason": self.connection_error or "Broker Execution Disabled",
+                }
+            )
+        )
         payload = {
             "selected_broker": "COINBASE",
             "broker": "COINBASE",
@@ -260,6 +286,10 @@ class CoinbaseLiveReadOnlyAdapter:
             "available_balance": values.get("available_balance"),
             "products_loaded": int(products_loaded or 0),
             "market_data_status": market_data_status,
+            "execution_supported": True,
+            "execution_enabled": False,
+            "broker_readiness": broker_readiness,
+            "readiness_score": broker_readiness["readiness_score"],
             "read_checks": dict(read_checks or {}),
             "drawdown_status": "UNKNOWN" if not has_balance else "AVAILABLE",
             "drawdown_reason": "" if has_balance else UNKNOWN_DRAW_DOWN_REASON,

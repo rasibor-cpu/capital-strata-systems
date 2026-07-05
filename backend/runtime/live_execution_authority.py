@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Mapping
 
+from backend.runtime.broker_readiness_framework import build_broker_readiness_snapshot
 
 AUTHORITY_CONDITIONS = (
     ("operator_requested_live", "Operator Intent Missing"),
@@ -40,28 +41,19 @@ class LiveExecutionAuthority:
 def evaluate_live_execution_authority(evidence: Mapping[str, Any] | None) -> LiveExecutionAuthority:
     data = evidence if isinstance(evidence, Mapping) else {}
     diagnostics = data.get("startup_diagnostics") if isinstance(data.get("startup_diagnostics"), Mapping) else {}
-    credential_status = str(
-        data.get("credential_status")
-        or data.get("credentials")
-        or diagnostics.get("credentials")
-        or diagnostics.get("credential_status")
-        or ""
-    ).upper()
-    market_data = str(data.get("market_data_status") or diagnostics.get("market_data") or "").upper()
+    broker_readiness_source = data.get("broker_readiness") if isinstance(data.get("broker_readiness"), Mapping) else data
+    readiness = build_broker_readiness_snapshot(broker_readiness_source)
     pilot_state = str(data.get("live_micro_pilot_state") or data.get("pilot_state") or diagnostics.get("pilot_state") or "").upper()
     go_no_go = str(data.get("go_no_go") or diagnostics.get("go_no_go") or "NO GO").upper()
 
     condition_status = {
         "operator_requested_live": _truthy(data.get("operator_requested_live", False)),
-        "credentials_present": credential_status in {"PRESENT", "PASS", "READY"},
-        "authenticated": _truthy(data.get("broker_authenticated", data.get("authenticated", diagnostics.get("authenticated", False)))),
-        "connected": _truthy(data.get("broker_connected", data.get("connected", diagnostics.get("connected", False)))),
-        "account_loaded": _truthy(data.get("account_loaded", diagnostics.get("account_loaded", False)))
-        or _value_present(data.get("account_equity"))
-        or _value_present(data.get("cash"))
-        or _value_present(data.get("available_balance")),
-        "market_data_ready": market_data in {"READY", "OK", "PASS", "AVAILABLE"} and _int(data.get("products_loaded", diagnostics.get("products_loaded", 0))) > 0,
-        "broker_execution_enabled": _truthy(data.get("broker_execution_enabled", False)),
+        "credentials_present": readiness.credentials_present,
+        "authenticated": readiness.authenticated,
+        "connected": readiness.connected,
+        "account_loaded": readiness.account_loaded,
+        "market_data_ready": readiness.market_data_ready,
+        "broker_execution_enabled": readiness.execution_enabled,
         "live_micro_pilot_armed": pilot_state == "ARMED",
         "capital_governor_pass": _pass(data.get("capital_governor", diagnostics.get("capital_governor"))),
         "unified_trade_gate_pass": _pass(data.get("unified_trade_gate", diagnostics.get("unified_trade_gate"))),

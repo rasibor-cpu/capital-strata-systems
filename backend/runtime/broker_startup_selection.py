@@ -70,6 +70,8 @@ class BrokerStartupSelection:
         payload.setdefault("go_no_go", "NO GO")
         payload.setdefault("readiness_checklist", [])
         payload.setdefault("startup_diagnostics", {})
+        payload.setdefault("broker_readiness", {})
+        payload.setdefault("readiness_score", 0.0)
         return payload
 
 
@@ -221,6 +223,8 @@ def broker_summary_from_artifacts(
         "live_authority_state",
         "live_execution_authority",
         "broker_execution_enabled",
+        "broker_readiness",
+        "readiness_score",
         "last_broker_sync",
         "products_loaded",
         "market_data_status",
