@@ -69,7 +69,8 @@ def test_phase153h_startup_summary_reflects_final_read_only_state() -> None:
 
     assert lines[0] == "========== LIVE STARTUP SUMMARY =========="
     assert lines[-1] == "========================================="
-    assert "Broker Execution: DISABLED" in lines
+    assert "Operator Requested Live: NO" in lines
+    assert "Execution Authority: NO" in lines
     assert "Can Live Execute: NO" in lines
     assert summary["Broker"] == "COINBASE"
     assert summary["Readiness State"] == "READ_ONLY_READY"
@@ -86,8 +87,9 @@ def test_phase153h_startup_summary_never_displays_armed_when_execution_not_armed
         pilot_status={"pilot_state": "DISARMED"},
     )
 
-    assert summary["Broker Execution"] == "DISABLED"
     assert summary["broker_execution_status"] == "DISABLED"
+    assert summary["Execution Authority"] == "NO"
+    assert summary["execution_authority"] is False
     assert summary["Can Live Execute"] == "NO"
     assert summary["can_live_execute"] is False
 

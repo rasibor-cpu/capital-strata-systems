@@ -6,6 +6,7 @@ from typing import Any, Callable, Mapping
 
 from backend.runtime.broker_startup_selection import BrokerStartupSelection, build_startup_broker_selection
 from backend.runtime.coinbase_live_adapter import CoinbaseLiveReadOnlyAdapter, READ_ONLY_EXECUTION_SCOPE
+from backend.runtime.live_execution_authority import evaluate_live_execution_authority
 from backend.runtime.live_readiness_state_machine import evaluate_live_readiness_state
 
 
@@ -128,6 +129,10 @@ def evaluate_coinbase_live_read_only(
         "drawdown_reason": "Broker balance unavailable",
         "broker_guard": "REJECT_BEFORE_BROKER",
         "live_micro_pilot_state": "DISARMED",
+        "operator_requested_live": bool(selection.operator_requested_live),
+        "execution_authority": False,
+        "authority_reason": "Credentials Missing" if selection.operator_requested_live else "Operator Intent Missing",
+        "live_authority_state": "BLOCKED",
     }
 
     if selection.selected_broker != "COINBASE" or selection.broker_mode != "live":
@@ -178,6 +183,10 @@ def selection_with_coinbase_readiness(
         selected_broker=selection.selected_broker,
         broker_mode=selection.broker_mode,
         broker_execution_armed=False,
+        operator_requested_live=selection.operator_requested_live,
+        execution_authority=False,
+        authority_reason=str(readiness.get("authority_reason", "Operator Intent Missing")),
+        live_authority_state=str(readiness.get("live_authority_state", "BLOCKED")),
         broker_connected=bool(readiness.get("broker_connected", False)),
         broker_authenticated=bool(readiness.get("broker_authenticated", False)),
         broker_health=str(readiness.get("broker_health", "UNKNOWN")),
@@ -195,6 +204,11 @@ def merge_readiness_into_broker_state(selection: BrokerStartupSelection, readine
             "execution_scope": str(readiness.get("execution_scope", state.get("broker_connection_mode", ""))),
             "auth_reason": str(readiness.get("auth_reason", state.get("readiness_reason", ""))),
             "can_live_execute": False,
+            "operator_requested_live": bool(readiness.get("operator_requested_live", state.get("operator_requested_live", False))),
+            "execution_authority": False,
+            "authority_reason": str(readiness.get("authority_reason", state.get("authority_reason", "Operator Intent Missing"))),
+            "live_authority_state": str(readiness.get("live_authority_state", state.get("live_authority_state", "BLOCKED"))),
+            "broker_execution_enabled": False,
             "live_order_permission": False,
             "execution_allowed": False,
             "credential_status": str(readiness.get("credential_status", "")),
@@ -228,10 +242,32 @@ def merge_readiness_into_broker_state(selection: BrokerStartupSelection, readine
             else {},
         }
     )
+    authority = evaluate_live_execution_authority(state).as_dict()
+    state.update(
+        {
+            "operator_requested_live": bool(authority.get("operator_requested_live", state.get("operator_requested_live", False))),
+            "execution_authority": False,
+            "authority_reason": str(authority.get("authority_reason", state.get("authority_reason", "Operator Intent Missing"))),
+            "live_authority_state": str(authority.get("live_authority_state", "BLOCKED")),
+            "live_execution_authority": authority,
+            "broker_execution_enabled": False,
+            "broker_execution_status": "DISABLED",
+            "can_live_execute": False,
+        }
+    )
     return state
 
 
 def _apply_readiness_state(result: dict[str, Any]) -> dict[str, Any]:
+    authority = evaluate_live_execution_authority(result).as_dict()
+    result["operator_requested_live"] = bool(authority.get("operator_requested_live", result.get("operator_requested_live", False)))
+    result["execution_authority"] = False
+    result["authority_reason"] = str(authority.get("authority_reason", result.get("authority_reason", "Operator Intent Missing")))
+    result["live_authority_state"] = str(authority.get("live_authority_state", "BLOCKED"))
+    result["live_execution_authority"] = authority
+    result["broker_execution_enabled"] = False
+    result["broker_execution_status"] = "DISABLED"
+    result["can_live_execute"] = False
     readiness = evaluate_live_readiness_state(result).as_dict()
     result["readiness_state"] = readiness["readiness_state"]
     result["go_no_go"] = readiness["go_no_go"]

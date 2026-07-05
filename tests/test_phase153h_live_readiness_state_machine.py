@@ -57,7 +57,7 @@ def test_phase153h_read_only_ready_requires_execution_disabled_and_pilot_disarme
         "live_micro_pilot_state": "DISARMED",
         "broker_guard": "REJECT_BEFORE_BROKER",
     }
-    armed = {**ready, "broker_execution_armed": True, "can_live_execute": True}
+    armed = {**ready, "execution_authority": True, "can_live_execute": True}
 
     ready_state = evaluate_live_readiness_state(ready).as_dict()
     armed_state = evaluate_live_readiness_state(armed).as_dict()

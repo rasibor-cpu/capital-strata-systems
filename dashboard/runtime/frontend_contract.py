@@ -998,6 +998,12 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
             broker_payload.get("broker_infrastructure_health", broker_payload.get("broker_health", broker_payload.get("api_health", "UNKNOWN")))
         ),
         "broker_execution_armed": _boolean(broker_payload.get("broker_execution_armed")),
+        "operator_requested_live": _boolean(broker_payload.get("operator_requested_live")),
+        "execution_authority": _boolean(broker_payload.get("execution_authority")),
+        "authority_reason": str(broker_payload.get("authority_reason", "Operator Intent Missing")),
+        "live_authority_state": str(broker_payload.get("live_authority_state", "BLOCKED")),
+        "live_execution_authority": _mapping(broker_payload.get("live_execution_authority")),
+        "broker_execution_enabled": _boolean(broker_payload.get("broker_execution_enabled")),
         "broker_execution_status": str(broker_payload.get("broker_execution_status", "DISABLED")),
         "broker_connection_mode": str(broker_payload.get("broker_connection_mode", "PAPER_ONLY")),
         "live_trading_enabled": _boolean(

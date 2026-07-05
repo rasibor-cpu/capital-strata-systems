@@ -106,8 +106,10 @@ def test_phase153f_live_broker_execution_requires_arm_live_phrase() -> None:
     result, _tape, output, _flushes = _run(["2", "LIVE", "2", "2", "LIVE", "2", "ARM LIVE", "1", "1", "Y"])
     text = "\n".join(output)
 
-    assert result.state.broker_execution_armed is True
-    assert result.state.can_live_execute is True
+    assert result.state.operator_requested_live is True
+    assert result.state.broker_execution_armed is False
+    assert result.state.execution_authority is False
+    assert result.state.can_live_execute is False
     assert "Expected: ARM LIVE" in text
     assert "Received: 2" in text
 

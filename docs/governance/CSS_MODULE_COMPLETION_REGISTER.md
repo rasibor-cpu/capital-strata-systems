@@ -129,3 +129,11 @@ Status: Final read-only validation polish implemented for review.
 Phase 153H adds the canonical Live Readiness State Machine, final-state LIVE STARTUP SUMMARY, structured readiness checklist, startup diagnostics JSON, and dashboard/API visibility for readiness state and GO / NO GO.
 
 This register does not authorize live broker execution. Broker execution remains disabled, `CAN_LIVE_EXECUTE` remains false, Live Micro-Pilot remains disarmed, and Unified Trade Gate, Margin Gate, AntiBleedGuard, RBAC, Kill Switch, and Phase 152A CAD 20 Governor remain authoritative.
+
+## Phase 153I Live Execution Authority Reconciliation Register
+
+Status: Authority reconciliation implemented for review.
+
+Phase 153I adds `LiveExecutionAuthority`, which separates `operator_requested_live` from `execution_authority`. Operator `ARM LIVE` input records intent only and cannot set `CAN_LIVE_EXECUTE` or broker execution authority.
+
+This register does not authorize live broker execution. Execution authority remains false unless all credential, authentication, connection, account, market data, broker enablement, Live Micro-Pilot, Capital Governor, Unified Trade Gate, Margin Gate, AntiBleedGuard, RBAC, Kill Switch, and GO / NO GO conditions pass.

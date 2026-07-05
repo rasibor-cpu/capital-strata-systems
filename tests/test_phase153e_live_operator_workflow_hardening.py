@@ -95,8 +95,10 @@ def test_phase153e_arm_live_requires_second_confirmation() -> None:
     )
 
     assert result.advanced is True
-    assert result.state.broker_execution_armed is True
-    assert result.state.can_live_execute is True
+    assert result.state.operator_requested_live is True
+    assert result.state.broker_execution_armed is False
+    assert result.state.execution_authority is False
+    assert result.state.can_live_execute is False
 
 
 def test_phase153e_wrong_arm_live_confirmation_leaves_execution_disabled() -> None:

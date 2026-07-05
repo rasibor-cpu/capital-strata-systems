@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from backend.runtime.live_execution_authority import evaluate_live_execution_authority
 from backend.runtime.live_readiness_state_machine import evaluate_live_readiness_state
 
 
@@ -240,6 +241,11 @@ class CoinbaseLiveReadOnlyAdapter:
             "execution_scope": READ_ONLY_EXECUTION_SCOPE,
             "broker_execution_status": DISABLED_EXECUTION_STATUS,
             "broker_execution_armed": False,
+            "operator_requested_live": False,
+            "execution_authority": False,
+            "authority_reason": "Operator Intent Missing",
+            "live_authority_state": "BLOCKED",
+            "broker_execution_enabled": False,
             "can_live_execute": False,
             "live_order_permission": False,
             "execution_allowed": False,
@@ -258,6 +264,10 @@ class CoinbaseLiveReadOnlyAdapter:
             "drawdown_status": "UNKNOWN" if not has_balance else "AVAILABLE",
             "drawdown_reason": "" if has_balance else UNKNOWN_DRAW_DOWN_REASON,
         }
+        authority = evaluate_live_execution_authority(payload).as_dict()
+        payload["live_execution_authority"] = authority
+        payload["authority_reason"] = str(authority.get("authority_reason", "Operator Intent Missing"))
+        payload["live_authority_state"] = str(authority.get("live_authority_state", "BLOCKED"))
         readiness = evaluate_live_readiness_state(payload).as_dict()
         payload["readiness_state"] = readiness["readiness_state"]
         payload["go_no_go"] = readiness["go_no_go"]

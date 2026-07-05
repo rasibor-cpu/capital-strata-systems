@@ -80,6 +80,12 @@ Phase 153H adds the canonical live readiness state machine, final-state startup 
 
 Phase 153H does not authorize live trading. Broker execution remains disabled, `CAN_LIVE_EXECUTE` remains false, Live Micro-Pilot remains disarmed, and all safety gates remain authoritative and fail-closed.
 
+## Phase 153I Live Execution Authority Reconciliation Addendum
+
+Phase 153I separates operator intent from execution authority. The operator phrase `ARM LIVE` now records `operator_requested_live = true` only; execution authority remains false unless credentials, authentication, connection, account data, market data, broker execution enablement, Live Micro-Pilot arming, Capital Governor, Unified Trade Gate, Margin Gate, AntiBleedGuard, RBAC, Kill Switch, and GO / NO GO conditions all pass.
+
+Phase 153I does not authorize live trading. If any authority condition fails, `execution_authority = false`, `CAN_LIVE_EXECUTE = false`, and broker orders remain impossible.
+
 ## Safety Controls Required For LIVE
 
 LIVE mode must continue to require Unified Trade Gate, Margin Gate, RBAC, Capital Governor, AntiBleedGuard, kill switches, emergency stops, broker validation, execution authorization, and configured broker controls.

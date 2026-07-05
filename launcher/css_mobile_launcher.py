@@ -652,6 +652,14 @@ def build_launcher_frontend_state(
             ),
             "api_health": str(broker_startup.get("broker_health", "UNKNOWN")),
             "broker_execution_armed": bool(broker_startup.get("broker_execution_armed", False)),
+            "operator_requested_live": bool(broker_startup.get("operator_requested_live", False)),
+            "execution_authority": bool(broker_startup.get("execution_authority", False)),
+            "authority_reason": str(broker_startup.get("authority_reason", "Operator Intent Missing")),
+            "live_authority_state": str(broker_startup.get("live_authority_state", "BLOCKED")),
+            "live_execution_authority": dict(broker_startup.get("live_execution_authority", {}))
+            if isinstance(broker_startup.get("live_execution_authority"), dict)
+            else {},
+            "broker_execution_enabled": bool(broker_startup.get("broker_execution_enabled", False)),
             "broker_execution_status": str(broker_startup.get("broker_execution_status", "DISABLED")),
             "broker_connection_mode": str(broker_startup.get("broker_connection_mode", "PAPER_ONLY")),
             "credential_diagnostics": dict(credential_diagnostics),
@@ -753,6 +761,21 @@ def get_launcher_live_readiness_state_feed() -> Dict[str, Any]:
         "go_no_go": broker.get("go_no_go", "NO GO"),
         "readiness_checklist": broker.get("readiness_checklist", []),
         "startup_diagnostics": broker.get("startup_diagnostics", {}),
+        "advisory_only": True,
+        "execution_allowed": False,
+    }
+
+
+def get_launcher_live_execution_authority_feed() -> Dict[str, Any]:
+    broker = get_launcher_broker_read_only_status_feed()
+    broker = broker if isinstance(broker, dict) else {}
+    return {
+        "operator_requested_live": broker.get("operator_requested_live", False),
+        "execution_authority": broker.get("execution_authority", False),
+        "authority_reason": broker.get("authority_reason", "Operator Intent Missing"),
+        "live_authority_state": broker.get("live_authority_state", "BLOCKED"),
+        "can_live_execute": broker.get("can_live_execute", False),
+        "live_execution_authority": broker.get("live_execution_authority", {}),
         "advisory_only": True,
         "execution_allowed": False,
     }
@@ -3601,6 +3624,16 @@ async def launcher_live_readiness_state():
     return {
         "section": "live_readiness_state",
         "data": get_launcher_live_readiness_state_feed(),
+        "advisory_only": True,
+        "execution_allowed": False,
+    }
+
+
+@launcher_router.get("/api/v1/live-execution-authority")
+async def launcher_live_execution_authority():
+    return {
+        "section": "live_execution_authority",
+        "data": get_launcher_live_execution_authority_feed(),
         "advisory_only": True,
         "execution_allowed": False,
     }

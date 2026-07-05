@@ -111,6 +111,28 @@ def get_live_readiness_state_payload(
     }
 
 
+def get_live_execution_authority_payload(
+    state_provider: DashboardStateProvider | None = None,
+) -> dict[str, Any]:
+    broker_payload = get_broker_read_only_status_payload(state_provider)
+    broker_data = broker_payload.get("data", {})
+    broker_data = broker_data if isinstance(broker_data, dict) else {}
+    return {
+        **broker_payload,
+        "section": "live_execution_authority",
+        "data": {
+            "operator_requested_live": broker_data.get("operator_requested_live", False),
+            "execution_authority": broker_data.get("execution_authority", False),
+            "authority_reason": broker_data.get("authority_reason", "Operator Intent Missing"),
+            "live_authority_state": broker_data.get("live_authority_state", "BLOCKED"),
+            "can_live_execute": broker_data.get("can_live_execute", False),
+            "live_execution_authority": broker_data.get("live_execution_authority", {}),
+        },
+        "advisory_only": True,
+        "execution_allowed": False,
+    }
+
+
 def create_dashboard_state_router(
     state_provider: DashboardStateProvider | None = None,
 ) -> APIRouter:
@@ -210,6 +232,10 @@ def create_dashboard_state_router(
     def read_live_readiness_state() -> dict[str, Any]:
         return get_live_readiness_state_payload(state_provider)
 
+    @router.get("/api/v1/live-execution-authority")
+    def read_live_execution_authority() -> dict[str, Any]:
+        return get_live_execution_authority_payload(state_provider)
+
     @router.get("/api/v1/broker-reconciliation")
     def read_broker_reconciliation() -> dict[str, Any]:
         return build_section_payload(
@@ -253,6 +279,7 @@ __all__ = [
     "get_broker_reconciliation_payload",
     "get_dashboard_state_payload",
     "get_frontend_payload",
+    "get_live_execution_authority_payload",
     "get_live_readiness_state_payload",
     "get_startup_diagnostics_payload",
 ]

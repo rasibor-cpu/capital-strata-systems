@@ -1821,6 +1821,10 @@ def _run_operator_startup_state_machine_once() -> Any:
         selected_broker=machine_state.selected_broker or "NONE",
         broker_mode=machine_state.broker_mode or "paper",
         broker_execution_armed=machine_state.broker_execution_armed,
+        operator_requested_live=machine_state.operator_requested_live,
+        execution_authority=machine_state.execution_authority,
+        authority_reason=machine_state.authority_reason,
+        live_authority_state=machine_state.live_authority_state,
         engine_mode=machine_state.engine_mode or "SAFE",
         cycle_mode=machine_state.cycle_mode or "manual",
         cycle_interval_seconds=machine_state.cycle_interval_seconds,
@@ -1873,6 +1877,7 @@ def select_broker_execution_config(selected_broker: str, selected_broker_mode: s
     # return False, selected_broker, selected_broker_mode
     result = _run_operator_startup_state_machine_once()
     armed = bool(result.state.broker_execution_armed)
+    operator_requested = bool(getattr(result.state, "operator_requested_live", False))
     selected = result.state.selected_broker or selected_broker
     mode = result.state.broker_mode or selected_broker_mode
     record_rbac_event(
@@ -1880,13 +1885,18 @@ def select_broker_execution_config(selected_broker: str, selected_broker_mode: s
         SESSION_USER_CTX,
         {
             "resource": "broker",
-            "action": "arm" if armed else "disarm",
+            "action": "request_live" if operator_requested else ("arm" if armed else "disarm"),
             "reason": "phase153f_startup_state_machine",
             "selected_broker": selected,
             "selected_broker_mode": mode,
+            "operator_requested_live": operator_requested,
+            "execution_authority": bool(getattr(result.state, "execution_authority", False)),
         },
     )
-    print(f"[BROKER EXECUTION {'ARMED' if armed else 'DISABLED'}] Selected broker preserved: {selected} / mode={mode}")
+    if operator_requested:
+        print(f"[BROKER EXECUTION REQUESTED] Execution authority remains DISABLED: {selected} / mode={mode}")
+    else:
+        print(f"[BROKER EXECUTION {'ARMED' if armed else 'DISABLED'}] Selected broker preserved: {selected} / mode={mode}")
     return armed, selected, mode
 
 
@@ -1944,6 +1954,7 @@ def _render_final_live_startup_summary() -> dict[str, Any]:
             "selected_broker": SELECTED_BROKER,
             "broker_mode": SELECTED_BROKER_MODE,
             "broker_execution_armed": bool(BROKER_EXECUTION_ARMED),
+            "operator_requested_live": bool(getattr(STARTUP_WIZARD_STATE, "operator_requested_live", False)),
             "engine_mode": globals().get("ENGINE_MODE", startup_state.get("engine_mode", "SAFE")),
         }
     )
@@ -1975,6 +1986,15 @@ def _publish_final_startup_diagnostics(summary: dict[str, Any]) -> None:
                     "readiness_state": readiness.get("readiness_state", summary.get("readiness_state", "UNCONFIGURED")),
                     "go_no_go": readiness.get("go_no_go", summary.get("go_no_go", "NO GO")),
                     "readiness_checklist": readiness.get("readiness_checklist", summary.get("readiness_checklist", [])),
+                    "operator_requested_live": bool(summary.get("operator_requested_live", False)),
+                    "execution_authority": False,
+                    "authority_reason": str(summary.get("authority_reason", "Operator Intent Missing")),
+                    "live_authority_state": str(summary.get("live_authority_state", "BLOCKED")),
+                    "live_execution_authority": dict(summary.get("live_execution_authority", {}))
+                    if isinstance(summary.get("live_execution_authority"), dict)
+                    else {},
+                    "broker_execution_enabled": False,
+                    "can_live_execute": False,
                 }
             )
             pcnrass_session_state["broker_state"] = STARTUP_BROKER_STATE
@@ -2099,6 +2119,10 @@ STARTUP_BROKER_SELECTION = build_startup_broker_selection(
     selected_broker=SELECTED_BROKER,
     broker_mode=SELECTED_BROKER_MODE,
     broker_execution_armed=BROKER_EXECUTION_ARMED,
+    operator_requested_live=bool(getattr(STARTUP_WIZARD_STATE, "operator_requested_live", False)),
+    execution_authority=False,
+    authority_reason="Credentials Missing" if bool(getattr(STARTUP_WIZARD_STATE, "operator_requested_live", False)) else "Operator Intent Missing",
+    live_authority_state="BLOCKED",
 )
 COINBASE_READ_ONLY_STATUS = evaluate_coinbase_live_read_only(
     STARTUP_BROKER_SELECTION,
@@ -2137,6 +2161,10 @@ try:
             "broker_mode": SELECTED_BROKER_MODE,
             "broker_execution_armed": BROKER_EXECUTION_ARMED,
             "broker_execution_enabled": False,
+            "operator_requested_live": bool(getattr(STARTUP_WIZARD_STATE, "operator_requested_live", False)),
+            "execution_authority": False,
+            "authority_reason": STARTUP_BROKER_STATE.get("authority_reason", "Operator Intent Missing"),
+            "live_authority_state": STARTUP_BROKER_STATE.get("live_authority_state", "BLOCKED"),
             "broker_state": STARTUP_BROKER_STATE,
         }
     )
@@ -2146,6 +2174,10 @@ try:
             "broker_mode": SELECTED_BROKER_MODE,
             "broker_execution_armed": BROKER_EXECUTION_ARMED,
             "broker_execution_enabled": False,
+            "operator_requested_live": bool(getattr(STARTUP_WIZARD_STATE, "operator_requested_live", False)),
+            "execution_authority": False,
+            "authority_reason": STARTUP_BROKER_STATE.get("authority_reason", "Operator Intent Missing"),
+            "live_authority_state": STARTUP_BROKER_STATE.get("live_authority_state", "BLOCKED"),
             "broker_state": STARTUP_BROKER_STATE,
         }
     )
@@ -4001,6 +4033,10 @@ def print_coinbase_broker_status() -> None:
     print(f"PRODUCT/PRICE STATUS: {readiness.get('product_price_status', 'NOT_TESTED')}")
     print(f"BALANCE/POSITION STATUS: {readiness.get('balance_position_status', 'NOT_TESTED')}")
     print(f"ORDER SUBMISSION STATUS: {readiness.get('order_submission_status', 'DISABLED')}")
+    print(f"OPERATOR REQUESTED LIVE: {'YES' if readiness.get('operator_requested_live') else 'NO'}")
+    print(f"EXECUTION AUTHORITY: {'YES' if readiness.get('execution_authority') else 'NO'}")
+    print(f"AUTHORITY REASON: {readiness.get('authority_reason', 'Operator Intent Missing')}")
+    print(f"LIVE AUTHORITY STATE: {readiness.get('live_authority_state', 'BLOCKED')}")
     print(f"BROKER EXECUTION: {'ARMED' if BROKER_EXECUTION_ARMED else 'DISABLED'}")
     print(f"CAN LIVE EXECUTE: {'YES' if readiness.get('can_live_execute') else 'NO'}")
     print(f"EXECUTION SCOPE: {execution_scope}")

@@ -97,7 +97,8 @@ def _startup_diagnostics(data: Mapping[str, Any]) -> dict[str, Any]:
         or "MISSING"
     ).strip().upper()
     credentials = "PRESENT" if credential_status in {"PRESENT", "PASS", "READY"} else "MISSING"
-    execution_enabled = _truthy(data.get("broker_execution_armed", data.get("execution_enabled", False)))
+    operator_requested_live = _truthy(data.get("operator_requested_live", False))
+    execution_enabled = _truthy(data.get("execution_authority", data.get("execution_enabled", False)))
     can_live_execute = _truthy(data.get("can_live_execute", False)) and execution_enabled
     authenticated = _truthy(data.get("broker_authenticated", data.get("authenticated", False)))
     connected = _truthy(data.get("broker_connected", data.get("connected", False)))
@@ -118,7 +119,11 @@ def _startup_diagnostics(data: Mapping[str, Any]) -> dict[str, Any]:
         "broker": str(data.get("selected_broker", data.get("broker", "NONE")) or "NONE"),
         "broker_mode": str(data.get("broker_mode", "paper") or "paper"),
         "execution_scope": str(data.get("execution_scope", "PAPER_OR_NOT_SELECTED") or "PAPER_OR_NOT_SELECTED"),
+        "operator_requested_live": operator_requested_live,
         "execution_enabled": execution_enabled,
+        "execution_authority": execution_enabled,
+        "authority_reason": str(data.get("authority_reason", "")),
+        "live_authority_state": str(data.get("live_authority_state", "BLOCKED")),
         "can_live_execute": can_live_execute,
         "pilot_state": pilot_state,
         "capital_governor": str(data.get("capital_governor", "PHASE_152A_CAD20_GUARD_ONLY")),

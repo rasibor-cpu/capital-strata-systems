@@ -41,6 +41,10 @@ class StartupWizardState:
     selected_broker: str = ""
     broker_mode: str = ""
     broker_execution_armed: bool = False
+    operator_requested_live: bool = False
+    execution_authority: bool = False
+    authority_reason: str = "Operator Intent Missing"
+    live_authority_state: str = "BLOCKED"
     engine_mode: str = ""
     cycle_mode: str = ""
     cycle_interval_seconds: int = 0
@@ -52,7 +56,8 @@ class StartupWizardState:
 
     def as_dict(self) -> dict[str, Any]:
         payload = asdict(self)
-        payload["broker_execution_status"] = "ARMED" if self.broker_execution_armed else "DISABLED"
+        payload["broker_execution_status"] = "ENABLED" if self.execution_authority else "DISABLED"
+        payload["broker_execution_enabled"] = bool(self.execution_authority)
         payload["execution_allowed"] = False
         payload["live_order_permission"] = False
         payload["advisory_only"] = True
@@ -141,23 +146,36 @@ def choose_broker_execution_arming(
     broker = normalize_broker(state.selected_broker)
     mode = normalize_broker_mode(state.broker_mode, selected_broker=broker)
     if normalized == "1":
-        return WizardStepResult(replace(state, broker_execution_armed=False, can_live_execute=False, step="engine_mode_selection", last_error=""), True)
+        return WizardStepResult(replace(state, broker_execution_armed=False, operator_requested_live=False, execution_authority=False, authority_reason="Operator Intent Missing", live_authority_state="BLOCKED", can_live_execute=False, step="engine_mode_selection", last_error=""), True)
     if broker == "NONE":
         message = "Broker execution cannot be armed because no broker is selected."
-        return WizardStepResult(replace(state, broker_execution_armed=False, can_live_execute=False, step="broker_selection", last_error=message), False, error=message)
+        return WizardStepResult(replace(state, broker_execution_armed=False, operator_requested_live=False, execution_authority=False, authority_reason="Operator Intent Missing", live_authority_state="BLOCKED", can_live_execute=False, step="broker_selection", last_error=message), False, error=message)
     profile = role_profile if isinstance(role_profile, Mapping) else {}
     if not bool(profile.get("can_arm_broker", False)):
         message = "Broker execution arming denied by RBAC."
-        return WizardStepResult(replace(state, broker_execution_armed=False, can_live_execute=False, step="engine_mode_selection", last_error=message), True, error=message)
+        return WizardStepResult(replace(state, broker_execution_armed=False, operator_requested_live=mode == "live", execution_authority=False, authority_reason="RBAC", live_authority_state="BLOCKED", can_live_execute=False, step="engine_mode_selection", last_error=message), True, error=message)
     if mode == "live":
         confirmation_result = require_exact_confirmation("ARM LIVE", arm_confirmation)
         if not confirmation_result["accepted"]:
             return WizardStepResult(
-                replace(state, broker_execution_armed=False, can_live_execute=False, step="engine_mode_selection", last_error=confirmation_result["message"]),
+                replace(state, broker_execution_armed=False, operator_requested_live=False, execution_authority=False, authority_reason="Operator Intent Missing", live_authority_state="BLOCKED", can_live_execute=False, step="engine_mode_selection", last_error=confirmation_result["message"]),
                 True,
                 error=confirmation_result["message"],
             )
-    return WizardStepResult(replace(state, broker_execution_armed=True, can_live_execute=mode == "live", step="engine_mode_selection", last_error=""), True)
+    return WizardStepResult(
+        replace(
+            state,
+            broker_execution_armed=False,
+            operator_requested_live=mode == "live",
+            execution_authority=False,
+            authority_reason="Credentials Missing" if mode == "live" else "Broker Execution Disabled",
+            live_authority_state="BLOCKED",
+            can_live_execute=False,
+            step="engine_mode_selection",
+            last_error="",
+        ),
+        True,
+    )
 
 
 def set_engine_mode(state: StartupWizardState, mode: Any) -> WizardStepResult:
@@ -287,13 +305,16 @@ def build_startup_summary(
         "broker_mode": str(source.get("broker_mode", "paper") or "paper"),
         "broker_connection_status": str(broker.get("connection_status", broker.get("broker_health", "NOT_TESTED"))),
         "broker_auth_status": str(broker.get("auth_status", "NOT_TESTED")),
-        "broker_execution_status": "ARMED" if bool(source.get("broker_execution_armed", False)) else "DISABLED",
+        "operator_requested_live": bool(source.get("operator_requested_live", False)),
+        "execution_authority": bool(source.get("execution_authority", False)),
+        "authority_reason": str(source.get("authority_reason", "Operator Intent Missing")),
+        "broker_execution_status": "ENABLED" if bool(source.get("execution_authority", False)) else "DISABLED",
         "live_micro_pilot_state": str(pilot.get("pilot_state", "DISARMED")),
         "canonical_live_capital_authority": "PHASE_152A_LIVE_MICRO_PILOT_GOVERNOR",
         "canonical_pilot_cap": f"{pilot.get('currency', 'CAD')} {pilot.get('canonical_live_pilot_limit_cad', pilot.get('max_live_test_capital', '20.00'))}",
         "engine_mode": str(source.get("engine_mode", "")),
         "cycle_mode": str(source.get("cycle_mode", "")),
-        "can_live_execute": bool(source.get("can_live_execute", False)),
+        "can_live_execute": bool(source.get("execution_authority", False)),
         "execution_scope": str(source.get("execution_scope", "PAPER_OR_NOT_SELECTED")),
         "execution_allowed": False,
         "advisory_only": True,

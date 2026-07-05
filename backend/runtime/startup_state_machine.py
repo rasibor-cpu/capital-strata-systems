@@ -53,6 +53,10 @@ class StartupRuntimeState:
     selected_broker: str = ""
     broker_mode: str = ""
     broker_execution_armed: bool = False
+    operator_requested_live: bool = False
+    execution_authority: bool = False
+    authority_reason: str = "Operator Intent Missing"
+    live_authority_state: str = "BLOCKED"
     engine_mode: str = ""
     cycle_mode: str = ""
     cycle_interval_seconds: int = 0
@@ -72,7 +76,8 @@ class StartupRuntimeState:
 
     def as_dict(self) -> dict[str, Any]:
         payload = asdict(self)
-        payload["broker_execution_status"] = "ARMED" if self.broker_execution_armed else "DISABLED"
+        payload["broker_execution_status"] = "ENABLED" if self.execution_authority else "DISABLED"
+        payload["broker_execution_enabled"] = bool(self.execution_authority)
         payload["live_order_permission"] = False
         payload["execution_allowed"] = False
         payload["advisory_only"] = True
@@ -232,7 +237,7 @@ class OperatorStartupStateMachine:
 
     def _handle_broker_execution(self, state: StartupRuntimeState) -> StartupRuntimeState:
         live_mode = normalize_broker_mode(state.broker_mode, selected_broker=state.selected_broker) == "live"
-        arm_text = "2. ARMED / BROKER EXECUTION ALLOWED" if not live_mode else "Type ARM LIVE to arm live broker execution"
+        arm_text = "2. REQUEST BROKER EXECUTION" if not live_mode else "Type ARM LIVE to request live broker execution"
         value = self._prompt(
             state,
             f"BROKER EXECUTION\n1. DISABLED / READ-ONLY VALIDATION\n{arm_text}\nEnter broker execution choice: ",
@@ -241,28 +246,38 @@ class OperatorStartupStateMachine:
         if self._is_quit(value):
             return self._cancel(state, "operator_exit")
         if value == "1":
-            return self._advance(replace(state, broker_execution_armed=False, can_live_execute=False, last_input=value, last_error=""), "ENGINE_MODE", "broker_execution_disabled")
+            return self._advance(replace(state, broker_execution_armed=False, operator_requested_live=False, execution_authority=False, authority_reason="Operator Intent Missing", live_authority_state="BLOCKED", can_live_execute=False, last_input=value, last_error=""), "ENGINE_MODE", "broker_execution_disabled")
         if live_mode and value != "ARM LIVE":
             confirmation = require_exact_confirmation("ARM LIVE", value)
             self.output_func(str(confirmation["message"]))
             self._audit("INVALID_CONFIRMATION", state, received=value if value else "<ENTER>", expected="ARM LIVE")
-            return replace(state, broker_execution_armed=False, can_live_execute=False, last_input=value if value else "<ENTER>", last_error=str(confirmation["message"]))
+            return replace(state, broker_execution_armed=False, operator_requested_live=False, execution_authority=False, authority_reason="Operator Intent Missing", live_authority_state="BLOCKED", can_live_execute=False, last_input=value if value else "<ENTER>", last_error=str(confirmation["message"]))
         if not live_mode and value != "2":
             return self._invalid(state, "1 or 2", value)
         if normalize_broker(state.selected_broker) == "NONE":
             message = "Broker execution cannot be armed because no broker is selected."
             self.output_func(message)
             self._audit("BROKER_ARM_BLOCKED", state, received=value, reason=message)
-            return replace(state, broker_execution_armed=False, can_live_execute=False, last_input=value, last_error=message)
+            return replace(state, broker_execution_armed=False, operator_requested_live=False, execution_authority=False, authority_reason="Operator Intent Missing", live_authority_state="BLOCKED", can_live_execute=False, last_input=value, last_error=message)
         if not bool(self.role_profile.get("can_arm_broker", False)):
             message = "Broker execution arming denied by RBAC."
             self.output_func(message)
             self._audit("BROKER_ARM_BLOCKED", state, received=value, reason=message)
-            return self._advance(replace(state, broker_execution_armed=False, can_live_execute=False, last_input=value, last_error=message), "ENGINE_MODE", "broker_arm_rbac_denied")
+            return self._advance(replace(state, broker_execution_armed=False, operator_requested_live=live_mode, execution_authority=False, authority_reason="RBAC", live_authority_state="BLOCKED", can_live_execute=False, last_input=value, last_error=message), "ENGINE_MODE", "broker_arm_rbac_denied")
         return self._advance(
-            replace(state, broker_execution_armed=True, can_live_execute=live_mode, last_input=value, last_error=""),
+            replace(
+                state,
+                broker_execution_armed=False,
+                operator_requested_live=live_mode,
+                execution_authority=False,
+                authority_reason="Credentials Missing",
+                live_authority_state="BLOCKED",
+                can_live_execute=False,
+                last_input=value,
+                last_error="",
+            ),
             "ENGINE_MODE",
-            "broker_execution_armed",
+            "operator_live_requested" if live_mode else "broker_execution_requested",
         )
 
     def _handle_engine_mode(self, state: StartupRuntimeState) -> StartupRuntimeState:

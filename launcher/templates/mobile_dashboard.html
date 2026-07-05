@@ -913,6 +913,10 @@
             <div class="status-row"><span>Broker Health</span><strong>{{ broker_startup.broker_health | default('UNKNOWN') }}</strong></div>
             <div class="status-row"><span>Broker Infrastructure</span><strong>{{ broker_startup.broker_infrastructure_health | default(broker_startup.broker_health | default('UNKNOWN')) }}</strong></div>
             <div class="status-row"><span>Broker Execution</span><strong>{{ broker_startup.broker_execution_status | default('DISABLED') }}</strong></div>
+            <div class="status-row"><span>Operator Requested Live</span><strong>{{ broker_startup.operator_requested_live | default(false) }}</strong></div>
+            <div class="status-row"><span>Execution Authority</span><strong>{{ broker_startup.execution_authority | default(false) }}</strong></div>
+            <div class="status-row"><span>Authority Reason</span><strong>{{ broker_startup.authority_reason | default('Operator Intent Missing') }}</strong></div>
+            <div class="status-row"><span>Live Authority State</span><strong>{{ broker_startup.live_authority_state | default('BLOCKED') }}</strong></div>
             <div class="status-row"><span>Execution Scope</span><strong>{{ broker_startup.execution_scope | default('PAPER_OR_NOT_SELECTED') }}</strong></div>
             <div class="status-row"><span>Can Live Execute</span><strong>{{ broker_startup.can_live_execute | default(false) }}</strong></div>
             <div class="status-row"><span>Coinbase Key</span><strong>{{ broker_startup.get('credential_diagnostics', {}).get('coinbase_key_present', false) }}</strong></div>

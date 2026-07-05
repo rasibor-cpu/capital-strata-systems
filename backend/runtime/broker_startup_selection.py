@@ -28,6 +28,10 @@ class BrokerStartupSelection:
     selected_broker: str = "NONE"
     broker_mode: str = "paper"
     broker_execution_armed: bool = False
+    operator_requested_live: bool = False
+    execution_authority: bool = False
+    authority_reason: str = "Operator Intent Missing"
+    live_authority_state: str = "BLOCKED"
     broker_connected: bool = False
     broker_authenticated: bool = False
     broker_health: str = "DISABLED"
@@ -43,6 +47,12 @@ class BrokerStartupSelection:
         payload["advisory_only"] = True
         payload["execution_allowed"] = False
         payload["live_order_permission"] = False
+        payload["operator_requested_live"] = bool(payload.get("operator_requested_live", False))
+        payload["execution_authority"] = bool(payload.get("execution_authority", False))
+        payload["authority_reason"] = payload.get("authority_reason") or "Operator Intent Missing"
+        payload["live_authority_state"] = payload.get("live_authority_state") or "BLOCKED"
+        payload["broker_execution_enabled"] = bool(payload.get("execution_authority", False))
+        payload["broker_execution_status"] = "ENABLED" if payload["execution_authority"] else "DISABLED"
         payload["can_live_execute"] = False
         payload["execution_scope"] = (
             "LIVE READ-ONLY VALIDATION"
@@ -116,6 +126,10 @@ def build_startup_broker_selection(
     selected_broker: Any = "NONE",
     broker_mode: Any = "paper",
     broker_execution_armed: Any = False,
+    operator_requested_live: Any = False,
+    execution_authority: Any = False,
+    authority_reason: Any = "",
+    live_authority_state: Any = "",
     broker_connected: Any = False,
     broker_authenticated: Any = False,
     broker_health: Any = "",
@@ -125,6 +139,8 @@ def build_startup_broker_selection(
     broker = normalize_broker(selected_broker)
     mode = normalize_broker_mode(broker_mode, selected_broker=broker)
     armed = _truthy(broker_execution_armed)
+    requested_live = _truthy(operator_requested_live)
+    authority = _truthy(execution_authority)
     connected = _truthy(broker_connected)
     authenticated = _truthy(broker_authenticated)
     health = str(broker_health or "").strip().upper()
@@ -152,11 +168,15 @@ def build_startup_broker_selection(
         selected_broker=broker,
         broker_mode=mode,
         broker_execution_armed=armed,
+        operator_requested_live=requested_live,
+        execution_authority=authority,
+        authority_reason=str(authority_reason or ("Authority Granted" if authority else "Operator Intent Missing")),
+        live_authority_state=str(live_authority_state or ("AUTHORIZED" if authority else "BLOCKED")),
         broker_connected=connected,
         broker_authenticated=authenticated,
         broker_health=health,
         broker_readiness_status=readiness,
-        broker_execution_status="ARMED" if armed else "DISABLED",
+        broker_execution_status="ENABLED" if authority else "DISABLED",
         broker_connection_mode=connection_mode,
         readiness_reason=reason,
         timestamp=_utc_now(),
@@ -179,6 +199,10 @@ def broker_summary_from_artifacts(
         selected_broker=selected,
         broker_mode=mode,
         broker_execution_armed=broker_state.get("broker_execution_armed", session.get("broker_execution_armed", session.get("broker_execution_enabled", False))),
+        operator_requested_live=broker_state.get("operator_requested_live", session.get("operator_requested_live", False)),
+        execution_authority=broker_state.get("execution_authority", session.get("execution_authority", False)),
+        authority_reason=broker_state.get("authority_reason", ""),
+        live_authority_state=broker_state.get("live_authority_state", ""),
         broker_connected=broker_state.get("broker_connected", broker_state.get("connected", False)),
         broker_authenticated=broker_state.get("broker_authenticated", broker_state.get("authenticated", False)),
         broker_health=broker_state.get("broker_health", broker_state.get("api_health", "")),
@@ -191,6 +215,12 @@ def broker_summary_from_artifacts(
         "go_no_go",
         "readiness_checklist",
         "startup_diagnostics",
+        "operator_requested_live",
+        "execution_authority",
+        "authority_reason",
+        "live_authority_state",
+        "live_execution_authority",
+        "broker_execution_enabled",
         "last_broker_sync",
         "products_loaded",
         "market_data_status",
@@ -227,6 +257,10 @@ def persist_broker_selection(
             "broker_connected": selection.broker_connected,
             "broker_health": selection.broker_health,
             "broker_execution_armed": selection.broker_execution_armed,
+            "operator_requested_live": broker_state.get("operator_requested_live", selection.operator_requested_live),
+            "execution_authority": broker_state.get("execution_authority", selection.execution_authority),
+            "authority_reason": broker_state.get("authority_reason", selection.authority_reason),
+            "live_authority_state": broker_state.get("live_authority_state", selection.live_authority_state),
             "broker_execution_enabled": False,
             "broker_state": broker_state,
             "advisory_only": True,
@@ -241,6 +275,10 @@ def persist_broker_selection(
             "broker_connected": selection.broker_connected,
             "broker_health": selection.broker_health,
             "broker_execution_armed": selection.broker_execution_armed,
+            "operator_requested_live": broker_state.get("operator_requested_live", selection.operator_requested_live),
+            "execution_authority": broker_state.get("execution_authority", selection.execution_authority),
+            "authority_reason": broker_state.get("authority_reason", selection.authority_reason),
+            "live_authority_state": broker_state.get("live_authority_state", selection.live_authority_state),
             "broker_execution_enabled": False,
             "broker_execution_status": selection.broker_execution_status,
             "broker_state": broker_state,

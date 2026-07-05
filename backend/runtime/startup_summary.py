@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from backend.runtime.live_execution_authority import evaluate_live_execution_authority
 from backend.runtime.live_readiness_state_machine import evaluate_live_readiness_state
 
 
@@ -12,9 +13,10 @@ STARTUP_SUMMARY_FIELDS = (
     "Broker",
     "Broker Mode",
     "Execution Scope",
+    "Operator Requested Live",
     "Execution Authority",
-    "Broker Execution",
     "Can Live Execute",
+    "Authority Reason",
     "Pilot State",
     "Capital Governor",
     "Unified Trade Gate",
@@ -52,23 +54,33 @@ def build_live_startup_summary(
         "margin_gate": gates.get("margin_gate", broker.get("margin_gate", "AUTHORITATIVE_FAIL_CLOSED")),
         "anti_bleed_guard": gates.get("anti_bleed_guard", broker.get("anti_bleed_guard", "AUTHORITATIVE_FAIL_CLOSED")),
         "kill_switch": gates.get("kill_switch", broker.get("kill_switch", "AUTHORITATIVE_FAIL_CLOSED")),
+        "rbac": gates.get("rbac", broker.get("rbac", "AUTHORITATIVE_FAIL_CLOSED")),
     }
     readiness = evaluate_live_readiness_state(merged)
     readiness_payload = readiness.as_dict()
     diagnostics = readiness_payload["startup_diagnostics"]
 
-    execution_armed = _truthy(source.get("broker_execution_armed", broker.get("broker_execution_armed", False)))
-    broker_execution = "ARMED" if execution_armed else "DISABLED"
-    can_live_execute = bool(merged.get("can_live_execute")) and execution_armed
-    execution_authority = "ARMED_BY_OPERATOR_AND_GATES" if execution_armed and can_live_execute else "FAIL_CLOSED_READ_ONLY"
+    operator_requested = _truthy(source.get("operator_requested_live", broker.get("operator_requested_live", False)))
+    broker_execution_enabled = _truthy(source.get("broker_execution_enabled", broker.get("broker_execution_enabled", False)))
+    authority_input = {
+        **merged,
+        **diagnostics,
+        "operator_requested_live": operator_requested,
+        "broker_execution_enabled": broker_execution_enabled,
+        "go_no_go": readiness.go_no_go,
+    }
+    authority = evaluate_live_execution_authority(authority_input)
+    authority_payload = authority.as_dict()
+    can_live_execute = authority.execution_authority
 
     summary = {
         "Broker": diagnostics["broker"],
         "Broker Mode": diagnostics["broker_mode"],
         "Execution Scope": diagnostics["execution_scope"],
-        "Execution Authority": execution_authority,
-        "Broker Execution": broker_execution,
+        "Operator Requested Live": "YES" if authority.operator_requested_live else "NO",
+        "Execution Authority": "YES" if authority.execution_authority else "NO",
         "Can Live Execute": "YES" if can_live_execute else "NO",
+        "Authority Reason": authority.authority_reason,
         "Pilot State": diagnostics["pilot_state"],
         "Capital Governor": str(merged.get("capital_governor", "PHASE_152A_CAD20_GUARD_ONLY")),
         "Unified Trade Gate": str(merged.get("unified_trade_gate", "AUTHORITATIVE_FAIL_CLOSED")),
@@ -84,14 +96,24 @@ def build_live_startup_summary(
         "GO / NO GO": readiness.go_no_go,
         "execution_allowed": False,
         "advisory_only": True,
-        "broker_execution_status": broker_execution,
+        "broker_execution_status": "ENABLED" if authority.execution_authority else "DISABLED",
+        "operator_requested_live": authority.operator_requested_live,
+        "execution_authority": authority.execution_authority,
+        "authority_reason": authority.authority_reason,
+        "live_authority_state": authority.live_authority_state,
+        "live_execution_authority": authority_payload,
         "can_live_execute": can_live_execute,
         "readiness_state": readiness.readiness_state,
         "go_no_go": readiness.go_no_go,
         "readiness_checklist": readiness_payload["readiness_checklist"],
         "startup_diagnostics": {
             **diagnostics,
-            "execution_enabled": execution_armed,
+            "operator_requested_live": authority.operator_requested_live,
+            "execution_enabled": authority.execution_authority,
+            "broker_execution_enabled": broker_execution_enabled,
+            "execution_authority": authority.execution_authority,
+            "authority_reason": authority.authority_reason,
+            "live_authority_state": authority.live_authority_state,
             "can_live_execute": can_live_execute,
             "timestamp": diagnostics.get("timestamp") or datetime.now(timezone.utc).isoformat(),
         },
