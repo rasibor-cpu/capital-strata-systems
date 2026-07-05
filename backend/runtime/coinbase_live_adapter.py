@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from backend.runtime.live_readiness_state_machine import evaluate_live_readiness_state
+
 
 READ_ONLY_EXECUTION_SCOPE = "LIVE READ-ONLY VALIDATION"
 DISABLED_EXECUTION_STATUS = "DISABLED"
@@ -220,7 +222,7 @@ class CoinbaseLiveReadOnlyAdapter:
             values.get(key) is not None
             for key in ("account_equity", "cash", "buying_power", "available_balance")
         )
-        return {
+        payload = {
             "selected_broker": "COINBASE",
             "broker": "COINBASE",
             "broker_mode": "live",
@@ -256,6 +258,12 @@ class CoinbaseLiveReadOnlyAdapter:
             "drawdown_status": "UNKNOWN" if not has_balance else "AVAILABLE",
             "drawdown_reason": "" if has_balance else UNKNOWN_DRAW_DOWN_REASON,
         }
+        readiness = evaluate_live_readiness_state(payload).as_dict()
+        payload["readiness_state"] = readiness["readiness_state"]
+        payload["go_no_go"] = readiness["go_no_go"]
+        payload["readiness_checklist"] = readiness["readiness_checklist"]
+        payload["startup_diagnostics"] = readiness["startup_diagnostics"]
+        return payload
 
 
 def load_coinbase_live_credentials(env: Mapping[str, Any] | None = None) -> CoinbaseLiveCredentials:

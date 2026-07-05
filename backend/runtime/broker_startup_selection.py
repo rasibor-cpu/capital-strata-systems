@@ -56,6 +56,10 @@ class BrokerStartupSelection:
         payload.setdefault("market_data_status", "NOT_TESTED")
         payload.setdefault("drawdown_status", "UNKNOWN")
         payload.setdefault("drawdown_reason", "Broker balance unavailable")
+        payload.setdefault("readiness_state", "UNCONFIGURED")
+        payload.setdefault("go_no_go", "NO GO")
+        payload.setdefault("readiness_checklist", [])
+        payload.setdefault("startup_diagnostics", {})
         return payload
 
 
@@ -182,8 +186,19 @@ def broker_summary_from_artifacts(
         readiness_reason=broker_state.get("readiness_reason", ""),
     )
     summary = selection.as_dict()
+    override_keys = {
+        "readiness_state",
+        "go_no_go",
+        "readiness_checklist",
+        "startup_diagnostics",
+        "last_broker_sync",
+        "products_loaded",
+        "market_data_status",
+        "drawdown_status",
+        "drawdown_reason",
+    }
     for key, value in broker_state.items():
-        if key not in summary:
+        if key not in summary or key in override_keys:
             summary[key] = value
     return summary
 

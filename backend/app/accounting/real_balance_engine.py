@@ -245,4 +245,6 @@ class RealBalanceEngine:
             "balance": 0.0,
             "equity": 0.0,
             "source": reason,
+            "drawdown_status": "UNKNOWN",
+            "drawdown_reason": "Broker balance unavailable",
         }

@@ -138,10 +138,10 @@ def test_phase153f_startup_summary_and_final_confirmation_gate_runtime() -> None
     text = "\n".join(output)
 
     assert result.runtime_start_allowed is True
-    assert "=== CSS STARTUP SUMMARY ===" in text
-    assert "Global Mode: paper" in text
-    assert "Canonical Pilot Cap: CAD 20.00" in text
-    assert "Can Live Execute: False" in text
+    assert "========== LIVE STARTUP SUMMARY ==========" in text
+    assert "Broker Mode: paper" in text
+    assert "Capital Governor: PHASE_152A_CAD20_GUARD_ONLY" in text
+    assert "Can Live Execute: NO" in text
 
 
 def test_phase153f_cancel_command_exits_from_any_screen() -> None:

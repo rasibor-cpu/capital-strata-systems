@@ -74,6 +74,12 @@ Phase 153G adds the canonical Coinbase LIVE read-only adapter for pre-live broke
 
 Phase 153G does not authorize live trading. Broker execution remains disabled, Live Micro-Pilot remains disarmed, `CAN_LIVE_EXECUTE` remains false, and order/cancel/modify endpoints are outside the adapter boundary. Missing broker balances now surface drawdown as `UNKNOWN` with reason `Broker balance unavailable` rather than implying a 100% drawdown.
 
+## Phase 153H Live Readiness Final Polish Addendum
+
+Phase 153H adds the canonical live readiness state machine, final-state startup summary, readiness checklist, and startup diagnostics JSON for Coinbase LIVE read-only validation. Broker infrastructure health, credential status, authentication status, connection status, account data, and market data are reported as independent values.
+
+Phase 153H does not authorize live trading. Broker execution remains disabled, `CAN_LIVE_EXECUTE` remains false, Live Micro-Pilot remains disarmed, and all safety gates remain authoritative and fail-closed.
+
 ## Safety Controls Required For LIVE
 
 LIVE mode must continue to require Unified Trade Gate, Margin Gate, RBAC, Capital Governor, AntiBleedGuard, kill switches, emergency stops, broker validation, execution authorization, and configured broker controls.

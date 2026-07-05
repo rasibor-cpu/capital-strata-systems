@@ -76,6 +76,41 @@ def get_broker_read_only_status_payload(
     )
 
 
+def get_startup_diagnostics_payload(
+    state_provider: DashboardStateProvider | None = None,
+) -> dict[str, Any]:
+    broker_payload = get_broker_read_only_status_payload(state_provider)
+    broker_data = broker_payload.get("data", {})
+    broker_data = broker_data if isinstance(broker_data, dict) else {}
+    return {
+        **broker_payload,
+        "section": "startup_diagnostics",
+        "data": broker_data.get("startup_diagnostics", {}),
+        "advisory_only": True,
+        "execution_allowed": False,
+    }
+
+
+def get_live_readiness_state_payload(
+    state_provider: DashboardStateProvider | None = None,
+) -> dict[str, Any]:
+    broker_payload = get_broker_read_only_status_payload(state_provider)
+    broker_data = broker_payload.get("data", {})
+    broker_data = broker_data if isinstance(broker_data, dict) else {}
+    return {
+        **broker_payload,
+        "section": "live_readiness_state",
+        "data": {
+            "readiness_state": broker_data.get("readiness_state", "UNCONFIGURED"),
+            "go_no_go": broker_data.get("go_no_go", "NO GO"),
+            "readiness_checklist": broker_data.get("readiness_checklist", []),
+            "startup_diagnostics": broker_data.get("startup_diagnostics", {}),
+        },
+        "advisory_only": True,
+        "execution_allowed": False,
+    }
+
+
 def create_dashboard_state_router(
     state_provider: DashboardStateProvider | None = None,
 ) -> APIRouter:
@@ -167,6 +202,14 @@ def create_dashboard_state_router(
     def read_broker_read_only_status() -> dict[str, Any]:
         return get_broker_read_only_status_payload(state_provider)
 
+    @router.get("/api/v1/startup-diagnostics")
+    def read_startup_diagnostics() -> dict[str, Any]:
+        return get_startup_diagnostics_payload(state_provider)
+
+    @router.get("/api/v1/live-readiness-state")
+    def read_live_readiness_state() -> dict[str, Any]:
+        return get_live_readiness_state_payload(state_provider)
+
     @router.get("/api/v1/broker-reconciliation")
     def read_broker_reconciliation() -> dict[str, Any]:
         return build_section_payload(
@@ -210,4 +253,6 @@ __all__ = [
     "get_broker_reconciliation_payload",
     "get_dashboard_state_payload",
     "get_frontend_payload",
+    "get_live_readiness_state_payload",
+    "get_startup_diagnostics_payload",
 ]

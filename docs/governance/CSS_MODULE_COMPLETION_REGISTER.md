@@ -121,3 +121,11 @@ Status: Canonical Coinbase read-only adapter implemented for review.
 Phase 153G adds `CoinbaseLiveReadOnlyAdapter` for Coinbase LIVE broker validation evidence. It publishes credential presence, authenticated/connected status, broker health, last successful sync, account/balance/product/market-data read status, and read-only dashboard/API fields while preserving disabled broker execution.
 
 This register does not authorize live broker execution. The adapter exposes no order, cancel, submit, or modify operations; Live Micro-Pilot remains disarmed; `CAN_LIVE_EXECUTE` remains false; and Phase 152A CAD 20 Governor remains the canonical live capital authority.
+
+## Phase 153H Live Readiness Final Polish Register
+
+Status: Final read-only validation polish implemented for review.
+
+Phase 153H adds the canonical Live Readiness State Machine, final-state LIVE STARTUP SUMMARY, structured readiness checklist, startup diagnostics JSON, and dashboard/API visibility for readiness state and GO / NO GO.
+
+This register does not authorize live broker execution. Broker execution remains disabled, `CAN_LIVE_EXECUTE` remains false, Live Micro-Pilot remains disarmed, and Unified Trade Gate, Margin Gate, AntiBleedGuard, RBAC, Kill Switch, and Phase 152A CAD 20 Governor remain authoritative.

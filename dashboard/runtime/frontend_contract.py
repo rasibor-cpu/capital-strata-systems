@@ -994,6 +994,9 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         "broker_connected": _boolean(broker_payload.get("broker_connected", broker_payload.get("connected"))),
         "broker_authenticated": _boolean(broker_payload.get("broker_authenticated")),
         "broker_health": str(broker_payload.get("broker_health", broker_payload.get("api_health", "UNKNOWN"))),
+        "broker_infrastructure_health": str(
+            broker_payload.get("broker_infrastructure_health", broker_payload.get("broker_health", broker_payload.get("api_health", "UNKNOWN")))
+        ),
         "broker_execution_armed": _boolean(broker_payload.get("broker_execution_armed")),
         "broker_execution_status": str(broker_payload.get("broker_execution_status", "DISABLED")),
         "broker_connection_mode": str(broker_payload.get("broker_connection_mode", "PAPER_ONLY")),
@@ -1034,7 +1037,11 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         "credential_status": str(
             broker_payload.get("credential_status", credential_diagnostics.get("credential_status", DATA_UNAVAILABLE))
         ),
+        "credentials": str(
+            broker_payload.get("credentials", broker_payload.get("credential_status", credential_diagnostics.get("credential_status", DATA_UNAVAILABLE)))
+        ),
         "auth_status": str(broker_payload.get("auth_status", "NOT_TESTED")),
+        "authentication_status": str(broker_payload.get("authentication_status", broker_payload.get("auth_status", "NOT_TESTED"))),
         "connection_status": str(broker_payload.get("connection_status", "NOT_TESTED")),
         "connection_error": str(broker_payload.get("connection_error", "")),
         "last_successful_sync": str(broker_payload.get("last_successful_sync", DATA_UNAVAILABLE)),
@@ -1047,6 +1054,10 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         "available_balance": broker_payload.get("available_balance", DATA_UNAVAILABLE),
         "products_loaded": _integer(broker_payload.get("products_loaded", 0)),
         "market_data_status": str(broker_payload.get("market_data_status", broker_payload.get("product_price_status", "NOT_TESTED"))),
+        "readiness_state": str(broker_payload.get("readiness_state", "UNCONFIGURED")),
+        "go_no_go": str(broker_payload.get("go_no_go", "NO GO")),
+        "readiness_checklist": _list(broker_payload.get("readiness_checklist")),
+        "startup_diagnostics": _mapping(broker_payload.get("startup_diagnostics")),
         "order_submission_status": str(broker_payload.get("order_submission_status", "DISABLED")),
         "orders_sent_count": _integer(broker_payload.get("orders_sent_count", 0)),
         "orders_blocked_count": _integer(broker_payload.get("orders_blocked_count", 0)),

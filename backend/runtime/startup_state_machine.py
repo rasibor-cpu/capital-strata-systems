@@ -14,10 +14,10 @@ from backend.runtime.broker_startup_selection import (
 )
 from backend.runtime.live_operator_wizard import (
     broker_validation_display,
-    build_startup_summary,
     paper_live_environment_conflict,
     require_exact_confirmation,
 )
+from backend.runtime.startup_summary import build_live_startup_summary, format_live_startup_summary
 
 
 STARTUP_STATE_SEQUENCE = (
@@ -287,10 +287,8 @@ class OperatorStartupStateMachine:
 
     def _handle_startup_summary(self, state: StartupRuntimeState) -> StartupRuntimeState:
         summary = self._summary(state)
-        self.output_func("=== CSS STARTUP SUMMARY ===")
-        for key, value in summary.items():
-            if key not in {"execution_allowed", "advisory_only"}:
-                self.output_func(f"{key.replace('_', ' ').title()}: {value}")
+        for line in format_live_startup_summary(summary):
+            self.output_func(line)
         self._audit("STARTUP_SUMMARY_DISPLAYED", state, summary=summary)
         return self._advance(state, "FINAL_CONFIRMATION", "startup_summary_displayed")
 
@@ -359,18 +357,26 @@ class OperatorStartupStateMachine:
             },
             env=self.env,
         )
-        return build_startup_summary(
+        broker_status = {
+            **status,
+            **dict(self.broker_status),
+            "broker_health": self.broker_status.get("broker_health", status.get("connection_status", "NOT_TESTED")),
+        }
+        summary = build_live_startup_summary(
             {
                 **state.as_dict(),
                 "selected_broker": state.selected_broker or "NONE",
                 "broker_mode": state.broker_mode or "paper",
             },
-            broker_status={
-                **status,
-                "broker_health": self.broker_status.get("broker_health", status.get("connection_status", "NOT_TESTED")),
-            },
+            broker_status=broker_status,
             pilot_status=self.pilot_status,
-        ) | {
+        )
+        return summary | {
+            "global_mode": str(state.global_mode or "paper"),
+            "selected_broker": str(state.selected_broker or "NONE"),
+            "broker_mode": str(state.broker_mode or "paper"),
+            "broker_connection_status": str(broker_status.get("connection_status", broker_status.get("broker_health", "NOT_TESTED"))),
+            "broker_auth_status": str(broker_status.get("auth_status", "NOT_TESTED")),
             "broker_connected": bool(self.broker_status.get("broker_connected", False)),
             "broker_authenticated": bool(self.broker_status.get("broker_authenticated", False)),
             "broker_health": str(self.broker_status.get("broker_health", "NOT_TESTED")),

@@ -647,6 +647,9 @@ def build_launcher_frontend_state(
             "broker_connected": bool(broker_startup.get("broker_connected", False)),
             "broker_authenticated": bool(broker_startup.get("broker_authenticated", False)),
             "broker_health": str(broker_startup.get("broker_health", "UNKNOWN")),
+            "broker_infrastructure_health": str(
+                broker_startup.get("broker_infrastructure_health", broker_startup.get("broker_health", "UNKNOWN"))
+            ),
             "api_health": str(broker_startup.get("broker_health", "UNKNOWN")),
             "broker_execution_armed": bool(broker_startup.get("broker_execution_armed", False)),
             "broker_execution_status": str(broker_startup.get("broker_execution_status", "DISABLED")),
@@ -659,7 +662,9 @@ def build_launcher_frontend_state(
             ),
             "missing_credential_names": list(credential_diagnostics.get("missing_credentials", [])),
             "credential_status": str(credential_diagnostics.get("credential_status", "DATA UNAVAILABLE")),
+            "credentials": str(broker_startup.get("credentials", credential_diagnostics.get("credential_status", "DATA UNAVAILABLE"))),
             "auth_status": str(broker_startup.get("auth_status", "NOT_TESTED")),
+            "authentication_status": str(broker_startup.get("authentication_status", broker_startup.get("auth_status", "NOT_TESTED"))),
             "connection_status": str(broker_startup.get("connection_status", "NOT_TESTED")),
             "connection_error": str(broker_startup.get("connection_error", "")),
             "last_successful_sync": str(broker_startup.get("last_successful_sync", "DATA UNAVAILABLE")),
@@ -672,6 +677,14 @@ def build_launcher_frontend_state(
             "available_balance": broker_startup.get("available_balance", "DATA UNAVAILABLE"),
             "products_loaded": int(broker_startup.get("products_loaded", 0) or 0),
             "market_data_status": str(broker_startup.get("market_data_status", broker_startup.get("product_price_status", "NOT_TESTED"))),
+            "readiness_state": str(broker_startup.get("readiness_state", "UNCONFIGURED")),
+            "go_no_go": str(broker_startup.get("go_no_go", "NO GO")),
+            "readiness_checklist": list(broker_startup.get("readiness_checklist", []))
+            if isinstance(broker_startup.get("readiness_checklist"), list)
+            else [],
+            "startup_diagnostics": dict(broker_startup.get("startup_diagnostics", {}))
+            if isinstance(broker_startup.get("startup_diagnostics"), dict)
+            else {},
             "order_submission_status": str(broker_startup.get("order_submission_status", "DISABLED")),
             "orders_sent_count": int(broker_startup.get("orders_sent_count", 0) or 0),
             "orders_blocked_count": int(broker_startup.get("orders_blocked_count", 0) or 0),
@@ -720,7 +733,29 @@ def get_launcher_live_readiness_certification_feed() -> Dict[str, Any]:
 
 
 def get_launcher_broker_read_only_status_feed() -> Dict[str, Any]:
+    summary = get_broker_startup_summary()
+    if summary:
+        return build_frontend_payload({"broker_summary": summary}).get("sections", {}).get("broker", {})
     return build_launcher_frontend_state().get("sections", {}).get("broker", {})
+
+
+def get_launcher_startup_diagnostics_feed() -> Dict[str, Any]:
+    broker = get_launcher_broker_read_only_status_feed()
+    diagnostics = broker.get("startup_diagnostics", {}) if isinstance(broker, dict) else {}
+    return dict(diagnostics) if isinstance(diagnostics, dict) else {}
+
+
+def get_launcher_live_readiness_state_feed() -> Dict[str, Any]:
+    broker = get_launcher_broker_read_only_status_feed()
+    broker = broker if isinstance(broker, dict) else {}
+    return {
+        "readiness_state": broker.get("readiness_state", "UNCONFIGURED"),
+        "go_no_go": broker.get("go_no_go", "NO GO"),
+        "readiness_checklist": broker.get("readiness_checklist", []),
+        "startup_diagnostics": broker.get("startup_diagnostics", {}),
+        "advisory_only": True,
+        "execution_allowed": False,
+    }
 
 
 def get_launcher_live_readiness_blockers_feed() -> Dict[str, Any]:
@@ -3546,6 +3581,26 @@ async def launcher_broker_read_only_status():
     return {
         "section": "broker",
         "data": get_launcher_broker_read_only_status_feed(),
+        "advisory_only": True,
+        "execution_allowed": False,
+    }
+
+
+@launcher_router.get("/api/v1/startup-diagnostics")
+async def launcher_startup_diagnostics():
+    return {
+        "section": "startup_diagnostics",
+        "data": get_launcher_startup_diagnostics_feed(),
+        "advisory_only": True,
+        "execution_allowed": False,
+    }
+
+
+@launcher_router.get("/api/v1/live-readiness-state")
+async def launcher_live_readiness_state():
+    return {
+        "section": "live_readiness_state",
+        "data": get_launcher_live_readiness_state_feed(),
         "advisory_only": True,
         "execution_allowed": False,
     }

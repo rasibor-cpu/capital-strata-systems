@@ -911,6 +911,7 @@
             <div class="status-row"><span>Broker Mode</span><strong>{{ broker_startup.broker_mode | default('paper') }}</strong></div>
             <div class="status-row"><span>Broker Connected</span><strong>{{ broker_startup.broker_connected | default(false) }}</strong></div>
             <div class="status-row"><span>Broker Health</span><strong>{{ broker_startup.broker_health | default('UNKNOWN') }}</strong></div>
+            <div class="status-row"><span>Broker Infrastructure</span><strong>{{ broker_startup.broker_infrastructure_health | default(broker_startup.broker_health | default('UNKNOWN')) }}</strong></div>
             <div class="status-row"><span>Broker Execution</span><strong>{{ broker_startup.broker_execution_status | default('DISABLED') }}</strong></div>
             <div class="status-row"><span>Execution Scope</span><strong>{{ broker_startup.execution_scope | default('PAPER_OR_NOT_SELECTED') }}</strong></div>
             <div class="status-row"><span>Can Live Execute</span><strong>{{ broker_startup.can_live_execute | default(false) }}</strong></div>
@@ -927,6 +928,8 @@
             <div class="status-row"><span>Available Balance</span><strong>{{ broker_startup.available_balance | default('DATA UNAVAILABLE') }}</strong></div>
             <div class="status-row"><span>Products Loaded</span><strong>{{ broker_startup.products_loaded | default(0) }}</strong></div>
             <div class="status-row"><span>Market Data Status</span><strong>{{ broker_startup.market_data_status | default('NOT_TESTED') }}</strong></div>
+            <div class="status-row"><span>Readiness State</span><strong>{{ broker_startup.readiness_state | default('UNCONFIGURED') }}</strong></div>
+            <div class="status-row"><span>GO / NO GO</span><strong>{{ broker_startup.go_no_go | default('NO GO') }}</strong></div>
             <div class="status-row"><span>Product / Price Status</span><strong>{{ broker_startup.product_price_status | default('NOT_TESTED') }}</strong></div>
             <div class="status-row"><span>Balance / Position Status</span><strong>{{ broker_startup.balance_position_status | default('NOT_TESTED') }}</strong></div>
             <div class="status-row"><span>Order Submission</span><strong>{{ broker_startup.order_submission_status | default('DISABLED') }}</strong></div>
@@ -948,6 +951,10 @@
             <div class="status-row"><span>Orders</span><strong>{{ phase152a_live_micro_pilot.orders_used_this_session | default(0) }} / {{ phase152a_live_micro_pilot.max_orders_per_session | default(10) }}</strong></div>
             <div class="status-row"><span>Broker Guard</span><strong>{{ phase152a_live_micro_pilot.broker_submission_guard | default('REJECT_BEFORE_BROKER') }}</strong></div>
             <div class="status-row"><span>Operator Controls</span><strong>{{ phase152a_live_micro_pilot.operator_controls | default('SUPER_USER_ONLY') }}</strong></div>
+            <div style="margin-top:8px; font-size:12px; color:var(--text-secondary);">Readiness Checklist</div>
+            {% for item in broker_startup.readiness_checklist | default([]) %}
+            <div class="status-row"><span>{{ item.label }}</span><strong>{{ 'PASS' if item.passed else 'PENDING' }}</strong></div>
+            {% endfor %}
         </div>
 
         <div class="card" id="phase152b-live-readiness-certification-card">

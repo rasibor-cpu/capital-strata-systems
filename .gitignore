@@ -52,8 +52,10 @@ backend/runtime/*
 !backend/runtime/broker_startup_selection.py
 !backend/runtime/coinbase_readiness.py
 !backend/runtime/coinbase_live_adapter.py
+!backend/runtime/live_readiness_state_machine.py
 !backend/runtime/live_operator_wizard.py
 !backend/runtime/startup_state_machine.py
+!backend/runtime/startup_summary.py
 reporting_store/
 out/
 feeds/

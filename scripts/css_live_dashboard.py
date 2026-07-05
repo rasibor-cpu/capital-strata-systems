@@ -209,6 +209,12 @@ from backend.runtime.live_operator_wizard import (
     startup_summary_confirmation,
 )
 from backend.runtime.live_micro_pilot_governor import live_micro_pilot_status
+from backend.runtime.live_readiness_state_machine import publish_live_readiness_state
+from backend.runtime.startup_summary import (
+    build_live_startup_summary,
+    format_live_startup_summary,
+    publish_startup_diagnostics,
+)
 from backend.runtime.startup_state_machine import (
     StartupMachineConfig,
     default_stdin_flush,
@@ -1917,7 +1923,70 @@ def confirm_startup_summary_before_runtime() -> None:
     if not result.runtime_start_allowed:
         print("[STARTUP NOT CONFIRMED] Runtime will not start.")
         raise SystemExit(0)
+    summary = _render_final_live_startup_summary()
+    _publish_final_startup_diagnostics(summary)
     print("[STARTUP CONFIRMED] Runtime cycle may start.")
+
+
+def _render_final_live_startup_summary() -> dict[str, Any]:
+    try:
+        pilot_status = live_micro_pilot_status()
+    except Exception:
+        pilot_status = {
+            "pilot_state": "DISARMED",
+            "currency": "CAD",
+            "canonical_live_pilot_limit_cad": "20.00",
+            "capital_governor": "PHASE_152A_CAD20_GUARD_ONLY",
+        }
+    startup_state = STARTUP_WIZARD_STATE.as_dict() if hasattr(STARTUP_WIZARD_STATE, "as_dict") else {}
+    startup_state.update(
+        {
+            "selected_broker": SELECTED_BROKER,
+            "broker_mode": SELECTED_BROKER_MODE,
+            "broker_execution_armed": bool(BROKER_EXECUTION_ARMED),
+            "engine_mode": globals().get("ENGINE_MODE", startup_state.get("engine_mode", "SAFE")),
+        }
+    )
+    summary = build_live_startup_summary(
+        startup_state,
+        broker_status=globals().get("STARTUP_BROKER_STATE", {}),
+        pilot_status=pilot_status,
+        gate_status={
+            "capital_governor": "PHASE_152A_CAD20_GUARD_ONLY",
+            "unified_trade_gate": "AUTHORITATIVE_FAIL_CLOSED",
+            "margin_gate": "AUTHORITATIVE_FAIL_CLOSED",
+            "anti_bleed_guard": "AUTHORITATIVE_FAIL_CLOSED",
+            "kill_switch": "AUTHORITATIVE_FAIL_CLOSED",
+        },
+    )
+    for line in format_live_startup_summary(summary):
+        print(line)
+    return summary
+
+
+def _publish_final_startup_diagnostics(summary: dict[str, Any]) -> None:
+    try:
+        diagnostics = publish_startup_diagnostics(ARTIFACTS_DIR / "startup_diagnostics.json", summary)
+        readiness = publish_live_readiness_state(ARTIFACTS_DIR / "live_readiness_state.json", diagnostics)
+        if isinstance(globals().get("STARTUP_BROKER_STATE"), dict):
+            STARTUP_BROKER_STATE.update(
+                {
+                    "startup_diagnostics": diagnostics,
+                    "readiness_state": readiness.get("readiness_state", summary.get("readiness_state", "UNCONFIGURED")),
+                    "go_no_go": readiness.get("go_no_go", summary.get("go_no_go", "NO GO")),
+                    "readiness_checklist": readiness.get("readiness_checklist", summary.get("readiness_checklist", [])),
+                }
+            )
+            pcnrass_session_state["broker_state"] = STARTUP_BROKER_STATE
+            pcnrass_account_state["broker_state"] = STARTUP_BROKER_STATE
+            persist_broker_selection(
+                account_state_path=ACCOUNT_STATE_FILE,
+                session_state_path=SESSION_STATE_FILE,
+                selection=STARTUP_BROKER_SELECTION,
+                broker_state_override=STARTUP_BROKER_STATE,
+            )
+    except Exception as exc:
+        print(f"[STARTUP DIAGNOSTICS WARN] {exc}")
 
 
 def safe_load_runtime_asset(symbol: str) -> bool:
