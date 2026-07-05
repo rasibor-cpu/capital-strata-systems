@@ -113,3 +113,11 @@ Status: Startup state machine implemented for review.
 Phase 153F replaces the startup prompt chain with an auditable operator startup state machine. It centralizes startup input handling, flushes pending stdin before confirmation prompts, ignores buffered ENTER presses, supports `Q` / `QUIT` / `EXIT` from every state, applies a configurable startup timeout, prevents silent LIVE-to-PAPER fallback, and requires final confirmation before runtime begins.
 
 This register does not authorize live broker execution. Existing live safety controls remain unchanged, and live orders remain blocked by default.
+
+## Phase 153G Coinbase Live Read-Only Adapter Register
+
+Status: Canonical Coinbase read-only adapter implemented for review.
+
+Phase 153G adds `CoinbaseLiveReadOnlyAdapter` for Coinbase LIVE broker validation evidence. It publishes credential presence, authenticated/connected status, broker health, last successful sync, account/balance/product/market-data read status, and read-only dashboard/API fields while preserving disabled broker execution.
+
+This register does not authorize live broker execution. The adapter exposes no order, cancel, submit, or modify operations; Live Micro-Pilot remains disarmed; `CAN_LIVE_EXECUTE` remains false; and Phase 152A CAD 20 Governor remains the canonical live capital authority.

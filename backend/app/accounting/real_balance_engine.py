@@ -53,7 +53,7 @@ class RealBalanceEngine:
     # ---------------------------
     def _get_coinbase_balance(self) -> Dict[str, Any]:
         if not self.adapter:
-            return self._default_balance("NO_COINBASE_ADAPTER")
+            return self._default_balance("COINBASE_BALANCE_UNAVAILABLE")
 
         accounts_payload = self._call_first_available(
             self.adapter,

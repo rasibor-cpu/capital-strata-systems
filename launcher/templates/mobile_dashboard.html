@@ -919,6 +919,14 @@
             <div class="status-row"><span>Credential Status</span><strong>{{ broker_startup.credential_status | default('DATA UNAVAILABLE') }}</strong></div>
             <div class="status-row"><span>Auth Status</span><strong>{{ broker_startup.auth_status | default('NOT_TESTED') }}</strong></div>
             <div class="status-row"><span>Connection Status</span><strong>{{ broker_startup.connection_status | default('NOT_TESTED') }}</strong></div>
+            <div class="status-row"><span>Connection Error</span><strong>{{ broker_startup.connection_error | default('') }}</strong></div>
+            <div class="status-row"><span>Last Broker Sync</span><strong>{{ broker_startup.last_broker_sync | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>Account Equity</span><strong>{{ broker_startup.account_equity | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>Cash</span><strong>{{ broker_startup.cash | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>Buying Power</span><strong>{{ broker_startup.buying_power | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>Available Balance</span><strong>{{ broker_startup.available_balance | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>Products Loaded</span><strong>{{ broker_startup.products_loaded | default(0) }}</strong></div>
+            <div class="status-row"><span>Market Data Status</span><strong>{{ broker_startup.market_data_status | default('NOT_TESTED') }}</strong></div>
             <div class="status-row"><span>Product / Price Status</span><strong>{{ broker_startup.product_price_status | default('NOT_TESTED') }}</strong></div>
             <div class="status-row"><span>Balance / Position Status</span><strong>{{ broker_startup.balance_position_status | default('NOT_TESTED') }}</strong></div>
             <div class="status-row"><span>Order Submission</span><strong>{{ broker_startup.order_submission_status | default('DISABLED') }}</strong></div>
@@ -926,6 +934,8 @@
             <div class="status-row"><span>Orders Blocked</span><strong>{{ broker_startup.orders_blocked_count | default(0) }}</strong></div>
             <div class="status-row"><span>Auth Reason</span><strong>{{ broker_startup.auth_reason | default(broker_startup.readiness_reason | default('DATA UNAVAILABLE')) }}</strong></div>
             <div class="status-row"><span>Credential Gaps</span><strong>{{ broker_startup.get('credential_diagnostics', {}).get('missing_credentials', []) | length }}</strong></div>
+            <div class="status-row"><span>Drawdown Status</span><strong>{{ broker_startup.drawdown_status | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>Drawdown Reason</span><strong>{{ broker_startup.drawdown_reason | default('DATA UNAVAILABLE') }}</strong></div>
             <div class="status-row"><span>Pilot State</span><strong>{{ phase152a_live_micro_pilot.pilot_state | default('DATA UNAVAILABLE') }}</strong></div>
             <div class="status-row"><span>Armed</span><strong>{{ phase152a_live_micro_pilot.pilot_armed | default(false) }}</strong></div>
             <div class="status-row"><span>Currency / Cap</span><strong>{{ phase152a_live_micro_pilot.currency | default('CAD') }} {{ phase152a_live_micro_pilot.max_live_test_capital | default('20.00') }}</strong></div>

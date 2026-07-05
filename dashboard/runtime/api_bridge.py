@@ -67,6 +67,15 @@ def get_broker_reconciliation_payload(
     return build_broker_reconciliation_payload(state.to_dict())
 
 
+def get_broker_read_only_status_payload(
+    state_provider: DashboardStateProvider | None = None,
+) -> dict[str, Any]:
+    return build_section_payload(
+        _state_from_provider(state_provider),
+        "broker",
+    )
+
+
 def create_dashboard_state_router(
     state_provider: DashboardStateProvider | None = None,
 ) -> APIRouter:
@@ -154,6 +163,10 @@ def create_dashboard_state_router(
             "broker",
         )
 
+    @router.get("/api/v1/broker-read-only-status")
+    def read_broker_read_only_status() -> dict[str, Any]:
+        return get_broker_read_only_status_payload(state_provider)
+
     @router.get("/api/v1/broker-reconciliation")
     def read_broker_reconciliation() -> dict[str, Any]:
         return build_section_payload(
@@ -193,6 +206,7 @@ __all__ = [
     "create_app",
     "create_dashboard_state_router",
     "default_dashboard_state_provider",
+    "get_broker_read_only_status_payload",
     "get_broker_reconciliation_payload",
     "get_dashboard_state_payload",
     "get_frontend_payload",

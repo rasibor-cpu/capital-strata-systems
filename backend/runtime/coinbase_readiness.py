@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
 from backend.runtime.broker_startup_selection import BrokerStartupSelection, build_startup_broker_selection
+from backend.runtime.coinbase_live_adapter import CoinbaseLiveReadOnlyAdapter, READ_ONLY_EXECUTION_SCOPE
 
 
 KEY_NAME_ENV_VARS = ("COINBASE_CDP_KEY_NAME", "COINBASE_KEY_NAME", "COINBASE_API_KEY")
@@ -95,7 +96,7 @@ def evaluate_coinbase_live_read_only(
     result: dict[str, Any] = {
         "selected_broker": selection.selected_broker,
         "broker_mode": selection.broker_mode,
-        "execution_scope": "LIVE READ-ONLY VALIDATION" if selection.selected_broker == "COINBASE" and selection.broker_mode == "live" else "PAPER_OR_NOT_SELECTED",
+        "execution_scope": READ_ONLY_EXECUTION_SCOPE if selection.selected_broker == "COINBASE" and selection.broker_mode == "live" else "PAPER_OR_NOT_SELECTED",
         "broker_execution_status": "DISABLED",
         "can_live_execute": False,
         "broker_connected": False,
@@ -113,6 +114,17 @@ def evaluate_coinbase_live_read_only(
         "advisory_only": True,
         "execution_allowed": False,
         "live_order_permission": False,
+        "connection_error": "",
+        "last_successful_sync": "",
+        "last_broker_sync": "DATA UNAVAILABLE",
+        "account_equity": None,
+        "cash": None,
+        "buying_power": None,
+        "available_balance": None,
+        "products_loaded": 0,
+        "market_data_status": "NOT_TESTED",
+        "drawdown_status": "UNKNOWN",
+        "drawdown_reason": "Broker balance unavailable",
     }
 
     if selection.selected_broker != "COINBASE" or selection.broker_mode != "live":
@@ -120,33 +132,37 @@ def evaluate_coinbase_live_read_only(
 
     if not diagnostics.ready:
         result["auth_reason"] = "missing credentials"
-        result["broker_health"] = "MISSING_CREDENTIALS"
+        result["broker_health"] = "UNKNOWN"
+        result["connection_status"] = "UNKNOWN"
+        result["connection_error"] = "missing credentials"
+        result["credential_status"] = "MISSING"
         return result
 
-    if adapter_factory is None:
-        from backend.app.brokers.broker_bootstrap import initialize_broker
-
-        adapter_factory = lambda: initialize_broker("coinbase", "live")
-
     try:
-        adapter = adapter_factory()
-        result["broker_authenticated"] = True
-        account_payload = _try_read(adapter, ("get_account", "get_account_balance", "get_account_summary"))
-        accounts_payload = _try_read(adapter, ("get_accounts",))
-        positions_payload = _try_read(adapter, ("get_positions", "list_positions"))
-        products_payload = _try_read(adapter, ("get_products", "list_products", "get_product", "get_price"))
+        read_client = adapter_factory() if adapter_factory is not None else None
+        adapter = CoinbaseLiveReadOnlyAdapter(env=env, read_client=read_client)
+        adapter_status = adapter.sync()
+        result.update(adapter_status)
+        result["credential_diagnostics"] = diagnostics.as_dict()
+        result["auth_reason"] = (
+            "coinbase_read_only_authentication_verified"
+            if adapter_status.get("broker_authenticated")
+            else str(adapter_status.get("connection_error") or "coinbase_read_only_authentication_pending")
+        )
         result["read_checks"] = {
-            "account": _status(account_payload),
-            "balances": _status(account_payload if account_payload is not None else accounts_payload),
-            "positions": _status(positions_payload, unavailable_ok=True),
-            "products_or_prices": _status(products_payload, unavailable_ok=True),
+            "account": str(adapter_status.get("read_checks", {}).get("account", "NOT_ATTEMPTED")),
+            "balances": str(adapter_status.get("read_checks", {}).get("balances", "NOT_ATTEMPTED")),
+            "positions": "UNAVAILABLE",
+            "products_or_prices": str(adapter_status.get("read_checks", {}).get("products", "NOT_ATTEMPTED")),
         }
-        result["broker_connected"] = True
-        result["broker_health"] = "GREEN"
-        result["auth_reason"] = "coinbase_read_only_authentication_verified"
         result["account_read_status"] = result["read_checks"]["account"]
+        result["auth_status"] = "AUTHENTICATED" if result["broker_authenticated"] else "NOT_AUTHENTICATED"
+        result["balance_position_status"] = result["read_checks"]["balances"]
+        result["product_price_status"] = result["market_data_status"]
     except Exception as exc:
-        result["broker_health"] = "AUTH_FAILED"
+        result["broker_health"] = "UNKNOWN"
+        result["connection_status"] = "UNKNOWN"
+        result["connection_error"] = str(exc)[:160]
         result["auth_reason"] = f"coinbase_read_only_auth_failed:{str(exc)[:120]}"
     return result
 
@@ -186,6 +202,19 @@ def merge_readiness_into_broker_state(selection: BrokerStartupSelection, readine
             "order_submission_status": str(readiness.get("order_submission_status", "DISABLED")),
             "orders_sent_count": int(readiness.get("orders_sent_count", 0) or 0),
             "orders_blocked_count": int(readiness.get("orders_blocked_count", 0) or 0),
+            "connection_error": str(readiness.get("connection_error", "")),
+            "last_successful_sync": str(readiness.get("last_successful_sync", "")),
+            "last_broker_sync": str(readiness.get("last_broker_sync", "DATA UNAVAILABLE")),
+            "account_equity": readiness.get("account_equity"),
+            "cash": readiness.get("cash"),
+            "buying_power": readiness.get("buying_power"),
+            "available_balance": readiness.get("available_balance"),
+            "products_loaded": int(readiness.get("products_loaded", 0) or 0),
+            "market_data_status": str(readiness.get("market_data_status", readiness.get("product_price_status", "NOT_TESTED"))),
+            "drawdown_status": str(readiness.get("drawdown_status", "UNKNOWN")),
+            "drawdown_reason": str(readiness.get("drawdown_reason", "Broker balance unavailable")),
+            "live_micro_pilot_state": str(readiness.get("live_micro_pilot_state", "DISARMED")),
+            "broker_guard": str(readiness.get("broker_guard", "REJECT_BEFORE_BROKER")),
         }
     )
     return state

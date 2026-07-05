@@ -43,6 +43,19 @@ class BrokerStartupSelection:
         payload["advisory_only"] = True
         payload["execution_allowed"] = False
         payload["live_order_permission"] = False
+        payload["can_live_execute"] = False
+        payload["execution_scope"] = (
+            "LIVE READ-ONLY VALIDATION"
+            if payload["selected_broker"] == "COINBASE" and payload["broker_mode"] == "live"
+            else payload["broker_connection_mode"]
+        )
+        payload["live_micro_pilot_state"] = "DISARMED"
+        payload["broker_guard"] = "REJECT_BEFORE_BROKER"
+        payload.setdefault("last_broker_sync", "DATA UNAVAILABLE")
+        payload.setdefault("products_loaded", 0)
+        payload.setdefault("market_data_status", "NOT_TESTED")
+        payload.setdefault("drawdown_status", "UNKNOWN")
+        payload.setdefault("drawdown_reason", "Broker balance unavailable")
         return payload
 
 

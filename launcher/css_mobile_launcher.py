@@ -661,8 +661,17 @@ def build_launcher_frontend_state(
             "credential_status": str(credential_diagnostics.get("credential_status", "DATA UNAVAILABLE")),
             "auth_status": str(broker_startup.get("auth_status", "NOT_TESTED")),
             "connection_status": str(broker_startup.get("connection_status", "NOT_TESTED")),
+            "connection_error": str(broker_startup.get("connection_error", "")),
+            "last_successful_sync": str(broker_startup.get("last_successful_sync", "DATA UNAVAILABLE")),
+            "last_broker_sync": str(broker_startup.get("last_broker_sync", broker_startup.get("last_successful_sync", "DATA UNAVAILABLE"))),
             "product_price_status": str(broker_startup.get("product_price_status", "NOT_TESTED")),
             "balance_position_status": str(broker_startup.get("balance_position_status", "NOT_TESTED")),
+            "account_equity": broker_startup.get("account_equity", "DATA UNAVAILABLE"),
+            "cash": broker_startup.get("cash", "DATA UNAVAILABLE"),
+            "buying_power": broker_startup.get("buying_power", "DATA UNAVAILABLE"),
+            "available_balance": broker_startup.get("available_balance", "DATA UNAVAILABLE"),
+            "products_loaded": int(broker_startup.get("products_loaded", 0) or 0),
+            "market_data_status": str(broker_startup.get("market_data_status", broker_startup.get("product_price_status", "NOT_TESTED"))),
             "order_submission_status": str(broker_startup.get("order_submission_status", "DISABLED")),
             "orders_sent_count": int(broker_startup.get("orders_sent_count", 0) or 0),
             "orders_blocked_count": int(broker_startup.get("orders_blocked_count", 0) or 0),
@@ -670,6 +679,10 @@ def build_launcher_frontend_state(
             "execution_scope": str(broker_startup.get("execution_scope", broker_startup.get("broker_connection_mode", "PAPER_ONLY"))),
             "can_live_execute": bool(broker_startup.get("can_live_execute", False)),
             "live_order_permission": bool(broker_startup.get("live_order_permission", False)),
+            "live_micro_pilot_state": str(broker_startup.get("live_micro_pilot_state", "DISARMED")),
+            "broker_guard": str(broker_startup.get("broker_guard", "REJECT_BEFORE_BROKER")),
+            "drawdown_status": str(broker_startup.get("drawdown_status", "DATA UNAVAILABLE")),
+            "drawdown_reason": str(broker_startup.get("drawdown_reason", "DATA UNAVAILABLE")),
             "limit_reconciliation": dict(limit_reconciliation),
             "canonical_live_capital_authority": str(
                 limit_reconciliation.get("canonical_authority", "PHASE_152A_LIVE_MICRO_PILOT_GOVERNOR")
@@ -704,6 +717,10 @@ def get_launcher_live_readiness_certification_feed() -> Dict[str, Any]:
         "live_readiness_certification",
         live_readiness_certification_status(),
     )
+
+
+def get_launcher_broker_read_only_status_feed() -> Dict[str, Any]:
+    return build_launcher_frontend_state().get("sections", {}).get("broker", {})
 
 
 def get_launcher_live_readiness_blockers_feed() -> Dict[str, Any]:
@@ -3522,6 +3539,16 @@ async def launcher_live_readiness_certification():
 @launcher_router.get("/api/v1/live-readiness-blockers")
 async def launcher_live_readiness_blockers():
     return get_launcher_live_readiness_blockers_feed()
+
+
+@launcher_router.get("/api/v1/broker-read-only-status")
+async def launcher_broker_read_only_status():
+    return {
+        "section": "broker",
+        "data": get_launcher_broker_read_only_status_feed(),
+        "advisory_only": True,
+        "execution_allowed": False,
+    }
 
 
 @launcher_router.get("/mobile/instruments")
