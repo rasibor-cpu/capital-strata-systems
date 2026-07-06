@@ -61,17 +61,27 @@ class BrokerCredentialDiagnostics:
     authentication_attempted: bool = False
     authenticated: bool = False
     failure_reason: str = "MISSING_CREDENTIALS"
+    canonical_failure_reason: str = "MISSING_CREDENTIALS"
+    readiness_status: str = "BLOCKED"
     recommended_action: str = "Configure broker credentials"
+    remediation_hint: str = "Configure broker credentials"
     severity: str = "ERROR"
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     missing_credentials: tuple[str, ...] = field(default_factory=tuple)
+    missing_credential_fields: tuple[str, ...] = field(default_factory=tuple)
     redacted: bool = True
     advisory_only: bool = True
+    live_trading_blocked: bool = True
     execution_allowed: bool = False
+    broker_name: str = "NONE"
 
     def as_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["missing_credentials"] = list(self.missing_credentials)
+        payload["missing_credential_fields"] = list(self.missing_credential_fields)
+        payload["broker_name"] = self.broker_name or str(self.broker or "NONE").upper()
+        payload["canonical_failure_reason"] = self.canonical_failure_reason or self.failure_reason
+        payload["remediation_hint"] = self.remediation_hint or self.recommended_action
         return payload
 
 
@@ -113,6 +123,8 @@ def diagnose_broker_credentials(
         credentials_present=False,
         failure_reason="MISSING_CREDENTIALS",
         recommended_action="Select a supported broker and configure read-only credentials",
+        remediation_hint="Select a supported broker and configure read-only credentials",
+        readiness_status="FAILED" if broker_name not in {"coinbase", "oanda"} else "BLOCKED",
         timestamp=timestamp,
     )
 
@@ -223,6 +235,7 @@ def _coinbase_diagnostics(
             reason = "NONE"
     return _diagnostic(
         broker="coinbase",
+        broker_name="COINBASE",
         credentials_present=credentials_present,
         key_present=key_present,
         secret_present=secret_present,
@@ -232,10 +245,14 @@ def _coinbase_diagnostics(
         authentication_attempted=authentication_attempted,
         authenticated=authenticated,
         failure_reason=reason,
+        canonical_failure_reason=reason,
+        readiness_status=_readiness_status(credentials_present, authenticated=authenticated),
         recommended_action=_recommended_action(reason, "coinbase"),
+        remediation_hint=_recommended_action(reason, "coinbase"),
         severity=_severity(reason, authenticated),
         timestamp=timestamp,
         missing_credentials=tuple(missing),
+        missing_credential_fields=tuple(missing),
     )
 
 
@@ -275,6 +292,7 @@ def _oanda_diagnostics(
             reason = "NONE"
     return _diagnostic(
         broker="oanda",
+        broker_name="OANDA",
         credentials_present=credentials_present,
         token_present=token_present,
         account_present=account_present,
@@ -283,10 +301,14 @@ def _oanda_diagnostics(
         authentication_attempted=authentication_attempted,
         authenticated=authenticated,
         failure_reason=reason,
+        canonical_failure_reason=reason,
+        readiness_status=_readiness_status(credentials_present, authenticated=authenticated),
         recommended_action=_recommended_action(reason, "oanda"),
+        remediation_hint=_recommended_action(reason, "oanda"),
         severity=_severity(reason, authenticated),
         timestamp=timestamp,
         missing_credentials=tuple(missing),
+        missing_credential_fields=tuple(missing),
     )
 
 
@@ -304,6 +326,12 @@ def _diagnostic(**kwargs: Any) -> BrokerCredentialDiagnostics:
     if reason not in CANONICAL_FAILURE_REASONS:
         reason = "UNKNOWN_ERROR"
     payload["failure_reason"] = reason
+    payload["canonical_failure_reason"] = str(payload.get("canonical_failure_reason", reason)).upper()
+    payload["readiness_status"] = str(payload.get("readiness_status", "BLOCKED") or "BLOCKED").upper()
+    payload["remediation_hint"] = str(payload.get("remediation_hint", payload.get("recommended_action", "Configure broker credentials")) or "Configure broker credentials")
+    payload["broker_name"] = str(payload.get("broker_name", str(payload.get("broker", "NONE")).upper()) or "NONE").upper()
+    payload["missing_credential_fields"] = tuple(payload.get("missing_credential_fields", payload.get("missing_credentials", ())))
+    payload["live_trading_blocked"] = True if payload.get("live_trading_blocked", True) else False
     return BrokerCredentialDiagnostics(**payload)
 
 
@@ -317,6 +345,7 @@ def _diagnostic_from_mapping(value: Mapping[str, Any]) -> BrokerCredentialDiagno
         reason = "NONE" if credentials_present else "MISSING_CREDENTIALS"
     return _diagnostic(
         broker=broker,
+        broker_name=str(value.get("broker_name", str(broker or "NONE")).upper()),
         credentials_present=credentials_present,
         key_present=_truthy(value.get("key_present", value.get("coinbase_key_present"))),
         secret_present=_truthy(value.get("secret_present")),
@@ -331,10 +360,15 @@ def _diagnostic_from_mapping(value: Mapping[str, Any]) -> BrokerCredentialDiagno
         authentication_attempted=_truthy(value.get("authentication_attempted")),
         authenticated=_truthy(value.get("authenticated")),
         failure_reason=reason,
+        canonical_failure_reason=str(value.get("canonical_failure_reason", reason)).upper(),
+        readiness_status=str(value.get("readiness_status", "READY" if credentials_present else "BLOCKED") or "BLOCKED").upper(),
         recommended_action=str(value.get("recommended_action", _recommended_action(reason, broker))),
+        remediation_hint=str(value.get("remediation_hint", value.get("recommended_action", _recommended_action(reason, broker)))) ,
         severity=str(value.get("severity", _severity(reason, _truthy(value.get("authenticated"))))),
         timestamp=str(value.get("timestamp", datetime.now(timezone.utc).isoformat())),
         missing_credentials=tuple(str(item) for item in value.get("missing_credentials", []) if str(item)),
+        missing_credential_fields=tuple(str(item) for item in value.get("missing_credential_fields", value.get("missing_credentials", [])) if str(item)),
+        live_trading_blocked=_truthy(value.get("live_trading_blocked", True)),
     )
 
 
@@ -403,6 +437,12 @@ def _recommended_action(reason: str, broker: str) -> str:
         "CLOCK_SKEW": "Synchronize system time before authentication",
         "NONE": "No credential remediation required",
     }.get(reason, "Inspect broker credential diagnostics")
+
+
+def _readiness_status(credentials_present: bool, *, authenticated: bool) -> str:
+    if authenticated:
+        return "READY"
+    return "READY" if credentials_present else "BLOCKED"
 
 
 def _severity(reason: str, authenticated: bool) -> str:

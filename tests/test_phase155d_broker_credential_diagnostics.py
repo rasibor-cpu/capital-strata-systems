@@ -33,6 +33,10 @@ def test_phase155d_missing_coinbase_credentials_are_canonical_and_fail_closed() 
     assert diagnostic["recommended_action"] == "Configure the Coinbase CDP key name"
     assert diagnostic["severity"] == "ERROR"
     assert diagnostic["execution_allowed"] is False
+    assert diagnostic["readiness_status"] == "BLOCKED"
+    assert diagnostic["live_trading_blocked"] is True
+    assert diagnostic["canonical_failure_reason"] == "KEY_MISSING"
+    assert diagnostic["missing_credential_fields"]
     assert set(CANONICAL_FAILURE_REASONS) >= {diagnostic["failure_reason"]}
 
 
@@ -82,6 +86,7 @@ def test_phase155d_oanda_token_and_account_diagnostics_are_specific() -> None:
     assert missing_account["account_present"] is False
     assert missing_account["failure_reason"] == "ACCOUNT_ID_MISSING"
     assert missing_account["recommended_action"] == "Configure OANDA Account ID"
+    assert missing_account["readiness_status"] == "BLOCKED"
     assert invalid_token["token_present"] is True
     assert invalid_token["failure_reason"] == "TOKEN_INVALID"
 
@@ -124,6 +129,50 @@ def test_phase155d_coinbase_and_oanda_publish_parity_schema() -> None:
     assert set(coinbase) == set(oanda)
     assert coinbase["execution_allowed"] is False
     assert oanda["execution_allowed"] is False
+    assert coinbase["broker_name"] == "COINBASE"
+    assert oanda["broker_name"] == "OANDA"
+
+
+def test_phase156a_valid_credentials_are_reported_as_ready_without_leaking_secrets() -> None:
+    coinbase = diagnose_broker_credentials(
+        "coinbase",
+        env={
+            "COINBASE_CDP_KEY_NAME": "present",
+            "COINBASE_CDP_PRIVATE_KEY": "-----BEGIN PRIVATE KEY-----\nhidden\n-----END PRIVATE KEY-----",
+        },
+        now=FIXED_NOW,
+    ).as_dict()
+    oanda = diagnose_broker_credentials(
+        "oanda",
+        env={
+            "OANDA_API_KEY": "present",
+            "OANDA_ACCOUNT_ID": "A1",
+            "OANDA_BASE_URL": "https://api-fxtrade.oanda.com",
+        },
+        now=FIXED_NOW,
+    ).as_dict()
+
+    assert coinbase["credentials_present"] is True
+    assert coinbase["readiness_status"] == "READY"
+    assert coinbase["live_trading_blocked"] is True
+    assert oanda["credentials_present"] is True
+    assert oanda["readiness_status"] == "READY"
+    assert oanda["failure_reason"] == "NONE"
+    assert "hidden" not in str(coinbase)
+    assert "A1" not in str(oanda)
+    assert "api-fxtrade.oanda.com" not in str(oanda)
+
+
+def test_phase156a_unknown_broker_is_safe_and_fail_closed() -> None:
+    diagnostic = diagnose_broker_credentials("mystery-broker", env={"SECRET": "hidden"}, now=FIXED_NOW).as_dict()
+
+    assert diagnostic["broker"] == "mystery-broker"
+    assert diagnostic["broker_name"] == "MYSTERY-BROKER"
+    assert diagnostic["failure_reason"] == "MISSING_CREDENTIALS"
+    assert diagnostic["readiness_status"] == "FAILED"
+    assert diagnostic["live_trading_blocked"] is True
+    assert diagnostic["execution_allowed"] is False
+    assert "hidden" not in str(diagnostic)
 
 
 def test_phase155d_frontend_and_api_expose_read_only_diagnostics() -> None:
@@ -151,6 +200,19 @@ def test_phase155d_frontend_and_api_expose_read_only_diagnostics() -> None:
     assert response.status_code == 200
     assert response.json()["section"] == "broker_credential_diagnostics"
     assert response.json()["data"]["failure_reason"] == "ACCOUNT_ID_MISSING"
+
+
+def test_phase156a_diagnostics_include_canonical_readiness_aliases_in_payloads() -> None:
+    diagnostic = diagnose_broker_credentials(
+        "oanda",
+        env={"OANDA_API_KEY": "present", "OANDA_BASE_URL": "https://api-fxtrade.oanda.com"},
+        now=FIXED_NOW,
+    ).as_dict()
+
+    assert diagnostic["broker_name"] == "OANDA"
+    assert diagnostic["canonical_failure_reason"] == "ACCOUNT_ID_MISSING"
+    assert diagnostic["remediation_hint"] == "Configure OANDA Account ID"
+    assert diagnostic["missing_credential_fields"] == diagnostic["missing_credentials"]
 
 
 def test_phase155d_mobile_dashboard_and_api_render_diagnostics(monkeypatch) -> None:
