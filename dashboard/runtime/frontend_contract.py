@@ -22,6 +22,7 @@ from backend.analytics.portfolio_correlation_engine import (
 )
 from backend.runtime.live_micro_pilot_governor import live_micro_pilot_status
 from backend.runtime.broker_operational_status import build_broker_operational_status
+from backend.runtime.broker_credential_diagnostics import diagnostics_payload
 from backend.validation.live_readiness_certification import (
     live_readiness_certification_status,
 )
@@ -55,6 +56,7 @@ FRONTEND_SECTIONS = (
     "live_micro_pilot",
     "live_readiness_certification",
     "broker",
+    "broker_credential_diagnostics",
     "broker_operational_status",
     "broker_parity",
     "coinbase_live_validation",
@@ -159,6 +161,7 @@ def build_frontend_payload(
             "live_micro_pilot": live_micro_pilot(dashboard_payload),
             "live_readiness_certification": live_readiness_certification(dashboard_payload),
             "broker": broker(dashboard_payload),
+            "broker_credential_diagnostics": broker_credential_diagnostics(dashboard_payload),
             "broker_operational_status": broker_operational_status(dashboard_payload),
             "broker_parity": broker_parity(dashboard_payload),
             "coinbase_live_validation": coinbase_live_validation(dashboard_payload),
@@ -990,6 +993,7 @@ def live_readiness_certification(dashboard_payload: Mapping[str, Any]) -> dict[s
 def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     broker_payload = _mapping(dashboard_payload.get("broker_summary"))
     credential_diagnostics = _mapping(broker_payload.get("credential_diagnostics"))
+    canonical_credential_diagnostics = broker_credential_diagnostics(dashboard_payload)
     limit_reconciliation = _mapping(broker_payload.get("limit_reconciliation"))
     broker_readiness = _mapping(broker_payload.get("broker_readiness"))
     return {
@@ -1046,6 +1050,7 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         "readiness_reasons": _string_list(
             broker_payload.get("readiness_reasons")
         ),
+        "broker_credential_diagnostics": canonical_credential_diagnostics,
         "credential_diagnostics": credential_diagnostics,
         "coinbase_key_present": _boolean(
             broker_payload.get("coinbase_key_present", credential_diagnostics.get("coinbase_key_present"))
@@ -1113,6 +1118,68 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
             limit_reconciliation.get("legacy_coinbase_max_live_order_usd", DATA_UNAVAILABLE),
         ),
         "broker_operational_status": broker_operational_status(dashboard_payload),
+    }
+
+
+def broker_credential_diagnostics(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
+    broker_payload = _mapping(dashboard_payload.get("broker_summary"))
+    source = _mapping(broker_payload.get("broker_credential_diagnostics"))
+    if not source:
+        source = _mapping(_mapping(broker_payload.get("credential_diagnostics")).get("broker_credential_diagnostics"))
+    if not source:
+        source = _mapping(broker_payload.get("credential_diagnostics"))
+    if not source:
+        return {
+            "broker": str(broker_payload.get("selected_broker", broker_payload.get("broker", "NONE"))).upper(),
+            "credentials_present": False,
+            "key_present": False,
+            "secret_present": False,
+            "private_key_present": False,
+            "token_present": False,
+            "account_present": False,
+            "base_url_present": False,
+            "pem_valid": False,
+            "jwt_generated": False,
+            "authentication_attempted": False,
+            "authenticated": False,
+            "failure_reason": "MISSING_CREDENTIALS",
+            "recommended_action": "Configure broker credentials",
+            "severity": "ERROR",
+            "timestamp": DATA_UNAVAILABLE,
+            "diagnostic_timestamp": DATA_UNAVAILABLE,
+            "missing_credentials": [],
+            "credential_status": "MISSING",
+            "advisory_only": True,
+            "execution_allowed": False,
+        }
+    payload = diagnostics_payload(
+        {
+            "broker": broker_payload.get("selected_broker", broker_payload.get("broker", "none")),
+            **source,
+        }
+    )
+    return {
+        "broker": str(payload.get("broker", "none")).upper(),
+        "credentials_present": _boolean(payload.get("credentials_present")),
+        "key_present": _boolean(payload.get("key_present")),
+        "secret_present": _boolean(payload.get("secret_present")),
+        "private_key_present": _boolean(payload.get("private_key_present")),
+        "token_present": _boolean(payload.get("token_present")),
+        "account_present": _boolean(payload.get("account_present")),
+        "base_url_present": _boolean(payload.get("base_url_present")),
+        "pem_valid": _boolean(payload.get("pem_valid")),
+        "jwt_generated": _boolean(payload.get("jwt_generated")),
+        "authentication_attempted": _boolean(payload.get("authentication_attempted")),
+        "authenticated": _boolean(payload.get("authenticated")),
+        "failure_reason": str(payload.get("failure_reason", "MISSING_CREDENTIALS")),
+        "recommended_action": str(payload.get("recommended_action", "Configure broker credentials")),
+        "severity": str(payload.get("severity", "ERROR")),
+        "timestamp": str(payload.get("timestamp", DATA_UNAVAILABLE)),
+        "diagnostic_timestamp": str(payload.get("timestamp", DATA_UNAVAILABLE)),
+        "missing_credentials": _string_list(payload.get("missing_credentials")),
+        "credential_status": "PRESENT" if _boolean(payload.get("credentials_present")) else "MISSING",
+        "advisory_only": True,
+        "execution_allowed": False,
     }
 
 
@@ -1503,10 +1570,28 @@ def _json_safe(value: Any) -> Any:
 def _is_sensitive_key(key: str) -> bool:
     normalized = key.strip().lower()
     safe_metadata_keys = {
+        "account_present",
+        "authenticated",
+        "authentication_attempted",
+        "base_url_present",
+        "broker_credential_diagnostics",
+        "credential_diagnostics",
+        "credential_status",
+        "credentials_present",
         "secrets_redacted",
         "credentials_redacted",
+        "diagnostic_timestamp",
+        "failure_reason",
+        "jwt_generated",
+        "key_present",
         "missing_credentials",
-        "credential_status",
+        "pem_valid",
+        "private_key_present",
+        "recommended_action",
+        "secret_present",
+        "severity",
+        "timestamp",
+        "token_present",
     }
 
     if normalized in safe_metadata_keys:
@@ -1540,6 +1625,8 @@ __all__ = [
     "WebsocketDelta",
     "account_summary",
     "broker",
+    "broker_credential_diagnostics",
+    "broker_operational_status",
     "broker_parity",
     "coinbase_live_validation",
     "oanda_live_validation",

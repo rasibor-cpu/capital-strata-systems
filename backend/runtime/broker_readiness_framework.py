@@ -5,6 +5,10 @@ from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from backend.runtime.broker_operational_status import build_broker_operational_status
+from backend.runtime.broker_credential_diagnostics import (
+    authority_reason_from_diagnostics,
+    diagnostics_payload,
+)
 
 
 CANONICAL_BROKER_READINESS_FIELDS = (
@@ -90,12 +94,17 @@ def build_broker_readiness_snapshot(
     data.update(overrides)
 
     diagnostics = data.get("credential_diagnostics") if isinstance(data.get("credential_diagnostics"), Mapping) else {}
+    canonical_diagnostics = data.get("broker_credential_diagnostics")
+    if not isinstance(canonical_diagnostics, Mapping):
+        canonical_diagnostics = diagnostics.get("broker_credential_diagnostics") if isinstance(diagnostics.get("broker_credential_diagnostics"), Mapping) else diagnostics
+    credential_payload = diagnostics_payload(canonical_diagnostics)
     credentials_present = _truthy(data.get("credentials_present")) or str(
         data.get("credential_status")
         or data.get("credentials")
+        or credential_payload.get("credential_status")
         or diagnostics.get("credential_status")
         or ""
-    ).upper() in {"PRESENT", "PASS", "READY"}
+    ).upper() in {"PRESENT", "PASS", "READY"} or _truthy(credential_payload.get("credentials_present"))
     authenticated = _truthy(data.get("authenticated", data.get("broker_authenticated", False)))
     connected = _truthy(data.get("connected", data.get("broker_connected", False)))
     account_loaded = (
@@ -132,7 +141,13 @@ def build_broker_readiness_snapshot(
         products_loaded=products_loaded,
         broker_health=str(data.get("broker_health", data.get("broker_infrastructure_health", "UNKNOWN")) or "UNKNOWN"),
         infrastructure_health=str(data.get("infrastructure_health", data.get("broker_infrastructure_health", "UNKNOWN")) or "UNKNOWN"),
-        credentials_health=str(data.get("credentials_health", "UNKNOWN") or "UNKNOWN"),
+        credentials_health=str(
+            data.get(
+                "credentials_health",
+                "READY" if credential_payload.get("credentials_present") else "MISSING",
+            )
+            or "UNKNOWN"
+        ),
         authentication_health=str(data.get("authentication_health", "UNKNOWN") or "UNKNOWN"),
         connection_health=str(data.get("connection_health", "UNKNOWN") or "UNKNOWN"),
         market_data_health=str(data.get("market_data_health", "UNKNOWN") or "UNKNOWN"),
@@ -143,7 +158,23 @@ def build_broker_readiness_snapshot(
         account_balance=_float_or_none(data.get("account_balance", data.get("cash"))),
         equity=_float_or_none(data.get("equity", data.get("account_equity"))),
         buying_power=_float_or_none(data.get("buying_power", data.get("available_balance"))),
-        authority_block_reason=str(data.get("authority_block_reason", data.get("authority_reason", _first_block_reason(credentials_present, authenticated, connected, account_loaded, market_data_ready))) or ""),
+        authority_block_reason=str(
+            data.get(
+                "authority_block_reason",
+                data.get(
+                    "authority_reason",
+                    _first_block_reason(
+                        credentials_present,
+                        authenticated,
+                        connected,
+                        account_loaded,
+                        market_data_ready,
+                        credential_payload,
+                    ),
+                ),
+            )
+            or ""
+        ),
         readiness_score=float(data.get("readiness_score", readiness_score) or readiness_score),
     )
 
@@ -203,9 +234,13 @@ def _first_block_reason(
     connected: bool,
     account_loaded: bool,
     market_data_ready: bool,
+    credential_payload: Mapping[str, Any] | None = None,
 ) -> str:
     if not credentials_present:
-        return "Credentials Missing"
+        return authority_reason_from_diagnostics(credential_payload or {})
+    diagnostic_reason = authority_reason_from_diagnostics(credential_payload or {})
+    if not authenticated and diagnostic_reason not in {"Broker Execution Disabled", "Credentials Missing"}:
+        return diagnostic_reason
     if not authenticated:
         return "Authentication Not Verified"
     if not connected:

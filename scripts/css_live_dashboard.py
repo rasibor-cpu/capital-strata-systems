@@ -187,6 +187,7 @@ from backend.runtime.broker_startup_selection import (
 )
 from backend.runtime.broker_parity_validator import broker_parity_payload
 from backend.runtime.broker_operational_status import endpoint_for_broker
+from backend.runtime.broker_credential_diagnostics import diagnostics_payload
 from backend.runtime.coinbase_readiness import (
     coinbase_credential_diagnostics,
     coinbase_live_limit_reconciliation,
@@ -4034,6 +4035,34 @@ def print_oanda_broker_status() -> None:
         _safe_emit_alert("emit_broker_alert", severity=AlertSeverity.INFO, message="OANDA Broker Connected Successfully", metadata={"broker": "OANDA"})
 
 
+def print_broker_credential_diagnostics() -> None:
+    state = globals().get("STARTUP_BROKER_STATE", {})
+    state = state if isinstance(state, dict) else {}
+    source = state.get("broker_credential_diagnostics")
+    if not isinstance(source, dict):
+        credential_diagnostics = state.get("credential_diagnostics")
+        if isinstance(credential_diagnostics, dict):
+            source = credential_diagnostics.get("broker_credential_diagnostics", credential_diagnostics)
+        else:
+            source = {}
+    payload = diagnostics_payload(
+        {
+            "broker": state.get("selected_broker", globals().get("SELECTED_BROKER", "NONE")),
+            **(source if isinstance(source, dict) else {}),
+        }
+    )
+    print("==================================================")
+    print("BROKER CREDENTIAL DIAGNOSTICS")
+    print("==================================================")
+    print(f"Broker: {str(payload.get('broker', 'none')).upper()}")
+    print(f"Credentials Present: {'YES' if payload.get('credentials_present') else 'NO'}")
+    print(f"Authentication Attempted: {'YES' if payload.get('authentication_attempted') else 'NO'}")
+    print(f"Authenticated: {'YES' if payload.get('authenticated') else 'NO'}")
+    print(f"Failure Reason: {payload.get('failure_reason', 'MISSING_CREDENTIALS')}")
+    print(f"Recommended Action: {payload.get('recommended_action', 'Configure broker credentials')}")
+    print(f"Severity: {payload.get('severity', 'ERROR')}")
+
+
 def print_coinbase_broker_status() -> None:
     print("--- COINBASE BROKER STATUS ---")
 
@@ -4618,6 +4647,8 @@ try:
         print(f"CAN PAPER EXECUTE: {'YES' if role_profile.get('can_execute_paper_trading') else 'NO'}")
         print(f"CAN LIVE EXECUTE: {'YES' if role_profile.get('can_execute_live_trading') else 'NO'}")
         print(f"ALLOWED ENGINE MODES: {', '.join(role_profile.get('allowed_engine_modes', [])) or 'NONE'}")
+
+        print_broker_credential_diagnostics()
 
         if SELECTED_BROKER == "OANDA":
             print_oanda_broker_status()

@@ -130,6 +130,14 @@ Phase 155C also corrects Coinbase endpoint reporting isolation, preserves drawdo
 
 Phase 155C does not authorize live trading. Broker execution remains disabled, LiveExecutionAuthority remains fail-closed, and no order/cancel/modify/close broker paths are introduced.
 
+## Phase 155D Canonical Broker Credential Diagnostics Addendum
+
+Phase 155D standardizes broker credential diagnostics for Coinbase and OANDA before authentication. Each broker now publishes the same diagnostic schema for credential presence, key/private-key/token/account presence, PEM/JWT status where applicable, authentication attempted/authenticated state, canonical failure reason, recommended action, severity, and timestamp.
+
+The diagnostics feed is consumed by broker readiness and LiveExecutionAuthority to replace generic credential blockers with specific explanations such as `Account ID Missing`, `Token Invalid`, `JWT Generation Failed`, or `Authentication Failed`.
+
+Phase 155D does not authorize live trading. The diagnostic engine exposes no secrets, creates no broker write methods, grants no execution authority, and leaves broker execution, Live Micro-Pilot arming, Unified Trade Gate, Margin Gate, AntiBleedGuard, Kill Switch, and the Phase 152A CAD 20 Governor unchanged and fail-closed.
+
 ## Safety Controls Required For LIVE
 
 LIVE mode must continue to require Unified Trade Gate, Margin Gate, RBAC, Capital Governor, AntiBleedGuard, kill switches, emergency stops, broker validation, execution authorization, and configured broker controls.

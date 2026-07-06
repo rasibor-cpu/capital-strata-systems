@@ -99,6 +99,7 @@ class BrokerState:
 
     position_snapshot: List[Dict[str, Any]] = field(default_factory=list)
 
+    broker_credential_diagnostics: Dict[str, Any] = field(default_factory=dict)
     coinbase_live_validation: Dict[str, Any] = field(default_factory=dict)
     oanda_live_validation: Dict[str, Any] = field(default_factory=dict)
 
@@ -397,9 +398,28 @@ class DashboardState:
     def _is_sensitive_key(key: str) -> bool:
         normalized = key.strip().lower()
         safe_metadata_keys = {
+            "account_present",
+            "authenticated",
+            "authentication_attempted",
+            "base_url_present",
+            "broker_credential_diagnostics",
+            "credential_diagnostics",
+            "credential_status",
+            "credentials_present",
             "secrets_redacted",
             "credentials_redacted",
+            "diagnostic_timestamp",
+            "failure_reason",
+            "jwt_generated",
+            "key_present",
             "missing_credentials",
+            "pem_valid",
+            "private_key_present",
+            "recommended_action",
+            "secret_present",
+            "severity",
+            "timestamp",
+            "token_present",
         }
 
         if normalized in safe_metadata_keys:

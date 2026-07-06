@@ -49,6 +49,7 @@ runtime/
 !backend/runtime/
 backend/runtime/*
 !backend/runtime/broker_operational_status.py
+!backend/runtime/broker_credential_diagnostics.py
 !backend/runtime/broker_readiness_framework.py
 !backend/runtime/broker_parity_validator.py
 !backend/runtime/live_micro_pilot_governor.py

@@ -169,3 +169,11 @@ Status: Canonical broker operational status implemented for review.
 Phase 155C adds a shared canonical broker operational contract for Coinbase and OANDA covering endpoint isolation, API version, server-time visibility, sync status, product counts, market/balance/margin state, operational state, and failure reason. Dashboard and launcher surfaces now expose the canonical operational state for both brokers.
 
 This register does not authorize live broker execution. Broker execution remains disabled, LiveExecutionAuthority remains authoritative and fail-closed, and no order/cancel/modify/close capabilities are added.
+
+## Phase 155D Canonical Broker Credential Diagnostics Register
+
+Status: Canonical broker credential diagnostics implemented for review.
+
+Phase 155D adds a broker-independent credential diagnostic contract for Coinbase and OANDA. It publishes credential presence, authentication attempted/authenticated state, canonical failure reason, recommended action, severity, and timestamp to broker readiness, LiveExecutionAuthority reason selection, dashboard/API, launcher, mobile dashboard, and runtime console output.
+
+This register does not authorize live broker execution. The diagnostics layer is read-only, exposes no secrets, grants no execution authority, and does not alter Unified Trade Gate, Margin Gate, AntiBleedGuard, Kill Switch, LiveExecutionAuthority, broker execution controls, or the Phase 152A CAD 20 Governor.

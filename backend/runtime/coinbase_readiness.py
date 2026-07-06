@@ -6,6 +6,10 @@ from typing import Any, Callable, Mapping
 
 from backend.runtime.broker_startup_selection import BrokerStartupSelection, build_startup_broker_selection
 from backend.runtime.broker_readiness_framework import broker_readiness_payload, build_broker_readiness_snapshot
+from backend.runtime.broker_credential_diagnostics import (
+    authority_reason_from_diagnostics,
+    diagnose_broker_credentials,
+)
 from backend.runtime.coinbase_live_adapter import CoinbaseLiveReadOnlyAdapter, READ_ONLY_EXECUTION_SCOPE
 from backend.runtime.live_execution_authority import evaluate_live_execution_authority
 from backend.runtime.live_readiness_state_machine import evaluate_live_readiness_state
@@ -28,13 +32,14 @@ class CoinbaseCredentialDiagnostics:
     private_key_present: bool
     key_file_present: bool
     missing_credentials: list[str] = field(default_factory=list)
+    canonical: dict[str, Any] = field(default_factory=dict)
 
     @property
     def ready(self) -> bool:
         return self.key_present and (self.private_key_present or self.key_file_present)
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "coinbase_key_present": self.key_present,
             "coinbase_private_key_present": self.private_key_present,
             "coinbase_key_file_present": self.key_file_present,
@@ -42,10 +47,18 @@ class CoinbaseCredentialDiagnostics:
             "credential_status": "PRESENT" if self.ready else "MISSING",
             "redacted": True,
         }
+        if self.canonical:
+            payload.update(dict(self.canonical))
+            payload["broker_credential_diagnostics"] = dict(self.canonical)
+            payload["coinbase_key_present"] = self.key_present
+            payload["coinbase_private_key_present"] = self.private_key_present
+            payload["coinbase_key_file_present"] = self.key_file_present
+        return payload
 
 
 def coinbase_credential_diagnostics(env: Mapping[str, Any] | None = None) -> CoinbaseCredentialDiagnostics:
     source = env if isinstance(env, Mapping) else os.environ
+    canonical = diagnose_broker_credentials("coinbase", env=source).as_dict()
     key_present = _any_present(source, KEY_NAME_ENV_VARS)
     private_key_present = _any_present(source, PRIVATE_KEY_ENV_VARS)
     key_file_present = _any_present(source, KEY_FILE_ENV_VARS)
@@ -59,6 +72,7 @@ def coinbase_credential_diagnostics(env: Mapping[str, Any] | None = None) -> Coi
         private_key_present=private_key_present,
         key_file_present=key_file_present,
         missing_credentials=missing,
+        canonical=canonical,
     )
 
 
@@ -96,6 +110,8 @@ def evaluate_coinbase_live_read_only(
     legacy_limit_usd: Any = 1.0,
 ) -> dict[str, Any]:
     diagnostics = coinbase_credential_diagnostics(env)
+    canonical_diagnostics = diagnostics.as_dict().get("broker_credential_diagnostics", diagnostics.as_dict())
+    authority_reason = authority_reason_from_diagnostics(canonical_diagnostics)
     result: dict[str, Any] = {
         "selected_broker": selection.selected_broker,
         "broker_type": _broker_type(selection.selected_broker),
@@ -120,6 +136,7 @@ def evaluate_coinbase_live_read_only(
             "products_or_prices": "NOT_ATTEMPTED",
         },
         "credential_diagnostics": diagnostics.as_dict(),
+        "broker_credential_diagnostics": dict(canonical_diagnostics),
         "limit_reconciliation": coinbase_live_limit_reconciliation(legacy_limit_usd=legacy_limit_usd),
         "advisory_only": True,
         "execution_allowed": False,
@@ -139,7 +156,7 @@ def evaluate_coinbase_live_read_only(
         "live_micro_pilot_state": "DISARMED",
         "operator_requested_live": bool(selection.operator_requested_live),
         "execution_authority": False,
-        "authority_reason": "Credentials Missing" if selection.operator_requested_live else "Operator Intent Missing",
+        "authority_reason": authority_reason if selection.operator_requested_live else "Operator Intent Missing",
         "live_authority_state": "BLOCKED",
     }
     result["broker_readiness"] = broker_readiness_payload(
@@ -163,6 +180,7 @@ def evaluate_coinbase_live_read_only(
         result["connection_status"] = "UNKNOWN"
         result["connection_error"] = "missing credentials"
         result["credential_status"] = "MISSING"
+        result["authority_block_reason"] = authority_reason
         return _apply_readiness_state(result)
 
     try:
@@ -170,7 +188,16 @@ def evaluate_coinbase_live_read_only(
         adapter = CoinbaseLiveReadOnlyAdapter(env=env, read_client=read_client)
         adapter_status = adapter.sync()
         result.update(adapter_status)
-        result["credential_diagnostics"] = diagnostics.as_dict()
+        authenticated = bool(adapter_status.get("broker_authenticated"))
+        canonical_diagnostics = diagnose_broker_credentials(
+            "coinbase",
+            env=env,
+            authentication_attempted=True,
+            authenticated=authenticated,
+            failure_reason=None if authenticated else str(adapter_status.get("connection_error") or "AUTH_FAILED"),
+        ).as_dict()
+        result["credential_diagnostics"] = {**diagnostics.as_dict(), **canonical_diagnostics, "broker_credential_diagnostics": canonical_diagnostics}
+        result["broker_credential_diagnostics"] = canonical_diagnostics
         result["auth_reason"] = (
             "coinbase_read_only_authentication_verified"
             if adapter_status.get("broker_authenticated")
@@ -187,6 +214,15 @@ def evaluate_coinbase_live_read_only(
         result["balance_position_status"] = result["read_checks"]["balances"]
         result["product_price_status"] = result["market_data_status"]
     except Exception as exc:
+        canonical_diagnostics = diagnose_broker_credentials(
+            "coinbase",
+            env=env,
+            authentication_attempted=True,
+            authenticated=False,
+            exception=exc,
+        ).as_dict()
+        result["credential_diagnostics"] = {**diagnostics.as_dict(), **canonical_diagnostics, "broker_credential_diagnostics": canonical_diagnostics}
+        result["broker_credential_diagnostics"] = canonical_diagnostics
         result["broker_health"] = "UNKNOWN"
         result["connection_status"] = "UNKNOWN"
         result["connection_error"] = str(exc)[:160]
@@ -219,6 +255,9 @@ def merge_readiness_into_broker_state(selection: BrokerStartupSelection, readine
     state.update(
         {
             "credential_diagnostics": dict(readiness.get("credential_diagnostics", {})),
+            "broker_credential_diagnostics": dict(readiness.get("broker_credential_diagnostics", {}))
+            if isinstance(readiness.get("broker_credential_diagnostics"), Mapping)
+            else dict(_mapping(readiness.get("credential_diagnostics")).get("broker_credential_diagnostics", {})),
             "limit_reconciliation": dict(readiness.get("limit_reconciliation", {})),
             "execution_scope": str(readiness.get("execution_scope", state.get("broker_connection_mode", ""))),
             "auth_reason": str(readiness.get("auth_reason", state.get("readiness_reason", ""))),

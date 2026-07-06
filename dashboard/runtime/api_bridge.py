@@ -148,6 +148,15 @@ def get_broker_readiness_payload(
     }
 
 
+def get_broker_credential_diagnostics_payload(
+    state_provider: DashboardStateProvider | None = None,
+) -> dict[str, Any]:
+    return build_section_payload(
+        _state_from_provider(state_provider),
+        "broker_credential_diagnostics",
+    )
+
+
 def get_broker_parity_payload(
     state_provider: DashboardStateProvider | None = None,
 ) -> dict[str, Any]:
@@ -291,6 +300,10 @@ def create_dashboard_state_router(
     def read_broker_readiness() -> dict[str, Any]:
         return get_broker_readiness_payload(state_provider)
 
+    @router.get("/api/v1/broker-credential-diagnostics")
+    def read_broker_credential_diagnostics() -> dict[str, Any]:
+        return get_broker_credential_diagnostics_payload(state_provider)
+
     @router.get("/api/v1/broker-parity")
     def read_broker_parity() -> dict[str, Any]:
         return get_broker_parity_payload(state_provider)
@@ -349,6 +362,7 @@ __all__ = [
     "get_broker_read_only_status_payload",
     "get_broker_parity_payload",
     "get_broker_operational_status_payload",
+    "get_broker_credential_diagnostics_payload",
     "get_broker_readiness_payload",
     "get_broker_reconciliation_payload",
     "get_coinbase_live_validation_payload",

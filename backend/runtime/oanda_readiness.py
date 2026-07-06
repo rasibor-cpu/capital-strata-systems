@@ -6,6 +6,10 @@ from typing import Any, Callable, Mapping
 
 from backend.runtime.broker_startup_selection import BrokerStartupSelection, build_startup_broker_selection
 from backend.runtime.broker_readiness_framework import broker_readiness_payload, build_broker_readiness_snapshot
+from backend.runtime.broker_credential_diagnostics import (
+    authority_reason_from_diagnostics,
+    diagnose_broker_credentials,
+)
 from backend.runtime.oanda_live_read_only_adapter import OandaLiveReadOnlyAdapter
 from backend.runtime.live_execution_authority import evaluate_live_execution_authority
 from backend.runtime.live_readiness_state_machine import evaluate_live_readiness_state
@@ -22,13 +26,14 @@ class OandaCredentialDiagnostics:
     account_present: bool
     url_present: bool
     missing_credentials: list[str] = field(default_factory=list)
+    canonical: dict[str, Any] = field(default_factory=dict)
 
     @property
     def ready(self) -> bool:
         return self.token_present and self.account_present and self.url_present
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "oanda_token_present": self.token_present,
             "oanda_account_present": self.account_present,
             "oanda_base_url_present": self.url_present,
@@ -36,10 +41,18 @@ class OandaCredentialDiagnostics:
             "credential_status": "PRESENT" if self.ready else "MISSING",
             "redacted": True,
         }
+        if self.canonical:
+            payload.update(dict(self.canonical))
+            payload["broker_credential_diagnostics"] = dict(self.canonical)
+            payload["oanda_token_present"] = self.token_present
+            payload["oanda_account_present"] = self.account_present
+            payload["oanda_base_url_present"] = self.url_present
+        return payload
 
 
 def oanda_credential_diagnostics(env: Mapping[str, Any] | None = None) -> OandaCredentialDiagnostics:
     source = env if isinstance(env, Mapping) else os.environ
+    canonical = diagnose_broker_credentials("oanda", env=source).as_dict()
     token_present = _any_present(source, TOKEN_ENV_VARS)
     account_present = _any_present(source, ACCOUNT_ENV_VARS)
     url_present = _any_present(source, URL_ENV_VARS)
@@ -55,6 +68,7 @@ def oanda_credential_diagnostics(env: Mapping[str, Any] | None = None) -> OandaC
         account_present=account_present,
         url_present=url_present,
         missing_credentials=missing,
+        canonical=canonical,
     )
 
 
@@ -92,6 +106,8 @@ def evaluate_oanda_live_read_only(
     legacy_limit_usd: Any = 1.0,
 ) -> dict[str, Any]:
     diagnostics = oanda_credential_diagnostics(env)
+    canonical_diagnostics = diagnostics.as_dict().get("broker_credential_diagnostics", diagnostics.as_dict())
+    authority_reason = authority_reason_from_diagnostics(canonical_diagnostics)
     result: dict[str, Any] = {
         "selected_broker": selection.selected_broker,
         "broker_type": _broker_type(selection.selected_broker),
@@ -116,6 +132,7 @@ def evaluate_oanda_live_read_only(
             "products_or_prices": "NOT_ATTEMPTED",
         },
         "credential_diagnostics": diagnostics.as_dict(),
+        "broker_credential_diagnostics": dict(canonical_diagnostics),
         "limit_reconciliation": oanda_live_limit_reconciliation(legacy_limit_usd=legacy_limit_usd),
         "advisory_only": True,
         "execution_allowed": False,
@@ -135,7 +152,7 @@ def evaluate_oanda_live_read_only(
         "live_micro_pilot_state": "DISARMED",
         "operator_requested_live": bool(selection.operator_requested_live),
         "execution_authority": False,
-        "authority_reason": "Credentials Missing" if selection.operator_requested_live else "Operator Intent Missing",
+        "authority_reason": authority_reason if selection.operator_requested_live else "Operator Intent Missing",
         "live_authority_state": "BLOCKED",
     }
     result["broker_readiness"] = broker_readiness_payload(
@@ -159,6 +176,7 @@ def evaluate_oanda_live_read_only(
         result["connection_status"] = "UNKNOWN"
         result["connection_error"] = "missing credentials"
         result["credential_status"] = "MISSING"
+        result["authority_block_reason"] = authority_reason
         return _apply_readiness_state(result)
 
     try:
@@ -166,7 +184,16 @@ def evaluate_oanda_live_read_only(
         adapter = OandaLiveReadOnlyAdapter(env=env, read_client=read_client)
         adapter_status = adapter.sync()
         result.update(adapter_status)
-        result["credential_diagnostics"] = diagnostics.as_dict()
+        authenticated = bool(adapter_status.get("broker_authenticated"))
+        canonical_diagnostics = diagnose_broker_credentials(
+            "oanda",
+            env=env,
+            authentication_attempted=True,
+            authenticated=authenticated,
+            failure_reason=None if authenticated else str(adapter_status.get("connection_error") or "AUTH_FAILED"),
+        ).as_dict()
+        result["credential_diagnostics"] = {**diagnostics.as_dict(), **canonical_diagnostics, "broker_credential_diagnostics": canonical_diagnostics}
+        result["broker_credential_diagnostics"] = canonical_diagnostics
         result["auth_reason"] = (
             "oanda_read_only_authentication_verified"
             if adapter_status.get("broker_authenticated")
@@ -183,6 +210,15 @@ def evaluate_oanda_live_read_only(
         result["balance_position_status"] = result["read_checks"]["balances"]
         result["product_price_status"] = result["market_data_status"]
     except Exception as exc:
+        canonical_diagnostics = diagnose_broker_credentials(
+            "oanda",
+            env=env,
+            authentication_attempted=True,
+            authenticated=False,
+            exception=exc,
+        ).as_dict()
+        result["credential_diagnostics"] = {**diagnostics.as_dict(), **canonical_diagnostics, "broker_credential_diagnostics": canonical_diagnostics}
+        result["broker_credential_diagnostics"] = canonical_diagnostics
         result["broker_health"] = "UNKNOWN"
         result["connection_status"] = "UNKNOWN"
         result["connection_error"] = str(exc)[:160]
@@ -215,6 +251,9 @@ def merge_readiness_into_broker_state(selection: BrokerStartupSelection, readine
     state.update(
         {
             "credential_diagnostics": dict(readiness.get("credential_diagnostics", {})),
+            "broker_credential_diagnostics": dict(readiness.get("broker_credential_diagnostics", {}))
+            if isinstance(readiness.get("broker_credential_diagnostics"), Mapping)
+            else dict(_mapping(readiness.get("credential_diagnostics")).get("broker_credential_diagnostics", {})),
             "limit_reconciliation": dict(readiness.get("limit_reconciliation", {})),
             "execution_scope": str(readiness.get("execution_scope", state.get("broker_connection_mode", ""))),
             "auth_reason": str(readiness.get("auth_reason", state.get("readiness_reason", ""))),

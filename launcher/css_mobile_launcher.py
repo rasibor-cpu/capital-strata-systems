@@ -93,6 +93,7 @@ from backend.runtime.broker_startup_selection import (
 )
 from backend.runtime.broker_parity_validator import broker_parity_payload
 from backend.runtime.broker_operational_status import build_broker_operational_status
+from backend.runtime.broker_credential_diagnostics import diagnostics_payload
 from backend.runtime.coinbase_live_read_only_operational_validation import (
     load_coinbase_operational_validation_artifacts,
 )
@@ -596,6 +597,16 @@ def build_launcher_frontend_state(
     broker_parity = broker_parity_payload(broker_startup)
     coinbase_validation = get_launcher_coinbase_live_validation_feed()
     oanda_validation = get_launcher_oanda_live_validation_feed()
+    broker_credential_diagnostics = diagnostics_payload(
+        {
+            "broker": broker,
+            **(
+                broker_startup.get("broker_credential_diagnostics")
+                if isinstance(broker_startup.get("broker_credential_diagnostics"), dict)
+                else credential_diagnostics.get("broker_credential_diagnostics", credential_diagnostics)
+            ),
+        }
+    )
 
     dashboard_payload = {
         "generated_at": _utc_iso_z(),
@@ -670,6 +681,7 @@ def build_launcher_frontend_state(
             "broker_ready": bool(broker_startup.get("broker_ready", broker_readiness.get("broker_ready", False))),
             "broker_readiness": dict(broker_readiness),
             "broker_parity": dict(broker_parity),
+            "broker_credential_diagnostics": dict(broker_credential_diagnostics),
             "coinbase_live_validation": dict(coinbase_validation),
             "oanda_live_validation": dict(oanda_validation),
             "broker_operational_status": {
@@ -797,6 +809,36 @@ def get_launcher_startup_diagnostics_feed() -> Dict[str, Any]:
     broker = get_launcher_broker_read_only_status_feed()
     diagnostics = broker.get("startup_diagnostics", {}) if isinstance(broker, dict) else {}
     return dict(diagnostics) if isinstance(diagnostics, dict) else {}
+
+
+def get_launcher_broker_credential_diagnostics_feed() -> Dict[str, Any]:
+    broker = get_launcher_broker_read_only_status_feed()
+    broker = broker if isinstance(broker, dict) else {}
+    source = broker.get("broker_credential_diagnostics")
+    if not isinstance(source, dict):
+        credential_diagnostics = broker.get("credential_diagnostics")
+        if isinstance(credential_diagnostics, dict):
+            source = credential_diagnostics.get("broker_credential_diagnostics", credential_diagnostics)
+        else:
+            source = {}
+    payload = diagnostics_payload(
+        {
+            "broker": broker.get("selected_broker", "none"),
+            **(source if isinstance(source, dict) else {}),
+        }
+    )
+    return {
+        "broker": str(payload.get("broker", "none")).upper(),
+        "credentials_present": bool(payload.get("credentials_present", False)),
+        "authentication_attempted": bool(payload.get("authentication_attempted", False)),
+        "authenticated": bool(payload.get("authenticated", False)),
+        "failure_reason": str(payload.get("failure_reason", "MISSING_CREDENTIALS")),
+        "recommended_action": str(payload.get("recommended_action", "Configure broker credentials")),
+        "severity": str(payload.get("severity", "ERROR")),
+        "diagnostic_timestamp": str(payload.get("timestamp", "")),
+        "advisory_only": True,
+        "execution_allowed": False,
+    }
 
 
 def get_launcher_live_readiness_state_feed() -> Dict[str, Any]:
@@ -3663,6 +3705,7 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "runtime_session_continuity": runtime_session_continuity,
         "runtime_health": runtime_health,
         "broker_startup": broker_startup,
+        "broker_credential_diagnostics": get_launcher_broker_credential_diagnostics_feed(),
         "broker_parity": get_launcher_broker_parity_feed(),
         "coinbase_live_validation": get_launcher_coinbase_live_validation_feed(),
         "oanda_live_validation": get_launcher_oanda_live_validation_feed(),
@@ -3850,6 +3893,16 @@ async def launcher_broker_readiness():
     return {
         "section": "broker_readiness",
         "data": get_launcher_broker_readiness_feed(),
+        "advisory_only": True,
+        "execution_allowed": False,
+    }
+
+
+@launcher_router.get("/api/v1/broker-credential-diagnostics")
+async def launcher_broker_credential_diagnostics():
+    return {
+        "section": "broker_credential_diagnostics",
+        "data": get_launcher_broker_credential_diagnostics_feed(),
         "advisory_only": True,
         "execution_allowed": False,
     }

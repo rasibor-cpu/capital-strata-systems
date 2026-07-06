@@ -1022,6 +1022,20 @@
             {% endfor %}
         </div>
 
+        <div class="card" id="broker-credential-diagnostics-card">
+            <div class="card-header">
+                Broker Credential Diagnostics
+                <span class="badge badge-warning">READ ONLY</span>
+            </div>
+            <div class="status-row"><span>Broker</span><strong>{{ broker_credential_diagnostics.broker | default('NONE') }}</strong></div>
+            <div class="status-row"><span>Credentials Present</span><strong>{{ broker_credential_diagnostics.credentials_present | default(false) }}</strong></div>
+            <div class="status-row"><span>Authentication Attempted</span><strong>{{ broker_credential_diagnostics.authentication_attempted | default(false) }}</strong></div>
+            <div class="status-row"><span>Authenticated</span><strong>{{ broker_credential_diagnostics.authenticated | default(false) }}</strong></div>
+            <div class="status-row"><span>Failure Reason</span><strong>{{ broker_credential_diagnostics.failure_reason | default('MISSING_CREDENTIALS') }}</strong></div>
+            <div class="status-row"><span>Recommended Action</span><strong>{{ broker_credential_diagnostics.recommended_action | default('Configure broker credentials') }}</strong></div>
+            <div class="status-row"><span>Severity</span><strong>{{ broker_credential_diagnostics.severity | default('ERROR') }}</strong></div>
+        </div>
+
         <div class="card" id="phase152b-live-readiness-certification-card">
             <div class="card-header">
                 Live Readiness Certification

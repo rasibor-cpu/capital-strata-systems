@@ -155,6 +155,13 @@ class BrokerStateBuilder:
                 )
             ),
 
+            broker_credential_diagnostics=_mapping(
+                broker_payload.get(
+                    "broker_credential_diagnostics",
+                    _mapping(broker_payload.get("credential_diagnostics", {})).get("broker_credential_diagnostics", {}),
+                )
+            ),
+
             coinbase_live_validation=_mapping(
                 broker_payload.get("coinbase_live_validation", {})
             ),

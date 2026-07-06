@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Mapping
 
 from backend.runtime.broker_readiness_framework import build_broker_readiness_snapshot
+from backend.runtime.broker_credential_diagnostics import authority_reason_from_diagnostics, diagnostics_payload
 
 AUTHORITY_CONDITIONS = (
     ("operator_requested_live", "Operator Intent Missing"),
@@ -43,6 +44,10 @@ def evaluate_live_execution_authority(evidence: Mapping[str, Any] | None) -> Liv
     diagnostics = data.get("startup_diagnostics") if isinstance(data.get("startup_diagnostics"), Mapping) else {}
     broker_readiness_source = data.get("broker_readiness") if isinstance(data.get("broker_readiness"), Mapping) else data
     readiness = build_broker_readiness_snapshot(broker_readiness_source)
+    credential_source = data.get("broker_credential_diagnostics")
+    if not isinstance(credential_source, Mapping):
+        credential_source = data.get("credential_diagnostics") if isinstance(data.get("credential_diagnostics"), Mapping) else {}
+    credential_payload = diagnostics_payload(credential_source)
     pilot_state = str(data.get("live_micro_pilot_state") or data.get("pilot_state") or diagnostics.get("pilot_state") or "").upper()
     go_no_go = str(data.get("go_no_go") or diagnostics.get("go_no_go") or "NO GO").upper()
 
@@ -65,7 +70,12 @@ def evaluate_live_execution_authority(evidence: Mapping[str, Any] | None) -> Liv
     }
     failed = tuple(key for key, _reason in AUTHORITY_CONDITIONS if not condition_status.get(key, False))
     authority = not failed
-    reason = "Authority Granted" if authority else next(reason for key, reason in AUTHORITY_CONDITIONS if key == failed[0])
+    if authority:
+        reason = "Authority Granted"
+    elif failed[0] in {"credentials_present", "authenticated"}:
+        reason = authority_reason_from_diagnostics(credential_payload)
+    else:
+        reason = next(reason for key, reason in AUTHORITY_CONDITIONS if key == failed[0])
     return LiveExecutionAuthority(
         operator_requested_live=condition_status["operator_requested_live"],
         execution_authority=authority,
