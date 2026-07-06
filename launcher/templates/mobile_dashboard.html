@@ -6,6 +6,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>{{ title }}</title>
     <link rel="manifest" href="/manifest.json">
+    <link rel="icon" href="/favicon.ico" sizes="any">
+    <link rel="icon" type="image/png" sizes="192x192" href="/static/css_pwa_icon_192.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-title" content="CSS">
+    <meta name="apple-mobile-web-app-capable" content="yes">
     <style>
         :root {
             --bg-color: #070909;
@@ -908,10 +913,17 @@
                 <span class="badge badge-warning">GUARD ONLY</span>
             </div>
             <div class="status-row"><span>Selected Broker</span><strong>{{ broker_startup.selected_broker | default('NONE') }}</strong></div>
+            <div class="status-row"><span>Broker Type</span><strong>{{ broker_startup.broker_type | default('UNKNOWN') }}</strong></div>
             <div class="status-row"><span>Broker Mode</span><strong>{{ broker_startup.broker_mode | default('paper') }}</strong></div>
             <div class="status-row"><span>Broker Connected</span><strong>{{ broker_startup.broker_connected | default(false) }}</strong></div>
             <div class="status-row"><span>Broker Health</span><strong>{{ broker_startup.broker_health | default('UNKNOWN') }}</strong></div>
             <div class="status-row"><span>Broker Infrastructure</span><strong>{{ broker_startup.broker_infrastructure_health | default(broker_startup.broker_health | default('UNKNOWN')) }}</strong></div>
+            <div class="status-row"><span>Infrastructure Health</span><strong>{{ broker_startup.infrastructure_health | default('UNKNOWN') }}</strong></div>
+            <div class="status-row"><span>Credentials Health</span><strong>{{ broker_startup.credentials_health | default('UNKNOWN') }}</strong></div>
+            <div class="status-row"><span>Authentication Health</span><strong>{{ broker_startup.authentication_health | default('UNKNOWN') }}</strong></div>
+            <div class="status-row"><span>Connection Health</span><strong>{{ broker_startup.connection_health | default('UNKNOWN') }}</strong></div>
+            <div class="status-row"><span>Market Data Health</span><strong>{{ broker_startup.market_data_health | default('UNKNOWN') }}</strong></div>
+            <div class="status-row"><span>Account Data Health</span><strong>{{ broker_startup.account_data_health | default('UNKNOWN') }}</strong></div>
             <div class="status-row"><span>Broker Ready</span><strong>{{ broker_startup.broker_ready | default(false) }}</strong></div>
             <div class="status-row"><span>Credentials Present</span><strong>{{ broker_startup.credentials_present | default(false) }}</strong></div>
             <div class="status-row"><span>Authenticated</span><strong>{{ broker_startup.authenticated | default(broker_startup.broker_authenticated | default(false)) }}</strong></div>

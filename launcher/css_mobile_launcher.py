@@ -647,6 +647,7 @@ def build_launcher_frontend_state(
         },
         "broker_summary": {
             "selected_broker": broker,
+            "broker_type": str(broker_startup.get("broker_type", broker_readiness.get("broker_type", "UNKNOWN"))),
             "broker_mode": broker_mode,
             "connected": bool(broker_startup.get("broker_connected", False)),
             "broker_connected": bool(broker_startup.get("broker_connected", False)),
@@ -664,6 +665,12 @@ def build_launcher_frontend_state(
             "account_loaded": bool(broker_startup.get("account_loaded", broker_readiness.get("account_loaded", False))),
             "market_data_ready": bool(broker_startup.get("market_data_ready", broker_readiness.get("market_data_ready", False))),
             "execution_supported": bool(broker_startup.get("execution_supported", broker_readiness.get("execution_supported", False))),
+            "infrastructure_health": str(broker_startup.get("infrastructure_health", broker_readiness.get("infrastructure_health", "UNKNOWN"))),
+            "credentials_health": str(broker_startup.get("credentials_health", broker_readiness.get("credentials_health", "UNKNOWN"))),
+            "authentication_health": str(broker_startup.get("authentication_health", broker_readiness.get("authentication_health", "UNKNOWN"))),
+            "connection_health": str(broker_startup.get("connection_health", broker_readiness.get("connection_health", "UNKNOWN"))),
+            "market_data_health": str(broker_startup.get("market_data_health", broker_readiness.get("market_data_health", "UNKNOWN"))),
+            "account_data_health": str(broker_startup.get("account_data_health", broker_readiness.get("account_data_health", "UNKNOWN"))),
             "readiness_score": broker_startup.get("readiness_score", broker_readiness.get("readiness_score", 0.0)),
             "api_health": str(broker_startup.get("broker_health", "UNKNOWN")),
             "broker_execution_armed": bool(broker_startup.get("broker_execution_armed", False)),
@@ -4295,6 +4302,21 @@ async def css_pwa_icon_512():
 
 
 # ── PAUSE / RESUME ROUTES ────────────────────────────────────────────────────
+
+@launcher_router.get("/apple-touch-icon.png")
+@launcher_router.get("/static/apple_touch_icon_180.png")
+async def apple_touch_icon():
+    return FileResponse(
+        os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "assets",
+            "branding",
+            "apple_touch_icon_180.png",
+        ),
+        media_type="image/png",
+    )
+
 
 _BROWSER_REDIRECT_TARGET = "/mobile#risk"
 

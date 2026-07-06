@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 
 from dashboard.auth.css_sign_on import (
     AuthFailure,
@@ -44,6 +44,8 @@ from dashboard.runtime.dashboard_hydration_coordinator import DashboardHydration
 from dashboard.runtime.frontend_contract import (
     build_frontend_payload,
     live_readiness_certification as build_live_readiness_certification_section,
+    live_micro_pilot as build_live_micro_pilot_section,
+    session_command_centre as build_session_command_centre_section,
 )
 from dashboard.runtime.runtime_bootstrap import DashboardRuntimeBootstrap
 from engine.execution.live_order_kill_switch import evaluate_live_order_kill_switch
@@ -63,6 +65,7 @@ SESSION_MAX_SECONDS = int(os.getenv("CSS_MOBILE_SESSION_SECONDS", "28800") or 28
 PASSWORD_CHANGE_SECONDS = int(os.getenv("CSS_MOBILE_PASSWORD_CHANGE_SECONDS", "600") or 600)
 MOBILE_EVENTS_FILE = PROJECT_ROOT / "artifacts" / "css_mobile_trade_events.jsonl"
 MOBILE_CONTROL_FILE = PROJECT_ROOT / "artifacts" / "css_mobile_controls.json"
+BRANDING_DIR = PROJECT_ROOT / "assets" / "branding"
 DEFAULT_COINBASE_MAX_LIVE_ORDER_USD = 1.00
 ENGINE_MODES = ("SAFE", "CONSERVATIVE", "BALANCED", "AGGRESSIVE")
 DEFAULT_MOBILE_CONTROLS = {
@@ -724,6 +727,18 @@ async def manifest():
                     "sizes": "any",
                     "type": "image/svg+xml",
                     "purpose": "any maskable",
+                },
+                {
+                    "src": "/static/css_pwa_icon_192.png",
+                    "sizes": "192x192",
+                    "type": "image/png",
+                    "purpose": "any maskable",
+                },
+                {
+                    "src": "/static/css_pwa_icon_512.png",
+                    "sizes": "512x512",
+                    "type": "image/png",
+                    "purpose": "any maskable",
                 }
             ],
         }
@@ -734,7 +749,7 @@ async def manifest():
 async def service_worker():
     script = """
 const CACHE_NAME = "css-mobile-shell-v1";
-const SHELL_URLS = ["/login", "/manifest.webmanifest", "/icon.svg"];
+const SHELL_URLS = ["/login", "/manifest.webmanifest", "/icon.svg", "/static/css_pwa_icon_192.png", "/apple-touch-icon.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_URLS)));
@@ -768,6 +783,27 @@ async def icon():
 </svg>
 """.strip()
     return PlainTextResponse(svg, media_type="image/svg+xml")
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    return FileResponse(BRANDING_DIR / "css.ico", media_type="image/x-icon")
+
+
+@app.get("/apple-touch-icon.png")
+@app.get("/static/apple_touch_icon_180.png")
+async def apple_touch_icon():
+    return FileResponse(BRANDING_DIR / "apple_touch_icon_180.png", media_type="image/png")
+
+
+@app.get("/static/css_pwa_icon_192.png")
+async def css_pwa_icon_192():
+    return FileResponse(BRANDING_DIR / "css_pwa_icon_192.png", media_type="image/png")
+
+
+@app.get("/static/css_pwa_icon_512.png")
+async def css_pwa_icon_512():
+    return FileResponse(BRANDING_DIR / "css_pwa_icon_512.png", media_type="image/png")
 
 
 def _login_success_response(user_ctx: Dict[str, Any]) -> RedirectResponse:
@@ -1297,9 +1333,18 @@ def _runtime_heartbeat_html() -> str:
     '''
 
 def _dashboard_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
-    dashboard_text = _mobile_dashboard_text(user_ctx, session)
-    dashboard_payload = _mobile_dashboard_payload(user_ctx, session)
-    frontend_payload = build_frontend_payload(dashboard_payload)
+    dashboard_state = DashboardHydrationCoordinator().hydrate(
+        **_mobile_runtime_payloads(user_ctx, session)
+    )
+    dashboard_payload = dashboard_state.to_dict()
+    dashboard_text = _mobile_dashboard_text_from_payload(dashboard_payload)
+    frontend_payload = {
+        "sections": {
+            "session_command_centre": build_session_command_centre_section(dashboard_payload),
+            "live_micro_pilot": build_live_micro_pilot_section(dashboard_payload),
+            "live_readiness_certification": build_live_readiness_certification_section(dashboard_payload),
+        }
+    }
     status = _system_status(user_ctx)
     system_mode = "Live" if status["system_live"] else "Paper"
     order_state = "Enabled" if status["orders_enabled"] else "Disabled"
@@ -1600,6 +1645,24 @@ def _live_readiness_certification_page(user_ctx: Dict[str, Any], session: Dict[s
 def _mobile_dashboard_text(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
     return DashboardRuntimeBootstrap().run(
         **_mobile_runtime_payloads(user_ctx, session)
+    )
+
+
+def _mobile_dashboard_text_from_payload(dashboard_payload: Dict[str, Any]) -> str:
+    account = _mapping(dashboard_payload.get("account_summary"))
+    session = _mapping(dashboard_payload.get("session"))
+    execution = _mapping(dashboard_payload.get("execution_summary"))
+    broker = _mapping(dashboard_payload.get("broker_summary"))
+    return "\n".join(
+        [
+            "Capital Strata Systems mobile dashboard",
+            f"Mode: {dashboard_payload.get('resolved_mode', 'paper')}",
+            f"Engine: {session.get('engine_mode', 'SAFE')}",
+            f"Broker: {broker.get('selected_broker', account.get('broker', 'MOBILE'))}",
+            f"Account equity: {_money(account.get('total_equity'))}",
+            f"Cash: {_money(account.get('cash_balance'))}",
+            f"Execution: {execution.get('execution_state', 'MOBILE_ORDERS_DISABLED')}",
+        ]
     )
 
 
@@ -3379,6 +3442,11 @@ def _page(title: str, body: str, meta_refresh: int = 0) -> str:
   <meta name="theme-color" content="#10202a">{refresh_tag}
   <title>CSS - {safe_title}</title>
   <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="192x192" href="/static/css_pwa_icon_192.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-title" content="CSS">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <style>{_css()}</style>
 </head>
 <body>

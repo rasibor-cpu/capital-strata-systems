@@ -88,7 +88,7 @@ Phase 153I does not authorize live trading. If any authority condition fails, `e
 
 ## Phase 154A Multi-Broker Readiness Framework Addendum
 
-Phase 154A introduces the canonical Broker Readiness Framework and OANDA LIVE read-only adapter. Coinbase and OANDA now publish the same readiness contract for credentials, authentication, connection, account data, market data, execution support, execution enablement, broker health, readiness score, and last sync.
+Phase 154A introduces the canonical Broker Readiness Framework and OANDA LIVE read-only adapter. Coinbase and OANDA now publish the same readiness contract for broker name, broker type, credentials, authentication, connection, account data, market data, products loaded, execution support, execution enablement, readiness score, last sync, and separate infrastructure, credentials, authentication, connection, market data, and account-data health dimensions.
 
 Phase 154A does not authorize live trading. Execution authority remains broker-independent and fail-closed; no broker-specific authority path may bypass Phase 152A CAD 20 Governor, Unified Trade Gate, Margin Gate, AntiBleedGuard, RBAC, Kill Switch, or Live Execution Authority.
 

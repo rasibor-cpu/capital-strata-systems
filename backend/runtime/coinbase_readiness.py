@@ -98,13 +98,20 @@ def evaluate_coinbase_live_read_only(
     diagnostics = coinbase_credential_diagnostics(env)
     result: dict[str, Any] = {
         "selected_broker": selection.selected_broker,
+        "broker_type": _broker_type(selection.selected_broker),
         "broker_mode": selection.broker_mode,
-        "execution_scope": READ_ONLY_EXECUTION_SCOPE if selection.selected_broker == "COINBASE" and selection.broker_mode == "live" else "PAPER_OR_NOT_SELECTED",
+        "execution_scope": READ_ONLY_EXECUTION_SCOPE if selection.selected_broker != "NONE" and selection.broker_mode == "live" else "PAPER_OR_NOT_SELECTED",
         "broker_execution_status": "DISABLED",
         "can_live_execute": False,
         "broker_connected": False,
         "broker_authenticated": False,
         "broker_health": "UNKNOWN" if selection.selected_broker == "COINBASE" else "DISABLED",
+        "infrastructure_health": "UNKNOWN" if selection.selected_broker != "NONE" else "DISABLED",
+        "credentials_health": "UNKNOWN",
+        "authentication_health": "NOT_TESTED",
+        "connection_health": "NOT_CONNECTED",
+        "market_data_health": "NOT_TESTED",
+        "account_data_health": "UNAVAILABLE",
         "auth_reason": "not_coinbase_live_read_only",
         "read_checks": {
             "account": "NOT_ATTEMPTED",
@@ -224,6 +231,13 @@ def merge_readiness_into_broker_state(selection: BrokerStartupSelection, readine
             "live_order_permission": False,
             "execution_allowed": False,
             "credential_status": str(readiness.get("credential_status", "")),
+            "broker_type": str(readiness.get("broker_type", _mapping(readiness.get("broker_readiness")).get("broker_type", _broker_type(state.get("selected_broker"))))),
+            "infrastructure_health": str(readiness.get("infrastructure_health", _mapping(readiness.get("broker_readiness")).get("infrastructure_health", "UNKNOWN"))),
+            "credentials_health": str(readiness.get("credentials_health", _mapping(readiness.get("broker_readiness")).get("credentials_health", "UNKNOWN"))),
+            "authentication_health": str(readiness.get("authentication_health", _mapping(readiness.get("broker_readiness")).get("authentication_health", "UNKNOWN"))),
+            "connection_health": str(readiness.get("connection_health", _mapping(readiness.get("broker_readiness")).get("connection_health", "UNKNOWN"))),
+            "market_data_health": str(readiness.get("market_data_health", _mapping(readiness.get("broker_readiness")).get("market_data_health", "UNKNOWN"))),
+            "account_data_health": str(readiness.get("account_data_health", _mapping(readiness.get("broker_readiness")).get("account_data_health", "UNKNOWN"))),
             "auth_status": str(readiness.get("auth_status", "")),
             "connection_status": str(readiness.get("connection_status", "")),
             "product_price_status": str(readiness.get("product_price_status", "")),
@@ -298,6 +312,17 @@ def _any_present(env: Mapping[str, Any], names: tuple[str, ...]) -> bool:
 
 def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _broker_type(broker: Any) -> str:
+    text = str(broker or "NONE").strip().upper()
+    if text == "COINBASE":
+        return "CRYPTO"
+    if text == "OANDA":
+        return "FX"
+    if text == "IBKR":
+        return "MULTI_ASSET"
+    return "NONE"
 
 
 def _try_read(adapter: Any, method_names: tuple[str, ...]) -> Any:

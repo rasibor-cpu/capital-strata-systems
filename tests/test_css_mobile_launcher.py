@@ -208,6 +208,12 @@ def test_launcher_manifest_and_icon_routes():
     assert data["name"] == "CSS Mobile Launcher"
     assert data["start_url"] == "/mobile-launcher"
     assert data["scope"] == "/"
+    assert data["icons"][0]["src"] == "/static/css_pwa_icon_192.png"
+    assert data["icons"][1]["src"] == "/static/css_pwa_icon_512.png"
+
+    response = client.get("/static/css_launcher_manifest.json")
+    assert response.status_code == 200
+    assert response.json()["short_name"] == "CSS"
     
     response = client.get("/static/css_launcher_icon.svg")
     assert response.status_code == 200
@@ -226,6 +232,19 @@ def test_launcher_manifest_and_icon_routes():
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
     assert response.content
+
+    response = client.get("/apple-touch-icon.png")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.content
+
+    response = client.get("/mobile")
+    assert '<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">' in response.text
+    assert '<link rel="icon" type="image/png" sizes="192x192" href="/static/css_pwa_icon_192.png">' in response.text
+
+    response = client.get("/mobile-launcher")
+    assert '<link rel="manifest" href="/static/css_launcher_manifest.json">' in response.text
+    assert '<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">' in response.text
 
 def test_launcher_health_and_status_routes(launcher_temp_dir):
     response = client.get("/health")

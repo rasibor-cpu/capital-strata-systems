@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
 from dashboard.runtime.api_bridge import (
     DashboardStateProvider,
@@ -16,6 +17,9 @@ from dashboard.runtime.dashboard_hydration_coordinator import (
 from dashboard.runtime.dashboard_state import DashboardState
 from dashboard.runtime.runtime_smoke_test import build_smoke_payloads
 from dashboard.runtime.ws_bridge import create_ws_router
+
+
+BRANDING_DIR = Path(__file__).resolve().parents[2] / "assets" / "branding"
 
 
 def demo_dashboard_state_provider() -> DashboardState:
@@ -43,6 +47,52 @@ def create_app(
     @app.get("/", include_in_schema=False)
     async def index() -> RedirectResponse:
         return RedirectResponse("/dashboard", status_code=303)
+
+    @app.get("/manifest.webmanifest")
+    async def manifest() -> JSONResponse:
+        return JSONResponse(
+            {
+                "name": "Capital Strata Systems",
+                "short_name": "CSS",
+                "description": "Capital Strata Systems institutional dashboard",
+                "start_url": "/dashboard",
+                "scope": "/",
+                "display": "standalone",
+                "background_color": "#111820",
+                "theme_color": "#111820",
+                "icons": [
+                    {
+                        "src": "/static/css_pwa_icon_192.png",
+                        "sizes": "192x192",
+                        "type": "image/png",
+                        "purpose": "any maskable",
+                    },
+                    {
+                        "src": "/static/css_pwa_icon_512.png",
+                        "sizes": "512x512",
+                        "type": "image/png",
+                        "purpose": "any maskable",
+                    },
+                ],
+            }
+        )
+
+    @app.get("/favicon.ico")
+    async def favicon() -> FileResponse:
+        return FileResponse(BRANDING_DIR / "css.ico", media_type="image/x-icon")
+
+    @app.get("/apple-touch-icon.png")
+    @app.get("/static/apple_touch_icon_180.png")
+    async def apple_touch_icon() -> FileResponse:
+        return FileResponse(BRANDING_DIR / "apple_touch_icon_180.png", media_type="image/png")
+
+    @app.get("/static/css_pwa_icon_192.png")
+    async def css_pwa_icon_192() -> FileResponse:
+        return FileResponse(BRANDING_DIR / "css_pwa_icon_192.png", media_type="image/png")
+
+    @app.get("/static/css_pwa_icon_512.png")
+    async def css_pwa_icon_512() -> FileResponse:
+        return FileResponse(BRANDING_DIR / "css_pwa_icon_512.png", media_type="image/png")
 
     @app.get("/dashboard", response_class=HTMLResponse)
     async def dashboard() -> HTMLResponse:
@@ -176,6 +226,16 @@ def _app_nav(active: str) -> str:
     )
 
 
+def _icon_links() -> str:
+    return """
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="192x192" href="/static/css_pwa_icon_192.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-title" content="CSS">
+  <meta name="apple-mobile-web-app-capable" content="yes">""".rstrip()
+
+
 def _dashboard_page() -> str:
     panel_ids = json.dumps(
         [
@@ -201,6 +261,7 @@ def _dashboard_page() -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111820">
   <title>CSS Institutional Web Dashboard</title>
+  {_icon_links()}
   <style>{_css()}</style>
 </head>
 <body><div style="background-color:#ffebee;color:#b71c1c;text-align:center;padding:8px;font-weight:bold;font-size:0.85em;border-bottom:1px solid #b71c1c;" aria-label="Risk Warning">Trading involves substantial risk. Loss of capital may occur. Past performance does not guarantee future results.</div>

@@ -56,7 +56,7 @@ class BrokerStartupSelection:
         payload["can_live_execute"] = False
         payload["execution_scope"] = (
             "LIVE READ-ONLY VALIDATION"
-            if payload["selected_broker"] == "COINBASE" and payload["broker_mode"] == "live"
+            if payload["selected_broker"] != "NONE" and payload["broker_mode"] == "live"
             else payload["broker_connection_mode"]
         )
         payload["live_micro_pilot_state"] = "DISARMED"
@@ -71,6 +71,13 @@ class BrokerStartupSelection:
         payload.setdefault("readiness_checklist", [])
         payload.setdefault("startup_diagnostics", {})
         payload.setdefault("broker_readiness", {})
+        payload.setdefault("broker_type", _broker_type(payload.get("selected_broker")))
+        payload.setdefault("infrastructure_health", "UNKNOWN")
+        payload.setdefault("credentials_health", "UNKNOWN")
+        payload.setdefault("authentication_health", "UNKNOWN")
+        payload.setdefault("connection_health", "UNKNOWN")
+        payload.setdefault("market_data_health", "UNKNOWN")
+        payload.setdefault("account_data_health", "UNKNOWN")
         payload.setdefault("readiness_score", 0.0)
         return payload
 
@@ -89,6 +96,17 @@ def normalize_broker(value: Any) -> str:
     }
     broker = aliases.get(text, text)
     return broker if broker in {"NONE", "COINBASE", "OANDA", "IBKR"} else "NONE"
+
+
+def _broker_type(broker: Any) -> str:
+    normalized = normalize_broker(broker)
+    if normalized == "COINBASE":
+        return "CRYPTO"
+    if normalized == "OANDA":
+        return "FX"
+    if normalized == "IBKR":
+        return "MULTI_ASSET"
+    return "NONE"
 
 
 def normalize_broker_mode(value: Any, *, selected_broker: str = "NONE") -> str:
@@ -224,6 +242,13 @@ def broker_summary_from_artifacts(
         "live_execution_authority",
         "broker_execution_enabled",
         "broker_readiness",
+        "broker_type",
+        "infrastructure_health",
+        "credentials_health",
+        "authentication_health",
+        "connection_health",
+        "market_data_health",
+        "account_data_health",
         "readiness_score",
         "last_broker_sync",
         "products_loaded",

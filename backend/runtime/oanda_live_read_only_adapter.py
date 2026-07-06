@@ -84,11 +84,17 @@ class OandaLiveReadOnlyAdapter:
     def get_positions(self) -> Any:
         return _call_first(self._client(), ("get_open_positions", "get_positions", "list_positions"))
 
+    def get_open_trades(self) -> Any:
+        return _call_first(self._client(), ("get_open_trades", "list_open_trades", "get_trades"))
+
     def get_pricing(self) -> Any:
         return _call_first(self._client(), ("get_pricing", "get_prices", "pricing", "heartbeat"))
 
     def get_instruments(self) -> Any:
         return _call_first(self._client(), ("get_instruments", "list_instruments", "instruments"))
+
+    def get_account_metadata(self) -> Any:
+        return _call_first(self._client(), ("get_account_metadata", "account_metadata", "get_account_details"))
 
     def get_server_status(self) -> Any:
         return _call_first(self._client(), ("get_server_status", "server_status", "heartbeat"))
@@ -114,9 +120,11 @@ class OandaLiveReadOnlyAdapter:
         try:
             account_payload = self.get_account_summary()
             positions_payload = self.get_positions()
+            open_trades_payload = self.get_open_trades()
             instruments_payload = self.get_instruments()
             pricing_payload = self.get_pricing() if include_market_data else None
             heartbeat_payload = self.heartbeat()
+            metadata_payload = self.get_account_metadata()
             account = _extract_account(account_payload)
             self.connected = True
             self.authenticated = bool(account_payload)
@@ -129,7 +137,7 @@ class OandaLiveReadOnlyAdapter:
                 account=account,
                 products_loaded=_count_items(instruments_payload),
                 market_data_ready=pricing_payload is not None or heartbeat_payload is not None,
-                positions_loaded=positions_payload is not None,
+                positions_loaded=positions_payload is not None or open_trades_payload is not None,
             )
         except Exception as exc:
             self.connected = False
@@ -166,6 +174,7 @@ class OandaLiveReadOnlyAdapter:
         snapshot = build_broker_readiness_snapshot(
             {
                 "broker_name": "OANDA",
+                "broker_type": "FX",
                 "mode": "live",
                 "credential_status": diagnostics.get("credential_status"),
                 "authenticated": self.authenticated,
@@ -174,6 +183,12 @@ class OandaLiveReadOnlyAdapter:
                 "market_data_ready": market_data_ready,
                 "products_loaded": products_loaded,
                 "broker_health": self.broker_health,
+                "infrastructure_health": self.broker_health,
+                "credentials_health": "READY" if diagnostics.get("credential_status") == "PRESENT" else "MISSING",
+                "authentication_health": "AUTHENTICATED" if self.authenticated else "NOT_TESTED",
+                "connection_health": "CONNECTED" if self.connected else "NOT_CONNECTED",
+                "market_data_health": "READY" if market_data_ready else "NOT_TESTED",
+                "account_data_health": "READY" if account_payload else "UNAVAILABLE",
                 "execution_supported": True,
                 "execution_enabled": False,
                 "last_successful_sync": self.last_successful_sync,
@@ -187,6 +202,7 @@ class OandaLiveReadOnlyAdapter:
         return {
             "selected_broker": "OANDA",
             "broker": "OANDA",
+            "broker_type": "FX",
             "broker_mode": "live",
             "credential_diagnostics": diagnostics,
             "credential_status": diagnostics.get("credential_status", "MISSING"),
@@ -195,6 +211,12 @@ class OandaLiveReadOnlyAdapter:
             "broker_authenticated": self.authenticated,
             "broker_connected": self.connected,
             "broker_health": self.broker_health,
+            "infrastructure_health": self.broker_health,
+            "credentials_health": "READY" if diagnostics.get("credential_status") == "PRESENT" else "MISSING",
+            "authentication_health": "AUTHENTICATED" if self.authenticated else "NOT_TESTED",
+            "connection_health": "CONNECTED" if self.connected else "NOT_CONNECTED",
+            "market_data_health": "READY" if market_data_ready else "NOT_TESTED",
+            "account_data_health": "READY" if account_payload else "UNAVAILABLE",
             "connection_status": self.broker_health,
             "connection_error": self.connection_error,
             "last_successful_sync": self.last_successful_sync,

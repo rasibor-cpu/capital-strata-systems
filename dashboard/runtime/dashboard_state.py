@@ -334,7 +334,7 @@ class DashboardState:
             "dashboard_messages": list(self.dashboard_messages),
         }
 
-        return self._json_safe(payload)
+        return payload
 
     @staticmethod
     def _normalize_mode(value: Any) -> str:

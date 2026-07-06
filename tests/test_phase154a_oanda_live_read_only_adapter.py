@@ -25,6 +25,10 @@ class FakeOandaReadClient:
         self.calls.append("get_open_positions")
         return {"positions": []}
 
+    def get_open_trades(self):
+        self.calls.append("get_open_trades")
+        return {"trades": []}
+
     def get_instruments(self):
         self.calls.append("get_instruments")
         return {"instruments": [{"name": "EUR_USD"}, {"name": "USD_CAD"}]}
@@ -36,6 +40,10 @@ class FakeOandaReadClient:
     def heartbeat(self):
         self.calls.append("heartbeat")
         return {"ok": True}
+
+    def get_account_metadata(self):
+        self.calls.append("get_account_metadata")
+        return {"account_id": "redacted-test-account", "currency": "CAD"}
 
     def submit_order(self):
         raise AssertionError("read-only adapter must never call submit_order")
@@ -79,7 +87,13 @@ def test_phase154a_oanda_read_only_sync_publishes_framework_payload() -> None:
     assert status["products_loaded"] == 2
     assert status["market_data_status"] == "OK"
     assert status["broker_readiness"]["broker_name"] == "OANDA"
+    assert status["broker_readiness"]["broker_type"] == "FX"
     assert status["broker_readiness"]["broker_ready"] is True
+    assert status["broker_readiness"]["credentials_health"] == "READY"
+    assert status["broker_readiness"]["authentication_health"] == "AUTHENTICATED"
+    assert status["broker_readiness"]["connection_health"] == "CONNECTED"
+    assert status["broker_readiness"]["market_data_health"] == "READY"
+    assert status["broker_readiness"]["account_data_health"] == "READY"
     assert status["broker_readiness"]["execution_enabled"] is False
     assert status["execution_allowed"] is False
     assert "submit_order" not in client.calls
@@ -93,5 +107,5 @@ def test_phase154a_oanda_adapter_exposes_no_write_methods() -> None:
     }
     forbidden_fragments = ("submit", "modify", "close", "cancel", "market_order", "limit_order", "stop_order", "place")
 
-    assert {"authenticate", "get_account_summary", "get_nav", "get_balance", "get_margin", "get_positions", "get_pricing", "get_instruments", "get_server_status", "heartbeat", "connection_status", "sync"} <= public_methods
+    assert {"authenticate", "get_account_summary", "get_nav", "get_balance", "get_margin", "get_positions", "get_open_trades", "get_pricing", "get_instruments", "get_server_status", "heartbeat", "get_account_metadata", "connection_status", "sync"} <= public_methods
     assert not any(fragment in method for method in public_methods for fragment in forbidden_fragments)

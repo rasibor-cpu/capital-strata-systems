@@ -13,6 +13,7 @@ def _ready_payload(broker_name: str) -> dict[str, object]:
         build_broker_readiness_snapshot(
             {
                 "broker_name": broker_name,
+                "broker_type": "CRYPTO" if broker_name == "COINBASE" else "FX",
                 "mode": "live",
                 "credential_status": "PRESENT",
                 "authenticated": True,
@@ -21,6 +22,12 @@ def _ready_payload(broker_name: str) -> dict[str, object]:
                 "market_data_ready": True,
                 "products_loaded": 2,
                 "broker_health": "HEALTHY",
+                "infrastructure_health": "HEALTHY",
+                "credentials_health": "READY",
+                "authentication_health": "AUTHENTICATED",
+                "connection_health": "CONNECTED",
+                "market_data_health": "READY",
+                "account_data_health": "READY",
                 "execution_supported": True,
                 "execution_enabled": True,
                 "last_successful_sync": "2026-07-04T12:00:00+00:00",
@@ -45,12 +52,24 @@ def _ready_payload(broker_name: str) -> dict[str, object]:
 
 
 def test_phase154a_broker_readiness_contract_is_identical_for_coinbase_and_oanda() -> None:
-    coinbase = broker_readiness_payload(build_broker_readiness_snapshot({"broker_name": "COINBASE", "credential_status": "PRESENT"}))
-    oanda = broker_readiness_payload(build_broker_readiness_snapshot({"broker_name": "OANDA", "credential_status": "PRESENT"}))
+    coinbase = broker_readiness_payload(build_broker_readiness_snapshot({"broker_name": "COINBASE", "broker_type": "CRYPTO", "credential_status": "PRESENT"}))
+    oanda = broker_readiness_payload(build_broker_readiness_snapshot({"broker_name": "OANDA", "broker_type": "FX", "credential_status": "PRESENT"}))
 
     assert set(coinbase) == set(oanda)
     assert coinbase["broker_name"] == "COINBASE"
     assert oanda["broker_name"] == "OANDA"
+    assert coinbase["broker_type"] == "CRYPTO"
+    assert oanda["broker_type"] == "FX"
+    for key in (
+        "infrastructure_health",
+        "credentials_health",
+        "authentication_health",
+        "connection_health",
+        "market_data_health",
+        "account_data_health",
+    ):
+        assert key in coinbase
+        assert key in oanda
     assert coinbase["execution_allowed"] is False
     assert oanda["execution_allowed"] is False
 

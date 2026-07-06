@@ -5,10 +5,53 @@ from datetime import datetime, timezone
 from typing import Any, Mapping
 
 
+CANONICAL_BROKER_READINESS_FIELDS = (
+    "broker_name",
+    "broker_type",
+    "mode",
+    "credentials_present",
+    "authenticated",
+    "connected",
+    "account_loaded",
+    "market_data_ready",
+    "products_loaded",
+    "broker_health",
+    "infrastructure_health",
+    "credentials_health",
+    "authentication_health",
+    "connection_health",
+    "market_data_health",
+    "account_data_health",
+    "execution_supported",
+    "execution_enabled",
+    "last_successful_sync",
+    "account_balance",
+    "equity",
+    "buying_power",
+    "authority_block_reason",
+    "readiness_score",
+)
+
+BROKER_PARITY_COMPARABLE_FIELDS = tuple(
+    field
+    for field in CANONICAL_BROKER_READINESS_FIELDS
+    if field
+    not in {
+        "broker_name",
+        "broker_type",
+        "last_successful_sync",
+        "account_balance",
+        "equity",
+        "buying_power",
+    }
+)
+
+
 @dataclass(frozen=True)
 class BrokerReadinessSnapshot:
     broker_name: str
-    mode: str
+    broker_type: str = "UNKNOWN"
+    mode: str = "paper"
     credentials_present: bool = False
     authenticated: bool = False
     connected: bool = False
@@ -16,6 +59,12 @@ class BrokerReadinessSnapshot:
     market_data_ready: bool = False
     products_loaded: int = 0
     broker_health: str = "UNKNOWN"
+    infrastructure_health: str = "UNKNOWN"
+    credentials_health: str = "UNKNOWN"
+    authentication_health: str = "UNKNOWN"
+    connection_health: str = "UNKNOWN"
+    market_data_health: str = "UNKNOWN"
+    account_data_health: str = "UNKNOWN"
     execution_supported: bool = False
     execution_enabled: bool = False
     last_successful_sync: str = ""
@@ -71,6 +120,7 @@ def build_broker_readiness_snapshot(
     )
     return BrokerReadinessSnapshot(
         broker_name=str(data.get("broker_name", data.get("selected_broker", data.get("broker", "NONE"))) or "NONE").upper(),
+        broker_type=str(data.get("broker_type", "EXTERNAL") or "EXTERNAL").upper(),
         mode=str(data.get("mode", data.get("broker_mode", "paper")) or "paper").lower(),
         credentials_present=credentials_present,
         authenticated=authenticated,
@@ -79,6 +129,12 @@ def build_broker_readiness_snapshot(
         market_data_ready=market_data_ready,
         products_loaded=products_loaded,
         broker_health=str(data.get("broker_health", data.get("broker_infrastructure_health", "UNKNOWN")) or "UNKNOWN"),
+        infrastructure_health=str(data.get("infrastructure_health", data.get("broker_infrastructure_health", "UNKNOWN")) or "UNKNOWN"),
+        credentials_health=str(data.get("credentials_health", "UNKNOWN") or "UNKNOWN"),
+        authentication_health=str(data.get("authentication_health", "UNKNOWN") or "UNKNOWN"),
+        connection_health=str(data.get("connection_health", "UNKNOWN") or "UNKNOWN"),
+        market_data_health=str(data.get("market_data_health", "UNKNOWN") or "UNKNOWN"),
+        account_data_health=str(data.get("account_data_health", "UNKNOWN") or "UNKNOWN"),
         execution_supported=_truthy(data.get("execution_supported", False)),
         execution_enabled=execution_enabled,
         last_successful_sync=str(data.get("last_successful_sync", data.get("last_broker_sync", "")) or ""),
@@ -168,6 +224,8 @@ def _float_or_none(value: Any) -> float | None:
 
 
 __all__ = [
+    "BROKER_PARITY_COMPARABLE_FIELDS",
+    "CANONICAL_BROKER_READINESS_FIELDS",
     "BrokerReadinessSnapshot",
     "broker_readiness_payload",
     "build_broker_readiness_snapshot",

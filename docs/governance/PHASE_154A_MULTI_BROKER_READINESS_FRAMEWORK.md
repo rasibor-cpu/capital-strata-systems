@@ -11,6 +11,7 @@ Phase 154A generalizes the Phase 152-153 live readiness architecture so Coinbase
 `backend/runtime/broker_readiness_framework.py` defines the broker-neutral readiness interface:
 
 - broker name
+- broker type
 - mode
 - credentials present
 - authenticated
@@ -19,6 +20,12 @@ Phase 154A generalizes the Phase 152-153 live readiness architecture so Coinbase
 - market data ready
 - products loaded
 - broker health
+- infrastructure health
+- credentials health
+- authentication health
+- connection health
+- market data health
+- account data health
 - execution supported
 - execution enabled
 - last successful sync
@@ -30,6 +37,8 @@ Phase 154A generalizes the Phase 152-153 live readiness architecture so Coinbase
 
 Both Coinbase and OANDA feed this same framework. Dashboard, startup summary, readiness state, and execution authority consume the framework instead of broker-specific readiness logic.
 
+Health dimensions are reported independently. Infrastructure, credentials, authentication, connection, market data, and account data are separate readiness values; one dimension must not imply another.
+
 ## OANDA Read-Only Adapter
 
 `backend/runtime/oanda_live_read_only_adapter.py` supports read-only OANDA validation only:
@@ -40,10 +49,12 @@ Both Coinbase and OANDA feed this same framework. Dashboard, startup summary, re
 - balance
 - margin
 - positions
+- open trades
 - pricing
 - instrument list
 - server status
 - heartbeat
+- account metadata
 
 The adapter exposes no order submission, order modification, trade close, cancel, market order, limit order, stop order, or other write-operation methods.
 

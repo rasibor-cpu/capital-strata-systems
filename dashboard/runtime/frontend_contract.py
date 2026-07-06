@@ -158,7 +158,7 @@ def build_frontend_payload(
         },
     }
 
-    return _json_safe(payload)
+    return payload
 
 
 def account_summary(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -922,25 +922,22 @@ def live_micro_pilot(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     if explicit_payload:
         payload = dict(explicit_payload)
     else:
-        try:
-            payload = live_micro_pilot_status()
-        except Exception as exc:
-            payload = {
-                "section_title": "Live Micro-Pilot Status",
-                "pilot_enabled": False,
-                "pilot_armed": False,
-                "pilot_state": "FAIL_CLOSED",
-                "currency": "CAD",
-                "max_live_test_capital": "20.00",
-                "max_position_size": "20.00",
-                "remaining_live_test_capacity": "0.00",
-                "config_valid": False,
-                "config_error": str(exc),
-                "pilot_guard_enforced": True,
-                "broker_submission_guard": "REJECT_BEFORE_BROKER",
-                "auto_flattening_enabled": False,
-                "operator_controls": "SUPER_USER_ONLY",
-            }
+        payload = {
+            "section_title": "Live Micro-Pilot Status",
+            "pilot_enabled": False,
+            "pilot_armed": False,
+            "pilot_state": "DISARMED",
+            "currency": "CAD",
+            "max_live_test_capital": "20.00",
+            "max_position_size": "20.00",
+            "remaining_live_test_capacity": "0.00",
+            "config_valid": False,
+            "config_error": "live_micro_pilot_artifact_not_provided",
+            "pilot_guard_enforced": True,
+            "broker_submission_guard": "REJECT_BEFORE_BROKER",
+            "auto_flattening_enabled": False,
+            "operator_controls": "SUPER_USER_ONLY",
+        }
     payload["execution_allowed"] = False
     payload["advisory_only"] = True
     return payload
@@ -987,6 +984,7 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     broker_readiness = _mapping(broker_payload.get("broker_readiness"))
     return {
         "selected_broker": str(broker_payload.get("selected_broker", "NONE")),
+        "broker_type": str(broker_payload.get("broker_type", broker_readiness.get("broker_type", "UNKNOWN"))),
         "broker_mode": str(broker_payload.get("broker_mode", "paper")),
         "connected": _boolean(broker_payload.get("connected")),
         "broker_connected": _boolean(broker_payload.get("broker_connected", broker_payload.get("connected"))),
@@ -1002,6 +1000,12 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         "account_loaded": _boolean(broker_payload.get("account_loaded", broker_readiness.get("account_loaded"))),
         "market_data_ready": _boolean(broker_payload.get("market_data_ready", broker_readiness.get("market_data_ready"))),
         "execution_supported": _boolean(broker_payload.get("execution_supported", broker_readiness.get("execution_supported"))),
+        "infrastructure_health": str(broker_payload.get("infrastructure_health", broker_readiness.get("infrastructure_health", "UNKNOWN"))),
+        "credentials_health": str(broker_payload.get("credentials_health", broker_readiness.get("credentials_health", "UNKNOWN"))),
+        "authentication_health": str(broker_payload.get("authentication_health", broker_readiness.get("authentication_health", "UNKNOWN"))),
+        "connection_health": str(broker_payload.get("connection_health", broker_readiness.get("connection_health", "UNKNOWN"))),
+        "market_data_health": str(broker_payload.get("market_data_health", broker_readiness.get("market_data_health", "UNKNOWN"))),
+        "account_data_health": str(broker_payload.get("account_data_health", broker_readiness.get("account_data_health", "UNKNOWN"))),
         "readiness_score": _number(broker_payload.get("readiness_score", broker_readiness.get("readiness_score"))),
         "broker_execution_armed": _boolean(broker_payload.get("broker_execution_armed")),
         "operator_requested_live": _boolean(broker_payload.get("operator_requested_live")),

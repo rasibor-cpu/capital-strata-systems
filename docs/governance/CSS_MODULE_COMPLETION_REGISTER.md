@@ -142,6 +142,6 @@ This register does not authorize live broker execution. Execution authority rema
 
 Status: Canonical multi-broker readiness framework implemented for review.
 
-Phase 154A adds `BrokerReadinessFramework` and `OandaLiveReadOnlyAdapter`. Coinbase and OANDA now publish the same readiness fields, and Live Execution Authority consumes that canonical readiness contract without broker-specific rules.
+Phase 154A adds `BrokerReadinessFramework` and `OandaLiveReadOnlyAdapter`. Coinbase and OANDA now publish the same readiness fields, including broker type and independent health dimensions for infrastructure, credentials, authentication, connection, market data, and account data. Live Execution Authority consumes that canonical readiness contract without broker-specific rules.
 
 This register does not authorize live broker execution. OANDA read-only validation exposes no write operations, and all broker execution remains governed by the canonical fail-closed authority path.
