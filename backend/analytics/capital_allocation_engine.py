@@ -35,12 +35,15 @@ class CapitalAllocationEngine:
             if not symbol:
                 raise CapitalAllocationEngineError("Ranking contains a symbol without a name")
             trade_count = int(row.get("trade_count", 0))
-            score = float(row.get("score", 0.0))
+            score = float(row.get("profitability_optimization_score", row.get("score", 0.0)))
             realized_pnl = float(row.get("realized_pnl", 0.0))
             normalized_rows.append(
                 {
                     "symbol": symbol,
                     "score": score,
+                    "base_score": float(row.get("score", score)),
+                    "profitability_optimization_score": score,
+                    "profitability_quality_status": str(row.get("profitability_quality_status", "")),
                     "trade_count": trade_count,
                     "realized_pnl": realized_pnl,
                 }
@@ -92,11 +95,16 @@ class CapitalAllocationEngine:
                 {
                     "symbol": row["symbol"],
                     "score": score,
+                    "base_score": float(row.get("base_score", score)),
+                    "profitability_optimization_score": score,
+                    "profitability_quality_status": str(row.get("profitability_quality_status", status)),
                     "trade_count": trade_count,
                     "realized_pnl": float(row["realized_pnl"]),
                     "allocation_weight": weight,
                     "allocation_amount": available_capital * weight,
                     "status": status,
+                    "advisory_only": True,
+                    "execution_allowed": False,
                 }
             )
 

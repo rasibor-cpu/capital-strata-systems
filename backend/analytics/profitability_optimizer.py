@@ -4,6 +4,7 @@ from typing import Any, Mapping
 
 from .adaptive_threshold_calibration_engine import AdaptiveThresholdCalibrationEngine
 from .dynamic_position_optimizer import DynamicPositionOptimizer
+from .profitability_optimization_score import rank_profitability_opportunities
 from .regime_parameter_profiles import RegimeParameterProfiles
 from .strategy_promotion_manager import StrategyPromotionManager
 
@@ -53,11 +54,15 @@ class ProfitabilityOptimizer:
         sizing_recommendations = self.position_optimizer.recommend(positions)
         strategy_recommendations = self.promotion_manager.recommend(league)
         regime_recommendations = self.regime_profiles.recommend_profiles()
+        profitability_rankings = rank_profitability_opportunities(
+            self._profitability_evidence(trades, league)
+        )
 
         estimated_improvement = self._estimate_improvement(trades, strategy_recommendations)
         confidence_score = self._confidence_score(trades, league, sizing_recommendations)
 
         return {
+            "profitability_optimization_rankings": profitability_rankings,
             "recommended_threshold_changes": threshold_recommendations,
             "recommended_sizing_changes": sizing_recommendations,
             "recommended_strategy_changes": strategy_recommendations,
@@ -69,8 +74,77 @@ class ProfitabilityOptimizer:
                 "strategy_count": len(league),
                 "position_rows": len(positions),
                 "recommendation_only": True,
+                "advisory_only": True,
+                "execution_allowed": False,
             },
         }
+
+    def _profitability_evidence(
+        self,
+        trades: list[Mapping[str, Any]],
+        league: list[Mapping[str, Any]],
+    ) -> list[dict[str, Any]]:
+        by_strategy: dict[str, dict[str, Any]] = {}
+        for trade in trades:
+            strategy_id = str(trade.get("strategy_id", "UNKNOWN")).strip() or "UNKNOWN"
+            row = by_strategy.setdefault(
+                strategy_id,
+                {
+                    "strategy_id": strategy_id,
+                    "trade_count": 0,
+                    "realized_pnl": 0.0,
+                    "wins": 0,
+                    "confidence_values": [],
+                    "asset_counts": {},
+                },
+            )
+            pnl = self._float(trade.get("realized_pnl", trade.get("pnl", 0.0)))
+            row["trade_count"] += 1
+            row["realized_pnl"] += pnl
+            row["wins"] += 1 if pnl > 0.0 else 0
+            confidence = trade.get("confidence")
+            if confidence is not None:
+                row["confidence_values"].append(self._clamp01(self._float(confidence)))
+            asset_class = str(trade.get("asset_class", "UNKNOWN")).upper()
+            row["asset_counts"][asset_class] = int(row["asset_counts"].get(asset_class, 0)) + 1
+
+        for league_row in league:
+            strategy_id = str(league_row.get("strategy_id", "UNKNOWN")).strip() or "UNKNOWN"
+            row = by_strategy.setdefault(
+                strategy_id,
+                {
+                    "strategy_id": strategy_id,
+                    "trade_count": int(league_row.get("sample_size", 0) or 0),
+                    "realized_pnl": self._float(league_row.get("realized_pnl", 0.0)),
+                    "wins": 0,
+                    "confidence_values": [],
+                    "asset_counts": {},
+                },
+            )
+            row["drawdown"] = self._float(league_row.get("drawdown", row.get("drawdown", 0.0)))
+            row["expected_edge"] = self._float(league_row.get("recent_trend", league_row.get("expected_edge", row.get("expected_edge", 0.0)))) * 100.0
+
+        evidence: list[dict[str, Any]] = []
+        for row in by_strategy.values():
+            trade_count = int(row.get("trade_count", 0))
+            wins = int(row.get("wins", 0))
+            asset_counts = dict(row.get("asset_counts", {}))
+            max_asset_count = max(asset_counts.values()) if asset_counts else 0
+            confidence_values = list(row.get("confidence_values", []))
+            evidence.append(
+                {
+                    "strategy_id": row["strategy_id"],
+                    "trade_count": trade_count,
+                    "realized_pnl": float(row.get("realized_pnl", 0.0)),
+                    "average_pnl": float(row.get("realized_pnl", 0.0)) / trade_count if trade_count > 0 else 0.0,
+                    "win_rate": wins / trade_count if trade_count > 0 else 0.0,
+                    "confidence": sum(confidence_values) / len(confidence_values) if confidence_values else None,
+                    "asset_class_concentration": max_asset_count / trade_count if trade_count > 0 and max_asset_count else None,
+                    "drawdown": row.get("drawdown"),
+                    "expected_edge": row.get("expected_edge"),
+                }
+            )
+        return evidence
 
     def _estimate_improvement(self, trades: list[Mapping[str, Any]], strategy_recommendations: list[Mapping[str, Any]]) -> float:
         if not trades:

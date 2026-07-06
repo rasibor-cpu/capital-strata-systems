@@ -25,6 +25,13 @@ from .opportunity_ranking_engine import OpportunityRankingEngine, OpportunityRan
 from .portfolio_correlation_engine import PortfolioCorrelationEngine, PortfolioCorrelationEngineError
 from .profitability_ranking_engine import ProfitabilityRankingEngine, ProfitabilityRankingEngineError
 from .profitability_optimizer import ProfitabilityOptimizer, ProfitabilityOptimizerError
+from .profitability_optimization_score import (
+    CANONICAL_PROFITABILITY_SCORE_COMPONENTS,
+    ProfitabilityOptimizationPolicy,
+    ProfitabilityOptimizationScoreError,
+    build_profitability_optimization_score,
+    rank_profitability_opportunities,
+)
 from .portfolio_optimization_engine import PortfolioOptimizationEngine, PortfolioOptimizationError
 from .signal_quality_engine import SignalQualityEngine
 from .marathon_readiness_optimizer import MarathonReadinessOptimizer, MarathonReadinessOptimizerError
@@ -96,6 +103,11 @@ __all__ = [
     "ProfitabilityRankingEngineError",
     "ProfitabilityOptimizer",
     "ProfitabilityOptimizerError",
+    "CANONICAL_PROFITABILITY_SCORE_COMPONENTS",
+    "ProfitabilityOptimizationPolicy",
+    "ProfitabilityOptimizationScoreError",
+    "build_profitability_optimization_score",
+    "rank_profitability_opportunities",
     "SignalQualityEngine",
     "MarathonReadinessOptimizer",
     "MarathonReadinessOptimizerError",

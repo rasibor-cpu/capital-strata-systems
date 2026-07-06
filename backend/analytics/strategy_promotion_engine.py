@@ -47,7 +47,7 @@ class StrategyPromotionEngine:
             realized_pnl = float(row.get("realized_pnl", 0.0))
             win_rate = float(row.get("win_rate", 0.0))
             average_pnl = float(row.get("average_pnl", 0.0))
-            score = float(row.get("score", 0.0))
+            score = float(row.get("profitability_optimization_score", row.get("score", 0.0)))
             confidence = min(1.0, max(0.0, trade_count / max(1, trade_count)))
             if trade_count >= 3 and score > 0.0 and win_rate >= 0.5:
                 recommendation = "PROMOTE"
@@ -69,6 +69,9 @@ class StrategyPromotionEngine:
                     "trade_count": trade_count,
                     "confidence": confidence,
                     "score": score,
+                    "profitability_optimization_score": score,
+                    "advisory_only": True,
+                    "execution_allowed": False,
                     "score_trend": "up" if score > 0.0 else "flat",
                     "recommendation": recommendation,
                 }
