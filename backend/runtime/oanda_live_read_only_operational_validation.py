@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from backend.runtime.oanda_live_read_only_adapter import OandaLiveReadOnlyAdapter
+from backend.runtime.broker_operational_status import (
+    build_broker_operational_status,
+    endpoint_for_broker,
+)
 
 
 FAILURE_REASONS = (
@@ -50,6 +54,7 @@ class OandaOperationalValidationResult:
     broker_validation: dict[str, Any] = field(default_factory=dict)
     broker_health: dict[str, Any] = field(default_factory=dict)
     broker_market_snapshot: dict[str, Any] = field(default_factory=dict)
+    broker_operational_status: dict[str, Any] = field(default_factory=dict)
     broker_execution_status: str = "DISABLED"
     execution_authority: bool = False
     can_live_execute: bool = False
@@ -197,6 +202,8 @@ class OandaLiveReadOnlyOperationalValidator:
         broker_validation = {
             "broker": "OANDA",
             "mode": "LIVE READ-ONLY",
+            "endpoint": endpoint_for_broker("OANDA", adapter.env if hasattr(adapter, "env") else {}),
+            "api_version": "v3",
             "validation_status": validation_status,
             "api_reachable": api_reachable,
             "authentication": authenticated,
@@ -216,6 +223,43 @@ class OandaLiveReadOnlyOperationalValidator:
             "advisory_only": True,
             "execution_allowed": False,
         }
+        server_time_value = "NOT_AVAILABLE"
+        plain_server_time = _plain(server_time)
+        if isinstance(plain_server_time, str):
+            server_time_value = plain_server_time
+        elif isinstance(plain_server_time, dict):
+            server_time_value = str(
+                plain_server_time.get("time")
+                or plain_server_time.get("server_time")
+                or plain_server_time.get("iso")
+                or "NOT_AVAILABLE"
+            )
+
+        last_failed_sync = "NOT_AVAILABLE"
+        if failures:
+            last_failed_sync = timestamp
+
+        broker_operational_status = build_broker_operational_status(
+            {
+                "broker": "OANDA",
+                "broker_type": "FX",
+                "mode": "LIVE_READ_ONLY",
+                "endpoint": endpoint_for_broker("OANDA", adapter.env if hasattr(adapter, "env") else {}),
+                "api_version": "v3",
+                "server_time": server_time_value,
+                "latency_ms": None,
+                "rate_limit_status": "UNKNOWN",
+                "last_successful_sync": adapter.last_successful_sync or "NOT_AVAILABLE",
+                "last_failed_sync": last_failed_sync,
+                "account_sync_status": "OK" if account_loaded else "PENDING",
+                "product_count": products_loaded,
+                "market_data_status": "OK" if market_data_loaded else "NOT_AVAILABLE",
+                "balance_status": "AVAILABLE" if balances_loaded else "NOT_AVAILABLE",
+                "margin_status": "BROKER_UNAVAILABLE" if account_loaded else "READ_ONLY_PENDING_ACCOUNT",
+                "failure_reasons": failures,
+            }
+        )
+        broker_validation["broker_operational_status"] = broker_operational_status
         broker_health = {
             "broker": "OANDA",
             "api_reachable": api_reachable,
@@ -259,6 +303,7 @@ class OandaLiveReadOnlyOperationalValidator:
             broker_validation=broker_validation,
             broker_health=broker_health,
             broker_market_snapshot=broker_market_snapshot,
+            broker_operational_status=broker_operational_status,
         ).as_dict()
 
 

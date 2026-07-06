@@ -161,3 +161,11 @@ Status: Coinbase live read-only operational validation implemented for review.
 Phase 155A adds `CoinbaseLiveReadOnlyOperationalValidator` to validate Coinbase API reachability, server time, account retrieval, portfolio retrieval, balances, products, and ticker reads using the existing `CoinbaseLiveReadOnlyAdapter`. It publishes canonical broker validation, broker health, and broker market snapshot artifacts for dashboard/API display.
 
 This register does not authorize live broker execution. No order, cancel, modify, or execution capability is added; broker execution remains disabled, LiveExecutionAuthority remains false, and the Live Micro-Pilot remains disarmed.
+
+## Phase 155C Canonical Broker Operational Status Register
+
+Status: Canonical broker operational status implemented for review.
+
+Phase 155C adds a shared canonical broker operational contract for Coinbase and OANDA covering endpoint isolation, API version, server-time visibility, sync status, product counts, market/balance/margin state, operational state, and failure reason. Dashboard and launcher surfaces now expose the canonical operational state for both brokers.
+
+This register does not authorize live broker execution. Broker execution remains disabled, LiveExecutionAuthority remains authoritative and fail-closed, and no order/cancel/modify/close capabilities are added.

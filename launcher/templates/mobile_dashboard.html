@@ -968,6 +968,13 @@
             <div class="status-row"><span>Products Loaded</span><strong>{{ coinbase_live_validation.products_loaded | default(0) }}</strong></div>
             <div class="status-row"><span>Market Data Loaded</span><strong>{{ coinbase_live_validation.market_data_loaded | default(false) }}</strong></div>
             <div class="status-row"><span>Coinbase Last Sync</span><strong>{{ coinbase_live_validation.last_successful_sync | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>Coinbase Endpoint</span><strong>{{ coinbase_live_validation.endpoint | default('NOT_AVAILABLE') }}</strong></div>
+            <div class="status-row"><span>Coinbase API Version</span><strong>{{ coinbase_live_validation.api_version | default('NOT_AVAILABLE') }}</strong></div>
+            <div class="status-row"><span>Coinbase Account Sync</span><strong>{{ coinbase_live_validation.account_sync_status | default('PENDING') }}</strong></div>
+            <div class="status-row"><span>Coinbase Balance Status</span><strong>{{ coinbase_live_validation.balance_status | default('NOT_AVAILABLE') }}</strong></div>
+            <div class="status-row"><span>Coinbase Margin Status</span><strong>{{ coinbase_live_validation.margin_status | default('READ_ONLY_PENDING_ACCOUNT') }}</strong></div>
+            <div class="status-row"><span>Coinbase Operational State</span><strong>{{ coinbase_live_validation.operational_state | default('PENDING') }}</strong></div>
+            <div class="status-row"><span>Coinbase Failure Reason</span><strong>{{ coinbase_live_validation.failure_reason | default('NONE') }}</strong></div>
             <div class="status-row"><span>Validation Timestamp</span><strong>{{ coinbase_live_validation.validation_timestamp | default('DATA UNAVAILABLE') }}</strong></div>
             <div class="status-row"><span>Validation Failures</span><strong>{{ coinbase_live_validation.failure_reasons | default([]) | length }}</strong></div>
 
@@ -979,6 +986,13 @@
             <div class="status-row"><span>OANDA Products Loaded</span><strong>{{ oanda_live_validation.products_loaded | default(0) }}</strong></div>
             <div class="status-row"><span>OANDA Market Data Loaded</span><strong>{{ oanda_live_validation.market_data_loaded | default(false) }}</strong></div>
             <div class="status-row"><span>OANDA Last Sync</span><strong>{{ oanda_live_validation.last_successful_sync | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>OANDA Endpoint</span><strong>{{ oanda_live_validation.endpoint | default('NOT_AVAILABLE') }}</strong></div>
+            <div class="status-row"><span>OANDA API Version</span><strong>{{ oanda_live_validation.api_version | default('NOT_AVAILABLE') }}</strong></div>
+            <div class="status-row"><span>OANDA Account Sync</span><strong>{{ oanda_live_validation.account_sync_status | default('PENDING') }}</strong></div>
+            <div class="status-row"><span>OANDA Balance Status</span><strong>{{ oanda_live_validation.balance_status | default('NOT_AVAILABLE') }}</strong></div>
+            <div class="status-row"><span>OANDA Margin Status</span><strong>{{ oanda_live_validation.margin_status | default('READ_ONLY_PENDING_ACCOUNT') }}</strong></div>
+            <div class="status-row"><span>OANDA Operational State</span><strong>{{ oanda_live_validation.operational_state | default('PENDING') }}</strong></div>
+            <div class="status-row"><span>OANDA Failure Reason</span><strong>{{ oanda_live_validation.failure_reason | default('NONE') }}</strong></div>
             <div class="status-row"><span>OANDA Validation Timestamp</span><strong>{{ oanda_live_validation.validation_timestamp | default('DATA UNAVAILABLE') }}</strong></div>
             <div class="status-row"><span>OANDA Validation Failures</span><strong>{{ oanda_live_validation.failure_reasons | default([]) | length }}</strong></div>
             <div class="status-row"><span>Product / Price Status</span><strong>{{ broker_startup.product_price_status | default('NOT_TESTED') }}</strong></div>

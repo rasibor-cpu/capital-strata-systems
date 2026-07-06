@@ -21,6 +21,7 @@ from backend.analytics.portfolio_correlation_engine import (
     PortfolioCorrelationEngineError,
 )
 from backend.runtime.live_micro_pilot_governor import live_micro_pilot_status
+from backend.runtime.broker_operational_status import build_broker_operational_status
 from backend.validation.live_readiness_certification import (
     live_readiness_certification_status,
 )
@@ -54,8 +55,10 @@ FRONTEND_SECTIONS = (
     "live_micro_pilot",
     "live_readiness_certification",
     "broker",
+    "broker_operational_status",
     "broker_parity",
     "coinbase_live_validation",
+    "oanda_live_validation",
     "broker_reconciliation",
     "analytics",
 )
@@ -156,6 +159,7 @@ def build_frontend_payload(
             "live_micro_pilot": live_micro_pilot(dashboard_payload),
             "live_readiness_certification": live_readiness_certification(dashboard_payload),
             "broker": broker(dashboard_payload),
+            "broker_operational_status": broker_operational_status(dashboard_payload),
             "broker_parity": broker_parity(dashboard_payload),
             "coinbase_live_validation": coinbase_live_validation(dashboard_payload),
             "oanda_live_validation": oanda_live_validation(dashboard_payload),
@@ -1108,6 +1112,29 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
             "legacy_coinbase_max_live_order_usd",
             limit_reconciliation.get("legacy_coinbase_max_live_order_usd", DATA_UNAVAILABLE),
         ),
+        "broker_operational_status": broker_operational_status(dashboard_payload),
+    }
+
+
+def broker_operational_status(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
+    broker_payload = _mapping(dashboard_payload.get("broker_summary"))
+    coinbase = coinbase_live_validation(dashboard_payload)
+    oanda = oanda_live_validation(dashboard_payload)
+
+    selected_broker = str(broker_payload.get("selected_broker", "UNKNOWN") or "UNKNOWN").upper()
+    selected: dict[str, Any]
+    if selected_broker == "OANDA":
+        selected = dict(oanda.get("broker_operational_status", {}))
+    else:
+        selected = dict(coinbase.get("broker_operational_status", {}))
+
+    return {
+        "selected_broker": selected_broker,
+        "selected": selected,
+        "coinbase": dict(coinbase.get("broker_operational_status", {})),
+        "oanda": dict(oanda.get("broker_operational_status", {})),
+        "advisory_only": True,
+        "execution_allowed": False,
     }
 
 
@@ -1128,6 +1155,29 @@ def coinbase_live_validation(dashboard_payload: Mapping[str, Any]) -> dict[str, 
     broker_validation = _mapping(source.get("broker_validation"))
     broker_health = _mapping(source.get("broker_health"))
     market_snapshot = _mapping(source.get("broker_market_snapshot"))
+    broker_operational = _mapping(
+        broker_validation.get("broker_operational_status", source.get("broker_operational_status"))
+    )
+    if not broker_operational:
+        broker_operational = build_broker_operational_status(
+            {
+                "broker": "COINBASE",
+                "broker_type": "CRYPTO",
+                "mode": "LIVE_READ_ONLY",
+                "account_sync_status": "OK" if _boolean(broker_validation.get("account_loaded", source.get("account_loaded"))) else "PENDING",
+                "product_count": _integer(broker_validation.get("products_loaded", source.get("products_loaded", 0))),
+                "market_data_status": "OK" if _boolean(broker_validation.get("market_data_loaded", source.get("market_data_loaded"))) else "NOT_AVAILABLE",
+                "balance_status": "AVAILABLE" if _boolean(broker_validation.get("balances_loaded", source.get("balances_loaded"))) else "NOT_AVAILABLE",
+                "margin_status": "BROKER_UNAVAILABLE" if _boolean(broker_validation.get("account_loaded", source.get("account_loaded"))) else "READ_ONLY_PENDING_ACCOUNT",
+                "last_successful_sync": str(
+                    broker_validation.get(
+                        "last_successful_sync",
+                        broker_health.get("last_successful_sync", source.get("last_successful_sync", DATA_UNAVAILABLE)),
+                    )
+                ),
+                "failure_reasons": _list(broker_validation.get("failure_reasons", source.get("failure_reasons"))),
+            }
+        )
     return {
         "validation_status": str(broker_validation.get("validation_status", source.get("validation_status", "DATA UNAVAILABLE"))),
         "api_reachable": _boolean(broker_validation.get("api_reachable", source.get("api_reachable"))),
@@ -1145,6 +1195,20 @@ def coinbase_live_validation(dashboard_payload: Mapping[str, Any]) -> dict[str, 
         ),
         "read_checks": _mapping(broker_validation.get("read_checks", source.get("read_checks"))),
         "failure_reasons": _list(broker_validation.get("failure_reasons", source.get("failure_reasons"))),
+        "broker_operational_status": broker_operational,
+        "endpoint": str(broker_operational.get("endpoint", "NOT_AVAILABLE")),
+        "api_version": str(broker_operational.get("api_version", "NOT_AVAILABLE")),
+        "server_time": str(broker_operational.get("server_time", "NOT_AVAILABLE")),
+        "latency_ms": broker_operational.get("latency_ms"),
+        "rate_limit_status": str(broker_operational.get("rate_limit_status", "UNKNOWN")),
+        "last_failed_sync": str(broker_operational.get("last_failed_sync", "NOT_AVAILABLE")),
+        "account_sync_status": str(broker_operational.get("account_sync_status", "PENDING")),
+        "product_count": _integer(broker_operational.get("product_count", broker_validation.get("products_loaded", source.get("products_loaded", 0)))),
+        "market_data_status": str(broker_operational.get("market_data_status", "NOT_AVAILABLE")),
+        "balance_status": str(broker_operational.get("balance_status", "NOT_AVAILABLE")),
+        "margin_status": str(broker_operational.get("margin_status", "READ_ONLY_PENDING_ACCOUNT")),
+        "operational_state": str(broker_operational.get("operational_state", "PENDING")),
+        "failure_reason": str(broker_operational.get("failure_reason", "NONE")),
         "broker_validation": broker_validation,
         "broker_health": broker_health,
         "broker_market_snapshot": market_snapshot,
@@ -1165,6 +1229,29 @@ def oanda_live_validation(dashboard_payload: Mapping[str, Any]) -> dict[str, Any
     broker_validation = _mapping(source.get("broker_validation"))
     broker_health = _mapping(source.get("broker_health"))
     market_snapshot = _mapping(source.get("broker_market_snapshot"))
+    broker_operational = _mapping(
+        broker_validation.get("broker_operational_status", source.get("broker_operational_status"))
+    )
+    if not broker_operational:
+        broker_operational = build_broker_operational_status(
+            {
+                "broker": "OANDA",
+                "broker_type": "FX",
+                "mode": "LIVE_READ_ONLY",
+                "account_sync_status": "OK" if _boolean(broker_validation.get("account_loaded", source.get("account_loaded"))) else "PENDING",
+                "product_count": _integer(broker_validation.get("products_loaded", source.get("products_loaded", 0))),
+                "market_data_status": "OK" if _boolean(broker_validation.get("market_data_loaded", source.get("market_data_loaded"))) else "NOT_AVAILABLE",
+                "balance_status": "AVAILABLE" if _boolean(broker_validation.get("balances_loaded", source.get("balances_loaded"))) else "NOT_AVAILABLE",
+                "margin_status": "BROKER_UNAVAILABLE" if _boolean(broker_validation.get("account_loaded", source.get("account_loaded"))) else "READ_ONLY_PENDING_ACCOUNT",
+                "last_successful_sync": str(
+                    broker_validation.get(
+                        "last_successful_sync",
+                        broker_health.get("last_successful_sync", source.get("last_successful_sync", DATA_UNAVAILABLE)),
+                    )
+                ),
+                "failure_reasons": _list(broker_validation.get("failure_reasons", source.get("failure_reasons"))),
+            }
+        )
     return {
         "validation_status": str(broker_validation.get("validation_status", source.get("validation_status", "DATA UNAVAILABLE"))),
         "api_reachable": _boolean(broker_validation.get("api_reachable", source.get("api_reachable"))),
@@ -1182,6 +1269,20 @@ def oanda_live_validation(dashboard_payload: Mapping[str, Any]) -> dict[str, Any
         ),
         "read_checks": _mapping(broker_validation.get("read_checks", source.get("read_checks"))),
         "failure_reasons": _list(broker_validation.get("failure_reasons", source.get("failure_reasons"))),
+        "broker_operational_status": broker_operational,
+        "endpoint": str(broker_operational.get("endpoint", "NOT_AVAILABLE")),
+        "api_version": str(broker_operational.get("api_version", "NOT_AVAILABLE")),
+        "server_time": str(broker_operational.get("server_time", "NOT_AVAILABLE")),
+        "latency_ms": broker_operational.get("latency_ms"),
+        "rate_limit_status": str(broker_operational.get("rate_limit_status", "UNKNOWN")),
+        "last_failed_sync": str(broker_operational.get("last_failed_sync", "NOT_AVAILABLE")),
+        "account_sync_status": str(broker_operational.get("account_sync_status", "PENDING")),
+        "product_count": _integer(broker_operational.get("product_count", broker_validation.get("products_loaded", source.get("products_loaded", 0)))),
+        "market_data_status": str(broker_operational.get("market_data_status", "NOT_AVAILABLE")),
+        "balance_status": str(broker_operational.get("balance_status", "NOT_AVAILABLE")),
+        "margin_status": str(broker_operational.get("margin_status", "READ_ONLY_PENDING_ACCOUNT")),
+        "operational_state": str(broker_operational.get("operational_state", "PENDING")),
+        "failure_reason": str(broker_operational.get("failure_reason", "NONE")),
         "broker_validation": broker_validation,
         "broker_health": broker_health,
         "broker_market_snapshot": market_snapshot,

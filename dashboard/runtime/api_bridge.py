@@ -175,6 +175,15 @@ def get_oanda_live_validation_payload(
     )
 
 
+def get_broker_operational_status_payload(
+    state_provider: DashboardStateProvider | None = None,
+) -> dict[str, Any]:
+    return build_section_payload(
+        _state_from_provider(state_provider),
+        "broker_operational_status",
+    )
+
+
 def create_dashboard_state_router(
     state_provider: DashboardStateProvider | None = None,
 ) -> APIRouter:
@@ -294,6 +303,10 @@ def create_dashboard_state_router(
     def read_oanda_live_read_only_validation() -> dict[str, Any]:
         return get_oanda_live_validation_payload(state_provider)
 
+    @router.get("/api/v1/broker-operational-status")
+    def read_broker_operational_status() -> dict[str, Any]:
+        return get_broker_operational_status_payload(state_provider)
+
     @router.get("/api/v1/broker-reconciliation")
     def read_broker_reconciliation() -> dict[str, Any]:
         return build_section_payload(
@@ -335,6 +348,7 @@ __all__ = [
     "default_dashboard_state_provider",
     "get_broker_read_only_status_payload",
     "get_broker_parity_payload",
+    "get_broker_operational_status_payload",
     "get_broker_readiness_payload",
     "get_broker_reconciliation_payload",
     "get_coinbase_live_validation_payload",

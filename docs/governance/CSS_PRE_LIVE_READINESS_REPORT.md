@@ -104,6 +104,32 @@ Phase 155A adds Coinbase LIVE read-only operational validation using the existin
 
 Phase 155A does not authorize live trading. Missing credentials and API failures remain fail-closed with structured reasons, broker execution remains `DISABLED`, LiveExecutionAuthority remains false, the Live Micro-Pilot remains `DISARMED`, and all existing gates remain authoritative.
 
+## Phase 155C Canonical Broker Operational Status Addendum
+
+Phase 155C standardizes read-only broker operational reporting for Coinbase and OANDA under one canonical schema:
+
+1. `broker`
+2. `broker_type`
+3. `mode`
+4. `endpoint`
+5. `api_version`
+6. `server_time`
+7. `latency_ms`
+8. `rate_limit_status`
+9. `last_successful_sync`
+10. `last_failed_sync`
+11. `account_sync_status`
+12. `product_count`
+13. `market_data_status`
+14. `balance_status`
+15. `margin_status`
+16. `operational_state`
+17. `failure_reason`
+
+Phase 155C also corrects Coinbase endpoint reporting isolation, preserves drawdown as `UNKNOWN` when broker balances are unavailable, and removes simulated margin labeling from live read-only operational reporting (`BROKER_UNAVAILABLE` or `READ_ONLY_PENDING_ACCOUNT` only).
+
+Phase 155C does not authorize live trading. Broker execution remains disabled, LiveExecutionAuthority remains fail-closed, and no order/cancel/modify/close broker paths are introduced.
+
 ## Safety Controls Required For LIVE
 
 LIVE mode must continue to require Unified Trade Gate, Margin Gate, RBAC, Capital Governor, AntiBleedGuard, kill switches, emergency stops, broker validation, execution authorization, and configured broker controls.

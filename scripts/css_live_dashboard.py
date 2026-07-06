@@ -155,11 +155,10 @@ def format_option_symbol(symbol: str) -> str:
 
 # === R11 BROKER URL ISOLATION ===
 def get_active_broker_url():
-    if SELECTED_BROKER == "OANDA":
-        return os.environ.get("OANDA_BASE_URL", "OANDA_NOT_SET")
-    elif SELECTED_BROKER == "COINBASE":
-        return "https://api.coinbase.com"
-    return "NO_BROKER_SELECTED"
+    endpoint = endpoint_for_broker(SELECTED_BROKER, os.environ)
+    if endpoint == "NOT_AVAILABLE":
+        return "NO_BROKER_SELECTED"
+    return endpoint
 
 import os
 print("RUNNING FILE:", os.path.abspath(__file__))
@@ -187,6 +186,7 @@ from backend.runtime.broker_startup_selection import (
     startup_broker_mode_from_choice,
 )
 from backend.runtime.broker_parity_validator import broker_parity_payload
+from backend.runtime.broker_operational_status import endpoint_for_broker
 from backend.runtime.coinbase_readiness import (
     coinbase_credential_diagnostics,
     coinbase_live_limit_reconciliation,
@@ -620,10 +620,16 @@ def margin_dashboard_lines(
             broker_mode,
         )
         broker_snapshot = adapter.get_margin_snapshot()
+        margin_source_display = str(getattr(broker_snapshot, "margin_source", "UNKNOWN") or "UNKNOWN").upper()
+        if _margin_dashboard_mode_is_live(broker_mode) and margin_source_display == "SIMULATED":
+            if str(getattr(broker_snapshot, "account_id", "") or "").startswith("SIMULATED"):
+                margin_source_display = "READ_ONLY_PENDING_ACCOUNT"
+            else:
+                margin_source_display = "BROKER_UNAVAILABLE"
         margin_snapshot = MarginEngine().calculate(
             required_margin=broker_snapshot.required_margin,
             available_margin=broker_snapshot.available_margin,
-            margin_source=broker_snapshot.margin_source,
+            margin_source=margin_source_display,
         )
         gate_decision = MarginTradeGate().evaluate(
             margin_snapshot,
@@ -632,7 +638,7 @@ def margin_dashboard_lines(
 
         return [
             "=== MARGIN DASHBOARD ===",
-            f"Margin Source: {broker_snapshot.margin_source}",
+            f"Margin Source: {margin_source_display}",
             f"Broker: {display_broker}",
             f"Broker Mode: {broker_mode.upper() if broker_mode else 'UNKNOWN'}",
             f"Required Margin: {_format_margin_dashboard_value(broker_snapshot.required_margin)}",
@@ -2670,7 +2676,7 @@ def pcnrass_activate_capital_source() -> None:
         if float(capital_governor.real_balance or 0.0) <= 0.0:
             print(
                 f"[LIVE CAPITAL WARNING] broker={SELECTED_BROKER} "
-                f"mode=live url={os.environ.get('OANDA_BASE_URL', 'UNKNOWN')} "
+                f"mode=live endpoint={get_active_broker_url()} "
                 f"balance_fetch_failed_or_zero. Live trading must remain blocked until real balance is loaded."
             )
 

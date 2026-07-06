@@ -4,6 +4,8 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
+from backend.runtime.broker_operational_status import build_broker_operational_status
+
 
 CANONICAL_BROKER_READINESS_FIELDS = (
     "broker_name",
@@ -163,6 +165,28 @@ def broker_readiness_payload(snapshot: BrokerReadinessSnapshot | Mapping[str, An
     return payload
 
 
+def broker_readiness_with_operational_status(
+    snapshot: BrokerReadinessSnapshot | Mapping[str, Any] | None,
+    operational_payload: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = broker_readiness_payload(snapshot)
+    payload["broker_operational_status"] = build_broker_operational_status(
+        {
+            "broker": payload.get("broker_name", "UNKNOWN"),
+            "broker_type": payload.get("broker_type", "UNKNOWN"),
+            "mode": payload.get("mode", "paper"),
+            "last_successful_sync": payload.get("last_successful_sync", "NOT_AVAILABLE"),
+            "account_sync_status": "OK" if payload.get("account_loaded") else "PENDING",
+            "product_count": payload.get("products_loaded", 0),
+            "market_data_status": "OK" if payload.get("market_data_ready") else "PENDING",
+            "balance_status": "AVAILABLE" if payload.get("account_balance") is not None else "NOT_AVAILABLE",
+            "margin_status": "BROKER_UNAVAILABLE" if payload.get("account_loaded") else "READ_ONLY_PENDING_ACCOUNT",
+        }
+        | dict(operational_payload or {})
+    )
+    return payload
+
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -228,6 +252,7 @@ __all__ = [
     "CANONICAL_BROKER_READINESS_FIELDS",
     "BrokerReadinessSnapshot",
     "broker_readiness_payload",
+    "broker_readiness_with_operational_status",
     "build_broker_readiness_snapshot",
     "utc_now_iso",
 ]

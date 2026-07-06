@@ -92,6 +92,7 @@ from backend.runtime.broker_startup_selection import (
     live_readiness_broker_evidence,
 )
 from backend.runtime.broker_parity_validator import broker_parity_payload
+from backend.runtime.broker_operational_status import build_broker_operational_status
 from backend.runtime.coinbase_live_read_only_operational_validation import (
     load_coinbase_operational_validation_artifacts,
 )
@@ -671,6 +672,16 @@ def build_launcher_frontend_state(
             "broker_parity": dict(broker_parity),
             "coinbase_live_validation": dict(coinbase_validation),
             "oanda_live_validation": dict(oanda_validation),
+            "broker_operational_status": {
+                "selected_broker": str(broker).upper(),
+                "selected": dict(
+                    oanda_validation.get("broker_operational_status", {})
+                    if str(broker).upper() == "OANDA"
+                    else coinbase_validation.get("broker_operational_status", {})
+                ),
+                "coinbase": dict(coinbase_validation.get("broker_operational_status", {})),
+                "oanda": dict(oanda_validation.get("broker_operational_status", {})),
+            },
             "credentials_present": bool(broker_startup.get("credentials_present", broker_readiness.get("credentials_present", False))),
             "authenticated": bool(
                 broker_startup.get("authenticated", broker_startup.get("broker_authenticated", broker_readiness.get("authenticated", False)))
@@ -832,6 +843,27 @@ def get_launcher_coinbase_live_validation_feed() -> Dict[str, Any]:
     broker_validation = artifacts.get("broker_validation", {})
     broker_health = artifacts.get("broker_health", {})
     market_snapshot = artifacts.get("broker_market_snapshot", {})
+    operational = broker_validation.get("broker_operational_status")
+    if not isinstance(operational, dict):
+        operational = build_broker_operational_status(
+            {
+                "broker": "COINBASE",
+                "broker_type": "CRYPTO",
+                "mode": "LIVE_READ_ONLY",
+                "account_sync_status": "OK" if bool(broker_validation.get("account_loaded", False)) else "PENDING",
+                "product_count": int(broker_validation.get("products_loaded", 0) or 0),
+                "market_data_status": "OK" if bool(broker_validation.get("market_data_loaded", False)) else "NOT_AVAILABLE",
+                "balance_status": "AVAILABLE" if bool(broker_validation.get("balances_loaded", False)) else "NOT_AVAILABLE",
+                "margin_status": "BROKER_UNAVAILABLE" if bool(broker_validation.get("account_loaded", False)) else "READ_ONLY_PENDING_ACCOUNT",
+                "last_successful_sync": str(
+                    broker_validation.get("last_successful_sync", broker_health.get("last_successful_sync", "DATA UNAVAILABLE"))
+                ),
+                "failure_reasons": list(broker_validation.get("failure_reasons", []))
+                if isinstance(broker_validation.get("failure_reasons"), list)
+                else [],
+            }
+        )
+
     return {
         "validation_status": str(broker_validation.get("validation_status", "DATA UNAVAILABLE")),
         "api_reachable": bool(broker_validation.get("api_reachable", False)),
@@ -853,6 +885,20 @@ def get_launcher_coinbase_live_validation_feed() -> Dict[str, Any]:
         "read_checks": dict(broker_validation.get("read_checks", {}))
         if isinstance(broker_validation.get("read_checks"), dict)
         else {},
+        "broker_operational_status": operational,
+        "endpoint": str(operational.get("endpoint", "NOT_AVAILABLE")),
+        "api_version": str(operational.get("api_version", "NOT_AVAILABLE")),
+        "server_time": str(operational.get("server_time", "NOT_AVAILABLE")),
+        "latency_ms": operational.get("latency_ms"),
+        "rate_limit_status": str(operational.get("rate_limit_status", "UNKNOWN")),
+        "last_failed_sync": str(operational.get("last_failed_sync", "NOT_AVAILABLE")),
+        "account_sync_status": str(operational.get("account_sync_status", "PENDING")),
+        "product_count": int(operational.get("product_count", broker_validation.get("products_loaded", 0)) or 0),
+        "market_data_status": str(operational.get("market_data_status", "NOT_AVAILABLE")),
+        "balance_status": str(operational.get("balance_status", "NOT_AVAILABLE")),
+        "margin_status": str(operational.get("margin_status", "READ_ONLY_PENDING_ACCOUNT")),
+        "operational_state": str(operational.get("operational_state", "PENDING")),
+        "failure_reason": str(operational.get("failure_reason", "NONE")),
         "broker_validation": dict(broker_validation) if isinstance(broker_validation, dict) else {},
         "broker_health": dict(broker_health) if isinstance(broker_health, dict) else {},
         "broker_market_snapshot": dict(market_snapshot) if isinstance(market_snapshot, dict) else {},
@@ -870,6 +916,27 @@ def get_launcher_oanda_live_validation_feed() -> Dict[str, Any]:
     broker_validation = artifacts.get("broker_validation", {})
     broker_health = artifacts.get("broker_health", {})
     market_snapshot = artifacts.get("broker_market_snapshot", {})
+    operational = broker_validation.get("broker_operational_status")
+    if not isinstance(operational, dict):
+        operational = build_broker_operational_status(
+            {
+                "broker": "OANDA",
+                "broker_type": "FX",
+                "mode": "LIVE_READ_ONLY",
+                "account_sync_status": "OK" if bool(broker_validation.get("account_loaded", False)) else "PENDING",
+                "product_count": int(broker_validation.get("products_loaded", 0) or 0),
+                "market_data_status": "OK" if bool(broker_validation.get("market_data_loaded", False)) else "NOT_AVAILABLE",
+                "balance_status": "AVAILABLE" if bool(broker_validation.get("balances_loaded", False)) else "NOT_AVAILABLE",
+                "margin_status": "BROKER_UNAVAILABLE" if bool(broker_validation.get("account_loaded", False)) else "READ_ONLY_PENDING_ACCOUNT",
+                "last_successful_sync": str(
+                    broker_validation.get("last_successful_sync", broker_health.get("last_successful_sync", "DATA UNAVAILABLE"))
+                ),
+                "failure_reasons": list(broker_validation.get("failure_reasons", []))
+                if isinstance(broker_validation.get("failure_reasons"), list)
+                else [],
+            }
+        )
+
     return {
         "validation_status": str(broker_validation.get("validation_status", "DATA UNAVAILABLE")),
         "api_reachable": bool(broker_validation.get("api_reachable", False)),
@@ -891,6 +958,20 @@ def get_launcher_oanda_live_validation_feed() -> Dict[str, Any]:
         "read_checks": dict(broker_validation.get("read_checks", {}))
         if isinstance(broker_validation.get("read_checks"), dict)
         else {},
+        "broker_operational_status": operational,
+        "endpoint": str(operational.get("endpoint", "NOT_AVAILABLE")),
+        "api_version": str(operational.get("api_version", "NOT_AVAILABLE")),
+        "server_time": str(operational.get("server_time", "NOT_AVAILABLE")),
+        "latency_ms": operational.get("latency_ms"),
+        "rate_limit_status": str(operational.get("rate_limit_status", "UNKNOWN")),
+        "last_failed_sync": str(operational.get("last_failed_sync", "NOT_AVAILABLE")),
+        "account_sync_status": str(operational.get("account_sync_status", "PENDING")),
+        "product_count": int(operational.get("product_count", broker_validation.get("products_loaded", 0)) or 0),
+        "market_data_status": str(operational.get("market_data_status", "NOT_AVAILABLE")),
+        "balance_status": str(operational.get("balance_status", "NOT_AVAILABLE")),
+        "margin_status": str(operational.get("margin_status", "READ_ONLY_PENDING_ACCOUNT")),
+        "operational_state": str(operational.get("operational_state", "PENDING")),
+        "failure_reason": str(operational.get("failure_reason", "NONE")),
         "broker_validation": dict(broker_validation) if isinstance(broker_validation, dict) else {},
         "broker_health": dict(broker_health) if isinstance(broker_health, dict) else {},
         "broker_market_snapshot": dict(market_snapshot) if isinstance(market_snapshot, dict) else {},

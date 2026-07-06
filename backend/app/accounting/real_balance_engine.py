@@ -46,6 +46,9 @@ class RealBalanceEngine:
             "balance": self._to_float(extracted.get("balance")),
             "equity": self._to_float(extracted.get("nav")),
             "source": "OANDA",
+            "balance_status": "AVAILABLE",
+            "drawdown_status": "AVAILABLE",
+            "drawdown_reason": "",
         }
 
     # ---------------------------
@@ -80,6 +83,9 @@ class RealBalanceEngine:
                     "balance": parsed_direct,
                     "equity": parsed_direct,
                     "source": "COINBASE_DIRECT_BALANCE",
+                    "balance_status": "AVAILABLE",
+                    "drawdown_status": "AVAILABLE",
+                    "drawdown_reason": "",
                 }
 
             return self._default_balance("COINBASE_NO_BALANCE_METHOD_VALUE")
@@ -107,6 +113,9 @@ class RealBalanceEngine:
             "source": "COINBASE",
             "account_count": len(accounts),
             "valued_count": valued_count,
+            "balance_status": "AVAILABLE",
+            "drawdown_status": "AVAILABLE",
+            "drawdown_reason": "",
         }
 
     # ---------------------------
@@ -242,9 +251,10 @@ class RealBalanceEngine:
 
     def _default_balance(self, reason: str = "DEFAULT") -> Dict[str, Any]:
         return {
-            "balance": 0.0,
-            "equity": 0.0,
+            "balance": None,
+            "equity": None,
             "source": reason,
+            "balance_status": "NOT_AVAILABLE",
             "drawdown_status": "UNKNOWN",
             "drawdown_reason": "Broker balance unavailable",
         }
