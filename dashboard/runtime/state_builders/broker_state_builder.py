@@ -158,6 +158,10 @@ class BrokerStateBuilder:
             coinbase_live_validation=_mapping(
                 broker_payload.get("coinbase_live_validation", {})
             ),
+
+            oanda_live_validation=_mapping(
+                broker_payload.get("oanda_live_validation", {})
+            ),
         )
 
         state.broker_state = broker_state

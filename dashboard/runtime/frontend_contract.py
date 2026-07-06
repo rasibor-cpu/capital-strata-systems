@@ -158,6 +158,7 @@ def build_frontend_payload(
             "broker": broker(dashboard_payload),
             "broker_parity": broker_parity(dashboard_payload),
             "coinbase_live_validation": coinbase_live_validation(dashboard_payload),
+            "oanda_live_validation": oanda_live_validation(dashboard_payload),
             "broker_reconciliation": broker_reconciliation(dashboard_payload),
             "analytics": analytics(dashboard_payload),
         },
@@ -1156,6 +1157,43 @@ def coinbase_live_validation(dashboard_payload: Mapping[str, Any]) -> dict[str, 
     }
 
 
+def oanda_live_validation(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
+    broker_payload = _mapping(dashboard_payload.get("broker_summary"))
+    explicit_payload = _mapping(dashboard_payload.get("oanda_live_validation"))
+    validation_payload = _mapping(broker_payload.get("oanda_live_validation"))
+    source = explicit_payload or validation_payload
+    broker_validation = _mapping(source.get("broker_validation"))
+    broker_health = _mapping(source.get("broker_health"))
+    market_snapshot = _mapping(source.get("broker_market_snapshot"))
+    return {
+        "validation_status": str(broker_validation.get("validation_status", source.get("validation_status", "DATA UNAVAILABLE"))),
+        "api_reachable": _boolean(broker_validation.get("api_reachable", source.get("api_reachable"))),
+        "authentication": _boolean(broker_validation.get("authentication", source.get("authenticated"))),
+        "account_loaded": _boolean(broker_validation.get("account_loaded", source.get("account_loaded"))),
+        "portfolio_loaded": _boolean(broker_validation.get("portfolio_loaded", source.get("portfolio_loaded"))),
+        "balances_loaded": _boolean(broker_validation.get("balances_loaded", source.get("balances_loaded"))),
+        "products_loaded": _integer(broker_validation.get("products_loaded", source.get("products_loaded", 0))),
+        "market_data_loaded": _boolean(broker_validation.get("market_data_loaded", source.get("market_data_loaded"))),
+        "last_successful_sync": str(
+            broker_validation.get("last_successful_sync", broker_health.get("last_successful_sync", source.get("last_successful_sync", DATA_UNAVAILABLE)))
+        ),
+        "validation_timestamp": str(
+            broker_validation.get("validation_timestamp", market_snapshot.get("validation_timestamp", source.get("validation_timestamp", DATA_UNAVAILABLE)))
+        ),
+        "read_checks": _mapping(broker_validation.get("read_checks", source.get("read_checks"))),
+        "failure_reasons": _list(broker_validation.get("failure_reasons", source.get("failure_reasons"))),
+        "broker_validation": broker_validation,
+        "broker_health": broker_health,
+        "broker_market_snapshot": market_snapshot,
+        "broker_execution_status": "DISABLED",
+        "execution_authority": False,
+        "can_live_execute": False,
+        "live_micro_pilot_state": "DISARMED",
+        "advisory_only": True,
+        "execution_allowed": False,
+    }
+
+
 def broker_reconciliation(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     return build_broker_reconciliation_payload(dashboard_payload)
 
@@ -1403,6 +1441,7 @@ __all__ = [
     "broker",
     "broker_parity",
     "coinbase_live_validation",
+    "oanda_live_validation",
     "broker_reconciliation",
     "build_frontend_payload",
     "build_section_payload",

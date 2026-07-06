@@ -198,6 +198,17 @@ from backend.runtime.coinbase_readiness import (
 from backend.runtime.coinbase_live_read_only_operational_validation import (
     validate_coinbase_live_read_only_operational,
 )
+from backend.runtime.oanda_readiness import (
+    oanda_credential_diagnostics,
+    oanda_live_limit_reconciliation,
+    confirm_oanda_live_read_only,
+    evaluate_oanda_live_read_only,
+    merge_readiness_into_broker_state as merge_oanda_readiness_into_broker_state,
+    selection_with_oanda_readiness,
+)
+from backend.runtime.oanda_live_read_only_operational_validation import (
+    validate_oanda_live_read_only_operational,
+)
 from backend.runtime.live_operator_wizard import (
     StartupWizardState,
     broker_validation_display,
@@ -2129,26 +2140,15 @@ STARTUP_BROKER_SELECTION = build_startup_broker_selection(
     authority_reason="Credentials Missing" if bool(getattr(STARTUP_WIZARD_STATE, "operator_requested_live", False)) else "Operator Intent Missing",
     live_authority_state="BLOCKED",
 )
-COINBASE_READ_ONLY_STATUS = evaluate_coinbase_live_read_only(
-    STARTUP_BROKER_SELECTION,
-    legacy_limit_usd=COINBASE_MAX_LIVE_ORDER_USD,
-)
-if SELECTED_BROKER == "OANDA" and SELECTED_BROKER_MODE == "live":
-    COINBASE_READ_ONLY_STATUS = OandaLiveReadOnlyAdapter(env=os.environ).sync()
-    COINBASE_READ_ONLY_STATUS.update(
-        {
-            "selected_broker": "OANDA",
-            "broker_mode": "live",
-            "execution_scope": "LIVE READ-ONLY VALIDATION",
-            "operator_requested_live": bool(getattr(STARTUP_WIZARD_STATE, "operator_requested_live", False)),
-            "execution_authority": False,
-            "authority_reason": COINBASE_READ_ONLY_STATUS.get("authority_reason", "Broker Execution Disabled"),
-            "live_authority_state": "BLOCKED",
-            "broker_execution_armed": False,
-            "broker_execution_enabled": False,
-            "broker_execution_status": "DISABLED",
-            "can_live_execute": False,
-        }
+if SELECTED_BROKER == "OANDA":
+    COINBASE_READ_ONLY_STATUS = evaluate_oanda_live_read_only(
+        STARTUP_BROKER_SELECTION,
+        legacy_limit_usd=1.0,
+    )
+else:
+    COINBASE_READ_ONLY_STATUS = evaluate_coinbase_live_read_only(
+        STARTUP_BROKER_SELECTION,
+        legacy_limit_usd=COINBASE_MAX_LIVE_ORDER_USD,
     )
 BROKER_VALIDATION_DISPLAY = broker_validation_display(
     selected_broker=SELECTED_BROKER,
@@ -2172,14 +2172,29 @@ if SELECTED_BROKER == "COINBASE" and SELECTED_BROKER_MODE == "live":
         artifacts_dir=ARTIFACTS_DIR,
     )
     COINBASE_READ_ONLY_STATUS["coinbase_live_validation"] = COINBASE_OPERATIONAL_VALIDATION
-STARTUP_BROKER_SELECTION = selection_with_coinbase_readiness(
-    STARTUP_BROKER_SELECTION,
-    COINBASE_READ_ONLY_STATUS,
-)
-STARTUP_BROKER_STATE = merge_readiness_into_broker_state(
-    STARTUP_BROKER_SELECTION,
-    COINBASE_READ_ONLY_STATUS,
-)
+elif SELECTED_BROKER == "OANDA" and SELECTED_BROKER_MODE == "live":
+    OANDA_OPERATIONAL_VALIDATION = validate_oanda_live_read_only_operational(
+        artifacts_dir=ARTIFACTS_DIR,
+    )
+    COINBASE_READ_ONLY_STATUS["oanda_live_validation"] = OANDA_OPERATIONAL_VALIDATION
+if SELECTED_BROKER == "OANDA":
+    STARTUP_BROKER_SELECTION = selection_with_oanda_readiness(
+        STARTUP_BROKER_SELECTION,
+        COINBASE_READ_ONLY_STATUS,
+    )
+    STARTUP_BROKER_STATE = merge_oanda_readiness_into_broker_state(
+        STARTUP_BROKER_SELECTION,
+        COINBASE_READ_ONLY_STATUS,
+    )
+else:
+    STARTUP_BROKER_SELECTION = selection_with_coinbase_readiness(
+        STARTUP_BROKER_SELECTION,
+        COINBASE_READ_ONLY_STATUS,
+    )
+    STARTUP_BROKER_STATE = merge_readiness_into_broker_state(
+        STARTUP_BROKER_SELECTION,
+        COINBASE_READ_ONLY_STATUS,
+    )
 STARTUP_BROKER_STATE["broker_parity"] = broker_parity_payload(STARTUP_BROKER_STATE)
 try:
     pcnrass_session_state.update(

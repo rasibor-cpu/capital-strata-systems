@@ -166,6 +166,15 @@ def get_coinbase_live_validation_payload(
     )
 
 
+def get_oanda_live_validation_payload(
+    state_provider: DashboardStateProvider | None = None,
+) -> dict[str, Any]:
+    return build_section_payload(
+        _state_from_provider(state_provider),
+        "oanda_live_validation",
+    )
+
+
 def create_dashboard_state_router(
     state_provider: DashboardStateProvider | None = None,
 ) -> APIRouter:
@@ -281,6 +290,10 @@ def create_dashboard_state_router(
     def read_coinbase_live_read_only_validation() -> dict[str, Any]:
         return get_coinbase_live_validation_payload(state_provider)
 
+    @router.get("/api/v1/oanda-live-read-only-validation")
+    def read_oanda_live_read_only_validation() -> dict[str, Any]:
+        return get_oanda_live_validation_payload(state_provider)
+
     @router.get("/api/v1/broker-reconciliation")
     def read_broker_reconciliation() -> dict[str, Any]:
         return build_section_payload(
@@ -325,6 +338,7 @@ __all__ = [
     "get_broker_readiness_payload",
     "get_broker_reconciliation_payload",
     "get_coinbase_live_validation_payload",
+    "get_oanda_live_validation_payload",
     "get_dashboard_state_payload",
     "get_frontend_payload",
     "get_live_execution_authority_payload",

@@ -93,6 +93,19 @@ class OandaLiveReadOnlyAdapter:
     def get_instruments(self) -> Any:
         return _call_first(self._client(), ("get_instruments", "list_instruments", "instruments"))
 
+    def get_candles(self, instrument: str = "EUR_USD") -> Any:
+        client = self._client()
+        method = getattr(client, "get_candles", None)
+        if callable(method):
+            return method(instrument)
+        request_json = getattr(client, "_request_json", None)
+        if callable(request_json):
+            return request_json("GET", f"v3/instruments/{instrument}/candles?count=10&granularity=M5")
+        request = getattr(client, "_request", None)
+        if callable(request):
+            return request("GET", f"/v3/instruments/{instrument}/candles?count=10&granularity=M5")
+        return None
+
     def get_account_metadata(self) -> Any:
         return _call_first(self._client(), ("get_account_metadata", "account_metadata", "get_account_details"))
 
@@ -260,6 +273,9 @@ def _call_first(client: Any, method_names: tuple[str, ...]) -> Any:
 def _extract_account(payload: Any) -> dict[str, Any]:
     payload = _plain(payload)
     if isinstance(payload, dict):
+        data = payload.get("data")
+        if isinstance(data, dict) and "account" in data:
+            return dict(data["account"])
         account = payload.get("account") or payload.get("data") or payload
         return dict(account) if isinstance(account, Mapping) else {}
     return {}

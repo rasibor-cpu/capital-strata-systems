@@ -470,24 +470,17 @@ def git_metadata(repository_root: str | Path | None = None) -> dict[str, Any]:
         return dict(cached)
 
     diagnostics: dict[str, Any] = {}
-    commit = ""
-    tag = ""
+    commit = _git_commit(root, diagnostics)
+    tag = _git_exact_tag_for_head(root, diagnostics)
     git_dir = root / ".git"
-    try:
-        head_text = (git_dir / "HEAD").read_text(encoding="utf-8").strip()
-        if head_text.startswith("ref:"):
-            ref = head_text.split(" ", 1)[1].strip()
-            commit = (git_dir / ref).read_text(encoding="utf-8").strip()
-            diagnostics["commit_source"] = ref
-        else:
-            commit = head_text
-            diagnostics["commit_source"] = "detached_head"
+    if not commit:
+        commit = _file_commit(git_dir, diagnostics)
+    if not tag and commit:
         tag = _tag_for_commit(git_dir, commit)
-        diagnostics["tag_source"] = "git_refs" if tag else "no_tag_for_head"
-    except Exception as exc:
-        diagnostics["metadata_error"] = str(exc)
-        commit = commit or _git_commit(root)
-        tag = tag or _git_tag_for_commit(root, commit)
+        if tag:
+            diagnostics["tag_source"] = diagnostics.get("tag_source") or "git_refs"
+    diagnostics.setdefault("commit_source", "unavailable")
+    diagnostics.setdefault("tag_source", "no_tag_for_head")
 
     result = {
         "commit": commit[:7] if commit else "",
@@ -497,6 +490,21 @@ def git_metadata(repository_root: str | Path | None = None) -> dict[str, Any]:
     }
     _GIT_METADATA_CACHE[cache_key] = result
     return dict(result)
+
+
+def _file_commit(git_dir: Path, diagnostics: dict[str, Any]) -> str:
+    try:
+        head_text = (git_dir / "HEAD").read_text(encoding="utf-8").strip()
+        if head_text.startswith("ref:"):
+            ref = head_text.split(" ", 1)[1].strip()
+            commit = (git_dir / ref).read_text(encoding="utf-8").strip()
+            diagnostics.setdefault("commit_source", ref)
+            return commit
+        diagnostics.setdefault("commit_source", "detached_head")
+        return head_text
+    except Exception as exc:
+        diagnostics["metadata_error"] = str(exc)
+        return ""
 
 
 def _tag_for_commit(git_dir: Path, commit: str) -> str:
@@ -525,7 +533,7 @@ def _tag_for_commit(git_dir: Path, commit: str) -> str:
     return ""
 
 
-def _git_commit(root: Path) -> str:
+def _git_commit(root: Path, diagnostics: dict[str, Any] | None = None) -> str:
     try:
         completed = subprocess.run(
             ["git", "-C", str(root), "rev-parse", "HEAD"],
@@ -534,28 +542,42 @@ def _git_commit(root: Path) -> str:
             encoding="utf-8",
             timeout=2,
         )
-    except Exception:
+    except Exception as exc:
+        if diagnostics is not None:
+            diagnostics["commit_error"] = str(exc)
         return ""
-    return completed.stdout.strip() if completed.returncode == 0 else ""
+    if completed.returncode == 0:
+        if diagnostics is not None:
+            diagnostics["commit_source"] = "git_rev_parse_head"
+        return completed.stdout.strip()
+    if diagnostics is not None:
+        diagnostics["commit_error"] = completed.stderr.strip() or f"git_rev_parse_failed:{completed.returncode}"
+    return ""
 
 
-def _git_tag_for_commit(root: Path, commit: str) -> str:
-    if not commit:
-        return ""
+def _git_exact_tag_for_head(root: Path, diagnostics: dict[str, Any] | None = None) -> str:
     try:
         completed = subprocess.run(
-            ["git", "-C", str(root), "tag", "--points-at", commit],
+            ["git", "-C", str(root), "describe", "--tags", "--exact-match", "HEAD"],
             capture_output=True,
             check=False,
             encoding="utf-8",
             timeout=2,
         )
-    except Exception:
+    except Exception as exc:
+        if diagnostics is not None:
+            diagnostics["tag_error"] = str(exc)
+            diagnostics["tag_source"] = "no_tag_for_head"
         return ""
-    if completed.returncode != 0:
-        return ""
-    tags = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
-    return tags[0] if tags else ""
+    if completed.returncode == 0:
+        tag = completed.stdout.strip()
+        if diagnostics is not None:
+            diagnostics["tag_source"] = "git_describe_exact_head" if tag else "no_tag_for_head"
+        return tag
+    if diagnostics is not None:
+        diagnostics["tag_source"] = "no_tag_for_head"
+        diagnostics["tag_error"] = completed.stderr.strip() or f"git_describe_failed:{completed.returncode}"
+    return ""
 
 
 def _blocker_summary(diagnostics: list[Mapping[str, Any]]) -> dict[str, Any]:
