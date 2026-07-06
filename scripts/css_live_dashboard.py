@@ -186,6 +186,7 @@ from backend.runtime.broker_startup_selection import (
     startup_broker_from_choice,
     startup_broker_mode_from_choice,
 )
+from backend.runtime.broker_parity_validator import broker_parity_payload
 from backend.runtime.coinbase_readiness import (
     coinbase_credential_diagnostics,
     coinbase_live_limit_reconciliation,
@@ -2171,6 +2172,7 @@ STARTUP_BROKER_STATE = merge_readiness_into_broker_state(
     STARTUP_BROKER_SELECTION,
     COINBASE_READ_ONLY_STATUS,
 )
+STARTUP_BROKER_STATE["broker_parity"] = broker_parity_payload(STARTUP_BROKER_STATE)
 try:
     pcnrass_session_state.update(
         {

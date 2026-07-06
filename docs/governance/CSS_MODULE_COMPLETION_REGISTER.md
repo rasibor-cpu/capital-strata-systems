@@ -145,3 +145,11 @@ Status: Canonical multi-broker readiness framework implemented for review.
 Phase 154A adds `BrokerReadinessFramework` and `OandaLiveReadOnlyAdapter`. Coinbase and OANDA now publish the same readiness fields, including broker type and independent health dimensions for infrastructure, credentials, authentication, connection, market data, and account data. Live Execution Authority consumes that canonical readiness contract without broker-specific rules.
 
 This register does not authorize live broker execution. OANDA read-only validation exposes no write operations, and all broker execution remains governed by the canonical fail-closed authority path.
+
+## Phase 154B Broker Parity Validation Register
+
+Status: Broker parity validation implemented for review.
+
+Phase 154B adds `BrokerParityValidator` to validate Coinbase and OANDA against the same canonical readiness fields and authority scenarios. It publishes parity status, mismatched fields, authority parity, and fail-closed parity to dashboard/API surfaces.
+
+This register does not authorize live broker execution. The validator is read-only, uses no broker order endpoints, and confirms missing credentials, failed authentication, disabled broker execution, and disarmed pilot states remain fail-closed for both brokers.

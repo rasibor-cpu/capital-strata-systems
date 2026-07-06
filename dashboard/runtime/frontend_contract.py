@@ -15,6 +15,7 @@ from dashboard.runtime.dashboard_state import (
 from dashboard.runtime.broker_balance_reconciliation import (
     build_broker_reconciliation_payload,
 )
+from backend.runtime.broker_parity_validator import broker_parity_payload
 from backend.analytics.portfolio_correlation_engine import (
     PortfolioCorrelationEngine,
     PortfolioCorrelationEngineError,
@@ -53,6 +54,7 @@ FRONTEND_SECTIONS = (
     "live_micro_pilot",
     "live_readiness_certification",
     "broker",
+    "broker_parity",
     "broker_reconciliation",
     "analytics",
 )
@@ -153,6 +155,7 @@ def build_frontend_payload(
             "live_micro_pilot": live_micro_pilot(dashboard_payload),
             "live_readiness_certification": live_readiness_certification(dashboard_payload),
             "broker": broker(dashboard_payload),
+            "broker_parity": broker_parity(dashboard_payload),
             "broker_reconciliation": broker_reconciliation(dashboard_payload),
             "analytics": analytics(dashboard_payload),
         },
@@ -1105,6 +1108,15 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def broker_parity(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
+    broker_payload = _mapping(dashboard_payload.get("broker_summary"))
+    explicit_payload = _mapping(dashboard_payload.get("broker_parity"))
+    report = dict(explicit_payload) if explicit_payload else broker_parity_payload(broker_payload)
+    report["execution_allowed"] = False
+    report["advisory_only"] = True
+    return report
+
+
 def broker_reconciliation(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     return build_broker_reconciliation_payload(dashboard_payload)
 
@@ -1350,6 +1362,7 @@ __all__ = [
     "WebsocketDelta",
     "account_summary",
     "broker",
+    "broker_parity",
     "broker_reconciliation",
     "build_frontend_payload",
     "build_section_payload",

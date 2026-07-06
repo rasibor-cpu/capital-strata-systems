@@ -91,6 +91,7 @@ from backend.runtime.broker_startup_selection import (
     broker_summary_from_artifacts,
     live_readiness_broker_evidence,
 )
+from backend.runtime.broker_parity_validator import broker_parity_payload
 from backend.runtime.live_micro_pilot_governor import live_micro_pilot_status
 from backend.validation.live_readiness_certification import (
     live_readiness_blocker_diagnostics,
@@ -585,6 +586,7 @@ def build_launcher_frontend_state(
         if isinstance(broker_startup.get("broker_readiness"), dict)
         else {}
     )
+    broker_parity = broker_parity_payload(broker_startup)
 
     dashboard_payload = {
         "generated_at": _utc_iso_z(),
@@ -658,6 +660,7 @@ def build_launcher_frontend_state(
             ),
             "broker_ready": bool(broker_startup.get("broker_ready", broker_readiness.get("broker_ready", False))),
             "broker_readiness": dict(broker_readiness),
+            "broker_parity": dict(broker_parity),
             "credentials_present": bool(broker_startup.get("credentials_present", broker_readiness.get("credentials_present", False))),
             "authenticated": bool(
                 broker_startup.get("authenticated", broker_startup.get("broker_authenticated", broker_readiness.get("authenticated", False)))
@@ -807,6 +810,11 @@ def get_launcher_broker_readiness_feed() -> Dict[str, Any]:
     broker = get_launcher_broker_read_only_status_feed()
     readiness = broker.get("broker_readiness", {}) if isinstance(broker, dict) else {}
     return dict(readiness) if isinstance(readiness, dict) else {}
+
+
+def get_launcher_broker_parity_feed() -> Dict[str, Any]:
+    broker = get_launcher_broker_read_only_status_feed()
+    return broker_parity_payload(broker if isinstance(broker, dict) else {})
 
 
 def get_launcher_live_readiness_blockers_feed() -> Dict[str, Any]:
@@ -3488,6 +3496,7 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "runtime_session_continuity": runtime_session_continuity,
         "runtime_health": runtime_health,
         "broker_startup": broker_startup,
+        "broker_parity": get_launcher_broker_parity_feed(),
         "recommendation_evaluation": recommendation_evaluation,
         "confidence_calibration": confidence_calibration,
         "recommendation_drift": recommendation_drift,
@@ -3672,6 +3681,16 @@ async def launcher_broker_readiness():
     return {
         "section": "broker_readiness",
         "data": get_launcher_broker_readiness_feed(),
+        "advisory_only": True,
+        "execution_allowed": False,
+    }
+
+
+@launcher_router.get("/api/v1/broker-parity")
+async def launcher_broker_parity():
+    return {
+        "section": "broker_parity",
+        "data": get_launcher_broker_parity_feed(),
         "advisory_only": True,
         "execution_allowed": False,
     }

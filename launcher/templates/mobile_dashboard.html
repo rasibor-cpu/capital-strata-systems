@@ -954,6 +954,12 @@
             <div class="status-row"><span>Market Data Status</span><strong>{{ broker_startup.market_data_status | default('NOT_TESTED') }}</strong></div>
             <div class="status-row"><span>Readiness State</span><strong>{{ broker_startup.readiness_state | default('UNCONFIGURED') }}</strong></div>
             <div class="status-row"><span>GO / NO GO</span><strong>{{ broker_startup.go_no_go | default('NO GO') }}</strong></div>
+            <div class="status-row"><span>Broker Parity Status</span><strong>{{ broker_parity.parity_status | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>Coinbase Readiness</span><strong>{{ broker_parity.coinbase_readiness.readiness_score | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>OANDA Readiness</span><strong>{{ broker_parity.oanda_readiness.readiness_score | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>Authority Parity</span><strong>{{ broker_parity.authority_parity | default(false) }}</strong></div>
+            <div class="status-row"><span>Fail-Closed Parity</span><strong>{{ broker_parity.fail_closed_parity | default(false) }}</strong></div>
+            <div class="status-row"><span>Mismatched Fields</span><strong>{{ broker_parity.mismatched_fields | default([]) | length }}</strong></div>
             <div class="status-row"><span>Product / Price Status</span><strong>{{ broker_startup.product_price_status | default('NOT_TESTED') }}</strong></div>
             <div class="status-row"><span>Balance / Position Status</span><strong>{{ broker_startup.balance_position_status | default('NOT_TESTED') }}</strong></div>
             <div class="status-row"><span>Order Submission</span><strong>{{ broker_startup.order_submission_status | default('DISABLED') }}</strong></div>

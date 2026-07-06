@@ -92,6 +92,12 @@ Phase 154A introduces the canonical Broker Readiness Framework and OANDA LIVE re
 
 Phase 154A does not authorize live trading. Execution authority remains broker-independent and fail-closed; no broker-specific authority path may bypass Phase 152A CAD 20 Governor, Unified Trade Gate, Margin Gate, AntiBleedGuard, RBAC, Kill Switch, or Live Execution Authority.
 
+## Phase 154B Broker Parity Validation Addendum
+
+Phase 154B adds a canonical Broker Parity Validator to compare Coinbase and OANDA readiness snapshots under the same Phase 154A framework. The report publishes Coinbase readiness, OANDA readiness, parity status, mismatched fields, authority parity, and fail-closed parity.
+
+Phase 154B does not authorize live trading. It validates identical fail-closed behavior for missing credentials, authentication failure, disabled broker execution, and disarmed pilot states without arming broker execution, arming the Live Micro-Pilot, or submitting orders.
+
 ## Safety Controls Required For LIVE
 
 LIVE mode must continue to require Unified Trade Gate, Margin Gate, RBAC, Capital Governor, AntiBleedGuard, kill switches, emergency stops, broker validation, execution authorization, and configured broker controls.
