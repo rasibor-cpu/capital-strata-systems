@@ -195,6 +195,9 @@ from backend.runtime.coinbase_readiness import (
     merge_readiness_into_broker_state,
     selection_with_coinbase_readiness,
 )
+from backend.runtime.coinbase_live_read_only_operational_validation import (
+    validate_coinbase_live_read_only_operational,
+)
 from backend.runtime.live_operator_wizard import (
     StartupWizardState,
     broker_validation_display,
@@ -2164,6 +2167,11 @@ if (
 ):
     COINBASE_READ_ONLY_STATUS["auth_reason"] = str(COINBASE_LIVE_CONFIRMATION_STATUS["reason"])
     COINBASE_READ_ONLY_STATUS["execution_scope"] = "PAPER_FALLBACK_AFTER_INVALID_LIVE_CONFIRMATION"
+if SELECTED_BROKER == "COINBASE" and SELECTED_BROKER_MODE == "live":
+    COINBASE_OPERATIONAL_VALIDATION = validate_coinbase_live_read_only_operational(
+        artifacts_dir=ARTIFACTS_DIR,
+    )
+    COINBASE_READ_ONLY_STATUS["coinbase_live_validation"] = COINBASE_OPERATIONAL_VALIDATION
 STARTUP_BROKER_SELECTION = selection_with_coinbase_readiness(
     STARTUP_BROKER_SELECTION,
     COINBASE_READ_ONLY_STATUS,

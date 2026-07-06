@@ -960,6 +960,16 @@
             <div class="status-row"><span>Authority Parity</span><strong>{{ broker_parity.authority_parity | default(false) }}</strong></div>
             <div class="status-row"><span>Fail-Closed Parity</span><strong>{{ broker_parity.fail_closed_parity | default(false) }}</strong></div>
             <div class="status-row"><span>Mismatched Fields</span><strong>{{ broker_parity.mismatched_fields | default([]) | length }}</strong></div>
+            <div class="status-row"><span>Coinbase Validation</span><strong>{{ coinbase_live_validation.validation_status | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>API Reachable</span><strong>{{ coinbase_live_validation.api_reachable | default(false) }}</strong></div>
+            <div class="status-row"><span>Authentication</span><strong>{{ coinbase_live_validation.authentication | default(false) }}</strong></div>
+            <div class="status-row"><span>Account Loaded</span><strong>{{ coinbase_live_validation.account_loaded | default(false) }}</strong></div>
+            <div class="status-row"><span>Balances Loaded</span><strong>{{ coinbase_live_validation.balances_loaded | default(false) }}</strong></div>
+            <div class="status-row"><span>Products Loaded</span><strong>{{ coinbase_live_validation.products_loaded | default(0) }}</strong></div>
+            <div class="status-row"><span>Market Data Loaded</span><strong>{{ coinbase_live_validation.market_data_loaded | default(false) }}</strong></div>
+            <div class="status-row"><span>Coinbase Last Sync</span><strong>{{ coinbase_live_validation.last_successful_sync | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>Validation Timestamp</span><strong>{{ coinbase_live_validation.validation_timestamp | default('DATA UNAVAILABLE') }}</strong></div>
+            <div class="status-row"><span>Validation Failures</span><strong>{{ coinbase_live_validation.failure_reasons | default([]) | length }}</strong></div>
             <div class="status-row"><span>Product / Price Status</span><strong>{{ broker_startup.product_price_status | default('NOT_TESTED') }}</strong></div>
             <div class="status-row"><span>Balance / Position Status</span><strong>{{ broker_startup.balance_position_status | default('NOT_TESTED') }}</strong></div>
             <div class="status-row"><span>Order Submission</span><strong>{{ broker_startup.order_submission_status | default('DISABLED') }}</strong></div>

@@ -258,6 +258,9 @@ def merge_readiness_into_broker_state(selection: BrokerStartupSelection, readine
             "drawdown_reason": str(readiness.get("drawdown_reason", "Broker balance unavailable")),
             "live_micro_pilot_state": str(readiness.get("live_micro_pilot_state", "DISARMED")),
             "broker_guard": str(readiness.get("broker_guard", "REJECT_BEFORE_BROKER")),
+            "coinbase_live_validation": dict(readiness.get("coinbase_live_validation", {}))
+            if isinstance(readiness.get("coinbase_live_validation"), Mapping)
+            else {},
             "broker_readiness": dict(readiness.get("broker_readiness", {}))
             if isinstance(readiness.get("broker_readiness"), Mapping)
             else broker_readiness_payload(build_broker_readiness_snapshot(readiness)),

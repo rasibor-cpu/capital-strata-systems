@@ -104,6 +104,10 @@ class CoinbaseLiveReadOnlyAdapter:
             ("get_account_balance", "get_balance", "get_live_balance", "get_portfolio_balance", "get_account"),
         )
 
+    def get_portfolios(self) -> Any:
+        client = self._client()
+        return self._call_first(client, ("get_portfolios", "list_portfolios", "get_portfolio", "get_accounts"))
+
     def get_products(self) -> Any:
         client = self._client()
         return self._call_first(client, ("get_products", "list_products", "get_product"))

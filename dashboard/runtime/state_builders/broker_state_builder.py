@@ -154,6 +154,10 @@ class BrokerStateBuilder:
                     broker_payload.get("broker_position_snapshot", []),
                 )
             ),
+
+            coinbase_live_validation=_mapping(
+                broker_payload.get("coinbase_live_validation", {})
+            ),
         )
 
         state.broker_state = broker_state

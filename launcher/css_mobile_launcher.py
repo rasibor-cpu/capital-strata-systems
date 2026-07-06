@@ -92,6 +92,9 @@ from backend.runtime.broker_startup_selection import (
     live_readiness_broker_evidence,
 )
 from backend.runtime.broker_parity_validator import broker_parity_payload
+from backend.runtime.coinbase_live_read_only_operational_validation import (
+    load_coinbase_operational_validation_artifacts,
+)
 from backend.runtime.live_micro_pilot_governor import live_micro_pilot_status
 from backend.validation.live_readiness_certification import (
     live_readiness_blocker_diagnostics,
@@ -587,6 +590,7 @@ def build_launcher_frontend_state(
         else {}
     )
     broker_parity = broker_parity_payload(broker_startup)
+    coinbase_validation = get_launcher_coinbase_live_validation_feed()
 
     dashboard_payload = {
         "generated_at": _utc_iso_z(),
@@ -661,6 +665,7 @@ def build_launcher_frontend_state(
             "broker_ready": bool(broker_startup.get("broker_ready", broker_readiness.get("broker_ready", False))),
             "broker_readiness": dict(broker_readiness),
             "broker_parity": dict(broker_parity),
+            "coinbase_live_validation": dict(coinbase_validation),
             "credentials_present": bool(broker_startup.get("credentials_present", broker_readiness.get("credentials_present", False))),
             "authenticated": bool(
                 broker_startup.get("authenticated", broker_startup.get("broker_authenticated", broker_readiness.get("authenticated", False)))
@@ -815,6 +820,44 @@ def get_launcher_broker_readiness_feed() -> Dict[str, Any]:
 def get_launcher_broker_parity_feed() -> Dict[str, Any]:
     broker = get_launcher_broker_read_only_status_feed()
     return broker_parity_payload(broker if isinstance(broker, dict) else {})
+
+
+def get_launcher_coinbase_live_validation_feed() -> Dict[str, Any]:
+    artifacts = load_coinbase_operational_validation_artifacts(LauncherConfig.ARTIFACTS_DIR)
+    broker_validation = artifacts.get("broker_validation", {})
+    broker_health = artifacts.get("broker_health", {})
+    market_snapshot = artifacts.get("broker_market_snapshot", {})
+    return {
+        "validation_status": str(broker_validation.get("validation_status", "DATA UNAVAILABLE")),
+        "api_reachable": bool(broker_validation.get("api_reachable", False)),
+        "authentication": bool(broker_validation.get("authentication", False)),
+        "account_loaded": bool(broker_validation.get("account_loaded", False)),
+        "portfolio_loaded": bool(broker_validation.get("portfolio_loaded", False)),
+        "balances_loaded": bool(broker_validation.get("balances_loaded", False)),
+        "products_loaded": int(broker_validation.get("products_loaded", 0) or 0),
+        "market_data_loaded": bool(broker_validation.get("market_data_loaded", False)),
+        "last_successful_sync": str(
+            broker_validation.get("last_successful_sync", broker_health.get("last_successful_sync", "DATA UNAVAILABLE"))
+        ),
+        "validation_timestamp": str(
+            broker_validation.get("validation_timestamp", market_snapshot.get("validation_timestamp", "DATA UNAVAILABLE"))
+        ),
+        "failure_reasons": list(broker_validation.get("failure_reasons", []))
+        if isinstance(broker_validation.get("failure_reasons"), list)
+        else [],
+        "read_checks": dict(broker_validation.get("read_checks", {}))
+        if isinstance(broker_validation.get("read_checks"), dict)
+        else {},
+        "broker_validation": dict(broker_validation) if isinstance(broker_validation, dict) else {},
+        "broker_health": dict(broker_health) if isinstance(broker_health, dict) else {},
+        "broker_market_snapshot": dict(market_snapshot) if isinstance(market_snapshot, dict) else {},
+        "broker_execution_status": "DISABLED",
+        "execution_authority": False,
+        "can_live_execute": False,
+        "live_micro_pilot_state": "DISARMED",
+        "advisory_only": True,
+        "execution_allowed": False,
+    }
 
 
 def get_launcher_live_readiness_blockers_feed() -> Dict[str, Any]:
@@ -3497,6 +3540,7 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "runtime_health": runtime_health,
         "broker_startup": broker_startup,
         "broker_parity": get_launcher_broker_parity_feed(),
+        "coinbase_live_validation": get_launcher_coinbase_live_validation_feed(),
         "recommendation_evaluation": recommendation_evaluation,
         "confidence_calibration": confidence_calibration,
         "recommendation_drift": recommendation_drift,
@@ -3691,6 +3735,16 @@ async def launcher_broker_parity():
     return {
         "section": "broker_parity",
         "data": get_launcher_broker_parity_feed(),
+        "advisory_only": True,
+        "execution_allowed": False,
+    }
+
+
+@launcher_router.get("/api/v1/coinbase-live-read-only-validation")
+async def launcher_coinbase_live_read_only_validation():
+    return {
+        "section": "coinbase_live_validation",
+        "data": get_launcher_coinbase_live_validation_feed(),
         "advisory_only": True,
         "execution_allowed": False,
     }

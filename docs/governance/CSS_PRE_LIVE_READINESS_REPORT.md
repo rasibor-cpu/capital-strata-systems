@@ -98,6 +98,12 @@ Phase 154B adds a canonical Broker Parity Validator to compare Coinbase and OAND
 
 Phase 154B does not authorize live trading. It validates identical fail-closed behavior for missing credentials, authentication failure, disabled broker execution, and disarmed pilot states without arming broker execution, arming the Live Micro-Pilot, or submitting orders.
 
+## Phase 155A Coinbase Live Read-Only Operational Validation Addendum
+
+Phase 155A adds Coinbase LIVE read-only operational validation using the existing `CoinbaseLiveReadOnlyAdapter` exclusively. It validates API reachability, server time, account retrieval, portfolio retrieval, balances, products, and ticker reads when credentials are present, and publishes `broker_validation.json`, `broker_health.json`, and `broker_market_snapshot.json`.
+
+Phase 155A does not authorize live trading. Missing credentials and API failures remain fail-closed with structured reasons, broker execution remains `DISABLED`, LiveExecutionAuthority remains false, the Live Micro-Pilot remains `DISARMED`, and all existing gates remain authoritative.
+
 ## Safety Controls Required For LIVE
 
 LIVE mode must continue to require Unified Trade Gate, Margin Gate, RBAC, Capital Governor, AntiBleedGuard, kill switches, emergency stops, broker validation, execution authorization, and configured broker controls.

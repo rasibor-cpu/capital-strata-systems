@@ -153,3 +153,11 @@ Status: Broker parity validation implemented for review.
 Phase 154B adds `BrokerParityValidator` to validate Coinbase and OANDA against the same canonical readiness fields and authority scenarios. It publishes parity status, mismatched fields, authority parity, and fail-closed parity to dashboard/API surfaces.
 
 This register does not authorize live broker execution. The validator is read-only, uses no broker order endpoints, and confirms missing credentials, failed authentication, disabled broker execution, and disarmed pilot states remain fail-closed for both brokers.
+
+## Phase 155A Coinbase Live Read-Only Operational Validation Register
+
+Status: Coinbase live read-only operational validation implemented for review.
+
+Phase 155A adds `CoinbaseLiveReadOnlyOperationalValidator` to validate Coinbase API reachability, server time, account retrieval, portfolio retrieval, balances, products, and ticker reads using the existing `CoinbaseLiveReadOnlyAdapter`. It publishes canonical broker validation, broker health, and broker market snapshot artifacts for dashboard/API display.
+
+This register does not authorize live broker execution. No order, cancel, modify, or execution capability is added; broker execution remains disabled, LiveExecutionAuthority remains false, and the Live Micro-Pilot remains disarmed.

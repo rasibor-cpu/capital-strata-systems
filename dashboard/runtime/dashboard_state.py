@@ -99,6 +99,8 @@ class BrokerState:
 
     position_snapshot: List[Dict[str, Any]] = field(default_factory=list)
 
+    coinbase_live_validation: Dict[str, Any] = field(default_factory=dict)
+
 
 # =========================================================
 # GOVERNANCE STATE
