@@ -6,6 +6,7 @@ from backend.app.accounting.real_balance_engine import RealBalanceEngine
 from backend.app.risk.equity_drawdown_guard import EquityDrawdownPolicy, evaluate_equity_drawdown
 from backend.governance.css_unified_trade_gate import CSSUnifiedTradeGate
 from backend.runtime.broker_credential_diagnostics import diagnose_broker_credentials
+from backend.runtime.capital_state import canonical_drawdown_display
 
 
 class _ZeroFundedOandaAdapter:
@@ -157,3 +158,76 @@ def test_phase156c_diagnostics_and_capital_payloads_do_not_leak_secrets() -> Non
     assert "top-secret" not in payload
     assert "BEGIN PRIVATE KEY" not in payload
     assert "hidden" not in payload.lower()
+
+
+def test_phase156d_missing_credentials_display_not_computable_instead_of_100_pct() -> None:
+    display = canonical_drawdown_display(
+        current_equity=0.0,
+        peak_equity=200.0,
+        max_drawdown_pct=5.0,
+        capital_state="BROKER_CREDENTIALS_MISSING",
+        drawdown_reason="Broker credentials missing",
+    )
+
+    assert display["drawdown_display"] == "NOT COMPUTABLE"
+    assert display["drawdown_status"] == "NOT_COMPUTABLE"
+    assert display["capital_state"] == "BROKER_CREDENTIALS_MISSING"
+    assert "credential" in display["drawdown_reason"].lower()
+
+
+def test_phase156d_broker_balance_unavailable_display_not_computable() -> None:
+    display = canonical_drawdown_display(
+        current_equity=0.0,
+        peak_equity=200.0,
+        max_drawdown_pct=5.0,
+        capital_state="BROKER_BALANCE_UNAVAILABLE",
+        drawdown_reason="Broker balance unavailable",
+    )
+
+    assert display["drawdown_display"] == "NOT COMPUTABLE"
+    assert display["drawdown_status"] == "NOT_COMPUTABLE"
+    assert display["capital_state"] == "BROKER_BALANCE_UNAVAILABLE"
+
+
+def test_phase156d_simulated_drawdown_display_remains_numeric() -> None:
+    display = canonical_drawdown_display(
+        current_equity=80.0,
+        peak_equity=100.0,
+        max_drawdown_pct=50.0,
+        capital_state="SIMULATED_CAPITAL_READY",
+    )
+
+    assert display["drawdown_status"] == "COMPUTED"
+    assert display["drawdown_display"] == "20.0000%"
+
+
+def test_phase156d_real_funded_drawdown_display_remains_numeric() -> None:
+    display = canonical_drawdown_display(
+        current_equity=90.0,
+        peak_equity=100.0,
+        max_drawdown_pct=25.0,
+        capital_state="CAPITAL_READY",
+    )
+
+    assert display["drawdown_status"] == "COMPUTED"
+    assert display["drawdown_display"] == "10.0000%"
+
+
+def test_phase156d_runtime_display_uses_canonical_capital_state_fields() -> None:
+    display = canonical_drawdown_display(
+        current_equity=0.0,
+        peak_equity=200.0,
+        max_drawdown_pct=5.0,
+        capital_state="ACCOUNT_DATA_NOT_READY",
+        drawdown_reason="Account data not ready",
+    )
+
+    assert set(display) >= {
+        "drawdown_display",
+        "drawdown_status",
+        "drawdown_reason",
+        "capital_state",
+        "evaluation",
+    }
+    assert display["drawdown_display"] == "NOT COMPUTABLE"
+    assert display["capital_state"] == "ACCOUNT_DATA_NOT_READY"

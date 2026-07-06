@@ -897,6 +897,7 @@ from backend.app.accounting.pnl_engine import (
     InstrumentSpec,
     ExecutionCost,
 )
+from backend.runtime.capital_state import canonical_drawdown_display
 from engine.performance.pnl_tracker import PnLTracker
 
 try:
@@ -5047,10 +5048,21 @@ try:
             print(f"LIVE EQUITY: {snapshot.live_equity:+.4f}")
 
             tracker_snapshot = pnl_tracker.equity_snapshot()
+            capital_snapshot = getattr(capital_governor, "balance_snapshot", {})
+            drawdown_display = canonical_drawdown_display(
+                current_equity=tracker_snapshot.get("current_equity"),
+                peak_equity=tracker_snapshot.get("peak_equity"),
+                max_drawdown_pct=5.0,
+                capital_state=capital_snapshot.get("capital_state", "CAPITAL_UNAVAILABLE"),
+                drawdown_reason=str(capital_snapshot.get("drawdown_reason", "")),
+            )
             print("--- TRACKER PERFORMANCE ---")
             print(f"TRACKER EQUITY: {tracker_snapshot['current_equity']:+.4f}")
             print(f"PEAK EQUITY: {tracker_snapshot['peak_equity']:+.4f}")
-            print(f"DRAWDOWN: {tracker_snapshot['current_drawdown']:.4%}")
+            print(f"DRAWDOWN: {drawdown_display['drawdown_display']}")
+            if drawdown_display["drawdown_status"] == "NOT_COMPUTABLE":
+                print(f"DRAWDOWN REASON: {drawdown_display['drawdown_reason'] or 'Capital state unavailable'}")
+                print(f"CAPITAL STATE: {drawdown_display['capital_state']}")
 
             runtime_supervisor.record_cycle(
                 equity=tracker_snapshot['current_equity'],

@@ -267,6 +267,37 @@ def evaluate_drawdown_state(
     }
 
 
+def canonical_drawdown_display(
+    *,
+    current_equity: float | None,
+    peak_equity: float | None,
+    max_drawdown_pct: float,
+    capital_state: Any,
+    drawdown_reason: str = "",
+) -> dict[str, Any]:
+    evaluation = evaluate_drawdown_state(
+        current_equity=current_equity,
+        peak_equity=peak_equity,
+        max_drawdown_pct=max_drawdown_pct,
+        capital_state=capital_state,
+        drawdown_reason=drawdown_reason,
+    )
+    drawdown_status = str(evaluation.get("drawdown_status", "NOT_COMPUTABLE")).upper()
+    drawdown_pct = evaluation.get("drawdown_pct")
+    if drawdown_status == "NOT_COMPUTABLE":
+        drawdown_display = "NOT COMPUTABLE"
+    else:
+        drawdown_display = f"{float(drawdown_pct or 0.0):.4f}%"
+
+    return {
+        "drawdown_display": drawdown_display,
+        "drawdown_status": drawdown_status,
+        "drawdown_reason": str(evaluation.get("drawdown_reason", "") or ""),
+        "capital_state": str(evaluation.get("capital_state", normalize_capital_state(capital_state))),
+        "evaluation": evaluation,
+    }
+
+
 def _capital_payload(capital_state: str, trade_gate_decision: str, trade_gate_reason: str, drawdown_reason: str) -> dict[str, Any]:
     return {
         "capital_state": capital_state,
@@ -312,4 +343,5 @@ __all__ = [
     "capital_state_from_credential_diagnostics",
     "classify_capital_state",
     "evaluate_drawdown_state",
+    "canonical_drawdown_display",
 ]
