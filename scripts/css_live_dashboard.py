@@ -2488,6 +2488,15 @@ class CapitalDeploymentGovernor:
         self.real_balance = 0.0
         self.real_equity = 0.0
         self.balance_source = "SIMULATED"
+        self.balance_snapshot: dict[str, Any] = {
+            "capital_state": "SIMULATED_CAPITAL_READY",
+            "drawdown_status": "COMPUTED",
+            "drawdown_reason": "",
+            "trade_gate_decision": "ALLOW",
+            "trade_gate_reason": "CAPITAL_READY",
+            "live_execution_authority": "NOT_EVALUATED",
+            "source": "SIMULATED",
+        }
 
     def _get_adapter(self):
         try:
@@ -2509,6 +2518,7 @@ class CapitalDeploymentGovernor:
             self.real_balance = float(data.get("balance", 0.0) or 0.0)
             self.real_equity = float(data.get("equity", self.real_balance) or 0.0)
             self.balance_source = str(data.get("source", "UNKNOWN"))
+            self.balance_snapshot = dict(data)
 
             print(
                 f"[REAL BALANCE LOADED] broker={SELECTED_BROKER} "
@@ -2522,12 +2532,19 @@ class CapitalDeploymentGovernor:
             self.real_balance = 0.0
             self.real_equity = 0.0
             self.balance_source = f"REAL_BALANCE_ERROR_{str(e)[:40]}"
-            print(f"[REAL BALANCE ERROR] {str(e)[:80]}")
-            return {
-                "balance": 0.0,
-                "equity": 0.0,
+            self.balance_snapshot = {
+                "balance": None,
+                "equity": None,
                 "source": self.balance_source,
+                "capital_state": "BROKER_BALANCE_UNAVAILABLE",
+                "drawdown_status": "NOT_COMPUTABLE",
+                "drawdown_reason": "Broker balance unavailable",
+                "trade_gate_decision": "BLOCK",
+                "trade_gate_reason": "CAPITAL_STATE_UNAVAILABLE",
+                "live_execution_authority": "NO",
             }
+            print(f"[REAL BALANCE ERROR] {str(e)[:80]}")
+            return dict(self.balance_snapshot)
 
     def available_capital(self) -> float:
         allocated = sum(self.active_test_allocations.values())
@@ -2590,6 +2607,17 @@ class CapitalDeploymentGovernor:
     def set_paper_mode(self) -> None:
         self.paper_mode = True
         self.balance_source = "SIMULATED"
+        self.balance_snapshot = {
+            "balance": float(self.simulated_capital_pool),
+            "equity": float(self.simulated_capital_pool),
+            "source": "SIMULATED",
+            "capital_state": "SIMULATED_CAPITAL_READY",
+            "drawdown_status": "COMPUTED",
+            "drawdown_reason": "",
+            "trade_gate_decision": "ALLOW",
+            "trade_gate_reason": "CAPITAL_READY",
+            "live_execution_authority": "NOT_EVALUATED",
+        }
 
 
 capital_governor = CapitalDeploymentGovernor()
@@ -3463,22 +3491,33 @@ def can_open_position(
     open_counts: dict[str, int],
     new_counts_this_cycle: dict[str, int],
 ) -> tuple[bool, str]:
+    capital_snapshot = getattr(capital_governor, "balance_snapshot", {})
+    capital_state = str(capital_snapshot.get("capital_state", "CAPITAL_UNAVAILABLE"))
+    capital_gate = str(capital_snapshot.get("trade_gate_decision", "BLOCK")).upper()
+    drawdown_status = str(capital_snapshot.get("drawdown_status", "NOT_COMPUTABLE")).upper()
+
+    if str(SELECTED_BROKER_MODE).lower() == "live" and capital_gate == "BLOCK":
+        reason = str(capital_snapshot.get("drawdown_reason", "Capital state unavailable"))
+        print(f"[CAPITAL BLOCK] state={capital_state} reason={reason}")
+        return False, "CAPITAL_STATE_UNAVAILABLE"
+
     # =========================
     # R16B DRAWDOWN CIRCUIT BREAKER
     # =========================
-    try:
-        current_dd = float(getattr(pnl_tracker, "max_drawdown", 0.0))
-        if current_dd >= 0.05:
-            print(f"[R16B BLOCK] Drawdown limit reached: {current_dd:.2%}")
-            _safe_emit_alert(
-                "emit_risk_alert",
-                severity=AlertSeverity.CRITICAL,
-                message=f"Drawdown limit reached: {current_dd:.2%}",
-                metadata={"current_dd": current_dd, "threshold": 0.05}
-            )
-            return False, "DRAWDOWN_LIMIT"
-    except Exception:
-        pass
+    if drawdown_status != "NOT_COMPUTABLE":
+        try:
+            current_dd = float(getattr(pnl_tracker, "max_drawdown", 0.0))
+            if current_dd >= 0.05:
+                print(f"[R16B BLOCK] Drawdown limit reached: {current_dd:.2%}")
+                _safe_emit_alert(
+                    "emit_risk_alert",
+                    severity=AlertSeverity.CRITICAL,
+                    message=f"Drawdown limit reached: {current_dd:.2%}",
+                    metadata={"current_dd": current_dd, "threshold": 0.05}
+                )
+                return False, "DRAWDOWN_LIMIT"
+        except Exception:
+            pass
 
     total_open = sum(open_counts.values())
 
@@ -4579,8 +4618,16 @@ try:
 
         try:
             pnl_tracker.current_equity = authoritative_live_equity
+            capital_snapshot = getattr(capital_governor, "balance_snapshot", {})
+            drawdown_status = str(capital_snapshot.get("drawdown_status", "COMPUTED")).upper()
+            drawdown_reason = str(capital_snapshot.get("drawdown_reason", ""))
 
-            if str(SELECTED_BROKER_MODE).lower() == "live" and authoritative_live_equity > 0:
+            if str(SELECTED_BROKER_MODE).lower() == "live" and drawdown_status == "NOT_COMPUTABLE":
+                print(
+                    f"[R16B NOT_COMPUTABLE] {drawdown_reason or 'Broker balance unavailable'} "
+                    f"state={capital_snapshot.get('capital_state', 'CAPITAL_UNAVAILABLE')}"
+                )
+            elif str(SELECTED_BROKER_MODE).lower() == "live" and authoritative_live_equity > 0:
                 pnl_tracker.starting_equity = authoritative_live_equity
                 pnl_tracker.peak_equity = authoritative_live_equity
                 pnl_tracker.max_drawdown = 0.0

@@ -1,4 +1,8 @@
 from typing import Any, Dict, Iterable, Optional
+import os
+
+from backend.runtime.broker_credential_diagnostics import diagnose_broker_credentials
+from backend.runtime.capital_state import classify_capital_state
 
 
 class RealBalanceEngine:
@@ -42,14 +46,14 @@ class RealBalanceEngine:
 
         extracted = self.adapter.extract_balance_nav(summary)
 
-        return {
+        return self._with_capital_state({
             "balance": self._to_float(extracted.get("balance")),
             "equity": self._to_float(extracted.get("nav")),
             "source": "OANDA",
             "balance_status": "AVAILABLE",
             "drawdown_status": "AVAILABLE",
             "drawdown_reason": "",
-        }
+        })
 
     # ---------------------------
     # COINBASE
@@ -79,14 +83,14 @@ class RealBalanceEngine:
             )
             parsed_direct = self._extract_balance_from_payload(account_balance_payload)
             if parsed_direct is not None and parsed_direct > 0:
-                return {
+                return self._with_capital_state({
                     "balance": parsed_direct,
                     "equity": parsed_direct,
                     "source": "COINBASE_DIRECT_BALANCE",
                     "balance_status": "AVAILABLE",
                     "drawdown_status": "AVAILABLE",
                     "drawdown_reason": "",
-                }
+                })
 
             return self._default_balance("COINBASE_NO_BALANCE_METHOD_VALUE")
 
@@ -105,9 +109,18 @@ class RealBalanceEngine:
                 valued_count += 1
 
         if total <= 0:
-            return self._default_balance(f"COINBASE_ZERO_BALANCE_FROM_{len(accounts)}_ACCOUNTS")
+            return self._with_capital_state(
+                {
+                    "balance": 0.0,
+                    "equity": 0.0,
+                    "source": f"COINBASE_ZERO_BALANCE_FROM_{len(accounts)}_ACCOUNTS",
+                    "balance_status": "AVAILABLE",
+                    "drawdown_status": "NOT_COMPUTABLE",
+                    "drawdown_reason": "Zero funded account",
+                }
+            )
 
-        return {
+        return self._with_capital_state({
             "balance": float(total),
             "equity": float(total),
             "source": "COINBASE",
@@ -116,7 +129,7 @@ class RealBalanceEngine:
             "balance_status": "AVAILABLE",
             "drawdown_status": "AVAILABLE",
             "drawdown_reason": "",
-        }
+        })
 
     # ---------------------------
     # Helpers
@@ -250,11 +263,32 @@ class RealBalanceEngine:
             return 0.0
 
     def _default_balance(self, reason: str = "DEFAULT") -> Dict[str, Any]:
-        return {
+        payload = {
             "balance": None,
             "equity": None,
             "source": reason,
             "balance_status": "NOT_AVAILABLE",
-            "drawdown_status": "UNKNOWN",
+            "drawdown_status": "NOT_COMPUTABLE",
             "drawdown_reason": "Broker balance unavailable",
         }
+        return self._with_capital_state(payload)
+
+    def _with_capital_state(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        broker = str(self.selected_broker or "NONE").upper()
+        mode = "live" if broker in {"COINBASE", "OANDA"} else "paper"
+        diagnostics = diagnose_broker_credentials(str(broker).lower(), env=os.environ).as_dict()
+        classification = classify_capital_state(
+            selected_broker=broker,
+            broker_mode=mode,
+            balance=payload.get("balance"),
+            equity=payload.get("equity"),
+            balance_status=str(payload.get("balance_status", "NOT_AVAILABLE")),
+            drawdown_reason=str(payload.get("drawdown_reason", "")),
+            credential_diagnostics=diagnostics,
+        )
+        merged = {**payload, **classification}
+        if merged.get("trade_gate_decision") == "BLOCK":
+            merged["drawdown_status"] = "NOT_COMPUTABLE"
+            if not str(merged.get("drawdown_reason", "")).strip():
+                merged["drawdown_reason"] = "Capital state unavailable"
+        return merged

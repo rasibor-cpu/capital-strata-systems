@@ -115,8 +115,11 @@ def test_phase155c_missing_broker_balance_reports_unknown_drawdown() -> None:
 
     assert balance["balance"] is None
     assert balance["equity"] is None
-    assert balance["drawdown_status"] == "UNKNOWN"
-    assert "unavailable" in str(balance["drawdown_reason"]).lower()
+    assert balance["drawdown_status"] == "NOT_COMPUTABLE"
+    assert any(
+        marker in str(balance["drawdown_reason"]).lower()
+        for marker in ("unavailable", "credential")
+    )
 
 
 def test_phase155c_live_read_only_margin_status_not_simulated() -> None:

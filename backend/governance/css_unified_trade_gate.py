@@ -8,6 +8,7 @@ from backend.governance.prop_trading_governor import (
     PropTradingGovernor,
     build_default_prop_state,
 )
+from backend.runtime.capital_state import is_tradeable_capital_state
 
 
 MAX_POSITIONS_BY_ASSET = {
@@ -105,6 +106,15 @@ class CSSUnifiedTradeGate:
     ) -> GateDecision:
 
         now = time.time()
+
+        capital_state = self._extract_capital_state(candidate, portfolio_state)
+        if capital_state is not None and not is_tradeable_capital_state(capital_state):
+            return self._reject(
+                "CAPITAL_STATE_UNAVAILABLE",
+                engine_mode,
+                now,
+                candidate,
+            )
 
         valid, reason = self._validate_candidate(candidate)
         if not valid:
@@ -299,6 +309,24 @@ class CSSUnifiedTradeGate:
                 )
 
         return True, "ok"
+
+    def _extract_capital_state(
+        self,
+        candidate: Dict[str, Any],
+        portfolio_state: Dict[str, Any],
+    ) -> str | None:
+        if isinstance(candidate, dict):
+            direct = candidate.get("capital_state")
+            if direct is not None:
+                return str(direct).upper()
+        if isinstance(portfolio_state, dict):
+            direct = portfolio_state.get("capital_state")
+            if direct is not None:
+                return str(direct).upper()
+            nested = portfolio_state.get("capital")
+            if isinstance(nested, dict) and nested.get("capital_state") is not None:
+                return str(nested.get("capital_state")).upper()
+        return None
 
     def _validate_session(
         self,

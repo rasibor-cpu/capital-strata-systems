@@ -10,7 +10,7 @@ Purpose:
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from backend.runtime.capital_state import evaluate_drawdown_state
 
 
 @dataclass(frozen=True)
@@ -22,55 +22,14 @@ def evaluate_equity_drawdown(
     current_equity: float | None,
     peak_equity: float | None,
     policy: EquityDrawdownPolicy,
+    *,
+    capital_state: str = "CAPITAL_READY",
+    drawdown_reason: str = "",
 ) -> dict:
-
-    timestamp = datetime.now(timezone.utc).isoformat()
-
-    if current_equity is None or peak_equity is None:
-        return {
-            "decision": "BLOCK",
-            "reason": "Equity data missing (fail-closed).",
-            "current_equity": current_equity,
-            "peak_equity": peak_equity,
-            "drawdown_pct": None,
-            "max_drawdown_pct": policy.max_drawdown_pct,
-            "allowed": False,
-            "timestamp_utc": timestamp,
-        }
-
-    if peak_equity <= 0:
-        return {
-            "decision": "BLOCK",
-            "reason": "Invalid peak equity value.",
-            "current_equity": current_equity,
-            "peak_equity": peak_equity,
-            "drawdown_pct": None,
-            "max_drawdown_pct": policy.max_drawdown_pct,
-            "allowed": False,
-            "timestamp_utc": timestamp,
-        }
-
-    drawdown_pct = ((peak_equity - current_equity) / peak_equity) * 100
-
-    if drawdown_pct >= policy.max_drawdown_pct:
-        return {
-            "decision": "BLOCK",
-            "reason": "Max equity drawdown exceeded.",
-            "current_equity": current_equity,
-            "peak_equity": peak_equity,
-            "drawdown_pct": round(drawdown_pct, 2),
-            "max_drawdown_pct": policy.max_drawdown_pct,
-            "allowed": False,
-            "timestamp_utc": timestamp,
-        }
-
-    return {
-        "decision": "ALLOW",
-        "reason": "Drawdown within limits.",
-        "current_equity": current_equity,
-        "peak_equity": peak_equity,
-        "drawdown_pct": round(drawdown_pct, 2),
-        "max_drawdown_pct": policy.max_drawdown_pct,
-        "allowed": True,
-        "timestamp_utc": timestamp,
-    }
+    return evaluate_drawdown_state(
+        current_equity=current_equity,
+        peak_equity=peak_equity,
+        max_drawdown_pct=policy.max_drawdown_pct,
+        capital_state=capital_state,
+        drawdown_reason=drawdown_reason,
+    )

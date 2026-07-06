@@ -64,7 +64,7 @@ class BrokerStartupSelection:
         payload.setdefault("last_broker_sync", "DATA UNAVAILABLE")
         payload.setdefault("products_loaded", 0)
         payload.setdefault("market_data_status", "NOT_TESTED")
-        payload.setdefault("drawdown_status", "UNKNOWN")
+        payload.setdefault("drawdown_status", "NOT_COMPUTABLE")
         payload.setdefault("drawdown_reason", "Broker balance unavailable")
         payload.setdefault("readiness_state", "UNCONFIGURED")
         payload.setdefault("go_no_go", "NO GO")
