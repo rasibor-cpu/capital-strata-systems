@@ -34,6 +34,8 @@ from .profitability_optimization_score import (
 )
 from .portfolio_optimization_engine import PortfolioOptimizationEngine, PortfolioOptimizationError
 from .signal_quality_engine import SignalQualityEngine
+from .portfolio_optimization_engine import PortfolioOptimizationEngine, PortfolioOptimizationError
+from .signal_quality_engine import SignalQualityEngine
 from .marathon_readiness_optimizer import MarathonReadinessOptimizer, MarathonReadinessOptimizerError
 from .regime_parameter_profiles import RegimeParameterProfiles, RegimeParameterProfilesError
 from .strategy_promotion_manager import StrategyPromotionManager, StrategyPromotionManagerError
@@ -45,6 +47,7 @@ from .trade_explanation_repository import TradeExplanationRepository, TradeExpla
 from .trade_forensics_engine import TradeForensicsEngine, TradeForensicsEngineError
 from .trade_quality_models import TradeQualityAssessment
 from .trade_quality_scoring_engine import TradeQualityScoringEngine, TradeQualityScoringEngineError
+from .explainable_decision_engine import ExplainableDecisionEngine, ExplainableDecisionEngineError
 from .trade_outcome_analytics_engine import TradeOutcomeAnalyticsEngine
 from .trade_outcome_repository import (
     DuplicateTradeOutcomeError,
@@ -141,4 +144,6 @@ __all__ = [
     "TradeExplanationRepositoryError",
     "TradeForensicsEngine",
     "TradeForensicsEngineError",
+    "ExplainableDecisionEngine",
+    "ExplainableDecisionEngineError",
 ]
