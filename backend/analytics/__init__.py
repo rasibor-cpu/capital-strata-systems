@@ -48,6 +48,7 @@ from .trade_forensics_engine import TradeForensicsEngine, TradeForensicsEngineEr
 from .trade_quality_models import TradeQualityAssessment
 from .trade_quality_scoring_engine import TradeQualityScoringEngine, TradeQualityScoringEngineError
 from .explainable_decision_engine import ExplainableDecisionEngine, ExplainableDecisionEngineError
+from .execution_quality_monitor import ExecutionQualityMonitor, ExecutionQualityMonitorError
 from .trade_outcome_analytics_engine import TradeOutcomeAnalyticsEngine
 from .trade_outcome_repository import (
     DuplicateTradeOutcomeError,
@@ -146,4 +147,6 @@ __all__ = [
     "TradeForensicsEngineError",
     "ExplainableDecisionEngine",
     "ExplainableDecisionEngineError",
+    "ExecutionQualityMonitor",
+    "ExecutionQualityMonitorError",
 ]
