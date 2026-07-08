@@ -75,6 +75,10 @@ from backend.portfolio.strategy_attribution_engine import (
     StrategyAttributionEngineError,
 )
 from backend.portfolio.utils import advisory_response, clamp, normalize_allocations, safe_float, safe_series
+from backend.portfolio.portfolio_scenario_generator import PortfolioScenarioGenerator
+from backend.portfolio.portfolio_tradeoff_analyzer import PortfolioTradeoffAnalyzer
+from backend.portfolio.portfolio_efficiency_frontier import PortfolioEfficiencyFrontier
+from backend.portfolio.institutional_portfolio_optimizer import InstitutionalPortfolioOptimizer
 
 __all__ = [
     "AdaptivePortfolioManager",
@@ -136,4 +140,8 @@ __all__ = [
     "normalize_allocations",
     "safe_float",
     "safe_series",
+    "PortfolioScenarioGenerator",
+    "PortfolioTradeoffAnalyzer",
+    "PortfolioEfficiencyFrontier",
+    "InstitutionalPortfolioOptimizer",
 ]
