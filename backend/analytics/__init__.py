@@ -49,6 +49,7 @@ from .trade_quality_models import TradeQualityAssessment
 from .trade_quality_scoring_engine import TradeQualityScoringEngine, TradeQualityScoringEngineError
 from .explainable_decision_engine import ExplainableDecisionEngine, ExplainableDecisionEngineError
 from .execution_quality_monitor import ExecutionQualityMonitor, ExecutionQualityMonitorError
+from .trade_outcome_attribution import TradeOutcomeAttributionEngine, TradeOutcomeAttributionError
 from .trade_outcome_analytics_engine import TradeOutcomeAnalyticsEngine
 from .trade_outcome_repository import (
     DuplicateTradeOutcomeError,
@@ -149,4 +150,6 @@ __all__ = [
     "ExplainableDecisionEngineError",
     "ExecutionQualityMonitor",
     "ExecutionQualityMonitorError",
+    "TradeOutcomeAttributionEngine",
+    "TradeOutcomeAttributionError",
 ]
