@@ -53,6 +53,13 @@ from .trade_outcome_attribution import TradeOutcomeAttributionEngine, TradeOutco
 from .broker_performance_intelligence import BrokerPerformanceIntelligenceEngine, BrokerPerformanceIntelligenceError
 from .decision_confidence_framework import DecisionConfidenceFramework, DecisionConfidenceFrameworkError
 from .broker_performance_confidence import build_broker_performance_confidence_report
+from .opportunity_intelligence_engine import (
+    ExpectedValueEngine,
+    OpportunityIntelligenceEngine,
+    OpportunityIntelligenceEngineError,
+    RiskAdjustedOpportunityScoringEngine,
+    build_opportunity_intelligence_report,
+)
 from .trade_outcome_analytics_engine import TradeOutcomeAnalyticsEngine
 from .trade_outcome_repository import (
     DuplicateTradeOutcomeError,
@@ -160,4 +167,9 @@ __all__ = [
     "DecisionConfidenceFramework",
     "DecisionConfidenceFrameworkError",
     "build_broker_performance_confidence_report",
+    "ExpectedValueEngine",
+    "OpportunityIntelligenceEngine",
+    "OpportunityIntelligenceEngineError",
+    "RiskAdjustedOpportunityScoringEngine",
+    "build_opportunity_intelligence_report",
 ]

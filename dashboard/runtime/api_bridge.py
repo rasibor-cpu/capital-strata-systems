@@ -23,6 +23,9 @@ from backend.validation.live_readiness_certification import (
 from backend.analytics.broker_performance_confidence import (
     build_broker_performance_confidence_report,
 )
+from backend.analytics.opportunity_intelligence_engine import (
+    build_opportunity_intelligence_report,
+)
 
 
 DashboardStateProvider = Callable[[], DashboardState]
@@ -213,6 +216,24 @@ def get_broker_performance_intelligence_payload(
     }
 
 
+def get_opportunity_intelligence_payload(
+    state_provider: DashboardStateProvider | None = None,
+) -> dict[str, Any]:
+    state = _state_from_provider(state_provider)
+    report = build_opportunity_intelligence_report(state.to_dict())
+    return {
+        "payload_version": "1.0.0",
+        "payload_schema": "css.opportunity_intelligence.v1",
+        "generated_at": report["generated_at"],
+        "section": "opportunity_intelligence",
+        "advisory_only": True,
+        "execution_allowed": False,
+        "data": report,
+        "opportunities": report["opportunities"],
+        "leaderboard": report["leaderboard"],
+    }
+
+
 def create_dashboard_state_router(
     state_provider: DashboardStateProvider | None = None,
 ) -> APIRouter:
@@ -260,6 +281,10 @@ def create_dashboard_state_router(
             _state_from_provider(state_provider),
             "opportunities",
         )
+
+    @router.get("/api/v1/opportunity-intelligence")
+    def read_opportunity_intelligence() -> dict[str, Any]:
+        return get_opportunity_intelligence_payload(state_provider)
 
     @router.get("/api/v1/trade-summary")
     def read_trade_summary() -> dict[str, Any]:
@@ -394,6 +419,7 @@ __all__ = [
     "get_oanda_live_validation_payload",
     "get_dashboard_state_payload",
     "get_frontend_payload",
+    "get_opportunity_intelligence_payload",
     "get_live_execution_authority_payload",
     "get_live_readiness_state_payload",
     "get_startup_diagnostics_payload",
