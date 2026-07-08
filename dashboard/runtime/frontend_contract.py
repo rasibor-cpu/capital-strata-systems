@@ -62,6 +62,7 @@ FRONTEND_SECTIONS = (
     "coinbase_live_validation",
     "oanda_live_validation",
     "broker_reconciliation",
+    "capital_allocation_intelligence",
     "analytics",
 )
 
@@ -167,6 +168,7 @@ def build_frontend_payload(
             "coinbase_live_validation": coinbase_live_validation(dashboard_payload),
             "oanda_live_validation": oanda_live_validation(dashboard_payload),
             "broker_reconciliation": broker_reconciliation(dashboard_payload),
+            "capital_allocation_intelligence": capital_allocation_intelligence(dashboard_payload),
             "analytics": analytics(dashboard_payload),
         },
     }
@@ -1366,6 +1368,70 @@ def broker_reconciliation(dashboard_payload: Mapping[str, Any]) -> dict[str, Any
     return build_broker_reconciliation_payload(dashboard_payload)
 
 
+def capital_allocation_intelligence(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
+    explicit = _mapping(dashboard_payload.get("capital_allocation_intelligence"))
+    if explicit:
+        report = explicit
+    else:
+        report = {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "allocation_plan": [],
+            "allocation_summary": {
+                "capital_used": 0.0,
+                "capital_remaining": 0.0,
+                "cash_reserve": 0.0,
+                "deployable_capital": 0.0,
+                "allocated_opportunity_count": 0,
+                "reviewed_opportunity_count": 0,
+                "shadow_runtime_stage": "AFTER_OPPORTUNITY_INTELLIGENCE",
+            },
+            "portfolio_metrics": {
+                "capital_efficiency_score": 0.0,
+                "expected_portfolio_return": 0.0,
+                "expected_portfolio_risk": 0.0,
+                "expected_drawdown": 0.0,
+                "portfolio_confidence": 0.0,
+                "risk_adjusted_capital_score": 0.0,
+                "diversification_score": 0.0,
+                "cash_allocation": 0.0,
+            },
+            "recommendations": [],
+            "warnings": [],
+            "capital_remaining": 0.0,
+        }
+    summary = _mapping(report.get("allocation_summary"))
+    metrics = _mapping(report.get("portfolio_metrics"))
+    capital_remaining = report.get("capital_remaining", summary.get("capital_remaining", 0.0))
+    return {
+        "generated_at": report["generated_at"],
+        "advisory_only": True,
+        "execution_allowed": False,
+        "capital_plan": report["allocation_plan"],
+        "allocation_summary": report["allocation_summary"],
+        "portfolio_metrics": report["portfolio_metrics"],
+        "recommendations": report["recommendations"],
+        "warnings": report["warnings"],
+        "top_ranked_opportunities": [
+            {
+                "rank": row.get("rank"),
+                "asset": row.get("asset"),
+                "broker": row.get("broker"),
+                "strategy": row.get("strategy"),
+                "allocated_capital": row.get("allocated_capital"),
+                "score": row.get("score"),
+                "rationale": row.get("rationale"),
+            }
+            for row in report["allocation_plan"][:5]
+        ],
+        "cash_allocation": metrics.get("cash_allocation", capital_remaining),
+        "unused_capital": capital_remaining,
+        "portfolio_diversification": metrics.get("diversification_score", 0.0),
+        "expected_return": metrics.get("expected_portfolio_return", 0.0),
+        "expected_risk": metrics.get("expected_portfolio_risk", 0.0),
+        "confidence": metrics.get("portfolio_confidence", 0.0),
+    }
+
+
 
 def analytics(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     analytics_summary = _mapping(dashboard_payload.get("analytics_summary"))
@@ -1631,6 +1697,7 @@ __all__ = [
     "coinbase_live_validation",
     "oanda_live_validation",
     "broker_reconciliation",
+    "capital_allocation_intelligence",
     "build_frontend_payload",
     "build_section_payload",
     "build_websocket_delta",

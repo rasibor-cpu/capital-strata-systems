@@ -60,6 +60,11 @@ from .opportunity_intelligence_engine import (
     RiskAdjustedOpportunityScoringEngine,
     build_opportunity_intelligence_report,
 )
+from .capital_allocation_optimizer import (
+    CapitalAllocationOptimizer,
+    CapitalAllocationOptimizerError,
+    build_capital_allocation_intelligence_report,
+)
 from .trade_outcome_analytics_engine import TradeOutcomeAnalyticsEngine
 from .trade_outcome_repository import (
     DuplicateTradeOutcomeError,
@@ -172,4 +177,7 @@ __all__ = [
     "OpportunityIntelligenceEngineError",
     "RiskAdjustedOpportunityScoringEngine",
     "build_opportunity_intelligence_report",
+    "CapitalAllocationOptimizer",
+    "CapitalAllocationOptimizerError",
+    "build_capital_allocation_intelligence_report",
 ]

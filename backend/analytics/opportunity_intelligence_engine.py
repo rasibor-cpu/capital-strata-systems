@@ -214,6 +214,7 @@ class OpportunityIntelligenceEngine:
     ) -> dict[str, Any]:
         score = self.scoring_engine.score(opportunity, context=context)
         asset = str(_first(opportunity, "asset", "symbol", default="UNKNOWN")).upper()
+        asset_class = str(_first(opportunity, "asset_class", default="UNKNOWN")).upper()
         strategy = str(_first(opportunity, "strategy", "strategy_id", default="UNKNOWN"))
         broker = str(_first(opportunity, "broker", "broker_name", default=_mapping(context).get("broker", "UNKNOWN"))).upper()
         strengths, weaknesses, supporting = _explain_factors(score["score_breakdown"])
@@ -221,6 +222,7 @@ class OpportunityIntelligenceEngine:
         return {
             "opportunity_id": str(_first(opportunity, "opportunity_id", "proposal_id", "trade_id", default=f"{asset}:{strategy}:{broker}")),
             "asset": asset,
+            "asset_class": asset_class,
             "broker": broker,
             "strategy": strategy,
             "regime": str(_first(opportunity, "regime", "market_regime", default="UNKNOWN")),

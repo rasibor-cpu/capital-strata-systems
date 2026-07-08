@@ -26,6 +26,9 @@ from backend.analytics.broker_performance_confidence import (
 from backend.analytics.opportunity_intelligence_engine import (
     build_opportunity_intelligence_report,
 )
+from backend.analytics.capital_allocation_optimizer import (
+    build_capital_allocation_intelligence_report,
+)
 
 
 DashboardStateProvider = Callable[[], DashboardState]
@@ -234,6 +237,27 @@ def get_opportunity_intelligence_payload(
     }
 
 
+def get_capital_allocation_intelligence_payload(
+    state_provider: DashboardStateProvider | None = None,
+) -> dict[str, Any]:
+    state = _state_from_provider(state_provider)
+    report = build_capital_allocation_intelligence_report(state.to_dict())
+    return {
+        "payload_version": "1.0.0",
+        "payload_schema": "css.capital_allocation_intelligence.v1",
+        "generated_at": report["generated_at"],
+        "section": "capital_allocation_intelligence",
+        "advisory_only": True,
+        "execution_allowed": False,
+        "data": report,
+        "capital_plan": report["allocation_plan"],
+        "allocation_summary": report["allocation_summary"],
+        "portfolio_metrics": report["portfolio_metrics"],
+        "recommendations": report["recommendations"],
+        "warnings": report["warnings"],
+    }
+
+
 def create_dashboard_state_router(
     state_provider: DashboardStateProvider | None = None,
 ) -> APIRouter:
@@ -285,6 +309,10 @@ def create_dashboard_state_router(
     @router.get("/api/v1/opportunity-intelligence")
     def read_opportunity_intelligence() -> dict[str, Any]:
         return get_opportunity_intelligence_payload(state_provider)
+
+    @router.get("/api/v1/capital-allocation-intelligence")
+    def read_capital_allocation_intelligence() -> dict[str, Any]:
+        return get_capital_allocation_intelligence_payload(state_provider)
 
     @router.get("/api/v1/trade-summary")
     def read_trade_summary() -> dict[str, Any]:
@@ -420,6 +448,7 @@ __all__ = [
     "get_dashboard_state_payload",
     "get_frontend_payload",
     "get_opportunity_intelligence_payload",
+    "get_capital_allocation_intelligence_payload",
     "get_live_execution_authority_payload",
     "get_live_readiness_state_payload",
     "get_startup_diagnostics_payload",

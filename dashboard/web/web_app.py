@@ -250,6 +250,7 @@ def _dashboard_page() -> str:
             "execution",
             "broker",
             "opportunities",
+            "capital_allocation_intelligence",
             "analytics",
         ]
     )
@@ -356,6 +357,37 @@ def _dashboard_page() -> str:
       <article>
         <strong>Drawdown State</strong>
         <span data-value="analytics.drawdown_state">0.00</span>
+      </article>
+    </section>
+
+    <section class="metric-band" aria-label="Capital allocation intelligence">
+      <article>
+        <strong>Shadow Capital Used</strong>
+        <span data-value="capital_allocation_intelligence.allocation_summary.capital_used">$0.00</span>
+      </article>
+      <article>
+        <strong>Cash Allocation</strong>
+        <span data-value="capital_allocation_intelligence.cash_allocation">$0.00</span>
+      </article>
+      <article>
+        <strong>Unused Capital</strong>
+        <span data-value="capital_allocation_intelligence.unused_capital">$0.00</span>
+      </article>
+      <article>
+        <strong>Portfolio Diversification</strong>
+        <span data-value="capital_allocation_intelligence.portfolio_diversification">0.00</span>
+      </article>
+      <article>
+        <strong>Expected Return</strong>
+        <span data-value="capital_allocation_intelligence.expected_return">0.00</span>
+      </article>
+      <article>
+        <strong>Expected Risk</strong>
+        <span data-value="capital_allocation_intelligence.expected_risk">0.00</span>
+      </article>
+      <article>
+        <strong>Confidence</strong>
+        <span data-value="capital_allocation_intelligence.confidence">0.00</span>
       </article>
     </section>
 
@@ -560,6 +592,25 @@ def _dashboard_page() -> str:
         </div>
         <div class="empty-state" id="opportunities-list">No active opportunities</div>
       </article>
+
+      <article class="panel wide" data-panel="capital_allocation_intelligence">
+        <div class="panel-head">
+          <h2>Capital Allocation Intelligence</h2>
+          <span data-value="capital_allocation_intelligence.allocation_summary.allocated_opportunity_count">0</span>
+        </div>
+        <div class="kv-grid two">
+          <div><strong>Capital Used</strong><span data-value="capital_allocation_intelligence.allocation_summary.capital_used">$0.00</span></div>
+          <div><strong>Capital Remaining</strong><span data-value="capital_allocation_intelligence.allocation_summary.capital_remaining">$0.00</span></div>
+          <div><strong>Cash Reserve</strong><span data-value="capital_allocation_intelligence.allocation_summary.cash_reserve">$0.00</span></div>
+          <div><strong>Deployable Capital</strong><span data-value="capital_allocation_intelligence.allocation_summary.deployable_capital">$0.00</span></div>
+          <div><strong>Expected Return</strong><span data-value="capital_allocation_intelligence.expected_return">0.00</span></div>
+          <div><strong>Expected Risk</strong><span data-value="capital_allocation_intelligence.expected_risk">0.00</span></div>
+          <div><strong>Portfolio Diversification</strong><span data-value="capital_allocation_intelligence.portfolio_diversification">0.00</span></div>
+          <div><strong>Confidence</strong><span data-value="capital_allocation_intelligence.confidence">0.00</span></div>
+        </div>
+        <div class="table" id="capital-allocation-list"></div>
+        <ul class="compact-list" id="capital-allocation-warnings"></ul>
+      </article>
     </section>
   </main>
 
@@ -576,12 +627,17 @@ def _dashboard_page() -> str:
     }}
 
     function get(path) {{
-      const [section, key] = path.split(".");
-      return state.sections?.[section]?.[key];
+      const parts = path.split(".");
+      let value = state.sections?.[parts.shift()];
+      for (const part of parts) {{
+        if (value === null || value === undefined) return undefined;
+        value = value?.[part];
+      }}
+      return value;
     }}
 
     function formatField(path, value) {{
-      if (["cash_balance", "total_equity", "buying_power", "margin_used", "available_margin", "net_pnl", "total_exposure", "daily_loss_limit", "total_execution_cost", "cash", "equity", "available_capital", "allocated_capital", "reserved_capital", "options_exposure", "underlying_exposure"].some((key) => path.endsWith(key))) {{
+      if (["cash_balance", "total_equity", "buying_power", "margin_used", "available_margin", "net_pnl", "total_exposure", "daily_loss_limit", "total_execution_cost", "cash", "equity", "available_capital", "allocated_capital", "reserved_capital", "options_exposure", "underlying_exposure", "capital_used", "capital_remaining", "cash_reserve", "deployable_capital", "cash_allocation", "unused_capital"].some((key) => path.endsWith(key))) {{
         return money(value);
       }}
       if (["win_rate_pct", "exposure_utilization_pct", "current_drawdown_pct", "capital_efficiency"].some((key) => path.endsWith(key))) {{
@@ -629,6 +685,7 @@ def _dashboard_page() -> str:
       renderPositions();
       renderRiskBreaches();
       renderOpportunities();
+      renderCapitalAllocation();
     }}
 
     function renderPositions() {{
@@ -666,9 +723,61 @@ def _dashboard_page() -> str:
       target.innerHTML = items.length ? items.map((item) => `<div>${{escapeHtml(JSON.stringify(item))}}</div>`).join("") : "No active opportunities";
     }}
 
+    function renderCapitalAllocation() {{
+      const section = state.sections.capital_allocation_intelligence || {{}};
+      const target = document.getElementById("capital-allocation-list");
+      const warnings = document.getElementById("capital-allocation-warnings");
+      const plan = section.capital_plan || [];
+      target.innerHTML = plan.length ? `
+        <div class="row head"><span>Rank</span><span>Asset</span><span>Broker</span><span>Capital</span><span>Score</span></div>
+        ${{plan.map((row) => `
+          <div class="row">
+            <span>${{escapeHtml(row.rank || "")}}</span>
+            <span>${{escapeHtml(row.asset || "UNKNOWN")}}</span>
+            <span>${{escapeHtml(row.broker || "UNKNOWN")}}</span>
+            <span>${{money(row.allocated_capital || 0)}}</span>
+            <span>${{Number(row.score || 0).toFixed(2)}}</span>
+          </div>
+          <div class="row detail"><span>${{escapeHtml(row.rationale || "")}}</span></div>
+        `).join("")}}
+      ` : `<div class="empty-state">No shadow allocation recommendations</div>`;
+      const warningItems = section.warnings || [];
+      warnings.innerHTML = warningItems.length ? warningItems.map((item) => `<li>${{escapeHtml(item)}}</li>`).join("") : "<li>NONE</li>";
+    }}
+
+    function normalizeCapitalAllocationPayload(payload) {{
+      const report = payload.data || {{}};
+      const metrics = payload.portfolio_metrics || report.portfolio_metrics || {{}};
+      const summary = payload.allocation_summary || report.allocation_summary || {{}};
+      return {{
+        generated_at: payload.generated_at || report.generated_at,
+        advisory_only: true,
+        execution_allowed: false,
+        capital_plan: payload.capital_plan || report.allocation_plan || [],
+        allocation_summary: summary,
+        portfolio_metrics: metrics,
+        recommendations: payload.recommendations || report.recommendations || [],
+        warnings: payload.warnings || report.warnings || [],
+        cash_allocation: metrics.cash_allocation || summary.capital_remaining || 0,
+        unused_capital: summary.capital_remaining || 0,
+        portfolio_diversification: metrics.diversification_score || 0,
+        expected_return: metrics.expected_portfolio_return || 0,
+        expected_risk: metrics.expected_portfolio_risk || 0,
+        confidence: metrics.portfolio_confidence || 0
+      }};
+    }}
+
+    async function refreshCapitalAllocation() {{
+      const response = await fetch("/api/v1/capital-allocation-intelligence", {{ cache: "no-store" }});
+      const payload = await response.json();
+      state.sections.capital_allocation_intelligence = normalizeCapitalAllocationPayload(payload);
+      render({{ ...(state.payload || {{}}), sections: state.sections }});
+    }}
+
     async function refresh() {{
       const response = await fetch("/api/v1/frontend-state", {{ cache: "no-store" }});
       render(await response.json());
+      refreshCapitalAllocation().catch(() => undefined);
     }}
 
     function connectSocket() {{
