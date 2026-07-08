@@ -50,6 +50,9 @@ from .trade_quality_scoring_engine import TradeQualityScoringEngine, TradeQualit
 from .explainable_decision_engine import ExplainableDecisionEngine, ExplainableDecisionEngineError
 from .execution_quality_monitor import ExecutionQualityMonitor, ExecutionQualityMonitorError
 from .trade_outcome_attribution import TradeOutcomeAttributionEngine, TradeOutcomeAttributionError
+from .broker_performance_intelligence import BrokerPerformanceIntelligenceEngine, BrokerPerformanceIntelligenceError
+from .decision_confidence_framework import DecisionConfidenceFramework, DecisionConfidenceFrameworkError
+from .broker_performance_confidence import build_broker_performance_confidence_report
 from .trade_outcome_analytics_engine import TradeOutcomeAnalyticsEngine
 from .trade_outcome_repository import (
     DuplicateTradeOutcomeError,
@@ -152,4 +155,9 @@ __all__ = [
     "ExecutionQualityMonitorError",
     "TradeOutcomeAttributionEngine",
     "TradeOutcomeAttributionError",
+    "BrokerPerformanceIntelligenceEngine",
+    "BrokerPerformanceIntelligenceError",
+    "DecisionConfidenceFramework",
+    "DecisionConfidenceFrameworkError",
+    "build_broker_performance_confidence_report",
 ]

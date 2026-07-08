@@ -20,6 +20,9 @@ from dashboard.runtime.ws_bridge import create_ws_router
 from backend.validation.live_readiness_certification import (
     live_readiness_blocker_diagnostics,
 )
+from backend.analytics.broker_performance_confidence import (
+    build_broker_performance_confidence_report,
+)
 
 
 DashboardStateProvider = Callable[[], DashboardState]
@@ -193,6 +196,23 @@ def get_broker_operational_status_payload(
     )
 
 
+def get_broker_performance_intelligence_payload(
+    state_provider: DashboardStateProvider | None = None,
+) -> dict[str, Any]:
+    state = _state_from_provider(state_provider)
+    report = build_broker_performance_confidence_report(state.to_dict())
+    return {
+        "payload_version": "1.0.0",
+        "payload_schema": "css.broker.performance_intelligence.v1",
+        "generated_at": report["generated_at"],
+        "section": "broker_performance_intelligence",
+        "data": report,
+        "advisory_only": True,
+        "execution_allowed": False,
+        "live_trading_enabled": False,
+    }
+
+
 def create_dashboard_state_router(
     state_provider: DashboardStateProvider | None = None,
 ) -> APIRouter:
@@ -320,6 +340,10 @@ def create_dashboard_state_router(
     def read_broker_operational_status() -> dict[str, Any]:
         return get_broker_operational_status_payload(state_provider)
 
+    @router.get("/api/v1/broker-performance-intelligence")
+    def read_broker_performance_intelligence() -> dict[str, Any]:
+        return get_broker_performance_intelligence_payload(state_provider)
+
     @router.get("/api/v1/broker-reconciliation")
     def read_broker_reconciliation() -> dict[str, Any]:
         return build_section_payload(
@@ -362,6 +386,7 @@ __all__ = [
     "get_broker_read_only_status_payload",
     "get_broker_parity_payload",
     "get_broker_operational_status_payload",
+    "get_broker_performance_intelligence_payload",
     "get_broker_credential_diagnostics_payload",
     "get_broker_readiness_payload",
     "get_broker_reconciliation_payload",
