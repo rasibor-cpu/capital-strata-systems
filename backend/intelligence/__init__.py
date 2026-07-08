@@ -11,3 +11,4 @@ from backend.intelligence.recommendation_engine import RecommendationEngine
 from backend.intelligence.explainability import Explainability
 from backend.intelligence.intelligence_service import IntelligenceService
 from backend.intelligence.briefings import BriefingGenerator
+from backend.intelligence.investment_committee_engine import InvestmentCommitteeEngine

@@ -8,6 +8,7 @@ from backend.portfolio.opportunity_portfolio_ranker import OpportunityPortfolioR
 from backend.portfolio.portfolio_resilience_analyzer import PortfolioResilienceAnalyzer
 from backend.portfolio.institutional_portfolio_optimizer import InstitutionalPortfolioOptimizer
 from backend.portfolio.utils import advisory_response
+from backend.intelligence.investment_committee_engine import InvestmentCommitteeEngine
 
 
 PAYLOAD_VERSION = "css.phase157b.portfolio_construction_intelligence.v1"
@@ -23,11 +24,13 @@ class PortfolioConstructionIntelligenceEngine:
         resilience_analyzer: PortfolioResilienceAnalyzer | None = None,
         diversification_optimizer: DiversificationOptimizer | None = None,
         institutional_optimizer: InstitutionalPortfolioOptimizer | None = None,
+        investment_committee_engine: InvestmentCommitteeEngine | None = None,
     ) -> None:
         self.ranker = ranker or OpportunityPortfolioRanker()
         self.resilience_analyzer = resilience_analyzer or PortfolioResilienceAnalyzer()
         self.diversification_optimizer = diversification_optimizer or DiversificationOptimizer(analyzer=self.resilience_analyzer)
         self.institutional_optimizer = institutional_optimizer or InstitutionalPortfolioOptimizer()
+        self.investment_committee_engine = investment_committee_engine or InvestmentCommitteeEngine()
 
     def analyze(
         self,
@@ -38,15 +41,26 @@ class PortfolioConstructionIntelligenceEngine:
         adaptive_strategy_intelligence: Mapping[str, Any] | None = None,
         opportunity_intelligence: Mapping[str, Any] | None = None,
         dashboard_context: Mapping[str, Any] | None = None,
+        broker_health: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         try:
             ranking = self.ranker.rank(approved_opportunities)
             resilience = self.resilience_analyzer.analyze(approved_opportunities)
             construction = self.diversification_optimizer.optimize(approved_opportunities, max_positions=max_positions)
             institutional_optimization = self.institutional_optimizer.optimize(approved_opportunities, max_positions=max_positions)
+            investment_committee_intelligence = self.investment_committee_engine.evaluate_portfolio(
+                approved_opportunities,
+                max_positions=max_positions,
+                decision_confidence=decision_confidence,
+                adaptive_strategy_intelligence=adaptive_strategy_intelligence,
+                opportunity_intelligence=opportunity_intelligence,
+                dashboard_context=dashboard_context,
+                broker_health=broker_health,
+                institutional_optimization=institutional_optimization,
+            )
 
             if ranking.get("status") == "DATA UNAVAILABLE":
-                return self._fail_closed("approved_opportunities_unavailable", ranking, resilience, construction, institutional_optimization)
+                return self._fail_closed("approved_opportunities_unavailable", ranking, resilience, construction, institutional_optimization, investment_committee_intelligence)
 
             recommendations = _recommendations(resilience, construction)
             status = _status(resilience, construction)
@@ -64,6 +78,7 @@ class PortfolioConstructionIntelligenceEngine:
                 portfolio_resilience=resilience,
                 diversification_optimization=construction,
                 institutional_portfolio_optimization=institutional_optimization,
+                investment_committee_intelligence=investment_committee_intelligence,
                 recommendations=recommendations,
                 integration={
                     "decision_confidence_consumed": isinstance(decision_confidence, Mapping),
@@ -79,6 +94,10 @@ class PortfolioConstructionIntelligenceEngine:
             )
         except Exception as exc:  # noqa: BLE001 - portfolio construction must fail closed.
             institutional_optimization = self.institutional_optimizer.optimize(None)
+            investment_committee_intelligence = self.investment_committee_engine.evaluate_portfolio(
+                None,
+                institutional_optimization=institutional_optimization,
+            )
             return advisory_response(
                 "FAIL_CLOSED",
                 payload_version=PAYLOAD_VERSION,
@@ -91,6 +110,7 @@ class PortfolioConstructionIntelligenceEngine:
                 ranked_opportunities=[],
                 replacement_candidates=[],
                 institutional_portfolio_optimization=institutional_optimization,
+                investment_committee_intelligence=investment_committee_intelligence,
                 recommendations=["No advisory portfolio changes while construction intelligence is unavailable."],
                 reasons=[f"portfolio_construction_intelligence_failed:{exc.__class__.__name__}"],
                 **_safety_flags(),
@@ -103,6 +123,7 @@ class PortfolioConstructionIntelligenceEngine:
         resilience: Mapping[str, Any],
         construction: Mapping[str, Any],
         institutional_optimization: Mapping[str, Any] | None = None,
+        investment_committee_intelligence: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         return advisory_response(
             "DATA UNAVAILABLE",
@@ -118,6 +139,7 @@ class PortfolioConstructionIntelligenceEngine:
             portfolio_resilience=resilience,
             diversification_optimization=construction,
             institutional_portfolio_optimization=institutional_optimization or {},
+            investment_committee_intelligence=investment_committee_intelligence or {},
             recommendations=["No advisory portfolio can be constructed without approved opportunities."],
             reasons=[reason, *ranking.get("reasons", [])],
             **_safety_flags(),
@@ -132,6 +154,7 @@ def analyze_portfolio_construction_intelligence(
     adaptive_strategy_intelligence: Mapping[str, Any] | None = None,
     opportunity_intelligence: Mapping[str, Any] | None = None,
     dashboard_context: Mapping[str, Any] | None = None,
+    broker_health: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     return PortfolioConstructionIntelligenceEngine().analyze(
         approved_opportunities,
@@ -140,6 +163,7 @@ def analyze_portfolio_construction_intelligence(
         adaptive_strategy_intelligence=adaptive_strategy_intelligence,
         opportunity_intelligence=opportunity_intelligence,
         dashboard_context=dashboard_context,
+        broker_health=broker_health,
     )
 
 
