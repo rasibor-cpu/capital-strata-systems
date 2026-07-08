@@ -5,7 +5,6 @@ Uses ReportTemplates to build Event-mapped reports from raw contexts.
 """
 
 from backend.events.event_models import Event
-from backend.reporting.report_models import create_report_event
 from backend.reporting.report_templates import ReportTemplates
 
 class ReportGenerator:
@@ -22,6 +21,7 @@ class ReportGenerator:
 
     def generate(self, report_type: str, title: str, context: dict, metadata: dict = None) -> Event:
         """Render report text and format it into a canonical Event object."""
+        from backend.reporting.report_models import create_report_event
         content = self.templates.render(report_type, context)
         return create_report_event(
             report_type=report_type,
