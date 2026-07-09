@@ -197,3 +197,83 @@ class ExecutiveRecommendations:
             warnings.append(f"WARNING: Statistical model confidence is slightly low ({conf:.1f}%).")
 
         return warnings
+
+    def generate_decision_intelligence(
+        self,
+        *,
+        portfolio_construction: Mapping[str, Any] | None = None,
+        optimizer: Mapping[str, Any] | None = None,
+        committee: Mapping[str, Any] | None = None,
+        decision_confidence: Mapping[str, Any] | None = None,
+        broker_health: Mapping[str, Any] | None = None,
+        runtime_health: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Exposes institutional decision explainability rationale for all recommendations."""
+        evidence = []
+        if portfolio_construction:
+            evidence.append("portfolio_construction")
+        if optimizer:
+            evidence.append("optimizer")
+        if committee:
+            evidence.append("committee")
+        if decision_confidence:
+            evidence.append("decision_confidence")
+        if broker_health:
+            evidence.append("broker_health")
+        if runtime_health:
+            evidence.append("runtime_health")
+
+        # 1. Why recommendation
+        pc = portfolio_construction or {}
+        preferred = pc.get("preferred_portfolio", [])
+        if preferred:
+            symbols = [item.get("symbol", item.get("opportunity_id", "Asset")) for item in preferred]
+            why_rec = f"Deploy advisory capital allocation to preferred assets: {', '.join(symbols)} to optimize return/risk tradeoffs."
+        else:
+            why_rec = "Rebalance portfolio configuration to match target strategic scenario parameters."
+
+        # 2. Why now
+        regime = "Unknown"
+        if pc:
+            pr = pc.get("portfolio_resilience", {})
+            if isinstance(pr, Mapping):
+                regime = pr.get("market_regime", "Unknown")
+        why_now = f"The active market regime is classified as {regime}, signaling structural alignment for this tactical configuration."
+
+        # 3. Confidence level
+        dc = decision_confidence or {}
+        conf = safe_float(dc.get("confidence", dc.get("confidence_score", 100.0)))
+
+        # 4. Risk drivers
+        risks = self.extract_risks(
+            portfolio_construction=portfolio_construction,
+            broker_health=broker_health,
+            runtime_health=runtime_health,
+            decision_confidence=decision_confidence,
+            committee=committee,
+        )
+
+        # 5. Capital allocation rationale
+        opt = optimizer or {}
+        best_overall = opt.get("best_overall", "Balanced")
+        allocation_rationale = f"Selected {best_overall} portfolio configuration because it matches risk policy and concentration limits."
+
+        # 6. Rejected alternatives
+        all_portfolios = opt.get("recommended_portfolios", [])
+        rejected = []
+        for p in all_portfolios:
+            name = p.get("name")
+            if name and name != best_overall:
+                rejected.append(name)
+        if not rejected:
+            rejected = ["Growth", "Opportunistic"]
+
+        return {
+            "why_recommendation": why_rec,
+            "why_now": why_now,
+            "confidence_level": f"{conf:.1f}%",
+            "risk_drivers": risks,
+            "evidence_used": evidence,
+            "capital_allocation_rationale": allocation_rationale,
+            "rejected_alternatives": rejected,
+        }

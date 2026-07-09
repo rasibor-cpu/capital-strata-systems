@@ -128,6 +128,14 @@ class ExecutiveDecisionBrief:
                 runtime_health=runtime_health,
                 decision_confidence=decision_confidence,
             )
+            decision_intel = self.recommendations.generate_decision_intelligence(
+                portfolio_construction=portfolio_construction,
+                optimizer=optimizer,
+                committee=committee,
+                decision_confidence=decision_confidence,
+                broker_health=broker_health,
+                runtime_health=runtime_health,
+            )
 
             # Build return brief payload
             res = advisory_response(
@@ -146,6 +154,7 @@ class ExecutiveDecisionBrief:
                 top_risks=top_risks,
                 recommended_actions=actions,
                 operational_warnings=warnings,
+                decision_intelligence=decision_intel,
                 execution_status={
                     "execution_authority": "NOT GRANTED",
                     "live_trading": "BLOCKED",
