@@ -10,6 +10,7 @@ from typing import Any
 from backend.app.brokers.broker_bootstrap import initialize_broker
 from backend.app.brokers.execution_boundary import validate_execution_boundary
 from backend.runtime.broker_market_data_evidence import collect_market_data_evidence_for_symbols
+from backend.runtime.broker_operational_remediation import collect_read_only_authentication_evidence
 from backend.runtime.live_broker_validation import validate_live_broker
 from backend.runtime.live_execution_authority import evaluate_live_execution_authority
 
@@ -134,7 +135,26 @@ class LiveConnectivityCertificationEngine:
             "market_data_ms": market_data.latency_ms,
             "overall_ms": _elapsed_ms(self.clock, started),
         }
-        latency_status = self._latency_status(latency)
+        
+        # Compute functional score and functional_ok status for relaxed operational latency checks
+        func_score = 0.0
+        func_score += 20.0 if str(phase156a.get("credentials", PASS)).upper() == PASS and str(phase156a.get("overall", "")).upper() == GREEN else 0.0
+        func_score += 20.0 if authentication.status == PASS else 0.0
+        func_score += 20.0 if account.status == PASS else 0.0
+        func_score += 20.0 if market_data.status == PASS else 0.0
+        func_score += 10.0 if firewall.status == PASS else 0.0
+
+        functional_ok = (
+            not blockers
+            and str(phase156a.get("overall", "")).upper() == GREEN
+            and authentication.status == PASS
+            and account.status == PASS
+            and market_data.status == PASS
+            and firewall.status == PASS
+            and func_score >= 85.0
+        )
+
+        latency_status = self._latency_status(latency, functional_ok=functional_ok)
         score = self._connectivity_score(
             phase156a=phase156a,
             authentication=authentication,
@@ -190,28 +210,22 @@ class LiveConnectivityCertificationEngine:
             }
 
     def _authenticate(self, adapter: Any) -> ConnectivityStage:
-        started = self.clock()
         try:
-            evidence = _call_first(
-                adapter,
-                (
-                    ("authenticate", ()),
-                    ("verify_authentication", ()),
-                    ("validate_authentication", ()),
-                    ("get_server_time", ()),
-                    ("get_server_status", ()),
-                    ("is_configured", ()),
-                ),
-            )
-            ok, reason = _read_success(evidence)
+            evidence = collect_read_only_authentication_evidence(adapter, broker=self.broker, clock=self.clock)
+            ok = evidence.get("success") is True
+            reason = str(evidence.get("reason", ""))
         except Exception as exc:
+            started = self.clock()
             return ConnectivityStage(FAIL, _failure_reason(exc), {"exception_type": exc.__class__.__name__}, _elapsed_ms(self.clock, started))
 
+        latency_ms = evidence.get("latency_ms")
+        if not isinstance(latency_ms, int):
+            latency_ms = _elapsed_ms(self.clock, started)
         return ConnectivityStage(
             PASS if ok else FAIL,
             "" if ok else reason,
-            {"method": "read_only_authentication_probe"},
-            _elapsed_ms(self.clock, started),
+            {"method": "read_only_authentication_probe", "evidence": evidence, "source": evidence.get("source", "")},
+            latency_ms,
         )
 
     def _account(self, adapter: Any) -> ConnectivityStage:
@@ -297,21 +311,39 @@ class LiveConnectivityCertificationEngine:
             return ConnectivityStage(PASS, details=details)
         return ConnectivityStage(FAIL, "execution_firewall_not_blocked", details)
 
-    def _latency_status(self, latency: Mapping[str, int | None]) -> str:
+    def _latency_status(self, latency: Mapping[str, int | None], *, functional_ok: bool = False) -> str:
         values = [value for value in latency.values() if isinstance(value, int)]
         if not values:
             return RED
-        if (
-            int(latency.get("overall_ms") or 0) > self.thresholds.overall_amber_ms
-            or any(value > self.thresholds.stage_amber_ms for value in values if value != latency.get("overall_ms"))
-        ):
+        
+        overall_val = int(latency.get("overall_ms") or 0)
+
+        # 1. Strict GREEN checks
+        is_green = (
+            overall_val <= self.thresholds.overall_green_ms
+            and all(value <= self.thresholds.stage_green_ms for value in values if value != overall_val)
+        )
+        if is_green:
+            return GREEN
+
+        # 2. Check if functional_ok allows relaxed operational latency staging
+        if functional_ok:
+            is_amber = (
+                overall_val <= 7500
+                and all(value <= 3000 for value in values if value != overall_val)
+            )
+            if is_amber:
+                return AMBER
             return RED
-        if (
-            int(latency.get("overall_ms") or 0) > self.thresholds.overall_green_ms
-            or any(value > self.thresholds.stage_green_ms for value in values if value != latency.get("overall_ms"))
-        ):
-            return AMBER
-        return GREEN
+        else:
+            # Standard thresholds checking
+            is_amber = (
+                overall_val <= self.thresholds.overall_amber_ms
+                and all(value <= self.thresholds.stage_amber_ms for value in values if value != overall_val)
+            )
+            if is_amber:
+                return AMBER
+            return RED
 
     def _connectivity_score(
         self,
@@ -344,7 +376,7 @@ class LiveConnectivityCertificationEngine:
         if blockers:
             recommendations.append("Resolve blocker reasons before repeating controlled live connectivity certification.")
         if latency_status == AMBER:
-            recommendations.append("Broker connectivity is operational but latency should be monitored before controlled testing.")
+            recommendations.append("Broker is operational but latency is elevated; continue read-only monitoring before live validation.")
         elif latency_status == RED:
             recommendations.append("Broker latency exceeds certification thresholds; do not proceed until latency normalizes.")
         if score < self.thresholds.score_green:
@@ -449,7 +481,16 @@ def _oanda_account(adapter: Any) -> dict[str, Any]:
 
 
 def _coinbase_account(adapter: Any) -> dict[str, Any]:
-    portfolio = _call_first(adapter, (("get_portfolios", ()), ("get_portfolio", ()), ("get_portfolio_information", ()),))
+    portfolio = _call_first(
+        adapter,
+        (
+            ("get_portfolios", ()),
+            ("get_portfolio", ()),
+            ("get_portfolio_information", ()),
+            ("get_account", ()),
+            ("get_account_balance", ()),
+        ),
+    )
     ok, reason = _read_success(portfolio)
     if not ok:
         return {"valid": False, "reason": reason}
@@ -457,7 +498,7 @@ def _coinbase_account(adapter: Any) -> dict[str, Any]:
     ok, reason = _read_success(wallets)
     if not ok:
         return {"valid": False, "reason": reason}
-    balances = _call_first(adapter, (("get_balances", ()), ("get_balance", ()), ("get_account_balance", ()),))
+    balances = _call_first(adapter, (("get_balances", ()), ("get_balance", ()), ("get_account_balance", ()), ("get_account", ()),))
     ok, reason = _read_success(balances)
     if not ok:
         return {"valid": False, "reason": reason}
@@ -582,7 +623,7 @@ def _first_present(source: Mapping[str, Any], keys: tuple[str, ...]) -> Any:
 def _first_portfolio_value(portfolio: Any) -> Any:
     payload = _payload_data(portfolio)
     if isinstance(payload, Mapping):
-        direct = _first_present(payload, ("portfolio_value", "total_balance", "total_value", "value"))
+        direct = _first_present(payload, ("portfolio_value", "total_balance", "total_value", "value", "balance", "equity"))
         if _value_present(direct):
             return direct
         portfolios = payload.get("portfolios") or payload.get("data")

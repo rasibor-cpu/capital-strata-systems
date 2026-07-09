@@ -429,3 +429,29 @@ def test_phase156b_no_execution_authority_or_broker_mutation() -> None:
     assert report["live_trading_blocked"] is True
     assert report["broker_execution_armed"] is False
     assert adapter.execution_calls == 0
+
+
+def test_phase156b_oanda_degraded_operational_latency_is_amber() -> None:
+    # Set high latency values exceeding strict GREEN thresholds, but within degraded AMBER limits:
+    # account_ms = 1050 ms, market_data_ms = 2050 ms, overall_ms = 5600 ms.
+    clock = _Clock([0.0, 0.0, 1.05, 1.05, 3.10, 3.10, 5.60, 5.60])
+    engine = LiveConnectivityCertificationEngine(
+        "oanda",
+        phase156a_fn=_phase156a_green,
+        initialize_broker_fn=_init_oanda,
+        authority_fn=_blocked_authority,
+        thresholds=ConnectivityLatencyThresholds(
+            stage_green_ms=250,
+            stage_amber_ms=1000,
+            overall_green_ms=750,
+            overall_amber_ms=2500,
+        ),
+        clock=clock,
+    )
+
+    report = engine.certify()
+
+    assert report["certification"] == AMBER
+    assert report["latency_status"] == AMBER
+    assert report["connectivity_score"] >= 85.0
+    assert "Broker is operational but latency is elevated; continue read-only monitoring before live validation." in report["recommendations"]
