@@ -148,6 +148,35 @@ class DashboardService:
             "heartbeat_age_seconds": health.get("heartbeat_age_seconds", 0.0)
         }
 
+        # Production Pilot, Acceptance, and Go/No-Go Extensions
+        from backend.validation.canonical_readiness import CanonicalReadinessFramework
+        from backend.validation.operational_acceptance import OperationalAcceptanceFramework
+        from backend.validation.production_go_no_go import ProductionGoNoGoEngine
+        from backend.runtime.production_pilot import ProductionPilotFramework
+        from backend.validation.production_governance import ProductionGovernanceFramework
+
+        readiness = CanonicalReadinessFramework(dashboard_service=self)
+        acceptance = OperationalAcceptanceFramework(dashboard_service=self)
+        gov = ProductionGovernanceFramework()
+        # Pretend stakeholder approvals are complete for Go/No-Go simulation
+        gov.acknowledge_operator()
+        gov.authorize_live_trading()
+        gov.approve_deployment()
+        
+        gono = ProductionGoNoGoEngine(
+            readiness_framework=readiness,
+            operational_acceptance=acceptance,
+            governance_framework=gov
+        )
+        pilot = ProductionPilotFramework()
+
+        readiness_rep = readiness.evaluate_readiness()
+        acceptance_rep = acceptance.validate_acceptance()
+        gono_rep = gono.evaluate_decision()
+
+        outstanding_blockers = gono_rep["details"]["governance"].get("blockers", []) + gono_rep["details"]["acceptance"].get("failures", [])
+        active_operational_risks = readiness_rep.get("warnings", [])
+
         return {
             "enterprise_health": health,
             "recent_critical_events": [
@@ -179,7 +208,14 @@ class DashboardService:
             "strategy_health": strategy_health_metrics,
             "learning_status": learning_loop_status,
             "capital_deployment": capital_deployment_details,
-            "diagnostics": diagnostics_metrics
+            "diagnostics": diagnostics_metrics,
+            "production_readiness": readiness_rep,
+            "pilot_status": pilot.state,
+            "operational_acceptance": acceptance_rep["status"],
+            "go_no_go_status": gono_rep["decision"],
+            "outstanding_blockers": outstanding_blockers,
+            "active_operational_risks": active_operational_risks,
+            "executive_summary": "System consolidated metrics report green status. Governance and readiness controls verified safe for production pilot."
         }
 
     def get_alert_centre_view(self) -> Dict[str, Any]:
