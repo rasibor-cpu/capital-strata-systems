@@ -12,11 +12,12 @@ FAIL = "FAIL"
 
 CRITICAL = "CRITICAL"
 INFO = "INFO"
+from backend.common.numeric_utils import clamp
 
 
 def clamp_score(value: float) -> float:
     """Clamp readiness scores into the canonical 0-100 range."""
-    return max(0.0, min(100.0, float(value)))
+    return clamp(value, 0.0, 100.0)
 
 
 @dataclass(frozen=True)

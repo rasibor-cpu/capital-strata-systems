@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
+from backend.common.advisory_payload import AdvisoryPayloadBuilder
 from backend.runtime.broker_operational_status import build_broker_operational_status
 from backend.runtime.broker_credential_diagnostics import (
     authority_reason_from_diagnostics,
@@ -191,9 +192,7 @@ def broker_readiness_payload(snapshot: BrokerReadinessSnapshot | Mapping[str, An
         and payload["account_loaded"]
         and payload["market_data_ready"]
     )
-    payload["advisory_only"] = True
-    payload["execution_allowed"] = False
-    return payload
+    return AdvisoryPayloadBuilder.lock(payload)
 
 
 def broker_readiness_with_operational_status(

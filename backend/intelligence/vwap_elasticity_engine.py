@@ -1,23 +1,15 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List
+from backend.common.numeric_utils import clamp, safe_float
 
 
 def clamp01(v: float) -> float:
-    if v < 0.0:
-        return 0.0
-    if v > 1.0:
-        return 1.0
-    return v
+    return clamp(v, 0.0, 1.0)
 
 
 def _safe_float(v: Any, default: float = 0.0) -> float:
-    try:
-        if v is None:
-            return default
-        return float(v)
-    except Exception:
-        return default
+    return safe_float(v, default=default)
 
 
 class VWAPElasticityEngine:

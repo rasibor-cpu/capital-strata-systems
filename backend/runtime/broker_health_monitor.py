@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from backend.common.advisory_payload import AdvisoryPayloadBuilder
 from backend.runtime.broker_credential_diagnostics import (
     diagnose_broker_credentials,
     diagnostics_payload,
@@ -142,7 +143,7 @@ class BrokerHealthMonitor:
             blockers=blockers,
         )
 
-        report = {
+        report = AdvisoryPayloadBuilder.lock({
             "payload_version": PAYLOAD_VERSION,
             "broker": broker_key.upper() if broker_key else "NONE",
             "mode": mode,
@@ -176,7 +177,7 @@ class BrokerHealthMonitor:
             "last_successful_validation": history.last_successful_validation,
             "blocker_reasons": blockers,
             "integration_payloads": integration,
-        }
+        })
         return _json_safe(report)
 
     def evaluate_all(
@@ -189,7 +190,8 @@ class BrokerHealthMonitor:
         reports = [self.evaluate_broker(broker, mode=mode, env=env) for broker in brokers]
         worst = RED if any(item["health"] == RED for item in reports) else AMBER if any(item["health"] == AMBER for item in reports) else GREEN
         return _json_safe(
-            {
+            AdvisoryPayloadBuilder.lock(
+                {
                 "payload_version": PAYLOAD_VERSION,
                 "health": worst,
                 "broker_count": len(reports),
@@ -197,8 +199,8 @@ class BrokerHealthMonitor:
                 "execution_allowed": False,
                 "live_trading_blocked": True,
                 "broker_execution_armed": False,
-                "advisory_only": True,
-            }
+                }
+            )
         )
 
     def to_json(self, broker: str, *, mode: str = "live", indent: int = 2) -> str:
@@ -213,16 +215,14 @@ class BrokerHealthMonitor:
         try:
             return diagnostics_payload(self.credential_diagnostics_fn(broker, env=env))
         except Exception as exc:
-            return {
+            return AdvisoryPayloadBuilder.lock({
                 "broker": broker,
                 "credentials_present": False,
                 "readiness_status": "BLOCKED",
                 "failure_reason": _failure_reason(exc),
                 "canonical_failure_reason": _failure_reason(exc),
-                "execution_allowed": False,
                 "live_trading_blocked": True,
-                "advisory_only": True,
-            }
+            })
 
     def _connectivity(self, broker: str, *, mode: str) -> dict[str, Any]:
         try:
@@ -230,7 +230,7 @@ class BrokerHealthMonitor:
             return dict(report) if isinstance(report, Mapping) else {}
         except Exception as exc:
             reason = _failure_reason(exc)
-            return {
+            return AdvisoryPayloadBuilder.lock({
                 "broker": broker.upper(),
                 "certification": RED,
                 "authentication": FAIL,
@@ -242,12 +242,10 @@ class BrokerHealthMonitor:
                     "market_data_ms": None,
                     "overall_ms": None,
                 },
-                "execution_allowed": False,
                 "live_trading_blocked": True,
                 "broker_execution_armed": False,
-                "advisory_only": True,
                 "blocker_reasons": [f"connectivity_exception:{reason}"],
-            }
+            })
 
 
 def monitor_broker_health(
@@ -534,17 +532,15 @@ def _integration_payload(
     blockers: list[str],
 ) -> dict[str, Any]:
     broker_name = broker.upper() if broker else "NONE"
-    broker_performance = {
+    broker_performance = AdvisoryPayloadBuilder.lock({
         "broker": broker_name,
         "broker_id": broker_name,
         "overall_score": score,
         "status": health,
         "latency_ms": latency.get("overall_ms") or latency.get("market_data_ms"),
         "recent_reliability_trend": trend,
-        "advisory_only": True,
-        "execution_allowed": False,
-    }
-    decision_confidence = {
+    })
+    decision_confidence = AdvisoryPayloadBuilder.lock({
         "broker_performance": broker_performance,
         "broker_diagnostics": dict(diagnostics),
         "runtime_health": {"engine_mode": "READY" if health != RED else "BLOCKED"},
@@ -553,28 +549,22 @@ def _integration_payload(
             "execution_authority": False,
             "execution_allowed": False,
         },
-        "advisory_only": True,
-        "execution_allowed": False,
-    }
-    opportunity_intelligence = {
+    })
+    opportunity_intelligence = AdvisoryPayloadBuilder.lock({
         "broker_performance": score / 100.0,
         "broker_health": health,
         "broker_reliability": rolling.get("reliability", 0.0),
         "blockers": list(blockers),
-        "advisory_only": True,
-        "execution_allowed": False,
-    }
-    dashboard_runtime_status = {
+    })
+    dashboard_runtime_status = AdvisoryPayloadBuilder.lock({
         "broker": broker_name,
         "broker_health": health,
         "overall_health_score": score,
         "connectivity_status": connectivity.get("certification", RED),
         "trend": trend,
-        "execution_allowed": False,
         "live_trading_blocked": True,
         "broker_execution_armed": False,
-        "advisory_only": True,
-    }
+    })
     return {
         "broker_performance_intelligence": broker_performance,
         "decision_confidence_framework": decision_confidence,
