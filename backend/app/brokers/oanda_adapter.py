@@ -77,12 +77,16 @@ class OandaLiveFirewallDecision:
 
 
 class OandaAdapter:
-    def __init__(self) -> None:
-        self.api_key = (os.getenv("OANDA_API_KEY") or "").strip()
-        self.account_id = (os.getenv("OANDA_ACCOUNT_ID") or "").strip()
-        self.base_url = (os.getenv("OANDA_BASE_URL") or "").strip().rstrip("/")
-        self.env = (os.getenv("OANDA_ENV") or "").strip().lower()
-        self.allow_live_trades = os.getenv("OANDA_ENABLE_LIVE_TRADING", "0").strip().lower() in ("1", "true", "yes", "on")
+    def __init__(self, credentials: Dict[str, Any] = None) -> None:
+        if credentials is None:
+            from backend.app.brokers.credential_loader import load_credentials
+            credentials = load_credentials("oanda", mode="paper") or {}
+            
+        self.api_key = str(credentials.get("OANDA_API_KEY") or credentials.get("OANDA_ACCESS_TOKEN") or credentials.get("OANDA_TOKEN") or "").strip()
+        self.account_id = str(credentials.get("OANDA_ACCOUNT_ID") or credentials.get("OANDA_PRACTICE_ACCOUNT_ID") or "").strip()
+        self.base_url = str(credentials.get("OANDA_BASE_URL") or "").strip().rstrip("/")
+        self.env = str(credentials.get("OANDA_ENV") or "practice").strip().lower()
+        self.allow_live_trades = str(credentials.get("OANDA_ENABLE_LIVE_TRADING") or "false").strip().lower() in ("1", "true", "yes", "on")
         
         self.health_state = "GREEN"
         self.consecutive_failures = 0

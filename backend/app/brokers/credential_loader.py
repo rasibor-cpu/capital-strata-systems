@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from dotenv import load_dotenv
@@ -25,8 +26,13 @@ from dotenv import load_dotenv
 from .broker_registry import get_broker_spec
 
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
 class CredentialLoadError(Exception):
     """Raised when broker credentials cannot be loaded safely."""
+
+    pass
 
 
 def _load_json_file(path: str) -> Dict[str, Any]:
@@ -120,7 +126,8 @@ def _env_present(*names: str) -> bool:
 
 
 def _load_coinbase_env_credentials(mode: str) -> Optional[Dict[str, Any]]:
-    load_dotenv()
+    load_dotenv(REPO_ROOT / ".env")
+    load_dotenv(REPO_ROOT / ".env.practice", override=False)
 
     key_file = (
         os.getenv("COINBASE_KEY_JSON_PATH")
@@ -174,7 +181,8 @@ def _load_coinbase_env_credentials(mode: str) -> Optional[Dict[str, Any]]:
 
 
 def _load_oanda_env_credentials(mode: str) -> Optional[Dict[str, Any]]:
-    load_dotenv()
+    load_dotenv(REPO_ROOT / ".env")
+    load_dotenv(REPO_ROOT / ".env.practice", override=False)
 
     token = (
         os.getenv("OANDA_API_KEY")
@@ -207,6 +215,10 @@ def _load_oanda_env_credentials(mode: str) -> Optional[Dict[str, Any]]:
     credentials["OANDA_ENABLE_LIVE_ORDERS"] = os.getenv(
         "OANDA_ENABLE_LIVE_ORDERS", "false"
     )
+    credentials["OANDA_BASE_URL"] = os.getenv("OANDA_BASE_URL") or (
+        "https://api-fxtrade.oanda.com" if env == "live" else "https://api-fxpractice.oanda.com"
+    )
+    credentials["OANDA_ENABLE_LIVE_TRADING"] = os.getenv("OANDA_ENABLE_LIVE_TRADING", "false")
 
     return credentials if credentials else None
 

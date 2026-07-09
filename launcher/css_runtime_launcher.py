@@ -10,6 +10,10 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
+from dotenv import load_dotenv
+load_dotenv(os.path.join(REPO_ROOT, ".env"))
+load_dotenv(os.path.join(REPO_ROOT, ".env.practice"), override=False)
+
 from backend.runtime.css_runtime_supervisor import CSSRuntimeSupervisor
 from backend.monitoring.css_alert_models import AlertSeverity
 from launcher.css_service_manager import CSSServiceManager

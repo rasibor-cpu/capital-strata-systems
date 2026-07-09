@@ -84,6 +84,16 @@ def _readiness_payload(
     source.setdefault("mode", "live")
     source.setdefault("execution_supported", True)
     source.setdefault("execution_enabled", False)
+    
+    if not source.get("credential_diagnostics") and not source.get("broker_credential_diagnostics"):
+        from backend.runtime.broker_credential_diagnostics import diagnose_broker_credentials
+        diag = diagnose_broker_credentials(broker_name.lower())
+        source["credential_diagnostics"] = diag.as_dict()
+        source["broker_credential_diagnostics"] = diag.as_dict()
+        source["credentials_present"] = diag.credentials_present
+        source["credentials_health"] = "READY" if diag.credentials_present else "MISSING"
+        source["readiness_state"] = "CREDENTIALS_PRESENT" if diag.credentials_present else "UNCONFIGURED"
+
     return broker_readiness_payload(build_broker_readiness_snapshot(source))
 
 

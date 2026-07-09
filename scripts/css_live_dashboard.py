@@ -2241,6 +2241,67 @@ try:
 except Exception as exc:
     print(f"[BROKER STARTUP PERSIST WARN] {exc}")
 
+print("\n=== STARTUP DIAGNOSTICS ===")
+print(f"Working Directory    : {os.getcwd()}")
+print(f"Project Root         : {PROJECT_ROOT}")
+print(f"Selected Broker      : {SELECTED_BROKER}")
+print(f"Selected Broker Mode : {SELECTED_BROKER_MODE}")
+
+env_file = PROJECT_ROOT / ".env"
+print(f".env file used       : {env_file}")
+
+dotenv_loaded = "NO"
+if env_file.exists():
+    dotenv_loaded = "YES"
+print(f"Environment Loaded   : {dotenv_loaded}")
+
+# Credential Source
+source = "NONE"
+if SELECTED_BROKER != "NONE":
+    try:
+        from backend.app.brokers.broker_registry import get_broker_spec
+        spec = get_broker_spec(SELECTED_BROKER)
+        if spec and os.path.exists(os.path.join(".", spec.credential_file)):
+            source = f"FILE ({spec.credential_file})"
+        else:
+            source = "DOTENV (.env)"
+    except Exception:
+        source = "DOTENV (.env)"
+print(f"Credential Source    : {source}")
+
+# Credential Status, Authentication Status, and Bootstrap Result
+cred_status = "MISSING"
+auth_status = "NOT_TESTED"
+bootstrap_result = "FAIL"
+
+if SELECTED_BROKER != "NONE":
+    from backend.runtime.broker_credential_diagnostics import diagnose_broker_credentials
+    diag = diagnose_broker_credentials(SELECTED_BROKER.lower())
+    if diag.credentials_present:
+        cred_status = "FOUND"
+    else:
+        cred_status = "INVALID" if diag.failure_reason in ("KEY_MISSING", "SECRET_MISSING", "PEM_INVALID", "TOKEN_INVALID", "ACCOUNT_ID_MISSING") else "MISSING"
+    
+    # Read from active status
+    readiness = globals().get("COINBASE_READ_ONLY_STATUS", {})
+    readiness = readiness if isinstance(readiness, dict) else {}
+    if readiness.get("broker_authenticated"):
+        auth_status = "AUTHENTICATED"
+    else:
+        auth_status = "NOT_AUTHENTICATED"
+        
+    if diag.credentials_present and readiness.get("broker_connected", False):
+        bootstrap_result = "PASS"
+else:
+    cred_status = "N/A"
+    auth_status = "N/A"
+    bootstrap_result = "N/A"
+    
+print(f"Credential Status    : {cred_status}")
+print(f"Authentication Status: {auth_status}")
+print(f"Bootstrap Result     : {bootstrap_result}")
+print("===========================\n")
+
 import sys
 from backend.app.security.environment_validator import validate_startup_security_environment, EnvironmentValidationError
 

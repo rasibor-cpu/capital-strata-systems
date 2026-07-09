@@ -108,12 +108,15 @@ class CoinbaseAdapter:
     def _candidate_json_paths(self) -> List[str]:
         candidates: List[str] = []
 
+        from backend.app.brokers.credential_loader import load_credentials
+        creds = load_credentials("coinbase", mode="paper") or {}
+
         for key in (
             "COINBASE_KEY_JSON_PATH",
             "COINBASE_KEY_JSON",
             "COINBASE_KEY_FILE",
         ):
-            value = os.getenv(key)
+            value = creds.get(key)
             if value:
                 candidates.append(value)
 
@@ -146,7 +149,8 @@ class CoinbaseAdapter:
         return ordered
 
     def _auto_load_from_cdp_json(self) -> Tuple[Optional[str], Optional[str]]:
-        for path in self._candidate_json_paths():
+        paths = self._candidate_json_paths()
+        for path in paths:
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     data = json.load(f)
@@ -172,18 +176,23 @@ class CoinbaseAdapter:
             api_key, api_secret = self._auto_load_from_cdp_json()
 
         if not api_key or not api_secret:
+            from backend.app.brokers.credential_loader import load_credentials
+            creds = load_credentials("coinbase", mode="paper") or {}
             api_key = (
-                os.getenv("COINBASE_API_KEY")
-                or os.getenv("COINBASE_CDP_KEY_NAME")
-                or os.getenv("COINBASE_KEY_NAME")
+                creds.get("COINBASE_API_KEY")
+                or creds.get("COINBASE_CDP_KEY_NAME")
+                or creds.get("COINBASE_KEY_NAME")
+                or creds.get("key_name")
+                or creds.get("name")
                 or self.api_key_name
                 or ""
             )
 
             api_secret = (
-                os.getenv("COINBASE_API_SECRET")
-                or os.getenv("COINBASE_CDP_PRIVATE_KEY")
-                or os.getenv("COINBASE_PRIVATE_KEY")
+                creds.get("COINBASE_CDP_PRIVATE_KEY")
+                or creds.get("COINBASE_PRIVATE_KEY")
+                or creds.get("private_key")
+                or creds.get("privateKey")
                 or ""
             )
 
