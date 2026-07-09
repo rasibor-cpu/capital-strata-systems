@@ -61,6 +61,8 @@ class InstitutionalPortfolioOptimizer:
                     "concentration_score": p["concentration_score"],
                     "capital_efficiency_score": p["capital_efficiency_score"],
                     "opportunities": p["opportunities"],
+                    "advisory_only": True,
+                    "execution_allowed": False,
                 })
 
                 if p["portfolio_quality_score"] > best_quality:

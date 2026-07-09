@@ -164,15 +164,40 @@ def discover_server_health_endpoints(
             continue
         seen.add(url)
         result = dict(endpoint)
+        started = time.perf_counter()
         try:
             request = Request(url, method="GET")
             response = opener(request, timeout=timeout_seconds)
             status = int(getattr(response, "status", getattr(response, "code", 0)) or 0)
-            result.update({"reachable": 200 <= status < 500, "status_code": status, "error": ""})
+            result.update(
+                {
+                    "reachable": 200 <= status < 500,
+                    "status_code": status,
+                    "error": "",
+                    "response_time_ms": _elapsed_ms(time.perf_counter, started),
+                    "health_state": _endpoint_health_state(status, True),
+                }
+            )
         except HTTPError as exc:
-            result.update({"reachable": True, "status_code": exc.code, "error": ""})
+            result.update(
+                {
+                    "reachable": True,
+                    "status_code": exc.code,
+                    "error": "",
+                    "response_time_ms": _elapsed_ms(time.perf_counter, started),
+                    "health_state": _endpoint_health_state(exc.code, True),
+                }
+            )
         except (TimeoutError, URLError, OSError) as exc:
-            result.update({"reachable": False, "status_code": None, "error": exc.__class__.__name__})
+            result.update(
+                {
+                    "reachable": False,
+                    "status_code": None,
+                    "error": exc.__class__.__name__,
+                    "response_time_ms": _elapsed_ms(time.perf_counter, started),
+                    "health_state": "RED",
+                }
+            )
         results.append(result)
 
     selected = next((item for item in results if item.get("reachable") is True), None)
@@ -180,6 +205,9 @@ def discover_server_health_endpoints(
         "advisory_only": True,
         "any_healthy": selected is not None,
         "selected_endpoint": selected,
+        "response_time": selected.get("response_time_ms") if selected else None,
+        "response_time_ms": selected.get("response_time_ms") if selected else None,
+        "health_state": selected.get("health_state") if selected else "RED",
         "endpoints": results,
         **_advisory_safety_flags(),
     }
@@ -373,6 +401,16 @@ def _default_health_candidates() -> list[dict[str, str]]:
         {"name": "dashboard_mobile", "source": "default", "url": "http://127.0.0.1:8090/api/status"},
         {"name": "launcher", "source": "default", "url": "http://127.0.0.1:12345/health"},
     ]
+
+
+def _endpoint_health_state(status_code: int | None, reachable: bool) -> str:
+    if not reachable:
+        return "RED"
+    if isinstance(status_code, int) and 200 <= status_code < 300:
+        return "GREEN"
+    if isinstance(status_code, int) and 300 <= status_code < 500:
+        return "AMBER"
+    return "RED"
 
 
 def _last_reason(attempts: list[dict[str, str]]) -> str:
