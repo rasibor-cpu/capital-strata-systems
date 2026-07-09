@@ -3,21 +3,19 @@ from __future__ import annotations
 import math
 from typing import Any, Iterable, Mapping
 
+from backend.common.numeric_utils import safe_float as common_safe_float, clamp as common_clamp
+from backend.common.advisory_payload import AdvisoryPayloadBuilder
+
 
 def safe_float(value: Any, default: float = 0.0) -> float:
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError):
-        return default
-    return numeric if math.isfinite(numeric) else default
+    return common_safe_float(value, default=default)
 
 
 to_float = safe_float
 
 
 def clamp(value: Any, low: float, high: float, default: float | None = None) -> float:
-    numeric = safe_float(value, low if default is None else default)
-    return max(low, min(high, numeric))
+    return common_clamp(value, low, high, default=default)
 
 
 bounded = clamp
@@ -75,6 +73,4 @@ def normalize_allocations(values: Mapping[str, Any] | None) -> dict[str, float]:
 
 
 def advisory_response(status: str, **payload: Any) -> dict[str, Any]:
-    response = {"status": status, "advisory_only": True, "execution_allowed": False}
-    response.update(payload)
-    return response
+    return AdvisoryPayloadBuilder.build(status, **payload)

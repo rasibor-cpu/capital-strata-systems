@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Mapping
-from backend.portfolio.utils import safe_float
+from backend.common.numeric_utils import safe_float
 
 
 class CommitteeMember:
