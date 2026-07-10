@@ -9,17 +9,18 @@ from typing import Any, Mapping
 from backend.runtime.broker_readiness_framework import build_broker_readiness_snapshot
 
 LIVE_READINESS_STATES = (
-    "UNCONFIGURED",
+    "NOT_INITIALIZED",
     "CREDENTIALS_PRESENT",
+    "CLIENT_CREATED",
+    "TRANSPORT_CONNECTED",
     "AUTHENTICATED",
-    "CONNECTED",
-    "ACCOUNT_DATA_READY",
-    "MARKET_DATA_READY",
-    "READ_ONLY_READY",
-    "LIVE_VALIDATED",
+    "ACCOUNT_ACCESSIBLE",
+    "ACCOUNT_DATA_AVAILABLE",
+    "MARKET_DATA_AVAILABLE",
+    "FULLY_OPERATIONAL",
 )
 
-READ_ONLY_READY_STATES = {"READ_ONLY_READY", "LIVE_VALIDATED"}
+READ_ONLY_READY_STATES = {"FULLY_OPERATIONAL"}
 
 
 @dataclass(frozen=True)
@@ -53,21 +54,26 @@ def evaluate_live_readiness_state(evidence: Mapping[str, Any] | None) -> LiveRea
     diagnostics = _startup_diagnostics(data)
     checklist = _readiness_checklist(diagnostics)
 
-    state = "UNCONFIGURED"
+    state = "NOT_INITIALIZED"
     if diagnostics["credentials"] == "PRESENT":
         state = "CREDENTIALS_PRESENT"
-    if state == "CREDENTIALS_PRESENT" and diagnostics["authenticated"]:
+    if state == "CREDENTIALS_PRESENT" and diagnostics.get("client_created", True):
+        state = "CLIENT_CREATED"
+    if state == "CLIENT_CREATED" and diagnostics["connected"]:
+        state = "TRANSPORT_CONNECTED"
+    # Authentication becomes PASS only after authenticated account evidence exists
+    if state == "TRANSPORT_CONNECTED" and diagnostics["authenticated"] and diagnostics["account_loaded"]:
         state = "AUTHENTICATED"
-    if state == "AUTHENTICATED" and diagnostics["connected"]:
-        state = "CONNECTED"
-    if state == "CONNECTED" and diagnostics["account_loaded"]:
-        state = "ACCOUNT_DATA_READY"
-    if state == "ACCOUNT_DATA_READY" and diagnostics["market_data"] == "READY":
-        state = "MARKET_DATA_READY"
-    if state == "MARKET_DATA_READY" and _read_only_safety_intact(diagnostics):
-        state = "READ_ONLY_READY"
-    if state == "READ_ONLY_READY" and _truthy(data.get("live_validated", False)):
-        state = "LIVE_VALIDATED"
+    if state == "AUTHENTICATED" and diagnostics["account_loaded"]:
+        state = "ACCOUNT_ACCESSIBLE"
+    
+    has_account_data = diagnostics["account_loaded"] and diagnostics.get("account_balance") is not None
+    if state == "ACCOUNT_ACCESSIBLE" and has_account_data:
+        state = "ACCOUNT_DATA_AVAILABLE"
+    if state == "ACCOUNT_DATA_AVAILABLE" and diagnostics["market_data"] == "READY":
+        state = "MARKET_DATA_AVAILABLE"
+    if state == "MARKET_DATA_AVAILABLE" and _read_only_safety_intact(diagnostics):
+        state = "FULLY_OPERATIONAL"
 
     diagnostics["readiness_state"] = state
     diagnostics["go_no_go"] = "GO" if state in READ_ONLY_READY_STATES else "NO GO"
@@ -128,6 +134,8 @@ def _startup_diagnostics(data: Mapping[str, Any]) -> dict[str, Any]:
         "credentials": credentials,
         "authenticated": authenticated,
         "connected": connected,
+        "client_created": _truthy(data.get("client_created", True)),
+        "account_balance": readiness.account_balance or readiness.equity or data.get("cash") or data.get("account_balance") or data.get("balance") or data.get("equity") or data.get("account_equity"),
         "market_data": "READY" if market_ready else market_data_status,
         "account_loaded": account_loaded,
         "products_loaded": products_loaded,

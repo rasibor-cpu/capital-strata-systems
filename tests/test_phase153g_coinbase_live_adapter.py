@@ -110,7 +110,7 @@ def test_phase153g_successful_read_only_sync_sets_healthy_without_execution() ->
 
     assert status["broker_connected"] is True
     assert status["broker_authenticated"] is True
-    assert status["broker_health"] == "HEALTHY"
+    assert status["broker_health"] == "GREEN"
     assert status["execution_scope"] == READ_ONLY_EXECUTION_SCOPE
     assert status["broker_execution_status"] == "DISABLED"
     assert status["can_live_execute"] is False
@@ -143,7 +143,7 @@ def test_phase153g_readiness_uses_canonical_adapter_and_preserves_disabled_execu
 
     assert status["broker_connected"] is True
     assert status["broker_authenticated"] is True
-    assert status["broker_health"] == "HEALTHY"
+    assert status["broker_health"] == "GREEN"
     assert status["auth_reason"] == "coinbase_read_only_authentication_verified"
     assert status["execution_scope"] == READ_ONLY_EXECUTION_SCOPE
     assert status["broker_execution_status"] == "DISABLED"
@@ -167,7 +167,7 @@ def test_phase153g_dashboard_exposes_read_only_broker_evidence_without_secret_va
     assert broker["broker_connected"] is True
     assert broker["broker_authenticated"] is True
     assert broker["credential_status"] == "PRESENT"
-    assert broker["connection_status"] == "HEALTHY"
+    assert broker["connection_status"] == "GREEN"
     assert broker["last_broker_sync"] != "DATA UNAVAILABLE"
     assert broker["account_equity"] == 20.0
     assert broker["products_loaded"] == 2

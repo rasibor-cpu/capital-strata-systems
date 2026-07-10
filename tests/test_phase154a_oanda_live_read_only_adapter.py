@@ -80,7 +80,7 @@ def test_phase154a_oanda_read_only_sync_publishes_framework_payload() -> None:
     assert status["selected_broker"] == "OANDA"
     assert status["broker_connected"] is True
     assert status["broker_authenticated"] is True
-    assert status["broker_health"] == "HEALTHY"
+    assert status["broker_health"] == "GREEN"
     assert status["account_equity"] == 105.0
     assert status["cash"] == 100.0
     assert status["buying_power"] == 90.0

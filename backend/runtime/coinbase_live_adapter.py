@@ -92,17 +92,82 @@ class CoinbaseLiveReadOnlyAdapter:
 
     def get_accounts(self) -> Any:
         client = self._client()
-        return self._call_first(client, ("get_accounts", "list_accounts"))
+        raw = self._call_first(client, ("get_accounts", "list_accounts"))
+        if raw is None:
+            raw_balance = self._call_first(
+                client,
+                ("get_account_balance", "get_balance", "get_live_balance", "get_portfolio_balance", "get_account"),
+            )
+            if raw_balance is not None:
+                payload = _to_plain(raw_balance)
+                if isinstance(payload, dict):
+                    balance_val = _extract_first_amount(payload, ("available_balance", "balance", "cash", "amount", "value", "equity"))
+                else:
+                    balance_val = _parse_amount(payload)
+                balance_float = self._to_float(balance_val)
+                return [{
+                    "account_id": "FALLBACK-COINBASE",
+                    "account_type": "fiat",
+                    "currency": "USD",
+                    "available_balance": balance_float,
+                    "held_balance": 0.0,
+                    "total_balance": balance_float,
+                    "equity": balance_float,
+                    "buying_power": balance_float
+                }]
+            return []
+        payload = _to_plain(raw)
+        if isinstance(payload, dict):
+            accounts = payload.get("accounts") or payload.get("data") or []
+        elif isinstance(payload, list):
+            accounts = payload
+        else:
+            accounts = []
+
+        normalized = []
+        for acct in accounts:
+            if not isinstance(acct, dict):
+                continue
+            uuid_val = acct.get("uuid") or acct.get("id") or "UNKNOWN_ID"
+            acct_type = acct.get("type", "crypto")
+            currency = acct.get("currency", "USD")
+            
+            avail_payload = acct.get("available_balance") or {}
+            if isinstance(avail_payload, dict):
+                avail_val = self._to_float(avail_payload.get("value") or avail_payload.get("amount"))
+            else:
+                avail_val = self._to_float(avail_payload)
+                
+            hold_payload = acct.get("hold") or {}
+            if isinstance(hold_payload, dict):
+                hold_val = self._to_float(hold_payload.get("value") or hold_payload.get("amount"))
+            else:
+                hold_val = self._to_float(hold_payload)
+                
+            total_val = avail_val + hold_val
+            equity_val = total_val
+            buying_power_val = avail_val if currency == "USD" else "NOT_APPLICABLE"
+            
+            normalized.append({
+                "account_id": uuid_val,
+                "account_type": acct_type,
+                "currency": currency,
+                "available_balance": avail_val,
+                "held_balance": hold_val,
+                "total_balance": total_val,
+                "equity": equity_val,
+                "buying_power": buying_power_val
+            })
+        return normalized
+
+    def _to_float(self, value: Any) -> float:
+        try:
+            return float(value or 0.0)
+        except Exception:
+            return 0.0
 
     def get_balances(self) -> Any:
-        client = self._client()
-        accounts = self._call_first(client, ("get_accounts", "list_accounts"))
-        if accounts is not None:
-            return accounts
-        return self._call_first(
-            client,
-            ("get_account_balance", "get_balance", "get_live_balance", "get_portfolio_balance", "get_account"),
-        )
+        return self.get_accounts()
 
     def get_portfolios(self) -> Any:
         client = self._client()
@@ -131,11 +196,12 @@ class CoinbaseLiveReadOnlyAdapter:
 
     def sync(self, *, include_market_data: bool = True) -> dict[str, Any]:
         self.health = "CONNECTING"
+        client_created = False
 
         if not self.credentials.ready:
             self.connected = False
             self.authenticated = False
-            self.health = "UNKNOWN"
+            self.health = "RED"
             self.connection_error = "missing credentials"
             return self._status_payload(
                 read_checks={
@@ -144,19 +210,22 @@ class CoinbaseLiveReadOnlyAdapter:
                     "products": "NOT_ATTEMPTED",
                     "server_time": "NOT_ATTEMPTED",
                     "ticker": "NOT_ATTEMPTED",
-                }
+                },
+                client_created=client_created
             )
 
         read_checks: dict[str, str] = {}
         try:
             client = self._client()
-            self.connected = True
-            self.health = "CONNECTED"
-
+            client_created = True
+            
+            # Transport checks
+            server_time_payload = self._safe_call(lambda: self.get_server_time())
             account_payload = self._safe_call(lambda: self.get_account())
             balances_payload = self._safe_call(lambda: self.get_balances())
+            self.connected = (server_time_payload is not None) or (account_payload is not None) or (isinstance(balances_payload, list) and len(balances_payload) > 0)
+
             products_payload = self._safe_call(lambda: self.get_products())
-            server_time_payload = self._safe_call(lambda: self.get_server_time())
             ticker_payload = self._safe_call(lambda: self.get_ticker()) if include_market_data else None
 
             del client
@@ -168,14 +237,15 @@ class CoinbaseLiveReadOnlyAdapter:
                 "ticker": _read_status(ticker_payload, unavailable_ok=True),
             }
 
+            # Authentication becomes PASS only after authenticated account evidence exists
             if read_checks["account"] == "OK" or read_checks["balances"] == "OK":
                 self.authenticated = True
-                self.health = "HEALTHY"
+                self.health = "GREEN"
                 self.connection_error = ""
                 self.last_successful_sync = self._now().isoformat()
             else:
                 self.authenticated = False
-                self.health = "CONNECTED"
+                self.health = "AMBER"
                 self.connection_error = "authenticated account or balance read unavailable"
 
             account_values = extract_coinbase_account_values(
@@ -186,13 +256,14 @@ class CoinbaseLiveReadOnlyAdapter:
                 read_checks=read_checks,
                 products_loaded=count_coinbase_products(products_payload),
                 market_data_status="OK" if read_checks["ticker"] == "OK" else read_checks["ticker"],
+                client_created=client_created
             )
         except Exception as exc:
             self.connected = False
             self.authenticated = False
-            self.health = "UNKNOWN"
+            self.health = "AMBER"
             self.connection_error = str(exc)[:160]
-            return self._status_payload(read_checks=read_checks)
+            return self._status_payload(read_checks=read_checks, client_created=client_created)
 
     def _client(self) -> Any:
         if self._read_client is not None:
@@ -225,6 +296,7 @@ class CoinbaseLiveReadOnlyAdapter:
         read_checks: Mapping[str, str] | None = None,
         products_loaded: int = 0,
         market_data_status: str = "NOT_TESTED",
+        client_created: bool = False,
     ) -> dict[str, Any]:
         values = dict(account_values or {})
         has_balance = any(
@@ -311,6 +383,7 @@ class CoinbaseLiveReadOnlyAdapter:
             "read_checks": dict(read_checks or {}),
             "drawdown_status": "UNKNOWN" if not has_balance else "AVAILABLE",
             "drawdown_reason": "" if has_balance else UNKNOWN_DRAW_DOWN_REASON,
+            "client_created": client_created,
         }
         authority = evaluate_live_execution_authority(payload).as_dict()
         payload["live_execution_authority"] = authority
@@ -324,15 +397,38 @@ class CoinbaseLiveReadOnlyAdapter:
         return payload
 
 
+def _load_private_key_content(path: str) -> tuple[str, str]:
+    if not path or not os.path.exists(path):
+        return "", ""
+    try:
+        content = Path(path).read_text(encoding="utf-8").strip()
+        try:
+            data = json.loads(content)
+            key_name = str(data.get("name") or data.get("key_name") or data.get("apiKey") or "").strip()
+            private_key = str(data.get("privateKey") or data.get("private_key") or data.get("apiSecret") or "").strip()
+            return key_name, private_key
+        except json.JSONDecodeError:
+            if "BEGIN" in content:
+                return "", content
+    except Exception:
+        pass
+    return "", ""
+
+
 def load_coinbase_live_credentials(env: Mapping[str, Any] | None = None) -> CoinbaseLiveCredentials:
     source = env if isinstance(env, Mapping) else os.environ
     key_name = _first_present(source, ("COINBASE_CDP_KEY_NAME", "COINBASE_KEY_NAME", "COINBASE_API_KEY"))
-    private_key = _first_present(
+    private_key_val = _first_present(
         source,
         (
             "COINBASE_CDP_PRIVATE_KEY",
             "COINBASE_PRIVATE_KEY",
             "COINBASE_API_SECRET",
+        ),
+    )
+    private_key_path = _first_present(
+        source,
+        (
             "COINBASE_CDP_PRIVATE_KEY_PATH",
             "COINBASE_PRIVATE_KEY_PATH",
         ),
@@ -340,22 +436,30 @@ def load_coinbase_live_credentials(env: Mapping[str, Any] | None = None) -> Coin
     key_file = _first_present(source, ("COINBASE_KEY_JSON_PATH", "COINBASE_KEY_JSON", "COINBASE_KEY_FILE"))
 
     loaded_key_name = key_name
-    loaded_private_key = private_key
-    if key_file and (not loaded_key_name or not loaded_private_key):
-        file_key_name, file_private_key = _load_key_file_values(key_file)
+    loaded_private_key = private_key_val
+
+    for path in (private_key_path, key_file):
+        if path and os.path.exists(path):
+            file_key_name, file_private_key = _load_private_key_content(path)
+            loaded_key_name = loaded_key_name or file_key_name
+            loaded_private_key = loaded_private_key or file_private_key
+
+    # Also resolve if loaded_private_key is a file path
+    if loaded_private_key and os.path.exists(loaded_private_key):
+        file_key_name, file_private_key = _load_private_key_content(loaded_private_key)
         loaded_key_name = loaded_key_name or file_key_name
-        loaded_private_key = loaded_private_key or file_private_key
+        loaded_private_key = file_private_key or loaded_private_key
 
     missing: list[str] = []
     if not loaded_key_name:
         missing.append("COINBASE_CDP_KEY_NAME|COINBASE_KEY_NAME|COINBASE_API_KEY")
-    if not loaded_private_key and not key_file:
+    if not loaded_private_key:
         missing.append("COINBASE_CDP_PRIVATE_KEY|COINBASE_PRIVATE_KEY|COINBASE_API_SECRET|COINBASE_KEY_FILE")
 
     return CoinbaseLiveCredentials(
         key_name_present=bool(loaded_key_name),
         private_key_present=bool(loaded_private_key),
-        key_file_present=bool(key_file),
+        key_file_present=bool(private_key_path or key_file),
         missing_credentials=tuple(missing),
         key_name=loaded_key_name,
         private_key=loaded_private_key,
@@ -364,6 +468,40 @@ def load_coinbase_live_credentials(env: Mapping[str, Any] | None = None) -> Coin
 
 def extract_coinbase_account_values(payload: Any) -> dict[str, Any]:
     plain = _to_plain(payload)
+    if isinstance(plain, list) and len(plain) > 0 and all(isinstance(x, dict) and "account_id" in x for x in plain):
+        # This is our normalized accounts list!
+        total_equity = 0.0
+        total_cash = 0.0
+        total_buying_power = 0.0
+        has_usd = False
+        
+        for acct in plain:
+            if acct.get("currency") == "USD":
+                total_equity += acct.get("equity", 0.0)
+                total_cash += acct.get("available_balance", 0.0)
+                total_buying_power += acct.get("available_balance", 0.0)
+                has_usd = True
+                
+        if has_usd:
+            return {
+                "account_equity": total_equity,
+                "cash": total_cash,
+                "buying_power": total_buying_power,
+                "available_balance": total_cash,
+            }
+            
+        for acct in plain:
+            total_equity += acct.get("equity", 0.0)
+            total_cash += acct.get("available_balance", 0.0)
+            
+        return {
+            "account_equity": total_equity,
+            "cash": total_cash,
+            "buying_power": "NOT_APPLICABLE",
+            "available_balance": total_cash,
+        }
+
+    # Legacy raw format handler
     balance = _extract_first_amount(plain, ("available_balance", "balance", "cash", "amount", "value"))
     equity = _extract_first_amount(plain, ("equity", "total", "portfolio_balance", "account_balance", "balance", "value"))
     buying_power = _extract_first_amount(plain, ("buying_power", "available_to_trade", "available_balance", "available", "cash"))

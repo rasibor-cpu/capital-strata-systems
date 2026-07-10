@@ -127,7 +127,7 @@ class OandaLiveReadOnlyAdapter:
         if diagnostics["credential_status"] != "PRESENT":
             self.connected = False
             self.authenticated = False
-            self.broker_health = "UNKNOWN"
+            self.broker_health = "RED"
             self.connection_error = "missing credentials"
             return self._status_payload(credential_diagnostics=diagnostics)
         try:
@@ -139,12 +139,20 @@ class OandaLiveReadOnlyAdapter:
             heartbeat_payload = self.heartbeat()
             metadata_payload = self.get_account_metadata()
             account = _extract_account(account_payload)
+            
+            # Transport is connected if we can reach the client (no exception raised)
             self.connected = True
-            self.authenticated = bool(account_payload)
-            self.broker_health = "HEALTHY" if self.authenticated else "CONNECTED"
-            self.connection_error = ""
+            # Authenticated is True only after authenticated account evidence exists
+            self.authenticated = bool(account_payload and account)
+            
             if self.authenticated:
+                self.broker_health = "GREEN"
                 self.last_successful_sync = self.now().isoformat()
+                self.connection_error = ""
+            else:
+                self.broker_health = "AMBER"
+                self.connection_error = "authenticated account or balance read unavailable"
+
             return self._status_payload(
                 credential_diagnostics=diagnostics,
                 account=account,
@@ -155,7 +163,8 @@ class OandaLiveReadOnlyAdapter:
         except Exception as exc:
             self.connected = False
             self.authenticated = False
-            self.broker_health = "UNKNOWN"
+            # Account unavailable or transport failure -> AMBER
+            self.broker_health = "AMBER"
             self.connection_error = str(exc)[:160]
             return self._status_payload(credential_diagnostics=diagnostics)
 

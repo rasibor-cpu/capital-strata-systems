@@ -87,7 +87,7 @@ def test_phase154a_readiness_state_uses_framework_for_any_broker() -> None:
     coinbase_state = evaluate_live_readiness_state({"broker_readiness": _ready_payload("COINBASE")["broker_readiness"]})
     oanda_state = evaluate_live_readiness_state({"broker_readiness": _ready_payload("OANDA")["broker_readiness"]})
 
-    assert coinbase_state.readiness_state == "MARKET_DATA_READY"
-    assert oanda_state.readiness_state == "MARKET_DATA_READY"
+    assert coinbase_state.readiness_state == "MARKET_DATA_AVAILABLE"
+    assert oanda_state.readiness_state == "MARKET_DATA_AVAILABLE"
     assert coinbase_state.as_dict()["startup_diagnostics"]["broker_ready"] is True
     assert oanda_state.as_dict()["startup_diagnostics"]["broker_ready"] is True

@@ -73,7 +73,7 @@ def test_phase153h_startup_summary_reflects_final_read_only_state() -> None:
     assert "Execution Authority: NO" in lines
     assert "Can Live Execute: NO" in lines
     assert summary["Broker"] == "COINBASE"
-    assert summary["Readiness State"] == "READ_ONLY_READY"
+    assert summary["Readiness State"] == "FULLY_OPERATIONAL"
     assert summary["GO / NO GO"] == "GO"
     assert summary["startup_diagnostics"]["execution_enabled"] is False
     assert summary["startup_diagnostics"]["can_live_execute"] is False
@@ -116,11 +116,11 @@ def test_phase153h_dashboard_and_launcher_expose_checklist_and_diagnostics(tmp_p
     endpoint = client.get("/api/v1/live-readiness-state")
     page = client.get("/mobile")
 
-    assert broker["readiness_state"] == "READ_ONLY_READY"
+    assert broker["readiness_state"] == "FULLY_OPERATIONAL"
     assert broker["go_no_go"] == "GO"
     assert broker["startup_diagnostics"]["broker"] == "COINBASE"
     assert endpoint.status_code == 200
-    assert endpoint.json()["data"]["readiness_state"] == "READ_ONLY_READY"
+    assert endpoint.json()["data"]["readiness_state"] == "FULLY_OPERATIONAL"
     assert page.status_code == 200
     assert "Readiness Checklist" in page.text
     assert "Readiness State" in page.text
