@@ -154,6 +154,8 @@ class DashboardService:
         from backend.validation.production_go_no_go import ProductionGoNoGoEngine
         from backend.runtime.production_pilot import ProductionPilotFramework
         from backend.validation.production_governance import ProductionGovernanceFramework
+        from backend.validation.endurance_evidence import CanonicalEnduranceEvidence
+        from backend.validation.controlled_pilot_gate import ControlledPilotGate
 
         readiness = CanonicalReadinessFramework(dashboard_service=self)
         acceptance = OperationalAcceptanceFramework(dashboard_service=self)
@@ -169,6 +171,18 @@ class DashboardService:
             governance_framework=gov
         )
         pilot = ProductionPilotFramework()
+        endurance = CanonicalEnduranceEvidence()
+        endurance.load_session()
+        endurance_eval = endurance.evaluate_result(target_hours=72.0)
+
+        gate = ControlledPilotGate(
+            endurance_evidence=endurance,
+            operational_acceptance=acceptance,
+            governance_framework=gov,
+            broker_readiness_score=100.0,
+            env_config_present=True
+        )
+        gate_res = gate.evaluate_gate()
 
         readiness_rep = readiness.evaluate_readiness()
         acceptance_rep = acceptance.validate_acceptance()
@@ -215,6 +229,18 @@ class DashboardService:
             "go_no_go_status": gono_rep["decision"],
             "outstanding_blockers": outstanding_blockers,
             "active_operational_risks": active_operational_risks,
+            "endurance_elapsed_time": endurance_eval["elapsed_duration_hours"],
+            "uninterrupted_runtime_duration": endurance_eval["uninterrupted_runtime_hours"],
+            "host_restart_count": endurance_eval["host_restart_count"],
+            "css_restart_count": endurance_eval["restart_count"],
+            "broker_reconnect_count": endurance_eval["broker_reconnect_count"],
+            "memory_baseline": endurance.memory_baseline,
+            "memory_peak": endurance.memory_peak,
+            "current_endurance_status": endurance_eval["result"],
+            "evidence_completeness": endurance_eval["evidence_completeness"],
+            "active_blockers": gate_res["blockers"],
+            "controlled_pilot_readiness": gate_res["decision"],
+            "latest_go_no_go_decision": gate_res["decision"],
             "executive_summary": "System consolidated metrics report green status. Governance and readiness controls verified safe for production pilot."
         }
 

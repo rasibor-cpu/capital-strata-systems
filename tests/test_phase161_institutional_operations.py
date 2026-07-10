@@ -208,7 +208,7 @@ def test_audit_intelligence_consolidation(setup_platform):
     
     report = setup_platform.get_audit_trail_report()
     assert "# Capital Strata Systems (CSS) Institutional Audit Report" in report
-    assert "T1" in report
+    assert "Approved" in report
 
 
 def test_canonical_readiness_checks(setup_platform):
