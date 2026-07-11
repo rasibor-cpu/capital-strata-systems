@@ -350,6 +350,25 @@ def test_phase156b_successful_coinbase_certification() -> None:
     assert report["stage_results"]["market_data"]["details"]["symbols"] == ["BTC-USD", "ETH-USD"]
 
 
+def test_phase156b_coinbase_portfolio_value_can_come_from_balances() -> None:
+    class PortfolioMetadataOnly(_CoinbaseAdapter):
+        def get_portfolios(self):
+            return {"portfolios": [{"uuid": "portfolio-1", "name": "default"}]}
+
+        def get_balances(self):
+            return {"accounts": [{"currency": "USD", "available_balance": {"value": "1500.00"}}]}
+
+    report = certify_live_connectivity(
+        "coinbase",
+        phase156a_fn=_phase156a_green,
+        initialize_broker_fn=lambda _broker, _mode: PortfolioMetadataOnly(),
+        authority_fn=_blocked_authority,
+    )
+
+    assert report["account"] == PASS
+    assert report["stage_results"]["account"]["details"]["portfolio_value_present"] is True
+
+
 def test_phase156b_execution_firewall_validation_fails_if_authority_granted() -> None:
     report = certify_live_connectivity(
         "oanda",
@@ -455,3 +474,21 @@ def test_phase156b_oanda_degraded_operational_latency_is_amber() -> None:
     assert report["latency_status"] == AMBER
     assert report["connectivity_score"] >= 85.0
     assert "Broker is operational but latency is elevated; continue read-only monitoring before live validation." in report["recommendations"]
+
+
+def test_phase156b_observed_degraded_live_latency_remains_amber_not_green() -> None:
+    clock = _Clock([0.0, 0.0, 2.4, 2.4, 6.2, 6.2, 8.8, 8.8])
+    engine = LiveConnectivityCertificationEngine(
+        "coinbase",
+        phase156a_fn=_phase156a_green,
+        initialize_broker_fn=_init_coinbase,
+        authority_fn=_blocked_authority,
+        clock=clock,
+    )
+
+    report = engine.certify()
+
+    assert report["certification"] == AMBER
+    assert report["latency_status"] == AMBER
+    assert report["latency"]["active_validation_ms"] == 8800
+    assert report["latency"]["account_ms"] == 3800

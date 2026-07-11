@@ -179,7 +179,7 @@ class CoinbaseLiveReadOnlyAdapter:
 
     def get_server_time(self) -> Any:
         client = self._client()
-        return self._call_first(client, ("get_time", "get_server_time", "server_time"))
+        return self._call_first(client, ("get_unix_time", "get_time", "get_server_time", "server_time"))
 
     def get_ticker(self, product_id: str | None = None) -> Any:
         client = self._client()

@@ -241,6 +241,37 @@ def test_phase156d_multi_symbol_payload_reports_missing_symbols() -> None:
     assert details["evidence"][0]["source"] == "get_ticker"
 
 
+def test_phase156d_coinbase_multi_symbol_uses_single_products_read() -> None:
+    class Adapter:
+        def __init__(self):
+            self.calls = 0
+
+        def get_products(self):
+            self.calls += 1
+            return {
+                "products": [
+                    {"product_id": "BTC-USD", "price": "65000.00"},
+                    {"product_id": "ETH-USD", "price": "3500.00"},
+                ]
+            }
+
+        def get_product(self, _instrument):
+            raise AssertionError("single product fallback should not be used")
+
+    adapter = Adapter()
+    details = collect_market_data_evidence_for_symbols(
+        adapter,
+        broker="coinbase",
+        instruments=("BTC-USD", "ETH-USD"),
+    )
+
+    assert details["valid"] is True
+    assert adapter.calls == 1
+    assert details["quotes"]["BTC-USD"]["source"] == "get_products"
+    assert details["quotes"]["ETH-USD"]["source"] == "get_products"
+    assert details["execution_allowed"] is False
+
+
 def test_phase156d_health_endpoint_discovery_uses_configured_endpoint_first() -> None:
     seen = []
 

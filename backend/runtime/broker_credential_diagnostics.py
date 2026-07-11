@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from functools import lru_cache
 import os
 from pathlib import Path
 from typing import Any, Mapping
@@ -96,8 +97,8 @@ def diagnose_broker_credentials(
     jwt_generated: bool = False,
     now: Any | None = None,
 ) -> BrokerCredentialDiagnostics:
-    source = env if isinstance(env, Mapping) else os.environ
     broker_name = str(broker or "NONE").strip().lower()
+    source = env if isinstance(env, Mapping) else _diagnostic_source_from_canonical_loader(broker_name)
     timestamp = _timestamp(now)
     if broker_name == "coinbase":
         return _coinbase_diagnostics(
@@ -466,6 +467,41 @@ def _timestamp(now: Any | None) -> str:
 
 def _any_present(env: Mapping[str, Any], names: tuple[str, ...]) -> bool:
     return any(bool(str(env.get(name, "") or "").strip()) for name in names)
+
+
+def _diagnostic_source_from_canonical_loader(broker_name: str) -> Mapping[str, Any]:
+    signature = _credential_env_signature(broker_name)
+    return dict(_cached_diagnostic_source_from_canonical_loader(broker_name, signature))
+
+
+@lru_cache(maxsize=16)
+def _cached_diagnostic_source_from_canonical_loader(
+    broker_name: str,
+    _signature: tuple[tuple[str, str], ...],
+) -> tuple[tuple[str, Any], ...]:
+    source: dict[str, Any] = dict(os.environ)
+    if broker_name not in {"coinbase", "oanda"}:
+        return tuple(source.items())
+    try:
+        from backend.app.brokers.credential_loader import load_credentials
+
+        credentials = load_credentials(broker_name, mode="paper") or {}
+    except Exception:
+        return tuple(source.items())
+    for key, value in credentials.items():
+        if value is not None and not source.get(str(key)):
+            source[str(key)] = value
+    return tuple(source.items())
+
+
+def _credential_env_signature(broker_name: str) -> tuple[tuple[str, str], ...]:
+    if broker_name == "coinbase":
+        names = COINBASE_KEY_ENV_VARS + COINBASE_SECRET_ENV_VARS + COINBASE_PRIVATE_KEY_ENV_VARS + COINBASE_KEY_FILE_ENV_VARS
+    elif broker_name == "oanda":
+        names = OANDA_TOKEN_ENV_VARS + OANDA_ACCOUNT_ENV_VARS + OANDA_BASE_URL_ENV_VARS
+    else:
+        names = ()
+    return tuple((name, str(os.environ.get(name, "") or "")) for name in names)
 
 
 def _truthy(value: Any) -> bool:

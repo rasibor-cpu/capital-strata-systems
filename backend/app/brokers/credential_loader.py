@@ -81,12 +81,12 @@ def _load_coinbase_json_credentials(path: str) -> Optional[Dict[str, Any]]:
     if not path:
         return None
 
-    normalized_path = str(path).strip().strip('"')
-    if not normalized_path or not os.path.exists(normalized_path):
+    normalized_path = _resolve_credential_path(path)
+    if not normalized_path:
         return None
 
     try:
-        payload = _load_json_file(normalized_path)
+        payload = _load_json_file(str(normalized_path))
     except CredentialLoadError:
         return None
 
@@ -96,7 +96,7 @@ def _load_coinbase_json_credentials(path: str) -> Optional[Dict[str, Any]]:
         or payload.get("apiKey")
         or payload.get("key")
     )
-    private_key = (
+    private_key = _normalize_coinbase_private_key_material(
         payload.get("privateKey")
         or payload.get("private_key")
         or payload.get("apiSecret")
@@ -110,15 +110,89 @@ def _load_coinbase_json_credentials(path: str) -> Optional[Dict[str, Any]]:
         "name": str(key_name),
         "key_name": str(key_name),
         "api_key_name": str(key_name),
-        "privateKey": str(private_key),
-        "private_key": str(private_key),
+        "privateKey": private_key,
+        "private_key": private_key,
         "COINBASE_CDP_KEY_NAME": str(key_name),
         "COINBASE_KEY_NAME": str(key_name),
-        "COINBASE_CDP_PRIVATE_KEY": str(private_key),
-        "COINBASE_PRIVATE_KEY": str(private_key),
-        "COINBASE_KEY_FILE": normalized_path,
-        "COINBASE_KEY_JSON_PATH": normalized_path,
+        "COINBASE_CDP_PRIVATE_KEY": private_key,
+        "COINBASE_PRIVATE_KEY": private_key,
+        "COINBASE_KEY_FILE": str(normalized_path),
+        "COINBASE_KEY_JSON_PATH": str(normalized_path),
     }
+
+
+def _resolve_credential_path(path: str) -> Optional[Path]:
+    raw = str(path or "").strip().strip('"')
+    if not raw:
+        return None
+    candidate = Path(raw).expanduser()
+    if not candidate.is_absolute():
+        candidate = REPO_ROOT / candidate
+    try:
+        candidate = candidate.resolve()
+    except OSError:
+        return None
+    return candidate if candidate.exists() and candidate.is_file() else None
+
+
+def _normalize_coinbase_private_key_material(value: Any) -> Optional[str]:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+
+    path = _resolve_credential_path(raw)
+    if path:
+        try:
+            content = path.read_text(encoding="utf-8")
+        except OSError:
+            return None
+        if path.suffix.lower() == ".json" or content.lstrip().startswith("{"):
+            try:
+                payload = json.loads(content)
+            except json.JSONDecodeError:
+                return None
+            if not isinstance(payload, dict):
+                return None
+            return _normalize_coinbase_private_key_material(
+                payload.get("privateKey")
+                or payload.get("private_key")
+                or payload.get("apiSecret")
+                or payload.get("secret")
+            )
+        return _normalize_pem_private_key(content)
+
+    if raw.startswith("{"):
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        return _normalize_coinbase_private_key_material(
+            payload.get("privateKey")
+            or payload.get("private_key")
+            or payload.get("apiSecret")
+            or payload.get("secret")
+        )
+
+    return _normalize_pem_private_key(raw)
+
+
+def _normalize_pem_private_key(value: str) -> Optional[str]:
+    normalized = (
+        str(value or "")
+        .replace("\ufeff", "")
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+        .replace("\\n", "\n")
+        .strip()
+    )
+    valid_begin = normalized.startswith("-----BEGIN EC PRIVATE KEY-----") or normalized.startswith("-----BEGIN PRIVATE KEY-----")
+    valid_end = normalized.endswith("-----END EC PRIVATE KEY-----") or normalized.endswith("-----END PRIVATE KEY-----")
+    if not (valid_begin and valid_end):
+        return None
+    lines = [line.strip() for line in normalized.splitlines() if line.strip()]
+    return "\n".join(lines)
 
 
 def _env_present(*names: str) -> bool:
@@ -129,14 +203,12 @@ def _load_coinbase_env_credentials(mode: str) -> Optional[Dict[str, Any]]:
     load_dotenv(REPO_ROOT / ".env")
     load_dotenv(REPO_ROOT / ".env.practice", override=False)
 
-    key_file = (
-        os.getenv("COINBASE_KEY_JSON_PATH")
-        or os.getenv("COINBASE_KEY_JSON")
-        or os.getenv("COINBASE_KEY_FILE")
-    )
-
-    if key_file:
-        json_credentials = _load_coinbase_json_credentials(key_file)
+    for key_file in (
+        os.getenv("COINBASE_KEY_JSON_PATH"),
+        os.getenv("COINBASE_KEY_JSON"),
+        os.getenv("COINBASE_KEY_FILE"),
+    ):
+        json_credentials = _load_coinbase_json_credentials(key_file or "")
         if json_credentials:
             json_credentials["COINBASE_ENABLE_LIVE_ORDERS"] = os.getenv(
                 "COINBASE_ENABLE_LIVE_ORDERS", "false"
@@ -144,11 +216,18 @@ def _load_coinbase_env_credentials(mode: str) -> Optional[Dict[str, Any]]:
             return json_credentials
 
     key_name = os.getenv("COINBASE_CDP_KEY_NAME") or os.getenv("COINBASE_KEY_NAME")
-    private_key = (
+    private_key_source = (
         os.getenv("COINBASE_CDP_PRIVATE_KEY")
         or os.getenv("COINBASE_PRIVATE_KEY")
         or os.getenv("COINBASE_CDP_PRIVATE_KEY_PATH")
         or os.getenv("COINBASE_PRIVATE_KEY_PATH")
+    )
+    private_key = _normalize_coinbase_private_key_material(private_key_source)
+
+    key_file = (
+        os.getenv("COINBASE_KEY_JSON_PATH")
+        or os.getenv("COINBASE_KEY_JSON")
+        or os.getenv("COINBASE_KEY_FILE")
     )
 
     if not key_name and not private_key and not key_file:
@@ -169,9 +248,10 @@ def _load_coinbase_env_credentials(mode: str) -> Optional[Dict[str, Any]]:
         credentials["COINBASE_CDP_PRIVATE_KEY"] = private_key
         credentials["COINBASE_PRIVATE_KEY"] = private_key
 
-    if key_file:
-        credentials["COINBASE_KEY_FILE"] = key_file
-        credentials["COINBASE_KEY_JSON_PATH"] = key_file
+    resolved_key_file = _resolve_credential_path(key_file or "")
+    if resolved_key_file:
+        credentials["COINBASE_KEY_FILE"] = str(resolved_key_file)
+        credentials["COINBASE_KEY_JSON_PATH"] = str(resolved_key_file)
 
     credentials["COINBASE_ENABLE_LIVE_ORDERS"] = os.getenv(
         "COINBASE_ENABLE_LIVE_ORDERS", "false"

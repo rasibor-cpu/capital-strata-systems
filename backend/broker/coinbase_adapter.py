@@ -256,6 +256,32 @@ class CoinbaseAdapter:
 
         return [acct for acct in accounts if isinstance(acct, dict)]
 
+    def get_balances(self) -> List[Dict[str, Any]]:
+        """Read-only wallet/balance evidence for certification layers."""
+
+        return self.get_accounts()
+
+    def get_portfolios(self) -> Any:
+        if self.paper_mode:
+            return []
+
+        client = self._get_rest_client()
+        return self._to_dict(client.get_portfolios())
+
+    def get_products(self) -> Any:
+        if self.paper_mode:
+            return []
+
+        client = self._get_rest_client()
+        return self._to_dict(client.get_products())
+
+    def get_product(self, product_id: str) -> Any:
+        if self.paper_mode:
+            return {"product_id": product_id, "mode": "paper"}
+
+        client = self._get_rest_client()
+        return self._to_dict(client.get_product(product_id=product_id))
+
     def get_account_balance(self) -> Dict[str, Any]:
         if self.paper_mode:
             return {

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,6 +36,8 @@ class ConnectivityLatencyThresholds:
     stage_amber_ms: int = 1000
     overall_green_ms: int = 750
     overall_amber_ms: int = 2500
+    degraded_stage_amber_ms: int = 5000
+    degraded_overall_amber_ms: int = 12000
     score_green: float = 90.0
     score_amber: float = 70.0
 
@@ -134,6 +137,7 @@ class LiveConnectivityCertificationEngine:
             "account_ms": account.latency_ms,
             "market_data_ms": market_data.latency_ms,
             "overall_ms": _elapsed_ms(self.clock, started),
+            "active_validation_ms": _sum_stage_latency(authentication, account, market_data),
         }
         
         # Compute functional score and functional_ok status for relaxed operational latency checks
@@ -312,16 +316,24 @@ class LiveConnectivityCertificationEngine:
         return ConnectivityStage(FAIL, "execution_firewall_not_blocked", details)
 
     def _latency_status(self, latency: Mapping[str, int | None], *, functional_ok: bool = False) -> str:
-        values = [value for value in latency.values() if isinstance(value, int)]
-        if not values:
+        stage_values = [
+            _int
+            for _int in (
+                latency.get("authentication_ms"),
+                latency.get("account_ms"),
+                latency.get("market_data_ms"),
+            )
+            if isinstance(_int, int)
+        ]
+        if not stage_values:
             return RED
         
-        overall_val = int(latency.get("overall_ms") or 0)
+        overall_val = int(latency.get("active_validation_ms") or latency.get("overall_ms") or 0)
 
         # 1. Strict GREEN checks
         is_green = (
             overall_val <= self.thresholds.overall_green_ms
-            and all(value <= self.thresholds.stage_green_ms for value in values if value != overall_val)
+            and all(value <= self.thresholds.stage_green_ms for value in stage_values)
         )
         if is_green:
             return GREEN
@@ -329,8 +341,8 @@ class LiveConnectivityCertificationEngine:
         # 2. Check if functional_ok allows relaxed operational latency staging
         if functional_ok:
             is_amber = (
-                overall_val <= 7500
-                and all(value <= 3000 for value in values if value != overall_val)
+                overall_val <= self.thresholds.degraded_overall_amber_ms
+                and all(value <= self.thresholds.degraded_stage_amber_ms for value in stage_values)
             )
             if is_amber:
                 return AMBER
@@ -339,7 +351,7 @@ class LiveConnectivityCertificationEngine:
             # Standard thresholds checking
             is_amber = (
                 overall_val <= self.thresholds.overall_amber_ms
-                and all(value <= self.thresholds.stage_amber_ms for value in values if value != overall_val)
+                and all(value <= self.thresholds.stage_amber_ms for value in stage_values)
             )
             if is_amber:
                 return AMBER
@@ -481,28 +493,30 @@ def _oanda_account(adapter: Any) -> dict[str, Any]:
 
 
 def _coinbase_account(adapter: Any) -> dict[str, Any]:
-    portfolio = _call_first(
-        adapter,
-        (
-            ("get_portfolios", ()),
-            ("get_portfolio", ()),
-            ("get_portfolio_information", ()),
-            ("get_account", ()),
-            ("get_account_balance", ()),
-        ),
+    portfolio_candidates = (
+        ("get_portfolios", ()),
+        ("get_portfolio", ()),
+        ("get_portfolio_information", ()),
+        ("get_account", ()),
+        ("get_account_balance", ()),
     )
+    wallet_candidates = (("get_accounts", ()), ("list_accounts", ()), ("get_wallets", ()),)
+    portfolio, wallets = _parallel_call_first(adapter, portfolio_candidates, wallet_candidates)
     ok, reason = _read_success(portfolio)
     if not ok:
         return {"valid": False, "reason": reason}
-    wallets = _call_first(adapter, (("get_accounts", ()), ("list_accounts", ()), ("get_wallets", ()),))
     ok, reason = _read_success(wallets)
     if not ok:
         return {"valid": False, "reason": reason}
-    balances = _call_first(adapter, (("get_balances", ()), ("get_balance", ()), ("get_account_balance", ()), ("get_account", ()),))
+    balances = wallets if _coinbase_wallets_include_balances(wallets) else _call_first(adapter, (("get_balances", ()), ("get_balance", ()), ("get_account_balance", ()), ("get_account", ()),))
     ok, reason = _read_success(balances)
     if not ok:
         return {"valid": False, "reason": reason}
     portfolio_value = _first_portfolio_value(portfolio)
+    if not _value_present(portfolio_value):
+        portfolio_value = _first_portfolio_value(balances)
+    if not _value_present(portfolio_value):
+        portfolio_value = _first_portfolio_value(wallets)
     missing = []
     if not _value_present(portfolio):
         missing.append("portfolio")
@@ -521,6 +535,18 @@ def _coinbase_account(adapter: Any) -> dict[str, Any]:
         "asset_balances_present": _value_present(balances),
         "portfolio_value_present": _value_present(portfolio_value),
     }
+
+
+def _coinbase_wallets_include_balances(wallets: Any) -> bool:
+    payload = _payload_data(wallets)
+    accounts = payload.get("accounts") if isinstance(payload, Mapping) else payload
+    if not isinstance(accounts, list):
+        return False
+    return any(
+        isinstance(account, Mapping)
+        and any(_value_present(account.get(key)) for key in ("available_balance", "balance", "hold", "total_balance"))
+        for account in accounts
+    )
 
 
 def _oanda_market_data(adapter: Any) -> dict[str, Any]:
@@ -579,6 +605,17 @@ def _call_first(adapter: Any, candidates: tuple[tuple[str, tuple[Any, ...]], ...
     return _NOT_FOUND
 
 
+def _parallel_call_first(
+    adapter: Any,
+    left: tuple[tuple[str, tuple[Any, ...]], ...],
+    right: tuple[tuple[str, tuple[Any, ...]], ...],
+) -> tuple[Any, Any]:
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        left_future = executor.submit(_call_first, adapter, left)
+        right_future = executor.submit(_call_first, adapter, right)
+        return left_future.result(), right_future.result()
+
+
 def _read_success(value: Any) -> tuple[bool, str]:
     if value is _NOT_FOUND:
         return False, "read_only_method_unavailable"
@@ -623,16 +660,16 @@ def _first_present(source: Mapping[str, Any], keys: tuple[str, ...]) -> Any:
 def _first_portfolio_value(portfolio: Any) -> Any:
     payload = _payload_data(portfolio)
     if isinstance(payload, Mapping):
-        direct = _first_present(payload, ("portfolio_value", "total_balance", "total_value", "value", "balance", "equity"))
+        direct = _first_present(payload, ("portfolio_value", "total_balance", "total_value", "value", "balance", "equity", "available_balance"))
         if _value_present(direct):
             return direct
-        portfolios = payload.get("portfolios") or payload.get("data")
+        portfolios = payload.get("portfolios") or payload.get("accounts") or payload.get("data")
     else:
         portfolios = payload
     if isinstance(portfolios, list) and portfolios:
         first = portfolios[0]
         if isinstance(first, Mapping):
-            return _first_present(first, ("portfolio_value", "total_balance", "total_value", "value"))
+            return _first_present(first, ("portfolio_value", "total_balance", "total_value", "value", "balance", "available_balance"))
     return None
 
 
@@ -667,6 +704,10 @@ def _value_present(value: Any) -> bool:
 
 def _elapsed_ms(clock: ClockFn, started: float) -> int:
     return max(0, int(round((clock() - started) * 1000)))
+
+
+def _sum_stage_latency(*stages: ConnectivityStage) -> int:
+    return int(sum(stage.latency_ms for stage in stages if isinstance(stage.latency_ms, int)))
 
 
 def _failure_reason(exc: BaseException) -> str:

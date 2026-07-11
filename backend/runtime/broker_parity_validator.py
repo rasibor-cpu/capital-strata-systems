@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
+from functools import lru_cache
 from typing import Any, Mapping
 
 from backend.runtime.broker_readiness_framework import (
@@ -65,8 +67,12 @@ def broker_parity_payload(
     else:
         readiness = summary.get("broker_readiness") if isinstance(summary.get("broker_readiness"), Mapping) else {}
         selected = str(summary.get("selected_broker", readiness.get("broker_name", "NONE")) or "NONE").upper()
-        coinbase = readiness if selected == "COINBASE" else None
-        oanda = readiness if selected == "OANDA" else None
+        if readiness:
+            coinbase = readiness if selected == "COINBASE" else _synthetic_unconfigured_readiness("COINBASE", "CRYPTO")
+            oanda = readiness if selected == "OANDA" else _synthetic_unconfigured_readiness("OANDA", "FX")
+        else:
+            coinbase = _synthetic_unconfigured_readiness("COINBASE", "CRYPTO")
+            oanda = _synthetic_unconfigured_readiness("OANDA", "FX")
         report = validate_broker_parity(coinbase, oanda)
     report["advisory_only"] = True
     report["execution_allowed"] = False
@@ -86,15 +92,66 @@ def _readiness_payload(
     source.setdefault("execution_enabled", False)
     
     if not source.get("credential_diagnostics") and not source.get("broker_credential_diagnostics"):
-        from backend.runtime.broker_credential_diagnostics import diagnose_broker_credentials
-        diag = diagnose_broker_credentials(broker_name.lower())
-        source["credential_diagnostics"] = diag.as_dict()
-        source["broker_credential_diagnostics"] = diag.as_dict()
-        source["credentials_present"] = diag.credentials_present
-        source["credentials_health"] = "READY" if diag.credentials_present else "MISSING"
-        source["readiness_state"] = "CREDENTIALS_PRESENT" if diag.credentials_present else "UNCONFIGURED"
+        if "credential_status" in source or "credentials_health" in source:
+            diag = _synthetic_credential_diagnostics(broker_name, source)
+            source["credential_diagnostics"] = diag
+            source["broker_credential_diagnostics"] = diag
+            source["credentials_present"] = diag["credentials_present"]
+            source["credentials_health"] = "READY" if diag["credentials_present"] else "MISSING"
+            source["readiness_state"] = "CREDENTIALS_PRESENT" if diag["credentials_present"] else "UNCONFIGURED"
+        else:
+            from backend.runtime.broker_credential_diagnostics import diagnose_broker_credentials
+            diag = diagnose_broker_credentials(broker_name.lower())
+            source["credential_diagnostics"] = diag.as_dict()
+            source["broker_credential_diagnostics"] = diag.as_dict()
+            source["credentials_present"] = diag.credentials_present
+            source["credentials_health"] = "READY" if diag.credentials_present else "MISSING"
+            source["readiness_state"] = "CREDENTIALS_PRESENT" if diag.credentials_present else "UNCONFIGURED"
 
     return broker_readiness_payload(build_broker_readiness_snapshot(source))
+
+
+def _synthetic_credential_diagnostics(broker_name: str, source: Mapping[str, Any]) -> dict[str, Any]:
+    status = str(source.get("credential_status", source.get("credentials_health", "")) or "").upper()
+    present = status in {"PRESENT", "READY", "PASS", "HEALTHY"}
+    reason = "NONE" if present else "MISSING_CREDENTIALS"
+    return {
+        "broker": broker_name.lower(),
+        "broker_name": broker_name.upper(),
+        "credentials_present": present,
+        "failure_reason": reason,
+        "canonical_failure_reason": reason,
+        "readiness_status": "READY" if present else "BLOCKED",
+        "missing_credentials": [] if present else ["synthetic_parity_credentials"],
+        "missing_credential_fields": [] if present else ["synthetic_parity_credentials"],
+        "redacted": True,
+        "advisory_only": True,
+        "execution_allowed": False,
+        "live_trading_blocked": True,
+    }
+
+
+def _synthetic_unconfigured_readiness(broker_name: str, broker_type: str) -> dict[str, Any]:
+    return {
+        "broker_name": broker_name,
+        "broker_type": broker_type,
+        "credential_status": "MISSING",
+        "credentials_health": "MISSING",
+        "authenticated": False,
+        "connected": False,
+        "account_loaded": False,
+        "market_data_ready": False,
+        "products_loaded": 0,
+        "broker_health": "UNKNOWN",
+        "infrastructure_health": "UNKNOWN",
+        "authentication_health": "NOT_TESTED",
+        "connection_health": "NOT_CONNECTED",
+        "market_data_health": "NOT_TESTED",
+        "account_data_health": "UNAVAILABLE",
+        "execution_supported": True,
+        "execution_enabled": False,
+        "authority_block_reason": "Broker readiness unavailable",
+    }
 
 
 def _mismatched_fields(
@@ -117,6 +174,11 @@ def _mismatched_fields(
 
 
 def _scenario_results() -> dict[str, Any]:
+    return deepcopy(_cached_scenario_results())
+
+
+@lru_cache(maxsize=1)
+def _cached_scenario_results() -> dict[str, Any]:
     scenarios = {
         "missing_credentials": (_missing_credentials_snapshot, "ARMED"),
         "authentication_failed": (_authentication_failed_snapshot, "ARMED"),

@@ -97,7 +97,11 @@ class BrokerHealthMonitor:
         freshness = _market_data_freshness(connectivity, now=now, thresholds=self.thresholds)
         firewall = _firewall_status(connectivity)
         reliability = _reliability(connectivity, api)
-        latency_health = _latency_health(latency, self.thresholds)
+        latency_health = _latency_health(
+            latency,
+            self.thresholds,
+            connectivity_latency_status=str(connectivity.get("latency_status", "") or ""),
+        )
         score = _overall_score(
             diagnostics=diagnostics,
             connectivity=connectivity,
@@ -427,7 +431,15 @@ def _latency_score(latency: Mapping[str, int | None], thresholds: BrokerHealthTh
     return 20.0
 
 
-def _latency_health(latency: Mapping[str, int | None], thresholds: BrokerHealthThresholds) -> str:
+def _latency_health(
+    latency: Mapping[str, int | None],
+    thresholds: BrokerHealthThresholds,
+    *,
+    connectivity_latency_status: str = "",
+) -> str:
+    canonical = str(connectivity_latency_status or "").upper()
+    if canonical in {GREEN, AMBER, RED}:
+        return canonical
     values = [value for key, value in latency.items() if key != "overall_ms" and isinstance(value, int)]
     if not values:
         return RED

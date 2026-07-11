@@ -107,6 +107,12 @@ def collect_market_data_evidence_for_symbols(
     instruments: tuple[str, ...] | list[str],
     clock: ClockFn = time.perf_counter,
 ) -> dict[str, Any]:
+    broker_name = _normalize_broker(broker)
+    if broker_name == "coinbase":
+        product_evidence = _collect_coinbase_products_evidence(adapter, tuple(instruments), clock=clock)
+        if product_evidence is not None:
+            return product_evidence
+
     evidence: list[dict[str, Any]] = []
     quotes: dict[str, dict[str, Any]] = {}
     missing: list[str] = []
@@ -143,6 +149,136 @@ def collect_market_data_evidence_for_symbols(
         "evidence": evidence,
         **_advisory_safety_flags(),
     }
+
+
+def _collect_coinbase_products_evidence(
+    adapter: Any,
+    instruments: tuple[str, ...],
+    *,
+    clock: ClockFn,
+) -> dict[str, Any] | None:
+    method = getattr(adapter, "get_products", None)
+    if not callable(method):
+        return None
+
+    started = clock()
+    try:
+        payload = method()
+    except TypeError:
+        return None
+    except Exception as exc:
+        latency_ms = _elapsed_ms(clock, started)
+        return {
+            "valid": False,
+            "reason": _failure_reason(exc),
+            "symbols": list(instruments),
+            "missing_symbols": list(instruments),
+            "quotes": {
+                instrument: {
+                    "status": FAIL,
+                    "reason": _failure_reason(exc),
+                    "source": "get_products",
+                    "latency_ms": latency_ms,
+                }
+                for instrument in instruments
+            },
+            "timestamp": _iso_timestamp(),
+            "evidence": [
+                {
+                    "success": False,
+                    "broker": "coinbase",
+                    "instrument": instrument,
+                    "source": "get_products",
+                    "timestamp": _iso_timestamp(),
+                    "latency_ms": latency_ms,
+                    "reason": _failure_reason(exc),
+                    **_advisory_safety_flags(),
+                }
+                for instrument in instruments
+            ],
+            **_advisory_safety_flags(),
+        }
+
+    ok, reason = _read_success(payload)
+    if not ok:
+        return None
+
+    products = _coinbase_product_map(payload)
+    if not products:
+        return None
+
+    latency_ms = _elapsed_ms(clock, started)
+    evidence: list[dict[str, Any]] = []
+    quotes: dict[str, dict[str, Any]] = {}
+    missing: list[str] = []
+    timestamp = ""
+    for instrument in instruments:
+        product = products.get(_normalize_symbol(instrument))
+        if product is None:
+            missing.append(instrument)
+            quotes[instrument] = {
+                "status": FAIL,
+                "reason": "market_data_missing",
+                "source": "get_products",
+                "latency_ms": latency_ms,
+            }
+            evidence.append(
+                {
+                    "success": False,
+                    "broker": "coinbase",
+                    "instrument": instrument,
+                    "source": "get_products",
+                    "timestamp": _iso_timestamp(),
+                    "latency_ms": latency_ms,
+                    "reason": "market_data_missing",
+                    **_advisory_safety_flags(),
+                }
+            )
+            continue
+        item = _success_payload(
+            broker="coinbase",
+            instrument=instrument,
+            source="get_products",
+            payload=product,
+            latency_ms=latency_ms,
+        )
+        evidence.append(item)
+        quotes[instrument] = {
+            "status": PASS,
+            "source": "get_products",
+            "timestamp": item.get("timestamp", ""),
+            "latency_ms": latency_ms,
+        }
+        if not timestamp and item.get("timestamp"):
+            timestamp = str(item["timestamp"])
+
+    return {
+        "valid": not missing,
+        "reason": "" if not missing else "market_data_missing",
+        "symbols": list(instruments),
+        "missing_symbols": missing,
+        "quotes": quotes,
+        "timestamp": timestamp or _iso_timestamp(),
+        "evidence": evidence,
+        **_advisory_safety_flags(),
+    }
+
+
+def _coinbase_product_map(payload: Any) -> dict[str, Any]:
+    source = _payload_data(payload)
+    products = source.get("products") if isinstance(source, Mapping) else source
+    if not isinstance(products, list):
+        return {}
+    mapped: dict[str, Any] = {}
+    for product in products:
+        if not isinstance(product, Mapping):
+            continue
+        for key in ("product_id", "product", "symbol", "id"):
+            value = product.get(key)
+            if _value_present(value):
+                mapped[_normalize_symbol(str(value))] = product
+                break
+    return mapped
 
 
 def discover_server_health_endpoints(

@@ -59,6 +59,35 @@ class FakeCoinbaseReadClient:
         return {"product_id": product_id, "price": "65000.00"}
 
 
+class FakeCoinbaseSdk184ReadClient:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def get_accounts(self):
+        self.calls.append("get_accounts")
+        return {
+            "accounts": [
+                {
+                    "currency": "USD",
+                    "available_balance": {"value": "12.50"},
+                    "hold": {"value": "0.00"},
+                }
+            ]
+        }
+
+    def get_products(self):
+        self.calls.append("get_products")
+        return {"products": [{"product_id": "BTC-USD"}]}
+
+    def get_unix_time(self):
+        self.calls.append("get_unix_time")
+        return {"epoch_seconds": "1783180800", "iso": "2026-07-04T12:00:00Z"}
+
+    def get_product(self, product_id: str):
+        self.calls.append(f"get_product:{product_id}")
+        return {"product_id": product_id, "price": "65000.00"}
+
+
 def _env() -> dict[str, str]:
     return {
         "COINBASE_CDP_KEY_NAME": "organizations/hidden/apiKeys/secret-name",
@@ -122,6 +151,21 @@ def test_phase153g_successful_read_only_sync_sets_healthy_without_execution() ->
     assert status["products_loaded"] == 2
     assert status["market_data_status"] == "OK"
     assert status["last_broker_sync"] == "2026-07-04T12:00:00+00:00"
+
+
+def test_phase153g_sdk_184_server_time_method_is_supported() -> None:
+    fake_client = FakeCoinbaseSdk184ReadClient()
+    adapter = CoinbaseLiveReadOnlyAdapter(env=_env(), read_client=fake_client)
+
+    server_time = adapter.get_server_time()
+    status = adapter.sync()
+
+    assert server_time["iso"] == "2026-07-04T12:00:00Z"
+    assert "get_unix_time" in fake_client.calls
+    assert status["read_checks"]["server_time"] == "OK"
+    assert status["broker_authenticated"] is True
+    assert status["execution_allowed"] is False
+    assert status["broker_execution_armed"] is False
 
 
 def test_phase153g_no_broker_balance_reports_unknown_drawdown() -> None:
