@@ -2,6 +2,7 @@ import os
 import json
 import datetime
 import time
+import copy
 from urllib.parse import parse_qs
 from typing import Dict, Any, List, Optional
 
@@ -105,6 +106,15 @@ from backend.runtime.coinbase_live_read_only_operational_validation import (
 from backend.runtime.oanda_live_read_only_operational_validation import (
     load_oanda_operational_validation_artifacts,
 )
+from backend.runtime.runtime_certification_snapshot import (
+    build_runtime_certification_snapshot,
+    runtime_certification_diagnostics,
+)
+from backend.runtime.operational_proving import (
+    build_operational_proving_report,
+    load_certification_history,
+    persist_certification_snapshot,
+)
 from backend.runtime.live_micro_pilot_governor import live_micro_pilot_status
 from backend.validation.live_readiness_certification import (
     live_readiness_blocker_diagnostics,
@@ -122,6 +132,7 @@ import uvicorn
 app = FastAPI(title=LauncherConfig.TITLE, version=LauncherConfig.VERSION)
 launcher_router = APIRouter()
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
+_LAUNCHER_RUNTIME_CERTIFICATION_SNAPSHOT_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
 def _utc_iso_z() -> str:
@@ -602,6 +613,19 @@ def build_launcher_frontend_state(
     broker_parity = broker_parity_payload(broker_startup)
     coinbase_validation = get_launcher_coinbase_live_validation_feed()
     oanda_validation = get_launcher_oanda_live_validation_feed()
+    runtime_certification_snapshots = _launcher_runtime_certification_snapshots(
+        runtime.get("current_cycle", 0),
+        coinbase_validation=coinbase_validation,
+        oanda_validation=oanda_validation,
+    )
+    selected_runtime_certification_snapshot = runtime_certification_snapshots.get(str(broker).upper(), {})
+    rc1_operational = get_launcher_rc1_operational_dashboard_feed(
+        runtime_summary=runtime,
+        runtime_health=health,
+        runtime_performance=None,
+        certification_snapshot=selected_runtime_certification_snapshot,
+        persist_history=False,
+    )
     broker_credential_diagnostics = diagnostics_payload(
         {
             "broker": broker,
@@ -687,6 +711,9 @@ def build_launcher_frontend_state(
             "broker_readiness": dict(broker_readiness),
             "broker_parity": dict(broker_parity),
             "broker_credential_diagnostics": dict(broker_credential_diagnostics),
+            "runtime_certification_snapshot": dict(selected_runtime_certification_snapshot),
+            "runtime_certification_snapshots": dict(runtime_certification_snapshots),
+            "rc1_operational_dashboard": dict(rc1_operational),
             "coinbase_live_validation": dict(coinbase_validation),
             "oanda_live_validation": dict(oanda_validation),
             "broker_operational_status": {
@@ -878,6 +905,101 @@ def get_launcher_broker_readiness_feed() -> Dict[str, Any]:
     broker = get_launcher_broker_read_only_status_feed()
     readiness = broker.get("broker_readiness", {}) if isinstance(broker, dict) else {}
     return dict(readiness) if isinstance(readiness, dict) else {}
+
+
+def _launcher_runtime_certification_snapshots(
+    cycle_id: Any,
+    *,
+    coinbase_validation: Optional[Dict[str, Any]] = None,
+    oanda_validation: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    cache_key = str(cycle_id if cycle_id is not None else "default")
+    if cache_key in _LAUNCHER_RUNTIME_CERTIFICATION_SNAPSHOT_CACHE:
+        return copy.deepcopy(_LAUNCHER_RUNTIME_CERTIFICATION_SNAPSHOT_CACHE[cache_key])
+    coinbase_source = coinbase_validation if isinstance(coinbase_validation, dict) else get_launcher_coinbase_live_validation_feed()
+    oanda_source = oanda_validation if isinstance(oanda_validation, dict) else get_launcher_oanda_live_validation_feed()
+    snapshots = {
+        "COINBASE": build_runtime_certification_snapshot(
+            "coinbase",
+            mode="live",
+            cycle_id=cycle_id,
+            phase156b=coinbase_source.get("broker_validation", coinbase_source),
+            phase156c=coinbase_source.get("broker_health", {}),
+            source="launcher_runtime_artifacts",
+            telemetry={
+                "certification_execution_ms": None,
+                "broker_api_calls_performed": 0,
+                "cache_hits": 0,
+                "cache_misses": 0,
+                "runtime_cycle_duration_ms": None,
+                "capability_cache_status": "ARTIFACT",
+            },
+        ),
+        "OANDA": build_runtime_certification_snapshot(
+            "oanda",
+            mode="live",
+            cycle_id=cycle_id,
+            phase156b=oanda_source.get("broker_validation", oanda_source),
+            phase156c=oanda_source.get("broker_health", {}),
+            source="launcher_runtime_artifacts",
+            telemetry={
+                "certification_execution_ms": None,
+                "broker_api_calls_performed": 0,
+                "cache_hits": 0,
+                "cache_misses": 0,
+                "runtime_cycle_duration_ms": None,
+                "capability_cache_status": "ARTIFACT",
+            },
+        ),
+    }
+    _LAUNCHER_RUNTIME_CERTIFICATION_SNAPSHOT_CACHE[cache_key] = copy.deepcopy(snapshots)
+    return snapshots
+
+
+def get_launcher_runtime_certification_snapshots_feed() -> Dict[str, Any]:
+    runtime = get_runtime_summary()
+    return _launcher_runtime_certification_snapshots(runtime.get("current_cycle", 0))
+
+
+def get_launcher_runtime_certification_snapshot_feed() -> Dict[str, Any]:
+    startup = get_broker_startup_summary()
+    broker = str(startup.get("selected_broker", "COINBASE")).upper()
+    snapshots = get_launcher_runtime_certification_snapshots_feed()
+    return dict(snapshots.get(broker, {}))
+
+
+def get_launcher_runtime_certification_diagnostics_feed() -> Dict[str, Any]:
+    return runtime_certification_diagnostics(get_launcher_runtime_certification_snapshot_feed())
+
+
+def _launcher_rc1_history_path() -> str:
+    return os.path.join(LauncherConfig.ARTIFACTS_DIR, "rc1_operational_certification_history.json")
+
+
+def get_launcher_rc1_operational_dashboard_feed(
+    *,
+    runtime_summary: Optional[Dict[str, Any]] = None,
+    runtime_health: Optional[Dict[str, Any]] = None,
+    runtime_performance: Optional[Dict[str, Any]] = None,
+    certification_snapshot: Optional[Dict[str, Any]] = None,
+    persist_history: bool = True,
+) -> Dict[str, Any]:
+    runtime = runtime_summary if isinstance(runtime_summary, dict) else get_runtime_summary()
+    performance = runtime_performance if isinstance(runtime_performance, dict) else get_runtime_performance_feed()
+    health = runtime_health if isinstance(runtime_health, dict) else get_runtime_health_feed(performance=performance)
+    snapshot = certification_snapshot if isinstance(certification_snapshot, dict) else get_launcher_runtime_certification_snapshot_feed()
+    history_path = _launcher_rc1_history_path()
+    if persist_history and snapshot:
+        persist_certification_snapshot(snapshot, history_path)
+    history = load_certification_history(history_path)
+    return build_operational_proving_report(
+        runtime_summary=runtime,
+        runtime_health=health,
+        runtime_performance=performance,
+        certification_snapshot=snapshot,
+        frontend_payload={},
+        history=history,
+    )
 
 
 def get_launcher_broker_parity_feed() -> Dict[str, Any]:
@@ -3712,6 +3834,14 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "broker_startup": broker_startup,
         "broker_credential_diagnostics": get_launcher_broker_credential_diagnostics_feed(),
         "broker_parity": get_launcher_broker_parity_feed(),
+        "runtime_certification_snapshot": get_launcher_runtime_certification_snapshot_feed(),
+        "runtime_certification_diagnostics": get_launcher_runtime_certification_diagnostics_feed(),
+        "rc1_operational_dashboard": get_launcher_rc1_operational_dashboard_feed(
+            runtime_summary=get_runtime_summary(),
+            runtime_health=runtime_health,
+            runtime_performance=runtime_performance,
+            certification_snapshot=get_launcher_runtime_certification_snapshot_feed(),
+        ),
         "coinbase_live_validation": get_launcher_coinbase_live_validation_feed(),
         "oanda_live_validation": get_launcher_oanda_live_validation_feed(),
         "recommendation_evaluation": recommendation_evaluation,
@@ -3918,6 +4048,36 @@ async def launcher_broker_parity():
     return {
         "section": "broker_parity",
         "data": get_launcher_broker_parity_feed(),
+        "advisory_only": True,
+        "execution_allowed": False,
+    }
+
+
+@launcher_router.get("/api/v1/runtime-certification-snapshot")
+async def launcher_runtime_certification_snapshot():
+    return {
+        "section": "runtime_certification_snapshot",
+        "data": get_launcher_runtime_certification_snapshot_feed(),
+        "advisory_only": True,
+        "execution_allowed": False,
+    }
+
+
+@launcher_router.get("/api/v1/runtime-certification-diagnostics")
+async def launcher_runtime_certification_diagnostics():
+    return {
+        "section": "runtime_certification_diagnostics",
+        "data": get_launcher_runtime_certification_diagnostics_feed(),
+        "advisory_only": True,
+        "execution_allowed": False,
+    }
+
+
+@launcher_router.get("/api/v1/rc1-operational-dashboard")
+async def launcher_rc1_operational_dashboard():
+    return {
+        "section": "rc1_operational_dashboard",
+        "data": get_launcher_rc1_operational_dashboard_feed(),
         "advisory_only": True,
         "execution_allowed": False,
     }

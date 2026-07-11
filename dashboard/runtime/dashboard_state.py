@@ -102,6 +102,8 @@ class BrokerState:
     broker_credential_diagnostics: Dict[str, Any] = field(default_factory=dict)
     coinbase_live_validation: Dict[str, Any] = field(default_factory=dict)
     oanda_live_validation: Dict[str, Any] = field(default_factory=dict)
+    runtime_certification_snapshot: Dict[str, Any] = field(default_factory=dict)
+    runtime_certification_snapshots: Dict[str, Any] = field(default_factory=dict)
 
 
 # =========================================================

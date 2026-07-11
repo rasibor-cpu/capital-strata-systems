@@ -23,6 +23,7 @@ from backend.analytics.portfolio_correlation_engine import (
 from backend.runtime.live_micro_pilot_governor import live_micro_pilot_status
 from backend.runtime.broker_operational_status import build_broker_operational_status
 from backend.runtime.broker_credential_diagnostics import diagnostics_payload
+from backend.runtime.operational_proving import build_operational_proving_report
 from backend.validation.live_readiness_certification import (
     live_readiness_certification_status,
 )
@@ -58,6 +59,8 @@ FRONTEND_SECTIONS = (
     "broker",
     "broker_credential_diagnostics",
     "broker_operational_status",
+    "runtime_certification_snapshot",
+    "rc1_operational_dashboard",
     "broker_parity",
     "coinbase_live_validation",
     "oanda_live_validation",
@@ -164,6 +167,8 @@ def build_frontend_payload(
             "broker": broker(dashboard_payload),
             "broker_credential_diagnostics": broker_credential_diagnostics(dashboard_payload),
             "broker_operational_status": broker_operational_status(dashboard_payload),
+            "runtime_certification_snapshot": runtime_certification_snapshot(dashboard_payload),
+            "rc1_operational_dashboard": rc1_operational_dashboard(dashboard_payload),
             "broker_parity": broker_parity(dashboard_payload),
             "coinbase_live_validation": coinbase_live_validation(dashboard_payload),
             "oanda_live_validation": oanda_live_validation(dashboard_payload),
@@ -992,12 +997,104 @@ def live_readiness_certification(dashboard_payload: Mapping[str, Any]) -> dict[s
     }
 
 
+def runtime_certification_snapshot(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
+    broker_payload = _mapping(dashboard_payload.get("broker_summary"))
+    selected_broker = str(broker_payload.get("selected_broker", broker_payload.get("broker", "NONE"))).upper()
+    snapshot = _runtime_snapshot_for_broker(dashboard_payload, selected_broker)
+    if not snapshot:
+        snapshot = _mapping(dashboard_payload.get("runtime_certification_snapshot"))
+    if not snapshot:
+        return {
+            "payload_version": "css.phase163b3a.runtime_certification_snapshot.v1",
+            "broker": selected_broker,
+            "certification": "DATA UNAVAILABLE",
+            "broker_readiness": "DATA UNAVAILABLE",
+            "operational_state": "DATA UNAVAILABLE",
+            "latency": {},
+            "market_data_freshness": {},
+            "telemetry": {
+                "certification_execution_ms": None,
+                "broker_api_calls_performed": 0,
+                "cache_hits": 0,
+                "cache_misses": 0,
+                "runtime_cycle_duration_ms": None,
+            },
+            "execution_allowed": False,
+            "live_trading_blocked": True,
+            "broker_execution_armed": False,
+            "advisory_only": True,
+        }
+    payload = dict(snapshot)
+    payload["execution_allowed"] = False
+    payload["live_trading_blocked"] = True
+    payload["broker_execution_armed"] = False
+    payload["advisory_only"] = True
+    return _json_safe(payload)
+
+
+def rc1_operational_dashboard(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
+    explicit = _mapping(dashboard_payload.get("rc1_operational_dashboard"))
+    if explicit:
+        payload = dict(explicit)
+    else:
+        snapshot = runtime_certification_snapshot(dashboard_payload)
+        if str(snapshot.get("certification", "")).upper() == "DATA UNAVAILABLE":
+            payload = {
+                "payload_version": "css.phase164.operational_proving.v1",
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "runtime_metrics": {},
+                "certification_history_trend": {
+                    "sample_count": 0,
+                    "red_certification_count": 0,
+                    "stable_amber_green_trend": False,
+                    "latest_certification": "DATA UNAVAILABLE",
+                    "score_delta": 0.0,
+                    "trend": "INSUFFICIENT_DATA",
+                },
+                "operational_scorecard": {
+                    "dimensions": {},
+                    "overall_operational_score": 0.0,
+                    "overall_status": "RED",
+                },
+                "pre_pilot_gate": {
+                    "eligible": False,
+                    "decision": "NOT_ELIGIBLE",
+                    "blockers": ["runtime_certification_snapshot_unavailable"],
+                    "recommendation": "Runtime certification snapshot is required before RC1 operational proving.",
+                    "execution_allowed": False,
+                    "live_trading_blocked": True,
+                    "broker_execution_armed": False,
+                    "advisory_only": True,
+                },
+                "open_risks": ["runtime_certification_snapshot_unavailable"],
+            }
+        else:
+            payload = build_operational_proving_report(
+                runtime_summary={
+                    "cycle_number": dashboard_payload.get("cycle_number"),
+                    "startup_timestamp": dashboard_payload.get("startup_timestamp"),
+                    "uptime_seconds": dashboard_payload.get("uptime_seconds", 0),
+                },
+                runtime_health=_mapping(dashboard_payload.get("runtime_health")),
+                runtime_performance=_mapping(dashboard_payload.get("runtime_performance")),
+                certification_snapshot=snapshot,
+                frontend_payload={},
+                history=_list(dashboard_payload.get("certification_history")),
+            )
+    payload["execution_allowed"] = False
+    payload["live_trading_blocked"] = True
+    payload["broker_execution_armed"] = False
+    payload["advisory_only"] = True
+    return _json_safe(payload)
+
+
 def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     broker_payload = _mapping(dashboard_payload.get("broker_summary"))
     credential_diagnostics = _mapping(broker_payload.get("credential_diagnostics"))
     canonical_credential_diagnostics = broker_credential_diagnostics(dashboard_payload)
     limit_reconciliation = _mapping(broker_payload.get("limit_reconciliation"))
     broker_readiness = _mapping(broker_payload.get("broker_readiness"))
+    certification_snapshot = runtime_certification_snapshot(dashboard_payload)
     return {
         "selected_broker": str(broker_payload.get("selected_broker", "NONE")),
         "broker_type": str(broker_payload.get("broker_type", broker_readiness.get("broker_type", "UNKNOWN"))),
@@ -1011,6 +1108,11 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         ),
         "broker_ready": _boolean(broker_payload.get("broker_ready", broker_readiness.get("broker_ready"))),
         "broker_readiness": broker_readiness,
+        "runtime_certification_snapshot": certification_snapshot,
+        "certification": str(certification_snapshot.get("certification", DATA_UNAVAILABLE)),
+        "operational_state": str(certification_snapshot.get("operational_state", DATA_UNAVAILABLE)),
+        "market_data_freshness": _mapping(certification_snapshot.get("market_data_freshness")),
+        "certification_latency": _mapping(certification_snapshot.get("latency")),
         "credentials_present": _boolean(broker_payload.get("credentials_present", broker_readiness.get("credentials_present"))),
         "authenticated": _boolean(broker_payload.get("authenticated", broker_payload.get("broker_authenticated", broker_readiness.get("authenticated")))),
         "account_loaded": _boolean(broker_payload.get("account_loaded", broker_readiness.get("account_loaded"))),
@@ -1216,11 +1318,89 @@ def broker_parity(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     return report
 
 
+def _runtime_snapshot_for_broker(dashboard_payload: Mapping[str, Any], broker_name: str) -> dict[str, Any]:
+    broker_key = str(broker_name or "").upper()
+    broker_payload = _mapping(dashboard_payload.get("broker_summary"))
+    candidates = [
+        _mapping(dashboard_payload.get("runtime_certification_snapshot")),
+        _mapping(broker_payload.get("runtime_certification_snapshot")),
+    ]
+    explicit_snapshots = _mapping(dashboard_payload.get("runtime_certification_snapshots"))
+    broker_snapshots = _mapping(broker_payload.get("runtime_certification_snapshots"))
+    for snapshots in (explicit_snapshots, broker_snapshots):
+        for key in (broker_key, broker_key.lower()):
+            candidates.append(_mapping(snapshots.get(key)))
+    for snapshot in candidates:
+        if snapshot and str(snapshot.get("broker", "")).upper() == broker_key:
+            return snapshot
+    return {}
+
+
+def _validation_source_from_runtime_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
+    if not snapshot:
+        return {}
+    phase156b = _mapping(snapshot.get("phase156b"))
+    phase156c = _mapping(snapshot.get("phase156c"))
+    latency = _mapping(snapshot.get("latency"))
+    freshness = _mapping(snapshot.get("market_data_freshness"))
+    capability_info = _mapping(snapshot.get("capability_info"))
+    certification = str(snapshot.get("certification", phase156b.get("certification", "RED"))).upper()
+    account_loaded = str(phase156b.get("account", "")).upper() == "PASS" or phase156b.get("account_loaded") is True
+    market_data_loaded = str(phase156b.get("market_data", "")).upper() == "PASS" or phase156b.get("market_data_loaded") is True
+    authenticated = str(phase156b.get("authentication", "")).upper() == "PASS" or phase156b.get("authentication") is True
+    products_loaded = len(_list(capability_info.get("symbols"))) or _integer(
+        capability_info.get("product_count", phase156b.get("products_loaded", 0))
+    )
+    broker_name = str(snapshot.get("broker", phase156b.get("broker", "UNKNOWN"))).upper()
+    broker_type = "FX" if broker_name == "OANDA" else "CRYPTO"
+    operational = build_broker_operational_status(
+        {
+            "broker": broker_name,
+            "broker_type": broker_type,
+            "mode": "LIVE_READ_ONLY",
+            "account_sync_status": "OK" if account_loaded else "PENDING",
+            "product_count": products_loaded,
+            "market_data_status": "OK" if market_data_loaded else "NOT_AVAILABLE",
+            "balance_status": "AVAILABLE" if account_loaded else "NOT_AVAILABLE",
+            "margin_status": "AVAILABLE" if account_loaded else "READ_ONLY_PENDING_ACCOUNT",
+            "last_successful_sync": str(snapshot.get("generated_at", DATA_UNAVAILABLE)),
+            "failure_reasons": _list(phase156b.get("blocker_reasons")),
+            "latency_ms": latency.get("active_validation_ms", latency.get("overall_ms")),
+        }
+    )
+    return {
+        "validation_status": certification,
+        "api_reachable": certification in {"GREEN", "AMBER"},
+        "authentication": authenticated,
+        "authenticated": authenticated,
+        "account_loaded": account_loaded,
+        "portfolio_loaded": account_loaded,
+        "balances_loaded": account_loaded,
+        "products_loaded": products_loaded,
+        "market_data_loaded": market_data_loaded,
+        "last_successful_sync": str(snapshot.get("generated_at", DATA_UNAVAILABLE)),
+        "validation_timestamp": str(snapshot.get("generated_at", DATA_UNAVAILABLE)),
+        "failure_reasons": _list(phase156b.get("blocker_reasons", phase156c.get("blocker_reasons"))),
+        "read_checks": {
+            "authentication": phase156b.get("authentication", "FAIL"),
+            "account": phase156b.get("account", "FAIL"),
+            "market_data": phase156b.get("market_data", "FAIL"),
+            "firewall": phase156b.get("execution_firewall", "PASS"),
+        },
+        "broker_validation": phase156b,
+        "broker_health": phase156c,
+        "broker_market_snapshot": freshness,
+        "broker_operational_status": operational,
+        "runtime_certification_snapshot": dict(snapshot),
+    }
+
+
 def coinbase_live_validation(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     broker_payload = _mapping(dashboard_payload.get("broker_summary"))
     explicit_payload = _mapping(dashboard_payload.get("coinbase_live_validation"))
     validation_payload = _mapping(broker_payload.get("coinbase_live_validation"))
-    source = explicit_payload or validation_payload
+    snapshot_source = _validation_source_from_runtime_snapshot(_runtime_snapshot_for_broker(dashboard_payload, "COINBASE"))
+    source = snapshot_source or explicit_payload or validation_payload
     broker_validation = _mapping(source.get("broker_validation"))
     broker_health = _mapping(source.get("broker_health"))
     market_snapshot = _mapping(source.get("broker_market_snapshot"))
@@ -1294,7 +1474,8 @@ def oanda_live_validation(dashboard_payload: Mapping[str, Any]) -> dict[str, Any
     broker_payload = _mapping(dashboard_payload.get("broker_summary"))
     explicit_payload = _mapping(dashboard_payload.get("oanda_live_validation"))
     validation_payload = _mapping(broker_payload.get("oanda_live_validation"))
-    source = explicit_payload or validation_payload
+    snapshot_source = _validation_source_from_runtime_snapshot(_runtime_snapshot_for_broker(dashboard_payload, "OANDA"))
+    source = snapshot_source or explicit_payload or validation_payload
     broker_validation = _mapping(source.get("broker_validation"))
     broker_health = _mapping(source.get("broker_health"))
     market_snapshot = _mapping(source.get("broker_market_snapshot"))
@@ -1693,6 +1874,8 @@ __all__ = [
     "broker",
     "broker_credential_diagnostics",
     "broker_operational_status",
+    "runtime_certification_snapshot",
+    "rc1_operational_dashboard",
     "broker_parity",
     "coinbase_live_validation",
     "oanda_live_validation",

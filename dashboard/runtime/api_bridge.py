@@ -29,6 +29,9 @@ from backend.analytics.opportunity_intelligence_engine import (
 from backend.analytics.capital_allocation_optimizer import (
     build_capital_allocation_intelligence_report,
 )
+from backend.runtime.runtime_certification_snapshot import (
+    runtime_certification_diagnostics,
+)
 
 
 DashboardStateProvider = Callable[[], DashboardState]
@@ -199,6 +202,39 @@ def get_broker_operational_status_payload(
     return build_section_payload(
         _state_from_provider(state_provider),
         "broker_operational_status",
+    )
+
+
+def get_runtime_certification_snapshot_payload(
+    state_provider: DashboardStateProvider | None = None,
+) -> dict[str, Any]:
+    return build_section_payload(
+        _state_from_provider(state_provider),
+        "runtime_certification_snapshot",
+    )
+
+
+def get_runtime_certification_diagnostics_payload(
+    state_provider: DashboardStateProvider | None = None,
+) -> dict[str, Any]:
+    snapshot_payload = get_runtime_certification_snapshot_payload(state_provider)
+    snapshot = snapshot_payload.get("data", {})
+    snapshot = snapshot if isinstance(snapshot, dict) else {}
+    return {
+        **snapshot_payload,
+        "section": "runtime_certification_diagnostics",
+        "data": runtime_certification_diagnostics(snapshot),
+        "advisory_only": True,
+        "execution_allowed": False,
+    }
+
+
+def get_rc1_operational_dashboard_payload(
+    state_provider: DashboardStateProvider | None = None,
+) -> dict[str, Any]:
+    return build_section_payload(
+        _state_from_provider(state_provider),
+        "rc1_operational_dashboard",
     )
 
 
@@ -393,6 +429,18 @@ def create_dashboard_state_router(
     def read_broker_operational_status() -> dict[str, Any]:
         return get_broker_operational_status_payload(state_provider)
 
+    @router.get("/api/v1/runtime-certification-snapshot")
+    def read_runtime_certification_snapshot() -> dict[str, Any]:
+        return get_runtime_certification_snapshot_payload(state_provider)
+
+    @router.get("/api/v1/runtime-certification-diagnostics")
+    def read_runtime_certification_diagnostics() -> dict[str, Any]:
+        return get_runtime_certification_diagnostics_payload(state_provider)
+
+    @router.get("/api/v1/rc1-operational-dashboard")
+    def read_rc1_operational_dashboard() -> dict[str, Any]:
+        return get_rc1_operational_dashboard_payload(state_provider)
+
     @router.get("/api/v1/broker-performance-intelligence")
     def read_broker_performance_intelligence() -> dict[str, Any]:
         return get_broker_performance_intelligence_payload(state_provider)
@@ -439,6 +487,9 @@ __all__ = [
     "get_broker_read_only_status_payload",
     "get_broker_parity_payload",
     "get_broker_operational_status_payload",
+    "get_runtime_certification_snapshot_payload",
+    "get_runtime_certification_diagnostics_payload",
+    "get_rc1_operational_dashboard_payload",
     "get_broker_performance_intelligence_payload",
     "get_broker_credential_diagnostics_payload",
     "get_broker_readiness_payload",
