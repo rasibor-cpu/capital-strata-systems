@@ -12,6 +12,7 @@ from backend.app.brokers.broker_bootstrap import initialize_broker
 from backend.app.brokers.execution_boundary import validate_execution_boundary
 from backend.runtime.broker_market_data_evidence import collect_market_data_evidence_for_symbols
 from backend.runtime.broker_operational_remediation import collect_read_only_authentication_evidence
+from backend.runtime.coinbase_authentication_trace import trace_coinbase_authentication
 from backend.runtime.live_broker_validation import validate_live_broker
 from backend.runtime.live_execution_authority import evaluate_live_execution_authority
 
@@ -216,19 +217,34 @@ class LiveConnectivityCertificationEngine:
     def _authenticate(self, adapter: Any) -> ConnectivityStage:
         try:
             evidence = collect_read_only_authentication_evidence(adapter, broker=self.broker, clock=self.clock)
+            coinbase_trace = (
+                trace_coinbase_authentication(adapter, mode=self.mode, require_credentials=False, clock=time.perf_counter)
+                if self.broker == "coinbase"
+                else {}
+            )
             ok = evidence.get("success") is True
-            reason = str(evidence.get("reason", ""))
+            if self.broker == "coinbase" and coinbase_trace:
+                ok = ok or coinbase_trace.get("authentication") == PASS
+            reason = str(
+                coinbase_trace.get("failure_stage")
+                or coinbase_trace.get("coinbase_error_code")
+                or evidence.get("reason", "")
+            )
         except Exception as exc:
             started = self.clock()
             return ConnectivityStage(FAIL, _failure_reason(exc), {"exception_type": exc.__class__.__name__}, _elapsed_ms(self.clock, started))
 
         latency_ms = evidence.get("latency_ms")
         if not isinstance(latency_ms, int):
+            started = self.clock()
             latency_ms = _elapsed_ms(self.clock, started)
+        details = {"method": "read_only_authentication_probe", "evidence": evidence, "source": evidence.get("source", "")}
+        if self.broker == "coinbase" and coinbase_trace:
+            details["coinbase_authentication_trace"] = coinbase_trace
         return ConnectivityStage(
             PASS if ok else FAIL,
             "" if ok else reason,
-            {"method": "read_only_authentication_probe", "evidence": evidence, "source": evidence.get("source", "")},
+            details,
             latency_ms,
         )
 

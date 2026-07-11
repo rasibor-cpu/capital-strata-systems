@@ -68,6 +68,8 @@ backend/runtime/*
 !backend/runtime/runtime_certification_snapshot.py
 !backend/runtime/operational_proving.py
 !backend/runtime/pre_pilot_certification_gate.py
+!backend/runtime/coinbase_authentication_trace.py
+!backend/runtime/coinbase_connectivity_certificate.py
 reporting_store/
 out/
 feeds/
