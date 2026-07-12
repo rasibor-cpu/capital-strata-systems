@@ -15,6 +15,7 @@ from backend.runtime.broker_operational_remediation import collect_read_only_aut
 from backend.runtime.coinbase_authentication_trace import trace_coinbase_authentication
 from backend.runtime.live_broker_validation import validate_live_broker
 from backend.runtime.live_execution_authority import evaluate_live_execution_authority
+from backend.runtime.oanda_authentication_trace import trace_oanda_authentication
 
 
 PASS = "PASS"
@@ -222,14 +223,25 @@ class LiveConnectivityCertificationEngine:
                 if self.broker == "coinbase"
                 else {}
             )
+            oanda_trace = (
+                trace_oanda_authentication(adapter, mode=self.mode, require_credentials=False, clock=time.perf_counter)
+                if self.broker == "oanda"
+                else {}
+            )
             ok = evidence.get("success") is True
             if self.broker == "coinbase" and coinbase_trace:
                 ok = ok or coinbase_trace.get("authentication") == PASS
-            reason = str(
-                coinbase_trace.get("failure_stage")
-                or coinbase_trace.get("coinbase_error_code")
-                or evidence.get("reason", "")
-            )
+            if self.broker == "oanda" and oanda_trace:
+                ok = ok or oanda_trace.get("authentication") == PASS
+            reason = str(evidence.get("reason", ""))
+            if self.broker == "coinbase":
+                reason = str(
+                    coinbase_trace.get("failure_stage")
+                    or coinbase_trace.get("coinbase_error_code")
+                    or reason
+                )
+            elif self.broker == "oanda" and not reason:
+                reason = str(oanda_trace.get("failure_stage") or oanda_trace.get("oanda_error_code") or "")
         except Exception as exc:
             started = self.clock()
             return ConnectivityStage(FAIL, _failure_reason(exc), {"exception_type": exc.__class__.__name__}, _elapsed_ms(self.clock, started))
@@ -241,6 +253,8 @@ class LiveConnectivityCertificationEngine:
         details = {"method": "read_only_authentication_probe", "evidence": evidence, "source": evidence.get("source", "")}
         if self.broker == "coinbase" and coinbase_trace:
             details["coinbase_authentication_trace"] = coinbase_trace
+        if self.broker == "oanda" and oanda_trace:
+            details["oanda_authentication_trace"] = oanda_trace
         return ConnectivityStage(
             PASS if ok else FAIL,
             "" if ok else reason,
