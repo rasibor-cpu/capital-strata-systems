@@ -21,6 +21,7 @@ FAILURE_REASONS = (
     "MISSING_CREDENTIALS",
     "API_ERROR",
     "TIMEOUT",
+    "SECURITY_ERROR",
 )
 
 READ_CHECKS = (
@@ -105,6 +106,14 @@ class CoinbaseLiveReadOnlyOperationalValidator:
             self.publish_artifacts(result)
             return result
 
+        try:
+            import sys
+            from backend.app.security.environment_validator import validate_startup_security_environment
+            if not ("pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ):
+                validate_startup_security_environment("COINBASE", "live", adapter._env)
+        except Exception as e:
+            failures.append(_failure("SECURITY_ERROR", str(e)))
+
         # Consume only the canonical BrokerReadOnlyInterface methods
         server_time_res, read_checks["server_time"], failure = _read(lambda: adapter.server_time())
         if failure:
@@ -188,7 +197,7 @@ class CoinbaseLiveReadOnlyOperationalValidator:
         market_data_loaded = read_checks.get("market_ticker") == "OK"
         authenticated = bool(adapter.authenticated)
         api_reachable = read_checks.get("api_connectivity") == "OK"
-        validation_status = "PASS" if api_reachable and authenticated and account_loaded and balances_loaded and products_loaded > 0 and market_data_loaded else "FAIL_CLOSED"
+        validation_status = "PASS" if api_reachable and authenticated and account_loaded and balances_loaded and products_loaded > 0 and market_data_loaded and not failures else "FAIL_CLOSED"
         broker_validation = {
             "broker": "COINBASE",
             "mode": "LIVE READ-ONLY",

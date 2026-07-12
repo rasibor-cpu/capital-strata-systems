@@ -1,6 +1,6 @@
 {
   "schema_version": "rc1b.broker_certification.v1",
-  "certification_timestamp": "2026-07-12T20:02:59Z",
+  "certification_timestamp": "2026-07-12T22:33:10Z",
   "broker_name": "OANDA",
   "broker_mode": "live",
   "technical_readiness": "GREEN",

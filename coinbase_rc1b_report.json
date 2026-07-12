@@ -1,6 +1,6 @@
 {
   "schema_version": "rc1b.broker_certification.v1",
-  "certification_timestamp": "2026-07-12T20:02:59Z",
+  "certification_timestamp": "2026-07-12T22:33:10Z",
   "broker_name": "COINBASE",
   "broker_mode": "live",
   "technical_readiness": "GREEN",
@@ -37,10 +37,10 @@
     "Proceed to operational broker staging pilot validation."
   ],
   "next_recommended_action": "Staging validations complete. Proceed to read-only pilot deployment.",
-  "previous_score": 5.0,
-  "score_delta": 95.0,
-  "previous_state": "RED",
-  "state_changed": true,
+  "previous_score": 100.0,
+  "score_delta": 0.0,
+  "previous_state": "GREEN",
+  "state_changed": false,
   "advisory_only": true,
   "execution_allowed": false,
   "live_trading_blocked": true,
