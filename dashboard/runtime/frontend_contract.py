@@ -27,6 +27,12 @@ from backend.runtime.operational_proving import build_operational_proving_report
 from backend.validation.live_readiness_certification import (
     live_readiness_certification_status,
 )
+from backend.investment_committee.committee_dashboard import (
+    committee_dashboard_section,
+)
+from backend.investment_committee.investment_committee import (
+    build_institutional_investment_committee_report,
+)
 
 try:
     from backend.scanner.unified_market_scanner import UnifiedMarketScanner
@@ -66,6 +72,7 @@ FRONTEND_SECTIONS = (
     "oanda_live_validation",
     "broker_reconciliation",
     "capital_allocation_intelligence",
+    "institutional_investment_committee",
     "analytics",
 )
 
@@ -174,6 +181,7 @@ def build_frontend_payload(
             "oanda_live_validation": oanda_live_validation(dashboard_payload),
             "broker_reconciliation": broker_reconciliation(dashboard_payload),
             "capital_allocation_intelligence": capital_allocation_intelligence(dashboard_payload),
+            "institutional_investment_committee": institutional_investment_committee(dashboard_payload),
             "analytics": analytics(dashboard_payload),
         },
     }
@@ -1613,6 +1621,65 @@ def capital_allocation_intelligence(dashboard_payload: Mapping[str, Any]) -> dic
     }
 
 
+def institutional_investment_committee(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
+    explicit = _mapping(dashboard_payload.get("institutional_investment_committee"))
+    opportunities_for_committee = _list(dashboard_payload.get("opportunities"))
+    if not explicit and not any(_committee_ready_opportunity(item) for item in opportunities_for_committee):
+        return {
+            "generated_at": str(dashboard_payload.get("generated_at", DATA_UNAVAILABLE)),
+            "committee_score": 0.0,
+            "decision": "WAIT",
+            "capital_rank": 0,
+            "expected_return": 0.0,
+            "expected_drawdown": 0.0,
+            "confidence": 0.0,
+            "capital_efficiency": 0.0,
+            "opportunity_rank": 0,
+            "committee_recommendation": "No committee-ready opportunities available.",
+            "consensus_score": 0.0,
+            "weighted_committee_confidence": 0.0,
+            "consensus": "NO_COMMITTEE_READY_OPPORTUNITIES",
+            "veto_reasons": [],
+            "committee_votes": [],
+            "committee_explanations": [],
+            "top_opportunities": [],
+            "capital_plan": [],
+            "blockers": [],
+            "recommendations": ["No committee-ready opportunities available."],
+            "scorecard": {},
+            "advisory_only": True,
+            "execution_allowed": False,
+            "live_trading_blocked": True,
+            "broker_execution_armed": False,
+        }
+    report = explicit or build_institutional_investment_committee_report(dashboard_payload)
+    section = committee_dashboard_section(report)
+    return {
+        **section,
+        "advisory_only": True,
+        "execution_allowed": False,
+        "live_trading_blocked": True,
+        "broker_execution_armed": False,
+    }
+
+
+def _committee_ready_opportunity(value: Any) -> bool:
+    row = _mapping(value)
+    if not row:
+        return False
+    return any(
+        key in row
+        for key in (
+            "expected_return",
+            "expected_reward",
+            "expected_value",
+            "requested_capital",
+            "capital_efficiency",
+            "decision_confidence",
+        )
+    )
+
+
 
 def analytics(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     analytics_summary = _mapping(dashboard_payload.get("analytics_summary"))
@@ -1881,6 +1948,7 @@ __all__ = [
     "oanda_live_validation",
     "broker_reconciliation",
     "capital_allocation_intelligence",
+    "institutional_investment_committee",
     "build_frontend_payload",
     "build_section_payload",
     "build_websocket_delta",

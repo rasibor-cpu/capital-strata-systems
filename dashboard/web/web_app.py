@@ -251,6 +251,7 @@ def _dashboard_page() -> str:
             "broker",
             "opportunities",
             "capital_allocation_intelligence",
+            "institutional_investment_committee",
             "analytics",
         ]
     )
@@ -388,6 +389,41 @@ def _dashboard_page() -> str:
       <article>
         <strong>Confidence</strong>
         <span data-value="capital_allocation_intelligence.confidence">0.00</span>
+      </article>
+    </section>
+
+    <section class="metric-band" aria-label="Institutional investment committee">
+      <article>
+        <strong>Committee Score</strong>
+        <span data-value="institutional_investment_committee.committee_score">0.00</span>
+      </article>
+      <article>
+        <strong>Committee Decision</strong>
+        <span data-value="institutional_investment_committee.decision">WAIT</span>
+      </article>
+      <article>
+        <strong>Capital Rank</strong>
+        <span data-value="institutional_investment_committee.capital_rank">0</span>
+      </article>
+      <article>
+        <strong>Expected Drawdown</strong>
+        <span data-value="institutional_investment_committee.expected_drawdown">0.00</span>
+      </article>
+      <article>
+        <strong>Confidence</strong>
+        <span data-value="institutional_investment_committee.confidence">0.00</span>
+      </article>
+      <article>
+        <strong>Capital Efficiency</strong>
+        <span data-value="institutional_investment_committee.capital_efficiency">0.00</span>
+      </article>
+      <article>
+        <strong>Consensus Score</strong>
+        <span data-value="institutional_investment_committee.consensus_score">0.00</span>
+      </article>
+      <article>
+        <strong>Consensus</strong>
+        <span data-value="institutional_investment_committee.consensus">NO_VOTES</span>
       </article>
     </section>
 
@@ -611,6 +647,27 @@ def _dashboard_page() -> str:
         <div class="table" id="capital-allocation-list"></div>
         <ul class="compact-list" id="capital-allocation-warnings"></ul>
       </article>
+
+      <article class="panel wide" data-panel="institutional_investment_committee">
+        <div class="panel-head">
+          <h2>Institutional Investment Committee</h2>
+          <span data-value="institutional_investment_committee.decision">WAIT</span>
+        </div>
+        <div class="kv-grid two">
+          <div><strong>Committee Score</strong><span data-value="institutional_investment_committee.committee_score">0.00</span></div>
+          <div><strong>Capital Rank</strong><span data-value="institutional_investment_committee.capital_rank">0</span></div>
+          <div><strong>Expected Return</strong><span data-value="institutional_investment_committee.expected_return">0.00</span></div>
+          <div><strong>Expected Drawdown</strong><span data-value="institutional_investment_committee.expected_drawdown">0.00</span></div>
+          <div><strong>Confidence</strong><span data-value="institutional_investment_committee.confidence">0.00</span></div>
+          <div><strong>Capital Efficiency</strong><span data-value="institutional_investment_committee.capital_efficiency">0.00</span></div>
+          <div><strong>Opportunity Rank</strong><span data-value="institutional_investment_committee.opportunity_rank">0</span></div>
+          <div><strong>Consensus Score</strong><span data-value="institutional_investment_committee.consensus_score">0.00</span></div>
+          <div><strong>Consensus</strong><span data-value="institutional_investment_committee.consensus">NO_VOTES</span></div>
+          <div><strong>Recommendation</strong><span data-value="institutional_investment_committee.committee_recommendation">No committee recommendation available.</span></div>
+        </div>
+        <div class="table" id="committee-opportunity-list"></div>
+        <div class="table" id="committee-vote-list"></div>
+      </article>
     </section>
   </main>
 
@@ -686,6 +743,7 @@ def _dashboard_page() -> str:
       renderRiskBreaches();
       renderOpportunities();
       renderCapitalAllocation();
+      renderCommittee();
     }}
 
     function renderPositions() {{
@@ -743,6 +801,41 @@ def _dashboard_page() -> str:
       ` : `<div class="empty-state">No shadow allocation recommendations</div>`;
       const warningItems = section.warnings || [];
       warnings.innerHTML = warningItems.length ? warningItems.map((item) => `<li>${{escapeHtml(item)}}</li>`).join("") : "<li>NONE</li>";
+    }}
+
+    function renderCommittee() {{
+      const section = state.sections.institutional_investment_committee || {{}};
+      const target = document.getElementById("committee-opportunity-list");
+      if (!target) return;
+      const rows = section.top_opportunities || [];
+      target.innerHTML = rows.length ? `
+        <div class="row head"><span>Rank</span><span>Symbol</span><span>Decision</span><span>Score</span><span>Capital</span></div>
+        ${{rows.map((row) => `
+          <div class="row">
+            <span>${{escapeHtml(row.capital_rank || "")}}</span>
+            <span>${{escapeHtml(row.symbol || "UNKNOWN")}}</span>
+            <span>${{escapeHtml(row.decision || "WAIT")}}</span>
+            <span>${{Number(row.committee_score || 0).toFixed(2)}}</span>
+            <span>${{money(row.recommended_capital || 0)}}</span>
+          </div>
+          <div class="row detail"><span>${{escapeHtml(row.recommendation || "")}}</span></div>
+        `).join("")}}
+      ` : `<div class="empty-state">No committee-ranked opportunities</div>`;
+      const votesTarget = document.getElementById("committee-vote-list");
+      if (!votesTarget) return;
+      const votes = section.committee_votes || [];
+      votesTarget.innerHTML = votes.length ? `
+        <div class="row head"><span>Committee</span><span>Vote</span><span>Confidence</span><span>Score</span></div>
+        ${{votes.map((vote) => `
+          <div class="row">
+            <span>${{escapeHtml(vote.committee || "UNKNOWN")}}</span>
+            <span>${{escapeHtml(vote.vote || "ABSTAIN")}}</span>
+            <span>${{Number(vote.confidence || 0).toFixed(2)}}</span>
+            <span>${{Number(vote.committee_score || 0).toFixed(2)}}</span>
+          </div>
+          <div class="row detail"><span>${{escapeHtml(vote.reason || "")}}</span></div>
+        `).join("")}}
+      ` : `<div class="empty-state">No committee votes available</div>`;
     }}
 
     function normalizeCapitalAllocationPayload(payload) {{

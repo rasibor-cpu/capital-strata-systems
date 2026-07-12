@@ -29,6 +29,9 @@ from backend.analytics.opportunity_intelligence_engine import (
 from backend.analytics.capital_allocation_optimizer import (
     build_capital_allocation_intelligence_report,
 )
+from backend.investment_committee.investment_committee import (
+    build_institutional_investment_committee_report,
+)
 from backend.runtime.runtime_certification_snapshot import (
     runtime_certification_diagnostics,
 )
@@ -294,6 +297,52 @@ def get_capital_allocation_intelligence_payload(
     }
 
 
+def get_institutional_investment_committee_payload(
+    state_provider: DashboardStateProvider | None = None,
+) -> dict[str, Any]:
+    state = _state_from_provider(state_provider)
+    report = build_institutional_investment_committee_report(state.to_dict())
+    return {
+        "payload_version": "1.0.0",
+        "payload_schema": "css.institutional_investment_committee.v1",
+        "generated_at": report["generated_at"],
+        "section": "institutional_investment_committee",
+        "advisory_only": True,
+        "execution_allowed": False,
+        "live_trading_blocked": True,
+        "broker_execution_armed": False,
+        "data": report,
+        "committee_score": report["committee_score"],
+        "decision": report["decision"],
+        "evaluations": report["evaluations"],
+        "capital_plan": report["capital_plan"],
+        "recommendations": report["recommendations"],
+        "blockers": report["blockers"],
+    }
+
+
+def get_institutional_investment_committee_votes_payload(
+    state_provider: DashboardStateProvider | None = None,
+) -> dict[str, Any]:
+    payload = get_institutional_investment_committee_payload(state_provider)
+    report = payload.get("data", {}) if isinstance(payload.get("data"), dict) else {}
+    evaluations = report.get("evaluations", []) if isinstance(report.get("evaluations"), list) else []
+    top = evaluations[0] if evaluations and isinstance(evaluations[0], dict) else {}
+    return {
+        "payload_version": "1.0.0",
+        "payload_schema": "css.institutional_investment_committee.votes.v1",
+        "generated_at": payload["generated_at"],
+        "section": "institutional_investment_committee_votes",
+        "advisory_only": True,
+        "execution_allowed": False,
+        "live_trading_blocked": True,
+        "broker_execution_armed": False,
+        "committee_votes": top.get("committee_votes", []),
+        "consensus": top.get("consensus", report.get("consensus_summary", {})),
+        "committee_history": report.get("committee_history", []),
+    }
+
+
 def create_dashboard_state_router(
     state_provider: DashboardStateProvider | None = None,
 ) -> APIRouter:
@@ -349,6 +398,14 @@ def create_dashboard_state_router(
     @router.get("/api/v1/capital-allocation-intelligence")
     def read_capital_allocation_intelligence() -> dict[str, Any]:
         return get_capital_allocation_intelligence_payload(state_provider)
+
+    @router.get("/api/v1/institutional-investment-committee")
+    def read_institutional_investment_committee() -> dict[str, Any]:
+        return get_institutional_investment_committee_payload(state_provider)
+
+    @router.get("/api/v1/institutional-investment-committee/votes")
+    def read_institutional_investment_committee_votes() -> dict[str, Any]:
+        return get_institutional_investment_committee_votes_payload(state_provider)
 
     @router.get("/api/v1/trade-summary")
     def read_trade_summary() -> dict[str, Any]:
@@ -500,6 +557,8 @@ __all__ = [
     "get_frontend_payload",
     "get_opportunity_intelligence_payload",
     "get_capital_allocation_intelligence_payload",
+    "get_institutional_investment_committee_payload",
+    "get_institutional_investment_committee_votes_payload",
     "get_live_execution_authority_payload",
     "get_live_readiness_state_payload",
     "get_startup_diagnostics_payload",
