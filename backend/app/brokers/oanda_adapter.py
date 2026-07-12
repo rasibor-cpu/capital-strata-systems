@@ -188,6 +188,18 @@ class OandaAdapter:
     # -------------------------
     # read endpoints
     # -------------------------
+    def get_server_status(self) -> Dict[str, Any]:
+        return self._request_json("GET", f"v3/accounts/{self.account_id}/summary")
+
+    def get_account_details(self) -> Dict[str, Any]:
+        return self._request_json("GET", f"v3/accounts/{self.account_id}")
+
+    def get_instruments(self) -> Dict[str, Any]:
+        return self._request_json("GET", f"v3/accounts/{self.account_id}/instruments")
+
+    def get_pricing(self, instruments: str = "EUR_USD") -> Dict[str, Any]:
+        return self._request_json("GET", f"v3/accounts/{self.account_id}/pricing?instruments={instruments}")
+
     def get_account_summary(self) -> Dict[str, Any]:
         return self._request_json("GET", f"v3/accounts/{self.account_id}/summary")
 

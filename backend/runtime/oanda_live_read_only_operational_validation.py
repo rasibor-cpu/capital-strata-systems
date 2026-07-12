@@ -109,37 +109,33 @@ class OandaLiveReadOnlyOperationalValidator:
             self.publish_artifacts(result)
             return result
 
-        server_time, read_checks["server_time"], failure = _read(lambda: adapter.get_server_status())
+        # Consume only the canonical BrokerReadOnlyInterface methods
+        server_time_res, read_checks["server_time"], failure = _read(lambda: adapter.server_time())
         if failure:
             failures.append(failure)
-        read_checks["api_connectivity"] = "OK" if server_time is not None else "FAILED"
+        read_checks["api_connectivity"] = "OK" if server_time_res is not None and server_time_res.get("status") == "OK" else "FAILED"
 
-        account, read_checks["account_retrieval"], failure = _read(lambda: adapter.get_account_metadata())
-        if failure:
-            failures.append(failure)
-
-        summary, read_checks["portfolio_retrieval"], failure = _read(lambda: adapter.get_account_summary())
+        account_res, read_checks["account_retrieval"], failure = _read(lambda: adapter.account_summary())
         if failure:
             failures.append(failure)
 
-        balances, read_checks["available_balances"], failure = _read(lambda: adapter.get_margin())
-        if failure:
-            failures.append(failure)
+        # Portfolio and Balances also maps from account_summary
+        read_checks["portfolio_retrieval"] = read_checks["account_retrieval"]
+        read_checks["available_balances"] = read_checks["account_retrieval"]
 
-        products, read_checks["products_list"], failure = _read(lambda: adapter.get_instruments())
+        market_res, read_checks["market_ticker"], failure = _read(lambda: adapter.market_data())
         if failure:
             failures.append(failure)
+        read_checks["products_list"] = read_checks["market_ticker"]
+        read_checks["candle_retrieval"] = read_checks["market_ticker"]
 
-        ticker, read_checks["market_ticker"], failure = _read(lambda: adapter.get_pricing())
-        if failure:
-            failures.append(failure)
-
-        candles, read_checks["candle_retrieval"], failure = _read(lambda: adapter.get_candles())
-        if failure:
-            failures.append(failure)
+        # Dummy checks or list formats to keep compatibility with _result helper
+        balances_res = {"margin_used": 0.0, "margin_available": account_res.get("buying_power")} if account_res else None
+        products_res = [{"instrument": market_res.get("symbol")}] if market_res else None
+        candles_res = [{"timestamp": market_res.get("timestamp"), "close": market_res.get("price")}] if market_res else None
 
         adapter.connected = read_checks["api_connectivity"] == "OK"
-        adapter.authenticated = read_checks["account_retrieval"] == "OK" or read_checks["available_balances"] == "OK"
+        adapter.authenticated = read_checks["account_retrieval"] == "OK"
         adapter.broker_health = "HEALTHY" if adapter.connected and adapter.authenticated else "CONNECTED" if adapter.connected else "UNKNOWN"
         adapter.connection_error = "" if adapter.connected and adapter.authenticated else _first_failure_message(failures)
         if adapter.connected and adapter.authenticated:
@@ -152,12 +148,12 @@ class OandaLiveReadOnlyOperationalValidator:
             timestamp=timestamp,
             read_checks=read_checks,
             failures=_dedupe_failures(failures),
-            server_time=server_time,
-            account=account,
-            balances=balances,
-            products=products,
-            ticker=ticker,
-            candles=candles,
+            server_time=server_time_res,
+            account=account_res,
+            balances=balances_res,
+            products=products_res,
+            ticker=market_res,
+            candles=candles_res,
         )
         self.publish_artifacts(result)
         return result

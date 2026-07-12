@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any, Mapping
+from abc import ABC, abstractmethod
 
 from backend.common.advisory_payload import AdvisoryPayloadBuilder
 from backend.runtime.broker_operational_status import build_broker_operational_status
@@ -281,6 +282,50 @@ def _float_or_none(value: Any) -> float | None:
         return None
 
 
+
+class BrokerReadOnlyInterface(ABC):
+    """
+    Canonical interface that all read-only broker adapters must implement.
+    Allows validation and readiness frameworks to interact with any broker
+    polymorphically.
+    """
+
+    @abstractmethod
+    def authenticate(self) -> dict[str, Any]:
+        """Authenticate with the broker. Returns status dict."""
+        pass
+
+    @abstractmethod
+    def account_summary(self) -> dict[str, Any]:
+        """Fetch general account summary (NAV, balance, buying power)."""
+        pass
+
+    @abstractmethod
+    def market_data(self, symbol: str | None = None) -> dict[str, Any]:
+        """Fetch market data/pricing evidence for the given or default symbol."""
+        pass
+
+    @abstractmethod
+    def positions(self) -> list[dict[str, Any]]:
+        """Fetch open positions."""
+        pass
+
+    @abstractmethod
+    def server_time(self) -> dict[str, Any]:
+        """Fetch server time or status."""
+        pass
+
+    @abstractmethod
+    def health(self) -> str:
+        """Get the current health status of the broker adapter (GREEN/AMBER/RED/UNKNOWN)."""
+        pass
+
+    @abstractmethod
+    def latency(self) -> dict[str, Any]:
+        """Get recent sync latency figures for different stages."""
+        pass
+
+
 __all__ = [
     "BROKER_PARITY_COMPARABLE_FIELDS",
     "CANONICAL_BROKER_READINESS_FIELDS",
@@ -289,4 +334,5 @@ __all__ = [
     "broker_readiness_with_operational_status",
     "build_broker_readiness_snapshot",
     "utc_now_iso",
+    "BrokerReadOnlyInterface",
 ]
