@@ -2187,16 +2187,68 @@ if (
 ):
     COINBASE_READ_ONLY_STATUS["auth_reason"] = str(COINBASE_LIVE_CONFIRMATION_STATUS["reason"])
     COINBASE_READ_ONLY_STATUS["execution_scope"] = "PAPER_FALLBACK_AFTER_INVALID_LIVE_CONFIRMATION"
+def pcnrass_update_authoritative_broker_state(val_data: dict[str, Any], validation_source: str) -> None:
+    global COINBASE_READ_ONLY_STATUS
+    if not val_data:
+        return
+        
+    status = val_data.get("validation_status", "FAIL_CLOSED")
+    is_success = (status == "PASS")
+    
+    # Base connection & auth fields
+    COINBASE_READ_ONLY_STATUS["broker_connected"] = bool(val_data.get("api_reachable", False))
+    COINBASE_READ_ONLY_STATUS["broker_authenticated"] = bool(val_data.get("authenticated", False))
+    COINBASE_READ_ONLY_STATUS["credential_status"] = "PASS" if is_success else "FAIL"
+    COINBASE_READ_ONLY_STATUS["auth_status"] = "PASS" if val_data.get("authenticated") else "FAIL"
+    COINBASE_READ_ONLY_STATUS["connection_status"] = "PASS" if val_data.get("api_reachable") else "FAIL"
+    COINBASE_READ_ONLY_STATUS["products_loaded"] = int(val_data.get("products_loaded", 0))
+    COINBASE_READ_ONLY_STATUS["market_data_status"] = "OK" if val_data.get("market_data_loaded") else "FAIL"
+    
+    failures = val_data.get("failure_reasons", [])
+    COINBASE_READ_ONLY_STATUS["connection_error"] = ", ".join([f.get("message", "") for f in failures]) if failures else ""
+    
+    # Freshness metadata
+    COINBASE_READ_ONLY_STATUS["generated_at"] = val_data.get("validation_timestamp", datetime.now(timezone.utc).isoformat())
+    COINBASE_READ_ONLY_STATUS["validation_completed"] = True
+    COINBASE_READ_ONLY_STATUS["validation_source"] = validation_source
+    
+    # Sequence tracking
+    seq = globals().get("PCNRASS_VALIDATION_SEQUENCE", 0) + 1
+    globals()["PCNRASS_VALIDATION_SEQUENCE"] = seq
+    COINBASE_READ_ONLY_STATUS["validation_sequence"] = seq
+    
+    if is_success:
+        COINBASE_READ_ONLY_STATUS["last_successful_validation_at"] = val_data.get("validation_timestamp", datetime.now(timezone.utc).isoformat())
+        COINBASE_READ_ONLY_STATUS["readiness_state"] = "FULLY_OPERATIONAL"
+        COINBASE_READ_ONLY_STATUS["go_no_go"] = "GO"
+    else:
+        COINBASE_READ_ONLY_STATUS["readiness_state"] = "FAIL_CLOSED"
+        COINBASE_READ_ONLY_STATUS["go_no_go"] = "NO GO"
+        # Clear/None-out fields to prevent stale-success leakage
+        COINBASE_READ_ONLY_STATUS["account_equity"] = None
+        COINBASE_READ_ONLY_STATUS["cash"] = None
+        COINBASE_READ_ONLY_STATUS["buying_power"] = None
+        COINBASE_READ_ONLY_STATUS["available_balance"] = None
+        
+    op_status = val_data.get("broker_operational_status", {})
+    if op_status and is_success:
+        COINBASE_READ_ONLY_STATUS["account_equity"] = op_status.get("equity", 0.0)
+        COINBASE_READ_ONLY_STATUS["cash"] = op_status.get("cash", 0.0)
+        COINBASE_READ_ONLY_STATUS["buying_power"] = op_status.get("buying_power", 0.0)
+        COINBASE_READ_ONLY_STATUS["available_balance"] = op_status.get("available_balance", 0.0)
+
 if SELECTED_BROKER == "COINBASE" and SELECTED_BROKER_MODE == "live":
     COINBASE_OPERATIONAL_VALIDATION = validate_coinbase_live_read_only_operational(
         artifacts_dir=ARTIFACTS_DIR,
     )
     COINBASE_READ_ONLY_STATUS["coinbase_live_validation"] = COINBASE_OPERATIONAL_VALIDATION
+    pcnrass_update_authoritative_broker_state(COINBASE_OPERATIONAL_VALIDATION, "COINBASE_LIVE_VALIDATOR")
 elif SELECTED_BROKER == "OANDA" and SELECTED_BROKER_MODE == "live":
     OANDA_OPERATIONAL_VALIDATION = validate_oanda_live_read_only_operational(
         artifacts_dir=ARTIFACTS_DIR,
     )
     COINBASE_READ_ONLY_STATUS["oanda_live_validation"] = OANDA_OPERATIONAL_VALIDATION
+    pcnrass_update_authoritative_broker_state(OANDA_OPERATIONAL_VALIDATION, "OANDA_LIVE_VALIDATOR")
 if SELECTED_BROKER == "OANDA":
     STARTUP_BROKER_SELECTION = selection_with_oanda_readiness(
         STARTUP_BROKER_SELECTION,

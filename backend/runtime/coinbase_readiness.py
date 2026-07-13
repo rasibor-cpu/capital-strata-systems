@@ -312,6 +312,11 @@ def merge_readiness_into_broker_state(selection: BrokerStartupSelection, readine
             "startup_diagnostics": dict(readiness.get("startup_diagnostics", {}))
             if isinstance(readiness.get("startup_diagnostics"), Mapping)
             else {},
+            "generated_at": str(readiness.get("generated_at", "")),
+            "validation_sequence": int(readiness.get("validation_sequence", 0) or 0),
+            "validation_completed": bool(readiness.get("validation_completed", False)),
+            "validation_source": str(readiness.get("validation_source", "")),
+            "last_successful_validation_at": str(readiness.get("last_successful_validation_at", "")),
         }
     )
     authority = evaluate_live_execution_authority(state).as_dict()
