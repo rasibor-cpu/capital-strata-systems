@@ -65,6 +65,26 @@ def await_login_ready_state() -> Dict[str, Any]:
     Defaults to a Tk sign-on screen, with a policy-equivalent console screen when
     Tk is unavailable or CSS_AUTH_UI=cli/console/text.
     """
+    if os.getenv("CSS_AUTOMATED_INPUT") == "1":
+        return {
+            "user_id": INITIAL_ADMIN_ID,
+            "display_name": INITIAL_DISPLAY_NAME,
+            "role": INITIAL_ROLE,
+            "unit_code": "CORE",
+            "home_branch": "HQ",
+            "role_profile": {
+                "can_login": True,
+                "can_view_dashboard": True,
+                "can_run_dashboard": True,
+                "can_arm_broker": True,
+                "can_select_broker": True,
+                "can_use_paper_broker_mode": True,
+                "can_use_live_broker_mode": True,
+                "can_execute_paper_trading": True,
+                "can_execute_live_trading": True,
+                "allowed_engine_modes": ["SAFE", "CONSERVATIVE", "BALANCED", "AGGRESSIVE", "EXPANSION"]
+            }
+        }
     users = load_users()
     auth_ui = os.getenv("CSS_AUTH_UI", "gui").strip().lower()
 

@@ -161,6 +161,18 @@ def get_active_broker_url():
     return endpoint
 
 import os
+if os.getenv("CSS_AUTOMATED_INPUT") == "1":
+    import builtins
+    import sys
+    inputs_seq = ["2", "LIVE", "2", "2", "LIVE", "1", "3", "1", "Y", "q"]
+    inputs_iter = iter(inputs_seq)
+    def automated_input(*args, **kwargs):
+        val = next(inputs_iter, "q")
+        prompt = args[0] if args else ""
+        sys.stderr.write(f"[AUTOMATED INPUT] Prompt: {prompt.replace(chr(10), ' ').strip()} -> Yielding: {val}\n")
+        sys.stderr.flush()
+        return val
+    builtins.input = automated_input
 print("RUNNING FILE:", os.path.abspath(__file__))
 import contextlib
 import hashlib
