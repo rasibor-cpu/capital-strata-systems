@@ -16,11 +16,13 @@ from backend.investment_committee.committee_models import (
     PORTFOLIO_VETO,
     REJECT,
     RISK_VETO,
+    VOTES,
     WAIT,
 )
 
 
 VETO_PRIORITY = (RISK_VETO, PORTFOLIO_VETO, LIQUIDITY_VETO, OPERATIONAL_VETO)
+EXPECTED_COMMITTEE_COUNT = 6
 
 
 class CommitteeConsensusEngine:
@@ -30,6 +32,9 @@ class CommitteeConsensusEngine:
         rows = list(votes)
         if not rows:
             return _payload(WAIT, "NO_VOTES", 0.0, {}, [], "No committee votes were available.")
+        invalid_reason = _invalid_vote_reason(rows)
+        if invalid_reason:
+            return _payload(WAIT, invalid_reason, 0.0, {}, [], "Committee vote evidence was incomplete or malformed.")
 
         counts: dict[str, int] = {APPROVE: 0, APPROVE_WITH_CAUTION: 0, WAIT: 0, REJECT: 0, ABSTAIN: 0}
         for vote in rows:
@@ -52,6 +57,15 @@ class CommitteeConsensusEngine:
         reject_count = counts.get(REJECT, 0)
         wait_count = counts.get(WAIT, 0)
         confidence = _weighted_confidence(rows)
+        if confidence <= 0.0:
+            return _payload(
+                WAIT,
+                "ZERO_CONFIDENCE_COMMITTEE",
+                0.0,
+                counts,
+                vetoes,
+                "Committee confidence was zero; advisory approval is withheld.",
+            )
 
         if approval_count == active_count:
             decision = APPROVED if counts.get(APPROVE, 0) == active_count else APPROVED_LOW_PRIORITY
@@ -112,4 +126,24 @@ def _payload(
     }
 
 
-__all__ = ["CommitteeConsensusEngine", "VETO_PRIORITY"]
+def _invalid_vote_reason(votes: Sequence[CommitteeVote]) -> str:
+    committees: set[str] = set()
+    for vote in votes:
+        if not isinstance(vote, CommitteeVote):
+            return "MALFORMED_COMMITTEE_VOTE"
+        if not str(vote.committee).strip():
+            return "MALFORMED_COMMITTEE_VOTE"
+        if vote.vote not in VOTES:
+            return "MALFORMED_COMMITTEE_VOTE"
+        try:
+            float(vote.committee_score)
+            float(vote.confidence)
+        except (TypeError, ValueError):
+            return "MALFORMED_COMMITTEE_VOTE"
+        committees.add(str(vote.committee).strip())
+    if len(committees) < EXPECTED_COMMITTEE_COUNT:
+        return "MISSING_COMMITTEE_VOTE"
+    return ""
+
+
+__all__ = ["CommitteeConsensusEngine", "EXPECTED_COMMITTEE_COUNT", "VETO_PRIORITY"]

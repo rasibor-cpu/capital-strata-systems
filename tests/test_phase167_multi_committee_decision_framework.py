@@ -140,6 +140,22 @@ def test_phase167_split_vote_waits():
     assert consensus["consensus"] == "SPLIT_COMMITTEE"
 
 
+def test_phase167_tie_resolves_to_wait():
+    consensus = CommitteeConsensusEngine().aggregate(
+        [
+            _vote("Market", "APPROVE"),
+            _vote("Risk", "REJECT", 35),
+            _vote("Capital", "APPROVE"),
+            _vote("Portfolio", "REJECT", 35),
+            _vote("Liquidity", "APPROVE_WITH_CAUTION", 68),
+            _vote("Operational", "REJECT", 35),
+        ]
+    )
+
+    assert consensus["institutional_recommendation"] == "WAIT"
+    assert consensus["consensus"] == "TIE_RESOLUTION_WAIT"
+
+
 def test_phase167_risk_veto():
     report = InstitutionalInvestmentCommittee().evaluate(
         [
@@ -194,6 +210,23 @@ def test_phase167_operational_veto():
 
     assert report["decision"] == "OPERATIONAL_VETO"
     assert "OPERATIONAL_VETO" in report["consensus_summary"]["veto_reasons"]
+
+
+def test_phase167_multiple_vetoes_use_deterministic_priority():
+    consensus = CommitteeConsensusEngine().aggregate(
+        [
+            _vote("Market", "APPROVE"),
+            _vote("Risk", "REJECT", 35, "RISK_VETO"),
+            _vote("Capital", "APPROVE"),
+            _vote("Portfolio", "REJECT", 35, "PORTFOLIO_VETO"),
+            _vote("Liquidity", "REJECT", 35, "LIQUIDITY_VETO"),
+            _vote("Operational", "REJECT", 35, "OPERATIONAL_VETO"),
+        ]
+    )
+
+    assert consensus["institutional_recommendation"] == "RISK_VETO"
+    assert consensus["consensus"] == "VETO"
+    assert consensus["veto_reasons"] == ["LIQUIDITY_VETO", "OPERATIONAL_VETO", "PORTFOLIO_VETO", "RISK_VETO"]
 
 
 def test_phase167_capital_displacement():
@@ -254,3 +287,52 @@ def test_phase167_edge_cases_no_votes_and_abstain():
     assert no_votes["institutional_recommendation"] == "WAIT"
     assert abstain["institutional_recommendation"] == "WAIT"
     assert no_votes["execution_allowed"] is False
+
+
+def test_phase167_malformed_vote_fails_closed():
+    consensus = CommitteeConsensusEngine().aggregate(
+        [
+            _vote("Market", "APPROVE"),
+            object(),
+            _vote("Capital", "APPROVE"),
+            _vote("Portfolio", "APPROVE"),
+            _vote("Liquidity", "APPROVE"),
+            _vote("Operational", "APPROVE"),
+        ]
+    )
+
+    assert consensus["institutional_recommendation"] == "WAIT"
+    assert consensus["consensus"] == "MALFORMED_COMMITTEE_VOTE"
+    assert consensus["execution_allowed"] is False
+
+
+def test_phase167_missing_committee_vote_fails_closed():
+    consensus = CommitteeConsensusEngine().aggregate(
+        [
+            _vote("Market", "APPROVE"),
+            _vote("Risk", "APPROVE"),
+            _vote("Capital", "APPROVE"),
+            _vote("Portfolio", "APPROVE"),
+            _vote("Liquidity", "APPROVE"),
+        ]
+    )
+
+    assert consensus["institutional_recommendation"] == "WAIT"
+    assert consensus["consensus"] == "MISSING_COMMITTEE_VOTE"
+
+
+def test_phase167_zero_confidence_cannot_approve():
+    consensus = CommitteeConsensusEngine().aggregate(
+        [
+            _vote("Market", "APPROVE", 0),
+            _vote("Risk", "APPROVE", 0),
+            _vote("Capital", "APPROVE", 0),
+            _vote("Portfolio", "APPROVE", 0),
+            _vote("Liquidity", "APPROVE", 0),
+            _vote("Operational", "APPROVE", 0),
+        ]
+    )
+
+    assert consensus["institutional_recommendation"] == "WAIT"
+    assert consensus["consensus"] == "ZERO_CONFIDENCE_COMMITTEE"
+    assert consensus["execution_allowed"] is False
