@@ -29,6 +29,7 @@ from dashboard.auth.css_sign_on import (
 )
 from backend.security.permissions import PermissionEngine
 from dashboard.runtime.broker_credential_check import _load_coinbase_credentials, load_local_env
+from backend.config.order_limit_config import DEFAULT_ORDER_LIMIT_CONFIG
 from dashboard.runtime.broker_balance_reconciliation import (
     build_broker_reconciliation_payload,
 )
@@ -66,13 +67,14 @@ PASSWORD_CHANGE_SECONDS = int(os.getenv("CSS_MOBILE_PASSWORD_CHANGE_SECONDS", "6
 MOBILE_EVENTS_FILE = PROJECT_ROOT / "artifacts" / "css_mobile_trade_events.jsonl"
 MOBILE_CONTROL_FILE = PROJECT_ROOT / "artifacts" / "css_mobile_controls.json"
 BRANDING_DIR = PROJECT_ROOT / "assets" / "branding"
-DEFAULT_COINBASE_MAX_LIVE_ORDER_USD = 1.00
+DEFAULT_COINBASE_MAX_LIVE_ORDER_USD = float(DEFAULT_ORDER_LIMIT_CONFIG.live_order_default_notional_usd)
 ENGINE_MODES = ("SAFE", "CONSERVATIVE", "BALANCED", "AGGRESSIVE")
 DEFAULT_MOBILE_CONTROLS = {
     "mobile_trading_mode": "MOBILE_READ_ONLY",
     "engine_mode": "SAFE",
     "live_order_kill_switch": False,
 }
+MOBILE_CONTROL_KEYS = frozenset(DEFAULT_MOBILE_CONTROLS)
 
 app = FastAPI(title="Capital Strata Systems Mobile", version="0.1.0")
 
@@ -885,7 +887,7 @@ def load_mobile_controls() -> Dict[str, Any]:
         raw = MOBILE_CONTROL_FILE.read_text(encoding="utf-8").strip()
         data = json.loads(raw) if raw else {}
         if isinstance(data, dict):
-            controls.update(data)
+            controls.update({key: data[key] for key in MOBILE_CONTROL_KEYS if key in data})
     except FileNotFoundError:
         pass
     except Exception:
@@ -907,7 +909,7 @@ def load_mobile_controls() -> Dict[str, Any]:
 
 def save_mobile_controls(controls: Dict[str, Any]) -> Dict[str, Any]:
     normalized = dict(DEFAULT_MOBILE_CONTROLS)
-    normalized.update(controls)
+    normalized.update({key: controls[key] for key in MOBILE_CONTROL_KEYS if key in controls})
     mode = str(normalized.get("mobile_trading_mode", "MOBILE_READ_ONLY")).strip().upper()
     normalized["mobile_trading_mode"] = mode if mode in {"MOBILE_READ_ONLY", "MOBILE_PAPER_TRADING", "MOBILE_LIVE_TRADING_ARMED"} else "MOBILE_READ_ONLY"
     normalized["runtime_mode"] = "live" if mode == "MOBILE_LIVE_TRADING_ARMED" else "paper"
@@ -1505,7 +1507,7 @@ def _live_micro_pilot_panel(
           <article><strong>Armed</strong><span>{html.escape(str(pilot.get("pilot_armed", False)))}</span></article>
           <article><strong>Cap</strong><span>{html.escape(str(pilot.get("currency", "CAD")))} {html.escape(str(pilot.get("max_live_test_capital", "20.00")))}</span></article>
           <article><strong>Remaining</strong><span>{html.escape(str(pilot.get("currency", "CAD")))} {html.escape(str(pilot.get("remaining_live_test_capacity", "DATA UNAVAILABLE")))}</span></article>
-          <article><strong>Positions</strong><span>{html.escape(str(pilot.get("open_live_positions", 0)))} / {html.escape(str(pilot.get("max_concurrent_positions", 1)))}</span></article>
+          <article><strong>Positions</strong><span>{html.escape(str(pilot.get("open_live_positions", 0)))} / {html.escape(str(pilot.get("max_concurrent_positions", DEFAULT_ORDER_LIMIT_CONFIG.live_pilot_max_concurrent_positions)))}</span></article>
           <article><strong>Orders</strong><span>{html.escape(str(pilot.get("orders_used_this_session", 0)))} / {html.escape(str(pilot.get("max_orders_per_session", 10)))}</span></article>
           <article><strong>Broker Guard</strong><span>{html.escape(str(pilot.get("broker_submission_guard", "REJECT_BEFORE_BROKER")))}</span></article>
           <article><strong>Operator Controls</strong><span>{html.escape(str(pilot.get("operator_controls", "SUPER_USER_ONLY")))}</span></article>
@@ -3000,7 +3002,7 @@ def _trade_ticket_page(
               </select>
 
               <label for="amount">USD Amount / Notional</label>
-              <input id="amount" name="amount" inputmode="decimal" value="1.00" required>
+              <input id="amount" name="amount" inputmode="decimal" value="{DEFAULT_ORDER_LIMIT_CONFIG.live_order_default_notional_usd}" required>
 
               <label for="qty">Quantity / Units</label>
               <input id="qty" name="qty" inputmode="decimal" value="1">

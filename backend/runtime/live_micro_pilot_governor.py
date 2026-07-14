@@ -8,6 +8,8 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Mapping
 
+from backend.config.order_limit_config import DEFAULT_ORDER_LIMIT_CONFIG
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "artifacts" / "live_micro_pilot_config.json"
@@ -31,12 +33,12 @@ class LiveMicroPilotAuthorizationError(PermissionError):
 class LiveMicroPilotConfig:
     pilot_enabled: bool = False
     currency: str = "CAD"
-    max_live_test_capital: Decimal = Decimal("20.00")
-    max_position_size: Decimal = Decimal("20.00")
-    max_concurrent_positions: int = 1
-    max_orders_per_session: int = 10
-    daily_loss_limit: Decimal = Decimal("2.00")
-    session_loss_limit: Decimal = Decimal("4.00")
+    max_live_test_capital: Decimal = DEFAULT_ORDER_LIMIT_CONFIG.live_pilot_max_total_cad
+    max_position_size: Decimal = DEFAULT_ORDER_LIMIT_CONFIG.live_pilot_max_position_cad
+    max_concurrent_positions: int = DEFAULT_ORDER_LIMIT_CONFIG.live_pilot_max_concurrent_positions
+    max_orders_per_session: int = DEFAULT_ORDER_LIMIT_CONFIG.live_pilot_max_orders_per_session
+    daily_loss_limit: Decimal = DEFAULT_ORDER_LIMIT_CONFIG.live_pilot_daily_loss_cad
+    session_loss_limit: Decimal = DEFAULT_ORDER_LIMIT_CONFIG.live_pilot_session_loss_cad
     allow_pyramiding: bool = False
     allow_averaging_down: bool = False
     require_manual_live_arming: bool = True
@@ -67,12 +69,12 @@ class LiveMicroPilotConfig:
         config = cls(
             pilot_enabled=_bool(payload.get("pilot_enabled", False)),
             currency=str(payload.get("currency", "CAD") or "CAD").upper(),
-            max_live_test_capital=money("max_live_test_capital", Decimal("20.00")),
-            max_position_size=money("max_position_size", Decimal("20.00")),
-            max_concurrent_positions=count("max_concurrent_positions", 1),
-            max_orders_per_session=count("max_orders_per_session", 10),
-            daily_loss_limit=money("daily_loss_limit", Decimal("2.00")),
-            session_loss_limit=money("session_loss_limit", Decimal("4.00")),
+            max_live_test_capital=money("max_live_test_capital", DEFAULT_ORDER_LIMIT_CONFIG.live_pilot_max_total_cad),
+            max_position_size=money("max_position_size", DEFAULT_ORDER_LIMIT_CONFIG.live_pilot_max_position_cad),
+            max_concurrent_positions=count("max_concurrent_positions", DEFAULT_ORDER_LIMIT_CONFIG.live_pilot_max_concurrent_positions),
+            max_orders_per_session=count("max_orders_per_session", DEFAULT_ORDER_LIMIT_CONFIG.live_pilot_max_orders_per_session),
+            daily_loss_limit=money("daily_loss_limit", DEFAULT_ORDER_LIMIT_CONFIG.live_pilot_daily_loss_cad),
+            session_loss_limit=money("session_loss_limit", DEFAULT_ORDER_LIMIT_CONFIG.live_pilot_session_loss_cad),
             allow_pyramiding=_bool(payload.get("allow_pyramiding", False)),
             allow_averaging_down=_bool(payload.get("allow_averaging_down", False)),
             require_manual_live_arming=_bool(payload.get("require_manual_live_arming", True)),
@@ -88,17 +90,17 @@ class LiveMicroPilotConfig:
     def validate(self) -> None:
         if self.currency != "CAD":
             raise LiveMicroPilotConfigurationError("Phase 152A live micro-pilot currency must be CAD")
-        if self.max_live_test_capital > Decimal("20.00"):
+        if self.max_live_test_capital > DEFAULT_ORDER_LIMIT_CONFIG.live_pilot_max_total_cad:
             raise LiveMicroPilotConfigurationError("max_live_test_capital cannot exceed CAD 20.00")
-        if self.max_position_size > Decimal("20.00"):
+        if self.max_position_size > DEFAULT_ORDER_LIMIT_CONFIG.live_pilot_max_position_cad:
             raise LiveMicroPilotConfigurationError("max_position_size cannot exceed CAD 20.00")
-        if self.max_concurrent_positions > 1:
+        if self.max_concurrent_positions > DEFAULT_ORDER_LIMIT_CONFIG.live_pilot_max_concurrent_positions:
             raise LiveMicroPilotConfigurationError("max_concurrent_positions cannot exceed 1")
-        if self.max_orders_per_session > 10:
+        if self.max_orders_per_session > DEFAULT_ORDER_LIMIT_CONFIG.live_pilot_max_orders_per_session:
             raise LiveMicroPilotConfigurationError("max_orders_per_session cannot exceed 10")
-        if self.daily_loss_limit > Decimal("2.00"):
+        if self.daily_loss_limit > DEFAULT_ORDER_LIMIT_CONFIG.live_pilot_daily_loss_cad:
             raise LiveMicroPilotConfigurationError("daily_loss_limit cannot exceed CAD 2.00")
-        if self.session_loss_limit > Decimal("4.00"):
+        if self.session_loss_limit > DEFAULT_ORDER_LIMIT_CONFIG.live_pilot_session_loss_cad:
             raise LiveMicroPilotConfigurationError("session_loss_limit cannot exceed CAD 4.00")
         if self.allow_pyramiding:
             raise LiveMicroPilotConfigurationError("allow_pyramiding cannot be true for Phase 152A")
