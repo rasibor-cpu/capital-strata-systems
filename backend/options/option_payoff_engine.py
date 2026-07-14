@@ -30,6 +30,12 @@ class OptionPayoffEngine:
         if strategy == "PUT_DEBIT_SPREAD":
             return self._put_debit_spread(strategy_payload)
 
+        if strategy == "COVERED_CALL":
+            return self._covered_call(strategy_payload)
+
+        if strategy == "CASH_SECURED_PUT":
+            return self._cash_secured_put(strategy_payload)
+
         return {
             "max_profit": 0,
             "max_loss": 0,
@@ -96,4 +102,34 @@ class OptionPayoffEngine:
             "max_profit": width - debit,
             "max_loss": debit,
             "breakeven": long_leg["strike"] - debit
+        }
+
+    # ----------------------------------------
+    # COVERED CALL
+    # ----------------------------------------
+    def _covered_call(self, payload):
+        return {
+            "total_premium_received": payload.get("total_premium_received", 0),
+            "max_profit": payload.get("maximum_profit", payload.get("max_profit", 0)),
+            "maximum_profit_per_share": payload.get("maximum_profit_per_share", 0),
+            "breakeven": payload.get("breakeven", 0),
+            "downside_exposure": payload.get("downside_exposure", 0),
+            "assignment_exposure": payload.get("assignment_exposure", {}),
+            "capped_upside": payload.get("capped_upside", {"capped": True}),
+        }
+
+    # ----------------------------------------
+    # CASH-SECURED PUT
+    # ----------------------------------------
+    def _cash_secured_put(self, payload):
+        return {
+            "total_premium_received": payload.get("total_premium_received", 0),
+            "max_profit": payload.get("maximum_profit", payload.get("max_profit", 0)),
+            "max_loss": payload.get("maximum_loss", payload.get("max_loss", 0)),
+            "breakeven": payload.get("breakeven", 0),
+            "cash_collateral_required": payload.get("cash_collateral_required", 0),
+            "downside_exposure": payload.get("downside_exposure", 0),
+            "assignment_cost_basis": payload.get("assignment_cost_basis", 0),
+            "assignment_exposure": payload.get("assignment_exposure", {}),
+            "collateral_efficiency": payload.get("collateral_efficiency", 0),
         }
