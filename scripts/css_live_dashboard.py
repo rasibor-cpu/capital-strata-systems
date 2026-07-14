@@ -2110,6 +2110,27 @@ def close_active_session(reason: str, extra: Optional[dict[str, Any]] = None) ->
         str(SESSION_USER_CTX.get("user_id")),
         payload,
     )
+    try:
+        import time
+        from dashboard.auth.css_sign_on import record_auth_audit_event
+        session_created = SESSION_USER_CTX.get("session_created")
+        session_age = None
+        if session_created:
+            try:
+                session_age = float(time.time() - float(session_created))
+            except Exception:
+                pass
+        record_auth_audit_event(
+            "logout",
+            str(SESSION_USER_CTX.get("user_id", "UNKNOWN")),
+            "SUCCESS",
+            failure_reason=None,
+            session_age=session_age,
+            auth_source=str(SESSION_USER_CTX.get("auth_source", "unknown")),
+            details={"reason": reason}
+        )
+    except Exception:
+        pass
 
     # PCNRASS: settle session balance into account balance only at session close.
     try:
@@ -4151,6 +4172,29 @@ def apply_defensive_exposure_reduction() -> int:
     return reductions
 
 
+def print_authentication_status_panel(current_status: dict) -> None:
+    auth_state = "AUTHENTICATED" if SESSION_USER_CTX.get("user_id") else "UNAUTHENTICATED"
+    auth_source = SESSION_USER_CTX.get("auth_source", "UNKNOWN")
+
+    now_epoch = time.time()
+    created = current_status.get("created", now_epoch)
+    session_age_seconds = max(0, int(now_epoch - float(created)))
+
+    max_session_sec = int(current_status.get("max_session_seconds", SESSION_MAX_SECONDS))
+    expiry_countdown = max(0, max_session_sec - session_age_seconds)
+
+    last_auth_time = SESSION_USER_CTX.get("last_auth_time", "N/A")
+    last_auth_event = SESSION_USER_CTX.get("last_auth_event", "N/A")
+
+    print("--- OPERATIONAL AUTHENTICATION STATUS ---")
+    print(f"Auth State: {auth_state}")
+    print(f"Auth Source: {auth_source}")
+    print(f"Session Age: {session_age_seconds} seconds")
+    print(f"Last Auth Time: {last_auth_time}")
+    print(f"Last Auth Event: {last_auth_event}")
+    print(f"Session Expiry Countdown: {expiry_countdown} seconds")
+
+
 def print_oanda_broker_status() -> None:
     print("--- OANDA BROKER STATUS ---")
 
@@ -4826,6 +4870,7 @@ try:
         print(f"CAN LIVE EXECUTE: {'YES' if role_profile.get('can_execute_live_trading') else 'NO'}")
         print(f"ALLOWED ENGINE MODES: {', '.join(role_profile.get('allowed_engine_modes', [])) or 'NONE'}")
 
+        print_authentication_status_panel(current_status)
         print_broker_credential_diagnostics()
 
         if SELECTED_BROKER == "OANDA":

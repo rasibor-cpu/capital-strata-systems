@@ -4,6 +4,8 @@ import getpass
 import hashlib
 import json
 import os
+import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
@@ -326,17 +328,56 @@ def change_authenticated_password(
 
 
 def authenticate_credentials(users: Dict[str, Any], user_id: str, password: str) -> Dict[str, Any]:
+    start_time = time.time()
     normalized_user_id = normalize_user_id(user_id)
     if not normalized_user_id:
+        AuthMetrics.failed_interactive_logins += 1
+        record_auth_audit_event(
+            "interactive_login_failure",
+            "UNKNOWN",
+            "FAIL",
+            "invalid_normalized_user_id",
+            auth_source="interactive"
+        )
         raise AuthFailure("INVALID_USER_ID", "Enter a valid five digit user ID.")
 
     user_record = users.get(normalized_user_id)
     if not isinstance(user_record, dict):
+        AuthMetrics.failed_interactive_logins += 1
+        record_auth_audit_event(
+            "unknown_user_rejection",
+            normalized_user_id,
+            "FAIL",
+            "user_not_found_in_registry",
+            auth_source="interactive"
+        )
+        record_auth_audit_event(
+            "interactive_login_failure",
+            normalized_user_id,
+            "FAIL",
+            "user_not_found_in_registry",
+            auth_source="interactive"
+        )
         raise AuthFailure("INVALID_USER_ID", "User ID not recognized.")
 
     now = datetime.now()
     lockout_remaining = active_lockout_remaining_seconds(user_record, now)
     if lockout_remaining > 0:
+        AuthMetrics.failed_interactive_logins += 1
+        record_auth_audit_event(
+            "locked_user_rejection",
+            normalized_user_id,
+            "FAIL",
+            "user_in_lockout_cooldown",
+            auth_source="interactive"
+        )
+        record_auth_audit_event(
+            "interactive_login_failure",
+            normalized_user_id,
+            "FAIL",
+            "user_in_lockout_cooldown",
+            auth_source="interactive"
+        )
         raise AuthFailure(
             "AUTH_LOCKOUT",
             (
@@ -351,10 +392,25 @@ def authenticate_credentials(users: Dict[str, Any], user_id: str, password: str)
     if supplied_hash != expected_hash:
         failed_attempts = int(user_record.get("failed_attempts", 0) or 0) + 1
         user_record["failed_attempts"] = failed_attempts
+        AuthMetrics.failed_interactive_logins += 1
 
         if failed_attempts >= LOCKOUT_START_ATTEMPT:
             lockout_seconds = lockout_seconds_for_attempt(failed_attempts)
             apply_timed_lockout(user_record, lockout_seconds, now)
+            record_auth_audit_event(
+                "locked_user_rejection",
+                normalized_user_id,
+                "FAIL",
+                "lockout_threshold_reached",
+                auth_source="interactive"
+            )
+            record_auth_audit_event(
+                "interactive_login_failure",
+                normalized_user_id,
+                "FAIL",
+                "lockout_threshold_reached",
+                auth_source="interactive"
+            )
             raise AuthFailure(
                 "AUTH_LOCKOUT",
                 (
@@ -364,6 +420,13 @@ def authenticate_credentials(users: Dict[str, Any], user_id: str, password: str)
             )
 
         remaining = LOCKOUT_START_ATTEMPT - failed_attempts
+        record_auth_audit_event(
+            "interactive_login_failure",
+            normalized_user_id,
+            "FAIL",
+            "password_incorrect",
+            auth_source="interactive"
+        )
         raise AuthFailure(
             "AUTH_FAILED",
             f"Authentication failed. {remaining} attempt(s) remaining.",
@@ -375,7 +438,26 @@ def authenticate_credentials(users: Dict[str, Any], user_id: str, password: str)
     if password_expired(user_record):
         raise PasswordChangeRequired(normalized_user_id)
 
-    return build_user_context(user_record, normalized_user_id)
+    user_ctx = build_user_context(user_record, normalized_user_id)
+    
+    # Latency tracking
+    latency = time.time() - start_time
+    AuthMetrics.authentication_latency_history.append(latency)
+    AuthMetrics.successful_interactive_logins += 1
+    
+    # Attach audit context info to returned user context
+    user_ctx["auth_source"] = "interactive"
+    user_ctx["last_auth_time"] = datetime.now(timezone.utc).isoformat()
+    user_ctx["last_auth_event"] = "interactive_login_success"
+
+    record_auth_audit_event(
+        "interactive_login_success",
+        normalized_user_id,
+        "SUCCESS",
+        auth_source="interactive"
+    )
+
+    return user_ctx
 
 
 def change_password(
@@ -569,6 +651,92 @@ def build_user_context(user_record: Dict[str, Any], user_id: str) -> Dict[str, A
     }
 
 
+class AuthMetrics:
+    successful_interactive_logins = 0
+    failed_interactive_logins = 0
+    restored_sessions = 0
+    rejected_restored_sessions = 0
+    expired_sessions = 0
+    invalidated_sessions = 0
+    malformed_session_files = 0
+    authentication_latency_history = []
+    restored_session_ages = []
+
+    @classmethod
+    def get_metrics_dict(cls) -> Dict[str, Any]:
+        avg_latency = 0.0
+        if cls.authentication_latency_history:
+            avg_latency = sum(cls.authentication_latency_history) / len(cls.authentication_latency_history)
+        avg_age = 0.0
+        if cls.restored_session_ages:
+            avg_age = sum(cls.restored_session_ages) / len(cls.restored_session_ages)
+            
+        return {
+            "successful_interactive_logins": cls.successful_interactive_logins,
+            "failed_interactive_logins": cls.failed_interactive_logins,
+            "restored_sessions": cls.restored_sessions,
+            "rejected_restored_sessions": cls.rejected_restored_sessions,
+            "expired_sessions": cls.expired_sessions,
+            "invalidated_sessions": cls.invalidated_sessions,
+            "malformed_session_files": cls.malformed_session_files,
+            "avg_authentication_latency_seconds": avg_latency,
+            "avg_restored_session_age_seconds": avg_age,
+        }
+
+
+_audit_ledger_instance = None
+
+
+def get_audit_ledger():
+    global _audit_ledger_instance
+    if _audit_ledger_instance is None:
+        try:
+            from backend.security.audit_ledger import AuditLedger
+            _audit_ledger_instance = AuditLedger()
+        except Exception:
+            class FallbackLedger:
+                def record(self, event_type, user_id, details):
+                    pass
+            _audit_ledger_instance = FallbackLedger()
+    return _audit_ledger_instance
+
+
+def record_auth_audit_event(
+    event_type: str,
+    user_id: str,
+    outcome: str,
+    failure_reason: Optional[str] = None,
+    session_age: Optional[float] = None,
+    auth_source: str = "restored",
+    details: Optional[Dict[str, Any]] = None,
+) -> None:
+    event_details = {
+        "utc_timestamp": datetime.now(timezone.utc).isoformat(),
+        "outcome": outcome,
+        "auth_source": auth_source,
+        "correlation_id": str(uuid.uuid4()),
+    }
+    if failure_reason:
+        event_details["failure_reason"] = failure_reason
+    if session_age is not None:
+        event_details["session_age_seconds"] = session_age
+    if details:
+        event_details.update(details)
+
+    # Sanitize secrets to prevent leakage
+    for k in list(event_details.keys()):
+        if any(sec in k.lower() for sec in ["pass", "secret", "key", "token", "pem"]):
+            event_details.pop(k, None)
+
+    try:
+        ledger = get_audit_ledger()
+        ledger.record(event_type, user_id, event_details)
+    except Exception as exc:
+        import sys
+        sys.stderr.write(f"[AUDIT FAIL] Failed to write audit event: {exc}\n")
+        sys.stderr.flush()
+
+
 def persist_login_session(user_ctx: Dict[str, Any]) -> None:
     SESSION_AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
     temp_file = SESSION_AUTH_FILE.with_name(SESSION_AUTH_FILE.name + ".tmp")
@@ -620,6 +788,13 @@ def persist_login_session(user_ctx: Dict[str, Any]) -> None:
 
 
 def invalidate_login_session() -> None:
+    AuthMetrics.invalidated_sessions += 1
+    record_auth_audit_event(
+        "session_invalidation",
+        "UNKNOWN",
+        "SUCCESS",
+        auth_source="restored"
+    )
     try:
         if SESSION_AUTH_FILE.exists():
             SESSION_AUTH_FILE.unlink()
@@ -633,12 +808,29 @@ def restore_login_session(users: Optional[Dict[str, Any]] = None) -> Optional[Di
     """
     Safely load and restore login session from css_auth_session.json.
     """
+    start_time = time.time()
     if not SESSION_AUTH_FILE.exists():
         return None
 
     try:
         raw = SESSION_AUTH_FILE.read_text(encoding="utf-8").strip()
         if not raw:
+            AuthMetrics.malformed_session_files += 1
+            AuthMetrics.rejected_restored_sessions += 1
+            record_auth_audit_event(
+                "malformed_persistence_rejection",
+                "UNKNOWN",
+                "FAIL",
+                "empty_session_file",
+                auth_source="restored"
+            )
+            record_auth_audit_event(
+                "restored_session_rejection",
+                "UNKNOWN",
+                "FAIL",
+                "empty_session_file",
+                auth_source="restored"
+            )
             invalidate_login_session()
             return None
         data = json.loads(raw)
@@ -646,6 +838,22 @@ def restore_login_session(users: Optional[Dict[str, Any]] = None) -> Optional[Di
         import sys
         sys.stderr.write(f"[SESSION RESTORE WARN] Failed to read/parse session file: {exc}\n")
         sys.stderr.flush()
+        AuthMetrics.malformed_session_files += 1
+        AuthMetrics.rejected_restored_sessions += 1
+        record_auth_audit_event(
+            "corrupted_persistence_file",
+            "UNKNOWN",
+            "FAIL",
+            f"json_parse_error: {exc}",
+            auth_source="restored"
+        )
+        record_auth_audit_event(
+            "restored_session_rejection",
+            "UNKNOWN",
+            "FAIL",
+            "json_parse_error",
+            auth_source="restored"
+        )
         invalidate_login_session()
         return None
 
@@ -653,6 +861,22 @@ def restore_login_session(users: Optional[Dict[str, Any]] = None) -> Optional[Di
         import sys
         sys.stderr.write("[SESSION RESTORE WARN] Session payload is not a JSON object\n")
         sys.stderr.flush()
+        AuthMetrics.malformed_session_files += 1
+        AuthMetrics.rejected_restored_sessions += 1
+        record_auth_audit_event(
+            "malformed_persistence_rejection",
+            "UNKNOWN",
+            "FAIL",
+            "root_not_object",
+            auth_source="restored"
+        )
+        record_auth_audit_event(
+            "restored_session_rejection",
+            "UNKNOWN",
+            "FAIL",
+            "root_not_object",
+            auth_source="restored"
+        )
         invalidate_login_session()
         return None
 
@@ -663,12 +887,44 @@ def restore_login_session(users: Optional[Dict[str, Any]] = None) -> Optional[Di
             import sys
             sys.stderr.write(f"[SESSION RESTORE WARN] Session missing required field: {field}\n")
             sys.stderr.flush()
+            AuthMetrics.malformed_session_files += 1
+            AuthMetrics.rejected_restored_sessions += 1
+            record_auth_audit_event(
+                "malformed_persistence_rejection",
+                "UNKNOWN",
+                "FAIL",
+                f"missing_field_{field}",
+                auth_source="restored"
+            )
+            record_auth_audit_event(
+                "restored_session_rejection",
+                "UNKNOWN",
+                "FAIL",
+                f"missing_field_{field}",
+                auth_source="restored"
+            )
             invalidate_login_session()
             return None
         if not isinstance(data[field], str):
             import sys
             sys.stderr.write(f"[SESSION RESTORE WARN] Session field {field} has invalid type\n")
             sys.stderr.flush()
+            AuthMetrics.malformed_session_files += 1
+            AuthMetrics.rejected_restored_sessions += 1
+            record_auth_audit_event(
+                "malformed_persistence_rejection",
+                "UNKNOWN",
+                "FAIL",
+                f"invalid_type_{field}",
+                auth_source="restored"
+            )
+            record_auth_audit_event(
+                "restored_session_rejection",
+                "UNKNOWN",
+                "FAIL",
+                f"invalid_type_{field}",
+                auth_source="restored"
+            )
             invalidate_login_session()
             return None
 
@@ -677,6 +933,22 @@ def restore_login_session(users: Optional[Dict[str, Any]] = None) -> Optional[Di
         import sys
         sys.stderr.write("[SESSION RESTORE WARN] Session has invalid user_id\n")
         sys.stderr.flush()
+        AuthMetrics.malformed_session_files += 1
+        AuthMetrics.rejected_restored_sessions += 1
+        record_auth_audit_event(
+            "malformed_persistence_rejection",
+            "UNKNOWN",
+            "FAIL",
+            "invalid_normalized_user_id",
+            auth_source="restored"
+        )
+        record_auth_audit_event(
+            "restored_session_rejection",
+            "UNKNOWN",
+            "FAIL",
+            "invalid_normalized_user_id",
+            auth_source="restored"
+        )
         invalidate_login_session()
         return None
 
@@ -686,6 +958,21 @@ def restore_login_session(users: Optional[Dict[str, Any]] = None) -> Optional[Di
         import sys
         sys.stderr.write(f"[SESSION RESTORE WARN] Restored user ID {user_id} not found in registry\n")
         sys.stderr.flush()
+        AuthMetrics.rejected_restored_sessions += 1
+        record_auth_audit_event(
+            "unknown_user_rejection",
+            user_id,
+            "FAIL",
+            "user_not_in_registry",
+            auth_source="restored"
+        )
+        record_auth_audit_event(
+            "restored_session_rejection",
+            user_id,
+            "FAIL",
+            "unknown_user",
+            auth_source="restored"
+        )
         invalidate_login_session()
         return None
 
@@ -694,6 +981,21 @@ def restore_login_session(users: Optional[Dict[str, Any]] = None) -> Optional[Di
         import sys
         sys.stderr.write("[SESSION RESTORE WARN] User registry record is invalid\n")
         sys.stderr.flush()
+        AuthMetrics.rejected_restored_sessions += 1
+        record_auth_audit_event(
+            "unknown_user_rejection",
+            user_id,
+            "FAIL",
+            "invalid_user_registry_format",
+            auth_source="restored"
+        )
+        record_auth_audit_event(
+            "restored_session_rejection",
+            user_id,
+            "FAIL",
+            "invalid_user_record",
+            auth_source="restored"
+        )
         invalidate_login_session()
         return None
 
@@ -704,6 +1006,21 @@ def restore_login_session(users: Optional[Dict[str, Any]] = None) -> Optional[Di
         import sys
         sys.stderr.write(f"[SESSION RESTORE WARN] Persisted role {persisted_role} differs from registry role {registry_role}\n")
         sys.stderr.flush()
+        AuthMetrics.rejected_restored_sessions += 1
+        record_auth_audit_event(
+            "role_mismatch_rejection",
+            user_id,
+            "FAIL",
+            f"persisted_role={persisted_role}_registry_role={registry_role}",
+            auth_source="restored"
+        )
+        record_auth_audit_event(
+            "restored_session_rejection",
+            user_id,
+            "FAIL",
+            "role_mismatch",
+            auth_source="restored"
+        )
         invalidate_login_session()
         return None
 
@@ -714,6 +1031,21 @@ def restore_login_session(users: Optional[Dict[str, Any]] = None) -> Optional[Di
         import sys
         sys.stderr.write(f"[SESSION RESTORE WARN] Restored user ID {user_id} is currently locked out\n")
         sys.stderr.flush()
+        AuthMetrics.rejected_restored_sessions += 1
+        record_auth_audit_event(
+            "locked_user_rejection",
+            user_id,
+            "FAIL",
+            "user_locked_or_in_lockout_cooldown",
+            auth_source="restored"
+        )
+        record_auth_audit_event(
+            "restored_session_rejection",
+            user_id,
+            "FAIL",
+            "user_locked_out",
+            auth_source="restored"
+        )
         invalidate_login_session()
         return None
 
@@ -724,6 +1056,22 @@ def restore_login_session(users: Optional[Dict[str, Any]] = None) -> Optional[Di
         import sys
         sys.stderr.write("[SESSION RESTORE WARN] Session last_login timestamp is malformed\n")
         sys.stderr.flush()
+        AuthMetrics.malformed_session_files += 1
+        AuthMetrics.rejected_restored_sessions += 1
+        record_auth_audit_event(
+            "malformed_persistence_rejection",
+            user_id,
+            "FAIL",
+            "timestamp_parse_error",
+            auth_source="restored"
+        )
+        record_auth_audit_event(
+            "restored_session_rejection",
+            user_id,
+            "FAIL",
+            "timestamp_parse_error",
+            auth_source="restored"
+        )
         invalidate_login_session()
         return None
 
@@ -740,20 +1088,76 @@ def restore_login_session(users: Optional[Dict[str, Any]] = None) -> Optional[Di
         import sys
         sys.stderr.write("[SESSION RESTORE WARN] Session timestamp is materially in the future\n")
         sys.stderr.flush()
+        AuthMetrics.rejected_restored_sessions += 1
+        record_auth_audit_event(
+            "future_timestamp_rejection",
+            user_id,
+            "FAIL",
+            "timestamp_in_future",
+            auth_source="restored"
+        )
+        record_auth_audit_event(
+            "restored_session_rejection",
+            user_id,
+            "FAIL",
+            "timestamp_in_future",
+            auth_source="restored"
+        )
         invalidate_login_session()
         return None
 
     # Reject expired sessions (24 hours default max age)
     SESSION_MAX_AGE_SECONDS = 86400
-    if now_utc - last_login_dt > timedelta(seconds=SESSION_MAX_AGE_SECONDS):
+    session_age = (now_utc - last_login_dt).total_seconds()
+    if session_age > SESSION_MAX_AGE_SECONDS:
         import sys
         sys.stderr.write("[SESSION RESTORE WARN] Session is expired\n")
         sys.stderr.flush()
+        AuthMetrics.expired_sessions += 1
+        AuthMetrics.rejected_restored_sessions += 1
+        record_auth_audit_event(
+            "session_expiration",
+            user_id,
+            "FAIL",
+            "session_max_age_exceeded",
+            session_age=session_age,
+            auth_source="restored"
+        )
+        record_auth_audit_event(
+            "restored_session_rejection",
+            user_id,
+            "FAIL",
+            "session_expired",
+            session_age=session_age,
+            auth_source="restored"
+        )
         invalidate_login_session()
         return None
 
     # Build context using canonical registry data to avoid trust issues
     user_ctx = build_user_context(user_record, user_id)
+    
+    # Successful restored session
+    AuthMetrics.restored_sessions += 1
+    AuthMetrics.restored_session_ages.append(session_age)
+    
+    # Track latency
+    latency = time.time() - start_time
+    AuthMetrics.authentication_latency_history.append(latency)
+    
+    # Attach audit context info to returned user context
+    user_ctx["auth_source"] = "restored"
+    user_ctx["last_auth_time"] = last_login_str
+    user_ctx["last_auth_event"] = "restored_session_success"
+
+    record_auth_audit_event(
+        "restored_session_success",
+        user_id,
+        "SUCCESS",
+        session_age=session_age,
+        auth_source="restored"
+    )
+
     import sys
     sys.stdout.write(f"[SESSION RESTORE OK] Restored valid session for user_id={user_id}\n")
     sys.stdout.flush()
