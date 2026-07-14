@@ -51,3 +51,13 @@ The certification framework operates under a strict read-only model:
 | **AMBER** (Score >= 60) | **GREEN** | **GO_READ_ONLY** |
 | **AMBER** (Score >= 60) | **AMBER** | **AMBER** |
 | **RED** (Score < 60) | *Any* | **NO_GO** |
+
+---
+
+## RC1-FINAL Enterprise Certification Boundary
+
+Phase RC1-FINAL consumes broker abstraction and broker diagnostic evidence as part of enterprise paper-trading readiness.
+
+It does not modify broker adapters, broker credentials, authentication, tokens, PEM files, `.env` files, live account settings, order routing, execution arming, or broker-write permissions.
+
+Broker evidence remains read-only and advisory. Live broker activation remains outside RC1-FINAL and requires a separate explicit certification phase.

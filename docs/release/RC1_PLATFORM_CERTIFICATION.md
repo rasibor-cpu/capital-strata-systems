@@ -31,3 +31,21 @@ Readiness is evaluated across eight dimensions:
 - **Recovery**: Automatic restart configurations.
 - **Broker Readiness**: Connectivity logs.
 - **Operational Readiness**: Staged validation readiness.
+
+---
+
+## RC1-FINAL Enterprise Certification Update
+
+Phase RC1-FINAL extends the platform certification layer into a final enterprise paper-trading release certificate.
+
+The maximum positive verdict is `READY_FOR_CONTROLLED_RC1_RELEASE`.
+
+RC1-FINAL does not authorize live trading, live broker activation, order routing, credential mutation, authentication mutation, runtime database mutation, or production deployment.
+
+Required posture remains:
+
+- `paper_only=true`
+- `advisory_only=true`
+- `execution_allowed=false`
+- `live_trading_blocked=true`
+- `broker_execution_armed=false`
