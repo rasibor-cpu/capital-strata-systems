@@ -166,3 +166,75 @@ The dashboard runtime smoke harness failure has been remediated in RC1-OPS-R1. A
 `NOT_READY`
 
 RC1-OPS should not be promoted to controlled operational runtime release until a clean RC1-OPS rerun is completed. Live trading remains blocked.
+
+## RC1-OPS-R2 Final Operational Rerun
+
+Phase RC1-OPS-R2 completed the clean operational rerun after the RC1-OPS-R1 PnL remediation.
+
+Repository evidence:
+
+- Branch: `css-unified-consolidation-2026-07-13`
+- Rerun baseline HEAD: `f85961cf976a38b771d79eaa24cfbc6a4a3b0d14`
+- Origin reference before rerun: `f85961cf976a38b771d79eaa24cfbc6a4a3b0d14`
+- Pre-run staged files: none
+- Runtime/report artifacts remained untracked and unstaged.
+
+Startup evidence:
+
+- `dashboard.runtime.demo_runtime_runner`: `PASS`
+- Runtime mode: `paper`
+- Engine mode: `SAFE`
+- Governance enabled: `YES`
+- Unified trade gate: `YES`
+- Risk state: `NORMAL`
+- Broker mode: `paper`
+- Live trading enabled: `NO`
+- Diagnostics warnings: `NONE`
+- Hydration gaps: `NONE`
+- Builder failures: `NONE`
+
+Smoke and PnL evidence:
+
+- `dashboard.runtime.runtime_smoke_test`: `PASS`
+- BTC-USD unrealized PnL: `25.00`
+- EUR_USD unrealized PnL: `2.50`
+- Total unrealized PnL: `27.50`
+- Realized PnL: `0.00`
+- Net PnL: `27.50`
+- Dashboard/runtime PnL reconciled.
+
+Restart-style evidence:
+
+- A second non-destructive demo runtime startup completed successfully.
+- PnL, risk, broker mode, live-disable, diagnostics, hydration, and builder status remained stable.
+- No production server stop, destructive rollback, broker write, runtime database mutation, or live broker operation was performed.
+
+Live-disable proof:
+
+- Platform live-disable verifier: `PASS`
+- `paper_only=True`
+- `advisory_only=True`
+- `execution_allowed=False`
+- `live_trading_blocked=True`
+- `broker_execution_armed=False`
+- `failures=[]`
+
+Rerun validation results:
+
+- RC1 certification/readiness: `44 passed`
+- Phase 164 / Phase 163B.3A / OI-010 / EI-001: `45 passed`
+- Dashboard/API/mobile/PnL: `41 passed`
+- Runtime supervisor/launcher/health/performance/advisory/ops: `23 passed`
+- Paper execution safety/event/evidence/unified execution: `76 passed`
+- Portfolio/runtime/OI/options lifecycle: `220 passed`
+- Risk/readiness/release/certification: `31 passed`
+- Broker startup/readiness/diagnostics/certification/health: `118 passed`
+- Live-read-only safety and broker authority regressions: `65 passed`
+- Dashboard safety/replay/permissions/trade gate/PnL visibility: `48 passed`
+- Targeted compile validation: `PASS`
+
+RC1-OPS-R2 verdict:
+
+`READY_FOR_CONTROLLED_RC1_RUNTIME`
+
+This verdict is limited to controlled RC1 operational runtime readiness. It does not authorize live trading, broker writes, execution arming, or live order routing.
