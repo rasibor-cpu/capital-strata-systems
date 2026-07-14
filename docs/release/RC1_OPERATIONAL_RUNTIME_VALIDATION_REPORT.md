@@ -8,6 +8,7 @@
 - Reference commit: `062e99a4bfa941a5f8ce8bbfb5c4152ebeac4670`
 - Validation posture: read-only / paper-only / no live execution
 - Final verdict: `NOT_READY`
+- Remediation status: `RC1-OPS-R1 REMEDIATED_READY_FOR_RC1_OPS_RERUN`
 
 ## Safety Posture
 
@@ -56,6 +57,32 @@ Operational impact:
 
 - This failure blocks RC1-OPS readiness.
 - The system remains fail-closed.
+
+## RC1-OPS-R1 Remediation Update
+
+The RC1-OPS smoke blocker was remediated under Phase RC1-OPS-R1.
+
+Root cause:
+
+- `PositionStateBuilder` emitted runtime totals as `total_realized_pnl` and `total_unrealized_pnl`.
+- `PnLSummaryBuilder` consumed only canonical adapter keys `realized_pnl` and `unrealized_pnl`.
+- The resulting summary reported `net_pnl=27.50` but `unrealized_pnl=0.00`.
+
+Authoritative remediation:
+
+- Canonical PnL keys remain first priority.
+- Normalized runtime position-state totals are now accepted as aliases when canonical keys are absent.
+- Account equity falls back to the account payload when canonical equity is absent.
+
+Corrected evidence:
+
+- Expected unrealized PnL: `27.50`
+- Actual unrealized PnL after remediation: `27.50`
+- Difference after remediation: `0.00`
+- `dashboard.runtime.runtime_smoke_test`: `PASSED`
+- `dashboard.runtime.demo_runtime_runner`: top-level unrealized PnL now reports `27.50`
+
+This update does not change the original RC1-OPS verdict to `READY_FOR_CONTROLLED_RC1_RUNTIME`. That verdict requires a clean RC1-OPS rerun.
 
 ## Dashboard Evidence
 
@@ -132,10 +159,10 @@ Result:
 
 ## Known Warning
 
-The dashboard runtime smoke harness failed because the PnL summary did not match the expected unrealized PnL value. This appears isolated from the passing dashboard and runtime regression suites, but it is still a release-blocking operational validation failure until investigated.
+The dashboard runtime smoke harness failure has been remediated in RC1-OPS-R1. A clean RC1-OPS rerun is still required before changing the operational release verdict.
 
 ## Final Verdict
 
 `NOT_READY`
 
-RC1-OPS should not be promoted to controlled operational runtime release until the smoke harness PnL mismatch is resolved or explicitly accepted through governance. Live trading remains blocked.
+RC1-OPS should not be promoted to controlled operational runtime release until a clean RC1-OPS rerun is completed. Live trading remains blocked.

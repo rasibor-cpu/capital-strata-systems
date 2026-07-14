@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from __future__ import annotations
-
 from typing import Any, Dict
 
 from dashboard.runtime._utils import safe_float, safe_int
@@ -31,12 +29,26 @@ class PnLSummaryBuilder:
         Legacy position state calculation and aggregation is retired (Phase 105B).
         """
         positions = position_state or {}
+        account = account_state or {}
 
         # Pure passthrough from Canonical PnL Snapshot
-        realized_pnl = safe_float(positions.get("realized_pnl", 0.0))
-        unrealized_pnl = safe_float(positions.get("unrealized_pnl", 0.0))
+        realized_pnl = _first_safe_float(
+            positions,
+            ("realized_pnl", "total_realized_pnl"),
+        )
+        unrealized_pnl = _first_safe_float(
+            positions,
+            ("unrealized_pnl", "total_unrealized_pnl"),
+        )
         net_pnl = safe_float(positions.get("net_pnl", realized_pnl + unrealized_pnl))
-        account_equity = safe_float(positions.get("equity", 0.0))
+        account_equity = _first_safe_float(
+            positions,
+            ("equity",),
+            default=_first_safe_float(
+                account,
+                ("equity", "total_equity", "account_equity"),
+            ),
+        )
         
         # We don't calculate exposures and win rates here anymore as they belong to 
         # risk or trade ledgers, but we safely pass 0.0 to satisfy strict type rendering if needed,
@@ -68,11 +80,26 @@ class PnLSummaryBuilder:
             "win_rate_pct": win_rate,
             "asset_realized_pnl": _safe_pnl_map(positions.get("asset_realized_pnl", {})),
             "asset_unrealized_pnl": _safe_pnl_map(positions.get("asset_unrealized_pnl", {})),
-            "open_positions": safe_int(positions.get("open_positions", 0)),
-            "closed_positions": safe_int(positions.get("closed_positions", 0)),
+            "open_positions": safe_int(
+                positions.get("open_positions", positions.get("open_count", 0))
+            ),
+            "closed_positions": safe_int(
+                positions.get("closed_positions", positions.get("closed_count", 0))
+            ),
             "source": str(positions.get("source", "engine.ledger.pnl_engine.PnLEngine")),
             "account_equity": account_equity,
         }
+
+
+def _first_safe_float(
+    values: Dict[str, Any],
+    keys: tuple[str, ...],
+    default: float = 0.0,
+) -> float:
+    for key in keys:
+        if key in values and values.get(key) is not None:
+            return safe_float(values.get(key))
+    return safe_float(default)
 
 
 def _safe_pnl_map(value: Any) -> Dict[str, float]:
