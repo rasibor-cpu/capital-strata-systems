@@ -1,8 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, replace
 from datetime import datetime, timezone
 from typing import Any, Dict, List
+
+from backend.options.income_position_metrics import IncomePositionMetricsCalculator
+from backend.options.paper_position_repository import PaperIncomeEvent, PaperIncomePosition, PaperPositionRepository, SAFE_FLAGS
+from backend.options.position_health import PositionHealthAnalyzer
+from backend.options.position_state_machine import ACTIVE, ASSIGNED, CLOSED_EARLY, COMPLETED, EXERCISED, EXPIRING, EXPIRED_WORTHLESS, VALID_STATES
+from backend.options.roll_decision_engine import RollDecision
+from backend.options.rolling_engine import RollingEngine
 
 
 CONTRACT_MULTIPLIER = 100.0
@@ -55,9 +62,13 @@ class OptionsPosition:
 
 
 class OptionsPositionManager:
-    def __init__(self) -> None:
+    def __init__(self, *, paper_repository: PaperPositionRepository | None = None) -> None:
         self.positions: Dict[str, Dict[str, Any]] = {}
         self.closed_log: List[Dict[str, Any]] = []
+        self.paper_repository = paper_repository or PaperPositionRepository()
+        self.paper_health = PositionHealthAnalyzer()
+        self.paper_metrics = IncomePositionMetricsCalculator()
+        self.paper_rolling = RollingEngine(repository=self.paper_repository)
 
     def open_long_option(
         self,
@@ -346,3 +357,107 @@ class OptionsPositionManager:
         if not current_note:
             return new_note
         return f"{current_note} | {new_note}"
+
+    def get_paper_income_position(self, position_id: str) -> Dict[str, Any]:
+        return self._paper_position(position_id).to_dict()
+
+    def list_paper_income_positions(self, *, states: List[str] | None = None) -> List[Dict[str, Any]]:
+        state_filter = {str(state or "").strip().upper() for state in states or [] if str(state or "").strip()}
+        if state_filter - VALID_STATES:
+            raise ValueError("invalid_paper_position_state_filter")
+        positions = self.paper_repository.all()
+        if state_filter:
+            positions = [position for position in positions if position.current_state in state_filter]
+        return [position.to_dict() for position in positions]
+
+    def get_paper_income_health(
+        self,
+        position_id: str,
+        *,
+        as_of: str,
+        underlying_price: float | None = None,
+        delta: float | None = None,
+        moneyness: str | None = None,
+    ) -> Dict[str, Any]:
+        return self.paper_health.calculate(
+            self._paper_position(position_id),
+            as_of=as_of,
+            underlying_price=underlying_price,
+            delta=delta,
+            moneyness=moneyness,
+        ).to_dict()
+
+    def get_paper_income_metrics(self, position_id: str, *, as_of: str) -> Dict[str, Any]:
+        return self.paper_metrics.calculate(self._paper_position(position_id), as_of=as_of).to_dict()
+
+    def recommend_paper_income_roll(
+        self,
+        position_id: str,
+        *,
+        as_of: str,
+        underlying_price: float,
+        delta: float,
+        moneyness: str,
+        strategy_quality: float = 0.75,
+        record: bool = False,
+    ) -> Dict[str, Any]:
+        decision = self.paper_rolling.recommend(
+            position_id,
+            as_of=as_of,
+            underlying_price=underlying_price,
+            delta=delta,
+            moneyness=moneyness,
+            strategy_quality=strategy_quality,
+        )
+        if record:
+            self.record_paper_roll_recommendation(position_id, decision)
+        return decision.to_dict()
+
+    def record_paper_roll_recommendation(self, position_id: str, decision: RollDecision) -> Dict[str, Any]:
+        position = self._paper_position(position_id)
+        if position.current_state == COMPLETED:
+            raise ValueError("cannot_roll_completed_paper_position")
+        recommendation_id = self._roll_recommendation_id(decision)
+        existing_ids = {
+            str(event.get("details", {}).get("recommendation_id", ""))
+            for event in position.lifecycle_events
+            if event.get("event_type") == "Roll Recommendation"
+        }
+        if recommendation_id in existing_ids:
+            return position.to_dict()
+        event = PaperIncomeEvent(
+            event_id=f"roll-{len(position.lifecycle_events) + 1:04d}",
+            event_type="Roll Recommendation",
+            timestamp=_now_iso(),
+            state=position.current_state,
+            details={"recommendation_id": recommendation_id, "decision": decision.to_dict()},
+        ).to_dict()
+        updated = replace(
+            position,
+            lifecycle_events=[*position.lifecycle_events, event],
+            timestamps={**position.timestamps, "updated_at": _now_iso()},
+            advisory_flags=dict(SAFE_FLAGS),
+        )
+        return self.paper_repository.update(updated).to_dict()
+
+    def _paper_position(self, position_id: str) -> PaperIncomePosition:
+        position = self.paper_repository.get(position_id)
+        if position.current_state not in VALID_STATES:
+            raise ValueError("invalid_paper_position_state")
+        if position.premium_received < 0 or position.premium_remaining < 0:
+            raise ValueError("invalid_paper_position_premium")
+        if position.collateral_reserved < 0:
+            raise ValueError("invalid_paper_position_collateral")
+        return position
+
+    @staticmethod
+    def _roll_recommendation_id(decision: RollDecision) -> str:
+        return "|".join(
+            [
+                decision.position_id,
+                decision.recommendation,
+                str(round(float(decision.expected_premium), 6)),
+                str(round(float(decision.capital_impact), 6)),
+                str(round(float(decision.confidence), 6)),
+            ]
+        )
