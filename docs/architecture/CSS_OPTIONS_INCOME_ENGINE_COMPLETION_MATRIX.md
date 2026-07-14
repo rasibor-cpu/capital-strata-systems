@@ -1,0 +1,154 @@
+# CSS Options Income Engine Completion Matrix
+
+Audit date: 2026-07-13
+
+Branch: `css-unified-consolidation-2026-07-13`
+
+Baseline reviewed: `8fb62f19c81650f7975edcb0ee9647b3d8d5f3df`
+
+Scope: repository evidence on the consolidated branch only. Historical branches were not used.
+
+Status terms:
+
+- `COMPLETE`: implementation exists and has direct tests or runtime wiring evidence.
+- `COMPLETE_PENDING_CERTIFICATION`: implementation exists and is test-covered, but production certification is still required before institutional/live use.
+- `PARTIAL`: implementation exists but is bounded, simulated, paper-only, display-only, or missing required integrations.
+- `PLACEHOLDER`: repository evidence explicitly identifies a scaffold, spec-only surface, disabled path, or future plug-in.
+- `NOT_PRESENT`: no implementation evidence found in the reviewed repository.
+
+## Complete Options Subsystem Inventory
+
+| Area | Modules and evidence | Audit finding |
+| --- | --- | --- |
+| Contract registry | `backend/app/options/options_contract_registry.py` defines `OptionsContractSpec`, supported underlyings `SPY`, `QQQ`, `AAPL`, symbol normalization, and `live_enabled=False`. | Static/simple registry exists. It is not a live OPRA chain or broker contract authority. |
+| Canonical contract model | `backend/trading/option_contract.py` defines `CanonicalOptionContract` with expiration, bid/ask, midpoint, IV, Greeks, intrinsic/extrinsic value, probability ITM, multiplier, currency, exchange, and timestamp validation. | Canonical data model is implemented and fail-closed. |
+| Canonical options repository | `backend/trading/canonical_options_repository.py` normalizes adapter rows, caches contracts, searches by underlying/type/strike/exchange, and returns empty results without an adapter. | Repository abstraction exists, but no live broker adapter is wired. |
+| Derivatives snapshot | `backend/trading/derivatives_models.py` serializes options and futures into a `DerivativesMarketSnapshot`. | Cross-derivatives serialization exists. |
+| Options chain adapter | `backend/scanner/options_chain_adapter.py` generates mock contracts, sets `asset_class="OPTIONS"`, and sets `tradable=False`; comments state future broker API plug-in and real Greeks. | Scanner-visible mock chains exist. Broker-sourced chains are not implemented. |
+| Greeks engine | `backend/trading/greeks_engine.py` implements broker-neutral Black-Scholes style delta, gamma, theta, vega, rho, intrinsic/extrinsic value, and probability ITM. | Greeks calculation is implemented. Production use still requires certification and market-data authority. |
+| Pricing calibration | `backend/options/option_pricing_calibration_engine.py` estimates simulated premiums from intrinsic value, strike distance, volatility multiplier, and DTE decay. | Simulated pricing exists. It is not live market pricing or IV inversion. |
+| Expiry parsing | `backend/options/option_expiry_parser_engine.py` parses several expiry date formats and computes days to expiry. | Basic DTE support exists. It is not an expiration lifecycle/assignment engine. |
+| Strategy selection | `backend/options/options_strategy_engine.py` builds `LONG_CALL`, `LONG_PUT`, `CALL_DEBIT_SPREAD`, and `PUT_DEBIT_SPREAD`; comments identify `COVERED_CALL` and `CASH_SECURED_PUT` as scaffolded. | Directional long options and debit spreads are implemented; income strategies are not. |
+| Strategy intelligence | `backend/options/options_intelligence_engine.py` validates candidate rows by premium, DTE, delta, volume, open interest, spread, liquidity, and score; delegates to strategy/payoff/risk engines. | Opportunity selection exists for the implemented directional/debit-spread strategies only. |
+| Payoff math | `backend/options/option_payoff_engine.py` calculates payoff for long calls, long puts, call debit spreads, and put debit spreads. | Payoff support exists for implemented strategies only. |
+| Risk profile | `backend/options/option_risk_profile_engine.py` computes risk/reward ratio, capped risk/profit flags, and strategy risk grade. | Strategy-level risk profile exists, but portfolio collateral/margin enforcement is missing. |
+| Position management | `backend/options/options_position_manager.py` opens and updates long option positions, computes unrealized/realized PnL, supports stop loss, take profit, trailing stop, time exits, and closed logs. | Long-option paper position management exists. It does not model short options, assignment, exercise, or income rolls. |
+| Options governance | `backend/app/options/options_governor.py` validates contract support, quantity, mode, and live-option enablement; live mode requires explicit enablement and account equity. | Governance gate exists and keeps live options disabled by default. |
+| Execution adapter | `backend/app/options/options_execution_adapter.py` states dry-run only, no live order placement, and no broker calls; returns dry-run execution records. | Paper/dry-run execution simulation exists. Live execution is not present. |
+| Lifecycle adapter | `backend/app/options/options_lifecycle_adapter.py` exposes canonical lifecycle payloads for OPTIONS and supports paper execution through the dry-run adapter. | Canonical lifecycle normalization exists for paper trades, not full options lifecycle. |
+| Cross-asset orchestration | `backend/app/orchestration/cross_asset_execution_orchestrator.py` routes `OPTIONS` through `OptionsExecutionAdapter` and records dry-run audit decisions. | Options are integrated into dry-run cross-asset orchestration. |
+| Unified execution foundation | `backend/execution/unified_execution_pipeline.py` includes `OPTIONS` in supported asset classes and rejects live mode in the foundation phase. | Paper-safe execution acceptance exists. |
+| Instrument universe | `backend/trading/canonical_trading_universe.py` includes SPY and QQQ options chains with explicit expiries, option types, ATM ladder policy, American style, and `expiry_source="canonical_options_chain_metadata"`. | Tradable universe metadata exists for paper/display workflows. |
+| Dashboard Greeks | `scripts/css_live_dashboard.py`, `dashboard/runtime/frontend_contract.py`, and `dashboard/web/web_app.py` expose option Greeks, portfolio Greeks, and options exposure fields. | Dashboard visibility exists. It is display/read-model support, not trading authority. |
+| Mobile/manual ticketing | `dashboard/mobile/mobile_app.py` includes `OPTIONS` as an asset-class selection; trade-tab tests assert options metadata display. | UI can present options metadata/manual ticket fields. It is not broker-live options routing. |
+| Portfolio/risk inclusion | `backend/app/risk/portfolio_governor.py`, `backend/app/risk/capital_allocation_governor.py`, `backend/portfolio/regime_aware_allocation.py`, `backend/analytics/autonomous_portfolio_manager.py`, and concentration/stress tests include OPTIONS as an asset class. | Broad asset-class awareness exists. Options-specific collateral, assignment, and income risk are missing. |
+| Evidence/journal/runtime audit | `dashboard/runtime/evidence_hashing.py`, `backend/app/audit/persistent_execution_journal.py`, and runtime event normalization modules exist; `tests/dashboard/test_persistent_execution_journal.py` includes an OPTIONS example. | Generic evidence foundations exist, but options strategy decisions are not specifically integrated with evidence hashing, the execution journal, or runtime event normalization. |
+| Governance/specs | `docs/architecture/CSS_OPTIONS_COMPLETION_MATRIX.md`, `docs/options_execution_adapter_spec.md`, `docs/options_risk_governor_spec.md`, `docs/options_dashboard_pnl_spec.md`, `docs/options_audit_ledger_spec.md`, and Phase 80-89 governance docs define prior options scope. | Governance coverage exists, including explicit safety boundaries and future requirements. |
+| Tests | `tests/test_canonical_derivatives_foundation.py`, `tests/test_options_lifecycle.py`, `tests/test_options_greeks_data_model.py`, `tests/test_options_greeks_dashboard.py`, `tests/test_portfolio_greeks_aggregation.py`, `tests/test_options_strategy_classification.py`, `tests/test_unified_execution_pipeline.py`, `tests/test_canonical_trading_universe.py`, `tests/test_asset_lifecycle_integration.py`, and related dashboard/portfolio tests. | Tests cover canonical models, Greeks, paper lifecycle, dashboard aggregation, strategy classification, universe metadata, and paper-safe execution. They do not cover income strategies or live options brokerage. |
+
+## Capability Matrix
+
+| Capability | Status | Source files | Tests | Orchestration | Broker integration | Dashboard integration | Governance | Production readiness |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Canonical option contract model | COMPLETE_PENDING_CERTIFICATION | `backend/trading/option_contract.py`; `backend/trading/canonical_options_repository.py` | `tests/test_canonical_derivatives_foundation.py` | Available to future engines through repository abstraction | Adapter protocol only | Indirect through dashboard Greeks/metadata | Derivatives foundation docs and options matrix | Not certified for live market-data authority |
+| Static/simple contract registry | PARTIAL | `backend/app/options/options_contract_registry.py` | Covered through lifecycle/governor paths | Used by options governor/adapter | None; `live_enabled=False` | None direct | Safety notes in registry and prior matrix | Paper/simple-symbol only |
+| Option chain ingestion | PLACEHOLDER | `backend/scanner/options_chain_adapter.py`; `backend/trading/canonical_options_repository.py` | Canonical repository adapter test only | Not wired to live orchestration | No live broker chain adapter | Scanner rows can surface as non-tradable | Spec notes future broker APIs | Not production-ready |
+| Greeks calculation | COMPLETE_PENDING_CERTIFICATION | `backend/trading/greeks_engine.py`; dashboard Greek helpers in `scripts/css_live_dashboard.py` | `tests/test_canonical_derivatives_foundation.py`; `tests/test_options_greeks_data_model.py`; `tests/test_options_greeks_dashboard.py`; `tests/test_portfolio_greeks_aggregation.py` | Not directly called by execution adapters | Broker Greeks accepted as source labels only | Web/dashboard Greeks panels and frontend payloads | Phase 80, 83, 85, 86, 87, 88 docs | Requires certified market-data source and model validation |
+| IV and premium modeling | PARTIAL | `backend/options/option_pricing_calibration_engine.py`; `backend/trading/option_contract.py` stores `implied_volatility` | Canonical derivatives tests cover IV field; no dedicated calibration tests found in this audit | Not wired to execution | No broker IV source | Not directly exposed as an engine output | Options specs mention pricing | Simulated/calibrated only |
+| Expiration/DTE parsing | PARTIAL | `backend/options/option_expiry_parser_engine.py`; `backend/trading/canonical_trading_universe.py` | `tests/test_canonical_trading_universe.py`; mobile opportunity metadata tests | Not integrated into lifecycle expiry handling | None | Mobile opportunity metadata surfaces expiries | Specs discuss expiry lifecycle | DTE parsing only; no exercise/assignment expiration workflow |
+| Long call strategy | PARTIAL | `backend/options/options_strategy_engine.py`; `backend/options/option_payoff_engine.py`; dashboard classifier | `tests/test_options_strategy_classification.py`; lifecycle/Greeks tests | Paper-safe pipeline and dry-run adapter only | None live | Dashboard classifies call symbols as `LONG_CALL` | Phase 89 says classification only | Strategy math exists; broker/live/lifecycle depth incomplete |
+| Long put strategy | PARTIAL | Same as long call | Same as long call | Paper-safe pipeline and dry-run adapter only | None live | Dashboard classifies put symbols as `LONG_PUT` | Phase 89 says classification only | Strategy math exists; broker/live/lifecycle depth incomplete |
+| Debit spreads | PARTIAL | `backend/options/options_strategy_engine.py`; `backend/options/option_payoff_engine.py` | No dedicated spread execution tests found; strategy engine is code evidence | Not routed as multi-leg orders | None | No multi-leg display found | Existing options matrix marks spreads partial | No multi-leg order/lifecycle authority |
+| Credit spreads | NOT_PRESENT | Placeholder constants only in dashboard future list | No tests found | None | None | Placeholder only | Future placeholder docs | Not production-ready |
+| Covered calls | PLACEHOLDER | Comments in `options_strategy_engine.py` and `options_intelligence_engine.py`; future placeholder constants | No tests found | None | None | Placeholder only | Existing options matrix marks placeholder | No stock-coverage validation, short-call leg, assignment, or roll |
+| Cash-secured puts | PLACEHOLDER | Comments in `options_strategy_engine.py` and `options_intelligence_engine.py`; future placeholder constants | No tests found | None | None | Placeholder only | Existing options matrix marks placeholder | No cash collateral, short-put leg, assignment, or wheel handoff |
+| Wheel | NOT_PRESENT | No implementation found | No tests found | None | None | None | Existing options matrix marks not present | Not production-ready |
+| Assignment/exercise | NOT_PRESENT | No options assignment/exercise engine found | No tests found | None | None | None | Options audit spec mentions expiry/expiration reporting as future work | Required before production income engine |
+| Rolling | NOT_PRESENT | General `backend/learning/rolling_reliability.py` exists, but no options roll-order/lifecycle engine found | `tests/test_phase139a_rolling_reliability.py` is generic, not options rolling | None | None | None | Existing matrix notes no options rolling implementation | Required for income lifecycle |
+| Margin/buying power/collateral | PARTIAL | General account/margin dashboard, portfolio governor, capital allocation governor, and `docs/options_risk_governor_spec.md` | General margin/portfolio tests; no options collateral tests found | Not in options execution path | Broker margin adapters exist for other assets; none for options | Dashboard shows account buying power/margin generally | Options risk governor spec defines required caps | Options-specific premium-at-risk and collateral are not implemented |
+| Premium/PnL | PARTIAL | `backend/options/options_position_manager.py`; `backend/options/option_payoff_engine.py`; `docs/options_dashboard_pnl_spec.md` | Lifecycle persistence tests and dashboard PnL specs; no full income PnL tests found | Paper lifecycle adapter persists closed outcomes | None | General PnL and options exposure surfaces | PnL spec exists | Long-option/simulated only; no short premium lifecycle |
+| Broker execution | PLACEHOLDER | `options_execution_adapter.py` says dry-run only/no broker calls; `options_governor.py` blocks live unless enabled | `tests/test_options_lifecycle.py`; `tests/test_unified_execution_pipeline.py` | Dry-run cross-asset orchestration exists | No live options broker adapter | Manual/mobile UI has asset selector only | Governance requires live-disabled boundary | Not production-ready |
+| Broker state authority | PARTIAL | Generic broker-state authority tests and broker governance exist | `tests/test_phase163b3j_broker_state_authority.py` and broker readiness tests | No options-specific bridge | No options broker source authority | None specific | Broker-state governance docs exist | Must be extended before live options |
+| Evidence hashing | PARTIAL | `dashboard/runtime/evidence_hashing.py`; options example in persistent journal test | `tests/dashboard/test_evidence_hashing.py`; `tests/dashboard/test_persistent_execution_journal.py` | Not attached to options strategy decisions | None | None specific | Evidence governance docs exist | Needs options decision and lifecycle evidence integration |
+| Persistent execution journal | PARTIAL | `backend/app/audit/persistent_execution_journal.py` | `tests/dashboard/test_persistent_execution_journal.py` includes `asset_class="OPTIONS"` | Generic journal compatible | None | None specific | Persistent journal salvage docs exist | Needs options orchestration write path |
+| Runtime event normalization | PARTIAL | `dashboard/runtime/runtime_event_bus.py` and related runtime event modules | `tests/dashboard/test_runtime_event_normalization.py` | Generic runtime event layer | None | Runtime/dashboard event views | Runtime event governance docs exist | Needs options-specific event taxonomy/wiring |
+| Reporting/certification | PARTIAL | Options PnL/audit specs; dashboard summaries; governance docs | Dashboard payload/smoke tests | Reporting is read-model only | None | Web/mobile summaries | Consolidation and options governance docs | Certification package for options income is not present |
+
+## Strategy Capability Matrix
+
+| Strategy | Opportunity scan | Contract selection | Entry | Lifecycle | Assignment | Rolling | Risk | Reporting | Testing |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Long Calls | PARTIAL: `OptionsIntelligenceEngine` scans call candidates by DTE, delta, liquidity, spread, premium | PARTIAL: selects near-underlying call | PARTIAL: paper/dry-run only | PARTIAL: long-option position manager and canonical lifecycle payloads | NOT_PRESENT | NOT_PRESENT | PARTIAL: payoff/risk profile, no portfolio options cap enforcement | PARTIAL: dashboard classifier/Greeks/PnL surfaces | PARTIAL: lifecycle, Greeks, strategy classification |
+| Long Puts | PARTIAL: same engine scans puts by direction | PARTIAL: selects near-underlying put | PARTIAL: paper/dry-run only | PARTIAL: long-option position manager and canonical lifecycle payloads | NOT_PRESENT | NOT_PRESENT | PARTIAL: payoff/risk profile, no portfolio options cap enforcement | PARTIAL: dashboard classifier/Greeks/PnL surfaces | PARTIAL: lifecycle, Greeks, strategy classification |
+| Covered Calls | PLACEHOLDER: named as scaffold/future placeholder | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT: no share coverage validation | PLACEHOLDER: strategy placeholder only | NOT_PRESENT |
+| Cash-Secured Puts | PLACEHOLDER: named as scaffold/future placeholder | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT: no cash collateral validation | PLACEHOLDER: strategy placeholder only | NOT_PRESENT |
+| Wheel | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT |
+| Debit Spreads | PARTIAL: strategy engine can choose debit spread for `ELITE` tier | PARTIAL: selects adjacent long/short legs | PLACEHOLDER: no multi-leg order path | NOT_PRESENT: no multi-leg lifecycle | NOT_PRESENT | NOT_PRESENT | PARTIAL: width/debit/RR math | NOT_PRESENT as a spread report | PARTIAL/NOT_PRESENT: code exists, no dedicated multi-leg lifecycle tests found |
+| Credit Spreads | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | PLACEHOLDER constants only | NOT_PRESENT |
+| Iron Condors | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | PLACEHOLDER constants only | NOT_PRESENT |
+| Butterflies | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | Placeholder family appears as `IRON_BUTTERFLY`; no generic butterfly implementation found | NOT_PRESENT |
+| Calendars | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | PLACEHOLDER constants only | NOT_PRESENT |
+| Diagonals | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | NOT_PRESENT | PLACEHOLDER constants only | NOT_PRESENT |
+
+## Integration Audit
+
+| Capability | Unified Trade Orchestrator | Portfolio Engine | Lifecycle Manager | Broker State Authority | Evidence Hashing | Persistent Execution Journal | Runtime Event Normalization | Dashboard | Reporting |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Canonical option contracts | Missing direct execution integration | PARTIAL through universe/risk asset-class awareness | Missing | Missing | Missing | Missing | Missing | PARTIAL metadata display | PARTIAL via docs/specs |
+| Mock option chains | Missing direct integration | Missing | Missing | Missing | Missing | Missing | Missing | Scanner-visible only | Missing |
+| Greeks | Missing execution integration | PARTIAL via dashboard portfolio aggregation | Missing | Missing | Missing | Missing | Missing | COMPLETE_PENDING_CERTIFICATION | PARTIAL |
+| Long calls/puts | PARTIAL paper-safe execution acceptance | PARTIAL asset-class allocation/exposure only | PARTIAL canonical lifecycle adapter | Missing options-specific broker authority | Missing | Missing options-specific write path | Missing | PARTIAL strategy/Greeks display | PARTIAL closed ledger/spec surfaces |
+| Debit spreads | Missing multi-leg orchestration | Missing | Missing multi-leg lifecycle | Missing | Missing | Missing | Missing | Missing | Missing |
+| Covered calls/CSP/Wheel | Missing | Missing | Missing | Missing | Missing | Missing | Missing | Placeholder only | Missing |
+| Risk/margin/collateral | PARTIAL generic paper gating | PARTIAL general portfolio governors | Missing | Missing options-specific state authority | Missing | Missing | Missing | PARTIAL general margin/Greeks display | PARTIAL governance specs |
+| Broker execution | PARTIAL dry-run only through cross-asset orchestrator and unified pipeline | Missing | PARTIAL paper lifecycle | Missing | Missing | Generic compatible only | Generic compatible only | Manual selector only | Missing |
+
+## Gap Analysis
+
+### MVP
+
+Required for the first institutional income release:
+
+- Covered call strategy builder with stock/share coverage validation.
+- Cash-secured put strategy builder with cash collateral validation.
+- Income-specific opportunity scan and contract selection using canonical option contracts, DTE, delta, premium, liquidity, spread, and open interest.
+- Short-premium lifecycle model for open, mark, close, expiration, assignment pending, assigned, and expired-worthless states.
+- Paper-only premium/PnL ledger for short calls and short puts.
+- Options-specific risk governor enforcing max premium at risk, max collateral, per-symbol exposure, max open income positions, and near-expiry restrictions.
+- Deterministic tests for covered calls, cash-secured puts, collateral gating, lifecycle transitions, and fail-closed malformed contracts.
+
+### Production
+
+Required before production certification:
+
+- Broker-sourced option chain adapter with explicit market-data authority and no credential leakage.
+- Broker state authority integration for positions, buying power, option approval level, short-option permissions, collateral, and assignment notices.
+- Evidence hash integration for option opportunity, strategy decision, risk approval, lifecycle events, and simulated/broker execution intent.
+- Persistent execution journal write path for options decisions and lifecycle events.
+- Runtime event taxonomy for options income events.
+- Read-only replay/certification package for options decisions and lifecycle outcomes.
+- Dashboard/reporting views for income strategy state, collateral, premium capture, assignment exposure, rolling candidates, and certification status.
+- Production certification tests covering safety gates, broker-state reconciliation, no-live-by-default controls, and rollback boundaries.
+
+### Advanced
+
+Future institutional enhancements:
+
+- Credit spreads.
+- Iron condors.
+- Butterflies.
+- Calendars.
+- Diagonals.
+- Straddles and strangles.
+- Portfolio Greeks hedging workflows.
+- Volatility regime and IV rank/IV percentile integration.
+- Tax-lot and exercise-style analysis.
+- Multi-broker options chain normalization.
+
+## Readiness Review
+
+1. CSS does not yet possess a production-grade options trading engine. Repository evidence shows dry-run-only execution in `backend/app/options/options_execution_adapter.py`, live-mode rejection in `backend/execution/unified_execution_pipeline.py`, mock non-tradable chains in `backend/scanner/options_chain_adapter.py`, and no live options broker adapter.
+
+2. The blockers to a complete institutional Options Income Engine are short-premium strategy implementation, collateral and assignment-aware lifecycle, options-specific risk governance, broker state authority, evidence/journal/runtime-event integration, dashboard/reporting for income workflows, and production certification. Existing files support directional long options, debit-spread math, Greeks, paper lifecycle, and display surfaces; they do not implement covered calls, cash-secured puts, Wheel, assignment, or rolling.
+
+3. The smallest implementation phase with the greatest capability and lowest architectural risk is a paper-only income strategy domain phase: add covered-call and cash-secured-put builders plus collateral/share-coverage validators and deterministic tests, without broker changes or live execution. This builds directly on `OptionStrategyEngine`, `OptionPayoffEngine`, `OptionRiskProfileEngine`, `OptionsPositionManager`, and existing governance specs while preserving the current live-disabled execution boundary.
