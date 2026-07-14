@@ -2128,6 +2128,11 @@ def close_active_session(reason: str, extra: Optional[dict[str, Any]] = None) ->
                 pass
 
     SESSION_CLOSED = True
+    try:
+        from dashboard.auth.css_sign_on import invalidate_login_session
+        invalidate_login_session()
+    except Exception:
+        pass
 
 
 

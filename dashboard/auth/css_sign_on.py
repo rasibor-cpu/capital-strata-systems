@@ -4,7 +4,7 @@ import getpass
 import hashlib
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -86,6 +86,10 @@ def await_login_ready_state() -> Dict[str, Any]:
             }
         }
     users = load_users()
+    restored = restore_login_session(users)
+    if restored is not None:
+        return restored
+
     auth_ui = os.getenv("CSS_AUTH_UI", "gui").strip().lower()
 
     if auth_ui in {"cli", "console", "text"}:
@@ -567,21 +571,193 @@ def build_user_context(user_record: Dict[str, Any], user_id: str) -> Dict[str, A
 
 def persist_login_session(user_ctx: Dict[str, Any]) -> None:
     SESSION_AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
-    SESSION_AUTH_FILE.write_text(
-        json.dumps(
-            {
-                "user_id": user_ctx.get("user_id"),
-                "display_name": user_ctx.get("display_name"),
-                "role": user_ctx.get("role"),
-                "unit_code": user_ctx.get("unit_code"),
-                "home_branch": user_ctx.get("home_branch"),
-                "last_login": datetime.now().isoformat(timespec="seconds"),
-                "login_persistence": True,
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    temp_file = SESSION_AUTH_FILE.with_name(SESSION_AUTH_FILE.name + ".tmp")
+    try:
+        temp_file.write_text(
+            json.dumps(
+                {
+                    "user_id": user_ctx.get("user_id"),
+                    "display_name": user_ctx.get("display_name"),
+                    "role": user_ctx.get("role"),
+                    "unit_code": user_ctx.get("unit_code"),
+                    "home_branch": user_ctx.get("home_branch"),
+                    "last_login": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    "login_persistence": True,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        os.replace(str(temp_file), str(SESSION_AUTH_FILE))
+    except Exception as exc:
+        import sys
+        sys.stderr.write(f"[SESSION PERSIST WARN] Failed to write session file: {exc}\n")
+        sys.stderr.flush()
+        try:
+            SESSION_AUTH_FILE.write_text(
+                json.dumps(
+                    {
+                        "user_id": user_ctx.get("user_id"),
+                        "display_name": user_ctx.get("display_name"),
+                        "role": user_ctx.get("role"),
+                        "unit_code": user_ctx.get("unit_code"),
+                        "home_branch": user_ctx.get("home_branch"),
+                        "last_login": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                        "login_persistence": True,
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+    finally:
+        try:
+            if temp_file.exists():
+                temp_file.unlink()
+        except Exception:
+            pass
+
+
+def invalidate_login_session() -> None:
+    try:
+        if SESSION_AUTH_FILE.exists():
+            SESSION_AUTH_FILE.unlink()
+    except Exception as exc:
+        import sys
+        sys.stderr.write(f"[SESSION INVALIDATION WARN] Failed to delete session file: {exc}\n")
+        sys.stderr.flush()
+
+
+def restore_login_session(users: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    """
+    Safely load and restore login session from css_auth_session.json.
+    """
+    if not SESSION_AUTH_FILE.exists():
+        return None
+
+    try:
+        raw = SESSION_AUTH_FILE.read_text(encoding="utf-8").strip()
+        if not raw:
+            invalidate_login_session()
+            return None
+        data = json.loads(raw)
+    except Exception as exc:
+        import sys
+        sys.stderr.write(f"[SESSION RESTORE WARN] Failed to read/parse session file: {exc}\n")
+        sys.stderr.flush()
+        invalidate_login_session()
+        return None
+
+    if not isinstance(data, dict):
+        import sys
+        sys.stderr.write("[SESSION RESTORE WARN] Session payload is not a JSON object\n")
+        sys.stderr.flush()
+        invalidate_login_session()
+        return None
+
+    # Required fields validation
+    required_fields = ["user_id", "display_name", "role", "unit_code", "home_branch", "last_login"]
+    for field in required_fields:
+        if field not in data or data[field] is None:
+            import sys
+            sys.stderr.write(f"[SESSION RESTORE WARN] Session missing required field: {field}\n")
+            sys.stderr.flush()
+            invalidate_login_session()
+            return None
+        if not isinstance(data[field], str):
+            import sys
+            sys.stderr.write(f"[SESSION RESTORE WARN] Session field {field} has invalid type\n")
+            sys.stderr.flush()
+            invalidate_login_session()
+            return None
+
+    user_id = normalize_user_id(data["user_id"])
+    if not user_id:
+        import sys
+        sys.stderr.write("[SESSION RESTORE WARN] Session has invalid user_id\n")
+        sys.stderr.flush()
+        invalidate_login_session()
+        return None
+
+    # Revalidate user registry
+    active_users = users if users is not None else load_users()
+    if user_id not in active_users:
+        import sys
+        sys.stderr.write(f"[SESSION RESTORE WARN] Restored user ID {user_id} not found in registry\n")
+        sys.stderr.flush()
+        invalidate_login_session()
+        return None
+
+    user_record = active_users[user_id]
+    if not isinstance(user_record, dict):
+        import sys
+        sys.stderr.write("[SESSION RESTORE WARN] User registry record is invalid\n")
+        sys.stderr.flush()
+        invalidate_login_session()
+        return None
+
+    # Derive role and permission info from user registry, never from persisted payload alone
+    registry_role = str(user_record.get("role", "VIEWER")).strip().upper()
+    persisted_role = str(data["role"]).strip().upper()
+    if registry_role != persisted_role:
+        import sys
+        sys.stderr.write(f"[SESSION RESTORE WARN] Persisted role {persisted_role} differs from registry role {registry_role}\n")
+        sys.stderr.flush()
+        invalidate_login_session()
+        return None
+
+    # Check if user is locked out
+    locked = bool(user_record.get("locked", False))
+    lockout_remaining = active_lockout_remaining_seconds(user_record, datetime.now())
+    if locked or lockout_remaining > 0:
+        import sys
+        sys.stderr.write(f"[SESSION RESTORE WARN] Restored user ID {user_id} is currently locked out\n")
+        sys.stderr.flush()
+        invalidate_login_session()
+        return None
+
+    # Validate session creation/expiration timestamps
+    last_login_str = data["last_login"]
+    last_login_dt = parse_datetime(last_login_str)
+    if not last_login_dt:
+        import sys
+        sys.stderr.write("[SESSION RESTORE WARN] Session last_login timestamp is malformed\n")
+        sys.stderr.flush()
+        invalidate_login_session()
+        return None
+
+    # Ensure timezone aware UTC comparison
+    # If naive (backward compatibility), treat as UTC
+    if last_login_dt.tzinfo is None:
+        last_login_dt = last_login_dt.replace(tzinfo=timezone.utc)
+    else:
+        last_login_dt = last_login_dt.astimezone(timezone.utc)
+
+    now_utc = datetime.now(timezone.utc)
+    # Reject materially in the future (skew limit: 60s)
+    if last_login_dt > now_utc + timedelta(seconds=60):
+        import sys
+        sys.stderr.write("[SESSION RESTORE WARN] Session timestamp is materially in the future\n")
+        sys.stderr.flush()
+        invalidate_login_session()
+        return None
+
+    # Reject expired sessions (24 hours default max age)
+    SESSION_MAX_AGE_SECONDS = 86400
+    if now_utc - last_login_dt > timedelta(seconds=SESSION_MAX_AGE_SECONDS):
+        import sys
+        sys.stderr.write("[SESSION RESTORE WARN] Session is expired\n")
+        sys.stderr.flush()
+        invalidate_login_session()
+        return None
+
+    # Build context using canonical registry data to avoid trust issues
+    user_ctx = build_user_context(user_record, user_id)
+    import sys
+    sys.stdout.write(f"[SESSION RESTORE OK] Restored valid session for user_id={user_id}\n")
+    sys.stdout.flush()
+    return user_ctx
 
 
 def await_console_login(users: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
