@@ -19,6 +19,11 @@ MC-003 connects Mission Control to the Desktop/mobile launcher runtime bridge
 so the shell consumes actual runtime snapshot evidence when available and
 fails closed to offline/unavailable state when the runtime is not active.
 
+MC-004 binds Mission Control to the active runtime publisher used by
+`scripts/css_live_dashboard.py`. It resolves existing runtime endpoint,
+artifact, heartbeat, and cache evidence without starting another runtime
+process or supervisor.
+
 ## Component Architecture
 
 Mission Control is implemented as an additive dashboard package:
@@ -40,6 +45,11 @@ Mission Control is implemented as an additive dashboard package:
 - `dashboard.mission_control.runtime_snapshot_provider`
 - `dashboard.mission_control.runtime_snapshot_normalizer`
 - `dashboard.mission_control.runtime_bridge`
+- `dashboard.mission_control.active_runtime_source`
+- `dashboard.mission_control.runtime_source_resolver`
+- `dashboard.mission_control.runtime_artifact_reader`
+- `dashboard.mission_control.runtime_endpoint_reader`
+- `dashboard.mission_control.runtime_source_diagnostics`
 
 The package is mounted into `dashboard.web.web_app.create_app` through an
 idempotent registration helper. The helper rejects conflicting
@@ -61,13 +71,15 @@ State flow:
    `css.mission_control.state.v1`.
 5. `dashboard.mission_control.source_registry` labels each section source and
    provenance.
-6. `dashboard.mission_control.runtime_snapshot_provider` resolves the current
+6. `dashboard.mission_control.runtime_source_resolver` selects the active
+   runtime source.
+7. `dashboard.mission_control.runtime_snapshot_provider` resolves the current
    runtime snapshot.
-7. `dashboard.mission_control.runtime_snapshot_normalizer` creates a
+8. `dashboard.mission_control.runtime_snapshot_normalizer` creates a
    canonical runtime snapshot with heartbeat and state hash.
-8. `dashboard.mission_control.freshness` calculates deterministic freshness.
-9. `dashboard.mission_control.health` derives display-only health.
-10. The shell renders all pages from the canonical Mission Control state.
+9. `dashboard.mission_control.freshness` calculates deterministic freshness.
+10. `dashboard.mission_control.health` derives display-only health.
+11. The shell renders all pages from the canonical Mission Control state.
 
 Unavailable live data remains `UNAVAILABLE`. Mock data is explicitly labeled.
 
@@ -85,25 +97,29 @@ Mission Control exposes only read-only GET routes:
 - `/mission-control/api/certification`
 - `/mission-control/api/runtime`
 - `/mission-control/api/heartbeat`
+- `/mission-control/api/runtime-source`
 
 There are no POST, PUT, PATCH, or DELETE operational routes in MC-002.
 
-MC-003 preserves this GET-only route architecture.
+MC-003 and MC-004 preserve this GET-only route architecture.
 
 ## Runtime Snapshot Architecture
 
 Mission Control runtime snapshot precedence is:
 
-1. In-process runtime source when the host shares process with the runtime
-   bridge.
-2. Existing runtime artifact evidence.
-3. Explicit cache-labeled artifact snapshot.
-4. Offline/unavailable fail-closed snapshot.
+1. Shared runtime registry when explicitly marked cross-process safe.
+2. Existing read-only localhost runtime endpoint when configured.
+3. Existing current runtime artifacts produced by the desktop publisher.
+4. Existing heartbeat and state artifacts.
+5. Fresh cache.
+6. Offline/unavailable fail-closed snapshot.
 
-The canonical Desktop source is
-`launcher.css_mobile_launcher.build_launcher_frontend_state`, which already
-bridges supervisor, session, account, broker, runtime health, artifact
-freshness, validation, and certification evidence into the frontend contract.
+The canonical Desktop runtime publisher is
+`scripts.css_live_dashboard.pcnrass_publish_runtime_artifacts`, which publishes
+through `backend.runtime.runtime_artifact_publisher.RuntimeArtifactPublisher`.
+The launcher bridge remains a read-only host integration surface; it is not
+treated as a cross-process runtime registry unless the payload explicitly
+declares that property.
 
 ## Runtime/Web-Host Separation
 
@@ -136,9 +152,13 @@ Each top-level Mission Control section exposes source metadata using:
 
 - `LIVE`
 - `RUNTIME`
+- `RUNTIME_ENDPOINT`
+- `RUNTIME_ARTIFACT`
+- `RUNTIME_REGISTRY`
 - `CACHE`
 - `HISTORICAL`
 - `MOCK`
+- `DEMO`
 - `UNAVAILABLE`
 - `UNKNOWN`
 
@@ -160,6 +180,10 @@ safety data downgrades Mission Control health.
 
 Runtime heartbeat freshness is mandatory. Stale or unavailable heartbeat state
 downgrades Mission Control health.
+
+MC-004 exposes runtime-source diagnostics with selected source, candidate
+sources, artifact freshness, process relationship, fallback reason, and source
+state hash.
 
 ## Health Model
 

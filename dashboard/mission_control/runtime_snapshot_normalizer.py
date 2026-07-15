@@ -71,7 +71,20 @@ def normalize_runtime_snapshot(
         "data_freshness": heartbeat_status,
         "generated_at": generated_at,
         "observed_at": heartbeat if heartbeat not in UNAVAILABLE_TEXT else generated_at,
-        "source": source_status if source_status in {"LIVE", "RUNTIME", "CACHE", "HISTORICAL", "MOCK", "DEMO"} else "RUNTIME",
+        "source": source_status
+        if source_status
+        in {
+            "LIVE",
+            "RUNTIME",
+            "RUNTIME_ENDPOINT",
+            "RUNTIME_ARTIFACT",
+            "RUNTIME_REGISTRY",
+            "CACHE",
+            "HISTORICAL",
+            "MOCK",
+            "DEMO",
+        }
+        else "RUNTIME",
         "provenance": {
             "source_name": source_name,
             "frontend_schema": frontend.get("payload_schema", "UNAVAILABLE"),
@@ -215,6 +228,8 @@ def _snapshot_from_artifacts(source: Any, *, source_name: str) -> dict[str, Any]
     supervisor = source.get("supervisor") if isinstance(source.get("supervisor"), Mapping) else {}
     session_payload = source.get("session") if isinstance(source.get("session"), Mapping) else {}
     account = source.get("account") if isinstance(source.get("account"), Mapping) else {}
+    runtime_portfolio = source.get("runtime_portfolio_state") if isinstance(source.get("runtime_portfolio_state"), Mapping) else {}
+    diagnostics = source.get("runtime_source_diagnostics") if isinstance(source.get("runtime_source_diagnostics"), Mapping) else {}
     session = session_payload.get("session") if isinstance(session_payload.get("session"), Mapping) else session_payload
     if not any((supervisor, session, account)):
         return {}
@@ -247,23 +262,30 @@ def _snapshot_from_artifacts(source: Any, *, source_name: str) -> dict[str, Any]
         "data_freshness": heartbeat_status,
         "generated_at": generated_at,
         "observed_at": heartbeat,
-        "source": str(source.get("source") or "CACHE").upper(),
-        "provenance": {"source_name": source_name, "source_files": ["supervisor", "session", "account"]},
-        "broker": {"selected_broker": _first_text(session.get("broker"), session.get("selected_broker"), default="UNAVAILABLE")},
+        "source": str(source.get("source_type") or source.get("source") or "CACHE").upper(),
+        "provenance": {
+            "source_name": source_name,
+            "source_files": ["supervisor", "session", "account", "runtime_portfolio_state"],
+            "runtime_source": diagnostics,
+        },
+        "source_diagnostics": diagnostics,
+        "broker": _broker_from_artifacts(session, account, runtime_portfolio),
         "portfolio": {
-            "equity": account.get("total_equity", account.get("account_balance", "UNAVAILABLE")),
-            "cash": account.get("cash_balance", account.get("account_balance", "UNAVAILABLE")),
-            "buying_power": account.get("buying_power", "UNAVAILABLE"),
-            "realized_pnl": account.get("lifetime_realized_pnl", "UNAVAILABLE"),
-            "unrealized_pnl": account.get("unrealized_pnl", "UNAVAILABLE"),
+            "equity": _nested_account(runtime_portfolio).get("equity", account.get("total_equity", account.get("account_balance", "UNAVAILABLE"))),
+            "cash": _nested_account(runtime_portfolio).get("cash", account.get("cash_balance", account.get("account_balance", "UNAVAILABLE"))),
+            "buying_power": _nested_account(runtime_portfolio).get("buying_power", account.get("buying_power", "UNAVAILABLE")),
+            "realized_pnl": _nested_account(runtime_portfolio).get("realized_pnl", account.get("lifetime_realized_pnl", "UNAVAILABLE")),
+            "unrealized_pnl": _nested_account(runtime_portfolio).get("open_pnl", account.get("unrealized_pnl", "UNAVAILABLE")),
             "net_pnl": (
                 account.get("lifetime_realized_pnl", 0.0) + account.get("unrealized_pnl", 0.0)
                 if isinstance(account.get("lifetime_realized_pnl", 0.0), (int, float))
                 and isinstance(account.get("unrealized_pnl", 0.0), (int, float))
                 else "UNAVAILABLE"
             ),
-            "positions": account.get("positions", []),
-            "open_positions": len(account.get("positions", [])) if isinstance(account.get("positions"), list) else "UNAVAILABLE",
+            "positions": runtime_portfolio.get("positions", account.get("positions", [])),
+            "open_positions": len(runtime_portfolio.get("positions", account.get("positions", [])))
+            if isinstance(runtime_portfolio.get("positions", account.get("positions", [])), list)
+            else "UNAVAILABLE",
         },
         "risk": {"risk_status": _first_text(session.get("risk_status"), default="UNAVAILABLE")},
         "market": {"market_regime": _first_text(session.get("market_regime"), default="UNAVAILABLE")},
@@ -276,6 +298,41 @@ def _snapshot_from_artifacts(source: Any, *, source_name: str) -> dict[str, Any]
     }
     snapshot["state_hash"] = state_hash({key: value for key, value in snapshot.items() if key != "state_hash"})
     return snapshot
+
+
+def _nested_account(runtime_portfolio: Mapping[str, Any]) -> Mapping[str, Any]:
+    account = runtime_portfolio.get("account") if isinstance(runtime_portfolio.get("account"), Mapping) else {}
+    return account
+
+
+def _broker_from_artifacts(session: Mapping[str, Any], account: Mapping[str, Any], runtime_portfolio: Mapping[str, Any]) -> dict[str, Any]:
+    broker_state = session.get("broker_state") if isinstance(session.get("broker_state"), Mapping) else {}
+    if not broker_state and isinstance(account.get("broker_state"), Mapping):
+        broker_state = account.get("broker_state")
+    if not broker_state and isinstance(runtime_portfolio.get("broker_state"), Mapping):
+        broker_state = runtime_portfolio.get("broker_state")
+    canonical = broker_state.get("canonical_broker_runtime_state") if isinstance(broker_state.get("canonical_broker_runtime_state"), Mapping) else {}
+    source = canonical if canonical else broker_state
+    return {
+        "selected_broker": _first_text(session.get("broker"), session.get("selected_broker"), account.get("selected_broker"), default="UNAVAILABLE"),
+        "broker_mode": _first_text(session.get("broker_mode"), account.get("broker_mode"), default="UNAVAILABLE"),
+        "broker_health": _first_text(source.get("overall_status"), source.get("broker_health"), source.get("readiness_state"), default="UNAVAILABLE"),
+        "authentication": _first_text(source.get("authentication_status"), source.get("authentication"), default="UNAVAILABLE"),
+        "transport": _first_text(source.get("connection_status"), source.get("transport"), default="UNAVAILABLE"),
+        "account": _first_text(source.get("account_status"), source.get("account"), default="UNAVAILABLE"),
+        "balances": _first_text(source.get("balance_status"), source.get("balances"), default="UNAVAILABLE"),
+        "buying_power": source.get("buying_power", account.get("buying_power", "UNAVAILABLE")),
+        "margin": _first_text(source.get("margin_status"), default="UNAVAILABLE"),
+        "market_data": _first_text(source.get("market_data_status"), source.get("market_data"), default="UNAVAILABLE"),
+        "products": source.get("product_status", source.get("products_loaded", "UNAVAILABLE")),
+        "readiness": _first_text(source.get("readiness_state"), source.get("readiness_status"), default="UNAVAILABLE"),
+        "overall_status": _first_text(source.get("overall_status"), source.get("broker_health"), default="UNAVAILABLE"),
+        "state_hash": _first_text(source.get("state_hash"), broker_state.get("state_hash"), default="UNAVAILABLE"),
+        "provenance": source.get("status_provenance", broker_state.get("status_provenance", {})),
+        "failure_reason": _first_text(source.get("failure_reason"), broker_state.get("failure_reason"), default="UNAVAILABLE"),
+        "warnings": source.get("warning_reasons", broker_state.get("warning_reasons", [])),
+        "execution_scope": _first_text(source.get("execution_scope"), default="READ_ONLY"),
+    }
 
 
 def _runtime_id(frontend: Mapping[str, Any], session: Mapping[str, Any], source_name: str) -> str:

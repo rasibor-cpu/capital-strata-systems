@@ -174,6 +174,7 @@ def _platform(frontend: Mapping[str, Any], broker: Mapping[str, Any], certificat
 
 def _runtime(frontend: Mapping[str, Any], governance: Mapping[str, Any], certification: Mapping[str, Any], runtime_snapshot: Mapping[str, Any]) -> dict[str, Any]:
     session = frontend.get("session") if isinstance(frontend.get("session"), Mapping) else {}
+    active_runtime_sources = {"RUNTIME", "LIVE", "RUNTIME_ENDPOINT", "RUNTIME_ARTIFACT", "RUNTIME_REGISTRY"}
     return {
         "runtime_id": runtime_snapshot.get("runtime_id", DATA_UNAVAILABLE),
         "runtime_status": runtime_snapshot.get("runtime_status", certification.get("operational_state", DATA_UNAVAILABLE)),
@@ -195,11 +196,12 @@ def _runtime(frontend: Mapping[str, Any], governance: Mapping[str, Any], certifi
         "disconnect_count": runtime_snapshot.get("disconnect_count", DATA_UNAVAILABLE),
         "state_hash": runtime_snapshot.get("state_hash", DATA_UNAVAILABLE),
         "source": runtime_snapshot.get("source", DATA_UNAVAILABLE),
+        "source_diagnostics": runtime_snapshot.get("source_diagnostics", {}),
         "subsystem_health": {
             "audit": governance.get("audit_enabled", DATA_UNAVAILABLE),
-            "api": "AVAILABLE" if runtime_snapshot.get("source") in {"RUNTIME", "LIVE"} else DATA_UNAVAILABLE,
+            "api": "AVAILABLE" if runtime_snapshot.get("source") in active_runtime_sources else DATA_UNAVAILABLE,
             "dashboard": "AVAILABLE",
-            "mobile": "AVAILABLE" if runtime_snapshot.get("source") in {"RUNTIME", "LIVE"} else DATA_UNAVAILABLE,
+            "mobile": "AVAILABLE" if runtime_snapshot.get("source") in active_runtime_sources else DATA_UNAVAILABLE,
             "certification": certification.get("certification", DATA_UNAVAILABLE),
         },
         "controls": {"restart": "DISABLED_MC001", "shutdown": "DISABLED_MC001"},

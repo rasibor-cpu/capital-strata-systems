@@ -7,9 +7,13 @@ from typing import Any
 
 SOURCE_LIVE = "LIVE"
 SOURCE_RUNTIME = "RUNTIME"
+SOURCE_RUNTIME_ENDPOINT = "RUNTIME_ENDPOINT"
+SOURCE_RUNTIME_ARTIFACT = "RUNTIME_ARTIFACT"
+SOURCE_RUNTIME_REGISTRY = "RUNTIME_REGISTRY"
 SOURCE_CACHE = "CACHE"
 SOURCE_HISTORICAL = "HISTORICAL"
 SOURCE_MOCK = "MOCK"
+SOURCE_DEMO = "DEMO"
 SOURCE_UNAVAILABLE = "UNAVAILABLE"
 SOURCE_UNKNOWN = "UNKNOWN"
 
@@ -17,9 +21,13 @@ SOURCE_STATUSES = frozenset(
     {
         SOURCE_LIVE,
         SOURCE_RUNTIME,
+        SOURCE_RUNTIME_ENDPOINT,
+        SOURCE_RUNTIME_ARTIFACT,
+        SOURCE_RUNTIME_REGISTRY,
         SOURCE_CACHE,
         SOURCE_HISTORICAL,
         SOURCE_MOCK,
+        SOURCE_DEMO,
         SOURCE_UNAVAILABLE,
         SOURCE_UNKNOWN,
     }
@@ -126,7 +134,7 @@ def _source_status(
     dashboard_state_available: bool,
     allow_mock: bool,
 ) -> str:
-    explicit = str(payload.get("data_source") or payload.get("source_status") or "").upper().strip()
+    explicit = str(payload.get("data_source") or payload.get("source_status") or payload.get("source") or "").upper().strip()
     if explicit in SOURCE_STATUSES:
         return explicit
 
@@ -146,10 +154,14 @@ def _source_status(
 __all__ = [
     "SECTION_SOURCE_MODULES",
     "SOURCE_CACHE",
+    "SOURCE_DEMO",
     "SOURCE_HISTORICAL",
     "SOURCE_LIVE",
     "SOURCE_MOCK",
     "SOURCE_RUNTIME",
+    "SOURCE_RUNTIME_ARTIFACT",
+    "SOURCE_RUNTIME_ENDPOINT",
+    "SOURCE_RUNTIME_REGISTRY",
     "SOURCE_STATUSES",
     "SOURCE_UNAVAILABLE",
     "SOURCE_UNKNOWN",

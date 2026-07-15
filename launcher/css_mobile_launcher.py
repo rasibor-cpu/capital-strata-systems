@@ -128,6 +128,7 @@ from backend.validation.validation_confidence_engine import ValidationConfidence
 from backend.validation.validation_readiness_engine import ValidationReadinessEngine
 from dashboard.runtime.frontend_contract import build_frontend_payload
 from dashboard.mission_control.host_registration import register_mission_control
+from dashboard.mission_control.runtime_bridge import runtime_snapshot_state_provider
 import uvicorn
 
 app = FastAPI(title=LauncherConfig.TITLE, version=LauncherConfig.VERSION)
@@ -4820,7 +4821,7 @@ async def mobile_control_resume(request: Request):
         )
     return RedirectResponse(_BROWSER_REDIRECT_TARGET, status_code=303)
 
-register_mission_control(app, build_launcher_frontend_state)
+register_mission_control(app, runtime_snapshot_state_provider(build_launcher_frontend_state))
 app.include_router(launcher_router)
 app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
 

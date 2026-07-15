@@ -53,6 +53,30 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
     async def mission_control_api_runtime() -> JSONResponse:
         return JSONResponse(safe_serialize(state().get("runtime_snapshot", {})))
 
+    @router.get("/mission-control/api/runtime-source")
+    async def mission_control_api_runtime_source() -> JSONResponse:
+        snapshot = state().get("runtime_snapshot", {})
+        snapshot = snapshot if isinstance(snapshot, Mapping) else {}
+        diagnostics = snapshot.get("source_diagnostics")
+        if not isinstance(diagnostics, Mapping):
+            diagnostics = state().get("runtime_source_diagnostics", {})
+        return JSONResponse(
+            safe_serialize(
+                {
+                    "source": snapshot.get("source", "UNAVAILABLE"),
+                    "runtime_status": snapshot.get("runtime_status", "UNAVAILABLE"),
+                    "heartbeat_status": snapshot.get("heartbeat_status", "UNAVAILABLE"),
+                    "state_hash": snapshot.get("state_hash", "UNAVAILABLE"),
+                    "diagnostics": diagnostics if isinstance(diagnostics, Mapping) else {},
+                    "read_only": True,
+                    "execution_allowed": False,
+                    "live_trading_blocked": True,
+                    "broker_execution_armed": False,
+                    "advisory_only": True,
+                }
+            )
+        )
+
     @router.get("/mission-control/api/heartbeat")
     async def mission_control_api_heartbeat() -> JSONResponse:
         snapshot = state().get("runtime_snapshot", {})

@@ -12,11 +12,7 @@ def build_runtime_snapshot(source: Callable[[], Mapping[str, Any] | None] | None
 
 def runtime_snapshot_state_provider(source: Callable[[], Mapping[str, Any] | None] | None = None):
     def provider() -> dict[str, Any]:
-        snapshot = RuntimeSnapshotProvider(source).get_snapshot()
-        return {
-            "runtime_snapshot": snapshot,
-            "frontend_payload": source() if source is not None else None,
-        }
+        return RuntimeSnapshotProvider(source, active_source_binding=True).get_state_payload()
 
     return provider
 
