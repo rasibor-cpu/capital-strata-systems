@@ -190,7 +190,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from dotenv import load_dotenv
+from backend.runtime.live_environment_loader import (
+    load_css_runtime_environment,
+    paper_only_coinbase_test_order_usd,
+)
 from backend.runtime.broker_startup_selection import (
     build_startup_broker_selection,
     persist_broker_selection,
@@ -821,8 +824,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-load_dotenv(PROJECT_ROOT / ".env")
-load_dotenv(PROJECT_ROOT / ".env.practice", override=False)
+CSS_ENVIRONMENT_LOAD_TRACE = load_css_runtime_environment(PROJECT_ROOT)
 
 # === PCNRASS PHASE 2 REAL MARKET PRICE FEED ===
 from backend.data.price_feed import get_price_feed
@@ -1356,7 +1358,7 @@ FUTURES_SYMBOLS = ["ES", "NQ", "CL", "GC"]
 
 CYCLE_SLEEP = 8
 FX_LIVE_UNITS = 1
-COINBASE_TEST_ORDER_USD = float(os.getenv("COINBASE_TEST_ORDER_USD", "1.00") or 1.00)
+COINBASE_TEST_ORDER_USD = paper_only_coinbase_test_order_usd(mode=os.getenv("SELECTED_BROKER_MODE"))
 COINBASE_MAX_LIVE_ORDER_USD = float(os.getenv("COINBASE_MAX_LIVE_ORDER_USD", "1.00") or 1.00)
 
 SESSION_IDLE_TIMEOUT_SECONDS = int(os.getenv("CSS_SESSION_IDLE_TIMEOUT_SECONDS", "3600") or 3600)

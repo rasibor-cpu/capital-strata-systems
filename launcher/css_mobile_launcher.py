@@ -6,10 +6,10 @@ import copy
 from urllib.parse import parse_qs
 from typing import Dict, Any, List, Optional
 
-from dotenv import load_dotenv
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
-load_dotenv(os.path.join(PROJECT_ROOT, ".env.practice"), override=False)
+from backend.runtime.live_environment_loader import load_css_runtime_environment
+
+CSS_ENVIRONMENT_LOAD_TRACE = load_css_runtime_environment(PROJECT_ROOT)
 from fastapi import APIRouter, Request, FastAPI
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
