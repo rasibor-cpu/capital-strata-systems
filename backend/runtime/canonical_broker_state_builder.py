@@ -20,6 +20,7 @@ from backend.runtime.canonical_broker_runtime_state import (
     finite_float,
     finite_int,
 )
+from backend.runtime.canonical_account_snapshot import build_canonical_account_snapshot
 from backend.runtime.canonical_broker_state_registry import classify_coinbase_environment
 from backend.runtime.canonical_broker_state_validator import contradiction_reasons, fail_closed_state
 
@@ -84,6 +85,58 @@ def build_canonical_broker_runtime_state(
     )
     failure_reason = _failure_reason(runtime, trace, adapter, cert, environment)
     warnings = _warning_reasons(runtime, trace, adapter, cert, environment)
+    account_snapshot = build_canonical_account_snapshot(
+        broker=broker_name,
+        mode=mode_key,
+        runtime_payload={
+            **runtime,
+            "account_status": account_status,
+            "balance_status": balance_status,
+            "buying_power_status": buying_power_status,
+            "margin_status": margin_status,
+            "market_data_status": market_data_status,
+            "status_provenance": _status_provenance(
+                mode=mode_key,
+                runtime=runtime,
+                trace=trace,
+                adapter=adapter,
+                cert=cert,
+                margin=margin,
+                credential_status=credential_status,
+                transport_status=transport_status,
+                authentication_status=authentication_status,
+                connection_status=connection_status,
+                account_status=account_status,
+                balance_status=balance_status,
+                buying_power_status=buying_power_status,
+                margin_status=margin_status,
+                market_data_status=market_data_status,
+                product_status=product_status,
+            ),
+        },
+        adapter_status=adapter,
+        certification=cert,
+        margin_snapshot=margin,
+        timestamp=timestamp or str(runtime.get("timestamp") or runtime.get("generated_at") or _utc_iso()),
+    )
+    status_provenance = _status_provenance(
+        mode=mode_key,
+        runtime=runtime,
+        trace=trace,
+        adapter=adapter,
+        cert=cert,
+        margin=margin,
+        credential_status=credential_status,
+        transport_status=transport_status,
+        authentication_status=authentication_status,
+        connection_status=connection_status,
+        account_status=account_status,
+        balance_status=balance_status,
+        buying_power_status=buying_power_status,
+        margin_status=margin_status,
+        market_data_status=market_data_status,
+        product_status=product_status,
+    )
     state = CanonicalBrokerRuntimeState(
         broker=broker_name,
         mode=mode_key,
@@ -133,28 +186,12 @@ def build_canonical_broker_runtime_state(
             market_data_status=market_data_status,
             product_status=product_status,
         ),
-        status_provenance=_status_provenance(
-            mode=mode_key,
-            runtime=runtime,
-            trace=trace,
-            adapter=adapter,
-            cert=cert,
-            margin=margin,
-            credential_status=credential_status,
-            transport_status=transport_status,
-            authentication_status=authentication_status,
-            connection_status=connection_status,
-            account_status=account_status,
-            balance_status=balance_status,
-            buying_power_status=buying_power_status,
-            margin_status=margin_status,
-            market_data_status=market_data_status,
-            product_status=product_status,
-        ),
+        account_snapshot=account_snapshot.to_dict(),
+        status_provenance=status_provenance,
         source_modules=tuple(source_modules) or _source_modules(runtime, trace, adapter, cert, margin),
         timestamp=timestamp or str(runtime.get("timestamp") or runtime.get("generated_at") or _utc_iso()),
     )
-    reasons = list(dict.fromkeys(pre_validation_reasons + contradiction_reasons(state)))
+    reasons = list(dict.fromkeys(pre_validation_reasons + list(account_snapshot.contradiction_reasons) + contradiction_reasons(state)))
     if reasons:
         return fail_closed_state(state, reasons)
     return state

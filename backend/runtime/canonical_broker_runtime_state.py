@@ -88,6 +88,7 @@ class CanonicalBrokerRuntimeState:
     warning_reasons: tuple[str, ...] = ()
     environment_evidence: Mapping[str, Any] = field(default_factory=dict)
     account_evidence: Mapping[str, Any] = field(default_factory=dict)
+    account_snapshot: Mapping[str, Any] = field(default_factory=dict)
     status_provenance: Mapping[str, Any] = field(default_factory=dict)
     source_modules: tuple[str, ...] = ()
     timestamp: str = ""
@@ -149,6 +150,7 @@ class CanonicalBrokerRuntimeState:
         payload = asdict(self)
         payload["environment_evidence"] = json_safe(dict(self.environment_evidence))
         payload["account_evidence"] = json_safe(dict(self.account_evidence))
+        payload["account_snapshot"] = json_safe(dict(self.account_snapshot))
         payload["status_provenance"] = json_safe(dict(self.status_provenance))
         payload["warning_reasons"] = list(self.warning_reasons)
         payload["source_modules"] = list(self.source_modules)
@@ -160,6 +162,7 @@ class CanonicalBrokerRuntimeState:
         payload = asdict(self)
         payload["environment_evidence"] = json_safe(dict(self.environment_evidence))
         payload["account_evidence"] = json_safe(dict(self.account_evidence))
+        payload["account_snapshot"] = json_safe(dict(self.account_snapshot))
         payload["status_provenance"] = json_safe(dict(self.status_provenance))
         return json.dumps(json_safe(payload), sort_keys=True, separators=(",", ":"), default=str)
 

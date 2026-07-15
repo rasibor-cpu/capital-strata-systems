@@ -1100,6 +1100,11 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     broker_payload = _mapping(dashboard_payload.get("broker_summary"))
     canonical_state = _mapping(broker_payload.get("canonical_broker_runtime_state"))
     canonical_account = _mapping(canonical_state.get("account_evidence"))
+    canonical_account_snapshot = _mapping(
+        canonical_state.get("account_snapshot")
+        or broker_payload.get("canonical_account_snapshot")
+        or broker_payload.get("account_snapshot")
+    )
     canonical_provenance = _mapping(canonical_state.get("status_provenance"))
     credential_diagnostics = _mapping(broker_payload.get("credential_diagnostics"))
     canonical_credential_diagnostics = broker_credential_diagnostics(dashboard_payload)
@@ -1122,6 +1127,7 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         "runtime_certification_snapshot": certification_snapshot,
         "canonical_broker_runtime_state": canonical_state,
         "canonical_account_evidence": canonical_account,
+        "canonical_account_snapshot": canonical_account_snapshot,
         "status_provenance": canonical_provenance,
         "overall_status": str(canonical_state.get("overall_status", broker_payload.get("overall_status", DATA_UNAVAILABLE))),
         "state_hash": str(canonical_state.get("state_hash", broker_payload.get("state_hash", ""))),
@@ -1207,10 +1213,34 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         "last_broker_sync": str(broker_payload.get("last_broker_sync", broker_payload.get("last_successful_sync", DATA_UNAVAILABLE))),
         "product_price_status": str(broker_payload.get("product_price_status", "NOT_TESTED")),
         "balance_position_status": str(broker_payload.get("balance_position_status", "NOT_TESTED")),
-        "account_equity": broker_payload.get("account_equity", DATA_UNAVAILABLE),
-        "cash": broker_payload.get("cash", DATA_UNAVAILABLE),
-        "buying_power": broker_payload.get("buying_power", DATA_UNAVAILABLE),
-        "available_balance": broker_payload.get("available_balance", DATA_UNAVAILABLE),
+        "account_equity": (
+            canonical_account_snapshot.get("equity")
+            if canonical_account_snapshot.get("balances_loaded") is True
+            else DATA_UNAVAILABLE
+            if canonical_account_snapshot
+            else broker_payload.get("account_equity", DATA_UNAVAILABLE)
+        ),
+        "cash": (
+            canonical_account_snapshot.get("cash")
+            if canonical_account_snapshot.get("balances_loaded") is True
+            else DATA_UNAVAILABLE
+            if canonical_account_snapshot
+            else broker_payload.get("cash", DATA_UNAVAILABLE)
+        ),
+        "buying_power": (
+            canonical_account_snapshot.get("buying_power")
+            if canonical_account_snapshot.get("balances_loaded") is True
+            else DATA_UNAVAILABLE
+            if canonical_account_snapshot
+            else broker_payload.get("buying_power", DATA_UNAVAILABLE)
+        ),
+        "available_balance": (
+            canonical_account_snapshot.get("available_balance")
+            if canonical_account_snapshot.get("balances_loaded") is True
+            else DATA_UNAVAILABLE
+            if canonical_account_snapshot
+            else broker_payload.get("available_balance", DATA_UNAVAILABLE)
+        ),
         "products_loaded": _integer(broker_payload.get("products_loaded", 0)),
         "market_data_status": str(broker_payload.get("market_data_status", broker_payload.get("product_price_status", "NOT_TESTED"))),
         "readiness_state": str(broker_payload.get("readiness_state", "UNCONFIGURED")),

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from backend.runtime.coinbase_live_adapter import CoinbaseLiveReadOnlyAdapter
+from backend.runtime.canonical_account_snapshot import build_canonical_account_snapshot
 from backend.runtime.broker_operational_status import (
     build_broker_operational_status,
     endpoint_for_broker,
@@ -198,6 +199,44 @@ class CoinbaseLiveReadOnlyOperationalValidator:
         authenticated = bool(adapter.authenticated)
         api_reachable = read_checks.get("api_connectivity") == "OK"
         validation_status = "PASS" if api_reachable and authenticated and account_loaded and balances_loaded and products_loaded > 0 and market_data_loaded and not failures else "FAIL_CLOSED"
+        account_plain = _plain(account) if isinstance(_plain(account), dict) else {}
+        account_snapshot = build_canonical_account_snapshot(
+            broker="COINBASE",
+            mode="live",
+            runtime_payload={
+                "broker": "COINBASE",
+                "broker_mode": "live",
+                "broker_authenticated": authenticated,
+                "broker_connected": api_reachable and authenticated,
+                "account_loaded": account_loaded,
+                "portfolio_loaded": read_checks.get("portfolio_retrieval") == "OK",
+                "balances_loaded": balances_loaded,
+                "market_data_loaded": market_data_loaded,
+                "account_equity": account_plain.get("equity"),
+                "cash": account_plain.get("balance"),
+                "balance": account_plain.get("balance"),
+                "buying_power": account_plain.get("buying_power"),
+                "available_balance": account_plain.get("balance"),
+                "currency": account_plain.get("currency", "USD"),
+                "account_id": account_plain.get("account_id", ""),
+                "portfolio_id": account_plain.get("account_id", ""),
+                "account_count": 1 if account_loaded else 0,
+                "portfolio_count": 1 if read_checks.get("portfolio_retrieval") == "OK" else 0,
+                "balance_timestamp": adapter.last_successful_sync or timestamp,
+                "last_successful_sync": adapter.last_successful_sync or timestamp,
+                "failure_reason": "" if balances_loaded else _first_failure_message(failures) or "BALANCE_UNAVAILABLE",
+            },
+            margin_snapshot={
+                "margin_source": "LIVE" if balances_loaded else "LIVE_UNAVAILABLE",
+                "account_id": account_plain.get("account_id", ""),
+                "buying_power": account_plain.get("buying_power") if balances_loaded else None,
+                "margin_available": account_plain.get("buying_power") if balances_loaded else None,
+                "required_margin": 0.0 if balances_loaded else None,
+                "free_margin": account_plain.get("buying_power") if balances_loaded else None,
+                "balance_timestamp": adapter.last_successful_sync or timestamp,
+            },
+            timestamp=timestamp,
+        )
         broker_validation = {
             "broker": "COINBASE",
             "mode": "LIVE READ-ONLY",
@@ -221,6 +260,8 @@ class CoinbaseLiveReadOnlyOperationalValidator:
             "live_micro_pilot_state": "DISARMED",
             "advisory_only": True,
             "execution_allowed": False,
+            "canonical_account_snapshot": account_snapshot.to_dict(),
+            "account_snapshot": account_snapshot.to_dict(),
         }
         server_time_value = "NOT_AVAILABLE"
         plain_server_time = _plain(server_time)
@@ -253,9 +294,26 @@ class CoinbaseLiveReadOnlyOperationalValidator:
                 "account_sync_status": "OK" if account_loaded else "PENDING",
                 "product_count": products_loaded,
                 "market_data_status": "OK" if market_data_loaded else "NOT_AVAILABLE",
-                "balance_status": "AVAILABLE" if balances_loaded else "NOT_AVAILABLE",
-                "margin_status": "BROKER_UNAVAILABLE" if account_loaded else "READ_ONLY_PENDING_ACCOUNT",
+                "balance_status": "AVAILABLE" if account_snapshot.balances_loaded else "NOT_AVAILABLE",
+                "margin_status": "AVAILABLE" if account_snapshot.margin_loaded else "NOT_AVAILABLE",
+                "equity": account_snapshot.equity,
+                "cash": account_snapshot.cash,
+                "buying_power": account_snapshot.buying_power,
+                "available_balance": account_snapshot.available_balance,
+                "margin_available": account_snapshot.margin_available,
+                "canonical_account_snapshot": account_snapshot.to_dict(),
                 "failure_reasons": failures,
+            }
+        )
+        broker_operational_status.update(
+            {
+                "equity": account_snapshot.equity,
+                "cash": account_snapshot.cash,
+                "buying_power": account_snapshot.buying_power,
+                "available_balance": account_snapshot.available_balance,
+                "margin_available": account_snapshot.margin_available,
+                "canonical_account_snapshot": account_snapshot.to_dict(),
+                "account_snapshot": account_snapshot.to_dict(),
             }
         )
         broker_validation["broker_operational_status"] = broker_operational_status

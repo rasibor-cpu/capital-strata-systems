@@ -1,4 +1,5 @@
 from __future__ import annotations
+from types import SimpleNamespace
 
 # === R15B MODE-AWARE EXIT PROFILE ===
 
@@ -633,26 +634,78 @@ def margin_dashboard_lines(
             else globals().get("SELECTED_BROKER_MODE", "paper")
         ).strip()
 
-        adapter, display_broker = _margin_dashboard_adapter_for_context(
-            broker,
-            broker_mode,
-        )
-        broker_snapshot = adapter.get_margin_snapshot()
         canonical_display_state = {}
         if isinstance(globals().get("COINBASE_READ_ONLY_STATUS"), dict):
             canonical_display_state = COINBASE_READ_ONLY_STATUS.get("canonical_broker_runtime_state", {}) or {}
+        canonical_account_snapshot = {}
+        if isinstance(canonical_display_state, dict):
+            canonical_account_snapshot = canonical_display_state.get("account_snapshot", {}) or {}
+        if not canonical_account_snapshot and isinstance(globals().get("COINBASE_READ_ONLY_STATUS"), dict):
+            canonical_account_snapshot = (
+                COINBASE_READ_ONLY_STATUS.get("canonical_account_snapshot")
+                or COINBASE_READ_ONLY_STATUS.get("account_snapshot")
+                or {}
+            )
         canonical_provenance = canonical_display_state.get("status_provenance", {}) if isinstance(canonical_display_state, dict) else {}
         canonical_balance_status = str(canonical_display_state.get("balance_status", "UNKNOWN") if isinstance(canonical_display_state, dict) else "UNKNOWN").upper()
         canonical_margin_provenance = str(canonical_provenance.get("margin", "UNKNOWN") if isinstance(canonical_provenance, dict) else "UNKNOWN").upper()
-        margin_source_display = str(getattr(broker_snapshot, "margin_source", "UNKNOWN") or "UNKNOWN").upper()
-        if _margin_dashboard_mode_is_live(broker_mode) and margin_source_display == "SIMULATED":
-            if str(getattr(broker_snapshot, "account_id", "") or "").startswith("SIMULATED"):
-                margin_source_display = "READ_ONLY_PENDING_ACCOUNT"
+        gate_snapshot = None
+        if (
+            broker == "COINBASE"
+            and _margin_dashboard_mode_is_live(broker_mode)
+            and isinstance(canonical_account_snapshot, dict)
+            and canonical_account_snapshot
+        ):
+            display_broker = "COINBASE"
+            snapshot_provenance = canonical_account_snapshot.get("provenance", {})
+            if isinstance(snapshot_provenance, dict):
+                canonical_margin_provenance = str(
+                    snapshot_provenance.get("margin_available")
+                    or snapshot_provenance.get("buying_power")
+                    or canonical_margin_provenance
+                    or "UNKNOWN"
+                ).upper()
+            if canonical_account_snapshot.get("balances_loaded") is True:
+                margin_source_display = canonical_margin_provenance if canonical_margin_provenance in {"LIVE", "CACHE", "HISTORICAL"} else "LIVE"
+                required_margin_value = float(canonical_account_snapshot.get("margin_required") or 0.0)
+                available_margin_value = float(
+                    canonical_account_snapshot.get("margin_available")
+                    if canonical_account_snapshot.get("margin_available") is not None
+                    else canonical_account_snapshot.get("buying_power")
+                    or 0.0
+                )
+                free_margin_value = float(
+                    canonical_account_snapshot.get("free_margin")
+                    if canonical_account_snapshot.get("free_margin") is not None
+                    else available_margin_value - required_margin_value
+                )
+                ratio = (required_margin_value / available_margin_value) if available_margin_value > 0 else 0.0
+                gate_snapshot = SimpleNamespace(
+                    buying_power=free_margin_value,
+                    margin_state="NORMAL" if available_margin_value > 0 and ratio < 0.70 else "CRITICAL",
+                    margin_ratio=ratio,
+                )
             else:
-                margin_source_display = "BROKER_UNAVAILABLE"
-        required_margin_value = broker_snapshot.required_margin
-        available_margin_value = broker_snapshot.available_margin
-        free_margin_value = broker_snapshot.free_margin
+                margin_source_display = "UNAVAILABLE"
+                required_margin_value = 0.0
+                available_margin_value = 0.0
+                free_margin_value = 0.0
+        else:
+            adapter, display_broker = _margin_dashboard_adapter_for_context(
+                broker,
+                broker_mode,
+            )
+            broker_snapshot = adapter.get_margin_snapshot()
+            gate_snapshot = broker_snapshot
+            margin_source_display = str(getattr(broker_snapshot, "margin_source", "UNKNOWN") or "UNKNOWN").upper()
+            if _margin_dashboard_mode_is_live(broker_mode) and margin_source_display == "SIMULATED":
+                if str(getattr(broker_snapshot, "account_id", "") or "").startswith("SIMULATED"):
+                    margin_source_display = "READ_ONLY_PENDING_ACCOUNT"
+                else:
+                    margin_source_display = "BROKER_UNAVAILABLE"
+            required_margin_value = broker_snapshot.required_margin
+            available_margin_value = broker_snapshot.available_margin
+            free_margin_value = broker_snapshot.free_margin
         if (
             _margin_dashboard_mode_is_live(broker_mode)
             and canonical_balance_status != "PASS"
@@ -662,13 +715,14 @@ def margin_dashboard_lines(
             required_margin_value = 0.0
             available_margin_value = 0.0
             free_margin_value = 0.0
+            gate_snapshot = None
         margin_snapshot = MarginEngine().calculate(
             required_margin=required_margin_value,
             available_margin=available_margin_value,
             margin_source=margin_source_display,
         )
         gate_decision = MarginTradeGate().evaluate(
-            margin_snapshot,
+            gate_snapshot,
             broker_mode=broker_mode,
         )
 
@@ -2285,10 +2339,21 @@ def pcnrass_update_authoritative_broker_state(val_data: dict[str, Any], validati
         
     op_status = val_data.get("broker_operational_status", {})
     if op_status and is_success:
-        COINBASE_READ_ONLY_STATUS["account_equity"] = op_status.get("equity", 0.0)
-        COINBASE_READ_ONLY_STATUS["cash"] = op_status.get("cash", 0.0)
-        COINBASE_READ_ONLY_STATUS["buying_power"] = op_status.get("buying_power", 0.0)
-        COINBASE_READ_ONLY_STATUS["available_balance"] = op_status.get("available_balance", 0.0)
+        op_snapshot = op_status.get("canonical_account_snapshot") or op_status.get("account_snapshot") or {}
+        if isinstance(op_snapshot, dict) and op_snapshot:
+            COINBASE_READ_ONLY_STATUS["canonical_account_snapshot"] = op_snapshot
+            COINBASE_READ_ONLY_STATUS["account_snapshot"] = op_snapshot
+            COINBASE_READ_ONLY_STATUS["account_equity"] = op_snapshot.get("equity")
+            COINBASE_READ_ONLY_STATUS["cash"] = op_snapshot.get("cash")
+            COINBASE_READ_ONLY_STATUS["buying_power"] = op_snapshot.get("buying_power")
+            COINBASE_READ_ONLY_STATUS["available_balance"] = op_snapshot.get("available_balance")
+            COINBASE_READ_ONLY_STATUS["margin_available"] = op_snapshot.get("margin_available")
+            COINBASE_READ_ONLY_STATUS["currency"] = op_snapshot.get("currency", COINBASE_READ_ONLY_STATUS.get("currency", "USD"))
+        else:
+            COINBASE_READ_ONLY_STATUS["account_equity"] = op_status.get("equity", 0.0)
+            COINBASE_READ_ONLY_STATUS["cash"] = op_status.get("cash", 0.0)
+            COINBASE_READ_ONLY_STATUS["buying_power"] = op_status.get("buying_power", 0.0)
+            COINBASE_READ_ONLY_STATUS["available_balance"] = op_status.get("available_balance", 0.0)
     inferred_broker = str(
         val_data.get("broker")
         or COINBASE_READ_ONLY_STATUS.get("selected_broker")

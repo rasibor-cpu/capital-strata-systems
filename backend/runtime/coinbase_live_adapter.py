@@ -14,6 +14,7 @@ from backend.runtime.broker_readiness_framework import (
 )
 from backend.runtime.live_execution_authority import evaluate_live_execution_authority
 from backend.runtime.live_readiness_state_machine import evaluate_live_readiness_state
+from backend.runtime.canonical_account_snapshot import build_canonical_account_snapshot
 
 
 READ_ONLY_EXECUTION_SCOPE = "LIVE READ-ONLY VALIDATION"
@@ -312,6 +313,7 @@ class CoinbaseLiveReadOnlyAdapter(BrokerReadOnlyInterface):
                 read_checks={
                     "account": "NOT_ATTEMPTED",
                     "balances": "NOT_ATTEMPTED",
+                    "portfolios": "NOT_ATTEMPTED",
                     "products": "NOT_ATTEMPTED",
                     "server_time": "NOT_ATTEMPTED",
                     "ticker": "NOT_ATTEMPTED",
@@ -329,6 +331,7 @@ class CoinbaseLiveReadOnlyAdapter(BrokerReadOnlyInterface):
             server_time_payload = self._safe_read("server_time", lambda: self.get_server_time())
             account_payload = self._safe_read("account", lambda: self.get_account())
             balances_payload = self._safe_read("balances", lambda: self.get_balances())
+            portfolio_payload = self._safe_read("portfolios", lambda: self.get_portfolios())
             self.connected = (server_time_payload is not None) or (account_payload is not None) or (isinstance(balances_payload, list) and len(balances_payload) > 0)
 
             products_payload = self._safe_read("products", lambda: self.get_products())
@@ -338,6 +341,7 @@ class CoinbaseLiveReadOnlyAdapter(BrokerReadOnlyInterface):
             read_checks = {
                 "account": _read_status(account_payload),
                 "balances": _read_status(balances_payload),
+                "portfolios": _read_status(portfolio_payload, unavailable_ok=True),
                 "products": _read_status(products_payload, unavailable_ok=True),
                 "server_time": _read_status(server_time_payload, unavailable_ok=True),
                 "ticker": _read_status(ticker_payload, unavailable_ok=True),
@@ -360,6 +364,8 @@ class CoinbaseLiveReadOnlyAdapter(BrokerReadOnlyInterface):
             return self._status_payload(
                 account_values=account_values,
                 read_checks=read_checks,
+                portfolio_loaded=read_checks["portfolios"] == "OK",
+                portfolio_count=count_coinbase_items(portfolio_payload),
                 products_loaded=count_coinbase_products(products_payload),
                 market_data_status="OK" if read_checks["ticker"] == "OK" else read_checks["ticker"],
                 client_created=client_created
@@ -407,6 +413,8 @@ class CoinbaseLiveReadOnlyAdapter(BrokerReadOnlyInterface):
         *,
         account_values: Mapping[str, Any] | None = None,
         read_checks: Mapping[str, str] | None = None,
+        portfolio_loaded: bool = False,
+        portfolio_count: int = 0,
         products_loaded: int = 0,
         market_data_status: str = "NOT_TESTED",
         client_created: bool = False,
@@ -415,6 +423,44 @@ class CoinbaseLiveReadOnlyAdapter(BrokerReadOnlyInterface):
         has_balance = any(
             values.get(key) is not None
             for key in ("account_equity", "cash", "buying_power", "available_balance")
+        )
+        account_loaded = str(dict(read_checks or {}).get("account", "")).upper() == "OK"
+        balances_loaded = str(dict(read_checks or {}).get("balances", "")).upper() == "OK" and has_balance
+        snapshot = build_canonical_account_snapshot(
+            broker="COINBASE",
+            mode="live",
+            runtime_payload={
+                "broker": "COINBASE",
+                "broker_mode": "live",
+                "broker_authenticated": bool(self.authenticated),
+                "broker_connected": bool(self.connected),
+                "account_loaded": account_loaded,
+                "balances_loaded": balances_loaded,
+                "portfolio_loaded": bool(portfolio_loaded),
+                "market_data_loaded": market_data_status in {"OK", "PASS", "READY", "AVAILABLE"},
+                "account_equity": values.get("account_equity"),
+                "cash": values.get("cash"),
+                "buying_power": values.get("buying_power"),
+                "available_balance": values.get("available_balance"),
+                "balance": values.get("cash"),
+                "currency": values.get("currency") or "USD",
+                "account_id": values.get("account_id") or "",
+                "portfolio_id": values.get("portfolio_id") or "",
+                "account_count": values.get("account_count") or 0,
+                "portfolio_count": int(portfolio_count or 0),
+                "balance_timestamp": self.last_successful_sync,
+                "last_successful_sync": self.last_successful_sync,
+                "failure_reason": "" if balances_loaded else self.connection_error or "BALANCE_UNAVAILABLE",
+            },
+            margin_snapshot={
+                "margin_source": "LIVE" if balances_loaded else "LIVE_UNAVAILABLE",
+                "account_id": values.get("account_id") or "",
+                "buying_power": values.get("buying_power") if balances_loaded else None,
+                "margin_available": values.get("buying_power") if balances_loaded else None,
+                "required_margin": 0.0 if balances_loaded else None,
+                "free_margin": values.get("buying_power") if balances_loaded else None,
+                "balance_timestamp": self.last_successful_sync,
+            },
         )
         broker_readiness = broker_readiness_payload(
             build_broker_readiness_snapshot(
@@ -425,7 +471,7 @@ class CoinbaseLiveReadOnlyAdapter(BrokerReadOnlyInterface):
                     "credential_status": "PRESENT" if self.credentials.ready else "MISSING",
                     "authenticated": self.authenticated,
                     "connected": self.connected,
-                    "account_loaded": has_balance,
+                    "account_loaded": balances_loaded,
                     "market_data_ready": market_data_status in {"OK", "PASS", "READY", "AVAILABLE"} and int(products_loaded or 0) > 0,
                     "products_loaded": int(products_loaded or 0),
                     "broker_health": self.health,
@@ -434,7 +480,7 @@ class CoinbaseLiveReadOnlyAdapter(BrokerReadOnlyInterface):
                     "authentication_health": "AUTHENTICATED" if self.authenticated else "NOT_TESTED",
                     "connection_health": "CONNECTED" if self.connected else "NOT_CONNECTED",
                     "market_data_health": market_data_status,
-                    "account_data_health": "READY" if has_balance else "UNAVAILABLE",
+                    "account_data_health": "READY" if balances_loaded else "UNAVAILABLE",
                     "execution_supported": True,
                     "execution_enabled": False,
                     "last_successful_sync": self.last_successful_sync,
@@ -462,7 +508,7 @@ class CoinbaseLiveReadOnlyAdapter(BrokerReadOnlyInterface):
             "authentication_health": "AUTHENTICATED" if self.authenticated else "NOT_TESTED",
             "connection_health": "CONNECTED" if self.connected else "NOT_CONNECTED",
             "market_data_health": market_data_status,
-            "account_data_health": "READY" if has_balance else "UNAVAILABLE",
+            "account_data_health": "READY" if balances_loaded else "UNAVAILABLE",
             "connection_status": self.health,
             "connection_error": self.connection_error,
             "last_successful_sync": self.last_successful_sync,
@@ -483,10 +529,19 @@ class CoinbaseLiveReadOnlyAdapter(BrokerReadOnlyInterface):
             "order_submission_status": "DISABLED",
             "orders_sent_count": 0,
             "orders_blocked_count": 0,
-            "account_equity": values.get("account_equity"),
-            "cash": values.get("cash"),
-            "buying_power": values.get("buying_power"),
-            "available_balance": values.get("available_balance"),
+            "account_loaded": account_loaded,
+            "balances_loaded": balances_loaded,
+            "portfolio_loaded": bool(portfolio_loaded),
+            "account_equity": snapshot.equity,
+            "cash": snapshot.cash,
+            "buying_power": snapshot.buying_power,
+            "available_balance": snapshot.available_balance,
+            "margin_available": snapshot.margin_available,
+            "currency": snapshot.currency,
+            "account_count": snapshot.account_count,
+            "portfolio_count": snapshot.portfolio_count,
+            "canonical_account_snapshot": snapshot.to_dict(),
+            "account_snapshot": snapshot.to_dict(),
             "products_loaded": int(products_loaded or 0),
             "market_data_status": market_data_status,
             "execution_supported": True,
@@ -498,8 +553,8 @@ class CoinbaseLiveReadOnlyAdapter(BrokerReadOnlyInterface):
             "http_status": _first_error_value(self.read_errors, "http_status"),
             "coinbase_error_code": _first_error_value(self.read_errors, "coinbase_error_code") or "",
             "coinbase_error_message": _first_error_value(self.read_errors, "coinbase_error_message") or "",
-            "drawdown_status": "UNKNOWN" if not has_balance else "AVAILABLE",
-            "drawdown_reason": "" if has_balance else UNKNOWN_DRAW_DOWN_REASON,
+            "drawdown_status": "UNKNOWN" if not balances_loaded else "AVAILABLE",
+            "drawdown_reason": "" if balances_loaded else UNKNOWN_DRAW_DOWN_REASON,
             "client_created": client_created,
         }
         authority = evaluate_live_execution_authority(payload).as_dict()
@@ -607,22 +662,30 @@ def extract_coinbase_account_values(payload: Any) -> dict[str, Any]:
                 has_usd = True
                 
         if has_usd:
+            selected = next((acct for acct in plain if acct.get("currency") == "USD"), {})
             return {
                 "account_equity": total_equity,
                 "cash": total_cash,
                 "buying_power": total_buying_power,
                 "available_balance": total_cash,
+                "currency": "USD",
+                "account_id": selected.get("account_id", ""),
+                "account_count": len(plain),
             }
             
         for acct in plain:
             total_equity += acct.get("equity", 0.0)
             total_cash += acct.get("available_balance", 0.0)
             
+        selected = plain[0]
         return {
             "account_equity": total_equity,
             "cash": total_cash,
             "buying_power": "NOT_APPLICABLE",
             "available_balance": total_cash,
+            "currency": selected.get("currency", "UNKNOWN"),
+            "account_id": selected.get("account_id", ""),
+            "account_count": len(plain),
         }
 
     # Legacy raw format handler
@@ -634,6 +697,9 @@ def extract_coinbase_account_values(payload: Any) -> dict[str, Any]:
         "cash": balance,
         "buying_power": buying_power,
         "available_balance": buying_power if buying_power is not None else balance,
+        "currency": "USD",
+        "account_id": "",
+        "account_count": 1 if balance is not None or equity is not None else 0,
     }
 
 
@@ -648,6 +714,10 @@ def count_coinbase_products(payload: Any) -> int:
                 return len(value)
         return 1 if plain else 0
     return 0
+
+
+def count_coinbase_items(payload: Any) -> int:
+    return count_coinbase_products(payload)
 
 
 def _default_coinbase_client(credentials: CoinbaseLiveCredentials) -> Any:

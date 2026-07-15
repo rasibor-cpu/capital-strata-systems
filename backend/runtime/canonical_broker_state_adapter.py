@@ -17,9 +17,13 @@ def adapt_canonical_state_to_legacy_broker_payload(
 ) -> dict[str, Any]:
     canonical = state if isinstance(state, CanonicalBrokerRuntimeState) else canonical_state_from_payload(state)
     base = dict(base_payload or {})
+    account_snapshot = dict(canonical.account_snapshot) if isinstance(canonical.account_snapshot, Mapping) else {}
+    balances_loaded = account_snapshot.get("balances_loaded") is True
     payload = {
         **base,
         "canonical_broker_runtime_state": canonical.to_dict(),
+        "canonical_account_snapshot": account_snapshot,
+        "account_snapshot": account_snapshot,
         "selected_broker": canonical.broker,
         "broker": canonical.broker,
         "broker_mode": canonical.mode,
@@ -60,6 +64,24 @@ def adapt_canonical_state_to_legacy_broker_payload(
         "status_provenance": dict(canonical.status_provenance),
         "state_hash": canonical.stable_hash(),
     }
+    if account_snapshot:
+        payload["account_loaded"] = account_snapshot.get("account_loaded", canonical.account_status == STATUS_PASS)
+        payload["balances_loaded"] = balances_loaded
+        payload["portfolio_loaded"] = account_snapshot.get("portfolio_loaded", False)
+        payload["market_data_loaded"] = account_snapshot.get("market_data_loaded", canonical.market_data_status == STATUS_PASS)
+        payload["currency"] = account_snapshot.get("currency", base.get("currency"))
+        if balances_loaded:
+            payload["account_equity"] = account_snapshot.get("equity")
+            payload["cash"] = account_snapshot.get("cash")
+            payload["buying_power"] = account_snapshot.get("buying_power")
+            payload["available_balance"] = account_snapshot.get("available_balance")
+            payload["margin_available"] = account_snapshot.get("margin_available")
+        elif canonical.mode == "live":
+            payload["account_equity"] = None
+            payload["cash"] = None
+            payload["buying_power"] = None
+            payload["available_balance"] = None
+            payload["margin_available"] = None
     return payload
 
 

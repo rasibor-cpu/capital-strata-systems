@@ -56,6 +56,23 @@ def contradiction_reasons(state: CanonicalBrokerRuntimeState) -> list[str]:
         reasons.append("balance_unavailable_but_margin_ready")
     if state.balance_status == STATUS_UNAVAILABLE and _positive_live_buying_power(state.environment_evidence):
         reasons.append("balance_unavailable_but_positive_live_margin")
+    account_snapshot = state.account_snapshot if isinstance(state.account_snapshot, Mapping) else {}
+    if account_snapshot:
+        snapshot_reasons = account_snapshot.get("contradiction_reasons")
+        if isinstance(snapshot_reasons, list):
+            reasons.extend(str(item) for item in snapshot_reasons if str(item))
+        if state.mode == "live" and account_snapshot.get("balances_loaded") is False:
+            if _positive_snapshot_value(account_snapshot, "buying_power"):
+                reasons.append("snapshot_buying_power_with_unavailable_balance")
+            if _positive_snapshot_value(account_snapshot, "margin_available"):
+                reasons.append("snapshot_margin_with_unavailable_balance")
+            if _positive_snapshot_value(account_snapshot, "equity"):
+                reasons.append("snapshot_equity_with_unavailable_balance")
+        if account_snapshot.get("equity_loaded") is True and account_snapshot.get("account_loaded") is False:
+            reasons.append("snapshot_equity_loaded_without_account")
+        if account_snapshot.get("state_hash") and state.account_evidence.get("account_snapshot_hash"):
+            if str(account_snapshot.get("state_hash")) != str(state.account_evidence.get("account_snapshot_hash")):
+                reasons.append("consumer_account_snapshot_hash_mismatch")
     if state.authentication_status == STATUS_FAIL and state.market_data_status == STATUS_PASS and state.overall_status == OVERALL_GREEN:
         reasons.append("authentication_failed_but_market_data_green")
     if state.connection_status == STATUS_PASS and state.overall_status == OVERALL_GREEN and state.authentication_status != STATUS_PASS:
@@ -88,6 +105,17 @@ def _contamination_present(evidence: Mapping[str, Any]) -> bool:
 def _positive_live_buying_power(evidence: Mapping[str, Any]) -> bool:
     value = evidence.get("live_buying_power")
     try:
+        return value is not None and float(value) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _positive_snapshot_value(snapshot: Mapping[str, Any], key: str) -> bool:
+    provenance = snapshot.get("provenance")
+    if isinstance(provenance, Mapping) and str(provenance.get(key, "")).upper() == "UNAVAILABLE":
+        return False
+    try:
+        value = snapshot.get(key)
         return value is not None and float(value) > 0
     except (TypeError, ValueError):
         return False
