@@ -1106,6 +1106,8 @@ def _login_page(message: str = "", status: str = "info") -> str:
               <span>Auth Required</span>
               <span>Timed Lockouts</span>
               <span>Role Authority</span>
+              <span>System READ ONLY</span>
+              <span>Engine SAFE</span>
             </div>
           </section>
 
@@ -1365,6 +1367,11 @@ def _dashboard_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
             <article><strong>Engine</strong><span>{html.escape(str(status['engine_mode']))}</span></article>
             <article><strong>Orders</strong><span>{order_state}</span></article>
             <article><strong>Broker Gate</strong><span>{broker_gate}</span></article>
+          </section>
+          <section class="system-strip" aria-label="Live execution guardrails">
+            <span>Engine SAFE</span>
+            <span>Orders DISABLED</span>
+            <span>Live Execution BLOCKED</span>
           </section>
 
           {_account_summary_cards(dashboard_payload)}
@@ -2163,7 +2170,7 @@ def _opportunities_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> st
             <article><strong>Visible Opportunities</strong><span>{html.escape(str(opportunity_payload.get("count", 0)))}</span></article>
           </section>
           <section class="data-panel" aria-label="Opportunity monitor">
-            <h2>Top Opportunities</h2>
+            <h2>Opportunity Monitor</h2>
             <p class="muted">This screen is observational. Trade execution remains governed by CSS tickets, role authority, order controls, and broker gates.</p>
             <div class="ops-table opportunity-table">
               <div class="ops-row ops-head">

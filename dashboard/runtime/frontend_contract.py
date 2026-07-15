@@ -23,6 +23,7 @@ from backend.analytics.portfolio_correlation_engine import (
 from backend.runtime.live_micro_pilot_governor import live_micro_pilot_status
 from backend.runtime.broker_operational_status import build_broker_operational_status
 from backend.runtime.broker_credential_diagnostics import diagnostics_payload
+from backend.runtime.broker_readiness_consolidation import build_canonical_broker_readiness
 from backend.runtime.operational_proving import build_operational_proving_report
 from backend.validation.live_readiness_certification import (
     live_readiness_certification_status,
@@ -1117,7 +1118,7 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     limit_reconciliation = _mapping(broker_payload.get("limit_reconciliation"))
     broker_readiness = _mapping(broker_payload.get("broker_readiness"))
     certification_snapshot = runtime_certification_snapshot(dashboard_payload)
-    return {
+    payload = {
         "selected_broker": str(broker_payload.get("selected_broker", "NONE")),
         "broker_type": str(broker_payload.get("broker_type", broker_readiness.get("broker_type", "UNKNOWN"))),
         "broker_mode": str(broker_payload.get("broker_mode", "paper")),
@@ -1297,6 +1298,12 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         ),
         "broker_operational_status": broker_operational_status(dashboard_payload),
     }
+    payload["canonical_broker_readiness"] = build_canonical_broker_readiness(
+        broker_section=payload,
+        certification_snapshot=certification_snapshot,
+    )
+    payload["broker_readiness"] = payload["canonical_broker_readiness"]
+    return payload
 
 
 def broker_credential_diagnostics(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:

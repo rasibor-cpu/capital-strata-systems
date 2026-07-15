@@ -78,6 +78,9 @@ backend/runtime/*
 !backend/runtime/canonical_broker_state_registry.py
 !backend/runtime/canonical_broker_state_adapter.py
 !backend/runtime/canonical_account_snapshot.py
+!backend/runtime/canonical_runtime_snapshot.py
+!backend/runtime/broker_readiness_consolidation.py
+!backend/runtime/operational_validation_framework.py
 !backend/runtime/live_environment_loader.py
 !backend/runtime/broker_environment_profiles.py
 reporting_store/

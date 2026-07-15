@@ -335,7 +335,7 @@ def _canonical_profile_credentials(broker_name: str, mode: str) -> BrokerEnviron
         explicit_profile=profile_mode_alias(mode),
         env=dict(os.environ),
         allow_legacy=False,
-        sanitize=False,
+        sanitize=True,
     )
 
 
