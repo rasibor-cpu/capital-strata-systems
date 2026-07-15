@@ -64,7 +64,6 @@ def run_broker_bootstrap_self_test(broker_name: str, mode: str) -> bool:
     from pathlib import Path
     import os
     from dotenv import load_dotenv
-    import requests
     
     project_root = Path(__file__).resolve().parents[3]
     env_file = project_root / ".env"
@@ -126,73 +125,38 @@ def run_broker_bootstrap_self_test(broker_name: str, mode: str) -> bool:
     else:
         stages["required fields present"] = "FAIL"
         
-    # Stage 5, 6, 7: Instantiate adapter and test live credentials
-    if stages["required fields present"] == "PASS":
-        try:
-            from .broker_registry import get_adapter
-            adapter_cls = get_adapter(broker_name)
-            if adapter_cls is not None:
-                adapter = _instantiate_adapter(
-                    adapter_cls=adapter_cls,
-                    broker_name=broker_name,
-                    creds=creds,
-                    mode=mode,
-                )
-                
-                # Verify authentication and account access
-                # OANDA:
-                if broker_name.lower() == "oanda":
-                    headers = {"Authorization": f"Bearer {adapter.api_key}"}
-                    url = f"{adapter.base_url}/v3/accounts/{adapter.account_id}"
-                    resp = requests.get(url, headers=headers, timeout=5)
-                    if resp.status_code == 200:
-                        stages["authentication successful"] = "PASS"
-                        stages["account accessible"] = "PASS"
-                    else:
-                        stages["authentication successful"] = "FAIL"
-                        stages["account accessible"] = "FAIL"
-                    
-                    md_url = f"{adapter.base_url}/v3/accounts/{adapter.account_id}/instruments"
-                    md_resp = requests.get(md_url, headers=headers, timeout=5)
-                    if md_resp.status_code == 200:
-                        stages["market data accessible"] = "PASS"
-                    else:
-                        stages["market data accessible"] = "FAIL"
-                
-                # Coinbase:
-                elif broker_name.lower() == "coinbase":
-                    client = adapter._get_rest_client()
-                    if client is not None:
-                        try:
-                            accounts = client.get_accounts()
-                            stages["authentication successful"] = "PASS"
-                            stages["account accessible"] = "PASS"
-                        except Exception:
-                            stages["authentication successful"] = "FAIL"
-                            stages["account accessible"] = "FAIL"
-                        
-                        try:
-                            client.get_product(product_id="BTC-USD")
-                            stages["market data accessible"] = "PASS"
-                        except Exception:
-                            stages["market data accessible"] = "FAIL"
-            else:
-                stages["authentication successful"] = "FAIL"
-                stages["account accessible"] = "FAIL"
-                stages["market data accessible"] = "FAIL"
-        except Exception:
-            stages["authentication successful"] = "FAIL"
-            stages["account accessible"] = "FAIL"
-            stages["market data accessible"] = "FAIL"
-    else:
-        stages["authentication successful"] = "FAIL"
-        stages["account accessible"] = "FAIL"
-        stages["market data accessible"] = "FAIL"
+    from backend.runtime.canonical_broker_state_builder import build_canonical_broker_runtime_state
+
+    canonical = build_canonical_broker_runtime_state(
+        broker=broker_name,
+        mode=mode,
+        runtime_payload={
+            "selected_broker": broker_name.upper(),
+            "broker_mode": mode,
+            "credential_status": "PRESENT" if stages["required fields present"] == "PASS" else "MISSING",
+            "broker_authenticated": False,
+            "broker_connected": False,
+            "account_loaded": False,
+            "balances_loaded": False,
+            "market_data_loaded": False,
+            "products_loaded": 0,
+            "validation_source": "broker_bootstrap_self_test",
+        },
+        env=os.environ,
+        source_modules=("backend.app.brokers.broker_bootstrap",),
+    )
+    stages["authentication successful"] = canonical.authentication_status
+    stages["account accessible"] = canonical.account_status
+    stages["market data accessible"] = canonical.market_data_status
 
     # Print results
     for stage, result in stages.items():
         symbol = "[v]" if result == "PASS" else "[x]"
         print(f" {symbol} {stage:<25} : {result}")
+    print(f" Canonical Overall Status      : {canonical.overall_status}")
+    print(f" Canonical Failure Reason      : {canonical.failure_reason}")
+    print(f" Canonical State Hash          : {canonical.stable_hash()}")
+    print(f" Canonical Provenance          : {canonical.status_provenance}")
     print("=================================================\n")
     
     return all(res == "PASS" for res in stages.values())

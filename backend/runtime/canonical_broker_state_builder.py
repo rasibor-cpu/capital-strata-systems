@@ -59,7 +59,8 @@ def build_canonical_broker_runtime_state(
     pre_validation_reasons = _pre_validation_reasons(runtime, trace, cert)
     credential_status = _credential_status(runtime, trace, adapter, cert)
     authentication_status = _authentication_status(trace, runtime, adapter, cert)
-    connection_status = _connection_status(runtime, adapter, trace, cert)
+    transport_status = _transport_status(runtime, adapter, trace, cert)
+    connection_status = _connection_status(transport_status, authentication_status)
     account_status = _read_status("account", runtime, trace, adapter, cert)
     balance_status = _read_status("balance", runtime, trace, adapter, cert)
     buying_power_status = _buying_power_status(runtime, adapter, margin)
@@ -87,6 +88,7 @@ def build_canonical_broker_runtime_state(
         broker=broker_name,
         mode=mode_key,
         credential_status=credential_status,
+        transport_status=transport_status,
         authentication_status=authentication_status,
         connection_status=connection_status,
         account_status=account_status,
@@ -121,6 +123,25 @@ def build_canonical_broker_runtime_state(
             trace=trace,
             adapter=adapter,
             cert=cert,
+            transport_status=transport_status,
+            authentication_status=authentication_status,
+            connection_status=connection_status,
+            account_status=account_status,
+            balance_status=balance_status,
+            buying_power_status=buying_power_status,
+            margin_status=margin_status,
+            market_data_status=market_data_status,
+            product_status=product_status,
+        ),
+        status_provenance=_status_provenance(
+            mode=mode_key,
+            runtime=runtime,
+            trace=trace,
+            adapter=adapter,
+            cert=cert,
+            margin=margin,
+            credential_status=credential_status,
+            transport_status=transport_status,
             authentication_status=authentication_status,
             connection_status=connection_status,
             account_status=account_status,
@@ -191,12 +212,22 @@ def _authentication_status(trace: Mapping[str, Any], *payloads: Mapping[str, Any
     return STATUS_NOT_TESTED
 
 
-def _connection_status(*payloads: Mapping[str, Any]) -> str:
+def _transport_status(*payloads: Mapping[str, Any]) -> str:
     for payload in payloads:
-        value = payload.get("connection_status") or payload.get("broker_connected") or payload.get("connected") or payload.get("api_reachable")
+        value = payload.get("transport_status") or payload.get("api_reachable") or payload.get("transport_reachable") or payload.get("broker_connected") or payload.get("connected")
         if value is not None:
-            return STATUS_PASS if value is True else canonical_status(value)
+            return STATUS_PASS if value is True else STATUS_FAIL if value is False else canonical_status(value)
     return STATUS_UNKNOWN
+
+
+def _connection_status(transport_status: str, authentication_status: str) -> str:
+    if transport_status == STATUS_PASS and authentication_status == STATUS_PASS:
+        return STATUS_PASS
+    if authentication_status == STATUS_FAIL:
+        return STATUS_FAIL
+    if transport_status == STATUS_FAIL:
+        return STATUS_FAIL
+    return transport_status
 
 
 def _read_status(kind: str, runtime: Mapping[str, Any], trace: Mapping[str, Any], adapter: Mapping[str, Any], cert: Mapping[str, Any]) -> str:
@@ -296,6 +327,10 @@ def _pre_validation_reasons(runtime: Mapping[str, Any], trace: Mapping[str, Any]
         reasons.append("broker_execution_armed_while_pilot_disarmed")
     if canonical_status(trace.get("authentication")) == STATUS_FAIL and str(cert.get("certification", "")).upper() in {"GREEN", "PASS"}:
         reasons.append("current_authentication_failure_overrides_stale_success")
+    raw_auth = trace.get("authentication") if trace.get("authentication") is not None else runtime.get("broker_authenticated", runtime.get("authenticated"))
+    raw_connected = runtime.get("broker_connected", runtime.get("connected", runtime.get("api_reachable")))
+    if (raw_auth is False or canonical_status(raw_auth) == STATUS_FAIL) and _truthy(raw_connected):
+        reasons.append("authentication_failed_but_connection_ready")
     raw_balance = runtime.get("balance_status") if runtime.get("balance_status") is not None else runtime.get("balances_loaded")
     balance_unavailable = raw_balance is False or canonical_status(raw_balance) == STATUS_UNAVAILABLE
     if balance_unavailable:
@@ -322,16 +357,16 @@ def _overall_status(*statuses_and_payloads: Any) -> str:
 
 def _failure_reason(runtime: Mapping[str, Any], trace: Mapping[str, Any], adapter: Mapping[str, Any], cert: Mapping[str, Any], environment: Mapping[str, Any]) -> str:
     if environment.get("status") == "FAIL":
-        return "COINBASE_LIVE_ENVIRONMENT_CONTAMINATION"
+        return "ENVIRONMENT_CONTAMINATION"
     for payload in (trace, adapter, runtime, cert):
         for key in ("failure_reason", "connection_error", "coinbase_error_code", "error_code"):
             value = payload.get(key)
             if value:
-                return str(value)
+                return _structured_reason(value)
         blockers = payload.get("blockers") or payload.get("blocker_reasons") or payload.get("failure_reasons")
         if isinstance(blockers, list) and blockers:
-            return str(blockers[0])
-    return ""
+            return _structured_reason(blockers[0])
+    return _derive_structured_failure_reason(runtime, trace, adapter, cert)
 
 
 def _account_evidence(
@@ -340,6 +375,7 @@ def _account_evidence(
     trace: Mapping[str, Any],
     adapter: Mapping[str, Any],
     cert: Mapping[str, Any],
+    transport_status: str,
     authentication_status: str,
     connection_status: str,
     account_status: str,
@@ -351,6 +387,7 @@ def _account_evidence(
 ) -> dict[str, Any]:
     balances_loaded = balance_status == STATUS_PASS
     return {
+        "transport_reachable": transport_status == STATUS_PASS,
         "authenticated": authentication_status == STATUS_PASS,
         "connected": connection_status == STATUS_PASS,
         "account_loaded": account_status == STATUS_PASS,
@@ -363,6 +400,117 @@ def _account_evidence(
         "account_type": str(runtime.get("account_type") or adapter.get("account_type") or cert.get("account_type") or "UNKNOWN"),
         "portfolio_loaded": _portfolio_loaded(runtime, trace, adapter, cert),
     }
+
+
+def _status_provenance(
+    *,
+    mode: str,
+    runtime: Mapping[str, Any],
+    trace: Mapping[str, Any],
+    adapter: Mapping[str, Any],
+    cert: Mapping[str, Any],
+    margin: Mapping[str, Any],
+    credential_status: str,
+    transport_status: str,
+    authentication_status: str,
+    connection_status: str,
+    account_status: str,
+    balance_status: str,
+    buying_power_status: str,
+    margin_status: str,
+    market_data_status: str,
+    product_status: str,
+) -> dict[str, Any]:
+    margin_source = _provenance_from_margin(margin)
+    return {
+        "credentials": _provenance_for_status(credential_status, mode, runtime, trace, adapter, cert),
+        "transport": _provenance_for_status(transport_status, mode, runtime, trace, adapter, cert),
+        "authentication": _provenance_for_status(authentication_status, mode, runtime, trace, adapter, cert),
+        "connection": _provenance_for_status(connection_status, mode, runtime, trace, adapter, cert),
+        "account": _provenance_for_status(account_status, mode, runtime, trace, adapter, cert),
+        "balances": _provenance_for_status(balance_status, mode, runtime, trace, adapter, cert),
+        "buying_power": margin_source if buying_power_status == STATUS_PASS else _provenance_for_status(buying_power_status, mode, runtime, trace, adapter, cert),
+        "margin": margin_source if margin_status == STATUS_PASS else _provenance_for_status(margin_status, mode, runtime, trace, adapter, cert),
+        "market_data": _provenance_for_status(market_data_status, mode, runtime, trace, adapter, cert),
+        "products": _provenance_for_status(product_status, mode, runtime, trace, adapter, cert),
+        "overall": "LIVE" if mode == "live" and all(
+            status == STATUS_PASS
+            for status in (credential_status, authentication_status, connection_status, account_status, balance_status, market_data_status)
+        ) else "UNAVAILABLE",
+    }
+
+
+def _provenance_for_status(status: str, mode: str, *payloads: Mapping[str, Any]) -> str:
+    for payload in payloads:
+        explicit = str(payload.get("provenance") or payload.get("source_provenance") or payload.get("data_provenance") or "").strip().upper()
+        if explicit in {"LIVE", "CACHE", "HISTORICAL", "SIMULATION", "UNAVAILABLE", "UNKNOWN"}:
+            return explicit
+    if status == STATUS_PASS:
+        return "LIVE" if str(mode).lower() == "live" else "SIMULATION"
+    if status in {STATUS_FAIL, STATUS_UNAVAILABLE, STATUS_BLOCKED}:
+        return "UNAVAILABLE"
+    return "UNKNOWN"
+
+
+def _provenance_from_margin(margin: Mapping[str, Any]) -> str:
+    source = str(margin.get("margin_source") or margin.get("source_provenance") or "").strip().upper()
+    if source in {"CACHE", "CACHED"}:
+        return "CACHE"
+    if source in {"HISTORICAL", "HISTORY"}:
+        return "HISTORICAL"
+    if source in {"SIMULATED", "SIMULATION"}:
+        return "SIMULATION"
+    if source in {"LIVE", "BROKER"}:
+        return "LIVE"
+    if source in {"LIVE_UNAVAILABLE", "UNAVAILABLE", "BROKER_UNAVAILABLE"}:
+        return "UNAVAILABLE"
+    return "UNKNOWN"
+
+
+def _derive_structured_failure_reason(*payloads: Mapping[str, Any]) -> str:
+    statuses = {}
+    for payload in payloads:
+        statuses.update({key: payload.get(key) for key in payload if key.endswith("_status") or key in {"authentication", "balances", "account", "market_data"}})
+    if canonical_status(statuses.get("authentication")) == STATUS_FAIL:
+        return "AUTHENTICATION_FAILED"
+    if canonical_status(statuses.get("account") or statuses.get("account_status")) in {STATUS_FAIL, STATUS_UNAVAILABLE}:
+        return "ACCOUNT_UNAVAILABLE"
+    if canonical_status(statuses.get("balances") or statuses.get("balance_status")) in {STATUS_FAIL, STATUS_UNAVAILABLE}:
+        return "BALANCE_UNAVAILABLE"
+    if canonical_status(statuses.get("market_data") or statuses.get("market_data_status")) in {STATUS_FAIL, STATUS_UNAVAILABLE}:
+        return "MARKET_DATA_UNAVAILABLE"
+    return "NO_FAILURE"
+
+
+def _structured_reason(value: Any) -> str:
+    text = str(value or "").strip().upper().replace("COINBASE_", "")
+    if not text or text == "NONE":
+        return "UNKNOWN"
+    aliases = {
+        "COINBASE_HTTP_401": "HTTP_401",
+        "HTTP_401": "HTTP_401",
+        "COINBASE_HTTP_403": "HTTP_403",
+        "HTTP_403": "HTTP_403",
+        "COINBASE_CLOCK_SKEW": "CLOCK_SKEW",
+        "CLOCK_SKEW": "CLOCK_SKEW",
+        "COINBASE_INVALID_JWT": "JWT_INVALID",
+        "INVALID_JWT": "JWT_INVALID",
+        "COINBASE_BALANCES_UNAVAILABLE": "BALANCE_UNAVAILABLE",
+        "BALANCES_UNAVAILABLE": "BALANCE_UNAVAILABLE",
+        "COINBASE_ACCOUNT_UNAVAILABLE": "ACCOUNT_UNAVAILABLE",
+        "ACCOUNT_UNAVAILABLE": "ACCOUNT_UNAVAILABLE",
+        "COINBASE_MARKET_DATA_ONLY": "MARKET_DATA_ONLY",
+        "MARKET_DATA_ONLY": "MARKET_DATA_ONLY",
+        "COINBASE_TIMEOUT": "BROKER_TIMEOUT",
+        "TIMEOUT": "BROKER_TIMEOUT",
+        "COINBASE_DNS_ERROR": "DNS_FAILURE",
+        "DNS_ERROR": "DNS_FAILURE",
+        "COINBASE_TLS_ERROR": "TLS_FAILURE",
+        "TLS_ERROR": "TLS_FAILURE",
+        "COINBASE_LIVE_ENVIRONMENT_CONTAMINATION": "ENVIRONMENT_CONTAMINATION",
+        "LIVE_ENVIRONMENT_CONTAMINATION": "ENVIRONMENT_CONTAMINATION",
+    }
+    return aliases.get(text, text)
 
 
 def _portfolio_loaded(runtime: Mapping[str, Any], trace: Mapping[str, Any], adapter: Mapping[str, Any], cert: Mapping[str, Any]) -> bool:

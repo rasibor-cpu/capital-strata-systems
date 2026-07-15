@@ -105,6 +105,7 @@ def test_phase166b_account_evidence_is_single_authoritative_object() -> None:
 
     assert state.overall_status == OVERALL_GREEN
     assert state.account_evidence == {
+        "transport_reachable": True,
         "authenticated": True,
         "connected": True,
         "account_loaded": True,

@@ -1100,6 +1100,7 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     broker_payload = _mapping(dashboard_payload.get("broker_summary"))
     canonical_state = _mapping(broker_payload.get("canonical_broker_runtime_state"))
     canonical_account = _mapping(canonical_state.get("account_evidence"))
+    canonical_provenance = _mapping(canonical_state.get("status_provenance"))
     credential_diagnostics = _mapping(broker_payload.get("credential_diagnostics"))
     canonical_credential_diagnostics = broker_credential_diagnostics(dashboard_payload)
     limit_reconciliation = _mapping(broker_payload.get("limit_reconciliation"))
@@ -1116,11 +1117,12 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         "broker_infrastructure_health": str(
             broker_payload.get("broker_infrastructure_health", broker_payload.get("broker_health", broker_payload.get("api_health", "UNKNOWN")))
         ),
-        "broker_ready": _boolean(broker_payload.get("broker_ready", broker_readiness.get("broker_ready"))),
+        "broker_ready": str(canonical_state.get("overall_status", "")).upper() == "GREEN",
         "broker_readiness": broker_readiness,
         "runtime_certification_snapshot": certification_snapshot,
         "canonical_broker_runtime_state": canonical_state,
         "canonical_account_evidence": canonical_account,
+        "status_provenance": canonical_provenance,
         "overall_status": str(canonical_state.get("overall_status", broker_payload.get("overall_status", DATA_UNAVAILABLE))),
         "state_hash": str(canonical_state.get("state_hash", broker_payload.get("state_hash", ""))),
         "contradiction_reasons": _string_list(canonical_state.get("contradiction_reasons", broker_payload.get("contradiction_reasons"))),
@@ -1128,7 +1130,9 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         "operational_state": str(certification_snapshot.get("operational_state", DATA_UNAVAILABLE)),
         "market_data_freshness": _mapping(certification_snapshot.get("market_data_freshness")),
         "certification_latency": _mapping(certification_snapshot.get("latency")),
-        "credentials_present": _boolean(broker_payload.get("credentials_present", broker_readiness.get("credentials_present"))),
+        "credentials_present": str(canonical_state.get("credential_status", "")).upper() == "PASS"
+        if canonical_state
+        else _boolean(broker_payload.get("credentials_present", broker_readiness.get("credentials_present"))),
         "authenticated": _boolean(canonical_account.get("authenticated", broker_payload.get("authenticated", broker_payload.get("broker_authenticated", broker_readiness.get("authenticated"))))),
         "account_loaded": _boolean(canonical_account.get("account_loaded", broker_payload.get("account_loaded", broker_readiness.get("account_loaded")))),
         "market_data_ready": _boolean(canonical_account.get("market_data_loaded", broker_payload.get("market_data_ready", broker_readiness.get("market_data_ready")))),
@@ -1139,7 +1143,7 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         "connection_health": str(canonical_state.get("connection_status", broker_payload.get("connection_health", broker_readiness.get("connection_health", "UNKNOWN")))),
         "market_data_health": str(canonical_state.get("market_data_status", broker_payload.get("market_data_health", broker_readiness.get("market_data_health", "UNKNOWN")))),
         "account_data_health": str(canonical_state.get("account_status", broker_payload.get("account_data_health", broker_readiness.get("account_data_health", "UNKNOWN")))),
-        "readiness_score": _number(broker_payload.get("readiness_score", broker_readiness.get("readiness_score"))),
+        "readiness_score": _number(canonical_state.get("readiness_score", broker_payload.get("readiness_score", broker_readiness.get("readiness_score")))),
         "broker_execution_armed": _boolean(broker_payload.get("broker_execution_armed")),
         "execution_allowed": False,
         "live_trading_blocked": True,
@@ -1156,12 +1160,10 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
             broker_payload.get("live_trading_enabled")
         ),
         "last_heartbeat": str(broker_payload.get("last_heartbeat", "")),
-        "api_health": str(broker_payload.get("api_health", "UNKNOWN")),
+        "api_health": str(canonical_state.get("overall_status", broker_payload.get("api_health", "UNKNOWN"))),
         "reconnect_state": str(broker_payload.get("reconnect_state", "NONE")),
         "supported_assets": _string_list(broker_payload.get("supported_assets")),
-        "account_readiness": str(
-            broker_payload.get("account_readiness", "UNKNOWN")
-        ),
+        "account_readiness": str(canonical_state.get("account_status", broker_payload.get("account_readiness", "UNKNOWN"))),
         "missing_credentials": _boolean(
             broker_payload.get("missing_credentials")
         ),
@@ -1195,7 +1197,11 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         ),
         "auth_status": str(broker_payload.get("auth_status", "NOT_TESTED")),
         "authentication_status": str(broker_payload.get("authentication_status", broker_payload.get("auth_status", "NOT_TESTED"))),
-        "connection_status": str(broker_payload.get("connection_status", "NOT_TESTED")),
+        "connection_status": (
+            "GREEN"
+            if str(canonical_state.get("overall_status", "")).upper() == "GREEN"
+            else str(canonical_state.get("connection_status", broker_payload.get("connection_status", "NOT_TESTED")))
+        ),
         "connection_error": str(broker_payload.get("connection_error", "")),
         "last_successful_sync": str(broker_payload.get("last_successful_sync", DATA_UNAVAILABLE)),
         "last_broker_sync": str(broker_payload.get("last_broker_sync", broker_payload.get("last_successful_sync", DATA_UNAVAILABLE))),
@@ -1878,6 +1884,9 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, Mapping):
         return {
             str(key): (
+                _json_safe_unredacted(item)
+                if str(key) == "status_provenance"
+                else
                 "REDACTED"
                 if _is_sensitive_key(str(key))
                 else _json_safe(item)
@@ -1886,6 +1895,18 @@ def _json_safe(value: Any) -> Any:
         }
     if isinstance(value, (list, tuple, set)):
         return [_json_safe(item) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
+def _json_safe_unredacted(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return format(value, "f")
+    if isinstance(value, Mapping):
+        return {str(key): _json_safe_unredacted(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe_unredacted(item) for item in value]
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     return str(value)

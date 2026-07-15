@@ -165,6 +165,9 @@ def build_runtime_certification_snapshot(
     snapshot["canonical_broker_runtime_state"] = canonical.to_dict()
     snapshot["overall_status"] = canonical.overall_status
     snapshot["state_hash"] = canonical.stable_hash()
+    snapshot["status_provenance"] = dict(canonical.status_provenance)
+    snapshot["account_evidence"] = dict(canonical.account_evidence)
+    snapshot["failure_reason"] = canonical.failure_reason
     return _json_safe(snapshot)
 
 

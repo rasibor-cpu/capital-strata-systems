@@ -24,12 +24,14 @@ def adapt_canonical_state_to_legacy_broker_payload(
         "broker": canonical.broker,
         "broker_mode": canonical.mode,
         "credential_status": "PRESENT" if canonical.credential_status == STATUS_PASS else canonical.credential_status,
+        "transport_status": "REACHABLE" if canonical.transport_status == STATUS_PASS else canonical.transport_status,
         "authentication_status": "AUTHENTICATED" if canonical.authentication_status == STATUS_PASS else canonical.authentication_status,
         "auth_status": "AUTHENTICATED" if canonical.authentication_status == STATUS_PASS else "NOT_AUTHENTICATED",
         "broker_authenticated": canonical.authentication_status == STATUS_PASS,
         "authenticated": canonical.authentication_status == STATUS_PASS,
         "connection_status": "CONNECTED" if canonical.connection_status == STATUS_PASS else canonical.connection_status,
         "broker_connected": canonical.connection_status == STATUS_PASS,
+        "connected": canonical.connection_status == STATUS_PASS,
         "account_data_health": "READY" if canonical.account_status == STATUS_PASS else canonical.account_status,
         "balance_position_status": "OK" if canonical.balance_status == STATUS_PASS else canonical.balance_status,
         "market_data_status": "OK" if canonical.market_data_status == STATUS_PASS else canonical.market_data_status,
@@ -54,6 +56,9 @@ def adapt_canonical_state_to_legacy_broker_payload(
         "failure_reason": canonical.failure_reason,
         "warning_reasons": list(canonical.warning_reasons),
         "environment_diagnostics": dict(canonical.environment_evidence),
+        "account_evidence": dict(canonical.account_evidence),
+        "status_provenance": dict(canonical.status_provenance),
+        "state_hash": canonical.stable_hash(),
     }
     return payload
 

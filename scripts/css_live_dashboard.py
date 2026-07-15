@@ -201,6 +201,7 @@ from backend.runtime.broker_parity_validator import broker_parity_payload
 from backend.runtime.broker_operational_status import endpoint_for_broker
 from backend.runtime.broker_credential_diagnostics import diagnostics_payload
 from backend.runtime.canonical_broker_state_builder import build_canonical_broker_runtime_state
+from backend.runtime.canonical_broker_state_adapter import adapt_canonical_state_to_legacy_broker_payload
 from backend.runtime.coinbase_readiness import (
     coinbase_credential_diagnostics,
     coinbase_live_limit_reconciliation,
@@ -634,15 +635,33 @@ def margin_dashboard_lines(
             broker_mode,
         )
         broker_snapshot = adapter.get_margin_snapshot()
+        canonical_display_state = {}
+        if isinstance(globals().get("COINBASE_READ_ONLY_STATUS"), dict):
+            canonical_display_state = COINBASE_READ_ONLY_STATUS.get("canonical_broker_runtime_state", {}) or {}
+        canonical_provenance = canonical_display_state.get("status_provenance", {}) if isinstance(canonical_display_state, dict) else {}
+        canonical_balance_status = str(canonical_display_state.get("balance_status", "UNKNOWN") if isinstance(canonical_display_state, dict) else "UNKNOWN").upper()
+        canonical_margin_provenance = str(canonical_provenance.get("margin", "UNKNOWN") if isinstance(canonical_provenance, dict) else "UNKNOWN").upper()
         margin_source_display = str(getattr(broker_snapshot, "margin_source", "UNKNOWN") or "UNKNOWN").upper()
         if _margin_dashboard_mode_is_live(broker_mode) and margin_source_display == "SIMULATED":
             if str(getattr(broker_snapshot, "account_id", "") or "").startswith("SIMULATED"):
                 margin_source_display = "READ_ONLY_PENDING_ACCOUNT"
             else:
                 margin_source_display = "BROKER_UNAVAILABLE"
+        required_margin_value = broker_snapshot.required_margin
+        available_margin_value = broker_snapshot.available_margin
+        free_margin_value = broker_snapshot.free_margin
+        if (
+            _margin_dashboard_mode_is_live(broker_mode)
+            and canonical_balance_status != "PASS"
+            and canonical_margin_provenance not in {"CACHE", "HISTORICAL"}
+        ):
+            margin_source_display = "UNAVAILABLE"
+            required_margin_value = 0.0
+            available_margin_value = 0.0
+            free_margin_value = 0.0
         margin_snapshot = MarginEngine().calculate(
-            required_margin=broker_snapshot.required_margin,
-            available_margin=broker_snapshot.available_margin,
+            required_margin=required_margin_value,
+            available_margin=available_margin_value,
             margin_source=margin_source_display,
         )
         gate_decision = MarginTradeGate().evaluate(
@@ -653,11 +672,13 @@ def margin_dashboard_lines(
         return [
             "=== MARGIN DASHBOARD ===",
             f"Margin Source: {margin_source_display}",
+            f"Margin Provenance: {canonical_margin_provenance}",
+            f"Canonical State Hash: {canonical_display_state.get('state_hash', 'UNKNOWN') if isinstance(canonical_display_state, dict) else 'UNKNOWN'}",
             f"Broker: {display_broker}",
             f"Broker Mode: {broker_mode.upper() if broker_mode else 'UNKNOWN'}",
-            f"Required Margin: {_format_margin_dashboard_value(broker_snapshot.required_margin)}",
-            f"Available Margin: {_format_margin_dashboard_value(broker_snapshot.available_margin)}",
-            f"Free Margin: {_format_margin_dashboard_value(broker_snapshot.free_margin)}",
+            f"Required Margin: {_format_margin_dashboard_value(required_margin_value)}",
+            f"Available Margin: {_format_margin_dashboard_value(available_margin_value)}",
+            f"Free Margin: {_format_margin_dashboard_value(free_margin_value)}",
             f"Utilization %: {_format_margin_dashboard_value(margin_snapshot.margin_utilization_pct, '%')}",
             f"Margin State: {str(margin_snapshot.margin_state.value)}",
             f"Escalation State: {str(margin_snapshot.escalation_state.value)}",
@@ -2228,6 +2249,9 @@ def pcnrass_update_authoritative_broker_state(val_data: dict[str, Any], validati
     COINBASE_READ_ONLY_STATUS["credential_status"] = "PASS" if is_success else "FAIL"
     COINBASE_READ_ONLY_STATUS["auth_status"] = "PASS" if val_data.get("authenticated") else "FAIL"
     COINBASE_READ_ONLY_STATUS["connection_status"] = "PASS" if val_data.get("api_reachable") else "FAIL"
+    COINBASE_READ_ONLY_STATUS["account_loaded"] = bool(val_data.get("account_loaded", False))
+    COINBASE_READ_ONLY_STATUS["balances_loaded"] = bool(val_data.get("balances_loaded", False))
+    COINBASE_READ_ONLY_STATUS["market_data_loaded"] = bool(val_data.get("market_data_loaded", False))
     COINBASE_READ_ONLY_STATUS["products_loaded"] = int(val_data.get("products_loaded", 0))
     COINBASE_READ_ONLY_STATUS["market_data_status"] = "OK" if val_data.get("market_data_loaded") else "FAIL"
     
@@ -2263,12 +2287,21 @@ def pcnrass_update_authoritative_broker_state(val_data: dict[str, Any], validati
         COINBASE_READ_ONLY_STATUS["cash"] = op_status.get("cash", 0.0)
         COINBASE_READ_ONLY_STATUS["buying_power"] = op_status.get("buying_power", 0.0)
         COINBASE_READ_ONLY_STATUS["available_balance"] = op_status.get("available_balance", 0.0)
+    inferred_broker = str(
+        val_data.get("broker")
+        or COINBASE_READ_ONLY_STATUS.get("selected_broker")
+        or ("OANDA" if "OANDA" in str(validation_source).upper() else "COINBASE")
+    )
+    inferred_mode = str(val_data.get("mode") or COINBASE_READ_ONLY_STATUS.get("broker_mode") or "live")
+    COINBASE_READ_ONLY_STATUS["selected_broker"] = inferred_broker.upper()
+    COINBASE_READ_ONLY_STATUS["broker"] = inferred_broker.upper()
+    COINBASE_READ_ONLY_STATUS["broker_mode"] = inferred_mode.lower()
     canonical = build_canonical_broker_runtime_state(
-        broker=str(COINBASE_READ_ONLY_STATUS.get("selected_broker", SELECTED_BROKER)),
-        mode=str(COINBASE_READ_ONLY_STATUS.get("broker_mode", SELECTED_BROKER_MODE)),
+        broker=inferred_broker,
+        mode=inferred_mode,
         runtime_payload=COINBASE_READ_ONLY_STATUS,
         certification=val_data,
-        env=os.environ,
+        env=val_data.get("env") if isinstance(val_data.get("env"), dict) else {},
         source_modules=(
             "scripts.css_live_dashboard",
             validation_source,
@@ -2277,6 +2310,19 @@ def pcnrass_update_authoritative_broker_state(val_data: dict[str, Any], validati
     COINBASE_READ_ONLY_STATUS["canonical_broker_runtime_state"] = canonical.to_dict()
     COINBASE_READ_ONLY_STATUS["overall_status"] = canonical.overall_status
     COINBASE_READ_ONLY_STATUS["state_hash"] = canonical.stable_hash()
+    COINBASE_READ_ONLY_STATUS.update(
+        adapt_canonical_state_to_legacy_broker_payload(
+            canonical,
+            base_payload=COINBASE_READ_ONLY_STATUS,
+        )
+    )
+    COINBASE_READ_ONLY_STATUS["credential_status"] = "PASS" if canonical.credential_status == "PASS" else "FAIL"
+    COINBASE_READ_ONLY_STATUS["auth_status"] = "PASS" if canonical.authentication_status == "PASS" else "FAIL"
+    COINBASE_READ_ONLY_STATUS["connection_status"] = "PASS" if canonical.connection_status == "PASS" else "FAIL"
+    if failures:
+        COINBASE_READ_ONLY_STATUS["connection_error"] = ", ".join([str(f.get("message", "")) for f in failures if isinstance(f, dict)])
+    elif canonical.failure_reason == "NO_FAILURE":
+        COINBASE_READ_ONLY_STATUS["connection_error"] = ""
 
 if SELECTED_BROKER == "COINBASE" and SELECTED_BROKER_MODE == "live":
     COINBASE_OPERATIONAL_VALIDATION = validate_coinbase_live_read_only_operational(
@@ -2380,23 +2426,21 @@ auth_status = "NOT_TESTED"
 bootstrap_result = "FAIL"
 
 if SELECTED_BROKER != "NONE":
-    from backend.runtime.broker_credential_diagnostics import diagnose_broker_credentials
-    diag = diagnose_broker_credentials(SELECTED_BROKER.lower())
-    if diag.credentials_present:
-        cred_status = "FOUND"
-    else:
-        cred_status = "INVALID" if diag.failure_reason in ("KEY_MISSING", "SECRET_MISSING", "PEM_INVALID", "TOKEN_INVALID", "ACCOUNT_ID_MISSING") else "MISSING"
-    
-    # Read from active status
     readiness = globals().get("COINBASE_READ_ONLY_STATUS", {})
     readiness = readiness if isinstance(readiness, dict) else {}
-    if readiness.get("broker_authenticated"):
-        auth_status = "AUTHENTICATED"
+    canonical = readiness.get("canonical_broker_runtime_state")
+    canonical = canonical if isinstance(canonical, dict) else {}
+    if canonical:
+        cred_status = str(canonical.get("credential_status", "UNKNOWN"))
+        auth_status = str(canonical.get("authentication_status", "UNKNOWN"))
+        bootstrap_result = str(canonical.get("overall_status", "FAIL_CLOSED"))
     else:
-        auth_status = "NOT_AUTHENTICATED"
-        
-    if diag.credentials_present and readiness.get("broker_connected", False):
-        bootstrap_result = "PASS"
+        from backend.runtime.broker_credential_diagnostics import diagnose_broker_credentials
+        diag = diagnose_broker_credentials(SELECTED_BROKER.lower())
+        if diag.credentials_present:
+            cred_status = "FOUND"
+        else:
+            cred_status = "INVALID" if diag.failure_reason in ("KEY_MISSING", "SECRET_MISSING", "PEM_INVALID", "TOKEN_INVALID", "ACCOUNT_ID_MISSING") else "MISSING"
 else:
     cred_status = "N/A"
     auth_status = "N/A"
@@ -2405,6 +2449,11 @@ else:
 print(f"Credential Status    : {cred_status}")
 print(f"Authentication Status: {auth_status}")
 print(f"Bootstrap Result     : {bootstrap_result}")
+if SELECTED_BROKER != "NONE" and isinstance(globals().get("COINBASE_READ_ONLY_STATUS", {}), dict):
+    canonical = COINBASE_READ_ONLY_STATUS.get("canonical_broker_runtime_state", {})
+    if isinstance(canonical, dict) and canonical:
+        print(f"Canonical State Hash : {canonical.get('state_hash', 'UNKNOWN')}")
+        print(f"Status Provenance    : {canonical.get('status_provenance', 'UNKNOWN')}")
 print("===========================\n")
 
 import sys
@@ -4300,6 +4349,10 @@ def print_coinbase_broker_status() -> None:
     diagnostics = readiness.get("credential_diagnostics")
     if not isinstance(diagnostics, dict):
         diagnostics = coinbase_credential_diagnostics().as_dict()
+    canonical = readiness.get("canonical_broker_runtime_state")
+    canonical = canonical if isinstance(canonical, dict) else {}
+    canonical_account = canonical.get("account_evidence") if isinstance(canonical.get("account_evidence"), dict) else {}
+    canonical_provenance = canonical.get("status_provenance") if isinstance(canonical.get("status_provenance"), dict) else {}
     limits = readiness.get("limit_reconciliation")
     if not isinstance(limits, dict):
         limits = coinbase_live_limit_reconciliation(legacy_limit_usd=COINBASE_MAX_LIVE_ORDER_USD)
@@ -4308,7 +4361,7 @@ def print_coinbase_broker_status() -> None:
         diagnostics.get("coinbase_private_key_present")
         or diagnostics.get("coinbase_key_file_present")
     )
-    connected = bool(readiness.get("broker_connected", coinbase is not None))
+    connected = bool(canonical_account.get("connected", readiness.get("broker_connected", False)))
     execution_scope = str(readiness.get("execution_scope", "PAPER_OR_NOT_SELECTED"))
     auth_reason = str(readiness.get("auth_reason", "not_coinbase_live_read_only"))
     if SELECTED_BROKER == "COINBASE" and SELECTED_BROKER_MODE == "live" and not BROKER_EXECUTION_ARMED:
@@ -4323,6 +4376,15 @@ def print_coinbase_broker_status() -> None:
     print(f"COINBASE KEY PRESENT: {'YES' if key_present else 'NO'}")
     print(f"COINBASE PRIVATE KEY PRESENT: {'YES' if private_key_present else 'NO'}")
     print(f"COINBASE CONNECTED: {'YES' if connected else 'NO'}")
+    print(f"CANONICAL TRANSPORT STATUS: {canonical.get('transport_status', 'UNKNOWN')}")
+    print(f"CANONICAL AUTH STATUS: {canonical.get('authentication_status', 'UNKNOWN')}")
+    print(f"CANONICAL ACCOUNT STATUS: {canonical.get('account_status', 'UNKNOWN')}")
+    print(f"CANONICAL BALANCE STATUS: {canonical.get('balance_status', 'UNKNOWN')}")
+    print(f"CANONICAL MARGIN STATUS: {canonical.get('margin_status', 'UNKNOWN')}")
+    print(f"CANONICAL OVERALL STATUS: {canonical.get('overall_status', 'UNKNOWN')}")
+    print(f"CANONICAL FAILURE REASON: {canonical.get('failure_reason', 'UNKNOWN')}")
+    print(f"CANONICAL STATE HASH: {canonical.get('state_hash', 'UNKNOWN')}")
+    print(f"CANONICAL PROVENANCE: {canonical_provenance if canonical_provenance else 'UNKNOWN'}")
     print(f"AUTH REASON: {auth_reason}")
     print(f"CREDENTIAL STATUS: {readiness.get('credential_status', 'DATA UNAVAILABLE')}")
     print(f"AUTH STATUS: {readiness.get('auth_status', 'NOT_TESTED')}")
@@ -4359,6 +4421,9 @@ def print_coinbase_broker_status() -> None:
     )
 
     if SELECTED_BROKER != "COINBASE":
+        return
+
+    if canonical:
         return
 
     if coinbase is None:

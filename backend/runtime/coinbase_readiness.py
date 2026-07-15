@@ -12,6 +12,7 @@ from backend.runtime.broker_credential_diagnostics import (
 )
 from backend.runtime.coinbase_live_adapter import CoinbaseLiveReadOnlyAdapter, READ_ONLY_EXECUTION_SCOPE
 from backend.runtime.canonical_broker_state_builder import build_canonical_broker_runtime_state
+from backend.runtime.canonical_broker_state_adapter import adapt_canonical_state_to_legacy_broker_payload
 from backend.runtime.live_execution_authority import evaluate_live_execution_authority
 from backend.runtime.live_readiness_state_machine import evaluate_live_readiness_state
 
@@ -360,6 +361,14 @@ def merge_readiness_into_broker_state(selection: BrokerStartupSelection, readine
             "validation_completed": bool(readiness.get("validation_completed", False)),
             "validation_source": str(readiness.get("validation_source", "")),
             "last_successful_validation_at": str(readiness.get("last_successful_validation_at", "")),
+            "canonical_broker_runtime_state": dict(readiness.get("canonical_broker_runtime_state", {}))
+            if isinstance(readiness.get("canonical_broker_runtime_state"), Mapping)
+            else {},
+            "overall_status": str(readiness.get("overall_status", "")),
+            "state_hash": str(readiness.get("state_hash", "")),
+            "status_provenance": dict(readiness.get("status_provenance", {}))
+            if isinstance(readiness.get("status_provenance"), Mapping)
+            else {},
         }
     )
     authority = evaluate_live_execution_authority(state).as_dict()
@@ -409,6 +418,12 @@ def _apply_readiness_state(result: dict[str, Any]) -> dict[str, Any]:
     result["overall_status"] = canonical.overall_status
     result["contradiction_reasons"] = list(canonical.contradiction_reasons)
     result["state_hash"] = canonical.stable_hash()
+    legacy_authority_reason = result.get("authority_reason")
+    result.update(adapt_canonical_state_to_legacy_broker_payload(canonical, base_payload=result))
+    if legacy_authority_reason:
+        result["authority_reason"] = str(legacy_authority_reason)
+    if str(result.get("auth_reason", "")).lower() == "live/practice contamination":
+        result["connection_status"] = "BLOCKED"
     return result
 
 

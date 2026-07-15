@@ -24,6 +24,10 @@ STARTUP_SUMMARY_FIELDS = (
     "Overall Status",
     "Failure Reason",
     "Warnings",
+    "Provenance",
+    "Operator Requested Live",
+    "Execution Authority",
+    "Can Live Execute",
     "State Hash",
 )
 
@@ -104,8 +108,9 @@ def build_live_startup_summary(
         "Readiness State": readiness.readiness_state,
         "GO / NO GO": readiness.go_no_go,
         "Overall Status": canonical_state.overall_status,
-        "Failure Reason": canonical_state.failure_reason or "NONE",
+        "Failure Reason": canonical_state.failure_reason or "UNKNOWN",
         "Warnings": ", ".join(canonical_state.warning_reasons) if canonical_state.warning_reasons else "NONE",
+        "Provenance": _format_provenance(canonical_state.status_provenance),
         "State Hash": canonical_state.stable_hash(),
         "execution_allowed": False,
         "live_trading_blocked": True,
@@ -125,6 +130,8 @@ def build_live_startup_summary(
             **diagnostics,
             "canonical_broker_runtime_state": canonical_state.to_dict(),
             "overall_status": canonical_state.overall_status,
+            "status_provenance": dict(canonical_state.status_provenance),
+            "state_hash": canonical_state.stable_hash(),
             "operator_requested_live": authority.operator_requested_live,
             "execution_enabled": authority.execution_authority,
             "broker_execution_enabled": broker_execution_enabled,
@@ -162,6 +169,13 @@ def _truthy(value: Any) -> bool:
     if isinstance(value, (int, float)):
         return value != 0
     return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on", "enabled", "armed", "connected", "authenticated", "pass", "ok", "green", "healthy"}
+
+
+def _format_provenance(provenance: Mapping[str, Any]) -> str:
+    if not isinstance(provenance, Mapping) or not provenance:
+        return "UNKNOWN"
+    keys = ("credentials", "authentication", "connection", "account", "balances", "buying_power", "margin", "market_data", "products")
+    return "; ".join(f"{key}={provenance.get(key, 'UNKNOWN')}" for key in keys)
 
 
 __all__ = [

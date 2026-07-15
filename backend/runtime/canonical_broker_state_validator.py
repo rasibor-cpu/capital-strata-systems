@@ -42,10 +42,14 @@ def contradiction_reasons(state: CanonicalBrokerRuntimeState) -> list[str]:
         reasons.append("non_finite_latency")
     if state.credential_status in {STATUS_FAIL, STATUS_UNAVAILABLE} and state.authentication_status == STATUS_PASS:
         reasons.append("credentials_missing_but_authentication_pass")
+    if state.authentication_status == STATUS_FAIL:
+        reasons.append("authentication_failed")
     if state.authentication_status == STATUS_FAIL and state.account_status == STATUS_PASS:
         reasons.append("authentication_failed_but_account_ready")
     if state.authentication_status == STATUS_FAIL and state.connection_status == STATUS_PASS:
         reasons.append("authentication_failed_but_connection_ready")
+    if state.authentication_status == STATUS_FAIL and state.transport_status == STATUS_PASS:
+        reasons.append("authentication_failed_but_transport_reachable")
     if state.balance_status == STATUS_UNAVAILABLE and state.buying_power_status == STATUS_PASS:
         reasons.append("balance_unavailable_but_buying_power_ready")
     if state.balance_status == STATUS_UNAVAILABLE and state.margin_status == STATUS_PASS:
