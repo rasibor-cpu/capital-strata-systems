@@ -156,12 +156,19 @@ def test_mc003_runtime_and_heartbeat_api_share_state_hash() -> None:
 
 
 def test_mc003_mobile_launcher_registers_mission_control_routes_read_only() -> None:
-    paths = {route.path: set(route.methods or set()) for route in css_mobile_launcher.app.routes if str(getattr(route, "path", "")).startswith("/mission-control")}
+    client = TestClient(css_mobile_launcher.app)
+    endpoints = (
+        "/mission-control/api/runtime",
+        "/mission-control/api/runtime-source",
+        "/mission-control/api/heartbeat",
+        "/mission-control/executive-overview",
+    )
 
-    assert "/mission-control/api/runtime" in paths
-    assert "/mission-control/api/heartbeat" in paths
-    assert "/mission-control/executive-overview" in paths or "/mission-control/{section_slug}" in paths
-    assert all(methods <= {"GET", "HEAD"} for methods in paths.values())
+    for endpoint in endpoints:
+        assert client.get(endpoint).status_code == 200
+        for method in ("post", "put", "patch", "delete"):
+            response = getattr(client, method)(endpoint)
+            assert response.status_code in {404, 405}
 
 
 def test_mc003_artifact_snapshot_cache_path_is_read_only_and_cache_labeled(tmp_path) -> None:

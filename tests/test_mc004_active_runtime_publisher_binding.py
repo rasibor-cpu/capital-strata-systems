@@ -225,10 +225,17 @@ def test_mc004_mission_control_state_and_runtime_source_api_share_snapshot(tmp_p
 
 
 def test_mc004_launcher_registration_exposes_runtime_source_route_read_only() -> None:
-    paths = {route.path: set(route.methods or set()) for route in css_mobile_launcher.app.routes if str(getattr(route, "path", "")).startswith("/mission-control")}
+    client = TestClient(css_mobile_launcher.app)
+    endpoints = (
+        "/mission-control/api/runtime",
+        "/mission-control/api/runtime-source",
+    )
 
-    assert "/mission-control/api/runtime-source" in paths
-    assert all(methods <= {"GET", "HEAD"} for methods in paths.values())
+    for endpoint in endpoints:
+        assert client.get(endpoint).status_code == 200
+        for method in ("post", "put", "patch", "delete"):
+            response = getattr(client, method)(endpoint)
+            assert response.status_code in {404, 405}
 
 
 def test_mc004_demo_payload_remains_isolated_from_active_runtime_binding() -> None:
