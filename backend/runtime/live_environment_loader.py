@@ -4,7 +4,12 @@ import os
 from pathlib import Path
 from typing import Any, MutableMapping
 
-from dotenv import dotenv_values, load_dotenv
+from backend.runtime.broker_environment_profiles import (
+    BrokerEnvironmentProfile,
+    build_broker_environment,
+    profile_mode_alias,
+    profile_trace,
+)
 
 
 PAPER_ONLY_LIVE_BLOCKED_KEYS = ("COINBASE_TEST_ORDER_USD",)
@@ -14,15 +19,32 @@ def load_css_runtime_environment(
     project_root: str | Path,
     *,
     mode: str | None = None,
+    profile: str | BrokerEnvironmentProfile | None = None,
+    broker: str = "COINBASE",
     env: MutableMapping[str, str] | None = None,
 ) -> dict[str, Any]:
     target_env = env if env is not None else os.environ
-    root = Path(project_root)
-    mode_key = _normalized_mode(mode or _mode_from_env(target_env))
+    legacy_profile = profile or profile_mode_alias(mode)
+    credentials = build_broker_environment(
+        project_root,
+        broker=broker,
+        explicit_profile=legacy_profile,
+        env=target_env,
+        allow_legacy=True,
+    )
+    trace = profile_trace(credentials)
+    mode_key = _mode_from_profile(credentials.profile)
     loaded = {
-        "env_loaded": _load_env_file(root / ".env", target_env, override=False),
-        "practice_env_loaded": False,
+        **trace,
+        "env_loaded": any(Path(path).name == ".env" for path in credentials.loaded_files),
+        "shared_env_loaded": any(Path(path).name == ".env.shared" for path in credentials.loaded_files),
+        "paper_env_loaded": any(Path(path).name == ".env.paper" for path in credentials.loaded_files),
+        "live_read_only_env_loaded": any(Path(path).name == ".env.live_read_only" for path in credentials.loaded_files),
+        "live_execution_env_loaded": any(Path(path).name == ".env.live_execution" for path in credentials.loaded_files),
+        "practice_env_loaded": any(Path(path).name == ".env.practice" for path in credentials.loaded_files),
         "mode": mode_key,
+        "profile": credentials.profile.value if credentials.profile else "UNSELECTED",
+        "canonical_broker_environment": credentials.redacted_diagnostics(),
         "removed_live_blocked_keys": [],
         "paper_only_keys_present_after_load": [],
         "secrets_redacted": True,
@@ -31,10 +53,9 @@ def load_css_runtime_environment(
         "broker_execution_armed": False,
         "advisory_only": True,
     }
-    if mode_key not in {"live", "unknown"}:
-        loaded["practice_env_loaded"] = _load_env_file(root / ".env.practice", target_env, override=False)
-    else:
-        loaded["removed_live_blocked_keys"] = sanitize_live_environment(target_env)
+    loaded["removed_live_blocked_keys"] = [
+        key for key in credentials.removed_inherited_variables if key in PAPER_ONLY_LIVE_BLOCKED_KEYS
+    ]
     loaded["paper_only_keys_present_after_load"] = [
         key for key in PAPER_ONLY_LIVE_BLOCKED_KEYS if target_env.get(key) not in (None, "")
     ]
@@ -49,21 +70,6 @@ def sanitize_live_environment(env: MutableMapping[str, str] | None = None) -> li
             target_env.pop(key, None)
             removed.append(key)
     return removed
-
-
-def _load_env_file(path: Path, env: MutableMapping[str, str], *, override: bool) -> bool:
-    if env is os.environ:
-        return bool(load_dotenv(path, override=override))
-    if not path.exists():
-        return False
-    loaded = False
-    for key, value in dotenv_values(path).items():
-        if value is None:
-            continue
-        if override or key not in env:
-            env[str(key)] = str(value)
-            loaded = True
-    return loaded
 
 
 def paper_only_coinbase_test_order_usd(
@@ -82,7 +88,7 @@ def paper_only_coinbase_test_order_usd(
 
 
 def _mode_from_env(env: MutableMapping[str, str]) -> str:
-    for key in ("CSS_BROKER_MODE", "SELECTED_BROKER_MODE", "BROKER_MODE", "CSS_RUNTIME_MODE", "ENGINE_MODE"):
+    for key in ("CSS_BROKER_MODE", "SELECTED_BROKER_MODE", "BROKER_MODE", "CSS_RUNTIME_MODE"):
         value = str(env.get(key, "") or "").strip()
         if value:
             return value
@@ -95,6 +101,14 @@ def _normalized_mode(value: str | None) -> str:
         return "live"
     if text in {"paper", "practice", "demo", "sim", "simulation", "safe"}:
         return "paper"
+    return "unknown"
+
+
+def _mode_from_profile(profile: BrokerEnvironmentProfile | None) -> str:
+    if profile == BrokerEnvironmentProfile.PAPER:
+        return "paper"
+    if profile in {BrokerEnvironmentProfile.LIVE_READ_ONLY, BrokerEnvironmentProfile.LIVE_EXECUTION}:
+        return "live"
     return "unknown"
 
 

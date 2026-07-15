@@ -60,6 +60,7 @@ def build_broker_registry(active_broker: Mapping[str, Any]) -> list[dict[str, An
     selected = str(active_broker.get("selected_broker", active_broker.get("broker", "NONE"))).upper()
     mode = str(active_broker.get("broker_mode", "paper")).lower()
     broker_health = str(active_broker.get("broker_health", "UNAVAILABLE"))
+    profile = _profile_metadata(active_broker)
     registry = [
         {
             "broker": "COINBASE",
@@ -71,6 +72,7 @@ def build_broker_registry(active_broker: Mapping[str, Any]) -> list[dict[str, An
             "market_data": active_broker.get("market_data_status", "UNKNOWN") if selected == "COINBASE" else "UNKNOWN",
             "account_data": active_broker.get("account_data_health", "UNKNOWN") if selected == "COINBASE" else "UNKNOWN",
             "readiness": active_broker.get("overall_status", broker_health) if selected == "COINBASE" else "UNCONFIGURED",
+            "profile": profile if selected == "COINBASE" else _inactive_profile(),
             "priority": 1,
             "supported_assets": ["CRYPTO"],
             "supported_strategies": ["spot_read_only", "future_pilot_candidate"],
@@ -86,6 +88,7 @@ def build_broker_registry(active_broker: Mapping[str, Any]) -> list[dict[str, An
             "market_data": active_broker.get("market_data_status", "UNKNOWN") if selected == "OANDA" else "UNKNOWN",
             "account_data": active_broker.get("account_data_health", "UNKNOWN") if selected == "OANDA" else "UNKNOWN",
             "readiness": active_broker.get("overall_status", broker_health) if selected == "OANDA" else "UNCONFIGURED",
+            "profile": profile if selected == "OANDA" else _inactive_profile(),
             "priority": 2,
             "supported_assets": ["FOREX"],
             "supported_strategies": ["fx_read_only", "future_pilot_candidate"],
@@ -105,6 +108,7 @@ def build_broker_registry(active_broker: Mapping[str, Any]) -> list[dict[str, An
             "supported_assets": ["STOCK", "ETF", "OPTION", "FUTURE"],
             "supported_strategies": ["future_options_income"],
             "selected": selected == "IBKR",
+            "profile": _inactive_profile(),
         },
         {
             "broker": "PAPER",
@@ -120,9 +124,48 @@ def build_broker_registry(active_broker: Mapping[str, Any]) -> list[dict[str, An
             "supported_assets": ["STOCK", "ETF", "OPTION", "FOREX", "CRYPTO"],
             "supported_strategies": ["paper_only"],
             "selected": selected in {"PAPER", "DEMO", "NONE"},
+            "profile": profile if selected in {"PAPER", "DEMO", "NONE"} else _inactive_profile(profile_name="PAPER"),
         },
     ]
     return registry
+
+
+def _profile_metadata(active_broker: Mapping[str, Any]) -> dict[str, Any]:
+    profile = active_broker.get("broker_environment_profile")
+    if not isinstance(profile, Mapping):
+        canonical = active_broker.get("canonical_broker_runtime_state")
+        if isinstance(canonical, Mapping):
+            profile = canonical.get("environment_evidence")
+    source = dict(profile) if isinstance(profile, Mapping) else {}
+    return {
+        "profile": str(source.get("profile", active_broker.get("profile", "UNSELECTED"))),
+        "environment": str(source.get("environment", active_broker.get("environment", active_broker.get("broker_mode", "paper")))),
+        "permissions_classification": str(source.get("permissions_classification", active_broker.get("permissions_classification", "UNKNOWN"))),
+        "profile_fingerprint": str(source.get("profile_fingerprint", active_broker.get("profile_fingerprint", ""))),
+        "contamination_status": str(source.get("status", active_broker.get("contamination_status", "UNKNOWN"))),
+        "contamination_keys": list(source.get("contamination_keys", active_broker.get("contamination_keys", [])) or []),
+        "credential_values_redacted": True,
+        "execution_allowed": False,
+        "live_trading_blocked": True,
+        "broker_execution_armed": False,
+        "advisory_only": True,
+    }
+
+
+def _inactive_profile(*, profile_name: str = "UNSELECTED") -> dict[str, Any]:
+    return {
+        "profile": profile_name,
+        "environment": "inactive",
+        "permissions_classification": "NOT_APPLICABLE",
+        "profile_fingerprint": "",
+        "contamination_status": "NOT_APPLICABLE",
+        "contamination_keys": [],
+        "credential_values_redacted": True,
+        "execution_allowed": False,
+        "live_trading_blocked": True,
+        "broker_execution_armed": False,
+        "advisory_only": True,
+    }
 
 
 __all__ = [

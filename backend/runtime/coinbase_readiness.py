@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from backend.runtime.broker_startup_selection import BrokerStartupSelection, build_startup_broker_selection
@@ -13,6 +14,7 @@ from backend.runtime.broker_credential_diagnostics import (
 from backend.runtime.coinbase_live_adapter import CoinbaseLiveReadOnlyAdapter, READ_ONLY_EXECUTION_SCOPE
 from backend.runtime.canonical_broker_state_builder import build_canonical_broker_runtime_state
 from backend.runtime.canonical_broker_state_adapter import adapt_canonical_state_to_legacy_broker_payload
+from backend.runtime.broker_environment_profiles import build_broker_environment, profile_mode_alias
 from backend.runtime.live_execution_authority import evaluate_live_execution_authority
 from backend.runtime.live_readiness_state_machine import evaluate_live_readiness_state
 
@@ -134,6 +136,13 @@ def evaluate_coinbase_live_read_only(
     adapter_factory: Callable[[], Any] | None = None,
     legacy_limit_usd: Any = 1.0,
 ) -> dict[str, Any]:
+    canonical_environment = build_broker_environment(
+        Path(__file__).resolve().parents[2],
+        broker="COINBASE",
+        explicit_profile=profile_mode_alias(selection.broker_mode),
+        env=dict(env) if isinstance(env, Mapping) else dict(os.environ),
+        allow_legacy=True,
+    ).redacted_diagnostics()
     diagnostics = coinbase_credential_diagnostics(env)
     canonical_diagnostics = diagnostics.as_dict().get("broker_credential_diagnostics", diagnostics.as_dict())
     authority_reason = authority_reason_from_diagnostics(canonical_diagnostics)
@@ -161,6 +170,8 @@ def evaluate_coinbase_live_read_only(
             "products_or_prices": "NOT_ATTEMPTED",
         },
         "credential_diagnostics": diagnostics.as_dict(),
+        "canonical_broker_environment": canonical_environment,
+        "broker_environment_profile": canonical_environment,
         "broker_credential_diagnostics": dict(canonical_diagnostics),
         "limit_reconciliation": coinbase_live_limit_reconciliation(legacy_limit_usd=legacy_limit_usd),
         "advisory_only": True,

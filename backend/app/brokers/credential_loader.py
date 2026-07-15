@@ -24,6 +24,11 @@ from typing import Any, Dict, Optional
 from dotenv import load_dotenv
 
 from .broker_registry import get_broker_spec
+from backend.runtime.broker_environment_profiles import (
+    BrokerEnvironmentCredentials,
+    build_broker_environment,
+    profile_mode_alias,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -200,35 +205,37 @@ def _env_present(*names: str) -> bool:
 
 
 def _load_coinbase_env_credentials(mode: str) -> Optional[Dict[str, Any]]:
-    load_dotenv(REPO_ROOT / ".env")
-    if str(mode or "").strip().lower() != "live":
-        load_dotenv(REPO_ROOT / ".env.practice", override=False)
+    canonical = _canonical_profile_credentials("COINBASE", mode)
+    source = canonical.credentials_for_broker()
+    if canonical.validation_status != "PASS" and not (
+        canonical.key_identifier_present or canonical.private_key_present
+    ):
+        return None
 
     for key_file in (
-        os.getenv("COINBASE_KEY_JSON_PATH"),
-        os.getenv("COINBASE_KEY_JSON"),
-        os.getenv("COINBASE_KEY_FILE"),
+        source.get("COINBASE_KEY_JSON_PATH"),
+        source.get("COINBASE_KEY_JSON"),
+        source.get("COINBASE_KEY_FILE"),
     ):
         json_credentials = _load_coinbase_json_credentials(key_file or "")
         if json_credentials:
-            json_credentials["COINBASE_ENABLE_LIVE_ORDERS"] = os.getenv(
-                "COINBASE_ENABLE_LIVE_ORDERS", "false"
-            )
+            json_credentials["COINBASE_ENABLE_LIVE_ORDERS"] = "false"
+            json_credentials["canonical_broker_environment"] = canonical.redacted_diagnostics()
             return json_credentials
 
-    key_name = os.getenv("COINBASE_CDP_KEY_NAME") or os.getenv("COINBASE_KEY_NAME")
+    key_name = source.get("COINBASE_CDP_KEY_NAME") or source.get("COINBASE_KEY_NAME")
     private_key_source = (
-        os.getenv("COINBASE_CDP_PRIVATE_KEY")
-        or os.getenv("COINBASE_PRIVATE_KEY")
-        or os.getenv("COINBASE_CDP_PRIVATE_KEY_PATH")
-        or os.getenv("COINBASE_PRIVATE_KEY_PATH")
+        source.get("COINBASE_CDP_PRIVATE_KEY")
+        or source.get("COINBASE_PRIVATE_KEY")
+        or source.get("COINBASE_CDP_PRIVATE_KEY_PATH")
+        or source.get("COINBASE_PRIVATE_KEY_PATH")
     )
     private_key = _normalize_coinbase_private_key_material(private_key_source)
 
     key_file = (
-        os.getenv("COINBASE_KEY_JSON_PATH")
-        or os.getenv("COINBASE_KEY_JSON")
-        or os.getenv("COINBASE_KEY_FILE")
+        source.get("COINBASE_KEY_JSON_PATH")
+        or source.get("COINBASE_KEY_JSON")
+        or source.get("COINBASE_KEY_FILE")
     )
 
     if not key_name and not private_key and not key_file:
@@ -254,29 +261,31 @@ def _load_coinbase_env_credentials(mode: str) -> Optional[Dict[str, Any]]:
         credentials["COINBASE_KEY_FILE"] = str(resolved_key_file)
         credentials["COINBASE_KEY_JSON_PATH"] = str(resolved_key_file)
 
-    credentials["COINBASE_ENABLE_LIVE_ORDERS"] = os.getenv(
-        "COINBASE_ENABLE_LIVE_ORDERS", "false"
-    )
+    credentials["COINBASE_ENABLE_LIVE_ORDERS"] = "false"
+    credentials["canonical_broker_environment"] = canonical.redacted_diagnostics()
 
     return credentials if credentials else None
 
 
 def _load_oanda_env_credentials(mode: str) -> Optional[Dict[str, Any]]:
-    load_dotenv(REPO_ROOT / ".env")
-    if str(mode or "").strip().lower() != "live":
-        load_dotenv(REPO_ROOT / ".env.practice", override=False)
+    canonical = _canonical_profile_credentials("OANDA", mode)
+    source = canonical.credentials_for_broker()
+    if canonical.validation_status != "PASS" and not (
+        canonical.key_identifier_present or canonical.private_key_present
+    ):
+        return None
 
     token = (
-        os.getenv("OANDA_API_KEY")
-        or os.getenv("OANDA_ACCESS_TOKEN")
-        or os.getenv("OANDA_TOKEN")
+        source.get("OANDA_API_KEY")
+        or source.get("OANDA_ACCESS_TOKEN")
+        or source.get("OANDA_TOKEN")
     )
     
     if mode == "live":
-        account_id = os.getenv("OANDA_ACCOUNT_ID")
+        account_id = source.get("OANDA_ACCOUNT_ID") or source.get("OANDA_LIVE_ACCOUNT_ID")
         env = "live"
     else:
-        account_id = os.getenv("OANDA_PRACTICE_ACCOUNT_ID") or os.getenv("OANDA_ACCOUNT_ID")
+        account_id = source.get("OANDA_PRACTICE_ACCOUNT_ID") or source.get("OANDA_ACCOUNT_ID")
         env = "practice"
 
     if not token and not account_id:
@@ -294,13 +303,12 @@ def _load_oanda_env_credentials(mode: str) -> Optional[Dict[str, Any]]:
         credentials["OANDA_PRACTICE_ACCOUNT_ID"] = account_id
 
     credentials["OANDA_ENV"] = env
-    credentials["OANDA_ENABLE_LIVE_ORDERS"] = os.getenv(
-        "OANDA_ENABLE_LIVE_ORDERS", "false"
-    )
-    credentials["OANDA_BASE_URL"] = os.getenv("OANDA_BASE_URL") or (
+    credentials["OANDA_ENABLE_LIVE_ORDERS"] = "false"
+    credentials["OANDA_BASE_URL"] = source.get("OANDA_BASE_URL") or (
         "https://api-fxtrade.oanda.com" if env == "live" else "https://api-fxpractice.oanda.com"
     )
-    credentials["OANDA_ENABLE_LIVE_TRADING"] = os.getenv("OANDA_ENABLE_LIVE_TRADING", "false")
+    credentials["OANDA_ENABLE_LIVE_TRADING"] = "false"
+    credentials["canonical_broker_environment"] = canonical.redacted_diagnostics()
 
     return credentials if credentials else None
 
@@ -315,6 +323,20 @@ def _load_env_fallback_credentials(broker_name: str, mode: str) -> Optional[Dict
         return _load_oanda_env_credentials(mode)
 
     return None
+
+
+def _canonical_profile_credentials(broker_name: str, mode: str) -> BrokerEnvironmentCredentials:
+    load_dotenv(REPO_ROOT / ".env")
+    if str(mode or "").strip().lower() != "live":
+        load_dotenv(REPO_ROOT / ".env.practice", override=False)
+    return build_broker_environment(
+        REPO_ROOT,
+        broker=broker_name,
+        explicit_profile=profile_mode_alias(mode),
+        env=dict(os.environ),
+        allow_legacy=False,
+        sanitize=False,
+    )
 
 
 def load_credentials_for_broker(

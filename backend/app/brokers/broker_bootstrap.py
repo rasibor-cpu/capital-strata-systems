@@ -51,7 +51,7 @@ def run_broker_bootstrap_self_test(broker_name: str, mode: str) -> bool:
     """
     print(f"\n=== BROKER BOOTSTRAP SELF-TEST ({broker_name.upper()} | {mode}) ===")
     stages = {
-        ".env located": "FAIL",
+        "profile selected": "FAIL",
         "environment loaded": "FAIL",
         "credential object created": "FAIL",
         "required fields present": "FAIL",
@@ -61,22 +61,15 @@ def run_broker_bootstrap_self_test(broker_name: str, mode: str) -> bool:
     }
     
     # Stage 1: .env located
-    from pathlib import Path
     import os
-    from dotenv import load_dotenv
+    from pathlib import Path
+    from backend.runtime.live_environment_loader import load_css_runtime_environment
     
     project_root = Path(__file__).resolve().parents[3]
-    env_file = project_root / ".env"
-    if env_file.exists():
-        stages[".env located"] = "PASS"
-    else:
-        stages[".env located"] = "FAIL"
-        
-    # Stage 2: environment loaded
-    load_dotenv(env_file)
-    if str(mode or "").strip().lower() != "live":
-        load_dotenv(project_root / ".env.practice", override=False)
-    if os.getenv("OANDA_API_KEY") or os.getenv("COINBASE_KEY_NAME"):
+    env_trace = load_css_runtime_environment(project_root, mode=mode, broker=broker_name, env=os.environ)
+    if env_trace.get("profile") not in {"UNSELECTED", "", None}:
+        stages["profile selected"] = "PASS"
+    if env_trace.get("validation_status") == "PASS" or os.getenv("OANDA_API_KEY") or os.getenv("COINBASE_KEY_NAME"):
         stages["environment loaded"] = "PASS"
     else:
         stages["environment loaded"] = "FAIL"

@@ -588,10 +588,29 @@ def _environment_evidence(
     trace: Mapping[str, Any],
     margin: Mapping[str, Any],
 ) -> dict[str, Any]:
+    profile_evidence = _mapping(runtime.get("canonical_broker_environment") or runtime.get("broker_environment_profile"))
     if broker == "COINBASE":
         evidence = classify_coinbase_environment(env or {}, mode=mode)
     else:
         evidence = {"broker": broker, "mode": mode, "status": "PASS", "contamination_keys": [], "findings": []}
+    if profile_evidence:
+        evidence["profile"] = profile_evidence.get("profile", evidence.get("profile", "UNSELECTED"))
+        evidence["environment"] = profile_evidence.get("environment", evidence.get("environment", mode))
+        evidence["permissions_classification"] = profile_evidence.get("permissions_classification", "UNKNOWN")
+        evidence["profile_fingerprint"] = profile_evidence.get("profile_fingerprint", "")
+        evidence["credential_source"] = profile_evidence.get("credential_source", "UNKNOWN")
+        evidence["read_only_allowed"] = bool(profile_evidence.get("read_only_allowed", False))
+        evidence["execution_requested"] = bool(profile_evidence.get("execution_requested", False))
+        evidence["execution_authorized"] = False
+        evidence["execution_allowed"] = False
+        evidence["live_trading_blocked"] = True
+        evidence["broker_execution_armed"] = False
+        evidence["advisory_only"] = True
+        if profile_evidence.get("contamination_keys"):
+            evidence["contamination_keys"] = list(profile_evidence.get("contamination_keys") or [])
+            evidence["status"] = "FAIL"
+        if profile_evidence.get("validation_status") == "FAIL":
+            evidence["status"] = "FAIL"
     if isinstance(runtime.get("environment_diagnostics"), Mapping):
         diag = dict(runtime.get("environment_diagnostics"))
         if diag.get("contamination_keys"):

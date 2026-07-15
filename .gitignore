@@ -79,6 +79,7 @@ backend/runtime/*
 !backend/runtime/canonical_broker_state_adapter.py
 !backend/runtime/canonical_account_snapshot.py
 !backend/runtime/live_environment_loader.py
+!backend/runtime/broker_environment_profiles.py
 reporting_store/
 out/
 feeds/

@@ -1106,6 +1106,12 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         or broker_payload.get("account_snapshot")
     )
     canonical_provenance = _mapping(canonical_state.get("status_provenance"))
+    environment_evidence = _mapping(
+        canonical_state.get("environment_evidence")
+        or broker_payload.get("broker_environment_profile")
+        or broker_payload.get("canonical_broker_environment")
+        or broker_payload.get("environment_diagnostics")
+    )
     credential_diagnostics = _mapping(broker_payload.get("credential_diagnostics"))
     canonical_credential_diagnostics = broker_credential_diagnostics(dashboard_payload)
     limit_reconciliation = _mapping(broker_payload.get("limit_reconciliation"))
@@ -1129,6 +1135,20 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         "canonical_account_evidence": canonical_account,
         "canonical_account_snapshot": canonical_account_snapshot,
         "status_provenance": canonical_provenance,
+        "broker_environment_profile": {
+            "profile": str(environment_evidence.get("profile", broker_payload.get("profile", "UNSELECTED"))),
+            "environment": str(environment_evidence.get("environment", broker_payload.get("environment", broker_payload.get("broker_mode", "paper")))),
+            "readiness": str(canonical_state.get("overall_status", broker_payload.get("broker_health", DATA_UNAVAILABLE))),
+            "permissions_classification": str(environment_evidence.get("permissions_classification", broker_payload.get("permissions_classification", "UNKNOWN"))),
+            "profile_fingerprint": str(environment_evidence.get("profile_fingerprint", broker_payload.get("profile_fingerprint", ""))),
+            "contamination_status": str(environment_evidence.get("status", broker_payload.get("contamination_status", "UNKNOWN"))),
+            "contamination_keys": _string_list(environment_evidence.get("contamination_keys", broker_payload.get("contamination_keys"))),
+            "credential_values_redacted": True,
+            "execution_allowed": False,
+            "live_trading_blocked": True,
+            "broker_execution_armed": False,
+            "advisory_only": True,
+        },
         "overall_status": str(canonical_state.get("overall_status", broker_payload.get("overall_status", DATA_UNAVAILABLE))),
         "state_hash": str(canonical_state.get("state_hash", broker_payload.get("state_hash", ""))),
         "contradiction_reasons": _string_list(canonical_state.get("contradiction_reasons", broker_payload.get("contradiction_reasons"))),

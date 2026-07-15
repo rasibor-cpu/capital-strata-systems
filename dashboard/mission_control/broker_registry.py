@@ -14,6 +14,7 @@ def build_broker_registry_console(state: Mapping[str, Any]) -> dict[str, Any]:
         "status": "fail_closed" if _runtime_unavailable(state) else active.get("connection_status", DATA_UNAVAILABLE),
         "registered_brokers": registered,
         "active_broker": active.get("selected_broker", DATA_UNAVAILABLE),
+        "broker_environment_profile": active.get("broker_environment_profile", {}),
         "capabilities": active.get("capabilities", []),
         "certification": _mapping(state.get("certification")).get("broker_readiness", DATA_UNAVAILABLE),
         "readiness": active.get("account_status", DATA_UNAVAILABLE),
