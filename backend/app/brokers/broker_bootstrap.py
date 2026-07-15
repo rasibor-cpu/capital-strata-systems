@@ -75,7 +75,8 @@ def run_broker_bootstrap_self_test(broker_name: str, mode: str) -> bool:
         
     # Stage 2: environment loaded
     load_dotenv(env_file)
-    load_dotenv(project_root / ".env.practice", override=False)
+    if str(mode or "").strip().lower() != "live":
+        load_dotenv(project_root / ".env.practice", override=False)
     if os.getenv("OANDA_API_KEY") or os.getenv("COINBASE_KEY_NAME"):
         stages["environment loaded"] = "PASS"
     else:

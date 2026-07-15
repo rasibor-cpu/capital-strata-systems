@@ -250,6 +250,27 @@ class CoinbaseMarginAdapter(BrokerMarginProvider):
 
     def _fallback_snapshot(self, note: str) -> MarginSnapshot:
         self.last_note = note
+        if self.mode == "LIVE":
+            return LegacyCompatibleMarginSnapshot(
+                broker="COINBASE",
+                account_id=self.account_id,
+                timestamp=self._timestamp(),
+                equity=0.0,
+                cash=0.0,
+                buying_power=0.0,
+                maintenance_margin=0.0,
+                initial_margin=0.0,
+                margin_used=0.0,
+                margin_available=0.0,
+                margin_ratio=0.0,
+                margin_state=MarginState.CRITICAL,
+                required_margin=0.0,
+                available_margin=0.0,
+                free_margin=0.0,
+                margin_utilization_pct=0.0,
+                margin_source="LIVE_UNAVAILABLE",
+                broker_name="COINBASE",
+            )
         return self._simulated_snapshot()
 
     def _extract_first_float(

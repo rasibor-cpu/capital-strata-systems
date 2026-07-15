@@ -7,6 +7,7 @@ from typing import Any, Mapping
 
 from backend.runtime.live_execution_authority import evaluate_live_execution_authority
 from backend.runtime.live_readiness_state_machine import evaluate_live_readiness_state
+from backend.runtime.canonical_broker_state_builder import canonical_state_from_payload
 
 
 STARTUP_SUMMARY_FIELDS = (
@@ -72,11 +73,19 @@ def build_live_startup_summary(
     authority = evaluate_live_execution_authority(authority_input)
     authority_payload = authority.as_dict()
     can_live_execute = authority.execution_authority
+    canonical_state = canonical_state_from_payload(
+        {
+            **merged,
+            "operator_requested_live": operator_requested,
+            "broker_execution_enabled": broker_execution_enabled,
+            "execution_authority": False,
+        }
+    )
 
     summary = {
-        "Broker": diagnostics["broker"],
-        "Broker Mode": diagnostics["broker_mode"],
-        "Execution Scope": diagnostics["execution_scope"],
+        "Broker": canonical_state.broker,
+        "Broker Mode": canonical_state.mode,
+        "Execution Scope": canonical_state.execution_scope,
         "Operator Requested Live": "YES" if authority.operator_requested_live else "NO",
         "Execution Authority": "YES" if authority.execution_authority else "NO",
         "Can Live Execute": "YES" if can_live_execute else "NO",
@@ -87,14 +96,17 @@ def build_live_startup_summary(
         "Margin Gate": str(merged.get("margin_gate", "AUTHORITATIVE_FAIL_CLOSED")),
         "AntiBleedGuard": str(merged.get("anti_bleed_guard", "AUTHORITATIVE_FAIL_CLOSED")),
         "Broker Guard": diagnostics["broker_guard"],
-        "Credentials": diagnostics["credential_status"],
-        "Authentication": diagnostics["authentication_status"],
-        "Connection": diagnostics["connection_status"],
-        "Account Data": "READY" if diagnostics["account_loaded"] else "NOT_READY",
-        "Market Data": diagnostics["market_data"],
+        "Credentials": canonical_state.credential_status,
+        "Authentication": canonical_state.authentication_status,
+        "Connection": canonical_state.connection_status,
+        "Account Data": canonical_state.account_status,
+        "Market Data": canonical_state.market_data_status,
         "Readiness State": readiness.readiness_state,
         "GO / NO GO": readiness.go_no_go,
+        "Overall Status": canonical_state.overall_status,
         "execution_allowed": False,
+        "live_trading_blocked": True,
+        "broker_execution_armed": False,
         "advisory_only": True,
         "broker_execution_status": "ENABLED" if authority.execution_authority else "DISABLED",
         "operator_requested_live": authority.operator_requested_live,
@@ -108,6 +120,8 @@ def build_live_startup_summary(
         "readiness_checklist": readiness_payload["readiness_checklist"],
         "startup_diagnostics": {
             **diagnostics,
+            "canonical_broker_runtime_state": canonical_state.to_dict(),
+            "overall_status": canonical_state.overall_status,
             "operator_requested_live": authority.operator_requested_live,
             "execution_enabled": authority.execution_authority,
             "broker_execution_enabled": broker_execution_enabled,

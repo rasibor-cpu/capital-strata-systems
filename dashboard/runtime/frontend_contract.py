@@ -1098,6 +1098,7 @@ def rc1_operational_dashboard(dashboard_payload: Mapping[str, Any]) -> dict[str,
 
 def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     broker_payload = _mapping(dashboard_payload.get("broker_summary"))
+    canonical_state = _mapping(broker_payload.get("canonical_broker_runtime_state"))
     credential_diagnostics = _mapping(broker_payload.get("credential_diagnostics"))
     canonical_credential_diagnostics = broker_credential_diagnostics(dashboard_payload)
     limit_reconciliation = _mapping(broker_payload.get("limit_reconciliation"))
@@ -1117,6 +1118,10 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         "broker_ready": _boolean(broker_payload.get("broker_ready", broker_readiness.get("broker_ready"))),
         "broker_readiness": broker_readiness,
         "runtime_certification_snapshot": certification_snapshot,
+        "canonical_broker_runtime_state": canonical_state,
+        "overall_status": str(canonical_state.get("overall_status", broker_payload.get("overall_status", DATA_UNAVAILABLE))),
+        "state_hash": str(canonical_state.get("state_hash", broker_payload.get("state_hash", ""))),
+        "contradiction_reasons": _string_list(canonical_state.get("contradiction_reasons", broker_payload.get("contradiction_reasons"))),
         "certification": str(certification_snapshot.get("certification", DATA_UNAVAILABLE)),
         "operational_state": str(certification_snapshot.get("operational_state", DATA_UNAVAILABLE)),
         "market_data_freshness": _mapping(certification_snapshot.get("market_data_freshness")),
@@ -1134,6 +1139,9 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         "account_data_health": str(broker_payload.get("account_data_health", broker_readiness.get("account_data_health", "UNKNOWN"))),
         "readiness_score": _number(broker_payload.get("readiness_score", broker_readiness.get("readiness_score"))),
         "broker_execution_armed": _boolean(broker_payload.get("broker_execution_armed")),
+        "execution_allowed": False,
+        "live_trading_blocked": True,
+        "advisory_only": True,
         "operator_requested_live": _boolean(broker_payload.get("operator_requested_live")),
         "execution_authority": _boolean(broker_payload.get("execution_authority")),
         "authority_reason": str(broker_payload.get("authority_reason", "Operator Intent Missing")),

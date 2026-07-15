@@ -96,11 +96,12 @@ def test_coinbase_margin_adapter_live_mode_fallback_path():
 
     assert isinstance(snapshot, MarginSnapshot)
     assert snapshot.account_id == "SIMULATED-COINBASE"
-    assert snapshot.equity == 10000.0
+    assert snapshot.equity == 0.0
     assert snapshot.margin_used == 0.0
-    assert snapshot.margin_available == 10000.0
+    assert snapshot.margin_available == 0.0
     assert snapshot.margin_ratio == 0.0
-    assert snapshot.margin_state == MarginState.NORMAL
+    assert snapshot.margin_state == MarginState.CRITICAL
+    assert snapshot.margin_source == "LIVE_UNAVAILABLE"
     assert adapter.last_note.startswith("LIVE_FALLBACK_ERROR_")
 
 

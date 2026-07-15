@@ -14,9 +14,10 @@ from dotenv import load_dotenv
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
-def load_local_env() -> None:
+def load_local_env(mode: str | None = None) -> None:
     load_dotenv(PROJECT_ROOT / ".env")
-    load_dotenv(PROJECT_ROOT / ".env.practice", override=False)
+    if str(mode or "").strip().lower() != "live":
+        load_dotenv(PROJECT_ROOT / ".env.practice", override=False)
 
 
 def check_oanda() -> bool:

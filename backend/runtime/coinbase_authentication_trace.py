@@ -126,6 +126,7 @@ def trace_coinbase_authentication(
     source = env if isinstance(env, Mapping) else os.environ
     credentials = validate_coinbase_credential_material(source, require_credentials=require_credentials)
     endpoint_alignment = _endpoint_alignment(source, mode=mode)
+    environment = _environment_status(source, mode=mode)
     endpoints = (
         _not_attempted_endpoints("credential_validation_failed")
         if require_credentials and credentials["status"] == FAIL
@@ -137,12 +138,16 @@ def trace_coinbase_authentication(
     blockers = list(credentials.get("blockers", []))
     if endpoint_alignment["status"] == FAIL:
         blockers.append("coinbase_endpoint_mode_mismatch")
+    if environment["status"] == FAIL:
+        blockers.extend(environment["contamination_keys"])
     if credentials["status"] == FAIL:
+        authentication_ok = False
+    if environment["status"] == FAIL:
         authentication_ok = False
     if not authentication_ok:
         blockers.append(_first_failure_stage(endpoints))
 
-    status = PASS if authentication_ok and endpoint_alignment["status"] != FAIL and credentials["status"] != FAIL else FAIL
+    status = PASS if authentication_ok and endpoint_alignment["status"] != FAIL and credentials["status"] != FAIL and environment["status"] != FAIL else FAIL
     return {
         "payload_version": PAYLOAD_VERSION,
         "broker": "COINBASE",
@@ -150,6 +155,7 @@ def trace_coinbase_authentication(
         "status": status,
         "authentication": status,
         "credential_validation": credentials,
+        "environment": environment,
         "endpoint_alignment": endpoint_alignment,
         "endpoint_verification": endpoints,
         "http_status": _first_http_status(endpoints),
@@ -313,6 +319,26 @@ def _endpoint_alignment(env: Mapping[str, Any], *, mode: str) -> dict[str, Any]:
         "mode": mode_key,
         "sandbox_live_mismatch": mismatch,
         "tls_connectivity_state": _tls_state(host),
+    }
+
+
+def _environment_status(env: Mapping[str, Any], *, mode: str) -> dict[str, Any]:
+    mode_key = str(mode or "live").strip().lower()
+    contamination_keys: list[str] = []
+    if mode_key == "live":
+        for key, value in env.items():
+            key_text = str(key)
+            if not key_text.startswith("COINBASE"):
+                continue
+            if value in (None, ""):
+                continue
+            if "TEST" in key_text or "PRACTICE" in key_text:
+                contamination_keys.append(key_text)
+    return {
+        "status": FAIL if contamination_keys else PASS,
+        "mode": mode_key,
+        "contamination_keys": sorted(contamination_keys),
+        "live_practice_consistent": not contamination_keys,
     }
 
 

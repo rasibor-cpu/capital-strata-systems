@@ -142,6 +142,21 @@ def test_phase165c_endpoint_mismatch_reports_precise_failure():
     assert trace["failure_stage"] == "coinbase_endpoint_mode_mismatch"
 
 
+def test_phase165_live_test_order_environment_contamination_fails_closed():
+    trace = trace_coinbase_authentication(
+        FakeCoinbaseReadOnlyAdapter(),
+        env=_env(COINBASE_TEST_ORDER_USD="1.00"),
+        mode="live",
+        require_credentials=True,
+    )
+
+    assert trace["authentication"] == "FAIL"
+    assert trace["environment"]["status"] == "FAIL"
+    assert trace["environment"]["contamination_keys"] == ["COINBASE_TEST_ORDER_USD"]
+    assert "COINBASE_TEST_ORDER_USD" in trace["blockers"]
+    assert trace["execution_allowed"] is False
+
+
 def test_phase165a_replaces_generic_broker_unavailable_with_http_trace():
     trace = trace_coinbase_authentication(
         FailingCoinbaseAdapter(Http503("Service Unavailable")),
@@ -175,7 +190,10 @@ def test_phase165d_e_successful_read_only_connectivity_certificate():
     assert not any("order" in call.lower() for call in adapter.calls)
 
 
-def test_phase165_trace_is_embedded_in_phase156b_coinbase_authentication():
+def test_phase165_trace_is_embedded_in_phase156b_coinbase_authentication(monkeypatch):
+    monkeypatch.delenv("COINBASE_TEST_ORDER_USD", raising=False)
+    monkeypatch.delenv("COINBASE_PRACTICE_ORDER_USD", raising=False)
+
     report = certify_live_connectivity(
         "coinbase",
         phase156a_fn=_phase156a_green,

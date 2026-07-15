@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from backend.runtime.broker_health_monitor import monitor_broker_health
+from backend.runtime.canonical_broker_state_builder import build_canonical_broker_runtime_state
 from backend.runtime.live_connectivity_certifier import certify_live_connectivity
 
 
@@ -150,6 +151,20 @@ def build_runtime_certification_snapshot(
             "capability_cache_status": str(_mapping(telemetry).get("capability_cache_status", "NOT_USED")),
         },
     }
+    canonical = build_canonical_broker_runtime_state(
+        broker=broker_key.upper() if broker_key else "NONE",
+        mode=mode_key,
+        runtime_payload=snapshot,
+        certification=phase156b_report,
+        source_modules=(
+            "backend.runtime.runtime_certification_snapshot",
+            "backend.runtime.live_connectivity_certifier",
+            "backend.runtime.broker_health_monitor",
+        ),
+    )
+    snapshot["canonical_broker_runtime_state"] = canonical.to_dict()
+    snapshot["overall_status"] = canonical.overall_status
+    snapshot["state_hash"] = canonical.stable_hash()
     return _json_safe(snapshot)
 
 

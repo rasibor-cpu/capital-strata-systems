@@ -201,7 +201,8 @@ def _env_present(*names: str) -> bool:
 
 def _load_coinbase_env_credentials(mode: str) -> Optional[Dict[str, Any]]:
     load_dotenv(REPO_ROOT / ".env")
-    load_dotenv(REPO_ROOT / ".env.practice", override=False)
+    if str(mode or "").strip().lower() != "live":
+        load_dotenv(REPO_ROOT / ".env.practice", override=False)
 
     for key_file in (
         os.getenv("COINBASE_KEY_JSON_PATH"),
@@ -262,7 +263,8 @@ def _load_coinbase_env_credentials(mode: str) -> Optional[Dict[str, Any]]:
 
 def _load_oanda_env_credentials(mode: str) -> Optional[Dict[str, Any]]:
     load_dotenv(REPO_ROOT / ".env")
-    load_dotenv(REPO_ROOT / ".env.practice", override=False)
+    if str(mode or "").strip().lower() != "live":
+        load_dotenv(REPO_ROOT / ".env.practice", override=False)
 
     token = (
         os.getenv("OANDA_API_KEY")

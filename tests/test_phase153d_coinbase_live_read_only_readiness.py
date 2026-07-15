@@ -12,6 +12,7 @@ from backend.runtime.broker_startup_selection import (
 )
 from backend.runtime.coinbase_readiness import (
     coinbase_credential_diagnostics,
+    coinbase_environment_diagnostics,
     coinbase_live_limit_reconciliation,
     confirm_coinbase_live_read_only,
     evaluate_coinbase_live_read_only,
@@ -42,6 +43,26 @@ def test_phase153d_missing_coinbase_credentials_fail_safely() -> None:
     assert status["auth_reason"] == "missing credentials"
     assert status["credential_diagnostics"]["credential_status"] == "MISSING"
     assert "COINBASE_CDP_KEY_NAME|COINBASE_KEY_NAME|COINBASE_API_KEY" in status["credential_diagnostics"]["missing_credentials"]
+
+
+def test_phase153d_coinbase_live_test_order_env_contamination_fails_closed() -> None:
+    env = {
+        "COINBASE_CDP_KEY_NAME": "present",
+        "COINBASE_CDP_PRIVATE_KEY": "present",
+        "COINBASE_TEST_ORDER_USD": "1.00",
+    }
+
+    diagnostics = coinbase_environment_diagnostics(env, mode="live")
+    status = evaluate_coinbase_live_read_only(_coinbase_live_selection(), env=env)
+
+    assert diagnostics["status"] == "FAIL"
+    assert diagnostics["contamination_keys"] == ["COINBASE_TEST_ORDER_USD"]
+    assert status["broker_connected"] is False
+    assert status["broker_authenticated"] is False
+    assert status["connection_status"] == "BLOCKED"
+    assert status["auth_reason"] == "live/practice contamination"
+    assert status["execution_allowed"] is False
+    assert status["broker_execution_armed"] is False
 
 
 def test_phase153d_coinbase_credentials_are_redacted() -> None:
@@ -202,4 +223,4 @@ def test_phase153d_mobile_dashboard_renders_readiness_and_canonical_limit(tmp_pa
     assert "Auth Reason" in response.text
     assert "Limit Authority" in response.text
     assert "PHASE_152A_LIVE_MICRO_PILOT_GOVERNOR" in response.text
-    assert "LEGACY_SECONDARY_LIMIT" in response.text
+    assert "Display-only compatibility guard" in response.text

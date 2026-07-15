@@ -74,6 +74,7 @@ class CoinbaseLiveReadOnlyAdapter(BrokerReadOnlyInterface):
         self.authenticated = False
         self.connection_error = ""
         self.last_successful_sync = ""
+        self.read_errors: dict[str, dict[str, Any]] = {}
 
     def connection_status(self) -> dict[str, Any]:
         return self._status_payload()
@@ -324,13 +325,14 @@ class CoinbaseLiveReadOnlyAdapter(BrokerReadOnlyInterface):
             client_created = True
             
             # Transport checks
-            server_time_payload = self._safe_call(lambda: self.get_server_time())
-            account_payload = self._safe_call(lambda: self.get_account())
-            balances_payload = self._safe_call(lambda: self.get_balances())
+            self.read_errors = {}
+            server_time_payload = self._safe_read("server_time", lambda: self.get_server_time())
+            account_payload = self._safe_read("account", lambda: self.get_account())
+            balances_payload = self._safe_read("balances", lambda: self.get_balances())
             self.connected = (server_time_payload is not None) or (account_payload is not None) or (isinstance(balances_payload, list) and len(balances_payload) > 0)
 
-            products_payload = self._safe_call(lambda: self.get_products())
-            ticker_payload = self._safe_call(lambda: self.get_ticker()) if include_market_data else None
+            products_payload = self._safe_read("products", lambda: self.get_products())
+            ticker_payload = self._safe_read("ticker", lambda: self.get_ticker()) if include_market_data else None
 
             del client
             read_checks = {
@@ -350,7 +352,7 @@ class CoinbaseLiveReadOnlyAdapter(BrokerReadOnlyInterface):
             else:
                 self.authenticated = False
                 self.health = "AMBER"
-                self.connection_error = "authenticated account or balance read unavailable"
+                self.connection_error = self._first_read_error_message() or "authenticated account or balance read unavailable"
 
             account_values = extract_coinbase_account_values(
                 balances_payload if balances_payload is not None else account_payload
@@ -379,10 +381,14 @@ class CoinbaseLiveReadOnlyAdapter(BrokerReadOnlyInterface):
         return self._read_client
 
     def _safe_call(self, func: Callable[[], Any]) -> Any:
+        return self._safe_read("read", func)
+
+    def _safe_read(self, stage: str, func: Callable[[], Any]) -> Any:
         try:
             return func()
         except Exception as exc:
             self.connection_error = str(exc)[:160]
+            self.read_errors[stage] = _exception_details(exc)
             return None
 
     def _call_first(self, client: Any, method_names: tuple[str, ...]) -> Any:
@@ -488,6 +494,10 @@ class CoinbaseLiveReadOnlyAdapter(BrokerReadOnlyInterface):
             "broker_readiness": broker_readiness,
             "readiness_score": broker_readiness["readiness_score"],
             "read_checks": dict(read_checks or {}),
+            "read_errors": dict(self.read_errors),
+            "http_status": _first_error_value(self.read_errors, "http_status"),
+            "coinbase_error_code": _first_error_value(self.read_errors, "coinbase_error_code") or "",
+            "coinbase_error_message": _first_error_value(self.read_errors, "coinbase_error_message") or "",
             "drawdown_status": "UNKNOWN" if not has_balance else "AVAILABLE",
             "drawdown_reason": "" if has_balance else UNKNOWN_DRAW_DOWN_REASON,
             "client_created": client_created,
@@ -502,6 +512,13 @@ class CoinbaseLiveReadOnlyAdapter(BrokerReadOnlyInterface):
         payload["readiness_checklist"] = readiness["readiness_checklist"]
         payload["startup_diagnostics"] = readiness["startup_diagnostics"]
         return payload
+
+    def _first_read_error_message(self) -> str:
+        for details in self.read_errors.values():
+            message = str(details.get("coinbase_error_message", "") or "")
+            if message:
+                return message[:160]
+        return ""
 
 
 def _load_private_key_content(path: str) -> tuple[str, str]:
@@ -665,6 +682,42 @@ def _read_status(payload: Any, *, unavailable_ok: bool = False) -> str:
     if payload is None:
         return "UNAVAILABLE" if unavailable_ok else "FAILED"
     return "OK"
+
+
+def _exception_details(exc: BaseException) -> dict[str, Any]:
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None) or getattr(exc, "status_code", None) or getattr(exc, "status", None)
+    try:
+        http_status = int(status) if status is not None else None
+    except (TypeError, ValueError):
+        http_status = None
+    return {
+        "exception_type": exc.__class__.__name__,
+        "http_status": http_status,
+        "coinbase_error_code": f"COINBASE_HTTP_{http_status}" if http_status else _exception_code(exc),
+        "coinbase_error_message": str(exc)[:160],
+    }
+
+
+def _exception_code(exc: BaseException) -> str:
+    text = f"{exc.__class__.__name__} {exc}".lower()
+    if "unauthorized" in text or "401" in text:
+        return "COINBASE_HTTP_401"
+    if "forbidden" in text or "403" in text:
+        return "COINBASE_HTTP_403"
+    if "timeout" in text:
+        return "COINBASE_TIMEOUT"
+    if "tls" in text or "ssl" in text or "certificate" in text:
+        return "COINBASE_TLS_ERROR"
+    return f"COINBASE_{exc.__class__.__name__.upper()}"
+
+
+def _first_error_value(errors: Mapping[str, Mapping[str, Any]], key: str) -> Any:
+    for details in errors.values():
+        value = details.get(key)
+        if value not in (None, ""):
+            return value
+    return None
 
 
 def _to_plain(value: Any) -> Any:

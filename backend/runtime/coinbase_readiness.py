@@ -11,6 +11,7 @@ from backend.runtime.broker_credential_diagnostics import (
     diagnose_broker_credentials,
 )
 from backend.runtime.coinbase_live_adapter import CoinbaseLiveReadOnlyAdapter, READ_ONLY_EXECUTION_SCOPE
+from backend.runtime.canonical_broker_state_builder import build_canonical_broker_runtime_state
 from backend.runtime.live_execution_authority import evaluate_live_execution_authority
 from backend.runtime.live_readiness_state_machine import evaluate_live_readiness_state
 
@@ -102,6 +103,29 @@ def coinbase_live_limit_reconciliation(*, legacy_limit_usd: Any = 1.0) -> dict[s
     }
 
 
+def coinbase_environment_diagnostics(env: Mapping[str, Any] | None = None, *, mode: str = "live") -> dict[str, Any]:
+    source = env if isinstance(env, Mapping) else os.environ
+    contamination = []
+    if str(mode or "").strip().lower() == "live":
+        contamination = sorted(
+            str(key)
+            for key, value in source.items()
+            if str(key).startswith("COINBASE")
+            and ("TEST" in str(key) or "PRACTICE" in str(key))
+            and value not in (None, "")
+        )
+    return {
+        "mode": str(mode or "live").strip().lower(),
+        "live_practice_consistent": not contamination,
+        "contamination_keys": contamination,
+        "status": "FAIL" if contamination else "PASS",
+        "advisory_only": True,
+        "execution_allowed": False,
+        "live_trading_blocked": True,
+        "broker_execution_armed": False,
+    }
+
+
 def evaluate_coinbase_live_read_only(
     selection: BrokerStartupSelection,
     *,
@@ -140,6 +164,8 @@ def evaluate_coinbase_live_read_only(
         "limit_reconciliation": coinbase_live_limit_reconciliation(legacy_limit_usd=legacy_limit_usd),
         "advisory_only": True,
         "execution_allowed": False,
+        "live_trading_blocked": True,
+        "broker_execution_armed": False,
         "live_order_permission": False,
         "connection_error": "",
         "last_successful_sync": "",
@@ -172,6 +198,23 @@ def evaluate_coinbase_live_read_only(
     )
 
     if selection.selected_broker != "COINBASE" or selection.broker_mode != "live":
+        return _apply_readiness_state(result)
+
+    environment_diagnostics = coinbase_environment_diagnostics(env, mode="live")
+    result["environment_diagnostics"] = environment_diagnostics
+    if environment_diagnostics["status"] != "PASS":
+        result["auth_reason"] = "live/practice contamination"
+        result["broker_health"] = "RED"
+        result["connection_status"] = "BLOCKED"
+        result["connection_error"] = "Coinbase live mode contains test/practice environment variables"
+        result["credential_status"] = "PRESENT" if diagnostics.ready else "MISSING"
+        result["authority_block_reason"] = "LIVE_PRACTICE_CONTAMINATION"
+        result["read_checks"] = {
+            "account": "NOT_ATTEMPTED",
+            "balances": "NOT_ATTEMPTED",
+            "positions": "UNAVAILABLE",
+            "products_or_prices": "NOT_ATTEMPTED",
+        }
         return _apply_readiness_state(result)
 
     if not diagnostics.ready:
@@ -350,6 +393,22 @@ def _apply_readiness_state(result: dict[str, Any]) -> dict[str, Any]:
     result["go_no_go"] = readiness["go_no_go"]
     result["readiness_checklist"] = readiness["readiness_checklist"]
     result["startup_diagnostics"] = readiness["startup_diagnostics"]
+    canonical = build_canonical_broker_runtime_state(
+        broker=str(result.get("selected_broker", result.get("broker", "COINBASE"))),
+        mode=str(result.get("broker_mode", result.get("mode", "live"))),
+        runtime_payload=result,
+        adapter_status=result,
+        env=_mapping(result.get("env")),
+        source_modules=(
+            "backend.runtime.coinbase_readiness",
+            "backend.runtime.coinbase_live_adapter",
+            "backend.runtime.live_readiness_state_machine",
+        ),
+    )
+    result["canonical_broker_runtime_state"] = canonical.to_dict()
+    result["overall_status"] = canonical.overall_status
+    result["contradiction_reasons"] = list(canonical.contradiction_reasons)
+    result["state_hash"] = canonical.stable_hash()
     return result
 
 
@@ -389,6 +448,7 @@ def _status(payload: Any, *, unavailable_ok: bool = False) -> str:
 __all__ = [
     "CoinbaseCredentialDiagnostics",
     "coinbase_credential_diagnostics",
+    "coinbase_environment_diagnostics",
     "coinbase_live_limit_reconciliation",
     "confirm_coinbase_live_read_only",
     "evaluate_coinbase_live_read_only",

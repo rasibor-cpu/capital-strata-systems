@@ -88,6 +88,21 @@ class FakeCoinbaseSdk184ReadClient:
         return {"product_id": product_id, "price": "65000.00"}
 
 
+class Http401(RuntimeError):
+    status_code = 401
+
+
+class UnauthorizedCoinbaseReadClient:
+    def get_accounts(self):
+        raise Http401("Unauthorized")
+
+    def get_products(self):
+        return {"products": []}
+
+    def get_time(self):
+        return {"iso": "2026-07-04T12:00:00Z"}
+
+
 def _env() -> dict[str, str]:
     return {
         "COINBASE_CDP_KEY_NAME": "organizations/hidden/apiKeys/secret-name",
@@ -175,6 +190,20 @@ def test_phase153g_no_broker_balance_reports_unknown_drawdown() -> None:
     assert status["drawdown_status"] == "UNKNOWN"
     assert status["drawdown_reason"] == UNKNOWN_DRAW_DOWN_REASON
     assert status["account_equity"] is None
+
+
+def test_phase153g_unauthorized_read_preserves_http_401_diagnostics() -> None:
+    adapter = CoinbaseLiveReadOnlyAdapter(env=_env(), read_client=UnauthorizedCoinbaseReadClient())
+    status = adapter.sync()
+
+    assert status["broker_authenticated"] is False
+    assert status["read_checks"]["account"] == "FAILED"
+    assert status["read_checks"]["balances"] == "FAILED"
+    assert status["http_status"] == 401
+    assert status["coinbase_error_code"] == "COINBASE_HTTP_401"
+    assert "account" in status["read_errors"]
+    assert status["execution_allowed"] is False
+    assert status["broker_execution_armed"] is False
 
 
 def test_phase153g_readiness_uses_canonical_adapter_and_preserves_disabled_execution() -> None:

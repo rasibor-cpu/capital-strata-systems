@@ -200,6 +200,7 @@ from backend.runtime.broker_startup_selection import (
 from backend.runtime.broker_parity_validator import broker_parity_payload
 from backend.runtime.broker_operational_status import endpoint_for_broker
 from backend.runtime.broker_credential_diagnostics import diagnostics_payload
+from backend.runtime.canonical_broker_state_builder import build_canonical_broker_runtime_state
 from backend.runtime.coinbase_readiness import (
     coinbase_credential_diagnostics,
     coinbase_live_limit_reconciliation,
@@ -2262,6 +2263,20 @@ def pcnrass_update_authoritative_broker_state(val_data: dict[str, Any], validati
         COINBASE_READ_ONLY_STATUS["cash"] = op_status.get("cash", 0.0)
         COINBASE_READ_ONLY_STATUS["buying_power"] = op_status.get("buying_power", 0.0)
         COINBASE_READ_ONLY_STATUS["available_balance"] = op_status.get("available_balance", 0.0)
+    canonical = build_canonical_broker_runtime_state(
+        broker=str(COINBASE_READ_ONLY_STATUS.get("selected_broker", SELECTED_BROKER)),
+        mode=str(COINBASE_READ_ONLY_STATUS.get("broker_mode", SELECTED_BROKER_MODE)),
+        runtime_payload=COINBASE_READ_ONLY_STATUS,
+        certification=val_data,
+        env=os.environ,
+        source_modules=(
+            "scripts.css_live_dashboard",
+            validation_source,
+        ),
+    )
+    COINBASE_READ_ONLY_STATUS["canonical_broker_runtime_state"] = canonical.to_dict()
+    COINBASE_READ_ONLY_STATUS["overall_status"] = canonical.overall_status
+    COINBASE_READ_ONLY_STATUS["state_hash"] = canonical.stable_hash()
 
 if SELECTED_BROKER == "COINBASE" and SELECTED_BROKER_MODE == "live":
     COINBASE_OPERATIONAL_VALIDATION = validate_coinbase_live_read_only_operational(
@@ -4339,7 +4354,7 @@ def print_coinbase_broker_status() -> None:
         f"CAD {limits.get('canonical_live_pilot_limit_cad', '20.00')}"
     )
     print(
-        "COINBASE LEGACY_SECONDARY_LIMIT USD: "
+        "COINBASE DISPLAY-ONLY LEGACY SECONDARY GUARD USD: "
         f"${float(limits.get('legacy_coinbase_max_live_order_usd', COINBASE_MAX_LIVE_ORDER_USD)):.2f}"
     )
 
