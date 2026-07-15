@@ -8,17 +8,30 @@ from dashboard.runtime.frontend_contract import DATA_UNAVAILABLE, build_frontend
 
 
 def frontend_payload_from_runtime(
-    dashboard_state: Mapping[str, Any] | None = None,
+    dashboard_state: Any = None,
     *,
     allow_mock: bool = True,
 ) -> dict[str, Any]:
-    source = dashboard_state if isinstance(dashboard_state, Mapping) else None
+    source = dashboard_state if dashboard_state is not None else None
     if source is None and allow_mock:
         source = mission_control_mock_dashboard_payload()
     payload = build_frontend_payload(source or {})
-    payload["mission_control_data_source"] = "MOCK" if bool((source or {}).get("mock_data")) else "RUNTIME"
-    payload["mission_control_mock_data"] = bool((source or {}).get("mock_data"))
+    if _is_mock_source(source):
+        data_source = "MOCK"
+    elif source is None:
+        data_source = "UNAVAILABLE"
+    else:
+        data_source = "RUNTIME"
+    payload["mission_control_data_source"] = data_source
+    payload["mission_control_mock_data"] = _is_mock_source(source)
+    payload["mission_control_dashboard_state_available"] = source is not None
     return payload
+
+
+def _is_mock_source(source: Any) -> bool:
+    if isinstance(source, Mapping):
+        return bool(source.get("mock_data"))
+    return False
 
 
 def section(payload: Mapping[str, Any], name: str) -> dict[str, Any]:

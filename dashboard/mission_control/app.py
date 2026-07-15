@@ -21,6 +21,7 @@ def create_app(state_provider: StateProvider | None = None) -> FastAPI:
         return {
             "ok": True,
             "app": "CSS Mission Control",
+            "host_registration": "standalone",
             "read_only": True,
             "execution_allowed": False,
             "live_trading_blocked": True,

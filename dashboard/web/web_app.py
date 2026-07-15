@@ -17,6 +17,7 @@ from dashboard.runtime.dashboard_hydration_coordinator import (
 from dashboard.runtime.dashboard_state import DashboardState
 from dashboard.runtime.runtime_smoke_test import build_smoke_payloads
 from dashboard.runtime.ws_bridge import create_ws_router
+from dashboard.mission_control.host_registration import register_mission_control
 
 
 BRANDING_DIR = Path(__file__).resolve().parents[2] / "assets" / "branding"
@@ -43,6 +44,7 @@ def create_app(
     )
     app.include_router(create_dashboard_state_router(provider))
     app.include_router(create_ws_router(provider))
+    register_mission_control(app, provider)
 
     @app.get("/", include_in_schema=False)
     async def index() -> RedirectResponse:
@@ -1866,7 +1868,7 @@ def _market_opportunities_page() -> str:
 
       <article class="panel opportunity-main">
         <div class="panel-head">
-          <h2>Top Opportunities</h2>
+          <h2>Opportunity Monitor</h2>
           <span id="opportunity-count-badge">0 ITEMS</span>
         </div>
         <div class="opportunity-table" id="opportunity-table"></div>

@@ -7,8 +7,13 @@ from datetime import datetime, timezone
 from math import isfinite
 from typing import Any
 
+from dashboard.mission_control.freshness import build_freshness_summary
+from dashboard.mission_control.health import build_health_summary
 from dashboard.mission_control.navigation import navigation_payload
+from dashboard.mission_control.permissions import mission_control_permissions_payload, validate_read_only_permissions
 from dashboard.mission_control.safety import SAFE_FLAGS, mission_control_safety_payload, normalize_metric, validate_no_secret_payload
+from dashboard.mission_control.serializers import state_hash, validate_serializable_payload
+from dashboard.mission_control.source_registry import build_source_registry
 from dashboard.mission_control.state_adapter import build_broker_registry, frontend_payload_from_runtime, section
 from dashboard.runtime.frontend_contract import DATA_UNAVAILABLE
 
@@ -54,7 +59,6 @@ def build_mission_control_state(
 
     state = {
         **asdict(envelope),
-        "data_freshness": _data_freshness(frontend, broker, certification),
         "navigation": navigation_payload(),
         "platform": _platform(frontend, broker, certification, safety),
         "runtime": _runtime(frontend, governance, certification),
@@ -67,20 +71,36 @@ def build_mission_control_state(
         "alerts": alerts,
         "certification": _certification(certification, broker),
         "audit": _audit(sections),
+        "explainability": _explainability(sections),
         "learning": _learning(sections),
         "governance": _governance(frontend, governance),
         "configuration": _configuration(frontend, broker),
         "documentation": _documentation_index(),
+        "permissions": mission_control_permissions_payload(),
         "safety": safety,
         "mock_data": bool(frontend.get("mission_control_mock_data")),
         "mock_data_label": "MOCK DATA - NOT LIVE" if frontend.get("mission_control_mock_data") else "RUNTIME DATA",
     }
+    source_registry = build_source_registry(
+        frontend,
+        state,
+        dashboard_state_available=bool(frontend.get("mission_control_dashboard_state_available")),
+        allow_mock=allow_mock,
+    )
+    freshness = build_freshness_summary(source_registry)
+    state["source_registry"] = source_registry
+    state["data_sources"] = source_registry
+    state["freshness"] = freshness
+    state["data_freshness"] = _data_freshness(frontend, broker, certification, freshness)
+    state["health"] = build_health_summary(state, freshness_summary=freshness)
+    state["state_hash"] = state_hash({key: value for key, value in state.items() if key not in {"generated_at", "state_hash"}})
     validation = validate_mission_control_state(state)
     state["contract_validation"] = validation
     if not validation["valid"]:
         state["platform"]["platform_status"] = "FAIL_CLOSED"
         state["safety"]["fail_closed"] = True
         state["safety"]["safety_status"] = "FAIL_CLOSED"
+        state["health"] = build_health_summary(state, freshness_summary=freshness)
     return _json_safe(state)
 
 
@@ -95,9 +115,17 @@ def validate_mission_control_state(state: Mapping[str, Any] | None) -> dict[str,
             reasons.append(f"safety_flag_invalid:{key}")
     if not isinstance(source.get("navigation"), list) or len(source.get("navigation", [])) != 15:
         reasons.append("navigation_structure_invalid")
+    permissions_ok, permission_reasons = validate_read_only_permissions(
+        source.get("permissions") if isinstance(source.get("permissions"), Mapping) else {}
+    )
+    if not permissions_ok:
+        reasons.extend(permission_reasons)
     ok, secret_reasons = validate_no_secret_payload(source)
     if not ok:
         reasons.extend(secret_reasons)
+    serialization = validate_serializable_payload(source)
+    if not serialization["valid"]:
+        reasons.extend(serialization["reasons"])
     _scan_non_finite(source, reasons=reasons)
     return {
         "valid": not reasons,
@@ -369,6 +397,20 @@ def _audit(sections: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _explainability(sections: Mapping[str, Any]) -> dict[str, Any]:
+    audit = sections.get("audit") if isinstance(sections.get("audit"), Mapping) else {}
+    committee = sections.get("institutional_investment_committee") if isinstance(sections.get("institutional_investment_committee"), Mapping) else {}
+    return {
+        "decision_explanations": audit.get("decision_explanations", committee.get("committee_explanations", [])),
+        "rules": audit.get("rules_evaluated", []),
+        "metrics": audit.get("supporting_metrics", {}),
+        "sources": ["dashboard.runtime.frontend_contract", "existing_css_explainability_surfaces"],
+        "warnings": audit.get("warnings", []),
+        "failures": audit.get("failures", []),
+        "read_only": True,
+    }
+
+
 def _learning(sections: Mapping[str, Any]) -> dict[str, Any]:
     analytics = sections.get("analytics") if isinstance(sections.get("analytics"), Mapping) else {}
     return {
@@ -429,7 +471,10 @@ def _configuration(frontend: Mapping[str, Any], broker: Mapping[str, Any]) -> di
 def _documentation_index() -> dict[str, Any]:
     return {
         "architecture": ["docs/architecture/CSS_MISSION_CONTROL_ARCHITECTURE.md"],
-        "governance": ["docs/governance/PHASE_MC_001_MISSION_CONTROL_FOUNDATION.md"],
+        "governance": [
+            "docs/governance/PHASE_MC_001_MISSION_CONTROL_FOUNDATION.md",
+            "docs/governance/PHASE_MC_002_MISSION_CONTROL_LIVE_DATA_INTEGRATION.md",
+        ],
         "release_reports": [],
         "certification_reports": [],
         "operator_runbooks": [],
@@ -442,13 +487,20 @@ def _documentation_index() -> dict[str, Any]:
     }
 
 
-def _data_freshness(frontend: Mapping[str, Any], broker: Mapping[str, Any], certification: Mapping[str, Any]) -> dict[str, Any]:
+def _data_freshness(
+    frontend: Mapping[str, Any],
+    broker: Mapping[str, Any],
+    certification: Mapping[str, Any],
+    freshness: Mapping[str, Any],
+) -> dict[str, Any]:
     return {
         "generated_at": frontend.get("generated_at", DATA_UNAVAILABLE),
         "last_runtime_heartbeat": broker.get("last_heartbeat", broker.get("last_successful_sync", DATA_UNAVAILABLE)),
         "broker_freshness": broker.get("last_successful_sync", DATA_UNAVAILABLE),
         "certification_freshness": certification.get("generated_at", DATA_UNAVAILABLE),
-        "stale_mandatory_data": False,
+        "overall_freshness": freshness.get("overall_freshness", DATA_UNAVAILABLE),
+        "stale_mandatory_data": bool(freshness.get("stale_mandatory_data")),
+        "sections": freshness.get("sections", {}),
     }
 
 

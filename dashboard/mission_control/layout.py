@@ -27,7 +27,7 @@ def render_mission_control_shell(state: Mapping[str, Any], *, active_section: st
 <body class="mc-body">
   <div class="mc-shell" data-mission-control-schema="{escape(state.get('schema_version'))}">
     <aside class="mc-sidebar">
-      <div class="mc-brand"><strong>CSS Mission Control</strong><span>Enterprise shell / MC-001</span></div>
+      <div class="mc-brand"><strong>CSS Mission Control</strong><span>Enterprise shell / MC-002</span></div>
       {nav}
     </aside>
     <main class="mc-main">
