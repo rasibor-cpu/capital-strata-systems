@@ -7,7 +7,7 @@ from math import isfinite
 from typing import Any, Mapping
 
 
-SCHEMA_VERSION = "css.phase166a.canonical_broker_runtime_state.v1"
+SCHEMA_VERSION = "css.phase166b.canonical_broker_runtime_state.v1"
 
 STATUS_PASS = "PASS"
 STATUS_WARNING = "WARNING"
@@ -86,6 +86,7 @@ class CanonicalBrokerRuntimeState:
     failure_reason: str = ""
     warning_reasons: tuple[str, ...] = ()
     environment_evidence: Mapping[str, Any] = field(default_factory=dict)
+    account_evidence: Mapping[str, Any] = field(default_factory=dict)
     source_modules: tuple[str, ...] = ()
     timestamp: str = ""
     schema_version: str = SCHEMA_VERSION
@@ -144,6 +145,7 @@ class CanonicalBrokerRuntimeState:
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["environment_evidence"] = json_safe(dict(self.environment_evidence))
+        payload["account_evidence"] = json_safe(dict(self.account_evidence))
         payload["warning_reasons"] = list(self.warning_reasons)
         payload["source_modules"] = list(self.source_modules)
         payload["contradiction_reasons"] = list(self.contradiction_reasons)
@@ -153,6 +155,7 @@ class CanonicalBrokerRuntimeState:
     def stable_json(self) -> str:
         payload = asdict(self)
         payload["environment_evidence"] = json_safe(dict(self.environment_evidence))
+        payload["account_evidence"] = json_safe(dict(self.account_evidence))
         return json.dumps(json_safe(payload), sort_keys=True, separators=(",", ":"), default=str)
 
     def stable_hash(self) -> str:

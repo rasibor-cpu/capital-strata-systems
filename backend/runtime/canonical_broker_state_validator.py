@@ -4,10 +4,9 @@ from math import isfinite
 from typing import Any, Mapping
 
 from backend.runtime.canonical_broker_runtime_state import (
-    OVERALL_CONTRADICTORY,
     OVERALL_FAIL_CLOSED,
+    OVERALL_GREEN,
     SCHEMA_VERSION,
-    STATUS_BLOCKED,
     STATUS_FAIL,
     STATUS_PASS,
     STATUS_UNAVAILABLE,
@@ -23,7 +22,7 @@ def validate_canonical_broker_state(state: CanonicalBrokerRuntimeState | Mapping
         "valid": valid,
         "contradictory": bool(reasons),
         "reasons": reasons,
-        "overall_status": canonical.overall_status if valid else OVERALL_CONTRADICTORY,
+        "overall_status": canonical.overall_status if valid else OVERALL_FAIL_CLOSED,
         "execution_allowed": False,
         "live_trading_blocked": True,
         "broker_execution_armed": False,
@@ -45,8 +44,18 @@ def contradiction_reasons(state: CanonicalBrokerRuntimeState) -> list[str]:
         reasons.append("credentials_missing_but_authentication_pass")
     if state.authentication_status == STATUS_FAIL and state.account_status == STATUS_PASS:
         reasons.append("authentication_failed_but_account_ready")
-    if state.balance_status == STATUS_UNAVAILABLE and state.margin_status == STATUS_PASS and _positive_live_buying_power(state.environment_evidence):
+    if state.authentication_status == STATUS_FAIL and state.connection_status == STATUS_PASS:
+        reasons.append("authentication_failed_but_connection_ready")
+    if state.balance_status == STATUS_UNAVAILABLE and state.buying_power_status == STATUS_PASS:
+        reasons.append("balance_unavailable_but_buying_power_ready")
+    if state.balance_status == STATUS_UNAVAILABLE and state.margin_status == STATUS_PASS:
+        reasons.append("balance_unavailable_but_margin_ready")
+    if state.balance_status == STATUS_UNAVAILABLE and _positive_live_buying_power(state.environment_evidence):
         reasons.append("balance_unavailable_but_positive_live_margin")
+    if state.authentication_status == STATUS_FAIL and state.market_data_status == STATUS_PASS and state.overall_status == OVERALL_GREEN:
+        reasons.append("authentication_failed_but_market_data_green")
+    if state.connection_status == STATUS_PASS and state.overall_status == OVERALL_GREEN and state.authentication_status != STATUS_PASS:
+        reasons.append("connected_green_without_authentication")
     if state.execution_allowed and state.live_trading_blocked:
         reasons.append("execution_allowed_while_live_trading_blocked")
     if state.broker_execution_armed and str(state.pilot_state).upper() == "DISARMED":
@@ -61,8 +70,7 @@ def contradiction_reasons(state: CanonicalBrokerRuntimeState) -> list[str]:
 
 
 def fail_closed_state(state: CanonicalBrokerRuntimeState, reasons: list[str] | tuple[str, ...]) -> CanonicalBrokerRuntimeState:
-    contradictory = bool(reasons)
-    return state.with_fail_closed(reasons, contradictory=contradictory)
+    return state.with_fail_closed(reasons, contradictory=False)
 
 
 def _contamination_present(evidence: Mapping[str, Any]) -> bool:

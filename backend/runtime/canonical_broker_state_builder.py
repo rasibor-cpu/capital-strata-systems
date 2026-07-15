@@ -64,6 +64,9 @@ def build_canonical_broker_runtime_state(
     balance_status = _read_status("balance", runtime, trace, adapter, cert)
     buying_power_status = _buying_power_status(runtime, adapter, margin)
     margin_status = _margin_status(runtime, adapter, margin)
+    if mode_key == "live" and balance_status != STATUS_PASS:
+        buying_power_status = STATUS_UNAVAILABLE
+        margin_status = STATUS_UNAVAILABLE
     market_data_status = _read_status("market_data", runtime, trace, adapter, cert)
     product_status = _read_status("product", runtime, trace, adapter, cert)
     readiness_score = _readiness_score(runtime, adapter, cert)
@@ -113,6 +116,20 @@ def build_canonical_broker_runtime_state(
         failure_reason=failure_reason,
         warning_reasons=tuple(warnings),
         environment_evidence=environment,
+        account_evidence=_account_evidence(
+            runtime=runtime,
+            trace=trace,
+            adapter=adapter,
+            cert=cert,
+            authentication_status=authentication_status,
+            connection_status=connection_status,
+            account_status=account_status,
+            balance_status=balance_status,
+            buying_power_status=buying_power_status,
+            margin_status=margin_status,
+            market_data_status=market_data_status,
+            product_status=product_status,
+        ),
         source_modules=tuple(source_modules) or _source_modules(runtime, trace, adapter, cert, margin),
         timestamp=timestamp or str(runtime.get("timestamp") or runtime.get("generated_at") or _utc_iso()),
     )
@@ -170,7 +187,7 @@ def _authentication_status(trace: Mapping[str, Any], *payloads: Mapping[str, Any
             else payload.get("authentication_status")
         )
         if value is not None:
-            return STATUS_PASS if value is True else canonical_status(value)
+            return STATUS_PASS if value is True else STATUS_FAIL if value is False else canonical_status(value)
     return STATUS_NOT_TESTED
 
 
@@ -279,6 +296,13 @@ def _pre_validation_reasons(runtime: Mapping[str, Any], trace: Mapping[str, Any]
         reasons.append("broker_execution_armed_while_pilot_disarmed")
     if canonical_status(trace.get("authentication")) == STATUS_FAIL and str(cert.get("certification", "")).upper() in {"GREEN", "PASS"}:
         reasons.append("current_authentication_failure_overrides_stale_success")
+    raw_balance = runtime.get("balance_status") if runtime.get("balance_status") is not None else runtime.get("balances_loaded")
+    balance_unavailable = raw_balance is False or canonical_status(raw_balance) == STATUS_UNAVAILABLE
+    if balance_unavailable:
+        if canonical_status(runtime.get("buying_power_status")) == STATUS_PASS or runtime.get("buying_power") not in (None, "", "DATA UNAVAILABLE", "UNAVAILABLE", "NOT_APPLICABLE"):
+            reasons.append("balance_unavailable_but_buying_power_ready")
+        if canonical_status(runtime.get("margin_status")) == STATUS_PASS or runtime.get("margin_available") not in (None, "", "DATA UNAVAILABLE", "UNAVAILABLE", "NOT_APPLICABLE"):
+            reasons.append("balance_unavailable_but_margin_ready")
     return reasons
 
 
@@ -298,7 +322,7 @@ def _overall_status(*statuses_and_payloads: Any) -> str:
 
 def _failure_reason(runtime: Mapping[str, Any], trace: Mapping[str, Any], adapter: Mapping[str, Any], cert: Mapping[str, Any], environment: Mapping[str, Any]) -> str:
     if environment.get("status") == "FAIL":
-        return "LIVE_PRACTICE_CONTAMINATION"
+        return "COINBASE_LIVE_ENVIRONMENT_CONTAMINATION"
     for payload in (trace, adapter, runtime, cert):
         for key in ("failure_reason", "connection_error", "coinbase_error_code", "error_code"):
             value = payload.get(key)
@@ -308,6 +332,57 @@ def _failure_reason(runtime: Mapping[str, Any], trace: Mapping[str, Any], adapte
         if isinstance(blockers, list) and blockers:
             return str(blockers[0])
     return ""
+
+
+def _account_evidence(
+    *,
+    runtime: Mapping[str, Any],
+    trace: Mapping[str, Any],
+    adapter: Mapping[str, Any],
+    cert: Mapping[str, Any],
+    authentication_status: str,
+    connection_status: str,
+    account_status: str,
+    balance_status: str,
+    buying_power_status: str,
+    margin_status: str,
+    market_data_status: str,
+    product_status: str,
+) -> dict[str, Any]:
+    balances_loaded = balance_status == STATUS_PASS
+    return {
+        "authenticated": authentication_status == STATUS_PASS,
+        "connected": connection_status == STATUS_PASS,
+        "account_loaded": account_status == STATUS_PASS,
+        "balances_loaded": balances_loaded,
+        "buying_power_loaded": balances_loaded and buying_power_status == STATUS_PASS,
+        "margin_loaded": balances_loaded and margin_status == STATUS_PASS,
+        "products_loaded": product_status == STATUS_PASS,
+        "market_data_loaded": market_data_status == STATUS_PASS,
+        "equity_loaded": balances_loaded and _equity_loaded(runtime, adapter, cert),
+        "account_type": str(runtime.get("account_type") or adapter.get("account_type") or cert.get("account_type") or "UNKNOWN"),
+        "portfolio_loaded": _portfolio_loaded(runtime, trace, adapter, cert),
+    }
+
+
+def _portfolio_loaded(runtime: Mapping[str, Any], trace: Mapping[str, Any], adapter: Mapping[str, Any], cert: Mapping[str, Any]) -> bool:
+    endpoints = _mapping(trace.get("endpoint_verification"))
+    portfolio_status = _first_status(
+        _mapping(endpoints.get("portfolios")).get("status"),
+        runtime.get("portfolio_loaded"),
+        adapter.get("portfolio_loaded"),
+        cert.get("portfolio_access") or cert.get("portfolio"),
+    )
+    return portfolio_status == STATUS_PASS
+
+
+def _equity_loaded(runtime: Mapping[str, Any], adapter: Mapping[str, Any], cert: Mapping[str, Any]) -> bool:
+    for payload in (runtime, adapter, cert):
+        for key in ("account_equity", "equity", "portfolio_value", "balance", "cash"):
+            value = payload.get(key)
+            if value not in (None, "", "DATA UNAVAILABLE", "UNAVAILABLE", "NOT_APPLICABLE"):
+                return finite_float(value, default=-1.0) >= 0
+    return False
 
 
 def _warning_reasons(*payloads: Mapping[str, Any]) -> list[str]:

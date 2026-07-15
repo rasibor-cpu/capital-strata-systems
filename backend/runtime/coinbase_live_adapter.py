@@ -701,14 +701,42 @@ def _exception_details(exc: BaseException) -> dict[str, Any]:
 
 def _exception_code(exc: BaseException) -> str:
     text = f"{exc.__class__.__name__} {exc}".lower()
+    if "clock" in text and "skew" in text:
+        return "COINBASE_CLOCK_SKEW"
+    if "expired" in text and "jwt" in text:
+        return "COINBASE_EXPIRED_JWT"
+    if "invalid" in text and "jwt" in text:
+        return "COINBASE_INVALID_JWT"
+    if "bad key" in text or "key format" in text:
+        return "COINBASE_BAD_KEY"
+    if "permission" in text or "denied" in text:
+        return "COINBASE_PERMISSION_DENIED"
+    if "dns" in text or "name resolution" in text or "getaddrinfo" in text:
+        return "COINBASE_DNS_ERROR"
     if "unauthorized" in text or "401" in text:
         return "COINBASE_HTTP_401"
     if "forbidden" in text or "403" in text:
         return "COINBASE_HTTP_403"
+    if "not found" in text or "404" in text:
+        return "COINBASE_HTTP_404"
     if "timeout" in text:
         return "COINBASE_TIMEOUT"
     if "tls" in text or "ssl" in text or "certificate" in text:
         return "COINBASE_TLS_ERROR"
+    if "portfolio" in text:
+        return "COINBASE_PORTFOLIO_UNAVAILABLE"
+    if "balance" in text:
+        return "COINBASE_BALANCES_UNAVAILABLE"
+    if "account" in text:
+        return "COINBASE_ACCOUNT_UNAVAILABLE"
+    if "market-data-only" in text or "market data only" in text:
+        return "COINBASE_MARKET_DATA_ONLY"
+    if "broker unavailable" in text:
+        return "COINBASE_BROKER_UNAVAILABLE"
+    if "unavailable" in text or "503" in text:
+        return "COINBASE_HTTP_503"
+    if "network" in text or "connection" in text:
+        return "COINBASE_NETWORK_ERROR"
     return f"COINBASE_{exc.__class__.__name__.upper()}"
 
 

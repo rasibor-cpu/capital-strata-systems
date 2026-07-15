@@ -14,6 +14,8 @@ from urllib.parse import urlparse
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
+from backend.runtime.canonical_broker_state_registry import classify_coinbase_environment
+
 
 PASS = "PASS"
 FAIL = "FAIL"
@@ -323,22 +325,10 @@ def _endpoint_alignment(env: Mapping[str, Any], *, mode: str) -> dict[str, Any]:
 
 
 def _environment_status(env: Mapping[str, Any], *, mode: str) -> dict[str, Any]:
-    mode_key = str(mode or "live").strip().lower()
-    contamination_keys: list[str] = []
-    if mode_key == "live":
-        for key, value in env.items():
-            key_text = str(key)
-            if not key_text.startswith("COINBASE"):
-                continue
-            if value in (None, ""):
-                continue
-            if "TEST" in key_text or "PRACTICE" in key_text:
-                contamination_keys.append(key_text)
+    evidence = classify_coinbase_environment(env, mode=mode)
     return {
-        "status": FAIL if contamination_keys else PASS,
-        "mode": mode_key,
-        "contamination_keys": sorted(contamination_keys),
-        "live_practice_consistent": not contamination_keys,
+        **evidence,
+        "live_practice_consistent": evidence.get("status") != FAIL,
     }
 
 
@@ -484,6 +474,18 @@ def _failure_reason(exc: BaseException) -> str:
     if status:
         return f"COINBASE_HTTP_{status}"
     text = f"{exc.__class__.__name__} {exc}".lower()
+    if "clock" in text and "skew" in text:
+        return "COINBASE_CLOCK_SKEW"
+    if "expired" in text and "jwt" in text:
+        return "COINBASE_EXPIRED_JWT"
+    if "invalid" in text and "jwt" in text:
+        return "COINBASE_INVALID_JWT"
+    if "bad key" in text or "key format" in text:
+        return "COINBASE_BAD_KEY"
+    if "permission" in text or "denied" in text:
+        return "COINBASE_PERMISSION_DENIED"
+    if "dns" in text or "name resolution" in text or "getaddrinfo" in text:
+        return "COINBASE_DNS_ERROR"
     if "tls" in text or "ssl" in text or "certificate" in text:
         return "COINBASE_TLS_ERROR"
     if "timeout" in text:
@@ -492,6 +494,18 @@ def _failure_reason(exc: BaseException) -> str:
         return "COINBASE_HTTP_401"
     if "forbidden" in text or "403" in text:
         return "COINBASE_HTTP_403"
+    if "not found" in text or "404" in text:
+        return "COINBASE_HTTP_404"
+    if "portfolio" in text:
+        return "COINBASE_PORTFOLIO_UNAVAILABLE"
+    if "balance" in text:
+        return "COINBASE_BALANCES_UNAVAILABLE"
+    if "account" in text:
+        return "COINBASE_ACCOUNT_UNAVAILABLE"
+    if "market-data-only" in text or "market data only" in text:
+        return "COINBASE_MARKET_DATA_ONLY"
+    if "broker unavailable" in text:
+        return "COINBASE_BROKER_UNAVAILABLE"
     if "unavailable" in text or "503" in text:
         return "COINBASE_HTTP_503"
     if "network" in text or "connection" in text:

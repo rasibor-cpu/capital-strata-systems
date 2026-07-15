@@ -159,7 +159,7 @@ def test_phase166a_environment_classification_and_live_contamination_fail_closed
     assert by_name["COINBASE_TEST_ORDER_USD"]["severity"] == "ERROR"
     assert by_name["COINBASE_MAX_LIVE_ORDER_USD"]["classification"] == CLASS_DEPRECATED
     assert by_name["COINBASE_MAX_LIVE_ORDER_USD"]["severity"] == "WARNING"
-    assert state.overall_status == OVERALL_CONTRADICTORY
+    assert state.overall_status == OVERALL_FAIL_CLOSED
     assert "live_mode_environment_contamination" in state.contradiction_reasons
 
 
@@ -184,7 +184,7 @@ def test_phase166a_contradictions_fail_closed(payload: dict, reason: str) -> Non
         margin_snapshot={"buying_power": 10.0} if "margin_status" in payload else {},
     )
 
-    assert state.overall_status == OVERALL_CONTRADICTORY
+    assert state.overall_status == OVERALL_FAIL_CLOSED
     assert reason in state.contradiction_reasons
     assert state.execution_allowed is False
     assert state.live_trading_blocked is True
@@ -199,7 +199,7 @@ def test_phase166a_positive_simulated_live_margin_is_rejected() -> None:
         margin_snapshot={"margin_source": "SIMULATED", "buying_power": 10000.0},
     )
 
-    assert state.overall_status == OVERALL_CONTRADICTORY
+    assert state.overall_status == OVERALL_FAIL_CLOSED
     assert "positive_simulated_live_margin" in state.contradiction_reasons
 
 

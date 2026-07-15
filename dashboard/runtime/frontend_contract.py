@@ -1099,6 +1099,7 @@ def rc1_operational_dashboard(dashboard_payload: Mapping[str, Any]) -> dict[str,
 def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     broker_payload = _mapping(dashboard_payload.get("broker_summary"))
     canonical_state = _mapping(broker_payload.get("canonical_broker_runtime_state"))
+    canonical_account = _mapping(canonical_state.get("account_evidence"))
     credential_diagnostics = _mapping(broker_payload.get("credential_diagnostics"))
     canonical_credential_diagnostics = broker_credential_diagnostics(dashboard_payload)
     limit_reconciliation = _mapping(broker_payload.get("limit_reconciliation"))
@@ -1108,10 +1109,10 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         "selected_broker": str(broker_payload.get("selected_broker", "NONE")),
         "broker_type": str(broker_payload.get("broker_type", broker_readiness.get("broker_type", "UNKNOWN"))),
         "broker_mode": str(broker_payload.get("broker_mode", "paper")),
-        "connected": _boolean(broker_payload.get("connected")),
-        "broker_connected": _boolean(broker_payload.get("broker_connected", broker_payload.get("connected"))),
-        "broker_authenticated": _boolean(broker_payload.get("broker_authenticated")),
-        "broker_health": str(broker_payload.get("broker_health", broker_payload.get("api_health", "UNKNOWN"))),
+        "connected": _boolean(canonical_account.get("connected", broker_payload.get("connected"))),
+        "broker_connected": _boolean(canonical_account.get("connected", broker_payload.get("broker_connected", broker_payload.get("connected")))),
+        "broker_authenticated": _boolean(canonical_account.get("authenticated", broker_payload.get("broker_authenticated"))),
+        "broker_health": str(canonical_state.get("overall_status", broker_payload.get("broker_health", broker_payload.get("api_health", "UNKNOWN")))),
         "broker_infrastructure_health": str(
             broker_payload.get("broker_infrastructure_health", broker_payload.get("broker_health", broker_payload.get("api_health", "UNKNOWN")))
         ),
@@ -1119,6 +1120,7 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         "broker_readiness": broker_readiness,
         "runtime_certification_snapshot": certification_snapshot,
         "canonical_broker_runtime_state": canonical_state,
+        "canonical_account_evidence": canonical_account,
         "overall_status": str(canonical_state.get("overall_status", broker_payload.get("overall_status", DATA_UNAVAILABLE))),
         "state_hash": str(canonical_state.get("state_hash", broker_payload.get("state_hash", ""))),
         "contradiction_reasons": _string_list(canonical_state.get("contradiction_reasons", broker_payload.get("contradiction_reasons"))),
@@ -1127,16 +1129,16 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         "market_data_freshness": _mapping(certification_snapshot.get("market_data_freshness")),
         "certification_latency": _mapping(certification_snapshot.get("latency")),
         "credentials_present": _boolean(broker_payload.get("credentials_present", broker_readiness.get("credentials_present"))),
-        "authenticated": _boolean(broker_payload.get("authenticated", broker_payload.get("broker_authenticated", broker_readiness.get("authenticated")))),
-        "account_loaded": _boolean(broker_payload.get("account_loaded", broker_readiness.get("account_loaded"))),
-        "market_data_ready": _boolean(broker_payload.get("market_data_ready", broker_readiness.get("market_data_ready"))),
+        "authenticated": _boolean(canonical_account.get("authenticated", broker_payload.get("authenticated", broker_payload.get("broker_authenticated", broker_readiness.get("authenticated"))))),
+        "account_loaded": _boolean(canonical_account.get("account_loaded", broker_payload.get("account_loaded", broker_readiness.get("account_loaded")))),
+        "market_data_ready": _boolean(canonical_account.get("market_data_loaded", broker_payload.get("market_data_ready", broker_readiness.get("market_data_ready")))),
         "execution_supported": _boolean(broker_payload.get("execution_supported", broker_readiness.get("execution_supported"))),
         "infrastructure_health": str(broker_payload.get("infrastructure_health", broker_readiness.get("infrastructure_health", "UNKNOWN"))),
         "credentials_health": str(broker_payload.get("credentials_health", broker_readiness.get("credentials_health", "UNKNOWN"))),
-        "authentication_health": str(broker_payload.get("authentication_health", broker_readiness.get("authentication_health", "UNKNOWN"))),
-        "connection_health": str(broker_payload.get("connection_health", broker_readiness.get("connection_health", "UNKNOWN"))),
-        "market_data_health": str(broker_payload.get("market_data_health", broker_readiness.get("market_data_health", "UNKNOWN"))),
-        "account_data_health": str(broker_payload.get("account_data_health", broker_readiness.get("account_data_health", "UNKNOWN"))),
+        "authentication_health": str(canonical_state.get("authentication_status", broker_payload.get("authentication_health", broker_readiness.get("authentication_health", "UNKNOWN")))),
+        "connection_health": str(canonical_state.get("connection_status", broker_payload.get("connection_health", broker_readiness.get("connection_health", "UNKNOWN")))),
+        "market_data_health": str(canonical_state.get("market_data_status", broker_payload.get("market_data_health", broker_readiness.get("market_data_health", "UNKNOWN")))),
+        "account_data_health": str(canonical_state.get("account_status", broker_payload.get("account_data_health", broker_readiness.get("account_data_health", "UNKNOWN")))),
         "readiness_score": _number(broker_payload.get("readiness_score", broker_readiness.get("readiness_score"))),
         "broker_execution_armed": _boolean(broker_payload.get("broker_execution_armed")),
         "execution_allowed": False,
