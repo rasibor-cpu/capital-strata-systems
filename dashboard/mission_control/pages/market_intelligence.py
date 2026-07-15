@@ -5,6 +5,7 @@ from dashboard.mission_control.pages._components import detail_table, metric_gri
 
 def render(state: dict) -> str:
     market = section(state, "market_intelligence")
+    opportunities = section(state, "opportunity_ranking")
     return (
         page_header("Market Intelligence", "Read-only regime, trend, volatility, liquidity, signal, rankings, watchlist, and freshness view.")
         + metric_grid(
@@ -31,5 +32,6 @@ def render(state: dict) -> str:
                 "watchlists": market.get("watchlists"),
                 "market_data_freshness": market.get("market_data_freshness"),
             }),
+            detail_table("Opportunity Ranking", opportunities.get("opportunities", [])),
         )
     )

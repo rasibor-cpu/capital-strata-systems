@@ -8,26 +8,36 @@ from math import isfinite
 from typing import Any
 
 from dashboard.mission_control.broker_telemetry import build_broker_telemetry
+from dashboard.mission_control.capital_allocation import build_capital_allocation_center
+from dashboard.mission_control.capital_committee import build_capital_committee_panel
 from dashboard.mission_control.committee_projection import build_committee_view
 from dashboard.mission_control.counterfactual_projection import build_counterfactual_projection
 from dashboard.mission_control.decision_intelligence import build_decision_panel
 from dashboard.mission_control.decision_trace import build_decision_trace
 from dashboard.mission_control.evidence_graph import build_evidence_graph
 from dashboard.mission_control.event_stream import build_alert_center, build_event_stream
+from dashboard.mission_control.execution_committee import build_execution_committee_panel
+from dashboard.mission_control.executive_dashboard import build_institutional_executive_dashboard
 from dashboard.mission_control.explanation_projection import build_decision_explanation
 from dashboard.mission_control.freshness import build_freshness_summary
 from dashboard.mission_control.health import build_health_summary
+from dashboard.mission_control.institutional_reporting import build_institutional_reporting
+from dashboard.mission_control.investment_committee import build_investment_committee_panel
 from dashboard.mission_control.navigation import navigation_payload
+from dashboard.mission_control.opportunity_ranking import build_opportunity_ranking
 from dashboard.mission_control.operations_timeline import build_operations_timeline
+from dashboard.mission_control.performance_attribution import build_performance_attribution
 from dashboard.mission_control.permissions import mission_control_permissions_payload, validate_read_only_permissions
 from dashboard.mission_control.portfolio_projection import build_options_income_panel, build_performance_panel, build_portfolio_command_view
 from dashboard.mission_control.recommendation_projection import build_recommendation_panel
 from dashboard.mission_control.risk_projection import build_risk_command_view
+from dashboard.mission_control.risk_committee import build_risk_committee_panel
 from dashboard.mission_control.runtime_snapshot_normalizer import normalize_runtime_snapshot
 from dashboard.mission_control.safety import SAFE_FLAGS, mission_control_safety_payload, normalize_metric, validate_no_secret_payload
 from dashboard.mission_control.serializers import state_hash, validate_serializable_payload
 from dashboard.mission_control.source_registry import build_source_registry
 from dashboard.mission_control.state_adapter import build_broker_registry, frontend_payload_from_runtime, section
+from dashboard.mission_control.strategy_war_room import build_strategy_war_room
 from dashboard.mission_control.system_metrics import build_executive_kpi_board, build_source_consistency, build_system_metrics
 from dashboard.mission_control.trade_lifecycle import build_trade_lifecycle
 from dashboard.runtime.frontend_contract import DATA_UNAVAILABLE
@@ -90,6 +100,7 @@ def build_mission_control_state(
         "audit": _audit(sections),
         "explainability": _explainability(sections),
         "learning": _learning(sections),
+        "institutional_sources": _institutional_sources(sections),
         "governance": _governance(frontend, governance),
         "configuration": _configuration(frontend, broker),
         "documentation": _documentation_index(),
@@ -116,6 +127,16 @@ def build_mission_control_state(
     state["counterfactuals"] = build_counterfactual_projection(state)
     state["recommendation_panel"] = build_recommendation_panel(state)
     state["evidence_graph"] = build_evidence_graph(state)
+    state["strategy_war_room"] = build_strategy_war_room(state)
+    state["opportunity_ranking"] = build_opportunity_ranking(state)
+    state["capital_allocation_center"] = build_capital_allocation_center(state)
+    state["performance_attribution"] = build_performance_attribution(state)
+    state["investment_committee"] = build_investment_committee_panel(state)
+    state["risk_committee"] = build_risk_committee_panel(state)
+    state["execution_committee"] = build_execution_committee_panel(state)
+    state["capital_committee"] = build_capital_committee_panel(state)
+    state["institutional_executive_dashboard"] = build_institutional_executive_dashboard(state)
+    state["institutional_reporting"] = build_institutional_reporting(state)
     state["source_consistency"] = build_source_consistency(state)
     source_registry = build_source_registry(
         frontend,
@@ -177,6 +198,21 @@ def validate_mission_control_state(state: Mapping[str, Any] | None) -> dict[str,
     recommendation_panel = source.get("recommendation_panel") if isinstance(source.get("recommendation_panel"), Mapping) else {}
     if recommendation_panel.get("forbidden_terms_absent") is False:
         reasons.append("recommendation_contains_execution_language")
+    for panel_name in (
+        "strategy_war_room",
+        "opportunity_ranking",
+        "capital_allocation_center",
+        "performance_attribution",
+        "investment_committee",
+        "risk_committee",
+        "execution_committee",
+        "capital_committee",
+        "institutional_executive_dashboard",
+        "institutional_reporting",
+    ):
+        panel = source.get(panel_name) if isinstance(source.get(panel_name), Mapping) else {}
+        if panel.get("status") == "FAIL_CLOSED":
+            reasons.append(f"institutional_panel_failed:{panel_name}")
     return {
         "valid": not reasons,
         "status": "PASS" if not reasons else "FAIL_CLOSED",
@@ -604,6 +640,18 @@ def _learning(sections: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _institutional_sources(sections: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "analytics": _section_mapping(sections, "analytics"),
+        "strategy_analytics": _section_mapping(sections, "strategy_analytics"),
+        "opportunity_intelligence": _section_mapping(sections, "opportunity_intelligence"),
+        "capital_allocation": _section_mapping(sections, "capital_allocation_intelligence"),
+        "investment_committee": _section_mapping(sections, "institutional_investment_committee"),
+        "performance_attribution": _section_mapping(sections, "performance_attribution"),
+        "execution_analytics": _section_mapping(sections, "execution_analytics"),
+    }
+
+
 def _governance(frontend: Mapping[str, Any], governance: Mapping[str, Any]) -> dict[str, Any]:
     session = frontend.get("session") if isinstance(frontend.get("session"), Mapping) else {}
     return {
@@ -651,6 +699,7 @@ def _documentation_index() -> dict[str, Any]:
             "docs/governance/PHASE_MC_004_ACTIVE_RUNTIME_PUBLISHER_BINDING.md",
             "docs/governance/PHASE_MC_005_OPERATIONS_COMMAND_CENTER.md",
             "docs/governance/PHASE_MC_006_DECISION_INTELLIGENCE.md",
+            "docs/governance/PHASE_MC_007A_INSTITUTIONAL_INTELLIGENCE.md",
         ],
         "release_reports": [],
         "certification_reports": [],
@@ -690,6 +739,11 @@ def _first_status(*values: Any) -> str:
 
 def _runtime_unavailable(runtime_snapshot: Mapping[str, Any]) -> bool:
     return str(runtime_snapshot.get("source", "")).upper() in {"", "UNAVAILABLE", "UNKNOWN"} or str(runtime_snapshot.get("runtime_status", "")).upper() in {"OFFLINE", "UNAVAILABLE"}
+
+
+def _section_mapping(sections: Mapping[str, Any], key: str) -> dict[str, Any]:
+    value = sections.get(key)
+    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _scan_non_finite(value: Any, *, reasons: list[str], path: str = "") -> None:

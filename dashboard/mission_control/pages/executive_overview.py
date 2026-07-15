@@ -14,6 +14,8 @@ def render(state: dict) -> str:
     freshness = section(state, "data_freshness")
     kpis = section(state, "executive_kpis")
     timeline = section(state, "operations_timeline")
+    institutional = section(state, "institutional_executive_dashboard")
+    reporting = section(state, "institutional_reporting")
     return (
         page_header("Executive Overview", "Enterprise-level platform, runtime, capital, risk, readiness, and alert posture.")
         + warning_banner(
@@ -56,6 +58,18 @@ def render(state: dict) -> str:
                 "source": kpis.get("source"),
                 "state_hash": kpis.get("state_hash"),
             }),
+            detail_table("Institutional Dashboard", {
+                "platform_health": institutional.get("platform_health"),
+                "investment_health": institutional.get("investment_health"),
+                "risk_health": institutional.get("risk_health"),
+                "broker_health": institutional.get("broker_health"),
+                "runtime_health": institutional.get("runtime_health"),
+                "portfolio_health": institutional.get("portfolio_health"),
+                "capital_health": institutional.get("capital_health"),
+                "links": institutional.get("links"),
+                "state_hash": institutional.get("state_hash"),
+            }),
+            detail_table("Institutional Reports", reporting.get("summaries", [])),
             detail_table("Operations Timeline", timeline.get("events", [])[:8]),
             detail_table("Capital And PnL", {
                 "cash": portfolio.get("cash"),

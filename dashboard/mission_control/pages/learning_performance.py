@@ -7,6 +7,8 @@ def render(state: dict) -> str:
     learning = section(state, "learning")
     performance = section(state, "performance_panel")
     recommendations = section(state, "recommendation_panel")
+    war_room = section(state, "strategy_war_room")
+    committee = section(state, "investment_committee")
     return (
         page_header("Learning and Performance", "Read-only strategy, asset, symbol, attribution, reliability, expectancy, drawdown, and recommendation intelligence.")
         + warning_banner("Historical and simulated results are advisory and not guaranteed live performance.", status="warn")
@@ -25,6 +27,16 @@ def render(state: dict) -> str:
                 "asset_class_rankings": learning.get("asset_class_rankings"),
                 "symbol_rankings": learning.get("symbol_rankings"),
                 "outcome_attribution": learning.get("outcome_attribution"),
+            }),
+            detail_table("Strategy War Room", war_room.get("strategies", [])),
+            detail_table("Investment Committee", {
+                "current_decisions": committee.get("current_decisions"),
+                "highest_ranked_ideas": committee.get("highest_ranked_ideas"),
+                "blocked_ideas": committee.get("blocked_ideas"),
+                "capital_recommendations": committee.get("capital_recommendations"),
+                "decision_quality": committee.get("decision_quality"),
+                "confidence_distribution": committee.get("confidence_distribution"),
+                "links": committee.get("links"),
             }),
             detail_table("Learning Observations", {
                 "premium_capture": learning.get("premium_capture"),

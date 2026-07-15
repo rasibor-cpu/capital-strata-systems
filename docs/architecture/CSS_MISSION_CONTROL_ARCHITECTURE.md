@@ -35,6 +35,11 @@ panel, trace, explanation, committee, counterfactual, recommendation, and
 evidence-graph views from the canonical Mission Control state. It remains
 advisory-only and cannot authorize trading.
 
+MC-007A adds the Institutional Intelligence projection layer. It derives
+strategy, opportunity, capital, attribution, committee, executive, and reporting
+views from the canonical Mission Control state and upstream analytics evidence.
+It remains read-only and does not create a new optimizer or authority path.
+
 ## Component Architecture
 
 Mission Control is implemented as an additive dashboard package:
@@ -75,6 +80,16 @@ Mission Control is implemented as an additive dashboard package:
 - `dashboard.mission_control.counterfactual_projection`
 - `dashboard.mission_control.committee_projection`
 - `dashboard.mission_control.evidence_graph`
+- `dashboard.mission_control.strategy_war_room`
+- `dashboard.mission_control.opportunity_ranking`
+- `dashboard.mission_control.capital_allocation`
+- `dashboard.mission_control.performance_attribution`
+- `dashboard.mission_control.executive_dashboard`
+- `dashboard.mission_control.investment_committee`
+- `dashboard.mission_control.risk_committee`
+- `dashboard.mission_control.execution_committee`
+- `dashboard.mission_control.capital_committee`
+- `dashboard.mission_control.institutional_reporting`
 
 The package is mounted into `dashboard.web.web_app.create_app` through an
 idempotent registration helper. The helper rejects conflicting
@@ -109,7 +124,10 @@ State flow:
 12. MC-006 decision-intelligence projections derive read-only explanation,
     trace, recommendation, committee, counterfactual, and evidence graph panels
     from the same canonical state.
-13. The shell renders all pages from the canonical Mission Control state.
+13. MC-007A institutional-intelligence projections derive strategy,
+    opportunity, capital, attribution, committee, executive, and reporting
+    panels from the same canonical state.
+14. The shell renders all pages from the canonical Mission Control state.
 
 Unavailable live data remains `UNAVAILABLE`. Mock data is explicitly labeled.
 
@@ -228,6 +246,10 @@ MC-006 decision-intelligence widgets expose the same source metadata and runtime
 state hash. Committee contradictions, evidence-graph mismatches, and execution
 language in recommendation actions fail closed.
 
+MC-007A institutional-intelligence widgets expose source, provenance, generated
+timestamp, freshness, runtime identifier, state hash, and decision hash.
+Institutional panels participate in source-consistency validation.
+
 ## Operations Command Center
 
 MC-005 adds read-only operational sections to the state contract:
@@ -267,6 +289,27 @@ risk, broker, audit, explainability, and learning evidence. They do not create
 a second decision engine, alter confidence, override committees, allocate
 capital, or trigger execution. Offline runtime state remains unknown/unavailable
 and cannot produce synthetic approvals.
+
+## Institutional Intelligence
+
+MC-007A adds read-only institutional sections to the state contract:
+
+- `strategy_war_room`
+- `opportunity_ranking`
+- `capital_allocation_center`
+- `performance_attribution`
+- `institutional_executive_dashboard`
+- `investment_committee`
+- `risk_committee`
+- `execution_committee`
+- `capital_committee`
+- `institutional_reporting`
+
+These sections adapt existing analytics, capital, portfolio, broker, risk,
+audit, and committee evidence. They do not duplicate upstream calculations,
+change committee outcomes, change allocation policy, or create an execution
+control plane. Existing Mission Control pages render the panels as supporting
+detail with links to related pages.
 
 ## Health Model
 

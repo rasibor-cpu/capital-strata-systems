@@ -8,6 +8,7 @@ def render(state: dict) -> str:
     lifecycle = section(state, "trade_lifecycle")
     decision = section(state, "decision_panel")
     trace = section(state, "decision_trace")
+    committee = section(state, "execution_committee")
     return (
         page_header("Trade Operations", "Read-only trade decision, gate, paper position, order, fill, rejection, slippage, and fee visibility.")
         + warning_banner("MC-001 exposes no executable trade tickets and cannot submit or cancel orders.", status="bad")
@@ -30,6 +31,17 @@ def render(state: dict) -> str:
                 "read_only": decision.get("read_only"),
             }),
             detail_table("Decision Trace", trace.get("stages", [])),
+            detail_table("Execution Committee", {
+                "execution_quality": committee.get("execution_quality"),
+                "latency": committee.get("latency"),
+                "slippage": committee.get("slippage"),
+                "fills": committee.get("fills"),
+                "rejects": committee.get("rejects"),
+                "broker_quality": committee.get("broker_quality"),
+                "routing_quality": committee.get("routing_quality"),
+                "controls": committee.get("controls"),
+                "links": committee.get("links"),
+            }),
             detail_table("Execution Quality", {
                 "slippage": trading.get("slippage"),
                 "fees": trading.get("fees"),

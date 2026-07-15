@@ -1869,6 +1869,7 @@ def _market_opportunities_page() -> str:
       <article class="panel opportunity-main">
         <div class="panel-head">
           <h2>Opportunity Monitor</h2>
+          <span>Top Opportunities</span>
           <span id="opportunity-count-badge">0 ITEMS</span>
         </div>
         <div class="opportunity-table" id="opportunity-table"></div>

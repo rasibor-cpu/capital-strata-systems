@@ -82,6 +82,16 @@ def build_source_consistency(state: Mapping[str, Any]) -> dict[str, Any]:
             "counterfactuals",
             "recommendation_panel",
             "evidence_graph",
+            "strategy_war_room",
+            "opportunity_ranking",
+            "capital_allocation_center",
+            "performance_attribution",
+            "investment_committee",
+            "risk_committee",
+            "execution_committee",
+            "capital_committee",
+            "institutional_executive_dashboard",
+            "institutional_reporting",
         )
     }
     mismatches = [
