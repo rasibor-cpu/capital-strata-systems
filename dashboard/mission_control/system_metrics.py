@@ -92,6 +92,16 @@ def build_source_consistency(state: Mapping[str, Any]) -> dict[str, Any]:
             "capital_committee",
             "institutional_executive_dashboard",
             "institutional_reporting",
+            "rbac_console",
+            "operator_console",
+            "approval_workflow_console",
+            "configuration_console",
+            "broker_registry_console",
+            "feature_flags_console",
+            "audit_console",
+            "change_history_console",
+            "rollback_console",
+            "governance_summary_console",
         )
     }
     mismatches = [

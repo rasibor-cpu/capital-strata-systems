@@ -10,6 +10,8 @@ def render(state: dict) -> str:
     counterfactuals = section(state, "counterfactuals")
     recommendations = section(state, "recommendation_panel")
     evidence = section(state, "evidence_graph")
+    audit_console = section(state, "audit_console")
+    history = section(state, "change_history_console")
     return (
         page_header("Audit and Explainability", "Read-only explanations, rules, metrics, source modules, evidence, warnings, failures, and operator actions.")
         + split_panels(
@@ -43,5 +45,15 @@ def render(state: dict) -> str:
                 "failures": audit.get("failures"),
                 "operator_actions": audit.get("operator_actions"),
             }),
+            detail_table("Audit Center", {
+                "configuration_changes": audit_console.get("configuration_changes"),
+                "runtime_events": audit_console.get("runtime_events"),
+                "operator_actions": audit_console.get("operator_actions"),
+                "certification_events": audit_console.get("certification_events"),
+                "committee_actions": audit_console.get("committee_actions"),
+                "decision_history": audit_console.get("decision_history"),
+                "deletion_enabled": audit_console.get("deletion_enabled"),
+            }),
+            detail_table("Change History", history.get("changes", [])),
         )
     )

@@ -10,6 +10,7 @@ def render(state: dict) -> str:
     onboarding = brokers.get("onboarding", {}) if isinstance(brokers.get("onboarding"), dict) else {}
     safety = brokers.get("safety", {}) if isinstance(brokers.get("safety"), dict) else {}
     telemetry = section(state, "broker_telemetry")
+    registry = section(state, "broker_registry_console")
     return (
         page_header("Broker Management", "Read-only active broker state, broker registry, selection preview, onboarding shell, capabilities, and safety controls.")
         + warning_banner("Broker selection and onboarding controls are disabled. Runtime broker state is display-only.", status="bad")
@@ -46,6 +47,17 @@ def render(state: dict) -> str:
                 "state_hash": telemetry.get("state_hash"),
             }),
             detail_table("Broker List", brokers.get("broker_list", [])),
+            detail_table("Broker Registry Console", {
+                "registered_brokers": registry.get("registered_brokers"),
+                "active_broker": registry.get("active_broker"),
+                "capabilities": registry.get("capabilities"),
+                "certification": registry.get("certification"),
+                "readiness": registry.get("readiness"),
+                "broker_status": registry.get("broker_status"),
+                "supported_products": registry.get("supported_products"),
+                "editing_enabled": registry.get("editing_enabled"),
+                "protected_fields_redacted": registry.get("protected_fields_redacted"),
+            }),
             detail_table("Selection Preview", selection),
             detail_table("Onboarding Shell", onboarding),
             detail_table("Broker Safety", safety),

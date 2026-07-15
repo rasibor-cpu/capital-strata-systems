@@ -40,6 +40,11 @@ strategy, opportunity, capital, attribution, committee, executive, and reporting
 views from the canonical Mission Control state and upstream analytics evidence.
 It remains read-only and does not create a new optimizer or authority path.
 
+MC-007B adds the Secure Operations projection layer. It derives RBAC, operator,
+approval, configuration, broker registry, feature flag, audit, change history,
+rollback planning, and governance posture views from the canonical Mission
+Control state. It remains locked and does not create write routes.
+
 ## Component Architecture
 
 Mission Control is implemented as an additive dashboard package:
@@ -90,6 +95,16 @@ Mission Control is implemented as an additive dashboard package:
 - `dashboard.mission_control.execution_committee`
 - `dashboard.mission_control.capital_committee`
 - `dashboard.mission_control.institutional_reporting`
+- `dashboard.mission_control.rbac_console`
+- `dashboard.mission_control.operator_console`
+- `dashboard.mission_control.approval_workflow`
+- `dashboard.mission_control.configuration_console`
+- `dashboard.mission_control.broker_registry`
+- `dashboard.mission_control.feature_flags`
+- `dashboard.mission_control.audit_console`
+- `dashboard.mission_control.change_history`
+- `dashboard.mission_control.rollback_console`
+- `dashboard.mission_control.governance_summary`
 
 The package is mounted into `dashboard.web.web_app.create_app` through an
 idempotent registration helper. The helper rejects conflicting
@@ -127,7 +142,10 @@ State flow:
 13. MC-007A institutional-intelligence projections derive strategy,
     opportunity, capital, attribution, committee, executive, and reporting
     panels from the same canonical state.
-14. The shell renders all pages from the canonical Mission Control state.
+14. MC-007B secure-operations projections derive RBAC, workflow,
+    configuration, registry, feature flag, audit, history, rollback planning,
+    and governance panels from the same canonical state.
+15. The shell renders all pages from the canonical Mission Control state.
 
 Unavailable live data remains `UNAVAILABLE`. Mock data is explicitly labeled.
 
@@ -250,6 +268,11 @@ MC-007A institutional-intelligence widgets expose source, provenance, generated
 timestamp, freshness, runtime identifier, state hash, and decision hash.
 Institutional panels participate in source-consistency validation.
 
+MC-007B secure-operations widgets expose source, provenance, generated
+timestamp, freshness, runtime identifier, and state hash. The panels participate
+in source-consistency validation and fail closed on invalid permissions or
+state mismatch.
+
 ## Operations Command Center
 
 MC-005 adds read-only operational sections to the state contract:
@@ -310,6 +333,27 @@ audit, and committee evidence. They do not duplicate upstream calculations,
 change committee outcomes, change allocation policy, or create an execution
 control plane. Existing Mission Control pages render the panels as supporting
 detail with links to related pages.
+
+## Secure Operations
+
+MC-007B adds read-only secure operations sections to the state contract:
+
+- `rbac_console`
+- `operator_console`
+- `approval_workflow_console`
+- `configuration_console`
+- `broker_registry_console`
+- `feature_flags_console`
+- `audit_console`
+- `change_history_console`
+- `rollback_console`
+- `governance_summary_console`
+
+These sections adapt existing permissions, governance, broker, configuration,
+audit, certification, and safety evidence. They do not add forms, write routes,
+state-changing controls, credential workflows, broker mutation, or runtime
+mutation. Existing governance, broker, configuration, audit, and certification
+pages render the panels as supporting detail.
 
 ## Health Model
 

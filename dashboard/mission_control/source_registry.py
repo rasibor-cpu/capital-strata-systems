@@ -97,6 +97,16 @@ SECTION_SOURCE_MODULES: dict[str, str] = {
     "capital_committee": "dashboard.mission_control.capital_committee",
     "institutional_executive_dashboard": "dashboard.mission_control.executive_dashboard",
     "institutional_reporting": "dashboard.mission_control.institutional_reporting",
+    "rbac_console": "dashboard.mission_control.rbac_console",
+    "operator_console": "dashboard.mission_control.operator_console",
+    "approval_workflow_console": "dashboard.mission_control.approval_workflow",
+    "configuration_console": "dashboard.mission_control.configuration_console",
+    "broker_registry_console": "dashboard.mission_control.broker_registry",
+    "feature_flags_console": "dashboard.mission_control.feature_flags",
+    "audit_console": "dashboard.mission_control.audit_console",
+    "change_history_console": "dashboard.mission_control.change_history",
+    "rollback_console": "dashboard.mission_control.rollback_console",
+    "governance_summary_console": "dashboard.mission_control.governance_summary",
     "source_consistency": "dashboard.mission_control.system_metrics",
 }
 

@@ -7,10 +7,15 @@ from datetime import datetime, timezone
 from math import isfinite
 from typing import Any
 
+from dashboard.mission_control.approval_workflow import build_approval_workflow_console
+from dashboard.mission_control.audit_console import build_audit_console
+from dashboard.mission_control.broker_registry import build_broker_registry_console
 from dashboard.mission_control.broker_telemetry import build_broker_telemetry
 from dashboard.mission_control.capital_allocation import build_capital_allocation_center
 from dashboard.mission_control.capital_committee import build_capital_committee_panel
+from dashboard.mission_control.change_history import build_change_history_console
 from dashboard.mission_control.committee_projection import build_committee_view
+from dashboard.mission_control.configuration_console import build_configuration_console
 from dashboard.mission_control.counterfactual_projection import build_counterfactual_projection
 from dashboard.mission_control.decision_intelligence import build_decision_panel
 from dashboard.mission_control.decision_trace import build_decision_trace
@@ -19,19 +24,24 @@ from dashboard.mission_control.event_stream import build_alert_center, build_eve
 from dashboard.mission_control.execution_committee import build_execution_committee_panel
 from dashboard.mission_control.executive_dashboard import build_institutional_executive_dashboard
 from dashboard.mission_control.explanation_projection import build_decision_explanation
+from dashboard.mission_control.feature_flags import build_feature_flags_console
 from dashboard.mission_control.freshness import build_freshness_summary
+from dashboard.mission_control.governance_summary import build_governance_summary_console
 from dashboard.mission_control.health import build_health_summary
 from dashboard.mission_control.institutional_reporting import build_institutional_reporting
 from dashboard.mission_control.investment_committee import build_investment_committee_panel
 from dashboard.mission_control.navigation import navigation_payload
 from dashboard.mission_control.opportunity_ranking import build_opportunity_ranking
+from dashboard.mission_control.operator_console import build_operator_console
 from dashboard.mission_control.operations_timeline import build_operations_timeline
 from dashboard.mission_control.performance_attribution import build_performance_attribution
 from dashboard.mission_control.permissions import mission_control_permissions_payload, validate_read_only_permissions
 from dashboard.mission_control.portfolio_projection import build_options_income_panel, build_performance_panel, build_portfolio_command_view
 from dashboard.mission_control.recommendation_projection import build_recommendation_panel
+from dashboard.mission_control.rbac_console import build_rbac_console
 from dashboard.mission_control.risk_projection import build_risk_command_view
 from dashboard.mission_control.risk_committee import build_risk_committee_panel
+from dashboard.mission_control.rollback_console import build_rollback_console
 from dashboard.mission_control.runtime_snapshot_normalizer import normalize_runtime_snapshot
 from dashboard.mission_control.safety import SAFE_FLAGS, mission_control_safety_payload, normalize_metric, validate_no_secret_payload
 from dashboard.mission_control.serializers import state_hash, validate_serializable_payload
@@ -102,7 +112,7 @@ def build_mission_control_state(
         "learning": _learning(sections),
         "institutional_sources": _institutional_sources(sections),
         "governance": _governance(frontend, governance),
-        "configuration": _configuration(frontend, broker),
+        "configuration": _configuration(frontend, broker, sections),
         "documentation": _documentation_index(),
         "permissions": mission_control_permissions_payload(),
         "safety": safety,
@@ -137,6 +147,16 @@ def build_mission_control_state(
     state["capital_committee"] = build_capital_committee_panel(state)
     state["institutional_executive_dashboard"] = build_institutional_executive_dashboard(state)
     state["institutional_reporting"] = build_institutional_reporting(state)
+    state["rbac_console"] = build_rbac_console(state)
+    state["operator_console"] = build_operator_console(state)
+    state["approval_workflow_console"] = build_approval_workflow_console(state)
+    state["configuration_console"] = build_configuration_console(state)
+    state["broker_registry_console"] = build_broker_registry_console(state)
+    state["feature_flags_console"] = build_feature_flags_console(state)
+    state["audit_console"] = build_audit_console(state)
+    state["change_history_console"] = build_change_history_console(state)
+    state["rollback_console"] = build_rollback_console(state)
+    state["governance_summary_console"] = build_governance_summary_console(state)
     state["source_consistency"] = build_source_consistency(state)
     source_registry = build_source_registry(
         frontend,
@@ -209,10 +229,22 @@ def validate_mission_control_state(state: Mapping[str, Any] | None) -> dict[str,
         "capital_committee",
         "institutional_executive_dashboard",
         "institutional_reporting",
+        "rbac_console",
+        "operator_console",
+        "approval_workflow_console",
+        "configuration_console",
+        "broker_registry_console",
+        "feature_flags_console",
+        "audit_console",
+        "change_history_console",
+        "rollback_console",
+        "governance_summary_console",
     ):
         panel = source.get(panel_name) if isinstance(source.get(panel_name), Mapping) else {}
         if panel.get("status") == "FAIL_CLOSED":
             reasons.append(f"institutional_panel_failed:{panel_name}")
+        if panel.get("status") == "fail_closed":
+            reasons.append(f"control_plane_panel_failed:{panel_name}")
     return {
         "valid": not reasons,
         "status": "PASS" if not reasons else "FAIL_CLOSED",
@@ -669,10 +701,12 @@ def _governance(frontend: Mapping[str, Any], governance: Mapping[str, Any]) -> d
         "allowed_engine_modes": ["SAFE", "CONSERVATIVE", "BALANCED", "AGGRESSIVE", "EXPANSION"],
         "governance_status": governance.get("governance_status", DATA_UNAVAILABLE),
         "rbac_summary": "READ_ONLY_MC001",
+        "approval_workflows": governance.get("approval_workflows", {}),
     }
 
 
-def _configuration(frontend: Mapping[str, Any], broker: Mapping[str, Any]) -> dict[str, Any]:
+def _configuration(frontend: Mapping[str, Any], broker: Mapping[str, Any], sections: Mapping[str, Any]) -> dict[str, Any]:
+    configuration = _section_mapping(sections, "configuration")
     return {
         "runtime_mode": frontend.get("resolved_mode", DATA_UNAVAILABLE),
         "engine_mode": (frontend.get("session") or {}).get("engine_mode", DATA_UNAVAILABLE) if isinstance(frontend.get("session"), Mapping) else DATA_UNAVAILABLE,
@@ -682,7 +716,7 @@ def _configuration(frontend: Mapping[str, Any], broker: Mapping[str, Any]) -> di
         "paper_limits": "CONFIGURED_IN_EXISTING_POLICY",
         "preview_limits": "CONFIGURED_IN_EXISTING_POLICY",
         "live_pilot_limits": "CONFIGURED_IN_EXISTING_POLICY",
-        "feature_flags": {},
+        "feature_flags": configuration.get("feature_flags", frontend.get("feature_flags", {})),
         "service_endpoints": "REDACTED_SAFE_SUMMARY",
         "data_refresh_settings": DATA_UNAVAILABLE,
         "live_limit_overrides": "DISABLED_MC001",
@@ -700,6 +734,7 @@ def _documentation_index() -> dict[str, Any]:
             "docs/governance/PHASE_MC_005_OPERATIONS_COMMAND_CENTER.md",
             "docs/governance/PHASE_MC_006_DECISION_INTELLIGENCE.md",
             "docs/governance/PHASE_MC_007A_INSTITUTIONAL_INTELLIGENCE.md",
+            "docs/governance/PHASE_MC_007B_SECURE_OPERATIONS.md",
         ],
         "release_reports": [],
         "certification_reports": [],

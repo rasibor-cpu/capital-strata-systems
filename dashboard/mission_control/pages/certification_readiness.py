@@ -5,6 +5,7 @@ from dashboard.mission_control.pages._components import detail_table, metric_gri
 
 def render(state: dict) -> str:
     cert = section(state, "certification")
+    summary = section(state, "governance_summary_console")
     return (
         page_header("Certification and Readiness", "Read-only RC1, operational, Options Income, broker, runtime, live-disable proof, blockers, and prerequisites.")
         + warning_banner("READY_FOR_CONTROLLED_RC1_RUNTIME is not READY_FOR_LIVE_TRADING.", status="warn")
@@ -25,6 +26,15 @@ def render(state: dict) -> str:
                 "warnings": cert.get("warnings"),
                 "ready_for_controlled_rc1_runtime": cert.get("ready_for_controlled_rc1_runtime"),
                 "ready_for_live_trading": cert.get("ready_for_live_trading"),
+            }),
+            detail_table("Governance Summary", {
+                "security_posture": summary.get("security_posture"),
+                "audit_posture": summary.get("audit_posture"),
+                "approval_posture": summary.get("approval_posture"),
+                "configuration_posture": summary.get("configuration_posture"),
+                "certification_posture": summary.get("certification_posture"),
+                "write_routes_enabled": summary.get("write_routes_enabled"),
+                "operator_actions_enabled": summary.get("operator_actions_enabled"),
             }),
         )
     )
