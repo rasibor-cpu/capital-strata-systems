@@ -30,6 +30,11 @@ broker telemetry, risk command, alert center, KPI, performance, Options Income,
 system metrics, and source-consistency views from the canonical Mission Control
 state. It remains read-only and does not add runtime controls.
 
+MC-006 adds the Decision Intelligence projection layer. It derives decision
+panel, trace, explanation, committee, counterfactual, recommendation, and
+evidence-graph views from the canonical Mission Control state. It remains
+advisory-only and cannot authorize trading.
+
 ## Component Architecture
 
 Mission Control is implemented as an additive dashboard package:
@@ -63,6 +68,13 @@ Mission Control is implemented as an additive dashboard package:
 - `dashboard.mission_control.broker_telemetry`
 - `dashboard.mission_control.risk_projection`
 - `dashboard.mission_control.system_metrics`
+- `dashboard.mission_control.decision_intelligence`
+- `dashboard.mission_control.decision_trace`
+- `dashboard.mission_control.explanation_projection`
+- `dashboard.mission_control.recommendation_projection`
+- `dashboard.mission_control.counterfactual_projection`
+- `dashboard.mission_control.committee_projection`
+- `dashboard.mission_control.evidence_graph`
 
 The package is mounted into `dashboard.web.web_app.create_app` through an
 idempotent registration helper. The helper rejects conflicting
@@ -94,7 +106,10 @@ State flow:
 10. `dashboard.mission_control.health` derives display-only health.
 11. MC-005 command-center projections derive read-only operational panels from
     the canonical Mission Control state.
-12. The shell renders all pages from the canonical Mission Control state.
+12. MC-006 decision-intelligence projections derive read-only explanation,
+    trace, recommendation, committee, counterfactual, and evidence graph panels
+    from the same canonical state.
+13. The shell renders all pages from the canonical Mission Control state.
 
 Unavailable live data remains `UNAVAILABLE`. Mock data is explicitly labeled.
 
@@ -113,6 +128,11 @@ Mission Control exposes only read-only GET routes:
 - `/mission-control/api/runtime`
 - `/mission-control/api/heartbeat`
 - `/mission-control/api/runtime-source`
+- `/mission-control/api/decision`
+- `/mission-control/api/decision-trace`
+- `/mission-control/api/explanation`
+- `/mission-control/api/recommendation`
+- `/mission-control/api/evidence`
 
 There are no POST, PUT, PATCH, or DELETE operational routes in MC-002.
 
@@ -204,6 +224,10 @@ MC-005 command-center widgets expose source, provenance, generated timestamp,
 freshness, and runtime state hash. Source consistency is validated and hash
 mismatches fail closed.
 
+MC-006 decision-intelligence widgets expose the same source metadata and runtime
+state hash. Committee contradictions, evidence-graph mismatches, and execution
+language in recommendation actions fail closed.
+
 ## Operations Command Center
 
 MC-005 adds read-only operational sections to the state contract:
@@ -225,6 +249,24 @@ These sections are projections of existing runtime, portfolio, broker, risk,
 alert, certification, and learning sections. They do not introduce new runtime
 state, broker calls, calculations with execution authority, or write-capable
 controls.
+
+## Decision Intelligence
+
+MC-006 adds read-only decision intelligence sections to the state contract:
+
+- `decision_panel`
+- `decision_trace`
+- `decision_explanation`
+- `committee_view`
+- `counterfactuals`
+- `recommendation_panel`
+- `evidence_graph`
+
+These sections are projections of existing runtime, trading, portfolio, market,
+risk, broker, audit, explainability, and learning evidence. They do not create
+a second decision engine, alter confidence, override committees, allocate
+capital, or trigger execution. Offline runtime state remains unknown/unavailable
+and cannot produce synthetic approvals.
 
 ## Health Model
 

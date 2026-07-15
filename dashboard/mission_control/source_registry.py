@@ -79,6 +79,13 @@ SECTION_SOURCE_MODULES: dict[str, str] = {
     "performance_panel": "dashboard.mission_control.portfolio_projection",
     "options_income_panel": "dashboard.mission_control.portfolio_projection",
     "system_metrics": "dashboard.mission_control.system_metrics",
+    "decision_panel": "dashboard.mission_control.decision_intelligence",
+    "decision_trace": "dashboard.mission_control.decision_trace",
+    "decision_explanation": "dashboard.mission_control.explanation_projection",
+    "committee_view": "dashboard.mission_control.committee_projection",
+    "counterfactuals": "dashboard.mission_control.counterfactual_projection",
+    "recommendation_panel": "dashboard.mission_control.recommendation_projection",
+    "evidence_graph": "dashboard.mission_control.evidence_graph",
     "source_consistency": "dashboard.mission_control.system_metrics",
 }
 

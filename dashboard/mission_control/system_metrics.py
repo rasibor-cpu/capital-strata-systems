@@ -75,6 +75,13 @@ def build_source_consistency(state: Mapping[str, Any]) -> dict[str, Any]:
             "performance_panel",
             "options_income_panel",
             "system_metrics",
+            "decision_panel",
+            "decision_trace",
+            "decision_explanation",
+            "committee_view",
+            "counterfactuals",
+            "recommendation_panel",
+            "evidence_graph",
         )
     }
     mismatches = [

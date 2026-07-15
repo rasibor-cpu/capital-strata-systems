@@ -6,12 +6,15 @@ from dashboard.mission_control.pages._components import detail_table, metric_gri
 def render(state: dict) -> str:
     trading = section(state, "trading")
     lifecycle = section(state, "trade_lifecycle")
+    decision = section(state, "decision_panel")
+    trace = section(state, "decision_trace")
     return (
         page_header("Trade Operations", "Read-only trade decision, gate, paper position, order, fill, rejection, slippage, and fee visibility.")
         + warning_banner("MC-001 exposes no executable trade tickets and cannot submit or cancel orders.", status="bad")
         + metric_grid(
             (
                 ("Execution Status", trading.get("execution_status"), trading.get("execution_status")),
+                ("Decision Status", decision.get("status"), decision.get("status")),
                 ("Accepted Decisions", trading.get("accepted_decisions"), "neutral"),
                 ("Rejected Decisions", trading.get("rejected_decisions"), "neutral"),
                 ("Open Positions", len(trading.get("open_positions", []) or []), "neutral"),
@@ -20,6 +23,13 @@ def render(state: dict) -> str:
             )
         )
         + split_panels(
+            detail_table("Decision Panel", {
+                "status": decision.get("status"),
+                "reason": decision.get("reason"),
+                "decisions": decision.get("decisions"),
+                "read_only": decision.get("read_only"),
+            }),
+            detail_table("Decision Trace", trace.get("stages", [])),
             detail_table("Execution Quality", {
                 "slippage": trading.get("slippage"),
                 "fees": trading.get("fees"),

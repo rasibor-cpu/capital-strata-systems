@@ -8,13 +8,20 @@ from math import isfinite
 from typing import Any
 
 from dashboard.mission_control.broker_telemetry import build_broker_telemetry
+from dashboard.mission_control.committee_projection import build_committee_view
+from dashboard.mission_control.counterfactual_projection import build_counterfactual_projection
+from dashboard.mission_control.decision_intelligence import build_decision_panel
+from dashboard.mission_control.decision_trace import build_decision_trace
+from dashboard.mission_control.evidence_graph import build_evidence_graph
 from dashboard.mission_control.event_stream import build_alert_center, build_event_stream
+from dashboard.mission_control.explanation_projection import build_decision_explanation
 from dashboard.mission_control.freshness import build_freshness_summary
 from dashboard.mission_control.health import build_health_summary
 from dashboard.mission_control.navigation import navigation_payload
 from dashboard.mission_control.operations_timeline import build_operations_timeline
 from dashboard.mission_control.permissions import mission_control_permissions_payload, validate_read_only_permissions
 from dashboard.mission_control.portfolio_projection import build_options_income_panel, build_performance_panel, build_portfolio_command_view
+from dashboard.mission_control.recommendation_projection import build_recommendation_panel
 from dashboard.mission_control.risk_projection import build_risk_command_view
 from dashboard.mission_control.runtime_snapshot_normalizer import normalize_runtime_snapshot
 from dashboard.mission_control.safety import SAFE_FLAGS, mission_control_safety_payload, normalize_metric, validate_no_secret_payload
@@ -102,6 +109,13 @@ def build_mission_control_state(
     state["performance_panel"] = build_performance_panel(state)
     state["options_income_panel"] = build_options_income_panel(state)
     state["system_metrics"] = build_system_metrics(state)
+    state["decision_panel"] = build_decision_panel(state)
+    state["decision_trace"] = build_decision_trace(state)
+    state["decision_explanation"] = build_decision_explanation(state)
+    state["committee_view"] = build_committee_view(state)
+    state["counterfactuals"] = build_counterfactual_projection(state)
+    state["recommendation_panel"] = build_recommendation_panel(state)
+    state["evidence_graph"] = build_evidence_graph(state)
     state["source_consistency"] = build_source_consistency(state)
     source_registry = build_source_registry(
         frontend,
@@ -154,6 +168,15 @@ def validate_mission_control_state(state: Mapping[str, Any] | None) -> dict[str,
         reasons.append("source_consistency_failed")
     if source_consistency.get("demo_runtime_mixing") is True:
         reasons.append("demo_runtime_mixing")
+    committee_view = source.get("committee_view") if isinstance(source.get("committee_view"), Mapping) else {}
+    if committee_view.get("status") == "FAIL_CLOSED":
+        reasons.append("committee_outcomes_contradictory")
+    evidence_graph = source.get("evidence_graph") if isinstance(source.get("evidence_graph"), Mapping) else {}
+    if evidence_graph.get("status") == "FAIL_CLOSED":
+        reasons.append("evidence_graph_inconsistent")
+    recommendation_panel = source.get("recommendation_panel") if isinstance(source.get("recommendation_panel"), Mapping) else {}
+    if recommendation_panel.get("forbidden_terms_absent") is False:
+        reasons.append("recommendation_contains_execution_language")
     return {
         "valid": not reasons,
         "status": "PASS" if not reasons else "FAIL_CLOSED",
@@ -627,6 +650,7 @@ def _documentation_index() -> dict[str, Any]:
             "docs/governance/PHASE_MC_003_MISSION_CONTROL_RUNTIME_SNAPSHOT_INTEGRATION.md",
             "docs/governance/PHASE_MC_004_ACTIVE_RUNTIME_PUBLISHER_BINDING.md",
             "docs/governance/PHASE_MC_005_OPERATIONS_COMMAND_CENTER.md",
+            "docs/governance/PHASE_MC_006_DECISION_INTELLIGENCE.md",
         ],
         "release_reports": [],
         "certification_reports": [],

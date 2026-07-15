@@ -6,6 +6,7 @@ from dashboard.mission_control.pages._components import detail_table, metric_gri
 def render(state: dict) -> str:
     learning = section(state, "learning")
     performance = section(state, "performance_panel")
+    recommendations = section(state, "recommendation_panel")
     return (
         page_header("Learning and Performance", "Read-only strategy, asset, symbol, attribution, reliability, expectancy, drawdown, and recommendation intelligence.")
         + warning_banner("Historical and simulated results are advisory and not guaranteed live performance.", status="warn")
@@ -31,6 +32,12 @@ def render(state: dict) -> str:
                 "observations": learning.get("learning_observations"),
                 "recommendations": learning.get("recommendations"),
                 "historical_results_label": learning.get("historical_results_label"),
+            }),
+            detail_table("Decision Recommendations", {
+                "decision": recommendations.get("decision"),
+                "recommendations": recommendations.get("recommendations"),
+                "forbidden_terms_absent": recommendations.get("forbidden_terms_absent"),
+                "execution_controls": recommendations.get("execution_controls"),
             }),
             detail_table("Performance Panel", {
                 "expectancy": performance.get("expectancy"),

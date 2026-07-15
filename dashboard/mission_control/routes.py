@@ -127,6 +127,26 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
     async def mission_control_api_certification() -> JSONResponse:
         return JSONResponse(safe_serialize(state().get("certification", {})))
 
+    @router.get("/mission-control/api/decision")
+    async def mission_control_api_decision() -> JSONResponse:
+        return JSONResponse(safe_serialize(state().get("decision_panel", {})))
+
+    @router.get("/mission-control/api/decision-trace")
+    async def mission_control_api_decision_trace() -> JSONResponse:
+        return JSONResponse(safe_serialize(state().get("decision_trace", {})))
+
+    @router.get("/mission-control/api/explanation")
+    async def mission_control_api_explanation() -> JSONResponse:
+        return JSONResponse(safe_serialize(state().get("decision_explanation", {})))
+
+    @router.get("/mission-control/api/recommendation")
+    async def mission_control_api_recommendation() -> JSONResponse:
+        return JSONResponse(safe_serialize(state().get("recommendation_panel", {})))
+
+    @router.get("/mission-control/api/evidence")
+    async def mission_control_api_evidence() -> JSONResponse:
+        return JSONResponse(safe_serialize(state().get("evidence_graph", {})))
+
     @router.get("/mission-control/{section_slug}", response_class=HTMLResponse)
     async def mission_control_page(section_slug: str) -> HTMLResponse:
         key = str(section_slug or "").replace("-", "_")
