@@ -9,6 +9,7 @@ def render(state: dict) -> str:
     selection = brokers.get("selection", {}) if isinstance(brokers.get("selection"), dict) else {}
     onboarding = brokers.get("onboarding", {}) if isinstance(brokers.get("onboarding"), dict) else {}
     safety = brokers.get("safety", {}) if isinstance(brokers.get("safety"), dict) else {}
+    telemetry = section(state, "broker_telemetry")
     return (
         page_header("Broker Management", "Read-only active broker state, broker registry, selection preview, onboarding shell, capabilities, and safety controls.")
         + warning_banner("Broker selection and onboarding controls are disabled. Runtime broker state is display-only.", status="bad")
@@ -28,6 +29,22 @@ def render(state: dict) -> str:
         )
         + split_panels(
             detail_table("Active Broker", active),
+            detail_table("Broker Telemetry", {
+                "broker": telemetry.get("broker"),
+                "authentication": telemetry.get("authentication"),
+                "connection": telemetry.get("connection"),
+                "transport": telemetry.get("transport"),
+                "latency": telemetry.get("latency"),
+                "market_data_freshness": telemetry.get("market_data_freshness"),
+                "heartbeat": telemetry.get("heartbeat"),
+                "api_availability": telemetry.get("api_availability"),
+                "rate_limits": telemetry.get("rate_limits"),
+                "products": telemetry.get("products"),
+                "account_readiness": telemetry.get("account_readiness"),
+                "overall_health": telemetry.get("overall_health"),
+                "source": telemetry.get("source"),
+                "state_hash": telemetry.get("state_hash"),
+            }),
             detail_table("Broker List", brokers.get("broker_list", [])),
             detail_table("Selection Preview", selection),
             detail_table("Onboarding Shell", onboarding),

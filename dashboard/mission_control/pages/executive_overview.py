@@ -12,6 +12,8 @@ def render(state: dict) -> str:
     alerts = section(state, "alerts")
     certification = section(state, "certification")
     freshness = section(state, "data_freshness")
+    kpis = section(state, "executive_kpis")
+    timeline = section(state, "operations_timeline")
     return (
         page_header("Executive Overview", "Enterprise-level platform, runtime, capital, risk, readiness, and alert posture.")
         + warning_banner(
@@ -40,6 +42,21 @@ def render(state: dict) -> str:
             )
         )
         + split_panels(
+            detail_table("Executive KPI Board", {
+                "uptime": kpis.get("uptime"),
+                "runtime_health": kpis.get("runtime_health"),
+                "broker_health": kpis.get("broker_health"),
+                "portfolio_health": kpis.get("portfolio_health"),
+                "risk_health": kpis.get("risk_health"),
+                "market_health": kpis.get("market_health"),
+                "alert_count": kpis.get("alert_count"),
+                "trade_quality": kpis.get("trade_quality"),
+                "system_readiness": kpis.get("system_readiness"),
+                "rc1_readiness": kpis.get("rc1_readiness"),
+                "source": kpis.get("source"),
+                "state_hash": kpis.get("state_hash"),
+            }),
+            detail_table("Operations Timeline", timeline.get("events", [])[:8]),
             detail_table("Capital And PnL", {
                 "cash": portfolio.get("cash"),
                 "buying_power": portfolio.get("buying_power"),

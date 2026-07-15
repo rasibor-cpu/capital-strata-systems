@@ -5,6 +5,10 @@ from dashboard.mission_control.pages._components import detail_table, metric_gri
 
 def render(state: dict) -> str:
     runtime = section(state, "runtime")
+    timeline = section(state, "operations_timeline")
+    event_stream = section(state, "event_stream")
+    metrics = section(state, "system_metrics")
+    consistency = section(state, "source_consistency")
     subsystem = runtime.get("subsystem_health", {}) if isinstance(runtime.get("subsystem_health"), dict) else {}
     return (
         page_header("Runtime Operations", "Read-only runtime cycle, supervisor, dependency, API, dashboard, mobile, and certification visibility.")
@@ -33,6 +37,26 @@ def render(state: dict) -> str:
                 "heartbeat_age_seconds": runtime.get("heartbeat_age_seconds"),
                 "state_hash": runtime.get("state_hash"),
             }),
+            detail_table("Operations Timeline", timeline.get("events", [])),
+            detail_table("Event Stream", {
+                "event_count": event_stream.get("event_count"),
+                "alert_count": event_stream.get("alert_count"),
+                "queue_depth": event_stream.get("queue_depth"),
+                "source": event_stream.get("source"),
+                "state_hash": event_stream.get("state_hash"),
+            }),
+            detail_table("System Metrics", {
+                "cpu": metrics.get("cpu"),
+                "memory": metrics.get("memory"),
+                "runtime_latency": metrics.get("runtime_latency"),
+                "api_latency": metrics.get("api_latency"),
+                "refresh_interval_seconds": metrics.get("refresh_interval_seconds"),
+                "event_queue": metrics.get("event_queue"),
+                "cycle_duration": metrics.get("cycle_duration"),
+                "runtime_age": metrics.get("runtime_age"),
+                "heartbeat_age": metrics.get("heartbeat_age"),
+            }),
+            detail_table("Source Consistency", consistency),
             detail_table("Subsystem Health", subsystem),
             detail_table("Disabled Controls", runtime.get("controls", {})),
         )

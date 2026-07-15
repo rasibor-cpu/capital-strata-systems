@@ -68,6 +68,18 @@ SECTION_SOURCE_MODULES: dict[str, str] = {
     "documentation": "dashboard.mission_control.contracts",
     "permissions": "dashboard.mission_control.permissions",
     "safety": "dashboard.mission_control.safety",
+    "operations_timeline": "dashboard.mission_control.operations_timeline",
+    "event_stream": "dashboard.mission_control.event_stream",
+    "trade_lifecycle": "dashboard.mission_control.trade_lifecycle",
+    "portfolio_command": "dashboard.mission_control.portfolio_projection",
+    "broker_telemetry": "dashboard.mission_control.broker_telemetry",
+    "risk_command_center": "dashboard.mission_control.risk_projection",
+    "alert_center": "dashboard.mission_control.event_stream",
+    "executive_kpis": "dashboard.mission_control.system_metrics",
+    "performance_panel": "dashboard.mission_control.portfolio_projection",
+    "options_income_panel": "dashboard.mission_control.portfolio_projection",
+    "system_metrics": "dashboard.mission_control.system_metrics",
+    "source_consistency": "dashboard.mission_control.system_metrics",
 }
 
 

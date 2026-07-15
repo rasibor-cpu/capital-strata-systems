@@ -5,6 +5,7 @@ from dashboard.mission_control.pages._components import detail_table, metric_gri
 
 def render(state: dict) -> str:
     risk = section(state, "risk")
+    command = section(state, "risk_command_center")
     return (
         page_header("Risk Command", "Read-only risk, gates, limits, drawdown, exposure, stress, Greeks, margin, and kill-switch visibility.")
         + warning_banner("Risk controls are display-only in MC-001; no limits or gates can be changed here.", status="bad")
@@ -33,6 +34,20 @@ def render(state: dict) -> str:
                 "greeks": risk.get("greeks"),
                 "assignment_exposure": risk.get("assignment_exposure"),
                 "collateral_utilization": risk.get("collateral_utilization"),
+            }),
+            detail_table("Risk Command Projection", {
+                "anti_bleed_guard": command.get("anti_bleed_guard"),
+                "risk_gates": command.get("risk_gates"),
+                "drawdown": command.get("drawdown"),
+                "capital_exposure": command.get("capital_exposure"),
+                "margin_utilization": command.get("margin_utilization"),
+                "var": command.get("var"),
+                "greeks": command.get("greeks"),
+                "stress_metrics": command.get("stress_metrics"),
+                "kill_switch": command.get("kill_switch"),
+                "overrides": command.get("overrides"),
+                "source": command.get("source"),
+                "state_hash": command.get("state_hash"),
             }),
         )
     )

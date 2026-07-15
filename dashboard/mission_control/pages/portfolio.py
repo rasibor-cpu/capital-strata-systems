@@ -5,6 +5,7 @@ from dashboard.mission_control.pages._components import detail_table, metric_gri
 
 def render(state: dict) -> str:
     portfolio = section(state, "portfolio")
+    command = section(state, "portfolio_command")
     return (
         page_header("Portfolio", "Read-only equity, cash, capital, exposure, allocation, PnL, collateral, drawdown, and attribution view.")
         + metric_grid(
@@ -23,6 +24,16 @@ def render(state: dict) -> str:
                 "sector_allocation": portfolio.get("sector_allocation"),
                 "currency_exposure": portfolio.get("currency_exposure"),
                 "concentration": portfolio.get("concentration", "UNAVAILABLE"),
+            }),
+            detail_table("Portfolio Command View", {
+                "available_capital": command.get("available_capital"),
+                "deployed_capital": command.get("deployed_capital"),
+                "capital_utilization": command.get("capital_utilization"),
+                "collateral": command.get("collateral"),
+                "drawdown": command.get("drawdown"),
+                "source": command.get("source"),
+                "freshness": command.get("freshness"),
+                "state_hash": command.get("state_hash"),
             }),
             detail_table("Performance Attribution", {
                 "pnl_by_asset_class": portfolio.get("pnl_by_asset_class"),

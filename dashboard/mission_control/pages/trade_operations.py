@@ -5,6 +5,7 @@ from dashboard.mission_control.pages._components import detail_table, metric_gri
 
 def render(state: dict) -> str:
     trading = section(state, "trading")
+    lifecycle = section(state, "trade_lifecycle")
     return (
         page_header("Trade Operations", "Read-only trade decision, gate, paper position, order, fill, rejection, slippage, and fee visibility.")
         + warning_banner("MC-001 exposes no executable trade tickets and cannot submit or cancel orders.", status="bad")
@@ -24,7 +25,11 @@ def render(state: dict) -> str:
                 "fees": trading.get("fees"),
                 "execution_quality": trading.get("execution_quality"),
                 "read_only": trading.get("read_only"),
+                "source": lifecycle.get("source"),
+                "state_hash": lifecycle.get("state_hash"),
             }),
+            detail_table("Trade Lifecycle", lifecycle.get("stages", [])),
+            detail_table("Lifecycle Events", lifecycle.get("events", [])),
             detail_table("Recent Rejections", trading.get("rejections", [])),
         )
     )

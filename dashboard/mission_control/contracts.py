@@ -7,15 +7,22 @@ from datetime import datetime, timezone
 from math import isfinite
 from typing import Any
 
+from dashboard.mission_control.broker_telemetry import build_broker_telemetry
+from dashboard.mission_control.event_stream import build_alert_center, build_event_stream
 from dashboard.mission_control.freshness import build_freshness_summary
 from dashboard.mission_control.health import build_health_summary
 from dashboard.mission_control.navigation import navigation_payload
+from dashboard.mission_control.operations_timeline import build_operations_timeline
 from dashboard.mission_control.permissions import mission_control_permissions_payload, validate_read_only_permissions
+from dashboard.mission_control.portfolio_projection import build_options_income_panel, build_performance_panel, build_portfolio_command_view
+from dashboard.mission_control.risk_projection import build_risk_command_view
 from dashboard.mission_control.runtime_snapshot_normalizer import normalize_runtime_snapshot
 from dashboard.mission_control.safety import SAFE_FLAGS, mission_control_safety_payload, normalize_metric, validate_no_secret_payload
 from dashboard.mission_control.serializers import state_hash, validate_serializable_payload
 from dashboard.mission_control.source_registry import build_source_registry
 from dashboard.mission_control.state_adapter import build_broker_registry, frontend_payload_from_runtime, section
+from dashboard.mission_control.system_metrics import build_executive_kpi_board, build_source_consistency, build_system_metrics
+from dashboard.mission_control.trade_lifecycle import build_trade_lifecycle
 from dashboard.runtime.frontend_contract import DATA_UNAVAILABLE
 
 
@@ -84,6 +91,18 @@ def build_mission_control_state(
         "mock_data": bool(frontend.get("mission_control_mock_data")),
         "mock_data_label": "MOCK DATA - NOT LIVE" if frontend.get("mission_control_mock_data") else "RUNTIME DATA",
     }
+    state["operations_timeline"] = build_operations_timeline(state)
+    state["event_stream"] = build_event_stream(state)
+    state["trade_lifecycle"] = build_trade_lifecycle(state)
+    state["portfolio_command"] = build_portfolio_command_view(state)
+    state["broker_telemetry"] = build_broker_telemetry(state)
+    state["risk_command_center"] = build_risk_command_view(state)
+    state["alert_center"] = build_alert_center(state)
+    state["executive_kpis"] = build_executive_kpi_board(state)
+    state["performance_panel"] = build_performance_panel(state)
+    state["options_income_panel"] = build_options_income_panel(state)
+    state["system_metrics"] = build_system_metrics(state)
+    state["source_consistency"] = build_source_consistency(state)
     source_registry = build_source_registry(
         frontend,
         state,
@@ -130,6 +149,11 @@ def validate_mission_control_state(state: Mapping[str, Any] | None) -> dict[str,
     if not serialization["valid"]:
         reasons.extend(serialization["reasons"])
     _scan_non_finite(source, reasons=reasons)
+    source_consistency = source.get("source_consistency") if isinstance(source.get("source_consistency"), Mapping) else {}
+    if source_consistency.get("status") == "FAIL_CLOSED":
+        reasons.append("source_consistency_failed")
+    if source_consistency.get("demo_runtime_mixing") is True:
+        reasons.append("demo_runtime_mixing")
     return {
         "valid": not reasons,
         "status": "PASS" if not reasons else "FAIL_CLOSED",
@@ -211,8 +235,8 @@ def _runtime(frontend: Mapping[str, Any], governance: Mapping[str, Any], certifi
 def _trading(execution: Mapping[str, Any], positions: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "candidate_trades": [],
-        "accepted_decisions": execution.get("accepted_trades", 0),
-        "rejected_decisions": execution.get("rejected_trades", 0),
+        "accepted_decisions": execution.get("accepted_trades", execution.get("accepted_trade_count", 0)),
+        "rejected_decisions": execution.get("rejected_trades", execution.get("rejected_trade_count", 0)),
         "trade_gate_outcomes": [],
         "execution_status": execution.get("execution_state", DATA_UNAVAILABLE),
         "paper_positions": positions.get("open_positions", []),
@@ -601,6 +625,8 @@ def _documentation_index() -> dict[str, Any]:
             "docs/governance/PHASE_MC_001_MISSION_CONTROL_FOUNDATION.md",
             "docs/governance/PHASE_MC_002_MISSION_CONTROL_LIVE_DATA_INTEGRATION.md",
             "docs/governance/PHASE_MC_003_MISSION_CONTROL_RUNTIME_SNAPSHOT_INTEGRATION.md",
+            "docs/governance/PHASE_MC_004_ACTIVE_RUNTIME_PUBLISHER_BINDING.md",
+            "docs/governance/PHASE_MC_005_OPERATIONS_COMMAND_CENTER.md",
         ],
         "release_reports": [],
         "certification_reports": [],

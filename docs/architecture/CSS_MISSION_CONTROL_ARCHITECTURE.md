@@ -24,6 +24,12 @@ MC-004 binds Mission Control to the active runtime publisher used by
 artifact, heartbeat, and cache evidence without starting another runtime
 process or supervisor.
 
+MC-005 adds the Institutional Operations Command Center projection layer. It
+derives operational timeline, event stream, trade lifecycle, portfolio command,
+broker telemetry, risk command, alert center, KPI, performance, Options Income,
+system metrics, and source-consistency views from the canonical Mission Control
+state. It remains read-only and does not add runtime controls.
+
 ## Component Architecture
 
 Mission Control is implemented as an additive dashboard package:
@@ -50,6 +56,13 @@ Mission Control is implemented as an additive dashboard package:
 - `dashboard.mission_control.runtime_artifact_reader`
 - `dashboard.mission_control.runtime_endpoint_reader`
 - `dashboard.mission_control.runtime_source_diagnostics`
+- `dashboard.mission_control.operations_timeline`
+- `dashboard.mission_control.event_stream`
+- `dashboard.mission_control.trade_lifecycle`
+- `dashboard.mission_control.portfolio_projection`
+- `dashboard.mission_control.broker_telemetry`
+- `dashboard.mission_control.risk_projection`
+- `dashboard.mission_control.system_metrics`
 
 The package is mounted into `dashboard.web.web_app.create_app` through an
 idempotent registration helper. The helper rejects conflicting
@@ -79,7 +92,9 @@ State flow:
    canonical runtime snapshot with heartbeat and state hash.
 9. `dashboard.mission_control.freshness` calculates deterministic freshness.
 10. `dashboard.mission_control.health` derives display-only health.
-11. The shell renders all pages from the canonical Mission Control state.
+11. MC-005 command-center projections derive read-only operational panels from
+    the canonical Mission Control state.
+12. The shell renders all pages from the canonical Mission Control state.
 
 Unavailable live data remains `UNAVAILABLE`. Mock data is explicitly labeled.
 
@@ -184,6 +199,32 @@ downgrades Mission Control health.
 MC-004 exposes runtime-source diagnostics with selected source, candidate
 sources, artifact freshness, process relationship, fallback reason, and source
 state hash.
+
+MC-005 command-center widgets expose source, provenance, generated timestamp,
+freshness, and runtime state hash. Source consistency is validated and hash
+mismatches fail closed.
+
+## Operations Command Center
+
+MC-005 adds read-only operational sections to the state contract:
+
+- `operations_timeline`
+- `event_stream`
+- `trade_lifecycle`
+- `portfolio_command`
+- `broker_telemetry`
+- `risk_command_center`
+- `alert_center`
+- `executive_kpis`
+- `performance_panel`
+- `options_income_panel`
+- `system_metrics`
+- `source_consistency`
+
+These sections are projections of existing runtime, portfolio, broker, risk,
+alert, certification, and learning sections. They do not introduce new runtime
+state, broker calls, calculations with execution authority, or write-capable
+controls.
 
 ## Health Model
 
