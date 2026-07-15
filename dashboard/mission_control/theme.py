@@ -1,0 +1,148 @@
+from __future__ import annotations
+
+
+MISSION_CONTROL_CSS = """
+:root {
+  --mc-bg: #0f1419;
+  --mc-surface: #151d25;
+  --mc-panel: #1b2631;
+  --mc-line: #2b3b4a;
+  --mc-text: #e9eef4;
+  --mc-muted: #a8b4c0;
+  --mc-good: #33c481;
+  --mc-warn: #f4b64a;
+  --mc-bad: #ff6b6b;
+  --mc-info: #68a8ff;
+}
+* { box-sizing: border-box; }
+body.mc-body {
+  margin: 0;
+  font-family: Inter, Segoe UI, Roboto, Arial, sans-serif;
+  background: var(--mc-bg);
+  color: var(--mc-text);
+}
+.mc-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 288px 1fr;
+}
+.mc-sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  background: #101820;
+  border-right: 1px solid var(--mc-line);
+  padding: 18px 12px;
+}
+.mc-brand { padding: 8px 10px 18px; }
+.mc-brand strong { display: block; font-size: 1.08rem; letter-spacing: .02em; }
+.mc-brand span { color: var(--mc-muted); font-size: .82rem; }
+.mc-nav { display: grid; gap: 4px; }
+.mc-nav a {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 38px;
+  padding: 8px 10px;
+  color: var(--mc-muted);
+  text-decoration: none;
+  border-radius: 6px;
+  border: 1px solid transparent;
+}
+.mc-nav a[aria-current="page"], .mc-nav a:hover {
+  color: var(--mc-text);
+  background: var(--mc-panel);
+  border-color: var(--mc-line);
+}
+.mc-main { min-width: 0; }
+.mc-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 22px;
+  background: rgba(15, 20, 25, .95);
+  border-bottom: 1px solid var(--mc-line);
+}
+.mc-status-strip { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.mc-badge, .mc-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: .76rem;
+  font-weight: 700;
+  border: 1px solid var(--mc-line);
+}
+.good { color: #dff8ec; background: rgba(51, 196, 129, .14); border-color: rgba(51, 196, 129, .45); }
+.warn { color: #ffe6b1; background: rgba(244, 182, 74, .13); border-color: rgba(244, 182, 74, .48); }
+.bad { color: #ffd5d5; background: rgba(255, 107, 107, .14); border-color: rgba(255, 107, 107, .48); }
+.neutral { color: var(--mc-text); background: rgba(104, 168, 255, .11); }
+.mc-content { padding: 22px; }
+.mc-breadcrumb { color: var(--mc-muted); font-size: .82rem; margin-bottom: 12px; }
+.mc-page-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.mc-page-header h1 { margin: 0 0 6px; font-size: 1.8rem; }
+.mc-page-header p { margin: 0; color: var(--mc-muted); max-width: 860px; line-height: 1.45; }
+.mc-eyebrow { text-transform: uppercase; letter-spacing: .08em; font-size: .72rem; color: var(--mc-info) !important; margin-bottom: 4px !important; }
+.mc-warning {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--mc-line);
+}
+.mc-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.mc-metric-card, .mc-panel {
+  background: var(--mc-surface);
+  border: 1px solid var(--mc-line);
+  border-radius: 8px;
+  padding: 14px;
+}
+.mc-metric-card span { display: block; color: var(--mc-muted); font-size: .78rem; margin-bottom: 8px; }
+.mc-metric-card strong { display: block; font-size: 1.08rem; line-height: 1.25; overflow-wrap: anywhere; }
+.mc-metric-card em { margin-top: 10px; font-style: normal; }
+.mc-panel-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.mc-panel h2 { margin: 0 0 10px; font-size: 1rem; }
+table { width: 100%; border-collapse: collapse; }
+th, td {
+  text-align: left;
+  vertical-align: top;
+  border-top: 1px solid var(--mc-line);
+  padding: 8px 6px;
+  overflow-wrap: anywhere;
+}
+th { color: var(--mc-muted); width: 34%; font-weight: 600; }
+.mc-footer { color: var(--mc-muted); font-size: .8rem; padding: 18px 22px 28px; }
+@media (max-width: 1100px) {
+  .mc-shell { grid-template-columns: 1fr; }
+  .mc-sidebar { position: relative; height: auto; }
+  .mc-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mc-metric-grid { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
+}
+@media (max-width: 680px) {
+  .mc-topbar, .mc-page-header { flex-direction: column; align-items: stretch; }
+  .mc-nav, .mc-metric-grid, .mc-panel-grid { grid-template-columns: 1fr; }
+  .mc-content { padding: 16px; }
+}
+"""
+
+
+__all__ = ["MISSION_CONTROL_CSS"]
