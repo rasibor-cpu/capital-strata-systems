@@ -108,9 +108,18 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
 
     @router.get("/mission-control/api/page-metadata")
     async def mission_control_api_page_metadata() -> JSONResponse:
+        current = state()
+        runtime = current.get("runtime") if isinstance(current.get("runtime"), Mapping) else {}
+        freshness = current.get("freshness") if isinstance(current.get("freshness"), Mapping) else {}
         return JSONResponse(
             {
                 "pages": [section.as_dict() for section in MISSION_CONTROL_SECTIONS],
+                "schema_version": current.get("schema_version", "UNAVAILABLE"),
+                "generated_at": current.get("generated_at", "UNAVAILABLE"),
+                "state_hash": current.get("state_hash", "UNAVAILABLE"),
+                "runtime_id": runtime.get("runtime_id", "UNAVAILABLE"),
+                "runtime_state_hash": runtime.get("state_hash", "UNAVAILABLE"),
+                "freshness": freshness.get("overall_freshness", "UNAVAILABLE"),
                 "read_only": True,
                 "execution_allowed": False,
                 "live_trading_blocked": True,
@@ -126,6 +135,10 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
     @router.get("/mission-control/api/certification")
     async def mission_control_api_certification() -> JSONResponse:
         return JSONResponse(safe_serialize(state().get("certification", {})))
+
+    @router.get("/mission-control/api/final-certification")
+    async def mission_control_api_final_certification() -> JSONResponse:
+        return JSONResponse(safe_serialize(state().get("final_certification", {})))
 
     @router.get("/mission-control/api/decision")
     async def mission_control_api_decision() -> JSONResponse:

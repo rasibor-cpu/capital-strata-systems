@@ -25,6 +25,7 @@ from dashboard.mission_control.execution_committee import build_execution_commit
 from dashboard.mission_control.executive_dashboard import build_institutional_executive_dashboard
 from dashboard.mission_control.explanation_projection import build_decision_explanation
 from dashboard.mission_control.feature_flags import build_feature_flags_console
+from dashboard.mission_control.final_certification import build_final_certification
 from dashboard.mission_control.freshness import build_freshness_summary
 from dashboard.mission_control.governance_summary import build_governance_summary_console
 from dashboard.mission_control.health import build_health_summary
@@ -178,6 +179,7 @@ def build_mission_control_state(
         state["safety"]["fail_closed"] = True
         state["safety"]["safety_status"] = "FAIL_CLOSED"
         state["health"] = build_health_summary(state, freshness_summary=freshness)
+    state["final_certification"] = build_final_certification(state)
     return _json_safe(state)
 
 
@@ -735,10 +737,18 @@ def _documentation_index() -> dict[str, Any]:
             "docs/governance/PHASE_MC_006_DECISION_INTELLIGENCE.md",
             "docs/governance/PHASE_MC_007A_INSTITUTIONAL_INTELLIGENCE.md",
             "docs/governance/PHASE_MC_007B_SECURE_OPERATIONS.md",
+            "docs/governance/MISSION_CONTROL_FINAL_CERTIFICATION.md",
         ],
         "release_reports": [],
         "certification_reports": [],
         "operator_runbooks": [],
+        "mission_control_runbooks": [
+            "docs/runbooks/MISSION_CONTROL_OPERATOR_GUIDE.md",
+            "docs/runbooks/MISSION_CONTROL_ADMIN_GUIDE.md",
+            "docs/runbooks/MISSION_CONTROL_DISASTER_RECOVERY.md",
+            "docs/runbooks/MISSION_CONTROL_DEPLOYMENT_GUIDE.md",
+            "docs/runbooks/MISSION_CONTROL_RUNTIME_VALIDATION.md",
+        ],
         "rollback_instructions": [],
         "broker_onboarding_guides": [],
         "incident_procedures": [],

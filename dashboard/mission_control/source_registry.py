@@ -107,6 +107,7 @@ SECTION_SOURCE_MODULES: dict[str, str] = {
     "change_history_console": "dashboard.mission_control.change_history",
     "rollback_console": "dashboard.mission_control.rollback_console",
     "governance_summary_console": "dashboard.mission_control.governance_summary",
+    "final_certification": "dashboard.mission_control.final_certification",
     "source_consistency": "dashboard.mission_control.system_metrics",
 }
 

@@ -30,10 +30,9 @@ def metric_grid(items: Sequence[tuple[str, Any, str]]) -> str:
 
 def detail_table(title: str, rows: Mapping[str, Any] | Sequence[Mapping[str, Any]]) -> str:
     if isinstance(rows, Mapping):
-        body = "".join(
-            f"<tr><th>{escape(key)}</th><td>{escape(value)}</td></tr>"
-            for key, value in rows.items()
-        )
+        body = "".join(f"<tr><th>{escape(key)}</th><td>{escape(value)}</td></tr>" for key, value in rows.items())
+        if not body:
+            body = '<tr><td colspan="2">No evidence available.</td></tr>'
     else:
         body = "".join(
             "<tr>"
@@ -41,6 +40,8 @@ def detail_table(title: str, rows: Mapping[str, Any] | Sequence[Mapping[str, Any
             + "</tr>"
             for row in rows
         )
+        if not body:
+            body = '<tr><td>No evidence available.</td></tr>'
     return f'<section class="mc-panel"><h2>{escape(title)}</h2><table>{body}</table></section>'
 
 

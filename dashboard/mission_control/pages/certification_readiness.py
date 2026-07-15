@@ -6,6 +6,7 @@ from dashboard.mission_control.pages._components import detail_table, metric_gri
 def render(state: dict) -> str:
     cert = section(state, "certification")
     summary = section(state, "governance_summary_console")
+    final = section(state, "final_certification")
     return (
         page_header("Certification and Readiness", "Read-only RC1, operational, Options Income, broker, runtime, live-disable proof, blockers, and prerequisites.")
         + warning_banner("READY_FOR_CONTROLLED_RC1_RUNTIME is not READY_FOR_LIVE_TRADING.", status="warn")
@@ -36,5 +37,15 @@ def render(state: dict) -> str:
                 "write_routes_enabled": summary.get("write_routes_enabled"),
                 "operator_actions_enabled": summary.get("operator_actions_enabled"),
             }),
+            detail_table("Mission Control Final Certification", {
+                "version": final.get("version"),
+                "overall": final.get("overall"),
+                "blockers": final.get("blockers"),
+                "api_contracts": final.get("api_contracts"),
+                "performance": final.get("performance"),
+                "resilience": final.get("resilience"),
+                "state_hash": final.get("state_hash"),
+            }),
+            detail_table("Final Certification Checks", final.get("checks", [])),
         )
     )

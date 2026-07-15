@@ -45,6 +45,11 @@ approval, configuration, broker registry, feature flag, audit, change history,
 rollback planning, and governance posture views from the canonical Mission
 Control state. It remains locked and does not create write routes.
 
+MC-007C adds final production hardening and Mission Control v1.0 certification.
+It validates architecture, runtime, broker, portfolio, decision intelligence,
+operations, committees, governance, security, RBAC, source registry, hashes,
+API contracts, performance, documentation, fail-closed behavior, and safety.
+
 ## Component Architecture
 
 Mission Control is implemented as an additive dashboard package:
@@ -105,6 +110,7 @@ Mission Control is implemented as an additive dashboard package:
 - `dashboard.mission_control.change_history`
 - `dashboard.mission_control.rollback_console`
 - `dashboard.mission_control.governance_summary`
+- `dashboard.mission_control.final_certification`
 
 The package is mounted into `dashboard.web.web_app.create_app` through an
 idempotent registration helper. The helper rejects conflicting
@@ -145,7 +151,9 @@ State flow:
 14. MC-007B secure-operations projections derive RBAC, workflow,
     configuration, registry, feature flag, audit, history, rollback planning,
     and governance panels from the same canonical state.
-15. The shell renders all pages from the canonical Mission Control state.
+15. MC-007C final certification summarizes completed state validation and
+    records Mission Control v1.0 certification status.
+16. The shell renders all pages from the canonical Mission Control state.
 
 Unavailable live data remains `UNAVAILABLE`. Mock data is explicitly labeled.
 
@@ -161,6 +169,7 @@ Mission Control exposes only read-only GET routes:
 - `/mission-control/api/page-metadata`
 - `/mission-control/api/brokers`
 - `/mission-control/api/certification`
+- `/mission-control/api/final-certification`
 - `/mission-control/api/runtime`
 - `/mission-control/api/heartbeat`
 - `/mission-control/api/runtime-source`
@@ -273,6 +282,10 @@ timestamp, freshness, runtime identifier, and state hash. The panels participate
 in source-consistency validation and fail closed on invalid permissions or
 state mismatch.
 
+MC-007C exposes final certification evidence and strengthens endpoint metadata
+for page metadata, including schema version, generated timestamp, state hash,
+runtime id, runtime state hash, and freshness.
+
 ## Operations Command Center
 
 MC-005 adds read-only operational sections to the state contract:
@@ -354,6 +367,34 @@ audit, certification, and safety evidence. They do not add forms, write routes,
 state-changing controls, credential workflows, broker mutation, or runtime
 mutation. Existing governance, broker, configuration, audit, and certification
 pages render the panels as supporting detail.
+
+## Production Hardening And Final Certification
+
+MC-007C adds the `final_certification` section. It certifies:
+
+- architecture
+- runtime
+- broker
+- portfolio
+- decision intelligence
+- operations
+- committees
+- governance
+- security
+- RBAC
+- source registry
+- state hash
+- runtime hash
+- API contracts
+- performance
+- documentation
+- fail-closed behavior
+- safety
+
+The final certification endpoint is read-only and reflects the same canonical
+state used by the dashboard pages. Mission Control displays a fail-closed
+runtime banner when runtime evidence is stale or unavailable. Empty tables show
+operator-friendly unavailable evidence text rather than blank panels.
 
 ## Health Model
 

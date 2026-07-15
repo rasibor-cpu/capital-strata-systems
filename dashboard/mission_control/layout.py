@@ -14,8 +14,16 @@ def render_mission_control_shell(state: Mapping[str, Any], *, active_section: st
     active = section_for_key(active_section)
     platform = _mapping(state.get("platform"))
     safety = _mapping(state.get("safety"))
+    runtime = _mapping(state.get("runtime"))
     nav = _render_nav(active.key)
     body = render_page(active.key, dict(state))
+    offline_banner = ""
+    if platform.get("runtime_offline") or str(runtime.get("heartbeat_status", "")).upper() in {"STALE", "OFFLINE", "UNAVAILABLE", "UNKNOWN"}:
+        offline_banner = (
+            '<div class="mc-warning bad">'
+            "Runtime evidence is unavailable or stale. Mission Control is displaying fail-closed read-only state."
+            "</div>"
+        )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -46,6 +54,7 @@ def render_mission_control_shell(state: Mapping[str, Any], *, active_section: st
         </div>
       </header>
       <section class="mc-content" aria-label="{escape(active.label)} workspace">
+        {offline_banner}
         {body}
       </section>
       <footer class="mc-footer">
