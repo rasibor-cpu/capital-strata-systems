@@ -14,7 +14,8 @@ def render(state: dict) -> str:
                 ("Runtime Mode", runtime.get("runtime_mode"), runtime.get("runtime_mode")),
                 ("Engine Mode", runtime.get("engine_mode"), "neutral"),
                 ("Cycle", runtime.get("cycle"), "neutral"),
-                ("Heartbeat", runtime.get("heartbeat"), "neutral"),
+                ("Heartbeat", runtime.get("heartbeat"), runtime.get("heartbeat_status")),
+                ("Source", runtime.get("source"), runtime.get("source")),
                 ("Certification", subsystem.get("certification"), subsystem.get("certification")),
             )
         )
@@ -24,8 +25,13 @@ def render(state: dict) -> str:
                 "restart_count": runtime.get("restart_count"),
                 "failure_count": runtime.get("failure_count"),
                 "recovery_count": runtime.get("recovery_count"),
+                "alert_count": runtime.get("alert_count"),
+                "disconnect_count": runtime.get("disconnect_count"),
                 "last_successful_cycle": runtime.get("last_successful_cycle", "UNAVAILABLE"),
                 "last_failed_cycle": runtime.get("last_failed_cycle", "UNAVAILABLE"),
+                "heartbeat_status": runtime.get("heartbeat_status"),
+                "heartbeat_age_seconds": runtime.get("heartbeat_age_seconds"),
+                "state_hash": runtime.get("state_hash"),
             }),
             detail_table("Subsystem Health", subsystem),
             detail_table("Disabled Controls", runtime.get("controls", {})),

@@ -12,6 +12,19 @@ def frontend_payload_from_runtime(
     *,
     allow_mock: bool = True,
 ) -> dict[str, Any]:
+    if isinstance(dashboard_state, Mapping) and isinstance(dashboard_state.get("frontend_payload"), Mapping):
+        payload = dict(dashboard_state["frontend_payload"])
+        payload["mission_control_data_source"] = str(dashboard_state.get("source") or payload.get("mission_control_data_source") or "RUNTIME").upper()
+        payload["mission_control_mock_data"] = _is_mock_source(dashboard_state)
+        payload["mission_control_dashboard_state_available"] = True
+        return payload
+    if isinstance(dashboard_state, Mapping) and dashboard_state.get("payload_schema") == "css.frontend.contract.v1" and isinstance(dashboard_state.get("sections"), Mapping):
+        payload = dict(dashboard_state)
+        payload["mission_control_data_source"] = str(payload.get("mission_control_data_source") or "RUNTIME").upper()
+        payload["mission_control_mock_data"] = _is_mock_source(dashboard_state)
+        payload["mission_control_dashboard_state_available"] = True
+        return payload
+
     source = dashboard_state if dashboard_state is not None else None
     if source is None and allow_mock:
         source = mission_control_mock_dashboard_payload()
@@ -30,7 +43,7 @@ def frontend_payload_from_runtime(
 
 def _is_mock_source(source: Any) -> bool:
     if isinstance(source, Mapping):
-        return bool(source.get("mock_data"))
+        return bool(source.get("mock_data") or source.get("mission_control_mock_data") or source.get("source") == "DEMO")
     return False
 
 

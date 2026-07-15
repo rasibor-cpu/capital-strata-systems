@@ -44,7 +44,7 @@ def create_app(
     )
     app.include_router(create_dashboard_state_router(provider))
     app.include_router(create_ws_router(provider))
-    register_mission_control(app, provider)
+    register_mission_control(app, provider if state_provider is not None else None)
 
     @app.get("/", include_in_schema=False)
     async def index() -> RedirectResponse:

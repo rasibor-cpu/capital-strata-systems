@@ -11,6 +11,7 @@ def render(state: dict) -> str:
             (
                 ("Active Alerts", alerts.get("count"), "good" if alerts.get("count") == 0 else "warn"),
                 ("Severity", alerts.get("severity"), alerts.get("severity")),
+                ("Heartbeat", alerts.get("heartbeat_status"), alerts.get("heartbeat_status")),
                 ("External Notifications", alerts.get("external_notifications"), alerts.get("external_notifications")),
             )
         )

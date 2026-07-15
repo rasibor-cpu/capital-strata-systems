@@ -32,6 +32,12 @@ def build_health_summary(
         reasons.append("contract_validation_failed")
     if freshness_summary.get("stale_mandatory_data") is True:
         reasons.append("mandatory_data_stale")
+    runtime_snapshot = state.get("runtime_snapshot") if isinstance(state.get("runtime_snapshot"), Mapping) else {}
+    heartbeat_status = str(runtime_snapshot.get("heartbeat_status", "")).upper()
+    if heartbeat_status in {"STALE", "OFFLINE", "UNAVAILABLE", "UNKNOWN"}:
+        reasons.append("runtime_heartbeat_stale")
+    if runtime_snapshot.get("runtime_status") in {"OFFLINE", "UNAVAILABLE"}:
+        reasons.append("runtime_offline")
 
     broker = state.get("brokers") if isinstance(state.get("brokers"), Mapping) else {}
     active_broker = broker.get("active_broker") if isinstance(broker.get("active_broker"), Mapping) else {}
@@ -41,8 +47,10 @@ def build_health_summary(
 
     if any(reason.startswith("unsafe_") for reason in reasons) or "contract_validation_failed" in reasons:
         health = HEALTH_FAIL_CLOSED
-    elif "mandatory_data_stale" in reasons:
+    elif "mandatory_data_stale" in reasons or "runtime_heartbeat_stale" in reasons:
         health = HEALTH_RED
+    elif "runtime_offline" in reasons:
+        health = HEALTH_UNAVAILABLE
     elif not state:
         health = HEALTH_UNAVAILABLE
     elif reasons:

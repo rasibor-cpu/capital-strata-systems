@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+import time
 from typing import Any
 
 from fastapi import APIRouter
@@ -19,9 +20,16 @@ StateProvider = Callable[[], Mapping[str, Any] | None]
 def create_mission_control_router(state_provider: StateProvider | None = None) -> APIRouter:
     provider = state_provider or (lambda: None)
     router = APIRouter()
+    cached_state: dict[str, Any] = {"updated_at": 0.0, "payload": {}}
 
     def state() -> dict[str, Any]:
-        return build_mission_control_state(provider(), allow_mock=False)
+        now = time.time()
+        if now - float(cached_state.get("updated_at", 0.0)) <= 5.0 and isinstance(cached_state.get("payload"), dict) and cached_state["payload"]:
+            return dict(cached_state["payload"])
+        payload = build_mission_control_state(provider(), allow_mock=False)
+        cached_state["updated_at"] = time.time()
+        cached_state["payload"] = payload
+        return dict(payload)
 
     @router.get("/mission-control", include_in_schema=False)
     async def mission_control_index() -> RedirectResponse:
@@ -40,6 +48,31 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
         current = state()
         freshness = current.get("freshness") if isinstance(current.get("freshness"), Mapping) else {}
         return JSONResponse(safe_serialize(build_health_summary(current, freshness_summary=freshness)))
+
+    @router.get("/mission-control/api/runtime")
+    async def mission_control_api_runtime() -> JSONResponse:
+        return JSONResponse(safe_serialize(state().get("runtime_snapshot", {})))
+
+    @router.get("/mission-control/api/heartbeat")
+    async def mission_control_api_heartbeat() -> JSONResponse:
+        snapshot = state().get("runtime_snapshot", {})
+        snapshot = snapshot if isinstance(snapshot, Mapping) else {}
+        return JSONResponse(
+            safe_serialize(
+                {
+                    "runtime_id": snapshot.get("runtime_id", "UNAVAILABLE"),
+                    "last_heartbeat": snapshot.get("last_heartbeat", "UNAVAILABLE"),
+                    "heartbeat_status": snapshot.get("heartbeat_status", "UNAVAILABLE"),
+                    "heartbeat_age_seconds": snapshot.get("heartbeat_age_seconds", "UNAVAILABLE"),
+                    "state_hash": snapshot.get("state_hash", "UNAVAILABLE"),
+                    "read_only": True,
+                    "execution_allowed": False,
+                    "live_trading_blocked": True,
+                    "broker_execution_armed": False,
+                    "advisory_only": True,
+                }
+            )
+        )
 
     @router.get("/mission-control/navigation")
     async def mission_control_navigation() -> JSONResponse:

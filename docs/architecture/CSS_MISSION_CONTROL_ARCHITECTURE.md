@@ -15,6 +15,10 @@ connects the shell to canonical read-only runtime/dashboard payloads. It does
 not create a second production server or change Desktop-specific runtime
 behavior.
 
+MC-003 connects Mission Control to the Desktop/mobile launcher runtime bridge
+so the shell consumes actual runtime snapshot evidence when available and
+fails closed to offline/unavailable state when the runtime is not active.
+
 ## Component Architecture
 
 Mission Control is implemented as an additive dashboard package:
@@ -33,10 +37,17 @@ Mission Control is implemented as an additive dashboard package:
 - `dashboard.mission_control.health`
 - `dashboard.mission_control.permissions`
 - `dashboard.mission_control.serializers`
+- `dashboard.mission_control.runtime_snapshot_provider`
+- `dashboard.mission_control.runtime_snapshot_normalizer`
+- `dashboard.mission_control.runtime_bridge`
 
 The package is mounted into `dashboard.web.web_app.create_app` through an
 idempotent registration helper. The helper rejects conflicting
 `/mission-control` routes and rejects write-capable methods.
+
+The Desktop launcher host mounts Mission Control through
+`launcher.css_mobile_launcher` with
+`build_launcher_frontend_state` as the authoritative in-process runtime source.
 
 ## State Flow
 
@@ -50,9 +61,13 @@ State flow:
    `css.mission_control.state.v1`.
 5. `dashboard.mission_control.source_registry` labels each section source and
    provenance.
-6. `dashboard.mission_control.freshness` calculates deterministic freshness.
-7. `dashboard.mission_control.health` derives display-only health.
-8. The shell renders all pages from the canonical Mission Control state.
+6. `dashboard.mission_control.runtime_snapshot_provider` resolves the current
+   runtime snapshot.
+7. `dashboard.mission_control.runtime_snapshot_normalizer` creates a
+   canonical runtime snapshot with heartbeat and state hash.
+8. `dashboard.mission_control.freshness` calculates deterministic freshness.
+9. `dashboard.mission_control.health` derives display-only health.
+10. The shell renders all pages from the canonical Mission Control state.
 
 Unavailable live data remains `UNAVAILABLE`. Mock data is explicitly labeled.
 
@@ -68,8 +83,45 @@ Mission Control exposes only read-only GET routes:
 - `/mission-control/api/page-metadata`
 - `/mission-control/api/brokers`
 - `/mission-control/api/certification`
+- `/mission-control/api/runtime`
+- `/mission-control/api/heartbeat`
 
 There are no POST, PUT, PATCH, or DELETE operational routes in MC-002.
+
+MC-003 preserves this GET-only route architecture.
+
+## Runtime Snapshot Architecture
+
+Mission Control runtime snapshot precedence is:
+
+1. In-process runtime source when the host shares process with the runtime
+   bridge.
+2. Existing runtime artifact evidence.
+3. Explicit cache-labeled artifact snapshot.
+4. Offline/unavailable fail-closed snapshot.
+
+The canonical Desktop source is
+`launcher.css_mobile_launcher.build_launcher_frontend_state`, which already
+bridges supervisor, session, account, broker, runtime health, artifact
+freshness, validation, and certification evidence into the frontend contract.
+
+## Runtime/Web-Host Separation
+
+The web dashboard host may remain available when the trading runtime is offline.
+In that condition Mission Control displays runtime offline and does not
+substitute demo account, broker, portfolio, or market values.
+
+## Demo Isolation
+
+Demo/default dashboard values are accepted only when explicitly labeled as mock
+or demo. Missing runtime data remains unavailable. The Executive Overview shows
+a runtime-offline banner when current runtime evidence is absent.
+
+## State Hash Consistency
+
+Mission Control state, runtime API, and heartbeat API derive from the same
+runtime snapshot during a refresh window. Runtime and heartbeat endpoints expose
+the same runtime snapshot hash as the full state payload.
 
 ## Runtime Integration
 
@@ -105,6 +157,9 @@ Freshness statuses are:
 
 Mandatory stale or unavailable runtime, broker, certification, platform, or
 safety data downgrades Mission Control health.
+
+Runtime heartbeat freshness is mandatory. Stale or unavailable heartbeat state
+downgrades Mission Control health.
 
 ## Health Model
 

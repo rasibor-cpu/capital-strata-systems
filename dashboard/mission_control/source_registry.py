@@ -42,6 +42,7 @@ class SourceDescriptor:
 
 SECTION_SOURCE_MODULES: dict[str, str] = {
     "platform": "dashboard.runtime.frontend_contract",
+    "runtime_snapshot": "dashboard.mission_control.runtime_snapshot_provider",
     "runtime": "dashboard.runtime.frontend_contract",
     "trading": "dashboard.runtime.frontend_contract",
     "portfolio": "dashboard.runtime.frontend_contract",

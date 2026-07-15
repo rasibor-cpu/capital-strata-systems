@@ -11,7 +11,7 @@ def render(state: dict) -> str:
     safety = brokers.get("safety", {}) if isinstance(brokers.get("safety"), dict) else {}
     return (
         page_header("Broker Management", "Read-only active broker state, broker registry, selection preview, onboarding shell, capabilities, and safety controls.")
-        + warning_banner("Broker selection and onboarding controls are disabled/mock-only in MC-001.", status="bad")
+        + warning_banner("Broker selection and onboarding controls are disabled. Runtime broker state is display-only.", status="bad")
         + metric_grid(
             (
                 ("Selected Broker", active.get("selected_broker"), active.get("selected_broker")),
@@ -21,6 +21,8 @@ def render(state: dict) -> str:
                 ("Account", active.get("account_status"), active.get("account_status")),
                 ("Market Data", active.get("market_data_status"), active.get("market_data_status")),
                 ("Balance", active.get("balance_status"), active.get("balance_status")),
+                ("Buying Power", active.get("buying_power_status"), "neutral"),
+                ("Margin", active.get("margin_status"), active.get("margin_status")),
                 ("Execution Scope", active.get("execution_scope"), active.get("execution_scope")),
             )
         )

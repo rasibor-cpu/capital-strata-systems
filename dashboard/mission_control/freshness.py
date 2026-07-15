@@ -11,7 +11,7 @@ STALE = "STALE"
 UNAVAILABLE = "UNAVAILABLE"
 UNKNOWN = "UNKNOWN"
 
-MANDATORY_SECTIONS = ("platform", "runtime", "brokers", "certification", "safety")
+MANDATORY_SECTIONS = ("platform", "runtime_snapshot", "runtime", "brokers", "certification", "safety")
 
 
 def build_freshness_summary(
