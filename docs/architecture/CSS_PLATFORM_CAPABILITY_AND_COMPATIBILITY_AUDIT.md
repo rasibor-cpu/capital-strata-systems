@@ -1,251 +1,337 @@
-# CSS Platform Capability and Compatibility Audit
+﻿# CSS Platform Capability And Compatibility Audit
 
 Phase: PCA-001
 
-Audit date: 2026-07-15
+Audit Date: 2026-07-16
 
-Branch: `css-unified-consolidation-2026-07-13`
+Baseline Branch: css-unified-consolidation-2026-07-13
 
-Repository baseline: `584c6a28c38d792312c0edaf07533ca933d24266`
+Baseline Commit SHA: 502fb70587b0597873a7a2531589cc6d75261220
 
-Scope: repository evidence only. This audit reviewed source modules, tests, architecture documents, governance documents, release evidence, runtime contracts, host registrations, safety gates, and certification artifacts. It did not perform live broker execution, change runtime state, modify credentials, or treat untracked runtime reports as authoritative source code.
+Audit Mode: Evidence-only, no implementation changes, no live execution.
 
-## Safety Boundary
+## Safety Posture (Verified)
 
-PCA-001 is evidence-only. It does not implement features or change runtime behavior.
+Required safety boundary is preserved across runtime, broker readiness, Mission Control, and certification artifacts:
 
-Required safety posture remains:
+- execution_allowed=false
+- live_trading_blocked=true
+- broker_execution_armed=false
+- advisory_only=true
 
-- `execution_allowed=false`
-- `live_trading_blocked=true`
-- `broker_execution_armed=false`
-- `advisory_only=true`
+Representative code/test evidence:
 
-The repository contains live-readiness and broker-certification modules, but the audited platform remains certification/advisory-only unless separate approved live controls are explicitly armed by authoritative execution governance. PCA-001 made no such change.
+- backend/runtime/canonical_broker_state_builder.py
+- backend/runtime/runtime_certification_snapshot.py
+- backend/runtime/broker_environment_profiles.py
+- dashboard/mission_control/routes.py
+- tests/test_phase166c_canonical_runtime_state_final_reconciliation.py
+- tests/test_phase166d_live_environment_contamination_elimination.py
+- tests/test_mc007c_production_hardening.py
+- tests/test_oi010_certification.py
 
-## Audit Method
+## Repository Verification
 
-Status values use the PCA-001 canonical taxonomy:
+Pre-work verification commands executed:
 
-- `COMPLETE_CERTIFIED`
-- `COMPLETE_PENDING_CERTIFICATION`
-- `COMPLETE_PAPER_ONLY`
-- `COMPLETE_ADVISORY_ONLY`
-- `IMPLEMENTED_NOT_INTEGRATED`
-- `INTEGRATED_NOT_HOST_ACTIVATED`
-- `PARTIALLY_IMPLEMENTED`
-- `PLACEHOLDER_OR_SHELL`
-- `DEPRECATED`
-- `DUPLICATED`
-- `INCOMPATIBLE`
-- `UNVERIFIED`
-- `NOT_IMPLEMENTED`
-- `OUT_OF_SCOPE`
-- `BLOCKED`
+- git branch --show-current
+- git rev-parse HEAD
+- git rev-parse origin/css-unified-consolidation-2026-07-13
+- git status --short
+- git log -10 --oneline
 
-Where code and documentation differ, code and executable tests take precedence. Where repository evidence is insufficient, the audit classifies the area as `UNVERIFIED` rather than assuming completion.
+Findings:
 
-## Platform Inventory Summary
+- Current branch is css-unified-consolidation-2026-07-13.
+- Local HEAD equals origin: 502fb70587b0597873a7a2531589cc6d75261220.
+- No tracked modifications were present before audit docs; pre-existing untracked runtime/report artifacts remained unstaged.
 
-| Subsystem ID | Name | Purpose | Primary modules | Entry points and host registrations | Tests and docs | Status | Safety posture | Known limitations |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `runtime` | Runtime and supervision | Publish runtime state, artifacts, health, session continuity, certification snapshots, and operational proving evidence. | `backend/runtime/*`, `backend/validation/*`, `dashboard/runtime/*`, `launcher/css_mobile_launcher.py` | Launcher imports runtime artifact, certification, broker, validation, and dashboard contract modules. | Extensive phase governance docs and runtime tests. | `COMPLETE_PENDING_CERTIFICATION` | Read-only state publication and fail-closed certification. | Current Desktop operational state was not live-validated in PCA-001. |
-| `trading` | Trading orchestration | Normalize asset classes, trading universe, lifecycle, dry-run orchestration, and advisory decisions. | `backend/trading/*`, `backend/app/orchestration/*`, `backend/execution/*` | Unified execution foundation and dashboard/manual-ticket surfaces. | Execution, lifecycle, universe, risk, and dashboard tests. | `COMPLETE_ADVISORY_ONLY` | Live execution authority remains blocked. | Live order submission path remains intentionally unavailable for pilot use. |
-| `strategy` | Strategy orchestration | Generate and score advisory opportunities across markets and regimes. | `backend/intelligence/*`, `backend/analytics/*`, `backend/learning/*`, `backend/market_intelligence/*` | Runtime and dashboard projections consume derived recommendations. | Broad learning, intelligence, and analytics tests. | `COMPLETE_ADVISORY_ONLY` | Advisory outputs do not authorize execution. | Multiple overlapping strategy/confidence evaluators require consolidation discipline. |
-| `portfolio` | Portfolio and accounting | Build advisory portfolio state, allocation views, attribution, position intelligence, and accounting projections. | `backend/portfolio/*`, `backend/analytics/*`, `engine/*` | Dashboard, Mission Control, and runtime state builders consume projections. | Portfolio and dashboard tests. | `COMPLETE_PENDING_CERTIFICATION` | Advisory/read-model only unless execution gates authorize separate action. | Several portfolio/allocation implementations overlap. |
-| `capital` | Capital allocation | Model risk budgets, exposure caps, capital rotation, and pilot/order-limit configuration. | `backend/allocation/*`, `backend/portfolio/*`, `backend/risk/*`, `backend/runtime/live_micro_pilot_governor.py` | Runtime, dashboard, and Mission Control projections. | Capital/risk/order-limit tests and governance docs. | `COMPLETE_ADVISORY_ONLY` | Does not move capital or grant order authority. | Live pilot policy remains restrictive and certification-gated. |
-| `risk` | Risk governance | Evaluate risk gates, stress, concentration, margin, limits, and kill-switch posture. | `backend/risk/*`, `engine/risk/*`, `backend/options/options_income_risk_*` | Trade gates, dashboard, Mission Control, and certification paths. | Risk governor, margin, options risk, and certification tests. | `COMPLETE_PENDING_CERTIFICATION` | Fail-closed gates remain authoritative. | Risk service overlap exists across core, engine, options, and Mission Control projections. |
-| `broker` | Broker readiness and connectivity | Diagnose credentials, bootstrap brokers, certify read-only connectivity, and publish canonical broker state. | `backend/runtime/broker_*`, `backend/runtime/canonical_broker_*`, `backend/broker/*`, `backend/brokers/*` | Launcher and dashboard consume canonical broker snapshots; certifiers remain advisory. | Phase 153-166 tests and governance docs. | `COMPLETE_ADVISORY_ONLY` | Read-only validation never arms execution. | Coinbase/OANDA read-only certification exists; live authorization remains blocked. IBKR appears adapter/runtime-manager only and is not canonical active. |
-| `execution` | Execution gates and boundary validation | Maintain execution firewall, R7/RBAC/NO-GO protections, boundary validation, and dry-run/paper paths. | `backend/execution/*`, `backend/runtime/live_execution_authority.py`, `backend/validation/*` | Unified execution and runtime certification surfaces. | Execution, safety, R7, certification, and regression tests. | `COMPLETE_ADVISORY_ONLY` | Execution gates remain authoritative. | No PCA evidence of approved live execution activation. |
-| `paper_trading` | Paper trading | Simulate paper-only trades, paper broker interactions, lifecycle, previews, and certification. | `backend/options/options_paper_broker.py`, `backend/options/paper_income_lifecycle.py`, paper execution adapters | Options Income and dashboard payload builders. | OI-004 through OI-010 tests. | `COMPLETE_PAPER_ONLY` | Paper previews cannot become executable broker orders. | Paper broker abstractions are not live broker integrations. |
-| `options_core` | Options lifecycle and models | Canonical options contracts, Greeks, payoff, risk profiles, strategy classification, and dry-run lifecycle. | `backend/options/*`, `backend/trading/option_contract.py`, `backend/app/options/*` | Dashboard and dry-run orchestration surfaces. | Options model, Greeks, lifecycle, and dashboard tests. | `COMPLETE_PENDING_CERTIFICATION` | Live options disabled by default. | Live chains, broker-sourced IV, exercise, assignment notices, and multi-leg live routing are not implemented. |
-| `options_income` | Options Income Engine | Paper/advisory income strategy domain, scanning, lifecycle, rolling, portfolio, risk, dashboard, broker abstraction, and certification. | `backend/options/options_income_*`, `backend/options/rolling_*`, `backend/options/paper_*` | Enterprise adapters and RC1-OI registration helpers. | OI-002 through OI-010, EI-001, and RC1-OI tests. | `COMPLETE_PAPER_ONLY` | Explicitly non-executable and advisory/paper-only. | Host activation is adapter/registration based; live brokerage and optional advanced strategies remain out of current scope. |
-| `derivatives_shared` | Shared derivatives services | Normalize derivatives exposure, stress, and volatility evidence for enterprise consumers. | `backend/derivatives/*` | Options Income RC1 integration consumes shared services. | EI-001 tests. | `COMPLETE_ADVISORY_ONLY` | Read-only normalization. | Broader derivatives product coverage remains partial. |
-| `treasury` | Treasury and liquidity | Cash, liquidity, FX, and swap roadmap areas. | Scattered legacy/root evidence and portfolio/capital services. | No clear canonical enterprise host activation found. | Roadmap/governance references. | `PARTIALLY_IMPLEMENTED` | No live capital movement authority in PCA scope. | FX forwards, FX swaps, cross-currency swaps, interest-rate swaps, and institutional liquidity workflows are not complete. |
-| `audit_events` | Audit and events | Produce audit records, event payloads, evidence hashes, journal entries, and certification evidence. | `backend/events/*`, `backend/app/audit/*`, `dashboard/runtime/evidence_hashing.py`, OI audit/event adapters | Runtime, dashboard, and RC1 integration. | Audit, event, dashboard, and RC1 tests. | `COMPLETE_PENDING_CERTIFICATION` | Records evidence only; no broker mutation. | Event consumers and cross-process persistence coverage are uneven. |
-| `alerts` | Alerts and notifications | Generate alerts and operational status from runtime, OI, and monitoring sources. | `backend/monitoring/*`, `backend/options/options_income_alerts.py`, Mission Control alert projections | Launcher, dashboard, and Mission Control read models. | Monitoring and OI tests. | `COMPLETE_ADVISORY_ONLY` | Alerts do not create actions. | Delivery and operator workflow evidence is less mature than alert generation. |
-| `explainability` | Explainability | Build decision explanations, trace views, recommendation reasoning, and OI explanations. | `backend/portfolio/explainability_engine.py`, `dashboard/mission_control/explanation_projection.py`, `backend/options/options_income_explainability.py` | Mission Control and dashboard payloads. | OI and Mission Control tests. | `COMPLETE_ADVISORY_ONLY` | Explanation surfaces cannot authorize execution. | Multiple explanation surfaces should share canonical evidence contracts. |
-| `learning` | Learning and performance analytics | Track strategy performance, adaptive weights, confidence calibration, attribution, and regime learning. | `backend/learning/*`, `backend/analytics/*` | Runtime, portfolio, and Mission Control projections. | Learning and analytics tests. | `COMPLETE_ADVISORY_ONLY` | Recommendations do not change execution gates. | Duplicate learning/evaluation concepts exist across learning, analytics, and portfolio. |
-| `certification` | Certification and readiness | Certify paper/advisory subsystems, runtime state, broker readiness, and RC1 readiness. | `backend/certification/*`, `backend/runtime/*certification*`, `backend/options/options_income_certification*` | Runtime, dashboard, Mission Control, and governance docs. | Phase certification tests and docs. | `COMPLETE_PENDING_CERTIFICATION` | Certification is not trading authority. | Multiple certification layers can diverge unless canonical snapshots are reused. |
-| `dashboard_web` | Web dashboard and APIs | Serve institutional dashboard, frontend contract, broker/margin/risk views, and Mission Control routes. | `dashboard/web/web_app.py`, `dashboard/runtime/*` | `create_app()` registers dashboard routers and Mission Control. | Dashboard and route tests. | `COMPLETE_PENDING_CERTIFICATION` | Read model by default; broker/margin reads must remain read-only. | Current Desktop server state was not actively smoke-tested in PCA-001. |
-| `mobile` | Mobile dashboard and launcher | Mobile/PWA routes, launcher runtime composition, Mission Control host registration, runtime artifacts. | `dashboard/mobile/*`, `launcher/css_mobile_launcher.py` | FastAPI app and launcher routes. | Mobile and launcher tests. | `COMPLETE_PENDING_CERTIFICATION` | Runtime surfaces remain read-only. | Cross-process runtime binding should be validated on Desktop. |
-| `mission_control` | Mission Control | Institutional command, monitoring, decision, secure operations, and certification shell. | `dashboard/mission_control/*` | Registered into `dashboard.web.web_app.create_app` and `launcher.css_mobile_launcher`. | MC-001 through MC-007C tests and docs. | `COMPLETE_CERTIFIED` | GET-only/read-only state plane; no mutation routes. | Certification is repository/test evidence; actual Desktop operational validation remains separate. |
-| `governance` | Governance, RBAC, feature flags, policies | Preserve R7, RBAC, NO-GO, safety controls, feature flags, and operator visibility. | `backend/governance/*`, `dashboard/mission_control/*governance*`, `backend/security/*` | Runtime, dashboard, and Mission Control projections. | Governance, safety, and MC tests. | `COMPLETE_PENDING_CERTIFICATION` | Controls remain authoritative. | Feature flag and configuration models appear in several locations. |
-| `deployment_ops` | Deployment and operations | Launch scripts, runbooks, release docs, runtime smoke, Desktop operational workflow. | `scripts/*`, `launcher/*`, `docs/runbooks/*`, `docs/release/*` | Desktop and dashboard startup commands. | Runtime smoke and RC1-OPS docs/tests. | `COMPLETE_PENDING_CERTIFICATION` | Startup does not imply trading authority. | Current machine operational validation was not rerun in PCA-001. |
+## Subsystem Inventory (Authoritative Summary)
 
-## Options Income Engine Conclusion
+Status taxonomy used exactly as required.
 
-The Options Income Engine should be considered complete for the approved paper/advisory scope represented by OI-002 through OI-010, EI-001, and RC1-OI.
+| ID | Subsystem | Purpose | Primary Modules | Entry Points / Hosts | Status | Safety Posture | Known Limitations |
+|---|---|---|---|---|---|---|---|
+| SYS-001 | Runtime Supervision | Runtime health, restart, continuity | backend/runtime/css_runtime_supervisor.py, backend/runtime/runtime_supervisor.py | launcher/css_runtime_launcher.py | COMPLETE_PENDING_CERTIFICATION | Advisory-only enforced | Desktop persistence variability across hosts |
+| SYS-002 | Runtime Artifact Publishing | Cross-process state publication | backend/runtime/runtime_artifact_publisher.py | launcher/css_mobile_launcher.py runtime readers | COMPLETE_PENDING_CERTIFICATION | execution_allowed false in payloads | File artifact freshness dependency |
+| SYS-003 | Mission Control Core | Operational visibility plane | dashboard/mission_control/* | dashboard/web/web_app.py, launcher/css_mobile_launcher.py | COMPLETE_CERTIFIED | GET-only and read-only route enforcement | Certification is test/document heavy |
+| SYS-004 | Frontend Contract Bridge | Canonical dashboard payload | dashboard/runtime/frontend_contract.py | dashboard/web/web_app.py API routes | COMPLETE_PENDING_CERTIFICATION | Read-only contract and redaction | Legacy compatibility fields remain |
+| SYS-005 | Broker Env Profiles (BR-001) | Strict paper/live profile isolation | backend/runtime/broker_environment_profiles.py, backend/runtime/live_environment_loader.py | runtime loader path and startup loaders | COMPLETE_PENDING_CERTIFICATION | Live blocked, contamination removal | Legacy file/profile migration complexity |
+| SYS-006 | Canonical Broker State | Unified broker readiness/status authority | backend/runtime/canonical_broker_state_builder.py | frontend contract and startup summary | COMPLETE_PENDING_CERTIFICATION | hard fail-closed flags | Multi-source status duplication |
+| SYS-007 | Coinbase Read-only Readiness | Coinbase credential/read checks | backend/runtime/coinbase_readiness.py | scripts/css_live_dashboard.py | COMPLETE_PAPER_ONLY | live authority blocked | Live execution unsupported |
+| SYS-008 | OANDA Read-only Readiness | OANDA credential/read checks | backend/runtime/oanda_readiness.py | scripts/css_live_dashboard.py | COMPLETE_PAPER_ONLY | live authority blocked | Live execution unsupported |
+| SYS-009 | IBKR Adapter Layer | IBKR placeholder connectivity/adapters | backend/brokers/ibkr/ibkr_adapter.py | backend/brokers/ibkr/ibkr_runtime_manager.py | PARTIALLY_IMPLEMENTED | no live authority path | No production-grade IBKR integration |
+| SYS-010 | Trading Orchestration | Signal-to-decision flow | engine/execution_router.py, engine/decision_builder.py | engine/run_engine.py | COMPLETE_ADVISORY_ONLY | gate and firewall layers | Host activation inconsistency |
+| SYS-011 | Strategy Orchestration | Strategy selection and routing | backend/strategies/*, engine/strategy/* | dashboard/runtime and engine loop | COMPLETE_ADVISORY_ONLY | no automatic live routing | Strategy readiness varies by asset class |
+| SYS-012 | Market Intelligence | Regime/factor intelligence | backend/market_intelligence/*, backend/intelligence/* | dashboard sections and APIs | COMPLETE_PENDING_CERTIFICATION | advisory outputs | Cross-process stale risk if artifacts old |
+| SYS-013 | Portfolio State | Portfolio lifecycle and summaries | backend/portfolio/*, backend/runtime/runtime_portfolio_lifecycle.py | frontend contract, Mission Control | COMPLETE_PENDING_CERTIFICATION | advisory-only projection | Accounting reconciliation depth varies |
+| SYS-014 | Capital Allocation | Capital and opportunity allocation | backend/runtime/caie_runtime_bridge.py, backend/options/options_income_allocator.py | dashboard intelligence sections | COMPLETE_ADVISORY_ONLY | constrained/no execution | Production calibration pending |
+| SYS-015 | Risk Governance | Risk scoring, stress, committees | backend/risk/*, backend/options/options_income_risk_governance.py | risk APIs and dashboards | COMPLETE_PENDING_CERTIFICATION | hard blocked execution | Duplicate risk summaries across layers |
+| SYS-016 | Execution Pipeline | Unified execution abstraction | engine/execution/*, backend/execution/* | execution router paths | PARTIALLY_IMPLEMENTED | fail-closed by default | Live pathways intentionally blocked |
+| SYS-017 | Paper Trading | Controlled paper operations | backend/options/options_paper_broker.py, engine/sim/* | OI and paper broker paths | COMPLETE_CERTIFIED | paper_only true | Not live-authority capable |
+| SYS-018 | Options Core Lifecycle | Option lifecycle and Greeks | backend/options/options_* core modules | options dashboards/tests | COMPLETE_PENDING_CERTIFICATION | non-executable posture | Advanced spread families not in canonical scope |
+| SYS-019 | Options Income Engine OI-001..010 | Income strategy domain and lifecycle | backend/options/options_income_* | internal adapters and test routers | COMPLETE_PAPER_ONLY | strict paper/advisory flags | Host activation limited |
+| SYS-020 | Options Enterprise Integration EI-001/RC1-OI | Enterprise adapters and certification hooks | backend/options/options_income_rc1_* | test-host registries, report builders | INTEGRATED_NOT_HOST_ACTIVATED | safe flags enforced | Not wired into production host runtime |
+| SYS-021 | Shared Derivatives Services | Exposure/stress/volatility services | backend/derivatives/* | consumed by RC1-OI integration | COMPLETE_PENDING_CERTIFICATION | advisory-safe payloads | Limited broad host consumers |
+| SYS-022 | Treasury Capability | Liquidity/cash management surfaces | engine/liquidity/*, engine/fiscal/* | analytics/report layers | PARTIALLY_IMPLEMENTED | advisory only | Institutional treasury roadmap largely open |
+| SYS-023 | Audit/Event Infrastructure | Event bus and audit records | backend/events/*, backend/options/options_income_event_adapter.py | certification adapters and run reports | COMPLETE_PENDING_CERTIFICATION | redaction and fail-closed patterns | Runtime ownership/persistence ambiguity |
+| SYS-024 | Alerts/Notifications | Alert generation/delivery | backend/notifications/*, tests/test_notification_* | dashboard/mobile surfaces | COMPLETE_PENDING_CERTIFICATION | no execution authority | Delivery channels partly simulation-oriented |
+| SYS-025 | Explainability | Decision explanation surfaces | backend/options/options_income_explainability.py, backend/intelligence/* | dashboard + Mission Control | COMPLETE_PENDING_CERTIFICATION | advisory-only | Explainability schema duplication |
+| SYS-026 | Learning/Analytics | Feedback and learning loops | backend/learning/*, options learning adapters | dashboard analytics and cert adapters | COMPLETE_PENDING_CERTIFICATION | no direct execution effect | Production drift controls still maturing |
+| SYS-027 | Certification/Readiness | RC1, runtime, broker cert | backend/validation/*, backend/runtime/runtime_certification_snapshot.py | release docs and dashboard sections | COMPLETE_PENDING_CERTIFICATION | safety checks explicit | Heavy reliance on test-driven evidence |
+| SYS-028 | Dashboard Web Host | Institutional web host + APIs | dashboard/web/web_app.py | FastAPI web app | COMPLETE_PENDING_CERTIFICATION | read-only route model | Desktop operational proof not equivalent to broad prod rollout |
+| SYS-029 | Mobile Dashboard Host | Launcher mobile host | launcher/css_mobile_launcher.py | uvicorn launcher module | COMPLETE_PENDING_CERTIFICATION | controls constrained; no live arming evidence | Large monolithic launcher complexity |
+| SYS-030 | RBAC/Auth Surfaces | Auth, permissions, recovery | dashboard/auth/*, dashboard/mission_control/permissions.py | dashboard and mission control consoles | PARTIALLY_IMPLEMENTED | read-only emphasis | Enterprise auth hardening still mixed |
+| SYS-031 | Deployment/Operations Docs | runbooks and deployment governance | docs/runbooks/*, docs/deployment/* | documentation consumed by operators | COMPLETE_PENDING_CERTIFICATION | policy-level safeguards | Operational validation still mostly controlled environments |
+| SYS-032 | Legacy/Build Scripts Footprint | historical patch scripts | scripts/build_* | non-host patch utilities | DEPRECATED | not in live runtime path | Drift/confusion risk if reused |
 
-Repository evidence supports:
+## Capability Classification Highlights
 
-- Covered call and cash-secured put paper strategy domain models.
-- Opportunity scanning over canonical inputs.
-- Paper lifecycle, premium accounting, collateral reservation/release, expiration, and assignment simulation.
-- Paper position health, rolling advisory, and income metrics.
-- Paper portfolio construction, capital allocation, diversification, expiry laddering, targets, and advisory rebalancing.
-- Paper risk budgets, Greeks aggregation, assignment risk, volatility risk, and stress testing.
-- Dashboard/API payload generation, alerts, explainability, and operational intelligence.
-- Paper broker abstraction, paper market data provider, paper account snapshots, broker health, and non-executable order preview.
-- Controlled paper certification, replay validation, audit reporting, readiness scoring, enterprise adapters, and RC1-OI registration helpers.
+1. Genuinely complete now:
+- Mission Control read-only visibility plane and API surface (MC-001..MC-007C) with host registrations in web and mobile hosts.
+- Broker environment profile separation and contamination controls for paper/live profile loading.
+- Canonical broker runtime state projection and front-end adapter integration.
+- OI-001..OI-010 paper/advisory capability stack with deterministic certification harness.
 
-The engine is not live-execution capable and is not live-broker integrated. It is paper-only and advisory-only by design. Missing optional strategies such as condors, calendars, diagonals, LEAPS income, wheel automation, and broader spreads should not be treated as a failure of the approved OI-002 through OI-010 scope unless a later roadmap explicitly promotes them to required scope.
+2. Complete only for paper/advisory use:
+- Options Income strategy execution lifecycle, risk, dashboard, broker abstraction, and certification.
+- Runtime readiness/certification and broker validation stack.
+- RC1 platform and RC1-OI final verdicts (controlled release posture only).
 
-Host activation is partially separated from implementation. Options Income has registration helpers and enterprise adapters, but PCA-001 did not verify an active production host route that continuously consumes every OI panel in a running Desktop process.
+3. Integrated but not host-activated:
+- Options Income API router and RC1 enterprise integration adapters are strongly implemented and tested, but production host route registration is not demonstrated in runtime host wiring.
 
-## Mission Control Conclusion
+4. Certified:
+- RC1 paper/advisory release readiness documents and corresponding certification tests.
+- Mission Control v1.0 final certification in tests and governance docs.
+- OI-010 and RC1-OI certification suites.
 
-Mission Control v1.0 is feature-complete and repository-certified for its read-only operational interface scope.
+5. Incomplete:
+- Production live execution authority pipeline.
+- Broad production deployment evidence beyond controlled/desktop proof.
+- Institutional treasury and advanced derivatives roadmap items.
+- IBKR production-grade integration.
 
-Evidence supports:
+6. Duplications observed:
+- Multiple broker status and readiness payload projections.
+- Repeated safety/status flags in multiple adapters.
+- Overlap across runtime snapshot, frontend contract, and Mission Control state projection layers.
 
-- Shell, navigation, layout, routes, pages, and host registration.
-- Dashboard web host registration through `dashboard.web.web_app.create_app`.
-- Launcher host registration through `launcher.css_mobile_launcher`.
-- Runtime snapshot providers, active runtime source resolution, artifact and endpoint readers, heartbeat/freshness/source registry, and state hashes.
-- Operations command center, decision intelligence, institutional intelligence, and secure operations projections.
-- GET-only API surface and final certification document.
-- Read-only safety posture with fixed execution flags.
+7. Incompatibilities observed:
+- Some legacy/startup script paths still carry old assumptions and broad global state, creating compatibility warnings with canonical profile/state architecture.
 
-The distinction is important: Mission Control is certified by repository evidence and tests as a read-only v1.0 interface. PCA-001 did not perform a live Desktop runtime session validation, so current Desktop operational validation remains `UNVERIFIED` in this audit.
+8. Approved roadmap items remaining:
+- Advanced derivatives families, institutional treasury stack, multi-currency hedging, deployment hardening, and secure live onboarding pathways.
 
-## Compatibility Summary
+9. Highest marginal value candidate:
+- Canonical host activation of Options Income enterprise integration (runtime + dashboard + Mission Control panels) with cross-process evidence and compatibility contract stabilization.
 
-Most core contracts are compatible or compatible with warnings. The highest-risk compatibility issues are not hard incompatibilities; they are divergence risks caused by parallel status fields, multiple snapshot builders, and adapter surfaces that are implemented before full host consumption.
+## Options Income Engine Deep Audit Conclusion
 
-| Integration | Classification | Evidence | Warning |
-| --- | --- | --- | --- |
-| Runtime snapshot to Mission Control | `COMPATIBLE` | Mission Control state provider, normalizer, bridge, and host registration. | Desktop runtime validation not rerun. |
-| Runtime snapshot to mobile dashboard | `COMPATIBLE_WITH_WARNINGS` | Launcher consumes runtime artifacts and frontend contract. | Cross-process freshness and artifact availability can fail closed. |
-| Frontend contract to dashboard web host | `COMPATIBLE` | `dashboard.web.web_app.create_app` includes dashboard state router and websocket router. | Demo provider is used when no provider is injected. |
-| Canonical broker state to diagnostics | `COMPATIBLE_WITH_WARNINGS` | Canonical broker state and diagnostic/certification modules exist. | Multiple broker readiness/certification layers can diverge unless canonical state is authoritative. |
-| Canonical broker state to margin/capital | `COMPATIBLE_WITH_WARNINGS` | Margin adapters and account snapshots feed dashboard/runtime surfaces. | Prior account-state ambiguity makes canonical provenance important. |
-| Risk state to trade gate | `COMPATIBLE` | Execution gates and risk governor tests preserve fail-closed behavior. | Live execution remains blocked. |
-| Decision intelligence to audit evidence | `COMPATIBLE_WITH_WARNINGS` | Decision trace, evidence graph, audit adapters, and Mission Control projections. | Evidence schemas should remain canonical across dashboard and audit stores. |
-| Options Income to portfolio/risk | `COMPATIBLE` | OI-006 and OI-007 modules plus EI-001 adapters. | Paper-only scope must remain explicit. |
-| Options Income to Mission Control | `COMPATIBLE_WITH_WARNINGS` | Mission Control operations/intelligence projections and OI enterprise adapters exist. | Continuous host consumption was not operationally verified. |
-| Shared derivatives to Options Income | `COMPATIBLE` | EI-001 uses shared derivatives services. | Broader derivatives products remain incomplete. |
-| Broker capabilities to runtime readiness | `COMPATIBLE_WITH_WARNINGS` | Broker capability/readiness/certification modules exist. | Certification must execute once per cycle and remain canonical. |
-| Feature flags to safety gates | `COMPATIBLE_WITH_WARNINGS` | Governance and Mission Control visibility exist. | Avoid creating dashboard/API paths that mutate live limits or execution flags. |
-| RBAC to operator permissions | `COMPATIBLE` | Mission Control secure operations surfaces summarize RBAC without write routes. | Runtime enforcement still belongs to existing authoritative controls. |
-| Deployment scripts to runtime architecture | `COMPATIBLE_WITH_WARNINGS` | Launcher, scripts, and runbooks exist. | Current Desktop startup should be validated after any host change. |
+Evidence reviewed:
 
-## Host Activation Findings
+- backend/options/options_income_*
+- backend/options/options_income_rc1_*
+- tests/test_oi002_income_strategy_domain_model.py through tests/test_oi010_certification.py
+- tests/test_ei001_options_enterprise_integration.py
+- tests/test_rc1_oi_enterprise_integration_certification.py
 
-| Category | Findings |
-| --- | --- |
-| Runtime-active | Launcher imports and composes runtime, broker, certification, validation, portfolio, learning, and dashboard state modules. |
-| Web-host-active | Dashboard web app registers dashboard state routes, websocket routes, and Mission Control routes. |
-| Mobile-host-active | Mobile/launcher surfaces include runtime state and Mission Control registration. |
-| Certification-consumed | Broker, Options Income, RC1, and Mission Control certification modules are consumed by tests/docs and selected runtime builders. |
-| Adapter-only | Some Options Income enterprise, event, audit, dashboard, learning, and certification adapters are caller-provided integration surfaces rather than independently active services. |
-| Test-only | Paper broker, certification scenarios, and some host-contract integrations are primarily exercised in pytest. |
-| Documentation-only or roadmap-only | Treasury, swaps, advanced derivatives, alternative data, and several advanced options strategies remain roadmap/deferred. |
+Conclusion:
 
-## Test and Certification Findings
+- Functional scope for canonical OI program is complete for paper/advisory operation: covered calls, cash-secured puts, rolling, position management, portfolio construction, risk budgets, Greeks, assignment and volatility risk handling, stress testing, and dashboard intelligence.
+- Broker integration is paper abstraction complete and enterprise-adapter integrated.
+- Runtime and host activation is not fully demonstrated for production host wiring of OI routes/panels; classify as COMPLETE_PAPER_ONLY with INTEGRATED_NOT_HOST_ACTIVATED components.
+- Certification is strong for paper-only scope; live execution capability remains blocked by design.
 
-The repository has broad unit, integration, dashboard, runtime, options, broker, certification, and Mission Control tests. Repository evidence includes OI-002 through OI-010 tests, EI-001 tests, RC1-OI tests, Mission Control tests through MC-007C, broker readiness/certification tests, risk and execution gate tests, dashboard route tests, and runtime smoke artifacts.
+Optional strategies not required by canonical OI scope remain not implemented as autonomous production strategies:
 
-Material gaps:
+- Spreads (complex multi-leg automation)
+- Iron condors
+- Calendar/diagonal automation
+- Wheel automation
+- LEAPS income automation
 
-- Current Desktop runtime operational validation is not proven by PCA-001.
-- Cross-process tests are thinner than in-process contract tests.
-- Live broker read-only validations are certification/advisory evidence, not live execution readiness.
-- Host activation for every Options Income panel should be validated in a running Desktop host before claiming production-active status.
-- Duplicate status builders and certification views need continued canonicalization to prevent dashboard/runtime drift.
+These are roadmap opportunities, not current-scope failures.
 
-## Roadmap Gap Findings
+## Mission Control Deep Audit Conclusion
 
-| Roadmap area | Current classification | Evidence and limitation |
-| --- | --- | --- |
-| Options Income | `COMPLETE_PAPER_ONLY` | Approved OI paper/advisory scope is implemented and tested. |
-| Institutional portfolio optimization | `PARTIALLY_IMPLEMENTED` | Multiple portfolio, allocation, and intelligence engines exist; production optimization authority remains advisory. |
-| FX forwards | `NOT_IMPLEMENTED` | No canonical enterprise implementation found. |
-| FX swaps | `NOT_IMPLEMENTED` | No canonical enterprise implementation found. |
-| Cross-currency swaps | `NOT_IMPLEMENTED` | No canonical enterprise implementation found. |
-| Interest-rate swaps | `NOT_IMPLEMENTED` | No canonical enterprise implementation found. |
-| Multi-currency hedging | `PARTIALLY_IMPLEMENTED` | Portfolio/currency concepts exist; institutional hedging workflow is not complete. |
-| Cash and liquidity management | `PARTIALLY_IMPLEMENTED` | Capital and buying-power views exist; treasury-grade liquidity workflow is incomplete. |
-| Advanced derivatives | `PARTIALLY_IMPLEMENTED` | Options and shared derivatives services exist; broader products are incomplete. |
-| Statistical arbitrage | `PARTIALLY_IMPLEMENTED` | Analytics/intelligence modules exist; production strategy package not certified. |
-| Cross-asset strategies | `PARTIALLY_IMPLEMENTED` | Cross-asset orchestration and intelligence exist; live authority remains blocked. |
-| Macro regime strategies | `PARTIALLY_IMPLEMENTED` | Regime and market intelligence engines exist; production operationalization is incomplete. |
-| Alternative data | `NOT_IMPLEMENTED` | No canonical integration found. |
-| Production deployment | `COMPLETE_PENDING_CERTIFICATION` | Runbooks and RC1 docs exist; current Desktop validation not rerun. |
-| Live broker execution | `BLOCKED` | Execution gates intentionally block live trading. |
-| Secure broker onboarding | `PARTIALLY_IMPLEMENTED` | Credential diagnostics and canonical state exist; onboarding UX/process remains incomplete. |
-| Institutional reporting | `COMPLETE_ADVISORY_ONLY` | Mission Control reporting projections exist. |
-| Mobile operations | `COMPLETE_PENDING_CERTIFICATION` | Mobile/launcher surfaces exist; Desktop runtime validation remains separate. |
+Evidence reviewed:
 
-## Highest-Value Improvement Analysis
+- dashboard/mission_control/*
+- dashboard/web/web_app.py
+- launcher/css_mobile_launcher.py
+- tests/test_mc001_mission_control_foundation.py through tests/test_mc007c_production_hardening.py
 
-| Rank | Initiative | Profit impact | Risk reduction | Operational value | Effort | Dependency readiness | Safety implication |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Canonical runtime host activation and operational proof for Desktop | Medium | High | Very high | Medium | High | Read-only; validates production surface without live execution. |
-| 2 | Broker read-only reconciliation and canonical certification hardening | Medium | High | High | Medium | High | Preserves execution firewall; improves live-pilot planning evidence. |
-| 3 | Consolidate duplicate portfolio/capital/risk/derivatives status surfaces | Medium | Medium | High | Medium-high | Medium | Reduces drift before new capabilities. |
-| 4 | Options Income host activation and Mission Control panel evidence | Medium | Medium | High | Medium | High | Paper/advisory only. |
-| 5 | Treasury/cash-liquidity foundation design | Medium-high | Medium | Medium | High | Medium-low | Should remain read-only until broker/account state is fully canonical. |
+Conclusion:
 
-Primary recommendation: complete a read-only Desktop operational proof that exercises the canonical runtime snapshot, Mission Control, broker certification state, dashboard, mobile launcher, audit pipeline, and Options Income panels in one host session.
+- Mission Control v1.0 is feature-complete for read-only operational command-plane objectives.
+- Host-activated in both web host and mobile launcher.
+- Runtime-compatible through runtime snapshot provider and source resolver chain with fail-closed behavior.
+- Operational validation is strong in test suites and controlled Desktop evidence docs.
+- Production-certified status should be interpreted as controlled/read-only certification; broad real-world desktop endurance evidence remains comparatively limited.
 
-Fallback recommendation: consolidate broker, runtime, and dashboard certification state into a single canonical snapshot contract before adding any new product capability.
+Classification: COMPLETE_CERTIFIED for read-only operational surface, with COMPATIBLE_WITH_WARNINGS for broad production activation assumptions.
 
-## Technical Debt and Risk Summary
+## Compatibility Audit Summary
 
-| Issue | Domain | Severity | Probability | Operational impact | Current mitigation | Recommended remediation | Priority |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Duplicate readiness/certification builders | Broker/runtime/certification | High | Medium | Dashboard and runtime can diverge. | Canonical broker state and certifier modules. | Enforce one canonical snapshot consumed by all displays. | P1 |
-| Duplicate portfolio/capital/risk calculations | Portfolio/capital/risk | Medium | High | Conflicting read models or scores. | Tests and adapters. | Identify canonical services and deprecate secondary projections. | P1 |
-| Host activation gap for adapter-only modules | Options Income/Mission Control | Medium | Medium | Implemented capability may not appear in runtime. | RC1/OI integration helpers. | Add host-level operational proof without enabling execution. | P1 |
-| Untracked runtime artifacts | Operations | Medium | High | Evidence confusion during audits. | Git status separation and ignore rules. | Keep artifacts untracked and add runbook explaining source-of-truth hierarchy. | P2 |
-| Environment loading risk | Broker/runtime | High | Medium | Live/practice contamination can block readiness. | Phase 166 work and loader trace evidence. | Preserve contamination tests and document loader precedence. | P1 |
-| Python launcher inconsistency | Operations | Medium | Medium | Developer/runtime validation friction. | Venv commands used in tests. | Standardize documented invocation paths. | P2 |
-| Cross-process state freshness risk | Runtime/dashboard | Medium | Medium | Stale UI state can mislead operators. | Freshness/source registry/hash logic. | Add Desktop cross-process smoke certification. | P1 |
-| Documentation drift | Governance/docs | Medium | High | Phase claims can overstate current activation. | PCA-001 platform audit. | Treat this audit and matrices as current source of truth until superseded. | P2 |
-| Live-execution blockers | Execution/broker | High | High | Prevents pilot execution. | Intended safety posture. | Do not relax; plan separate approved pilot readiness phase. | P0 |
+See detailed matrix in CSS_PLATFORM_COMPATIBILITY_MATRIX.md.
+
+High-confidence compatible links:
+
+- runtime snapshot -> Mission Control
+- runtime snapshot -> mobile dashboard
+- frontend contract -> dashboard hosts
+- canonical broker state -> broker diagnostics/readiness adapters
+- broker environment profiles -> credential loaders/readiness paths
+
+Compatible with warnings:
+
+- Options Income -> Mission Control (panel/test wiring evidence exists, broad host runtime activation remains partial)
+- certification -> RC1 readiness (test/document certified, controlled operational evidence)
+- deployment scripts -> canonical runtime architecture (legacy launcher/script breadth may diverge)
+
+Unverified or partial areas:
+
+- cross-process production endurance for all runtime artifact consumers
+- IBKR parity in production-grade pathways
+
+## Duplication And Consolidation Summary
+
+See detailed register in CSS_PLATFORM_DUPLICATION_AND_CONSOLIDATION_REGISTER.md.
+
+Highest-risk duplication clusters:
+
+- Broker readiness/status projections
+- Runtime snapshot/state hash/freshness adapters
+- Safety flag propagation wrappers
+- Environment/credential alias handling
+
+## Host Activation Audit Summary
+
+Runtime-active and host-active:
+
+- Mission Control host registration and routes in dashboard and mobile hosts.
+- Frontend contract API and dashboard surfaces.
+
+Implemented but not clearly host-activated in production runtime:
+
+- Options Income API router and enterprise-integration route surface.
+- Several certification adapters and enterprise wrappers consumed primarily in tests/certification pipelines.
+
+Adapter-only/test-only signals:
+
+- RC1-OI host integration contracts via in-memory host registries in tests.
+- IBKR adapters with placeholder behavior.
+
+## Test And Certification Audit Summary
+
+Focused representative slices executed during PCA-001:
+
+- python -m pytest tests/test_mc007c_production_hardening.py -q
+- python -m pytest tests/test_oi010_certification.py -q
+- python -m pytest tests/test_rc1_oi_enterprise_integration_certification.py -q
+- python -m pytest tests/test_br001_broker_environment_profiles.py tests/test_phase166d_live_environment_contamination_elimination.py tests/test_phase156b_live_connectivity_certifier.py -q
+
+All executed slices passed in this audit run.
+
+Gaps and risks:
+
+- Full repository suite not run due to scope/hang risk.
+- Desktop operational validation exists but broad production endurance remains limited.
+- Large launcher script complexity increases regression/test fragility risk.
+
+## Roadmap Gap Audit Summary
+
+See roadmap document for full classification.
+
+Notable remaining areas:
+
+- Institutional portfolio optimization completion depth and production activation
+- Treasury and liquidity institutionalization
+- FX forwards/swaps and cross-currency hedging
+- Live broker execution governance and secure onboarding
+- Institutional reporting and mobile operations hardening at production scale
+
+## Highest-Value Improvement Analysis (Top 5)
+
+1. Canonical host activation for Options Income enterprise services
+2. Broker readiness/canonical state consolidation to one authority payload
+3. Runtime artifact ownership and freshness contract hardening across processes
+4. Mission Control and frontend payload schema simplification and de-duplication
+5. Deployment and production endurance evidence automation
+
+Primary recommendation: Option 1.
+
+Fallback recommendation: Option 2.
+
+## Technical Debt And Risk Register (Summary)
+
+Top risks:
+
+- Duplicate service projections across runtime/dashboard layers
+- Stale aliases and compatibility fields
+- Environment loading/credential alias complexity
+- Cross-process artifact freshness and ownership ambiguity
+- Host activation gaps for implemented enterprise adapters
+- Monolithic launcher risk and test fragility
+
+Detailed register with severity/probability/action is in governance and duplication documents.
 
 ## Platform Readiness Scorecard
 
-| Area | Score | Status | Reason not higher |
-| --- | ---: | --- | --- |
-| Architecture | 88 | `COMPLETE_PENDING_CERTIFICATION` | Strong modularity, but duplicate projections and legacy paths remain. |
-| Runtime | 82 | `COMPLETE_PENDING_CERTIFICATION` | Runtime artifacts and supervision exist; current Desktop operation not PCA-validated. |
-| Trading | 78 | `COMPLETE_ADVISORY_ONLY` | Orchestration exists, but live authority remains blocked. |
-| Portfolio | 80 | `COMPLETE_PENDING_CERTIFICATION` | Mature read models; overlap across engines remains. |
-| Risk | 86 | `COMPLETE_PENDING_CERTIFICATION` | Strong fail-closed posture; service duplication remains. |
-| Broker | 74 | `COMPLETE_ADVISORY_ONLY` | Read-only certification exists; live readiness still blocked by credentials/state evidence outside PCA. |
-| Execution | 84 | `COMPLETE_ADVISORY_ONLY` | Safety strong; no approved live path. |
-| Options | 76 | `COMPLETE_PENDING_CERTIFICATION` | Models and paper support exist; live chains/exercise/multi-leg routing absent. |
-| Options Income | 90 | `COMPLETE_PAPER_ONLY` | Approved paper/advisory scope complete; live brokerage out of scope. |
-| Derivatives | 70 | `PARTIALLY_IMPLEMENTED` | Options/shared services exist; broader derivatives incomplete. |
-| Treasury | 42 | `PARTIALLY_IMPLEMENTED` | Cash/capital pieces exist; treasury products/workflows incomplete. |
-| Audit | 82 | `COMPLETE_PENDING_CERTIFICATION` | Evidence foundations strong; cross-process persistence needs validation. |
-| Alerts | 76 | `COMPLETE_ADVISORY_ONLY` | Alert generation exists; delivery/operator workflow less mature. |
-| Explainability | 82 | `COMPLETE_ADVISORY_ONLY` | Multiple useful views; canonical evidence contract should be tightened. |
-| Learning | 80 | `COMPLETE_ADVISORY_ONLY` | Broad engines; no execution authority and some overlap. |
-| Certification | 84 | `COMPLETE_PENDING_CERTIFICATION` | Many certification layers; canonical source-of-truth discipline remains important. |
-| Dashboard | 82 | `COMPLETE_PENDING_CERTIFICATION` | Web host and contracts exist; current Desktop validation not rerun. |
-| Mobile | 78 | `COMPLETE_PENDING_CERTIFICATION` | Mobile/launcher exists; cross-process proof should be refreshed. |
-| Mission Control | 92 | `COMPLETE_CERTIFIED` | Repository/test certified; live Desktop operation still separate evidence. |
-| Governance | 88 | `COMPLETE_PENDING_CERTIFICATION` | R7/RBAC/NO-GO posture preserved; config/flag surfaces overlap. |
-| Deployment | 74 | `COMPLETE_PENDING_CERTIFICATION` | Runbooks and launchers exist; current machine proof pending. |
-| Live Readiness | 48 | `BLOCKED` | Live execution intentionally blocked; read-only broker state still requires current operational evidence. |
+Scores are conservative and bounded by evidence quality.
 
-Overall Platform Score: 79 / 100
+| Area | Score | Why Not Higher |
+|---|---:|---|
+| Architecture | 83 | Duplication and legacy overlap remain |
+| Runtime | 81 | Cross-process artifact and launcher complexity risks |
+| Trading | 74 | Advisory-first, execution pathways intentionally constrained |
+| Portfolio | 79 | Strong modeling; production-scale evidence limited |
+| Risk | 82 | Robust governance modules; consolidation needed |
+| Broker | 77 | Coinbase/OANDA strong read-only, IBKR partial |
+| Execution | 58 | Live execution authority intentionally blocked |
+| Options | 80 | Core lifecycle mature; advanced strategy automation deferred |
+| Options Income | 86 | Strong paper/advisory completion, host activation gap |
+| Derivatives | 73 | Shared services present; broader host consumers limited |
+| Treasury | 41 | Partial implementation and roadmap-heavy |
+| Audit | 80 | Strong adapters and reports; persistence ownership unclear |
+| Alerts | 76 | Good framework coverage; channel hardening pending |
+| Explainability | 78 | Strong model outputs; schema duplication exists |
+| Learning | 75 | Mature adapters, production drift controls pending |
+| Certification | 88 | Extensive certification suites and docs |
+| Dashboard | 84 | Mature contracts and routes, legacy overlap |
+| Mobile | 72 | Host active but monolithic runtime wrapper risk |
+| Mission Control | 90 | Feature complete and host activated read-only plane |
+| Governance | 87 | Broad policy and reports; some doc-code drift risk |
+| Deployment | 63 | Controlled readiness strong, full production proof limited |
+| Live Readiness | 28 | Explicitly blocked by design and policy |
 
-Controlled Paper Readiness: 88 / 100
+Aggregate metrics:
 
-Operational Readiness: 78 / 100
-
-Production Deployment Readiness: 74 / 100
-
-Live Trading Readiness: 48 / 100
+- Overall Platform Score: 76
+- Controlled Paper Readiness: 90
+- Operational Readiness: 78
+- Production Deployment Readiness: 64
+- Live Trading Readiness: 28
 
 ## Overall Verdict
 
-CSS is a mature RC1-stage platform with strong paper/advisory readiness, extensive governance controls, broad dashboard and Mission Control visibility, and substantial certification infrastructure.
+Verdict: CONDITIONAL GO
 
-The strongest current platform value is not another new trading feature. The highest-value next step is a controlled, read-only Desktop operational proof that verifies the canonical runtime snapshot, dashboard, Mission Control, broker certification, audit pipeline, and Options Income paper/advisory surfaces in one active host session.
+Interpretation:
 
-Live trading remains `BLOCKED` by design. PCA-001 does not recommend enabling execution.
+- GO for controlled paper/advisory operation and continued integration hardening.
+- Not a GO for live execution enablement or unrestricted production trading.
+
+Conditions:
+
+1. Keep hard safety flags immutable.
+2. Prioritize Options Income host activation and compatibility stabilization.
+3. Reduce canonical-state duplication before any broader production rollout.
+4. Preserve strict broker environment profile separation.
+
+## Evidence Priority Rule
+
+Where code/tests and documents differ, code and executable tests govern this audit.
+
+UNVERIFIED labels were used where direct executable or host evidence was insufficient.

@@ -1,53 +1,33 @@
-# CSS Platform Duplication and Consolidation Register
+# CSS Platform Duplication And Consolidation Register
 
 Phase: PCA-001
 
-Baseline: `584c6a28c38d792312c0edaf07533ca933d24266`
+Baseline SHA: 502fb70587b0597873a7a2531589cc6d75261220
 
-This register identifies duplicate or overlapping implementations that may cause state drift. PCA-001 did not remove or modify production code.
+| Area | Modules Involved | Canonical Implementation | Legacy / Parallel Implementation | Risk Of Divergence | Recommended Consolidation | Urgency | Migration Complexity |
+|---|---|---|---|---|---|---|---|
+| Broker readiness/status | backend/runtime/canonical_broker_state_builder.py; backend/runtime/coinbase_readiness.py; backend/runtime/oanda_readiness.py; dashboard/mission_control/state_adapter.py | canonical_broker_state_builder | Readiness-specific adapters and frontend reshaping layers | High | Make canonical broker runtime state the only status authority; adapters become pure projections | High | Medium |
+| Runtime snapshot generation | backend/runtime/runtime_certification_snapshot.py; dashboard/mission_control/runtime_snapshot_provider.py; dashboard/mission_control/runtime_source_resolver.py | runtime_certification_snapshot plus source_resolver | Multiple state wrapping layers | High | Define one canonical snapshot envelope with versioned adapters only | High | Medium |
+| Freshness logic | dashboard/mission_control/freshness.py; runtime artifact freshness modules | mission_control freshness summaries | Multiple freshness derivations in runtime/dashboard | Medium | Reuse a single freshness evaluator across consumers | Medium | Low |
+| State hashing | dashboard/mission_control/serializers.py; canonical broker/runtime state builders | canonical broker/runtime stable hash | Per-surface state hashing | Medium | Standardize one hash contract for runtime and derived views | Medium | Medium |
+| Safety flags propagation | Many runtime, dashboard, certification payload builders | canonical safe flags in broker/runtime state | Repeated inline fields in many payloads | Medium | Centralize safe flag mixin/helper | Medium | Low |
+| Environment loaders | backend/runtime/broker_environment_profiles.py; backend/runtime/live_environment_loader.py | broker_environment_profiles.build_broker_environment | startup wrappers and legacy loader paths | High | Keep one canonical profile loader and reduce wrapper logic | High | Medium |
+| Credential aliases | broker env profile and readiness modules | profile-scoped credential abstraction | many legacy alias env names | High | Publish deprecation path and reduce alias set | High | Medium |
+| Dashboard payload projections | dashboard/runtime/frontend_contract.py; dashboard/mission_control/state_adapter.py | frontend_contract | mission-control-specific projection reshaping | Medium | Minimize bespoke projection logic in Mission Control | Medium | Medium |
+| Options Income runtime integration | options_income_runtime_registration.py; options_income_rc1_runtime_snapshot.py | RC1 runtime registration/snapshot | test-only host registries and panel stubs | Medium | Promote runtime registration into canonical host path | High | Medium |
+| Alerts/explainability/report shapes | backend/notifications/*; backend/options/options_income_* adapters | domain payload builders | parallel report/evidence wrappers | Medium | Normalize envelope schema across subsystems | Medium | Medium |
+| Certification reporting | RC1 platform docs, OI docs, mission control docs | release-level certification summary | subsystem-specific certification reports | Low | Keep hierarchy but share common evidence schema | Low | Medium |
+| Legacy script patchers | scripts/build_* and root patch scripts | canonical runtime/host code paths | legacy repository mutation scripts | High | Mark deprecated and move to archive/quarantine | High | Low |
 
-| Area | Modules involved | Canonical candidate | Legacy or overlapping implementation | Risk of divergence | Recommended consolidation | Urgency | Migration complexity |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Broker readiness and certification | `backend/runtime/live_connectivity_certifier.py`, `live_broker_validation.py`, `broker_readiness_framework.py`, `broker_operational_status.py`, `canonical_broker_runtime_state.py`, `canonical_broker_state_*` | Canonical broker runtime state plus Live Connectivity Certifier output | Secondary health/readiness builders and dashboard-specific summaries | High | Require dashboards/runtime/API to consume canonical certification state and expose provenance. | P1 | Medium |
-| Broker market-data evidence | `broker_market_data_evidence.py`, Coinbase/OANDA read-only validation modules, adapter quote methods | Broker market-data evidence module or certifier evidence section | Broker-specific validation payload mapping | Medium | Standardize quote evidence fields by broker and symbol. | P1 | Medium |
-| Account/balance/margin snapshots | `canonical_account_snapshot.py`, margin adapters, broker readiness payloads, dashboard margin API | Canonical account snapshot with provenance | Margin-specific dashboard calls and broker-specific summaries | High | Use canonical snapshot for balance, buying power, margin, and account freshness. | P1 | Medium |
-| Portfolio construction | `backend/portfolio/*`, `backend/analytics/autonomous_portfolio_manager.py`, OI portfolio modules | Domain-specific portfolio state contracts with enterprise adapter boundaries | Parallel allocation/intelligence engines | Medium | Define canonical read models and isolate specialized engines as advisory contributors. | P2 | High |
-| Capital allocation | `backend/allocation/*`, `backend/portfolio/capital_rotation_engine.py`, OI allocator/constraints, live pilot governor | Typed capital policy/configuration model and runtime capital snapshot | Strategy-specific allocation calculations | Medium | Centralize limits and publish derived advisory allocations. | P1 | Medium |
-| Risk budgeting and limits | `backend/risk/*`, `engine/risk/*`, OI risk budget/limits, Mission Control projections | Existing authoritative risk gates for execution; OI risk for paper-only | Dashboard and OI risk summaries | Medium | Keep execution risk gates separate from advisory risk projections with explicit scope. | P1 | Medium |
-| Greeks aggregation | `backend/trading/greeks_engine.py`, `backend/options/options_greeks_aggregator.py`, dashboard Greeks helpers | Shared derivatives/Greeks contract for read models | Dashboard-specific aggregation and OI-specific aggregators | Medium | Reuse shared derivatives services for portfolio-level views. | P2 | Medium |
-| Stress testing | Core risk stress modules, OI stress testing, derivatives stress service | Shared derivatives stress service for derivatives; core risk stress for whole portfolio | OI-specific stress report builders | Medium | Preserve domain calculations but normalize outputs through shared service. | P2 | Medium |
-| Dashboard payloads | `dashboard/runtime/frontend_contract.py`, OI dashboard payloads, Mission Control serializers, mobile payloads | Runtime frontend contract plus Mission Control state contract | Feature-specific payload builders with overlapping status fields | Medium | Define payload ownership and field aliases. | P1 | Medium |
-| Alerts | Monitoring alert repository, OI alerts, Mission Control alert projections | Monitoring alert repository for operational alerts; OI alerts as advisory source | Feature-local alert builders | Medium | Use alert adapter pattern with canonical severity/status. | P2 | Low-medium |
-| Explainability | Portfolio explainability, OI explainability, Mission Control explanation projection | Canonical evidence/audit explanation contract | Separate narrative payloads | Medium | Normalize explanations to source, inputs, rules, outputs, and confidence. | P2 | Medium |
-| Certification | Runtime certifier, broker certifiers, OI certification, Mission Control final certification, RC1 docs | Scope-specific certificates with canonical runtime certification index | Independent phase certificates | Medium | Publish a certification registry with scope, timestamp, commit, and safety flags. | P1 | Medium |
-| Replay validation | OI replay validator, runtime validation/replay artifacts | Runtime validation for platform; OI replay for OI paper certification | Per-subsystem replay logic | Low-medium | Keep domain replay tests but share hash/provenance helpers. | P3 | Low |
-| Audit reporting | OI audit adapter/report, app audit journal, event bus, runtime evidence hashing | Enterprise audit/event contract | Subsystem-specific audit records | Medium | Normalize record schema and attach subsystem scope. | P2 | Medium |
-| Runtime snapshot generation | Runtime artifact publisher, certification snapshot, Mission Control normalizer, dashboard hydration | Runtime certification snapshot as authoritative source for readiness | Dashboard-specific and Mission Control-specific derived snapshots | High | Generate once per cycle and have consumers render it. | P1 | Medium |
-| Freshness logic | Runtime artifact freshness, Mission Control freshness, broker market-data freshness | Runtime freshness service with consumer-specific display adapters | Per-surface freshness calculation | Medium | Share freshness thresholds and source-provenance fields. | P1 | Low-medium |
-| State hashing | Mission Control hash, runtime hash/evidence hashing, OI replay hash | Runtime state hash plus evidence hash library | Feature-local hash generation | Medium | Include hash type, source scope, and inputs in every hash payload. | P2 | Medium |
-| Feature flags | Governance/feature flag modules, Mission Control feature flag console, runtime configs | Existing governance feature flag authority | Dashboard visibility models | Medium | Keep Mission Control read-only and document authority source. | P2 | Low |
-| Configuration models | Runtime environment loader, live/paper config, broker credentials, order limits | Typed configuration models with explicit mode precedence | Environment variables and compatibility aliases | High | Continue mode-specific loading tests and forbid live import of test-only variables. | P1 | Medium |
+## Priority Consolidation Themes
 
-## Consolidation Principles
+1. Broker and runtime state authority consolidation.
+2. Environment loader and credential alias simplification.
+3. Mission Control/frontend contract projection deduplication.
+4. Canonical host activation for Options Income enterprise services.
 
-1. Do not remove legacy code until a canonical producer and all consumers are proven.
-2. Preserve execution firewall, R7, RBAC, NO-GO, and broker startup gates as authoritative.
-3. Treat advisory and paper models as contributors, not execution authorities.
-4. Prefer a single runtime-cycle snapshot over dashboard-triggered recomputation.
-5. Carry provenance, scope, timestamp, source, and safety flags in every normalized payload.
+## Migration Guidance
 
-## Priority Consolidation Backlog
-
-| Priority | Recommendation | Reason |
-| --- | --- | --- |
-| P1 | Canonical broker certification state reuse | Prevents broker health/readiness contradictions. |
-| P1 | Canonical runtime snapshot consumed by dashboard, mobile, and Mission Control | Prevents UI state divergence. |
-| P1 | Account/balance/margin provenance consolidation | Prevents authenticated/account/balance inconsistencies. |
-| P1 | Configuration and environment loading precedence documentation/tests | Prevents live/practice contamination. |
-| P2 | Portfolio/capital/risk projection ownership | Reduces duplicate financial state calculations. |
-| P2 | Audit/evidence/explainability schema normalization | Improves institutional traceability. |
-| P2 | Options Income active host proof | Separates implementation completion from operational availability. |
-
-## Non-Actions in PCA-001
-
-PCA-001 did not delete code, redirect imports, change runtime behavior, clean artifacts, alter credentials, modify limits, or change execution authority.
+1. Prefer adapter slimming over broad refactors.
+2. Preserve fail-closed posture while reducing duplication.
+3. Quarantine placeholder and legacy patch scripts before enabling broader operational hosts.
