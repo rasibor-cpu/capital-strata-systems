@@ -238,9 +238,12 @@ def build_broker_environment(
         selected=selected,
     )
     removed = sanitize_broker_profile_environment(target_env) if sanitize else []
-    loaded, skipped = _load_profile_files(root, selected, target_env, allow_legacy=allow_legacy)
-    contamination = _contamination_keys(target_env, selected)
-    removed.extend(_remove_incompatible_profile_variables(target_env, selected))
+    # When an explicit environment mapping is provided, profile file loading remains
+    # deterministic and isolated from process-level pytest flags.
+    allow_legacy_files = allow_legacy or env is not None
+    loaded, skipped = _load_profile_files(root, selected, target_env, allow_legacy=allow_legacy_files)
+    contamination = _contamination_keys(target_env, selected, broker=broker)
+    removed.extend(_remove_incompatible_profile_variables(target_env, selected, broker=broker))
     failures = list(selection_failures)
     warnings: list[str] = []
     if contamination:
@@ -485,24 +488,26 @@ def _environment_name(profile: BrokerEnvironmentProfile | None) -> str:
     return "unselected"
 
 
-def _contamination_keys(env: Mapping[str, Any], selected: BrokerEnvironmentProfile | None) -> list[str]:
+def _contamination_keys(env: Mapping[str, Any], selected: BrokerEnvironmentProfile | None, broker: str = "COINBASE") -> list[str]:
+    broker_keys = COINBASE_PROFILE_KEYS if str(broker).upper() == "COINBASE" else OANDA_PROFILE_KEYS
     keys: list[str] = []
     if selected in {BrokerEnvironmentProfile.LIVE_READ_ONLY, BrokerEnvironmentProfile.LIVE_EXECUTION}:
-        keys.extend(sorted(key for key in TEST_PRACTICE_SANDBOX_KEYS if env.get(key) not in (None, "")))
+        keys.extend(sorted(key for key in TEST_PRACTICE_SANDBOX_KEYS if key in broker_keys and env.get(key) not in (None, "")))
         for key, value in env.items():
             value_text = str(value or "").strip().lower()
-            if key in PROFILE_SPECIFIC_KEYS and any(token in value_text for token in ("sandbox", "practice", "demo")):
+            if key in broker_keys and any(token in value_text for token in ("sandbox", "practice", "demo")):
                 keys.append(str(key))
     if selected == BrokerEnvironmentProfile.PAPER:
-        keys.extend(sorted(key for key in LIVE_CREDENTIAL_KEYS if env.get(key) not in (None, "")))
+        keys.extend(sorted(key for key in LIVE_CREDENTIAL_KEYS if key in broker_keys and env.get(key) not in (None, "")))
     return list(dict.fromkeys(keys))
 
 
-def _remove_incompatible_profile_variables(env: MutableMapping[str, str], selected: BrokerEnvironmentProfile | None) -> list[str]:
+def _remove_incompatible_profile_variables(env: MutableMapping[str, str], selected: BrokerEnvironmentProfile | None, broker: str = "COINBASE") -> list[str]:
+    broker_keys = COINBASE_PROFILE_KEYS if str(broker).upper() == "COINBASE" else OANDA_PROFILE_KEYS
     if selected in {BrokerEnvironmentProfile.LIVE_READ_ONLY, BrokerEnvironmentProfile.LIVE_EXECUTION}:
-        keys = TEST_PRACTICE_SANDBOX_KEYS
+        keys = TEST_PRACTICE_SANDBOX_KEYS & broker_keys
     elif selected == BrokerEnvironmentProfile.PAPER:
-        keys = LIVE_CREDENTIAL_KEYS | LIVE_AUTHORITY_KEYS
+        keys = (LIVE_CREDENTIAL_KEYS | LIVE_AUTHORITY_KEYS) & broker_keys
     else:
         keys = frozenset()
     removed: list[str] = []

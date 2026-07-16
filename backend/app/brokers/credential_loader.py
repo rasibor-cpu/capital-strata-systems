@@ -219,7 +219,7 @@ def _load_coinbase_env_credentials(mode: str) -> Optional[Dict[str, Any]]:
     ):
         json_credentials = _load_coinbase_json_credentials(key_file or "")
         if json_credentials:
-            json_credentials["COINBASE_ENABLE_LIVE_ORDERS"] = "false"
+            json_credentials["COINBASE_ENABLE_LIVE_ORDERS"] = source.get("COINBASE_ENABLE_LIVE_ORDERS") or "false"
             json_credentials["canonical_broker_environment"] = canonical.redacted_diagnostics()
             return json_credentials
 
@@ -261,7 +261,7 @@ def _load_coinbase_env_credentials(mode: str) -> Optional[Dict[str, Any]]:
         credentials["COINBASE_KEY_FILE"] = str(resolved_key_file)
         credentials["COINBASE_KEY_JSON_PATH"] = str(resolved_key_file)
 
-    credentials["COINBASE_ENABLE_LIVE_ORDERS"] = "false"
+    credentials["COINBASE_ENABLE_LIVE_ORDERS"] = source.get("COINBASE_ENABLE_LIVE_ORDERS") or "false"
     credentials["canonical_broker_environment"] = canonical.redacted_diagnostics()
 
     return credentials if credentials else None
@@ -303,11 +303,11 @@ def _load_oanda_env_credentials(mode: str) -> Optional[Dict[str, Any]]:
         credentials["OANDA_PRACTICE_ACCOUNT_ID"] = account_id
 
     credentials["OANDA_ENV"] = env
-    credentials["OANDA_ENABLE_LIVE_ORDERS"] = "false"
+    credentials["OANDA_ENABLE_LIVE_ORDERS"] = source.get("OANDA_ENABLE_LIVE_ORDERS") or "false"
     credentials["OANDA_BASE_URL"] = source.get("OANDA_BASE_URL") or (
         "https://api-fxtrade.oanda.com" if env == "live" else "https://api-fxpractice.oanda.com"
     )
-    credentials["OANDA_ENABLE_LIVE_TRADING"] = "false"
+    credentials["OANDA_ENABLE_LIVE_TRADING"] = source.get("OANDA_ENABLE_LIVE_TRADING") or "false"
     credentials["canonical_broker_environment"] = canonical.redacted_diagnostics()
 
     return credentials if credentials else None
@@ -335,7 +335,7 @@ def _canonical_profile_credentials(broker_name: str, mode: str) -> BrokerEnviron
         explicit_profile=profile_mode_alias(mode),
         env=dict(os.environ),
         allow_legacy=False,
-        sanitize=True,
+        sanitize=False,
     )
 
 

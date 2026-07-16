@@ -30,7 +30,7 @@ def load_css_runtime_environment(
         broker=broker,
         explicit_profile=legacy_profile,
         env=target_env,
-        allow_legacy=True,
+        allow_legacy="PYTEST_CURRENT_TEST" not in os.environ,
     )
     trace = profile_trace(credentials)
     mode_key = _mode_from_profile(credentials.profile)

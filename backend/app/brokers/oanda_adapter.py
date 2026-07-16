@@ -80,7 +80,8 @@ class OandaAdapter:
     def __init__(self, credentials: Dict[str, Any] = None) -> None:
         if credentials is None:
             from backend.app.brokers.credential_loader import load_credentials
-            credentials = load_credentials("oanda", mode="paper") or {}
+            mode = "live" if str(os.getenv("OANDA_ENABLE_LIVE_TRADING") or "").strip() in ("1", "true", "yes", "on") else "paper"
+            credentials = load_credentials("oanda", mode=mode) or {}
             
         self.api_key = str(credentials.get("OANDA_API_KEY") or credentials.get("OANDA_ACCESS_TOKEN") or credentials.get("OANDA_TOKEN") or "").strip()
         self.account_id = str(credentials.get("OANDA_ACCOUNT_ID") or credentials.get("OANDA_PRACTICE_ACCOUNT_ID") or "").strip()

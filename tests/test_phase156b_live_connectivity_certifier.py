@@ -206,6 +206,10 @@ def test_phase156b_authentication_failure_is_blocked() -> None:
     class AuthFail(_OandaAdapter):
         def authenticate(self):
             return {"ok": False, "error": "auth_failed"}
+        def get_account_summary(self):
+            return {"ok": False, "error": "auth_failed"}
+        def get_account_details(self):
+            return {"ok": False, "error": "auth_failed"}
 
     report = certify_live_connectivity(
         "oanda",
@@ -222,6 +226,10 @@ def test_phase156b_authentication_failure_is_blocked() -> None:
 def test_phase156b_broker_unavailable_fails_closed() -> None:
     class Unavailable(_OandaAdapter):
         def authenticate(self):
+            raise RuntimeError("broker unavailable")
+        def get_account_summary(self):
+            raise RuntimeError("broker unavailable")
+        def get_account_details(self):
             raise RuntimeError("broker unavailable")
 
     report = certify_live_connectivity(

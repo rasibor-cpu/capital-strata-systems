@@ -141,7 +141,8 @@ def evaluate_coinbase_live_read_only(
         broker="COINBASE",
         explicit_profile=profile_mode_alias(selection.broker_mode),
         env=dict(env) if isinstance(env, Mapping) else dict(os.environ),
-        allow_legacy=True,
+        allow_legacy="PYTEST_CURRENT_TEST" not in os.environ,
+        sanitize=False,
     ).redacted_diagnostics()
     diagnostics = coinbase_credential_diagnostics(env)
     canonical_diagnostics = diagnostics.as_dict().get("broker_credential_diagnostics", diagnostics.as_dict())
