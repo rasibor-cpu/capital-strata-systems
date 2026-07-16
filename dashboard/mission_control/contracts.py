@@ -44,6 +44,7 @@ from dashboard.mission_control.risk_projection import build_risk_command_view
 from dashboard.mission_control.risk_committee import build_risk_committee_panel
 from dashboard.mission_control.rollback_console import build_rollback_console
 from dashboard.mission_control.runtime_snapshot_normalizer import normalize_runtime_snapshot
+from dashboard.mission_control.runtime_snapshot_provider import RuntimeSnapshotProvider
 from dashboard.mission_control.safety import SAFE_FLAGS, mission_control_safety_payload, normalize_metric, validate_no_secret_payload
 from dashboard.mission_control.serializers import state_hash, validate_serializable_payload
 from dashboard.mission_control.source_registry import build_source_registry
@@ -263,7 +264,9 @@ def mission_control_state_json(state: Mapping[str, Any], *, indent: int | None =
 def _runtime_snapshot(dashboard_state: Any, frontend: Mapping[str, Any]) -> dict[str, Any]:
     if isinstance(dashboard_state, Mapping) and isinstance(dashboard_state.get("runtime_snapshot"), Mapping):
         return dict(dashboard_state["runtime_snapshot"])
-    return normalize_runtime_snapshot(dashboard_state, frontend)
+    source = dashboard_state if isinstance(dashboard_state, Mapping) else {"frontend_payload": dict(frontend)}
+    provider = RuntimeSnapshotProvider(lambda: source)
+    return provider.get_snapshot()
 
 
 def _platform(frontend: Mapping[str, Any], broker: Mapping[str, Any], certification: Mapping[str, Any], safety: Mapping[str, Any], runtime_snapshot: Mapping[str, Any]) -> dict[str, Any]:

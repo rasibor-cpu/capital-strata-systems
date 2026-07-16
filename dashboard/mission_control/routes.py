@@ -51,52 +51,15 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
 
     @router.get("/mission-control/api/runtime")
     async def mission_control_api_runtime() -> JSONResponse:
-        return JSONResponse(safe_serialize(state().get("runtime_snapshot", {})))
+        return JSONResponse(safe_serialize(_runtime_snapshot_payload(state())))
 
     @router.get("/mission-control/api/runtime-source")
     async def mission_control_api_runtime_source() -> JSONResponse:
-        snapshot = state().get("runtime_snapshot", {})
-        snapshot = snapshot if isinstance(snapshot, Mapping) else {}
-        diagnostics = snapshot.get("source_diagnostics")
-        if not isinstance(diagnostics, Mapping):
-            diagnostics = state().get("runtime_source_diagnostics", {})
-        return JSONResponse(
-            safe_serialize(
-                {
-                    "source": snapshot.get("source", "UNAVAILABLE"),
-                    "runtime_status": snapshot.get("runtime_status", "UNAVAILABLE"),
-                    "heartbeat_status": snapshot.get("heartbeat_status", "UNAVAILABLE"),
-                    "state_hash": snapshot.get("state_hash", "UNAVAILABLE"),
-                    "diagnostics": diagnostics if isinstance(diagnostics, Mapping) else {},
-                    "read_only": True,
-                    "execution_allowed": False,
-                    "live_trading_blocked": True,
-                    "broker_execution_armed": False,
-                    "advisory_only": True,
-                }
-            )
-        )
+        return JSONResponse(safe_serialize(_runtime_source_payload(state())))
 
     @router.get("/mission-control/api/heartbeat")
     async def mission_control_api_heartbeat() -> JSONResponse:
-        snapshot = state().get("runtime_snapshot", {})
-        snapshot = snapshot if isinstance(snapshot, Mapping) else {}
-        return JSONResponse(
-            safe_serialize(
-                {
-                    "runtime_id": snapshot.get("runtime_id", "UNAVAILABLE"),
-                    "last_heartbeat": snapshot.get("last_heartbeat", "UNAVAILABLE"),
-                    "heartbeat_status": snapshot.get("heartbeat_status", "UNAVAILABLE"),
-                    "heartbeat_age_seconds": snapshot.get("heartbeat_age_seconds", "UNAVAILABLE"),
-                    "state_hash": snapshot.get("state_hash", "UNAVAILABLE"),
-                    "read_only": True,
-                    "execution_allowed": False,
-                    "live_trading_blocked": True,
-                    "broker_execution_armed": False,
-                    "advisory_only": True,
-                }
-            )
-        )
+        return JSONResponse(safe_serialize(_heartbeat_payload(state())))
 
     @router.get("/mission-control/navigation")
     async def mission_control_navigation() -> JSONResponse:
@@ -108,25 +71,7 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
 
     @router.get("/mission-control/api/page-metadata")
     async def mission_control_api_page_metadata() -> JSONResponse:
-        current = state()
-        runtime = current.get("runtime") if isinstance(current.get("runtime"), Mapping) else {}
-        freshness = current.get("freshness") if isinstance(current.get("freshness"), Mapping) else {}
-        return JSONResponse(
-            {
-                "pages": [section.as_dict() for section in MISSION_CONTROL_SECTIONS],
-                "schema_version": current.get("schema_version", "UNAVAILABLE"),
-                "generated_at": current.get("generated_at", "UNAVAILABLE"),
-                "state_hash": current.get("state_hash", "UNAVAILABLE"),
-                "runtime_id": runtime.get("runtime_id", "UNAVAILABLE"),
-                "runtime_state_hash": runtime.get("state_hash", "UNAVAILABLE"),
-                "freshness": freshness.get("overall_freshness", "UNAVAILABLE"),
-                "read_only": True,
-                "execution_allowed": False,
-                "live_trading_blocked": True,
-                "broker_execution_armed": False,
-                "advisory_only": True,
-            }
-        )
+        return JSONResponse(_page_metadata_payload(state()))
 
     @router.get("/mission-control/api/brokers")
     async def mission_control_api_brokers() -> JSONResponse:
@@ -168,6 +113,67 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
         return HTMLResponse(render_mission_control_shell(current, active_section=section.key))
 
     return router
+
+
+def _runtime_snapshot_payload(current: Mapping[str, Any]) -> dict[str, Any]:
+    snapshot = current.get("runtime_snapshot", {})
+    return dict(snapshot) if isinstance(snapshot, Mapping) else {}
+
+
+def _runtime_source_payload(current: Mapping[str, Any]) -> dict[str, Any]:
+    snapshot = _runtime_snapshot_payload(current)
+    diagnostics = snapshot.get("source_diagnostics")
+    if not isinstance(diagnostics, Mapping):
+        diagnostics = current.get("runtime_source_diagnostics", {})
+    return _read_only_payload(
+        {
+            "source": snapshot.get("source", "UNAVAILABLE"),
+            "runtime_status": snapshot.get("runtime_status", "UNAVAILABLE"),
+            "heartbeat_status": snapshot.get("heartbeat_status", "UNAVAILABLE"),
+            "state_hash": snapshot.get("state_hash", "UNAVAILABLE"),
+            "diagnostics": diagnostics if isinstance(diagnostics, Mapping) else {},
+        }
+    )
+
+
+def _heartbeat_payload(current: Mapping[str, Any]) -> dict[str, Any]:
+    snapshot = _runtime_snapshot_payload(current)
+    return _read_only_payload(
+        {
+            "runtime_id": snapshot.get("runtime_id", "UNAVAILABLE"),
+            "last_heartbeat": snapshot.get("last_heartbeat", "UNAVAILABLE"),
+            "heartbeat_status": snapshot.get("heartbeat_status", "UNAVAILABLE"),
+            "heartbeat_age_seconds": snapshot.get("heartbeat_age_seconds", "UNAVAILABLE"),
+            "state_hash": snapshot.get("state_hash", "UNAVAILABLE"),
+        }
+    )
+
+
+def _page_metadata_payload(current: Mapping[str, Any]) -> dict[str, Any]:
+    runtime = current.get("runtime") if isinstance(current.get("runtime"), Mapping) else {}
+    freshness = current.get("freshness") if isinstance(current.get("freshness"), Mapping) else {}
+    return _read_only_payload(
+        {
+            "pages": [section.as_dict() for section in MISSION_CONTROL_SECTIONS],
+            "schema_version": current.get("schema_version", "UNAVAILABLE"),
+            "generated_at": current.get("generated_at", "UNAVAILABLE"),
+            "state_hash": current.get("state_hash", "UNAVAILABLE"),
+            "runtime_id": runtime.get("runtime_id", "UNAVAILABLE"),
+            "runtime_state_hash": runtime.get("state_hash", "UNAVAILABLE"),
+            "freshness": freshness.get("overall_freshness", "UNAVAILABLE"),
+        }
+    )
+
+
+def _read_only_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        **dict(payload),
+        "read_only": True,
+        "execution_allowed": False,
+        "live_trading_blocked": True,
+        "broker_execution_armed": False,
+        "advisory_only": True,
+    }
 
 
 __all__ = ["create_mission_control_router"]

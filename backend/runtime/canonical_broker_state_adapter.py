@@ -91,11 +91,55 @@ def adapt_canonical_state_to_legacy_broker_payload(
     return payload
 
 
+def broker_environment_profile_view(
+    profile_source: Mapping[str, Any] | None = None,
+    *,
+    fallback: Mapping[str, Any] | None = None,
+    default_profile: str = "UNSELECTED",
+    default_environment: str = "paper",
+    inactive: bool = False,
+) -> dict[str, Any]:
+    source = dict(profile_source) if isinstance(profile_source, Mapping) else {}
+    fallback_payload = dict(fallback) if isinstance(fallback, Mapping) else {}
+    if inactive:
+        return {
+            "profile": default_profile,
+            "environment": "inactive",
+            "permissions_classification": "NOT_APPLICABLE",
+            "profile_fingerprint": "",
+            "contamination_status": "NOT_APPLICABLE",
+            "contamination_keys": [],
+            "credential_values_redacted": True,
+            "execution_allowed": False,
+            "live_trading_blocked": True,
+            "broker_execution_armed": False,
+            "advisory_only": True,
+        }
+
+    contamination_keys = source.get("contamination_keys", fallback_payload.get("contamination_keys", [])) or []
+    return {
+        "profile": str(source.get("profile", fallback_payload.get("profile", default_profile))),
+        "environment": str(source.get("environment", fallback_payload.get("environment", default_environment))),
+        "permissions_classification": str(
+            source.get("permissions_classification", fallback_payload.get("permissions_classification", "UNKNOWN"))
+        ),
+        "profile_fingerprint": str(source.get("profile_fingerprint", fallback_payload.get("profile_fingerprint", ""))),
+        "contamination_status": str(source.get("status", fallback_payload.get("contamination_status", "UNKNOWN"))),
+        "contamination_keys": [str(item) for item in contamination_keys if str(item)],
+        "credential_values_redacted": True,
+        "execution_allowed": False,
+        "live_trading_blocked": True,
+        "broker_execution_armed": False,
+        "advisory_only": True,
+    }
+
+
 def adapt_legacy_payload_to_canonical_state(payload: Mapping[str, Any] | None = None) -> CanonicalBrokerRuntimeState:
     return canonical_state_from_payload(payload or {})
 
 
 __all__ = [
+    "broker_environment_profile_view",
     "adapt_canonical_state_to_legacy_broker_payload",
     "adapt_legacy_payload_to_canonical_state",
 ]

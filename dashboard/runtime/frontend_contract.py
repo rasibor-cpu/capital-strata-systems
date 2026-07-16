@@ -15,6 +15,7 @@ from dashboard.runtime.dashboard_state import (
 from dashboard.runtime.broker_balance_reconciliation import (
     build_broker_reconciliation_payload,
 )
+from backend.runtime.canonical_broker_state_adapter import broker_environment_profile_view
 from backend.runtime.broker_parity_validator import broker_parity_payload
 from backend.analytics.portfolio_correlation_engine import (
     PortfolioCorrelationEngine,
@@ -1137,18 +1138,13 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         "canonical_account_snapshot": canonical_account_snapshot,
         "status_provenance": canonical_provenance,
         "broker_environment_profile": {
-            "profile": str(environment_evidence.get("profile", broker_payload.get("profile", "UNSELECTED"))),
-            "environment": str(environment_evidence.get("environment", broker_payload.get("environment", broker_payload.get("broker_mode", "paper")))),
+            **broker_environment_profile_view(
+                environment_evidence,
+                fallback=broker_payload,
+                default_environment=str(broker_payload.get("broker_mode", "paper")),
+            ),
             "readiness": str(canonical_state.get("overall_status", broker_payload.get("broker_health", DATA_UNAVAILABLE))),
-            "permissions_classification": str(environment_evidence.get("permissions_classification", broker_payload.get("permissions_classification", "UNKNOWN"))),
-            "profile_fingerprint": str(environment_evidence.get("profile_fingerprint", broker_payload.get("profile_fingerprint", ""))),
-            "contamination_status": str(environment_evidence.get("status", broker_payload.get("contamination_status", "UNKNOWN"))),
             "contamination_keys": _string_list(environment_evidence.get("contamination_keys", broker_payload.get("contamination_keys"))),
-            "credential_values_redacted": True,
-            "execution_allowed": False,
-            "live_trading_blocked": True,
-            "broker_execution_armed": False,
-            "advisory_only": True,
         },
         "overall_status": str(canonical_state.get("overall_status", broker_payload.get("overall_status", DATA_UNAVAILABLE))),
         "state_hash": str(canonical_state.get("state_hash", broker_payload.get("state_hash", ""))),

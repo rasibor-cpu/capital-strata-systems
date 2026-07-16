@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from backend.runtime.canonical_broker_state_adapter import broker_environment_profile_view
 from dashboard.mission_control.mock_data import mission_control_mock_dashboard_payload
 from dashboard.runtime.frontend_contract import DATA_UNAVAILABLE, build_frontend_payload
 
@@ -136,36 +137,15 @@ def _profile_metadata(active_broker: Mapping[str, Any]) -> dict[str, Any]:
         canonical = active_broker.get("canonical_broker_runtime_state")
         if isinstance(canonical, Mapping):
             profile = canonical.get("environment_evidence")
-    source = dict(profile) if isinstance(profile, Mapping) else {}
-    return {
-        "profile": str(source.get("profile", active_broker.get("profile", "UNSELECTED"))),
-        "environment": str(source.get("environment", active_broker.get("environment", active_broker.get("broker_mode", "paper")))),
-        "permissions_classification": str(source.get("permissions_classification", active_broker.get("permissions_classification", "UNKNOWN"))),
-        "profile_fingerprint": str(source.get("profile_fingerprint", active_broker.get("profile_fingerprint", ""))),
-        "contamination_status": str(source.get("status", active_broker.get("contamination_status", "UNKNOWN"))),
-        "contamination_keys": list(source.get("contamination_keys", active_broker.get("contamination_keys", [])) or []),
-        "credential_values_redacted": True,
-        "execution_allowed": False,
-        "live_trading_blocked": True,
-        "broker_execution_armed": False,
-        "advisory_only": True,
-    }
+    return broker_environment_profile_view(
+        profile,
+        fallback=active_broker,
+        default_environment=str(active_broker.get("broker_mode", "paper")),
+    )
 
 
 def _inactive_profile(*, profile_name: str = "UNSELECTED") -> dict[str, Any]:
-    return {
-        "profile": profile_name,
-        "environment": "inactive",
-        "permissions_classification": "NOT_APPLICABLE",
-        "profile_fingerprint": "",
-        "contamination_status": "NOT_APPLICABLE",
-        "contamination_keys": [],
-        "credential_values_redacted": True,
-        "execution_allowed": False,
-        "live_trading_blocked": True,
-        "broker_execution_armed": False,
-        "advisory_only": True,
-    }
+    return broker_environment_profile_view(default_profile=profile_name, inactive=True)
 
 
 __all__ = [
