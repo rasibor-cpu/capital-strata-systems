@@ -897,7 +897,16 @@ try:
     from backend.monitoring.css_alert_models import AlertSeverity
     from backend.runtime.css_runtime_supervisor import CSSRuntimeSupervisor
     css_runtime_alert_service = CSSAlertService()
-    css_supervisor = CSSRuntimeSupervisor(alert_service=css_runtime_alert_service)
+    css_supervisor = CSSRuntimeSupervisor(
+        alert_service=css_runtime_alert_service,
+        # Phase 171B: use a subordinate state_dir so the dashboard does not
+        # write to the canonical supervisor artifact owned exclusively by
+        # css_runtime_launcher.py (runtime/supervisor/).
+        # The canonical path is consumed by Mission Control, the freshness
+        # manager, and the mobile launcher -- all of which expect the launcher
+        # process to be the sole writer.
+        state_dir="runtime/supervisor/dashboard",
+    )
 except Exception as alert_init_e:
     print(f"[ALERT SERVICE INIT WARN] {alert_init_e}")
 
@@ -3842,7 +3851,7 @@ if saved_state and RESUME_PREVIOUS_SESSION:
     )
     _safe_emit_alert("emit_system_alert", severity=AlertSeverity.INFO, message="CSS Runtime Recovered/Resumed from previous state", metadata={"cycle_counter_reset": True})
     if css_supervisor:
-        css_supervisor.record_restart("RESUME_PREVIOUS_SESSION")
+        css_supervisor.record_restart()  # Phase 171B: removed invalid positional arg (pre-existing defect; record_restart takes no args beyond self)
 elif saved_state and not RESUME_PREVIOUS_SESSION:
     print("[RECOVERY IGNORED] Previous realized PnL was not restored. Fresh session active. Set CSS_RESUME_SESSION=true to resume.")
 
