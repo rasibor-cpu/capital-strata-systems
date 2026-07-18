@@ -8,6 +8,7 @@ from dashboard.mission_control.navigation import MISSION_CONTROL_SECTIONS, secti
 from dashboard.mission_control.pages import render_page
 from dashboard.mission_control.pages._components import status_class
 from dashboard.mission_control.theme import MISSION_CONTROL_CSS
+from dashboard.ui_interaction import DISCLOSURE_JS
 
 
 def render_mission_control_shell(state: Mapping[str, Any], *, active_section: str = "executive_overview") -> str:
@@ -62,6 +63,7 @@ def render_mission_control_shell(state: Mapping[str, Any], *, active_section: st
       </footer>
     </main>
   </div>
+  <script>{DISCLOSURE_JS}</script>
 </body>
 </html>"""
 

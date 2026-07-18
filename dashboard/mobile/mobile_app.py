@@ -853,7 +853,7 @@ async def manifest():
                     "purpose": "any maskable",
                 }
             ],
-            "css_shell_cache": "css-mobile-shell-v176a",
+            "css_shell_cache": "css-mobile-shell-v176b",
         }
     )
 
@@ -861,7 +861,7 @@ async def manifest():
 @app.get("/service-worker.js")
 async def service_worker():
     script = """
-const CACHE_NAME = "css-mobile-shell-v176a";
+const CACHE_NAME = "css-mobile-shell-v176b";
 const SHELL_URLS = ["/login", "/manifest.webmanifest", "/icon.svg", "/static/css_pwa_icon_192.png", "/apple-touch-icon.png"];
 
 self.addEventListener("install", (event) => {
@@ -3558,6 +3558,8 @@ def _status_markup(message: str, status: str) -> str:
 
 
 def _page(title: str, body: str, meta_refresh: int = 0) -> str:
+    from dashboard.ui_interaction import DISCLOSURE_JS
+
     safe_title = html.escape(title)
     refresh_tag = f'\n  <meta http-equiv="refresh" content="{meta_refresh}">' if meta_refresh > 0 else ""
     return f"""<!doctype html>
@@ -3577,6 +3579,7 @@ def _page(title: str, body: str, meta_refresh: int = 0) -> str:
 </head>
 <body>
   {body}
+  <script>{DISCLOSURE_JS}</script>
   <script>
     if ("serviceWorker" in navigator) {{
       navigator.serviceWorker.register("/service-worker.js").catch(() => undefined);
@@ -3587,6 +3590,14 @@ def _page(title: str, body: str, meta_refresh: int = 0) -> str:
 
 
 def _css() -> str:
+    from dashboard.ui_interaction.css import CSS_DISCLOSURE
+
+    mobile_disclosure = (
+        CSS_DISCLOSURE.replace("var(--mc-line, #2b3b4a)", "var(--line)")
+        .replace("var(--mc-surface, #151d25)", "var(--panel)")
+        .replace("var(--mc-muted, #a8b4c0)", "var(--muted)")
+        .replace("var(--mc-info, #68a8ff)", "var(--teal, #0d9488)")
+    )
     return """
 :root {
   color-scheme: light;
@@ -4113,9 +4124,6 @@ pre {
     grid-template-columns: 1fr 1fr;
   }
 }
-.rc-m-acc { border: 1px solid var(--line); background: var(--panel); margin: 0 0 10px; padding: 0 12px 12px; }
-.rc-m-acc summary { cursor: pointer; font-weight: 700; padding: 12px 0; list-style: none; }
-.rc-m-acc summary::-webkit-details-marker { display: none; }
 .rc-m-cards { display: grid; gap: 10px; }
 .rc-m-cards .command-card { min-height: auto; }
 .pill { display: inline-flex; align-items: center; min-height: 22px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; font-weight: 700; }
@@ -4127,7 +4135,7 @@ select, textarea {
   font-size: 16px;
   padding: 12px 13px;
 }
-"""
+""" + mobile_disclosure
 
 def _get_alert_summary() -> List[Dict[str, Any]]:
     alerts_dir = os.path.join(os.getcwd(), "runtime", "alerts")

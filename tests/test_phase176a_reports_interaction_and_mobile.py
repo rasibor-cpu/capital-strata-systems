@@ -17,9 +17,9 @@ from dashboard.mobile.mobile_app import app as mobile_app
 def test_desktop_reports_page_has_interactive_controls() -> None:
     html = render_page("reports_center", {"governance": {"role": "ADMIN", "current_user": "admin1"}})
     assert 'id="rc-categories"' in html
-    assert 'class="rc-accordion"' in html
-    assert "<summary" in html
-    assert 'aria-controls=' in html
+    assert "data-css-disclosure-trigger" in html
+    assert "aria-expanded=" in html
+    assert "aria-controls=" in html
     assert 'data-rc-action="view"' in html
     assert 'data-rc-action="generate-open"' in html
     assert 'id="rc-create-form"' in html
@@ -28,10 +28,12 @@ def test_desktop_reports_page_has_interactive_controls() -> None:
     assert "POST /api/v1/reports/generate" in html or "reports/generate" in html
     assert 'id="rc-library"' in html
     assert 'id="rc-detail"' in html
-    assert "filesystem" not in html.lower() or "no arbitrary" in html.lower() or True
     # No SQL/path filter controls
     assert 'name="sql"' not in html
     assert 'name="path"' not in html
+    # Phase 176B: no broken native details accordion
+    assert 'class="rc-accordion"' not in html
+    assert "<summary" not in html
 
 
 def test_desktop_unavailable_reports_have_disabled_generate() -> None:
@@ -69,9 +71,11 @@ def test_mobile_reports_home_contains_menu_and_categories() -> None:
     )
     assert "Reports menu" in html
     assert "Create Report" in html
-    assert "rc-m-acc" in html
+    assert "data-css-disclosure-trigger" in html
     assert "ADVISORY ONLY" in html
     assert "EXECUTION BLOCKED" in html
+    assert "rc-m-acc" not in html
+    assert "<summary" not in html
 
 
 def test_mobile_reports_hidden_logic_for_unauthorized_role() -> None:
@@ -129,10 +133,10 @@ def test_mobile_app_routes_and_nav() -> None:
     assert client.get("/reports", follow_redirects=False).status_code in {303, 307, 302}
     sw = client.get("/service-worker.js")
     assert sw.status_code == 200
-    assert "css-mobile-shell-v176a" in sw.text
+    assert "css-mobile-shell-v176b" in sw.text
     man = client.get("/manifest.webmanifest")
     assert man.status_code == 200
-    assert man.json().get("css_shell_cache") == "css-mobile-shell-v176a"
+    assert man.json().get("css_shell_cache") == "css-mobile-shell-v176b"
 
 
 def test_mission_control_reports_still_get_only() -> None:
@@ -141,7 +145,8 @@ def test_mission_control_reports_still_get_only() -> None:
     client = TestClient(app)
     page = client.get("/mission-control/reports")
     assert page.status_code == 200
-    assert "rc-accordion" in page.text
+    assert "data-css-disclosure-trigger" in page.text
+    assert "CSSUIInteraction" in page.text
     assert client.post("/mission-control/api/reports/catalog").status_code in {405, 404, 400}
 
 

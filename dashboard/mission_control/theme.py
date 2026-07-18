@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dashboard.ui_interaction.css import CSS_DISCLOSURE
+
 
 MISSION_CONTROL_CSS = """
 :root {
@@ -140,18 +142,13 @@ th { color: var(--mc-muted); width: 34%; font-weight: 600; }
   text-decoration: none; cursor: pointer; font: inherit;
 }
 .rc-linkish { border: none; background: transparent; color: var(--mc-info); padding: 0; min-height: auto; text-align: left; }
-.rc-linkish:focus-visible, .rc-btn:focus-visible, .rc-subnav-link:focus-visible, .rc-accordion-summary:focus-visible {
+.rc-linkish:focus-visible, .rc-btn:focus-visible, .rc-subnav-link:focus-visible, .css-disclosure-trigger:focus-visible {
   outline: 2px solid var(--mc-info); outline-offset: 2px;
 }
 .rc-btn-primary { background: rgba(104, 168, 255, .18); border-color: rgba(104, 168, 255, .5); }
 .rc-btn:disabled, .rc-btn[disabled] { opacity: .45; cursor: not-allowed; }
-.rc-accordion { margin: 0 0 10px; border: 1px solid var(--mc-line); border-radius: 8px; background: var(--mc-surface); }
-.rc-accordion-summary {
-  list-style: none; cursor: pointer; display: flex; justify-content: space-between; gap: 12px;
-  align-items: center; padding: 12px 14px; font-weight: 600;
-}
-.rc-accordion-summary::-webkit-details-marker { display: none; }
-.rc-accordion-body { padding: 0 14px 14px; display: grid; gap: 10px; }
+/* Phase 176B: category expanders use .css-disclosure (button), not <details>/<summary>.
+   Do NOT set display:flex on <summary> — it breaks native details toggle in Chromium/WebKit. */
 .rc-card-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
 .rc-card { border: 1px solid var(--mc-line); border-radius: 8px; padding: 12px; background: var(--mc-panel); }
 .rc-card header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
@@ -189,7 +186,7 @@ th { color: var(--mc-muted); width: 34%; font-weight: 600; }
   .mc-content { padding: 16px; }
   .rc-card-grid, .rc-filters { grid-template-columns: 1fr; }
 }
-"""
+""" + CSS_DISCLOSURE
 
 
 __all__ = ["MISSION_CONTROL_CSS"]

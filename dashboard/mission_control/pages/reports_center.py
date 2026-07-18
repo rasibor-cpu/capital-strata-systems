@@ -7,6 +7,7 @@ import json
 from typing import Any
 
 from dashboard.mission_control.pages._components import page_header, warning_banner
+from dashboard.ui_interaction import render_disclosure
 
 
 def render(state: dict) -> str:
@@ -110,26 +111,36 @@ def _subnav() -> str:
 def _categories_panel(categories: list[dict], can_generate: bool) -> str:
     blocks = []
     for cat in categories:
-        key = _esc(cat.get("key"))
-        label = _esc(cat.get("label"))
-        count = _esc(cat.get("count"))
+        key = str(cat.get("key") or "unknown")
+        label = str(cat.get("label") or key)
+        meta = f"{cat.get('count')} reports · {cat.get('available')} available"
         reports = cat.get("reports") or []
-        cards = "".join(_report_card(r, can_generate) for r in reports) or "<p class='rc-muted'>No reports.</p>"
-        blocks.append(
-            f"""
-<details class="rc-accordion" id="cat-{key}">
-  <summary class="rc-accordion-summary" aria-controls="cat-panel-{key}">
-    <span>{label}</span>
-    <span class="rc-badge">{count} reports · { _esc(cat.get('available')) } available</span>
-  </summary>
-  <div class="rc-accordion-body" id="cat-panel-{key}" role="region">{cards}</div>
-</details>
-"""
+        cards = (
+            f'<div class="rc-card-grid">{"".join(_report_card(r, can_generate) for r in reports)}</div>'
+            if reports
+            else "<p class='rc-muted'>No reports.</p>"
         )
+        blocks.append(
+            render_disclosure(
+                title=label,
+                body_html=cards,
+                panel_id=f"cat-panel-{key}",
+                meta=meta,
+                open_by_default=False,
+                class_name="css-disclosure rc-category-disclosure",
+            )
+        )
+    toolbar = """
+<div class="css-disclosure-toolbar" role="toolbar" aria-label="Category expand controls">
+  <button type="button" class="rc-btn" data-css-disclosure-expand-all="true">Expand all</button>
+  <button type="button" class="rc-btn" data-css-disclosure-expand-all="false">Collapse all</button>
+</div>
+"""
     return (
-        '<section class="mc-panel" id="rc-categories" aria-label="Report categories">'
+        '<section class="mc-panel" id="rc-categories" data-css-disclosure-scope aria-label="Report categories">'
         "<h2>Report Categories</h2>"
         "<p class='rc-muted'>Expand a category to view registry entries. Generate is enabled only for AVAILABLE / AVAILABLE_WITH_LIMITATIONS when authorized.</p>"
+        + toolbar
         + "".join(blocks)
         + "</section>"
     )
@@ -200,7 +211,7 @@ def _create_panel(generatable: list[dict], can_generate: bool) -> str:
     <div id="rc-dynamic-filters" class="rc-filters" aria-live="polite"></div>
     <div id="rc-readiness" class="rc-readiness" aria-live="polite"></div>
     <div class="rc-actions">
-      <button type="button" class="rc-btn" id="rc-check-readiness" {disabled}>Check readiness</button>
+      <button type="button" class="rc-btn" id="rc-check-readiness" data-rc-action="check-readiness" {disabled}>Check readiness</button>
       <button type="submit" class="rc-btn rc-btn-primary" id="rc-generate-btn"{disabled}>Generate</button>
     </div>
   </form>
@@ -232,8 +243,8 @@ def _library_panel(home: dict) -> str:
   <h2>Report Library</h2>
   <div class="rc-library-tools">
     <label>Report ID <input type="search" id="rc-library-search" placeholder="cssrpt_…" autocomplete="off"></label>
-    <button type="button" class="rc-btn" id="rc-library-open">Open</button>
-    <button type="button" class="rc-btn" id="rc-library-refresh">Refresh list</button>
+    <button type="button" class="rc-btn" id="rc-library-open" data-rc-action="library-open">Open</button>
+    <button type="button" class="rc-btn" id="rc-library-refresh" data-rc-action="library-refresh">Refresh list</button>
   </div>
   <h3>Latest Daily Executive Brief</h3>
   <pre class="rc-result">{_esc(json.dumps(latest, indent=2, default=str))}</pre>
@@ -264,7 +275,8 @@ def _detail_panel() -> str:
 
 
 def _scripts() -> str:
-    # Native <details> provides expand/collapse + keyboard. JS wires generate/readiness/library.
+    # Category expand/collapse: shared CSSUIInteraction disclosures (Phase 176B).
+    # Page script wires generate/readiness/library only.
     return r"""
 <script>
 (function () {
@@ -474,12 +486,7 @@ def _scripts() -> str:
     btn.addEventListener('click', () => detailAction(btn.getAttribute('data-rc-detail')));
   });
 
-  // Enhance details with aria-expanded for accessibility tooling
-  document.querySelectorAll('details.rc-accordion').forEach((el) => {
-    const sync = () => el.querySelector('summary')?.setAttribute('aria-expanded', el.open ? 'true' : 'false');
-    sync();
-    el.addEventListener('toggle', sync);
-  });
+  if (window.CSSUIInteraction) window.CSSUIInteraction.init(document);
 
   // Deep-link: #rc-create?code=...
   const hash = window.location.hash || '';

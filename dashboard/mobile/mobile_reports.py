@@ -13,6 +13,7 @@ from backend.reports_center.ui_contract import (
     generatable_selector_options,
     navigation_payload,
 )
+from dashboard.ui_interaction import render_disclosure
 
 
 def can_view_reports(user_ctx: Mapping[str, Any]) -> bool:
@@ -65,14 +66,17 @@ def render_reports_home(
     )
     cat_markup = []
     for cat in cats:
+        key = str(cat.get("key") or "unknown")
         cards = "".join(_mobile_report_card(r) for r in (cat.get("reports") or [])[:40])
         cat_markup.append(
-            f"""
-<details class="rc-m-acc"{' open' if category else ''}>
-  <summary>{_esc(cat.get('label'))} <span class="pill">{_esc(cat.get('count'))}</span></summary>
-  <div class="rc-m-cards">{cards or '<p>No reports.</p>'}</div>
-</details>
-"""
+            render_disclosure(
+                title=str(cat.get("label") or key),
+                body_html=f'<div class="rc-m-cards">{cards or "<p>No reports.</p>"}</div>',
+                panel_id=f"m-cat-{key}",
+                meta=str(cat.get("count") or ""),
+                open_by_default=bool(category),
+                class_name="css-disclosure rc-m-disclosure",
+            )
         )
     recent = home.get("recent_reports") or []
     recent_cards = "".join(_archive_card(r) for r in recent[:8]) or "<p>No recent archived reports.</p>"
@@ -105,8 +109,12 @@ def render_reports_home(
     <h2>Recent reports</h2>
     <div class="rc-m-cards">{recent_cards}</div>
   </section>
-  <section class="data-panel" aria-label="Categories">
+  <section class="data-panel" aria-label="Categories" data-css-disclosure-scope>
     <h2>Categories</h2>
+    <div class="css-disclosure-toolbar" role="toolbar" aria-label="Category expand controls">
+      <button type="button" class="button-link quiet" data-css-disclosure-expand-all="true">Expand all</button>
+      <button type="button" class="button-link quiet" data-css-disclosure-expand-all="false">Collapse all</button>
+    </div>
     {''.join(cat_markup)}
   </section>
 </main>
