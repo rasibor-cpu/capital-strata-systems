@@ -23,14 +23,20 @@ def render_disclosure(
     meta: str = "",
     open_by_default: bool = False,
     class_name: str = "css-disclosure",
+    anchor_id: str = "",
 ) -> str:
-    """Render an accessible expand/collapse control that always receives pointer events."""
+    """Render an accessible expand/collapse control that always receives pointer events.
+
+    ``anchor_id`` (optional) places a stable deep-link target on the wrapper
+    (e.g. ``cat-trading_transactions``) so hash navigation can open the panel.
+    """
     expanded = "true" if open_by_default else "false"
     hidden = "" if open_by_default else " hidden"
     trigger_id = f"{panel_id}-trigger"
     meta_html = f'<span class="css-disclosure-meta">{escape(meta)}</span>' if meta else ""
+    wrapper_id = f' id="{escape(anchor_id)}"' if anchor_id else ""
     return f"""
-<div class="{escape(class_name)}" data-css-disclosure>
+<div class="{escape(class_name)}" data-css-disclosure{wrapper_id}>
   <button type="button"
           class="css-disclosure-trigger"
           id="{escape(trigger_id)}"
@@ -54,6 +60,66 @@ def render_disclosure(
 
 DISCLOSURE_JS = r"""
 (function () {
+  function setOpen(trigger, panel, open) {
+    if (!trigger || !panel) return;
+    trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+    panel.hidden = !open;
+    if (open) panel.removeAttribute('hidden'); else panel.setAttribute('hidden', '');
+  }
+  function openDisclosureForTarget(raw) {
+    if (!raw) return false;
+    var key = String(raw).replace(/^#/, '');
+    var candidates = [key];
+    if (key.indexOf('cat-panel-') === 0) candidates.push(key.replace(/^cat-panel-/, 'cat-'));
+    if (key.indexOf('cat-') === 0 && key.indexOf('cat-panel-') !== 0) {
+      candidates.push('cat-panel-' + key.slice(4));
+    }
+    var i, el, trigger, panel, wrap;
+    for (i = 0; i < candidates.length; i++) {
+      el = document.getElementById(candidates[i]);
+      if (!el) continue;
+      if (el.hasAttribute('data-css-disclosure-panel')) {
+        panel = el;
+        trigger = document.querySelector('[data-css-disclosure-trigger][aria-controls="' + el.id + '"]');
+        setOpen(trigger, panel, true);
+        wrap = el.closest('[data-css-disclosure]');
+        if (wrap && wrap.id) wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        else el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return true;
+      }
+      if (el.hasAttribute('data-css-disclosure')) {
+        trigger = el.querySelector('[data-css-disclosure-trigger]');
+        panel = trigger ? document.getElementById(trigger.getAttribute('aria-controls') || '') : null;
+        setOpen(trigger, panel, true);
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return true;
+      }
+    }
+    var section = document.getElementById(key);
+    if (section) {
+      section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return true;
+    }
+    return false;
+  }
+  function syncSubtabs() {
+    var hash = (window.location.hash || '').replace(/^#/, '');
+    var section = hash.split(/[?&]/)[0];
+    document.querySelectorAll('[data-css-subtab]').forEach(function (link) {
+      var target = (link.getAttribute('data-css-subtab') || link.getAttribute('href') || '').replace(/^#/, '');
+      var active = target && section && (section === target || section.indexOf(target) === 0);
+      link.classList.toggle('is-active', !!active);
+      if (active) link.setAttribute('aria-current', 'true');
+      else link.removeAttribute('aria-current');
+    });
+  }
+  function applyHash() {
+    var hash = window.location.hash || '';
+    if (!hash || hash === '#') return;
+    var bare = hash.replace(/^#/, '');
+    openDisclosureForTarget(bare);
+    syncSubtabs();
+  }
   function bindDisclosure(root) {
     root.querySelectorAll('[data-css-disclosure-trigger]').forEach(function (btn) {
       if (btn.dataset.cssDisclosureBound === '1') return;
@@ -63,15 +129,7 @@ DISCLOSURE_JS = r"""
         var panel = panelId ? document.getElementById(panelId) : null;
         if (!panel) return;
         var open = btn.getAttribute('aria-expanded') === 'true';
-        var next = !open;
-        btn.setAttribute('aria-expanded', next ? 'true' : 'false');
-        if (next) {
-          panel.hidden = false;
-          panel.removeAttribute('hidden');
-        } else {
-          panel.hidden = true;
-          panel.setAttribute('hidden', '');
-        }
+        setOpen(btn, panel, !open);
       });
     });
   }
@@ -84,11 +142,29 @@ DISCLOSURE_JS = r"""
         var open = btn.getAttribute('data-css-disclosure-expand-all') !== 'false';
         scope.querySelectorAll('[data-css-disclosure-trigger]').forEach(function (trigger) {
           var panel = document.getElementById(trigger.getAttribute('aria-controls') || '');
-          if (!panel) return;
-          trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
-          panel.hidden = !open;
-          if (open) panel.removeAttribute('hidden'); else panel.setAttribute('hidden', '');
+          setOpen(trigger, panel, open);
         });
+      });
+    });
+  }
+  function bindSubtabs(root) {
+    root.querySelectorAll('[data-css-subtab]').forEach(function (link) {
+      if (link.dataset.cssSubtabBound === '1') return;
+      link.dataset.cssSubtabBound = '1';
+      link.addEventListener('click', function (ev) {
+        var target = (link.getAttribute('data-css-subtab') || link.getAttribute('href') || '').replace(/^#/, '');
+        if (!target) return;
+        // Same-page hash navigation: open disclosures / scroll, mark active.
+        if (link.getAttribute('href') && link.getAttribute('href').charAt(0) === '#') {
+          ev.preventDefault();
+          if (window.history && window.history.pushState) {
+            window.history.pushState(null, '', '#' + target);
+          } else {
+            window.location.hash = '#' + target;
+          }
+          openDisclosureForTarget(target);
+          syncSubtabs();
+        }
       });
     });
   }
@@ -96,13 +172,21 @@ DISCLOSURE_JS = r"""
     root = root || document;
     bindDisclosure(root);
     bindExpandCollapseAll(root);
+    bindSubtabs(root);
+    applyHash();
   }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', function () { init(document); });
   } else {
     init(document);
   }
-  window.CSSUIInteraction = { init: init };
+  window.addEventListener('hashchange', applyHash);
+  window.CSSUIInteraction = {
+    init: init,
+    openDisclosureForTarget: openDisclosureForTarget,
+    applyHash: applyHash,
+    syncSubtabs: syncSubtabs
+  };
 })();
 """
 
@@ -122,6 +206,7 @@ INTERACTIVE_PATTERNS: tuple[tuple[str, str], ...] = (
     ("dialog", r"<dialog\b"),
     ("data_action", r"data-(?:rc-)?action="),
     ("hx_attr", r"\bhx-(?:get|post|target|trigger)\b"),
+    ("subtab", r"data-css-subtab"),
 )
 
 

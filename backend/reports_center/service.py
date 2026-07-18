@@ -271,7 +271,10 @@ class ReportsCenterService:
         if not self.access.can_view_catalog(role):
             return {"status": "DENIED", "reports": []}
         filters = filters or {}
-        items = self.archive.list_recent(limit=int(filters.get("limit") or 50))
+        limit = int(filters.get("limit") or 50)
+        if str(filters.get("view") or "").lower() == "latest":
+            limit = min(limit, 20)
+        items = self.archive.list_recent(limit=limit)
         if filters.get("category"):
             items = [i for i in items if i.get("report_family") == filters["category"] or i.get("category") == filters["category"]]
         if filters.get("report_type"):
@@ -280,7 +283,7 @@ class ReportsCenterService:
             items = [i for i in items if str(i.get("report_status")).upper() == str(filters["status"]).upper()]
         if filters.get("report_id"):
             items = [i for i in items if i.get("report_id") == filters["report_id"]]
-        return {"status": "OK", "count": len(items), "reports": items, **SAFETY_LOCKS}
+        return {"status": "OK", "count": len(items), "reports": items, "view": filters.get("view") or "all", **SAFETY_LOCKS}
 
     def print_info(self, report_id: str, *, role: str = "VIEWER", user_id: str = "anonymous") -> dict[str, Any]:
         data = self.archive.retrieve(report_id)

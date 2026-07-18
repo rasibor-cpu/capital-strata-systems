@@ -2680,11 +2680,24 @@
             });
             document.querySelectorAll("[data-screen]").forEach(function (btn) {
                 btn.classList.remove("active");
+                btn.removeAttribute("aria-current");
+            });
+            document.querySelectorAll("[data-quick-screen]").forEach(function (btn) {
+                btn.classList.remove("active");
+                btn.removeAttribute("aria-current");
             });
             var screen = document.getElementById("screen-" + name);
             var btn = document.querySelector("[data-screen='" + name + "']");
+            var quick = document.querySelector("[data-quick-screen='" + name + "']");
             if (screen) screen.classList.add("active");
-            if (btn) btn.classList.add("active");
+            if (btn) {
+                btn.classList.add("active");
+                btn.setAttribute("aria-current", "page");
+            }
+            if (quick) {
+                quick.classList.add("active");
+                quick.setAttribute("aria-current", "true");
+            }
             try {
                 window.sessionStorage.setItem("css_mobile_active_screen", name);
             } catch (err) {

@@ -10,6 +10,14 @@ from dashboard.mission_control.pages._components import page_header, warning_ban
 from dashboard.ui_interaction import render_disclosure
 
 
+def _json_script(element_id: str, payload: Any) -> str:
+    """Embed JSON for browser JSON.parse without HTML-escaping quotes (which breaks parsing)."""
+    raw = json.dumps(payload, default=str)
+    # Prevent </script> breakout while keeping valid JSON text for textContent/JSON.parse.
+    safe = raw.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+    return f'<script type="application/json" id="{_esc(element_id)}">{safe}</script>'
+
+
 def render(state: dict) -> str:
     """Render interactive Reports Center — catalogue-driven, RBAC-aware."""
     try:
@@ -35,8 +43,6 @@ def render(state: dict) -> str:
     can_generate = bool(auth.get("reports_generate"))
     categories = category_sections()
     generatable = generatable_selector_options()
-    catalog_json = html.escape(json.dumps({"categories": categories, "generatable": generatable}, default=str))
-    auth_json = html.escape(json.dumps({"role": role, "user_id": user_id, "can_generate": can_generate}, default=str))
 
     return (
         page_header(
@@ -54,8 +60,8 @@ def render(state: dict) -> str:
         + _create_panel(generatable, can_generate)
         + _library_panel(home)
         + _detail_panel()
-        + f'<script type="application/json" id="rc-catalog-data">{catalog_json}</script>'
-        + f'<script type="application/json" id="rc-auth-data">{auth_json}</script>'
+        + _json_script("rc-catalog-data", {"categories": categories, "generatable": generatable})
+        + _json_script("rc-auth-data", {"role": role, "user_id": user_id, "can_generate": can_generate})
         + _scripts()
     )
 
@@ -98,14 +104,17 @@ def _metrics(home: dict, auth: dict) -> str:
 
 def _subnav() -> str:
     links = [
-        ("#rc-categories", "Categories"),
-        ("#rc-frequent", "Generatable"),
-        ("#rc-create", "Create Report"),
-        ("#rc-library", "Library"),
-        ("#rc-detail", "Detail"),
+        ("rc-categories", "Categories"),
+        ("rc-frequent", "Generatable"),
+        ("rc-create", "Create Report"),
+        ("rc-library", "Library"),
+        ("rc-detail", "Detail"),
     ]
-    markup = "".join(f'<a class="rc-subnav-link" href="{href}">{_esc(label)}</a>' for href, label in links)
-    return f'<nav class="rc-subnav" aria-label="Reports sections">{markup}</nav>'
+    markup = "".join(
+        f'<a class="rc-subnav-link" href="#{target}" data-css-subtab="{target}" role="tab">{_esc(label)}</a>'
+        for target, label in links
+    )
+    return f'<nav class="rc-subnav" role="tablist" aria-label="Reports sections">{markup}</nav>'
 
 
 def _categories_panel(categories: list[dict], can_generate: bool) -> str:
@@ -125,6 +134,7 @@ def _categories_panel(categories: list[dict], can_generate: bool) -> str:
                 title=label,
                 body_html=cards,
                 panel_id=f"cat-panel-{key}",
+                anchor_id=f"cat-{key}",
                 meta=meta,
                 open_by_default=False,
                 class_name="css-disclosure rc-category-disclosure",
@@ -488,10 +498,13 @@ def _scripts() -> str:
 
   if (window.CSSUIInteraction) window.CSSUIInteraction.init(document);
 
-  // Deep-link: #rc-create?code=...
+  // Deep-link: #rc-create?code=... or #cat-{category}
   const hash = window.location.hash || '';
   const match = hash.match(/code=([A-Za-z0-9_]+)/);
   if (match) selectReport(match[1]);
+  if (window.CSSUIInteraction && typeof window.CSSUIInteraction.applyHash === 'function') {
+    window.CSSUIInteraction.applyHash();
+  }
 })();
 </script>
 """

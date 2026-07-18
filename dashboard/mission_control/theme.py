@@ -141,6 +141,9 @@ th { color: var(--mc-muted); width: 34%; font-weight: 600; }
   background: var(--mc-panel); color: var(--mc-text);
   text-decoration: none; cursor: pointer; font: inherit;
 }
+.rc-subnav-link.is-active, .rc-subnav-link[aria-current="true"] {
+  background: rgba(104, 168, 255, .18); border-color: rgba(104, 168, 255, .55); font-weight: 700;
+}
 .rc-linkish { border: none; background: transparent; color: var(--mc-info); padding: 0; min-height: auto; text-align: left; }
 .rc-linkish:focus-visible, .rc-btn:focus-visible, .rc-subnav-link:focus-visible, .css-disclosure-trigger:focus-visible {
   outline: 2px solid var(--mc-info); outline-offset: 2px;

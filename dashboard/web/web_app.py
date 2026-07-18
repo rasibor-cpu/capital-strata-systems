@@ -1977,12 +1977,24 @@ def _session_command_centre_page() -> str:
         document.getElementById("daily-executive-summary").textContent = show(data.daily_executive_summary);
         const links = data.navigation_links || [];
         document.getElementById("nav-count").textContent = String(links.length);
-        document.getElementById("scc-nav-links").innerHTML = links.map((link) => `<span>${{show(link.label)}}</span>`).join("");
+        document.getElementById("scc-nav-links").innerHTML = links.map((link) => {{
+          const label = show(link.label || link.title || link.name);
+          const href = link.href || link.route || link.url || "";
+          if (href && typeof href === "string" && href !== "DATA UNAVAILABLE") {{
+            const safe = String(href).replace(/"/g, "&quot;");
+            return `<a class="scc-nav-link" href="${{safe}}">${{label}}</a>`;
+          }}
+          return `<span class="scc-nav-disabled" title="No route available">${{label}}</span>`;
+        }}).join("");
         const cards = data.intelligence_cards || [];
         document.getElementById("card-count").textContent = String(cards.length);
         document.getElementById("scc-cards").innerHTML = cards.map((card) => `<li>${{show(card.title)}}: ${{show(card.value)}} (${{show(card.status)}})</li>`).join("");
       }})
-      .catch(() => undefined);
+      .catch((err) => {{
+        const note = document.getElementById("daily-executive-summary");
+        if (note) note.textContent = "DATA UNAVAILABLE — session command centre request failed.";
+        console.error("session-command-centre load failed", err);
+      }});
   </script>
 </body>
 </html>"""

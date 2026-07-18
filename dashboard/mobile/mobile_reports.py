@@ -72,7 +72,8 @@ def render_reports_home(
             render_disclosure(
                 title=str(cat.get("label") or key),
                 body_html=f'<div class="rc-m-cards">{cards or "<p>No reports.</p>"}</div>',
-                panel_id=f"m-cat-{key}",
+                panel_id=f"m-cat-panel-{key}",
+                anchor_id=f"m-cat-{key}",
                 meta=str(cat.get("count") or ""),
                 open_by_default=bool(category),
                 class_name="css-disclosure rc-m-disclosure",
@@ -234,7 +235,8 @@ def render_library(
   {header_fn("Report Library", user_ctx, "reports")}
   {identity_fn(user_ctx, "Library")}
   <section class="data-panel">
-    <h2>Report Library</h2>
+    <h2>Report Library{" — Latest" if str(filters.get("view") or "").lower() == "latest" else ""}</h2>
+    <p class="muted">Canonical archive listing via ReportsCenterService. No arbitrary filesystem browsing.</p>
     <form method="get" action="/reports/library" class="form-panel">
       <label>Report ID <input name="report_id" value="{_esc(filters.get('report_id'))}" autocomplete="off"></label>
       <label>Type <input name="report_type" value="{_esc(filters.get('report_type'))}"></label>
@@ -245,6 +247,7 @@ def render_library(
         </select>
       </label>
       <label>Category <input name="category" value="{_esc(filters.get('category'))}"></label>
+      <input type="hidden" name="view" value="{_esc(filters.get('view') or '')}">
       <button type="submit">Filter</button>
     </form>
     <div class="rc-m-cards">{cards}</div>

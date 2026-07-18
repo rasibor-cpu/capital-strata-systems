@@ -133,10 +133,10 @@ def test_mobile_app_routes_and_nav() -> None:
     assert client.get("/reports", follow_redirects=False).status_code in {303, 307, 302}
     sw = client.get("/service-worker.js")
     assert sw.status_code == 200
-    assert "css-mobile-shell-v176b" in sw.text
+    assert "css-mobile-shell-v176c" in sw.text
     man = client.get("/manifest.webmanifest")
     assert man.status_code == 200
-    assert man.json().get("css_shell_cache") == "css-mobile-shell-v176b"
+    assert man.json().get("css_shell_cache") == "css-mobile-shell-v176c"
 
 
 def test_mission_control_reports_still_get_only() -> None:

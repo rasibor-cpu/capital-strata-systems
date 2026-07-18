@@ -122,8 +122,12 @@
     document.querySelectorAll("[data-screen]").forEach((button) => {
       button.addEventListener("click", () => {
         activeScreen = button.getAttribute("data-screen") || "home";
-        document.querySelectorAll("[data-screen]").forEach((item) => item.classList.remove("active"));
+        document.querySelectorAll("[data-screen]").forEach((item) => {
+          item.classList.remove("active");
+          item.removeAttribute("aria-current");
+        });
         button.classList.add("active");
+        button.setAttribute("aria-current", "page");
         render();
       });
     });

@@ -11,20 +11,38 @@ from typing import Any
 
 from backend.reports_center.registry import all_definitions, by_category, catalog_payload, category_menu
 
-# Canonical mobile/desktop category navigation (compact labels).
-REPORTS_NAV_CATEGORIES: tuple[dict[str, str], ...] = (
+# Static Reports menu entries (not category disclosures).
+_REPORTS_NAV_STATIC: tuple[dict[str, str], ...] = (
     {"key": "home", "label": "Report Home", "href_mobile": "/reports", "href_mc": "/mission-control/reports"},
     {"key": "latest", "label": "Latest Reports", "href_mobile": "/reports/library?view=latest", "href_mc": "/mission-control/reports#rc-library"},
     {"key": "create", "label": "Create Report", "href_mobile": "/reports/create", "href_mc": "/mission-control/reports#rc-create"},
     {"key": "library", "label": "Report Library", "href_mobile": "/reports/library", "href_mc": "/mission-control/reports#rc-library"},
-    {"key": "trading_transactions", "label": "Trading & Transactions", "href_mobile": "/reports?category=trading_transactions", "href_mc": "/mission-control/reports#cat-trading_transactions"},
-    {"key": "portfolio_performance", "label": "Portfolio & Performance", "href_mobile": "/reports?category=portfolio_performance", "href_mc": "/mission-control/reports#cat-portfolio_performance"},
-    {"key": "accounts_cash", "label": "Accounts & Cash", "href_mobile": "/reports?category=accounts_cash", "href_mc": "/mission-control/reports#cat-accounts_cash"},
-    {"key": "risk_exposure", "label": "Risk & Exposure", "href_mobile": "/reports?category=risk_exposure", "href_mc": "/mission-control/reports#cat-risk_exposure"},
-    {"key": "broker_execution", "label": "Broker & Execution", "href_mobile": "/reports?category=broker_execution", "href_mc": "/mission-control/reports#cat-broker_execution"},
-    {"key": "executive_intelligence", "label": "Executive Intelligence", "href_mobile": "/reports?category=executive_intelligence", "href_mc": "/mission-control/reports#cat-executive_intelligence"},
-    {"key": "distribution_print_audit", "label": "Distribution & Audit", "href_mobile": "/reports?category=distribution_print_audit", "href_mc": "/mission-control/reports#cat-distribution_print_audit"},
 )
+
+
+def _reports_nav_categories() -> tuple[dict[str, str], ...]:
+    """Build full category deep-links from the registry menu (keeps MC/mobile in sync).
+
+    Mission Control anchors use ``#cat-{key}`` which maps to disclosure wrapper ids
+    (``id="cat-{key}"``) and opens the matching panel via CSSUIInteraction.
+    """
+    entries = list(_REPORTS_NAV_STATIC)
+    for meta in category_menu():
+        key = str(meta["key"])
+        label = str(meta["label"])
+        entries.append(
+            {
+                "key": key,
+                "label": label,
+                "href_mobile": f"/reports?category={key}",
+                "href_mc": f"/mission-control/reports#cat-{key}",
+            }
+        )
+    return tuple(entries)
+
+
+# Lazy-friendly alias: call navigation_payload() / iterate via REPORTS_NAV_CATEGORIES property helper.
+REPORTS_NAV_CATEGORIES = _reports_nav_categories()  # evaluated at import; category_menu is static registry
 
 # Map registry supported_scopes → safe form controls (no free-form SQL/path).
 SCOPE_FIELD_MAP: dict[str, dict[str, Any]] = {

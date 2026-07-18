@@ -79,6 +79,12 @@ MOBILE_CONTROL_KEYS = frozenset(DEFAULT_MOBILE_CONTROLS)
 
 app = FastAPI(title="Capital Strata Systems Mobile", version="0.1.0")
 
+# Phase 176C: mount Reports Center write/print APIs so mobile detail Print/PDF links resolve
+# on the same origin (canonical /api/v1/reports/*).
+from backend.reports_center.routes import create_reports_center_router
+
+app.include_router(create_reports_center_router())
+
 _SESSIONS: Dict[str, Dict[str, Any]] = {}
 _PASSWORD_CHANGES: Dict[str, Dict[str, Any]] = {}
 
@@ -293,6 +299,11 @@ async def reports_library_screen(request: Request):
         "status": request.query_params.get("status") or None,
         "category": request.query_params.get("category") or None,
     }
+    # Phase 176C: honour ?view=latest from Reports nav contract
+    view = str(request.query_params.get("view") or "").strip().lower()
+    if view == "latest":
+        filters["view"] = "latest"
+        filters["limit"] = filters.get("limit") or 20
     filters = {k: v for k, v in filters.items() if v}
     return HTMLResponse(
         mobile_reports.render_library(
@@ -853,7 +864,7 @@ async def manifest():
                     "purpose": "any maskable",
                 }
             ],
-            "css_shell_cache": "css-mobile-shell-v176b",
+            "css_shell_cache": "css-mobile-shell-v176c",
         }
     )
 
@@ -861,7 +872,7 @@ async def manifest():
 @app.get("/service-worker.js")
 async def service_worker():
     script = """
-const CACHE_NAME = "css-mobile-shell-v176b";
+const CACHE_NAME = "css-mobile-shell-v176c";
 const SHELL_URLS = ["/login", "/manifest.webmanifest", "/icon.svg", "/static/css_pwa_icon_192.png", "/apple-touch-icon.png"];
 
 self.addEventListener("install", (event) => {
@@ -1094,8 +1105,11 @@ def _status_strip(user_ctx: Optional[Dict[str, Any]] = None) -> str:
 
 def _top_nav(user_ctx: Dict[str, Any], active: str) -> str:
     links = []
-    if active != "dashboard":
-        links.append('<a class="button-link" href="/dashboard">Dashboard</a>')
+    dash_class = "button-link" if active == "dashboard" else "button-link quiet"
+    if active == "dashboard":
+        links.append(f'<a class="{dash_class}" href="/dashboard" aria-current="page">Dashboard</a>')
+    else:
+        links.append('<a class="button-link quiet" href="/dashboard">Dashboard</a>')
     for key, label, href in (
         ("reports", "Reports", "/reports"),
         ("positions", "Positions", "/positions"),
@@ -1114,18 +1128,34 @@ def _top_nav(user_ctx: Dict[str, Any], active: str) -> str:
         ("margin", "Margin", "/margin"),):
         if key == "reports" and not mobile_reports.can_view_reports(user_ctx):
             continue
-        if active != key:
+        if active == key:
+            links.append(
+                f'<a class="button-link" href="{href}" aria-current="page">{label}</a>'
+            )
+        else:
             links.append(
                 f'<a class="button-link quiet" href="{href}">{label}</a>'
             )
-    if active != "audit" and _can_view_audit_logs(user_ctx):
-        links.append('<a class="button-link quiet" href="/audit">Audit</a>')
-    if active != "trade" and _can_submit_trade(user_ctx):
-        links.append('<a class="button-link" href="/trade">Trade</a>')
-    if active != "controls" and _can_manage_mobile_controls(user_ctx):
-        links.append('<a class="button-link" href="/controls">Controls</a>')
-    if active != "users" and can_manage_users(user_ctx):
-        links.append('<a class="button-link" href="/users">Users</a>')
+    if _can_view_audit_logs(user_ctx):
+        if active == "audit":
+            links.append('<a class="button-link" href="/audit" aria-current="page">Audit</a>')
+        else:
+            links.append('<a class="button-link quiet" href="/audit">Audit</a>')
+    if _can_submit_trade(user_ctx):
+        if active == "trade":
+            links.append('<a class="button-link" href="/trade" aria-current="page">Trade</a>')
+        else:
+            links.append('<a class="button-link" href="/trade">Trade</a>')
+    if _can_manage_mobile_controls(user_ctx):
+        if active == "controls":
+            links.append('<a class="button-link" href="/controls" aria-current="page">Controls</a>')
+        else:
+            links.append('<a class="button-link" href="/controls">Controls</a>')
+    if can_manage_users(user_ctx):
+        if active == "users":
+            links.append('<a class="button-link" href="/users" aria-current="page">Users</a>')
+        else:
+            links.append('<a class="button-link" href="/users">Users</a>')
     links.append(
         '<form method="post" action="/logout"><button class="ghost" type="submit">Logout</button></form>'
     )
@@ -3763,9 +3793,18 @@ a.button-link {
   font-size: 15px;
   font-weight: 700;
 }
+a.button-link[aria-current="page"] {
+  outline: 2px solid var(--teal-dark);
+  outline-offset: 2px;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.35);
+}
 a.button-link.quiet {
   background: #e7eef1;
   color: var(--ink);
+}
+a.button-link.quiet[aria-current="page"] {
+  background: #d5e8ea;
+  font-weight: 800;
 }
 button:active { background: var(--teal-dark); }
 button.ghost {
