@@ -300,6 +300,143 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
             )
         )
 
+    @router.get("/mission-control/api/reports/catalog")
+    async def mission_control_reports_catalog(
+        category: str | None = None,
+        status: str | None = None,
+        q: str | None = None,
+        generatable_only: bool = False,
+    ) -> JSONResponse:
+        from backend.reports_center.registry import catalog_payload
+
+        return JSONResponse(
+            safe_serialize(
+                _read_only_payload(
+                    catalog_payload(
+                        category=category,
+                        status=status,
+                        q=q,
+                        generatable_only=generatable_only,
+                    )
+                )
+            )
+        )
+
+    @router.get("/mission-control/api/reports/home")
+    async def mission_control_reports_home() -> JSONResponse:
+        from backend.reports_center.service import ReportsCenterService
+
+        return JSONResponse(safe_serialize(_read_only_payload(ReportsCenterService().home(role="ADMIN"))))
+
+    @router.get("/mission-control/api/reports/categories")
+    async def mission_control_reports_categories() -> JSONResponse:
+        from backend.reports_center.registry import category_menu
+
+        return JSONResponse(safe_serialize(_read_only_payload({"categories": category_menu()})))
+
+    @router.get("/mission-control/api/reports/definitions/{report_code}")
+    async def mission_control_reports_definition(report_code: str) -> JSONResponse:
+        from backend.reports_center.registry import by_code
+
+        item = by_code(report_code)
+        if item is None:
+            return JSONResponse(safe_serialize(_read_only_payload({"status": "NOT_FOUND"})), status_code=404)
+        return JSONResponse(safe_serialize(_read_only_payload({"status": "OK", "definition": item.as_dict()})))
+
+    @router.get("/mission-control/api/reports/readiness/{report_code}")
+    async def mission_control_reports_readiness(report_code: str) -> JSONResponse:
+        from backend.reports_center.service import ReportsCenterService
+
+        return JSONResponse(
+            safe_serialize(_read_only_payload(ReportsCenterService().readiness(report_code, role="ADMIN")))
+        )
+
+    @router.get("/mission-control/api/reports")
+    async def mission_control_reports_library(
+        category: str | None = None,
+        report_type: str | None = None,
+        status: str | None = None,
+        report_id: str | None = None,
+    ) -> JSONResponse:
+        from backend.reports_center.service import ReportsCenterService
+
+        return JSONResponse(
+            safe_serialize(
+                _read_only_payload(
+                    ReportsCenterService().list_library(
+                        filters={
+                            "category": category,
+                            "report_type": report_type,
+                            "status": status,
+                            "report_id": report_id,
+                        },
+                        role="ADMIN",
+                    )
+                )
+            )
+        )
+
+    @router.get("/mission-control/api/reports/{report_id}")
+    async def mission_control_reports_get(report_id: str) -> JSONResponse:
+        from backend.reports_center.service import ReportsCenterService
+
+        result = ReportsCenterService().retrieve(report_id, role="ADMIN")
+        code = 200 if result.get("status") == "OK" else 404
+        return JSONResponse(safe_serialize(_read_only_payload(result)), status_code=code)
+
+    @router.get("/mission-control/api/reports/{report_id}/versions")
+    async def mission_control_reports_versions(report_id: str) -> JSONResponse:
+        from backend.reports_center.service import ReportsCenterService
+
+        svc = ReportsCenterService()
+        result = svc.retrieve(report_id, role="ADMIN")
+        if result.get("status") != "OK":
+            return JSONResponse(safe_serialize(_read_only_payload(result)), status_code=404)
+        report = result["report"]
+        vers = svc.archive.versions(
+            str(report.get("report_family") or "unknown"),
+            str(report.get("report_type") or ""),
+            str(report.get("report_date") or ""),
+        )
+        return JSONResponse(safe_serialize(_read_only_payload({"report_id": report_id, "versions": vers})))
+
+    @router.get("/mission-control/api/reports/{report_id}/print")
+    async def mission_control_reports_print_info(report_id: str) -> JSONResponse:
+        return JSONResponse(
+            safe_serialize(
+                _read_only_payload(
+                    {
+                        "report_id": report_id,
+                        "print_endpoint": f"/api/v1/reports/{report_id}/print",
+                        "pdf_endpoint": f"/api/v1/reports/{report_id}/pdf",
+                        "note": "Printable HTML/PDF delivery is under /api/v1/reports (MC remains GET-only).",
+                    }
+                )
+            )
+        )
+
+    @router.get("/mission-control/api/reports/{report_id}/pdf")
+    async def mission_control_reports_pdf_info(report_id: str) -> JSONResponse:
+        return JSONResponse(
+            safe_serialize(
+                _read_only_payload(
+                    {
+                        "report_id": report_id,
+                        "pdf_endpoint": f"/api/v1/reports/{report_id}/pdf",
+                        "note": "Controlled PDF delivery is under /api/v1/reports.",
+                    }
+                )
+            )
+        )
+
+    @router.get("/mission-control/api/reports/{report_id}/audit")
+    async def mission_control_reports_audit(report_id: str) -> JSONResponse:
+        from backend.reports_center.service import ReportsCenterService
+
+        return JSONResponse(
+            safe_serialize(_read_only_payload(ReportsCenterService().audit_history(report_id, role="ADMIN")))
+        )
+
     @router.get("/mission-control/{section_slug}", response_class=HTMLResponse)
     async def mission_control_page(section_slug: str) -> HTMLResponse:
         key = str(section_slug or "").replace("-", "_")

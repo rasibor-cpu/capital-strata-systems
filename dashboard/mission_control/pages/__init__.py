@@ -11,6 +11,7 @@ from dashboard.mission_control.pages import (
     market_intelligence,
     options_income,
     portfolio,
+    reports_center,
     risk_command,
     runtime_operations,
     system_configuration,
@@ -21,6 +22,7 @@ from dashboard.mission_control.pages import (
 
 PAGE_MODULES = {
     "executive_overview": executive_overview,
+    "reports_center": reports_center,
     "runtime_operations": runtime_operations,
     "trade_operations": trade_operations,
     "portfolio": portfolio,

@@ -17,6 +17,7 @@ class MissionControlSection:
 
 MISSION_CONTROL_SECTIONS: tuple[MissionControlSection, ...] = (
     MissionControlSection("executive_overview", "Executive Overview", "/mission-control/executive-overview", "Enterprise status, readiness, capital, alerts, and runtime heartbeat.", "grid"),
+    MissionControlSection("reports_center", "Reports", "/mission-control/reports", "Institutional Reports Center — catalogue, generate, library, print, export, and audit.", "file"),
     MissionControlSection("runtime_operations", "Runtime Operations", "/mission-control/runtime-operations", "Runtime cycle, supervisor, subsystem, dependency, API, dashboard, and mobile health.", "activity"),
     MissionControlSection("trade_operations", "Trade Operations", "/mission-control/trade-operations", "Read-only trade decisions, gates, paper positions, orders, fills, rejections, and execution quality.", "route"),
     MissionControlSection("portfolio", "Portfolio", "/mission-control/portfolio", "Equity, cash, exposure, allocation, PnL, drawdown, and performance attribution.", "briefcase"),
@@ -37,7 +38,10 @@ SECTION_BY_KEY = {section.key: section for section in MISSION_CONTROL_SECTIONS}
 
 
 def section_for_key(key: str | None) -> MissionControlSection:
-    return SECTION_BY_KEY.get(str(key or "").strip().lower(), MISSION_CONTROL_SECTIONS[0])
+    normalized = str(key or "").strip().lower().replace("-", "_")
+    if normalized == "reports":
+        normalized = "reports_center"
+    return SECTION_BY_KEY.get(normalized, MISSION_CONTROL_SECTIONS[0])
 
 
 def navigation_payload() -> list[dict[str, str]]:

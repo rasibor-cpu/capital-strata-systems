@@ -193,7 +193,7 @@ def validate_mission_control_state(state: Mapping[str, Any] | None) -> dict[str,
     for key, expected in SAFE_FLAGS.items():
         if safety.get(key) is not expected:
             reasons.append(f"safety_flag_invalid:{key}")
-    if not isinstance(source.get("navigation"), list) or len(source.get("navigation", [])) != 15:
+    if not isinstance(source.get("navigation"), list) or len(source.get("navigation", [])) != 16:
         reasons.append("navigation_structure_invalid")
     permissions_ok, permission_reasons = validate_read_only_permissions(
         source.get("permissions") if isinstance(source.get("permissions"), Mapping) else {}

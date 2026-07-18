@@ -19,6 +19,7 @@ from dashboard.runtime.runtime_smoke_test import build_smoke_payloads
 from dashboard.runtime.ws_bridge import create_ws_router
 from dashboard.mission_control.host_registration import register_mission_control
 from backend.executive_intelligence.distribution_routes import create_executive_brief_distribution_router
+from backend.reports_center.routes import create_reports_center_router
 
 
 BRANDING_DIR = Path(__file__).resolve().parents[2] / "assets" / "branding"
@@ -47,6 +48,7 @@ def create_app(
     app.include_router(create_ws_router(provider))
     register_mission_control(app, provider if state_provider is not None else None)
     app.include_router(create_executive_brief_distribution_router())
+    app.include_router(create_reports_center_router())
 
     @app.get("/", include_in_schema=False)
     async def index() -> RedirectResponse:

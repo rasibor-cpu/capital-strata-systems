@@ -24,6 +24,7 @@ def test_mc001_repository_shell_registers_all_required_pages() -> None:
 
     assert keys == [
         "executive_overview",
+        "reports_center",
         "runtime_operations",
         "trade_operations",
         "portfolio",
@@ -163,7 +164,7 @@ def test_mc001_fastapi_app_serves_shell_state_navigation_and_health() -> None:
     assert nav_response.status_code == 200
     assert health_response.status_code == 200
     assert state_response.json()["schema_version"] == MISSION_CONTROL_SCHEMA_VERSION
-    assert len(nav_response.json()) == 15
+    assert len(nav_response.json()) == 16
     assert "Broker Management" in page_response.text
     assert health_response.json()["execution_allowed"] is False
     assert health_response.json()["live_trading_blocked"] is True
