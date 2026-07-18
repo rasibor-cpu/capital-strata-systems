@@ -7,6 +7,12 @@ Phase 176C machine-readable registry export.
 divergence is remediated. Intentionally unavailable COMING_SOON / DISABLED /
 FAIL_CLOSED controls are unchanged.
 
+**Phase 176E note:** Canonical launcher (port 8765) mounts
+`create_reports_center_router()` so Mission Control Generate
+`POST /api/v1/reports/generate` is REGISTERED_AND_REACHABLE on the same host
+that serves the Reports UI (relative URL). See
+`PHASE_176E_REPORT_GENERATION_ROUTE_RECONCILIATION.md`.
+
 - Total controls: **144**
 - Pages audited: **49**
 - Sub-tabs audited: **5**

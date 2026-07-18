@@ -33,6 +33,15 @@
 | A4 | Unauthorized role | API 403 **and** HTML access denied |
 | A5 | Forged `X-CSS-Role` without trust flag | Denied |
 
+## Report generation (Phase 176E)
+
+| Step | Action | Expected |
+|------|--------|----------|
+| G1 | Confirm UI host (canonical launcher **8765**) | OpenAPI lists `POST /api/v1/reports/generate` |
+| G2 | Click Generate on a safe report (e.g. `safety_lock_report`) | **HTTP 200**, not 404 |
+| G3 | Confirm archive | `report_id` / version / hash returned; Library lists report |
+| G4 | Detail / print / versions / audit / integrity | All succeed on same host |
+
 ## Desktop test sequence
 
 | Step | Action | Expected |

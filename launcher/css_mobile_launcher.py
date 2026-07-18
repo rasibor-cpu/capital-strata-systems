@@ -129,6 +129,8 @@ from backend.validation.validation_readiness_engine import ValidationReadinessEn
 from dashboard.runtime.frontend_contract import build_frontend_payload
 from dashboard.mission_control.host_registration import register_mission_control
 from dashboard.mission_control.runtime_bridge import runtime_snapshot_state_provider
+from backend.executive_intelligence.distribution_routes import create_executive_brief_distribution_router
+from backend.reports_center.routes import create_reports_center_router
 import uvicorn
 
 app = FastAPI(title=LauncherConfig.TITLE, version=LauncherConfig.VERSION)
@@ -4911,6 +4913,12 @@ def _mission_control_registry_source() -> Dict[str, Any]:
 
 
 register_mission_control(app, runtime_snapshot_state_provider(_mission_control_registry_source))
+# Phase 176E: Mission Control HTML on the canonical launcher (port 8765) uses
+# same-origin relative /api/v1/reports/* URLs. Mount the controlled write/read
+# Reports Center router here so Generate/print/audit are not 404 while MC GET
+# routes remain on /mission-control/api/reports/*.
+app.include_router(create_reports_center_router())
+app.include_router(create_executive_brief_distribution_router())
 app.include_router(launcher_router)
 app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
 
