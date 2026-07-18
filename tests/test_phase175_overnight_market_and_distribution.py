@@ -105,11 +105,69 @@ def test_overnight_valid_evidence() -> None:
     assert payload["source_hashes"]
 
 
-def test_overnight_missing_evidence_fail_closed() -> None:
-    payload = produce_overnight_market_intelligence(injected={})
+def test_overnight_missing_evidence_fail_closed(tmp_path: Path) -> None:
+    """Fail-closed when no disk evidence exists.
+
+    Isolation note: ``injected={}`` is falsy in Python, so overnight production
+    still falls through to filesystem loaders. Tests must use an empty
+    ``repo_root`` (or an explicit unavailable injected bundle) — never depend on
+    the absence of workspace artifacts under Path.cwd().
+    """
+    payload = produce_overnight_market_intelligence(repo_root=tmp_path)
     assert payload["validation_status"] == "FAIL"
     assert payload["market_data_status"] == "UNAVAILABLE"
     assert payload["regime_current"] in {None, "UNAVAILABLE"} or payload["freshness"] == "UNAVAILABLE"
+    assert "regime_evidence_unavailable" in payload.get("blockers", []) or "no_market_sources" in payload.get(
+        "blockers", []
+    )
+
+
+def test_overnight_empty_repo_independent_of_workspace_artifacts(tmp_path: Path) -> None:
+    """Deterministic: empty tmp root fails closed even if cwd has live artifacts."""
+    cwd_payload = produce_overnight_market_intelligence()  # may PASS if workspace has evidence
+    isolated = produce_overnight_market_intelligence(repo_root=tmp_path)
+    assert isolated["validation_status"] == "FAIL"
+    assert isolated["market_data_status"] == "UNAVAILABLE"
+    # Workspace result must not leak into the isolated root result
+    assert isolated.get("source_provenance") == [] or all(
+        "injected:" not in str(p.get("path", "")) for p in (isolated.get("source_provenance") or [])
+    )
+    _ = cwd_payload  # allowed to be PASS or FAIL depending on local artifacts
+
+
+def test_overnight_explicit_unavailable_injected_fails_closed() -> None:
+    payload = produce_overnight_market_intelligence(
+        injected={
+            "regime": {
+                "current": "UNAVAILABLE",
+                "freshness": "UNAVAILABLE",
+            }
+        }
+    )
+    assert payload["validation_status"] == "FAIL"
+    assert payload["market_data_status"] == "UNAVAILABLE"
+    assert payload["regime_current"] == "UNAVAILABLE"
+
+
+def test_overnight_valid_disk_evidence_consumed(tmp_path: Path) -> None:
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir(parents=True)
+    (artifacts / "runtime_advisory_snapshot.json").write_text(
+        '{"market_regime":"Risk-On","regime_confidence":0.9,"freshness":"FRESH"}',
+        encoding="utf-8",
+    )
+    (artifacts / "portfolio_decision.json").write_text(
+        '{"market_regime":"Risk-On","freshness":"FRESH","ranked_opportunities":[{"symbol":"EUR_USD","confidence":0.8}]}',
+        encoding="utf-8",
+    )
+    payload = produce_overnight_market_intelligence(repo_root=tmp_path)
+    assert payload["validation_status"] == "PASS"
+    assert payload["market_data_status"] == "AVAILABLE"
+    assert payload["regime_current"] == "Risk-On"
+    sources = {str(p.get("source") or "") for p in (payload.get("source_provenance") or [])}
+    assert "runtime_advisory_snapshot" in sources
+    assert "portfolio_decision" in sources
+    assert "runtime_advisory_snapshot" in (payload.get("source_hashes") or {})
 
 
 def test_overnight_stale_evidence() -> None:

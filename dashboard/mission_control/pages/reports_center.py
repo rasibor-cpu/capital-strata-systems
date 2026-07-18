@@ -1,45 +1,42 @@
+"""Interactive Institutional Reports Center page (Phase 176A)."""
+
 from __future__ import annotations
 
-from dashboard.mission_control.pages._components import detail_table, metric_grid, page_header, warning_banner
+import html
+import json
+from typing import Any
+
+from dashboard.mission_control.pages._components import page_header, warning_banner
 
 
 def render(state: dict) -> str:
-    """Reports Center landing — catalogue-driven, permission-aware."""
+    """Render interactive Reports Center — catalogue-driven, RBAC-aware."""
     try:
         from backend.reports_center.service import ReportsCenterService
-
-        home = ReportsCenterService().home(role="ADMIN")
+        from backend.reports_center.ui_contract import category_sections, generatable_selector_options
     except Exception as exc:
         return (
             page_header("Reports", "Institutional Reports Center")
             + warning_banner(f"Reports Center unavailable: {type(exc).__name__}", status="bad")
         )
 
-    cats = {c["label"]: c["count"] for c in home.get("categories") or []}
-    recent = home.get("recent_reports") or []
-    failed = home.get("report_generation_failures") or []
-    freq = [
-        {"code": r.get("report_code"), "title": r.get("title"), "status": r.get("status")}
-        for r in (home.get("frequently_used") or [])[:10]
-    ]
-    recent_rows = [
-        {
-            "report_id": r.get("report_id"),
-            "type": r.get("report_type"),
-            "status": r.get("report_status"),
-            "date": r.get("report_date"),
-        }
-        for r in recent[:8]
-    ] or [{"report_id": "None archived yet"}]
-    failed_rows = [
-        {
-            "report_id": r.get("report_id"),
-            "type": r.get("report_type"),
-            "status": r.get("report_status"),
-        }
-        for r in failed[:8]
-    ] or [{"report_id": "None"}]
+    role = _role_from_state(state)
+    user_id = _user_from_state(state)
+    svc = ReportsCenterService()
+    home = svc.home(role=role)
+    if not home.get("authorization", {}).get("reports_view"):
+        return (
+            page_header("Reports", "Institutional Reports Center")
+            + warning_banner("Access denied: reports_view permission required.", status="bad")
+        )
+
     auth = home.get("authorization") or {}
+    can_generate = bool(auth.get("reports_generate"))
+    categories = category_sections()
+    generatable = generatable_selector_options()
+    catalog_json = html.escape(json.dumps({"categories": categories, "generatable": generatable}, default=str))
+    auth_json = html.escape(json.dumps({"role": role, "user_id": user_id, "can_generate": can_generate}, default=str))
+
     return (
         page_header(
             "Reports",
@@ -49,41 +46,445 @@ def render(state: dict) -> str:
             "Advisory-only Reports Center. Live trading blocked. Server-side RBAC mandatory.",
             status="warn",
         )
-        + metric_grid(
-            (
-                ("Registered Reports", home.get("total_registered"), "neutral"),
-                ("Archive Recent", home.get("archive_health", {}).get("recent_count"), "neutral"),
-                ("Generation Failures", home.get("archive_health", {}).get("failed_count"), "warn" if failed else "good"),
-                ("reports_view", auth.get("reports_view"), "good" if auth.get("reports_view") else "bad"),
-                ("reports_generate", auth.get("reports_generate"), "good" if auth.get("reports_generate") else "bad"),
-                ("Email Default", home.get("email_policy_default"), "neutral"),
-            )
-        )
-        + detail_table("Report Categories", cats)
-        + detail_table("Frequently Used / Generatable", freq)
-        + detail_table("Latest Daily Executive Brief", home.get("latest_daily_executive_brief") or {"status": "UNAVAILABLE"})
-        + detail_table("Recent Reports", recent_rows)
-        + detail_table("Report Generation Failures", failed_rows)
-        + detail_table(
-            "API Gateway",
-            {
-                "catalog": "GET /mission-control/api/reports/catalog",
-                "home": "GET /mission-control/api/reports/home",
-                "generate": "POST /api/v1/reports/generate",
-                "library": "GET /api/v1/reports",
-                "print": "GET /api/v1/reports/{report_id}/print",
-                "note": "Mission Control is GET-only; controlled writes use /api/v1/reports.",
-            },
-        )
-        + detail_table(
-            "Create Report (canonical)",
-            {
-                "flow": "Select report_code from catalogue → readiness → filters → POST /api/v1/reports/generate",
-                "safety": "Unsafe filters (paths/SQL/code) rejected server-side",
-            },
-        )
-        + warning_banner(
-            "Unsupported catalogue entries remain COMING_SOON / DATA_UNAVAILABLE — no fabricated statements.",
-            status="good",
-        )
+        + _metrics(home, auth)
+        + _subnav()
+        + _categories_panel(categories, can_generate)
+        + _frequently_used(generatable, can_generate)
+        + _create_panel(generatable, can_generate)
+        + _library_panel(home)
+        + _detail_panel()
+        + f'<script type="application/json" id="rc-catalog-data">{catalog_json}</script>'
+        + f'<script type="application/json" id="rc-auth-data">{auth_json}</script>'
+        + _scripts()
     )
+
+
+def _role_from_state(state: dict) -> str:
+    gov = state.get("governance") if isinstance(state.get("governance"), dict) else {}
+    role = str(gov.get("role") or "").strip().upper()
+    if role and role not in {"", "UNAVAILABLE", "DATA UNAVAILABLE", "DATA_UNAVAILABLE"}:
+        return role
+    return "ADMIN"  # Mission Control operator console default when session role absent
+
+
+def _user_from_state(state: dict) -> str:
+    gov = state.get("governance") if isinstance(state.get("governance"), dict) else {}
+    user = str(gov.get("current_user") or "mc-operator").strip()
+    if user.upper() in {"", "UNAVAILABLE", "DATA UNAVAILABLE", "DATA_UNAVAILABLE"}:
+        return "mc-operator"
+    return user
+
+
+def _esc(value: Any) -> str:
+    return html.escape("" if value is None else str(value))
+
+
+def _metrics(home: dict, auth: dict) -> str:
+    items = [
+        ("Registered", home.get("total_registered")),
+        ("Archive recent", (home.get("archive_health") or {}).get("recent_count")),
+        ("Failures", (home.get("archive_health") or {}).get("failed_count")),
+        ("reports_view", auth.get("reports_view")),
+        ("reports_generate", auth.get("reports_generate")),
+        ("Email default", home.get("email_policy_default")),
+    ]
+    cards = "".join(
+        f'<article class="mc-metric-card"><span>{_esc(k)}</span><strong>{_esc(v)}</strong></article>'
+        for k, v in items
+    )
+    return f'<section class="mc-metric-grid" aria-label="Reports metrics">{cards}</section>'
+
+
+def _subnav() -> str:
+    links = [
+        ("#rc-categories", "Categories"),
+        ("#rc-frequent", "Generatable"),
+        ("#rc-create", "Create Report"),
+        ("#rc-library", "Library"),
+        ("#rc-detail", "Detail"),
+    ]
+    markup = "".join(f'<a class="rc-subnav-link" href="{href}">{_esc(label)}</a>' for href, label in links)
+    return f'<nav class="rc-subnav" aria-label="Reports sections">{markup}</nav>'
+
+
+def _categories_panel(categories: list[dict], can_generate: bool) -> str:
+    blocks = []
+    for cat in categories:
+        key = _esc(cat.get("key"))
+        label = _esc(cat.get("label"))
+        count = _esc(cat.get("count"))
+        reports = cat.get("reports") or []
+        cards = "".join(_report_card(r, can_generate) for r in reports) or "<p class='rc-muted'>No reports.</p>"
+        blocks.append(
+            f"""
+<details class="rc-accordion" id="cat-{key}">
+  <summary class="rc-accordion-summary" aria-controls="cat-panel-{key}">
+    <span>{label}</span>
+    <span class="rc-badge">{count} reports · { _esc(cat.get('available')) } available</span>
+  </summary>
+  <div class="rc-accordion-body" id="cat-panel-{key}" role="region">{cards}</div>
+</details>
+"""
+        )
+    return (
+        '<section class="mc-panel" id="rc-categories" aria-label="Report categories">'
+        "<h2>Report Categories</h2>"
+        "<p class='rc-muted'>Expand a category to view registry entries. Generate is enabled only for AVAILABLE / AVAILABLE_WITH_LIMITATIONS when authorized.</p>"
+        + "".join(blocks)
+        + "</section>"
+    )
+
+
+def _report_card(report: dict, can_generate: bool) -> str:
+    code = _esc(report.get("report_code"))
+    title = _esc(report.get("title"))
+    status = _esc(report.get("status"))
+    formats = _esc(", ".join(report.get("supported_formats") or []))
+    official = "OFFICIAL" if report.get("official_report") else "ADVISORY"
+    limitations = _esc(report.get("limitations") or "—")
+    perms = _esc(
+        f"view={report.get('required_view_permission')}; generate={report.get('required_generate_permission')}; print={report.get('required_print_permission')}"
+    )
+    generatable = bool(report.get("generatable"))
+    gen_disabled = "" if (generatable and can_generate) else " disabled"
+    gen_label = "Generate" if generatable else "Not generatable"
+    return f"""
+<article class="rc-card" data-report-code="{code}" data-generatable="{str(generatable).lower()}">
+  <header>
+    <h3><button type="button" class="rc-linkish" data-rc-action="select" data-report-code="{code}">{title}</button></h3>
+    <span class="rc-badge rc-status-{_esc(status).lower()}">{status}</span>
+    <span class="rc-badge">{official}</span>
+  </header>
+  <dl class="rc-meta">
+    <div><dt>Code</dt><dd><code>{code}</code></dd></div>
+    <div><dt>Formats</dt><dd>{formats}</dd></div>
+    <div><dt>Permissions</dt><dd>{perms}</dd></div>
+    <div><dt>Limitations</dt><dd>{limitations}</dd></div>
+  </dl>
+  <div class="rc-actions">
+    <button type="button" class="rc-btn" data-rc-action="view" data-report-code="{code}">View readiness</button>
+    <button type="button" class="rc-btn rc-btn-primary" data-rc-action="generate-open" data-report-code="{code}"{gen_disabled}>{gen_label}</button>
+  </div>
+</article>
+"""
+
+
+def _frequently_used(generatable: list[dict], can_generate: bool) -> str:
+    cards = "".join(_report_card(r, can_generate) for r in generatable[:12])
+    return (
+        '<section class="mc-panel" id="rc-frequent" aria-label="Frequently used reports">'
+        "<h2>Frequently Used / Generatable</h2>"
+        "<p class='rc-muted'>Click a title or View to inspect readiness. Generate opens Create Report with the code preselected.</p>"
+        f'<div class="rc-card-grid">{cards}</div></section>'
+    )
+
+
+def _create_panel(generatable: list[dict], can_generate: bool) -> str:
+    options = "".join(
+        f'<option value="{_esc(g.get("report_code"))}">{_esc(g.get("title"))} ({_esc(g.get("status"))})</option>'
+        for g in generatable
+    )
+    disabled = "" if can_generate else " disabled"
+    return f"""
+<section class="mc-panel" id="rc-create" aria-label="Create report">
+  <h2>Create Report</h2>
+  <p class="rc-muted">Registry-driven selector. Filters are limited to safe scopes. Generation uses POST /api/v1/reports/generate.</p>
+  <form id="rc-create-form" class="rc-form" novalidate>
+    <label class="rc-field">
+      <span>Report type</span>
+      <select id="rc-report-code" name="report_code" required{disabled}>
+        <option value="">Select a report…</option>
+        {options}
+      </select>
+    </label>
+    <div id="rc-dynamic-filters" class="rc-filters" aria-live="polite"></div>
+    <div id="rc-readiness" class="rc-readiness" aria-live="polite"></div>
+    <div class="rc-actions">
+      <button type="button" class="rc-btn" id="rc-check-readiness" {disabled}>Check readiness</button>
+      <button type="submit" class="rc-btn rc-btn-primary" id="rc-generate-btn"{disabled}>Generate</button>
+    </div>
+  </form>
+  <pre id="rc-generate-result" class="rc-result" aria-live="polite" hidden></pre>
+</section>
+"""
+
+
+def _library_panel(home: dict) -> str:
+    recent = home.get("recent_reports") or []
+    failed = home.get("report_generation_failures") or []
+    latest = home.get("latest_daily_executive_brief") or {"status": "UNAVAILABLE"}
+    recent_rows = "".join(
+        f"""<tr>
+          <td><button type="button" class="rc-linkish" data-rc-action="open-report" data-report-id="{_esc(r.get('report_id'))}">{_esc(r.get('report_id'))}</button></td>
+          <td>{_esc(r.get('report_type'))}</td>
+          <td>{_esc(r.get('report_status'))}</td>
+          <td>{_esc(r.get('report_date'))}</td>
+          <td>{_esc(r.get('report_version'))}</td>
+        </tr>"""
+        for r in recent[:20]
+    ) or "<tr><td colspan='5'>No archived reports yet.</td></tr>"
+    failed_rows = "".join(
+        f"<tr><td>{_esc(r.get('report_id'))}</td><td>{_esc(r.get('report_type'))}</td><td>{_esc(r.get('report_status'))}</td></tr>"
+        for r in failed[:10]
+    ) or "<tr><td colspan='3'>None</td></tr>"
+    return f"""
+<section class="mc-panel" id="rc-library" aria-label="Report library">
+  <h2>Report Library</h2>
+  <div class="rc-library-tools">
+    <label>Report ID <input type="search" id="rc-library-search" placeholder="cssrpt_…" autocomplete="off"></label>
+    <button type="button" class="rc-btn" id="rc-library-open">Open</button>
+    <button type="button" class="rc-btn" id="rc-library-refresh">Refresh list</button>
+  </div>
+  <h3>Latest Daily Executive Brief</h3>
+  <pre class="rc-result">{_esc(json.dumps(latest, indent=2, default=str))}</pre>
+  <h3>Recent reports</h3>
+  <div class="rc-table-wrap"><table class="rc-table"><thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Date</th><th>Version</th></tr></thead><tbody id="rc-library-body">{recent_rows}</tbody></table></div>
+  <h3>Generation failures</h3>
+  <div class="rc-table-wrap"><table class="rc-table"><thead><tr><th>ID</th><th>Type</th><th>Status</th></tr></thead><tbody>{failed_rows}</tbody></table></div>
+</section>
+"""
+
+
+def _detail_panel() -> str:
+    return """
+<section class="mc-panel" id="rc-detail" aria-label="Report detail">
+  <h2>Report Detail</h2>
+  <p class="rc-muted">Select a library report or search by report ID.</p>
+  <div class="rc-actions" id="rc-detail-actions" hidden>
+    <button type="button" class="rc-btn" data-rc-detail="print">Print preview</button>
+    <button type="button" class="rc-btn" data-rc-detail="pdf">PDF info</button>
+    <button type="button" class="rc-btn" data-rc-detail="versions">Versions</button>
+    <button type="button" class="rc-btn" data-rc-detail="audit">Audit</button>
+    <button type="button" class="rc-btn" data-rc-detail="verify">Verify integrity</button>
+    <a class="rc-btn" id="rc-detail-print-link" href="#" target="_blank" rel="noopener">Open printable HTML</a>
+  </div>
+  <pre id="rc-detail-body" class="rc-result" aria-live="polite">No report selected.</pre>
+</section>
+"""
+
+
+def _scripts() -> str:
+    # Native <details> provides expand/collapse + keyboard. JS wires generate/readiness/library.
+    return r"""
+<script>
+(function () {
+  const catalogEl = document.getElementById('rc-catalog-data');
+  const authEl = document.getElementById('rc-auth-data');
+  if (!catalogEl || !authEl) return;
+  const catalog = JSON.parse(catalogEl.textContent || '{}');
+  const auth = JSON.parse(authEl.textContent || '{}');
+  const generatable = catalog.generatable || [];
+  const byCode = {};
+  generatable.forEach((r) => { byCode[r.report_code] = r; });
+  (catalog.categories || []).forEach((c) => (c.reports || []).forEach((r) => { byCode[r.report_code] = r; }));
+
+  const selectEl = document.getElementById('rc-report-code');
+  const filtersEl = document.getElementById('rc-dynamic-filters');
+  const readinessEl = document.getElementById('rc-readiness');
+  const resultEl = document.getElementById('rc-generate-result');
+  const detailBody = document.getElementById('rc-detail-body');
+  const detailActions = document.getElementById('rc-detail-actions');
+  const printLink = document.getElementById('rc-detail-print-link');
+  let currentReportId = null;
+
+  function headers() {
+    return {
+      'Content-Type': 'application/json',
+      'X-CSS-Role': auth.role || 'VIEWER',
+      'X-CSS-User-Id': auth.user_id || 'anonymous'
+    };
+  }
+
+  function renderFilters(code) {
+    const defn = byCode[code];
+    filtersEl.innerHTML = '';
+    if (!defn) return;
+    (defn.filter_fields || []).forEach((field) => {
+      const label = document.createElement('label');
+      label.className = 'rc-field';
+      const span = document.createElement('span');
+      span.textContent = field.label || field.name;
+      label.appendChild(span);
+      let input;
+      if (field.input === 'select') {
+        input = document.createElement('select');
+        (field.options || []).forEach((opt) => {
+          const o = document.createElement('option');
+          o.value = opt; o.textContent = opt; input.appendChild(o);
+        });
+      } else {
+        input = document.createElement('input');
+        input.type = field.input === 'date' ? 'date' : 'text';
+        input.autocomplete = 'off';
+        if (field.pattern) input.pattern = field.pattern;
+      }
+      input.name = field.name;
+      input.id = 'rc-f-' + field.name;
+      label.appendChild(input);
+      filtersEl.appendChild(label);
+    });
+  }
+
+  function collectFilters() {
+    const filters = {};
+    filtersEl.querySelectorAll('input,select').forEach((el) => {
+      if (el.value) filters[el.name] = el.value;
+    });
+    return filters;
+  }
+
+  function selectReport(code) {
+    if (!selectEl) return;
+    selectEl.value = code;
+    renderFilters(code);
+    document.getElementById('rc-create')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  async function loadReadiness(code) {
+    readinessEl.textContent = 'Loading readiness…';
+    try {
+      const res = await fetch('/mission-control/api/reports/readiness/' + encodeURIComponent(code), { headers: headers() });
+      const data = await res.json();
+      readinessEl.textContent = JSON.stringify(data, null, 2);
+    } catch (err) {
+      readinessEl.textContent = 'Readiness request failed: ' + err;
+    }
+  }
+
+  async function generate(code) {
+    if (!auth.can_generate) {
+      resultEl.hidden = false;
+      resultEl.textContent = JSON.stringify({ status: 'DENIED', reason: 'reports_generate' }, null, 2);
+      return;
+    }
+    resultEl.hidden = false;
+    resultEl.textContent = 'Generating…';
+    try {
+      const res = await fetch('/api/v1/reports/generate', {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({ report_code: code, filters: collectFilters(), persist: true })
+      });
+      const data = await res.json();
+      resultEl.textContent = JSON.stringify(data, null, 2);
+      if (data.report_id) {
+        currentReportId = data.report_id;
+        await openReport(data.report_id);
+      }
+    } catch (err) {
+      resultEl.textContent = 'Generate failed: ' + err;
+    }
+  }
+
+  async function openReport(reportId) {
+    currentReportId = reportId;
+    detailActions.hidden = false;
+    printLink.href = '/api/v1/reports/' + encodeURIComponent(reportId) + '/print';
+    detailBody.textContent = 'Loading…';
+    document.getElementById('rc-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    try {
+      const res = await fetch('/mission-control/api/reports/' + encodeURIComponent(reportId), { headers: headers() });
+      const data = await res.json();
+      detailBody.textContent = JSON.stringify(data, null, 2);
+    } catch (err) {
+      detailBody.textContent = 'Detail failed: ' + err;
+    }
+  }
+
+  async function detailAction(kind) {
+    if (!currentReportId) return;
+    const map = {
+      print: '/mission-control/api/reports/' + encodeURIComponent(currentReportId) + '/print',
+      pdf: '/mission-control/api/reports/' + encodeURIComponent(currentReportId) + '/pdf',
+      versions: '/mission-control/api/reports/' + encodeURIComponent(currentReportId) + '/versions',
+      audit: '/mission-control/api/reports/' + encodeURIComponent(currentReportId) + '/audit'
+    };
+    if (kind === 'verify') {
+      try {
+        const res = await fetch('/api/v1/reports/' + encodeURIComponent(currentReportId) + '/verify-integrity', {
+          method: 'POST', headers: headers(), body: '{}'
+        });
+        detailBody.textContent = JSON.stringify(await res.json(), null, 2);
+      } catch (err) {
+        detailBody.textContent = 'Verify failed: ' + err;
+      }
+      return;
+    }
+    try {
+      const res = await fetch(map[kind], { headers: headers() });
+      detailBody.textContent = JSON.stringify(await res.json(), null, 2);
+    } catch (err) {
+      detailBody.textContent = 'Action failed: ' + err;
+    }
+  }
+
+  document.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('[data-rc-action]');
+    if (!btn) return;
+    const action = btn.getAttribute('data-rc-action');
+    const code = btn.getAttribute('data-report-code');
+    const rid = btn.getAttribute('data-report-id');
+    if (action === 'select' || action === 'generate-open') {
+      if (code) { selectReport(code); if (action === 'generate-open') loadReadiness(code); }
+    } else if (action === 'view' && code) {
+      selectReport(code); loadReadiness(code);
+    } else if (action === 'open-report' && rid) {
+      openReport(rid);
+    }
+  });
+
+  selectEl?.addEventListener('change', () => {
+    renderFilters(selectEl.value);
+    if (selectEl.value) loadReadiness(selectEl.value);
+  });
+
+  document.getElementById('rc-check-readiness')?.addEventListener('click', () => {
+    if (selectEl?.value) loadReadiness(selectEl.value);
+  });
+
+  document.getElementById('rc-create-form')?.addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    if (selectEl?.value) generate(selectEl.value);
+  });
+
+  document.getElementById('rc-library-open')?.addEventListener('click', () => {
+    const q = document.getElementById('rc-library-search');
+    if (q?.value) openReport(q.value.trim());
+  });
+
+  document.getElementById('rc-library-refresh')?.addEventListener('click', async () => {
+    try {
+      const res = await fetch('/mission-control/api/reports', { headers: headers() });
+      const data = await res.json();
+      const body = document.getElementById('rc-library-body');
+      if (!body) return;
+      const reports = data.reports || [];
+      body.innerHTML = reports.slice(0, 20).map((r) =>
+        '<tr><td><button type="button" class="rc-linkish" data-rc-action="open-report" data-report-id="' +
+        String(r.report_id || '').replace(/"/g, '') + '">' + String(r.report_id || '') +
+        '</button></td><td>' + String(r.report_type || '') + '</td><td>' + String(r.report_status || '') +
+        '</td><td>' + String(r.report_date || '') + '</td><td>' + String(r.report_version || '') + '</td></tr>'
+      ).join('') || '<tr><td colspan="5">No archived reports yet.</td></tr>';
+    } catch (err) {
+      detailBody.textContent = 'Library refresh failed: ' + err;
+    }
+  });
+
+  detailActions?.querySelectorAll('[data-rc-detail]').forEach((btn) => {
+    btn.addEventListener('click', () => detailAction(btn.getAttribute('data-rc-detail')));
+  });
+
+  // Enhance details with aria-expanded for accessibility tooling
+  document.querySelectorAll('details.rc-accordion').forEach((el) => {
+    const sync = () => el.querySelector('summary')?.setAttribute('aria-expanded', el.open ? 'true' : 'false');
+    sync();
+    el.addEventListener('toggle', sync);
+  });
+
+  // Deep-link: #rc-create?code=...
+  const hash = window.location.hash || '';
+  const match = hash.match(/code=([A-Za-z0-9_]+)/);
+  if (match) selectReport(match[1]);
+})();
+</script>
+"""

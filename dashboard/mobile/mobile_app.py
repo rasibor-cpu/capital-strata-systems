@@ -28,6 +28,7 @@ from dashboard.auth.css_sign_on import (
     save_users,
 )
 from backend.security.permissions import PermissionEngine
+from dashboard.mobile import mobile_reports
 from dashboard.runtime.broker_credential_check import _load_coinbase_credentials, load_local_env
 from backend.config.order_limit_config import DEFAULT_ORDER_LIMIT_CONFIG
 from dashboard.runtime.broker_balance_reconciliation import (
@@ -209,6 +210,115 @@ async def risk_screen(request: Request):
         return RedirectResponse("/login", status_code=303)
 
     return HTMLResponse(_risk_page(session["user_ctx"], session))
+
+
+@app.get("/reports", response_class=HTMLResponse)
+async def reports_home_screen(request: Request):
+    session = _get_session(request)
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+    category = request.query_params.get("category")
+    return HTMLResponse(
+        mobile_reports.render_reports_home(
+            session["user_ctx"],
+            header_fn=_header,
+            page_fn=_page,
+            identity_fn=_identity_strip,
+            category=category,
+        )
+    )
+
+
+@app.get("/reports/create", response_class=HTMLResponse)
+async def reports_create_screen(request: Request):
+    session = _get_session(request)
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+    code = str(request.query_params.get("code") or "")
+    return HTMLResponse(
+        mobile_reports.render_create(
+            session["user_ctx"],
+            header_fn=_header,
+            page_fn=_page,
+            identity_fn=_identity_strip,
+            preselect=code,
+        )
+    )
+
+
+@app.post("/reports/generate", response_class=HTMLResponse)
+async def reports_generate_submit(request: Request):
+    session = _get_session(request)
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+    form = await _read_form(request)
+    if not mobile_reports.can_generate_reports(session["user_ctx"]):
+        return HTMLResponse(
+            mobile_reports.render_create(
+                session["user_ctx"],
+                header_fn=_header,
+                page_fn=_page,
+                identity_fn=_identity_strip,
+                preselect=str(form.get("report_code") or ""),
+                message="Generate denied: reports_generate permission required.",
+                status="error",
+            ),
+            status_code=403,
+        )
+    result = mobile_reports.generate_from_form(session["user_ctx"], form)
+    ok = result.get("status") == "OK"
+    return HTMLResponse(
+        mobile_reports.render_create(
+            session["user_ctx"],
+            header_fn=_header,
+            page_fn=_page,
+            identity_fn=_identity_strip,
+            preselect=str(form.get("report_code") or ""),
+            message="Generation complete." if ok else f"Generation status: {result.get('status')}",
+            status="info" if ok else "error",
+            result=result,
+        ),
+        status_code=200 if ok else 400,
+    )
+
+
+@app.get("/reports/library", response_class=HTMLResponse)
+async def reports_library_screen(request: Request):
+    session = _get_session(request)
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+    filters = {
+        "report_id": request.query_params.get("report_id") or None,
+        "report_type": request.query_params.get("report_type") or None,
+        "status": request.query_params.get("status") or None,
+        "category": request.query_params.get("category") or None,
+    }
+    filters = {k: v for k, v in filters.items() if v}
+    return HTMLResponse(
+        mobile_reports.render_library(
+            session["user_ctx"],
+            header_fn=_header,
+            page_fn=_page,
+            identity_fn=_identity_strip,
+            filters=filters,
+        )
+    )
+
+
+@app.get("/reports/detail/{report_id}", response_class=HTMLResponse)
+async def reports_detail_screen(request: Request, report_id: str):
+    session = _get_session(request)
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(
+        mobile_reports.render_detail(
+            session["user_ctx"],
+            report_id,
+            header_fn=_header,
+            page_fn=_page,
+            identity_fn=_identity_strip,
+        )
+    )
 
 
 @app.get("/governance", response_class=HTMLResponse)
@@ -717,7 +827,7 @@ async def manifest():
         {
             "name": "Capital Strata Systems",
             "short_name": "CSS",
-            "description": "Capital Strata Systems mobile dashboard",
+            "description": "Capital Strata Systems mobile dashboard — Reports Center v176a",
             "start_url": "/login",
             "scope": "/",
             "display": "standalone",
@@ -743,6 +853,7 @@ async def manifest():
                     "purpose": "any maskable",
                 }
             ],
+            "css_shell_cache": "css-mobile-shell-v176a",
         }
     )
 
@@ -750,7 +861,7 @@ async def manifest():
 @app.get("/service-worker.js")
 async def service_worker():
     script = """
-const CACHE_NAME = "css-mobile-shell-v1";
+const CACHE_NAME = "css-mobile-shell-v176a";
 const SHELL_URLS = ["/login", "/manifest.webmanifest", "/icon.svg", "/static/css_pwa_icon_192.png", "/apple-touch-icon.png"];
 
 self.addEventListener("install", (event) => {
@@ -986,6 +1097,7 @@ def _top_nav(user_ctx: Dict[str, Any], active: str) -> str:
     if active != "dashboard":
         links.append('<a class="button-link" href="/dashboard">Dashboard</a>')
     for key, label, href in (
+        ("reports", "Reports", "/reports"),
         ("positions", "Positions", "/positions"),
         ("history", "History", "/history"),
         ("risk", "Risk", "/risk"),
@@ -1000,6 +1112,8 @@ def _top_nav(user_ctx: Dict[str, Any], active: str) -> str:
         ("live-readiness-certification", "Live Cert", "/live-readiness-certification"),
         ("alerts", "Alert Centre", "/alerts"),
         ("margin", "Margin", "/margin"),):
+        if key == "reports" and not mobile_reports.can_view_reports(user_ctx):
+            continue
         if active != key:
             links.append(
                 f'<a class="button-link quiet" href="{href}">{label}</a>'
@@ -1968,6 +2082,7 @@ def _account_summary_cards(dashboard_payload: Dict[str, Any]) -> str:
 
 def _command_center_panel(user_ctx: Dict[str, Any]) -> str:
     cards = [
+        ("Reports", "Institutional report catalogue, create, library, and print.", "/reports"),
         ("Positions", "Open position inventory and asset counts.", "/positions"),
         ("History", "Trade ticket and execution outcome log.", "/history"),
         ("Risk", "Drawdown, exposure, limits, and breaches.", "/risk"),
@@ -1976,6 +2091,8 @@ def _command_center_panel(user_ctx: Dict[str, Any]) -> str:
         ("Market", "Regime, VWAP, liquidity, and pressure state.", "/market"),
         ("Broker", "Broker readiness and live-order gate posture.", "/broker"),
     ]
+    if not mobile_reports.can_view_reports(user_ctx):
+        cards = [c for c in cards if c[0] != "Reports"]
     if _can_view_audit_logs(user_ctx):
         cards.append(("Audit", "Filter, export, and review governed event trails.", "/audit"))
     if _can_submit_trade(user_ctx):
@@ -3995,6 +4112,20 @@ pre {
   .ticket-row {
     grid-template-columns: 1fr 1fr;
   }
+}
+.rc-m-acc { border: 1px solid var(--line); background: var(--panel); margin: 0 0 10px; padding: 0 12px 12px; }
+.rc-m-acc summary { cursor: pointer; font-weight: 700; padding: 12px 0; list-style: none; }
+.rc-m-acc summary::-webkit-details-marker { display: none; }
+.rc-m-cards { display: grid; gap: 10px; }
+.rc-m-cards .command-card { min-height: auto; }
+.pill { display: inline-flex; align-items: center; min-height: 22px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; font-weight: 700; }
+select, textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: var(--field);
+  color: var(--ink);
+  font-size: 16px;
+  padding: 12px 13px;
 }
 """
 

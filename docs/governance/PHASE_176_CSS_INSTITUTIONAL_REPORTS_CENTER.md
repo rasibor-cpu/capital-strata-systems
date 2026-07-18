@@ -203,3 +203,13 @@ Mission Control, RBAC, and printer import.
 
 Wire additional producers only when evidence, validation, permissions, and
 identity/versioning are complete. Enable email per family only with explicit policy.
+
+## Phase 176A — Interaction and mobile integration
+
+See `docs/governance/PHASE_176A_REPORTS_CENTER_INTERACTION_AND_MOBILE_INTEGRATION.md`.
+
+**Desktop root cause:** Reports page was static tables only (no accordions/buttons/forms/JS).
+
+**Mobile root cause:** `_top_nav` / Command Center omitted Reports; no `/reports*` routes.
+
+**Remediation:** Interactive MC Reports UI; shared `ui_contract`; mobile Reports home/create/library/detail; SW cache `css-mobile-shell-v176a`. Registry/producers/RBAC/safety unchanged.

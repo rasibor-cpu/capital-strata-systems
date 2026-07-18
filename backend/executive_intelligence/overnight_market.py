@@ -79,6 +79,13 @@ def produce_overnight_market_intelligence(
 
     Returns a fail-closed structure. When critical regime evidence is absent,
     ``market_data_status`` / freshness become UNAVAILABLE (never invented).
+
+    Evidence selection:
+    - ``injected`` omitted / ``None``: load from ``repo_root`` filesystem artifacts.
+    - ``injected`` non-empty mapping: use only the injected bundle (no disk merge).
+    - ``injected={}`` is falsy and therefore falls through to disk — tests that need
+      an empty evidence environment must pass an empty ``repo_root`` or an explicit
+      unavailable injected regime object.
     """
     root = Path(repo_root) if repo_root else Path.cwd()
     generated_at = utc_now_iso()
