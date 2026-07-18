@@ -148,6 +148,30 @@ class MorningBriefArchiveStore:
             self._atomic_write_json(stage / "executive_morning_brief.json", brief)
             (stage / "executive_morning_brief.md").write_text(md, encoding="utf-8")
             self._atomic_write_json(stage / "validation.json", validation)
+            pdf_meta: dict[str, Any] = {"status": "NOT_GENERATED"}
+            try:
+                from backend.executive_intelligence.print_report import pdf_sha256, render_printable_pdf
+
+                if str(brief.get("report_status")).upper() == "FINAL":
+                    pdf_bytes = render_printable_pdf(brief, printed_by="executive_intelligence_archive")
+                    pdf_path = stage / "executive_morning_brief.pdf"
+                    if pdf_path.exists():
+                        raise RuntimeError("refusing_pdf_overwrite")
+                    pdf_path.write_bytes(pdf_bytes)
+                    pdf_meta = {
+                        "status": "OK",
+                        "sha256": pdf_sha256(pdf_bytes),
+                        "bytes": len(pdf_bytes),
+                        "file": "executive_morning_brief.pdf",
+                    }
+            except Exception as exc:
+                if str(brief.get("report_status")).upper() == "FINAL":
+                    pdf_meta = {
+                        "status": "FAILED",
+                        "reason": str(exc),
+                        "file": None,
+                    }
+                    # Do not fail FINAL JSON/MD publish — printable is PARTIAL
             version_manifest = {
                 "report_id": brief.get("report_id"),
                 "report_date": brief.get("report_date"),
@@ -163,7 +187,10 @@ class MorningBriefArchiveStore:
                     "json": "executive_morning_brief.json",
                     "markdown": "executive_morning_brief.md",
                     "validation": "validation.json",
+                    "pdf": "executive_morning_brief.pdf" if pdf_meta.get("status") == "OK" else None,
                 },
+                "pdf": pdf_meta,
+                "printable_status": "OK" if pdf_meta.get("status") == "OK" else ("PARTIAL" if str(brief.get("report_status")).upper() == "FINAL" else "N/A"),
                 **SAFETY_LOCKS,
             }
             self._atomic_write_json(stage / "manifest.json", version_manifest)

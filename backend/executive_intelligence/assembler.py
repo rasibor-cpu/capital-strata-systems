@@ -239,19 +239,39 @@ class ExecutiveMorningBriefAssembler:
             "panel_status": panel_status,
             "freshness": freshness if regime else "UNAVAILABLE",
             "overnight_market_summary": market.get("overnight_market_summary"),
-            "liquidity": market.get("liquidity"),
-            "volatility": market.get("volatility"),
+            "liquidity": as_mapping(market.get("overnight_market_summary")).get("liquidity_observations")
+            if isinstance(market.get("overnight_market_summary"), Mapping)
+            else market.get("liquidity"),
+            "volatility": as_mapping(market.get("overnight_market_summary")).get("volatility_changes")
+            if isinstance(market.get("overnight_market_summary"), Mapping)
+            else market.get("volatility"),
             "spread": market.get("spread"),
             "regime_current": safe_str(regime),
             "regime": safe_str(regime),
+            "prior_regime": (
+                market.get("prior_regime")
+                or as_mapping(as_mapping(market.get("overnight_full")).get("market_regime")).get("prior_regime")
+                or "UNAVAILABLE"
+            ),
             "regime_transitions": market.get("regime_transitions")
             if isinstance(market.get("regime_transitions"), list)
-            else [],
+            else (
+                as_mapping(market.get("overnight_market_summary")).get("relevant_regime_transitions")
+                if isinstance(as_mapping(market.get("overnight_market_summary")).get("relevant_regime_transitions"), list)
+                else []
+            ),
             "regime_implications": market.get("regime_implications")
             if isinstance(market.get("regime_implications"), list)
             else [],
             "intel_highlights": market.get("intel_highlights") if isinstance(market.get("intel_highlights"), list) else [],
             "confidence": conf,
+            "market_confidence": as_mapping(market.get("market_confidence"))
+            if isinstance(market.get("market_confidence"), Mapping)
+            else {"value": conf},
+            "trading_implications": market.get("trading_implications")
+            if isinstance(market.get("trading_implications"), list)
+            else [],
+            "asset_class_coverage": as_mapping(market.get("asset_class_coverage")),
             "unavailable_fields": unavailable,
         }
 

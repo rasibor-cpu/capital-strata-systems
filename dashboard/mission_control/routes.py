@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+import json
 import time
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Query
@@ -208,6 +210,95 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
                 status_code=404,
             )
         return JSONResponse(safe_serialize(_read_only_payload(brief)))
+
+    @router.get("/mission-control/api/morning-briefings/{report_date}/distribution-status")
+    async def mission_control_morning_briefings_distribution_status(report_date: str) -> JSONResponse:
+        """Read-only distribution status. Write actions are under /api/v1/executive-brief (freeze)."""
+        retrieval = _morning_brief_retrieval()
+        brief = retrieval.by_date(report_date)
+        year, month = report_date.split("-")[0], report_date.split("-")[1] if len(report_date) >= 7 else ("", "")
+        pdf_path = None
+        printable_status = "UNAVAILABLE"
+        if brief is not None:
+            ver = brief.get("report_version") or brief.get("version")
+            candidate = (
+                Path.cwd()
+                / "artifacts"
+                / "runtime_reports"
+                / "morning_briefings"
+                / year
+                / month
+                / report_date
+                / str(ver)
+                / "executive_morning_brief.pdf"
+            )
+            if candidate.is_file():
+                pdf_path = str(candidate)
+                printable_status = "OK"
+            else:
+                man = (
+                    Path.cwd()
+                    / "artifacts"
+                    / "runtime_reports"
+                    / "morning_briefings"
+                    / year
+                    / month
+                    / report_date
+                    / str(ver)
+                    / "manifest.json"
+                )
+                if man.is_file():
+                    try:
+                        meta = json.loads(man.read_text(encoding="utf-8"))
+                        printable_status = str(meta.get("printable_status") or meta.get("pdf", {}).get("status") or "PARTIAL")
+                    except Exception:
+                        printable_status = "PARTIAL"
+        return JSONResponse(
+            safe_serialize(
+                _read_only_payload(
+                    {
+                        "report_date": report_date,
+                        "report_present": brief is not None,
+                        "report_status": None if brief is None else brief.get("report_status"),
+                        "printable_status": printable_status,
+                        "pdf_archived": pdf_path is not None,
+                        "controlled_write_api": "/api/v1/executive-brief",
+                        "note": "Mission Control is GET-only; print/email POST actions use /api/v1/executive-brief.",
+                    }
+                )
+            )
+        )
+
+    @router.get("/mission-control/api/morning-briefings/{report_date}/print")
+    async def mission_control_morning_briefings_print_info(report_date: str) -> JSONResponse:
+        return JSONResponse(
+            safe_serialize(
+                _read_only_payload(
+                    {
+                        "report_date": report_date,
+                        "print_endpoint": f"/api/v1/executive-brief/{report_date}/print",
+                        "pdf_endpoint": f"/api/v1/executive-brief/{report_date}/pdf",
+                        "requires_permission": "executive_brief_print",
+                        "note": "Use /api/v1/executive-brief for RBAC-gated printable HTML/PDF (MC remains GET-only).",
+                    }
+                )
+            )
+        )
+
+    @router.get("/mission-control/api/morning-briefings/{report_date}/pdf")
+    async def mission_control_morning_briefings_pdf_info(report_date: str) -> JSONResponse:
+        return JSONResponse(
+            safe_serialize(
+                _read_only_payload(
+                    {
+                        "report_date": report_date,
+                        "pdf_endpoint": f"/api/v1/executive-brief/{report_date}/pdf",
+                        "requires_permission": "executive_brief_print",
+                        "note": "PDF bytes are served from /api/v1/executive-brief to preserve Mission Control GET-only freeze.",
+                    }
+                )
+            )
+        )
 
     @router.get("/mission-control/{section_slug}", response_class=HTMLResponse)
     async def mission_control_page(section_slug: str) -> HTMLResponse:

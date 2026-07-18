@@ -30,8 +30,15 @@ def gather_evidence(repo_root: Path | None = None, *, injected: Mapping[str, Any
         evidence["portfolio"] = _load_portfolio(root)
     if "market" not in evidence:
         evidence["market"] = _load_market(root)
-    if "opportunities" not in evidence:
-        evidence["opportunities"] = _load_opportunities(root)
+    # Merge overnight opportunity seeds into opportunities when absent/empty
+    market = as_mapping(evidence.get("market"))
+    opp_input = as_mapping(market.get("opportunity_input"))
+    seeds = opp_input.get("ranked_opportunity_seeds") if isinstance(opp_input.get("ranked_opportunity_seeds"), list) else []
+    if "opportunities" not in evidence or not evidence.get("opportunities"):
+        if seeds:
+            evidence["opportunities"] = seeds
+        else:
+            evidence["opportunities"] = _load_opportunities(root)
     if "committee" not in evidence:
         evidence["committee"] = _load_json(root / "artifacts" / "portfolio_decision.json") or {}
     if "learning" not in evidence:
@@ -134,24 +141,61 @@ def _load_portfolio(root: Path) -> dict[str, Any]:
 
 
 def _load_market(root: Path) -> dict[str, Any]:
-    # Existing regime / advisory snapshots only — overnight rollup is Phase 175
-    advisory = _load_json(root / "artifacts" / "runtime_advisory_snapshot.json") or {}
-    decision = _load_json(root / "artifacts" / "portfolio_decision.json") or {}
-    regime = (
-        advisory.get("market_regime")
-        or advisory.get("regime")
-        or decision.get("market_regime")
-        or as_mapping(decision.get("market_intelligence")).get("regime")
-    )
-    if not regime:
-        return {}
+    """Load market evidence via Phase 175 overnight producer (fail-closed)."""
+    try:
+        from backend.executive_intelligence.overnight_market import produce_overnight_market_intelligence
+
+        overnight = produce_overnight_market_intelligence(root)
+    except Exception:
+        overnight = {}
+
+    if not overnight or (
+        overnight.get("market_data_status") in {None, "UNAVAILABLE"}
+        and not overnight.get("regime_current")
+    ):
+        # Legacy fallback: advisory/decision regime only (may still be UNAVAILABLE)
+        advisory = _load_json(root / "artifacts" / "runtime_advisory_snapshot.json") or {}
+        decision = _load_json(root / "artifacts" / "portfolio_decision.json") or {}
+        regime = (
+            advisory.get("market_regime")
+            or advisory.get("regime")
+            or decision.get("market_regime")
+            or as_mapping(decision.get("market_intelligence")).get("regime")
+        )
+        if not regime:
+            return {}
+        return {
+            "regime": regime,
+            "regime_current": regime,
+            "freshness": normalize_freshness(advisory.get("freshness") or decision.get("freshness") or "AGING"),
+            "confidence": advisory.get("regime_confidence") or decision.get("regime_confidence"),
+            "overnight_market_summary": None,
+            "source": "legacy_advisory_fallback",
+        }
+
     return {
-        "regime": regime,
-        "regime_current": regime,
-        "freshness": normalize_freshness(advisory.get("freshness") or decision.get("freshness") or "AGING"),
-        "confidence": advisory.get("regime_confidence") or decision.get("regime_confidence"),
-        "overnight_market_summary": None,  # Phase 175
-        "source": "runtime_advisory_snapshot|portfolio_decision",
+        "regime": overnight.get("regime_current") or overnight.get("regime"),
+        "regime_current": overnight.get("regime_current") or overnight.get("regime"),
+        "prior_regime": as_mapping(overnight.get("market_regime")).get("prior_regime"),
+        "regime_transition_time": as_mapping(overnight.get("market_regime")).get("regime_transition_time"),
+        "regime_confidence": as_mapping(overnight.get("market_regime")).get("regime_confidence"),
+        "regime_implications": as_mapping(overnight.get("market_regime")).get("regime_implications"),
+        "freshness": normalize_freshness(overnight.get("freshness", "AGING")),
+        "confidence": as_mapping(overnight.get("market_confidence")).get("value") or overnight.get("confidence"),
+        "market_confidence": overnight.get("market_confidence"),
+        "overnight_market_summary": overnight.get("overnight_summary") or overnight.get("overnight_market_summary"),
+        "trading_implications": overnight.get("trading_implications"),
+        "asset_class_coverage": overnight.get("asset_class_coverage"),
+        "opportunity_input": overnight.get("opportunity_input"),
+        "source_provenance": overnight.get("source_provenance"),
+        "source_hashes": overnight.get("source_hashes"),
+        "market_data_status": overnight.get("market_data_status"),
+        "validation_status": overnight.get("validation_status"),
+        "reporting_window_start_utc": overnight.get("reporting_window_start_utc"),
+        "reporting_window_end_utc": overnight.get("reporting_window_end_utc"),
+        "generated_at_utc": overnight.get("generated_at_utc"),
+        "source": "overnight_market_intelligence_v1",
+        "overnight_full": overnight,
     }
 
 

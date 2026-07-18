@@ -27,6 +27,9 @@ class PermissionEngine:
                 "access_admin_console",
                 "view_reports",
                 "view_audit_logs",
+                "executive_brief_print",
+                "executive_brief_email",
+                "manage_executive_brief_grants",
             },
             "SUPER_USER": {
                 "manage_system",
@@ -47,6 +50,9 @@ class PermissionEngine:
                 "view_audit_logs",
                 "view_positions",
                 "view_market_scanner",
+                "executive_brief_print",
+                "executive_brief_email",
+                "manage_executive_brief_grants",
             },
             "AUDIT": {
                 "view_audit_logs",

@@ -222,6 +222,9 @@ def _market_score(market: Mapping[str, Any]) -> float | None:
         return None
     if str(market.get("panel_status", "")).upper() == "UNAVAILABLE":
         return None
+    mc = as_mapping(market.get("market_confidence"))
+    if "value" in mc and mc.get("value") is not None:
+        return clamp01(mc.get("value"))
     if "score" in market:
         return clamp01(market.get("score"))
     regime = market.get("regime_current") or market.get("regime")
