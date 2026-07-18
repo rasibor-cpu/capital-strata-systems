@@ -4,6 +4,11 @@
 **Branch:** `css-unified-consolidation-2026-07-13`
 **Status:** Complete.
 
+**Follow-on:** Phase 176D (`docs/governance/PHASE_176D_CANONICAL_AUTHORIZATION_CONTEXT_UNIFICATION.md`)
+unifies authorization context so Mission Control Reports HTML and APIs cannot
+diverge (removes hardcoded ADMIN / TRADER fallbacks; session bridge from
+`css_auth_session.json`).
+
 ## Objective
 
 Certify that visible desktop/mobile controls perform their **intended workflows**, not merely that elements exist, are clickable, open, or return HTTP 200.

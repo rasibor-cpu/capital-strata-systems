@@ -248,3 +248,28 @@ backend.trading.trade_quality_scoring_engine = mock_engine
 # Make it possible to import it from backend.trading as well
 setattr(backend.trading, "trade_quality_scoring_engine", mock_engine)
 
+
+# ---------------------------------------------------------------------------
+# Phase 176D — isolate authorization from live Desktop session artifacts
+# ---------------------------------------------------------------------------
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _css_auth_test_isolation(monkeypatch, request):
+    """Deterministic auth for unit tests: trusted headers on; live session stubs off.
+
+    Opt out with @pytest.mark.live_session for bridge/live-acceptance tests.
+    """
+    if request.node.get_closest_marker("live_session"):
+        return
+    monkeypatch.setenv("CSS_TRUST_INTERNAL_AUTH_HEADERS", "1")
+    monkeypatch.setattr(
+        "dashboard.auth.css_sign_on.restore_login_session",
+        lambda users=None: None,
+    )
+    monkeypatch.setattr(
+        "dashboard.auth.session_bridge._load_recovery_user_ctx",
+        lambda: None,
+    )
+

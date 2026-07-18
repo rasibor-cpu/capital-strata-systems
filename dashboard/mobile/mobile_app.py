@@ -864,7 +864,7 @@ async def manifest():
                     "purpose": "any maskable",
                 }
             ],
-            "css_shell_cache": "css-mobile-shell-v176c",
+            "css_shell_cache": "css-mobile-shell-v176d",
         }
     )
 
@@ -872,7 +872,7 @@ async def manifest():
 @app.get("/service-worker.js")
 async def service_worker():
     script = """
-const CACHE_NAME = "css-mobile-shell-v176c";
+const CACHE_NAME = "css-mobile-shell-v176d";
 const SHELL_URLS = ["/login", "/manifest.webmanifest", "/icon.svg", "/static/css_pwa_icon_192.png", "/apple-touch-icon.png"];
 
 self.addEventListener("install", (event) => {

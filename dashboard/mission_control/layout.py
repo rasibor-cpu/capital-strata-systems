@@ -4,6 +4,7 @@ import html
 from collections.abc import Mapping
 from typing import Any
 
+from backend.security.authorization_context import ensure_mc_authorization_state
 from dashboard.mission_control.navigation import MISSION_CONTROL_SECTIONS, section_for_key
 from dashboard.mission_control.pages import render_page
 from dashboard.mission_control.pages._components import status_class
@@ -13,11 +14,12 @@ from dashboard.ui_interaction import DISCLOSURE_JS
 
 def render_mission_control_shell(state: Mapping[str, Any], *, active_section: str = "executive_overview") -> str:
     active = section_for_key(active_section)
-    platform = _mapping(state.get("platform"))
-    safety = _mapping(state.get("safety"))
-    runtime = _mapping(state.get("runtime"))
+    state_dict = ensure_mc_authorization_state(dict(state))
+    platform = _mapping(state_dict.get("platform"))
+    safety = _mapping(state_dict.get("safety"))
+    runtime = _mapping(state_dict.get("runtime"))
     nav = _render_nav(active.key)
-    body = render_page(active.key, dict(state))
+    body = render_page(active.key, state_dict)
     offline_banner = ""
     if platform.get("runtime_offline") or str(runtime.get("heartbeat_status", "")).upper() in {"STALE", "OFFLINE", "UNAVAILABLE", "UNKNOWN"}:
         offline_banner = (
@@ -34,7 +36,7 @@ def render_mission_control_shell(state: Mapping[str, Any], *, active_section: st
   <style>{MISSION_CONTROL_CSS}</style>
 </head>
 <body class="mc-body">
-  <div class="mc-shell" data-mission-control-schema="{escape(state.get('schema_version'))}">
+  <div class="mc-shell" data-mission-control-schema="{escape(state_dict.get('schema_version'))}">
     <aside class="mc-sidebar">
       <div class="mc-brand"><strong>CSS Mission Control</strong><span>Enterprise shell / MC-002</span></div>
       {nav}
@@ -59,7 +61,7 @@ def render_mission_control_shell(state: Mapping[str, Any], *, active_section: st
         {body}
       </section>
       <footer class="mc-footer">
-        Generated {escape(state.get('generated_at'))}. Advisory-only display. No execution authority is granted from Mission Control.
+        Generated {escape(state_dict.get('generated_at'))}. Advisory-only display. No execution authority is granted from Mission Control.
       </footer>
     </main>
   </div>

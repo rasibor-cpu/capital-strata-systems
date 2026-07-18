@@ -60,13 +60,14 @@ def test_mission_control_reports_http_subtabs_and_apis() -> None:
     app = FastAPI()
     register_mission_control(app, lambda: None)
     client = TestClient(app)
-    page = client.get("/mission-control/reports")
+    headers = {"X-CSS-Role": "ADMIN", "X-CSS-User-Id": "admin1"}
+    page = client.get("/mission-control/reports", headers=headers)
     assert page.status_code == 200
     assert 'data-css-subtab="rc-create"' in page.text
     assert 'id="cat-trading_transactions"' in page.text
     assert "openDisclosureForTarget" in page.text
     # Readiness / catalog APIs remain GET-only under MC
-    catalog = client.get("/mission-control/api/reports/catalog")
+    catalog = client.get("/mission-control/api/reports/catalog", headers=headers)
     assert catalog.status_code == 200
     assert "categories" in catalog.json() or "reports" in catalog.json() or catalog.json()
 

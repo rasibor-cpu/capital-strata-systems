@@ -152,6 +152,57 @@ def _safe_load_artifact(filename: str) -> Dict[str, Any]:
     return {}
 
 
+def _launcher_auth_identity(session_state: Dict[str, Any]) -> Dict[str, str]:
+    """Resolve authenticated user/role for frontend session (Phase 176D).
+
+    Prefer css_auth_session / recovery session_user_ctx over trading-session
+    artifacts that do not carry RBAC identity (and must not default to TRADER).
+    """
+    try:
+        from dashboard.auth.session_bridge import load_bridged_session_context
+
+        auth = load_bridged_session_context(channel="launcher_frontend")
+        if auth.authenticated and auth.active:
+            return {
+                "user_id": auth.user_id,
+                "role": auth.role,
+                "session_id": auth.session_id,
+                "display_name": auth.display_name,
+            }
+    except Exception:
+        pass
+
+    recovery = _safe_load_artifact("css_session_recovery.json")
+    ctx = recovery.get("session_user_ctx") if isinstance(recovery, dict) else None
+    if isinstance(ctx, dict) and ctx.get("user_id") and ctx.get("role"):
+        return {
+            "user_id": str(ctx.get("user_id")),
+            "role": str(ctx.get("role")).upper(),
+            "session_id": str(ctx.get("session_id") or ""),
+            "display_name": str(ctx.get("display_name") or ""),
+        }
+
+    auth_file = _safe_load_artifact("css_auth_session.json")
+    if isinstance(auth_file, dict) and auth_file.get("user_id") and auth_file.get("role"):
+        return {
+            "user_id": str(auth_file.get("user_id")),
+            "role": str(auth_file.get("role")).upper(),
+            "session_id": "",
+            "display_name": str(auth_file.get("display_name") or ""),
+        }
+
+    if isinstance(session_state, dict):
+        nested = session_state.get("session_user_ctx")
+        if isinstance(nested, dict) and nested.get("user_id") and nested.get("role"):
+            return {
+                "user_id": str(nested.get("user_id")),
+                "role": str(nested.get("role")).upper(),
+                "session_id": str(nested.get("session_id") or ""),
+                "display_name": str(nested.get("display_name") or ""),
+            }
+    return {}
+
+
 # ── PAUSE / RESUME CONTROL ARTIFACT ─────────────────────────────────────────
 
 MOBILE_CONTROLS_FILE = os.path.join(LauncherConfig.ARTIFACTS_DIR, "css_mobile_controls.json")
@@ -590,6 +641,7 @@ def build_launcher_frontend_state(
     session_state = _safe_load_artifact("css_session_state_pcnrass.json") or _safe_load_artifact("css_session_recovery.json")
     session = session_state.get("session", {}) if isinstance(session_state.get("session"), dict) else session_state
     session = session if isinstance(session, dict) else {}
+    auth_identity = _launcher_auth_identity(session_state if isinstance(session_state, dict) else {})
     positions = _launcher_positions_for_frontend()
     runtime_mode = str(runtime.get("runtime_mode", "PAPER")).lower()
     broker_startup = get_broker_startup_summary()
@@ -648,12 +700,14 @@ def build_launcher_frontend_state(
         "resolved_mode": "live" if runtime_mode == "live" and broker_mode == "live" else "paper",
         "broker_mode": broker_mode,
         "session": {
-            "session_id": str(session.get("session_id", "LAUNCHER-SESSION")),
+            "session_id": str(session.get("session_id", auth_identity.get("session_id") or "LAUNCHER-SESSION")),
             "cycle_number": runtime.get("current_cycle", 0),
             "engine_mode": engine.get("engine_mode", runtime.get("runtime_mode", "PAPER")),
             "live_or_paper": "live" if runtime_mode == "live" else "paper",
             "resolved_mode": "live" if runtime_mode == "live" and broker_mode == "live" else "paper",
-            "role": str(session.get("role", "TRADER")),
+            # Phase 176D: never invent TRADER; use authenticated identity when present.
+            "role": str(auth_identity.get("role") or session.get("role") or "UNAUTHENTICATED"),
+            "user_id": str(auth_identity.get("user_id") or session.get("user_id") or "UNAUTHENTICATED"),
         },
         "account_summary": {
             "account_balance": account.get("cash", 0.0),

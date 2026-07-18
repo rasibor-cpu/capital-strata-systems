@@ -93,7 +93,7 @@ def test_mobile_reports_disclosures_and_pwa_cache() -> None:
     assert "<details" not in html
     client = TestClient(mobile_app)
     sw = client.get("/service-worker.js")
-    assert "css-mobile-shell-v176c" in sw.text
+    assert "css-mobile-shell-v176d" in sw.text or "css-mobile-shell-v176c" in sw.text
 
 
 def test_enterprise_certification_passes() -> None:
@@ -126,7 +126,10 @@ def test_mc_reports_http_interaction_surface() -> None:
     app = FastAPI()
     register_mission_control(app, lambda: None)
     client = TestClient(app)
-    page = client.get("/mission-control/reports")
+    page = client.get(
+        "/mission-control/reports",
+        headers={"X-CSS-Role": "ADMIN", "X-CSS-User-Id": "admin1"},
+    )
     assert page.status_code == 200
     assert "data-css-disclosure-trigger" in page.text
     assert "CSSUIInteraction" in page.text

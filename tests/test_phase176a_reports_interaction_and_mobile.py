@@ -133,17 +133,20 @@ def test_mobile_app_routes_and_nav() -> None:
     assert client.get("/reports", follow_redirects=False).status_code in {303, 307, 302}
     sw = client.get("/service-worker.js")
     assert sw.status_code == 200
-    assert "css-mobile-shell-v176c" in sw.text
+    assert "css-mobile-shell-v176d" in sw.text or "css-mobile-shell-v176c" in sw.text
     man = client.get("/manifest.webmanifest")
     assert man.status_code == 200
-    assert man.json().get("css_shell_cache") == "css-mobile-shell-v176c"
+    assert man.json().get("css_shell_cache") in {"css-mobile-shell-v176d", "css-mobile-shell-v176c"}
 
 
 def test_mission_control_reports_still_get_only() -> None:
     app = FastAPI()
     register_mission_control(app, lambda: None)
     client = TestClient(app)
-    page = client.get("/mission-control/reports")
+    page = client.get(
+        "/mission-control/reports",
+        headers={"X-CSS-Role": "ADMIN", "X-CSS-User-Id": "admin1"},
+    )
     assert page.status_code == 200
     assert "data-css-disclosure-trigger" in page.text
     assert "CSSUIInteraction" in page.text

@@ -229,7 +229,10 @@ def test_mission_control_get_only_reports_routes() -> None:
     nav = client.get("/mission-control/api/navigation")
     assert nav.status_code == 200
     assert any(s.get("key") == "reports_center" for s in nav.json())
-    cat = client.get("/mission-control/api/reports/catalog")
+    cat = client.get(
+        "/mission-control/api/reports/catalog",
+        headers={"X-CSS-Role": "ADMIN", "X-CSS-User-Id": "admin1"},
+    )
     assert cat.status_code == 200
     body = cat.json()
     assert body["total_registered"] == len(CATALOGUE)

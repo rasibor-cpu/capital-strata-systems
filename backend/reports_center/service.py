@@ -34,8 +34,8 @@ class ReportsCenterService:
         )
         self.access = ReportsAccessControl()
 
-    def home(self, *, role: str = "VIEWER") -> dict[str, Any]:
-        auth = self.access.authorization_status(role)
+    def home(self, *, role: str = "VIEWER", user_id: str = "") -> dict[str, Any]:
+        auth = self.access.authorization_status(role, user_id=user_id)
         recent = self.archive.list_recent(limit=15)
         failed = self.archive.list_failed(limit=10)
         # Latest morning brief pointer

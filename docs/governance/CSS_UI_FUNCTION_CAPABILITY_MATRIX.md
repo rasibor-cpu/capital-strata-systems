@@ -2,6 +2,11 @@
 
 Phase 176C machine-readable registry export.
 
+**Phase 176D note:** Reports Center HTML/API/mobile now share one canonical
+`CSSAuthorizationContext` (session bridge). Pre-176D API ALLOW / HTML DENY
+divergence is remediated. Intentionally unavailable COMING_SOON / DISABLED /
+FAIL_CLOSED controls are unchanged.
+
 - Total controls: **144**
 - Pages audited: **49**
 - Sub-tabs audited: **5**

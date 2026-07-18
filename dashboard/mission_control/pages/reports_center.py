@@ -29,17 +29,33 @@ def render(state: dict) -> str:
             + warning_banner(f"Reports Center unavailable: {type(exc).__name__}", status="bad")
         )
 
-    role = _role_from_state(state)
-    user_id = _user_from_state(state)
-    svc = ReportsCenterService()
-    home = svc.home(role=role)
-    if not home.get("authorization", {}).get("reports_view"):
+    state = _with_canonical_auth(state)
+    # Phase 176D: pages consume canonical authorization; they do not recompute RBAC.
+    reports_auth = state.get("reports_authorization") if isinstance(state.get("reports_authorization"), dict) else None
+    auth_ctx = state.get("authorization_context") if isinstance(state.get("authorization_context"), dict) else {}
+    if reports_auth is None:
+        return (
+            page_header("Reports", "Institutional Reports Center")
+            + warning_banner("Access denied: authorization context unavailable.", status="bad")
+        )
+
+    role = str(auth_ctx.get("role") or reports_auth.get("role") or "")
+    user_id = str(auth_ctx.get("user_id") or reports_auth.get("user_id") or "")
+    if not reports_auth.get("reports_view"):
         return (
             page_header("Reports", "Institutional Reports Center")
             + warning_banner("Access denied: reports_view permission required.", status="bad")
         )
 
-    auth = home.get("authorization") or {}
+    svc = ReportsCenterService()
+    home = svc.home(role=role, user_id=user_id)
+    # Prefer the precomputed canonical authorization payload for page/API parity.
+    auth = dict(home.get("authorization") or {})
+    auth.update({k: reports_auth.get(k) for k in reports_auth if k.startswith("reports_") or k in {
+        "user_id", "role", "authenticated", "identity_source", "permission_source", "correlation_id",
+        "executive_brief_email", "email_default_policy",
+    }})
+    home["authorization"] = auth
     can_generate = bool(auth.get("reports_generate"))
     categories = category_sections()
     generatable = generatable_selector_options()
@@ -61,25 +77,24 @@ def render(state: dict) -> str:
         + _library_panel(home)
         + _detail_panel()
         + _json_script("rc-catalog-data", {"categories": categories, "generatable": generatable})
-        + _json_script("rc-auth-data", {"role": role, "user_id": user_id, "can_generate": can_generate})
+        + _json_script(
+            "rc-auth-data",
+            {
+                "role": role,
+                "user_id": user_id,
+                "can_generate": can_generate,
+                "identity_source": auth_ctx.get("identity_source") or reports_auth.get("identity_source"),
+                "authenticated": bool(auth_ctx.get("authenticated", reports_auth.get("authenticated"))),
+            },
+        )
         + _scripts()
     )
 
 
-def _role_from_state(state: dict) -> str:
-    gov = state.get("governance") if isinstance(state.get("governance"), dict) else {}
-    role = str(gov.get("role") or "").strip().upper()
-    if role and role not in {"", "UNAVAILABLE", "DATA UNAVAILABLE", "DATA_UNAVAILABLE"}:
-        return role
-    return "ADMIN"  # Mission Control operator console default when session role absent
+def _with_canonical_auth(state: dict) -> dict:
+    from backend.security.authorization_context import ensure_mc_authorization_state
 
-
-def _user_from_state(state: dict) -> str:
-    gov = state.get("governance") if isinstance(state.get("governance"), dict) else {}
-    user = str(gov.get("current_user") or "mc-operator").strip()
-    if user.upper() in {"", "UNAVAILABLE", "DATA UNAVAILABLE", "DATA_UNAVAILABLE"}:
-        return "mc-operator"
-    return user
+    return ensure_mc_authorization_state(state)
 
 
 def _esc(value: Any) -> str:

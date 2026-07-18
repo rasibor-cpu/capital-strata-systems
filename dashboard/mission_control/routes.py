@@ -6,9 +6,12 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
+from backend.security.authorization_context import apply_auth_to_mission_control_state
+from backend.security.auth_diagnostics import log_authorization_denial
+from dashboard.auth.session_bridge import resolve_authorization_context
 from dashboard.mission_control.contracts import build_mission_control_state
 from dashboard.mission_control.health import build_health_summary
 from dashboard.mission_control.layout import render_mission_control_shell
@@ -24,7 +27,7 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
     router = APIRouter()
     cached_state: dict[str, Any] = {"updated_at": 0.0, "payload": {}}
 
-    def state() -> dict[str, Any]:
+    def state_base() -> dict[str, Any]:
         now = time.time()
         if now - float(cached_state.get("updated_at", 0.0)) <= 5.0 and isinstance(cached_state.get("payload"), dict) and cached_state["payload"]:
             return dict(cached_state["payload"])
@@ -32,6 +35,22 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
         cached_state["updated_at"] = time.time()
         cached_state["payload"] = payload
         return dict(payload)
+
+    def state(request: Request | None = None) -> dict[str, Any]:
+        """Dashboard snapshot overlaid with the canonical authorization context."""
+        auth = resolve_authorization_context(channel="mission_control", request=request)
+        return apply_auth_to_mission_control_state(state_base(), auth)
+
+    def _reports_role_user(request: Request) -> tuple[str, str, Any]:
+        auth = resolve_authorization_context(channel="mission_control_reports_api", request=request)
+        if not auth.authenticated or not auth.active:
+            log_authorization_denial(
+                route=str(request.url.path),
+                auth=auth,
+                permission_requested="reports_view",
+                denial_reason=auth.denial_reason or "not_authenticated",
+            )
+        return auth.role, auth.user_id, auth
 
     @router.get("/mission-control", include_in_schema=False)
     async def mission_control_index() -> RedirectResponse:
@@ -302,13 +321,21 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
 
     @router.get("/mission-control/api/reports/catalog")
     async def mission_control_reports_catalog(
+        request: Request,
         category: str | None = None,
         status: str | None = None,
         q: str | None = None,
         generatable_only: bool = False,
     ) -> JSONResponse:
         from backend.reports_center.registry import catalog_payload
+        from backend.reports_center.rbac import ReportsAccessControl
 
+        role, _user, auth = _reports_role_user(request)
+        if not auth.authenticated or not ReportsAccessControl().can_view_catalog(role):
+            return JSONResponse(
+                safe_serialize(_read_only_payload({"status": "DENIED", "authorization": auth.reports_authorization()})),
+                status_code=403,
+            )
         return JSONResponse(
             safe_serialize(
                 _read_only_payload(
@@ -323,36 +350,53 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
         )
 
     @router.get("/mission-control/api/reports/home")
-    async def mission_control_reports_home() -> JSONResponse:
+    async def mission_control_reports_home(request: Request) -> JSONResponse:
         from backend.reports_center.service import ReportsCenterService
 
-        return JSONResponse(safe_serialize(_read_only_payload(ReportsCenterService().home(role="ADMIN"))))
+        role, user_id, auth = _reports_role_user(request)
+        home = ReportsCenterService().home(role=role, user_id=user_id)
+        home["authorization"] = auth.reports_authorization()
+        if not auth.authenticated or not home["authorization"].get("reports_view"):
+            return JSONResponse(safe_serialize(_read_only_payload(home)), status_code=403)
+        return JSONResponse(safe_serialize(_read_only_payload(home)))
 
     @router.get("/mission-control/api/reports/categories")
-    async def mission_control_reports_categories() -> JSONResponse:
+    async def mission_control_reports_categories(request: Request) -> JSONResponse:
         from backend.reports_center.registry import category_menu
+        from backend.reports_center.rbac import ReportsAccessControl
 
+        role, _user, auth = _reports_role_user(request)
+        if not auth.authenticated or not ReportsAccessControl().can_view_catalog(role):
+            return JSONResponse(safe_serialize(_read_only_payload({"status": "DENIED"})), status_code=403)
         return JSONResponse(safe_serialize(_read_only_payload({"categories": category_menu()})))
 
     @router.get("/mission-control/api/reports/definitions/{report_code}")
-    async def mission_control_reports_definition(report_code: str) -> JSONResponse:
+    async def mission_control_reports_definition(report_code: str, request: Request) -> JSONResponse:
         from backend.reports_center.registry import by_code
+        from backend.reports_center.rbac import ReportsAccessControl
 
+        role, _user, auth = _reports_role_user(request)
         item = by_code(report_code)
         if item is None:
             return JSONResponse(safe_serialize(_read_only_payload({"status": "NOT_FOUND"})), status_code=404)
+        if not auth.authenticated or not ReportsAccessControl().can_view_report(role, item.required_view_permission):
+            return JSONResponse(safe_serialize(_read_only_payload({"status": "DENIED"})), status_code=403)
         return JSONResponse(safe_serialize(_read_only_payload({"status": "OK", "definition": item.as_dict()})))
 
     @router.get("/mission-control/api/reports/readiness/{report_code}")
-    async def mission_control_reports_readiness(report_code: str) -> JSONResponse:
+    async def mission_control_reports_readiness(report_code: str, request: Request) -> JSONResponse:
         from backend.reports_center.service import ReportsCenterService
 
+        role, _user, auth = _reports_role_user(request)
+        if not auth.authenticated:
+            return JSONResponse(safe_serialize(_read_only_payload({"status": "DENIED"})), status_code=403)
         return JSONResponse(
-            safe_serialize(_read_only_payload(ReportsCenterService().readiness(report_code, role="ADMIN")))
+            safe_serialize(_read_only_payload(ReportsCenterService().readiness(report_code, role=role)))
         )
 
     @router.get("/mission-control/api/reports")
     async def mission_control_reports_library(
+        request: Request,
         category: str | None = None,
         report_type: str | None = None,
         status: str | None = None,
@@ -360,6 +404,9 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
     ) -> JSONResponse:
         from backend.reports_center.service import ReportsCenterService
 
+        role, _user, auth = _reports_role_user(request)
+        if not auth.authenticated:
+            return JSONResponse(safe_serialize(_read_only_payload({"status": "DENIED"})), status_code=403)
         return JSONResponse(
             safe_serialize(
                 _read_only_payload(
@@ -370,26 +417,32 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
                             "status": status,
                             "report_id": report_id,
                         },
-                        role="ADMIN",
+                        role=role,
                     )
                 )
             )
         )
 
     @router.get("/mission-control/api/reports/{report_id}")
-    async def mission_control_reports_get(report_id: str) -> JSONResponse:
+    async def mission_control_reports_get(report_id: str, request: Request) -> JSONResponse:
         from backend.reports_center.service import ReportsCenterService
 
-        result = ReportsCenterService().retrieve(report_id, role="ADMIN")
+        role, _user, auth = _reports_role_user(request)
+        if not auth.authenticated:
+            return JSONResponse(safe_serialize(_read_only_payload({"status": "DENIED"})), status_code=403)
+        result = ReportsCenterService().retrieve(report_id, role=role)
         code = 200 if result.get("status") == "OK" else 404
         return JSONResponse(safe_serialize(_read_only_payload(result)), status_code=code)
 
     @router.get("/mission-control/api/reports/{report_id}/versions")
-    async def mission_control_reports_versions(report_id: str) -> JSONResponse:
+    async def mission_control_reports_versions(report_id: str, request: Request) -> JSONResponse:
         from backend.reports_center.service import ReportsCenterService
 
+        role, _user, auth = _reports_role_user(request)
+        if not auth.authenticated:
+            return JSONResponse(safe_serialize(_read_only_payload({"status": "DENIED"})), status_code=403)
         svc = ReportsCenterService()
-        result = svc.retrieve(report_id, role="ADMIN")
+        result = svc.retrieve(report_id, role=role)
         if result.get("status") != "OK":
             return JSONResponse(safe_serialize(_read_only_payload(result)), status_code=404)
         report = result["report"]
@@ -401,7 +454,10 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
         return JSONResponse(safe_serialize(_read_only_payload({"report_id": report_id, "versions": vers})))
 
     @router.get("/mission-control/api/reports/{report_id}/print")
-    async def mission_control_reports_print_info(report_id: str) -> JSONResponse:
+    async def mission_control_reports_print_info(report_id: str, request: Request) -> JSONResponse:
+        _role, _user, auth = _reports_role_user(request)
+        if not auth.authenticated:
+            return JSONResponse(safe_serialize(_read_only_payload({"status": "DENIED"})), status_code=403)
         return JSONResponse(
             safe_serialize(
                 _read_only_payload(
@@ -416,7 +472,10 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
         )
 
     @router.get("/mission-control/api/reports/{report_id}/pdf")
-    async def mission_control_reports_pdf_info(report_id: str) -> JSONResponse:
+    async def mission_control_reports_pdf_info(report_id: str, request: Request) -> JSONResponse:
+        _role, _user, auth = _reports_role_user(request)
+        if not auth.authenticated:
+            return JSONResponse(safe_serialize(_read_only_payload({"status": "DENIED"})), status_code=403)
         return JSONResponse(
             safe_serialize(
                 _read_only_payload(
@@ -430,18 +489,21 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
         )
 
     @router.get("/mission-control/api/reports/{report_id}/audit")
-    async def mission_control_reports_audit(report_id: str) -> JSONResponse:
+    async def mission_control_reports_audit(report_id: str, request: Request) -> JSONResponse:
         from backend.reports_center.service import ReportsCenterService
 
+        role, _user, auth = _reports_role_user(request)
+        if not auth.authenticated:
+            return JSONResponse(safe_serialize(_read_only_payload({"status": "DENIED"})), status_code=403)
         return JSONResponse(
-            safe_serialize(_read_only_payload(ReportsCenterService().audit_history(report_id, role="ADMIN")))
+            safe_serialize(_read_only_payload(ReportsCenterService().audit_history(report_id, role=role)))
         )
 
     @router.get("/mission-control/{section_slug}", response_class=HTMLResponse)
-    async def mission_control_page(section_slug: str) -> HTMLResponse:
+    async def mission_control_page(section_slug: str, request: Request) -> HTMLResponse:
         key = str(section_slug or "").replace("-", "_")
         section = section_for_key(key)
-        current = state()
+        current = state(request)
         return HTMLResponse(render_mission_control_shell(current, active_section=section.key))
 
     return router
