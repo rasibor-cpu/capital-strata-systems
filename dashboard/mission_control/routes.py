@@ -4,7 +4,7 @@ from collections.abc import Callable, Mapping
 import time
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from dashboard.mission_control.contracts import build_mission_control_state
@@ -105,6 +105,110 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
     async def mission_control_api_evidence() -> JSONResponse:
         return JSONResponse(safe_serialize(state().get("evidence_graph", {})))
 
+    # ── Phase 174: Daily Executive Brief / morning briefings (GET-only) ──
+    @router.get("/mission-control/api/morning-briefings")
+    async def mission_control_morning_briefings(
+        date_from: str | None = None,
+        date_to: str | None = None,
+        include_failed: bool = False,
+    ) -> JSONResponse:
+        retrieval = _morning_brief_retrieval()
+        return JSONResponse(
+            safe_serialize(
+                _read_only_payload(
+                    {
+                        "items": retrieval.list_summaries(
+                            date_from=date_from,
+                            date_to=date_to,
+                            include_failed=include_failed,
+                        ),
+                        "manifest": retrieval.manifest(),
+                    }
+                )
+            )
+        )
+
+    @router.get("/mission-control/api/morning-briefings/latest")
+    async def mission_control_morning_briefings_latest() -> JSONResponse:
+        brief = _morning_brief_retrieval().latest()
+        if brief is None:
+            return JSONResponse(
+                safe_serialize(
+                    _read_only_payload(
+                        {
+                            "status": "DATA UNAVAILABLE",
+                            "reason": "no_final_morning_brief",
+                        }
+                    )
+                ),
+                status_code=404,
+            )
+        return JSONResponse(safe_serialize(_read_only_payload(brief)))
+
+    @router.get("/mission-control/api/morning-briefings/manifest")
+    async def mission_control_morning_briefings_manifest() -> JSONResponse:
+        return JSONResponse(safe_serialize(_read_only_payload(_morning_brief_retrieval().manifest())))
+
+    @router.get("/mission-control/api/morning-briefings/compare")
+    async def mission_control_morning_briefings_compare(
+        from_date: str = Query("", alias="from"),
+        to_date: str = Query("", alias="to"),
+    ) -> JSONResponse:
+        return JSONResponse(
+            safe_serialize(_read_only_payload(_morning_brief_retrieval().compare_stub(from_date, to_date)))
+        )
+
+    @router.get("/mission-control/api/morning-briefings/{report_date}")
+    async def mission_control_morning_briefings_by_date(report_date: str) -> JSONResponse:
+        retrieval = _morning_brief_retrieval()
+        try:
+            brief = retrieval.by_date(report_date)
+        except ValueError:
+            return JSONResponse(
+                safe_serialize(_read_only_payload({"status": "BAD_REQUEST", "reason": "invalid_report_date"})),
+                status_code=400,
+            )
+        if brief is None:
+            return JSONResponse(
+                safe_serialize(_read_only_payload({"status": "DATA UNAVAILABLE", "report_date": report_date})),
+                status_code=404,
+            )
+        return JSONResponse(safe_serialize(_read_only_payload(brief)))
+
+    @router.get("/mission-control/api/morning-briefings/{report_date}/versions")
+    async def mission_control_morning_briefings_versions(report_date: str) -> JSONResponse:
+        retrieval = _morning_brief_retrieval()
+        try:
+            versions = retrieval.versions(report_date)
+        except ValueError:
+            return JSONResponse(
+                safe_serialize(_read_only_payload({"status": "BAD_REQUEST", "reason": "invalid_report_date"})),
+                status_code=400,
+            )
+        return JSONResponse(
+            safe_serialize(_read_only_payload({"report_date": report_date, "versions": versions}))
+        )
+
+    @router.get("/mission-control/api/morning-briefings/{report_date}/previous")
+    async def mission_control_morning_briefings_previous(report_date: str) -> JSONResponse:
+        brief = _morning_brief_retrieval().previous(report_date)
+        if brief is None:
+            return JSONResponse(
+                safe_serialize(_read_only_payload({"status": "DATA UNAVAILABLE", "report_date": report_date})),
+                status_code=404,
+            )
+        return JSONResponse(safe_serialize(_read_only_payload(brief)))
+
+    @router.get("/mission-control/api/morning-briefings/{report_date}/next")
+    async def mission_control_morning_briefings_next(report_date: str) -> JSONResponse:
+        brief = _morning_brief_retrieval().next(report_date)
+        if brief is None:
+            return JSONResponse(
+                safe_serialize(_read_only_payload({"status": "DATA UNAVAILABLE", "report_date": report_date})),
+                status_code=404,
+            )
+        return JSONResponse(safe_serialize(_read_only_payload(brief)))
+
     @router.get("/mission-control/{section_slug}", response_class=HTMLResponse)
     async def mission_control_page(section_slug: str) -> HTMLResponse:
         key = str(section_slug or "").replace("-", "_")
@@ -113,6 +217,15 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
         return HTMLResponse(render_mission_control_shell(current, active_section=section.key))
 
     return router
+
+
+def _morning_brief_retrieval():
+    from pathlib import Path
+
+    from backend.executive_intelligence.retrieval import MorningBriefRetrieval
+
+    root = Path.cwd() / "artifacts" / "runtime_reports" / "morning_briefings"
+    return MorningBriefRetrieval(root)
 
 
 def _runtime_snapshot_payload(current: Mapping[str, Any]) -> dict[str, Any]:
