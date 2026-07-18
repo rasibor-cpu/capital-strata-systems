@@ -170,7 +170,7 @@ def build_mission_control_state(
     state["source_registry"] = source_registry
     state["data_sources"] = source_registry
     state["freshness"] = freshness
-    state["data_freshness"] = _data_freshness(frontend, broker, certification, freshness)
+    state["data_freshness"] = _data_freshness(frontend, broker, certification, freshness, runtime_snapshot)
     state["health"] = build_health_summary(state, freshness_summary=freshness)
     state["state_hash"] = state_hash({key: value for key, value in state.items() if key not in {"generated_at", "state_hash"}})
     validation = validate_mission_control_state(state)
@@ -766,10 +766,19 @@ def _data_freshness(
     broker: Mapping[str, Any],
     certification: Mapping[str, Any],
     freshness: Mapping[str, Any],
+    runtime_snapshot: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    # Phase 172A: "last_runtime_heartbeat" must be the CANONICAL supervisor
+    # heartbeat (runtime/supervisor/css_runtime_supervisor_state.json,
+    # published by launcher/css_runtime_launcher.py), not broker connectivity
+    # data. runtime_snapshot["last_heartbeat"] is populated by
+    # RuntimeSnapshotProvider -> RuntimeSourceResolver -> RuntimeArtifactReader
+    # from that canonical artifact (see backend/runtime/canonical_runtime_snapshot.py).
+    snapshot = runtime_snapshot if isinstance(runtime_snapshot, Mapping) else {}
+    canonical_heartbeat = snapshot.get("last_heartbeat", DATA_UNAVAILABLE)
     return {
         "generated_at": frontend.get("generated_at", DATA_UNAVAILABLE),
-        "last_runtime_heartbeat": broker.get("last_heartbeat", broker.get("last_successful_sync", DATA_UNAVAILABLE)),
+        "last_runtime_heartbeat": canonical_heartbeat if canonical_heartbeat not in (None, "", DATA_UNAVAILABLE) else broker.get("last_heartbeat", broker.get("last_successful_sync", DATA_UNAVAILABLE)),
         "broker_freshness": broker.get("last_successful_sync", DATA_UNAVAILABLE),
         "certification_freshness": certification.get("generated_at", DATA_UNAVAILABLE),
         "overall_freshness": freshness.get("overall_freshness", DATA_UNAVAILABLE),

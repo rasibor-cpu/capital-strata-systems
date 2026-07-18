@@ -43,13 +43,19 @@ class RuntimeArtifactReader:
         critical_names = ("supervisor", "session", "account")
         critical_available = all(isinstance(payloads.get(name), Mapping) and bool(payloads.get(name)) for name in critical_names)
         freshness_status = str(freshness.get("freshness_status") or "UNAVAILABLE").upper()
-        active = critical_available and freshness_status in {"GREEN", "AMBER"}
+        canonical_authority = freshness.get("canonical_authority") if isinstance(freshness.get("canonical_authority"), Mapping) else {}
+        canonical_alive = bool(canonical_authority.get("canonical_alive"))
+        active = critical_available and freshness_status in {"GREEN", "AMBER"} and canonical_alive
         source_type = SOURCE_RUNTIME_ARTIFACT if active else SOURCE_HISTORICAL if any(payloads.values()) else SOURCE_RUNTIME_ARTIFACT
         failure = ""
         if not any(payloads.values()):
             failure = "runtime_artifacts_missing"
         elif not critical_available:
             failure = "critical_runtime_artifacts_missing"
+        elif canonical_authority.get("orphan_runtime"):
+            failure = "orphaned_runtime_detected"
+        elif not canonical_alive:
+            failure = f"canonical_runtime_not_alive:{canonical_authority.get('authority_status', 'UNKNOWN')}"
         elif freshness_status not in {"GREEN", "AMBER"}:
             failure = f"runtime_artifacts_not_fresh:{freshness_status}"
 

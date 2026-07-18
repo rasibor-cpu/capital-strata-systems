@@ -809,6 +809,13 @@ def build_launcher_frontend_state(
         },
         "opportunities": _launcher_opportunities_for_frontend(limit=10, opportunity_feed=opportunity_feed),
         "live_readiness_certification": live_readiness_certification_status(live_readiness_evidence),
+        # Phase 172A: the canonical launcher's own supervisor heartbeat, read
+        # directly from runtime/supervisor/css_runtime_supervisor_state.json
+        # via get_supervisor_summary(). Threaded through so Mission Control's
+        # "Last Runtime Heartbeat" reflects the canonical launcher heartbeat
+        # (not broker connectivity data) even when Mission Control is served
+        # live, in-process, by this launcher session.
+        "canonical_runtime_supervisor": get_supervisor_summary(),
     }
     return build_frontend_payload(dashboard_payload)
 
@@ -2136,10 +2143,22 @@ def ensure_runtime_artifacts_current(
 
 
 def _publish_supervisor_heartbeat_snapshot() -> Dict[str, Any]:
+    # Phase 172A: this is a gap-fill write only -- it fires when the
+    # canonical launcher's own artifact (runtime/supervisor/
+    # css_runtime_supervisor_state.json) is missing or stale, i.e. when
+    # launcher/css_runtime_launcher.py is not actively heartbeating. It must
+    # NEVER claim "RUNNING": doing so previously let an orphaned dashboard
+    # process (started without the canonical launcher) masquerade as a
+    # healthy canonical runtime in Mission Control. The "synthetic" marker
+    # lets every downstream reader (RuntimeArtifactFreshnessManager via
+    # classify_canonical_runtime_authority) recognize this write as
+    # non-authoritative regardless of the status string it carries.
     payload = {
-        "status": "RUNNING",
+        "status": "ORPHANED_RUNTIME",
         "last_heartbeat": _utc_iso_z(),
-        "source": "css_mobile_launcher",
+        "source": "css_mobile_launcher_gap_fill",
+        "synthetic": True,
+        "reason": "canonical_launcher_not_detected",
         "advisory_only": True,
         "execution_allowed": False,
     }
@@ -4821,7 +4840,23 @@ async def mobile_control_resume(request: Request):
         )
     return RedirectResponse(_BROWSER_REDIRECT_TARGET, status_code=303)
 
-register_mission_control(app, runtime_snapshot_state_provider(build_launcher_frontend_state))
+def _mission_control_registry_source() -> Dict[str, Any]:
+    # Phase 172A: build_launcher_frontend_state() reads the canonical
+    # supervisor artifact and other runtime artifacts fresh from disk on
+    # every call (get_supervisor_summary(), _safe_load_artifact(), ...) --
+    # it is not a stale in-memory cache, so it is safe to mark this registry
+    # callback as cross-process safe. This lets Mission Control trust this
+    # live, in-process reading instead of falling back to the artifact-file
+    # path, which is gated by session/account artifact mtime freshness
+    # thresholds unrelated to canonical launcher health. The canonical
+    # authority classification inside build_canonical_runtime_snapshot()
+    # still fails closed on the resulting payload regardless of this flag.
+    payload = build_launcher_frontend_state()
+    payload["mission_control_runtime_registry_cross_process_safe"] = True
+    return payload
+
+
+register_mission_control(app, runtime_snapshot_state_provider(_mission_control_registry_source))
 app.include_router(launcher_router)
 app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
 

@@ -7,6 +7,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from backend.runtime.canonical_runtime_authority import (
+    AUTHORITY_ONLINE,
+    classify_canonical_runtime_authority,
+)
+
 
 class RuntimeArtifactFreshnessError(RuntimeError):
     """Fail-closed exception for runtime artifact freshness checks."""
@@ -54,16 +59,18 @@ class RuntimeArtifactFreshnessManager:
         account_state_path: str | Path | None = None,
         session_state_path: str | Path | None = None,
         supervisor_state_path: str | Path | None = None,
+        dashboard_supervisor_state_path: str | Path | None = None,
         closed_trade_ledger_path: str | Path | None = None,
         stale_after_seconds: float = 300.0,
         thresholds: Mapping[str, float] | None = None,
     ) -> None:
         root = Path(artifacts_dir)
         self.artifacts_dir = root
+        supervisor_state = Path(supervisor_state_path) if supervisor_state_path else root.parent / "runtime" / "supervisor" / "css_runtime_supervisor_state.json"
         self.paths = {
             "account_state": Path(account_state_path) if account_state_path else root / "css_account_state_pcnrass.json",
             "session_state": Path(session_state_path) if session_state_path else root / "css_session_state_pcnrass.json",
-            "supervisor_state": Path(supervisor_state_path) if supervisor_state_path else root.parent / "runtime" / "supervisor" / "css_runtime_supervisor_state.json",
+            "supervisor_state": supervisor_state,
             "closed_trade_ledger": Path(closed_trade_ledger_path) if closed_trade_ledger_path else root.parent / "audit_logs" / "closed_trades.jsonl",
             "portfolio_snapshot": root / "portfolio_snapshot.json",
             "runtime_portfolio_state": root / "runtime_portfolio_state.json",
@@ -71,6 +78,11 @@ class RuntimeArtifactFreshnessManager:
             "portfolio_decision": root / "portfolio_decision.json",
             "validation_summary": root / "validation_summary.json",
         }
+        self.dashboard_supervisor_state_path = (
+            Path(dashboard_supervisor_state_path)
+            if dashboard_supervisor_state_path
+            else supervisor_state.parent / "dashboard" / supervisor_state.name
+        )
         self.stale_after_seconds = float(stale_after_seconds)
         configured = dict(self.DEFAULT_THRESHOLDS)
         configured.update({str(key): float(value) for key, value in (thresholds or {}).items()})
@@ -91,8 +103,24 @@ class RuntimeArtifactFreshnessManager:
         warnings: list[str] = []
         blockers: list[str] = []
 
+        canonical_authority = classify_canonical_runtime_authority(
+            self._read_json(self.paths["supervisor_state"]) or None,
+            self._read_json(self.dashboard_supervisor_state_path) or None,
+            now=now_dt,
+            stale_after_seconds=self.thresholds.get("supervisor_state", self.stale_after_seconds),
+        )
+
         for name, path in self.paths.items():
             artifact = self._artifact_state(name, path, now_dt, active)
+            if name == "supervisor_state" and artifact["exists"] and canonical_authority["authority_status"] != AUTHORITY_ONLINE:
+                # A recent file mtime is not proof of canonical health -- the
+                # declared status/heartbeat inside the file is authoritative.
+                # Fail closed: never let a stale/stopped/orphaned/malformed
+                # canonical supervisor read as FRESH or AGING.
+                artifact["freshness"] = "STALE"
+                artifact["status"] = "STALE"
+                artifact["stale"] = True
+            artifact["canonical_authority"] = canonical_authority
             artifacts[name] = artifact
             status = artifact["freshness"]
             if status == "MISSING":
@@ -121,6 +149,10 @@ class RuntimeArtifactFreshnessManager:
         if "runtime_portfolio_state" in artifacts:
             artifacts["portfolio_state"] = dict(artifacts["runtime_portfolio_state"])
 
+        if canonical_authority["orphan_runtime"]:
+            blockers.append("orphaned_runtime_detected")
+            warnings.append("orphaned_runtime_detected")
+
         material_warnings = [item for item in warnings if item != "no_recent_closed_trades"]
         if blockers:
             status = "RED"
@@ -137,6 +169,7 @@ class RuntimeArtifactFreshnessManager:
             "refreshed_artifacts": sorted(set(refreshed_artifacts)),
             "warnings": sorted(set(warnings)),
             "blockers": sorted(set(blockers)),
+            "canonical_authority": canonical_authority,
             "advisory_only": True,
             "execution_allowed": False,
         }

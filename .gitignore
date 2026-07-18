@@ -83,6 +83,7 @@ backend/runtime/*
 !backend/runtime/operational_validation_framework.py
 !backend/runtime/live_environment_loader.py
 !backend/runtime/broker_environment_profiles.py
+!backend/runtime/canonical_runtime_authority.py
 reporting_store/
 out/
 feeds/

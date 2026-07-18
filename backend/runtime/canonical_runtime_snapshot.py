@@ -6,6 +6,11 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+from backend.runtime.canonical_runtime_authority import (
+    AUTHORITY_ONLINE,
+    classify_canonical_runtime_authority,
+)
+
 
 SCHEMA_VERSION = "css.op002.canonical_runtime_snapshot.v1"
 DATA_UNAVAILABLE = "DATA UNAVAILABLE"
@@ -49,7 +54,15 @@ def build_canonical_runtime_snapshot(
     rc1 = _mapping(sections.get("rc1_operational_dashboard"))
 
     generated_at = _first_text(frontend.get("generated_at"), frontend.get("timestamp"), default=_now())
-    heartbeat = _first_text(broker.get("last_heartbeat"), broker.get("last_successful_sync"), generated_at, default="UNAVAILABLE")
+    # Phase 172A: the canonical launcher's supervisor heartbeat (threaded
+    # through by the caller as frontend["canonical_runtime_supervisor"], read
+    # directly from runtime/supervisor/css_runtime_supervisor_state.json)
+    # takes precedence over broker connectivity data -- "Last Runtime
+    # Heartbeat" must reflect the canonical launcher, never broker sync time.
+    canonical_supervisor = _mapping(frontend.get("canonical_runtime_supervisor"))
+    canonical_authority = classify_canonical_runtime_authority(canonical_supervisor, None) if canonical_supervisor else None
+    canonical_heartbeat = _first_text(canonical_supervisor.get("last_heartbeat_at"), canonical_supervisor.get("last_heartbeat"), default="")
+    heartbeat = canonical_heartbeat or _first_text(broker.get("last_heartbeat"), broker.get("last_successful_sync"), generated_at, default="UNAVAILABLE")
     heartbeat_age = _age_seconds(heartbeat)
     heartbeat_status = _heartbeat_status(heartbeat_age, heartbeat, stale_after_seconds=stale_after_seconds)
     source_status = str(frontend.get("mission_control_data_source") or "RUNTIME").upper()
@@ -58,7 +71,11 @@ def build_canonical_runtime_snapshot(
         "runtime_id": _runtime_id(frontend, session, source_name),
         "session_id": _first_text(session.get("session_id"), frontend.get("session_id"), default="UNAVAILABLE"),
         "user_id": _first_text(session.get("user_id"), frontend.get("user_id"), default="UNAVAILABLE"),
-        "runtime_status": _runtime_status(frontend, certification, heartbeat_status),
+        "runtime_status": (
+            canonical_authority["authority_status"]
+            if canonical_authority and canonical_authority["authority_status"] != AUTHORITY_ONLINE
+            else _runtime_status(frontend, certification, heartbeat_status)
+        ),
         "runtime_mode": _first_text(frontend.get("resolved_mode"), session.get("resolved_mode"), default="UNAVAILABLE"),
         "engine_mode": _first_text(session.get("engine_mode"), frontend.get("engine_mode"), default="UNAVAILABLE"),
         "cycle_mode": _first_text(frontend.get("cycle_mode"), default="UNAVAILABLE"),
@@ -203,12 +220,22 @@ def _snapshot_from_artifacts(source: Any, *, source_name: str) -> dict[str, Any]
     heartbeat_age = _age_seconds(heartbeat)
     heartbeat_status = _heartbeat_status(heartbeat_age, heartbeat, stale_after_seconds=120.0)
     generated_at = _now()
+    # Phase 172A: prefer the fail-closed canonical authority classification
+    # (backend.runtime.canonical_runtime_authority, computed by
+    # RuntimeArtifactFreshnessManager) over the raw supervisor status field
+    # whenever it detects a non-ONLINE condition -- e.g. ORPHANED_RUNTIME,
+    # where a subordinate dashboard heartbeat is fresh but the canonical
+    # launcher is stopped/absent. A subordinate dashboard heartbeat must
+    # never be able to present itself as canonical runtime health.
+    canonical_authority = _mapping(_mapping(diagnostics.get("freshness")).get("canonical_authority"))
+    authority_status = str(canonical_authority.get("authority_status") or "").upper()
+    runtime_status = authority_status if authority_status and authority_status != "ONLINE" else _first_text(supervisor.get("status"), default="OFFLINE")
     snapshot = {
         "schema_version": SCHEMA_VERSION,
         "runtime_id": _first_text(session.get("runtime_id"), session.get("session_id"), default="runtime_artifacts:UNAVAILABLE"),
         "session_id": _first_text(session.get("session_id"), default="UNAVAILABLE"),
         "user_id": _first_text(session.get("user_id"), default="UNAVAILABLE"),
-        "runtime_status": _first_text(supervisor.get("status"), default="OFFLINE"),
+        "runtime_status": runtime_status,
         "runtime_mode": _first_text(session.get("resolved_mode"), session.get("live_or_paper"), session.get("engine_mode"), default="UNAVAILABLE"),
         "engine_mode": _first_text(session.get("engine_mode"), default="UNAVAILABLE"),
         "cycle_mode": _first_text(session.get("cycle_mode"), default="UNAVAILABLE"),

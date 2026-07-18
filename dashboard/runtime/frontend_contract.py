@@ -157,6 +157,11 @@ def build_frontend_payload(
         "session": _mapping(dashboard_payload.get("session")),
         "session_id": str(dashboard_payload.get("session_id", "")),
         "resolved_mode": str(dashboard_payload.get("resolved_mode", "paper")),
+        # Phase 172A: passthrough of the canonical launcher supervisor state
+        # (read directly from the canonical artifact by the caller), kept
+        # separate from "broker" so the canonical runtime heartbeat is never
+        # confused with broker connectivity heartbeat.
+        "canonical_runtime_supervisor": _mapping(dashboard_payload.get("canonical_runtime_supervisor")),
         "sections": {
             "account_summary": account_summary(dashboard_payload),
             "trade": trade(dashboard_payload),
