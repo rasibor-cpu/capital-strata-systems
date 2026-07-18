@@ -1,6 +1,6 @@
 # CSS Dashboard Functional Acceptance Runbook
 
-**Phase:** 176C / 176D / 176E / 176F
+**Phase:** 176C / 176D / 176E / 176F / 176G
 **Purpose:** Repeatable operator verification that dashboard controls perform intended workflows after deployment.
 
 ## Prerequisites
@@ -53,6 +53,17 @@
 | P5 | Create Report selector | Lists all `can_generate` reports; not empty when generatable exist |
 | P6 | Click Generate on a card | Create selector preselects that `report_code` |
 | P7 | Mobile Reports cards | Same permission names and `can_generate` parity |
+
+## Plain-English PDF (Phase 176G)
+
+| Step | Action | Expected |
+|------|--------|----------|
+| PDF1 | Generate Safety Lock / Transaction Journal / Runtime Health | Response `pdf.pdf_available=true`; archive contains `report.pdf` |
+| PDF2 | Open PDF from detail | `%PDF` bytes from `/api/v1/reports/{id}/pdf` — not HTML fallback labeled as PDF |
+| PDF3 | Read PDF content | Plain English title, period, summary, safety status, limitations |
+| PDF4 | Force PDF renderer failure (test) | Canonical archive preserved; `printable_status=PARTIAL` |
+| PDF5 | VIEWER without print grant | PDF denied |
+| PDF6 | Daily Executive Brief FINAL | Phase 175 PDF endpoint still works |
 
 ## Desktop test sequence
 

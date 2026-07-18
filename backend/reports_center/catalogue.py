@@ -11,9 +11,43 @@ from dataclasses import replace
 
 from backend.reports_center.constants import EMAIL_POLICY_DISABLED, EMAIL_POLICY_EXECUTIVE_BRIEF
 from backend.reports_center.definition import CSSReportDefinition, defn
+from backend.reports_center.narrative import adapter_for_category
 
 # Canonical pre-generation validator for Reports Center producers (safe filters + dispatch).
 _RC_VALIDATOR = "reports_center.producers.validate_filters"
+
+
+def _apply_pdf_policy(item: CSSReportDefinition) -> CSSReportDefinition:
+    """Phase 176G: generatable reports require HTML+PDF with primary_human_format=PDF."""
+    if item.status not in {"AVAILABLE", "AVAILABLE_WITH_LIMITATIONS"} or not item.producer:
+        return replace(
+            item,
+            pdf_required=False,
+            pdf_supported=False,
+            pdf_status="NOT_APPLICABLE",
+            narrative_adapter="",
+            primary_human_format="HTML",
+            technical_export_formats=tuple(
+                f for f in item.supported_formats if f not in {"HTML", "PDF"}
+            ),
+        )
+    formats = list(item.supported_formats)
+    if "HTML" not in formats:
+        formats.insert(0, "HTML")
+    if "PDF" not in formats:
+        formats.append("PDF")
+    tech = tuple(f for f in formats if f not in {"HTML", "PDF"})
+    return replace(
+        item,
+        supported_formats=tuple(formats),
+        pdf_required=True,
+        pdf_supported=True,
+        pdf_status="SUPPORTED",
+        narrative_adapter=item.narrative_adapter or adapter_for_category(item.category),
+        primary_human_format="PDF",
+        technical_export_formats=tech or ("JSON",),
+        printable=True,
+    )
 
 
 def _coming(
@@ -969,7 +1003,7 @@ def build_catalogue() -> tuple[CSSReportDefinition, ...]:
     for item in items:
         if item.status in {"AVAILABLE", "AVAILABLE_WITH_LIMITATIONS"} and not item.validator:
             item = replace(item, validator=_RC_VALIDATOR)
-        filled.append(item)
+        filled.append(_apply_pdf_policy(item))
     return tuple(filled)
 
 

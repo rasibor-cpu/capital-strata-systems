@@ -229,4 +229,10 @@ def ui_report_definition(
         "configuration_error": caps["configuration_error"],
         "producer_registered": caps["producer_registered"],
         "evidence_contract_supported": caps["evidence_contract_supported"],
+        "pdf_required": definition.pdf_required,
+        "pdf_supported": definition.pdf_supported,
+        "pdf_status": definition.pdf_status,
+        "narrative_adapter": definition.narrative_adapter,
+        "primary_human_format": definition.primary_human_format,
+        "technical_export_formats": list(definition.technical_export_formats),
     }

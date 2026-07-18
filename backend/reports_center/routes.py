@@ -175,36 +175,23 @@ def create_reports_center_router(
         return HTMLResponse(str(result.get("html") or ""))
 
     @router.get("/{report_id}/pdf")
-    async def pdf_info(report_id: str, request: Request) -> JSONResponse:
+    async def pdf_download(report_id: str, request: Request) -> Response:
         auth = _resolve(request, permission="reports_print")
         if not auth.authenticated:
             return JSONResponse(safe_serialize({"status": "DENIED", **SAFETY_LOCKS}), status_code=403)
-        info = service.print_info(report_id, role=auth.role, user_id=auth.user_id)
-        if info.get("status") != "OK":
-            code = 403 if info.get("status") == "DENIED" else 404
-            return JSONResponse(safe_serialize(info), status_code=code)
-        data = service.archive.retrieve(report_id) or {}
-        if data.get("report_type") == "daily_executive_brief" or str(report_id).startswith("cssrpt_executive_"):
-            date = str(data.get("report_date") or "")
-            return JSONResponse(
-                safe_serialize(
-                    {
-                        **info,
-                        "pdf_bytes_endpoint": f"/api/v1/executive-brief/{date}/pdf",
-                        "note": "Executive brief PDF served by Phase 175 distribution API.",
-                    }
-                )
+        result = service.pdf_bytes(report_id, role=auth.role, user_id=auth.user_id)
+        if result.get("status") == "BRIDGE":
+            return JSONResponse(safe_serialize(result))
+        if result.get("status") == "OK" and result.get("pdf_bytes"):
+            return Response(
+                content=result["pdf_bytes"],
+                media_type="application/pdf",
+                headers={
+                    "Content-Disposition": f'inline; filename="{result.get("filename") or (report_id + ".pdf")}"'
+                },
             )
-        return JSONResponse(
-            safe_serialize(
-                {
-                    **info,
-                    "pdf_status": "HTML_PRINT_FALLBACK",
-                    "note": "Use printable HTML; dedicated PDF renderer is available for executive briefs.",
-                    "print_html": f"/api/v1/reports/{report_id}/print",
-                }
-            )
-        )
+        code = 403 if result.get("status") == "DENIED" else (404 if result.get("status") == "NOT_FOUND" else 409)
+        return JSONResponse(safe_serialize({k: v for k, v in result.items() if k != "pdf_bytes"}), status_code=code)
 
     @router.get("/{report_id}/audit")
     async def audit(report_id: str, request: Request) -> JSONResponse:

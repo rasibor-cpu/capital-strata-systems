@@ -18,6 +18,11 @@ that serves the Reports UI (relative URL). See
 and effective `can_generate` are not stripped by a reduced DTO. See
 `PHASE_176F_REPORT_PERMISSION_AND_GENERATABILITY_RECONCILIATION.md`.
 
+**Phase 176G note:** Generatable reports use PDF as `primary_human_format` with
+shared plain-English `CSSReportPDFRenderer`. Desktop/mobile detail expose
+**Open PDF** as the primary action. See
+`PHASE_176G_UNIVERSAL_PLAIN_ENGLISH_PDF_REPORTING.md`.
+
 - Total controls: **144**
 - Pages audited: **49**
 - Sub-tabs audited: **5**

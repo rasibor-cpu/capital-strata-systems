@@ -44,6 +44,8 @@ class ReportArchiveStore:
         markdown: str = "",
         html: str = "",
         csv_text: str = "",
+        pdf_bytes: bytes | None = None,
+        pdf_meta: dict[str, Any] | None = None,
         created_by: str = "reports_center",
         created_reason: str = "generate",
     ) -> dict[str, Any]:
@@ -97,6 +99,25 @@ class ReportArchiveStore:
             (target / "report.html").write_text(html, encoding="utf-8")
         if csv_text:
             (target / "report.csv").write_text(csv_text, encoding="utf-8")
+        pdf_manifest: dict[str, Any] | None = None
+        if pdf_bytes:
+            (target / "report.pdf").write_bytes(pdf_bytes)
+            pdf_manifest = {
+                "filename": "report.pdf",
+                "size": len(pdf_bytes),
+                "sha256": _sha256_bytes(pdf_bytes),
+                "generated_at_utc": (pdf_meta or {}).get("generated_at_utc") or _utc_now(),
+                "renderer_version": (pdf_meta or {}).get("renderer_version") or "",
+                "narrative_adapter": (pdf_meta or {}).get("narrative_adapter") or "",
+                "page_count": (pdf_meta or {}).get("page_count"),
+            }
+            body["pdf_status"] = "OK"
+            body["printable_status"] = "COMPLETE"
+            body["pdf_sha256"] = pdf_manifest["sha256"]
+            # Refresh JSON with PDF metadata (canonical hash remains pre-PDF content hash)
+            (target / "report.json").write_text(
+                json.dumps(body, indent=2, sort_keys=True, default=str), encoding="utf-8"
+            )
         validation_path = target / "validation.json"
         validation_path.write_text(json.dumps(validation or {}, indent=2, sort_keys=True), encoding="utf-8")
         provenance = {
@@ -119,6 +140,9 @@ class ReportArchiveStore:
             "files": sorted(p.name for p in target.iterdir() if p.is_file()),
             "official_report": bool(body.get("official_report")),
             "advisory_only": True,
+            "printable_status": body.get("printable_status") or ("COMPLETE" if pdf_bytes else "PARTIAL"),
+            "pdf_status": body.get("pdf_status") or ("OK" if pdf_bytes else "NOT_ATTACHED"),
+            "pdf": pdf_manifest,
             **SAFETY_LOCKS,
         }
         (target / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
@@ -133,6 +157,7 @@ class ReportArchiveStore:
                         "report_version": ver_name,
                         "report_hash": report_hash,
                         "path_ref": f"{family}/{report_type}/{report_date[:4]}/{report_date[5:7]}/{report_date}/{ver_name}",
+                        "pdf_status": manifest.get("pdf_status"),
                     },
                     indent=2,
                     sort_keys=True,
@@ -147,7 +172,76 @@ class ReportArchiveStore:
             "report_status": status,
             "archive_ref": f"{family}/{report_type}/{report_date[:4]}/{report_date[5:7]}/{report_date}/{('FAILED/' + ver_name) if status == 'FAILED' else ver_name}",
             "path_ref": str(target.relative_to(self.root)).replace("\\", "/"),
+            "pdf_status": manifest.get("pdf_status"),
+            "printable_status": manifest.get("printable_status"),
+            "pdf": pdf_manifest,
         }
+
+    def attach_pdf(
+        self,
+        report_id: str,
+        pdf_bytes: bytes,
+        *,
+        pdf_meta: dict[str, Any] | None = None,
+        failure_reason: str | None = None,
+    ) -> dict[str, Any]:
+        """Attach or record PDF outcome on an existing version directory without corrupting JSON."""
+        meta = self._locate(report_id)
+        if meta is None:
+            return {"status": "NOT_FOUND", "report_id": report_id}
+        target = meta["dir"]
+        man_path = target / "manifest.json"
+        report_path = target / "report.json"
+        manifest = json.loads(man_path.read_text(encoding="utf-8")) if man_path.is_file() else {}
+        body = json.loads(report_path.read_text(encoding="utf-8")) if report_path.is_file() else {}
+        if failure_reason:
+            body["pdf_status"] = "FAILED"
+            body["printable_status"] = "PARTIAL"
+            body["pdf_failure_reason"] = failure_reason[:300]
+            manifest["pdf_status"] = "FAILED"
+            manifest["printable_status"] = "PARTIAL"
+            manifest["pdf_failure_reason"] = failure_reason[:300]
+            manifest["pdf"] = None
+        else:
+            (target / "report.pdf").write_bytes(pdf_bytes)
+            pdf_manifest = {
+                "filename": "report.pdf",
+                "size": len(pdf_bytes),
+                "sha256": _sha256_bytes(pdf_bytes),
+                "generated_at_utc": (pdf_meta or {}).get("generated_at_utc") or _utc_now(),
+                "renderer_version": (pdf_meta or {}).get("renderer_version") or "",
+                "narrative_adapter": (pdf_meta or {}).get("narrative_adapter") or "",
+                "page_count": (pdf_meta or {}).get("page_count"),
+            }
+            body["pdf_status"] = "OK"
+            body["printable_status"] = "COMPLETE"
+            body["pdf_sha256"] = pdf_manifest["sha256"]
+            body.pop("pdf_failure_reason", None)
+            manifest["pdf_status"] = "OK"
+            manifest["printable_status"] = "COMPLETE"
+            manifest["pdf"] = pdf_manifest
+            manifest.pop("pdf_failure_reason", None)
+        manifest["files"] = sorted(p.name for p in target.iterdir() if p.is_file())
+        if report_path.is_file():
+            # Preserve original report_hash; only annotate PDF fields.
+            report_path.write_text(json.dumps(body, indent=2, sort_keys=True, default=str), encoding="utf-8")
+        man_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+        return {
+            "status": "OK",
+            "report_id": report_id,
+            "pdf_status": manifest.get("pdf_status"),
+            "printable_status": manifest.get("printable_status"),
+            "pdf": manifest.get("pdf"),
+        }
+
+    def read_pdf(self, report_id: str) -> bytes | None:
+        meta = self._locate(report_id)
+        if meta is None:
+            return None
+        path = meta["dir"] / "report.pdf"
+        if not path.is_file():
+            return None
+        return path.read_bytes()
 
     def retrieve(self, report_id: str) -> dict[str, Any] | None:
         meta = self._locate(report_id)
@@ -193,6 +287,14 @@ class ReportArchiveStore:
     def list_failed(self, *, limit: int = 25) -> list[dict[str, Any]]:
         return [m for m in self.list_recent(limit=limit * 3) if str(m.get("report_status")).upper() == "FAILED"][:limit]
 
+    # PDF annotation keys written after canonical report_hash (store/attach_pdf).
+    _PDF_ANNOTATION_KEYS = frozenset({
+        "pdf_status",
+        "printable_status",
+        "pdf_sha256",
+        "pdf_failure_reason",
+    })
+
     def verify_integrity(self, report_id: str) -> dict[str, Any]:
         meta = self._locate(report_id)
         if meta is None:
@@ -201,16 +303,17 @@ class ReportArchiveStore:
         raw = path.read_text(encoding="utf-8")
         data = json.loads(raw)
         stored = str(data.get("report_hash") or "")
-        # Recompute excluding mutable verification of stored hash: hash the body without report_hash then compare
-        clone = dict(data)
-        expected = clone.pop("report_hash", None)
-        recomputed = _sha256_text(json.dumps(clone, indent=2, sort_keys=True, default=str))
-        # Also accept hash of file as written (includes report_hash) matching stored
-        file_hash = _sha256_text(raw)
-        ok = stored and (stored == recomputed or stored == file_hash or stored == expected)
-        # Practical: re-serialize with hash and compare to stored content hash field
-        body_for_hash = {k: v for k, v in data.items() if k != "report_hash"}
+        # Canonical hash is pre-PDF content: drop report_hash and PDF annotations.
+        body_for_hash = {
+            k: v
+            for k, v in data.items()
+            if k != "report_hash" and k not in self._PDF_ANNOTATION_KEYS
+        }
         alt = _sha256_text(json.dumps(body_for_hash, indent=2, sort_keys=True, default=str))
+        # Also accept full-file hash and hash-with-annotations (legacy / alternate writers).
+        clone = {k: v for k, v in data.items() if k != "report_hash"}
+        recomputed = _sha256_text(json.dumps(clone, indent=2, sort_keys=True, default=str))
+        file_hash = _sha256_text(raw)
         ok = bool(stored) and stored in {alt, recomputed, file_hash}
         return {
             "status": "OK" if ok else "MISMATCH",

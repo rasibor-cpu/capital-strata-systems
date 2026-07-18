@@ -10,6 +10,7 @@ from typing import Any
 from backend.reports_center.archive import ReportArchiveStore
 from backend.reports_center.audit import ReportAuditLog
 from backend.reports_center.constants import SAFETY_LOCKS, SCHEMA_VERSION
+from backend.reports_center.pdf_renderer import CSSReportPDFRenderer
 from backend.reports_center.producers import produce, utc_today, validate_filters
 from backend.reports_center.rbac import ReportsAccessControl
 from backend.reports_center.registry import by_code, catalog_payload, category_menu
@@ -33,6 +34,7 @@ class ReportsCenterService:
             audit_root if audit_root else self.repo_root / "artifacts/runtime_reports/report_audit"
         )
         self.access = ReportsAccessControl()
+        self.pdf_renderer = CSSReportPDFRenderer()
 
     def home(self, *, role: str = "VIEWER", user_id: str = "") -> dict[str, Any]:
         auth = self.access.authorization_status(role, user_id=user_id)
@@ -202,6 +204,11 @@ class ReportsCenterService:
         produced["schema_version"] = SCHEMA_VERSION
 
         archive_meta = None
+        pdf_result: dict[str, Any] = {
+            "pdf_status": "NOT_ATTACHED",
+            "pdf_available": False,
+            "printable_status": "PARTIAL",
+        }
         # Daily executive brief already archived under morning_briefings — record bridge only
         if report_code == "daily_executive_brief":
             archive_meta = {
@@ -210,26 +217,109 @@ class ReportsCenterService:
             }
             report_id = f"cssrpt_executive_daily_executive_brief_{report_date}_bridge"
             produced["report_id"] = report_id
+            # Phase 175 PDF remains canonical for FINAL briefs; expose bridge endpoint.
+            if str(produced.get("report_status") or "").upper() == "FINAL":
+                pdf_result = {
+                    "pdf_status": "OK",
+                    "pdf_available": True,
+                    "printable_status": "COMPLETE",
+                    "pdf_bytes_endpoint": f"/api/v1/executive-brief/{report_date}/pdf",
+                    "note": "Executive Brief PDF served by Phase 175 distribution API.",
+                    "primary_human_format": "PDF",
+                }
+            else:
+                pdf_result = {
+                    "pdf_status": "UNAVAILABLE",
+                    "pdf_available": False,
+                    "printable_status": "PARTIAL",
+                    "pdf_failure_reason": "brief_not_final",
+                    "note": "Official Executive Brief PDF requires FINAL status (Phase 175).",
+                }
         elif persist:
+            # Render plain-English HTML/PDF before archive so report.html is narrative, not dump.
+            defn_dict = definition.as_dict()
+            narrative_html = ""
+            pdf_bytes = None
+            pdf_meta = None
+            try:
+                rendered = self.pdf_renderer.render(
+                    produced,
+                    definition=defn_dict,
+                    printed_by=f"{user_id}/{role}",
+                )
+                narrative_html = str(rendered.get("html") or "")
+                pdf_bytes = rendered["pdf_bytes"]
+                pdf_meta = {
+                    "generated_at_utc": rendered["generated_at_utc"],
+                    "renderer_version": rendered["renderer_version"],
+                    "narrative_adapter": rendered["narrative_adapter"],
+                    "page_count": rendered["page_count"],
+                }
+                pdf_result = {
+                    "pdf_status": "OK",
+                    "pdf_available": True,
+                    "printable_status": "COMPLETE",
+                    "pdf_sha256": rendered["pdf_sha256"],
+                    "page_count": rendered["page_count"],
+                    "renderer_version": rendered["renderer_version"],
+                    "narrative_adapter": rendered["narrative_adapter"],
+                    "primary_human_format": "PDF",
+                }
+            except Exception as exc:
+                pdf_result = {
+                    "pdf_status": "FAILED",
+                    "pdf_available": False,
+                    "printable_status": "PARTIAL",
+                    "pdf_failure_reason": str(exc)[:200],
+                    "primary_human_format": "PDF",
+                }
+                # Official reports: PDF failure blocks distribution claim but not canonical archive.
+                if definition.official_report:
+                    pdf_result["distribution_blocked"] = True
+                    pdf_result["note"] = (
+                        "Official report PDF failure blocks distribution; canonical archive preserved."
+                    )
+
+            # PDF status fields are annotated after canonical report_hash in archive.store/attach_pdf.
             archive_meta = self.archive.publish(
                 family=definition.category,
                 report_type=report_code,
                 report_date=report_date,
-                payload=produced,
+                payload=dict(produced),
                 validation={
                     "finalization_allowed": produced.get("report_status") == "FINAL",
                     "report_status": produced.get("report_status"),
                 },
                 markdown=str(produced.get("markdown") or ""),
-                html=str(produced.get("html") or ""),
+                html=narrative_html or str(produced.get("html") or ""),
                 csv_text=str(produced.get("csv") or ""),
+                pdf_bytes=pdf_bytes,
+                pdf_meta=pdf_meta,
                 created_by=user_id,
                 created_reason="reports_center_generate",
             )
+            if pdf_result.get("pdf_status") == "FAILED":
+                self.archive.attach_pdf(
+                    archive_meta["report_id"],
+                    b"",
+                    failure_reason=str(pdf_result.get("pdf_failure_reason") or "pdf_render_failed"),
+                )
+                self.audit.record(
+                    action="pdf_render",
+                    outcome="FAILED",
+                    actor_id=user_id,
+                    actor_role=role,
+                    report_id=archive_meta["report_id"],
+                    report_type=report_code,
+                    failure_reason=str(pdf_result.get("pdf_failure_reason") or "")[:200],
+                )
             produced["report_id"] = archive_meta["report_id"]
             produced["report_version"] = archive_meta["report_version"]
             produced["report_hash"] = archive_meta["report_hash"]
             produced["archive_ref"] = archive_meta["archive_ref"]
+            pdf_result["pdf_endpoint"] = f"/api/v1/reports/{archive_meta['report_id']}/pdf"
+            if archive_meta.get("pdf"):
+                pdf_result["pdf"] = archive_meta["pdf"]
         else:
             produced["report_id"] = f"cssrpt_draft_{report_code}_{report_date}"
             produced["report_status"] = produced.get("report_status") or "DRAFT"
@@ -258,6 +348,9 @@ class ReportsCenterService:
             "blockers": [] if produced.get("report_status") == "FINAL" else [produced.get("limitations") or "generation_failed"],
             "archive": archive_meta,
             "available_formats": list(definition.supported_formats),
+            "primary_human_format": definition.primary_human_format or "PDF",
+            "technical_export_formats": list(definition.technical_export_formats),
+            "pdf": pdf_result,
             "authorized_actions": self._actions_for(definition, role, produced),
             "report": produced,
             **SAFETY_LOCKS,
@@ -320,6 +413,8 @@ class ReportsCenterService:
             return {"status": "DENIED", "reason": "print_denied"}
         status = str(data.get("report_status") or "").upper()
         official_print = status == "FINAL"
+        pdf_status = str(data.get("pdf_status") or "NOT_ATTACHED")
+        pdf_available = pdf_status == "OK" and self.archive.read_pdf(report_id) is not None
         return {
             "status": "OK",
             "report_id": report_id,
@@ -328,7 +423,106 @@ class ReportsCenterService:
             "diagnostic_preview_only": not official_print,
             "html_endpoint": f"/api/v1/reports/{report_id}/print",
             "pdf_endpoint": f"/api/v1/reports/{report_id}/pdf",
+            "primary_human_format": (definition.primary_human_format if definition else "PDF"),
+            "technical_export_formats": list(definition.technical_export_formats) if definition else [],
+            "pdf_status": pdf_status,
+            "pdf_available": pdf_available,
+            "printable_status": data.get("printable_status") or ("COMPLETE" if pdf_available else "PARTIAL"),
+            "pdf_failure_reason": data.get("pdf_failure_reason"),
             "requires_permission": required,
+            **SAFETY_LOCKS,
+        }
+
+    def pdf_bytes(self, report_id: str, *, role: str = "VIEWER", user_id: str = "anonymous") -> dict[str, Any]:
+        """Return native PDF bytes when archived; never claim HTML fallback as PDF."""
+        info = self.print_info(report_id, role=role, user_id=user_id)
+        if info.get("status") != "OK":
+            return info
+        data = self.archive.retrieve(report_id) or {}
+        definition = by_code(str(data.get("report_type") or ""))
+        # Bridge DEB to Phase 175 when requested via reports IDs that are not in reports archive.
+        if str(data.get("report_type") or "") == "daily_executive_brief" or str(report_id).startswith(
+            "cssrpt_executive_"
+        ):
+            return {
+                "status": "BRIDGE",
+                "pdf_bytes_endpoint": f"/api/v1/executive-brief/{data.get('report_date') or ''}/pdf",
+                "note": "Executive Brief PDF served by Phase 175 distribution API.",
+                **info,
+            }
+        raw = self.archive.read_pdf(report_id)
+        if raw is None:
+            # Attempt on-demand render for older archives without PDF
+            if definition and definition.pdf_supported:
+                try:
+                    rendered = self.pdf_renderer.render(
+                        data,
+                        definition=definition.as_dict(),
+                        printed_by=f"{user_id}/{role}",
+                    )
+                    self.archive.attach_pdf(
+                        report_id,
+                        rendered["pdf_bytes"],
+                        pdf_meta={
+                            "generated_at_utc": rendered["generated_at_utc"],
+                            "renderer_version": rendered["renderer_version"],
+                            "narrative_adapter": rendered["narrative_adapter"],
+                            "page_count": rendered["page_count"],
+                        },
+                    )
+                    raw = rendered["pdf_bytes"]
+                    info["pdf_status"] = "OK"
+                    info["pdf_available"] = True
+                    info["printable_status"] = "COMPLETE"
+                except Exception as exc:
+                    self.archive.attach_pdf(report_id, b"", failure_reason=str(exc)[:200])
+                    self.audit.record(
+                        action="pdf_render",
+                        outcome="FAILED",
+                        actor_id=user_id,
+                        actor_role=role,
+                        report_id=report_id,
+                        report_type=str(data.get("report_type") or ""),
+                        failure_reason=str(exc)[:200],
+                    )
+                    return {
+                        "status": "FAILED",
+                        "pdf_status": "FAILED",
+                        "pdf_available": False,
+                        "printable_status": "PARTIAL",
+                        "pdf_failure_reason": str(exc)[:200],
+                        **{k: v for k, v in info.items() if k != "status"},
+                        **SAFETY_LOCKS,
+                    }
+            else:
+                return {
+                    "status": "UNAVAILABLE",
+                    "pdf_status": "UNAVAILABLE",
+                    "pdf_available": False,
+                    "note": "PDF not archived for this report.",
+                    **{k: v for k, v in info.items() if k != "status"},
+                    **SAFETY_LOCKS,
+                }
+        self.audit.record(
+            action="pdf_export",
+            outcome="OK",
+            actor_id=user_id,
+            actor_role=role,
+            permission_used=(definition.required_print_permission if definition else "reports_print_all"),
+            report_id=report_id,
+            report_type=str(data.get("report_type") or ""),
+            report_version=str(data.get("report_version") or ""),
+            report_hash=str(data.get("report_hash") or ""),
+            official=str(data.get("report_status") or "").upper() == "FINAL",
+        )
+        return {
+            "status": "OK",
+            "content_type": "application/pdf",
+            "pdf_bytes": raw,
+            "filename": f"{report_id}.pdf",
+            "pdf_status": "OK",
+            "pdf_available": True,
+            **{k: v for k, v in info.items() if k not in {"status", "pdf_status", "pdf_available"}},
             **SAFETY_LOCKS,
         }
 

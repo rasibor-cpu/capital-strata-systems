@@ -2,6 +2,11 @@
 
 Phase 176 — generated from canonical catalogue `backend.reports_center.catalogue`.
 
+**Phase 176G note:** Every generatable report declares `primary_human_format=PDF`,
+`pdf_supported=true`, and receives plain-English PDF via `CSSReportPDFRenderer`.
+Daily Executive Brief FINAL PDF bytes remain Phase 175 distribution. See
+`PHASE_176G_UNIVERSAL_PLAIN_ENGLISH_PDF_REPORTING.md`.
+
 | report_code | title | category | status | inventory_class | producer | evidence | formats | view_perm | generate_perm | print_perm | email_policy | official | advisory | phase | limitations |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | daily_executive_brief | Daily Executive Brief | executive_intelligence | AVAILABLE | IMPLEMENTED_AND_RELIABLE | executive_intelligence.ExecutiveIntelligenceEngine | runtime_health, broker_health, portfolio, risk, overnight_market_intelligence, trading_intelligence, learning | HTML, PDF, JSON, Markdown | reports_view | reports_generate | executive_brief_print | EXECUTIVE_BRIEF_ADMIN_SUPER_ONLY | True | True | 174/175/176 | Market panel UNAVAILABLE blocks FINAL (fail-closed). |

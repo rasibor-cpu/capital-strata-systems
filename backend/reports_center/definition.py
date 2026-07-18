@@ -39,6 +39,13 @@ class CSSReportDefinition:
     limitations: str = ""
     implementation_phase: str = "176"
     menu_path: str = ""
+    # Phase 176G — universal plain-English PDF policy
+    pdf_required: bool = False
+    pdf_supported: bool = False
+    pdf_status: str = "NOT_APPLICABLE"  # SUPPORTED | PDF_NOT_YET_AVAILABLE | NOT_APPLICABLE | FAILED
+    narrative_adapter: str = ""
+    primary_human_format: str = "HTML"
+    technical_export_formats: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -46,6 +53,7 @@ class CSSReportDefinition:
             "supported_scopes",
             "supported_formats",
             "evidence_sources",
+            "technical_export_formats",
         ):
             d[key] = list(d[key])
         # Property — not a dataclass field; must be explicit for API/UI payloads.

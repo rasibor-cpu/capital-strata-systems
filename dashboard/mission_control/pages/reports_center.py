@@ -185,6 +185,9 @@ def _report_card(report: dict, can_generate: bool) -> str:
     perms = _esc(
         f"View permission: {view_p}; Generate permission: {gen_p}; Print permission: {print_p}"
     )
+    primary = _esc(report.get("primary_human_format") or "PDF")
+    tech = _esc(", ".join(report.get("technical_export_formats") or []) or "—")
+    pdf_state = _esc(report.get("pdf_status") or ("SUPPORTED" if report.get("pdf_supported") else "NOT_APPLICABLE"))
     # Effective generate uses server-side can_generate when present; page-level
     # can_generate remains a coarse gate for the Create panel.
     effective = bool(report.get("can_generate")) if "can_generate" in report else (
@@ -208,6 +211,9 @@ def _report_card(report: dict, can_generate: bool) -> str:
   </header>
   <dl class="rc-meta">
     <div><dt>Code</dt><dd><code>{code}</code></dd></div>
+    <div><dt>Primary format</dt><dd>{primary}</dd></div>
+    <div><dt>Technical formats</dt><dd>{tech}</dd></div>
+    <div><dt>PDF</dt><dd>{pdf_state}</dd></div>
     <div><dt>Formats</dt><dd>{formats}</dd></div>
     <div><dt>Permissions</dt><dd>{perms}</dd></div>
     {reason_row}
@@ -303,12 +309,13 @@ def _detail_panel() -> str:
   <h2>Report Detail</h2>
   <p class="rc-muted">Select a library report or search by report ID.</p>
   <div class="rc-actions" id="rc-detail-actions" hidden>
+    <a class="rc-btn rc-btn-primary" id="rc-detail-pdf-link" href="#" target="_blank" rel="noopener">Open PDF</a>
     <button type="button" class="rc-btn" data-rc-detail="print">Print preview</button>
-    <button type="button" class="rc-btn" data-rc-detail="pdf">PDF info</button>
+    <a class="rc-btn" id="rc-detail-print-link" href="#" target="_blank" rel="noopener">View Report (HTML)</a>
+    <button type="button" class="rc-btn" data-rc-detail="pdf">PDF status</button>
     <button type="button" class="rc-btn" data-rc-detail="versions">Versions</button>
     <button type="button" class="rc-btn" data-rc-detail="audit">Audit</button>
     <button type="button" class="rc-btn" data-rc-detail="verify">Verify integrity</button>
-    <a class="rc-btn" id="rc-detail-print-link" href="#" target="_blank" rel="noopener">Open printable HTML</a>
   </div>
   <pre id="rc-detail-body" class="rc-result" aria-live="polite">No report selected.</pre>
 </section>
@@ -433,12 +440,20 @@ def _scripts() -> str:
     currentReportId = reportId;
     detailActions.hidden = false;
     printLink.href = '/api/v1/reports/' + encodeURIComponent(reportId) + '/print';
+    const pdfLink = document.getElementById('rc-detail-pdf-link');
+    if (pdfLink) pdfLink.href = '/api/v1/reports/' + encodeURIComponent(reportId) + '/pdf';
     detailBody.textContent = 'Loading…';
     document.getElementById('rc-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     try {
       const res = await fetch('/mission-control/api/reports/' + encodeURIComponent(reportId), { headers: headers() });
       const data = await res.json();
-      detailBody.textContent = JSON.stringify(data, null, 2);
+      const pdfMeta = {
+        primary_action: 'Open PDF',
+        pdf_endpoint: '/api/v1/reports/' + reportId + '/pdf',
+        html_endpoint: '/api/v1/reports/' + reportId + '/print',
+        note: 'PDF is the primary human-facing format. HTML print remains available.'
+      };
+      detailBody.textContent = JSON.stringify({ ...data, pdf_ui: pdfMeta }, null, 2);
     } catch (err) {
       detailBody.textContent = 'Detail failed: ' + err;
     }

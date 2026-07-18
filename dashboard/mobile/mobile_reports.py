@@ -280,9 +280,24 @@ def render_detail(
     print_info = _svc().print_info(report_id, role=role, user_id=user_id)
     actions = []
     if print_info.get("status") == "OK":
-        actions.append(f"<a class='button-link' href='/api/v1/reports/{_esc(report_id)}/print' target='_blank' rel='noopener'>Print preview</a>")
-        actions.append(f"<a class='button-link quiet' href='/api/v1/reports/{_esc(report_id)}/pdf'>PDF info</a>")
+        pdf_label = "Open PDF"
+        if print_info.get("pdf_available"):
+            pdf_label = "Open PDF (available)"
+        elif print_info.get("pdf_status") == "FAILED":
+            pdf_label = "PDF failed"
+        elif print_info.get("pdf_status") in {"UNAVAILABLE", "NOT_ATTACHED"}:
+            pdf_label = "PDF unavailable"
+        actions.append(
+            f"<a class='button-link' href='/api/v1/reports/{_esc(report_id)}/pdf' target='_blank' rel='noopener'>{pdf_label}</a>"
+        )
+        actions.append(
+            f"<a class='button-link quiet' href='/api/v1/reports/{_esc(report_id)}/print' target='_blank' rel='noopener'>Print / View HTML</a>"
+        )
     actions.append(f"<a class='button-link quiet' href='/reports/library'>Library</a>")
+    pdf_banner = (
+        f"<p>Primary format: PDF · Status: {_esc(print_info.get('pdf_status'))} · "
+        f"Printable: {_esc(print_info.get('printable_status'))}</p>"
+    )
     content = report.get("html") or report.get("content") or report
     # Executive brief panels if present
     brief_extra = ""
@@ -313,6 +328,7 @@ def render_detail(
     <p><code>{_esc(report_id)}</code></p>
     <p>Hash: {_esc(report.get('report_hash'))}</p>
     <p>Limitations: {_esc(report.get('limitations') or '—')}</p>
+    {pdf_banner}
     <div class="top-actions" style="flex-wrap:wrap;gap:8px;">{''.join(actions)}</div>
   </section>
   {brief_extra}

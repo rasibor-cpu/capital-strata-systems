@@ -473,16 +473,19 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
 
     @router.get("/mission-control/api/reports/{report_id}/pdf")
     async def mission_control_reports_pdf_info(report_id: str, request: Request) -> JSONResponse:
-        _role, _user, auth = _reports_role_user(request)
+        from backend.reports_center.service import ReportsCenterService
+
+        role, user, auth = _reports_role_user(request)
         if not auth.authenticated:
             return JSONResponse(safe_serialize(_read_only_payload({"status": "DENIED"})), status_code=403)
+        info = ReportsCenterService().print_info(report_id, role=role, user_id=user)
         return JSONResponse(
             safe_serialize(
                 _read_only_payload(
                     {
-                        "report_id": report_id,
+                        **info,
                         "pdf_endpoint": f"/api/v1/reports/{report_id}/pdf",
-                        "note": "Controlled PDF delivery is under /api/v1/reports.",
+                        "note": "Controlled PDF bytes are delivered by GET /api/v1/reports/{id}/pdf.",
                     }
                 )
             )

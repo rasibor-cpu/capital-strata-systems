@@ -53,7 +53,9 @@ def test_no_available_without_producer() -> None:
             assert d.generatable
             assert "XLSX" not in d.supported_formats
             if "PDF" in d.supported_formats:
-                assert d.report_code == "daily_executive_brief"
+                assert d.pdf_supported is True
+                assert d.primary_human_format == "PDF"
+                assert d.pdf_status == "SUPPORTED"
             if d.emailable:
                 assert d.report_code == "daily_executive_brief"
                 assert d.email_policy == "EXECUTIVE_BRIEF_ADMIN_SUPER_ONLY"

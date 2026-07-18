@@ -254,6 +254,11 @@ def _pdf_lines(brief: Mapping[str, Any], *, printed_by: str, ts: str) -> list[st
     return [str(line) for line in lines]
 
 
+def build_text_pdf(lines: list[str], *, lines_per_page: int = 48) -> bytes:
+    """Public wrapper around the Phase 175 minimal PDF writer (reuse for Reports Center)."""
+    return _build_simple_pdf(lines, lines_per_page=lines_per_page)
+
+
 def _build_simple_pdf(lines: list[str], *, lines_per_page: int = 48) -> bytes:
     """Minimal PDF 1.4 writer (Helvetica text)."""
     pages: list[list[str]] = []
