@@ -49,7 +49,12 @@ class ReportsCenterService:
                 except Exception:
                     latest_brief = None
         cat = catalog_payload()
-        generatable = [r for r in cat["reports"] if r.get("status") in {"AVAILABLE", "AVAILABLE_WITH_LIMITATIONS"}]
+        from backend.reports_center.capabilities import ui_report_definition
+        from backend.reports_center.registry import all_definitions
+
+        access = self.access
+        ui_rows = [ui_report_definition(d, role=role, access=access) for d in all_definitions()]
+        generatable = [r for r in ui_rows if r.get("can_generate")]
         return {
             "schema_version": SCHEMA_VERSION,
             "title": "CSS Institutional Reports Center",
@@ -77,22 +82,33 @@ class ReportsCenterService:
             return {"status": "NOT_FOUND", "report_code": report_code}
         if not self.access.can_view_report(role, definition.required_view_permission):
             return {"status": "DENIED", "report_code": report_code, "reason": "view_denied"}
+        from backend.reports_center.capabilities import evaluate_report_capabilities, ui_report_definition
+
+        caps = evaluate_report_capabilities(definition, role=role, access=self.access)
+        ui_def = ui_report_definition(definition, role=role, access=self.access)
         return {
             "status": "OK",
             "report_code": report_code,
             "definition": definition.as_dict(),
-            "generatable": definition.generatable,
+            "ui_definition": ui_def,
+            "generatable": caps["generatable"],
+            "can_generate": caps["can_generate"],
+            "generate_label": caps["generate_label"],
+            "generate_blocked_reason": caps["generate_blocked_reason"],
             "required_evidence": list(definition.evidence_sources),
-            "evidence_availability": "KNOWN" if definition.generatable else "INSUFFICIENT_OR_UNREGISTERED",
+            "evidence_availability": (
+                "KNOWN" if caps["evidence_contract_supported"] else "INSUFFICIENT_OR_UNREGISTERED"
+            ),
             "freshness": "EVALUATED_AT_GENERATION",
             "limitations": definition.limitations,
-            "validation_readiness": definition.generatable,
+            "validation_readiness": caps["generatable"],
             "permissions": {
                 "view": definition.required_view_permission,
                 "generate": definition.required_generate_permission,
                 "print": definition.required_print_permission,
                 "email": definition.required_email_permission or "EMAIL_DISABLED",
             },
+            "capabilities": caps,
             "confidentiality_classification": (
                 "CONFIDENTIAL_FINANCIAL" if definition.contains_financial_values else "INTERNAL"
             ),

@@ -1,11 +1,11 @@
 # CSS Dashboard Functional Acceptance Runbook
 
-**Phase:** 176C / 176D
+**Phase:** 176C / 176D / 176E / 176F
 **Purpose:** Repeatable operator verification that dashboard controls perform intended workflows after deployment.
 
 ## Prerequisites
 
-1. Deploy branch `css-unified-consolidation-2026-07-13` including Phase 176C/176D artifacts.
+1. Deploy branch `css-unified-consolidation-2026-07-13` including Phase 176C–176F artifacts.
 2. Desktop host running web/Mission Control (example: `uvicorn dashboard.web.web_app:app --host 0.0.0.0 --port 8000`).
 3. Mobile host running `dashboard.mobile.mobile_app:app` (or unified host mounting both).
 4. Valid CLI/runtime session bridged via `artifacts/css_auth_session.json` (e.g. `00000` / `SUPER_USER`) — Phase 176D.
@@ -41,6 +41,18 @@
 | G2 | Click Generate on a safe report (e.g. `safety_lock_report`) | **HTTP 200**, not 404 |
 | G3 | Confirm archive | `report_id` / version / hash returned; Library lists report |
 | G4 | Detail / print / versions / audit / integrity | All succeed on same host |
+
+## Report permission / generatability display (Phase 176F)
+
+| Step | Action | Expected |
+|------|--------|----------|
+| P1 | Open Reports as `00000` / `SUPER_USER` | Cards show real permission names (`reports_view`, `reports_generate`, print family) — **not** `None` |
+| P2 | Daily Executive Brief / Safety Lock | Generate **Enabled** (button active) |
+| P3 | Transaction Journal | Generate **Enabled with limitations** |
+| P4 | COMING_SOON / DATA_UNAVAILABLE / DISABLED | Generate **Disabled** with status reason |
+| P5 | Create Report selector | Lists all `can_generate` reports; not empty when generatable exist |
+| P6 | Click Generate on a card | Create selector preselects that `report_code` |
+| P7 | Mobile Reports cards | Same permission names and `can_generate` parity |
 
 ## Desktop test sequence
 

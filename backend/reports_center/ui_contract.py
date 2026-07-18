@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from backend.reports_center.capabilities import evaluate_report_capabilities, ui_report_definition
+from backend.reports_center.rbac import ReportsAccessControl
 from backend.reports_center.registry import all_definitions, by_category, catalog_payload, category_menu
 
 # Static Reports menu entries (not category disclosures).
@@ -85,33 +87,23 @@ def ui_catalog(*, generatable_only: bool = False) -> dict[str, Any]:
     return catalog_payload(generatable_only=generatable_only)
 
 
-def category_sections() -> list[dict[str, Any]]:
-    """Category blocks with nested report definitions for interactive UIs."""
+def _ui_row(d: Any, *, role: str, access: ReportsAccessControl) -> dict[str, Any]:
+    row = ui_report_definition(d, role=role, access=access)
+    row["filter_fields"] = filter_fields_for_scopes(d.supported_scopes)
+    return row
+
+
+def category_sections(*, role: str = "VIEWER") -> list[dict[str, Any]]:
+    """Category blocks with nested canonical UI report definitions."""
+    access = ReportsAccessControl()
+    role_u = str(role or "VIEWER").upper()
     out: list[dict[str, Any]] = []
     for meta in category_menu():
         defs = by_category(meta["key"])
         out.append(
             {
                 **meta,
-                "reports": [
-                    {
-                        "report_code": d.report_code,
-                        "title": d.title,
-                        "status": d.status,
-                        "supported_formats": list(d.supported_formats),
-                        "official_report": d.official_report,
-                        "advisory_only": d.advisory_only,
-                        "limitations": d.limitations,
-                        "required_view_permission": d.required_view_permission,
-                        "required_generate_permission": d.required_generate_permission,
-                        "required_print_permission": d.required_print_permission,
-                        "generatable": d.generatable,
-                        "emailable": d.emailable,
-                        "supported_scopes": list(d.supported_scopes),
-                        "filter_fields": filter_fields_for_scopes(d.supported_scopes),
-                    }
-                    for d in defs
-                ],
+                "reports": [_ui_row(d, role=role_u, access=access) for d in defs],
             }
         )
     return out
@@ -148,23 +140,40 @@ def filter_fields_for_scopes(scopes: tuple[str, ...] | list[str]) -> list[dict[s
     return fields
 
 
-def generatable_selector_options() -> list[dict[str, Any]]:
-    options = []
+def generatable_selector_options(*, role: str = "VIEWER") -> list[dict[str, Any]]:
+    """Reports the user may legitimately generate (server-side capability eval)."""
+    access = ReportsAccessControl()
+    role_u = str(role or "VIEWER").upper()
+    options: list[dict[str, Any]] = []
     for d in all_definitions():
-        if not d.generatable:
+        row = _ui_row(d, role=role_u, access=access)
+        if not row.get("can_generate"):
             continue
-        options.append(
-            {
-                "report_code": d.report_code,
-                "title": d.title,
-                "status": d.status,
-                "supported_scopes": list(d.supported_scopes),
-                "supported_formats": list(d.supported_formats),
-                "limitations": d.limitations,
-                "filter_fields": filter_fields_for_scopes(d.supported_scopes),
-            }
-        )
+        options.append(row)
     return options
+
+
+def capability_parity_payload(*, role: str) -> dict[str, Any]:
+    """Desktop/mobile shared capability snapshot for a role."""
+    access = ReportsAccessControl()
+    role_u = str(role or "VIEWER").upper()
+    rows = [
+        evaluate_report_capabilities(d, role=role_u, access=access)
+        for d in all_definitions()
+    ]
+    return {
+        "role": role_u,
+        "reports": rows,
+        "generatable_count": sum(1 for r in rows if r.get("can_generate")),
+        "available_generatable": sum(
+            1 for r in rows if r.get("can_generate") and r.get("status") == "AVAILABLE"
+        ),
+        "available_with_limitations_generatable": sum(
+            1
+            for r in rows
+            if r.get("can_generate") and r.get("status") == "AVAILABLE_WITH_LIMITATIONS"
+        ),
+    }
 
 
 def navigation_payload(*, surface: str = "mobile") -> list[dict[str, str]]:

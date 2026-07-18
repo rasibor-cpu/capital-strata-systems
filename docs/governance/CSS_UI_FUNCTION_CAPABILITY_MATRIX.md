@@ -13,6 +13,11 @@ FAIL_CLOSED controls are unchanged.
 that serves the Reports UI (relative URL). See
 `PHASE_176E_REPORT_GENERATION_ROUTE_RECONCILIATION.md`.
 
+**Phase 176F note:** Report cards / Create selector use canonical
+`ui_report_definition` + `evaluate_report_capabilities` so permission *names*
+and effective `can_generate` are not stripped by a reduced DTO. See
+`PHASE_176F_REPORT_PERMISSION_AND_GENERATABILITY_RECONCILIATION.md`.
+
 - Total controls: **144**
 - Pages audited: **49**
 - Sub-tabs audited: **5**

@@ -43,12 +43,14 @@ def test_desktop_unavailable_reports_have_disabled_generate() -> None:
 
 
 def test_ui_contract_parity() -> None:
-    cats = category_sections()
+    cats = category_sections(role="ADMIN")
     assert len(cats) >= 8
     assert all("reports" in c for c in cats)
-    gens = generatable_selector_options()
+    gens = generatable_selector_options(role="ADMIN")
     assert len(gens) >= 10
     assert all(g.get("filter_fields") is not None for g in gens)
+    assert all(g.get("required_view_permission") for g in gens)
+    assert all(g.get("can_generate") for g in gens)
     mobile_nav = navigation_payload(surface="mobile")
     mc_nav = navigation_payload(surface="desktop")
     assert [n["key"] for n in mobile_nav] == [n["key"] for n in mc_nav]
@@ -154,7 +156,7 @@ def test_mission_control_reports_still_get_only() -> None:
 
 
 def test_coming_soon_not_in_generatable_selector() -> None:
-    codes = {g["report_code"] for g in generatable_selector_options()}
+    codes = {g["report_code"] for g in generatable_selector_options(role="ADMIN")}
     assert "cash_forecast" not in codes
     assert "live_execution_activity" not in codes
     assert "safety_lock_report" in codes

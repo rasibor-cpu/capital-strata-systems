@@ -57,7 +57,7 @@ def render_reports_home(
     role, _ = _role_user(user_ctx)
     home = _svc().home(role=role)
     auth = home.get("authorization") or {}
-    cats = category_sections()
+    cats = category_sections(role=role)
     if category:
         cats = [c for c in cats if c.get("key") == category]
     nav = "".join(
@@ -93,7 +93,7 @@ def render_reports_home(
   </section>
   <section class="metric-grid" aria-label="Reports summary">
     <article><strong>Registered</strong><span>{_esc(home.get('total_registered'))}</span></article>
-    <article><strong>Generatable</strong><span>{_esc(len(generatable_selector_options()))}</span></article>
+    <article><strong>Generatable</strong><span>{_esc(len(generatable_selector_options(role=role)))}</span></article>
     <article><strong>Failures</strong><span>{_esc((home.get('archive_health') or {}).get('failed_count'))}</span></article>
     <article><strong>reports_view</strong><span>{_esc(auth.get('reports_view'))}</span></article>
     <article><strong>reports_generate</strong><span>{_esc(auth.get('reports_generate'))}</span></article>
@@ -137,7 +137,8 @@ def render_create(
     if not can_view_reports(user_ctx):
         return page_fn("Create Report", "<main class='dashboard-shell'><p>Access denied.</p></main>")
     can_gen = can_generate_reports(user_ctx)
-    options = generatable_selector_options()
+    role, _ = _role_user(user_ctx)
+    options = generatable_selector_options(role=role)
     opts = "".join(
         f"<option value='{_esc(o['report_code'])}' {'selected' if o['report_code']==preselect else ''}>"
         f"{_esc(o['title'])} ({_esc(o['status'])})</option>"
@@ -335,17 +336,24 @@ def generate_from_form(user_ctx: Mapping[str, Any], form: Mapping[str, str]) -> 
 
 def _mobile_report_card(report: Mapping[str, Any]) -> str:
     code = _esc(report.get("report_code"))
-    generatable = bool(report.get("generatable"))
+    effective = bool(report.get("can_generate")) if "can_generate" in report else bool(report.get("generatable"))
+    view_p = report.get("required_view_permission")
+    gen_p = report.get("required_generate_permission")
+    print_p = report.get("required_print_permission")
+    gen_state = report.get("generate_label") or ("Enabled" if effective else "Disabled")
+    blocked = report.get("generate_blocked_reason") or report.get("status") or ""
     gen_link = (
         f"<a class='button-link' href='/reports/create?code={code}'>Generate</a>"
-        if generatable
-        else "<span class='pill'>Not generatable</span>"
+        if effective
+        else f"<span class='pill'>Not generatable ({_esc(blocked)})</span>"
     )
     return f"""
 <article class="command-card" style="display:block;text-decoration:none;">
   <strong>{_esc(report.get('title'))}</strong>
   <span>{_esc(report.get('status'))} · {_esc(', '.join(report.get('supported_formats') or []))}</span>
   <span>{'OFFICIAL' if report.get('official_report') else 'ADVISORY'}</span>
+  <span style="display:block;margin-top:6px;">View: {_esc(view_p)} · Generate: {_esc(gen_p)} · Print: {_esc(print_p)}</span>
+  <span style="display:block;margin-top:4px;">Generate state: {_esc(gen_state)}</span>
   <span style="display:block;margin-top:6px;">{_esc((report.get('limitations') or '')[:160])}</span>
   <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
     <a class="button-link quiet" href="/reports/create?code={code}">Open</a>

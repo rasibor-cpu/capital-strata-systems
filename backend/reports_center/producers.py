@@ -58,10 +58,9 @@ def _html_wrap(title: str, body: str, *, limitations: str = "", advisory: bool =
     )
 
 
-def produce(report_code: str, *, filters: dict[str, Any], repo_root: Path) -> dict[str, Any]:
-    """Dispatch to a concrete producer. Raises ValueError for unavailable codes."""
-    filters = validate_filters(filters)
-    handlers = {
+def _producer_handlers() -> dict[str, Any]:
+    """Canonical producer dispatch table (lazy so helpers exist at call time)."""
+    return {
         "daily_executive_brief": _daily_executive_brief,
         "overnight_market_intelligence": _overnight_market,
         "executive_kpi_summary": _executive_kpi,
@@ -95,7 +94,21 @@ def produce(report_code: str, *, filters: dict[str, Any], repo_root: Path) -> di
         "report_generation_failures": _generation_failures,
         "distribution_print_audit_home": _distribution_home,
     }
-    fn = handlers.get(report_code)
+
+
+def registered_producer_codes() -> frozenset[str]:
+    """Report codes with a concrete producer implementation."""
+    return frozenset(_producer_handlers().keys())
+
+
+def producer_is_registered(report_code: str) -> bool:
+    return str(report_code or "").strip() in registered_producer_codes()
+
+
+def produce(report_code: str, *, filters: dict[str, Any], repo_root: Path) -> dict[str, Any]:
+    """Dispatch to a concrete producer. Raises ValueError for unavailable codes."""
+    filters = validate_filters(filters)
+    fn = _producer_handlers().get(report_code)
     if fn is None:
         raise ValueError("producer_not_available")
     return fn(filters=filters, repo_root=repo_root)

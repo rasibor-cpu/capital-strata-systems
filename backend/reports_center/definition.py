@@ -48,6 +48,8 @@ class CSSReportDefinition:
             "evidence_sources",
         ):
             d[key] = list(d[key])
+        # Property — not a dataclass field; must be explicit for API/UI payloads.
+        d["generatable"] = self.generatable
         return d
 
     @property

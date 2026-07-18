@@ -57,8 +57,8 @@ def render(state: dict) -> str:
     }})
     home["authorization"] = auth
     can_generate = bool(auth.get("reports_generate"))
-    categories = category_sections()
-    generatable = generatable_selector_options()
+    categories = category_sections(role=role)
+    generatable = generatable_selector_options(role=role)
 
     return (
         page_header(
@@ -178,14 +178,29 @@ def _report_card(report: dict, can_generate: bool) -> str:
     formats = _esc(", ".join(report.get("supported_formats") or []))
     official = "OFFICIAL" if report.get("official_report") else "ADVISORY"
     limitations = _esc(report.get("limitations") or "—")
+    view_p = report.get("required_view_permission")
+    gen_p = report.get("required_generate_permission")
+    print_p = report.get("required_print_permission")
+    # Display registry permission names; never invent defaults in the card.
     perms = _esc(
-        f"view={report.get('required_view_permission')}; generate={report.get('required_generate_permission')}; print={report.get('required_print_permission')}"
+        f"View permission: {view_p}; Generate permission: {gen_p}; Print permission: {print_p}"
     )
-    generatable = bool(report.get("generatable"))
-    gen_disabled = "" if (generatable and can_generate) else " disabled"
-    gen_label = "Generate" if generatable else "Not generatable"
+    # Effective generate uses server-side can_generate when present; page-level
+    # can_generate remains a coarse gate for the Create panel.
+    effective = bool(report.get("can_generate")) if "can_generate" in report else (
+        bool(report.get("generatable")) and can_generate
+    )
+    gen_state = _esc(report.get("generate_label") or ("Enabled" if effective else "Disabled"))
+    blocked = report.get("generate_blocked_reason") or report.get("status") or ""
+    reason_row = (
+        f"<div><dt>Generate</dt><dd>{gen_state}</dd></div>"
+        if effective
+        else f"<div><dt>Generate</dt><dd>{gen_state} — reason: {_esc(blocked)}</dd></div>"
+    )
+    gen_disabled = "" if effective else " disabled"
+    gen_label = "Generate" if effective else "Not generatable"
     return f"""
-<article class="rc-card" data-report-code="{code}" data-generatable="{str(generatable).lower()}">
+<article class="rc-card" data-report-code="{code}" data-generatable="{str(effective).lower()}">
   <header>
     <h3><button type="button" class="rc-linkish" data-rc-action="select" data-report-code="{code}">{title}</button></h3>
     <span class="rc-badge rc-status-{_esc(status).lower()}">{status}</span>
@@ -195,6 +210,7 @@ def _report_card(report: dict, can_generate: bool) -> str:
     <div><dt>Code</dt><dd><code>{code}</code></dd></div>
     <div><dt>Formats</dt><dd>{formats}</dd></div>
     <div><dt>Permissions</dt><dd>{perms}</dd></div>
+    {reason_row}
     <div><dt>Limitations</dt><dd>{limitations}</dd></div>
   </dl>
   <div class="rc-actions">
