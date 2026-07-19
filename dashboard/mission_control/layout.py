@@ -11,44 +11,68 @@ from dashboard.mission_control.pages._components import status_class
 from dashboard.mission_control.theme import MISSION_CONTROL_CSS
 from dashboard.ui_interaction import DISCLOSURE_JS
 
-# Phase 176H: Android/WebKit often fails to synthesize click on <a> inside a
-# sticky overflow scrollport. Ensure touch taps navigate via real hrefs.
-MC_NAV_TOUCH_JS = r"""
+# Phase 176H.1: DO NOT intercept touch with preventDefault. Native <a href>
+# navigation must work without JavaScript. Optional diagnostics only.
+MC_NAV_TOUCH_DEBUG_JS = r"""
 (function () {
-  var nav = document.querySelector('.mc-nav');
-  if (!nav) return;
-  var startX = 0, startY = 0, tracking = false;
-  function hrefOf(el) {
-    var a = el && el.closest ? el.closest('a[href]') : null;
-    if (!a || !nav.contains(a)) return null;
-    var href = a.getAttribute('href') || '';
-    if (!href || href.charAt(0) === '#') return null;
-    return href;
+  if (!/[?&]touch_debug=1(?:&|$)/.test(String(window.location.search || ''))) return;
+  var box = document.createElement('div');
+  box.id = 'mc-touch-debug';
+  box.setAttribute('aria-live', 'polite');
+  box.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:99999;max-height:42vh;overflow:auto;background:rgba(0,0,0,.92);color:#9fef9f;font:12px/1.35 monospace;padding:10px;border:1px solid #33c481;border-radius:8px;pointer-events:none;white-space:pre-wrap;';
+  document.body.appendChild(box);
+  function line(label, value) {
+    return label + ': ' + (value == null ? 'null' : String(value));
   }
-  nav.addEventListener('touchstart', function (ev) {
-    var t = ev.changedTouches && ev.changedTouches[0];
-    if (!t) return;
-    tracking = true;
-    startX = t.clientX;
-    startY = t.clientY;
-  }, { passive: true });
-  nav.addEventListener('touchend', function (ev) {
-    if (!tracking) return;
-    tracking = false;
-    var t = ev.changedTouches && ev.changedTouches[0];
-    if (!t) return;
-    if (Math.abs(t.clientX - startX) > 14 || Math.abs(t.clientY - startY) > 14) return;
-    var href = hrefOf(ev.target);
-    if (!href) return;
-    // Force navigation when the browser suppresses the synthetic click.
-    ev.preventDefault();
-    window.location.assign(href);
-  }, { passive: false });
+  function describe(el) {
+    if (!el || !el.tagName) return String(el);
+    var id = el.id ? ('#' + el.id) : '';
+    var cls = el.className && typeof el.className === 'string' ? ('.' + el.className.trim().split(/\s+/).join('.')) : '';
+    return el.tagName + id + cls;
+  }
+  function sample(ev, kind) {
+    var t = ev.target;
+    var node = t && t.nodeType === 3 ? t.parentElement : t;
+    var x = 0, y = 0;
+    if (ev.changedTouches && ev.changedTouches[0]) {
+      x = ev.changedTouches[0].clientX;
+      y = ev.changedTouches[0].clientY;
+    } else if (typeof ev.clientX === 'number') {
+      x = ev.clientX;
+      y = ev.clientY;
+    }
+    var top = document.elementFromPoint(x, y);
+    var a = node && node.closest ? node.closest('a[href]') : null;
+    var cs = a ? window.getComputedStyle(a) : null;
+    var br = a ? a.getBoundingClientRect() : null;
+    box.textContent = [
+      'CSS MC touch_debug=1 (dev only)',
+      line('event', kind),
+      line('target', describe(node)),
+      line('defaultPrevented', ev.defaultPrevented),
+      line('elementFromPoint', describe(top)),
+      line('anchor', a ? a.getAttribute('href') : null),
+      line('pointer-events', cs ? cs.pointerEvents : null),
+      line('z-index', cs ? cs.zIndex : null),
+      line('rect', br ? (Math.round(br.left) + ',' + Math.round(br.top) + ' ' + Math.round(br.width) + 'x' + Math.round(br.height)) : null),
+      line('topmost', describe(top)),
+      line('handler', 'none-native-anchor-only'),
+      line('destination', a ? a.href : null)
+    ].join('\n');
+  }
+  ['pointerdown', 'touchstart', 'touchend', 'click'].forEach(function (kind) {
+    document.addEventListener(kind, function (ev) { sample(ev, kind); }, true);
+  });
 })();
 """
 
 
-def render_mission_control_shell(state: Mapping[str, Any], *, active_section: str = "executive_overview") -> str:
+def render_mission_control_shell(
+    state: Mapping[str, Any],
+    *,
+    active_section: str = "executive_overview",
+    touch_debug: bool = False,
+) -> str:
     active = section_for_key(active_section)
     state_dict = ensure_mc_authorization_state(dict(state))
     platform = _mapping(state_dict.get("platform"))
@@ -63,16 +87,20 @@ def render_mission_control_shell(state: Mapping[str, Any], *, active_section: st
             "Runtime evidence is unavailable or stale. Mission Control is displaying fail-closed read-only state."
             "</div>"
         )
+    debug_script = f"<script>{MC_NAV_TOUCH_DEBUG_JS}</script>" if touch_debug else ""
+    # Build marker proves served HTML includes Phase 176H.1 (native-anchor navigation).
+    build_meta = '<meta name="css-mc-nav" content="native-anchor-176h1">'
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  {build_meta}
   <title>CSS Mission Control - {escape(active.label)}</title>
   <style>{MISSION_CONTROL_CSS}</style>
 </head>
 <body class="mc-body">
-  <div class="mc-shell" data-mission-control-schema="{escape(state_dict.get('schema_version'))}">
+  <div class="mc-shell" data-mission-control-schema="{escape(state_dict.get('schema_version'))}" data-mc-nav="native-anchor-176h1">
     <aside class="mc-sidebar">
       <div class="mc-brand"><strong>CSS Mission Control</strong><span>Enterprise shell / MC-002</span></div>
       {nav}
@@ -102,7 +130,7 @@ def render_mission_control_shell(state: Mapping[str, Any], *, active_section: st
     </main>
   </div>
   <script>{DISCLOSURE_JS}</script>
-  <script>{MC_NAV_TOUCH_JS}</script>
+  {debug_script}
 </body>
 </html>"""
 
@@ -111,9 +139,11 @@ def _render_nav(active_key: str) -> str:
     links = []
     for section in MISSION_CONTROL_SECTIONS:
         current = ' aria-current="page"' if section.key == active_key else ""
+        # Real same-origin path anchors — navigation must work with JavaScript disabled.
         links.append(
             f'<a href="{escape(section.route)}"{current} data-section="{escape(section.key)}">'
-            f'<span aria-hidden="true">{escape(section.icon)}</span><span>{escape(section.label)}</span></a>'
+            f'<span class="mc-nav-icon" aria-hidden="true">{escape(section.icon)}</span>'
+            f'<span class="mc-nav-label">{escape(section.label)}</span></a>'
         )
     return f'<nav class="mc-nav" aria-label="Mission Control navigation">{"".join(links)}</nav>'
 
@@ -131,4 +161,4 @@ def escape(value: Any) -> str:
     return html.escape(str(value if value is not None else "UNAVAILABLE"), quote=True)
 
 
-__all__ = ["render_mission_control_shell"]
+__all__ = ["render_mission_control_shell", "MC_NAV_TOUCH_DEBUG_JS"]

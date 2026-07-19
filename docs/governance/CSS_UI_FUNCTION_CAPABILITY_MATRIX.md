@@ -31,6 +31,10 @@ shared plain-English `CSSReportPDFRenderer`. Desktop/mobile detail expose
 back to Executive Overview; unknown slugs return HTTP 404. See
 `PHASE_176I_MISSION_CONTROL_ROUTE_RESOLUTION_RECONCILIATION.md`.
 
+**Phase 176H.1 note:** MC nav is native-anchor only (176H touchend/preventDefault
+removed). PWA shell `css-mobile-shell-v176h1` excludes `/mission-control`. See
+`PHASE_176H1_PHYSICAL_ANDROID_NAVIGATION_REMEDIATION.md`.
+
 - Total controls: **144**
 - Pages audited: **49**
 - Sub-tabs audited: **5**

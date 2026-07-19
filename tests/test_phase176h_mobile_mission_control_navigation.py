@@ -1,4 +1,7 @@
-"""Phase 176H — Mission Control mobile/touch navigation reconciliation."""
+"""Phase 176H — Mission Control mobile/touch navigation reconciliation.
+
+Phase 176H.1: navigation is native-anchor only (no touchend preventDefault).
+"""
 
 from __future__ import annotations
 
@@ -6,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from dashboard.mission_control.host_registration import register_mission_control
-from dashboard.mission_control.layout import MC_NAV_TOUCH_JS, render_mission_control_shell
+from dashboard.mission_control.layout import MC_NAV_TOUCH_DEBUG_JS, render_mission_control_shell
 from dashboard.mission_control.navigation import MISSION_CONTROL_SECTIONS
 from dashboard.mission_control.theme import MISSION_CONTROL_CSS
 
@@ -31,7 +34,7 @@ REQUIRED_LABELS = [
 ]
 
 
-def _shell_html() -> str:
+def _shell_html(**kwargs) -> str:
     return render_mission_control_shell(
         {
             "schema_version": "test",
@@ -55,6 +58,7 @@ def _shell_html() -> str:
             },
         },
         active_section="reports_center",
+        **kwargs,
     )
 
 
@@ -65,28 +69,35 @@ def test_all_mc_nav_items_are_real_anchors() -> None:
         assert f'href="{section.route}"' in html
         assert f'data-section="{section.key}"' in html
         assert section.label in html
-    # No inert role=button nav without href
-    assert 'class="mc-nav"' in html
     assert html.count('href="/mission-control/') == len(MISSION_CONTROL_SECTIONS)
+    assert 'data-mc-nav="native-anchor-176h1"' in html
+    assert 'name="css-mc-nav" content="native-anchor-176h1"' in html
 
 
-def test_mobile_css_clears_sidebar_overflow_scrollport() -> None:
+def test_mobile_css_static_sidebar_no_scrollport() -> None:
     assert "overflow-y: auto" in MISSION_CONTROL_CSS  # desktop sidebar may scroll
     assert "@media (max-width: 1100px)" in MISSION_CONTROL_CSS
-    # Critical Phase 176H rule
+    assert "position: static" in MISSION_CONTROL_CSS
     assert "overflow: visible" in MISSION_CONTROL_CSS
     assert "touch-action: manipulation" in MISSION_CONTROL_CSS
-    assert "z-index: 6" in MISSION_CONTROL_CSS
+    assert "pointer-events: none" in MISSION_CONTROL_CSS
     assert "min-height: 44px" in MISSION_CONTROL_CSS
 
 
-def test_touch_nav_script_present_and_assigns_location() -> None:
-    assert "touchend" in MC_NAV_TOUCH_JS
-    assert "location.assign" in MC_NAV_TOUCH_JS
-    assert "preventDefault" in MC_NAV_TOUCH_JS
-    html = _shell_html()
-    assert "location.assign" in html
-    assert "touchend" in html
+def test_no_nav_preventdefault_in_default_shell() -> None:
+    html = _shell_html(touch_debug=False)
+    assert "location.assign" not in html
+    # Production shell must not ship the 176H touchend interceptor.
+    assert "Force navigation when the browser suppresses" not in html
+    assert "mc-touch-debug" not in html
+
+
+def test_touch_debug_overlay_only_when_enabled() -> None:
+    assert "touch_debug=1" in MC_NAV_TOUCH_DEBUG_JS
+    assert "elementFromPoint" in MC_NAV_TOUCH_DEBUG_JS
+    enabled = _shell_html(touch_debug=True)
+    assert "mc-touch-debug" in enabled or "touch_debug=1" in enabled
+    assert "elementFromPoint" in enabled
 
 
 def test_http_routes_resolve_for_every_section() -> None:
@@ -102,8 +113,8 @@ def test_http_routes_resolve_for_every_section() -> None:
         assert res.status_code == 200, section.route
         assert f'href="{section.route}"' in res.text
         assert 'aria-label="Mission Control navigation"' in res.text
-        assert "overflow: visible" in res.text
-        assert "location.assign" in res.text
+        assert "native-anchor-176h1" in res.text
+        assert res.headers.get("cache-control", "").lower() == "no-store"
         matrix.append((section.label, "PASS"))
     assert [label for label, _ in matrix] == [s.label for s in MISSION_CONTROL_SECTIONS]
     assert all(status == "PASS" for _, status in matrix)

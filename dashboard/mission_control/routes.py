@@ -520,8 +520,13 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
                 headers={"Cache-Control": "no-store"},
             )
         current = state(request)
+        touch_debug = str(request.query_params.get("touch_debug") or "").strip() == "1"
         return HTMLResponse(
-            render_mission_control_shell(current, active_section=section.key),
+            render_mission_control_shell(
+                current,
+                active_section=section.key,
+                touch_debug=touch_debug,
+            ),
             headers={"Cache-Control": "no-store"},
         )
 

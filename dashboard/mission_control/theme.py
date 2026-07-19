@@ -55,8 +55,14 @@ body.mc-body {
   touch-action: manipulation;
   -webkit-tap-highlight-color: rgba(104, 168, 255, .25);
   position: relative;
-  z-index: 1;
+  z-index: 2;
   cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* Ensure nested icon/label spans do not become the exclusive touch target. */
+.mc-nav a > * {
+  pointer-events: none;
 }
 .mc-nav a[aria-current="page"], .mc-nav a:hover, .mc-nav a:active {
   color: var(--mc-text);
@@ -185,16 +191,27 @@ th { color: var(--mc-muted); width: 34%; font-weight: 600; }
 .rc-status-coming_soon, .rc-status-data_unavailable, .rc-status-disabled { border-color: rgba(244,182,74,.48); }
 @media (max-width: 1100px) {
   .mc-shell { grid-template-columns: 1fr; }
-  /* Phase 176H: nested overflow scrollports on mobile steal Android touch
-     activation from .mc-nav anchors. Drop the scrollport when stacked. */
+  /* Phase 176H.1: stacked mobile layout — no sticky/overflow scrollport on
+     sidebar or topbar so native <a href> hit testing is reliable on Android. */
   .mc-sidebar {
-    position: relative;
+    position: static;
     height: auto;
+    max-height: none;
     overflow: visible;
-    z-index: 6;
+    z-index: auto;
     -webkit-overflow-scrolling: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--mc-line);
   }
-  .mc-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mc-topbar {
+    position: static;
+    z-index: auto;
+  }
+  .mc-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    position: static;
+    z-index: auto;
+  }
   .mc-metric-grid { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
 }
 @media (max-width: 680px) {

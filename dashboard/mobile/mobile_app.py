@@ -864,7 +864,7 @@ async def manifest():
                     "purpose": "any maskable",
                 }
             ],
-            "css_shell_cache": "css-mobile-shell-v176d",
+            "css_shell_cache": "css-mobile-shell-v176h1",
         }
     )
 
@@ -872,7 +872,7 @@ async def manifest():
 @app.get("/service-worker.js")
 async def service_worker():
     script = """
-const CACHE_NAME = "css-mobile-shell-v176d";
+const CACHE_NAME = "css-mobile-shell-v176h1";
 const SHELL_URLS = ["/login", "/manifest.webmanifest", "/icon.svg", "/static/css_pwa_icon_192.png", "/apple-touch-icon.png"];
 
 self.addEventListener("install", (event) => {
@@ -889,6 +889,12 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+  const url = new URL(event.request.url);
+  // Mission Control HTML is dynamic and must never be satisfied from the PWA shell cache.
+  if (url.pathname.startsWith("/mission-control")) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
   event.respondWith(fetch(event.request).catch(() => caches.match(event.request)));
 });
 """.strip()
