@@ -1,0 +1,10 @@
+---
+description: HealthChecker+ product and safety conventions
+alwaysApply: true
+---
+
+- Prefer the v6 surface (`index.html` + root `app.js` / `style.css`) unless a task names a legacy file.
+- Keep core flows localStorage-first; do not require a live backend for UI work.
+- User-facing medical language must stay non-diagnostic and cautious.
+- Preserve iOS/PWA basics: viewport meta, manifest, apple-touch-icon, service worker file.
+- Run `python3 -m unittest discover -s tests -p 'test_*.py' -q` before finishing Python changes.

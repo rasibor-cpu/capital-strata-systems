@@ -1,0 +1,17 @@
+{
+  "name": "healthchecker-plus",
+  "install": "bash scripts/cursor-install.sh",
+  "terminals": [
+    {
+      "name": "web",
+      "command": "python3 -m http.server 8080 --bind 127.0.0.1",
+      "description": "Serves HealthChecker+ statically at http://127.0.0.1:8080 (index.html)."
+    }
+  ],
+  "ports": [
+    {
+      "name": "web",
+      "port": 8080
+    }
+  ]
+}

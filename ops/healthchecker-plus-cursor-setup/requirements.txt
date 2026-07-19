@@ -1,0 +1,3 @@
+# HealthChecker+ currently ships a static web app plus a pure-Python
+# intelligence module. Keep this file for Cursor Cloud install hooks
+# and future backend dependencies.
