@@ -1,48 +1,44 @@
 # Apply HealthChecker+ Cursor setup
 
-## Blocker
+## Why this package lives here temporarily
 
-The Cursor GitHub App currently has write access only to `rasibor-cpu/capital-strata-systems`.
-It cannot push to `rasibor-cpu/HealthChecker-` until that repo is included in the app installation.
+Cloud Agents started on `capital-strata-systems` receive a GitHub token scoped to that repo only.
+They cannot push to `rasibor-cpu/HealthChecker-` even when the Cursor GitHub App can see both repos.
+A new Cloud Agent must be started **with repository = HealthChecker-**.
 
-## 1) Grant GitHub access (required)
+## Recommended: new Cloud Agent on HealthChecker-
 
-1. Open https://cursor.com/dashboard/integrations
-2. Next to GitHub, click **Manage Connections** / configure repository access
-3. Include `rasibor-cpu/HealthChecker-` (or choose **All repositories**)
-4. Confirm at https://github.com/settings/installations if prompted
+1. Go to https://cursor.com/agents
+2. Select repository **`rasibor-cpu/HealthChecker-`**
+3. Prompt:
 
-## 2) Apply this setup to HealthChecker-
+```
+Apply the Cursor Cloud Agent setup for this repo.
 
-### Option A — Cloud Agent (recommended after access grant)
+Fetch and apply this patch onto a branch css-agent/cursor-cloud-setup-a78b:
 
-Start a Cloud Agent on `rasibor-cpu/HealthChecker-` and ask it to apply the patch/bundle from this artifact, or re-run: “Set up HealthChecker+ for Cursor Cloud Agents”.
+https://raw.githubusercontent.com/rasibor-cpu/capital-strata-systems/css-agent/healthchecker-plus-cursor-setup-a78b/ops/healthchecker-plus-cursor-setup/0001-cursor-cloud-setup.patch
 
-### Option B — Local apply with patch
+Then push the branch and open a PR into main.
+Verify with: bash scripts/cursor-install.sh
+```
+
+## Local apply
 
 ```bash
 git clone https://github.com/rasibor-cpu/HealthChecker-.git
 cd HealthChecker-
 git checkout -b css-agent/cursor-cloud-setup-a78b
-git am /path/to/0001-cursor-cloud-setup.patch
-git push -u origin css-agent/cursor-cloud-setup-a78b
-gh pr create --base main --title "Add Cursor Cloud Agent setup" --body "Configures HealthChecker+ for Cursor via GitHub."
-```
-
-### Option C — Bundle fetch
-
-```bash
-git clone https://github.com/rasibor-cpu/HealthChecker-.git
-cd HealthChecker-
-git fetch /path/to/cursor-cloud-setup.bundle HEAD:css-agent/cursor-cloud-setup-a78b
-git checkout css-agent/cursor-cloud-setup-a78b
+curl -fsSL \
+  https://raw.githubusercontent.com/rasibor-cpu/capital-strata-systems/css-agent/healthchecker-plus-cursor-setup-a78b/ops/healthchecker-plus-cursor-setup/0001-cursor-cloud-setup.patch \
+  | git am
 git push -u origin css-agent/cursor-cloud-setup-a78b
 ```
 
-## What this setup adds
+## What the setup adds
 
 - `.cursor/environment.json` — install hook + port 8080 web terminal
 - `scripts/cursor-install.sh` — idempotent checks + unit tests
 - `AGENTS.md` — cloud agent guidance
-- `tests/test_foot_pain_engine.py` — smoke tests for the intelligence engine
-- README updates for Cursor/GitHub usage
+- `tests/test_foot_pain_engine.py` — intelligence engine smoke tests
+- README / gitignore / Cursor rules
