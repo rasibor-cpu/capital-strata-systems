@@ -31,6 +31,11 @@ shared plain-English `CSSReportPDFRenderer`. Desktop/mobile detail expose
 back to Executive Overview; unknown slugs return HTTP 404. See
 `PHASE_176I_MISSION_CONTROL_ROUTE_RESOLUTION_RECONCILIATION.md`.
 
+**Phase 176I (PDF open) note:** Open PDF uses only
+`GET /api/v1/reports/{id}/pdf` (`application/pdf`, `inline`). MC
+`/mission-control/api/reports/{id}/pdf` redirects to that route; metadata is
+`/pdf-info`. See `PHASE_176I_PDF_OPEN_ROUTE_RECONCILIATION.md`.
+
 **Phase 176H.1 note:** MC nav is native-anchor only (176H touchend/preventDefault
 removed). PWA shell `css-mobile-shell-v176h1` excludes `/mission-control`. See
 `PHASE_176H1_PHYSICAL_ANDROID_NAVIGATION_REMEDIATION.md`.
@@ -115,7 +120,7 @@ flex shell; sidebar/main internal scroll) so Android Chrome does not
 | `mc.reports.action.library_refresh` | reports_center | library refresh | api_action | /mission-control/reports | — | GET /mission-control/api/reports | **FUNCTIONAL** | DESKTOP_ONLY | — | `test_reports_workflow_e2e` |
 | `mc.reports.action.library_open` | reports_center | library open | api_action | /mission-control/reports | — | GET /mission-control/api/reports/{id} | **FUNCTIONAL** | DESKTOP_ONLY | — | `test_reports_workflow_e2e` |
 | `mc.reports.action.detail_print` | reports_center | detail print | api_action | /mission-control/reports | — | GET /mission-control/api/reports/{id}/print | **FUNCTIONAL** | DESKTOP_ONLY | — | `test_reports_workflow_e2e` |
-| `mc.reports.action.detail_pdf` | reports_center | detail pdf | api_action | /mission-control/reports | — | GET /mission-control/api/reports/{id}/pdf | **FUNCTIONAL** | DESKTOP_ONLY | — | `test_reports_workflow_e2e` |
+| `mc.reports.action.detail_pdf` | reports_center | detail pdf | api_action | /mission-control/reports | — | GET /api/v1/reports/{id}/pdf | **FUNCTIONAL** | DESKTOP_ONLY | — | `test_phase176i_pdf_open_route_reconciliation` |
 | `mc.reports.action.detail_versions` | reports_center | detail versions | api_action | /mission-control/reports | — | GET /mission-control/api/reports/{id}/versions | **FUNCTIONAL** | DESKTOP_ONLY | — | `test_reports_workflow_e2e` |
 | `mc.reports.action.detail_audit` | reports_center | detail audit | api_action | /mission-control/reports | — | GET /mission-control/api/reports/{id}/audit | **FUNCTIONAL** | DESKTOP_ONLY | — | `test_reports_workflow_e2e` |
 | `mc.reports.action.verify_integrity` | reports_center | verify integrity | api_action | /mission-control/reports | — | POST /api/v1/reports/{id}/verify-integrity | **FUNCTIONAL** | DESKTOP_ONLY | — | `test_reports_workflow_e2e` |

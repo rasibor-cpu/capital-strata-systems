@@ -472,7 +472,21 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
         )
 
     @router.get("/mission-control/api/reports/{report_id}/pdf")
+    async def mission_control_reports_pdf_open(report_id: str) -> RedirectResponse:
+        """Phase 176I PDF open: never return metadata JSON from a /pdf path.
+
+        Open-PDF actions must land on the canonical bytes route. This MC path
+        redirects so any legacy /mission-control/api/reports/{id}/pdf callers
+        receive the PDF (or auth denial from the canonical handler), not JSON.
+        """
+        return RedirectResponse(
+            url=f"/api/v1/reports/{report_id}/pdf",
+            status_code=307,
+        )
+
+    @router.get("/mission-control/api/reports/{report_id}/pdf-info")
     async def mission_control_reports_pdf_info(report_id: str, request: Request) -> JSONResponse:
+        """PDF availability metadata only — not used by Open PDF buttons."""
         from backend.reports_center.service import ReportsCenterService
 
         role, user, auth = _reports_role_user(request)
@@ -485,7 +499,7 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
                     {
                         **info,
                         "pdf_endpoint": f"/api/v1/reports/{report_id}/pdf",
-                        "note": "Controlled PDF bytes are delivered by GET /api/v1/reports/{id}/pdf.",
+                        "note": "Open PDF must use GET /api/v1/reports/{id}/pdf (application/pdf).",
                     }
                 )
             )

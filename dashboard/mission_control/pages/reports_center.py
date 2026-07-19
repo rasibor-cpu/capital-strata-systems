@@ -309,10 +309,10 @@ def _detail_panel() -> str:
   <h2>Report Detail</h2>
   <p class="rc-muted">Select a library report or search by report ID.</p>
   <div class="rc-actions" id="rc-detail-actions" hidden>
-    <a class="rc-btn rc-btn-primary" id="rc-detail-pdf-link" href="#" target="_blank" rel="noopener">Open PDF</a>
+    <a class="rc-btn rc-btn-primary" id="rc-detail-pdf-link" href="#" target="_blank" rel="noopener" data-rc-pdf-open="1">Open PDF</a>
     <button type="button" class="rc-btn" data-rc-detail="print">Print preview</button>
     <a class="rc-btn" id="rc-detail-print-link" href="#" target="_blank" rel="noopener">View Report (HTML)</a>
-    <button type="button" class="rc-btn" data-rc-detail="pdf">PDF status</button>
+    <button type="button" class="rc-btn" data-rc-detail="pdf-status">PDF status</button>
     <button type="button" class="rc-btn" data-rc-detail="versions">Versions</button>
     <button type="button" class="rc-btn" data-rc-detail="audit">Audit</button>
     <button type="button" class="rc-btn" data-rc-detail="verify">Verify integrity</button>
@@ -436,12 +436,17 @@ def _scripts() -> str:
     }
   }
 
+  function canonicalPdfHref(reportId) {
+    return '/api/v1/reports/' + encodeURIComponent(reportId) + '/pdf';
+  }
+
   async function openReport(reportId) {
     currentReportId = reportId;
     detailActions.hidden = false;
     printLink.href = '/api/v1/reports/' + encodeURIComponent(reportId) + '/print';
     const pdfLink = document.getElementById('rc-detail-pdf-link');
-    if (pdfLink) pdfLink.href = '/api/v1/reports/' + encodeURIComponent(reportId) + '/pdf';
+    // Phase 176I: Open PDF must navigate only to the canonical PDF bytes route.
+    if (pdfLink) pdfLink.href = canonicalPdfHref(reportId);
     detailBody.textContent = 'Loading…';
     document.getElementById('rc-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     try {
@@ -449,9 +454,9 @@ def _scripts() -> str:
       const data = await res.json();
       const pdfMeta = {
         primary_action: 'Open PDF',
-        pdf_endpoint: '/api/v1/reports/' + reportId + '/pdf',
+        pdf_endpoint: canonicalPdfHref(reportId),
         html_endpoint: '/api/v1/reports/' + reportId + '/print',
-        note: 'PDF is the primary human-facing format. HTML print remains available.'
+        note: 'PDF is the primary human-facing format. Open PDF uses GET /api/v1/reports/{id}/pdf only.'
       };
       detailBody.textContent = JSON.stringify({ ...data, pdf_ui: pdfMeta }, null, 2);
     } catch (err) {
@@ -463,7 +468,8 @@ def _scripts() -> str:
     if (!currentReportId) return;
     const map = {
       print: '/mission-control/api/reports/' + encodeURIComponent(currentReportId) + '/print',
-      pdf: '/mission-control/api/reports/' + encodeURIComponent(currentReportId) + '/pdf',
+      // Metadata only — never the Open PDF path (canonical bytes are /api/v1/.../pdf).
+      'pdf-status': '/mission-control/api/reports/' + encodeURIComponent(currentReportId) + '/pdf-info',
       versions: '/mission-control/api/reports/' + encodeURIComponent(currentReportId) + '/versions',
       audit: '/mission-control/api/reports/' + encodeURIComponent(currentReportId) + '/audit'
     };

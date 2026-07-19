@@ -288,7 +288,8 @@ def render_detail(
         elif print_info.get("pdf_status") in {"UNAVAILABLE", "NOT_ATTACHED"}:
             pdf_label = "PDF unavailable"
         actions.append(
-            f"<a class='button-link' href='/api/v1/reports/{_esc(report_id)}/pdf' target='_blank' rel='noopener'>{pdf_label}</a>"
+            f"<a class='button-link' href='/api/v1/reports/{_esc(report_id)}/pdf' "
+            f"target='_blank' rel='noopener' data-rc-pdf-open='1'>{pdf_label}</a>"
         )
         actions.append(
             f"<a class='button-link quiet' href='/api/v1/reports/{_esc(report_id)}/print' target='_blank' rel='noopener'>Print / View HTML</a>"
