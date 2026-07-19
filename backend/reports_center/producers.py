@@ -118,9 +118,16 @@ def _daily_executive_brief(*, filters: dict[str, Any], repo_root: Path) -> dict[
     from backend.executive_intelligence.service import ExecutiveIntelligenceEngine
 
     engine = ExecutiveIntelligenceEngine(repo_root=repo_root)
-    result = engine.generate(report_date=filters.get("report_date"), persist=True, created_reason="reports_center")
+    # Production disk path: wait for readiness orchestration (Phase 176J).
+    result = engine.generate(
+        report_date=filters.get("report_date"),
+        persist=True,
+        created_reason="reports_center",
+        wait_for_readiness=True,
+    )
     brief = result.get("brief") or {}
     archive = result.get("archive") or {}
+    readiness = result.get("readiness") or {}
     status = str(brief.get("report_status") or archive.get("report_status") or "FAILED")
     return {
         "title": "Daily Executive Brief",
@@ -130,6 +137,7 @@ def _daily_executive_brief(*, filters: dict[str, Any], repo_root: Path) -> dict[
         "official_report": status == "FINAL",
         "content": brief,
         "bridge_archive": archive,
+        "readiness": readiness,
         "formats": {"json": True, "html": True, "pdf": True, "markdown": True},
         "limitations": brief.get("limitations") or "",
         "external_identity": {
@@ -170,7 +178,12 @@ def _brief_subset(name: str, extractor) -> Any:
         from backend.executive_intelligence.service import ExecutiveIntelligenceEngine
 
         engine = ExecutiveIntelligenceEngine(repo_root=repo_root)
-        result = engine.generate(report_date=filters.get("report_date"), persist=False, created_reason="reports_center_subset")
+        result = engine.generate(
+            report_date=filters.get("report_date"),
+            persist=False,
+            created_reason="reports_center_subset",
+            wait_for_readiness=False,
+        )
         brief = result.get("brief") or {}
         extracted = extractor(brief)
         text = json.dumps(extracted, indent=2, sort_keys=True, default=str)

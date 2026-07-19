@@ -42,6 +42,7 @@ class MorningBriefArchiveStore:
         *,
         created_by: str = "executive_intelligence_engine",
         created_reason: str = "scheduled_cutover",
+        readiness: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
         Persist DRAFT→FINAL or FAILED.
@@ -61,6 +62,9 @@ class MorningBriefArchiveStore:
         sanitized = sanitize_payload(dict(brief))
         sanitized["report_version"] = version
         sanitized["version"] = version
+        if readiness:
+            sanitized["readiness_orchestration"] = dict(readiness)
+            sanitized["readiness_audit"] = readiness.get("audit_phrase")
 
         final_ok = bool(validation.get("finalization_allowed") or validation.get("pass"))
         if final_ok:
@@ -73,7 +77,14 @@ class MorningBriefArchiveStore:
             report_hash = self._hash_brief(sanitized)
             sanitized["report_hash"] = report_hash
             target = date_dir / version
-            self._write_version_dir(target, sanitized, validation, created_by=created_by, created_reason=created_reason)
+            self._write_version_dir(
+                target,
+                sanitized,
+                validation,
+                created_by=created_by,
+                created_reason=created_reason,
+                readiness=readiness,
+            )
             self._mark_prior_superseded(date_dir, version)
             self._atomic_write_json(
                 date_dir / "current.json",
@@ -86,6 +97,7 @@ class MorningBriefArchiveStore:
                     "state_hash": sanitized.get("state_hash"),
                     "report_hash": report_hash,
                     "generated_at_utc": sanitized.get("generated_at_utc"),
+                    "readiness_audit": sanitized.get("readiness_audit"),
                     **SAFETY_LOCKS,
                 },
             )
@@ -108,7 +120,14 @@ class MorningBriefArchiveStore:
         sanitized["report_hash"] = self._hash_brief({**sanitized, "report_hash": None})
         failed_name = utc_now_iso().replace(":", "").replace("-", "") + "_FAILED"
         target = date_dir / "failed" / failed_name
-        self._write_version_dir(target, sanitized, validation, created_by=created_by, created_reason=created_reason)
+        self._write_version_dir(
+            target,
+            sanitized,
+            validation,
+            created_by=created_by,
+            created_reason=created_reason,
+            readiness=readiness,
+        )
         self._rebuild_manifest()
         return {
             "status": "FAILED",
@@ -136,6 +155,7 @@ class MorningBriefArchiveStore:
         *,
         created_by: str,
         created_reason: str,
+        readiness: Mapping[str, Any] | None = None,
     ) -> None:
         if target.exists():
             raise RuntimeError(f"refusing_overwrite:{target}")
@@ -191,9 +211,13 @@ class MorningBriefArchiveStore:
                 },
                 "pdf": pdf_meta,
                 "printable_status": "OK" if pdf_meta.get("status") == "OK" else ("PARTIAL" if str(brief.get("report_status")).upper() == "FINAL" else "N/A"),
+                "readiness": dict(readiness) if readiness else brief.get("readiness_orchestration"),
+                "readiness_audit": (readiness or {}).get("audit_phrase") or brief.get("readiness_audit"),
                 **SAFETY_LOCKS,
             }
             self._atomic_write_json(stage / "manifest.json", version_manifest)
+            if readiness:
+                self._atomic_write_json(stage / "readiness.json", readiness)
             # Atomic directory publish: replace into place via rename of stage
             os.replace(str(stage), str(target))
         finally:

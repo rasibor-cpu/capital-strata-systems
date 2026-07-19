@@ -47,6 +47,9 @@ audit/
 state/
 runtime/
 !backend/runtime/
+!dashboard/runtime/
+!dashboard/runtime/api/
+!dashboard/runtime/api/**
 backend/runtime/*
 !backend/runtime/broker_operational_status.py
 !backend/runtime/broker_credential_diagnostics.py

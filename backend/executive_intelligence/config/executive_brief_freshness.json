@@ -1,0 +1,49 @@
+{
+  "schema_version": "css.executive_brief_freshness_policy.v1",
+  "retry_interval_seconds": 60,
+  "max_wait_seconds": 1800,
+  "advisory_only": true,
+  "gates": {
+    "runtime_snapshot": {
+      "max_age_seconds": 90,
+      "required": true,
+      "allow_absent_when_advisory": false
+    },
+    "executive_kpi_snapshot": {
+      "max_age_seconds": 120,
+      "required": true,
+      "allow_absent_when_advisory": false
+    },
+    "portfolio_snapshot": {
+      "max_age_seconds": 120,
+      "required": true,
+      "allow_absent_when_advisory": false
+    },
+    "risk_snapshot": {
+      "max_age_seconds": 120,
+      "required": true,
+      "allow_absent_when_advisory": true
+    },
+    "market_snapshot": {
+      "max_age_seconds": 300,
+      "required": true,
+      "allow_absent_when_advisory": false
+    },
+    "learning_snapshot": {
+      "max_age_seconds": 1800,
+      "required": true,
+      "allow_absent_when_advisory": true
+    },
+    "broker_snapshot": {
+      "max_age_seconds": 300,
+      "required": true,
+      "allow_absent_when_advisory": false,
+      "never_ready_when_unavailable": true
+    },
+    "system_heartbeat": {
+      "max_age_seconds": 60,
+      "required": true,
+      "allow_absent_when_advisory": false
+    }
+  }
+}

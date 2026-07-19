@@ -10,6 +10,8 @@ from backend.executive_intelligence.constants import (
     PLATFORM_CONTRACT,
     SAFETY_LOCKS,
 )
+from backend.executive_intelligence.orchestrator import ExecutiveBriefReadinessOrchestrator
+from backend.executive_intelligence.readiness import ExecutiveBriefReadinessEvaluator
 from backend.executive_intelligence.service import ExecutiveIntelligenceEngine
 
 __all__ = [
@@ -17,5 +19,7 @@ __all__ = [
     "BRIEF_SCHEMA_VERSION",
     "PLATFORM_CONTRACT",
     "SAFETY_LOCKS",
+    "ExecutiveBriefReadinessEvaluator",
+    "ExecutiveBriefReadinessOrchestrator",
     "ExecutiveIntelligenceEngine",
 ]

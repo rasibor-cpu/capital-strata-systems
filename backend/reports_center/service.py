@@ -40,8 +40,9 @@ class ReportsCenterService:
         auth = self.access.authorization_status(role, user_id=user_id)
         recent = self.archive.list_recent(limit=15)
         failed = self.archive.list_failed(limit=10)
-        # Latest morning brief pointer
+        # Latest morning brief pointer + Phase 176J readiness snapshot
         latest_brief = None
+        deb_readiness = None
         mb = self.repo_root / "artifacts/runtime_reports/morning_briefings"
         if mb.is_dir():
             latest_files = sorted(mb.rglob("latest.json"), key=lambda p: p.stat().st_mtime, reverse=True)
@@ -50,6 +51,19 @@ class ReportsCenterService:
                     latest_brief = json.loads(latest_files[0].read_text(encoding="utf-8"))
                 except Exception:
                     latest_brief = None
+            session_path = mb / "readiness" / "latest_session.json"
+            if session_path.is_file():
+                try:
+                    deb_readiness = json.loads(session_path.read_text(encoding="utf-8"))
+                except Exception:
+                    deb_readiness = None
+        if deb_readiness is None:
+            try:
+                from backend.executive_intelligence.service import ExecutiveIntelligenceEngine
+
+                deb_readiness = ExecutiveIntelligenceEngine(repo_root=self.repo_root).readiness()
+            except Exception:
+                deb_readiness = {"status": "UNAVAILABLE", "waiting_for": ["Waiting for Runtime"]}
         cat = catalog_payload()
         from backend.reports_center.capabilities import ui_report_definition
         from backend.reports_center.registry import all_definitions
@@ -63,6 +77,7 @@ class ReportsCenterService:
             "categories": category_menu(),
             "frequently_used": generatable[:12],
             "latest_daily_executive_brief": latest_brief,
+            "executive_brief_readiness": deb_readiness,
             "recent_reports": recent,
             "report_generation_failures": failed,
             "reports_awaiting_validation": [],
@@ -88,7 +103,7 @@ class ReportsCenterService:
 
         caps = evaluate_report_capabilities(definition, role=role, access=self.access)
         ui_def = ui_report_definition(definition, role=role, access=self.access)
-        return {
+        payload: dict[str, Any] = {
             "status": "OK",
             "report_code": report_code,
             "definition": definition.as_dict(),
@@ -119,6 +134,25 @@ class ReportsCenterService:
             "email_policy": definition.email_policy,
             **SAFETY_LOCKS,
         }
+        if report_code == "daily_executive_brief":
+            from backend.executive_intelligence.service import ExecutiveIntelligenceEngine
+
+            engine = ExecutiveIntelligenceEngine(repo_root=self.repo_root)
+            deb_ready = engine.readiness()
+            payload["executive_brief_readiness"] = deb_ready
+            payload["freshness"] = deb_ready.get("status")
+            payload["waiting_for"] = deb_ready.get("waiting_for") or []
+            payload["waiting_labels"] = deb_ready.get("waiting_labels") or []
+            session_path = (
+                self.repo_root
+                / "artifacts/runtime_reports/morning_briefings/readiness/latest_session.json"
+            )
+            if session_path.is_file():
+                try:
+                    payload["readiness_session"] = json.loads(session_path.read_text(encoding="utf-8"))
+                except Exception:
+                    payload["readiness_session"] = None
+        return payload
 
     def generate(
         self,

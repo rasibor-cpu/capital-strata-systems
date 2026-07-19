@@ -130,6 +130,8 @@ from dashboard.runtime.frontend_contract import build_frontend_payload
 from dashboard.mission_control.host_registration import register_mission_control
 from dashboard.mission_control.runtime_bridge import runtime_snapshot_state_provider
 from backend.executive_intelligence.distribution_routes import create_executive_brief_distribution_router
+from dashboard.runtime.api.executive_brief_readiness import create_executive_brief_readiness_router
+from dashboard.mission_control.contracts import build_mission_control_state
 from backend.reports_center.routes import create_reports_center_router
 import uvicorn
 
@@ -4913,12 +4915,29 @@ def _mission_control_registry_source() -> Dict[str, Any]:
 
 
 register_mission_control(app, runtime_snapshot_state_provider(_mission_control_registry_source))
+
+
+def _executive_brief_readiness_mc_state() -> Dict[str, Any]:
+    """Read-only MC state for Phase 176J readiness API (no broker/runtime mutations)."""
+    try:
+        return build_mission_control_state(
+            _mission_control_registry_source(),
+            allow_mock=False,
+        )
+    except Exception:
+        return {}
+
+
 # Phase 176E: Mission Control HTML on the canonical launcher (port 8765) uses
 # same-origin relative /api/v1/reports/* URLs. Mount the controlled write/read
 # Reports Center router here so Generate/print/audit are not 404 while MC GET
 # routes remain on /mission-control/api/reports/*.
 app.include_router(create_reports_center_router())
 app.include_router(create_executive_brief_distribution_router())
+# Phase 176J — advisory Executive Brief readiness (read-only).
+app.include_router(
+    create_executive_brief_readiness_router(state_provider=_executive_brief_readiness_mc_state)
+)
 app.include_router(launcher_router)
 app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
 

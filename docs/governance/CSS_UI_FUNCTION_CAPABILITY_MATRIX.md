@@ -36,6 +36,11 @@ back to Executive Overview; unknown slugs return HTTP 404. See
 `/mission-control/api/reports/{id}/pdf` redirects to that route; metadata is
 `/pdf-info`. See `PHASE_176I_PDF_OPEN_ROUTE_RECONCILIATION.md`.
 
+**Phase 176J note:** Daily Executive Brief waits for evidence freshness via
+`ExecutiveBriefReadinessOrchestrator` (READY/WAITING/FAILED). UI shows Waiting
+for Runtime/Portfolio/Broker/Market instead of immediate fail. See
+`PHASE_176J_EXECUTIVE_BRIEF_READINESS_ORCHESTRATOR.md`.
+
 **Phase 176H.1 note:** MC nav is native-anchor only (176H touchend/preventDefault
 removed). PWA shell `css-mobile-shell-v176h1` excludes `/mission-control`. See
 `PHASE_176H1_PHYSICAL_ANDROID_NAVIGATION_REMEDIATION.md`.

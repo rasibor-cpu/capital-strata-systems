@@ -30,6 +30,19 @@ def _esc(value: Any) -> str:
     return html.escape("" if value is None else str(value))
 
 
+def _esc_readiness_block(home: Mapping[str, Any]) -> str:
+    readiness = home.get("executive_brief_readiness") or {}
+    waiting = readiness.get("waiting_labels") or readiness.get("waiting_for") or []
+    if not waiting and str(readiness.get("status") or "").upper() == "WAITING":
+        waiting = ["Waiting for Runtime", "Waiting for Portfolio", "Waiting for Broker", "Waiting for Market"]
+    items = "".join(f"<li>{_esc(item)}</li>" for item in waiting) or "<li>Ready</li>"
+    return (
+        f"<p><strong>Executive Brief readiness:</strong> {_esc(readiness.get('status') or 'UNKNOWN')}</p>"
+        f"<ul>{items}</ul>"
+        f"<p>{_esc(readiness.get('reason') or '')}</p>"
+    )
+
+
 def _svc() -> ReportsCenterService:
     return ReportsCenterService()
 
@@ -104,6 +117,7 @@ def render_reports_home(
   </section>
   <section class="data-panel" aria-label="Latest Daily Executive Brief">
     <h2>Latest Daily Executive Brief</h2>
+    {_esc_readiness_block(home)}
     <pre class="terminal-panel" style="white-space:pre-wrap;overflow:auto;max-height:220px;">{_esc(json.dumps(latest, indent=2, default=str))}</pre>
   </section>
   <section class="data-panel" aria-label="Recent reports">

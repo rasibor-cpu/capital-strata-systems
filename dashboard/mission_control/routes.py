@@ -179,6 +179,31 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
             safe_serialize(_read_only_payload(_morning_brief_retrieval().compare_stub(from_date, to_date)))
         )
 
+    @router.get("/mission-control/api/morning-briefings/readiness")
+    async def mission_control_morning_briefings_readiness() -> JSONResponse:
+        """Phase 176J: Executive Brief readiness gates (Waiting for Runtime/Portfolio/…)."""
+        from backend.executive_intelligence.service import ExecutiveIntelligenceEngine
+
+        evaluation = ExecutiveIntelligenceEngine().readiness()
+        session = None
+        session_path = Path.cwd() / "artifacts/runtime_reports/morning_briefings/readiness/latest_session.json"
+        if session_path.is_file():
+            try:
+                session = json.loads(session_path.read_text(encoding="utf-8"))
+            except Exception:
+                session = None
+        return JSONResponse(
+            safe_serialize(
+                _read_only_payload(
+                    {
+                        "executive_brief_readiness": evaluation,
+                        "readiness_session": session,
+                        "waiting_for": evaluation.get("waiting_for") or [],
+                    }
+                )
+            )
+        )
+
     @router.get("/mission-control/api/morning-briefings/{report_date}")
     async def mission_control_morning_briefings_by_date(report_date: str) -> JSONResponse:
         retrieval = _morning_brief_retrieval()

@@ -271,6 +271,18 @@ def _library_panel(home: dict) -> str:
     recent = home.get("recent_reports") or []
     failed = home.get("report_generation_failures") or []
     latest = home.get("latest_daily_executive_brief") or {"status": "UNAVAILABLE"}
+    readiness = home.get("executive_brief_readiness") or {}
+    waiting = readiness.get("waiting_labels") or readiness.get("waiting_for") or []
+    if not waiting and str(readiness.get("status") or "").upper() == "WAITING":
+        waiting = ["Waiting for Runtime", "Waiting for Portfolio", "Waiting for Broker", "Waiting for Market"]
+    waiting_html = "".join(f"<li>{_esc(item)}</li>" for item in waiting) or "<li>Ready</li>"
+    readiness_block = f"""
+  <div class="rc-warning" aria-live="polite">
+    <strong>Executive Brief readiness:</strong> {_esc(readiness.get('status') or 'UNKNOWN')}
+    <ul class="rc-wait-list">{waiting_html}</ul>
+    <p class="rc-muted">{_esc(readiness.get('reason') or readiness.get('audit_phrase') or '')}</p>
+  </div>
+"""
     recent_rows = "".join(
         f"""<tr>
           <td><button type="button" class="rc-linkish" data-rc-action="open-report" data-report-id="{_esc(r.get('report_id'))}">{_esc(r.get('report_id'))}</button></td>
@@ -294,6 +306,7 @@ def _library_panel(home: dict) -> str:
     <button type="button" class="rc-btn" id="rc-library-refresh" data-rc-action="library-refresh">Refresh list</button>
   </div>
   <h3>Latest Daily Executive Brief</h3>
+  {readiness_block}
   <pre class="rc-result">{_esc(json.dumps(latest, indent=2, default=str))}</pre>
   <h3>Recent reports</h3>
   <div class="rc-table-wrap"><table class="rc-table"><thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Date</th><th>Version</th></tr></thead><tbody id="rc-library-body">{recent_rows}</tbody></table></div>

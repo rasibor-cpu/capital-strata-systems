@@ -1,6 +1,97 @@
 from __future__ import annotations
 
-from dashboard.mission_control.pages._components import detail_table, metric_grid, page_header, section, split_panels, warning_banner
+from dashboard.mission_control.pages._components import (
+    detail_table,
+    escape,
+    metric_grid,
+    page_header,
+    section,
+    split_panels,
+    warning_banner,
+)
+from backend.reporting.executive_brief_readiness_orchestrator import (
+    ExecutiveBriefReadinessOrchestrator,
+    evidence_from_mission_control_state,
+)
+
+
+def _readiness_state_class(state: str) -> str:
+    """Map readiness states distinctly (avoid status_class treating NOT_READY as good)."""
+    token = str(state or "").strip().upper().replace("-", "_")
+    if token == "GREEN":
+        return "good"
+    if token == "AMBER":
+        return "warn"
+    if token in {"RED", "NOT_READY"}:
+        return "bad"
+    return "neutral"
+
+
+def _executive_brief_readiness_card(state: dict) -> str:
+    """Phase 176J — advisory Executive Brief readiness card (read-only)."""
+    try:
+        orch = ExecutiveBriefReadinessOrchestrator()
+        report = orch.generate_report(evidence=evidence_from_mission_control_state(state))
+        missing = list(report.missing_datasets or [])
+        warnings = list(report.warning_items or [])
+        missing_txt = ", ".join(str(x) for x in missing[:8]) if missing else "None"
+        if len(missing) > 8:
+            missing_txt += f" (+{len(missing) - 8} more)"
+        warnings_txt = "; ".join(str(x) for x in warnings[:5]) if warnings else "None"
+        if len(warnings) > 5:
+            warnings_txt += f" (+{len(warnings) - 5} more)"
+        score_txt = f"{report.score:.1f}" if isinstance(report.score, (int, float)) else "—"
+        est = report.estimated_generation_time or "—"
+        overall = report.overall_state or "NOT_READY"
+        state_cls = _readiness_state_class(overall)
+        empty_note = ""
+        if overall == "NOT_READY" and not missing and not warnings:
+            empty_note = (
+                '<p class="mc-muted">No usable readiness evidence yet — '
+                "components will appear as sources become available.</p>"
+            )
+        return (
+            '<section class="mc-panel" id="executive-brief-readiness" '
+            'aria-label="Executive Brief Readiness" '
+            'data-phase="176J" data-advisory-only="true" '
+            f'data-overall-state="{escape(overall)}">'
+            "<h2>Executive Brief Readiness</h2>"
+            '<p class="mc-muted">Advisory readiness layer only — no trading or execution impact. '
+            "Computed from the current Mission Control snapshot (no polling loop).</p>"
+            f"{empty_note}"
+            "<table>"
+            f"<tr><th>Overall State</th><td>"
+            f'<em class="mc-status {state_cls}">{escape(overall)}</em></td></tr>'
+            f"<tr><th>Score</th><td>{escape(score_txt)}</td></tr>"
+            f"<tr><th>Missing Components</th><td>{escape(missing_txt)}</td></tr>"
+            f"<tr><th>Warnings</th><td>{escape(warnings_txt)}</td></tr>"
+            f"<tr><th>Estimated Generation Time</th><td>{escape(est)}</td></tr>"
+            "</table>"
+            '<p class="mc-muted"><a href="/api/executive-brief/readiness">'
+            "GET /api/executive-brief/readiness</a></p>"
+            "</section>"
+        )
+    except Exception as exc:  # noqa: BLE001 — never fail Executive Overview for readiness
+        return (
+            '<section class="mc-panel" id="executive-brief-readiness" '
+            'aria-label="Executive Brief Readiness" '
+            'data-phase="176J" data-advisory-only="true" data-overall-state="NOT_READY">'
+            "<h2>Executive Brief Readiness</h2>"
+            '<p class="mc-muted">Advisory readiness temporarily unavailable. '
+            "Existing Executive Overview cards remain active.</p>"
+            "<table>"
+            '<tr><th>Overall State</th><td>'
+            '<em class="mc-status bad">NOT_READY</em></td></tr>'
+            "<tr><th>Score</th><td>—</td></tr>"
+            "<tr><th>Missing Components</th><td>Unavailable</td></tr>"
+            "<tr><th>Warnings</th><td>"
+            f"{escape(type(exc).__name__)} during local evaluation</td></tr>"
+            "<tr><th>Estimated Generation Time</th><td>—</td></tr>"
+            "</table>"
+            '<p class="mc-muted"><a href="/api/executive-brief/readiness">'
+            "GET /api/executive-brief/readiness</a></p>"
+            "</section>"
+        )
 
 
 def render(state: dict) -> str:
@@ -25,6 +116,7 @@ def render(state: dict) -> str:
             status="bad" if platform.get("runtime_offline") else "good",
         )
         + warning_banner(state.get("mock_data_label", "RUNTIME DATA"), status="warn" if state.get("mock_data") else "good")
+        + _executive_brief_readiness_card(state)
         + metric_grid(
             (
                 ("Platform Status", platform.get("platform_status"), platform.get("platform_status")),
