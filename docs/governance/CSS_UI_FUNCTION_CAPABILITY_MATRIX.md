@@ -23,6 +23,10 @@ shared plain-English `CSSReportPDFRenderer`. Desktop/mobile detail expose
 **Open PDF** as the primary action. See
 `PHASE_176G_UNIVERSAL_PLAIN_ENGLISH_PDF_REPORTING.md`.
 
+**Phase 176H note:** Mission Control sidebar nav is touch-safe on mobile
+(overflow cleared + touchend href assign). See
+`PHASE_176H_MOBILE_MISSION_CONTROL_NAVIGATION_RECONCILIATION.md`.
+
 - Total controls: **144**
 - Pages audited: **49**
 - Sub-tabs audited: **5**

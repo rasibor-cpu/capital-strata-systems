@@ -11,6 +11,42 @@ from dashboard.mission_control.pages._components import status_class
 from dashboard.mission_control.theme import MISSION_CONTROL_CSS
 from dashboard.ui_interaction import DISCLOSURE_JS
 
+# Phase 176H: Android/WebKit often fails to synthesize click on <a> inside a
+# sticky overflow scrollport. Ensure touch taps navigate via real hrefs.
+MC_NAV_TOUCH_JS = r"""
+(function () {
+  var nav = document.querySelector('.mc-nav');
+  if (!nav) return;
+  var startX = 0, startY = 0, tracking = false;
+  function hrefOf(el) {
+    var a = el && el.closest ? el.closest('a[href]') : null;
+    if (!a || !nav.contains(a)) return null;
+    var href = a.getAttribute('href') || '';
+    if (!href || href.charAt(0) === '#') return null;
+    return href;
+  }
+  nav.addEventListener('touchstart', function (ev) {
+    var t = ev.changedTouches && ev.changedTouches[0];
+    if (!t) return;
+    tracking = true;
+    startX = t.clientX;
+    startY = t.clientY;
+  }, { passive: true });
+  nav.addEventListener('touchend', function (ev) {
+    if (!tracking) return;
+    tracking = false;
+    var t = ev.changedTouches && ev.changedTouches[0];
+    if (!t) return;
+    if (Math.abs(t.clientX - startX) > 14 || Math.abs(t.clientY - startY) > 14) return;
+    var href = hrefOf(ev.target);
+    if (!href) return;
+    // Force navigation when the browser suppresses the synthetic click.
+    ev.preventDefault();
+    window.location.assign(href);
+  }, { passive: false });
+})();
+"""
+
 
 def render_mission_control_shell(state: Mapping[str, Any], *, active_section: str = "executive_overview") -> str:
     active = section_for_key(active_section)
@@ -66,6 +102,7 @@ def render_mission_control_shell(state: Mapping[str, Any], *, active_section: st
     </main>
   </div>
   <script>{DISCLOSURE_JS}</script>
+  <script>{MC_NAV_TOUCH_JS}</script>
 </body>
 </html>"""
 

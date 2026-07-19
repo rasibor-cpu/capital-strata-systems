@@ -33,6 +33,7 @@ body.mc-body {
   top: 0;
   height: 100vh;
   overflow-y: auto;
+  z-index: 6;
   background: #101820;
   border-right: 1px solid var(--mc-line);
   padding: 18px 12px;
@@ -40,24 +41,29 @@ body.mc-body {
 .mc-brand { padding: 8px 10px 18px; }
 .mc-brand strong { display: block; font-size: 1.08rem; letter-spacing: .02em; }
 .mc-brand span { color: var(--mc-muted); font-size: .82rem; }
-.mc-nav { display: grid; gap: 4px; }
+.mc-nav { display: grid; gap: 4px; position: relative; z-index: 1; }
 .mc-nav a {
   display: flex;
   gap: 8px;
   align-items: center;
-  min-height: 38px;
+  min-height: 44px;
   padding: 8px 10px;
   color: var(--mc-muted);
   text-decoration: none;
   border-radius: 6px;
   border: 1px solid transparent;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: rgba(104, 168, 255, .25);
+  position: relative;
+  z-index: 1;
+  cursor: pointer;
 }
-.mc-nav a[aria-current="page"], .mc-nav a:hover {
+.mc-nav a[aria-current="page"], .mc-nav a:hover, .mc-nav a:active {
   color: var(--mc-text);
   background: var(--mc-panel);
   border-color: var(--mc-line);
 }
-.mc-main { min-width: 0; }
+.mc-main { min-width: 0; position: relative; z-index: 1; }
 .mc-topbar {
   position: sticky;
   top: 0;
@@ -179,7 +185,15 @@ th { color: var(--mc-muted); width: 34%; font-weight: 600; }
 .rc-status-coming_soon, .rc-status-data_unavailable, .rc-status-disabled { border-color: rgba(244,182,74,.48); }
 @media (max-width: 1100px) {
   .mc-shell { grid-template-columns: 1fr; }
-  .mc-sidebar { position: relative; height: auto; }
+  /* Phase 176H: nested overflow scrollports on mobile steal Android touch
+     activation from .mc-nav anchors. Drop the scrollport when stacked. */
+  .mc-sidebar {
+    position: relative;
+    height: auto;
+    overflow: visible;
+    z-index: 6;
+    -webkit-overflow-scrolling: auto;
+  }
   .mc-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .mc-metric-grid { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
 }
@@ -188,6 +202,7 @@ th { color: var(--mc-muted); width: 34%; font-weight: 600; }
   .mc-nav, .mc-metric-grid, .mc-panel-grid { grid-template-columns: 1fr; }
   .mc-content { padding: 16px; }
   .rc-card-grid, .rc-filters { grid-template-columns: 1fr; }
+  .mc-nav a { min-height: 48px; }
 }
 """ + CSS_DISCLOSURE
 
