@@ -6,6 +6,12 @@ governance, risk gates, ledger/accounting, and audit certification. See `README.
 
 ## Cursor Cloud specific instructions
 
+**Canonical repo/environment:** Always use the GitHub repo/environment
+`rasibor-cpu/capital-strata-systems` (checked out at `/workspace` on the Linux VM) until
+explicitly advised otherwise. This is the same product formerly named
+`REA-capital-trading-engine`; ignore/do not switch to that old name. There is no Windows
+`C:\` filesystem on the Cloud VM — Windows paths in docs/launchers refer to a local machine only.
+
 This is a **Python-only** project (Python 3.12 in this environment; CI targets 3.11).
 There is no Node/JS toolchain — the files under `ui/` and `frontend/` are loose static
 assets with no `package.json`, build step, or lockfile.
