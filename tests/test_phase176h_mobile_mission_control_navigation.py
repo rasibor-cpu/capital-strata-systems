@@ -78,7 +78,9 @@ def test_mobile_css_static_sidebar_no_scrollport() -> None:
     assert "overflow-y: auto" in MISSION_CONTROL_CSS  # desktop sidebar may scroll
     assert "@media (max-width: 1100px)" in MISSION_CONTROL_CSS
     assert "position: static" in MISSION_CONTROL_CSS
-    assert "overflow: visible" in MISSION_CONTROL_CSS
+    # Phase 176H.3: mobile isolates document scroll; sidebar/main scroll internally.
+    assert "height: 100dvh" in MISSION_CONTROL_CSS
+    assert "overflow: hidden" in MISSION_CONTROL_CSS
     assert "touch-action: manipulation" in MISSION_CONTROL_CSS
     assert "pointer-events: none" in MISSION_CONTROL_CSS
     assert "min-height: 44px" in MISSION_CONTROL_CSS

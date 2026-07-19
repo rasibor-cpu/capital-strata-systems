@@ -66,12 +66,17 @@ def test_nav_child_spans_use_pointer_events_none() -> None:
 
 
 def test_mobile_layout_disables_sticky_overlay_risk() -> None:
-    # Under the mobile media query, sidebar and topbar are static.
+    # Under the mobile media query, sidebar and topbar are static; 176H.3
+    # isolates document scrolling so Android does not pointercancel nav taps.
     idx = MISSION_CONTROL_CSS.index("@media (max-width: 1100px)")
-    mobile = MISSION_CONTROL_CSS[idx : idx + 800]
+    mobile = MISSION_CONTROL_CSS[idx : idx + 1200]
     assert "position: static" in mobile
     assert ".mc-sidebar" in mobile
     assert ".mc-topbar" in mobile
+    assert "height: 100dvh" in mobile
+    assert "overflow: hidden" in mobile
+    assert "flex: 1" in mobile
+    assert "min-height: 0" in mobile
 
 
 def test_cache_control_no_store_on_mc_html() -> None:

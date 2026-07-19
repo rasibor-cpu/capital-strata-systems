@@ -35,6 +35,11 @@ back to Executive Overview; unknown slugs return HTTP 404. See
 removed). PWA shell `css-mobile-shell-v176h1` excludes `/mission-control`. See
 `PHASE_176H1_PHYSICAL_ANDROID_NAVIGATION_REMEDIATION.md`.
 
+**Phase 176H.3 note:** Mobile MC isolates scrolling (`html/body` overflow hidden;
+flex shell; sidebar/main internal scroll) so Android Chrome does not
+`pointercancel` native nav taps. See
+`PHASE_176H3_ANDROID_POINTERCANCEL_REMEDIATION.md`.
+
 - Total controls: **144**
 - Pages audited: **49**
 - Sub-tabs audited: **5**

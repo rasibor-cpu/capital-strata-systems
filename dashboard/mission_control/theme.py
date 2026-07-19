@@ -190,18 +190,40 @@ th { color: var(--mc-muted); width: 34%; font-weight: 600; }
 .rc-status-available, .rc-status-available_with_limitations { border-color: rgba(51,196,129,.45); }
 .rc-status-coming_soon, .rc-status-data_unavailable, .rc-status-disabled { border-color: rgba(244,182,74,.48); }
 @media (max-width: 1100px) {
-  .mc-shell { grid-template-columns: 1fr; }
-  /* Phase 176H.1: stacked mobile layout — no sticky/overflow scrollport on
-     sidebar or topbar so native <a href> hit testing is reliable on Android. */
+  /* Phase 176H.3: isolate scrolling so Android Chrome does not pointercancel
+     native <a href> taps while the HTML document is the pan surface. */
+  html,
+  body.mc-body {
+    height: 100%;
+    max-height: 100dvh;
+    overflow: hidden;
+  }
+  .mc-shell {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    max-height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+    grid-template-columns: none;
+  }
   .mc-sidebar {
     position: static;
     height: auto;
-    max-height: none;
-    overflow: visible;
+    max-height: min(46vh, 420px);
+    overflow: auto;
+    flex: 0 0 auto;
     z-index: auto;
-    -webkit-overflow-scrolling: auto;
+    -webkit-overflow-scrolling: touch;
     border-right: 0;
     border-bottom: 1px solid var(--mc-line);
+  }
+  .mc-main {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    position: relative;
+    z-index: 1;
   }
   .mc-topbar {
     position: static;
