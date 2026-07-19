@@ -36,12 +36,45 @@ MISSION_CONTROL_SECTIONS: tuple[MissionControlSection, ...] = (
 
 SECTION_BY_KEY = {section.key: section for section in MISSION_CONTROL_SECTIONS}
 
+# URL path segment → section (derived from published routes; no silent EO default).
+SECTION_BY_SLUG: dict[str, MissionControlSection] = {}
+for _section in MISSION_CONTROL_SECTIONS:
+    _route_slug = _section.route.rstrip("/").rsplit("/", 1)[-1].lower()
+    SECTION_BY_SLUG[_route_slug] = _section
+    SECTION_BY_SLUG[_section.key.replace("_", "-")] = _section
+    SECTION_BY_SLUG[_section.key] = _section
+# Explicit aliases for clarity / legacy bookmarks
+SECTION_BY_SLUG.setdefault("reports", SECTION_BY_KEY["reports_center"])
+SECTION_BY_SLUG.setdefault("reports-center", SECTION_BY_KEY["reports_center"])
+
+
+def resolve_section_slug(section_slug: str | None) -> MissionControlSection | None:
+    """Resolve a Mission Control URL slug to a section.
+
+    Returns None for unknown slugs. Never silently falls back to Executive Overview.
+    """
+    raw = str(section_slug or "").strip().lower()
+    if not raw:
+        return None
+    hyphen = raw.replace("_", "-")
+    underscore = raw.replace("-", "_")
+    return (
+        SECTION_BY_SLUG.get(raw)
+        or SECTION_BY_SLUG.get(hyphen)
+        or SECTION_BY_SLUG.get(underscore)
+        or SECTION_BY_KEY.get(underscore)
+    )
+
 
 def section_for_key(key: str | None) -> MissionControlSection:
+    """Resolve a known section key. Unknown keys raise KeyError (fail closed)."""
     normalized = str(key or "").strip().lower().replace("-", "_")
     if normalized == "reports":
         normalized = "reports_center"
-    return SECTION_BY_KEY.get(normalized, MISSION_CONTROL_SECTIONS[0])
+    section = SECTION_BY_KEY.get(normalized)
+    if section is None:
+        raise KeyError(f"unknown_mission_control_section:{normalized or 'EMPTY'}")
+    return section
 
 
 def navigation_payload() -> list[dict[str, str]]:
@@ -51,6 +84,9 @@ def navigation_payload() -> list[dict[str, str]]:
 __all__ = [
     "MISSION_CONTROL_SECTIONS",
     "MissionControlSection",
+    "SECTION_BY_KEY",
+    "SECTION_BY_SLUG",
     "navigation_payload",
+    "resolve_section_slug",
     "section_for_key",
 ]

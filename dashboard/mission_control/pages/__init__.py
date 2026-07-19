@@ -41,7 +41,9 @@ PAGE_MODULES = {
 
 
 def render_page(section_key: str, state: dict) -> str:
-    module = PAGE_MODULES.get(section_key, executive_overview)
+    module = PAGE_MODULES.get(section_key)
+    if module is None:
+        raise KeyError(f"unknown_mission_control_page:{section_key}")
     return module.render(state)
 
 

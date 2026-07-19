@@ -27,6 +27,10 @@ shared plain-English `CSSReportPDFRenderer`. Desktop/mobile detail expose
 (overflow cleared + touchend href assign). See
 `PHASE_176H_MOBILE_MISSION_CONTROL_NAVIGATION_RECONCILIATION.md`.
 
+**Phase 176I note:** Mission Control `{section_slug}` no longer silently falls
+back to Executive Overview; unknown slugs return HTTP 404. See
+`PHASE_176I_MISSION_CONTROL_ROUTE_RESOLUTION_RECONCILIATION.md`.
+
 - Total controls: **144**
 - Pages audited: **49**
 - Sub-tabs audited: **5**

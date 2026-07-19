@@ -15,7 +15,7 @@ from dashboard.auth.session_bridge import resolve_authorization_context
 from dashboard.mission_control.contracts import build_mission_control_state
 from dashboard.mission_control.health import build_health_summary
 from dashboard.mission_control.layout import render_mission_control_shell
-from dashboard.mission_control.navigation import MISSION_CONTROL_SECTIONS, section_for_key
+from dashboard.mission_control.navigation import MISSION_CONTROL_SECTIONS, resolve_section_slug, section_for_key
 from dashboard.mission_control.serializers import safe_serialize
 
 
@@ -504,10 +504,26 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
 
     @router.get("/mission-control/{section_slug}", response_class=HTMLResponse)
     async def mission_control_page(section_slug: str, request: Request) -> HTMLResponse:
-        key = str(section_slug or "").replace("-", "_")
-        section = section_for_key(key)
+        section = resolve_section_slug(section_slug)
+        if section is None:
+            return HTMLResponse(
+                (
+                    "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+                    "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+                    "<title>404 — Mission Control</title></head><body>"
+                    "<h1>404</h1>"
+                    "<p>Unknown Mission Control section.</p>"
+                    "<p><a href='/mission-control/executive-overview'>Executive Overview</a></p>"
+                    "</body></html>"
+                ),
+                status_code=404,
+                headers={"Cache-Control": "no-store"},
+            )
         current = state(request)
-        return HTMLResponse(render_mission_control_shell(current, active_section=section.key))
+        return HTMLResponse(
+            render_mission_control_shell(current, active_section=section.key),
+            headers={"Cache-Control": "no-store"},
+        )
 
     return router
 
