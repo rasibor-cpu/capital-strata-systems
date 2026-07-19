@@ -50,6 +50,10 @@ runtime/
 !dashboard/runtime/
 !dashboard/runtime/api/
 !dashboard/runtime/api/**
+# Keep generated caches excluded even after the api/ un-ignore above.
+dashboard/runtime/**/__pycache__/
+dashboard/runtime/**/*.py[cod]
+dashboard/runtime/**/*.pyc
 backend/runtime/*
 !backend/runtime/broker_operational_status.py
 !backend/runtime/broker_credential_diagnostics.py
