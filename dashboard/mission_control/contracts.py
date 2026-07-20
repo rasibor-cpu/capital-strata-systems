@@ -490,28 +490,76 @@ def _risk(risk: Mapping[str, Any], governance: Mapping[str, Any], runtime_snapsh
 
 def _options_income(sections: Mapping[str, Any]) -> dict[str, Any]:
     options = sections.get("options_income") if isinstance(sections.get("options_income"), Mapping) else {}
+    status = str(options.get("status") or "").strip()
+    # Phase 177D: when frontend has not published OI, serve canonical runtime aggregation
+    if not options or status in {"", "UNAVAILABLE", "NOT YET DEPLOYED"}:
+        try:
+            from backend.options.options_income_runtime_service import build_mission_control_options_income
+
+            return build_mission_control_options_income()
+        except Exception as exc:  # noqa: BLE001 — fail-closed MC projection
+            return {
+                "status": "FAILED",
+                "deployment_state": "NOT_DEPLOYED",
+                "opportunities": [],
+                "accepted_candidates": [],
+                "rejected_candidates": [],
+                "covered_calls": [],
+                "cash_secured_puts": [],
+                "paper_positions": [],
+                "premium_accounting": {"status": "FAILED", "reason": type(exc).__name__},
+                "collateral": {"status": "FAILED"},
+                "position_health": "FAILED",
+                "rolling_recommendations": [],
+                "income_targets": {"status": "FAILED"},
+                "portfolio_allocation": {},
+                "greeks": {"status": "FAILED"},
+                "assignment_risk": {"status": "FAILED"},
+                "volatility_risk": {"status": "FAILED"},
+                "stress_tests": {},
+                "alerts": [],
+                "certification": {"outcome": "FAILED"},
+                "operational_readiness": "FAILED",
+                "data_source": "RUNTIME",
+                "execution_blocked": True,
+                "advisory_only": True,
+                "failure_reason": type(exc).__name__,
+            }
     return {
         "status": options.get("status", "UNAVAILABLE"),
+        "engine_status": options.get("engine_status", options.get("status", "UNAVAILABLE")),
+        "deployment_state": options.get("deployment_state", "DEPLOYED"),
         "opportunities": options.get("opportunities", []),
-        "accepted_candidates": [],
-        "rejected_candidates": [],
-        "covered_calls": [],
-        "cash_secured_puts": [],
-        "paper_positions": [],
-        "premium_accounting": "UNAVAILABLE",
-        "collateral": "UNAVAILABLE",
-        "position_health": "UNAVAILABLE",
-        "rolling_recommendations": [],
-        "income_targets": "UNAVAILABLE",
-        "portfolio_allocation": "UNAVAILABLE",
-        "greeks": "UNAVAILABLE",
-        "assignment_risk": "UNAVAILABLE",
-        "volatility_risk": "UNAVAILABLE",
-        "stress_tests": "UNAVAILABLE",
-        "alerts": [],
-        "certification": "UNAVAILABLE",
-        "operational_readiness": "UNAVAILABLE",
+        "accepted_candidates": options.get("accepted_candidates", []),
+        "rejected_candidates": options.get("rejected_candidates", []),
+        "covered_calls": options.get("covered_calls", []),
+        "cash_secured_puts": options.get("cash_secured_puts", []),
+        "paper_positions": options.get("paper_positions", []),
+        "premium_accounting": options.get("premium_accounting", "UNAVAILABLE"),
+        "collateral": options.get("collateral", "UNAVAILABLE"),
+        "position_health": options.get("position_health", "UNAVAILABLE"),
+        "rolling_recommendations": options.get("rolling_recommendations", []),
+        "income_targets": options.get("income_targets", "UNAVAILABLE"),
+        "run_rate": options.get("run_rate", options.get("income_targets", "UNAVAILABLE")),
+        "portfolio_allocation": options.get("portfolio_allocation", "UNAVAILABLE"),
+        "greeks": options.get("greeks", "UNAVAILABLE"),
+        "assignment_risk": options.get("assignment_risk", "UNAVAILABLE"),
+        "volatility_risk": options.get("volatility_risk", "UNAVAILABLE"),
+        "stress_tests": options.get("stress_tests", "UNAVAILABLE"),
+        "alerts": options.get("alerts", []),
+        "certification": options.get("certification", "UNAVAILABLE"),
+        "operational_readiness": options.get("operational_readiness", "UNAVAILABLE"),
         "data_source": options.get("data_source", "UNAVAILABLE"),
+        "source": options.get("source", options.get("data_source", "UNAVAILABLE")),
+        "provenance": options.get("provenance", {}),
+        "state_hash": options.get("state_hash", "UNAVAILABLE"),
+        "generated_at": options.get("generated_at", "UNAVAILABLE"),
+        "last_successful_refresh": options.get("last_successful_refresh", "UNAVAILABLE"),
+        "missing_dependencies": options.get("missing_dependencies", []),
+        "opportunity_count": options.get("opportunity_count", len(options.get("opportunities", []) or [])),
+        "advisory_only": True,
+        "execution_blocked": True,
+        "execution_authority": options.get("execution_authority", "BLOCKED"),
     }
 
 
@@ -615,10 +663,20 @@ def _alerts_from_runtime(alerts: Mapping[str, Any], runtime_snapshot: Mapping[st
 
 def _certification(certification: Mapping[str, Any], broker: Mapping[str, Any], runtime_snapshot: Mapping[str, Any]) -> dict[str, Any]:
     runtime_certification = runtime_snapshot.get("certification") if isinstance(runtime_snapshot.get("certification"), Mapping) else {}
+    oi_cert = runtime_certification.get("options_income_certification", DATA_UNAVAILABLE)
+    try:
+        from backend.options.options_income_runtime_service import build_mission_control_options_income
+
+        oi = build_mission_control_options_income()
+        cert_block = oi.get("certification") if isinstance(oi.get("certification"), Mapping) else {}
+        if cert_block.get("outcome"):
+            oi_cert = cert_block.get("outcome")
+    except Exception:
+        pass
     return {
         "rc1_platform_certification": runtime_certification.get("rc1_certification", certification.get("certification", DATA_UNAVAILABLE)),
         "rc1_operational_readiness": runtime_certification.get("rc1_operational_readiness", certification.get("operational_state", DATA_UNAVAILABLE)),
-        "options_income_certification": runtime_certification.get("options_income_certification", DATA_UNAVAILABLE),
+        "options_income_certification": oi_cert,
         "broker_readiness": runtime_certification.get("broker_readiness", broker.get("broker_health", DATA_UNAVAILABLE)),
         "runtime_readiness": runtime_certification.get("runtime_readiness", certification.get("operational_state", DATA_UNAVAILABLE)),
         "production_readiness_contribution": DATA_UNAVAILABLE,

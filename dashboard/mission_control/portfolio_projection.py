@@ -55,18 +55,42 @@ def build_performance_panel(state: Mapping[str, Any]) -> dict[str, Any]:
 def build_options_income_panel(state: Mapping[str, Any]) -> dict[str, Any]:
     options = _mapping(state.get("options_income"))
     status = options.get("status", DATA_UNAVAILABLE)
-    deployed = status not in {DATA_UNAVAILABLE, "UNAVAILABLE", "", None}
+    deployment = str(options.get("deployment_state") or "").upper()
+    # Phase 177D precise semantics: deployed advisory states are not "NOT YET DEPLOYED"
+    deployed = deployment == "DEPLOYED" or status not in {
+        DATA_UNAVAILABLE,
+        "UNAVAILABLE",
+        "NOT_DEPLOYED",
+        "NOT YET DEPLOYED",
+        "",
+        None,
+    }
+    panel_status = status if deployed else "NOT YET DEPLOYED"
+    if deployed and status in {"ADVISORY_ONLY", "DATA_DEPENDENCY_BLOCKED", "READY", "NO_CURRENT_OPPORTUNITIES", "PARTIAL_DATA"}:
+        panel_status = status
     return {
-        "status": status if deployed else "NOT YET DEPLOYED",
-        "deployed": deployed,
+        "status": panel_status,
+        "deployed": bool(deployed),
+        "deployment_state": options.get("deployment_state", "UNKNOWN"),
+        "opportunity_count": options.get("opportunity_count", len(options.get("opportunities", []) or [])),
         "opportunities": options.get("opportunities", []),
         "premium_accounting": options.get("premium_accounting", DATA_UNAVAILABLE),
         "collateral": options.get("collateral", DATA_UNAVAILABLE),
         "greeks": options.get("greeks", DATA_UNAVAILABLE),
         "assignment_risk": options.get("assignment_risk", DATA_UNAVAILABLE),
+        "volatility_risk": options.get("volatility_risk", DATA_UNAVAILABLE),
         "rolling_recommendations": options.get("rolling_recommendations", []),
+        "income_targets": options.get("income_targets", DATA_UNAVAILABLE),
+        "run_rate": options.get("run_rate", DATA_UNAVAILABLE),
         "certification": options.get("certification", DATA_UNAVAILABLE),
         "operational_readiness": options.get("operational_readiness", DATA_UNAVAILABLE),
+        "missing_dependencies": options.get("missing_dependencies", []),
+        "state_hash": options.get("state_hash", DATA_UNAVAILABLE),
+        "generated_at": options.get("generated_at", DATA_UNAVAILABLE),
+        "last_successful_refresh": options.get("last_successful_refresh", DATA_UNAVAILABLE),
+        "provenance": options.get("provenance", {}),
+        "advisory_only": True,
+        "execution_blocked": True,
         "read_only": True,
         **_metadata(state, "options_income_panel"),
     }

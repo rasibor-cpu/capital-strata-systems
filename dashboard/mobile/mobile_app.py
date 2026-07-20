@@ -2143,6 +2143,7 @@ def _command_center_panel(user_ctx: Dict[str, Any]) -> str:
         ("Opportunities", "Current monitor queue and watchlist posture.", "/opportunities"),
         ("Market", "Regime, VWAP, liquidity, and pressure state.", "/market"),
         ("Broker", "Broker readiness and live-order gate posture.", "/broker"),
+        ("Options Income", "Advisory covered-call / CSP status, premium, and certification.", "/mission-control/options-income"),
     ]
     if not mobile_reports.can_view_reports(user_ctx):
         cards = [c for c in cards if c[0] != "Reports"]

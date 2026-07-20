@@ -76,6 +76,7 @@ FRONTEND_SECTIONS = (
     "capital_allocation_intelligence",
     "institutional_investment_committee",
     "analytics",
+    "options_income",
 )
 
 DATA_UNAVAILABLE = "DATA UNAVAILABLE"
@@ -190,10 +191,38 @@ def build_frontend_payload(
             "capital_allocation_intelligence": capital_allocation_intelligence(dashboard_payload),
             "institutional_investment_committee": institutional_investment_committee(dashboard_payload),
             "analytics": analytics(dashboard_payload),
+            "options_income": options_income(dashboard_payload),
         },
     }
 
     return payload
+
+
+def options_income(dashboard_payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Phase 177D — concise mobile/frontend Options Income card (advisory only)."""
+    _ = dashboard_payload
+    try:
+        from backend.options.options_income_runtime_service import build_options_income_mobile_card
+
+        card = build_options_income_mobile_card()
+        card["section"] = "options_income"
+        card["advisory_only"] = True
+        card["execution_blocked"] = True
+        card["live_trading_enabled"] = False
+        return _json_safe(card)
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "section": "options_income",
+            "options_income_status": "FAILED",
+            "opportunity_count": 0,
+            "certification": "FAILED",
+            "failure_reason": type(exc).__name__,
+            "advisory_only": True,
+            "execution_blocked": True,
+            "live_trading_enabled": False,
+            "detail_route": "/mission-control/options-income",
+            "provenance": "RUNTIME",
+        }
 
 
 def account_summary(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:

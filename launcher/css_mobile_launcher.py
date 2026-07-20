@@ -137,6 +137,8 @@ from dashboard.runtime.api.executive_decision_intelligence import (
     create_executive_decision_intelligence_router,
 )
 from dashboard.runtime.api.runtime_mode import create_runtime_mode_router
+from backend.options.options_income_api import create_options_income_router
+from backend.options.options_income_runtime_service import get_cached_options_income_payload
 from dashboard.mission_control.contracts import build_mission_control_state
 from backend.reports_center.routes import create_reports_center_router
 from backend.runtime.runtime_mode import RuntimeMode, resolve_runtime_mode
@@ -5024,6 +5026,8 @@ app.include_router(
 app.include_router(
     create_runtime_mode_router(state_provider=_executive_brief_readiness_mc_state)
 )
+# Phase 177D — Options Income Engine runtime APIs (read-only, advisory, execution blocked).
+app.include_router(create_options_income_router(payload_provider=get_cached_options_income_payload))
 app.include_router(launcher_router)
 app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
 

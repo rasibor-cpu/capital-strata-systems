@@ -56,7 +56,7 @@ SECTION_SOURCE_MODULES: dict[str, str] = {
     "portfolio": "dashboard.runtime.frontend_contract",
     "market_intelligence": "dashboard.runtime.frontend_contract",
     "risk": "dashboard.runtime.frontend_contract",
-    "options_income": "dashboard.runtime.frontend_contract",
+    "options_income": "backend.options.options_income_runtime_service",
     "brokers": "backend.runtime.canonical_broker_runtime_state",
     "alerts": "dashboard.runtime.dashboard_state",
     "certification": "backend.runtime.runtime_certification_snapshot",
