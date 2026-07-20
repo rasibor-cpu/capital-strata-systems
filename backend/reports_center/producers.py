@@ -75,6 +75,11 @@ def _producer_handlers() -> dict[str, Any]:
         "account_statement": _account_statement,
         "portfolio_summary": _portfolio_summary,
         "pnl_report": _pnl_report,
+        "executive_financial_summary": _executive_financial_summary,
+        "canonical_income_statement": _canonical_income_statement,
+        "canonical_balance_sheet": _canonical_balance_sheet,
+        "canonical_cash_flow_statement": _canonical_cash_flow_statement,
+        "profitability_run_rate_report": _profitability_run_rate_report,
         "risk_summary": _risk_summary,
         "safety_lock_report": _safety_lock,
         "broker_health_report": _broker_health,
@@ -655,6 +660,66 @@ def _pnl_report(*, filters: dict[str, Any], repo_root: Path) -> dict[str, Any]:
         "html": _html_wrap("PnL Report", text, limitations="Ledger-backed PnL only."),
         **SAFETY_LOCKS,
     }
+
+
+def _executive_financial_summary(*, filters: dict[str, Any], repo_root: Path) -> dict[str, Any]:
+    from backend.executive_reporting.service import produce_report_center_payload
+
+    return produce_report_center_payload(
+        report_code="executive_financial_summary",
+        title="Executive Financial Summary",
+        filters=filters,
+        repo_root=repo_root,
+        view="full",
+    )
+
+
+def _canonical_income_statement(*, filters: dict[str, Any], repo_root: Path) -> dict[str, Any]:
+    from backend.executive_reporting.service import produce_report_center_payload
+
+    return produce_report_center_payload(
+        report_code="canonical_income_statement",
+        title="Income Statement",
+        filters=filters,
+        repo_root=repo_root,
+        view="income",
+    )
+
+
+def _canonical_balance_sheet(*, filters: dict[str, Any], repo_root: Path) -> dict[str, Any]:
+    from backend.executive_reporting.service import produce_report_center_payload
+
+    return produce_report_center_payload(
+        report_code="canonical_balance_sheet",
+        title="Balance Sheet",
+        filters=filters,
+        repo_root=repo_root,
+        view="balance",
+    )
+
+
+def _canonical_cash_flow_statement(*, filters: dict[str, Any], repo_root: Path) -> dict[str, Any]:
+    from backend.executive_reporting.service import produce_report_center_payload
+
+    return produce_report_center_payload(
+        report_code="canonical_cash_flow_statement",
+        title="Cash-Flow Statement",
+        filters=filters,
+        repo_root=repo_root,
+        view="cash",
+    )
+
+
+def _profitability_run_rate_report(*, filters: dict[str, Any], repo_root: Path) -> dict[str, Any]:
+    from backend.executive_reporting.service import produce_report_center_payload
+
+    return produce_report_center_payload(
+        report_code="profitability_run_rate_report",
+        title="Profitability Run-Rate Report",
+        filters=filters,
+        repo_root=repo_root,
+        view="run_rate",
+    )
 
 
 def _risk_summary(*, filters: dict[str, Any], repo_root: Path) -> dict[str, Any]:

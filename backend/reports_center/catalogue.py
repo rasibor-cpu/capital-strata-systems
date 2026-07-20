@@ -513,6 +513,68 @@ def build_catalogue() -> tuple[CSSReportDefinition, ...]:
             implementation_phase="176",
         )
     )
+    # Phase 178 — Executive Financial Reporting Suite (Phase 177-backed)
+    for code, title, desc, view_hint in [
+        (
+            "executive_financial_summary",
+            "Executive Financial Summary",
+            "Executive financial summary derived from the Phase 177 Canonical Financial Reporting Engine.",
+            "summary",
+        ),
+        (
+            "canonical_income_statement",
+            "Income Statement",
+            "Canonical income statement from Phase 177 (management reporting).",
+            "income",
+        ),
+        (
+            "canonical_balance_sheet",
+            "Balance Sheet",
+            "Canonical balance sheet from Phase 177 (management reporting).",
+            "balance",
+        ),
+        (
+            "canonical_cash_flow_statement",
+            "Cash-Flow Statement",
+            "Canonical cash-flow statement from Phase 177 (management reporting).",
+            "cash",
+        ),
+        (
+            "profitability_run_rate_report",
+            "Profitability Run-Rate Report",
+            "Target profit versus actual run-rate from Phase 177.",
+            "run_rate",
+        ),
+    ]:
+        items.append(
+            defn(
+                report_type=code,
+                report_code=code,
+                title=title,
+                description=desc,
+                category="portfolio_performance",
+                supported_scopes=("report_date", "period"),
+                supported_formats=("HTML", "JSON", "PDF"),
+                producer=f"reports_center.producers.{code}",
+                evidence_sources=(
+                    "canonical_financial_reporting",
+                    "mission_control.portfolio",
+                ),
+                contains_financial_values=True,
+                printable=True,
+                downloadable=True,
+                required_print_permission="portfolio_report_print",
+                status="AVAILABLE_WITH_LIMITATIONS",
+                inventory_class="PARTIAL",
+                limitations=(
+                    "Advisory management reporting from Phase 177. "
+                    "Not audited statutory statements. "
+                    f"Producer view={view_hint}."
+                ),
+                implementation_phase="178",
+                menu_path=f"Reports / Portfolio Performance / {title}",
+            )
+        )
     for code, title in [
         ("portfolio_holdings", "Portfolio Holdings Report"),
         ("position_statement", "Position Statement"),

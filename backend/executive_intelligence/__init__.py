@@ -14,6 +14,9 @@ from backend.executive_intelligence.orchestrator import ExecutiveBriefReadinessO
 from backend.executive_intelligence.readiness import ExecutiveBriefReadinessEvaluator
 from backend.executive_intelligence.service import ExecutiveIntelligenceEngine
 
+# Phase 178 — optional read-only financial provider for EI consumers
+from backend.executive_reporting.ei_adapter import executive_intelligence_financial_provider  # noqa: F401
+
 __all__ = [
     "ARCHIVE_SCHEMA_VERSION",
     "BRIEF_SCHEMA_VERSION",
@@ -22,4 +25,5 @@ __all__ = [
     "ExecutiveBriefReadinessEvaluator",
     "ExecutiveBriefReadinessOrchestrator",
     "ExecutiveIntelligenceEngine",
+    "executive_intelligence_financial_provider",
 ]

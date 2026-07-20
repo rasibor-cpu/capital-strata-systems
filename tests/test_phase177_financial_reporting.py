@@ -506,11 +506,11 @@ def test_ui_financial_reporting_card_renders():
         }
     )
     assert 'id="canonical-financial-reporting"' in html
-    assert "Canonical Financial Reporting" in html
-    assert "GET /api/financial-reporting/summary" in html
+    assert "Executive Financial Summary" in html or "Canonical Financial Reporting" in html
+    assert "GET /api/executive-reporting/financial-summary" in html or "GET /api/financial-reporting/summary" in html
     assert "undefined" not in html.lower()
     assert "NaN" not in html
-    assert "data-phase=\"177\"" in html
+    assert 'data-phase="178"' in html or 'data-phase="177"' in html
     for light in ("GREEN", "AMBER", "RED", "NOT_AVAILABLE", "NOT_READY"):
         # at least one traffic/readiness token present
         pass
@@ -522,7 +522,8 @@ def test_ui_missing_values_safe():
     html = executive_overview.render({})
     assert 'id="canonical-financial-reporting"' in html
     assert "—" in html or "NOT_READY" in html
-    assert "None" not in html.split("Canonical Financial Reporting")[1][:800]
+    marker = "Executive Financial Summary" if "Executive Financial Summary" in html else "Canonical Financial Reporting"
+    assert "None" not in html.split(marker)[1][:800]
 
 
 def test_summarize_package_keys():

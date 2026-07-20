@@ -477,7 +477,42 @@ def evidence_from_mission_control_state(state: Mapping[str, Any] | None) -> dict
         "broker_health": broker_health,
     }
 
-    return {
+    income_statement = reporting.get("income_statement") or state.get("income_statement")
+    balance_sheet = reporting.get("balance_sheet") or state.get("balance_sheet")
+    cash_flow = reporting.get("cash_flow") or state.get("cash_flow")
+
+    # Phase 178: when MC lacks statement blobs, derive 176J evidence from Phase 177 package.
+    financial_report_package = (
+        state.get("financial_report_package")
+        or reporting.get("financial_report_package")
+        or state.get("executive_financial_report")
+    )
+    if not (income_statement and balance_sheet and cash_flow):
+        try:
+            from backend.executive_reporting.service import ExecutiveFinancialReportingService
+
+            if not isinstance(financial_report_package, Mapping):
+                financial_report_package = ExecutiveFinancialReportingService().generate_from_state(
+                    dict(state)
+                )
+            from backend.executive_reporting.evidence_bridge import merge_financial_evidence_into_176j
+
+            bridged = merge_financial_evidence_into_176j(
+                {
+                    "income_statement": income_statement,
+                    "balance_sheet": balance_sheet,
+                    "cash_flow": cash_flow,
+                },
+                financial_report_package,
+            )
+            income_statement = bridged.get("income_statement") or income_statement
+            balance_sheet = bridged.get("balance_sheet") or balance_sheet
+            cash_flow = bridged.get("cash_flow") or cash_flow
+            financial_report_package = bridged.get("financial_report_package") or financial_report_package
+        except Exception:
+            pass
+
+    evidence = {
         "runtime": {
             "status": runtime_health,
             "heartbeat": runtime.get("heartbeat") or platform.get("heartbeat"),
@@ -494,9 +529,9 @@ def evidence_from_mission_control_state(state: Mapping[str, Any] | None) -> dict
             "unrealized_pnl": portfolio.get("unrealized_pnl"),
             "net_pnl": portfolio.get("net_pnl"),
         },
-        "income_statement": reporting.get("income_statement") or state.get("income_statement"),
-        "balance_sheet": reporting.get("balance_sheet") or state.get("balance_sheet"),
-        "cash_flow": reporting.get("cash_flow") or state.get("cash_flow"),
+        "income_statement": income_statement,
+        "balance_sheet": balance_sheet,
+        "cash_flow": cash_flow,
         "market_intelligence": market,
         "ai_recommendation_summary": state.get("ai_recommendation_summary")
         or reporting.get("ai_recommendation_summary")
@@ -510,6 +545,15 @@ def evidence_from_mission_control_state(state: Mapping[str, Any] | None) -> dict
             "generated_at": freshness.get("generated_at"),
         },
     }
+    if isinstance(financial_report_package, Mapping):
+        evidence["financial_report_package"] = {
+            "present": True,
+            "schema_version": financial_report_package.get("schema_version"),
+            "report_id": financial_report_package.get("report_id"),
+            "advisory_only": True,
+            "trading_impact": False,
+        }
+    return evidence
 
 
 class ExecutiveBriefReadinessOrchestrator:
