@@ -13,6 +13,11 @@ from backend.reporting.executive_brief_readiness_orchestrator import (
     ExecutiveBriefReadinessOrchestrator,
     evidence_from_mission_control_state,
 )
+from backend.financial_reporting.adapters import (
+    contract_from_mission_control_state,
+    summarize_package,
+)
+from backend.financial_reporting.engine import CanonicalFinancialReportingEngine
 
 
 def _readiness_state_class(state: str) -> str:
@@ -94,6 +99,82 @@ def _executive_brief_readiness_card(state: dict) -> str:
         )
 
 
+def _financial_reporting_card(state: dict) -> str:
+    """Phase 177 — advisory Canonical Financial Reporting summary card (read-only)."""
+    try:
+        engine = CanonicalFinancialReportingEngine()
+        contract = contract_from_mission_control_state(state)
+        package = engine.generate_financial_report_package(contract)
+        summary = summarize_package(package)
+        period = summary.get("reporting_period") or {}
+        period_label = period.get("label") if isinstance(period, dict) else None
+        readiness = summary.get("readiness") or {}
+        ready_state = str(readiness.get("overall_state") or "NOT_READY")
+        traffic = str(summary.get("profitability_traffic_light") or "NOT_AVAILABLE")
+        ready_cls = _readiness_state_class(ready_state)
+        traffic_cls = _readiness_state_class(traffic if traffic != "NOT_AVAILABLE" else "NOT_READY")
+
+        def _disp(value: object) -> str:
+            if value is None:
+                return "—"
+            text = str(value)
+            if text.strip().upper() in {"NONE", "NULL", "UNDEFINED", "NAN"}:
+                return "—"
+            return text
+
+        return (
+            '<section class="mc-panel" id="canonical-financial-reporting" '
+            'aria-label="Canonical Financial Reporting" '
+            'data-phase="177" data-advisory-only="true" '
+            f'data-traffic-light="{escape(traffic)}" '
+            f'data-readiness="{escape(ready_state)}">'
+            "<h2>Canonical Financial Reporting</h2>"
+            '<p class="mc-muted">Advisory management-reporting foundation — not audited statutory statements. '
+            "No trading or execution impact.</p>"
+            "<table>"
+            f"<tr><th>Reporting Period</th><td>{escape(_disp(period_label))}</td></tr>"
+            f"<tr><th>Net Profit</th><td>{escape(_disp(summary.get('net_profit')))}</td></tr>"
+            f"<tr><th>Target Profit</th><td>{escape(_disp(summary.get('target_profit')))}</td></tr>"
+            f"<tr><th>Target Achieved %</th><td>{escape(_disp(summary.get('target_achieved_percentage')))}</td></tr>"
+            f"<tr><th>Required Daily Run Rate</th><td>{escape(_disp(summary.get('required_daily_run_rate')))}</td></tr>"
+            f"<tr><th>Projected Period-End Profit</th><td>{escape(_disp(summary.get('projected_period_end_profit')))}</td></tr>"
+            f"<tr><th>Profitability Traffic Light</th><td>"
+            f'<em class="mc-status {traffic_cls}">{escape(traffic)}</em></td></tr>'
+            f"<tr><th>Financial Reporting Readiness</th><td>"
+            f'<em class="mc-status {ready_cls}">{escape(ready_state)}</em></td></tr>'
+            "</table>"
+            '<p class="mc-muted"><a href="/api/financial-reporting/summary">'
+            "GET /api/financial-reporting/summary</a></p>"
+            "</section>"
+        )
+    except Exception as exc:  # noqa: BLE001 — never fail Executive Overview for reporting
+        return (
+            '<section class="mc-panel" id="canonical-financial-reporting" '
+            'aria-label="Canonical Financial Reporting" '
+            'data-phase="177" data-advisory-only="true" '
+            'data-traffic-light="NOT_AVAILABLE" data-readiness="NOT_READY">'
+            "<h2>Canonical Financial Reporting</h2>"
+            '<p class="mc-muted">Advisory financial reporting temporarily unavailable. '
+            "Existing Executive Overview cards remain active.</p>"
+            "<table>"
+            "<tr><th>Reporting Period</th><td>—</td></tr>"
+            "<tr><th>Net Profit</th><td>—</td></tr>"
+            "<tr><th>Target Profit</th><td>—</td></tr>"
+            "<tr><th>Target Achieved %</th><td>—</td></tr>"
+            "<tr><th>Required Daily Run Rate</th><td>—</td></tr>"
+            "<tr><th>Projected Period-End Profit</th><td>—</td></tr>"
+            '<tr><th>Profitability Traffic Light</th><td>'
+            '<em class="mc-status bad">NOT_AVAILABLE</em></td></tr>'
+            '<tr><th>Financial Reporting Readiness</th><td>'
+            '<em class="mc-status bad">NOT_READY</em></td></tr>'
+            "</table>"
+            f'<p class="mc-muted">{escape(type(exc).__name__)} during local evaluation</p>'
+            '<p class="mc-muted"><a href="/api/financial-reporting/summary">'
+            "GET /api/financial-reporting/summary</a></p>"
+            "</section>"
+        )
+
+
 def render(state: dict) -> str:
     platform = section(state, "platform")
     runtime = section(state, "runtime")
@@ -117,6 +198,7 @@ def render(state: dict) -> str:
         )
         + warning_banner(state.get("mock_data_label", "RUNTIME DATA"), status="warn" if state.get("mock_data") else "good")
         + _executive_brief_readiness_card(state)
+        + _financial_reporting_card(state)
         + metric_grid(
             (
                 ("Platform Status", platform.get("platform_status"), platform.get("platform_status")),

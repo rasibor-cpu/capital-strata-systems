@@ -131,6 +131,7 @@ from dashboard.mission_control.host_registration import register_mission_control
 from dashboard.mission_control.runtime_bridge import runtime_snapshot_state_provider
 from backend.executive_intelligence.distribution_routes import create_executive_brief_distribution_router
 from dashboard.runtime.api.executive_brief_readiness import create_executive_brief_readiness_router
+from dashboard.runtime.api.financial_reporting import create_financial_reporting_router
 from dashboard.mission_control.contracts import build_mission_control_state
 from backend.reports_center.routes import create_reports_center_router
 import uvicorn
@@ -4937,6 +4938,10 @@ app.include_router(create_executive_brief_distribution_router())
 # Phase 176J — advisory Executive Brief readiness (read-only).
 app.include_router(
     create_executive_brief_readiness_router(state_provider=_executive_brief_readiness_mc_state)
+)
+# Phase 177 — advisory Canonical Financial Reporting (read-only).
+app.include_router(
+    create_financial_reporting_router(state_provider=_executive_brief_readiness_mc_state)
 )
 app.include_router(launcher_router)
 app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
