@@ -91,6 +91,7 @@ backend/runtime/*
 !backend/runtime/live_environment_loader.py
 !backend/runtime/broker_environment_profiles.py
 !backend/runtime/canonical_runtime_authority.py
+!backend/runtime/runtime_mode.py
 reporting_store/
 out/
 feeds/

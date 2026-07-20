@@ -277,7 +277,10 @@ def _platform(frontend: Mapping[str, Any], broker: Mapping[str, Any], certificat
         "product": "CSS Mission Control",
         "platform_status": _first_status(runtime_snapshot.get("runtime_health"), certification.get("certification"), runtime_broker.get("broker_health"), "UNAVAILABLE"),
         "runtime_health": runtime_snapshot.get("runtime_health", "UNAVAILABLE"),
-        "runtime_mode": runtime_snapshot.get("runtime_mode", frontend.get("resolved_mode", "UNAVAILABLE")),
+        "runtime_mode": runtime_snapshot.get("runtime_mode")
+        or frontend.get("runtime_mode")
+        or frontend.get("resolved_mode")
+        or "DISABLED",
         "engine_mode": runtime_snapshot.get("engine_mode", "UNAVAILABLE"),
         "cycle": runtime_snapshot.get("cycle", "UNAVAILABLE"),
         "heartbeat": runtime_snapshot.get("last_heartbeat", "UNAVAILABLE"),
@@ -513,6 +516,8 @@ def _options_income(sections: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _brokers(broker: Mapping[str, Any], runtime_snapshot: Mapping[str, Any]) -> dict[str, Any]:
+    from backend.app.brokers.canonical_tier1 import get_canonical_broker_registry
+
     canonical = broker.get("canonical_broker_runtime_state") if isinstance(broker.get("canonical_broker_runtime_state"), Mapping) else {}
     runtime_broker = runtime_snapshot.get("broker") if isinstance(runtime_snapshot.get("broker"), Mapping) else {}
     if _runtime_unavailable(runtime_snapshot):
@@ -550,9 +555,12 @@ def _brokers(broker: Mapping[str, Any], runtime_snapshot: Mapping[str, Any]) -> 
         "failure_reason": runtime_broker.get("failure_reason", canonical.get("failure_reason", broker.get("failure_reason", DATA_UNAVAILABLE))),
         "warnings": runtime_broker.get("warnings", broker.get("warning_reasons", [])),
     }
+    registry = get_canonical_broker_registry()
     return {
         "active_broker": active,
         "broker_list": build_broker_registry(broker),
+        "primary_roles": registry.primary_roles(),
+        "tier1_brokers": list(registry.list_brokers()),
         "selection": {
             "enabled": False,
             "mode": "PREVIEW_ONLY_MC001",

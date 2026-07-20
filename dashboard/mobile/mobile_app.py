@@ -1024,8 +1024,16 @@ def load_mobile_controls() -> Dict[str, Any]:
     mode = str(controls.get("mobile_trading_mode", "MOBILE_READ_ONLY")).strip().upper()
     controls["mobile_trading_mode"] = mode if mode in {"MOBILE_READ_ONLY", "MOBILE_PAPER_TRADING", "MOBILE_LIVE_TRADING_ARMED"} else "MOBILE_READ_ONLY"
 
-    # Backward compatibility mappings
-    controls["runtime_mode"] = "live" if mode == "MOBILE_LIVE_TRADING_ARMED" else "paper"
+    # Phase 177A: map mobile control modes onto canonical RuntimeMode vocabulary
+    if mode == "MOBILE_LIVE_TRADING_ARMED":
+        controls["runtime_mode"] = "LIVE"
+        controls["canonical_runtime_mode"] = "LIVE"
+    elif mode == "MOBILE_PAPER_TRADING":
+        controls["runtime_mode"] = "PAPER"
+        controls["canonical_runtime_mode"] = "PAPER"
+    else:
+        controls["runtime_mode"] = "LIVE_READ_ONLY"
+        controls["canonical_runtime_mode"] = "LIVE_READ_ONLY"
     controls["orders_enabled"] = mode != "MOBILE_READ_ONLY"
 
     engine_mode = str(controls.get("engine_mode", "SAFE")).strip().upper()
@@ -1040,7 +1048,15 @@ def save_mobile_controls(controls: Dict[str, Any]) -> Dict[str, Any]:
     normalized.update({key: controls[key] for key in MOBILE_CONTROL_KEYS if key in controls})
     mode = str(normalized.get("mobile_trading_mode", "MOBILE_READ_ONLY")).strip().upper()
     normalized["mobile_trading_mode"] = mode if mode in {"MOBILE_READ_ONLY", "MOBILE_PAPER_TRADING", "MOBILE_LIVE_TRADING_ARMED"} else "MOBILE_READ_ONLY"
-    normalized["runtime_mode"] = "live" if mode == "MOBILE_LIVE_TRADING_ARMED" else "paper"
+    if mode == "MOBILE_LIVE_TRADING_ARMED":
+        normalized["runtime_mode"] = "LIVE"
+        normalized["canonical_runtime_mode"] = "LIVE"
+    elif mode == "MOBILE_PAPER_TRADING":
+        normalized["runtime_mode"] = "PAPER"
+        normalized["canonical_runtime_mode"] = "PAPER"
+    else:
+        normalized["runtime_mode"] = "LIVE_READ_ONLY"
+        normalized["canonical_runtime_mode"] = "LIVE_READ_ONLY"
     normalized["orders_enabled"] = mode != "MOBILE_READ_ONLY"
     engine_mode = str(normalized.get("engine_mode", "SAFE")).strip().upper()
     normalized["engine_mode"] = engine_mode if engine_mode in ENGINE_MODES else "SAFE"
@@ -1073,7 +1089,8 @@ def _system_status(user_ctx: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     kill_switch = evaluate_live_order_kill_switch(controls)
     return {
         "runtime_mode": controls["runtime_mode"],
-        "system_live": controls["runtime_mode"] == "live",
+        "system_live": str(controls.get("canonical_runtime_mode") or controls["runtime_mode"]).upper()
+        in {"LIVE", "LIVE_MICRO_PILOT"},
         "orders_enabled": bool(controls["orders_enabled"]),
         "engine_mode": controls["engine_mode"],
         "mobile_trading_mode": controls["mobile_trading_mode"],

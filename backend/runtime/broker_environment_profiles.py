@@ -65,12 +65,44 @@ OANDA_PROFILE_KEYS = frozenset(
         "OANDA_BASE_URL",
         "OANDA_ENV",
         "OANDA_MODE",
+        "OANDA_API_VERSION",
         "OANDA_ENABLE_LIVE_ORDERS",
         "OANDA_ENABLE_LIVE_TRADING",
     }
 )
 
-PROFILE_SPECIFIC_KEYS = COINBASE_PROFILE_KEYS | OANDA_PROFILE_KEYS
+BINANCE_PROFILE_KEYS = frozenset(
+    {
+        "BINANCE_API_KEY",
+        "BINANCE_API_SECRET",
+        "BINANCE_BASE_URL",
+        "BINANCE_API_URL",
+        "BINANCE_REST_URL",
+        "BINANCE_TESTNET_URL",
+        "BINANCE_API_VERSION",
+        "BINANCE_ENABLE_LIVE_ORDERS",
+        "BINANCE_ENABLE_LIVE_TRADING",
+    }
+)
+
+QUESTRADE_PROFILE_KEYS = frozenset(
+    {
+        "QUESTRADE_REFRESH_TOKEN",
+        "QUESTRADE_ACCESS_TOKEN",
+        "QUESTRADE_API_KEY",
+        "QUESTRADE_BASE_URL",
+        "QUESTRADE_API_URL",
+        "QUESTRADE_AUTH_URL",
+        "QUESTRADE_API_VERSION",
+        "QUESTRADE_ENABLE_LIVE_ORDERS",
+        "QT_REFRESH_TOKEN",
+        "QT_ACCESS_TOKEN",
+    }
+)
+
+PROFILE_SPECIFIC_KEYS = (
+    COINBASE_PROFILE_KEYS | OANDA_PROFILE_KEYS | BINANCE_PROFILE_KEYS | QUESTRADE_PROFILE_KEYS
+)
 
 TEST_PRACTICE_SANDBOX_KEYS = frozenset(
     key
@@ -84,6 +116,9 @@ LIVE_AUTHORITY_KEYS = frozenset(
         "COINBASE_ENABLE_LIVE_TRADING",
         "OANDA_ENABLE_LIVE_ORDERS",
         "OANDA_ENABLE_LIVE_TRADING",
+        "BINANCE_ENABLE_LIVE_ORDERS",
+        "BINANCE_ENABLE_LIVE_TRADING",
+        "QUESTRADE_ENABLE_LIVE_ORDERS",
     }
 )
 
@@ -93,6 +128,10 @@ LIVE_CREDENTIAL_KEYS = frozenset(
         "COINBASE_CDP_PRIVATE_KEY",
         "COINBASE_CDP_PRIVATE_KEY_PATH",
         "OANDA_LIVE_ACCOUNT_ID",
+        "BINANCE_API_KEY",
+        "BINANCE_API_SECRET",
+        "QUESTRADE_REFRESH_TOKEN",
+        "QUESTRADE_ACCESS_TOKEN",
     }
 )
 
@@ -489,21 +528,51 @@ def _environment_name(profile: BrokerEnvironmentProfile | None) -> str:
 
 
 def _contamination_keys(env: Mapping[str, Any], selected: BrokerEnvironmentProfile | None, broker: str = "COINBASE") -> list[str]:
-    broker_keys = COINBASE_PROFILE_KEYS if str(broker).upper() == "COINBASE" else OANDA_PROFILE_KEYS
+    broker_u = str(broker).upper()
+    if broker_u == "COINBASE":
+        broker_keys = COINBASE_PROFILE_KEYS
+    elif broker_u == "OANDA":
+        broker_keys = OANDA_PROFILE_KEYS
+    elif broker_u == "BINANCE":
+        broker_keys = BINANCE_PROFILE_KEYS
+    elif broker_u == "QUESTRADE":
+        broker_keys = QUESTRADE_PROFILE_KEYS
+    else:
+        broker_keys = COINBASE_PROFILE_KEYS
     keys: list[str] = []
     if selected in {BrokerEnvironmentProfile.LIVE_READ_ONLY, BrokerEnvironmentProfile.LIVE_EXECUTION}:
         keys.extend(sorted(key for key in TEST_PRACTICE_SANDBOX_KEYS if key in broker_keys and env.get(key) not in (None, "")))
         for key, value in env.items():
             value_text = str(value or "").strip().lower()
-            if key in broker_keys and any(token in value_text for token in ("sandbox", "practice", "demo")):
+            if key in broker_keys and any(token in value_text for token in ("sandbox", "practice", "demo", "testnet")):
                 keys.append(str(key))
+        # Phase 177C — detect foreign broker host tokens under this broker's endpoint keys
+        try:
+            from backend.app.brokers.contamination_isolation import analyze_environment_contamination
+
+            report = analyze_environment_contamination(env, selected_broker=broker_u)
+            for finding in report.findings:
+                if finding.owner_broker == broker_u:
+                    keys.append(finding.field)
+        except Exception:
+            pass
     if selected == BrokerEnvironmentProfile.PAPER:
         keys.extend(sorted(key for key in LIVE_CREDENTIAL_KEYS if key in broker_keys and env.get(key) not in (None, "")))
     return list(dict.fromkeys(keys))
 
 
 def _remove_incompatible_profile_variables(env: MutableMapping[str, str], selected: BrokerEnvironmentProfile | None, broker: str = "COINBASE") -> list[str]:
-    broker_keys = COINBASE_PROFILE_KEYS if str(broker).upper() == "COINBASE" else OANDA_PROFILE_KEYS
+    broker_u = str(broker).upper()
+    if broker_u == "COINBASE":
+        broker_keys = COINBASE_PROFILE_KEYS
+    elif broker_u == "OANDA":
+        broker_keys = OANDA_PROFILE_KEYS
+    elif broker_u == "BINANCE":
+        broker_keys = BINANCE_PROFILE_KEYS
+    elif broker_u == "QUESTRADE":
+        broker_keys = QUESTRADE_PROFILE_KEYS
+    else:
+        broker_keys = COINBASE_PROFILE_KEYS
     if selected in {BrokerEnvironmentProfile.LIVE_READ_ONLY, BrokerEnvironmentProfile.LIVE_EXECUTION}:
         keys = TEST_PRACTICE_SANDBOX_KEYS & broker_keys
     elif selected == BrokerEnvironmentProfile.PAPER:
@@ -515,7 +584,18 @@ def _remove_incompatible_profile_variables(env: MutableMapping[str, str], select
         if env.get(key) not in (None, ""):
             env.pop(key, None)
             removed.append(key)
-    return removed
+    # Also scrub foreign broker endpoint values that contaminate selected broker keys
+    try:
+        from backend.app.brokers.contamination_isolation import analyze_environment_contamination
+
+        report = analyze_environment_contamination(env, selected_broker=broker_u)
+        for finding in report.findings:
+            if finding.code.startswith("CROSS_BROKER") and finding.field in env and finding.owner_broker == broker_u:
+                env.pop(finding.field, None)
+                removed.append(finding.field)
+    except Exception:
+        pass
+    return list(dict.fromkeys(removed))
 
 
 def _credential_source(env: Mapping[str, Any], broker: str, loaded_files: list[str]) -> str:
@@ -616,11 +696,13 @@ def _json_safe(value: Any) -> Any:
 __all__ = [
     "BrokerEnvironmentCredentials",
     "BrokerEnvironmentProfile",
+    "BINANCE_PROFILE_KEYS",
     "COINBASE_PROFILE_KEYS",
     "LIVE_AUTHORITY_KEYS",
     "OANDA_PROFILE_KEYS",
     "PROFILE_SELECTION_KEYS",
     "PROFILE_SPECIFIC_KEYS",
+    "QUESTRADE_PROFILE_KEYS",
     "build_broker_environment",
     "legacy_variable_migration_register",
     "profile_mode_alias",

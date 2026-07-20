@@ -171,9 +171,10 @@ def test_mobile_dashboard_helpers_missing_files_handled_safely(launcher_temp_dir
         get_runtime_summary, get_account_summary, 
         get_trade_summary, get_engine_summary, build_mobile_dashboard_context
     )
-    # Ensure missing files don't crash
+    # Ensure missing files don't crash — Phase 177A fail-closed (no silent PAPER)
     runtime = get_runtime_summary()
-    assert runtime["runtime_mode"] == "PAPER"
+    assert runtime["runtime_mode"] == "DISABLED"
+    assert runtime.get("execution_enabled") is False
     
     account = get_account_summary()
     assert account["cash"] == 0.0
@@ -182,7 +183,8 @@ def test_mobile_dashboard_helpers_missing_files_handled_safely(launcher_temp_dir
     assert trade["open_trades_count"] == 0
     
     engine = get_engine_summary()
-    assert engine["engine_mode"] == "PAPER"
+    assert engine["engine_mode"] == "UNAVAILABLE"
+    assert engine["runtime_mode"] == "DISABLED"
     
     context = build_mobile_dashboard_context()
     assert "runtime" in context
@@ -197,7 +199,7 @@ def test_mobile_dashboard_helpers_malformed_json_handled_safely(launcher_temp_di
         f.write("{ invalid }")
     
     context = build_mobile_dashboard_context()
-    assert context["runtime"]["runtime_mode"] == "PAPER"
+    assert context["runtime"]["runtime_mode"] == "DISABLED"
     assert context["account"]["cash"] == 0.0
     assert "portfolio_summary" in context
 
@@ -1156,7 +1158,8 @@ def test_mobile_trade_ticket_data_provider_failure_returns_degraded(launcher_tem
 
     assert payload["status"] == "DEGRADED"
     assert payload["symbols"] == []
-    assert payload["runtime"]["runtime_mode"] == "PAPER"
+    assert payload["runtime"]["runtime_mode"] == "DISABLED"
+    assert payload["runtime"].get("execution_enabled") is False
     assert payload["account"]["cash"] == 0.0
     assert payload["account"]["buying_power"] == 0.0
     assert payload["account"]["equity"] == 0.0

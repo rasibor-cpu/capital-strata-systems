@@ -136,8 +136,10 @@ from dashboard.runtime.api.executive_reporting import create_executive_reporting
 from dashboard.runtime.api.executive_decision_intelligence import (
     create_executive_decision_intelligence_router,
 )
+from dashboard.runtime.api.runtime_mode import create_runtime_mode_router
 from dashboard.mission_control.contracts import build_mission_control_state
 from backend.reports_center.routes import create_reports_center_router
+from backend.runtime.runtime_mode import RuntimeMode, resolve_runtime_mode
 import uvicorn
 
 app = FastAPI(title=LauncherConfig.TITLE, version=LauncherConfig.VERSION)
@@ -148,6 +150,22 @@ _LAUNCHER_RUNTIME_CERTIFICATION_SNAPSHOT_CACHE: Dict[str, Dict[str, Any]] = {}
 
 def _utc_iso_z() -> str:
     return datetime.datetime.now(datetime.UTC).replace(tzinfo=None).isoformat() + "Z"
+
+
+def _canonical_runtime_resolution(
+    *,
+    session: Optional[Dict[str, Any]] = None,
+    broker_startup: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Phase 177A — single launcher entry to the canonical Runtime Mode Resolver."""
+    try:
+        return resolve_runtime_mode(
+            session=session or {},
+            broker_startup=broker_startup or {},
+            evidence=(broker_startup or {}),
+        ).as_dict()
+    except Exception:
+        return resolve_runtime_mode().as_dict()  # fail-closed → DISABLED
 
 
 def _safe_load_artifact(filename: str) -> Dict[str, Any]:
@@ -502,10 +520,18 @@ def get_mobile_launcher_status() -> str:
 
 def get_runtime_summary() -> Dict[str, Any]:
     session = _safe_load_artifact("css_session_state_pcnrass.json").get("session", {}) or _safe_load_artifact("css_session_recovery.json").get("session", {})
-    runtime_mode = _clean_text(session.get("engine_mode"), fallback="PAPER").upper()
+    session = session if isinstance(session, dict) else {}
+    # Phase 177A: do NOT treat engine_mode (SAFE/BALANCED/...) as runtime_mode; do NOT default PAPER
+    resolution = _canonical_runtime_resolution(session=session)
+    runtime_mode = str(resolution.get("runtime_mode") or RuntimeMode.DISABLED.value).upper()
     last_update = _clean_text(session.get("start_time"), fallback=_utc_iso_z())
     summary = {
         "runtime_mode": runtime_mode,
+        "runtime_mode_resolution": resolution,
+        "execution_enabled": bool(resolution.get("execution_enabled")),
+        "execution_authority": resolution.get("execution_authority") or "BLOCKED",
+        "order_submission": resolution.get("order_submission") or "BLOCKED",
+        "runtime_mode_reason": resolution.get("reason"),
         "current_cycle": session.get("cycle_number", 0),
         "last_update": last_update,
     }
@@ -652,12 +678,19 @@ def build_launcher_frontend_state(
     session = session if isinstance(session, dict) else {}
     auth_identity = _launcher_auth_identity(session_state if isinstance(session_state, dict) else {})
     positions = _launcher_positions_for_frontend()
-    runtime_mode = str(runtime.get("runtime_mode", "PAPER")).lower()
     broker_startup = get_broker_startup_summary()
+    runtime_mode_resolution = _canonical_runtime_resolution(
+        session=session,
+        broker_startup=broker_startup if isinstance(broker_startup, dict) else {},
+    )
+    runtime_mode = str(runtime_mode_resolution.get("runtime_mode") or RuntimeMode.DISABLED.value).lower()
     broker = str(broker_startup.get("selected_broker") or session.get("broker", session.get("selected_broker", "NONE")))
-    broker_mode = str(broker_startup.get("broker_mode") or session.get("broker_mode", "paper")).lower()
+    broker_mode = str(broker_startup.get("broker_mode") or session.get("broker_mode") or "").lower()
     if broker_mode not in {"live", "paper"}:
-        broker_mode = "paper"
+        # Phase 177A: do not invent paper; leave empty and let resolver reason surface
+        broker_mode = str(runtime_mode_resolution.get("broker_mode") or "").lower()
+        if broker_mode not in {"live", "paper"}:
+            broker_mode = "unresolved"
     credential_diagnostics = (
         broker_startup.get("credential_diagnostics")
         if isinstance(broker_startup.get("credential_diagnostics"), dict)
@@ -700,20 +733,33 @@ def build_launcher_frontend_state(
         }
     )
 
+    canonical_mode = str(runtime_mode_resolution.get("runtime_mode") or RuntimeMode.DISABLED.value).upper()
+    # Display aliases for legacy consumers that still expect live_or_paper binary
+    live_family = canonical_mode in {
+        RuntimeMode.LIVE.value,
+        RuntimeMode.LIVE_READ_ONLY.value,
+        RuntimeMode.LIVE_MICRO_PILOT.value,
+    }
     dashboard_payload = {
         "generated_at": _utc_iso_z(),
         "session_id": str(session.get("session_id", "LAUNCHER-SESSION")),
         "cycle_number": runtime.get("current_cycle", 0),
-        "engine_mode": engine.get("engine_mode", runtime.get("runtime_mode", "PAPER")),
-        "live_or_paper": "live" if runtime_mode == "live" else "paper",
-        "resolved_mode": "live" if runtime_mode == "live" and broker_mode == "live" else "paper",
+        "engine_mode": engine.get("engine_mode", "UNAVAILABLE"),
+        "runtime_mode": canonical_mode,
+        "runtime_mode_resolution": runtime_mode_resolution,
+        "live_or_paper": "live" if live_family else ("paper" if canonical_mode == RuntimeMode.PAPER.value else "disabled"),
+        "resolved_mode": canonical_mode,
         "broker_mode": broker_mode,
+        "execution_enabled": bool(runtime_mode_resolution.get("execution_enabled")),
+        "execution_authority": runtime_mode_resolution.get("execution_authority") or "BLOCKED",
+        "order_submission": runtime_mode_resolution.get("order_submission") or "BLOCKED",
         "session": {
             "session_id": str(session.get("session_id", auth_identity.get("session_id") or "LAUNCHER-SESSION")),
             "cycle_number": runtime.get("current_cycle", 0),
-            "engine_mode": engine.get("engine_mode", runtime.get("runtime_mode", "PAPER")),
-            "live_or_paper": "live" if runtime_mode == "live" else "paper",
-            "resolved_mode": "live" if runtime_mode == "live" and broker_mode == "live" else "paper",
+            "engine_mode": engine.get("engine_mode", "UNAVAILABLE"),
+            "runtime_mode": canonical_mode,
+            "live_or_paper": "live" if live_family else ("paper" if canonical_mode == RuntimeMode.PAPER.value else "disabled"),
+            "resolved_mode": canonical_mode,
             # Phase 176D: never invent TRADER; use authenticated identity when present.
             "role": str(auth_identity.get("role") or session.get("role") or "UNAUTHENTICATED"),
             "user_id": str(auth_identity.get("user_id") or session.get("user_id") or "UNAUTHENTICATED"),
@@ -2462,14 +2508,24 @@ def record_paper_validation_checkpoint(checkpoint: Optional[Dict[str, Any]] = No
 
 def get_engine_summary() -> Dict[str, Any]:
     state = _safe_load_artifact("css_session_state_pcnrass.json") or _safe_load_artifact("css_session_recovery.json")
-    session = state.get("session", {})
-    engine_mode = _clean_text(session.get("engine_mode"), fallback=get_runtime_summary().get("runtime_mode", "PAPER")).upper()
+    session = state.get("session", {}) if isinstance(state.get("session"), dict) else {}
+    # Engine mode is strategy posture (SAFE/BALANCED/...), NOT runtime PAPER/LIVE
+    raw = str(session.get("engine_mode") or "").strip().upper()
+    if raw in {"SAFE", "BALANCED", "AGGRESSIVE", "EXPANSION", "CONSERVATIVE"}:
+        engine_mode = raw
+    else:
+        engine_mode = "UNAVAILABLE"
+    resolution = _canonical_runtime_resolution(session=session)
+    runtime_mode = str(resolution.get("runtime_mode") or RuntimeMode.DISABLED.value).upper()
     
     summary = {
         "engine_mode": engine_mode,
+        "runtime_mode": runtime_mode,
         "current_strategy": session.get("strategy", "DEFAULT"),
-        "trade_gate_status": "OPEN" if engine_mode == "LIVE" else "SIMULATED",
-        "runtime_readiness": "ONLINE" if session else "OFFLINE"
+        "trade_gate_status": "BLOCKED" if not resolution.get("execution_enabled") else "OPEN",
+        "runtime_readiness": "ONLINE" if session else "OFFLINE",
+        "execution_enabled": bool(resolution.get("execution_enabled")),
+        "order_submission": resolution.get("order_submission") or "BLOCKED",
     }
     return summary
 
@@ -2631,7 +2687,11 @@ def get_mobile_trade_ticket_data() -> Dict[str, Any]:
         "total_pnl": 0.0,
     }
     runtime_fallback = {
-        "runtime_mode": "PAPER",
+        "runtime_mode": RuntimeMode.DISABLED.value,
+        "execution_enabled": False,
+        "execution_authority": "BLOCKED",
+        "order_submission": "BLOCKED",
+        "runtime_mode_reason": "provider_unavailable_fail_closed",
         "current_cycle": 0,
         "last_update": _utc_iso_z(),
         "supervisor_status": "OFFLINE",
@@ -2641,10 +2701,13 @@ def get_mobile_trade_ticket_data() -> Dict[str, Any]:
         "status": "OFFLINE",
     }
     engine_fallback = {
-        "engine_mode": "PAPER",
+        "engine_mode": "UNAVAILABLE",
+        "runtime_mode": RuntimeMode.DISABLED.value,
         "current_strategy": "DEFAULT",
-        "trade_gate_status": "SIMULATED",
+        "trade_gate_status": "BLOCKED",
         "runtime_readiness": "OFFLINE",
+        "execution_enabled": False,
+        "order_submission": "BLOCKED",
     }
     pause_fallback = {
         "trading_paused": False,
@@ -2787,7 +2850,9 @@ def get_mobile_trade_ticket_data() -> Dict[str, Any]:
 
 
 def _mode_badge() -> str:
-    return "LIVE MODE" if _default_trade_mode() == "live" else "PAPER MODE"
+    resolution = _canonical_runtime_resolution()
+    mode = str(resolution.get("runtime_mode") or RuntimeMode.DISABLED.value).upper()
+    return f"{mode} MODE"
 
 
 def get_trading_universe_feed(*, mode: Optional[str] = None) -> Dict[str, Any]:
@@ -4954,6 +5019,10 @@ app.include_router(
 # Phase 179 — advisory Executive Decision Intelligence (read-only orchestration).
 app.include_router(
     create_executive_decision_intelligence_router(state_provider=_executive_brief_readiness_mc_state)
+)
+# Phase 177A — canonical Runtime Mode Resolver (read-only).
+app.include_router(
+    create_runtime_mode_router(state_provider=_executive_brief_readiness_mc_state)
 )
 app.include_router(launcher_router)
 app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")

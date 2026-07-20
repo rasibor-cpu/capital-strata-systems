@@ -3,6 +3,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from backend.app.brokers.canonical_tier1 import get_canonical_broker_registry
+from backend.app.brokers.contamination_isolation import (
+    analyze_environment_contamination,
+    analyze_runtime_state_contamination,
+    merge_contamination_reports,
+)
 from backend.runtime.canonical_broker_state_adapter import broker_environment_profile_view
 from dashboard.mission_control.mock_data import mission_control_mock_dashboard_payload
 from dashboard.runtime.frontend_contract import DATA_UNAVAILABLE, build_frontend_payload
@@ -58,77 +64,56 @@ def section(payload: Mapping[str, Any], name: str) -> dict[str, Any]:
 
 
 def build_broker_registry(active_broker: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Phase 177C — Mission Control rows from canonical Tier-1 registry (no IBKR)."""
     selected = str(active_broker.get("selected_broker", active_broker.get("broker", "NONE"))).upper()
-    mode = str(active_broker.get("broker_mode", "paper")).lower()
-    broker_health = str(active_broker.get("broker_health", "UNAVAILABLE"))
     profile = _profile_metadata(active_broker)
-    registry = [
-        {
-            "broker": "COINBASE",
-            "status": broker_health if selected == "COINBASE" else "SUPPORTED",
-            "mode": mode if selected == "COINBASE" else "available",
-            "capabilities": ["accounts", "balances", "portfolios", "products", "market_data"],
-            "credentials_present": active_broker.get("credential_status", "UNKNOWN") if selected == "COINBASE" else "UNKNOWN",
-            "authentication": active_broker.get("authentication_status", "UNKNOWN") if selected == "COINBASE" else "UNKNOWN",
-            "market_data": active_broker.get("market_data_status", "UNKNOWN") if selected == "COINBASE" else "UNKNOWN",
-            "account_data": active_broker.get("account_data_health", "UNKNOWN") if selected == "COINBASE" else "UNKNOWN",
-            "readiness": active_broker.get("overall_status", broker_health) if selected == "COINBASE" else "UNCONFIGURED",
-            "profile": profile if selected == "COINBASE" else _inactive_profile(),
-            "priority": 1,
-            "supported_assets": ["CRYPTO"],
-            "supported_strategies": ["spot_read_only", "future_pilot_candidate"],
-            "selected": selected == "COINBASE",
-        },
-        {
-            "broker": "OANDA",
-            "status": broker_health if selected == "OANDA" else "SUPPORTED",
-            "mode": mode if selected == "OANDA" else "available",
-            "capabilities": ["account_summary", "pricing", "instruments", "market_data"],
-            "credentials_present": active_broker.get("credential_status", "UNKNOWN") if selected == "OANDA" else "UNKNOWN",
-            "authentication": active_broker.get("authentication_status", "UNKNOWN") if selected == "OANDA" else "UNKNOWN",
-            "market_data": active_broker.get("market_data_status", "UNKNOWN") if selected == "OANDA" else "UNKNOWN",
-            "account_data": active_broker.get("account_data_health", "UNKNOWN") if selected == "OANDA" else "UNKNOWN",
-            "readiness": active_broker.get("overall_status", broker_health) if selected == "OANDA" else "UNCONFIGURED",
-            "profile": profile if selected == "OANDA" else _inactive_profile(),
-            "priority": 2,
-            "supported_assets": ["FOREX"],
-            "supported_strategies": ["fx_read_only", "future_pilot_candidate"],
-            "selected": selected == "OANDA",
-        },
-        {
-            "broker": "IBKR",
-            "status": "FUTURE_ADAPTER",
-            "mode": "not_configured",
-            "capabilities": ["equities", "options", "futures"],
-            "credentials_present": "UNKNOWN",
-            "authentication": "NOT_TESTED",
-            "market_data": "UNAVAILABLE",
-            "account_data": "UNAVAILABLE",
-            "readiness": "UNCONFIGURED",
-            "priority": 3,
-            "supported_assets": ["STOCK", "ETF", "OPTION", "FUTURE"],
-            "supported_strategies": ["future_options_income"],
-            "selected": selected == "IBKR",
-            "profile": _inactive_profile(),
-        },
-        {
-            "broker": "PAPER",
-            "status": "AVAILABLE",
-            "mode": "paper",
-            "capabilities": ["simulation", "paper_positions", "paper_orders"],
-            "credentials_present": "NOT_REQUIRED",
-            "authentication": "NOT_REQUIRED",
-            "market_data": "SIMULATION",
-            "account_data": "SIMULATION",
-            "readiness": "READY_FOR_PAPER",
-            "priority": 4,
-            "supported_assets": ["STOCK", "ETF", "OPTION", "FOREX", "CRYPTO"],
-            "supported_strategies": ["paper_only"],
-            "selected": selected in {"PAPER", "DEMO", "NONE"},
-            "profile": profile if selected in {"PAPER", "DEMO", "NONE"} else _inactive_profile(profile_name="PAPER"),
-        },
-    ]
-    return registry
+    env_report = analyze_environment_contamination(selected_broker=selected)
+    runtime_report = analyze_runtime_state_contamination(active_broker)
+    contamination = merge_contamination_reports(env_report, runtime_report)
+    rows = get_canonical_broker_registry().mission_control_rows(
+        selected_broker=selected,
+        active=active_broker,
+        contamination_by_broker=contamination.findings_by_broker(),
+    )
+    for row in rows:
+        row["profile"] = profile if row.get("selected") else _inactive_profile()
+        row["account_data"] = row.get("account")
+        row["broker_status"] = row.get("status")
+        row["broker_role"] = row.get("role")
+    # Paper/NONE selection marker (not a Tier-1 broker; simulation lane)
+    if selected in {"PAPER", "DEMO", "NONE", ""}:
+        rows.append(
+            {
+                "broker": "PAPER",
+                "role": "SIMULATION_LANE",
+                "broker_role": "SIMULATION_LANE",
+                "broker_type": "SIMULATION",
+                "status": "AVAILABLE",
+                "operational_state": "AVAILABLE",
+                "mode": "paper",
+                "readiness": "READY_FOR_PAPER",
+                "certification": "NOT_REQUIRED",
+                "latency": "UNAVAILABLE",
+                "authentication": "NOT_REQUIRED",
+                "market_data": "SIMULATION",
+                "account": "SIMULATION",
+                "account_data": "SIMULATION",
+                "execution": "DISABLED",
+                "execution_authority": "BLOCKED",
+                "last_sync": "UNAVAILABLE",
+                "credentials_present": "NOT_REQUIRED",
+                "supported_assets": ["STOCK", "ETF", "OPTION", "FOREX", "CRYPTO"],
+                "capabilities": ["simulation", "paper_positions", "paper_orders"],
+                "selected": True,
+                "priority": 99,
+                "execution_blocked": True,
+                "advisory_only": True,
+                "profile": profile if selected in {"PAPER", "DEMO", "NONE", ""} else _inactive_profile(profile_name="PAPER"),
+                "contamination_isolated": True,
+                "contamination_findings": [],
+            }
+        )
+    return rows
 
 
 def _profile_metadata(active_broker: Mapping[str, Any]) -> dict[str, Any]:

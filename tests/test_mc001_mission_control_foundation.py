@@ -100,7 +100,9 @@ def test_mc001_broker_management_contains_active_list_onboarding_and_safety() ->
 
     assert active["selected_broker"] == "DEMO"
     assert "canonical_state_hash" in active
-    assert {row["broker"] for row in brokers["broker_list"]} >= {"COINBASE", "OANDA", "IBKR", "PAPER"}
+    assert {row["broker"] for row in brokers["broker_list"]} >= {"COINBASE", "OANDA", "BINANCE", "QUESTRADE", "PAPER"}
+    assert "IBKR" not in {row["broker"] for row in brokers["broker_list"]}
+    assert brokers.get("primary_roles", {}).get("PRIMARY_CRYPTO_BROKER") == "COINBASE"
     assert brokers["selection"]["enabled"] is False
     assert brokers["selection"]["arming_available"] is False
     assert brokers["selection"]["can_change_credentials"] is False

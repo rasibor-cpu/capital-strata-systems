@@ -59,8 +59,12 @@ def test_phase153c_broker_selection_cannot_be_skipped_when_execution_disabled() 
 
 
 def test_phase153c_invalid_broker_and_disabled_ibkr_fail_closed() -> None:
+    from backend.runtime.broker_startup_selection import normalize_broker
+
     assert startup_broker_from_choice("bad") == "NONE"
-    assert startup_broker_from_choice("4", ibkr_supported=False) == "NONE"
+    # Phase 177C Revision B: choice 4 is BINANCE (not IBKR). IBKR maps to NONE.
+    assert startup_broker_from_choice("4", ibkr_supported=False) == "BINANCE"
+    assert normalize_broker("IBKR") == "NONE"
     assert startup_broker_mode_from_choice("2", selected_broker="NONE", global_mode="live") == "paper"
 
 

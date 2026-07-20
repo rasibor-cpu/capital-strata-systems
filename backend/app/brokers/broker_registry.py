@@ -24,12 +24,23 @@ class BrokerSpec:
     supported_asset_classes: List[str]
 
 
+# Phase 177C Revision B — canonical Tier-1 metadata (IBKR/Alpaca removed from active set).
+# Capability-rich registry lives in backend.app.brokers.canonical_tier1.
 BROKER_REGISTRY: Dict[str, BrokerSpec] = {
     "coinbase": BrokerSpec(
         name="coinbase",
         display_name="Coinbase",
         pip_package="coinbase-advanced-py",
         credential_file="cdp_api_key.json",
+        supports_paper=True,
+        supports_live=True,  # live = LIVE_READ_ONLY / future; execution not enabled by registry
+        supported_asset_classes=["crypto", "spot_crypto"],
+    ),
+    "binance": BrokerSpec(
+        name="binance",
+        display_name="Binance",
+        pip_package="python-binance",
+        credential_file=".env.binance",
         supports_paper=True,
         supports_live=True,
         supported_asset_classes=["crypto", "spot_crypto"],
@@ -43,14 +54,14 @@ BROKER_REGISTRY: Dict[str, BrokerSpec] = {
         supports_live=True,
         supported_asset_classes=["fx", "forex"],
     ),
-    "alpaca": BrokerSpec(
-        name="alpaca",
-        display_name="Alpaca",
-        pip_package="alpaca-py",
-        credential_file=".env.alpaca",
+    "questrade": BrokerSpec(
+        name="questrade",
+        display_name="Questrade",
+        pip_package="",
+        credential_file=".env.questrade",
         supports_paper=True,
         supports_live=True,
-        supported_asset_classes=["equities", "stocks", "crypto"],
+        supported_asset_classes=["equities_ca", "etf", "option"],
     ),
 }
 
@@ -101,6 +112,7 @@ def get_adapter(broker_name: str) -> Type[object]:
 
         return OandaAdapter
 
+    # Binance / Questrade: registered for LIVE_READ_ONLY roadmap; adapters not executable yet.
     raise NotImplementedError(
         f"No adapter class is available for broker '{broker_name}'. "
         "The broker is registered but not executable in this runtime."

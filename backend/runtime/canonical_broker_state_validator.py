@@ -34,7 +34,7 @@ def contradiction_reasons(state: CanonicalBrokerRuntimeState) -> list[str]:
     reasons: list[str] = []
     if state.schema_version != SCHEMA_VERSION:
         reasons.append("unsupported_schema_version")
-    if state.broker not in {"NONE", "COINBASE", "OANDA", "IBKR", "DEMO"}:
+    if state.broker not in {"NONE", "COINBASE", "OANDA", "BINANCE", "QUESTRADE", "DEMO"}:
         reasons.append("invalid_broker_identity")
     if not _finite(state.readiness_score):
         reasons.append("non_finite_readiness_score")

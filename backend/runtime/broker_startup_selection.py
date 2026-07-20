@@ -7,11 +7,18 @@ from pathlib import Path
 from typing import Any, Mapping
 
 
+# Phase 177C Revision B — startup selection. IBKR removed from roadmap.
+# BINANCE / QUESTRADE are Tier-1 registered but not yet live-startup enabled.
 SUPPORTED_STARTUP_BROKERS = {
     "1": "NONE",
     "2": "COINBASE",
     "3": "OANDA",
+    "4": "BINANCE",
+    "5": "QUESTRADE",
 }
+
+TIER1_STARTUP_BROKERS = frozenset({"NONE", "COINBASE", "OANDA", "BINANCE", "QUESTRADE"})
+STARTUP_LIVE_ENABLED_BROKERS = frozenset({"COINBASE", "OANDA"})  # read-only validation path today
 
 CANONICAL_STARTUP_SEQUENCE = (
     "authenticate_startup_user",
@@ -93,19 +100,26 @@ def normalize_broker(value: Any) -> str:
         "COINBASE_ADVANCED": "COINBASE",
         "CB": "COINBASE",
         "OANDA_V20": "OANDA",
+        "BN": "BINANCE",
+        "BINANCE_SPOT": "BINANCE",
+        "QT": "QUESTRADE",
+        # IBKR explicitly excluded from active roadmap (Revision B)
+        "IBKR": "NONE",
+        "INTERACTIVE_BROKERS": "NONE",
+        "INTERACTIVE BROKERS": "NONE",
     }
     broker = aliases.get(text, text)
-    return broker if broker in {"NONE", "COINBASE", "OANDA", "IBKR"} else "NONE"
+    return broker if broker in TIER1_STARTUP_BROKERS else "NONE"
 
 
 def _broker_type(broker: Any) -> str:
     normalized = normalize_broker(broker)
-    if normalized == "COINBASE":
+    if normalized in {"COINBASE", "BINANCE"}:
         return "CRYPTO"
     if normalized == "OANDA":
         return "FX"
-    if normalized == "IBKR":
-        return "MULTI_ASSET"
+    if normalized == "QUESTRADE":
+        return "EQUITIES_CA"
     return "NONE"
 
 
@@ -117,10 +131,17 @@ def normalize_broker_mode(value: Any, *, selected_broker: str = "NONE") -> str:
 
 
 def startup_broker_from_choice(choice: Any, *, ibkr_supported: bool = False) -> str:
+    """Map numeric startup choice → broker.
+
+    ``ibkr_supported`` is retained for call-site compatibility but ignored —
+    IBKR is not on the Phase 177C roadmap.
+    """
+    _ = ibkr_supported
     normalized = str(choice or "1").strip()
-    if normalized == "4":
-        return "IBKR" if ibkr_supported else "NONE"
-    return SUPPORTED_STARTUP_BROKERS.get(normalized, "NONE")
+    broker = SUPPORTED_STARTUP_BROKERS.get(normalized, "NONE")
+    # Choices 4/5 (Binance/Questrade) are selectable for future LIVE_READ_ONLY
+    # onboarding but do not enable execution.
+    return broker
 
 
 def startup_broker_mode_from_choice(choice: Any, *, selected_broker: str, global_mode: str = "paper") -> str:

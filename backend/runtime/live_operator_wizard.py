@@ -93,16 +93,12 @@ def choose_global_mode(state: StartupWizardState, choice: Any, confirmation: Any
 
 
 def choose_broker(state: StartupWizardState, choice: Any, *, ibkr_supported: bool = False) -> WizardStepResult:
+    """Phase 177C Revision B — Tier-1 choices 1–5. IBKR is not selectable."""
+    _ = ibkr_supported
     normalized = str(choice or "").strip()
-    if normalized not in {"1", "2", "3", "4"}:
-        return _invalid_choice(state, "1, 2, 3, or 4", normalized)
-    if normalized == "4" and not ibkr_supported:
-        return WizardStepResult(
-            replace(state, step="broker_selection", last_error="IBKR is not enabled in this runtime."),
-            False,
-            error="IBKR is not enabled in this runtime.",
-        )
-    broker = startup_broker_from_choice(normalized, ibkr_supported=ibkr_supported)
+    if normalized not in {"1", "2", "3", "4", "5"}:
+        return _invalid_choice(state, "1, 2, 3, 4, or 5", normalized)
+    broker = startup_broker_from_choice(normalized)
     next_step = "broker_execution_arming" if broker == "NONE" else "broker_specific_mode_selection"
     mode = "paper" if broker == "NONE" else ""
     return WizardStepResult(replace(state, selected_broker=broker, broker_mode=mode, step=next_step, last_error=""), True)

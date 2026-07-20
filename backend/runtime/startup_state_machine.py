@@ -173,17 +173,21 @@ class OperatorStartupStateMachine:
         return self._advance(replace(state, global_mode="live", last_input=value, last_error=""), "BROKER_SELECTION", "global_live_confirmed")
 
     def _handle_broker_selection(self, state: StartupRuntimeState) -> StartupRuntimeState:
-        value = self._prompt(state, "BROKER SELECTION\n1. NONE / PAPER ONLY\n2. COINBASE\n3. OANDA\n4. IBKR (if supported)\nEnter broker choice (1-4): ")
+        value = self._prompt(
+            state,
+            "BROKER SELECTION (Phase 177C Tier-1)\n"
+            "1. NONE / PAPER ONLY\n"
+            "2. COINBASE (Primary Crypto)\n"
+            "3. OANDA (Primary FX)\n"
+            "4. BINANCE (Secondary Crypto — LIVE_READ_ONLY roadmap)\n"
+            "5. QUESTRADE (Primary Canadian Equities — LIVE_READ_ONLY roadmap)\n"
+            "Enter broker choice (1-5): ",
+        )
         if self._is_quit(value):
             return self._cancel(state, "operator_exit")
-        if value not in {"1", "2", "3", "4"}:
-            return self._invalid(state, "1, 2, 3, or 4", value)
-        if value == "4" and not self.config.ibkr_supported:
-            message = "IBKR is not enabled in this runtime. Please choose another broker."
-            self.output_func(message)
-            self._audit("INVALID_BROKER", state, received=value, reason=message)
-            return replace(state, last_input=value, last_error=message)
-        broker = startup_broker_from_choice(value, ibkr_supported=self.config.ibkr_supported)
+        if value not in {"1", "2", "3", "4", "5"}:
+            return self._invalid(state, "1, 2, 3, 4, or 5", value)
+        broker = startup_broker_from_choice(value)
         next_state = "BROKER_EXECUTION" if broker == "NONE" else "BROKER_MODE"
         broker_mode = "paper" if broker == "NONE" else ""
         scope = "PAPER_OR_NOT_SELECTED" if broker == "NONE" else "BROKER_SELECTED_PENDING_MODE"

@@ -14,7 +14,9 @@ def test_registry_contains_approved_brokers() -> None:
     brokers = list_supported_brokers()
     assert "oanda" in brokers
     assert "coinbase" in brokers
-    assert "alpaca" in brokers
+    assert "binance" in brokers
+    assert "questrade" in brokers
+    assert "alpaca" not in brokers
 
 
 def test_get_broker_spec_for_unregistered_broker_raises_keyerror() -> None:
@@ -28,10 +30,11 @@ def test_get_adapter_resolves_canonical_brokers() -> None:
 
 
 def test_get_adapter_for_unsupported_registered_broker_raises_notimplementederror() -> None:
-    # Alpaca is registered in BROKER_REGISTRY but has no adapter defined in get_adapter
-    # Ensure it fails safely with NotImplementedError rather than KeyError
+    # Binance / Questrade are registered but adapters are not executable yet
     with pytest.raises(NotImplementedError, match="not executable in this runtime"):
-        get_adapter("alpaca")
+        get_adapter("binance")
+    with pytest.raises(NotImplementedError, match="not executable in this runtime"):
+        get_adapter("questrade")
 
 
 def test_get_adapter_for_unregistered_broker_raises_keyerror() -> None:
