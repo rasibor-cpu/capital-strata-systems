@@ -25,6 +25,9 @@ def _readiness_state_class(state: str) -> str:
         return "warn"
     if token in {"RED", "NOT_READY"}:
         return "bad"
+    # NOT_AVAILABLE and unknown tokens must never render as green
+    if token == "NOT_AVAILABLE":
+        return "neutral"
     return "neutral"
 
 
@@ -106,7 +109,7 @@ def _financial_reporting_card(state: dict) -> str:
         ready_state = str(summary.get("reporting_readiness") or "NOT_READY")
         traffic = str(summary.get("profitability_traffic_light") or "NOT_AVAILABLE")
         ready_cls = _readiness_state_class(ready_state)
-        traffic_cls = _readiness_state_class(traffic if traffic != "NOT_AVAILABLE" else "NOT_READY")
+        traffic_cls = _readiness_state_class(traffic)
         generated = summary.get("generated_at") or package.get("generated_at") or "—"
 
         def _disp(value: object) -> str:
@@ -179,7 +182,7 @@ def _financial_reporting_card(state: dict) -> str:
             "<tr><th>Projected Period-End Profit</th><td>—</td></tr>"
             "<tr><th>Target Variance</th><td>—</td></tr>"
             '<tr><th>Profitability Traffic Light</th><td>'
-            '<em class="mc-status bad">NOT_AVAILABLE</em></td></tr>'
+            '<em class="mc-status neutral">NOT_AVAILABLE</em></td></tr>'
             '<tr><th>Financial Reporting Readiness</th><td>'
             '<em class="mc-status bad">NOT_READY</em></td></tr>'
             "<tr><th>Last Generated</th><td>—</td></tr>"

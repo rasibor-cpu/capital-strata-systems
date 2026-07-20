@@ -94,9 +94,9 @@ def build_executive_financial_report_package(
         "narrative": narrative,
         "kpi_table": _kpi_table(summary),
         "management_actions": actions,
-        "evidence_index": list(summary.get("evidence_references") or []),
-        "warnings": list(summary.get("financial_warnings") or []),
-        "blockers": list(summary.get("financial_blockers") or []),
+        "evidence_index": list(dict.fromkeys(summary.get("evidence_references") or [])),
+        "warnings": list(dict.fromkeys(summary.get("financial_warnings") or [])),
+        "blockers": list(dict.fromkeys(summary.get("financial_blockers") or [])),
         "limitations": [
             "Management reporting foundation only — not audited statutory financial statements.",
             "Derived exclusively from Phase 177 Canonical Financial Reporting Engine outputs.",
