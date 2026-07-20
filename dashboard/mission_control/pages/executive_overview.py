@@ -14,6 +14,96 @@ from backend.reporting.executive_brief_readiness_orchestrator import (
     evidence_from_mission_control_state,
 )
 from backend.executive_reporting.service import ExecutiveFinancialReportingService
+from backend.executive_decision_intelligence.service import ExecutiveDecisionIntelligenceService
+
+
+def _edi_state_class(state: str) -> str:
+    token = str(state or "").strip().upper()
+    if token == "STABLE":
+        return "good"
+    if token == "ATTENTION":
+        return "warn"
+    if token in {"STRESSED", "NOT_READY", "DEGRADED"}:
+        return "bad"
+    return "neutral"
+
+
+def _executive_decision_intelligence_card(state: dict) -> str:
+    """Phase 179 — Executive Decision Intelligence card (orchestration only; no P&L math)."""
+    try:
+        service = ExecutiveDecisionIntelligenceService()
+        summary = service.summary(state)
+        exec_state = str(summary.get("executive_state") or "DEGRADED")
+        state_cls = _edi_state_class(exec_state)
+        conf = summary.get("confidence") if isinstance(summary.get("confidence"), dict) else {}
+        conf_band = str(conf.get("confidence_band") or "VERY_LOW")
+        conf_val = conf.get("overall_confidence")
+        next_action = summary.get("recommended_next_action")
+        if isinstance(next_action, dict):
+            next_text = str(next_action.get("title") or "—")
+        else:
+            next_text = str(summary.get("recommended_executive_focus") or "—")
+        generated = str(summary.get("generated_at") or "—")
+
+        def _list_rows(items: object, limit: int = 5) -> str:
+            rows = []
+            if isinstance(items, list):
+                for entry in items[:limit]:
+                    if isinstance(entry, dict):
+                        title = escape(str(entry.get("title") or entry.get("code") or "—"))
+                        pri = escape(str(entry.get("priority") or ""))
+                        rows.append(f"<li><strong>{pri}</strong> {title}</li>")
+            if not rows:
+                rows.append("<li>—</li>")
+            return "<ol>" + "".join(rows) + "</ol>"
+
+        return (
+            '<section class="mc-panel" id="executive-decision-intelligence" '
+            'aria-label="Executive Decision Intelligence" '
+            'data-phase="179" data-advisory-only="true" data-trading-impact="false" '
+            f'data-executive-state="{escape(exec_state)}">'
+            "<h2>Executive Decision Intelligence</h2>"
+            '<p class="mc-muted">Advisory orchestration of Phase 176J/177/178 and Mission Control signals. '
+            "Does not recalculate financial statements. No trading or execution impact.</p>"
+            "<table>"
+            f"<tr><th>Overall Executive State</th><td>"
+            f'<em class="mc-status {state_cls}">{escape(exec_state)}</em></td></tr>'
+            f"<tr><th>Confidence</th><td>{escape(conf_band)} ({escape(str(conf_val if conf_val is not None else '—'))})</td></tr>"
+            f"<tr><th>Recommended Next Action</th><td>{escape(next_text)}</td></tr>"
+            f"<tr><th>Generated</th><td>{escape(generated)}</td></tr>"
+            "</table>"
+            "<h3>Top Priorities</h3>"
+            + _list_rows(summary.get("top_five_priorities"))
+            + "<h3>Top Risks</h3>"
+            + _list_rows(summary.get("top_risks"), 3)
+            + "<h3>Top Opportunities</h3>"
+            + _list_rows(summary.get("top_opportunities"), 3)
+            + '<p class="mc-muted">'
+            '<a href="/api/executive-decision-intelligence/summary">GET /api/executive-decision-intelligence/summary</a>'
+            " · "
+            '<a href="/api/executive-decision-intelligence/scorecard">GET /api/executive-decision-intelligence/scorecard</a>'
+            "</p>"
+            "</section>"
+        )
+    except Exception as exc:  # noqa: BLE001 — never fail EO for EDI
+        return (
+            '<section class="mc-panel" id="executive-decision-intelligence" '
+            'aria-label="Executive Decision Intelligence" '
+            'data-phase="179" data-advisory-only="true" data-trading-impact="false" '
+            'data-executive-state="DEGRADED">'
+            "<h2>Executive Decision Intelligence</h2>"
+            '<p class="mc-muted">Advisory EDI temporarily unavailable. Existing Executive Overview cards remain active.</p>'
+            "<table>"
+            '<tr><th>Overall Executive State</th><td><em class="mc-status bad">DEGRADED</em></td></tr>'
+            "<tr><th>Confidence</th><td>—</td></tr>"
+            "<tr><th>Recommended Next Action</th><td>—</td></tr>"
+            "<tr><th>Generated</th><td>—</td></tr>"
+            "</table>"
+            f'<p class="mc-muted">{escape(type(exc).__name__)} during local evaluation</p>'
+            '<p class="mc-muted"><a href="/api/executive-decision-intelligence/summary">'
+            "GET /api/executive-decision-intelligence/summary</a></p>"
+            "</section>"
+        )
 
 
 def _readiness_state_class(state: str) -> str:
@@ -219,6 +309,7 @@ def render(state: dict) -> str:
         + warning_banner(state.get("mock_data_label", "RUNTIME DATA"), status="warn" if state.get("mock_data") else "good")
         + _executive_brief_readiness_card(state)
         + _financial_reporting_card(state)
+        + _executive_decision_intelligence_card(state)
         + metric_grid(
             (
                 ("Platform Status", platform.get("platform_status"), platform.get("platform_status")),

@@ -133,6 +133,9 @@ from backend.executive_intelligence.distribution_routes import create_executive_
 from dashboard.runtime.api.executive_brief_readiness import create_executive_brief_readiness_router
 from dashboard.runtime.api.financial_reporting import create_financial_reporting_router
 from dashboard.runtime.api.executive_reporting import create_executive_reporting_router
+from dashboard.runtime.api.executive_decision_intelligence import (
+    create_executive_decision_intelligence_router,
+)
 from dashboard.mission_control.contracts import build_mission_control_state
 from backend.reports_center.routes import create_reports_center_router
 import uvicorn
@@ -4947,6 +4950,10 @@ app.include_router(
 # Phase 178 — advisory Executive Financial Reporting Suite (read-only).
 app.include_router(
     create_executive_reporting_router(state_provider=_executive_brief_readiness_mc_state)
+)
+# Phase 179 — advisory Executive Decision Intelligence (read-only orchestration).
+app.include_router(
+    create_executive_decision_intelligence_router(state_provider=_executive_brief_readiness_mc_state)
 )
 app.include_router(launcher_router)
 app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
