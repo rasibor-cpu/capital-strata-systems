@@ -73,11 +73,16 @@ def render_mission_control_shell(
     active_section: str = "executive_overview",
     touch_debug: bool = False,
 ) -> str:
+    from dashboard.enterprise_shell.routes import ROUTES, mobile_home_href
+    from dashboard.enterprise_shell.shell import render_brand_home_link, render_breadcrumbs
+
     active = section_for_key(active_section)
     state_dict = ensure_mc_authorization_state(dict(state))
     platform = _mapping(state_dict.get("platform"))
     safety = _mapping(state_dict.get("safety"))
     runtime = _mapping(state_dict.get("runtime"))
+    # Prefer canonical platform_status when contracts embed it (Phase 177F+).
+    platform_status = _mapping(state_dict.get("platform_status")) or platform
     nav = _render_nav(active.key)
     body = render_page(active.key, state_dict)
     offline_banner = ""
@@ -90,6 +95,19 @@ def render_mission_control_shell(
     debug_script = f"<script>{MC_NAV_TOUCH_DEBUG_JS}</script>" if touch_debug else ""
     # Build marker proves served HTML includes Phase 176H.1 (native-anchor navigation).
     build_meta = '<meta name="css-mc-nav" content="native-anchor-176h1">'
+    home_href = mobile_home_href(for_surface="mission_control")
+    brand = render_brand_home_link(for_surface="mission_control", title="CSS Mission Control")
+    crumbs = render_breadcrumbs(
+        [
+            ("Home", home_href),
+            ("Mission Control", ROUTES.mc_home if active.key != "executive_overview" else None),
+            (active.label, None),
+        ]
+    )
+    runtime_mode = platform_status.get("runtime_mode") or platform.get("runtime_mode") or "DISABLED"
+    execution_state = platform_status.get("execution_state") or (
+        "BLOCKED" if safety.get("live_trading_blocked") else "UNKNOWN"
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -102,22 +120,26 @@ def render_mission_control_shell(
 <body class="mc-body">
   <div class="mc-shell" data-mission-control-schema="{escape(state_dict.get('schema_version'))}" data-mc-nav="native-anchor-176h1">
     <aside class="mc-sidebar">
-      <div class="mc-brand"><strong>CSS Mission Control</strong><span>Enterprise shell / MC-002</span></div>
+      <div class="mc-brand">{brand}<span>Enterprise shell · Phase 177H</span></div>
+      <nav class="mc-nav-home" aria-label="CSS Home">
+        <a href="{escape(home_href)}" data-css-home="1"><span class="mc-nav-icon" aria-hidden="true">home</span><span class="mc-nav-label">Home</span></a>
+      </nav>
       {nav}
     </aside>
     <main class="mc-main">
       <header class="mc-topbar">
         <div>
           <strong>{escape(platform.get('product', 'CSS Mission Control'))}</strong>
-          <div class="mc-breadcrumb">Mission Control / {escape(active.label)}</div>
+          {crumbs}
         </div>
         <div class="mc-status-strip" aria-label="Global status indicators">
-          {_badge('Mode', platform.get('runtime_mode'))}
-          {_badge('Broker', platform.get('selected_broker'))}
+          {_badge('Runtime', runtime_mode)}
+          {_badge('Execution', execution_state)}
+          {_badge('Broker', platform_status.get('broker_mode') or platform.get('selected_broker') or 'NONE')}
           {_badge('Broker Health', platform.get('broker_health'))}
           {_badge('Platform', platform.get('platform_status'))}
-          {_badge('Execution', 'BLOCKED' if safety.get('live_trading_blocked') else 'UNKNOWN')}
           {_badge('Safety', safety.get('safety_status'))}
+          {_badge('Posture', 'ADVISORY / READ-ONLY')}
         </div>
       </header>
       <section class="mc-content" aria-label="{escape(active.label)} workspace">

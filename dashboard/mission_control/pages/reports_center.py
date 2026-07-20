@@ -325,6 +325,8 @@ def _detail_panel() -> str:
     <a class="rc-btn rc-btn-primary" id="rc-detail-pdf-link" href="#" target="_blank" rel="noopener" data-rc-pdf-open="1">Open PDF</a>
     <button type="button" class="rc-btn" data-rc-detail="print">Print preview</button>
     <a class="rc-btn" id="rc-detail-print-link" href="#" target="_blank" rel="noopener">View Report (HTML)</a>
+    <a class="rc-btn" href="/api/options-income/report.viewer">Options Income paginated viewer</a>
+    <a class="rc-btn" href="/api/reports">Report discovery API</a>
     <button type="button" class="rc-btn" data-rc-detail="pdf-status">PDF status</button>
     <button type="button" class="rc-btn" data-rc-detail="versions">Versions</button>
     <button type="button" class="rc-btn" data-rc-detail="audit">Audit</button>

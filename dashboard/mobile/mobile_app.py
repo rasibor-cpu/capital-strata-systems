@@ -88,9 +88,11 @@ app.include_router(create_reports_center_router())
 # Phase 177F — canonical mode + telemetry APIs on the mobile surface
 from dashboard.runtime.api.runtime_mode import create_runtime_mode_router
 from dashboard.runtime.api.runtime_telemetry import create_runtime_telemetry_router
+from dashboard.runtime.api.reports_discovery import create_reports_discovery_router
 
 app.include_router(create_runtime_mode_router())
 app.include_router(create_runtime_telemetry_router())
+app.include_router(create_reports_discovery_router(surface="mobile"))
 
 _SESSIONS: Dict[str, Dict[str, Any]] = {}
 _PASSWORD_CHANGES: Dict[str, Dict[str, Any]] = {}
@@ -236,6 +238,7 @@ async def reports_home_screen(request: Request):
             session["user_ctx"],
             header_fn=_header,
             page_fn=_page,
+            footer_fn=_mobile_footer,
             identity_fn=_identity_strip,
             category=category,
         )
@@ -253,6 +256,7 @@ async def reports_create_screen(request: Request):
             session["user_ctx"],
             header_fn=_header,
             page_fn=_page,
+            footer_fn=_mobile_footer,
             identity_fn=_identity_strip,
             preselect=code,
         )
@@ -271,6 +275,7 @@ async def reports_generate_submit(request: Request):
                 session["user_ctx"],
                 header_fn=_header,
                 page_fn=_page,
+                footer_fn=_mobile_footer,
                 identity_fn=_identity_strip,
                 preselect=str(form.get("report_code") or ""),
                 message="Generate denied: reports_generate permission required.",
@@ -285,6 +290,7 @@ async def reports_generate_submit(request: Request):
             session["user_ctx"],
             header_fn=_header,
             page_fn=_page,
+            footer_fn=_mobile_footer,
             identity_fn=_identity_strip,
             preselect=str(form.get("report_code") or ""),
             message="Generation complete." if ok else f"Generation status: {result.get('status')}",
@@ -317,6 +323,7 @@ async def reports_library_screen(request: Request):
             session["user_ctx"],
             header_fn=_header,
             page_fn=_page,
+            footer_fn=_mobile_footer,
             identity_fn=_identity_strip,
             filters=filters,
         )
@@ -334,6 +341,7 @@ async def reports_detail_screen(request: Request, report_id: str):
             report_id,
             header_fn=_header,
             page_fn=_page,
+            footer_fn=_mobile_footer,
             identity_fn=_identity_strip,
         )
     )
@@ -889,7 +897,7 @@ async def manifest():
                     "purpose": "any maskable",
                 }
             ],
-            "css_shell_cache": "css-mobile-shell-v176h1",
+            "css_shell_cache": "css-mobile-shell-v177h",
         }
     )
 
@@ -897,7 +905,7 @@ async def manifest():
 @app.get("/service-worker.js")
 async def service_worker():
     script = """
-const CACHE_NAME = "css-mobile-shell-v176h1";
+const CACHE_NAME = "css-mobile-shell-v177h";
 const SHELL_URLS = ["/login", "/manifest.webmanifest", "/icon.svg", "/static/css_pwa_icon_192.png", "/apple-touch-icon.png"];
 
 self.addEventListener("install", (event) => {
@@ -1174,62 +1182,45 @@ def _status_strip(user_ctx: Optional[Dict[str, Any]] = None) -> str:
 
 
 def _top_nav(user_ctx: Dict[str, Any], active: str) -> str:
-    links = []
-    dash_class = "button-link" if active == "dashboard" else "button-link quiet"
-    if active == "dashboard":
-        links.append(f'<a class="{dash_class}" href="/dashboard" aria-current="page">Dashboard</a>')
-    else:
-        links.append('<a class="button-link quiet" href="/dashboard">Dashboard</a>')
-    for key, label, href in (
-        ("reports", "Reports", "/reports"),
-        ("positions", "Positions", "/positions"),
-        ("history", "History", "/history"),
-        ("risk", "Risk", "/risk"),
-        ("governance", "Governance", "/governance"),
-        ("opportunities", "Opportunities", "/opportunities"),
-        ("market", "Market", "/market"),
-        ("broker", "Broker", "/broker"),
-        ("session-command-centre", "Command Centre", "/session-command-centre"),
-        ("trade-status", "Trade Status", "/trade-status"),
-        ("trade-summary", "Trade Summary", "/trade-summary"),
-        ("live-micro-pilot", "Micro-Pilot", "/live-micro-pilot"),
-        ("live-readiness-certification", "Live Cert", "/live-readiness-certification"),
-        ("alerts", "Alert Centre", "/alerts"),
-        ("margin", "Margin", "/margin"),):
-        if key == "reports" and not mobile_reports.can_view_reports(user_ctx):
-            continue
-        if active == key:
-            links.append(
-                f'<a class="button-link" href="{href}" aria-current="page">{label}</a>'
-            )
-        else:
-            links.append(
-                f'<a class="button-link quiet" href="{href}">{label}</a>'
-            )
-    if _can_view_audit_logs(user_ctx):
-        if active == "audit":
-            links.append('<a class="button-link" href="/audit" aria-current="page">Audit</a>')
-        else:
-            links.append('<a class="button-link quiet" href="/audit">Audit</a>')
-    if _can_submit_trade(user_ctx):
-        if active == "trade":
-            links.append('<a class="button-link" href="/trade" aria-current="page">Trade</a>')
-        else:
-            links.append('<a class="button-link" href="/trade">Trade</a>')
-    if _can_manage_mobile_controls(user_ctx):
-        if active == "controls":
-            links.append('<a class="button-link" href="/controls" aria-current="page">Controls</a>')
-        else:
-            links.append('<a class="button-link" href="/controls">Controls</a>')
-    if can_manage_users(user_ctx):
-        if active == "users":
-            links.append('<a class="button-link" href="/users" aria-current="page">Users</a>')
-        else:
-            links.append('<a class="button-link" href="/users">Users</a>')
-    links.append(
-        '<form method="post" action="/logout"><button class="ghost" type="submit">Logout</button></form>'
+    from dashboard.enterprise_shell.shell import render_mobile_enterprise_nav
+
+    return render_mobile_enterprise_nav(
+        user_ctx,
+        active,
+        can_view_reports=mobile_reports.can_view_reports(user_ctx),
+        can_trade=_can_submit_trade(user_ctx),
+        can_audit=_can_view_audit_logs(user_ctx),
+        can_controls=_can_manage_mobile_controls(user_ctx),
+        can_users=can_manage_users(user_ctx),
     )
-    return "\n".join(links)
+
+
+def _mobile_footer(user_ctx: Dict[str, Any], active: str) -> str:
+    from dashboard.enterprise_shell.shell import render_mobile_footer_nav
+
+    return render_mobile_footer_nav(
+        active,
+        can_view_reports=mobile_reports.can_view_reports(user_ctx),
+        can_trade=_can_submit_trade(user_ctx),
+    )
+
+
+def _page_breadcrumbs(active: str, title: str) -> str:
+    from dashboard.enterprise_shell.routes import ROUTES, mobile_home_href
+    from dashboard.enterprise_shell.shell import render_breadcrumbs
+
+    if active in {"dashboard", "home", ""}:
+        return ""
+    trail: list[tuple[str, str | None]] = [("Home", mobile_home_href(for_surface="mobile"))]
+    if active == "reports" or str(active).startswith("reports"):
+        if title == "Reports":
+            trail.append(("Reports", None))
+        else:
+            trail.append(("Reports", ROUTES.mobile_reports))
+            trail.append((title, None))
+    else:
+        trail.append((title, None))
+    return render_breadcrumbs(trail)
 
 
 def _header(title: str, user_ctx: Dict[str, Any], active: str) -> str:
@@ -1241,10 +1232,9 @@ def _header(title: str, user_ctx: Dict[str, Any], active: str) -> str:
         <div>
           <p class="eyebrow">Capital Strata Systems</p>
           <h1>{html.escape(title)}</h1>
+          {_page_breadcrumbs(active, title)}
         </div>
-        <nav class="top-actions" aria-label="Mobile controls">
-          {_top_nav(user_ctx, active)}
-        </nav>
+        {_top_nav(user_ctx, active)}
       </header>
       {_status_strip(user_ctx)}
     """
@@ -1599,6 +1589,7 @@ def _dashboard_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
           <section class="terminal-panel" aria-label="Dashboard output">
             <pre>{html.escape(dashboard_text)}</pre>
           </section>
+        {_mobile_footer(user_ctx, "dashboard")}
         </main>
         """,
         meta_refresh=30
@@ -1690,6 +1681,7 @@ def _session_command_centre_page(user_ctx: Dict[str, Any], session: Dict[str, An
             <h2>Navigation Links</h2>
             <div class="command-grid">{nav_markup}</div>
           </section>
+        {_mobile_footer(user_ctx, "session-command-centre")}
         </main>
         """,
         meta_refresh=30,
@@ -1782,6 +1774,7 @@ def _live_micro_pilot_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) ->
               <article><strong>Broker Connectivity</strong><span>{html.escape(str(reporting.get("no_broker_connectivity_required", True)))}</span></article>
             </div>
           </section>
+        {_mobile_footer(user_ctx, "live-micro-pilot")}
         </main>
         """,
         meta_refresh=30,
@@ -1859,6 +1852,7 @@ def _live_readiness_certification_page(user_ctx: Dict[str, Any], session: Dict[s
             <h2>Blockers</h2>
             <ul>{blocker_markup}</ul>
           </section>
+        {_mobile_footer(user_ctx, "live-readiness-certification")}
         </main>
         """,
         meta_refresh=30,
@@ -2004,6 +1998,7 @@ def _trade_summary_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> st
               </table>
             </div>
           </section>
+        {_mobile_footer(user_ctx, "trade-summary")}
         </main>
         """,
         meta_refresh=30
@@ -2286,6 +2281,7 @@ def _positions_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
               {rows}
             </div>
           </section>
+        {_mobile_footer(user_ctx, "positions")}
         </main>
         """,
         meta_refresh=30
@@ -2320,6 +2316,7 @@ def _history_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
               {rows}
             </div>
           </section>
+        {_mobile_footer(user_ctx, "history")}
         </main>
         """,
         meta_refresh=30
@@ -2355,6 +2352,7 @@ def _risk_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
             <h2>Risk Limit Breaches</h2>
             <ul class="compact-list">{breach_markup}</ul>
           </section>
+        {_mobile_footer(user_ctx, "risk")}
         </main>
         """,
         meta_refresh=30
@@ -2394,6 +2392,7 @@ def _governance_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
             <h2>Last Governance Event</h2>
             <p>{html.escape(str(governance.get("last_governance_event", "NONE") or "NONE"))}</p>
           </section>
+        {_mobile_footer(user_ctx, "governance")}
         </main>
         """,
         meta_refresh=30
@@ -2429,6 +2428,7 @@ def _opportunities_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> st
               {rows}
             </div>
           </section>
+        {_mobile_footer(user_ctx, "opportunities")}
         </main>
         """,
         meta_refresh=30
@@ -2467,6 +2467,7 @@ def _market_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
               {_kv("Signal Confluence", market.get("signal_confluence_state"))}
             </div>
           </section>
+        {_mobile_footer(user_ctx, "market")}
         </main>
         """,
         meta_refresh=30
@@ -2578,6 +2579,7 @@ def _broker_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
             <p class="muted">Broker secrets are never displayed. Live orders still require CSS live mode, order enablement, broker readiness, role authority, and explicit EXECUTE confirmation.</p>
             {controls_link}
           </section>
+        {_mobile_footer(user_ctx, "broker")}
         </main>
         """,
         meta_refresh=30
@@ -2613,6 +2615,7 @@ def _margin_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
             <div id="margin-error" style="display:none; color:#ff4d4f; padding:20px; font-weight:bold; font-size:18px;">DATA UNAVAILABLE</div>
             <button type="button" data-refresh-margin style="margin-top:20px;">Refresh Margin</button>
           </section>
+        {_mobile_footer(user_ctx, "margin")}
         </main>
         <script>
           function money(val) {{
@@ -2736,6 +2739,7 @@ def _audit_page(
               {rows}
             </div>
           </section>
+        {_mobile_footer(user_ctx, "audit")}
         </main>
         """,
         meta_refresh=30
@@ -2851,6 +2855,7 @@ def _controls_page(
             <article><strong>User Gate</strong><span>{'Manage' if can_manage else 'View'}</span></article>
             <article><strong>Audit</strong><span>On</span></article>
           </section>
+        {_mobile_footer(user_ctx, "controls")}
         </main>
         """,
         meta_refresh=30
@@ -2924,6 +2929,7 @@ def _users_page(
               <button type="submit">Create User</button>
             </form>
           </section>
+        {_mobile_footer(user_ctx, "users")}
         </main>
         """,
         meta_refresh=30
@@ -3122,6 +3128,7 @@ def _access_denied_page(user_ctx: Dict[str, Any], message: str) -> str:
           {_header("Access Denied", user_ctx, "access")}
           {_identity_strip(user_ctx, "Authority Restricted")}
           {_status_markup(message, "error")}
+        {_mobile_footer(user_ctx, "access")}
         </main>
         """,
         meta_refresh=30
@@ -3301,6 +3308,7 @@ def _trade_ticket_page(
           {trade_form_markup}
 
           {_recent_tickets_panel()}
+        {_mobile_footer(user_ctx, "trade")}
         </main>
         """,
         meta_refresh=30
@@ -4277,6 +4285,28 @@ select, textarea {
   font-size: 16px;
   padding: 12px 13px;
 }
+
+.css-enterprise-nav { display:flex; flex-direction:column; align-items:flex-end; gap:8px; }
+.css-brand-home { display:inline-flex; align-items:center; gap:8px; text-decoration:none; color:var(--ink); font-weight:800; min-height:44px; }
+.css-brand-mark { background:var(--left); color:#fff; padding:6px 8px; border-radius:6px; font-size:12px; }
+.css-breadcrumbs { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:6px; font-size:13px; color:var(--muted); }
+.css-crumb { color:var(--teal-dark); text-decoration:none; }
+.css-crumb.current { color:var(--ink); font-weight:700; }
+.css-crumb-sep { opacity:.5; }
+.css-more-wrap { width:100%; max-width:420px; }
+.css-more-list { list-style:none; margin:0; padding:0; }
+.css-more-list a { display:block; min-height:44px; padding:10px 12px; text-decoration:none; color:var(--ink); border-bottom:1px solid var(--line); }
+.css-footer-nav {
+  position:sticky; bottom:0; z-index:30; display:none; gap:4px; justify-content:space-around;
+  background:#10202a; padding:8px 6px max(8px, env(safe-area-inset-bottom)); border-top:1px solid #203040;
+}
+.css-footer-item { flex:1; text-align:center; color:#d7e2e8; text-decoration:none; font-size:11px; font-weight:700; min-height:44px; display:flex; align-items:center; justify-content:center; padding:6px 4px; }
+.css-footer-item.active, .css-footer-item[aria-current="page"] { color:#fff; background:#1d8a8a; border-radius:8px; }
+@media (max-width: 720px) {
+  .css-footer-nav { display:flex; }
+  .dashboard-shell { padding-bottom:72px; }
+  .top-actions.css-primary-nav a.button-link.quiet { font-size:12px; }
+}
 """ + mobile_disclosure
 
 def _get_alert_summary() -> List[Dict[str, Any]]:
@@ -4420,6 +4450,7 @@ def _alerts_page(user_ctx: Dict[str, Any]) -> str:
             <div id="css-alert-filter-label" class="muted" style="margin-bottom: 10px;">Showing all alerts</div>
             {alerts_html}
           </section>
+        {_mobile_footer(user_ctx, "alerts")}
         </main>
         <script>
           function filterAlerts(severity) {{
@@ -4482,6 +4513,7 @@ def _trade_status_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str
                 <h2>Ledger Data</h2>
                 <div class="alert error">DATA UNAVAILABLE: No active CSS runtime session found. Cannot load canonical state.</div>
               </section>
+            {_mobile_footer(user_ctx, "trade-status")}
             </main>
             ''',
             meta_refresh=30
@@ -4599,6 +4631,7 @@ def _trade_status_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str
               </table>
             </div>
           </section>
+        {_mobile_footer(user_ctx, "trade-status")}
         </main>
         ''',
     )

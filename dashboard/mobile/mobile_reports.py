@@ -16,6 +16,15 @@ from backend.reports_center.ui_contract import (
 from dashboard.ui_interaction import render_disclosure
 
 
+
+def _apply_footer(body: str, user_ctx, footer_fn) -> str:
+    if not footer_fn:
+        return body
+    ft = footer_fn(user_ctx, "reports")
+    if ft and "</main>" in body:
+        return body.replace("</main>", ft + "</main>", 1)
+    return body + (ft or "")
+
 def can_view_reports(user_ctx: Mapping[str, Any]) -> bool:
     role = str(user_ctx.get("role") or "VIEWER").upper()
     return ReportsAccessControl().can_view_catalog(role)
@@ -56,20 +65,50 @@ def render_reports_home(
     *,
     header_fn: Callable[..., str],
     page_fn: Callable[..., str],
+    footer_fn: Callable[..., str] | None = None,
     identity_fn: Callable[..., str],
     category: str | None = None,
 ) -> str:
     if not can_view_reports(user_ctx):
         return page_fn(
             "Reports",
-            f"<main class='dashboard-shell'>{header_fn('Reports', user_ctx, 'reports')}"
-            f"{identity_fn(user_ctx, 'Reports')}"
-            "<section class='data-panel'><h2>Access denied</h2>"
-            "<p>reports_view permission required.</p></section></main>",
+            _apply_footer(
+                f"<main class='dashboard-shell'>{header_fn('Reports', user_ctx, 'reports')}"
+                f"{identity_fn(user_ctx, 'Reports')}"
+                "<section class='data-panel'><h2>Access denied</h2>"
+                "<p>reports_view permission required.</p></section></main>",
+                user_ctx,
+                footer_fn,
+            ),
         )
     role, _ = _role_user(user_ctx)
     home = _svc().home(role=role)
     auth = home.get("authorization") or {}
+    from dashboard.enterprise_shell.reports_hub import build_reports_hub_payload
+
+    hub = build_reports_hub_payload(role=role, surface="mobile")
+    hub_sections = []
+    for group in hub.get("groups") or []:
+        cards = []
+        for r in group.get("reports") or []:
+            status = _esc(r.get("readiness") or r.get("status") or "unknown")
+            title = _esc(r.get("title"))
+            view = r.get("view_href")
+            action = (
+                f"<a class='button-link' href='{_esc(view)}'>Open viewer</a>"
+                if view
+                else f"<span class='quiet'> {_esc(r.get('status') or 'NOT_YET_IMPLEMENTED')}</span>"
+            )
+            cards.append(
+                f"<article class='rc-m-card'><strong>{title}</strong>"
+                f"<div>Status: {status}</div><div>Source: {_esc(r.get('source'))}</div>"
+                f"<div>{action}</div></article>"
+            )
+        hub_sections.append(
+            f"<section class='data-panel' aria-label='{_esc(group.get('label'))}'>"
+            f"<h3>{_esc(group.get('label'))}</h3>"
+            f"<div class='rc-m-cards'>{''.join(cards) or '<p>No entries.</p>'}</div></section>"
+        )
     cats = category_sections(role=role)
     if category:
         cats = [c for c in cats if c.get("key") == category]
@@ -115,6 +154,11 @@ def render_reports_home(
     <h2>Reports menu</h2>
     <div class="top-actions" style="flex-wrap:wrap;gap:8px;">{nav}</div>
   </section>
+  <section class="data-panel" aria-label="Enterprise Reports Hub">
+    <h2>Enterprise Reports Hub</h2>
+    <p>Organized access to available and planned reports. Coming-soon entries are labelled honestly — no fabricated financial bodies.</p>
+    {''.join(hub_sections)}
+  </section>
   <section class="data-panel" aria-label="Latest Daily Executive Brief">
     <h2>Latest Daily Executive Brief</h2>
     {_esc_readiness_block(home)}
@@ -134,7 +178,7 @@ def render_reports_home(
   </section>
 </main>
 """
-    return page_fn("Reports", body)
+    return page_fn("Reports", _apply_footer(body, user_ctx, footer_fn))
 
 
 def render_create(
@@ -142,6 +186,7 @@ def render_create(
     *,
     header_fn: Callable[..., str],
     page_fn: Callable[..., str],
+    footer_fn: Callable[..., str] | None = None,
     identity_fn: Callable[..., str],
     preselect: str = "",
     message: str = "",
@@ -149,7 +194,7 @@ def render_create(
     result: Optional[dict] = None,
 ) -> str:
     if not can_view_reports(user_ctx):
-        return page_fn("Create Report", "<main class='dashboard-shell'><p>Access denied.</p></main>")
+        return page_fn("Create Report", _apply_footer("<main class='dashboard-shell'><p>Access denied.</p></main>", user_ctx, footer_fn))
     can_gen = can_generate_reports(user_ctx)
     role, _ = _role_user(user_ctx)
     options = generatable_selector_options(role=role)
@@ -227,7 +272,7 @@ def render_create(
   </script>
 </main>
 """
-    return page_fn("Create Report", body)
+    return page_fn("Create Report", _apply_footer(body, user_ctx, footer_fn))
 
 
 def render_library(
@@ -235,11 +280,12 @@ def render_library(
     *,
     header_fn: Callable[..., str],
     page_fn: Callable[..., str],
+    footer_fn: Callable[..., str] | None = None,
     identity_fn: Callable[..., str],
     filters: Optional[dict] = None,
 ) -> str:
     if not can_view_reports(user_ctx):
-        return page_fn("Report Library", "<main class='dashboard-shell'><p>Access denied.</p></main>")
+        return page_fn("Report Library", _apply_footer("<main class='dashboard-shell'><p>Access denied.</p></main>", user_ctx, footer_fn))
     role, _ = _role_user(user_ctx)
     filters = filters or {}
     listing = _svc().list_library(filters=filters, role=role)
@@ -269,7 +315,7 @@ def render_library(
   </section>
 </main>
 """
-    return page_fn("Report Library", body)
+    return page_fn("Report Library", _apply_footer(body, user_ctx, footer_fn))
 
 
 def render_detail(
@@ -278,17 +324,22 @@ def render_detail(
     *,
     header_fn: Callable[..., str],
     page_fn: Callable[..., str],
+    footer_fn: Callable[..., str] | None = None,
     identity_fn: Callable[..., str],
 ) -> str:
     if not can_view_reports(user_ctx):
-        return page_fn("Report Detail", "<main class='dashboard-shell'><p>Access denied.</p></main>")
+        return page_fn("Report Detail", _apply_footer("<main class='dashboard-shell'><p>Access denied.</p></main>", user_ctx, footer_fn))
     role, user_id = _role_user(user_ctx)
     result = _svc().retrieve(report_id, role=role)
     if result.get("status") != "OK":
         return page_fn(
             "Report Detail",
-            f"<main class='dashboard-shell'>{header_fn('Report Detail', user_ctx, 'reports')}"
-            f"<section class='data-panel'><h2>{_esc(result.get('status'))}</h2></section></main>",
+            _apply_footer(
+                f"<main class='dashboard-shell'>{header_fn('Report Detail', user_ctx, 'reports')}"
+                f"<section class='data-panel'><h2>{_esc(result.get('status'))}</h2></section></main>",
+                user_ctx,
+                footer_fn,
+            ),
         )
     report = result.get("report") or {}
     print_info = _svc().print_info(report_id, role=role, user_id=user_id)
@@ -352,7 +403,7 @@ def render_detail(
   </section>
 </main>
 """
-    return page_fn("Report Detail", body)
+    return page_fn("Report Detail", _apply_footer(body, user_ctx, footer_fn))
 
 
 def generate_from_form(user_ctx: Mapping[str, Any], form: Mapping[str, str]) -> dict[str, Any]:

@@ -3947,7 +3947,7 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
     )
     launcher_sections = launcher_frontend_state.get("sections", {}) if isinstance(launcher_frontend_state, dict) else {}
 
-    return {
+    context = {
         "title": "CSS Mobile Dashboard",
         "version": LauncherConfig.VERSION,
         "runtime": get_runtime_summary(),
@@ -4044,6 +4044,28 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
             "dashboard_status": "ONLINE"
         }
     }
+    # Phase 177H.1 — canonical enterprise navigation contract for the launcher SPA.
+    try:
+        from backend.runtime.platform_status import build_platform_status
+        from dashboard.enterprise_shell.nav_contract import build_enterprise_navigation_contract
+
+        platform_status = build_platform_status()
+    except Exception:
+        platform_status = {
+            "runtime_mode": "DISABLED",
+            "execution_state": "BLOCKED",
+            "mobile_access_mode": "READ_ONLY",
+            "broker_mode": "NONE",
+            "fail_closed": True,
+        }
+    context["platform_status"] = platform_status
+    context["enterprise_nav"] = build_enterprise_navigation_contract(
+        surface="launcher_spa",
+        platform_status=platform_status,
+    )
+    context["options_income_posture"] = "ADVISORY_ONLY"
+    return context
+
 
 def build_launcher_context() -> Dict[str, Any]:
     status = get_mobile_launcher_status()
@@ -5043,6 +5065,18 @@ app.include_router(
 )
 # Phase 177F — canonical Runtime Telemetry (read-only).
 app.include_router(create_runtime_telemetry_router())
+# Phase 177H — read-only report discovery + paginated viewer (Options Income).
+from dashboard.runtime.api.reports_discovery import create_reports_discovery_router
+
+app.include_router(
+    create_reports_discovery_router(
+        surface="mission_control",
+        options_income_snapshot_provider=get_cached_options_income_payload,
+    )
+)
+from dashboard.runtime.api.enterprise_navigation import create_enterprise_navigation_router
+
+app.include_router(create_enterprise_navigation_router(surface="launcher_spa"))
 # Phase 177D — Options Income Engine runtime APIs (read-only, advisory, execution blocked).
 app.include_router(create_options_income_router(payload_provider=get_cached_options_income_payload))
 app.include_router(launcher_router)

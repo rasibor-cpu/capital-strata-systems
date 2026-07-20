@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta http-equiv="refresh" content="30">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>{{ title }}</title>
     <link rel="manifest" href="/manifest.json">
     <link rel="icon" href="/favicon.ico" sizes="any">
@@ -232,9 +232,10 @@
             right: 0;
             bottom: 0;
             display: grid;
-            grid-template-columns: repeat(6, minmax(0, 1fr));
+            grid-template-columns: repeat(5, minmax(0, 1fr));
             gap: 4px;
             padding: 6px 8px;
+            padding-bottom: max(6px, env(safe-area-inset-bottom));
             border-top: 1px solid var(--border-strong);
             background: #090c0b;
             z-index: 100;
@@ -263,6 +264,33 @@
             background: var(--success-soft);
         }
         .nav-icon { font-size: 16px; }
+        .css-spa-brand { display:inline-flex; align-items:center; gap:8px; color:var(--text-primary); text-decoration:none; font-weight:800; min-height:44px; }
+        .css-spa-brand-mark { background:#1d8a8a; color:#041014; padding:4px 7px; border-radius:4px; font-size:11px; }
+        .css-spa-crumbs { display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:12px; color:var(--text-secondary); margin-top:4px; }
+        .css-spa-crumb { color:#93c5fd; text-decoration:none; }
+        .css-spa-crumb.current { color:var(--text-primary); font-weight:700; }
+        .css-spa-more-panel {
+          position:fixed; left:0; right:0; bottom:64px; max-height:55vh; overflow:auto; z-index:120;
+          background:#0d1210; border-top:1px solid var(--border-strong); padding:12px; display:none;
+          padding-bottom: max(12px, env(safe-area-inset-bottom));
+        }
+        .css-spa-more-panel.open { display:block; }
+        .css-spa-more-panel a, .css-spa-more-panel button.css-spa-more-item {
+          display:flex; align-items:center; min-height:44px; width:100%; padding:10px 12px;
+          color:var(--text-primary); text-decoration:none; background:transparent; border:0; border-bottom:1px solid var(--border-color);
+          font-size:14px; text-align:left; cursor:pointer;
+        }
+        .css-spa-more-panel .coming-soon { opacity:.55; }
+        .bottom-nav a.nav-link {
+          min-height:48px; padding:5px 2px; font-size:11px; font-weight:600;
+          border:1px solid var(--border-strong); border-radius:6px; color:var(--text-secondary);
+          background:#111512; text-decoration:none; display:flex; flex-direction:column;
+          align-items:center; justify-content:center; gap:3px; line-height:1.2;
+        }
+        .bottom-nav a.nav-link.active, .bottom-nav button.active {
+          color: var(--success); border-color: var(--success-border); background: var(--success-soft);
+        }
+        body { padding-bottom: 72px; }
 
         /* ── ALLOCATION BAR ── */
         .alloc-bar {
@@ -722,27 +750,33 @@
 </head>
 <body>
 
-    <!-- HEADER -->
-    <div class="mobile-header">
+    <!-- HEADER — Phase 177H.1 enterprise shell -->
+    <header class="mobile-header" role="banner">
         <div class="mobile-title">
-            <h1>{{ title }}</h1>
-            <p>v{{ version }} &nbsp;|&nbsp; Operations + Paper Trade</p>
+            <a class="css-spa-brand" href="{{ enterprise_nav.canonical_home }}" aria-label="CSS Home — return to Mobile Dashboard landing">
+                <span class="css-spa-brand-mark" aria-hidden="true">CSS</span>
+                <span>{{ title }}</span>
+            </a>
+            <p>v{{ version }} &nbsp;|&nbsp; Advisory / Read-Only</p>
+            <nav class="css-spa-crumbs" id="css-spa-crumbs" aria-label="Section context">
+                <a class="css-spa-crumb" href="{{ enterprise_nav.canonical_home }}">Home</a>
+                <span aria-hidden="true">›</span>
+                <a class="css-spa-crumb" href="/mobile">Mobile</a>
+                <span aria-hidden="true">›</span>
+                <span class="css-spa-crumb current" id="css-spa-crumb-current" aria-current="page">Home</span>
+            </nav>
         </div>
-        <div class="status-strip">
+        <div class="status-strip" aria-label="Canonical platform status">
+            <span class="pill warn">Runtime&nbsp;<strong id="css-spa-runtime-mode">{{ platform_status.runtime_mode | default(enterprise_nav.platform_status.runtime_mode) | default('DISABLED') }}</strong></span>
+            <span class="pill bad">Execution&nbsp;<strong id="css-spa-execution">{{ platform_status.execution_state | default(enterprise_nav.platform_status.execution_state) | default('BLOCKED') }}</strong></span>
+            <span class="pill">Access&nbsp;<strong>{{ platform_status.mobile_access_mode | default(enterprise_nav.platform_status.mobile_access_mode) | default('READ_ONLY') }}</strong></span>
+            <span class="pill">Broker&nbsp;<strong>{{ platform_status.broker_mode | default(enterprise_nav.platform_status.broker_mode) | default('NONE') }}</strong></span>
+            <span class="pill">OI&nbsp;<strong>{{ options_income_posture | default('ADVISORY_ONLY') }}</strong></span>
             <span class="pill {% if health.backend_available %}good{% else %}bad{% endif %}">
                 Backend&nbsp;<strong>{% if health.backend_available %}ONLINE{% else %}OFFLINE{% endif %}</strong>
             </span>
-            <span class="pill {% if staleness == 'ACTIVE' %}good{% elif staleness == 'STALE' %}warn{% else %}bad{% endif %}">
-                Heartbeat&nbsp;<strong>{{ staleness }}</strong>
-            </span>
-            <span class="pill {% if runtime.supervisor_status in ('RUNNING', 'DEGRADED') %}good{% else %}warn{% endif %}">
-                Supervisor&nbsp;<strong>{{ runtime.supervisor_status }}</strong>
-            </span>
-            <span class="pill {% if pause_state.trading_paused %}warn{% else %}good{% endif %}">
-                Trading&nbsp;<strong>{% if pause_state.trading_paused %}PAUSED{% else %}ACTIVE{% endif %}</strong>
-            </span>
         </div>
-    </div>
+    </header>
 
     <!-- PAUSE BANNER (only shown when paused) -->
     {% if pause_state.trading_paused %}
@@ -2166,27 +2200,45 @@
     </div><!-- /screen-alerts -->
 
     <!-- ══════════════════════════════════════════════
-         BOTTOM NAVIGATION
+         BOTTOM NAVIGATION — Phase 177H.1 enterprise
          ══════════════════════════════════════════════ -->
-    <nav class="bottom-nav" aria-label="Mobile Dashboard Screens">
-        <button type="button" class="active" data-screen="home" id="nav-home">
-            <span class="nav-icon">🏠</span>Home
+    <div id="css-spa-more-panel" class="css-spa-more-panel" hidden role="dialog" aria-label="More modules" aria-modal="false">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <strong>More</strong>
+            <button type="button" class="button button-secondary" id="css-spa-more-close" aria-label="Close More menu">Close</button>
+        </div>
+        <ul style="list-style:none;margin:0;padding:0;" id="css-spa-more-list">
+        {% for item in enterprise_nav.more %}
+            <li>
+            {% if item.spa_screen and item.enabled %}
+                <button type="button" class="css-spa-more-item" data-spa-screen="{{ item.spa_screen }}" data-nav-id="{{ item.id }}">{{ item.label }}</button>
+            {% elif item.href and item.enabled %}
+                <a href="{{ item.href }}" data-nav-id="{{ item.id }}" {% if item.cross_surface %}rel="noopener"{% endif %}>{{ item.label }}{% if item.external_indicator %} ↗{% endif %}</a>
+            {% else %}
+                <span class="css-spa-more-item coming-soon" aria-disabled="true">{{ item.label }} (coming soon)</span>
+            {% endif %}
+            </li>
+        {% endfor %}
+        </ul>
+        <p style="font-size:11px;color:var(--text-secondary);margin-top:10px;">Trade links do not enable execution. Runtime remains DISABLED / BLOCKED.</p>
+    </div>
+
+    <nav class="bottom-nav" aria-label="CSS enterprise primary navigation" data-shell-cache="{{ enterprise_nav.shell_cache }}">
+        {% for item in enterprise_nav.primary %}
+            {% if item.id == 'more' %}
+        <button type="button" data-nav-id="more" id="nav-more" aria-haspopup="dialog" aria-expanded="false" aria-controls="css-spa-more-panel">
+            <span class="nav-icon" aria-hidden="true">☰</span><span>{{ item.label }}</span>
         </button>
-        <button type="button" data-screen="positions" id="nav-positions">
-            <span class="nav-icon">📊</span>Positions
+            {% elif item.spa_screen %}
+        <button type="button" data-screen="{{ item.spa_screen }}" data-nav-id="{{ item.id }}" id="nav-{{ item.id }}">
+            <span class="nav-icon" aria-hidden="true">•</span><span>{{ item.label }}</span>
         </button>
-        <button type="button" data-screen="execution" id="nav-execution">
-            <span class="nav-icon">⚡</span>Execution
-        </button>
-        <button type="button" data-screen="trade" id="nav-trade">
-            <span class="nav-icon">💳</span>Trade
-        </button>
-        <button type="button" data-screen="risk" id="nav-risk">
-            <span class="nav-icon">🛡</span>Risk
-        </button>
-        <button type="button" data-screen="alerts" id="nav-alerts">
-            <span class="nav-icon">🔔</span>Alerts
-        </button>
+            {% else %}
+        <a class="nav-link" href="{{ item.href }}" data-nav-id="{{ item.id }}" id="nav-{{ item.id }}" aria-label="{{ item.aria_label }}">
+            <span class="nav-icon" aria-hidden="true">•</span><span>{{ item.label }}</span>
+        </a>
+            {% endif %}
+        {% endfor %}
     </nav>
 
     <script>
@@ -2202,6 +2254,7 @@
         var alertsSnapshot = {{ alerts | tojson }};
         var tradeTicketFeedData = null;
         var tradeTicketSymbolLookup = {};
+        var enterpriseNav = {{ enterprise_nav | tojson }};
         var lastApiResponseMs = null;
 
         function formatMoney(value) {
@@ -2678,7 +2731,7 @@
             document.querySelectorAll(".screen").forEach(function (el) {
                 el.classList.remove("active");
             });
-            document.querySelectorAll("[data-screen]").forEach(function (btn) {
+            document.querySelectorAll(".bottom-nav [data-screen], .bottom-nav button, .bottom-nav a.nav-link").forEach(function (btn) {
                 btn.classList.remove("active");
                 btn.removeAttribute("aria-current");
             });
@@ -2687,23 +2740,62 @@
                 btn.removeAttribute("aria-current");
             });
             var screen = document.getElementById("screen-" + name);
-            var btn = document.querySelector("[data-screen='" + name + "']");
             var quick = document.querySelector("[data-quick-screen='" + name + "']");
             if (screen) screen.classList.add("active");
-            if (btn) {
-                btn.classList.add("active");
-                btn.setAttribute("aria-current", "page");
-            }
             if (quick) {
                 quick.classList.add("active");
                 quick.setAttribute("aria-current", "true");
             }
+
+            var crumb = document.getElementById("css-spa-crumb-current");
+            if (crumb) {
+                var labels = {
+                    home: "Home",
+                    positions: "Positions",
+                    execution: "Execution",
+                    trade: "Trade",
+                    risk: "Risk",
+                    alerts: "Alerts"
+                };
+                crumb.textContent = labels[name] || (name ? name.charAt(0).toUpperCase() + name.slice(1) : "Home");
+            }
+
+            closeMoreMenu();
+
+            var moreBtn = document.getElementById("nav-more");
+            var tradeBtn = document.getElementById("nav-trade");
+            if (name === "trade" && tradeBtn) {
+                tradeBtn.classList.add("active");
+                tradeBtn.setAttribute("aria-current", "page");
+            } else if (name === "positions" || name === "execution" || name === "risk" || name === "alerts") {
+                if (moreBtn) {
+                    moreBtn.classList.add("active");
+                    moreBtn.setAttribute("aria-current", "true");
+                }
+            }
+            // spa home: no primary Home link active; crumb only
+
             try {
                 window.sessionStorage.setItem("css_mobile_active_screen", name);
             } catch (err) {
                 // ignore storage failures
             }
             window.location.hash = "#" + name;
+        }
+
+        function closeMoreMenu() {
+            var panel = document.getElementById("css-spa-more-panel");
+            var btn = document.getElementById("nav-more");
+            if (panel) { panel.classList.remove("open"); panel.setAttribute("hidden", ""); }
+            if (btn) { btn.setAttribute("aria-expanded", "false"); }
+        }
+        function openMoreMenu() {
+            var panel = document.getElementById("css-spa-more-panel");
+            var btn = document.getElementById("nav-more");
+            if (panel) { panel.classList.add("open"); panel.removeAttribute("hidden"); }
+            if (btn) { btn.setAttribute("aria-expanded", "true"); }
+            var closeBtn = document.getElementById("css-spa-more-close");
+            if (closeBtn) closeBtn.focus();
         }
 
         function normalizeText(value) {
@@ -3131,7 +3223,7 @@
         }
 
         document.addEventListener("DOMContentLoaded", function () {
-            document.querySelectorAll("[data-screen]").forEach(function (btn) {
+            document.querySelectorAll(".bottom-nav [data-screen]").forEach(function (btn) {
                 btn.addEventListener("click", function () {
                     showScreen(btn.getAttribute("data-screen"));
                 });
@@ -3140,6 +3232,44 @@
                 btn.addEventListener("click", function () {
                     showScreen(btn.getAttribute("data-quick-screen"));
                 });
+            });
+
+            var moreToggle = document.getElementById("nav-more");
+            if (moreToggle) {
+                moreToggle.addEventListener("click", function () {
+                    var panel = document.getElementById("css-spa-more-panel");
+                    var isOpen = panel && panel.classList.contains("open");
+                    if (isOpen) {
+                        closeMoreMenu();
+                        moreToggle.focus();
+                    } else {
+                        openMoreMenu();
+                    }
+                });
+            }
+            var moreClose = document.getElementById("css-spa-more-close");
+            if (moreClose) {
+                moreClose.addEventListener("click", function () {
+                    closeMoreMenu();
+                    if (moreToggle) moreToggle.focus();
+                });
+            }
+            document.querySelectorAll("#css-spa-more-panel [data-spa-screen]").forEach(function (btn) {
+                btn.addEventListener("click", function () {
+                    var screenName = btn.getAttribute("data-spa-screen");
+                    closeMoreMenu();
+                    showScreen(screenName);
+                    if (moreToggle) moreToggle.focus();
+                });
+            });
+            document.addEventListener("keydown", function (event) {
+                if (event.key === "Escape") {
+                    var panel = document.getElementById("css-spa-more-panel");
+                    if (panel && panel.classList.contains("open")) {
+                        closeMoreMenu();
+                        if (moreToggle) moreToggle.focus();
+                    }
+                }
             });
 
             var validScreens = ["home", "positions", "execution", "trade", "risk", "alerts"];

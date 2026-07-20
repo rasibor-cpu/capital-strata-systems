@@ -99,6 +99,18 @@ body.mc-body {
 .neutral { color: var(--mc-text); background: rgba(104, 168, 255, .11); }
 .mc-content { padding: 22px; }
 .mc-breadcrumb { color: var(--mc-muted); font-size: .82rem; margin-bottom: 12px; }
+.css-breadcrumbs { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:6px; font-size:.82rem; color:var(--mc-muted); }
+.css-crumb { color:var(--mc-info); text-decoration:none; }
+.css-crumb.current { color:var(--mc-text); font-weight:700; }
+.css-crumb-sep { opacity:.55; }
+.css-brand-home { display:inline-flex; align-items:center; gap:8px; text-decoration:none; color:var(--mc-text); margin-bottom:6px; min-height:44px; }
+.css-brand-mark { background:var(--mc-info); color:#061018; padding:4px 7px; border-radius:4px; font-size:.75rem; font-weight:800; }
+.mc-nav-home { margin-bottom:8px; }
+.mc-nav-home a {
+  display:flex; gap:8px; align-items:center; min-height:44px; padding:8px 10px;
+  color:var(--mc-text); text-decoration:none; border-radius:6px; border:1px solid var(--mc-line);
+  background:var(--mc-panel);
+}
 .mc-page-header {
   display: flex;
   justify-content: space-between;

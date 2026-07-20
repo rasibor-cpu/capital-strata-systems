@@ -127,6 +127,26 @@ def create_options_income_router(payload_provider: Callable[[], Mapping[str, Any
         report = build_options_income_executive_report(snapshot=payload_provider())
         return HTMLResponse(str(report.get("html") or ""), media_type="text/html")
 
+    @router.get("/api/options-income/report.viewer")
+    def get_options_income_report_viewer() -> Any:
+        """Phase 177H — one-page-at-a-time paginated viewer (default human-facing mode)."""
+        from fastapi.responses import HTMLResponse
+
+        from backend.options.options_income_reporting import build_options_income_executive_report
+        from dashboard.enterprise_shell.routes import ROUTES, mobile_home_href
+        from dashboard.reports_viewer import render_paginated_viewer
+
+        report = build_options_income_executive_report(snapshot=payload_provider())
+        doc = report.get("document") or {}
+        html = render_paginated_viewer(
+            doc if isinstance(doc, dict) else {},
+            reports_href=ROUTES.mc_reports,
+            home_href=mobile_home_href(for_surface="mission_control"),
+            print_href="/api/options-income/report.html",
+            surface="mission_control",
+        )
+        return HTMLResponse(html, media_type="text/html")
+
     return router
 
 

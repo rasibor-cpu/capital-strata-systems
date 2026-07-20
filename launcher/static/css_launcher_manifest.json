@@ -3,6 +3,8 @@
   "short_name": "CSS",
   "description": "Capital Strata Systems - Autonomous Multi-Asset Trading Platform",
   "start_url": "/mobile-launcher",
+  "css_shell_cache": "css-launcher-spa-shell-v177h1",
+  "css_pwa_note": "Installed PWA starts at launcher landing, not Mission Control or a stale SPA subsection.",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",

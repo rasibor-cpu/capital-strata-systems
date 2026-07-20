@@ -69,7 +69,14 @@ def test_all_mc_nav_items_are_real_anchors() -> None:
         assert f'href="{section.route}"' in html
         assert f'data-section="{section.key}"' in html
         assert section.label in html
-    assert html.count('href="/mission-control/') == len(MISSION_CONTROL_SECTIONS)
+    # Count sidebar module anchors only (exclude Home + breadcrumb links).
+    import re
+
+    nav_block = re.search(r'<nav class="mc-nav"[^>]*>(.*?)</nav>', html, re.S)
+    assert nav_block is not None
+    nav_hrefs = re.findall(r'href="(/mission-control/[^"]+)"', nav_block.group(1))
+    assert len(nav_hrefs) == len(MISSION_CONTROL_SECTIONS)
+    assert 'data-css-home="1"' in html
     assert 'data-mc-nav="native-anchor-176h1"' in html
     assert 'name="css-mc-nav" content="native-anchor-176h1"' in html
 
