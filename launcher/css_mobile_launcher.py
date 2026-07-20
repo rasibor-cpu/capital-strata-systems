@@ -137,6 +137,7 @@ from dashboard.runtime.api.executive_decision_intelligence import (
     create_executive_decision_intelligence_router,
 )
 from dashboard.runtime.api.runtime_mode import create_runtime_mode_router
+from dashboard.runtime.api.runtime_telemetry import create_runtime_telemetry_router
 from backend.options.options_income_api import create_options_income_router
 from backend.options.options_income_runtime_service import get_cached_options_income_payload
 from dashboard.mission_control.contracts import build_mission_control_state
@@ -534,16 +535,30 @@ def get_runtime_summary() -> Dict[str, Any]:
         "execution_authority": resolution.get("execution_authority") or "BLOCKED",
         "order_submission": resolution.get("order_submission") or "BLOCKED",
         "runtime_mode_reason": resolution.get("reason"),
-        "current_cycle": session.get("cycle_number", 0),
+        "current_cycle": session.get("cycle_number") if "cycle_number" in session else None,
+        "session_cycle": session.get("cycle_number") if "cycle_number" in session else None,
         "last_update": last_update,
     }
     
     supervisor = get_supervisor_summary()
     summary["supervisor_status"] = _clean_text(supervisor.get("status"), fallback="OFFLINE").upper()
     summary["last_heartbeat"] = _clean_text(supervisor.get("last_heartbeat"), fallback="N/A")
-    summary["restart_count"] = supervisor.get("restart_count", 0)
-    summary["failure_count"] = supervisor.get("failure_count", 0)
+    summary["restart_count"] = supervisor.get("restart_count")
+    summary["managed_service_restart_count"] = supervisor.get("restart_count")
+    summary["failure_count"] = supervisor.get("failure_count")
     summary["status"] = get_mobile_launcher_status()
+    try:
+        from backend.runtime.runtime_telemetry import telemetry_summary_for_ui
+
+        tele = telemetry_summary_for_ui()
+        summary["supervisor_cycles_completed"] = tele.get("supervisor_cycles_completed")
+        summary["display_cycle"] = tele.get("display_cycle")
+        if summary["current_cycle"] is None:
+            summary["current_cycle"] = tele.get("session_cycle")
+        summary["telemetry"] = tele
+    except Exception:
+        summary["supervisor_cycles_completed"] = None
+        summary["display_cycle"] = "UNKNOWN"
     
     return summary
 
@@ -5026,6 +5041,8 @@ app.include_router(
 app.include_router(
     create_runtime_mode_router(state_provider=_executive_brief_readiness_mc_state)
 )
+# Phase 177F — canonical Runtime Telemetry (read-only).
+app.include_router(create_runtime_telemetry_router())
 # Phase 177D — Options Income Engine runtime APIs (read-only, advisory, execution blocked).
 app.include_router(create_options_income_router(payload_provider=get_cached_options_income_payload))
 app.include_router(launcher_router)

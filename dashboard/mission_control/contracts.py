@@ -282,7 +282,14 @@ def _platform(frontend: Mapping[str, Any], broker: Mapping[str, Any], certificat
         or frontend.get("resolved_mode")
         or "DISABLED",
         "engine_mode": runtime_snapshot.get("engine_mode", "UNAVAILABLE"),
-        "cycle": runtime_snapshot.get("cycle", "UNAVAILABLE"),
+        "cycle": (
+            (frontend.get("sections") or {}).get("runtime_telemetry", {}).get("display_cycle")
+            if isinstance(frontend.get("sections"), Mapping)
+            and isinstance((frontend.get("sections") or {}).get("runtime_telemetry"), Mapping)
+            and (frontend.get("sections") or {}).get("runtime_telemetry", {}).get("display_cycle")
+            not in (None, "", "UNKNOWN", "NOT_REPORTED", "UNAVAILABLE")
+            else runtime_snapshot.get("cycle", "UNAVAILABLE")
+        ),
         "heartbeat": runtime_snapshot.get("last_heartbeat", "UNAVAILABLE"),
         "selected_broker": selected_broker,
         "broker_health": broker_health,
@@ -298,28 +305,59 @@ def _platform(frontend: Mapping[str, Any], broker: Mapping[str, Any], certificat
 def _runtime(frontend: Mapping[str, Any], governance: Mapping[str, Any], certification: Mapping[str, Any], runtime_snapshot: Mapping[str, Any]) -> dict[str, Any]:
     session = frontend.get("session") if isinstance(frontend.get("session"), Mapping) else {}
     active_runtime_sources = {"RUNTIME", "LIVE", "RUNTIME_ENDPOINT", "RUNTIME_ARTIFACT", "RUNTIME_REGISTRY"}
+    sections = frontend.get("sections") if isinstance(frontend.get("sections"), Mapping) else {}
+    telemetry = sections.get("runtime_telemetry") if isinstance(sections.get("runtime_telemetry"), Mapping) else {}
+    platform = sections.get("runtime_status") if isinstance(sections.get("runtime_status"), Mapping) else {}
+    # Prefer canonical telemetry; never invent cycle 0 from missing session fields.
+    display_cycle = telemetry.get("display_cycle")
+    if display_cycle in (None, "", "UNKNOWN", "NOT_REPORTED", "UNAVAILABLE"):
+        if "cycle" in runtime_snapshot and runtime_snapshot.get("cycle") is not None:
+            display_cycle = runtime_snapshot.get("cycle")
+        elif "cycle_number" in session and session.get("cycle_number") is not None:
+            display_cycle = session.get("cycle_number")
+        else:
+            display_cycle = DATA_UNAVAILABLE
+    restart = telemetry.get("managed_service_restart_count")
+    if restart in (None, "", "UNKNOWN", "NOT_REPORTED", "UNAVAILABLE"):
+        restart = runtime_snapshot.get("restart_count", DATA_UNAVAILABLE)
     return {
         "runtime_id": runtime_snapshot.get("runtime_id", DATA_UNAVAILABLE),
         "runtime_status": runtime_snapshot.get("runtime_status", certification.get("operational_state", DATA_UNAVAILABLE)),
-        "runtime_mode": runtime_snapshot.get("runtime_mode", frontend.get("resolved_mode", DATA_UNAVAILABLE)),
-        "engine_mode": runtime_snapshot.get("engine_mode", session.get("engine_mode", DATA_UNAVAILABLE)),
+        "runtime_mode": platform.get("runtime_mode")
+        or runtime_snapshot.get("runtime_mode")
+        or frontend.get("resolved_mode", DATA_UNAVAILABLE),
+        "engine_mode": platform.get("engine_mode")
+        or runtime_snapshot.get("engine_mode", session.get("engine_mode", DATA_UNAVAILABLE)),
+        "broker_mode": platform.get("broker_mode", DATA_UNAVAILABLE),
+        "mobile_access_mode": platform.get("mobile_access_mode", DATA_UNAVAILABLE),
+        "execution_state": platform.get("execution_state", "BLOCKED"),
         "cycle_mode": runtime_snapshot.get("cycle_mode", DATA_UNAVAILABLE),
-        "cycle": runtime_snapshot.get("cycle", session.get("cycle_number", 0)),
-        "uptime": runtime_snapshot.get("uptime_seconds", DATA_UNAVAILABLE),
-        "heartbeat": runtime_snapshot.get("last_heartbeat", frontend.get("generated_at", DATA_UNAVAILABLE)),
-        "heartbeat_status": runtime_snapshot.get("heartbeat_status", DATA_UNAVAILABLE),
-        "heartbeat_age_seconds": runtime_snapshot.get("heartbeat_age_seconds", DATA_UNAVAILABLE),
+        "cycle": display_cycle,
+        "session_cycle": telemetry.get("session_cycle", DATA_UNAVAILABLE),
+        "supervisor_cycles_completed": telemetry.get("supervisor_cycles_completed", DATA_UNAVAILABLE),
+        "display_cycle": telemetry.get("display_cycle", display_cycle),
+        "uptime": telemetry.get("uptime_seconds", runtime_snapshot.get("uptime_seconds", DATA_UNAVAILABLE)),
+        "heartbeat": telemetry.get("heartbeat", runtime_snapshot.get("last_heartbeat", frontend.get("generated_at", DATA_UNAVAILABLE))),
+        "heartbeat_status": runtime_snapshot.get("heartbeat_status", telemetry.get("freshness", DATA_UNAVAILABLE)),
+        "heartbeat_age_seconds": telemetry.get("heartbeat_age_seconds", runtime_snapshot.get("heartbeat_age_seconds", DATA_UNAVAILABLE)),
         "last_successful_cycle": runtime_snapshot.get("last_successful_cycle", DATA_UNAVAILABLE),
         "last_failed_cycle": runtime_snapshot.get("last_failed_cycle", DATA_UNAVAILABLE),
-        "supervisor_state": runtime_snapshot.get("runtime_status", DATA_UNAVAILABLE),
-        "restart_count": runtime_snapshot.get("restart_count", DATA_UNAVAILABLE),
-        "failure_count": runtime_snapshot.get("failure_count", DATA_UNAVAILABLE),
-        "recovery_count": runtime_snapshot.get("recovery_count", DATA_UNAVAILABLE),
+        "supervisor_state": telemetry.get("supervisor_status", runtime_snapshot.get("runtime_status", DATA_UNAVAILABLE)),
+        "restart_count": restart,
+        "managed_service_restart_count": telemetry.get("managed_service_restart_count", restart),
+        "failure_count": telemetry.get("supervisor_failure_count", runtime_snapshot.get("failure_count", DATA_UNAVAILABLE)),
+        "recovery_count": telemetry.get("recovery_attempts", runtime_snapshot.get("recovery_count", DATA_UNAVAILABLE)),
         "alert_count": runtime_snapshot.get("alert_count", DATA_UNAVAILABLE),
-        "disconnect_count": runtime_snapshot.get("disconnect_count", DATA_UNAVAILABLE),
-        "state_hash": runtime_snapshot.get("state_hash", DATA_UNAVAILABLE),
-        "source": runtime_snapshot.get("source", DATA_UNAVAILABLE),
+        "disconnect_count": telemetry.get("broker_disconnect_count", runtime_snapshot.get("disconnect_count", DATA_UNAVAILABLE)),
+        "state_hash": telemetry.get("state_hash", runtime_snapshot.get("state_hash", DATA_UNAVAILABLE)),
+        "source": (
+            "MOCK"
+            if frontend.get("mission_control_mock_data")
+            or (isinstance(frontend.get("session"), Mapping) and frontend.get("session", {}).get("mock_data"))
+            else "RUNTIME_TELEMETRY|RUNTIME_MODE_RESOLVER"
+        ),
         "source_diagnostics": runtime_snapshot.get("source_diagnostics", {}),
+        "telemetry_provenance": telemetry.get("provenance", {}),
         "subsystem_health": {
             "audit": governance.get("audit_enabled", DATA_UNAVAILABLE),
             "api": "AVAILABLE" if runtime_snapshot.get("source") in active_runtime_sources else DATA_UNAVAILABLE,

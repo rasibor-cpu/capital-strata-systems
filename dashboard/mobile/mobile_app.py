@@ -85,6 +85,13 @@ from backend.reports_center.routes import create_reports_center_router
 
 app.include_router(create_reports_center_router())
 
+# Phase 177F — canonical mode + telemetry APIs on the mobile surface
+from dashboard.runtime.api.runtime_mode import create_runtime_mode_router
+from dashboard.runtime.api.runtime_telemetry import create_runtime_telemetry_router
+
+app.include_router(create_runtime_mode_router())
+app.include_router(create_runtime_telemetry_router())
+
 _SESSIONS: Dict[str, Dict[str, Any]] = {}
 _PASSWORD_CHANGES: Dict[str, Dict[str, Any]] = {}
 
@@ -522,17 +529,35 @@ async def alerts_screen(request: Request):
 async def status(request: Request):
     session = _get_session(request)
     system_status = _system_status(session["user_ctx"] if session else None)
+    platform = system_status.get("platform_status") or {}
+    telemetry = system_status.get("telemetry_summary") or {}
     return JSONResponse(
         {
             "ok": True,
             "authenticated": bool(session),
             "mode": "mobile-full-access",
-            "system_mode": system_status["runtime_mode"],
+            # Phase 177F — canonical platform concepts (resolver is sole runtime_mode authority)
+            "runtime_mode": platform.get("runtime_mode", "DISABLED"),
+            "runtime_mode_reason": platform.get("runtime_mode_reason"),
+            "fail_closed": platform.get("fail_closed", True),
+            "execution_authority": platform.get("execution_authority", False),
+            "execution_state": platform.get("execution_state", "BLOCKED"),
+            "engine_mode": platform.get("engine_mode", system_status.get("engine_mode")),
+            "broker_mode": platform.get("broker_mode", "NONE"),
+            "mobile_access_mode": platform.get("mobile_access_mode", "READ_ONLY"),
+            "operator_intent": platform.get("operator_intent", "UNSET"),
+            "source": platform.get("source", "RUNTIME_MODE_RESOLVER"),
+            "generated_at": platform.get("generated_at"),
+            "provenance": platform.get("provenance"),
+            # Compatibility alias: MUST equal canonical runtime_mode (never mobile-access derived)
+            "system_mode": platform.get("system_mode", platform.get("runtime_mode", "DISABLED")),
+            "system_mode_deprecated": True,
             "orders_enabled": system_status["orders_enabled"],
-            "engine_mode": system_status["engine_mode"],
             "broker_live_gate": system_status["broker_live_gate"],
             "live_order_kill_switch": system_status["live_order_kill_switch"],
             "live_orders_enabled": system_status["live_orders_enabled"],
+            "telemetry": telemetry,
+            "options_income_link": system_status.get("options_income_link"),
         }
     )
 
@@ -1024,16 +1049,20 @@ def load_mobile_controls() -> Dict[str, Any]:
     mode = str(controls.get("mobile_trading_mode", "MOBILE_READ_ONLY")).strip().upper()
     controls["mobile_trading_mode"] = mode if mode in {"MOBILE_READ_ONLY", "MOBILE_PAPER_TRADING", "MOBILE_LIVE_TRADING_ARMED"} else "MOBILE_READ_ONLY"
 
-    # Phase 177A: map mobile control modes onto canonical RuntimeMode vocabulary
+    # Phase 177F: mobile access / ticket posture are NOT platform runtime_mode.
+    # Platform runtime_mode comes only from Runtime Mode Resolver (see build_platform_status).
     if mode == "MOBILE_LIVE_TRADING_ARMED":
-        controls["runtime_mode"] = "LIVE"
-        controls["canonical_runtime_mode"] = "LIVE"
+        controls["ticket_posture"] = "LIVE"
+        controls["mobile_access_mode"] = "OPERATOR"
     elif mode == "MOBILE_PAPER_TRADING":
-        controls["runtime_mode"] = "PAPER"
-        controls["canonical_runtime_mode"] = "PAPER"
+        controls["ticket_posture"] = "PAPER"
+        controls["mobile_access_mode"] = "OPERATOR"
     else:
-        controls["runtime_mode"] = "LIVE_READ_ONLY"
-        controls["canonical_runtime_mode"] = "LIVE_READ_ONLY"
+        controls["ticket_posture"] = "READ_ONLY"
+        controls["mobile_access_mode"] = "READ_ONLY"
+    # Deprecated local aliases for ticket UI only — never publish as platform runtime_mode.
+    controls["runtime_mode"] = controls["ticket_posture"]
+    controls["canonical_runtime_mode"] = controls["ticket_posture"]
     controls["orders_enabled"] = mode != "MOBILE_READ_ONLY"
 
     engine_mode = str(controls.get("engine_mode", "SAFE")).strip().upper()
@@ -1049,14 +1078,16 @@ def save_mobile_controls(controls: Dict[str, Any]) -> Dict[str, Any]:
     mode = str(normalized.get("mobile_trading_mode", "MOBILE_READ_ONLY")).strip().upper()
     normalized["mobile_trading_mode"] = mode if mode in {"MOBILE_READ_ONLY", "MOBILE_PAPER_TRADING", "MOBILE_LIVE_TRADING_ARMED"} else "MOBILE_READ_ONLY"
     if mode == "MOBILE_LIVE_TRADING_ARMED":
-        normalized["runtime_mode"] = "LIVE"
-        normalized["canonical_runtime_mode"] = "LIVE"
+        normalized["ticket_posture"] = "LIVE"
+        normalized["mobile_access_mode"] = "OPERATOR"
     elif mode == "MOBILE_PAPER_TRADING":
-        normalized["runtime_mode"] = "PAPER"
-        normalized["canonical_runtime_mode"] = "PAPER"
+        normalized["ticket_posture"] = "PAPER"
+        normalized["mobile_access_mode"] = "OPERATOR"
     else:
-        normalized["runtime_mode"] = "LIVE_READ_ONLY"
-        normalized["canonical_runtime_mode"] = "LIVE_READ_ONLY"
+        normalized["ticket_posture"] = "READ_ONLY"
+        normalized["mobile_access_mode"] = "READ_ONLY"
+    normalized["runtime_mode"] = normalized["ticket_posture"]
+    normalized["canonical_runtime_mode"] = normalized["ticket_posture"]
     normalized["orders_enabled"] = mode != "MOBILE_READ_ONLY"
     engine_mode = str(normalized.get("engine_mode", "SAFE")).strip().upper()
     normalized["engine_mode"] = engine_mode if engine_mode in ENGINE_MODES else "SAFE"
@@ -1087,18 +1118,29 @@ def _system_status(user_ctx: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     broker_ready = controls.get("mobile_trading_mode") == "MOBILE_LIVE_TRADING_ARMED"
 
     kill_switch = evaluate_live_order_kill_switch(controls)
+    from backend.options.options_income_surface_link import options_income_detail_link
+    from backend.runtime.platform_status import build_platform_status
+    from backend.runtime.runtime_telemetry import telemetry_summary_for_ui
+
+    platform = build_platform_status(mobile_controls=controls)
+    telemetry = telemetry_summary_for_ui()
     return {
-        "runtime_mode": controls["runtime_mode"],
-        "system_live": str(controls.get("canonical_runtime_mode") or controls["runtime_mode"]).upper()
-        in {"LIVE", "LIVE_MICRO_PILOT"},
-        "orders_enabled": bool(controls["orders_enabled"]),
-        "engine_mode": controls["engine_mode"],
+        # ticket_posture retained for mobile trading UI; platform runtime_mode is separate
+        "runtime_mode": platform["runtime_mode"],
+        "ticket_posture": controls.get("ticket_posture") or controls.get("runtime_mode"),
+        "system_live": False,  # platform execution remains blocked unless future authorized phase
+        "orders_enabled": bool(controls["orders_enabled"]) and platform.get("execution_state") != "BLOCKED",
+        "engine_mode": platform.get("engine_mode") or controls["engine_mode"],
         "mobile_trading_mode": controls["mobile_trading_mode"],
+        "mobile_access_mode": platform.get("mobile_access_mode"),
         "live_order_kill_switch": kill_switch.blocked,
         "live_order_kill_switch_reason": kill_switch.reason,
-        "broker_live_ready": broker_ready,
-        "broker_live_gate": "READY" if broker_ready else "OFF",
-        "live_orders_enabled": broker_ready and not kill_switch.blocked,
+        "broker_live_ready": broker_ready and platform.get("execution_state") != "BLOCKED",
+        "platform_status": platform,
+        "telemetry_summary": telemetry,
+        "options_income_link": options_income_detail_link(),
+        "broker_live_gate": "READY" if broker_ready and platform.get("execution_state") != "BLOCKED" else "OFF",
+        "live_orders_enabled": False,  # Phase 177F: never imply live orders while platform execution is blocked
         "can_trade": _can_submit_trade(user_ctx or {}),
         "can_manage_controls": _can_manage_mobile_controls(user_ctx or {}),
         "can_manage_users": can_manage_users(user_ctx or {}),
@@ -1109,14 +1151,19 @@ def _system_status(user_ctx: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
 def _status_strip(user_ctx: Optional[Dict[str, Any]] = None) -> str:
     status = _system_status(user_ctx)
     role = html.escape(str((user_ctx or {}).get("role", "SIGNED_OUT")))
-    system_mode = status.get("mobile_trading_mode", "READ_ONLY").replace("MOBILE_", "").replace("_", " ")
+    runtime_mode = html.escape(str(status.get("runtime_mode", "DISABLED")))
+    mobile_access = html.escape(str(status.get("mobile_access_mode", "READ_ONLY")))
+    engine_mode = html.escape(str(status.get("engine_mode", "UNKNOWN")))
+    execution_state = html.escape(str((status.get("platform_status") or {}).get("execution_state", "BLOCKED")))
     order_state = "ENABLED" if status["orders_enabled"] else "DISABLED"
     kill_state = "ON" if status["live_order_kill_switch"] else "OFF"
     trade_state = "TRADE AUTH" if status["can_trade"] else "VIEW AUTH"
     return f"""
       <section class="system-strip" aria-label="CSS system status">
-        <span>System {system_mode}</span>
-        <span>Engine {html.escape(str(status['engine_mode']))}</span>
+        <span>Runtime {runtime_mode}</span>
+        <span>Access {mobile_access}</span>
+        <span>Engine {engine_mode}</span>
+        <span>Execution {execution_state}</span>
         <span>Orders {order_state}</span>
         <span>Kill Switch {kill_state}</span>
         <span>Broker Gate {html.escape(str(status['broker_live_gate']))}</span>
@@ -2134,6 +2181,21 @@ def _account_summary_cards(dashboard_payload: Dict[str, Any]) -> str:
 
 
 def _command_center_panel(user_ctx: Dict[str, Any]) -> str:
+    from backend.options.options_income_runtime_service import build_options_income_mobile_card
+    from backend.options.options_income_surface_link import options_income_detail_link
+    from backend.runtime.runtime_telemetry import telemetry_summary_for_ui
+
+    oi_link = options_income_detail_link()
+    try:
+        oi_card = build_options_income_mobile_card()
+    except Exception:
+        oi_card = {
+            "options_income_status": "UNAVAILABLE",
+            "opportunity_count": 0,
+            "certification": "UNAVAILABLE",
+            "execution_blocked": True,
+        }
+    tele = telemetry_summary_for_ui()
     cards = [
         ("Reports", "Institutional report catalogue, create, library, and print.", "/reports"),
         ("Positions", "Open position inventory and asset counts.", "/positions"),
@@ -2143,7 +2205,15 @@ def _command_center_panel(user_ctx: Dict[str, Any]) -> str:
         ("Opportunities", "Current monitor queue and watchlist posture.", "/opportunities"),
         ("Market", "Regime, VWAP, liquidity, and pressure state.", "/market"),
         ("Broker", "Broker readiness and live-order gate posture.", "/broker"),
-        ("Options Income", "Advisory covered-call / CSP status, premium, and certification.", "/mission-control/options-income"),
+        (
+            "Options Income",
+            (
+                f"Status {oi_card.get('options_income_status')}; "
+                f"opps {oi_card.get('opportunity_count')}; "
+                f"cert {oi_card.get('certification')} — advisory detail on Mission Control."
+            ),
+            oi_link.get("href") or "/mission-control/options-income",
+        ),
     ]
     if not mobile_reports.can_view_reports(user_ctx):
         cards = [c for c in cards if c[0] != "Reports"]
@@ -2165,9 +2235,18 @@ def _command_center_panel(user_ctx: Dict[str, Any]) -> str:
         """
         for title, description, href in cards
     )
+    cycle_label = html.escape(str(tele.get("display_cycle", "UNKNOWN")))
+    sup_cycles = html.escape(str(tele.get("supervisor_cycles_completed", "UNKNOWN")))
+    restarts = html.escape(str(tele.get("managed_service_restart_count", "UNKNOWN")))
     return f"""
       <section class="data-panel" aria-label="CSS command center">
         <h2>Command Center</h2>
+        <div class="metric-grid account-grid" aria-label="Runtime telemetry summary">
+          <article><strong>Session Cycle</strong><span>{cycle_label}</span></article>
+          <article><strong>Supervisor Cycles</strong><span>{sup_cycles}</span></article>
+          <article><strong>Managed Restarts</strong><span>{restarts}</span></article>
+          <article><strong>OI Status</strong><span>{html.escape(str(oi_card.get('options_income_status')))}</span></article>
+        </div>
         <div class="command-grid">
           {links}
         </div>

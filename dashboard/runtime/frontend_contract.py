@@ -77,6 +77,8 @@ FRONTEND_SECTIONS = (
     "institutional_investment_committee",
     "analytics",
     "options_income",
+    "runtime_status",
+    "runtime_telemetry",
 )
 
 DATA_UNAVAILABLE = "DATA UNAVAILABLE"
@@ -157,7 +159,7 @@ def build_frontend_payload(
         "schema_metadata": envelope.schema_metadata,
         "session": _mapping(dashboard_payload.get("session")),
         "session_id": str(dashboard_payload.get("session_id", "")),
-        "resolved_mode": str(dashboard_payload.get("resolved_mode", "paper")),
+        "resolved_mode": _canonical_resolved_mode(dashboard_payload),
         # Phase 172A: passthrough of the canonical launcher supervisor state
         # (read directly from the canonical artifact by the caller), kept
         # separate from "broker" so the canonical runtime heartbeat is never
@@ -192,23 +194,107 @@ def build_frontend_payload(
             "institutional_investment_committee": institutional_investment_committee(dashboard_payload),
             "analytics": analytics(dashboard_payload),
             "options_income": options_income(dashboard_payload),
+            "runtime_status": runtime_status(dashboard_payload),
+            "runtime_telemetry": runtime_telemetry(dashboard_payload),
         },
     }
 
     return payload
 
 
+def _canonical_resolved_mode(dashboard_payload: Mapping[str, Any] | None = None) -> str:
+    """Phase 177F — never default to paper; use Runtime Mode Resolver (except explicit mocks)."""
+    payload = _mapping(dashboard_payload)
+    session = _mapping(payload.get("session"))
+    # MC-001 / explicit demo payloads remain isolated and labeled mock.
+    if payload.get("mock_data") or session.get("mock_data") or payload.get("mission_control_mock_data"):
+        explicit = payload.get("resolved_mode") or session.get("runtime_mode")
+        if explicit not in (None, ""):
+            return str(explicit).strip()
+    try:
+        from backend.runtime.platform_status import build_platform_status
+
+        return str(build_platform_status().get("runtime_mode") or "DISABLED")
+    except Exception:
+        return "DISABLED"
+
+
+def runtime_status(dashboard_payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    payload = _mapping(dashboard_payload)
+    session = _mapping(payload.get("session"))
+    if payload.get("mock_data") or session.get("mock_data") or payload.get("mission_control_mock_data"):
+        return {
+            "runtime_mode": str(payload.get("resolved_mode") or "paper"),
+            "fail_closed": True,
+            "execution_state": "BLOCKED",
+            "execution_authority": False,
+            "engine_mode": session.get("engine_mode") or "SAFE",
+            "broker_mode": "NONE",
+            "mobile_access_mode": "READ_ONLY",
+            "operator_intent": "UNSET",
+            "system_mode": str(payload.get("resolved_mode") or "paper"),
+            "system_mode_deprecated": True,
+            "source": "MOCK",
+            "provenance": {"runtime_mode": "MOCK"},
+            "generated_at": payload.get("generated_at"),
+        }
+    try:
+        from backend.runtime.platform_status import build_platform_status
+
+        return _json_safe(build_platform_status())
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "runtime_mode": "DISABLED",
+            "fail_closed": True,
+            "execution_state": "BLOCKED",
+            "error": type(exc).__name__,
+            "source": "RUNTIME_MODE_RESOLVER",
+        }
+
+
+def runtime_telemetry(dashboard_payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    payload = _mapping(dashboard_payload)
+    session = _mapping(payload.get("session"))
+    if payload.get("mock_data") or session.get("mock_data") or payload.get("mission_control_mock_data"):
+        cycle = session.get("cycle_number")
+        return {
+            "display_cycle": cycle if cycle is not None else "UNKNOWN",
+            "session_cycle": cycle if cycle is not None else "UNKNOWN",
+            "supervisor_cycles_completed": "UNKNOWN",
+            "managed_service_restart_count": "UNKNOWN",
+            "source": "MOCK",
+            "provenance": {"session_cycle": "MOCK"},
+        }
+    try:
+        from backend.runtime.runtime_telemetry import telemetry_summary_for_ui
+
+        return _json_safe(telemetry_summary_for_ui())
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "display_cycle": "UNKNOWN",
+            "session_cycle": "UNKNOWN",
+            "supervisor_cycles_completed": "UNKNOWN",
+            "managed_service_restart_count": "UNKNOWN",
+            "error": type(exc).__name__,
+            "source": "RUNTIME_TELEMETRY",
+        }
+
+
 def options_income(dashboard_payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """Phase 177D — concise mobile/frontend Options Income card (advisory only)."""
+    """Phase 177D/177F — concise mobile/frontend Options Income card (advisory only)."""
     _ = dashboard_payload
     try:
         from backend.options.options_income_runtime_service import build_options_income_mobile_card
+        from backend.options.options_income_surface_link import options_income_detail_link
 
         card = build_options_income_mobile_card()
+        link = options_income_detail_link()
         card["section"] = "options_income"
         card["advisory_only"] = True
         card["execution_blocked"] = True
         card["live_trading_enabled"] = False
+        card["detail_route"] = link.get("href") or card.get("detail_route")
+        card["same_origin_api_expected"] = False
         return _json_safe(card)
     except Exception as exc:  # noqa: BLE001
         return {
@@ -221,6 +307,7 @@ def options_income(dashboard_payload: Mapping[str, Any] | None = None) -> dict[s
             "execution_blocked": True,
             "live_trading_enabled": False,
             "detail_route": "/mission-control/options-income",
+            "same_origin_api_expected": False,
             "provenance": "RUNTIME",
         }
 
