@@ -409,12 +409,13 @@ def _daily_executive_brief(*, filters: dict[str, Any], repo_root: Path) -> dict[
     from backend.executive_intelligence.service import ExecutiveIntelligenceEngine
 
     engine = ExecutiveIntelligenceEngine(repo_root=repo_root)
-    # Production disk path: wait for readiness orchestration (Phase 176J).
+    # Viewer/catalogue reads must be bounded and side-effect free. The single-shot
+    # path still applies final validation and remains fail-closed.
     result = engine.generate(
         report_date=filters.get("report_date"),
-        persist=True,
+        persist=False,
         created_reason="reports_center",
-        wait_for_readiness=True,
+        wait_for_readiness=False,
     )
     brief = result.get("brief") or {}
     archive = result.get("archive") or {}

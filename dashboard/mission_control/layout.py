@@ -122,7 +122,7 @@ def render_mission_control_shell(
     <aside class="mc-sidebar">
       <div class="mc-brand">{brand}<span>Enterprise shell · Phase 177H</span></div>
       <nav class="mc-nav-home" aria-label="CSS Home">
-        <a href="{escape(home_href)}" data-css-home="1"><span class="mc-nav-icon" aria-hidden="true">home</span><span class="mc-nav-label">Home</span></a>
+        <a href="{escape(home_href)}" data-css-home="1">{_nav_icon()}<span class="mc-nav-label">Home</span></a>
       </nav>
       {nav}
     </aside>
@@ -164,10 +164,18 @@ def _render_nav(active_key: str) -> str:
         # Real same-origin path anchors — navigation must work with JavaScript disabled.
         links.append(
             f'<a href="{escape(section.route)}"{current} data-section="{escape(section.key)}">'
-            f'<span class="mc-nav-icon" aria-hidden="true">{escape(section.icon)}</span>'
+            f'{_nav_icon()}'
             f'<span class="mc-nav-label">{escape(section.label)}</span></a>'
         )
     return f'<nav class="mc-nav" aria-label="Mission Control navigation">{"".join(links)}</nav>'
+
+
+def _nav_icon() -> str:
+    return (
+        '<span class="mc-nav-icon" aria-hidden="true">'
+        '<svg viewBox="0 0 16 16" width="16" height="16" focusable="false">'
+        '<circle cx="8" cy="8" r="3"></circle></svg></span>'
+    )
 
 
 def _badge(label: str, value: Any) -> str:

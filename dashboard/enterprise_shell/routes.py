@@ -17,7 +17,8 @@ from urllib.parse import urljoin, urlparse
 class CanonicalRoutes:
     """Per-surface landing and primary destinations."""
 
-    mobile_home: str = "/dashboard"
+    mobile_home: str = "/mobile-launcher"
+    mobile_dashboard: str = "/dashboard"
     mobile_reports: str = "/reports"
     mobile_positions: str = "/positions"
     mobile_trade: str = "/trade"
@@ -87,13 +88,15 @@ def _safe_join(base: str, path: str) -> str:
 
 
 def mobile_home_href(*, for_surface: str = "mobile") -> str:
-    """Primary CSS Mobile Dashboard landing.
+    """Primary CSS basic mobile launcher landing.
 
-    On Mission Control / launcher surfaces, prefer CSS_MOBILE_DASHBOARD_BASE_URL
-    when set so Home returns to the :8090 dashboard rather than MC root.
+    Mobile-dashboard surfaces may use the configured launcher origin. Launcher
+    and Mission Control surfaces use the same-origin rendered landing route.
     """
-    if for_surface in {"mission_control", "launcher", "mc"}:
-        base = _env_base("CSS_MOBILE_DASHBOARD_BASE_URL") or _env_base("CSS_MOBILE_PUBLIC_URL")
+    if for_surface in {"mobile", "dashboard"}:
+        base = _env_base("CSS_LAUNCHER_PUBLIC_URL") or _env_base(
+            "CSS_MISSION_CONTROL_BASE_URL"
+        )
         return _safe_join(base, ROUTES.mobile_home)
     return ROUTES.mobile_home
 

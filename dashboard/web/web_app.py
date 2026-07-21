@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
 from dashboard.runtime.api_bridge import (
@@ -20,9 +19,10 @@ from dashboard.runtime.ws_bridge import create_ws_router
 from dashboard.mission_control.host_registration import register_mission_control
 from backend.executive_intelligence.distribution_routes import create_executive_brief_distribution_router
 from backend.reports_center.routes import create_reports_center_router
+from backend.common.branding import get_brand_service
 
 
-BRANDING_DIR = Path(__file__).resolve().parents[2] / "assets" / "branding"
+BRAND = get_brand_service()
 
 
 def demo_dashboard_state_provider() -> DashboardState:
@@ -41,7 +41,7 @@ def create_app(
 ) -> FastAPI:
     provider = state_provider or demo_dashboard_state_provider
     app = FastAPI(
-        title="Capital Strata Systems Institutional Web Dashboard",
+        title=f"{BRAND.organization_name} Institutional Web Dashboard",
         version="0.1.0",
     )
     app.include_router(create_dashboard_state_router(provider))
@@ -57,48 +57,45 @@ def create_app(
     @app.get("/manifest.webmanifest")
     async def manifest() -> JSONResponse:
         return JSONResponse(
-            {
-                "name": "Capital Strata Systems",
-                "short_name": "CSS",
-                "description": "Capital Strata Systems institutional dashboard",
-                "start_url": "/dashboard",
-                "scope": "/",
-                "display": "standalone",
-                "background_color": "#111820",
-                "theme_color": "#111820",
-                "icons": [
-                    {
-                        "src": "/static/css_pwa_icon_192.png",
-                        "sizes": "192x192",
-                        "type": "image/png",
-                        "purpose": "any maskable",
-                    },
-                    {
-                        "src": "/static/css_pwa_icon_512.png",
-                        "sizes": "512x512",
-                        "type": "image/png",
-                        "purpose": "any maskable",
-                    },
-                ],
-            }
+            BRAND.manifest(),
+            media_type="application/manifest+json",
         )
 
     @app.get("/favicon.ico")
     async def favicon() -> FileResponse:
-        return FileResponse(BRANDING_DIR / "css.ico", media_type="image/x-icon")
+        return _brand_file("favicon")
+
+    @app.get("/favicon-16x16.png")
+    async def favicon_16() -> FileResponse:
+        return _brand_file("favicon_16")
+
+    @app.get("/favicon-32x32.png")
+    async def favicon_32() -> FileResponse:
+        return _brand_file("favicon_32")
 
     @app.get("/apple-touch-icon.png")
     @app.get("/static/apple_touch_icon_180.png")
     async def apple_touch_icon() -> FileResponse:
-        return FileResponse(BRANDING_DIR / "apple_touch_icon_180.png", media_type="image/png")
+        return _brand_file("apple_touch")
 
     @app.get("/static/css_pwa_icon_192.png")
     async def css_pwa_icon_192() -> FileResponse:
-        return FileResponse(BRANDING_DIR / "css_pwa_icon_192.png", media_type="image/png")
+        return _brand_file("icon_192")
 
     @app.get("/static/css_pwa_icon_512.png")
     async def css_pwa_icon_512() -> FileResponse:
-        return FileResponse(BRANDING_DIR / "css_pwa_icon_512.png", media_type="image/png")
+        return _brand_file("icon_512")
+
+    @app.get("/pwa/{filename}")
+    async def canonical_pwa_icon(filename: str) -> FileResponse:
+        file_to_key = {
+            BRAND.asset(key).filename: key
+            for key in ("icon_192", "icon_512", "maskable_192", "maskable_512")
+        }
+        asset_key = file_to_key.get(filename)
+        if asset_key is None:
+            raise HTTPException(status_code=404, detail="pwa_asset_not_found")
+        return _brand_file(asset_key)
 
     @app.get("/dashboard", response_class=HTMLResponse)
     async def dashboard() -> HTMLResponse:
@@ -232,14 +229,23 @@ def _app_nav(active: str) -> str:
     )
 
 
+def _brand_file(asset_key: str) -> FileResponse:
+    asset = BRAND.asset(asset_key)
+    return FileResponse(
+        BRAND.asset_path(asset_key),
+        media_type=asset.media_type,
+        headers={
+            "Cache-Control": "public, max-age=86400, immutable",
+            "X-CSS-PWA-Version": BRAND.asset_version,
+        },
+    )
+
+
 def _icon_links() -> str:
-    return """
-  <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="/favicon.ico" sizes="any">
-  <link rel="icon" type="image/png" sizes="192x192" href="/static/css_pwa_icon_192.png">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
-  <meta name="apple-mobile-web-app-title" content="CSS">
-  <meta name="apple-mobile-web-app-capable" content="yes">""".rstrip()
+    return BRAND.html_head(
+        manifest_href="/manifest.webmanifest",
+        include_viewport=False,
+    )
 
 
 def _dashboard_page() -> str:
@@ -267,7 +273,6 @@ def _dashboard_page() -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#111820">
   <title>CSS Institutional Web Dashboard</title>
   {_icon_links()}
   <style>{_css()}</style>
@@ -913,7 +918,7 @@ def _positions_page() -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#111820">
+  {_icon_links()}
   <title>CSS Professional Positions</title>
   <style>{_css()}</style>
 </head>
@@ -1135,7 +1140,7 @@ def _execution_page() -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#111820">
+  {_icon_links()}
   <title>CSS Execution History</title>
   <style>{_css()}</style>
 </head>
@@ -1336,7 +1341,7 @@ def _risk_governance_page() -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#111820">
+  {_icon_links()}
   <title>CSS Risk & Governance Center</title>
   <style>{_css()}</style>
 </head>
@@ -1535,7 +1540,7 @@ def _trade_page() -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#111820">
+  {_icon_links()}
   <title>CSS Trade Universe</title>
   <style>{_css()}</style>
 </head>
@@ -1789,7 +1794,7 @@ def _market_opportunities_page() -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#111820">
+  {_icon_links()}
   <title>CSS Market & Opportunity Center</title>
   <style>{_css()}</style>
 </head>

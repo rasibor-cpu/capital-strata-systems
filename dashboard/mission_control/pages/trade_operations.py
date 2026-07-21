@@ -9,6 +9,9 @@ def render(state: dict) -> str:
     decision = section(state, "decision_panel")
     trace = section(state, "decision_trace")
     committee = section(state, "execution_committee")
+    balances = section(state, "broker_balance_summary")
+    account_values = balances.get("account_summary") if isinstance(balances.get("account_summary"), dict) else {}
+    account_context = balances.get("account_context") if isinstance(balances.get("account_context"), dict) else {}
     return (
         page_header("Trade Operations", "Read-only trade decision, gate, paper position, order, fill, rejection, slippage, and fee visibility.")
         + warning_banner("MC-001 exposes no executable trade tickets and cannot submit or cancel orders.", status="bad")
@@ -21,9 +24,18 @@ def render(state: dict) -> str:
                 ("Open Positions", len(trading.get("open_positions", []) or []), "neutral"),
                 ("Orders", len(trading.get("orders", []) or []), "neutral"),
                 ("Fills", len(trading.get("fills", []) or []), "neutral"),
+                ("Account Value", _display_value(account_values.get("total_account_value")), "neutral"),
+                ("Available to Trade", _display_value(account_values.get("available_to_trade")), "neutral"),
+                ("Buying Power", _display_value(account_values.get("buying_power")), "neutral"),
+                ("Margin Available", _display_value(account_values.get("margin_available")), "neutral"),
             )
         )
         + split_panels(
+            detail_table("Account Summary", account_values),
+            detail_table("Asset Breakdown", balances.get("asset_breakdown", [])),
+            detail_table("Position Value", balances.get("position_value", {})),
+            detail_table("Collateral / Margin", balances.get("collateral_margin", {})),
+            detail_table("Account Context", account_context),
             detail_table("Decision Panel", {
                 "status": decision.get("status"),
                 "reason": decision.get("reason"),
@@ -55,3 +67,10 @@ def render(state: dict) -> str:
             detail_table("Recent Rejections", trading.get("rejections", [])),
         )
     )
+
+
+def _display_value(value: object) -> str:
+    row = value if isinstance(value, dict) else {}
+    if row.get("availability_state") != "AVAILABLE":
+        return "UNAVAILABLE"
+    return f"{row.get('value')} {row.get('currency')}"

@@ -7,6 +7,11 @@ from typing import Any, Callable, Mapping
 from dashboard.enterprise_shell.reports_hub import build_reports_hub_payload
 from dashboard.enterprise_shell.routes import ROUTES, mobile_home_href
 from dashboard.reports_viewer.paginated_viewer import render_paginated_viewer
+from dashboard.reports_viewer.report_adapter import (
+    archived_report_document,
+    registered_report_document,
+    unavailable_report_document,
+)
 
 
 def create_reports_discovery_router(
@@ -45,6 +50,12 @@ def create_reports_discovery_router(
             "write_routes": False,
         }
 
+    @router.get("/api/reports/audit-matrix")
+    def get_report_audit_matrix() -> dict[str, Any]:
+        from backend.reports_center.viewer_audit import audit_report_catalogue
+
+        return audit_report_catalogue()
+
     @router.get("/api/reports/{report_id}/metadata")
     def get_report_metadata(report_id: str) -> dict[str, Any]:
         return _metadata_for(report_id, role=_role(), oi_provider=options_income_snapshot_provider)
@@ -56,15 +67,22 @@ def create_reports_discovery_router(
 
     @router.get("/api/reports/{report_id}/view")
     def get_report_view(report_id: str) -> Any:
-        html = _view_html(
-            report_id,
-            role=_role(),
-            oi_provider=options_income_snapshot_provider,
-            surface=surface,
+        viewer_base = (
+            ROUTES.report_viewer
+            if surface == "mobile"
+            else ROUTES.mc_report_viewer
         )
-        if html is None:
-            raise HTTPException(status_code=404, detail="report_not_available")
-        return HTMLResponse(html, media_type="text/html")
+        return JSONResponse(
+            {
+                **_metadata_for(
+                    report_id,
+                    role=_role(),
+                    oi_provider=options_income_snapshot_provider,
+                ),
+                "viewer_href": f"{viewer_base}?report_code={report_id}",
+                "note": "API routes return JSON. Open viewer_href for rendered HTML.",
+            }
+        )
 
     # HTML viewer entry for mobile/MC shells (query-driven)
     @router.get(ROUTES.report_viewer if surface == "mobile" else ROUTES.mc_report_viewer)
@@ -76,21 +94,30 @@ def create_reports_discovery_router(
         rid = report_id or report_code or ("options_income_executive" if source == "options_income" else "")
         if not rid:
             raise HTTPException(status_code=400, detail="report_id_required")
-        if source == "reports_center":
-            # Library artifacts require an instance id via /api/v1/reports/{id}/print;
-            # discovery hub links catalogue codes as coming-soon when no instance exists.
-            raise HTTPException(
-                status_code=404,
-                detail="reports_center_instance_required_use_library_open",
+        if source == "reports_center" and report_id:
+            document, _ = archived_report_document(report_id, role=_role())
+            html = _render_document(document, surface=surface)
+        elif source == "reports_center" or rid not in {
+            "options_income_executive",
+            "broker_executive",
+        }:
+            document, _ = registered_report_document(rid, role=_role())
+            html = _render_document(document, surface=surface)
+        else:
+            html = _view_html(
+                rid,
+                role=_role(),
+                oi_provider=options_income_snapshot_provider,
+                surface=surface,
             )
-        html = _view_html(
-            rid,
-            role=_role(),
-            oi_provider=options_income_snapshot_provider,
-            surface=surface,
-        )
-        if html is None:
-            raise HTTPException(status_code=404, detail="report_not_available")
+            if html is None:
+                document, _ = unavailable_report_document(
+                    report_name=rid,
+                    status="DATA_UNAVAILABLE",
+                    reason="REPORT_DEPENDENCY_UNAVAILABLE",
+                    producer=None,
+                )
+                html = _render_document(document, surface=surface)
         return HTMLResponse(html, media_type="text/html")
 
     return router
@@ -127,8 +154,9 @@ def _metadata_for(
             "css_version": doc.get("css_version"),
             "commit_reference": doc.get("commit_reference"),
             "certification_state": "ADVISORY_ONLY",
-            "view_href": f"/api/reports/{rid}/view",
-            "print_href": "/api/options-income/report.html",
+            "api_href": f"/api/reports/{rid}",
+            "viewer_href": f"{ROUTES.report_viewer}?report_code={rid}",
+            "print_api_href": "/api/options-income/report.html",
             "write_routes": False,
             "advisory_only": True,
             "execution_allowed": False,
@@ -149,8 +177,9 @@ def _metadata_for(
             "css_version": doc.get("css_version"),
             "commit_reference": doc.get("commit_reference"),
             "certification_state": "ADVISORY_ONLY",
-            "view_href": f"/api/reports/{rid}/view",
-            "print_href": f"/api/reports/{rid}/view",
+            "api_href": f"/api/reports/{rid}",
+            "viewer_href": f"{ROUTES.report_viewer}?report_code={rid}",
+            "print_api_href": None,
             "write_routes": False,
             "advisory_only": True,
             "execution_allowed": False,
@@ -227,11 +256,19 @@ def _view_html(
         doc,
         reports_href=reports,
         home_href=home,
-        print_href=(
-            "/api/reports/broker_executive/view"
-            if rid == "broker_executive"
-            else "/api/options-income/report.html"
-        ),
+        surface=surface,
+    )
+
+
+def _render_document(document: Mapping[str, Any], *, surface: str) -> str:
+    reports = ROUTES.mc_reports if surface == "mission_control" else ROUTES.mobile_reports
+    home = mobile_home_href(
+        for_surface="mission_control" if surface == "mission_control" else "mobile"
+    )
+    return render_paginated_viewer(
+        document,
+        reports_href=reports,
+        home_href=home,
         surface=surface,
     )
 

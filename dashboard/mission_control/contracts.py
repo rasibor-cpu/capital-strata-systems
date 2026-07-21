@@ -54,6 +54,7 @@ from dashboard.mission_control.strategy_war_room import build_strategy_war_room
 from dashboard.mission_control.system_metrics import build_executive_kpi_board, build_source_consistency, build_system_metrics
 from dashboard.mission_control.trade_lifecycle import build_trade_lifecycle
 from dashboard.runtime.frontend_contract import DATA_UNAVAILABLE
+from backend.brokers.account_balance_contract import build_broker_balance_summary
 
 
 MISSION_CONTROL_SCHEMA_VERSION = "css.mission_control.state.v1"
@@ -139,6 +140,16 @@ def build_mission_control_state(
         "platform": _platform(frontend, broker, certification, safety, runtime_snapshot),
         "runtime": _runtime(frontend, governance, certification, runtime_snapshot),
         "trading": _trading(execution, positions),
+        "broker_balance_summary": (
+            dict(account.get("broker_balance_summary"))
+            if isinstance(account.get("broker_balance_summary"), Mapping)
+            else build_broker_balance_summary(
+                account,
+                broker=str(account.get("broker") or broker.get("selected_broker") or "NONE"),
+                mode=str(account.get("account_mode") or frontend.get("resolved_mode") or "ADVISORY"),
+                as_of=str(frontend.get("generated_at") or ""),
+            )
+        ),
         "portfolio": _portfolio(account, positions, pnl, runtime_snapshot),
         "market_intelligence": _market(market, runtime_snapshot),
         "risk": _risk(risk, governance, runtime_snapshot),

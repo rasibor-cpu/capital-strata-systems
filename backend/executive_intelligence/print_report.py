@@ -13,12 +13,13 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+from backend.common.branding import CONFIDENTIALITY_BANNER, get_brand_service
 from backend.executive_intelligence.constants import SAFETY_LOCKS
 from backend.executive_intelligence.sanitizer import sanitize_payload
 from backend.executive_intelligence.utils import as_mapping, utc_now_iso
 
 
-CONFIDENTIALITY = "CSS CONFIDENTIAL — ADVISORY ONLY — NOT AN EXECUTION ORDER"
+CONFIDENTIALITY = CONFIDENTIALITY_BANNER
 
 
 def assert_final_printable(brief: Mapping[str, Any]) -> None:
@@ -38,6 +39,7 @@ def render_printable_html(
     print_timestamp_utc: str | None = None,
 ) -> str:
     """Printer-friendly HTML for a FINAL brief."""
+    brand = get_brand_service()
     assert_final_printable(brief)
     clean = sanitize_payload(dict(brief))
     ts = print_timestamp_utc or utc_now_iso()
@@ -111,10 +113,14 @@ def render_printable_html(
     .footer {{ margin-top: 28px; border-top: 1px solid #999; padding-top: 10px; font-size: 11px; }}
     .page-break {{ page-break-before: always; }}
     .small {{ font-size: 11px; color: #333; }}
+    .document-page {{ position:relative; isolation:isolate; min-height:250mm; }}
+    {brand.watermark_css(page_selector=".document-page")}
   </style>
 </head>
 <body>
-  <h1>Capital Strata Systems — Daily Executive Brief</h1>
+  <main class="document-page">
+  {brand.watermark_markup()}
+  <h1>{esc(brand.organization_name)} — Daily Executive Brief</h1>
   <div class="banner">
     <strong>ADVISORY ONLY</strong> · execution_allowed=false · live_trading_blocked=true ·
     broker_execution_armed=false · {esc(CONFIDENTIALITY)}
@@ -182,6 +188,7 @@ def render_printable_html(
     <div class="small">Page numbers applied by the browser/printer driver. CSS Daily Executive Brief — Phase 175 printable.</div>
     <div class="small">Safety locks: {esc(json.dumps(SAFETY_LOCKS))}</div>
   </div>
+  </main>
 </body>
 </html>
 """
@@ -198,7 +205,10 @@ def render_printable_pdf(
     clean = sanitize_payload(dict(brief))
     ts = print_timestamp_utc or utc_now_iso()
     lines = _pdf_lines(clean, printed_by=printed_by, ts=ts)
-    return _build_simple_pdf(lines)
+    return _build_simple_pdf(
+        lines,
+        watermark_text=get_brand_service().organization_name,
+    )
 
 
 def pdf_sha256(pdf_bytes: bytes) -> str:
@@ -206,13 +216,14 @@ def pdf_sha256(pdf_bytes: bytes) -> str:
 
 
 def _pdf_lines(brief: Mapping[str, Any], *, printed_by: str, ts: str) -> list[str]:
+    brand = get_brand_service()
     panels = as_mapping(brief.get("panels"))
     decision = as_mapping(panels.get("executive_decision"))
     market = as_mapping(panels.get("market_intelligence"))
     kpis = as_mapping(brief.get("executive_kpis"))
     actions = decision.get("executive_actions") or []
     lines = [
-        "Capital Strata Systems — Daily Executive Brief",
+        f"{brand.organization_name} — Daily Executive Brief",
         CONFIDENTIALITY,
         f"Report date: {brief.get('report_date')}",
         f"Report ID: {brief.get('report_id')}",
@@ -254,12 +265,26 @@ def _pdf_lines(brief: Mapping[str, Any], *, printed_by: str, ts: str) -> list[st
     return [str(line) for line in lines]
 
 
-def build_text_pdf(lines: list[str], *, lines_per_page: int = 48) -> bytes:
+def build_text_pdf(
+    lines: list[str],
+    *,
+    lines_per_page: int = 48,
+    watermark_text: str | None = None,
+) -> bytes:
     """Public wrapper around the Phase 175 minimal PDF writer (reuse for Reports Center)."""
-    return _build_simple_pdf(lines, lines_per_page=lines_per_page)
+    return _build_simple_pdf(
+        lines,
+        lines_per_page=lines_per_page,
+        watermark_text=watermark_text,
+    )
 
 
-def _build_simple_pdf(lines: list[str], *, lines_per_page: int = 48) -> bytes:
+def _build_simple_pdf(
+    lines: list[str],
+    *,
+    lines_per_page: int = 48,
+    watermark_text: str | None = None,
+) -> bytes:
     """Minimal PDF 1.4 writer (Helvetica text)."""
     pages: list[list[str]] = []
     for i in range(0, max(len(lines), 1), lines_per_page):
@@ -280,7 +305,12 @@ def _build_simple_pdf(lines: list[str], *, lines_per_page: int = 48) -> bytes:
 
     next_id = 4
     for page_index, page_lines in enumerate(pages):
-        content = _page_content_stream(page_lines, page_no=page_index + 1, page_count=len(pages))
+        content = _page_content_stream(
+            page_lines,
+            page_no=page_index + 1,
+            page_count=len(pages),
+            watermark_text=watermark_text,
+        )
         content_id = next_id
         next_id += 1
         objects.append(f"<< /Length {len(content)} >>\nstream\n".encode("latin-1") + content + b"\nendstream")
@@ -319,13 +349,34 @@ def _build_simple_pdf(lines: list[str], *, lines_per_page: int = 48) -> bytes:
     return bytes(out)
 
 
-def _page_content_stream(lines: list[str], *, page_no: int, page_count: int) -> bytes:
+def _page_content_stream(
+    lines: list[str],
+    *,
+    page_no: int,
+    page_count: int,
+    watermark_text: str | None = None,
+) -> bytes:
     # PDF text: escape special chars
     def esc(text: str) -> str:
         return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
     y = 750
-    parts = ["BT", "/F1 10 Tf", "14 TL", f"1 0 0 1 40 {y} Tm"]
+    parts = []
+    if watermark_text:
+        watermark = esc(str(watermark_text)[:48])
+        parts.extend(
+            [
+                "q",
+                "0.92 g",
+                "BT",
+                "/F1 44 Tf",
+                "0.707 0.707 -0.707 0.707 150 280 Tm",
+                f"({watermark}) Tj",
+                "ET",
+                "Q",
+            ]
+        )
+    parts.extend(["BT", "/F1 10 Tf", "14 TL", f"1 0 0 1 40 {y} Tm"])
     for line in lines:
         safe = esc(line[:110])
         parts.append(f"({safe}) Tj")

@@ -296,7 +296,8 @@ def test_broker_report_contains_operational_states_and_pagination() -> None:
     hub = build_reports_hub_payload(role="VIEWER", surface="mission_control")
     cards = [card for group in hub["groups"] for card in group.get("reports", [])]
     broker_card = next(card for card in cards if card.get("report_id") == "broker_executive")
-    assert broker_card["view_href"] == "/api/reports/broker_executive/view"
+    assert broker_card["viewer_href"] == "/mission-control/reports/viewer?report_code=broker_executive"
+    assert broker_card["view_href"] == broker_card["viewer_href"]
 
 
 def test_api_routes_are_get_only() -> None:

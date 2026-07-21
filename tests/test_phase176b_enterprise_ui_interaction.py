@@ -93,7 +93,7 @@ def test_mobile_reports_disclosures_and_pwa_cache() -> None:
     assert "<details" not in html
     client = TestClient(mobile_app)
     sw = client.get("/service-worker.js")
-    assert "css-mobile-shell-v176d" in sw.text or "css-mobile-shell-v176c" in sw.text
+    assert "css-mobile-pwa-180a1" in sw.text
 
 
 def test_enterprise_certification_passes() -> None:

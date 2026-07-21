@@ -8,6 +8,7 @@ from __future__ import annotations
 import html
 from typing import Any, Mapping, Sequence
 
+from backend.common.branding import get_brand_service
 from dashboard.enterprise_shell.routes import (
     ROUTES,
     breadcrumbs_for,
@@ -61,11 +62,13 @@ def render_breadcrumbs(
 
 
 def render_brand_home_link(*, for_surface: str = "mobile", title: str = "CSS") -> str:
+    brand = get_brand_service()
     href = mobile_home_href(for_surface=for_surface)
     return (
         f'<a class="css-brand-home" href="{_esc(href)}" '
-        f'aria-label="CSS Home — return to Mobile Dashboard landing">'
-        f'<span class="css-brand-mark" aria-hidden="true">CSS</span>'
+        f'aria-label="CSS Home — return to basic mobile landing">'
+        f'<img class="css-brand-mark" src="{_esc(brand.asset_url("logo"))}" '
+        f'alt="" aria-hidden="true">'
         f'<span class="css-brand-text">{_esc(title)}</span></a>'
     )
 
@@ -88,7 +91,7 @@ def render_mobile_enterprise_nav(
         ("mission-control", "Mission Control", mc),
     ]
     if can_trade:
-        primary.append(("trade", "Trade", ROUTES.mobile_trade))
+        primary.append(("trade", "Trade Operations", ROUTES.mobile_trade))
     if can_view_reports:
         primary.append(("reports", "Reports", ROUTES.mobile_reports))
     primary.append(("more", "More", "#css-more-menu"))
@@ -111,26 +114,28 @@ def render_mobile_enterprise_nav(
     more_items: list[tuple[str, str, str]] = [
         ("positions", "Positions", ROUTES.mobile_positions),
         ("execution", "Execution", ROUTES.mobile_execution),
-        ("risk", "Risk", ROUTES.mobile_risk),
-        ("alerts", "Alerts", ROUTES.mobile_alerts),
+        ("risk", "Risk Command", ROUTES.mobile_risk),
+        ("alerts", "Alerts and Incidents", ROUTES.mobile_alerts),
         ("broker", "Broker Management", ROUTES.mobile_broker),
-        ("session-command-centre", "Runtime Diagnostics", ROUTES.mobile_runtime),
-        ("live-readiness-certification", "Certification", ROUTES.mobile_certification),
+        ("portfolio", "Portfolio", cross_surface_href(ROUTES.mc_portfolio, target="mission_control")),
+        ("session-command-centre", "Runtime Operations", ROUTES.mobile_runtime),
+        ("live-readiness-certification", "Certification and Readiness", ROUTES.mobile_certification),
         ("history", "History", ROUTES.mobile_history),
         ("governance", "Governance", ROUTES.mobile_governance),
         ("opportunities", "Opportunities", ROUTES.mobile_opportunities),
-        ("market", "Market", ROUTES.mobile_market),
+        ("market", "Market Intelligence", ROUTES.mobile_market),
         ("margin", "Margin", ROUTES.mobile_margin),
         ("trade-summary", "Trade Summary", ROUTES.mobile_trade_summary),
         ("live-micro-pilot", "Micro-Pilot", ROUTES.mobile_micro_pilot),
         ("options-income", "Options Income", cross_surface_href(ROUTES.mc_options_income, target="mission_control")),
+        ("documentation-runbooks", "Documentation and Runbooks", cross_surface_href("/mission-control/documentation-runbooks", target="mission_control")),
     ]
     if can_audit:
-        more_items.append(("audit", "Audit", ROUTES.mobile_audit))
+        more_items.append(("audit", "Audit and Readiness", ROUTES.mobile_audit))
     if can_controls:
-        more_items.append(("controls", "Settings / Controls", ROUTES.mobile_controls))
+        more_items.append(("controls", "System Configuration", ROUTES.mobile_controls))
     if can_users:
-        more_items.append(("users", "Administration", ROUTES.mobile_users))
+        more_items.append(("users", "Users and Governance", ROUTES.mobile_users))
 
     more_links = "".join(
         f'<li><a href="{_esc(href)}"{" aria-current=\"page\"" if active == key else ""}>{_esc(label)}</a></li>'
@@ -172,7 +177,7 @@ def render_mobile_footer_nav(
         ("mission-control", "Mission Control", mc),
     ]
     if can_trade:
-        items.append(("trade", "Trade", ROUTES.mobile_trade))
+        items.append(("trade", "Trade Operations", ROUTES.mobile_trade))
     else:
         items.append(("positions", "Positions", ROUTES.mobile_positions))
     if can_view_reports:

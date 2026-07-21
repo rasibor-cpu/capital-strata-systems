@@ -64,6 +64,8 @@ body.mc-body {
 .mc-nav a > * {
   pointer-events: none;
 }
+.mc-nav-icon { width:18px; height:18px; display:inline-flex; align-items:center; justify-content:center; flex:0 0 18px; color:currentColor; }
+.mc-nav-icon svg { display:block; fill:currentColor; }
 .mc-nav a[aria-current="page"], .mc-nav a:hover, .mc-nav a:active {
   color: var(--mc-text);
   background: var(--mc-panel);
@@ -104,7 +106,7 @@ body.mc-body {
 .css-crumb.current { color:var(--mc-text); font-weight:700; }
 .css-crumb-sep { opacity:.55; }
 .css-brand-home { display:inline-flex; align-items:center; gap:8px; text-decoration:none; color:var(--mc-text); margin-bottom:6px; min-height:44px; }
-.css-brand-mark { background:var(--mc-info); color:#061018; padding:4px 7px; border-radius:4px; font-size:.75rem; font-weight:800; }
+.css-brand-mark { width:28px; height:28px; border-radius:6px; object-fit:contain; }
 .mc-nav-home { margin-bottom:8px; }
 .mc-nav-home a {
   display:flex; gap:8px; align-items:center; min-height:44px; padding:8px 10px;

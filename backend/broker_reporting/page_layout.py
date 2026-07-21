@@ -11,6 +11,7 @@ import json
 from dataclasses import asdict, dataclass, field
 from typing import Any, Sequence
 
+from backend.common.branding import get_brand_service
 from backend.security.vault_redaction import redact_text, redact_value
 
 SCHEMA_VERSION = "css.enterprise.report.page_layout.v1"
@@ -38,6 +39,7 @@ class EnterpriseReportDocument:
     page_count: int
     pages: list[ReportPage]
     presentation: dict[str, Any]
+    branding: dict[str, Any] = field(default_factory=dict)
     schema_version: str = SCHEMA_VERSION
 
     def as_dict(self) -> dict[str, Any]:
@@ -50,11 +52,20 @@ class EnterpriseReportDocument:
             "page_count": self.page_count,
             "pages": [p.as_dict() for p in self.pages],
             "presentation": self.presentation,
+            "branding": self.branding,
             "schema_version": self.schema_version,
         }
 
     def to_html(self) -> str:
         """PDF-style paginated HTML — page-oriented, minimal continuous scroll."""
+        brand = get_brand_service()
+        default_branding = brand.document_context(
+            report_title=self.title,
+            generated_at=self.generated_at,
+            document_id=self.report_id,
+            runtime_version=self.css_version,
+        )
+        branding = {**default_branding, **self.branding}
         parts = [
             "<!DOCTYPE html><html><head><meta charset='utf-8'>",
             f"<title>{_esc(self.title)}</title>",
@@ -67,10 +78,19 @@ class EnterpriseReportDocument:
             "h1{font-size:22pt;margin:0 0 12px;} h2{font-size:14pt;margin:18px 0 8px;}",
             ".meta{color:#444;font-size:10pt;margin-bottom:18px;} pre{white-space:pre-wrap;font-size:10pt;}",
             ".footer{margin-top:24px;font-size:9pt;color:#666;border-top:1px solid #ccc;padding-top:8px;}",
+            ".document-header{font-size:9pt;color:#555;border-bottom:1px solid #ddd;padding-bottom:6px;margin-bottom:12px;}",
+            brand.watermark_css(page_selector=".page"),
             "</style></head><body>",
         ]
         for page in self.pages:
             parts.append("<section class='page'>")
+            parts.append(brand.watermark_markup())
+            parts.append(
+                "<header class='document-header'>"
+                f"{_esc(branding['organization'])} · {_esc(self.title)} · "
+                f"{_esc(self.generated_at)} · {_esc(branding['classification'])}"
+                "</header>"
+            )
             if page.page_type == "cover":
                 parts.append(f"<h1>{_esc(page.title)}</h1>")
             else:
@@ -84,7 +104,8 @@ class EnterpriseReportDocument:
             parts.append("<pre>" + _esc("\n".join(page.lines)) + "</pre>")
             parts.append(
                 f"<div class='footer'>Page {page.page_number} of {self.page_count} · "
-                "CSS Enterprise Reporting Standard · Advisory only · Execution blocked</div>"
+                f"Document {_esc(self.report_id)} · Runtime {_esc(self.css_version)} · "
+                f"{_esc(branding['confidentiality_banner'])}</div>"
             )
             parts.append("</section>")
         parts.append("</body></html>")
@@ -101,7 +122,16 @@ def build_paginated_document(
     executive_summary: Sequence[str],
     sections: Sequence[tuple[str, Any]],
     lines_per_page: int = DEFAULT_LINES_PER_PAGE,
+    classification: str | None = None,
 ) -> EnterpriseReportDocument:
+    brand = get_brand_service()
+    branding = brand.document_context(
+        report_title=title,
+        generated_at=generated_at,
+        document_id=report_id,
+        runtime_version=css_version,
+        classification=classification,
+    )
     pages: list[ReportPage] = []
 
     # Cover
@@ -113,7 +143,7 @@ def build_paginated_document(
         f"CSS Version: {css_version}",
         f"Commit: {commit_reference or 'N/A'}",
         "",
-        "Classification: Advisory management report",
+        f"Classification: {branding['classification']}",
         "Execution authority: BLOCKED",
         "Trading impact: false",
         "",
@@ -178,8 +208,13 @@ def build_paginated_document(
                 "css_version",
                 "report_id",
                 "commit_reference",
+                "canonical_branding",
+                "watermark",
+                "classification",
+                "confidentiality_banner",
             ],
         },
+        branding=branding,
     )
 
 

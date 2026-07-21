@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 
 from dashboard.auth.css_sign_on import (
@@ -28,6 +28,10 @@ from dashboard.auth.css_sign_on import (
     save_users,
 )
 from backend.security.permissions import PermissionEngine
+from backend.brokers.account_balance_contract import build_broker_balance_summary
+from backend.common.branding import get_brand_service
+from dashboard.enterprise_shell.mobile_landing import render_mobile_landing
+from dashboard.enterprise_shell.nav_contract import build_enterprise_navigation_contract
 from dashboard.mobile import mobile_reports
 from dashboard.runtime.broker_credential_check import _load_coinbase_credentials, load_local_env
 from backend.config.order_limit_config import DEFAULT_ORDER_LIMIT_CONFIG
@@ -67,7 +71,20 @@ SESSION_MAX_SECONDS = int(os.getenv("CSS_MOBILE_SESSION_SECONDS", "28800") or 28
 PASSWORD_CHANGE_SECONDS = int(os.getenv("CSS_MOBILE_PASSWORD_CHANGE_SECONDS", "600") or 600)
 MOBILE_EVENTS_FILE = PROJECT_ROOT / "artifacts" / "css_mobile_trade_events.jsonl"
 MOBILE_CONTROL_FILE = PROJECT_ROOT / "artifacts" / "css_mobile_controls.json"
-BRANDING_DIR = PROJECT_ROOT / "assets" / "branding"
+BRAND = get_brand_service()
+PWA_ASSET_VERSION = BRAND.asset_version
+PWA_CACHE_NAME = f"css-mobile-pwa-{PWA_ASSET_VERSION}"
+PWA_ICON_FILE_KEYS = {
+    BRAND.asset(key).filename: key
+    for key in (
+        "icon_192",
+        "icon_512",
+        "maskable_192",
+        "maskable_512",
+        "favicon_16",
+        "favicon_32",
+    )
+}
 DEFAULT_COINBASE_MAX_LIVE_ORDER_USD = float(DEFAULT_ORDER_LIMIT_CONFIG.live_order_default_notional_usd)
 ENGINE_MODES = ("SAFE", "CONSERVATIVE", "BALANCED", "AGGRESSIVE")
 DEFAULT_MOBILE_CONTROLS = {
@@ -96,6 +113,23 @@ app.include_router(create_reports_discovery_router(surface="mobile"))
 
 _SESSIONS: Dict[str, Dict[str, Any]] = {}
 _PASSWORD_CHANGES: Dict[str, Dict[str, Any]] = {}
+
+
+@app.get("/mobile-launcher", response_class=HTMLResponse)
+async def mobile_landing():
+    return HTMLResponse(
+        render_mobile_landing(
+            build_enterprise_navigation_contract(surface="mobile"),
+            manifest_href="/manifest.webmanifest",
+            balance_summary=build_broker_balance_summary(
+                {},
+                broker="NONE",
+                mode="ADVISORY",
+            ),
+            extra_head=_pwa_head(include_manifest=False, include_viewport=False),
+            service_worker_script=_service_worker_registration_script(),
+        )
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -868,105 +902,167 @@ async def users_submit(request: Request):
 @app.get("/manifest.webmanifest")
 async def manifest():
     return JSONResponse(
-        {
-            "name": "Capital Strata Systems",
-            "short_name": "CSS",
-            "description": "Capital Strata Systems mobile dashboard — Reports Center v176a",
-            "start_url": "/login",
-            "scope": "/",
-            "display": "standalone",
-            "background_color": "#f4f7f8",
-            "theme_color": "#10202a",
-            "icons": [
-                {
-                    "src": "/icon.svg",
-                    "sizes": "any",
-                    "type": "image/svg+xml",
-                    "purpose": "any maskable",
-                },
-                {
-                    "src": "/static/css_pwa_icon_192.png",
-                    "sizes": "192x192",
-                    "type": "image/png",
-                    "purpose": "any maskable",
-                },
-                {
-                    "src": "/static/css_pwa_icon_512.png",
-                    "sizes": "512x512",
-                    "type": "image/png",
-                    "purpose": "any maskable",
-                }
-            ],
-            "css_shell_cache": "css-mobile-shell-v177h",
-        }
+        BRAND.manifest(),
+        media_type="application/manifest+json",
+        headers={
+            "Cache-Control": "no-cache, max-age=0, must-revalidate",
+            "X-CSS-PWA-Version": PWA_ASSET_VERSION,
+        },
+    )
+
+
+@app.get("/pwa-offline", response_class=HTMLResponse)
+async def pwa_offline():
+    return HTMLResponse(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<meta name=\"theme-color\" content=\"#101820\"><title>CSS Offline</title></head>"
+        "<body><main><h1>CSS Mission Control is offline</h1>"
+        "<p>Reconnect to sign in or refresh runtime information. No private data is cached.</p>"
+        "</main></body></html>",
+        headers={"Cache-Control": "public, max-age=86400"},
     )
 
 
 @app.get("/service-worker.js")
 async def service_worker():
-    script = """
-const CACHE_NAME = "css-mobile-shell-v177h";
-const SHELL_URLS = ["/login", "/manifest.webmanifest", "/icon.svg", "/static/css_pwa_icon_192.png", "/apple-touch-icon.png"];
+    safe_static_assets = [
+        "/pwa-offline",
+        BRAND.asset_url("favicon"),
+        BRAND.asset_url("favicon_16"),
+        BRAND.asset_url("favicon_32"),
+        BRAND.asset_url("apple_touch"),
+        BRAND.asset_url("icon_192"),
+        BRAND.asset_url("icon_512"),
+        BRAND.asset_url("maskable_192"),
+        BRAND.asset_url("maskable_512"),
+    ]
+    script = f"""
+const CACHE_NAME = {json.dumps(PWA_CACHE_NAME)};
+const CACHE_PREFIX = "css-mobile-pwa-";
+const SAFE_STATIC_ASSETS = {json.dumps(safe_static_assets, indent=2)};
+const PROTECTED_PREFIXES = [
+  "/api", "/login", "/logout", "/dashboard", "/reports", "/mission-control",
+  "/broker", "/positions", "/trade", "/runtime", "/session", "/users", "/audit"
+];
 
-self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_URLS)));
-});
+self.addEventListener("install", (event) => {{
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(SAFE_STATIC_ASSETS))
+  );
+  self.skipWaiting();
+}});
 
-self.addEventListener("activate", (event) => {
+self.addEventListener("activate", (event) => {{
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))
-    )
+      Promise.all(
+        keys
+          .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
+          .map((key) => caches.delete(key))
+      )
+    ).then(() => self.clients.claim())
   );
-});
+}});
 
-self.addEventListener("fetch", (event) => {
+self.addEventListener("fetch", (event) => {{
   if (event.request.method !== "GET") return;
   const url = new URL(event.request.url);
-  // Mission Control HTML is dynamic and must never be satisfied from the PWA shell cache.
-  if (url.pathname.startsWith("/mission-control")) {
+  if (url.origin !== self.location.origin) return;
+  if (PROTECTED_PREFIXES.some((prefix) => url.pathname.startsWith(prefix))) {{
     event.respondWith(fetch(event.request));
     return;
-  }
-  event.respondWith(fetch(event.request).catch(() => caches.match(event.request)));
-});
+  }}
+  const safePath = SAFE_STATIC_ASSETS.some((asset) => {{
+    const allowed = new URL(asset, self.location.origin);
+    return allowed.pathname === url.pathname;
+  }});
+  if (safePath) {{
+    event.respondWith(
+      caches.match(event.request, {{ ignoreSearch: false }}).then(
+        (cached) => cached || fetch(event.request)
+      )
+    );
+    return;
+  }}
+  if (event.request.mode === "navigate") {{
+    event.respondWith(
+      fetch(event.request).catch(() => caches.match("/pwa-offline"))
+    );
+  }}
+}});
 """.strip()
-    return PlainTextResponse(script, media_type="application/javascript")
+    return PlainTextResponse(
+        script,
+        media_type="application/javascript",
+        headers={
+            "Cache-Control": "no-cache, max-age=0, must-revalidate",
+            "Service-Worker-Allowed": "/",
+            "X-CSS-PWA-Version": PWA_ASSET_VERSION,
+        },
+    )
 
 
 @app.get("/icon.svg")
 async def icon():
-    svg = """
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="88" fill="#10202a"/>
-  <circle cx="256" cy="256" r="172" fill="none" stroke="#1d8a8a" stroke-width="24"/>
-  <circle cx="256" cy="256" r="118" fill="none" stroke="#c9861a" stroke-width="12"/>
-  <path d="M126 322 L214 214 L286 270 L388 158" fill="none" stroke="#e8fbfb" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
-  <text x="256" y="300" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="92" font-weight="700" fill="#ffffff">CSS</text>
-</svg>
-""".strip()
-    return PlainTextResponse(svg, media_type="image/svg+xml")
+    return RedirectResponse(
+        BRAND.asset_url("icon_512"),
+        status_code=307,
+    )
 
 
 @app.get("/favicon.ico")
 async def favicon():
-    return FileResponse(BRANDING_DIR / "css.ico", media_type="image/x-icon")
+    return _branding_file("favicon")
+
+
+@app.get("/favicon-16x16.png")
+async def favicon_16():
+    return _branding_file("favicon_16")
+
+
+@app.get("/favicon-32x32.png")
+async def favicon_32():
+    return _branding_file("favicon_32")
 
 
 @app.get("/apple-touch-icon.png")
 @app.get("/static/apple_touch_icon_180.png")
 async def apple_touch_icon():
-    return FileResponse(BRANDING_DIR / "apple_touch_icon_180.png", media_type="image/png")
+    return _branding_file("apple_touch")
+
+
+@app.get("/pwa/{filename}")
+async def pwa_icon(filename: str):
+    asset_key = PWA_ICON_FILE_KEYS.get(filename)
+    if asset_key is None:
+        raise HTTPException(status_code=404, detail="pwa_asset_not_found")
+    return _branding_file(asset_key)
 
 
 @app.get("/static/css_pwa_icon_192.png")
 async def css_pwa_icon_192():
-    return FileResponse(BRANDING_DIR / "css_pwa_icon_192.png", media_type="image/png")
+    return _branding_file("icon_192")
 
 
 @app.get("/static/css_pwa_icon_512.png")
 async def css_pwa_icon_512():
-    return FileResponse(BRANDING_DIR / "css_pwa_icon_512.png", media_type="image/png")
+    return _branding_file("icon_512")
+
+
+def _branding_file(asset_key: str) -> FileResponse:
+    try:
+        asset = BRAND.asset(asset_key)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="pwa_asset_not_found")
+    return FileResponse(
+        BRAND.asset_path(asset_key),
+        media_type=asset.media_type,
+        headers={
+            "Cache-Control": "public, max-age=86400, immutable",
+            "X-CSS-PWA-Version": PWA_ASSET_VERSION,
+        },
+    )
 
 
 def _login_success_response(user_ctx: Dict[str, Any]) -> RedirectResponse:
@@ -1322,13 +1418,28 @@ def _login_page(message: str = "", status: str = "info") -> str:
             {_status_markup(message, status)}
             <form method="post" action="/login" autocomplete="on">
               <label for="user_id">User ID</label>
-              <input id="user_id" name="user_id" inputmode="numeric" pattern="[0-9]*" autocomplete="username" required>
+              <input id="user_id" name="user_id" inputmode="numeric" pattern="[0-9]*" autocomplete="username" tabindex="1" autofocus required>
 
               <label for="password">Password</label>
-              <input id="password" name="password" type="password" required>
+              <input id="password" name="password" type="password" autocomplete="current-password" tabindex="2" required>
 
-              <button type="submit">Sign On</button>
+              <button type="submit" tabindex="3">Sign On</button>
             </form>
+            <script>
+              (function () {{
+                var user = document.getElementById("user_id");
+                var password = document.getElementById("password");
+                if (user && password) {{
+                  user.addEventListener("keydown", function (event) {{
+                    if (event.key === "Enter") {{
+                      event.preventDefault();
+                      password.focus();
+                    }}
+                  }});
+                  window.requestAnimationFrame(function () {{ user.focus(); }});
+                }}
+              }})();
+            </script>
           </section>
         </main>
         """,
@@ -2030,14 +2141,16 @@ def _mobile_runtime_payloads(
     orders_enabled = bool(controls["orders_enabled"])
     return {
         "account_payload": {
-            "cash_balance": 10000.00,
-            "total_equity": 10250.00,
-            "buying_power": 5000.00,
-            "margin_used": 0.00,
-            "available_margin": 5000.00,
-            "currency": "USD",
-            "broker": "MOBILE",
+            "cash_balance": None,
+            "total_equity": None,
+            "buying_power": None,
+            "margin_used": None,
+            "available_margin": None,
+            "currency": "UNAVAILABLE",
+            "broker": "NONE",
             "account_mode": runtime_mode,
+            "source": "RUNTIME_DATA_UNAVAILABLE",
+            "provenance": "NO_FALLBACK_AMOUNT",
         },
         "positions_payload": {
             "positions": [
@@ -2170,22 +2283,42 @@ def _mobile_runtime_payloads(
 
 def _account_summary_cards(dashboard_payload: Dict[str, Any]) -> str:
     account = _mapping(dashboard_payload.get("account_summary"))
-    pnl = _mapping(dashboard_payload.get("pnl_summary"))
     open_positions = _mapping(dashboard_payload.get("open_positions"))
+    canonical = _mapping(account.get("broker_balance_summary"))
+    fields = _mapping(canonical.get("account_summary"))
+    context = _mapping(canonical.get("account_context"))
+
+    def balance(name: str) -> str:
+        row = _mapping(fields.get(name))
+        if row.get("availability_state") != "AVAILABLE":
+            return "UNAVAILABLE"
+        return html.escape(f"{row.get('value')} {row.get('currency')}")
 
     return f"""
       <section class="data-panel" aria-label="Institutional account summary">
         <h2>Account Summary</h2>
         <div class="metric-grid account-grid">
-          <article><strong>Cash</strong><span>{_money(account.get("cash_balance"))}</span></article>
-          <article><strong>Total Equity</strong><span>{_money(account.get("total_equity"))}</span></article>
-          <article><strong>Net PnL</strong><span>{_money(pnl.get("net_pnl"))}</span></article>
+          <article><strong>Total Account Value</strong><span>{balance("total_account_value")}</span></article>
+          <article><strong>Total Equity</strong><span>{balance("total_equity")}</span></article>
+          <article><strong>Cash</strong><span>{balance("cash")}</span></article>
+          <article><strong>Available to Trade</strong><span>{balance("available_to_trade")}</span></article>
+          <article><strong>Buying Power</strong><span>{balance("buying_power")}</span></article>
+          <article><strong>Market Value</strong><span>{balance("market_value")}</span></article>
+          <article><strong>Held / Reserved</strong><span>{balance("held_reserved")}</span></article>
+          <article><strong>Pending</strong><span>{balance("pending")}</span></article>
+          <article><strong>Unrealized P&amp;L</strong><span>{balance("unrealized_pnl")}</span></article>
+          <article><strong>Realized P&amp;L</strong><span>{balance("realized_pnl")}</span></article>
+          <article><strong>Total P&amp;L</strong><span>{balance("total_pnl")}</span></article>
           <article><strong>Open Positions</strong><span>{html.escape(str(open_positions.get("total", 0)))}</span></article>
-          <article><strong>Buying Power</strong><span>{_money(account.get("buying_power"))}</span></article>
-          <article><strong>Margin Used</strong><span>{_money(account.get("margin_used"))}</span></article>
-          <article><strong>Available Margin</strong><span>{_money(account.get("available_margin"))}</span></article>
-          <article><strong>Exposure</strong><span>{_money(pnl.get("total_exposure"))}</span></article>
+          <article><strong>Margin Used</strong><span>{balance("margin_used")}</span></article>
+          <article><strong>Margin Available</strong><span>{balance("margin_available")}</span></article>
         </div>
+        <p class="muted">Broker: {html.escape(str(context.get("broker") or "UNAVAILABLE"))} ·
+        Account: {html.escape(str(context.get("account_alias") or "UNAVAILABLE"))} ·
+        Base currency: {html.escape(str(context.get("base_currency") or "UNAVAILABLE"))} ·
+        Source: {html.escape(str(context.get("data_source") or "UNAVAILABLE"))} ·
+        As of: {html.escape(str(context.get("data_timestamp") or "UNAVAILABLE"))} ·
+        Execution: BLOCKED</p>
       </section>
     """
 
@@ -3470,23 +3603,39 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
         if not is_live_request:
             from engine.risk.margin_state import MarginState
             class PaperFallbackMarginSnapshot:
-                def __init__(self):
-                    self.margin_source = "SIMULATED"
+                def __init__(self, paper_capital: float):
+                    balance_contract = build_broker_balance_summary(
+                        {
+                            "paper_capital": paper_capital,
+                            "currency": str(pnl_snapshot.get("currency") or "USD"),
+                        },
+                        broker="PAPER",
+                        mode="PAPER",
+                    )
+                    margin_available = balance_contract["account_summary"][
+                        "margin_available"
+                    ]["value"]
+                    self.margin_source = "CSS_PAPER_CAPITAL"
                     self.broker_mode = "PAPER"
                     self.margin_state = MarginState.NORMAL
-                    self.available_margin = 10000.00
+                    self.available_margin = margin_available
                     self.required_margin = 0.00
                     self.utilization_pct = 0.00
-                    self.trade_gate_allowed = True
-                    self.reason = "PAPER_SIMULATED_MARGIN_FALLBACK"
-                    self.buying_power = 10000.00
+                    self.trade_gate_allowed = margin_available is not None
+                    self.reason = "PAPER_CAPITAL_COLLATERAL_POLICY"
+                    self.buying_power = margin_available
                     self.margin_ratio = 0.00
                     self.broker_name = broker
-            margin_snapshot = PaperFallbackMarginSnapshot()
+                    self.currency = str(pnl_snapshot.get("currency") or "USD")
+                    self.provenance = "PnlRuntimeService.get_latest_snapshot.equity"
+                    self.configuration_source = balance_contract["account_context"][
+                        "configuration_source"
+                    ]
+            margin_snapshot = PaperFallbackMarginSnapshot(equity)
             _record_mobile_event({
                 "event_type": "mobile_margin_fallback",
-                "reason": "PAPER_SIMULATED_MARGIN_FALLBACK",
-                "margin_source": "SIMULATED"
+                "reason": "PAPER_CAPITAL_COLLATERAL_POLICY",
+                "margin_source": "CSS_PAPER_CAPITAL"
             })
         else:
             result = {"ok": False, "status": "MARGIN_SNAPSHOT_UNAVAILABLE", "ticket": ticket, "broker_response": {"error": "Failed to retrieve canonical margin state"}}
@@ -3722,27 +3871,39 @@ def _page(title: str, body: str, meta_refresh: int = 0) -> str:
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#10202a">{refresh_tag}
+  {_pwa_head()}{refresh_tag}
   <title>CSS - {safe_title}</title>
-  <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="/favicon.ico" sizes="any">
-  <link rel="icon" type="image/png" sizes="192x192" href="/static/css_pwa_icon_192.png">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
-  <meta name="apple-mobile-web-app-title" content="CSS">
-  <meta name="apple-mobile-web-app-capable" content="yes">
   <style>{_css()}</style>
 </head>
 <body>
   {body}
   <script>{DISCLOSURE_JS}</script>
-  <script>
-    if ("serviceWorker" in navigator) {{
-      navigator.serviceWorker.register("/service-worker.js").catch(() => undefined);
-    }}
-  </script>
+  {_service_worker_registration_script()}
 </body>
 </html>"""
+
+
+def _pwa_head(
+    *,
+    include_manifest: bool = True,
+    include_viewport: bool = True,
+) -> str:
+    return BRAND.html_head(
+        manifest_href="/manifest.webmanifest",
+        include_manifest=include_manifest,
+        include_viewport=include_viewport,
+    )
+
+
+def _service_worker_registration_script() -> str:
+    return f"""<script>
+    if ("serviceWorker" in navigator) {{
+      navigator.serviceWorker.register(
+        "/service-worker.js?v={PWA_ASSET_VERSION}",
+        {{ scope: "/", updateViaCache: "none" }}
+      ).catch(() => undefined);
+    }}
+  </script>"""
 
 
 def _css() -> str:

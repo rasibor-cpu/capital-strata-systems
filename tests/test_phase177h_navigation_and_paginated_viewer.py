@@ -21,8 +21,8 @@ from dashboard.mission_control.layout import render_mission_control_shell
 from dashboard.reports_viewer import render_paginated_viewer
 
 
-def test_canonical_mobile_home_is_dashboard():
-    assert mobile_home_href(for_surface="mobile") == "/dashboard"
+def test_canonical_mobile_home_is_basic_landing():
+    assert mobile_home_href(for_surface="mobile") == "/mobile-launcher"
 
 
 def test_mission_control_home_uses_env_base(monkeypatch):
@@ -50,7 +50,7 @@ def test_breadcrumbs_mark_current_and_are_navigable():
 
 def test_brand_and_home_links_point_to_landing():
     brand = render_brand_home_link(for_surface="mobile")
-    assert 'href="/dashboard"' in brand
+    assert 'href="/mobile-launcher"' in brand
     assert "aria-label" in brand
     nav = render_mobile_enterprise_nav({"role": "VIEWER"}, "risk", can_view_reports=True)
     assert ">Home<" in nav

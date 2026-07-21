@@ -48,6 +48,21 @@ def contract_from_mission_control_state(state: dict[str, Any] | None) -> Financi
     """
     raw = state if isinstance(state, dict) else {}
     portfolio = raw.get("portfolio") if isinstance(raw.get("portfolio"), dict) else {}
+    balance_summary = (
+        raw.get("broker_balance_summary")
+        if isinstance(raw.get("broker_balance_summary"), dict)
+        else {}
+    )
+    balance_fields = (
+        balance_summary.get("account_summary")
+        if isinstance(balance_summary.get("account_summary"), dict)
+        else {}
+    )
+    balance_context = (
+        balance_summary.get("account_context")
+        if isinstance(balance_summary.get("account_context"), dict)
+        else {}
+    )
     reporting = raw.get("institutional_reporting") if isinstance(raw.get("institutional_reporting"), dict) else {}
     fr = raw.get("financial_reporting") if isinstance(raw.get("financial_reporting"), dict) else {}
 
@@ -65,12 +80,21 @@ def contract_from_mission_control_state(state: dict[str, Any] | None) -> Financi
 
     realized_gains, realized_losses = _split_signed(_amt_from_state(portfolio.get("realized_pnl")))
     unrealized_gains, unrealized_losses = _split_signed(_amt_from_state(portfolio.get("unrealized_pnl")))
-    cash = _amt_from_state(portfolio.get("cash"))
-    equity = _amt_from_state(portfolio.get("equity"))
+    cash = _amt_from_state(
+        _canonical_balance_value(balance_fields.get("cash"), portfolio.get("cash"))
+    )
+    equity = _amt_from_state(
+        _canonical_balance_value(
+            balance_fields.get("total_equity"),
+            portfolio.get("equity"),
+        )
+    )
 
     evidence: list[str] = ["mission_control.portfolio"]
     if reporting:
         evidence.append("mission_control.institutional_reporting")
+    if balance_summary:
+        evidence.append("mission_control.broker_balance_summary")
 
     freshness = None
     df = raw.get("data_freshness")
@@ -80,7 +104,12 @@ def contract_from_mission_control_state(state: dict[str, Any] | None) -> Financi
     target = _amt_from_state(raw.get("target_profit"))
 
     return FinancialDataContract(
-        currency=str(raw.get("currency") or portfolio.get("currency") or "USD"),
+        currency=str(
+            balance_context.get("base_currency")
+            or raw.get("currency")
+            or portfolio.get("currency")
+            or "USD"
+        ),
         reporting_period=period,
         as_of=as_of,
         source_system="css.mission_control",
@@ -96,6 +125,12 @@ def contract_from_mission_control_state(state: dict[str, Any] | None) -> Financi
         target_profit=target,
         advisory_only=True,
     )
+
+
+def _canonical_balance_value(field: Any, fallback: Any) -> Any:
+    if isinstance(field, dict) and field.get("availability_state") == "AVAILABLE":
+        return field.get("value")
+    return fallback
 
 
 def summarize_package(package: dict[str, Any]) -> dict[str, Any]:

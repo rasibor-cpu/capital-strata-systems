@@ -507,7 +507,14 @@ def test_ui_financial_reporting_card_renders():
     )
     assert 'id="canonical-financial-reporting"' in html
     assert "Executive Financial Summary" in html or "Canonical Financial Reporting" in html
-    assert "GET /api/executive-reporting/financial-summary" in html or "GET /api/financial-reporting/summary" in html
+    assert (
+        "/mission-control/reports/viewer?source=reports_center&amp;"
+        "report_code=executive_financial_summary"
+    ) in html
+    financial_card = html.split('id="canonical-financial-reporting"', 1)[1].split(
+        "</section>", 1
+    )[0]
+    assert 'href="/api/' not in financial_card
     assert "undefined" not in html.lower()
     assert "NaN" not in html
     assert 'data-phase="178"' in html or 'data-phase="177"' in html

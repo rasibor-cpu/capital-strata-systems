@@ -161,8 +161,8 @@ def _executive_brief_readiness_card(state: dict) -> str:
             f"<tr><th>Warnings</th><td>{escape(warnings_txt)}</td></tr>"
             f"<tr><th>Estimated Generation Time</th><td>{escape(est)}</td></tr>"
             "</table>"
-            '<p class="mc-muted"><a href="/api/executive-brief/readiness">'
-            "GET /api/executive-brief/readiness</a></p>"
+            '<p class="mc-muted"><a href="/mission-control/reports/viewer?source=reports_center&amp;report_code=daily_executive_brief">'
+            "Open Daily Executive Brief</a></p>"
             "</section>"
         )
     except Exception as exc:  # noqa: BLE001 — never fail Executive Overview for readiness
@@ -182,8 +182,8 @@ def _executive_brief_readiness_card(state: dict) -> str:
             f"{escape(type(exc).__name__)} during local evaluation</td></tr>"
             "<tr><th>Estimated Generation Time</th><td>—</td></tr>"
             "</table>"
-            '<p class="mc-muted"><a href="/api/executive-brief/readiness">'
-            "GET /api/executive-brief/readiness</a></p>"
+            '<p class="mc-muted"><a href="/mission-control/reports/viewer?source=reports_center&amp;report_code=daily_executive_brief">'
+            "Open Daily Executive Brief</a></p>"
             "</section>"
         )
 
@@ -244,11 +244,13 @@ def _financial_reporting_card(state: dict) -> str:
             '<p class="mc-muted">Downloads via Reports Center: Executive Financial Summary, Income Statement, '
             "Balance Sheet, Cash-Flow Statement, Profitability Run-Rate Report.</p>"
             '<p class="mc-muted">'
-            '<a href="/api/executive-reporting/financial-summary">GET /api/executive-reporting/financial-summary</a>'
+            '<a href="/mission-control/reports/viewer?source=reports_center&amp;report_code=executive_financial_summary">Executive Financial Summary</a>'
             " · "
-            '<a href="/api/executive-reporting/financial-report">GET /api/executive-reporting/financial-report</a>'
+            '<a href="/mission-control/reports/viewer?source=reports_center&amp;report_code=canonical_income_statement">Income Statement</a>'
             " · "
-            '<a href="/api/financial-reporting/summary">GET /api/financial-reporting/summary</a>'
+            '<a href="/mission-control/reports/viewer?source=reports_center&amp;report_code=canonical_balance_sheet">Balance Sheet</a>'
+            " · "
+            '<a href="/mission-control/reports/viewer?source=reports_center&amp;report_code=canonical_cash_flow_statement">Cash-Flow Statement</a>'
             "</p>"
             "</section>"
         )
@@ -279,8 +281,8 @@ def _financial_reporting_card(state: dict) -> str:
             "<tr><th>Top Management Action</th><td>—</td></tr>"
             "</table>"
             f'<p class="mc-muted">{escape(type(exc).__name__)} during local evaluation</p>'
-            '<p class="mc-muted"><a href="/api/executive-reporting/financial-summary">'
-            "GET /api/executive-reporting/financial-summary</a></p>"
+            '<p class="mc-muted"><a href="/mission-control/reports/viewer?source=reports_center&amp;report_code=executive_financial_summary">'
+            "Open Executive Financial Summary</a></p>"
             "</section>"
         )
 
@@ -298,6 +300,7 @@ def render(state: dict) -> str:
     timeline = section(state, "operations_timeline")
     institutional = section(state, "institutional_executive_dashboard")
     reporting = section(state, "institutional_reporting")
+    balance_summary = section(state, "broker_balance_summary")
     return (
         page_header("Executive Overview", "Enterprise-level platform, runtime, capital, risk, readiness, and alert posture.")
         + warning_banner(
@@ -329,6 +332,7 @@ def render(state: dict) -> str:
             )
         )
         + split_panels(
+            detail_table("Canonical Account Balance", balance_summary),
             detail_table("Executive KPI Board", {
                 "uptime": kpis.get("uptime"),
                 "runtime_health": kpis.get("runtime_health"),

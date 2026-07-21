@@ -15,6 +15,7 @@ from dashboard.runtime.dashboard_state import (
 from dashboard.runtime.broker_balance_reconciliation import (
     build_broker_reconciliation_payload,
 )
+from backend.brokers.account_balance_contract import build_broker_balance_summary
 from backend.runtime.canonical_broker_state_adapter import broker_environment_profile_view
 from backend.runtime.broker_parity_validator import broker_parity_payload
 from backend.analytics.portfolio_correlation_engine import (
@@ -314,15 +315,28 @@ def options_income(dashboard_payload: Mapping[str, Any] | None = None) -> dict[s
 
 def account_summary(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     account = _mapping(dashboard_payload.get("account_summary"))
+    existing = account.get("broker_balance_summary")
+    canonical = (
+        dict(existing)
+        if isinstance(existing, Mapping)
+        else build_broker_balance_summary(
+            account,
+            broker=str(account.get("broker") or dashboard_payload.get("broker_mode") or "NONE"),
+            mode=str(account.get("account_mode") or dashboard_payload.get("resolved_mode") or "ADVISORY"),
+            as_of=str(dashboard_payload.get("generated_at") or account.get("timestamp") or ""),
+        )
+    )
+    fields = canonical["account_summary"]
     return {
-        "cash_balance": _number(account.get("cash_balance")),
-        "total_equity": _number(account.get("total_equity")),
-        "buying_power": _number(account.get("buying_power")),
-        "margin_used": _number(account.get("margin_used")),
-        "available_margin": _number(account.get("available_margin")),
-        "currency": str(account.get("currency", "USD")),
-        "broker": str(account.get("broker", "NONE")),
-        "account_mode": str(account.get("account_mode", "paper")),
+        "cash_balance": fields["cash"]["value"],
+        "total_equity": fields["total_equity"]["value"],
+        "buying_power": fields["buying_power"]["value"],
+        "margin_used": fields["margin_used"]["value"],
+        "available_margin": fields["margin_available"]["value"],
+        "currency": canonical["account_context"]["base_currency"],
+        "broker": canonical["account_context"]["broker"],
+        "account_mode": canonical["account_context"]["environment"],
+        "broker_balance_summary": canonical,
     }
 
 

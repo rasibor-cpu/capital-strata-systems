@@ -4,12 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>{{ title }}</title>
-    <link rel="manifest" href="/static/css_launcher_manifest.json">
-    <link rel="icon" href="/favicon.ico" sizes="any">
-    <link rel="icon" type="image/png" sizes="192x192" href="/static/css_pwa_icon_192.png">
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
-    <meta name="apple-mobile-web-app-title" content="CSS">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" href="{{ brand.assets.favicon.url }}" sizes="any">
+    <link rel="icon" type="image/png" sizes="16x16" href="{{ brand.assets.favicon_16.url }}">
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ brand.assets.favicon_32.url }}">
+    <link rel="apple-touch-icon" sizes="180x180" href="{{ brand.assets.apple_touch.url }}">
+    <meta name="application-name" content="{{ brand.short_application_name }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="{{ brand.short_application_name }}">
     <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="{{ brand.palette.theme }}">
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -104,7 +108,7 @@
 <body>
 
     <div class="header">
-        <img src="/static/css_launcher_icon.svg" alt="CSS Icon">
+        <img src="{{ brand.assets.logo.url }}" alt="CSS Icon">
         <h2>{{ title }}</h2>
         <div style="font-size: 12px; color: #888;">v{{ version }}</div>
     </div>

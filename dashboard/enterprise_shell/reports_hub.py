@@ -7,7 +7,7 @@ from typing import Any
 from backend.reports_center.rbac import ReportsAccessControl
 from backend.reports_center.registry import by_category, category_menu
 from backend.reports_center.ui_contract import ui_report_definition
-from dashboard.enterprise_shell.routes import ROUTES, cross_surface_href
+from dashboard.enterprise_shell.routes import ROUTES, mobile_home_href
 
 
 # Operator-facing hub groups (map onto registry categories + special entries).
@@ -42,7 +42,7 @@ HUB_GROUPS: tuple[dict[str, Any], ...] = (
                 "readiness": "ADVISORY_ONLY",
                 "source": "OPTIONS_INCOME_RUNTIME",
                 "format": "HTML",
-                "view_href": "/api/reports/options_income_executive/view",
+                "api_href": "/api/reports/options_income_executive",
                 "print_href": "/api/options-income/report.html",
                 "metadata_href": "/api/reports/options_income_executive/metadata",
             },
@@ -61,8 +61,8 @@ HUB_GROUPS: tuple[dict[str, Any], ...] = (
                 "readiness": "ADVISORY_ONLY",
                 "source": "BROKER_OPERATIONAL_STATE",
                 "format": "HTML",
-                "view_href": "/api/reports/broker_executive/view",
-                "print_href": "/api/reports/broker_executive/view",
+                "api_href": "/api/reports/broker_executive",
+                "print_href": None,
                 "metadata_href": "/api/reports/broker_executive/metadata",
             },
         ),
@@ -127,9 +127,11 @@ def build_reports_hub_payload(
                 row = ui_report_definition(d, role=role_u, access=access)
                 code = str(row.get("report_code") or row.get("report_type") or "")
                 status = str(row.get("status") or "COMING_SOON")
-                view_href = None
-                if status in {"AVAILABLE", "AVAILABLE_WITH_LIMITATIONS"} and code:
-                    view_href = f"{viewer_base}?source=reports_center&report_code={code}"
+                view_href = (
+                    f"{viewer_base}?source=reports_center&report_code={code}"
+                    if code
+                    else None
+                )
                 cards.append(
                     {
                         "report_id": code or None,
@@ -146,6 +148,10 @@ def build_reports_hub_payload(
                         "data_freshness": None,
                         "certification_state": None,
                         "view_href": view_href,
+                        "viewer_href": view_href,
+                        "rendered_href": view_href,
+                        "report_page_href": view_href,
+                        "api_href": f"/api/reports/{code}" if code else None,
                         "export_href": f"/api/v1/reports/{{id}}/pdf" if row.get("pdf_supported") else None,
                         "open_action": "view" if view_href else "none",
                         "export_action": "pdf" if row.get("pdf_supported") else "none",
@@ -154,10 +160,14 @@ def build_reports_hub_payload(
                 )
         for special in group.get("special") or ():
             card = dict(special)
-            if surface == "mobile" and card.get("print_href", "").startswith("/api/options-income"):
-                card["print_href"] = cross_surface_href(card["print_href"], target="mission_control")
-                card["view_href"] = cross_surface_href(str(card.get("view_href") or ""), target="mission_control")
-                card["metadata_href"] = cross_surface_href(str(card.get("metadata_href") or ""), target="mission_control")
+            report_id = str(card.get("report_id") or "")
+            viewer_href = f"{viewer_base}?report_code={report_id}"
+            card["api_href"] = card.get("metadata_href")
+            card["viewer_href"] = viewer_href
+            card["rendered_href"] = viewer_href
+            card["report_page_href"] = viewer_href
+            card["view_href"] = viewer_href
+            card["print_href"] = None
             card["readiness"] = _status_label(str(card.get("status") or ""))
             cards.append(card)
         for planned in group.get("planned") or ():
@@ -194,7 +204,9 @@ def build_reports_hub_payload(
         "schema_version": "css.reports_hub.v1",
         "surface": surface,
         "reports_home": reports_home,
-        "home_href": ROUTES.mobile_home if surface == "mobile" else ROUTES.mc_home,
+        "home_href": mobile_home_href(
+            for_surface="mobile" if surface == "mobile" else "mission_control"
+        ),
         "registry_categories": category_menu(),
         "groups": groups_out,
         "write_routes": False,

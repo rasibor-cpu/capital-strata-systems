@@ -76,6 +76,7 @@ def render(state: dict) -> str:
     telemetry = section(state, "broker_telemetry")
     registry = section(state, "broker_registry_console")
     enterprise_runtime = section(state, "enterprise_broker_runtime")
+    balance_summary = section(state, "broker_balance_summary")
     broker_list = brokers.get("broker_list", []) if isinstance(brokers.get("broker_list"), list) else []
     # Compact Tier-1 status table for Mission Control (Role + Status)
     tier_rows = []
@@ -122,6 +123,7 @@ def render(state: dict) -> str:
             )
         )
         + split_panels(
+            detail_table("Canonical Broker Balance Summary", balance_summary),
             detail_table("Tier-1 Broker Status (Role + State)", tier_rows),
             detail_table("Active Broker", active),
             detail_table("Broker Telemetry", {

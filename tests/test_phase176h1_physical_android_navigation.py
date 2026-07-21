@@ -96,8 +96,9 @@ def test_touch_debug_query_injects_overlay_script() -> None:
 
 def test_service_worker_excludes_mission_control_html() -> None:
     src = Path("dashboard/mobile/mobile_app.py").read_text(encoding="utf-8")
-    assert 'pathname.startsWith("/mission-control")' in src
-    assert "css-mobile-shell-v176h1" in src
+    assert '"/mission-control"' in src
+    assert "PROTECTED_PREFIXES.some" in src
+    assert "css-mobile-pwa-" in src
 
 
 def test_js_disabled_navigation_via_plain_anchors(tmp_path: Path) -> None:

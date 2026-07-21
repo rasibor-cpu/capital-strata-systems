@@ -10,11 +10,18 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 from backend.runtime.live_environment_loader import load_css_runtime_environment
 
 CSS_ENVIRONMENT_LOAD_TRACE = load_css_runtime_environment(PROJECT_ROOT)
-from fastapi import APIRouter, Request, FastAPI
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from launcher.css_launcher_config import LauncherConfig
+from dashboard.enterprise_shell.mobile_landing import render_mobile_landing
+from dashboard.enterprise_shell.nav_contract import (
+    SPA_SHELL_CACHE,
+    build_enterprise_navigation_contract,
+)
+from backend.brokers.account_balance_contract import build_broker_balance_summary
+from backend.common.branding import get_brand_service
 from backend.monitoring.alert_repository import (
     AlertRepository,
     AlertCentreCompatibilityAdapter,
@@ -63,6 +70,7 @@ from backend.analytics.autonomous_portfolio_manager import (
     AutonomousPortfolioManager,
     AutonomousPortfolioManagerError,
 )
+
 from backend.analytics.strategy_evolution_engine import (
     StrategyEvolutionEngine,
     StrategyEvolutionEngineError,
@@ -146,6 +154,7 @@ from backend.runtime.runtime_mode import RuntimeMode, resolve_runtime_mode
 import uvicorn
 
 app = FastAPI(title=LauncherConfig.TITLE, version=LauncherConfig.VERSION)
+BRAND = get_brand_service()
 launcher_router = APIRouter()
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
 _LAUNCHER_RUNTIME_CERTIFICATION_SNAPSHOT_CACHE: Dict[str, Dict[str, Any]] = {}
@@ -564,15 +573,28 @@ def get_runtime_summary() -> Dict[str, Any]:
 
 def get_account_summary() -> Dict[str, Any]:
     state = _safe_load_artifact("css_account_state_pcnrass.json") or _safe_load_artifact("css_account_state_pcnrass_BACKUP.json")
-    summary = {
-        "cash": state.get("account_balance", 0.0),
-        "equity": state.get("total_equity", state.get("account_balance", 0.0)),
-        "buying_power": state.get("buying_power", state.get("account_balance", 0.0)),
-        "open_pnl": state.get("unrealized_pnl", 0.0),
-        "realized_pnl": state.get("lifetime_realized_pnl", 0.0),
-        "total_pnl": state.get("lifetime_realized_pnl", 0.0) + state.get("unrealized_pnl", 0.0)
+    canonical = build_broker_balance_summary(
+        {
+            **state,
+            "cash": state.get("account_balance"),
+            "total_equity": state.get("total_equity"),
+            "buying_power": state.get("buying_power"),
+            "unrealized_pnl": state.get("unrealized_pnl"),
+            "realized_pnl": state.get("lifetime_realized_pnl"),
+        },
+        broker=str(state.get("broker") or "NONE"),
+        mode=str(state.get("account_mode") or state.get("mode") or "ADVISORY"),
+    )
+    fields = canonical["account_summary"]
+    return {
+        "cash": fields["cash"]["value"],
+        "equity": fields["total_equity"]["value"],
+        "buying_power": fields["buying_power"]["value"],
+        "open_pnl": fields["unrealized_pnl"]["value"],
+        "realized_pnl": fields["realized_pnl"]["value"],
+        "total_pnl": fields["total_pnl"]["value"],
+        "broker_balance_summary": canonical,
     }
-    return summary
 
 
 def get_broker_startup_summary() -> Dict[str, Any]:
@@ -787,9 +809,12 @@ def build_launcher_frontend_state(
             "total_equity": account.get("equity", 0.0),
             "equity": account.get("equity", 0.0),
             "buying_power": account.get("buying_power", 0.0),
-            "currency": "USD",
+            "currency": account.get("broker_balance_summary", {}).get(
+                "account_context", {}
+            ).get("base_currency", "UNAVAILABLE"),
             "broker": broker,
             "account_mode": broker_mode,
+            "broker_balance_summary": account.get("broker_balance_summary"),
         },
         "pnl_summary": {
             "realized_pnl": account.get("realized_pnl", 0.0),
@@ -4063,6 +4088,7 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         surface="launcher_spa",
         platform_status=platform_status,
     )
+    context["brand"] = BRAND.snapshot()
     context["options_income_posture"] = "ADVISORY_ONLY"
     return context
 
@@ -4078,19 +4104,25 @@ def build_launcher_context() -> Dict[str, Any]:
         "status": status,
         "supervisor": supervisor,
         "recent_alerts": alerts,
-        "dashboard_url": LauncherConfig.DASHBOARD_URL
+        "dashboard_url": LauncherConfig.DASHBOARD_URL,
+        "brand": BRAND.snapshot(),
     }
 
 @launcher_router.get("/", response_class=HTMLResponse)
 async def launcher_home(request: Request):
-    context = build_launcher_context()
-    return templates.TemplateResponse(request, "mobile_launcher.html", context)
+    return HTMLResponse(
+        render_mobile_landing(
+            build_enterprise_navigation_contract(surface="launcher"),
+            manifest_href="/manifest.json",
+            title=LauncherConfig.TITLE,
+            balance_summary=get_account_summary().get("broker_balance_summary"),
+        )
+    )
 
 @launcher_router.get("/mobile-launcher", response_class=HTMLResponse)
 @launcher_router.get("/launcher/", response_class=HTMLResponse)
 async def launcher_home_alias(request: Request):
-    context = build_launcher_context()
-    return templates.TemplateResponse(request, "mobile_launcher.html", context)
+    return await launcher_home(request)
 
 @launcher_router.get("/mobile-dashboard", response_class=HTMLResponse)
 @launcher_router.get("/mobile", response_class=HTMLResponse)
@@ -4869,49 +4901,96 @@ async def mobile_strategy_evolution():
 
 @launcher_router.get("/manifest.json")
 async def get_manifest():
-    return FileResponse(
-        os.path.join(os.path.dirname(__file__), "static", "css_launcher_manifest.json"),
+    return JSONResponse(
+        BRAND.manifest(
+            start_url="/mobile-launcher",
+            app_id="/css-mobile-launcher",
+            name="CSS Mobile Launcher",
+            short_name="CSS",
+            shell_cache=SPA_SHELL_CACHE,
+        ),
         media_type="application/manifest+json",
+        headers={"Cache-Control": "no-cache, max-age=0, must-revalidate"},
     )
 
 
 @launcher_router.get("/favicon.ico")
 async def get_favicon():
-    favicon_path = os.path.join(os.path.dirname(__file__), "..", "assets", "branding", "css.ico")
-    if os.path.exists(favicon_path):
-        return FileResponse(favicon_path, media_type="image/x-icon")
-
     return FileResponse(
-        os.path.join(os.path.dirname(__file__), "static", "css_launcher_icon.svg"),
-        media_type="image/svg+xml",
+        BRAND.asset_path("favicon"),
+        media_type=BRAND.asset("favicon").media_type,
+        headers={"Cache-Control": "public, max-age=86400, immutable"},
+    )
+
+
+@launcher_router.get("/favicon-16x16.png")
+async def get_favicon_16():
+    return FileResponse(
+        BRAND.asset_path("favicon_16"),
+        media_type=BRAND.asset("favicon_16").media_type,
+        headers={"Cache-Control": "public, max-age=86400, immutable"},
+    )
+
+
+@launcher_router.get("/favicon-32x32.png")
+async def get_favicon_32():
+    return FileResponse(
+        BRAND.asset_path("favicon_32"),
+        media_type=BRAND.asset("favicon_32").media_type,
+        headers={"Cache-Control": "public, max-age=86400, immutable"},
+    )
+
+
+@launcher_router.get("/pwa/{filename}")
+async def get_canonical_pwa_icon(filename: str):
+    file_to_key = {
+        BRAND.asset(key).filename: key
+        for key in ("icon_192", "icon_512", "maskable_192", "maskable_512")
+    }
+    asset_key = file_to_key.get(filename)
+    if asset_key is None:
+        raise HTTPException(status_code=404, detail="pwa_asset_not_found")
+    asset = BRAND.asset(asset_key)
+    return FileResponse(
+        BRAND.asset_path(asset_key),
+        media_type=asset.media_type,
+        headers={"Cache-Control": "public, max-age=86400, immutable"},
     )
 
 
 @launcher_router.get("/static/css_pwa_icon_192.png")
 async def css_pwa_icon_192():
     return FileResponse(
-        os.path.join(
-            os.path.dirname(__file__),
-            "..",
-            "assets",
-            "branding",
-            "css_pwa_icon_192.png",
-        ),
-        media_type="image/png",
+        BRAND.asset_path("icon_192"),
+        media_type=BRAND.asset("icon_192").media_type,
+        headers={"Cache-Control": "public, max-age=86400, immutable"},
     )
 
 
 @launcher_router.get("/static/css_pwa_icon_512.png")
 async def css_pwa_icon_512():
     return FileResponse(
-        os.path.join(
-            os.path.dirname(__file__),
-            "..",
-            "assets",
-            "branding",
-            "css_pwa_icon_512.png",
-        ),
-        media_type="image/png",
+        BRAND.asset_path("icon_512"),
+        media_type=BRAND.asset("icon_512").media_type,
+        headers={"Cache-Control": "public, max-age=86400, immutable"},
+    )
+
+
+@launcher_router.get("/static/css_pwa_icon_maskable_192.png")
+async def css_pwa_icon_maskable_192():
+    return FileResponse(
+        BRAND.asset_path("maskable_192"),
+        media_type=BRAND.asset("maskable_192").media_type,
+        headers={"Cache-Control": "public, max-age=86400, immutable"},
+    )
+
+
+@launcher_router.get("/static/css_pwa_icon_maskable_512.png")
+async def css_pwa_icon_maskable_512():
+    return FileResponse(
+        BRAND.asset_path("maskable_512"),
+        media_type=BRAND.asset("maskable_512").media_type,
+        headers={"Cache-Control": "public, max-age=86400, immutable"},
     )
 
 
@@ -4921,14 +5000,9 @@ async def css_pwa_icon_512():
 @launcher_router.get("/static/apple_touch_icon_180.png")
 async def apple_touch_icon():
     return FileResponse(
-        os.path.join(
-            os.path.dirname(__file__),
-            "..",
-            "assets",
-            "branding",
-            "apple_touch_icon_180.png",
-        ),
-        media_type="image/png",
+        BRAND.asset_path("apple_touch"),
+        media_type=BRAND.asset("apple_touch").media_type,
+        headers={"Cache-Control": "public, max-age=86400, immutable"},
     )
 
 

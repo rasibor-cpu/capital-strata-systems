@@ -6,11 +6,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>{{ title }}</title>
     <link rel="manifest" href="/manifest.json">
-    <link rel="icon" href="/favicon.ico" sizes="any">
-    <link rel="icon" type="image/png" sizes="192x192" href="/static/css_pwa_icon_192.png">
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
-    <meta name="apple-mobile-web-app-title" content="CSS">
+    <link rel="icon" href="{{ brand.assets.favicon.url }}" sizes="any">
+    <link rel="icon" type="image/png" sizes="16x16" href="{{ brand.assets.favicon_16.url }}">
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ brand.assets.favicon_32.url }}">
+    <link rel="apple-touch-icon" sizes="180x180" href="{{ brand.assets.apple_touch.url }}">
+    <meta name="application-name" content="{{ brand.short_application_name }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="{{ brand.short_application_name }}">
     <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="{{ brand.palette.theme }}">
     <style>
         :root {
             --bg-color: #070909;
@@ -749,11 +753,17 @@
     </style>
 </head>
 <body>
+    {% macro money(value) -%}
+        {% if value is number %}${{ "%.2f"|format(value) }}{% else %}UNAVAILABLE{% endif %}
+    {%- endmacro %}
+    {% macro pnl_class(value) -%}
+        {% if value is number %}{% if value >= 0 %}text-success{% else %}text-danger{% endif %}{% endif %}
+    {%- endmacro %}
 
     <!-- HEADER — Phase 177H.1 enterprise shell -->
     <header class="mobile-header" role="banner">
         <div class="mobile-title">
-            <a class="css-spa-brand" href="{{ enterprise_nav.canonical_home }}" aria-label="CSS Home — return to Mobile Dashboard landing">
+            <a class="css-spa-brand" href="{{ enterprise_nav.canonical_home }}" aria-label="CSS Home — return to basic mobile landing">
                 <span class="css-spa-brand-mark" aria-hidden="true">CSS</span>
                 <span>{{ title }}</span>
             </a>
@@ -874,16 +884,16 @@
             <div class="stat-grid">
                 <div class="stat-item">
                     <div class="stat-label">Equity</div>
-                    <div class="stat-value">${{ "%.2f"|format(account.equity) }}</div>
+                    <div class="stat-value">{{ money(account.equity) }}</div>
                 </div>
                 <div class="stat-item">
                     <div class="stat-label">Cash</div>
-                    <div class="stat-value">${{ "%.2f"|format(account.cash) }}</div>
+                    <div class="stat-value">{{ money(account.cash) }}</div>
                 </div>
                 <div class="stat-item">
                     <div class="stat-label">Total PnL</div>
-                    <div class="stat-value {% if account.total_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
-                        ${{ "%.2f"|format(account.total_pnl) }}
+                    <div class="stat-value {{ pnl_class(account.total_pnl) }}">
+                        {{ money(account.total_pnl) }}
                     </div>
                 </div>
                 <div class="stat-item">
@@ -1098,32 +1108,32 @@
             <div class="stat-grid">
                 <div class="stat-item">
                     <div class="stat-label">Equity</div>
-                    <div class="stat-value">${{ "%.2f"|format(account.equity) }}</div>
+                    <div class="stat-value">{{ money(account.equity) }}</div>
                 </div>
                 <div class="stat-item">
                     <div class="stat-label">Cash</div>
-                    <div class="stat-value">${{ "%.2f"|format(account.cash) }}</div>
+                    <div class="stat-value">{{ money(account.cash) }}</div>
                 </div>
                 <div class="stat-item">
                     <div class="stat-label">Buying Power</div>
-                    <div class="stat-value">${{ "%.2f"|format(account.buying_power) }}</div>
+                    <div class="stat-value">{{ money(account.buying_power) }}</div>
                 </div>
                 <div class="stat-item">
                     <div class="stat-label">Total PnL</div>
-                    <div class="stat-value {% if account.total_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
-                        ${{ "%.2f"|format(account.total_pnl) }}
+                    <div class="stat-value {{ pnl_class(account.total_pnl) }}">
+                        {{ money(account.total_pnl) }}
                     </div>
                 </div>
                 <div class="stat-item">
                     <div class="stat-label">Open PnL</div>
-                    <div class="stat-value {% if account.open_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
-                        ${{ "%.2f"|format(account.open_pnl) }}
+                    <div class="stat-value {{ pnl_class(account.open_pnl) }}">
+                        {{ money(account.open_pnl) }}
                     </div>
                 </div>
                 <div class="stat-item">
                     <div class="stat-label">Realized PnL</div>
-                    <div class="stat-value {% if account.realized_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
-                        ${{ "%.2f"|format(account.realized_pnl) }}
+                    <div class="stat-value {{ pnl_class(account.realized_pnl) }}">
+                        {{ money(account.realized_pnl) }}
                     </div>
                 </div>
             </div>
@@ -2030,17 +2040,17 @@
 
         <div class="card">
             <div class="card-header">Exposure Snapshot</div>
-            <div class="status-row"><span>Equity</span><strong>${{ "%.2f"|format(account.equity) }}</strong></div>
-            <div class="status-row"><span>Cash</span><strong>${{ "%.2f"|format(account.cash) }}</strong></div>
-            <div class="status-row"><span>Buying Power</span><strong>${{ "%.2f"|format(account.buying_power) }}</strong></div>
+            <div class="status-row"><span>Equity</span><strong>{{ money(account.equity) }}</strong></div>
+            <div class="status-row"><span>Cash</span><strong>{{ money(account.cash) }}</strong></div>
+            <div class="status-row"><span>Buying Power</span><strong>{{ money(account.buying_power) }}</strong></div>
             <div class="status-row"><span>Open PnL</span>
-                <strong class="{% if account.open_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
-                    ${{ "%.2f"|format(account.open_pnl) }}
+                <strong class="{{ pnl_class(account.open_pnl) }}">
+                    {{ money(account.open_pnl) }}
                 </strong>
             </div>
             <div class="status-row"><span>Realized PnL</span>
-                <strong class="{% if account.realized_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
-                    ${{ "%.2f"|format(account.realized_pnl) }}
+                <strong class="{{ pnl_class(account.realized_pnl) }}">
+                    {{ money(account.realized_pnl) }}
                 </strong>
             </div>
         </div>

@@ -99,16 +99,21 @@ def test_offline_state_handled_safely(launcher_temp_dir):
     assert context["supervisor"]["status"] == "STOPPED"
 
 def test_manifest_exists_and_valid_json():
-    manifest_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "launcher", "static", "css_launcher_manifest.json")
-    assert os.path.exists(manifest_path)
-    with open(manifest_path, "r") as f:
-        data = json.load(f)
-        assert data["name"] == "CSS Mobile Launcher"
-        assert data["display"] == "standalone"
+    from backend.common.branding import get_brand_service
+
+    data = get_brand_service().manifest(
+        start_url="/mobile-launcher",
+        app_id="/css-mobile-launcher",
+        name="CSS Mobile Launcher",
+        short_name="CSS",
+    )
+    assert data["name"] == "CSS Mobile Launcher"
+    assert data["display"] == "standalone"
 
 def test_icon_asset_exists():
-    icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "launcher", "static", "css_launcher_icon.svg")
-    assert os.path.exists(icon_path)
+    from backend.common.branding import get_brand_service
+
+    assert get_brand_service().asset_path("logo").exists()
     
 def test_launcher_does_not_expose_secrets(launcher_temp_dir, monkeypatch):
     monkeypatch.setenv("COINBASE_CDP_KEY_NAME", "organizations/css-secret-key")
@@ -177,7 +182,13 @@ def test_mobile_dashboard_helpers_missing_files_handled_safely(launcher_temp_dir
     assert runtime.get("execution_enabled") is False
     
     account = get_account_summary()
-    assert account["cash"] == 0.0
+    assert account["cash"] is None
+    assert (
+        account["broker_balance_summary"]["account_summary"]["cash"][
+            "availability_state"
+        ]
+        == "UNAVAILABLE"
+    )
     
     trade = get_trade_summary()
     assert trade["open_trades_count"] == 0
@@ -210,16 +221,10 @@ def test_launcher_manifest_and_icon_routes():
     assert data["name"] == "CSS Mobile Launcher"
     assert data["start_url"] == "/mobile-launcher"
     assert data["scope"] == "/"
-    assert data["icons"][0]["src"] == "/static/css_pwa_icon_192.png"
-    assert data["icons"][1]["src"] == "/static/css_pwa_icon_512.png"
-
-    response = client.get("/static/css_launcher_manifest.json")
-    assert response.status_code == 200
-    assert response.json()["short_name"] == "CSS"
-    
-    response = client.get("/static/css_launcher_icon.svg")
-    assert response.status_code == 200
-    assert "image/svg+xml" in response.headers["content-type"]
+    assert data["icons"][0]["src"] == "/pwa/css-icon-192.png?v=180a1"
+    assert data["icons"][1]["src"] == "/pwa/css-icon-512.png?v=180a1"
+    assert data["icons"][2]["purpose"] == "maskable"
+    assert data["icons"][3]["purpose"] == "maskable"
 
     response = client.get("/favicon.ico")
     assert response.status_code == 200
@@ -235,18 +240,29 @@ def test_launcher_manifest_and_icon_routes():
     assert response.headers["content-type"] == "image/png"
     assert response.content
 
+    for icon_path in (
+        "/favicon-16x16.png?v=180a1",
+        "/favicon-32x32.png?v=180a1",
+        "/pwa/css-icon-maskable-192.png?v=180a1",
+        "/pwa/css-icon-maskable-512.png?v=180a1",
+    ):
+        response = client.get(icon_path)
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/png"
+        assert response.content
+
     response = client.get("/apple-touch-icon.png")
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
     assert response.content
 
     response = client.get("/mobile")
-    assert '<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">' in response.text
-    assert '<link rel="icon" type="image/png" sizes="192x192" href="/static/css_pwa_icon_192.png">' in response.text
+    assert '<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=180a1">' in response.text
+    assert '<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png?v=180a1">' in response.text
 
     response = client.get("/mobile-launcher")
-    assert '<link rel="manifest" href="/static/css_launcher_manifest.json">' in response.text
-    assert '<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">' in response.text
+    assert '<link rel="manifest" href="/manifest.json">' in response.text
+    assert '<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=180a1">' in response.text
 
 def test_launcher_health_and_status_routes(launcher_temp_dir):
     response = client.get("/health")

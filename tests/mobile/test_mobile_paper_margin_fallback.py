@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from dashboard.mobile.mobile_app import execute_mobile_trade_ticket
 
-def test_paper_mobile_trade_uses_synthetic_margin_fallback():
+def test_paper_mobile_trade_uses_synthetic_margin_fallback(monkeypatch):
     # Arrange
     user_ctx = {"role": "TRADER", "user_id": "U1"}
     form = {
@@ -14,6 +14,7 @@ def test_paper_mobile_trade_uses_synthetic_margin_fallback():
         "amount": "1000.00"
     }
     
+    monkeypatch.setenv("CSS_PAPER_COLLATERAL_RATIO", "1.0")
     with patch("dashboard.mobile.mobile_app._can_submit_trade", return_value=True), \
          patch("dashboard.mobile.mobile_app.load_mobile_controls", return_value={"mobile_trading_mode": "MOBILE_PAPER_TRADING"}), \
          patch("dashboard.mobile.mobile_app.SessionRuntimeService") as mock_session_svc, \
@@ -47,13 +48,52 @@ def test_paper_mobile_trade_uses_synthetic_margin_fallback():
         call_kwargs = mock_exec_gate_inst.evaluate_trade.call_args[1]
         fallback_snapshot = call_kwargs["margin_snapshot"]
         assert fallback_snapshot is not None
-        assert fallback_snapshot.margin_source == "SIMULATED"
+        assert fallback_snapshot.margin_source == "CSS_PAPER_CAPITAL"
         assert fallback_snapshot.broker_mode == "PAPER"
         assert fallback_snapshot.available_margin == 10000.00
         assert fallback_snapshot.required_margin == 0.00
         assert fallback_snapshot.utilization_pct == 0.00
         assert fallback_snapshot.trade_gate_allowed is True
-        assert fallback_snapshot.reason == "PAPER_SIMULATED_MARGIN_FALLBACK"
+        assert fallback_snapshot.reason == "PAPER_CAPITAL_COLLATERAL_POLICY"
+        assert fallback_snapshot.provenance == "PnlRuntimeService.get_latest_snapshot.equity"
+
+
+def test_paper_margin_tracks_current_small_capital_without_fixed_ceiling(monkeypatch):
+    user_ctx = {"role": "TRADER", "user_id": "U1"}
+    form = {
+        "broker": "CSS_PAPER",
+        "asset_class": "FX",
+        "symbol": "EUR_USD",
+        "side": "BUY",
+        "qty": "1",
+        "amount": "100.00",
+    }
+    monkeypatch.setenv("CSS_PAPER_COLLATERAL_RATIO", "1.0")
+    with patch("dashboard.mobile.mobile_app._can_submit_trade", return_value=True), \
+         patch("dashboard.mobile.mobile_app.load_mobile_controls", return_value={"mobile_trading_mode": "MOBILE_PAPER_TRADING"}), \
+         patch("dashboard.mobile.mobile_app.SessionRuntimeService") as mock_session_svc, \
+         patch("dashboard.mobile.mobile_app.PnlRuntimeService") as mock_pnl_svc, \
+         patch("backend.intelligence.trade_decision_orchestrator.TradeDecisionOrchestrator") as mock_orchestrator, \
+         patch("engine.execution.execution_gate.ExecutionGate") as mock_exec_gate, \
+         patch("backend.app.persistence.services.trade_runtime_service.TradeRuntimeService"):
+        mock_session_svc.return_value.get_active_sessions.return_value = [{"session_id": "session1"}]
+        mock_pnl_svc.return_value.get_latest_snapshot.return_value = {
+            "equity": 200.0,
+            "equity_peak": 200.0,
+            "currency": "USD",
+        }
+        mock_orchestrator.return_value.evaluate_trade.return_value = {
+            "filters": {"governance_approved": True}
+        }
+        mock_exec_gate.return_value.evaluate_trade.return_value = {
+            "decision": {"final": "ALLOW"}
+        }
+        result = execute_mobile_trade_ticket(user_ctx, form)
+        snapshot = mock_exec_gate.return_value.evaluate_trade.call_args[1]["margin_snapshot"]
+        assert result["ok"] is True
+        assert snapshot.available_margin == 200.0
+        assert snapshot.buying_power == 200.0
+        assert snapshot.available_margin != 10000.0
 
 
 def test_live_mobile_trade_blocks_on_missing_margin():

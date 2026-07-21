@@ -17,7 +17,7 @@ from dashboard.enterprise_shell.routes import (
 from dashboard.enterprise_shell.shell import shell_status_indicators
 
 SCHEMA_VERSION = "css.enterprise_navigation.v1"
-SPA_SHELL_CACHE = "css-launcher-spa-shell-v177h1"
+SPA_SHELL_CACHE = "css-launcher-spa-shell-rc11"
 
 
 def _dest(
@@ -75,15 +75,18 @@ def build_enterprise_navigation_contract(
         oi = ROUTES.mc_options_income
         broker = ROUTES.mc_broker
         runtime_mc = ROUTES.mc_runtime
-        oi_viewer = "/api/options-income/report.viewer"
-        discovery = "/api/reports"
+        oi_viewer = f"{ROUTES.mc_report_viewer}?report_code=options_income_executive"
+        discovery = ROUTES.mc_reports
     else:
         reports = cross_surface_href(ROUTES.mc_reports, target="mission_control")
         oi = cross_surface_href(ROUTES.mc_options_income, target="mission_control")
         broker = cross_surface_href(ROUTES.mc_broker, target="mission_control")
         runtime_mc = cross_surface_href(ROUTES.mc_runtime, target="mission_control")
-        oi_viewer = cross_surface_href("/api/options-income/report.viewer", target="mission_control")
-        discovery = cross_surface_href("/api/reports", target="mission_control")
+        oi_viewer = cross_surface_href(
+            f"{ROUTES.mc_report_viewer}?report_code=options_income_executive",
+            target="mission_control",
+        )
+        discovery = cross_surface_href(ROUTES.mc_reports, target="mission_control")
 
     primary = [
         _dest(
@@ -94,8 +97,8 @@ def build_enterprise_navigation_contract(
             primary=True,
             cross_surface=surface in {"launcher_spa", "mission_control", "launcher"},
             match=["/dashboard", home],
-            aria_label="CSS Home — Mobile Dashboard landing",
-            note="Canonical CSS Mobile Dashboard landing; not browser Back.",
+            aria_label="CSS Home — basic mobile landing",
+            note="Canonical basic mobile landing; never browser Back or an API route.",
         ),
         _dest(
             id="mission_control",
@@ -108,7 +111,7 @@ def build_enterprise_navigation_contract(
         ),
         _dest(
             id="trade",
-            label="Trade",
+            label="Trade Operations",
             spa_screen="trade" if surface == "launcher_spa" else None,
             href=None if surface == "launcher_spa" else ROUTES.mobile_trade,
             icon="trade",
@@ -139,8 +142,8 @@ def build_enterprise_navigation_contract(
     more = [
         _dest(id="positions", label="Positions", spa_screen="positions", icon="positions", more=True, match=["positions"]),
         _dest(id="execution", label="Execution", spa_screen="execution", icon="execution", more=True, match=["execution"]),
-        _dest(id="risk", label="Risk", spa_screen="risk", icon="risk", more=True, match=["risk"]),
-        _dest(id="alerts", label="Alerts", spa_screen="alerts", icon="alerts", more=True, match=["alerts"]),
+        _dest(id="risk", label="Risk Command", spa_screen="risk", icon="risk", more=True, match=["risk"]),
+        _dest(id="alerts", label="Alerts and Incidents", spa_screen="alerts", icon="alerts", more=True, match=["alerts"]),
         _dest(
             id="spa_runtime",
             label="Runtime (Mobile SPA)",
@@ -161,7 +164,7 @@ def build_enterprise_navigation_contract(
         ),
         _dest(
             id="runtime_diagnostics",
-            label="Runtime Diagnostics",
+            label="Runtime Operations",
             href=runtime_mc,
             icon="activity",
             more=True,
@@ -183,20 +186,20 @@ def build_enterprise_navigation_contract(
             href=oi_viewer,
             icon="file",
             more=True,
-            match=["/api/options-income/report.viewer", "/api/reports/options_income_executive/view"],
+            match=[ROUTES.mc_report_viewer, ROUTES.report_viewer],
             note="Opens Phase 177H paginated viewer (one page at a time).",
         ),
         _dest(
             id="report_discovery",
-            label="Report Discovery API",
+            label="Reports Catalogue",
             href=discovery,
             icon="file",
             more=True,
-            match=["/api/reports"],
+            match=[ROUTES.mc_reports, ROUTES.mobile_reports],
         ),
         _dest(
             id="certification",
-            label="Certification",
+            label="Certification and Readiness",
             href=ROUTES.mc_home.replace("executive-overview", "certification-readiness")
             if surface != "mobile"
             else cross_surface_href("/mission-control/certification-readiness", target="mission_control"),
@@ -206,7 +209,7 @@ def build_enterprise_navigation_contract(
         ),
         _dest(
             id="settings",
-            label="Settings",
+            label="System Configuration",
             href="/mission-control/system-configuration"
             if surface != "mobile"
             else cross_surface_href("/mission-control/system-configuration", target="mission_control"),
@@ -216,7 +219,7 @@ def build_enterprise_navigation_contract(
         ),
         _dest(
             id="administration",
-            label="Administration",
+            label="Users and Governance",
             href="/mission-control/users-governance"
             if surface != "mobile"
             else cross_surface_href("/mission-control/users-governance", target="mission_control"),
@@ -237,6 +240,29 @@ def build_enterprise_navigation_contract(
             d["note"] = "IBKR is roadmap-excluded from Tier-1."
 
     status = shell_status_indicators(platform_status)
+    def mc_link(path: str) -> str:
+        return (
+            path
+            if surface in {"launcher_spa", "mission_control", "launcher"}
+            else cross_surface_href(path, target="mission_control")
+        )
+    landing = [
+        _dest(id="landing_home", label="Home", href=home, aria_label="Home"),
+        _dest(id="landing_mission_control", label="Mission Control", href=mc_link(ROUTES.mc_home)),
+        _dest(id="landing_trade", label="Trade Operations", href=mc_link(ROUTES.mc_trade)),
+        _dest(id="landing_reports", label="Reports", href=mc_link(ROUTES.mc_reports)),
+        _dest(id="landing_portfolio", label="Portfolio", href=mc_link(ROUTES.mc_portfolio)),
+        _dest(id="landing_market", label="Market Intelligence", href=mc_link("/mission-control/market-intelligence")),
+        _dest(id="landing_risk", label="Risk Command", href=mc_link(ROUTES.mc_risk)),
+        _dest(id="landing_options", label="Options Income", href=mc_link(ROUTES.mc_options_income)),
+        _dest(id="landing_broker", label="Broker Management", href=mc_link(ROUTES.mc_broker)),
+        _dest(id="landing_runtime", label="Runtime Operations", href=mc_link(ROUTES.mc_runtime)),
+        _dest(id="landing_certification", label="Certification and Readiness", href=mc_link("/mission-control/certification-readiness")),
+        _dest(id="landing_alerts", label="Alerts and Incidents", href=mc_link(ROUTES.mc_alerts)),
+        _dest(id="landing_users", label="Users and Governance", href=mc_link("/mission-control/users-governance")),
+        _dest(id="landing_configuration", label="System Configuration", href=mc_link("/mission-control/system-configuration")),
+        _dest(id="landing_documentation", label="Documentation and Runbooks", href=mc_link("/mission-control/documentation-runbooks")),
+    ]
     crumbs = {
         "home": [("Home", home), ("Mobile", None)],
         "trade": [("Home", home), ("Mobile", "/mobile"), ("Trade", None)],
@@ -254,9 +280,8 @@ def build_enterprise_navigation_contract(
         "spa_entry": "/mobile",
         "pwa_start_url": "/mobile-launcher",
         "pwa_start_note": (
-            "Installed PWA opens the launcher landing (/mobile-launcher), not Mission Control. "
-            "From there operators open /mobile (SPA) or Mission Control via canonical links. "
-            "SPA hash restore may reopen the last local screen but Home always returns to the Mobile Dashboard landing."
+            "Installed PWA opens the basic landing (/mobile-launcher), not Mission Control. "
+            "Mission Control and all operational modules remain explicit destinations."
         ),
         "shell_cache": SPA_SHELL_CACHE,
         "write_routes": False,
@@ -266,6 +291,7 @@ def build_enterprise_navigation_contract(
         "primary": primary,
         "more": more,
         "destinations": destinations,
+        "landing": landing,
         "breadcrumbs": crumbs,
         "spa_screens": ["home", "positions", "execution", "trade", "risk", "alerts"],
         "active_match_rules": {

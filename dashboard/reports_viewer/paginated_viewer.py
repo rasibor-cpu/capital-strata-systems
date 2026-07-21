@@ -10,6 +10,7 @@ import html
 import json
 from typing import Any, Mapping, Sequence
 
+from backend.common.branding import get_brand_service
 from dashboard.enterprise_shell.routes import ROUTES, mobile_home_href
 
 
@@ -44,6 +45,7 @@ def render_paginated_viewer(
     title_override: str | None = None,
 ) -> str:
     """Render a full HTML document with page-oriented viewer controls."""
+    brand = get_brand_service()
     pages = _pages_from_document(document)
     page_count = int(document.get("page_count") or len(pages) or 1)
     report_title = title_override or str(document.get("title") or "CSS Report")
@@ -52,6 +54,15 @@ def render_paginated_viewer(
     css_version = str(document.get("css_version") or "")
     commit = document.get("commit_reference")
     presentation = dict(document.get("presentation") or {})
+    branding = {
+        **brand.document_context(
+            report_title=report_title,
+            generated_at=generated_at,
+            document_id=report_id,
+            runtime_version=css_version,
+        ),
+        **dict(document.get("branding") or {}),
+    }
     home = home_href or mobile_home_href(for_surface=surface if surface != "mission_control" else "mission_control")
     reports = reports_href or (ROUTES.mc_reports if surface == "mission_control" else ROUTES.mobile_reports)
 
@@ -69,6 +80,10 @@ def render_paginated_viewer(
         page_sheets.append(
             f'<article class="css-rv-page" data-page="{_esc(p["page_number"])}" hidden '
             f'aria-label="Page {_esc(p["page_number"])} of {_esc(page_count)}">'
+            f"{brand.watermark_markup()}"
+            '<header class="css-rv-document-header">'
+            f"{_esc(branding['organization'])} · {_esc(report_title)} · "
+            f"{_esc(generated_at)} · {_esc(branding['classification'])}</header>"
             f'<{heading}>{_esc(p["title"])}</{heading}>'
             f'<div class="css-rv-meta">Report ID: {_esc(report_id)} · Generated: {_esc(generated_at)}'
             f' · CSS: {_esc(css_version)}'
@@ -76,7 +91,8 @@ def render_paginated_viewer(
             + "</div>"
             f'<div class="css-rv-body">{body}</div>'
             f'<footer class="css-rv-page-footer">Page {_esc(p["page_number"])} of {_esc(page_count)}'
-            " · CSS Enterprise Reporting Standard · Advisory only · Execution blocked</footer>"
+            f" · Document {_esc(report_id)} · Runtime {_esc(css_version)}"
+            f" · {_esc(branding['confidentiality_banner'])}</footer>"
             "</article>"
         )
 
@@ -104,14 +120,14 @@ def render_paginated_viewer(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>{_esc(report_title)} — CSS Report Viewer</title>
+  <title>{_esc(report_title)} — {_esc(brand.short_application_name)} Report Viewer</title>
   <style>{_viewer_css()}</style>
 </head>
 <body class="css-rv-body-root" data-continuous-default="{str(continuous).lower()}">
   <a class="css-rv-skip" href="#css-rv-stage">Skip to report page</a>
   <header class="css-rv-toolbar" role="banner">
     <div class="css-rv-toolbar-left">
-      <a class="css-rv-brand" href="{_esc(home)}" aria-label="CSS Home">CSS</a>
+      <a class="css-rv-brand" href="{_esc(home)}" aria-label="CSS Home"><img src="{_esc(brand.asset_url('logo'))}" alt="" aria-hidden="true"><span>CSS</span></a>
       <a class="css-rv-btn" href="{_esc(home)}">Home</a>
       <a class="css-rv-btn" href="{_esc(reports)}">Back to Reports</a>
     </div>
@@ -227,8 +243,9 @@ def _esc_js(value: str) -> str:
 
 
 def _viewer_css() -> str:
-    return """
-:root { --rv-ink:#10202a; --rv-muted:#5a6b75; --rv-bg:#d8dee3; --rv-sheet:#fff; --rv-accent:#1d8a8a; }
+    brand = get_brand_service()
+    css = """
+:root { --rv-ink:__BRAND_INK__; --rv-muted:#5a6b75; --rv-bg:#d8dee3; --rv-sheet:#fff; --rv-accent:__BRAND_GOLD__; }
 * { box-sizing: border-box; }
 body.css-rv-body-root { margin:0; font-family: Georgia, "Times New Roman", serif; background:var(--rv-bg); color:var(--rv-ink); }
 .css-rv-skip { position:absolute; left:-9999px; }
@@ -244,7 +261,8 @@ body.css-rv-body-root { margin:0; font-family: Georgia, "Times New Roman", serif
   color:#fff; text-decoration:none; font-size:14px; cursor:pointer;
 }
 .css-rv-btn:focus-visible, .css-rv-toolbar a:focus-visible { outline:2px solid #68a8ff; outline-offset:2px; }
-.css-rv-brand { font-weight:800; letter-spacing:.04em; }
+.css-rv-brand { font-weight:800; letter-spacing:.04em; gap:8px; }
+.css-rv-brand img { width:28px; height:28px; border-radius:6px; }
 .css-rv-toolbar-center { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 .css-rv-toolbar-right, .css-rv-toolbar-left { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
 .css-rv-page-label select { min-height:44px; font-size:14px; }
@@ -259,6 +277,7 @@ body.css-rv-body-root { margin:0; font-family: Georgia, "Times New Roman", serif
 }
 .css-rv-page h1 { font-size:22pt; margin:0 0 12px; }
 .css-rv-page h2 { font-size:14pt; margin:0 0 10px; }
+.css-rv-document-header { font-size:9pt; color:#555; border-bottom:1px solid #ddd; padding-bottom:6px; margin-bottom:12px; }
 .css-rv-meta { color:var(--rv-muted); font-size:10pt; margin-bottom:16px; font-family:"Segoe UI", Arial, sans-serif; }
 .css-rv-body { font-size:11pt; line-height:1.45; white-space:pre-wrap; word-break:break-word; }
 .css-rv-page-footer { margin-top:24px; padding-top:8px; border-top:1px solid #ccc; font-size:9pt; color:#666; font-family:"Segoe UI", Arial, sans-serif; }
@@ -279,6 +298,11 @@ body.css-rv-readable .css-rv-body { font-size:16px; line-height:1.6; }
   .css-rv-page[hidden] { display:block !important; }
 }
 """
+    return (
+        css.replace("__BRAND_INK__", brand.palette.ink)
+        .replace("__BRAND_GOLD__", brand.palette.gold)
+        + brand.watermark_css(page_selector=".css-rv-page")
+    )
 
 
 def document_from_pages(
@@ -292,6 +316,7 @@ def document_from_pages(
     presentation: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     page_list = list(pages)
+    brand = get_brand_service()
     return {
         "title": title,
         "report_id": report_id,
@@ -301,6 +326,12 @@ def document_from_pages(
         "page_count": len(page_list),
         "pages": [dict(p) for p in page_list],
         "presentation": dict(presentation or {"page_size": "A4", "viewer_hints": {"continuous_scroll_default": False}}),
+        "branding": brand.document_context(
+            report_title=title,
+            generated_at=generated_at,
+            document_id=report_id,
+            runtime_version=css_version,
+        ),
     }
 
 

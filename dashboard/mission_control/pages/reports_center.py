@@ -220,6 +220,7 @@ def _report_card(report: dict, can_generate: bool) -> str:
     <div><dt>Limitations</dt><dd>{limitations}</dd></div>
   </dl>
   <div class="rc-actions">
+    <a class="rc-btn" href="/mission-control/reports/viewer?source=reports_center&amp;report_code={code}">Open report</a>
     <button type="button" class="rc-btn" data-rc-action="view" data-report-code="{code}">View readiness</button>
     <button type="button" class="rc-btn rc-btn-primary" data-rc-action="generate-open" data-report-code="{code}"{gen_disabled}>{gen_label}</button>
   </div>
@@ -325,8 +326,8 @@ def _detail_panel() -> str:
     <a class="rc-btn rc-btn-primary" id="rc-detail-pdf-link" href="#" target="_blank" rel="noopener" data-rc-pdf-open="1">Open PDF</a>
     <button type="button" class="rc-btn" data-rc-detail="print">Print preview</button>
     <a class="rc-btn" id="rc-detail-print-link" href="#" target="_blank" rel="noopener">View Report (HTML)</a>
-    <a class="rc-btn" href="/api/options-income/report.viewer">Options Income paginated viewer</a>
-    <a class="rc-btn" href="/api/reports">Report discovery API</a>
+    <a class="rc-btn" href="/mission-control/reports/viewer?report_code=options_income_executive">Options Income paginated viewer</a>
+    <a class="rc-btn" href="/mission-control/reports">Reports catalogue</a>
     <button type="button" class="rc-btn" data-rc-detail="pdf-status">PDF status</button>
     <button type="button" class="rc-btn" data-rc-detail="versions">Versions</button>
     <button type="button" class="rc-btn" data-rc-detail="audit">Audit</button>
@@ -458,7 +459,7 @@ def _scripts() -> str:
   async function openReport(reportId) {
     currentReportId = reportId;
     detailActions.hidden = false;
-    printLink.href = '/api/v1/reports/' + encodeURIComponent(reportId) + '/print';
+    printLink.href = '/mission-control/reports/viewer?source=reports_center&report_id=' + encodeURIComponent(reportId);
     const pdfLink = document.getElementById('rc-detail-pdf-link');
     // Phase 176I: Open PDF must navigate only to the canonical PDF bytes route.
     if (pdfLink) pdfLink.href = canonicalPdfHref(reportId);

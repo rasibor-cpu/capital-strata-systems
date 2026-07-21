@@ -30,9 +30,9 @@ def test_nav_contract_primary_destinations():
 
 
 def test_nav_contract_rejects_unsafe_bases(monkeypatch):
-    monkeypatch.setenv("CSS_MOBILE_DASHBOARD_BASE_URL", "javascript:alert(1)")
+    monkeypatch.setenv("CSS_LAUNCHER_PUBLIC_URL", "javascript:alert(1)")
     href = mobile_home_href(for_surface="mission_control")
-    assert href == "/dashboard"
+    assert href == "/mobile-launcher"
     assert "javascript:" not in href
     assert "localhost" not in href
 
@@ -54,8 +54,8 @@ def test_launcher_spa_consumes_enterprise_nav():
     assert page.status_code == 200
     text = page.text
     assert "CSS enterprise primary navigation" in text
-    assert 'data-shell-cache="css-launcher-spa-shell-v177h1"' in text
-    assert "CSS Home — return to Mobile Dashboard landing" in text
+    assert 'data-shell-cache="css-launcher-spa-shell-rc11"' in text
+    assert "CSS Home — return to basic mobile landing" in text
     assert "Runtime" in text and "DISABLED" in text
     assert "Execution" in text and "BLOCKED" in text
     assert "READ_ONLY" in text
@@ -64,7 +64,7 @@ def test_launcher_spa_consumes_enterprise_nav():
     assert 'href="/mission-control/reports"' in text or ">Reports<" in text
     assert "css-spa-more-panel" in text
     assert "Positions" in text
-    assert "/api/options-income/report.viewer" in text
+    assert "/mission-control/reports/viewer" in text
     assert "enterpriseNav" in text or "enterprise_nav" in text
     assert "localhost" not in text.lower() or "127.0.0.1" not in text  # no phone-inaccessible hard-codes in nav
     assert "ibkr" not in text.lower()

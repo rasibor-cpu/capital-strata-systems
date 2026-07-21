@@ -20,15 +20,10 @@ def render(state: dict) -> str:
         + (
             '<section class="mc-panel" aria-label="Options Income reports">'
             "<h2>Reports</h2>"
-            '<p><a class="rc-btn rc-btn-primary" href="/api/options-income/report.viewer">'
+            '<p><a class="rc-btn rc-btn-primary" href="/mission-control/reports/viewer?report_code=options_income_executive">'
             "Open paginated Options Income report</a> "
-            '<a class="rc-btn" href="/api/options-income/report.html" target="_blank" rel="noopener">'
-            "Printable continuous pages</a> "
-            '<a class="rc-btn" href="/mission-control/reports">Reports hub</a> '
-            '<a class="rc-btn" href="/api/reports/options_income_executive/view">'
-            "Discovery viewer</a></p>"
-            "<p class=\"mc-muted\">Default human-facing view is page-oriented (Previous/Next). "
-            "Continuous HTML is print fallback only.</p>"
+            '<a class="rc-btn" href="/mission-control/reports">Reports hub</a></p>'
+            "<p class=\"mc-muted\">All human-facing report links use the shared paginated viewer.</p>"
             "</section>"
         )
         + metric_grid(
