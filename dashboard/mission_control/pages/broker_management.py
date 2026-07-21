@@ -4,6 +4,69 @@ from dashboard.mission_control.pages._components import detail_table, metric_gri
 
 
 def render(state: dict) -> str:
+    authorization = state.get("authorization_context") if isinstance(state.get("authorization_context"), dict) else {}
+    diagnostics_allowed = bool(
+        authorization.get("authenticated")
+        and authorization.get("active")
+        and str(authorization.get("role") or "").upper() in {"SUPER_USER", "ADMIN"}
+    )
+    if diagnostics_allowed:
+        enterprise_runtime = section(state, "enterprise_broker_runtime")
+        runtime_health = (
+            enterprise_runtime.get("broker_health")
+            if isinstance(enterprise_runtime.get("broker_health"), dict)
+            else {}
+        )
+        bindings = runtime_health.get("bindings") if isinstance(runtime_health.get("bindings"), list) else []
+        questrade_binding = next(
+            (
+                row
+                for row in bindings
+                if isinstance(row, dict) and row.get("broker") == "QUESTRADE"
+            ),
+            {},
+        )
+        questrade_panel = {
+            "Operational State": runtime_health.get("status", "CONFIGURATION_REQUIRED"),
+            "Secure Configuration": "ENTERPRISE_HANDLES_ONLY"
+            if questrade_binding
+            else "CONFIGURATION_REQUIRED",
+            "Authorization State": (
+                "OAUTH_HANDLE_BOUND"
+                if questrade_binding.get("oauth_handle")
+                else "CONFIGURATION_REQUIRED"
+            ),
+            "Token Health": enterprise_runtime.get("secret_lease_health", []),
+            "API Server Health": enterprise_runtime.get("provider_health", {}),
+            "Account Selection": enterprise_runtime.get("holdings_readiness", {}).get(
+                "account_id_sanitized"
+            )
+            if isinstance(enterprise_runtime.get("holdings_readiness"), dict)
+            else None,
+            "Balances": enterprise_runtime.get("holdings_readiness", {}).get("status")
+            if isinstance(enterprise_runtime.get("holdings_readiness"), dict)
+            else None,
+            "Holdings": enterprise_runtime.get("holdings_readiness", {}).get("status")
+            if isinstance(enterprise_runtime.get("holdings_readiness"), dict)
+            else None,
+            "Market Data": enterprise_runtime.get("market_data_readiness", []),
+            "Option Chain": enterprise_runtime.get("options_readiness", []),
+            "Certification": (
+                enterprise_runtime.get("certification", {}).get("outcome")
+                if isinstance(enterprise_runtime.get("certification"), dict)
+                else "NOT_CERTIFIED"
+            ),
+            "Required Action": "Resolve certification blockers",
+            "OAuth Launch Enabled": False,
+            "Credential Form Enabled": False,
+            "Execution": "EXECUTION_BLOCKED",
+        }
+    else:
+        questrade_panel = {
+            "Status": "AUTHENTICATION_REQUIRED",
+            "Detail": "Authenticate to view Questrade configuration and token-health metadata",
+            "Execution": "EXECUTION_BLOCKED",
+        }
     brokers = section(state, "brokers")
     active = brokers.get("active_broker", {}) if isinstance(brokers.get("active_broker"), dict) else {}
     selection = brokers.get("selection", {}) if isinstance(brokers.get("selection"), dict) else {}
@@ -12,6 +75,7 @@ def render(state: dict) -> str:
     roles = brokers.get("primary_roles", {}) if isinstance(brokers.get("primary_roles"), dict) else {}
     telemetry = section(state, "broker_telemetry")
     registry = section(state, "broker_registry_console")
+    enterprise_runtime = section(state, "enterprise_broker_runtime")
     broker_list = brokers.get("broker_list", []) if isinstance(brokers.get("broker_list"), list) else []
     # Compact Tier-1 status table for Mission Control (Role + Status)
     tier_rows = []
@@ -41,7 +105,7 @@ def render(state: dict) -> str:
             }
         )
     return (
-        page_header("Broker Management", "Phase 178B canonical Tier-1 operational states — expected conditions are structured and execution remains blocked.")
+        page_header("Broker Management", "Canonical Tier-1 states with secure Questrade read-only onboarding — execution remains blocked.")
         + warning_banner("Broker selection and onboarding controls are disabled. LIVE_READ_ONLY only — execution blocked.", status="bad")
         + metric_grid(
             (
@@ -95,6 +159,22 @@ def render(state: dict) -> str:
             }),
             detail_table("Selection Preview", selection),
             detail_table("Onboarding Shell", onboarding),
+            detail_table("Questrade Secure Read-Only Onboarding", questrade_panel),
+            detail_table("Enterprise Broker Health", enterprise_runtime.get("broker_health", {})),
+            detail_table("OAuth Status", enterprise_runtime.get("oauth_status", [])),
+            detail_table("Secret Lease Health", enterprise_runtime.get("secret_lease_health", [])),
+            detail_table(
+                "Credential Governance Summary",
+                enterprise_runtime.get("credential_governance_summary", {}),
+            ),
+            detail_table("Provider Health", enterprise_runtime.get("provider_health", {})),
+            detail_table("Holdings Readiness", enterprise_runtime.get("holdings_readiness", {})),
+            detail_table("Market Data Readiness", enterprise_runtime.get("market_data_readiness", [])),
+            detail_table("Options Readiness", enterprise_runtime.get("options_readiness", [])),
+            detail_table(
+                "Advisory Readiness",
+                {"status": enterprise_runtime.get("advisory_readiness", "DATA_DEPENDENCY_BLOCKED")},
+            ),
             detail_table("Broker Safety", safety),
         )
     )

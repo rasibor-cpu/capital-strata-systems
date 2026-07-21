@@ -1870,22 +1870,32 @@ def _mobile_dashboard_text_from_payload(dashboard_payload: Dict[str, Any]) -> st
     session = _mapping(dashboard_payload.get("session"))
     execution = _mapping(dashboard_payload.get("execution_summary"))
     broker = _mapping(dashboard_payload.get("broker_summary"))
-    return "\n".join(
-        [
-            "Capital Strata Systems mobile dashboard",
-            f"Mode: {dashboard_payload.get('resolved_mode', 'paper')}",
-            f"Engine: {session.get('engine_mode', 'SAFE')}",
-            f"Broker: {broker.get('selected_broker', account.get('broker', 'MOBILE'))}",
-            f"Broker state: {broker.get('canonical_operational_state', 'DISABLED')}",
-            f"Broker action: {broker.get('required_action') or 'None'}",
-            f"Account state: {broker.get('account_state', 'UNAVAILABLE')}",
-            f"Market data: {broker.get('market_data_state', 'UNAVAILABLE')}",
-            f"Option chain: {broker.get('option_chain_state', 'UNAVAILABLE')}",
-            f"Account equity: {_money(account.get('total_equity'))}",
-            f"Cash: {_money(account.get('cash_balance'))}",
-            f"Execution: {execution.get('execution_state', 'MOBILE_ORDERS_DISABLED')}",
-        ]
-    )
+    lines = [
+        "Capital Strata Systems mobile dashboard",
+        f"Mode: {dashboard_payload.get('resolved_mode', 'paper')}",
+        f"Engine: {session.get('engine_mode', 'SAFE')}",
+        f"Broker: {broker.get('selected_broker', account.get('broker', 'MOBILE'))}",
+        f"Broker state: {broker.get('canonical_operational_state', 'DISABLED')}",
+        f"Broker action: {broker.get('required_action') or 'None'}",
+        f"Account state: {broker.get('account_state', 'UNAVAILABLE')}",
+        f"Market data: {broker.get('market_data_state', 'UNAVAILABLE')}",
+        f"Option chain: {broker.get('option_chain_state', 'UNAVAILABLE')}",
+        f"Account equity: {_money(account.get('total_equity'))}",
+        f"Cash: {_money(account.get('cash_balance'))}",
+        f"Execution: {execution.get('execution_state', 'MOBILE_ORDERS_DISABLED')}",
+    ]
+    questrade = _mapping(broker.get("questrade_read_only"))
+    if questrade:
+        lines.extend(
+            [
+                f"Questrade readiness: {questrade.get('readiness', 'UNAVAILABLE')}",
+                f"Questrade account: {questrade.get('selected_account') or 'NOT_SELECTED'}",
+                f"Questrade holdings: {questrade.get('holdings_status', 'UNAVAILABLE')}",
+                f"Questrade option chain: {questrade.get('option_chain_status', 'UNAVAILABLE')}",
+                "Questrade details: /mission-control/broker-management",
+            ]
+        )
+    return "\n".join(lines)
 
 
 def _mobile_dashboard_payload(

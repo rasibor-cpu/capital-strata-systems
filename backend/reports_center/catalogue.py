@@ -1031,7 +1031,30 @@ def build_catalogue() -> tuple[CSSReportDefinition, ...]:
         ("backup_recovery_status", "Backup/Recovery Status"),
         ("storage_archive_health", "Storage and Archive Health"),
     ]:
-        items.append(_coming(code, title, "operations_system", inventory="PARTIAL" if "runtime" in code or "readiness" in code else "FUTURE_CAPABILITY"))
+        if code == "production_readiness":
+            items.append(
+                defn(
+                    report_type=code,
+                    report_code=code,
+                    title=title,
+                    description="Phase 181 controlled-deployment readiness certification evidence.",
+                    category="operations_system",
+                    supported_formats=("HTML", "PDF", "JSON"),
+                    producer="reports_center.producers.production_readiness",
+                    evidence_sources=("production_readiness_certification",),
+                    printable=True,
+                    downloadable=True,
+                    status="AVAILABLE_WITH_LIMITATIONS",
+                    inventory_class="PARTIAL",
+                    limitations=(
+                        "Evidence-only controlled-deployment readiness. No deployment, "
+                        "broker authentication, or trading authorization."
+                    ),
+                    implementation_phase="181",
+                )
+            )
+        else:
+            items.append(_coming(code, title, "operations_system", inventory="PARTIAL" if "runtime" in code or "readiness" in code else "FUTURE_CAPABILITY"))
 
     # ------------------------------------------------------------------ Distribution & Print Audit (menu family)
     items.append(
@@ -1052,6 +1075,141 @@ def build_catalogue() -> tuple[CSSReportDefinition, ...]:
             implementation_phase="176",
         )
     )
+
+    # ------------------------------------------------------ Phase 179D Broker Runtime
+    for code, title in (
+        ("enterprise_broker_readiness", "Broker Readiness"),
+        ("enterprise_provider_readiness", "Provider Readiness"),
+        ("enterprise_holdings_certification", "Holdings Certification"),
+        ("enterprise_market_data_certification", "Market Data Certification"),
+        ("enterprise_runtime_dependency_matrix", "Runtime Dependency Matrix"),
+        ("enterprise_options_income_readiness", "Options Income Readiness"),
+        ("enterprise_advisory_runtime_certification", "Advisory Runtime Certification"),
+    ):
+        items.append(
+            defn(
+                report_type=code,
+                report_code=code,
+                title=title,
+                description=(
+                    f"{title} from Enterprise Broker Runtime certification evidence. "
+                    "Fails closed when evidence is unavailable."
+                ),
+                category="operations_system",
+                supported_formats=("HTML", "PDF", "JSON"),
+                producer=f"reports_center.producers.{code}",
+                evidence_sources=("enterprise_broker_runtime_certification",),
+                printable=True,
+                downloadable=True,
+                status="AVAILABLE_WITH_LIMITATIONS",
+                inventory_class="PARTIAL",
+                limitations=(
+                    "Metadata-only advisory report. Missing certification evidence produces "
+                    "FAILED rather than inferred readiness."
+                ),
+                implementation_phase="179D/179D.1",
+            )
+        )
+
+    # ---------------------------------------------------- Phase 180 Governance
+    for code, title in (
+        ("enterprise_governance_readiness", "Governance Readiness"),
+        ("enterprise_iso_27001_readiness", "ISO 27001 Readiness"),
+        ("enterprise_iso_9001_readiness", "ISO 9001 Readiness"),
+        ("enterprise_business_continuity_readiness", "Business Continuity Readiness"),
+        ("enterprise_risk_register", "Enterprise Risk Register"),
+        ("enterprise_executive_certification_summary", "Executive Certification Summary"),
+        ("enterprise_compliance_dashboard", "Compliance Dashboard"),
+        ("enterprise_outstanding_certification_blockers", "Outstanding Certification Blockers"),
+    ):
+        items.append(
+            defn(
+                report_type=code,
+                report_code=code,
+                title=title,
+                description=(
+                    f"{title} from read-only Enterprise Governance evidence. "
+                    "No ISO or production certification claim."
+                ),
+                category="compliance_audit",
+                supported_formats=("HTML", "PDF", "JSON"),
+                producer=f"reports_center.producers.{code}",
+                evidence_sources=("enterprise_governance_certification",),
+                printable=True,
+                downloadable=True,
+                status="AVAILABLE_WITH_LIMITATIONS",
+                inventory_class="PARTIAL",
+                limitations=(
+                    "Readiness evidence only. Missing evidence remains FAILED and "
+                    "formal certification is never inferred."
+                ),
+                implementation_phase="180",
+            )
+        )
+
+    # ------------------------------------------- Phase 181 Production Readiness
+    for code, title in (
+        ("operational_acceptance", "Operational Acceptance"),
+        ("endurance_readiness", "Endurance Readiness"),
+        ("disaster_recovery_readiness", "Disaster Recovery Readiness"),
+        ("deployment_readiness", "Deployment Readiness"),
+        ("production_outstanding_blockers", "Outstanding Blockers"),
+        ("final_certification_summary", "Final Certification Summary"),
+    ):
+        items.append(
+            defn(
+                report_type=code,
+                report_code=code,
+                title=title,
+                description=(
+                    f"{title} from archived Phase 181 certification evidence."
+                ),
+                category="operations_system",
+                supported_formats=("HTML", "PDF", "JSON"),
+                producer=f"reports_center.producers.{code}",
+                evidence_sources=("production_readiness_certification",),
+                printable=True,
+                downloadable=True,
+                status="AVAILABLE_WITH_LIMITATIONS",
+                inventory_class="PARTIAL",
+                limitations=(
+                    "Evidence-only report. Missing test, endurance, recovery, or "
+                    "deployment evidence remains explicit."
+                ),
+                implementation_phase="181",
+            )
+        )
+
+    # ------------------------------------------- CSS Enterprise RC1 Certification
+    for code, title in (
+        ("rc1_certification_summary", "RC1 Certification Summary"),
+        ("rc1_readiness_scorecard", "RC1 Readiness Scorecard"),
+        ("rc1_regression_evidence", "Regression Evidence"),
+        ("rc1_compile_evidence", "Compile Evidence"),
+        ("rc1_runtime_evidence", "Runtime Evidence"),
+        ("rc1_outstanding_blockers", "Outstanding Blockers"),
+    ):
+        items.append(
+            defn(
+                report_type=code,
+                report_code=code,
+                title=title,
+                description=f"{title} from immutable CSS Enterprise RC1 evidence.",
+                category="operations_system",
+                supported_formats=("HTML", "PDF", "JSON"),
+                producer=f"reports_center.producers.{code}",
+                evidence_sources=("css_enterprise_rc1_certification",),
+                printable=True,
+                downloadable=True,
+                status="AVAILABLE_WITH_LIMITATIONS",
+                inventory_class="PARTIAL",
+                limitations=(
+                    "Actual evidence only. Failed or unavailable command execution "
+                    "remains an explicit RC1 blocker."
+                ),
+                implementation_phase="RC1",
+            )
+        )
 
     # uniqueness check
     codes = [i.report_code for i in items]

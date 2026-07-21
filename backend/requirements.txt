@@ -6,3 +6,4 @@ python-dotenv
 requests
 coinbase-advanced-py
 beautifulsoup4==4.15.0
+cryptography==49.0.0

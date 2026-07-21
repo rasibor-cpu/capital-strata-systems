@@ -45,6 +45,11 @@ COINBASE_KEY_FILE_ENV_VARS = ("COINBASE_KEY_JSON_PATH", "COINBASE_KEY_JSON", "CO
 OANDA_TOKEN_ENV_VARS = ("OANDA_API_KEY", "OANDA_ACCESS_TOKEN", "OANDA_TOKEN")
 OANDA_ACCOUNT_ENV_VARS = ("OANDA_ACCOUNT_ID", "OANDA_LIVE_ACCOUNT_ID", "OANDA_PRACTICE_ACCOUNT_ID")
 OANDA_BASE_URL_ENV_VARS = ("OANDA_BASE_URL",)
+QUESTRADE_TOKEN_REFERENCE_ENV_VARS = (
+    "QUESTRADE_TOKEN_STORE_ID",
+)
+QUESTRADE_ACCOUNT_REFERENCE_ENV_VARS = ("QUESTRADE_ACCOUNT_HASH",)
+QUESTRADE_API_SERVER_ENV_VARS = ("QUESTRADE_API_SERVER", "QUESTRADE_BASE_URL", "QUESTRADE_API_URL")
 
 
 @dataclass(frozen=True)
@@ -52,10 +57,12 @@ class BrokerCredentialDiagnostics:
     broker: str
     credentials_present: bool
     key_present: bool = False
+    key_identifier_present: bool = False
     secret_present: bool = False
     private_key_present: bool = False
     token_present: bool = False
     account_present: bool = False
+    account_identifier_present: bool = False
     base_url_present: bool = False
     pem_valid: bool = False
     jwt_generated: bool = False
@@ -112,6 +119,15 @@ def diagnose_broker_credentials(
         )
     if broker_name == "oanda":
         return _oanda_diagnostics(
+            source,
+            authentication_attempted=authentication_attempted,
+            authenticated=authenticated,
+            failure_reason=failure_reason,
+            exception=exception,
+            timestamp=timestamp,
+        )
+    if broker_name == "questrade":
+        return _questrade_diagnostics(
             source,
             authentication_attempted=authentication_attempted,
             authenticated=authenticated,
@@ -313,6 +329,52 @@ def _oanda_diagnostics(
     )
 
 
+def _questrade_diagnostics(
+    env: Mapping[str, Any],
+    *,
+    authentication_attempted: bool,
+    authenticated: bool,
+    failure_reason: str | None,
+    exception: BaseException | None,
+    timestamp: str,
+) -> BrokerCredentialDiagnostics:
+    token_present = _any_present(env, QUESTRADE_TOKEN_REFERENCE_ENV_VARS)
+    account_present = _any_present(env, QUESTRADE_ACCOUNT_REFERENCE_ENV_VARS)
+    base_url_present = _any_present(env, QUESTRADE_API_SERVER_ENV_VARS)
+    missing = () if token_present else ("QUESTRADE_REFRESH_TOKEN|QUESTRADE_TOKEN_STORE_ID",)
+    reason = _explicit_reason(failure_reason, exception)
+    if not reason:
+        if not token_present:
+            reason = "MISSING_CREDENTIALS"
+        elif authentication_attempted and not authenticated:
+            reason = "AUTH_FAILED"
+        else:
+            reason = "NONE"
+    return _diagnostic(
+        broker="questrade",
+        broker_name="QUESTRADE",
+        credentials_present=token_present,
+        key_present=token_present,
+        key_identifier_present=token_present,
+        token_present=token_present,
+        account_present=account_present,
+        account_identifier_present=account_present,
+        base_url_present=base_url_present,
+        pem_valid=True,
+        authentication_attempted=authentication_attempted,
+        authenticated=authenticated,
+        failure_reason=reason,
+        canonical_failure_reason=reason,
+        readiness_status=_readiness_status(token_present, authenticated=authenticated),
+        recommended_action=_recommended_action(reason, "questrade"),
+        remediation_hint=_recommended_action(reason, "questrade"),
+        severity=_severity(reason, authenticated),
+        timestamp=timestamp,
+        missing_credentials=missing,
+        missing_credential_fields=missing,
+    )
+
+
 def _diagnostic(**kwargs: Any) -> BrokerCredentialDiagnostics:
     payload = {
         "broker": "none",
@@ -331,6 +393,8 @@ def _diagnostic(**kwargs: Any) -> BrokerCredentialDiagnostics:
     payload["readiness_status"] = str(payload.get("readiness_status", "BLOCKED") or "BLOCKED").upper()
     payload["remediation_hint"] = str(payload.get("remediation_hint", payload.get("recommended_action", "Configure broker credentials")) or "Configure broker credentials")
     payload["broker_name"] = str(payload.get("broker_name", str(payload.get("broker", "NONE")).upper()) or "NONE").upper()
+    payload.setdefault("key_identifier_present", bool(payload.get("key_present")))
+    payload.setdefault("account_identifier_present", bool(payload.get("account_present")))
     payload["missing_credential_fields"] = tuple(payload.get("missing_credential_fields", payload.get("missing_credentials", ())))
     payload["live_trading_blocked"] = True if payload.get("live_trading_blocked", True) else False
     return BrokerCredentialDiagnostics(**payload)

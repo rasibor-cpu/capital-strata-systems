@@ -349,13 +349,26 @@ def load_credentials_for_broker(
 
     try:
         if spec.credential_file.endswith(".json"):
-            return _load_json_file(credential_path)
-        return _load_env_style_file(credential_path)
+            credentials = _load_json_file(credential_path)
+        else:
+            credentials = _load_env_style_file(credential_path)
     except CredentialLoadError:
         env_credentials = _load_env_fallback_credentials(broker_name, mode)
         if env_credentials:
-            return env_credentials
-        raise
+            credentials = env_credentials
+        else:
+            raise
+    from backend.security.identity.broker_secret_adapter import (
+        redirect_legacy_mapping_if_configured,
+    )
+
+    return redirect_legacy_mapping_if_configured(
+        broker_name,
+        credentials,
+        component="backend.app.brokers.credential_loader",
+        source_path=credential_path,
+        environment=mode,
+    )
 
 
 def load_credentials(
@@ -373,6 +386,13 @@ def credential_file_exists(
     broker_name: str,
     base_dir: str = ".",
 ) -> bool:
+    from backend.security.identity.broker_secret_adapter import (
+        broker_secret_presence_if_configured,
+    )
+
+    authority_presence = broker_secret_presence_if_configured(broker_name)
+    if authority_presence is True:
+        return True
     spec = get_broker_spec(broker_name)
     credential_path = os.path.join(base_dir, spec.credential_file)
 

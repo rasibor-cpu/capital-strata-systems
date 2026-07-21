@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from math import isfinite
+import re
 from typing import Any
 
 
@@ -13,6 +14,16 @@ SAFE_FLAGS = {
 }
 SECRET_TOKENS = ("secret", "token", "private", "credential", "password", "pem", "jwt", "api_key", "apikey", "signature")
 ORDER_CAPABLE_TOKENS = ("submit_order", "place_order", "cancel_order", "execute_trade", "enable_live", "arm_execution")
+_CREDENTIAL_METADATA_KEYS = {
+    "credential_type",
+    "credential_name",
+    "credential_id",
+    "credential_count",
+    "secret_type",
+    "secret_uuid",
+    "secret_count",
+}
+_METADATA_LABEL = re.compile(r"^[A-Z0-9_.:/-]{1,128}$", re.I)
 
 
 def mission_control_safety_payload(source: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -76,6 +87,12 @@ def _scan_secret_payload(payload: Any, *, path: str, reasons: list[str]) -> None
             key_text = str(key).lower()
             next_path = f"{path}.{key}" if path else str(key)
             if any(token in key_text for token in SECRET_TOKENS):
+                if key_text in _CREDENTIAL_METADATA_KEYS and (
+                    isinstance(value, int)
+                    or (isinstance(value, str) and _METADATA_LABEL.fullmatch(value))
+                ):
+                    _scan_secret_payload(value, path=next_path, reasons=reasons)
+                    continue
                 safe_label = str(value).upper() in {
                     "PRESENT",
                     "MISSING",

@@ -29,6 +29,7 @@ from backend.options.options_income_dashboard_payloads import (
     OPTIONS_INCOME_ENGINE_VERSION,
 )
 from backend.options.paper_position_repository import SAFE_FLAGS
+from backend.brokers.runtime.runtime_models import resolve_advisory_state
 
 SCHEMA_VERSION = "css.options_income.runtime.v1"
 SNAPSHOT_RELATIVE = Path("artifacts") / "options_income_runtime_snapshot.json"
@@ -329,36 +330,39 @@ def _classify_engine_status(
     scanner_completed: bool,
     advisory: Mapping[str, Any] | None = None,
 ) -> str:
-    if not imports_ok:
-        return STATUS_FAILED
     summary = dashboard.get("summary") if isinstance(dashboard.get("summary"), Mapping) else {}
     fail_closed = str(summary.get("engine_status") or "").upper() == "FAIL_CLOSED"
     missing = list(deps.get("missing_dependencies") or [])
     advisory_status = str((advisory or {}).get("readiness_status") or (advisory or {}).get("status") or "").upper()
-    if dashboard.get("correlation_id"):
-        return STATUS_FAILED
-    if advisory_status == "FAILED" or (advisory or {}).get("failed"):
-        return STATUS_FAILED
-    if fail_closed:
-        # Expected input gates are dependency failures; all other fail-closed
-        # dashboard outcomes are unexpected engine failures.
-        if advisory_status == STATUS_DATA_DEPENDENCY_BLOCKED or missing:
-            return STATUS_DATA_DEPENDENCY_BLOCKED
-        return STATUS_FAILED
-    if advisory_status == STATUS_DATA_DEPENDENCY_BLOCKED:
-        return STATUS_DATA_DEPENDENCY_BLOCKED
-    if advisory_status == STATUS_PROVIDER_UNAVAILABLE:
-        return STATUS_PROVIDER_UNAVAILABLE
-    if advisory_status == "STALE" or (advisory or {}).get("stale"):
-        return STATUS_STALE
-    if advisory_status in {"PARTIAL_DATA", "DEGRADED"} or (advisory or {}).get("partial"):
-        return STATUS_PARTIAL_DATA
-    if missing or not scanner_completed:
-        return STATUS_DATA_DEPENDENCY_BLOCKED
+    states: list[str] = []
+    if (
+        not imports_ok
+        or dashboard.get("correlation_id")
+        or advisory_status in {"FAILED", "FAILURE"}
+        or (advisory or {}).get("failed")
+    ):
+        states.append("FAILURE")
+    aliases = {
+        STATUS_DATA_DEPENDENCY_BLOCKED: "DATA_DEPENDENCY_BLOCKED",
+        STATUS_PROVIDER_UNAVAILABLE: "PROVIDER_UNAVAILABLE",
+        STATUS_STALE: "STALE",
+        STATUS_PARTIAL_DATA: "PARTIAL_DATA",
+        "DEGRADED": "PARTIAL_DATA",
+    }
+    if advisory_status in aliases:
+        states.append(aliases[advisory_status])
+    if (advisory or {}).get("stale"):
+        states.append("STALE")
+    if (advisory or {}).get("partial"):
+        states.append("PARTIAL_DATA")
+    if not advisory_status and (missing or not scanner_completed):
+        states.append("DATA_DEPENDENCY_BLOCKED")
+    if fail_closed and not states:
+        states.append("FAILURE")
     _ = position_count
-    if opportunity_count > 0:
-        return STATUS_ADVISORY_READY
-    return STATUS_NO_CURRENT_OPPORTUNITIES
+    states.append("ADVISORY_READY" if opportunity_count > 0 else "NO_CURRENT_OPPORTUNITIES")
+    resolved = resolve_advisory_state(states).value
+    return STATUS_FAILED if resolved == "FAILURE" else resolved
 
 
 def _build_certification(

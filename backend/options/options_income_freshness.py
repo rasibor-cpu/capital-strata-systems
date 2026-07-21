@@ -15,6 +15,9 @@ FRESHNESS_LIMITS_SECONDS: dict[str, int] = {
     "volatility_history": 86400,
     "market_calendar": 86400,
 }
+EXPIRY_LIMITS_SECONDS: dict[str, int] = {
+    key: value * 3 for key, value in FRESHNESS_LIMITS_SECONDS.items()
+}
 
 
 def utc_now() -> str:
@@ -43,41 +46,58 @@ def evaluate_freshness(
     now: str | None = None,
 ) -> dict[str, Any]:
     limit = int(FRESHNESS_LIMITS_SECONDS.get(data_type, 900))
+    expiry_limit = int(EXPIRY_LIMITS_SECONDS.get(data_type, limit * 3))
     age = age_seconds(provider_timestamp, now=now)
     generated = now or utc_now()
     if provider_timestamp is None:
         return {
             "data_type": data_type,
             "limit_seconds": limit,
+            "stale_threshold_seconds": limit,
+            "expiry_threshold_seconds": expiry_limit,
             "age_seconds": None,
             "freshness": "UNKNOWN",
-            "stale": True,
+            "stale": False,
             "stale_reason": "missing_provider_timestamp",
             "generated_at": generated,
+            "acquisition_timestamp": generated,
             "provider_timestamp": None,
+            "expired": False,
+            "advisory_status": "TIMESTAMP_REQUIRED",
         }
     if age is None:
         return {
             "data_type": data_type,
             "limit_seconds": limit,
+            "stale_threshold_seconds": limit,
+            "expiry_threshold_seconds": expiry_limit,
             "age_seconds": None,
             "freshness": "UNKNOWN",
-            "stale": True,
+            "stale": False,
             "stale_reason": "unparseable_timestamp",
             "generated_at": generated,
+            "acquisition_timestamp": generated,
             "provider_timestamp": provider_timestamp,
+            "expired": False,
+            "advisory_status": "TIMESTAMP_INVALID",
         }
     stale = age > limit
+    expired = age > expiry_limit
     return {
         "data_type": data_type,
         "limit_seconds": limit,
+        "stale_threshold_seconds": limit,
+        "expiry_threshold_seconds": expiry_limit,
         "age_seconds": round(age, 3),
         "freshness": "STALE" if stale else "FRESH",
         "stale": stale,
         "stale_reason": f"age_exceeds_{limit}s" if stale else None,
         "generated_at": generated,
+        "acquisition_timestamp": generated,
         "provider_timestamp": provider_timestamp,
+        "expired": expired,
+        "advisory_status": "DATA_DEPENDENCY_BLOCKED" if expired else ("STALE" if stale else "ADVISORY_READY"),
     }
 
 
-__all__ = ["FRESHNESS_LIMITS_SECONDS", "age_seconds", "evaluate_freshness", "utc_now"]
+__all__ = ["EXPIRY_LIMITS_SECONDS", "FRESHNESS_LIMITS_SECONDS", "age_seconds", "evaluate_freshness", "utc_now"]

@@ -36,21 +36,31 @@ class ProviderUnavailableError(QuestradeAdvisoryError):
     code = "PROVIDER_UNAVAILABLE"
 
 
+class InvalidGrantError(QuestradeAdvisoryError):
+    code = "INVALID_GRANT"
+
+
+class AuthorizationRevokedError(QuestradeAdvisoryError):
+    code = "AUTHORIZATION_REVOKED"
+
+
+class UnsafeApiServerError(QuestradeAdvisoryError):
+    code = "API_SERVER_REJECTED"
+
+
 def sanitize_error_message(exc: BaseException) -> str:
-    text = f"{type(exc).__name__}:{exc}"
-    lowered = text.lower()
-    for needle in ("token", "secret", "password", "authorization", "bearer", "refresh"):
-        if needle in lowered:
-            return f"{type(exc).__name__}:[redacted]"
-    return text[:200]
+    return f"{type(exc).__name__}:[redacted]"
 
 
 __all__ = [
     "AuthenticationNotActivatedError",
+    "AuthorizationRevokedError",
+    "InvalidGrantError",
     "ConfigurationRequiredError",
     "ProviderUnavailableError",
     "QuestradeAdvisoryError",
     "RateLimitError",
     "SymbolUnsupportedError",
+    "UnsafeApiServerError",
     "sanitize_error_message",
 ]

@@ -9,6 +9,8 @@ from typing import Any, Mapping, Sequence
 
 from backend.app.brokers.operational_adapter import get_operational_adapter
 from backend.app.brokers.operational_state import BrokerCapability
+from backend.brokers.questrade.advisory_adapter import QuestradeAdvisoryAdapter
+from backend.brokers.questrade.contracts import account_restrictions
 from backend.brokers.questrade.readiness import questrade_advisory_readiness
 from backend.options.options_income_advisory_contracts import SCHEMA_VERSION, broker_capability_truth
 from backend.options.options_income_collateral_authority import resolve_collateral_authority
@@ -58,6 +60,7 @@ def resolve_options_income_advisory_data(
     holdings_provider: Any | None = None,
     calendar_provider: Mapping[str, Any] | None = None,
     event_provider: Mapping[str, Any] | None = None,
+    enterprise_broker_provider: Any | None = None,
     generated_at: str | None = None,
 ) -> dict[str, Any]:
     """Assemble canonical advisory inputs. Providers default to registry (usually empty)."""
@@ -66,13 +69,45 @@ def resolve_options_income_advisory_data(
     md_provider = market_data_provider if market_data_provider is not None else get_market_data_provider()
     chain_provider = option_chain_provider if option_chain_provider is not None else get_option_chain_provider()
     hold_provider = holdings_provider if holdings_provider is not None else get_holdings_provider()
+    questrade_adapter: QuestradeAdvisoryAdapter | None = None
+    if broker and str(broker).upper() == "QUESTRADE":
+        if enterprise_broker_provider is not None:
+            md_provider = market_data_provider or enterprise_broker_provider
+            chain_provider = option_chain_provider or enterprise_broker_provider
+            hold_provider = holdings_provider or enterprise_broker_provider
+        else:
+            questrade_adapter = QuestradeAdvisoryAdapter()
+            md_provider = md_provider or questrade_adapter
+            chain_provider = chain_provider or questrade_adapter
+            hold_provider = hold_provider or questrade_adapter
 
     registry = provider_registry_status()
     capabilities = broker_capability_truth()
-    questrade = questrade_advisory_readiness(probe_env=True)
+    questrade = (
+        enterprise_broker_provider.operational_summary()
+        if enterprise_broker_provider is not None
+        and hasattr(enterprise_broker_provider, "operational_summary")
+        else (
+            questrade_adapter.readiness()
+            if questrade_adapter
+            else questrade_advisory_readiness(probe_env=True)
+        )
+    )
     broker_operational: dict[str, Any] | None = None
     broker_option_chain_state: dict[str, Any] | None = None
-    if broker and str(broker).upper() in {"COINBASE", "BINANCE", "OANDA", "QUESTRADE"}:
+    if enterprise_broker_provider is not None and broker and str(broker).upper() == "QUESTRADE":
+        broker_operational = dict(questrade)
+        permits_options = bool(
+            getattr(enterprise_broker_provider, "capabilities", None)
+            and enterprise_broker_provider.capabilities.permits("OPTION_CHAINS")
+        )
+        broker_option_chain_state = {
+            "state": "ADVISORY_READY" if permits_options else "DATA_DEPENDENCY_BLOCKED",
+            "success": permits_options,
+            "expected_condition": True,
+            "execution_allowed": False,
+        }
+    elif broker and str(broker).upper() in {"COINBASE", "BINANCE", "OANDA", "QUESTRADE"}:
         operational_adapter = get_operational_adapter(str(broker))
         broker_operational = operational_adapter.operational_snapshot()
         if hasattr(operational_adapter, "option_chain"):
@@ -82,8 +117,12 @@ def resolve_options_income_advisory_data(
     broker_advisory_ready = bool(
         broker
         and broker_operational
-        and str(broker_operational.get("operational_state") or "").upper()
-        in {"ACCOUNT_READY", "HOLDINGS_READY", "READ_ONLY_READY", "ADVISORY_READY"}
+        and str(
+            broker_operational.get("operational_state")
+            or broker_operational.get("broker_health")
+            or ""
+        ).upper()
+        in {"ACCOUNT_READY", "HOLDINGS_READY", "READ_ONLY_READY", "ADVISORY_READY", "READY"}
         and broker_option_chain_state
         and bool(broker_option_chain_state.get("success"))
     )
@@ -97,6 +136,11 @@ def resolve_options_income_advisory_data(
 
     holdings = fetch_account_holdings(provider=hold_provider, broker=broker, generated_at=ts)
     collateral = resolve_collateral_authority(holdings=holdings, generated_at=ts)
+    restrictions = (
+        account_restrictions(holdings.get("account_type"))
+        if broker and str(broker).upper() == "QUESTRADE"
+        else None
+    )
     events = resolve_market_event_context(
         underlying=symbols[0] if symbols else None,
         calendar_provider=calendar_provider,
@@ -122,6 +166,7 @@ def resolve_options_income_advisory_data(
                 holdings=holdings,
                 chain=chain,
                 broker_supports_listed_options=broker_ok,
+                account_restrictions=restrictions,
             )
         )
 
@@ -131,6 +176,7 @@ def resolve_options_income_advisory_data(
         collateral=collateral,
         chain=chain_rows[0] if chain_rows else None,
         broker_supports_listed_options=broker_ok,
+        account_restrictions=restrictions,
     )
 
     market_ready = any(str(r.get("status") or "").upper() == "READY" for r in market_rows)
@@ -159,14 +205,39 @@ def resolve_options_income_advisory_data(
     if not broker_advisory_ready:
         missing.append("BROKER_OPERATIONAL_READINESS")
 
-    chain_not_configured = all(
-        str(r.get("status") or "").upper() == "OPTION_CHAIN_PROVIDER_NOT_CONFIGURED" for r in chain_rows
-    ) if chain_rows else (chain_provider is None)
+    source_statuses = {
+        str(row.get("status") or "").upper()
+        for row in (*market_rows, *chain_rows, holdings)
+    }
+    dependency_states = {
+        "NOT_CONFIGURED",
+        "CONFIGURATION_REQUIRED",
+        "CREDENTIALS_REQUIRED",
+        "AUTHENTICATION_REQUIRED",
+        "TOKEN_REFRESH_REQUIRED",
+        "ACCOUNT_REQUIRED",
+        "HOLDINGS_REQUIRED",
+        "MARKET_DATA_REQUIRED",
+        "OPTION_CHAIN_PROVIDER_NOT_CONFIGURED",
+        "OPTION_CHAIN_PROVIDER_REQUIRED",
+        "INCOMPLETE",
+    }
+    unavailable_states = {
+        "PROVIDER_UNAVAILABLE",
+        "BROKER_UNAVAILABLE",
+        "MARKET_DATA_UNAVAILABLE",
+        "OPTION_CHAIN_UNAVAILABLE",
+        "RATE_LIMITED",
+    }
+    dependency_blocked = bool(source_statuses & dependency_states)
+    provider_unavailable = bool(source_statuses & unavailable_states)
 
-    if chain_not_configured:
-        readiness_status = "DATA_DEPENDENCY_BLOCKED"
-    elif failed and not (chain_ready or stale):
+    if failed:
         readiness_status = "FAILED"
+    elif dependency_blocked:
+        readiness_status = "DATA_DEPENDENCY_BLOCKED"
+    elif provider_unavailable:
+        readiness_status = "PROVIDER_UNAVAILABLE"
     elif stale:
         readiness_status = "STALE"
     elif partial and not (market_ready and chain_ready and holdings_ready):
@@ -199,6 +270,7 @@ def resolve_options_income_advisory_data(
         "provider_registry": registry,
         "broker_capability_truth": capabilities,
         "questrade_readiness": questrade,
+        "account_restrictions": restrictions,
         "broker": broker,
         "broker_listed_options_compatible": broker_ok,
         "broker_operational_state": broker_operational,

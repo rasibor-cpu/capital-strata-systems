@@ -13,8 +13,11 @@ from backend.options.options_income_freshness import utc_now
 
 # Authority levels (highest first)
 AUTHORITY_BROKER = "BROKER_REPORTED"
+AUTHORITY_BROKER_BUYING_POWER = "BROKER_BUYING_POWER"
+AUTHORITY_MARGIN = "BROKER_MARGIN"
+AUTHORITY_OPTION_COLLATERAL = "BROKER_OPTION_COLLATERAL"
 AUTHORITY_HOLDINGS = "ACCOUNT_HOLDINGS_CASH"
-AUTHORITY_DERIVED = "CSS_DERIVED_ADVISORY"
+AUTHORITY_DERIVED = "ENTERPRISE_ESTIMATE"
 AUTHORITY_UNAVAILABLE = "UNAVAILABLE"
 
 SIMULATED_FIXTURE_MARKERS = {
@@ -29,6 +32,10 @@ SIMULATED_FIXTURE_MARKERS = {
 
 def resolve_collateral_authority(
     *,
+    broker_buying_power: Mapping[str, Any] | None = None,
+    broker_margin: Mapping[str, Any] | None = None,
+    broker_option_collateral: Mapping[str, Any] | None = None,
+    enterprise_estimate: Mapping[str, Any] | None = None,
     broker_collateral: Mapping[str, Any] | None = None,
     holdings: Mapping[str, Any] | None = None,
     css_derived: Mapping[str, Any] | None = None,
@@ -37,28 +44,66 @@ def resolve_collateral_authority(
     """Return the highest reliable collateral envelope."""
     ts = generated_at or utc_now()
 
-    broker = dict(broker_collateral or {})
-    if _broker_collateral_reliable(broker):
+    hold = dict(holdings or {})
+    hierarchy = (
+        (
+            AUTHORITY_BROKER_BUYING_POWER,
+            dict(broker_buying_power or {})
+            or _holding_value(hold, "buying_power", "broker_buying_power"),
+            "broker_reported_buying_power",
+        ),
+        (
+            AUTHORITY_MARGIN,
+            dict(broker_margin or {})
+            or _holding_value(hold, "maintenance_excess", "broker_margin"),
+            "broker_reported_margin",
+        ),
+        (
+            AUTHORITY_OPTION_COLLATERAL,
+            dict(broker_option_collateral or {})
+            or _holding_value(hold, "option_collateral", "broker_option_collateral"),
+            "broker_reported_option_collateral",
+        ),
+    )
+    for authority, broker, basis in hierarchy:
+        if not _broker_collateral_reliable(broker):
+            continue
         return collateral_envelope(
             generated_at=ts,
             status="READY",
-            authority_level=AUTHORITY_BROKER,
+            authority_level=authority,
             source=str(broker.get("source") or "BROKER"),
             provenance="BROKER",
             currency=broker.get("currency"),
             value=float(broker["value"]),
-            calculation_basis=broker.get("calculation_basis") or "broker_reported_buying_power_or_collateral",
-            timestamp=broker.get("timestamp") or ts,
+            calculation_basis=broker.get("calculation_basis") or basis,
+            timestamp=broker.get("timestamp") or broker.get("provider_timestamp"),
             haircut_or_reserve=broker.get("haircut_or_reserve"),
             broker_confirmed=True,
             css_derived=False,
         )
 
-    hold = dict(holdings or {})
+    legacy_broker = dict(broker_collateral or {})
+    if _broker_collateral_reliable(legacy_broker):
+        return collateral_envelope(
+            generated_at=ts,
+            status="READY",
+            authority_level=AUTHORITY_BROKER,
+            source=str(legacy_broker.get("source") or "BROKER"),
+            provenance="BROKER",
+            currency=legacy_broker.get("currency"),
+            value=float(legacy_broker["value"]),
+            calculation_basis=legacy_broker.get("calculation_basis")
+            or "legacy_broker_reported_collateral",
+            timestamp=legacy_broker.get("timestamp") or legacy_broker.get("provider_timestamp"),
+            haircut_or_reserve=legacy_broker.get("haircut_or_reserve"),
+            broker_confirmed=True,
+            css_derived=False,
+            legacy_compatibility=True,
+        )
+
     cash = hold.get("cash")
-    bp = hold.get("buying_power")
-    value = bp if bp is not None else cash
-    if _holdings_collateral_reliable(hold, value):
+    if _holdings_collateral_reliable(hold, cash):
         return collateral_envelope(
             generated_at=ts,
             status=str(hold.get("status")).upper(),
@@ -66,26 +111,27 @@ def resolve_collateral_authority(
             source="ACCOUNT_HOLDINGS",
             provenance="ACCOUNT_HOLDINGS",
             currency=hold.get("base_currency"),
-            value=float(value),
-            calculation_basis="holdings.cash_or_buying_power",
-            timestamp=hold.get("provider_timestamp") or ts,
+            value=float(cash),
+            calculation_basis="legacy_holdings_cash",
+            timestamp=hold.get("provider_timestamp") or hold.get("timestamp") or ts,
             haircut_or_reserve=hold.get("haircut_or_reserve"),
             broker_confirmed=False,
             css_derived=False,
+            legacy_compatibility=True,
         )
 
-    derived = dict(css_derived or {})
+    derived = dict(enterprise_estimate or css_derived or {})
     if derived.get("value") is not None and not _is_simulated_fixture(derived):
         return collateral_envelope(
             generated_at=ts,
             status="DERIVED",
             authority_level=AUTHORITY_DERIVED,
-            source="CSS_DERIVED",
-            provenance="DERIVED",
+            source="ENTERPRISE_ESTIMATE",
+            provenance="ENTERPRISE_ESTIMATE",
             currency=derived.get("currency"),
             value=float(derived["value"]),
-            calculation_basis=derived.get("calculation_basis") or "css_advisory_estimate",
-            timestamp=derived.get("timestamp") or ts,
+            calculation_basis=derived.get("calculation_basis") or "enterprise_advisory_estimate",
+            timestamp=derived.get("timestamp"),
             haircut_or_reserve=derived.get("haircut_or_reserve"),
             broker_confirmed=False,
             css_derived=True,
@@ -121,6 +167,28 @@ def _is_simulated_fixture(row: Mapping[str, Any]) -> bool:
     return False
 
 
+def _holding_value(row: Mapping[str, Any], field: str, source: str) -> dict[str, Any]:
+    value = row.get(field)
+    if value is None:
+        return {}
+    return {
+        "value": value,
+        "status": row.get("status"),
+        "provenance": "BROKER"
+        if str(row.get("provenance") or "").upper() in {
+            "BROKER",
+            "ACCOUNT_HOLDINGS",
+            "QUESTRADE_BALANCES",
+        }
+        else row.get("provenance"),
+        "currency": row.get("base_currency") or row.get("currency"),
+        "timestamp": row.get("provider_timestamp") or row.get("timestamp"),
+        "freshness": row.get("freshness"),
+        "stale": row.get("stale"),
+        "source": source,
+    }
+
+
 def _valid_nonnegative_number(value: Any) -> bool:
     try:
         number = float(value)
@@ -132,7 +200,13 @@ def _valid_nonnegative_number(value: Any) -> bool:
 def _broker_collateral_reliable(row: Mapping[str, Any]) -> bool:
     if not row or _is_simulated_fixture(row) or not _valid_nonnegative_number(row.get("value")):
         return False
-    if str(row.get("status") or "").upper() not in {"READY", "AVAILABLE", "CONFIRMED"}:
+    if str(row.get("status") or "").upper() not in {
+        "READY",
+        "AVAILABLE",
+        "CONFIRMED",
+        "HOLDINGS_READY",
+        "ACCOUNT_READY",
+    }:
         return False
     if str(row.get("provenance") or "").upper() not in {"BROKER", "BROKER_API"}:
         return False
@@ -153,8 +227,11 @@ def _holdings_collateral_reliable(row: Mapping[str, Any], value: Any) -> bool:
 
 __all__ = [
     "AUTHORITY_BROKER",
+    "AUTHORITY_BROKER_BUYING_POWER",
     "AUTHORITY_DERIVED",
     "AUTHORITY_HOLDINGS",
+    "AUTHORITY_MARGIN",
+    "AUTHORITY_OPTION_COLLATERAL",
     "AUTHORITY_UNAVAILABLE",
     "resolve_collateral_authority",
 ]

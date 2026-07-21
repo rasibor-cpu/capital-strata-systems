@@ -43,7 +43,11 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
 
     def _reports_role_user(request: Request) -> tuple[str, str, Any]:
         auth = resolve_authorization_context(channel="mission_control_reports_api", request=request)
-        if not auth.authenticated or not auth.active:
+        if (
+            not auth.authenticated
+            or not auth.active
+            or str(auth.role or "").upper() not in {"SUPER_USER", "ADMIN"}
+        ):
             log_authorization_denial(
                 route=str(request.url.path),
                 auth=auth,
@@ -161,6 +165,57 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
                 "execution_allowed": False,
             }
         return JSONResponse(safe_serialize(payload))
+
+    # Phase 178D — authenticated, sanitized, GET-only Questrade diagnostics.
+    @router.get("/api/brokers/questrade/diagnostics/{section}")
+    async def questrade_read_only_diagnostics(section: str, request: Request) -> JSONResponse:
+        from backend.brokers.questrade import QuestradeAdvisoryAdapter
+
+        auth = resolve_authorization_context(channel="questrade_read_only_diagnostics", request=request)
+        if not auth.authenticated or not auth.active:
+            log_authorization_denial(
+                route=str(request.url.path),
+                auth=auth,
+                permission_requested="broker_diagnostics_view",
+                denial_reason=auth.denial_reason or "not_authenticated",
+            )
+            return JSONResponse(
+                safe_serialize({"status": "DENIED", "execution_allowed": False}),
+                status_code=403,
+            )
+        adapter = QuestradeAdvisoryAdapter()
+        handlers: dict[str, Callable[[], Mapping[str, Any]]] = {
+            "configuration": adapter.configuration_status,
+            "authorization": adapter.token_status,
+            "token-health": adapter.token_status,
+            "api-server": lambda: {
+                "status": adapter.token_status().get("state"),
+                "api_server": ((adapter.token_status().get("data") or {}).get("metadata") or {}).get("api_server"),
+                "dynamic_discovery_required": True,
+                "execution_allowed": False,
+            },
+            "accounts": adapter.get_accounts,
+            "selected-account": lambda: {
+                "status": adapter.readiness().get("state"),
+                "selected_account": adapter.readiness().get("selected_account"),
+                "full_account_number_returned": False,
+                "execution_allowed": False,
+            },
+            "balances": adapter.get_balances,
+            "holdings": adapter.get_holdings_snapshot,
+            "market-data": lambda: adapter.get_underlying_quote("SPY"),
+            "option-chain": lambda: adapter.get_option_chain("SPY"),
+            "onboarding": adapter.onboarding_status,
+            "readiness": adapter.readiness,
+            "certification": adapter.certification,
+        }
+        handler = handlers.get(str(section).lower())
+        if handler is None:
+            return JSONResponse(
+                safe_serialize({"status": "NOT_FOUND", "execution_allowed": False}),
+                status_code=404,
+            )
+        return JSONResponse(safe_serialize(handler()))
 
     @router.get("/mission-control/api/certification")
     async def mission_control_api_certification() -> JSONResponse:

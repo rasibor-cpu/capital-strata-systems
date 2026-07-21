@@ -91,9 +91,11 @@ def fetch_option_chain(
         greeks_origin = "MISSING"
 
     status = str(raw.get("status") or "READY").upper()
+    if status in {"OPTION_CHAIN_READY", "ADVISORY_READY"}:
+        status = "READY"
     if fresh["stale"]:
         status = "STALE"
-    elif missing:
+    elif missing and status == "READY":
         status = "PARTIAL_DATA" if (calls or puts) else "INCOMPLETE"
 
     return option_chain_envelope(
@@ -103,6 +105,9 @@ def fetch_option_chain(
         provider_timestamp=provider_ts,
         received_at=ts,
         age_seconds=fresh.get("age_seconds"),
+        stale_threshold_seconds=fresh.get("stale_threshold_seconds"),
+        expiry_threshold_seconds=fresh.get("expiry_threshold_seconds"),
+        advisory_status=fresh.get("advisory_status"),
         freshness=fresh.get("freshness"),
         quality="PARTIAL" if missing else "COMPLETE",
         completeness_pct=None,

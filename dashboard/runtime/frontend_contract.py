@@ -1437,6 +1437,25 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         ),
         "broker_operational_status": broker_operational_status(dashboard_payload),
     }
+    if selected_name == "QUESTRADE":
+        from backend.brokers.questrade import QuestradeAdvisoryAdapter
+
+        questrade = QuestradeAdvisoryAdapter()
+        q_ready = questrade.readiness()
+        q_checks = _mapping(q_ready.get("validation_checks"))
+        payload["questrade_read_only"] = {
+            "state": q_ready.get("state"),
+            "readiness": questrade.certification().get("outcome"),
+            "required_action": questrade.certification().get("required_action"),
+            "selected_account": q_ready.get("selected_account"),
+            "holdings_status": "READY" if q_checks.get("holdings_fresh") else "UNAVAILABLE",
+            "option_chain_status": "READY" if q_checks.get("option_chain_ready") else "UNAVAILABLE",
+            "last_refresh": operational.get("last_successful_operation") or DATA_UNAVAILABLE,
+            "details_link": "/mission-control/broker-management",
+            "credential_controls_available": False,
+            "execution_state": "EXECUTION_BLOCKED",
+            "execution_allowed": False,
+        }
     payload["canonical_broker_readiness"] = build_canonical_broker_readiness(
         broker_section=payload,
         certification_snapshot=certification_snapshot,

@@ -11,6 +11,8 @@ import json
 from dataclasses import asdict, dataclass, field
 from typing import Any, Sequence
 
+from backend.security.vault_redaction import redact_text, redact_value
+
 SCHEMA_VERSION = "css.enterprise.report.page_layout.v1"
 DEFAULT_LINES_PER_PAGE = 42
 
@@ -126,7 +128,7 @@ def build_paginated_document(
             page_number=2,
             page_type="summary",
             title="Executive Summary",
-            lines=list(executive_summary),
+            lines=[redact_text(line) for line in executive_summary],
         )
     )
 
@@ -162,6 +164,8 @@ def build_paginated_document(
         pages=pages,
         presentation={
             "mode": "paginated",
+            "page_size": "A4",
+            "orientation": "portrait",
             "layout": "pdf_style_pages",
             "scroll_policy": "minimize_continuous_scroll",
             "identical_pagination": ["browser", "mobile", "pdf"],
@@ -180,6 +184,7 @@ def build_paginated_document(
 
 
 def _format_payload(payload: Any) -> list[str]:
+    payload = redact_value(payload)
     if isinstance(payload, str):
         return payload.splitlines() or [payload]
     if isinstance(payload, (list, tuple)):

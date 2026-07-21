@@ -183,3 +183,9 @@ CSS_*_HISTORY.txt
 *.phase*.bak
 
 PHASE*_REAL_BALANCE_ENGINE.txt
+
+# Enterprise Broker Runtime source
+!backend/brokers/runtime/
+!backend/brokers/runtime/*.py
+backend/brokers/runtime/__pycache__/
+backend/brokers/runtime/*.pyc

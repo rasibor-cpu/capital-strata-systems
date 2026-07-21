@@ -20,6 +20,15 @@ def render(state: dict) -> str:
                 ("RBAC", governance.get("rbac_summary"), governance.get("rbac_summary")),
             )
         )
+        + (
+            '<section class="mc-panel"><h2>Credential Governance</h2>'
+            '<p>ESMS-001 vault health, ESMS-002 dependencies, rotation, audit, and compliance metadata.</p>'
+            '<p><a href="/mission-control/credential-governance">Open Credential Governance</a> · '
+            '<a href="/mission-control/enterprise-identity">Open Enterprise Identity &amp; Secrets</a> · '
+            '<a href="/mission-control/enterprise-oauth">Open Enterprise OAuth</a> · '
+            '<a href="/mission-control/enterprise-governance">Open Executive Governance</a> · '
+            '<a href="/mission-control/production-readiness">Open Production Readiness</a></p></section>'
+        )
         + split_panels(
             detail_table("Session", {
                 "session": governance.get("session"),

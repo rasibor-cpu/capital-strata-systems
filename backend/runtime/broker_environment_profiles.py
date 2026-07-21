@@ -89,6 +89,11 @@ QUESTRADE_PROFILE_KEYS = frozenset(
     {
         "QUESTRADE_REFRESH_TOKEN",
         "QUESTRADE_ACCESS_TOKEN",
+        "QUESTRADE_TOKEN_STORE_ID",
+        "QUESTRADE_SECRET_STORE_PROVIDER",
+        "QUESTRADE_ACCOUNT_HASH",
+        "QUESTRADE_ACCOUNT_ID",
+        "QUESTRADE_API_SERVER",
         "QUESTRADE_API_KEY",
         "QUESTRADE_BASE_URL",
         "QUESTRADE_API_URL",
@@ -149,6 +154,15 @@ COINBASE_PRIVATE_KEY_FIELDS = (
 
 OANDA_TOKEN_FIELDS = ("OANDA_API_KEY", "OANDA_ACCESS_TOKEN", "OANDA_TOKEN")
 OANDA_ACCOUNT_FIELDS = ("OANDA_ACCOUNT_ID", "OANDA_LIVE_ACCOUNT_ID", "OANDA_PRACTICE_ACCOUNT_ID")
+QUESTRADE_TOKEN_FIELDS = (
+    "QUESTRADE_TOKEN_STORE_ID",
+)
+QUESTRADE_ACCOUNT_FIELDS = (
+    "QUESTRADE_ACCOUNT_HASH",
+)
+SECURE_CONFIGURATION_REFERENCE_KEYS = frozenset(
+    {"QUESTRADE_TOKEN_STORE_ID", "QUESTRADE_ACCOUNT_HASH", "QUESTRADE_SECRET_STORE_PROVIDER"}
+)
 
 
 @dataclass(frozen=True)
@@ -159,6 +173,7 @@ class BrokerEnvironmentCredentials:
     credential_source: str
     key_identifier_present: bool
     private_key_present: bool
+    account_identifier_present: bool
     permissions_classification: str
     base_url: str
     read_only_allowed: bool
@@ -305,15 +320,29 @@ def build_broker_environment(
 
     broker_name = str(broker or "COINBASE").upper()
     profile_env = _environment_name(selected)
-    key_present = _any_present(target_env, COINBASE_KEY_FIELDS if broker_name == "COINBASE" else OANDA_TOKEN_FIELDS)
-    private_key_present = _any_present(target_env, COINBASE_PRIVATE_KEY_FIELDS if broker_name == "COINBASE" else OANDA_ACCOUNT_FIELDS)
+    credential_fields = {
+        "COINBASE": COINBASE_KEY_FIELDS,
+        "OANDA": OANDA_TOKEN_FIELDS,
+        "QUESTRADE": QUESTRADE_TOKEN_FIELDS,
+    }.get(broker_name, ())
+    private_key_fields = {
+        "COINBASE": COINBASE_PRIVATE_KEY_FIELDS,
+        "OANDA": OANDA_ACCOUNT_FIELDS,
+    }.get(broker_name, ())
+    account_fields = {
+        "OANDA": OANDA_ACCOUNT_FIELDS,
+        "QUESTRADE": QUESTRADE_ACCOUNT_FIELDS,
+    }.get(broker_name, ())
+    key_present = _any_present(target_env, credential_fields)
+    private_key_present = _any_present(target_env, private_key_fields)
+    account_identifier_present = _any_present(target_env, account_fields)
     credential_source = _credential_source(target_env, broker_name, loaded)
     if credential_source == "UNKNOWN" and selected is not None:
         failures.append("unknown_credential_source")
     base_url = _base_url(target_env, broker_name, selected)
     if _invalid_base_url(base_url, selected):
         failures.append("invalid_base_url")
-    permissions = _permissions_classification(target_env, selected)
+    permissions = _permissions_classification(target_env, selected, broker_name)
     fingerprint = _profile_fingerprint(
         selected=selected,
         broker=broker_name,
@@ -334,6 +363,7 @@ def build_broker_environment(
         credential_source=credential_source,
         key_identifier_present=key_present,
         private_key_present=private_key_present,
+        account_identifier_present=account_identifier_present,
         permissions_classification=permissions,
         base_url=base_url,
         read_only_allowed=selected in {BrokerEnvironmentProfile.LIVE_READ_ONLY, BrokerEnvironmentProfile.LIVE_EXECUTION},
@@ -354,7 +384,7 @@ def build_broker_environment(
 def sanitize_broker_profile_environment(env: MutableMapping[str, str] | None = None) -> list[str]:
     target_env = env if env is not None else os.environ
     removed: list[str] = []
-    for key in sorted(PROFILE_SPECIFIC_KEYS):
+    for key in sorted(PROFILE_SPECIFIC_KEYS - SECURE_CONFIGURATION_REFERENCE_KEYS):
         if target_env.get(key) not in (None, ""):
             target_env.pop(key, None)
             removed.append(key)
@@ -607,6 +637,9 @@ def _credential_source(env: Mapping[str, Any], broker: str, loaded_files: list[s
     if broker == "OANDA":
         if _any_present(env, OANDA_TOKEN_FIELDS) or _any_present(env, OANDA_ACCOUNT_FIELDS):
             return "PROFILE_ENV"
+    if broker == "QUESTRADE":
+        if _any_present(env, QUESTRADE_TOKEN_FIELDS) or _any_present(env, QUESTRADE_ACCOUNT_FIELDS):
+            return "SECURE_REFERENCE_ENV"
     if loaded_files:
         return "PROFILE_FILE_NO_CREDENTIALS"
     return "UNKNOWN"
@@ -621,6 +654,14 @@ def _base_url(env: Mapping[str, Any], broker: str, selected: BrokerEnvironmentPr
         if value:
             return value
         return "https://api-fxpractice.oanda.com" if selected == BrokerEnvironmentProfile.PAPER else "https://api-fxtrade.oanda.com"
+    if broker == "QUESTRADE":
+        value = str(
+            env.get("QUESTRADE_API_SERVER")
+            or env.get("QUESTRADE_BASE_URL")
+            or env.get("QUESTRADE_API_URL")
+            or ""
+        ).strip()
+        return value or "https://login.questrade.com/oauth2/token"
     return ""
 
 
@@ -633,7 +674,13 @@ def _invalid_base_url(base_url: str, selected: BrokerEnvironmentProfile | None) 
     return False
 
 
-def _permissions_classification(env: Mapping[str, Any], selected: BrokerEnvironmentProfile | None) -> str:
+def _permissions_classification(
+    env: Mapping[str, Any],
+    selected: BrokerEnvironmentProfile | None,
+    broker: str,
+) -> str:
+    if broker == "QUESTRADE":
+        return "PAPER_NOT_REQUIRED" if selected == BrokerEnvironmentProfile.PAPER else "READ_ONLY"
     raw = " ".join(str(env.get(key, "") or "").lower() for key in ("COINBASE_API_PERMISSIONS", "COINBASE_SCOPES", "COINBASE_CDP_PERMISSIONS"))
     if selected == BrokerEnvironmentProfile.PAPER:
         return "PAPER_NOT_REQUIRED"

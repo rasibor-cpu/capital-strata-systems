@@ -19,6 +19,79 @@ from backend.options.options_income_runtime_service import (
 SCHEMA_VERSION = "css.options_income.report.v1"
 
 
+def report_safe_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
+    """Project account data to report-safe metadata before serialization."""
+    root = dict(snapshot)
+    advisory = dict(root.get("advisory_data") or {})
+    holdings = dict(advisory.get("holdings") or {})
+    safe_holdings = {
+        key: holdings.get(key)
+        for key in (
+            "contract",
+            "schema_version",
+            "status",
+            "broker",
+            "account_type",
+            "base_currency",
+            "quality",
+            "quality_flags",
+            "completeness_pct",
+            "missing_fields",
+            "failure_reason",
+            "freshness",
+            "age_seconds",
+            "provider_timestamp",
+            "received_at",
+            "generated_at",
+            "provenance",
+            "demonstration",
+        )
+    }
+    safe_holdings.update(
+        {
+            "holding_count": len(holdings.get("holdings") or []),
+            "option_position_count": len(holdings.get("option_positions") or []),
+            "restricted_position_count": len(holdings.get("restricted_positions") or []),
+            "short_position_count": len(holdings.get("short_positions") or []),
+            "monetary_values_redacted": True,
+            "account_identifier_redacted": True,
+            "advisory_only": True,
+            "execution_allowed": False,
+        }
+    )
+    collateral = dict(advisory.get("collateral") or root.get("collateral") or {})
+    safe_collateral = {
+        key: collateral.get(key)
+        for key in (
+            "contract",
+            "schema_version",
+            "status",
+            "authority_level",
+            "source",
+            "currency",
+            "broker_confirmed",
+            "css_derived",
+            "failure_reason",
+            "provenance",
+            "timestamp",
+            "generated_at",
+            "rejects_simulated_10000_fixture",
+        )
+    }
+    safe_collateral.update(
+        {
+            "monetary_value_redacted": True,
+            "advisory_only": True,
+            "execution_allowed": False,
+        }
+    )
+    advisory["holdings"] = safe_holdings
+    advisory["collateral"] = safe_collateral
+    root["advisory_data"] = advisory
+    root["collateral"] = safe_collateral
+    return root
+
+
 def _safe_git_commit() -> str | None:
     try:
         import subprocess
@@ -41,7 +114,9 @@ def build_options_income_executive_report(
     css_version: str = "Phase-177D",
     commit_reference: str | None = None,
 ) -> dict[str, Any]:
-    snap = dict(snapshot or build_options_income_runtime_snapshot(ctx or OptionsIncomeRuntimeContext(persist=False)))
+    snap = report_safe_snapshot(
+        snapshot or build_options_income_runtime_snapshot(ctx or OptionsIncomeRuntimeContext(persist=False))
+    )
     generated = str(snap.get("generated_at") or "")
     report_id = f"OI-{generated.replace('-', '').replace(':', '')}-{uuid4().hex[:8].upper()}"
     commit = commit_reference if commit_reference is not None else _safe_git_commit()

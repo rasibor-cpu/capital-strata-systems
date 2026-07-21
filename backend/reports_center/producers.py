@@ -58,6 +58,204 @@ def _html_wrap(title: str, body: str, *, limitations: str = "", advisory: bool =
     )
 
 
+def _enterprise_broker_runtime_report(report_code: str, title: str):
+    def _produce(*, filters: dict[str, Any], repo_root: Path) -> dict[str, Any]:
+        evidence_path = (
+            repo_root
+            / "artifacts"
+            / "enterprise_broker_runtime_certification.json"
+        )
+        evidence: dict[str, Any] | None = None
+        if evidence_path.is_file():
+            try:
+                loaded = json.loads(evidence_path.read_text(encoding="utf-8"))
+                evidence = loaded if isinstance(loaded, dict) else None
+            except Exception:
+                evidence = None
+        available = evidence is not None
+        content = evidence or {
+            "status": "EVIDENCE_UNAVAILABLE",
+            "reason": "ENTERPRISE_BROKER_RUNTIME_CERTIFICATION_NOT_PUBLISHED",
+            "execution_posture": "DISABLED",
+            "execution_authority": "BLOCKED",
+            "fail_closed": True,
+            "advisory_only": True,
+            "execution_allowed": False,
+        }
+        text = json.dumps(content, indent=2, sort_keys=True, default=str)
+        return {
+            "title": title,
+            "report_type": report_code,
+            "report_date": filters.get("report_date") or utc_today(),
+            "report_status": "FINAL"
+            if available and content.get("outcome") == "CERTIFIED"
+            else "FAILED",
+            "official_report": False,
+            "content": content,
+            "html": _html_wrap(
+                title,
+                text,
+                limitations=(
+                    "Enterprise Broker Runtime metadata only. Missing or uncertified "
+                    "evidence remains FAILED."
+                ),
+            ),
+            "limitations": "ADVISORY_ONLY; no broker or OAuth activation.",
+            **SAFETY_LOCKS,
+        }
+
+    return _produce
+
+
+def _enterprise_governance_report(report_code: str, title: str):
+    def _produce(*, filters: dict[str, Any], repo_root: Path) -> dict[str, Any]:
+        path = repo_root / "artifacts" / "enterprise_governance_certification.json"
+        evidence: dict[str, Any] | None = None
+        if path.is_file():
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+                evidence = loaded if isinstance(loaded, dict) else None
+            except Exception:
+                evidence = None
+        complete_report_evidence = bool(
+            evidence is not None
+            and isinstance(evidence.get("evidence_inventory"), list)
+        )
+        content = evidence or {
+            "status": "EVIDENCE_UNAVAILABLE",
+            "reason": "ENTERPRISE_GOVERNANCE_EVIDENCE_NOT_PUBLISHED",
+            "formal_certification_claimed": False,
+            "production_certified": False,
+            "execution_posture": "DISABLED",
+            "execution_authority": "BLOCKED",
+            "fail_closed": True,
+            "advisory_only": True,
+            "execution_allowed": False,
+        }
+        content["formal_certification_claimed"] = False
+        content["production_certified"] = False
+        text = json.dumps(content, indent=2, sort_keys=True, default=str)
+        return {
+            "title": title,
+            "report_type": report_code,
+            "report_date": filters.get("report_date") or utc_today(),
+            "report_status": "FINAL" if complete_report_evidence else "FAILED",
+            "official_report": False,
+            "content": content,
+            "html": _html_wrap(
+                title,
+                text,
+                limitations=(
+                    "Readiness evidence only; not ISO or production certification."
+                ),
+            ),
+            "limitations": "ADVISORY_ONLY; formal certification not claimed.",
+            **SAFETY_LOCKS,
+        }
+
+    return _produce
+
+
+def _production_readiness_report(report_code: str, title: str):
+    def _produce(*, filters: dict[str, Any], repo_root: Path) -> dict[str, Any]:
+        path = repo_root / "artifacts" / "production_readiness_certification.json"
+        evidence: dict[str, Any] | None = None
+        if path.is_file():
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+                evidence = loaded if isinstance(loaded, dict) else None
+            except Exception:
+                evidence = None
+        content = evidence or {
+            "status": "EVIDENCE_UNAVAILABLE",
+            "reason": "PRODUCTION_READINESS_CERTIFICATION_NOT_PUBLISHED",
+            "deployment_authorized": False,
+            "deployment_performed": False,
+            "production_trading_certified": False,
+            "execution_posture": "DISABLED",
+            "execution_authority": "BLOCKED",
+            "fail_closed": True,
+            "advisory_only": True,
+            "execution_allowed": False,
+        }
+        content["deployment_authorized"] = False
+        content["deployment_performed"] = False
+        content["production_trading_certified"] = False
+        complete = bool(
+            evidence is not None
+            and isinstance(evidence.get("evidence_inventory"), list)
+        )
+        text = json.dumps(content, indent=2, sort_keys=True, default=str)
+        return {
+            "title": title,
+            "report_type": report_code,
+            "report_date": filters.get("report_date") or utc_today(),
+            "report_status": "FINAL" if complete else "FAILED",
+            "official_report": False,
+            "content": content,
+            "html": _html_wrap(
+                title,
+                text,
+                limitations=(
+                    "Controlled-deployment evidence only; deployment and trading remain blocked."
+                ),
+            ),
+            "limitations": "ADVISORY_ONLY; no deployment authorization.",
+            **SAFETY_LOCKS,
+        }
+
+    return _produce
+
+
+def _rc1_certification_report(report_code: str, title: str):
+    def _produce(*, filters: dict[str, Any], repo_root: Path) -> dict[str, Any]:
+        path = repo_root / "artifacts" / "css_enterprise_rc1_certification.json"
+        evidence: dict[str, Any] | None = None
+        if path.is_file():
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+                evidence = loaded if isinstance(loaded, dict) else None
+            except Exception:
+                evidence = None
+        content = evidence or {
+            "status": "NOT_READY",
+            "reason": "RC1_CERTIFICATION_EVIDENCE_UNAVAILABLE",
+            "tag_recommendation": None,
+            "deployment_authorized": False,
+            "execution_posture": "DISABLED",
+            "execution_authority": "BLOCKED",
+            "fail_closed": True,
+            "advisory_only": True,
+            "execution_allowed": False,
+        }
+        content["tag_recommendation"] = (
+            "CSS_ENTERPRISE_RC1" if content.get("status") == "CERTIFIED" else None
+        )
+        content["deployment_authorized"] = False
+        complete = bool(
+            evidence is not None
+            and isinstance(evidence.get("evidence_inventory"), list)
+        )
+        text = json.dumps(content, indent=2, sort_keys=True, default=str)
+        return {
+            "title": title,
+            "report_type": report_code,
+            "report_date": filters.get("report_date") or utc_today(),
+            "report_status": "FINAL" if complete else "FAILED",
+            "official_report": False,
+            "content": content,
+            "html": _html_wrap(
+                title,
+                text,
+                limitations="RC1 evidence only; no tag or deployment action.",
+            ),
+            "limitations": "No tag creation, deployment authorization, or execution.",
+            **SAFETY_LOCKS,
+        }
+
+    return _produce
+
+
 def _producer_handlers() -> dict[str, Any]:
     """Canonical producer dispatch table (lazy so helpers exist at call time)."""
     return {
@@ -98,6 +296,94 @@ def _producer_handlers() -> dict[str, Any]:
         "runtime_health": _runtime_health,
         "report_generation_failures": _generation_failures,
         "distribution_print_audit_home": _distribution_home,
+        "enterprise_broker_readiness": _enterprise_broker_runtime_report(
+            "enterprise_broker_readiness", "Broker Readiness"
+        ),
+        "enterprise_provider_readiness": _enterprise_broker_runtime_report(
+            "enterprise_provider_readiness", "Provider Readiness"
+        ),
+        "enterprise_holdings_certification": _enterprise_broker_runtime_report(
+            "enterprise_holdings_certification", "Holdings Certification"
+        ),
+        "enterprise_market_data_certification": _enterprise_broker_runtime_report(
+            "enterprise_market_data_certification", "Market Data Certification"
+        ),
+        "enterprise_runtime_dependency_matrix": _enterprise_broker_runtime_report(
+            "enterprise_runtime_dependency_matrix", "Runtime Dependency Matrix"
+        ),
+        "enterprise_options_income_readiness": _enterprise_broker_runtime_report(
+            "enterprise_options_income_readiness", "Options Income Readiness"
+        ),
+        "enterprise_advisory_runtime_certification": _enterprise_broker_runtime_report(
+            "enterprise_advisory_runtime_certification",
+            "Advisory Runtime Certification",
+        ),
+        "enterprise_governance_readiness": _enterprise_governance_report(
+            "enterprise_governance_readiness", "Governance Readiness"
+        ),
+        "enterprise_iso_27001_readiness": _enterprise_governance_report(
+            "enterprise_iso_27001_readiness", "ISO 27001 Readiness"
+        ),
+        "enterprise_iso_9001_readiness": _enterprise_governance_report(
+            "enterprise_iso_9001_readiness", "ISO 9001 Readiness"
+        ),
+        "enterprise_business_continuity_readiness": _enterprise_governance_report(
+            "enterprise_business_continuity_readiness",
+            "Business Continuity Readiness",
+        ),
+        "enterprise_risk_register": _enterprise_governance_report(
+            "enterprise_risk_register", "Enterprise Risk Register"
+        ),
+        "enterprise_executive_certification_summary": _enterprise_governance_report(
+            "enterprise_executive_certification_summary",
+            "Executive Certification Summary",
+        ),
+        "enterprise_compliance_dashboard": _enterprise_governance_report(
+            "enterprise_compliance_dashboard", "Compliance Dashboard"
+        ),
+        "enterprise_outstanding_certification_blockers": _enterprise_governance_report(
+            "enterprise_outstanding_certification_blockers",
+            "Outstanding Certification Blockers",
+        ),
+        "production_readiness": _production_readiness_report(
+            "production_readiness", "Production Readiness"
+        ),
+        "operational_acceptance": _production_readiness_report(
+            "operational_acceptance", "Operational Acceptance"
+        ),
+        "endurance_readiness": _production_readiness_report(
+            "endurance_readiness", "Endurance Readiness"
+        ),
+        "disaster_recovery_readiness": _production_readiness_report(
+            "disaster_recovery_readiness", "Disaster Recovery Readiness"
+        ),
+        "deployment_readiness": _production_readiness_report(
+            "deployment_readiness", "Deployment Readiness"
+        ),
+        "production_outstanding_blockers": _production_readiness_report(
+            "production_outstanding_blockers", "Outstanding Blockers"
+        ),
+        "final_certification_summary": _production_readiness_report(
+            "final_certification_summary", "Final Certification Summary"
+        ),
+        "rc1_certification_summary": _rc1_certification_report(
+            "rc1_certification_summary", "RC1 Certification Summary"
+        ),
+        "rc1_readiness_scorecard": _rc1_certification_report(
+            "rc1_readiness_scorecard", "RC1 Readiness Scorecard"
+        ),
+        "rc1_regression_evidence": _rc1_certification_report(
+            "rc1_regression_evidence", "Regression Evidence"
+        ),
+        "rc1_compile_evidence": _rc1_certification_report(
+            "rc1_compile_evidence", "Compile Evidence"
+        ),
+        "rc1_runtime_evidence": _rc1_certification_report(
+            "rc1_runtime_evidence", "Runtime Evidence"
+        ),
+        "rc1_outstanding_blockers": _rc1_certification_report(
+            "rc1_outstanding_blockers", "Outstanding Blockers"
+        ),
     }
 
 

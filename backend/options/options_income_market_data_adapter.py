@@ -79,7 +79,10 @@ def fetch_underlying_market_data(
 
     provider_ts = raw.get("timestamp") or raw.get("provider_timestamp")
     fresh = evaluate_freshness("underlying_quote", provider_timestamp=provider_ts, now=ts)
-    status = "STALE" if fresh["stale"] else str(raw.get("status") or "READY").upper()
+    status = str(raw.get("status") or "READY").upper()
+    if status in {"MARKET_DATA_READY", "ADVISORY_READY"}:
+        status = "READY"
+    status = "STALE" if fresh["stale"] else status
     if status == "READY" and fresh["stale"]:
         status = "STALE"
 
@@ -104,6 +107,9 @@ def fetch_underlying_market_data(
         provider_timestamp=provider_ts,
         received_at=ts,
         age_seconds=fresh.get("age_seconds"),
+        stale_threshold_seconds=fresh.get("stale_threshold_seconds"),
+        expiry_threshold_seconds=fresh.get("expiry_threshold_seconds"),
+        advisory_status=fresh.get("advisory_status"),
         freshness=fresh.get("freshness"),
         quality="PARTIAL" if missing else "COMPLETE",
         completeness_pct=round(100.0 * (3 - len(missing)) / 3.0, 2),

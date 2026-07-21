@@ -182,6 +182,31 @@ def build_broker_executive_report_package(
         "contamination_status": contamination.status,
         "registered_count": len(TIER1_BROKERS),
     }
+    from backend.brokers.questrade import QuestradeAdvisoryAdapter
+
+    questrade = QuestradeAdvisoryAdapter()
+    q_readiness = questrade.readiness()
+    q_checks = q_readiness.get("validation_checks") if isinstance(q_readiness.get("validation_checks"), Mapping) else {}
+    questrade_report = {
+        "configuration_state": q_readiness.get("state"),
+        "secure_configuration": questrade.configuration_status(),
+        "authorization_state": questrade.token_status().get("state"),
+        "token_health": questrade.token_status().get("data"),
+        "selected_account_type": "UNAVAILABLE",
+        "balance_readiness": q_checks.get("balances_fresh"),
+        "holdings_readiness": q_checks.get("holdings_fresh"),
+        "option_chain_readiness": q_checks.get("option_chain_ready"),
+        "account_restrictions": "BROKER_CONFIRMATION_REQUIRED",
+        "rate_limits": {"status": "NOT_OBSERVED", "retries": 0},
+        "certification": questrade.certification(),
+        "recommended_action": questrade.certification().get("required_action"),
+        "oauth_launch_enabled": False,
+        "full_account_number_returned": False,
+        "token_values_returned": False,
+        "execution_boundary": "EXECUTION_BLOCKED",
+        "execution_allowed": False,
+    }
+    per_broker["QUESTRADE"]["secure_read_only"] = questrade_report
 
     document = build_paginated_document(
         title="CSS Broker Executive Report",
@@ -205,6 +230,7 @@ def build_broker_executive_report_package(
             ("Connection History", {"events": history}),
             ("Account Summary", account_summary),
             ("Market Data Summary", market_data_summary),
+            ("Questrade Secure Read-Only Connectivity", questrade_report),
             ("Contamination Analysis", contamination.as_dict()),
             ("LIVE_READ_ONLY Contracts", lro),
             (

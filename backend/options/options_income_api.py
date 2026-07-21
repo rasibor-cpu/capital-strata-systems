@@ -368,16 +368,10 @@ def _authorization_denial(request: Any) -> dict[str, Any] | None:
 
 
 def _redacted_report_snapshot(payload: Mapping[str, Any]) -> dict[str, Any]:
-    """Keep public paginated-report compatibility without exposing account detail."""
-    root = dict(payload)
-    advisory = dict(root.get("advisory_data") or {})
-    holdings_envelope = build_options_income_api_payload(root, "holdings")
-    collateral_envelope = build_options_income_api_payload(root, "collateral_summary")
-    advisory["holdings"] = holdings_envelope.get("data", {})
-    advisory["collateral"] = collateral_envelope.get("data", {})
-    root["advisory_data"] = advisory
-    root["collateral"] = collateral_envelope.get("data", {})
-    return root
+    """Compatibility wrapper around the canonical report-safe projection."""
+    from backend.options.options_income_reporting import report_safe_snapshot
+
+    return report_safe_snapshot(payload)
 
 
 def _assert_safe(payload: Mapping[str, Any]) -> None:

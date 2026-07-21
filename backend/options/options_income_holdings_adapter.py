@@ -13,6 +13,14 @@ class HoldingsProvider(Protocol):
     def get_holdings_snapshot(self) -> dict[str, Any]: ...
 
 
+HOLDINGS_AUTHORITY = (
+    "BROKER_HOLDINGS",
+    "ENTERPRISE_CACHE",
+    "CSS_DERIVED",
+    "UNAVAILABLE",
+)
+
+
 def _sanitize_account_id(raw: Any) -> str | None:
     text = str(raw or "").strip()
     if not text:
@@ -78,11 +86,14 @@ def fetch_account_holdings(
                 "market_value": row.get("market_value"),
                 "currency": row.get("currency"),
                 "restricted": bool(row.get("restricted")),
-                "encumbered_quantity": row.get("encumbered_quantity") or 0,
+                "encumbered_quantity": row.get("encumbered_quantity"),
+                "provenance": row.get("provenance") or raw.get("provenance") or "ACCOUNT_HOLDINGS",
             }
         )
 
     status = str(raw.get("status") or "READY").upper()
+    if status in {"HOLDINGS_READY", "ADVISORY_READY"}:
+        status = "READY"
     if fresh["stale"]:
         status = "STALE"
 
@@ -99,22 +110,95 @@ def fetch_account_holdings(
         provider_timestamp=provider_ts,
         received_at=ts,
         age_seconds=fresh.get("age_seconds"),
+        stale_threshold_seconds=fresh.get("stale_threshold_seconds"),
+        expiry_threshold_seconds=fresh.get("expiry_threshold_seconds"),
+        advisory_status=fresh.get("advisory_status"),
         freshness=fresh.get("freshness"),
         quality="PARTIAL" if missing else "COMPLETE",
         missing_fields=missing,
         failure_reason=raw.get("failure_reason") or fresh.get("stale_reason"),
         broker=raw.get("broker") or broker,
-        account_id_sanitized=_sanitize_account_id(raw.get("account_id") or raw.get("account_number")),
+        account_id_sanitized=raw.get("account_id_sanitized")
+        or _sanitize_account_id(raw.get("account_id") or raw.get("account_number")),
         account_type=raw.get("account_type"),
         base_currency=raw.get("base_currency") or raw.get("currency"),
         cash=raw.get("cash"),
         buying_power=raw.get("buying_power"),
+        maintenance_excess=raw.get("maintenance_excess"),
+        option_collateral=raw.get("option_collateral"),
         equity=raw.get("equity"),
+        balances=list(raw.get("balances") or []),
         holdings=holdings_rows,
-        option_positions=list(raw.get("option_positions") or []),
+        option_positions=[
+            {
+                **dict(row),
+                "provenance": row.get("provenance")
+                or raw.get("provenance")
+                or "ACCOUNT_HOLDINGS",
+            }
+            for row in list(raw.get("option_positions") or [])
+            if isinstance(row, Mapping)
+        ],
         short_positions=list(raw.get("short_positions") or []),
         restricted_positions=list(raw.get("restricted_positions") or []),
     )
 
 
-__all__ = ["HoldingsProvider", "fetch_account_holdings"]
+def resolve_holdings_authority(
+    *,
+    broker_holdings: Mapping[str, Any] | None = None,
+    enterprise_cache: Mapping[str, Any] | None = None,
+    css_derived: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Choose the highest traceable holdings source without fabricating rows."""
+    candidates = (
+        ("BROKER_HOLDINGS", broker_holdings, {"BROKER", "QUESTRADE_POSITIONS", "ACCOUNT_HOLDINGS"}),
+        ("ENTERPRISE_CACHE", enterprise_cache, {"CACHE", "ENTERPRISE_CACHE"}),
+        ("CSS_DERIVED", css_derived, {"DERIVED", "CSS_DERIVED"}),
+    )
+    for authority, value, provenances in candidates:
+        row = dict(value or {})
+        provenance = str(row.get("provenance") or "").upper()
+        status = str(row.get("status") or "").upper()
+        holdings = row.get("holdings")
+        options = row.get("option_positions")
+        if (
+            provenance in provenances
+            and status in {"READY", "HOLDINGS_READY", "PARTIAL_DATA", "STALE"}
+            and (isinstance(holdings, list) or isinstance(options, list))
+            and not row.get("demonstration")
+        ):
+            return {
+                **row,
+                "authority_level": authority,
+                "holdings": [
+                    {**dict(item), "provenance": item.get("provenance") or provenance}
+                    for item in list(holdings or [])
+                    if isinstance(item, Mapping)
+                ],
+                "option_positions": [
+                    {**dict(item), "provenance": item.get("provenance") or provenance}
+                    for item in list(options or [])
+                    if isinstance(item, Mapping)
+                ],
+                "fabricated": False,
+                "execution_allowed": False,
+            }
+    return {
+        "status": "UNAVAILABLE",
+        "authority_level": "UNAVAILABLE",
+        "holdings": [],
+        "option_positions": [],
+        "provenance": "UNAVAILABLE",
+        "fabricated": False,
+        "failure_reason": "NO_TRACEABLE_HOLDINGS_SOURCE",
+        "execution_allowed": False,
+    }
+
+
+__all__ = [
+    "HOLDINGS_AUTHORITY",
+    "HoldingsProvider",
+    "fetch_account_holdings",
+    "resolve_holdings_authority",
+]

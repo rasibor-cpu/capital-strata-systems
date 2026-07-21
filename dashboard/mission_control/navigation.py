@@ -34,11 +34,57 @@ MISSION_CONTROL_SECTIONS: tuple[MissionControlSection, ...] = (
     MissionControlSection("documentation_runbooks", "Documentation / Runbooks", "/mission-control/documentation-runbooks", "Safe index of architecture, governance, release, certification, and operator runbook documents.", "book"),
 )
 
-SECTION_BY_KEY = {section.key: section for section in MISSION_CONTROL_SECTIONS}
+CREDENTIAL_GOVERNANCE_SECTION = MissionControlSection(
+    "credential_governance",
+    "Credential Governance",
+    "/mission-control/credential-governance",
+    "ESMS-001 vault health, ESMS-002 dependencies, rotation, audit, and compliance metadata.",
+    "key",
+)
+ENTERPRISE_IDENTITY_SECTION = MissionControlSection(
+    "enterprise_identity",
+    "Enterprise Identity & Secrets",
+    "/mission-control/enterprise-identity",
+    "Canonical identity, secret, vault, rotation, risk, authentication, and audit metadata.",
+    "shield-key",
+)
+ENTERPRISE_OAUTH_SECTION = MissionControlSection(
+    "enterprise_oauth",
+    "Enterprise OAuth",
+    "/mission-control/enterprise-oauth",
+    "Provider registration, scopes, lifecycle, expiry, rotation, risk, policy, and audit metadata.",
+    "oauth",
+)
+ENTERPRISE_GOVERNANCE_SECTION = MissionControlSection(
+    "enterprise_governance",
+    "Executive Governance",
+    "/mission-control/enterprise-governance",
+    "ISO readiness, continuity, enterprise risk, compliance, and certification blockers.",
+    "governance",
+)
+PRODUCTION_READINESS_SECTION = MissionControlSection(
+    "production_readiness",
+    "Production Readiness",
+    "/mission-control/production-readiness",
+    "Operational acceptance, endurance, recovery, deployment, and final certification evidence.",
+    "readiness",
+)
+GOVERNANCE_AUXILIARY_SECTIONS = (
+    CREDENTIAL_GOVERNANCE_SECTION,
+    ENTERPRISE_IDENTITY_SECTION,
+    ENTERPRISE_OAUTH_SECTION,
+    ENTERPRISE_GOVERNANCE_SECTION,
+    PRODUCTION_READINESS_SECTION,
+)
+
+SECTION_BY_KEY = {
+    section.key: section
+    for section in (*MISSION_CONTROL_SECTIONS, *GOVERNANCE_AUXILIARY_SECTIONS)
+}
 
 # URL path segment → section (derived from published routes; no silent EO default).
 SECTION_BY_SLUG: dict[str, MissionControlSection] = {}
-for _section in MISSION_CONTROL_SECTIONS:
+for _section in (*MISSION_CONTROL_SECTIONS, *GOVERNANCE_AUXILIARY_SECTIONS):
     _route_slug = _section.route.rstrip("/").rsplit("/", 1)[-1].lower()
     SECTION_BY_SLUG[_route_slug] = _section
     SECTION_BY_SLUG[_section.key.replace("_", "-")] = _section
@@ -83,6 +129,12 @@ def navigation_payload() -> list[dict[str, str]]:
 
 __all__ = [
     "MISSION_CONTROL_SECTIONS",
+    "CREDENTIAL_GOVERNANCE_SECTION",
+    "ENTERPRISE_IDENTITY_SECTION",
+    "ENTERPRISE_OAUTH_SECTION",
+    "ENTERPRISE_GOVERNANCE_SECTION",
+    "PRODUCTION_READINESS_SECTION",
+    "GOVERNANCE_AUXILIARY_SECTIONS",
     "MissionControlSection",
     "SECTION_BY_KEY",
     "SECTION_BY_SLUG",

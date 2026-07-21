@@ -7,30 +7,18 @@ Purpose
 Responsible for initializing the selected broker adapter
 during system startup.
 
-Flow
-----
-1. User selects broker.
-2. Credentials are loaded.
-3. Required SDK dependencies are checked.
-4. Adapter instance is created.
-5. Adapter is returned to the trading engine.
+Canonical flow
+--------------
+1. Enterprise Broker Runtime composition is supplied.
+2. A pre-registered native binding is resolved.
+3. Capability-bound RuntimeSecretLease objects are issued.
+4. An advisory-only native adapter is returned.
 
-PCNRASS SAFE VERSION
---------------------
-- Preserves existing bootstrap flow.
-- Preserves governance behavior.
-- Preserves OANDA behavior.
-- Supports Coinbase CDP JSON credential files.
-- Does not pass raw Coinbase private-key text as a file path.
-- Fail-closed design maintained.
+The historical self-test remains compatibility evidence only. It cannot
+initialize a broker or be certified Enterprise Managed.
 """
 
-from typing import Any, Dict
-
-from .broker_registry import get_adapter
-from .credential_loader import load_credentials
-from .install_utils import ensure_broker_dependencies
-
+from typing import Any
 
 class BrokerBootstrapError(Exception):
     """Raised when broker initialization fails."""
@@ -155,108 +143,34 @@ def run_broker_bootstrap_self_test(broker_name: str, mode: str) -> bool:
     return all(res == "PASS" for res in stages.values())
 
 
-def initialize_broker(broker_name: str, mode: str = "paper"):
-    """
-    Initialize a broker adapter.
-    """
-
-    broker_name = broker_name.lower()
-
-    # Run self-test
-    self_test_ok = run_broker_bootstrap_self_test(broker_name, mode)
-    if not self_test_ok:
-         print(f"[BROKER BOOTSTRAP] WARNING: Bootstrap self-test has failed stages.")
-
-    print(f"[BROKER BOOTSTRAP] Initializing broker: {broker_name}")
-    print(f"[BROKER BOOTSTRAP] Mode: {mode}")
-
-    dependency_status = ensure_broker_dependencies(broker_name)
-
-    if not dependency_status.get("ok"):
-        raise BrokerBootstrapError(
-            "Broker dependency unavailable for "
-            f"{broker_name}: {dependency_status.get('package')}"
-        )
-
-    creds = load_credentials(broker_name, mode=mode)
-
-    if creds is None:
-        raise BrokerBootstrapError(
-            f"No credentials found for broker: {broker_name}"
-        )
-
-    adapter_cls = get_adapter(broker_name)
-
-    if adapter_cls is None:
-        raise BrokerBootstrapError(
-            f"No adapter registered for broker: {broker_name}"
-        )
-
-    adapter = _instantiate_adapter(
-        adapter_cls=adapter_cls,
-        broker_name=broker_name,
-        creds=creds,
-        mode=mode,
-    )
-
-    connect = getattr(adapter, "connect", None)
-
-    if callable(connect):
-        connect()
-    else:
-        is_configured = getattr(adapter, "is_configured", None)
-
-        if callable(is_configured) and not is_configured():
-            raise BrokerBootstrapError(
-                f"{broker_name} adapter is not configured"
-            )
-
-    print(f"[BROKER BOOTSTRAP] {broker_name} successfully initialized")
-
-    return adapter
-
-
-def _instantiate_adapter(
-    adapter_cls: type,
+def initialize_broker(
     broker_name: str,
-    creds: Dict[str, Any],
-    mode: str,
+    mode: str = "disabled",
+    *,
+    enterprise_runtime: Any | None = None,
+    operator: str = "SYSTEM",
+    provider: Any | None = None,
 ):
     """
-    Instantiate adapter while supporting legacy and modern
-    credential naming conventions.
+    Initialize only through the Enterprise Broker Runtime.
+
+    Legacy credential loading remains available solely to the separately named
+    self-test above and cannot initialize a broker.
     """
-
-    if broker_name == "coinbase":
-        api_key_name = str(
-            creds.get("api_key_name")
-            or creds.get("name")
-            or creds.get("key_name")
-            or creds.get("COINBASE_CDP_KEY_NAME")
-            or creds.get("COINBASE_KEY_NAME")
-            or ""
-        )
-
-        api_private_key_path = str(
-            creds.get("COINBASE_KEY_JSON_PATH")
-            or creds.get("COINBASE_KEY_FILE")
-            or ""
-        )
-
-        return adapter_cls(
-            api_key_name=api_key_name,
-            api_private_key_path=api_private_key_path,
-            paper_mode=(mode != "live"),
-        )
-
+    normalized = str(broker_name).upper()
+    if str(mode).lower() not in {"disabled", "read_only", "advisory"}:
+        raise BrokerBootstrapError("BROKER_RUNTIME_MODE_NOT_ADVISORY")
+    if enterprise_runtime is None:
+        raise BrokerBootstrapError("ENTERPRISE_BROKER_RUNTIME_REQUIRED")
+    if normalized not in {"QUESTRADE", "COINBASE", "BINANCE", "OANDA"}:
+        raise BrokerBootstrapError(f"UNSUPPORTED_ENTERPRISE_BROKER:{normalized}")
     try:
-        return adapter_cls(
-            credentials=creds,
-            mode=mode,
+        return enterprise_runtime.native_adapter(
+            normalized,
+            operator=operator,
+            provider=provider,
         )
-
-    except TypeError:
-        try:
-            return adapter_cls(credentials=creds)
-        except TypeError:
-            return adapter_cls()
+    except Exception as exc:
+        raise BrokerBootstrapError(
+            f"ENTERPRISE_BROKER_RUNTIME_BINDING_UNAVAILABLE:{normalized}"
+        ) from exc

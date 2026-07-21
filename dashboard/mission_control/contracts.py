@@ -37,6 +37,7 @@ from dashboard.mission_control.operator_console import build_operator_console
 from dashboard.mission_control.operations_timeline import build_operations_timeline
 from dashboard.mission_control.performance_attribution import build_performance_attribution
 from dashboard.mission_control.permissions import mission_control_permissions_payload, validate_read_only_permissions
+from backend.security.vault_redaction import redact_value
 from dashboard.mission_control.portfolio_projection import build_options_income_panel, build_performance_panel, build_portfolio_command_view
 from dashboard.mission_control.recommendation_projection import build_recommendation_panel
 from dashboard.mission_control.rbac_console import build_rbac_console
@@ -86,6 +87,42 @@ def build_mission_control_state(
     governance = section(frontend, "governance")
     certification = section(frontend, "runtime_certification_snapshot")
     alerts = _alerts(dashboard_state)
+    credential_governance_source = (
+        dashboard_state.get("credential_governance")
+        if isinstance(dashboard_state, Mapping)
+        and isinstance(dashboard_state.get("credential_governance"), Mapping)
+        else {}
+    )
+    identity_governance_source = (
+        dashboard_state.get("identity_governance")
+        if isinstance(dashboard_state, Mapping)
+        and isinstance(dashboard_state.get("identity_governance"), Mapping)
+        else {}
+    )
+    oauth_governance_source = (
+        dashboard_state.get("oauth_governance")
+        if isinstance(dashboard_state, Mapping)
+        and isinstance(dashboard_state.get("oauth_governance"), Mapping)
+        else {}
+    )
+    enterprise_broker_runtime_source = (
+        dashboard_state.get("enterprise_broker_runtime")
+        if isinstance(dashboard_state, Mapping)
+        and isinstance(dashboard_state.get("enterprise_broker_runtime"), Mapping)
+        else {}
+    )
+    enterprise_governance_source = (
+        dashboard_state.get("enterprise_governance")
+        if isinstance(dashboard_state, Mapping)
+        and isinstance(dashboard_state.get("enterprise_governance"), Mapping)
+        else {}
+    )
+    production_readiness_source = (
+        dashboard_state.get("production_readiness")
+        if isinstance(dashboard_state, Mapping)
+        and isinstance(dashboard_state.get("production_readiness"), Mapping)
+        else {}
+    )
     safety = mission_control_safety_payload(
         {
             **SAFE_FLAGS,
@@ -114,6 +151,150 @@ def build_mission_control_state(
         "learning": _learning(sections),
         "institutional_sources": _institutional_sources(sections),
         "governance": _governance(frontend, governance),
+        "credential_governance": redact_value(
+            {
+                "schema_version": "css.credential.governance.v1",
+                "vault_health": {"status": "UNCONFIGURED", "record_count": 0},
+                "credential_inventory": [],
+                "rotation_queue": [],
+                "expiring_soon": [],
+                "audit_events": [],
+                "dependency_graph": {},
+                "compliance": {"outcome": "EVIDENCE_PENDING"},
+                "selected_credential": {},
+                **dict(credential_governance_source),
+                "secrets_returned": False,
+                "advisory_only": True,
+                "execution_allowed": False,
+            }
+        ),
+        "identity_governance": redact_value(
+            {
+                "schema_version": "css.enterprise_identity.governance.v1",
+                "enterprise_identity": [],
+                "enterprise_secrets": [],
+                "vault_health": {"status": "UNCONFIGURED", "record_count": 0},
+                "rotation": {"reminders": [], "automatic_rotation": False},
+                "certificates": [],
+                "oauth": [],
+                "broker_authentication": [],
+                "risk": {"high_risk_count": 0},
+                "audit": [],
+                "secret_authority": {},
+                "legacy_compatibility": [],
+                "ownership_coverage": {"coverage_pct": 0},
+                "orphaned_secrets": [],
+                "direct_access_violations": [],
+                "migration_progress": {"complete": False},
+                "vault_health_score": {"score": 0, "status": "UNCONFIGURED"},
+                **dict(identity_governance_source),
+                "plaintext_returned": False,
+                "advisory_only": True,
+                "execution_allowed": False,
+            }
+        ),
+        "oauth_governance": redact_value(
+            {
+                "schema_version": "css.oauth.governance.v1",
+                "provider_inventory": [],
+                "authorization_status": [],
+                "scope_summary": {},
+                "expiry_forecast": [],
+                "rotation_readiness": {"rows": []},
+                "risk": {"high_risk_count": 0},
+                "policy": {},
+                "audit": [],
+                "certification": {"outcome": "NOT_CERTIFIED"},
+                **dict(oauth_governance_source),
+                "authorization_performed": False,
+                "refresh_performed": False,
+                "execution_allowed": False,
+            }
+        ),
+        "enterprise_broker_runtime": redact_value(
+            {
+                "schema_version": "css.enterprise_broker_runtime.governance.v1",
+                "broker_health": {"status": "CONFIGURATION_REQUIRED", "bindings": []},
+                "oauth_status": [],
+                "secret_lease_health": [],
+                "credential_governance_summary": {
+                    "enterprise_binding_count": 0,
+                    "legacy_compatibility_count": 0,
+                    "plaintext_returned": False,
+                },
+                "provider_health": {},
+                "holdings_readiness": {},
+                "market_data_readiness": [],
+                "options_readiness": [],
+                "advisory_readiness": "DATA_DEPENDENCY_BLOCKED",
+                "certification": {"outcome": "NOT_CERTIFIED"},
+                **dict(enterprise_broker_runtime_source),
+                "execution_posture": "DISABLED",
+                "execution_authority": "BLOCKED",
+                "fail_closed": True,
+                "advisory_only": True,
+                "execution_allowed": False,
+            }
+        ),
+        "enterprise_governance": redact_value(
+            {
+                "schema_version": "css.enterprise_governance.v1",
+                "overall_certification_readiness": 0,
+                "governance_score": 0,
+                "domains": {},
+                "iso_27001": {"percentage": 0, "formal_certification_claimed": False},
+                "iso_9001": {"percentage": 0, "formal_certification_claimed": False},
+                "business_continuity": {"percentage": 0},
+                "enterprise_risk_summary": {"risk_count": 0},
+                "enterprise_risk_register": [],
+                "certification": {
+                    "status": "EVIDENCE_INCOMPLETE",
+                    "formal_certification_claimed": False,
+                },
+                "broker_readiness": "EVIDENCE_MISSING",
+                "runtime_readiness": "EVIDENCE_MISSING",
+                "security_posture": "EVIDENCE_MISSING",
+                "compliance_posture": "EVIDENCE_MISSING",
+                "outstanding_blockers": [],
+                **dict(enterprise_governance_source),
+                "formal_certification_claimed": False,
+                "production_certified": False,
+                "read_only": True,
+                "execution_posture": "DISABLED",
+                "execution_authority": "BLOCKED",
+                "fail_closed": True,
+                "advisory_only": True,
+                "execution_allowed": False,
+            }
+        ),
+        "production_readiness": redact_value(
+            {
+                "schema_version": "css.production_readiness.certification.v1",
+                "status": "NOT_CERTIFIED",
+                "certification_score": 0,
+                "governance_score": 0,
+                "broker_readiness": "EVIDENCE_MISSING",
+                "runtime_readiness": "EVIDENCE_MISSING",
+                "deployment_blockers": [],
+                "outstanding_risks": {},
+                "evidence_completeness": 0,
+                "platform_certification": {},
+                "operational_acceptance": {},
+                "endurance_readiness": {},
+                "disaster_recovery_readiness": {},
+                "deployment_readiness": {},
+                **dict(production_readiness_source),
+                "evidence_fabricated": False,
+                "deployment_authorized": False,
+                "deployment_performed": False,
+                "production_trading_certified": False,
+                "execution_posture": "DISABLED",
+                "execution_authority": "BLOCKED",
+                "fail_closed": True,
+                "advisory_only": True,
+                "execution_allowed": False,
+            }
+        ),
         "configuration": _configuration(frontend, broker, sections),
         "documentation": _documentation_index(),
         "permissions": mission_control_permissions_payload(),

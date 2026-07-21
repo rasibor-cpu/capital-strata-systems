@@ -82,6 +82,14 @@ class CertificationEngine:
     def generate_reports(self, result: CertificationResult = None) -> Dict[str, Any]:
         return self.service.generate_reports(result=result)
 
+    def evaluate_enterprise_governance(self, evidence) -> Dict[str, Any]:
+        """Evaluate supplied governance evidence without inferring or fabricating it."""
+        from backend.governance.governance_certification import (
+            certify_governance_readiness,
+        )
+
+        return certify_governance_readiness(evidence)
+
     def run_production_checks(self) -> Dict[str, Any]:
         result = self.evaluate()
         data = result.to_legacy_dict()

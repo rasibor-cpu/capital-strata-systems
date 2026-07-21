@@ -14,6 +14,7 @@ def evaluate_covered_call_eligibility(
     holdings: Mapping[str, Any] | None,
     chain: Mapping[str, Any] | None = None,
     broker_supports_listed_options: bool = False,
+    account_restrictions: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Validate share coverage without inventing holdings."""
     reasons: list[str] = []
@@ -22,6 +23,9 @@ def evaluate_covered_call_eligibility(
         reasons.append("holdings_unavailable")
     if not broker_supports_listed_options:
         reasons.append("broker_lacks_listed_options_capability")
+    restrictions = dict(account_restrictions or {})
+    if restrictions and restrictions.get("requires_broker_confirmation"):
+        reasons.append("account_options_permission_unconfirmed")
 
     rows = list(hold.get("holdings") or [])
     match = None
@@ -76,6 +80,7 @@ def evaluate_cash_secured_put_eligibility(
     collateral: Mapping[str, Any] | None,
     chain: Mapping[str, Any] | None = None,
     broker_supports_listed_options: bool = False,
+    account_restrictions: Mapping[str, Any] | None = None,
     currency: str | None = None,
     reserve_haircut: float = 0.0,
 ) -> dict[str, Any]:
@@ -84,6 +89,9 @@ def evaluate_cash_secured_put_eligibility(
     coll = dict(collateral or {})
     if not broker_supports_listed_options:
         reasons.append("broker_lacks_listed_options_capability")
+    restrictions = dict(account_restrictions or {})
+    if restrictions and not restrictions.get("cash_secured_puts_assumed"):
+        reasons.append("account_cash_secured_put_permission_unconfirmed")
 
     auth = str(coll.get("authority_level") or "UNAVAILABLE")
     if auth == "UNAVAILABLE" or coll.get("value") is None:

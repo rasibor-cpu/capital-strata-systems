@@ -257,10 +257,15 @@ ALLOWED_TRANSITIONS: Mapping[BrokerOperationalState, frozenset[BrokerOperational
     ),
 }
 
-_REDACTED_KEY = re.compile(r"(token|secret|password|authorization|private.?key|api.?key|account.?number)", re.I)
+_REDACTED_KEY = re.compile(
+    r"(token|secret|password|authorization|private.?key|api.?key|oauth.?code|"
+    r"client.?secret|certificate|account.?number)",
+    re.I,
+)
 _BEARER = re.compile(r"\bBearer\s+\S+", re.I)
 _INLINE_SECRET = re.compile(
-    r"\b(token|secret|password|api[_-]?key|authorization|account[_-]?number)\s*[:=]\s*([^\s,;]+)",
+    r"\b(token|secret|password|api[_-]?key|authorization|oauth[_-]?code|client[_-]?secret|"
+    r"certificate|account[_-]?number)\s*[:=]\s*([^\s,;]+)",
     re.I,
 )
 _T = TypeVar("_T")
