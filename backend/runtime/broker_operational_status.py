@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping
 
+from backend.app.brokers.operational_state import BrokerOperationalState, operation_result
 
 CANONICAL_BROKER_OPERATIONAL_STATUS_FIELDS = (
     "broker",
@@ -21,6 +22,11 @@ CANONICAL_BROKER_OPERATIONAL_STATUS_FIELDS = (
     "balance_status",
     "margin_status",
     "operational_state",
+    "legacy_operational_state",
+    "operation_result",
+    "recommended_action",
+    "expected_condition",
+    "retryable",
     "failure_reason",
 )
 
@@ -42,7 +48,12 @@ class BrokerOperationalStatus:
     market_data_status: str = "PENDING"
     balance_status: str = "NOT_AVAILABLE"
     margin_status: str = "READ_ONLY_PENDING_ACCOUNT"
-    operational_state: str = "PENDING"
+    operational_state: str = BrokerOperationalState.NOT_INITIALIZED.value
+    legacy_operational_state: str = "PENDING"
+    operation_result: Mapping[str, Any] | None = None
+    recommended_action: str = ""
+    expected_condition: bool = True
+    retryable: bool = False
     failure_reason: str = "NONE"
 
     def as_dict(self) -> dict[str, Any]:
@@ -93,14 +104,47 @@ def build_broker_operational_status(
             margin_status = "BROKER_UNAVAILABLE"
 
     failure_reason = _failure_reason(source)
-    operational_state = str(source.get("operational_state", "") or "").upper()
-    if not operational_state:
+    legacy_operational_state = str(source.get("operational_state", "") or "").upper()
+    if not legacy_operational_state:
         if failure_reason not in {"NONE", "PENDING"}:
-            operational_state = "DEGRADED"
+            legacy_operational_state = "DEGRADED"
         elif account_sync_status == "OK" and market_data_status == "OK":
-            operational_state = "OPERATIONAL"
+            legacy_operational_state = "OPERATIONAL"
         else:
-            operational_state = "PENDING"
+            legacy_operational_state = "PENDING"
+
+    canonical_state = {
+        "OPERATIONAL": BrokerOperationalState.READ_ONLY_READY,
+        "READY": BrokerOperationalState.READ_ONLY_READY,
+        "LIVE_READ_ONLY": BrokerOperationalState.READ_ONLY_READY,
+        "DEGRADED": BrokerOperationalState.DEGRADED,
+        "BLOCKED": BrokerOperationalState.EXECUTION_BLOCKED,
+        "DISABLED": BrokerOperationalState.DISABLED,
+        "FAILED": BrokerOperationalState.FAILED,
+        "ERROR": BrokerOperationalState.FAILED,
+        "UNCONFIGURED": BrokerOperationalState.CONFIGURATION_REQUIRED,
+        "PENDING": BrokerOperationalState.NOT_INITIALIZED,
+    }.get(legacy_operational_state, BrokerOperationalState.NOT_INITIALIZED)
+    result = operation_result(
+        broker=broker,
+        operation="operational_status",
+        state=canonical_state,
+        success=canonical_state is BrokerOperationalState.READ_ONLY_READY,
+        retryable=canonical_state in {BrokerOperationalState.DEGRADED, BrokerOperationalState.PROVIDER_UNAVAILABLE},
+        expected_condition=canonical_state is not BrokerOperationalState.FAILED,
+        failure_code=None if failure_reason in {"NONE", "PENDING"} else failure_reason,
+        operator_message=(
+            "Broker is ready for read-only operations"
+            if canonical_state is BrokerOperationalState.READ_ONLY_READY
+            else "Broker is not ready for read-only operations"
+        ),
+        recommended_action=(
+            ""
+            if canonical_state is BrokerOperationalState.READ_ONLY_READY
+            else "Review broker configuration and canonical readiness"
+        ),
+        latency_ms=_float_or_none(source.get("latency_ms")),
+    ).as_dict()
 
     obj = BrokerOperationalStatus(
         broker=broker,
@@ -118,7 +162,12 @@ def build_broker_operational_status(
         market_data_status=market_data_status,
         balance_status=balance_status,
         margin_status=margin_status,
-        operational_state=operational_state,
+        operational_state=canonical_state.value,
+        legacy_operational_state=legacy_operational_state,
+        operation_result=result,
+        recommended_action=result["recommended_action"],
+        expected_condition=result["expected_condition"],
+        retryable=result["retryable"],
         failure_reason=failure_reason,
     )
     return obj.as_dict()

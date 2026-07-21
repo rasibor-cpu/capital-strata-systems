@@ -41,6 +41,7 @@ from typing import Any, Dict, Mapping, Optional, List
 
 import requests
 
+from backend.app.brokers.operational_state import BrokerOperationalState, operation_result
 from engine.execution.live_order_kill_switch import evaluate_live_order_kill_switch
 from backend.app.security.live_toggle import is_live_execution_authorized
 from backend.app.observability.audit_context import get_audit_user
@@ -107,7 +108,23 @@ class OandaAdapter:
 
     def _request_json(self, method: str, path: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         if not self.is_configured():
-            raise RuntimeError("OANDA not configured: set OANDA_API_KEY, OANDA_ACCOUNT_ID and OANDA_BASE_URL.")
+            result = operation_result(
+                broker="OANDA",
+                operation=f"http_{method.lower()}",
+                state=BrokerOperationalState.CONFIGURATION_REQUIRED,
+                failure_code="CONFIGURATION_REQUIRED",
+                operator_message="OANDA read-only configuration is required",
+                technical_message="No network request was attempted",
+                recommended_action="Configure OANDA endpoint, credentials, and account selection",
+                data={"path": path},
+            ).as_dict()
+            return {
+                "ok": False,
+                "status": None,
+                "data": None,
+                "error": "CONFIGURATION_REQUIRED",
+                "operation_result": result,
+            }
 
         if self.margin_rejection_lock and method.upper() in ("POST", "PUT"):
             # Block new orders if margin rejected
@@ -174,6 +191,18 @@ class OandaAdapter:
 
         self._record_failure()
         return {"ok": False, "status": None, "data": None, "error": "max_retries_exhausted"}
+
+    def operational_readiness(self) -> Dict[str, Any]:
+        """Structured compatibility boundary; performs no authentication."""
+        from backend.app.brokers.operational_adapter import OandaOperationalAdapter
+
+        configuration = {
+            "OANDA_BASE_URL": self.base_url,
+            "OANDA_API_TOKEN": "configured" if self.api_key else "",
+            "OANDA_ACCOUNT_ID": "configured" if self.account_id else "",
+            "OANDA_ENVIRONMENT": self.env,
+        }
+        return OandaOperationalAdapter(configuration=configuration).readiness()
 
     def _record_success(self):
         self.consecutive_failures = 0

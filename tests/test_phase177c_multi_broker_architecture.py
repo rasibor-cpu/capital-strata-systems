@@ -47,13 +47,13 @@ def test_legacy_metadata_registry_aligned() -> None:
     assert get_broker_spec("questrade").display_name == "Questrade"
 
 
-def test_binance_questrade_adapters_not_executable() -> None:
-    import pytest
-
-    with pytest.raises(NotImplementedError):
-        get_adapter("binance")
-    with pytest.raises(NotImplementedError):
-        get_adapter("questrade")
+def test_binance_questrade_adapters_are_structured_and_non_executable() -> None:
+    for broker in ("binance", "questrade"):
+        adapter = get_adapter(broker)()
+        readiness = adapter.readiness()
+        assert readiness["expected_condition"] is True
+        assert readiness["execution_allowed"] is False
+        assert readiness["state"] in {"CREDENTIALS_REQUIRED", "CONFIGURATION_REQUIRED"}
 
 
 def test_mission_control_broker_list_tier1() -> None:

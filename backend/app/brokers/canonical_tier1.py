@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Mapping, Sequence
 
+from backend.app.brokers.operational_state import BrokerOperationalState
+
 SCHEMA_VERSION = "css.broker.tier1.v1"
 
 # Canonical Tier-1 set — Revision B
@@ -43,16 +45,8 @@ class BrokerRole(str, Enum):
     UNASSIGNED = "UNASSIGNED"
 
 
-class OperationalState(str, Enum):
-    REGISTERED = "REGISTERED"
-    UNCONFIGURED = "UNCONFIGURED"
-    AUTHENTICATING = "AUTHENTICATING"
-    LIVE_READ_ONLY = "LIVE_READ_ONLY"
-    READY = "READY"
-    DEGRADED = "DEGRADED"
-    BLOCKED = "BLOCKED"
-    DISABLED = "DISABLED"
-    ERROR = "ERROR"
+# Backward-compatible import name; canonical truth lives in operational_state.
+OperationalState = BrokerOperationalState
 
 
 class CertificationState(str, Enum):
@@ -176,6 +170,14 @@ class BrokerHealthSnapshot:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on", "enabled", "authorized", "armed"}
 
 
 def _coinbase_spec() -> BrokerPluginSpec:
@@ -400,14 +402,14 @@ class CanonicalBrokerRegistry:
             error = active.get("failure_reason") or active.get("connection_error") or active.get("error_state")
             mode = str(active.get("broker_mode") or "").lower()
             if str(active.get("broker_mode") or "").upper() in {"LIVE_READ_ONLY", "LIVE-READ-ONLY"} or (
-                mode == "live" and not bool(active.get("execution_authority"))
+                mode == "live" and not _truthy(active.get("execution_authority"))
             ):
                 op_state = OperationalState.LIVE_READ_ONLY.value
                 cert = CertificationState.IN_PROGRESS.value
             elif readiness.upper() in {"READY", "FULLY_OPERATIONAL", "PASS"}:
                 op_state = OperationalState.READY.value
             elif error:
-                op_state = OperationalState.BLOCKED.value
+                op_state = OperationalState.DEGRADED.value
             else:
                 op_state = OperationalState.UNCONFIGURED.value
         else:
@@ -461,20 +463,29 @@ class CanonicalBrokerRegistry:
                 active=active,
                 contamination_findings=contamination_by_broker.get(name, ()),
             )
+            from backend.app.brokers.operational_adapter import get_operational_adapter
+
+            operational = get_operational_adapter(
+                name,
+                configuration=active.get("configuration")
+                if snap.selected and isinstance(active.get("configuration"), Mapping)
+                else {},
+                evidence=active if snap.selected else {},
+            ).operational_snapshot()
             rows.append(
                 {
                     "broker": snap.broker,
                     "role": snap.role,
                     "broker_type": snap.broker_type,
-                    "status": snap.operational_state,
-                    "operational_state": snap.operational_state,
+                    "status": operational["operational_state"],
+                    "operational_state": operational["operational_state"],
                     "mode": (
                         "live_read_only"
                         if snap.selected and snap.operational_state == OperationalState.LIVE_READ_ONLY.value
                         else ("selected" if snap.selected else "available")
                     ),
-                    "readiness": snap.operational_readiness,
-                    "certification": snap.certification_state,
+                    "readiness": operational["readiness"],
+                    "certification": operational["certification"],
                     "latency": snap.latency_ms if snap.latency_ms is not None else "UNAVAILABLE",
                     "authentication": snap.authentication_state,
                     "market_data": snap.market_data_health,
@@ -482,6 +493,13 @@ class CanonicalBrokerRegistry:
                     "execution": snap.execution_capability,
                     "execution_authority": snap.execution_authority,
                     "last_sync": snap.last_sync or "UNAVAILABLE",
+                    "last_successful_operation": operational["last_successful_operation"] or "UNAVAILABLE",
+                    "freshness": operational["freshness"],
+                    "recommended_action": operational["recommended_action"],
+                    "expected_condition": operational["expected_condition"],
+                    "retryable": operational["retryable"],
+                    "capability_states": operational["capability_states"],
+                    "operation_result": operational["operation_result"],
                     "credentials_present": snap.credential_health,
                     "connection_health": snap.connection_health,
                     "error_state": snap.error_state,
@@ -495,6 +513,7 @@ class CanonicalBrokerRegistry:
                     "priority": self.get(name).priority,
                     "live_read_only_allowed": snap.live_read_only_allowed,
                     "execution_blocked": True,
+                    "execution_state": operational["execution_state"],
                     "advisory_only": True,
                     "contamination_isolated": snap.contamination_isolated,
                     "contamination_findings": snap.contamination_findings,

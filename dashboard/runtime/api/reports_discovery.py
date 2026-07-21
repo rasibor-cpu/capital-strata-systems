@@ -133,6 +133,28 @@ def _metadata_for(
             "advisory_only": True,
             "execution_allowed": False,
         }
+    if rid == "broker_executive":
+        doc = _broker_document()
+        return {
+            "ok": True,
+            "report_id": rid,
+            "title": doc.get("title"),
+            "category": "risk_operations",
+            "status": "AVAILABLE",
+            "readiness": "advisory_only",
+            "source": "BROKER_OPERATIONAL_STATE",
+            "format": "HTML",
+            "page_count": doc.get("page_count"),
+            "generated_at": doc.get("generated_at"),
+            "css_version": doc.get("css_version"),
+            "commit_reference": doc.get("commit_reference"),
+            "certification_state": "ADVISORY_ONLY",
+            "view_href": f"/api/reports/{rid}/view",
+            "print_href": f"/api/reports/{rid}/view",
+            "write_routes": False,
+            "advisory_only": True,
+            "execution_allowed": False,
+        }
 
     from backend.reports_center.rbac import ReportsAccessControl
     from backend.reports_center.registry import by_code
@@ -180,6 +202,12 @@ def _options_income_document(
         return None
 
 
+def _broker_document() -> dict[str, Any]:
+    from backend.broker_reporting import build_broker_executive_report_package
+
+    return build_broker_executive_report_package().document
+
+
 def _view_html(
     report_id: str,
     *,
@@ -188,9 +216,9 @@ def _view_html(
     surface: str,
 ) -> str | None:
     rid = str(report_id or "").strip()
-    if rid != "options_income_executive":
+    if rid not in {"options_income_executive", "broker_executive"}:
         return None
-    doc = _options_income_document(oi_provider)
+    doc = _broker_document() if rid == "broker_executive" else _options_income_document(oi_provider)
     if not doc:
         return None
     reports = ROUTES.mc_reports if surface == "mission_control" else ROUTES.mobile_reports
@@ -199,7 +227,11 @@ def _view_html(
         doc,
         reports_href=reports,
         home_href=home,
-        print_href="/api/options-income/report.html",
+        print_href=(
+            "/api/reports/broker_executive/view"
+            if rid == "broker_executive"
+            else "/api/options-income/report.html"
+        ),
         surface=surface,
     )
 

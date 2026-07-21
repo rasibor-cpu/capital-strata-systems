@@ -6,6 +6,7 @@ from typing import Any, Mapping
 from abc import ABC, abstractmethod
 
 from backend.common.advisory_payload import AdvisoryPayloadBuilder
+from backend.app.brokers.operational_state import BrokerOperationalState, operation_result
 from backend.runtime.broker_operational_status import build_broker_operational_status
 from backend.runtime.broker_credential_diagnostics import (
     authority_reason_from_diagnostics,
@@ -193,6 +194,39 @@ def broker_readiness_payload(snapshot: BrokerReadinessSnapshot | Mapping[str, An
         and payload["account_loaded"]
         and payload["market_data_ready"]
     )
+    if not payload["credentials_present"]:
+        state = BrokerOperationalState.CREDENTIALS_REQUIRED
+        action = "Configure broker credentials through the approved secret store"
+    elif not payload["authenticated"]:
+        state = BrokerOperationalState.AUTHENTICATION_REQUIRED
+        action = "Authenticate through an approved future activation workflow"
+    elif not payload["account_loaded"]:
+        state = BrokerOperationalState.ACCOUNT_REQUIRED
+        action = "Select and load an authorized read-only account"
+    elif not payload["market_data_ready"]:
+        state = BrokerOperationalState.MARKET_DATA_REQUIRED
+        action = "Restore read-only market-data availability"
+    else:
+        state = BrokerOperationalState.READ_ONLY_READY
+        action = ""
+    payload["operational_result"] = operation_result(
+        broker=payload["broker_name"],
+        operation="readiness",
+        state=state,
+        success=state is BrokerOperationalState.READ_ONLY_READY,
+        failure_code=None if state is BrokerOperationalState.READ_ONLY_READY else state.value,
+        operator_message=(
+            "Broker is ready for read-only operations"
+            if state is BrokerOperationalState.READ_ONLY_READY
+            else "Broker read-only prerequisites are incomplete"
+        ),
+        recommended_action=action,
+        data={"deprecated_boolean_ready": payload["broker_ready"]},
+    ).as_dict()
+    payload["operational_state"] = state.value
+    payload["recommended_action"] = action
+    payload["expected_condition"] = True
+    payload["ready_for_execution"] = False
     return AdvisoryPayloadBuilder.lock(payload)
 
 

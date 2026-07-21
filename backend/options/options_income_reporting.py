@@ -75,6 +75,52 @@ def build_options_income_executive_report(
         ("Rolling Recommendations", snap.get("rolling_recommendations") or []),
         ("Portfolio Allocation", snap.get("portfolio_allocation") or {}),
         ("Stress Testing", snap.get("stress_tests") or {}),
+        ("Advisory Data Providers", {
+            "provider_summary": snap.get("provider_summary"),
+            "data_readiness": snap.get("data_readiness"),
+            "freshness": (snap.get("advisory_data") or {}).get("option_chains")
+            if isinstance(snap.get("advisory_data"), dict)
+            else None,
+        }),
+        ("Holdings Coverage and Collateral Authority", {
+            "holdings": (snap.get("advisory_data") or {}).get("holdings")
+            if isinstance(snap.get("advisory_data"), dict)
+            else None,
+            "collateral": (snap.get("advisory_data") or {}).get("collateral")
+            if isinstance(snap.get("advisory_data"), dict)
+            else snap.get("collateral"),
+            "eligibility": (snap.get("advisory_data") or {}).get("eligibility")
+            if isinstance(snap.get("advisory_data"), dict)
+            else None,
+        }),
+        ("Symbol Normalization and Provider Limitations", {
+            "broker_capability_truth": (snap.get("advisory_data") or {}).get("broker_capability_truth")
+            if isinstance(snap.get("advisory_data"), dict)
+            else None,
+            "questrade_readiness": (snap.get("advisory_data") or {}).get("questrade_readiness")
+            if isinstance(snap.get("advisory_data"), dict)
+            else None,
+            "events": (snap.get("advisory_data") or {}).get("events")
+            if isinstance(snap.get("advisory_data"), dict)
+            else None,
+            "notes": [
+                "BTC_USD / BTC-USD aliases are excluded from listed-equity option eligibility",
+                "Coinbase, Binance, and OANDA do not provide listed-equity option chains",
+                "Demonstration fixtures are never published as live market data",
+            ],
+        }),
+        ("Broker Operational and Capability States", {
+            "operational_state": (snap.get("advisory_data") or {}).get("broker_operational_state")
+            if isinstance(snap.get("advisory_data"), dict)
+            else None,
+            "option_chain_state": (snap.get("advisory_data") or {}).get("broker_option_chain_state")
+            if isinstance(snap.get("advisory_data"), dict)
+            else None,
+            "expected_condition": (snap.get("advisory_data") or {}).get("broker_expected_condition")
+            if isinstance(snap.get("advisory_data"), dict)
+            else None,
+            "execution_allowed": False,
+        }),
         ("Certification and Operational Readiness", {
             "certification": snap.get("certification"),
             "operational_readiness": snap.get("operational_readiness"),
@@ -86,6 +132,7 @@ def build_options_income_executive_report(
                 "No fabricated option-chain opportunities when MARKET_DATA/OPTION_CHAIN absent",
                 "Collateral never inferred from simulated 10000 margin fixtures",
                 "Runtime mode and broker registry consulted; execution remains blocked",
+                "OPTION_CHAIN_PROVIDER_NOT_CONFIGURED until an approved provider is registered",
             ],
         }),
     ]

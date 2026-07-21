@@ -11,7 +11,7 @@ def render(state: dict) -> str:
     return (
         page_header(
             "Options Income",
-            "Phase 177D — canonical Options Income Engine (advisory). Covered calls, CSPs, premium, collateral, Greeks, rolling, certification.",
+            "Phase 178A — advisory data contracts connected. Covered calls, CSPs, premium, collateral, Greeks, rolling, certification. Execution blocked.",
         )
         + warning_banner(
             "ADVISORY ONLY — Execution blocked. No option orders, rolls, assignments, or broker transmissions from this page.",
@@ -38,6 +38,8 @@ def render(state: dict) -> str:
                 ("Opportunities", options.get("opportunity_count", len(options.get("opportunities", []) or [])), "neutral"),
                 ("Certification", cert.get("outcome") if cert else options.get("certification"), "neutral"),
                 ("Operational Readiness", options.get("operational_readiness"), options.get("operational_readiness")),
+                ("Data Readiness", (options.get("data_readiness") or {}).get("status") if isinstance(options.get("data_readiness"), dict) else options.get("engine_status"), "neutral"),
+                ("Chain / Holdings", _provider_chip(options.get("provider_summary")), "neutral"),
                 ("Assignment Risk", _risk_status(options.get("assignment_risk")), "neutral"),
                 ("Volatility Risk", _risk_status(options.get("volatility_risk")), "neutral"),
                 ("Last Refresh", options.get("last_successful_refresh"), "neutral"),
@@ -57,6 +59,8 @@ def render(state: dict) -> str:
                 "run_rate": run_rate,
                 "portfolio_allocation": options.get("portfolio_allocation"),
                 "missing_dependencies": options.get("missing_dependencies"),
+                "data_readiness": options.get("data_readiness"),
+                "provider_summary": options.get("provider_summary"),
             }),
             detail_table("Risk And Rolling", {
                 "rolling_recommendations": options.get("rolling_recommendations"),
@@ -99,3 +103,11 @@ def _risk_status(value) -> str:
     if isinstance(value, dict):
         return str(value.get("status") or value.get("detail") or "UNAVAILABLE")
     return str(value or "UNAVAILABLE")
+
+
+def _provider_chip(summary) -> str:
+    if not isinstance(summary, dict):
+        return "NOT_CONFIGURED"
+    chain = summary.get("option_chain_status") or summary.get("readiness_status") or "UNKNOWN"
+    holdings = summary.get("holdings_status") or "UNKNOWN"
+    return f"{chain} / {holdings}"

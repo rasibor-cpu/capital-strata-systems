@@ -7,6 +7,10 @@ from backend.app.brokers.broker_registry import (
     list_supported_brokers,
 )
 from backend.app.brokers.oanda_adapter import OandaAdapter
+from backend.app.brokers.operational_adapter import (
+    BinanceOperationalAdapter,
+    QuestradeOperationalAdapter,
+)
 from backend.broker.coinbase_adapter import CoinbaseAdapter
 
 
@@ -29,12 +33,11 @@ def test_get_adapter_resolves_canonical_brokers() -> None:
     assert get_adapter("coinbase") == CoinbaseAdapter
 
 
-def test_get_adapter_for_unsupported_registered_broker_raises_notimplementederror() -> None:
-    # Binance / Questrade are registered but adapters are not executable yet
-    with pytest.raises(NotImplementedError, match="not executable in this runtime"):
-        get_adapter("binance")
-    with pytest.raises(NotImplementedError, match="not executable in this runtime"):
-        get_adapter("questrade")
+def test_get_adapter_returns_structured_state_adapters() -> None:
+    assert get_adapter("binance") is BinanceOperationalAdapter
+    assert get_adapter("questrade") is QuestradeOperationalAdapter
+    assert BinanceOperationalAdapter().readiness()["state"] == "CREDENTIALS_REQUIRED"
+    assert QuestradeOperationalAdapter().readiness()["state"] == "CONFIGURATION_REQUIRED"
 
 
 def test_get_adapter_for_unregistered_broker_raises_keyerror() -> None:

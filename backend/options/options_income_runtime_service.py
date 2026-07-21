@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from backend.options.options_income_advisory_contracts import unexpected_advisory_fault
 from backend.options.options_income_dashboard import (
     build_options_income_dashboard,
     fail_closed_dashboard,
@@ -41,6 +42,10 @@ STATUS_ADVISORY_ONLY = "ADVISORY_ONLY"
 STATUS_DATA_DEPENDENCY_BLOCKED = "DATA_DEPENDENCY_BLOCKED"
 STATUS_NO_OPEN_OPTION_POSITIONS = "NO_OPEN_OPTION_POSITIONS"
 STATUS_TARGET_NOT_CONFIGURED = "TARGET_NOT_CONFIGURED"
+STATUS_STALE = "STALE"
+STATUS_DEGRADED = "DEGRADED"
+STATUS_ADVISORY_READY = "ADVISORY_READY"
+STATUS_PROVIDER_UNAVAILABLE = "PROVIDER_UNAVAILABLE"
 
 CANONICAL_MODULES = (
     "backend.options.options_income_strategy_domain",
@@ -78,6 +83,8 @@ class OptionsIncomeRuntimeContext:
     remaining_days: int | None = None
     persist: bool = True
     generated_at: str | None = None
+    # Phase 178A — optional advisory data bundle from options_income_data_resolver
+    advisory_data: Mapping[str, Any] | None = None
 
 
 def _utc_now() -> str:
@@ -160,6 +167,23 @@ def _detect_dependencies(ctx: OptionsIncomeRuntimeContext) -> dict[str, Any]:
         "missing_dependencies": missing,
         "provenance": "RUNTIME",
     }
+
+
+def _merge_advisory_dependencies(
+    deps: Mapping[str, Any],
+    advisory: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    merged = dict(deps)
+    missing = list(merged.get("missing_dependencies") or [])
+    for dependency in list((advisory or {}).get("missing_dependencies") or []):
+        name = str(dependency)
+        if name and name not in missing:
+            missing.append(name)
+    merged["missing_dependencies"] = missing
+    merged["advisory_readiness"] = (
+        str((advisory or {}).get("readiness_status") or (advisory or {}).get("status") or "").upper() or None
+    )
+    return merged
 
 
 def _build_run_rate(ctx: OptionsIncomeRuntimeContext) -> dict[str, Any]:
@@ -302,25 +326,39 @@ def _classify_engine_status(
     dashboard: Mapping[str, Any],
     opportunity_count: int,
     position_count: int,
+    scanner_completed: bool,
+    advisory: Mapping[str, Any] | None = None,
 ) -> str:
     if not imports_ok:
         return STATUS_FAILED
     summary = dashboard.get("summary") if isinstance(dashboard.get("summary"), Mapping) else {}
     fail_closed = str(summary.get("engine_status") or "").upper() == "FAIL_CLOSED"
     missing = list(deps.get("missing_dependencies") or [])
+    advisory_status = str((advisory or {}).get("readiness_status") or (advisory or {}).get("status") or "").upper()
+    if dashboard.get("correlation_id"):
+        return STATUS_FAILED
+    if advisory_status == "FAILED" or (advisory or {}).get("failed"):
+        return STATUS_FAILED
     if fail_closed:
-        # Host-input gaps that block opportunity generation are dependencies, not engine failure.
-        if missing and opportunity_count == 0:
+        # Expected input gates are dependency failures; all other fail-closed
+        # dashboard outcomes are unexpected engine failures.
+        if advisory_status == STATUS_DATA_DEPENDENCY_BLOCKED or missing:
             return STATUS_DATA_DEPENDENCY_BLOCKED
         return STATUS_FAILED
-    if opportunity_count == 0 and missing:
+    if advisory_status == STATUS_DATA_DEPENDENCY_BLOCKED:
         return STATUS_DATA_DEPENDENCY_BLOCKED
-    if opportunity_count == 0 and not missing:
-        return STATUS_NO_CURRENT_OPPORTUNITIES
-    if missing:
+    if advisory_status == STATUS_PROVIDER_UNAVAILABLE:
+        return STATUS_PROVIDER_UNAVAILABLE
+    if advisory_status == "STALE" or (advisory or {}).get("stale"):
+        return STATUS_STALE
+    if advisory_status in {"PARTIAL_DATA", "DEGRADED"} or (advisory or {}).get("partial"):
         return STATUS_PARTIAL_DATA
+    if missing or not scanner_completed:
+        return STATUS_DATA_DEPENDENCY_BLOCKED
     _ = position_count
-    return STATUS_READY
+    if opportunity_count > 0:
+        return STATUS_ADVISORY_READY
+    return STATUS_NO_CURRENT_OPPORTUNITIES
 
 
 def _build_certification(
@@ -331,7 +369,27 @@ def _build_certification(
     deps: Mapping[str, Any],
     runtime_mode: Mapping[str, Any],
     engine_status: str,
+    advisory: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    adv = dict(advisory or {})
+    registry = adv.get("provider_registry") if isinstance(adv.get("provider_registry"), Mapping) else {}
+    collateral = adv.get("collateral") if isinstance(adv.get("collateral"), Mapping) else {}
+    events = adv.get("events") if isinstance(adv.get("events"), Mapping) else {}
+    chain_rows = list(adv.get("option_chain_rows") or [])
+    market_rows = list(adv.get("market_data_rows") or [])
+    holdings = adv.get("holdings") if isinstance(adv.get("holdings"), Mapping) else {}
+
+    chain_configured = bool(registry.get("option_chain_providers")) or any(
+        str(r.get("status") or "").upper() not in {"OPTION_CHAIN_PROVIDER_NOT_CONFIGURED", "NOT_CONFIGURED", ""}
+        for r in chain_rows
+    )
+    market_configured = bool(registry.get("market_data_providers")) or any(
+        str(r.get("status") or "").upper() not in {"NOT_CONFIGURED", ""} for r in market_rows
+    )
+    chain_fresh = any(str(r.get("freshness") or "").upper() == "FRESH" for r in chain_rows)
+    market_fresh = any(str(r.get("freshness") or "").upper() == "FRESH" for r in market_rows)
+    collateral_traceable = str(collateral.get("authority_level") or "UNAVAILABLE") != "UNAVAILABLE"
+
     checks = {
         "runtime_service_deployed": True,
         "canonical_modules_import": imports_ok,
@@ -352,11 +410,47 @@ def _build_certification(
         "account_holding_data_available": bool(deps.get("account_holdings_available")),
         "execution_authority_blocked": not bool(runtime_mode.get("execution_enabled")),
         "advisory_boundary_intact": True,
+        # Phase 178A advisory-data certification facets
+        "market_data_provider_configured": market_configured if adv else False,
+        "underlying_quote_fresh": market_fresh if adv else False,
+        "option_chain_provider_configured": chain_configured if adv else False,
+        "option_chain_fresh_and_complete": (
+            chain_fresh
+            and any(str(r.get("status") or "").upper() == "READY" for r in chain_rows)
+            if adv
+            else False
+        ),
+        "holdings_available": bool(deps.get("account_holdings_available")),
+        "balances_available": holdings.get("cash") is not None if adv else False,
+        "collateral_traceable": collateral_traceable if adv else False,
+        "broker_compatibility_known": bool(adv.get("broker_capability_truth")) if adv else True,
+        "greeks_quality_known": any(
+            str(r.get("greeks_origin") or "MISSING").upper() in {"PROVIDER", "DERIVED", "MISSING"} for r in chain_rows
+        )
+        if chain_rows
+        else True,
+        "event_data_status": str(events.get("status") or "EVENT_DATA_UNAVAILABLE"),
+        "execution_blocked": True,
     }
     if not imports_ok:
         outcome = "FAILED"
+    elif engine_status == STATUS_STALE:
+        outcome = "STALE_DATA_BLOCKED"
     elif engine_status == STATUS_DATA_DEPENDENCY_BLOCKED:
         outcome = "DATA_DEPENDENCY_BLOCKED"
+    elif engine_status == STATUS_FAILED:
+        outcome = "FAILED"
+    elif (
+        checks["option_chain_data_available"]
+        and checks["market_data_available"]
+        and checks["account_holding_data_available"]
+        and checks["collateral_traceable"]
+        and checks["execution_authority_blocked"]
+        and checks["advisory_boundary_intact"]
+    ):
+        outcome = "CERTIFIED_ADVISORY"
+    elif checks["option_chain_data_available"] and checks["market_data_available"]:
+        outcome = "ADVISORY_READY" if engine_status in {STATUS_ADVISORY_READY, STATUS_NO_CURRENT_OPPORTUNITIES, STATUS_READY} else "PARTIALLY_READY"
     elif all(
         [
             checks["canonical_modules_import"],
@@ -368,8 +462,6 @@ def _build_certification(
         ]
     ) and not checks["option_chain_data_available"]:
         outcome = "ADVISORY_READY"
-    elif checks["option_chain_data_available"] and checks["market_data_available"]:
-        outcome = "CERTIFIED_ADVISORY"
     else:
         outcome = "PARTIALLY_READY"
 
@@ -381,12 +473,19 @@ def _build_certification(
         "modules_imported": list(import_ok_list),
         "operational_readiness": (
             "ADVISORY_ONLY"
-            if outcome in {"ADVISORY_READY", "CERTIFIED_ADVISORY", "DATA_DEPENDENCY_BLOCKED", "PARTIALLY_READY"}
+            if outcome
+            in {
+                "ADVISORY_READY",
+                "CERTIFIED_ADVISORY",
+                "DATA_DEPENDENCY_BLOCKED",
+                "PARTIALLY_READY",
+                "STALE_DATA_BLOCKED",
+            }
             else outcome
         ),
         "live_ready": False,
         "execution_ready": False,
-        "provenance": "OPTIONS_ENGINE|RUNTIME",
+        "provenance": "OPTIONS_ENGINE|RUNTIME|ADVISORY_DATA",
         **SAFE_FLAGS,
         "paper_only": True,
     }
@@ -612,7 +711,8 @@ def build_options_income_runtime_snapshot(ctx: OptionsIncomeRuntimeContext | Non
     imports_ok, import_ok_list, import_failed = _probe_imports()
     runtime_mode = _resolve_runtime_mode()
     brokers = _resolve_broker_registry()
-    deps = _detect_dependencies(ctx)
+    advisory = dict(ctx.advisory_data) if isinstance(ctx.advisory_data, Mapping) else None
+    deps = _merge_advisory_dependencies(_detect_dependencies(ctx), advisory)
 
     if not imports_ok:
         dashboard = fail_closed_dashboard(reason="canonical_module_import_failure", generated_at=generated_at)
@@ -637,7 +737,9 @@ def build_options_income_runtime_snapshot(ctx: OptionsIncomeRuntimeContext | Non
                 broker_execution_armed=False,
             )
         except Exception as exc:  # noqa: BLE001
-            dashboard = fail_closed_dashboard(reason=str(exc) or type(exc).__name__, generated_at=generated_at)
+            fault = unexpected_advisory_fault(exc)
+            dashboard = fail_closed_dashboard(reason=fault["failure_reason"], generated_at=generated_at)
+            dashboard["correlation_id"] = fault["correlation_id"]
 
     covered, puts, rejected = _split_opportunities(dashboard)
     positions = dashboard.get("positions") if isinstance(dashboard.get("positions"), Mapping) else {}
@@ -649,6 +751,8 @@ def build_options_income_runtime_snapshot(ctx: OptionsIncomeRuntimeContext | Non
         dashboard=dashboard,
         opportunity_count=opportunity_count,
         position_count=position_count,
+        scanner_completed=ctx.opportunities is not None,
+        advisory=advisory,
     )
     certification = _build_certification(
         imports_ok=imports_ok,
@@ -657,16 +761,63 @@ def build_options_income_runtime_snapshot(ctx: OptionsIncomeRuntimeContext | Non
         deps=deps,
         runtime_mode=runtime_mode,
         engine_status=engine_status,
+        advisory=advisory,
     )
     run_rate = _build_run_rate(ctx)
     premium = _premium_accounting(dashboard, ctx)
     greeks = _greeks_block(dashboard, position_count)
     rolls = _rolls_block(dashboard)
     collateral = _collateral_block(dashboard, deps)
+    if advisory and isinstance(advisory.get("collateral"), Mapping):
+        adv_coll = dict(advisory["collateral"])
+        if adv_coll.get("authority_level") and adv_coll.get("authority_level") != "UNAVAILABLE":
+            collateral = {
+                **collateral,
+                **adv_coll,
+                "status": adv_coll.get("status") or collateral.get("status"),
+                "advisory_only": True,
+                "execution_allowed": False,
+            }
     risk = dashboard.get("risk") if isinstance(dashboard.get("risk"), Mapping) else {}
 
     deployment_state = "DEPLOYED" if imports_ok else STATUS_NOT_DEPLOYED
-    mc_status = STATUS_ADVISORY_ONLY if imports_ok and engine_status == STATUS_DATA_DEPENDENCY_BLOCKED else engine_status
+    if engine_status == STATUS_DATA_DEPENDENCY_BLOCKED:
+        mc_status = STATUS_ADVISORY_ONLY
+    elif engine_status == STATUS_STALE:
+        mc_status = STATUS_DEGRADED
+    else:
+        mc_status = engine_status
+
+    rejected_count = len(rejected)
+    provider_summary = None
+    if advisory:
+        provider_summary = {
+            "provider_registry": advisory.get("provider_registry"),
+            "option_chain_status": (advisory.get("option_chains") or {}).get("status")
+            if isinstance(advisory.get("option_chains"), Mapping)
+            else None,
+            "holdings_status": (advisory.get("holdings") or {}).get("status")
+            if isinstance(advisory.get("holdings"), Mapping)
+            else None,
+            "collateral_status": (advisory.get("collateral") or {}).get("status")
+            if isinstance(advisory.get("collateral"), Mapping)
+            else None,
+            "collateral_authority": (advisory.get("collateral") or {}).get("authority_level")
+            if isinstance(advisory.get("collateral"), Mapping)
+            else None,
+            "questrade_adapter_state": (advisory.get("questrade_readiness") or {}).get("adapter_state")
+            if isinstance(advisory.get("questrade_readiness"), Mapping)
+            else None,
+            "broker_capability_truth": advisory.get("broker_capability_truth"),
+            "events_status": (advisory.get("events") or {}).get("status")
+            if isinstance(advisory.get("events"), Mapping)
+            else None,
+            "readiness_status": advisory.get("readiness_status"),
+            "broker_operational_state": advisory.get("broker_operational_state"),
+            "broker_option_chain_state": advisory.get("broker_option_chain_state"),
+            "broker_expected_condition": advisory.get("broker_expected_condition"),
+            "last_successful_refresh": advisory.get("last_successful_refresh"),
+        }
 
     core: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
@@ -682,6 +833,16 @@ def build_options_income_runtime_snapshot(ctx: OptionsIncomeRuntimeContext | Non
         "order_submission": "BLOCKED",
         "live_trading_enabled": False,
         "opportunity_count": opportunity_count,
+        "opportunity_outcome": (
+            "QUALIFYING_OPPORTUNITIES_FOUND"
+            if engine_status == STATUS_ADVISORY_READY
+            else (
+                STATUS_NO_CURRENT_OPPORTUNITIES
+                if engine_status == STATUS_NO_CURRENT_OPPORTUNITIES
+                else "EVALUATION_BLOCKED"
+            )
+        ),
+        "rejected_opportunity_count": rejected_count,
         "opportunities": covered + puts,
         "accepted_candidates": covered + puts,
         "rejected_candidates": rejected,
@@ -721,6 +882,16 @@ def build_options_income_runtime_snapshot(ctx: OptionsIncomeRuntimeContext | Non
         "runtime_mode": runtime_mode,
         "broker_registry": brokers,
         "dashboard": dashboard,
+        "advisory_data": advisory,
+        "provider_summary": provider_summary,
+        "data_readiness": {
+            "status": (advisory or {}).get("readiness_status") if advisory else engine_status,
+            "market_data_available": deps.get("market_data_available"),
+            "option_chain_available": deps.get("option_chain_available"),
+            "account_holdings_available": deps.get("account_holdings_available"),
+            "missing_dependencies": deps.get("missing_dependencies"),
+            "deployment_is_not_data_readiness": True,
+        },
         "data_source": "OPTIONS_ENGINE",
         "source": "OPTIONS_ENGINE",
         "provenance": {
@@ -732,9 +903,14 @@ def build_options_income_runtime_snapshot(ctx: OptionsIncomeRuntimeContext | Non
             "broker": "BROKER" if deps.get("account_holdings_available") else "ABSENT",
             "configuration": "CONFIGURATION",
             "runtime": "RUNTIME",
+            "advisory": (advisory or {}).get("provenance") if advisory else None,
         },
         "generated_at": generated_at,
-        "last_successful_refresh": generated_at if imports_ok else None,
+        "last_successful_refresh": (
+            generated_at
+            if advisory and str(advisory.get("readiness_status") or "").upper() == STATUS_ADVISORY_READY
+            else None
+        ),
         "failure_reason": (
             ";".join(import_failed)
             if not imports_ok
@@ -745,6 +921,7 @@ def build_options_income_runtime_snapshot(ctx: OptionsIncomeRuntimeContext | Non
                 else None
             )
         ),
+        "correlation_id": dashboard.get("correlation_id"),
         "paper_only": True,
         **SAFE_FLAGS,
     }
@@ -801,6 +978,9 @@ def build_mission_control_options_income(ctx: OptionsIncomeRuntimeContext | None
         "last_successful_refresh": snap["last_successful_refresh"],
         "missing_dependencies": snap["missing_dependencies"],
         "opportunity_count": snap["opportunity_count"],
+        "rejected_opportunity_count": snap.get("rejected_opportunity_count"),
+        "provider_summary": snap.get("provider_summary"),
+        "data_readiness": snap.get("data_readiness"),
         "runtime_mode": snap["runtime_mode"],
         "failure_reason": snap.get("failure_reason"),
         "paper_only": True,
@@ -817,6 +997,8 @@ def build_options_income_mobile_card(ctx: OptionsIncomeRuntimeContext | None = N
     collateral = snap.get("collateral") if isinstance(snap.get("collateral"), Mapping) else {}
     assignment = snap.get("assignment_risk") if isinstance(snap.get("assignment_risk"), Mapping) else {}
     cert = snap.get("certification") if isinstance(snap.get("certification"), Mapping) else {}
+    readiness = snap.get("data_readiness") if isinstance(snap.get("data_readiness"), Mapping) else {}
+    providers = snap.get("provider_summary") if isinstance(snap.get("provider_summary"), Mapping) else {}
     return {
         "options_income_status": snap.get("status"),
         "opportunity_count": snap.get("opportunity_count"),
@@ -828,6 +1010,20 @@ def build_options_income_mobile_card(ctx: OptionsIncomeRuntimeContext | None = N
         "collateral_utilization": collateral.get("utilization"),
         "assignment_risk_level": assignment.get("status"),
         "certification": cert.get("outcome"),
+        "data_readiness": readiness.get("status"),
+        "missing_dependencies_count": len(list(snap.get("missing_dependencies") or [])),
+        "provider_chain_status": providers.get("option_chain_status") or providers.get("readiness_status"),
+        "broker_operational_state": (
+            (providers.get("broker_operational_state") or {}).get("operational_state")
+            if isinstance(providers.get("broker_operational_state"), Mapping)
+            else None
+        ),
+        "broker_option_chain_state": (
+            (providers.get("broker_option_chain_state") or {}).get("state")
+            if isinstance(providers.get("broker_option_chain_state"), Mapping)
+            else None
+        ),
+        "broker_expected_condition": providers.get("broker_expected_condition"),
         "last_refresh": snap.get("last_successful_refresh"),
         "detail_route": "/mission-control/options-income",
         "advisory_only": True,
@@ -844,7 +1040,19 @@ _CACHE: dict[str, Any] | None = None
 def get_cached_options_income_payload(*, force: bool = False) -> dict[str, Any]:
     global _CACHE
     if force or _CACHE is None:
-        _CACHE = build_options_income_runtime_snapshot(OptionsIncomeRuntimeContext(persist=True))
+        try:
+            from backend.options.options_income_data_resolver import (
+                build_runtime_context_from_advisory,
+                resolve_options_income_advisory_data,
+            )
+
+            advisory = resolve_options_income_advisory_data()
+            ctx = build_runtime_context_from_advisory(advisory, persist=True)
+            # Attach advisory bundle explicitly for snapshot facets
+            ctx.advisory_data = advisory
+            _CACHE = build_options_income_runtime_snapshot(ctx)
+        except Exception:  # noqa: BLE001 — fail closed to empty context
+            _CACHE = build_options_income_runtime_snapshot(OptionsIncomeRuntimeContext(persist=True))
     return dict(_CACHE)
 
 
@@ -853,9 +1061,14 @@ __all__ = [
     "OptionsIncomeRuntimeContext",
     "SCHEMA_VERSION",
     "STATUS_ADVISORY_ONLY",
+    "STATUS_ADVISORY_READY",
     "STATUS_DATA_DEPENDENCY_BLOCKED",
+    "STATUS_DEGRADED",
     "STATUS_NO_CURRENT_OPPORTUNITIES",
     "STATUS_NO_OPEN_OPTION_POSITIONS",
+    "STATUS_PARTIAL_DATA",
+    "STATUS_PROVIDER_UNAVAILABLE",
+    "STATUS_STALE",
     "STATUS_TARGET_NOT_CONFIGURED",
     "build_mission_control_options_income",
     "build_options_income_mobile_card",

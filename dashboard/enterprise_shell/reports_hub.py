@@ -52,6 +52,20 @@ HUB_GROUPS: tuple[dict[str, Any], ...] = (
         "key": "risk_operations",
         "label": "Risk and Operations",
         "registry_categories": ("risk_exposure", "broker_execution", "operations_system", "trading_transactions"),
+        "special": (
+            {
+                "report_id": "broker_executive",
+                "title": "Broker Operational State",
+                "category": "risk_operations",
+                "status": "AVAILABLE",
+                "readiness": "ADVISORY_ONLY",
+                "source": "BROKER_OPERATIONAL_STATE",
+                "format": "HTML",
+                "view_href": "/api/reports/broker_executive/view",
+                "print_href": "/api/reports/broker_executive/view",
+                "metadata_href": "/api/reports/broker_executive/metadata",
+            },
+        ),
         "planned": (
             {"title": "Runtime Health", "status": "COMING_SOON"},
             {"title": "Operational Intelligence", "status": "COMING_SOON"},

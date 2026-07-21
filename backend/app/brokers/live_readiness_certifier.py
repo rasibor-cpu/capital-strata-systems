@@ -68,6 +68,7 @@ class LiveReadinessCertificationResult:
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
     audit_payload: dict[str, Any] = field(default_factory=dict)
+    operational_result: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return _json_safe(
@@ -83,6 +84,10 @@ class LiveReadinessCertificationResult:
                 "operator_approval_required": self.operator_approval_required,
                 "timestamp": self.timestamp,
                 "audit_payload": self.audit_payload,
+                "operational_result": self.operational_result,
+                "operational_state": self.operational_result.get("state", "NOT_INITIALIZED"),
+                "read_only_ready": self.operational_result.get("state") == "READ_ONLY_READY",
+                "execution_ready": False,
             }
         )
 
@@ -162,6 +167,11 @@ def certify_live_readiness(
     )
 
     status = LIVE_READINESS_PASS if not blocking else LIVE_READINESS_FAIL
+    from backend.app.brokers.operational_adapter import get_operational_adapter
+
+    operational_result: dict[str, Any] = {}
+    if broker.upper() in {"COINBASE", "BINANCE", "OANDA", "QUESTRADE"}:
+        operational_result = get_operational_adapter(broker).readiness()
     audit_payload = _audit_payload(
         broker=broker or "NONE",
         mode=mode,
@@ -181,6 +191,7 @@ def certify_live_readiness(
         blocking_reasons=tuple(blocking),
         warnings=tuple(warnings),
         audit_payload=audit_payload,
+        operational_result=operational_result,
     )
 
     if audit_sink is not None:

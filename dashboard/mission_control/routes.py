@@ -98,6 +98,70 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
     async def mission_control_api_brokers() -> JSONResponse:
         return JSONResponse(safe_serialize(state().get("brokers", {})))
 
+    # Phase 178B — canonical GET-only broker operational-state contracts.
+    @router.get("/api/brokers/states")
+    async def broker_state_definitions() -> JSONResponse:
+        from backend.app.brokers.operational_state import state_definitions
+
+        return JSONResponse(safe_serialize(state_definitions()))
+
+    @router.get("/api/brokers/{broker}/status")
+    async def broker_operational_status(broker: str) -> JSONResponse:
+        from backend.app.brokers.operational_adapter import get_operational_adapter
+
+        try:
+            payload = get_operational_adapter(broker).operational_snapshot()
+        except KeyError:
+            payload = {
+                "broker": str(broker).upper(),
+                "operational_state": "DISABLED",
+                "failure_code": "BROKER_NOT_TIER1",
+                "expected_condition": True,
+                "recommended_action": "Use a canonical Tier-1 broker",
+                "execution_allowed": False,
+            }
+        return JSONResponse(safe_serialize(payload))
+
+    @router.get("/api/brokers/{broker}/capabilities")
+    async def broker_capability_states(broker: str) -> JSONResponse:
+        from backend.app.brokers.operational_adapter import get_operational_adapter
+
+        try:
+            adapter = get_operational_adapter(broker)
+            payload = {
+                "broker": adapter.broker,
+                "capabilities": adapter.capability_states(),
+                "execution_allowed": False,
+            }
+        except KeyError:
+            payload = {
+                "broker": str(broker).upper(),
+                "capabilities": {},
+                "state": "DISABLED",
+                "failure_code": "BROKER_NOT_TIER1",
+                "execution_allowed": False,
+            }
+        return JSONResponse(safe_serialize(payload))
+
+    @router.get("/api/brokers/{broker}/readiness")
+    async def broker_operational_readiness(broker: str) -> JSONResponse:
+        from backend.app.brokers.operational_adapter import get_operational_adapter
+
+        try:
+            payload = get_operational_adapter(broker).readiness()
+        except KeyError:
+            payload = {
+                "broker": str(broker).upper(),
+                "operation": "readiness",
+                "state": "DISABLED",
+                "success": False,
+                "expected_condition": True,
+                "failure_code": "BROKER_NOT_TIER1",
+                "recommended_action": "Use a canonical Tier-1 broker",
+                "execution_allowed": False,
+            }
+        return JSONResponse(safe_serialize(payload))
+
     @router.get("/mission-control/api/certification")
     async def mission_control_api_certification() -> JSONResponse:
         return JSONResponse(safe_serialize(state().get("certification", {})))

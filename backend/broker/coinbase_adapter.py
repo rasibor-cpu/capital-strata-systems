@@ -15,6 +15,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
+from backend.app.brokers.operational_state import BrokerOperationalState, operation_result
+
 try:
     from coinbase.rest import RESTClient  # type: ignore
 except Exception:
@@ -53,18 +55,50 @@ class CoinbaseAdapter:
         product_id: str,
         granularity_name: str,
         limit: int = 200,
-    ) -> List[Dict[str, Any]]:
+    ) -> Any:
         granularity = GRANULARITY_MAP.get(granularity_name)
         if granularity is None:
-            raise ValueError(f"Unsupported granularity: {granularity_name}")
+            return operation_result(
+                broker="COINBASE",
+                operation="candles",
+                state=BrokerOperationalState.MARKET_DATA_UNAVAILABLE,
+                failure_code="UNSUPPORTED_GRANULARITY",
+                operator_message="Requested Coinbase candle granularity is unsupported",
+                recommended_action=f"Use one of: {', '.join(sorted(GRANULARITY_MAP))}",
+                data={"product_id": product_id, "granularity": granularity_name},
+            ).as_dict()
 
         url = COINBASE_CANDLES_URL.format(product_id=product_id)
-        resp = requests.get(
-            url,
-            params={"granularity": granularity},
-            timeout=self.timeout_seconds,
-        )
-        resp.raise_for_status()
+        try:
+            resp = requests.get(
+                url,
+                params={"granularity": granularity},
+                timeout=self.timeout_seconds,
+            )
+            if resp.status_code == 429:
+                return operation_result(
+                    broker="COINBASE",
+                    operation="candles",
+                    state=BrokerOperationalState.RATE_LIMITED,
+                    retryable=True,
+                    failure_code="RATE_LIMITED",
+                    operator_message="Coinbase market data is rate limited",
+                    recommended_action="Retry after the provider rate-limit window",
+                    data={"product_id": product_id},
+                ).as_dict()
+            resp.raise_for_status()
+        except requests.RequestException as exc:
+            return operation_result(
+                broker="COINBASE",
+                operation="candles",
+                state=BrokerOperationalState.PROVIDER_UNAVAILABLE,
+                retryable=True,
+                failure_code="PROVIDER_UNAVAILABLE",
+                operator_message="Coinbase market data provider is unavailable",
+                technical_message=f"{type(exc).__name__}: {exc}",
+                recommended_action="Retry after provider recovery",
+                data={"product_id": product_id},
+            ).as_dict()
 
         raw = resp.json()
         raw.reverse()
@@ -93,7 +127,15 @@ class CoinbaseAdapter:
                 "size_usd": size_usd,
             }
 
-        raise NotImplementedError("Live Coinbase execution not enabled in active adapter.")
+        return operation_result(
+            broker="COINBASE",
+            operation="place_market_buy",
+            state=BrokerOperationalState.EXECUTION_BLOCKED,
+            failure_code="EXECUTION_BLOCKED",
+            operator_message="Coinbase live execution is blocked",
+            recommended_action="Use read-only broker operations only",
+            data={"product_id": product_id, "requested_size_usd": size_usd},
+        ).as_dict()
 
     def place_market_sell(self, *, product_id: str, size_asset: float) -> Dict[str, Any]:
         if self.paper_mode:
@@ -103,7 +145,25 @@ class CoinbaseAdapter:
                 "size_asset": size_asset,
             }
 
-        raise NotImplementedError("Live Coinbase execution not enabled in active adapter.")
+        return operation_result(
+            broker="COINBASE",
+            operation="place_market_sell",
+            state=BrokerOperationalState.EXECUTION_BLOCKED,
+            failure_code="EXECUTION_BLOCKED",
+            operator_message="Coinbase live execution is blocked",
+            recommended_action="Use read-only broker operations only",
+            data={"product_id": product_id, "requested_size_asset": size_asset},
+        ).as_dict()
+
+    def operational_readiness(self) -> Dict[str, Any]:
+        """Structured compatibility boundary; performs no authentication."""
+        from backend.app.brokers.operational_adapter import CoinbaseOperationalAdapter
+
+        configuration = {
+            "COINBASE_API_KEY": self.api_key_name,
+            "COINBASE_API_SECRET": "configured" if self.api_private_key_path else "",
+        }
+        return CoinbaseOperationalAdapter(configuration=configuration).readiness()
 
     def _candidate_json_paths(self) -> List[str]:
         candidates: List[str] = []
@@ -207,6 +267,37 @@ class CoinbaseAdapter:
 
         return RESTClient(api_key=api_key, api_secret=api_secret)
 
+    def _client_or_result(self, operation: str) -> Tuple[Any | None, Dict[str, Any] | None]:
+        """Capture expected SDK/credential conditions at the public boundary."""
+        try:
+            return self._get_rest_client(), None
+        except RuntimeError as exc:
+            message = str(exc)
+            state = (
+                BrokerOperationalState.CREDENTIALS_REQUIRED
+                if "credentials" in message.lower()
+                else BrokerOperationalState.PROVIDER_UNAVAILABLE
+            )
+            result = operation_result(
+                broker="COINBASE",
+                operation=operation,
+                state=state,
+                retryable=state is BrokerOperationalState.PROVIDER_UNAVAILABLE,
+                failure_code=state.value,
+                operator_message=(
+                    "Coinbase credentials are required"
+                    if state is BrokerOperationalState.CREDENTIALS_REQUIRED
+                    else "Coinbase client provider is unavailable"
+                ),
+                technical_message=message,
+                recommended_action=(
+                    "Configure Coinbase credentials through the approved secret store"
+                    if state is BrokerOperationalState.CREDENTIALS_REQUIRED
+                    else "Install or restore the approved Coinbase client dependency"
+                ),
+            ).as_dict()
+            return None, result
+
     @staticmethod
     def _to_dict(obj: Any) -> Any:
         if obj is None:
@@ -240,11 +331,13 @@ class CoinbaseAdapter:
         except Exception:
             return 0.0
 
-    def get_accounts(self) -> List[Dict[str, Any]]:
+    def get_accounts(self) -> Any:
         if self.paper_mode:
             return []
 
-        client = self._get_rest_client()
+        client, expected = self._client_or_result("accounts")
+        if expected is not None:
+            return expected
         payload = self._to_dict(client.get_accounts())
 
         if isinstance(payload, dict):
@@ -265,21 +358,27 @@ class CoinbaseAdapter:
         if self.paper_mode:
             return []
 
-        client = self._get_rest_client()
+        client, expected = self._client_or_result("portfolios")
+        if expected is not None:
+            return expected
         return self._to_dict(client.get_portfolios())
 
     def get_products(self) -> Any:
         if self.paper_mode:
             return []
 
-        client = self._get_rest_client()
+        client, expected = self._client_or_result("products")
+        if expected is not None:
+            return expected
         return self._to_dict(client.get_products())
 
     def get_product(self, product_id: str) -> Any:
         if self.paper_mode:
             return {"product_id": product_id, "mode": "paper"}
 
-        client = self._get_rest_client()
+        client, expected = self._client_or_result("product")
+        if expected is not None:
+            return expected
         return self._to_dict(client.get_product(product_id=product_id))
 
     def get_account_balance(self) -> Dict[str, Any]:
@@ -293,6 +392,8 @@ class CoinbaseAdapter:
             }
 
         accounts = self.get_accounts()
+        if isinstance(accounts, dict) and accounts.get("state"):
+            return accounts
         total = 0.0
 
         for account in accounts:

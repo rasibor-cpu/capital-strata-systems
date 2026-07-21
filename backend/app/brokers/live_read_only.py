@@ -53,6 +53,9 @@ class LiveReadOnlyContract:
     live_trading_enabled: bool
     advisory_only: bool
     reason: str
+    operational_state: str = "NOT_INITIALIZED"
+    operation_results: Mapping[str, Any] = field(default_factory=dict)
+    compatibility: Mapping[str, Any] = field(default_factory=dict)
     schema_version: str = SCHEMA_VERSION
     generated_at: str = ""
 
@@ -60,7 +63,10 @@ class LiveReadOnlyContract:
         payload = asdict(self)
         payload["allowed_actions"] = list(self.allowed_actions)
         payload["blocked_actions"] = list(self.blocked_actions)
+        payload["operation_results"] = dict(self.operation_results)
+        payload["compatibility"] = dict(self.compatibility)
         payload["generated_at"] = self.generated_at or _utc_now()
+        payload["execution_allowed"] = False
         return payload
 
 
@@ -88,6 +94,7 @@ def build_live_read_only_contract(broker: str, *, evidence: Mapping[str, Any] | 
             live_trading_enabled=False,
             advisory_only=True,
             reason="broker_not_in_tier1_registry",
+            operational_state="DISABLED",
         )
 
     spec = registry.get(key)
@@ -103,9 +110,27 @@ def build_live_read_only_contract(broker: str, *, evidence: Mapping[str, Any] | 
             live_trading_enabled=False,
             advisory_only=True,
             reason="live_read_only_not_advertised",
+            operational_state="DISABLED",
         )
 
     evidence = evidence if isinstance(evidence, Mapping) else {}
+    from backend.app.brokers.operational_adapter import get_operational_adapter
+
+    configuration = evidence.get("configuration") if isinstance(evidence.get("configuration"), Mapping) else {}
+    adapter_evidence = evidence.get("operational_evidence") if isinstance(evidence.get("operational_evidence"), Mapping) else evidence
+    adapter = get_operational_adapter(key, configuration=configuration, evidence=adapter_evidence)
+    results = {
+        "authenticate": adapter.authenticate(),
+        "account": adapter.account(),
+        "balances": adapter.balances(),
+        "holdings": adapter.holdings(),
+        "positions": adapter.positions(),
+        "market_data": adapter.market_data(),
+        "products": adapter.products(),
+        "health": adapter.health(),
+        "readiness": adapter.readiness(),
+    }
+    readiness = results["readiness"]
     # Evidence may report auth/connectivity; never elevates execution
     return LiveReadOnlyContract(
         broker=key,
@@ -118,6 +143,13 @@ def build_live_read_only_contract(broker: str, *, evidence: Mapping[str, Any] | 
         live_trading_enabled=False,
         advisory_only=True,
         reason=str(evidence.get("reason") or "live_read_only_validation_only"),
+        operational_state=str(readiness.get("state") or "NOT_INITIALIZED"),
+        operation_results=results,
+        compatibility={
+            "deprecated_boolean_ready": bool(readiness.get("success")),
+            "deprecated_reason": str(readiness.get("operator_message") or ""),
+            "canonical_source": "operation_results.readiness",
+        },
     )
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import backend.options.options_income_runtime_service as runtime_service
 from backend.app.brokers.canonical_tier1 import TIER1_BROKERS, get_canonical_broker_registry
 from backend.options.options_income_api import (
     OPTIONS_INCOME_API_ROUTES,
@@ -11,10 +12,14 @@ from backend.options.options_income_api import (
 from backend.options.options_income_reporting import build_options_income_executive_report
 from backend.options.options_income_runtime_service import (
     OptionsIncomeRuntimeContext,
+    STATUS_ADVISORY_READY,
     STATUS_ADVISORY_ONLY,
     STATUS_DATA_DEPENDENCY_BLOCKED,
+    STATUS_FAILED,
     STATUS_NO_CURRENT_OPPORTUNITIES,
     STATUS_NO_OPEN_OPTION_POSITIONS,
+    STATUS_PARTIAL_DATA,
+    STATUS_STALE,
     STATUS_TARGET_NOT_CONFIGURED,
     build_mission_control_options_income,
     build_options_income_mobile_card,
@@ -50,6 +55,84 @@ def test_no_current_opportunities_when_chains_present_but_empty() -> None:
     )
     assert snap["engine_status"] == STATUS_NO_CURRENT_OPPORTUNITIES
     assert snap["opportunity_count"] == 0
+
+
+def test_advisory_readiness_precedes_empty_opportunity_outcome() -> None:
+    cases = (
+        ("DATA_DEPENDENCY_BLOCKED", ["BROKER_OPERATIONAL_READINESS"], STATUS_DATA_DEPENDENCY_BLOCKED),
+        ("STALE", [], STATUS_STALE),
+        ("PARTIAL_DATA", [], STATUS_PARTIAL_DATA),
+    )
+    for readiness, missing, expected in cases:
+        snap = build_options_income_runtime_snapshot(
+            OptionsIncomeRuntimeContext(
+                persist=False,
+                option_chain_available=True,
+                market_data_available=True,
+                account_holdings_available=True,
+                opportunities=[],
+                advisory_data={
+                    "readiness_status": readiness,
+                    "missing_dependencies": missing,
+                    "stale": readiness == "STALE",
+                    "partial": readiness == "PARTIAL_DATA",
+                },
+            )
+        )
+        assert snap["engine_status"] == expected
+        assert snap["opportunity_outcome"] == "EVALUATION_BLOCKED"
+        assert snap["opportunity_count"] == 0
+        assert set(missing).issubset(set(snap["missing_dependencies"]))
+
+
+def test_fully_ready_with_opportunity_is_advisory_ready(monkeypatch) -> None:
+    monkeypatch.setattr(
+        runtime_service,
+        "build_options_income_dashboard",
+        lambda **kwargs: {
+            "summary": {"engine_status": "READY"},
+            "opportunities": {
+                "accepted_candidates": [{"strategy_type": "COVERED_CALL", "symbol": "SPY"}],
+                "rejected_candidates": [],
+            },
+            "positions": {},
+        },
+    )
+    snap = build_options_income_runtime_snapshot(
+        OptionsIncomeRuntimeContext(
+            persist=False,
+            option_chain_available=True,
+            market_data_available=True,
+            account_holdings_available=True,
+            opportunities=[{"strategy_type": "COVERED_CALL", "symbol": "SPY"}],
+            advisory_data={"readiness_status": "ADVISORY_READY", "missing_dependencies": []},
+        )
+    )
+    assert snap["engine_status"] == STATUS_ADVISORY_READY
+    assert snap["opportunity_count"] == 1
+    assert snap["opportunity_outcome"] == "QUALIFYING_OPPORTUNITIES_FOUND"
+
+
+def test_unexpected_scanner_fault_is_sanitized_failed(monkeypatch) -> None:
+    def _raise(**kwargs):
+        raise RuntimeError("access_token=secret-value account_number=123456")
+
+    monkeypatch.setattr(runtime_service, "build_options_income_dashboard", _raise)
+    snap = build_options_income_runtime_snapshot(
+        OptionsIncomeRuntimeContext(
+            persist=False,
+            option_chain_available=True,
+            market_data_available=True,
+            account_holdings_available=True,
+            opportunities=[],
+            advisory_data={"readiness_status": "ADVISORY_READY", "missing_dependencies": []},
+        )
+    )
+    assert snap["engine_status"] == STATUS_FAILED
+    assert snap["correlation_id"]
+    assert snap["failure_reason"] == "UNEXPECTED_PROVIDER_FAULT"
+    assert "secret-value" not in str(snap)
+    assert "123456" not in str(snap)
 
 
 def test_premium_periods_separated() -> None:

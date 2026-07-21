@@ -34,14 +34,22 @@ def detail_table(title: str, rows: Mapping[str, Any] | Sequence[Mapping[str, Any
         if not body:
             body = '<tr><td colspan="2">No evidence available.</td></tr>'
     else:
-        body = "".join(
-            "<tr>"
-            + "".join(f"<td>{escape(value)}</td>" for value in row.values())
-            + "</tr>"
-            for row in rows
+        normalized = [row for row in rows if isinstance(row, Mapping)]
+        headers = list(normalized[0].keys()) if normalized else []
+        header = (
+            "<thead><tr>"
+            + "".join(f"<th>{escape(key)}</th>" for key in headers)
+            + "</tr></thead>"
+            if headers
+            else ""
         )
-        if not body:
-            body = '<tr><td>No evidence available.</td></tr>'
+        body_rows = "".join(
+            "<tr>"
+            + "".join(f"<td>{escape(row.get(key))}</td>" for key in headers)
+            + "</tr>"
+            for row in normalized
+        )
+        body = header + f"<tbody>{body_rows}</tbody>" if body_rows else '<tbody><tr><td>No evidence available.</td></tr></tbody>'
     return f'<section class="mc-panel"><h2>{escape(title)}</h2><table>{body}</table></section>'
 
 

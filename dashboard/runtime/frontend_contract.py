@@ -1221,6 +1221,16 @@ def rc1_operational_dashboard(dashboard_payload: Mapping[str, Any]) -> dict[str,
 
 def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     broker_payload = _mapping(dashboard_payload.get("broker_summary"))
+    selected_name = str(broker_payload.get("selected_broker", broker_payload.get("broker", "NONE"))).upper()
+    operational: dict[str, Any] = {}
+    if selected_name in {"COINBASE", "BINANCE", "OANDA", "QUESTRADE"}:
+        from backend.app.brokers.operational_adapter import get_operational_adapter
+
+        operational = get_operational_adapter(
+            selected_name,
+            configuration=_mapping(broker_payload.get("configuration")),
+            evidence=broker_payload,
+        ).operational_snapshot()
     canonical_state = _mapping(broker_payload.get("canonical_broker_runtime_state"))
     canonical_account = _mapping(canonical_state.get("account_evidence"))
     canonical_account_snapshot = _mapping(
@@ -1242,6 +1252,18 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     certification_snapshot = runtime_certification_snapshot(dashboard_payload)
     payload = {
         "selected_broker": str(broker_payload.get("selected_broker", "NONE")),
+        "canonical_operational_state": operational.get("operational_state", "DISABLED"),
+        "canonical_readiness": operational.get("readiness", "NOT_INITIALIZED"),
+        "required_action": operational.get("recommended_action", ""),
+        "expected_condition": operational.get("expected_condition", True),
+        "retryable": operational.get("retryable", False),
+        "capability_states": operational.get("capability_states", {}),
+        "account_state": _capability_state(operational, "ACCOUNT"),
+        "market_data_state": _capability_state(operational, "MARKET_DATA"),
+        "option_chain_state": _capability_state(operational, "OPTION_CHAIN"),
+        "execution_state": "EXECUTION_BLOCKED",
+        "operational_last_refresh": operational.get("last_successful_operation") or DATA_UNAVAILABLE,
+        "details_link": "/mission-control/broker-management",
         "broker_type": str(broker_payload.get("broker_type", broker_readiness.get("broker_type", "UNKNOWN"))),
         "broker_mode": str(broker_payload.get("broker_mode", "paper")),
         "connected": _boolean(canonical_account.get("connected", broker_payload.get("connected"))),
@@ -1936,6 +1958,12 @@ def _dashboard_payload(
     if isinstance(dashboard_state, Mapping):
         return _json_safe(dict(dashboard_state))
     return DashboardState().to_dict()
+
+
+def _capability_state(operational: Mapping[str, Any], capability: str) -> str:
+    states = operational.get("capability_states") if isinstance(operational.get("capability_states"), Mapping) else {}
+    result = states.get(capability) if isinstance(states.get(capability), Mapping) else {}
+    return str(result.get("state") or "UNAVAILABLE")
 
 
 def _mapping(value: Any) -> dict[str, Any]:

@@ -27,16 +27,21 @@ def render(state: dict) -> str:
                 "Operational State": row.get("operational_state") or row.get("status"),
                 "Readiness": row.get("readiness"),
                 "Certification": row.get("certification"),
+                "Required Action": row.get("recommended_action"),
+                "Expected Condition": row.get("expected_condition"),
+                "Retryable": row.get("retryable"),
                 "Latency": row.get("latency"),
+                "Freshness": row.get("freshness"),
                 "Authentication": row.get("authentication"),
                 "Market Data": row.get("market_data"),
+                "Option Chain": _capability_state(row, "OPTION_CHAIN"),
                 "Account": row.get("account") or row.get("account_data"),
                 "Execution": row.get("execution"),
-                "Last Sync": row.get("last_sync"),
+                "Last Operation": row.get("last_successful_operation") or row.get("last_sync"),
             }
         )
     return (
-        page_header("Broker Management", "Phase 177C canonical Tier-1 registry — Coinbase, Binance, OANDA, Questrade. IBKR removed from roadmap. Display-only.")
+        page_header("Broker Management", "Phase 178B canonical Tier-1 operational states — expected conditions are structured and execution remains blocked.")
         + warning_banner("Broker selection and onboarding controls are disabled. LIVE_READ_ONLY only — execution blocked.", status="bad")
         + metric_grid(
             (
@@ -72,6 +77,11 @@ def render(state: dict) -> str:
                 "state_hash": telemetry.get("state_hash"),
             }),
             detail_table("Broker List", broker_list),
+            detail_table("Capability-Specific States", {
+                str(row.get("broker")): row.get("capability_states")
+                for row in broker_list
+                if isinstance(row, dict) and row.get("broker") != "PAPER"
+            }),
             detail_table("Broker Registry Console", {
                 "registered_brokers": registry.get("registered_brokers"),
                 "active_broker": registry.get("active_broker"),
@@ -88,3 +98,9 @@ def render(state: dict) -> str:
             detail_table("Broker Safety", safety),
         )
     )
+
+
+def _capability_state(row: dict, capability: str) -> str:
+    states = row.get("capability_states") if isinstance(row.get("capability_states"), dict) else {}
+    result = states.get(capability) if isinstance(states.get(capability), dict) else {}
+    return str(result.get("state") or "UNAVAILABLE")

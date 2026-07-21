@@ -108,6 +108,11 @@ def build_broker_executive_report_package(
             "readiness_score": per_broker[broker]["readiness_score"],
             "operational_state": per_broker[broker]["operational_state"],
             "live_read_only_allowed": per_broker[broker]["live_read_only_allowed"],
+            "expected_condition": per_broker[broker]["expected_condition"],
+            "retryable": per_broker[broker]["retryable"],
+            "recommended_action": per_broker[broker]["recommended_action"],
+            "last_successful_operation": per_broker[broker]["last_successful_operation"],
+            "freshness": per_broker[broker]["freshness"],
         }
         for broker in TIER1_BROKERS
     }
@@ -202,8 +207,33 @@ def build_broker_executive_report_package(
             ("Market Data Summary", market_data_summary),
             ("Contamination Analysis", contamination.as_dict()),
             ("LIVE_READ_ONLY Contracts", lro),
+            (
+                "Operational and Capability States",
+                {
+                    broker: {
+                        "operational_state": per_broker[broker]["operational_state"],
+                        "capability_states": per_broker[broker]["capability_states"],
+                        "expected_condition": per_broker[broker]["expected_condition"],
+                        "recommended_action": per_broker[broker]["recommended_action"],
+                        "retryable": per_broker[broker]["retryable"],
+                        "last_successful_operation": per_broker[broker]["last_successful_operation"],
+                    }
+                    for broker in TIER1_BROKERS
+                },
+            ),
             ("Per-Broker Registry Rows", per_broker),
         ],
+    )
+    document.presentation.update(
+        {
+            "page_size": "A4",
+            "orientation": "portrait",
+            "viewer_hints": {
+                "default_mode": "one_page_at_a_time",
+                "controls": ["previous", "next", "page_selector", "toc", "print_export"],
+                "continuous_scroll_default": False,
+            },
+        }
     )
 
     return BrokerExecutiveReportPackage(

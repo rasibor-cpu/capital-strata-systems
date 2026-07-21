@@ -86,6 +86,24 @@ class BrokerStartupSelection:
         payload.setdefault("market_data_health", "UNKNOWN")
         payload.setdefault("account_data_health", "UNKNOWN")
         payload.setdefault("readiness_score", 0.0)
+        if payload["selected_broker"] in {"COINBASE", "BINANCE", "OANDA", "QUESTRADE"}:
+            from backend.app.brokers.operational_adapter import get_operational_adapter
+
+            operational = get_operational_adapter(payload["selected_broker"]).operational_snapshot()
+            payload["canonical_operational_state"] = operational["operational_state"]
+            payload["canonical_operation_result"] = operational["operation_result"]
+            payload["capability_states"] = operational["capability_states"]
+            payload["recommended_action"] = operational["recommended_action"]
+            payload["expected_condition"] = operational["expected_condition"]
+            payload["retryable"] = operational["retryable"]
+        else:
+            payload["canonical_operational_state"] = "DISABLED"
+            payload["canonical_operation_result"] = {}
+            payload["capability_states"] = {}
+            payload["recommended_action"] = "Select a Tier-1 broker for read-only validation"
+            payload["expected_condition"] = True
+            payload["retryable"] = False
+        payload["execution_state"] = "EXECUTION_BLOCKED"
         return payload
 
 

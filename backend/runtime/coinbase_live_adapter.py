@@ -70,7 +70,7 @@ class CoinbaseLiveReadOnlyAdapter(BrokerReadOnlyInterface):
         self._client_factory = client_factory
         self._now = now or (lambda: datetime.now(timezone.utc))
         self.default_product_id = default_product_id
-        self.health = "UNKNOWN"
+        self.health_state = "UNKNOWN"
         self.connected = False
         self.authenticated = False
         self.connection_error = ""
@@ -150,7 +150,7 @@ class CoinbaseLiveReadOnlyAdapter(BrokerReadOnlyInterface):
         }
 
     def health(self) -> str:
-        return self.health
+        return self.health_state
 
     # OANDA compatibility methods (to prevent any mismatches on checks)
     def get_account_summary(self) -> Any:
@@ -301,13 +301,13 @@ class CoinbaseLiveReadOnlyAdapter(BrokerReadOnlyInterface):
         return None
 
     def sync(self, *, include_market_data: bool = True) -> dict[str, Any]:
-        self.health = "CONNECTING"
+        self.health_state = "CONNECTING"
         client_created = False
 
         if not self.credentials.ready:
             self.connected = False
             self.authenticated = False
-            self.health = "RED"
+            self.health_state = "RED"
             self.connection_error = "missing credentials"
             return self._status_payload(
                 read_checks={
@@ -350,12 +350,12 @@ class CoinbaseLiveReadOnlyAdapter(BrokerReadOnlyInterface):
             # Authentication becomes PASS only after authenticated account evidence exists
             if read_checks["account"] == "OK" or read_checks["balances"] == "OK":
                 self.authenticated = True
-                self.health = "GREEN"
+                self.health_state = "GREEN"
                 self.connection_error = ""
                 self.last_successful_sync = self._now().isoformat()
             else:
                 self.authenticated = False
-                self.health = "AMBER"
+                self.health_state = "AMBER"
                 self.connection_error = self._first_read_error_message() or "authenticated account or balance read unavailable"
 
             account_values = extract_coinbase_account_values(
@@ -373,7 +373,7 @@ class CoinbaseLiveReadOnlyAdapter(BrokerReadOnlyInterface):
         except Exception as exc:
             self.connected = False
             self.authenticated = False
-            self.health = "AMBER"
+            self.health_state = "AMBER"
             self.connection_error = str(exc)[:160]
             return self._status_payload(read_checks=read_checks, client_created=client_created)
 
@@ -474,8 +474,8 @@ class CoinbaseLiveReadOnlyAdapter(BrokerReadOnlyInterface):
                     "account_loaded": balances_loaded,
                     "market_data_ready": market_data_status in {"OK", "PASS", "READY", "AVAILABLE"} and int(products_loaded or 0) > 0,
                     "products_loaded": int(products_loaded or 0),
-                    "broker_health": self.health,
-                    "infrastructure_health": self.health,
+                    "broker_health": self.health_state,
+                    "infrastructure_health": self.health_state,
                     "credentials_health": "READY" if self.credentials.ready else "MISSING",
                     "authentication_health": "AUTHENTICATED" if self.authenticated else "NOT_TESTED",
                     "connection_health": "CONNECTED" if self.connected else "NOT_CONNECTED",
@@ -502,14 +502,14 @@ class CoinbaseLiveReadOnlyAdapter(BrokerReadOnlyInterface):
             "broker_authenticated": bool(self.authenticated),
             "authenticated": bool(self.authenticated),
             "connected": bool(self.connected),
-            "broker_health": self.health,
-            "infrastructure_health": self.health,
+            "broker_health": self.health_state,
+            "infrastructure_health": self.health_state,
             "credentials_health": "READY" if self.credentials.ready else "MISSING",
             "authentication_health": "AUTHENTICATED" if self.authenticated else "NOT_TESTED",
             "connection_health": "CONNECTED" if self.connected else "NOT_CONNECTED",
             "market_data_health": market_data_status,
             "account_data_health": "READY" if balances_loaded else "UNAVAILABLE",
-            "connection_status": self.health,
+            "connection_status": self.health_state,
             "connection_error": self.connection_error,
             "last_successful_sync": self.last_successful_sync,
             "last_broker_sync": self.last_successful_sync or "DATA UNAVAILABLE",

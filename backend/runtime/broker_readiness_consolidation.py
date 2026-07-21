@@ -32,6 +32,15 @@ def build_canonical_broker_readiness(
         certification.get("broker"),
         default="NONE",
     )
+    operational: dict[str, Any] = {}
+    if str(selected_broker).upper() in {"COINBASE", "BINANCE", "OANDA", "QUESTRADE"}:
+        from backend.app.brokers.operational_adapter import get_operational_adapter
+
+        operational = get_operational_adapter(
+            str(selected_broker),
+            configuration=_mapping(source.get("configuration")),
+            evidence=source,
+        ).operational_snapshot()
     readiness = {
         "schema_version": SCHEMA_VERSION,
         "broker": str(selected_broker).upper(),
@@ -50,6 +59,13 @@ def build_canonical_broker_readiness(
         "readiness_score": _number(_first(source.get("readiness_score"), broker.get("readiness_score"), certification.get("connectivity_score"), default=0.0)),
         "overall_status": _overall(_first(source.get("overall_status"), runtime_broker.get("overall_status"), broker.get("overall_status"), certification.get("certification"), default="UNAVAILABLE")),
         "failure_reason": _first(source.get("failure_reason"), runtime_broker.get("failure_reason"), broker.get("failure_reason"), default=DATA_UNAVAILABLE),
+        "operational_state": operational.get("operational_state", "NOT_INITIALIZED"),
+        "capability_states": operational.get("capability_states", {}),
+        "expected_condition": operational.get("expected_condition", True),
+        "retryable": operational.get("retryable", False),
+        "recommended_action": operational.get("recommended_action", ""),
+        "canonical_certification": operational.get("certification", "NOT_INITIALIZED"),
+        "last_successful_operation": operational.get("last_successful_operation"),
         "warnings": _list(source.get("warning_reasons", runtime_broker.get("warnings", broker.get("readiness_reasons", [])))),
         "provenance": {
             "canonical_owner": "backend.runtime.broker_readiness_consolidation",
@@ -62,7 +78,10 @@ def build_canonical_broker_readiness(
         "broker_execution_armed": False,
         "advisory_only": True,
     }
-    readiness["ready_for_read_only_validation"] = readiness["overall_status"] in {"GREEN", "AMBER"}
+    readiness["ready_for_read_only_validation"] = (
+        readiness["overall_status"] in {"GREEN", "AMBER"}
+        and readiness["operational_state"] == "READ_ONLY_READY"
+    )
     readiness["ready_for_execution"] = False
     return readiness
 

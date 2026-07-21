@@ -76,7 +76,7 @@ Separate from Phase 178 financial arithmetic (`trading_impact=false`, no executi
 
 ## Explicit non-goals / remaining work
 
-- Binance / Questrade live adapters not yet executable (`NotImplementedError`)
+- Phase 178B supersedes the placeholder behavior: Binance / Questrade now expose source-only structured operational adapters; execution remains blocked
 - Full LIVE_READ_ONLY network validation against live Binance/Questrade accounts is a follow-on ops phase
 - Historical `backend/brokers/ibkr/*` stubs left on disk but demoted from registry/startup/MC
 

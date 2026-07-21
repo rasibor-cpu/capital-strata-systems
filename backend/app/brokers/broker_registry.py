@@ -112,8 +112,31 @@ def get_adapter(broker_name: str) -> Type[object]:
 
         return OandaAdapter
 
-    # Binance / Questrade: registered for LIVE_READ_ONLY roadmap; adapters not executable yet.
-    raise NotImplementedError(
-        f"No adapter class is available for broker '{broker_name}'. "
-        "The broker is registered but not executable in this runtime."
-    )
+    # Phase 178B: expected incomplete-adapter conditions are structured states.
+    # These classes are source-only/read-only and never authenticate or execute.
+    if key == "binance":
+        from backend.app.brokers.operational_adapter import BinanceOperationalAdapter
+
+        return BinanceOperationalAdapter
+
+    if key == "questrade":
+        from backend.app.brokers.operational_adapter import QuestradeOperationalAdapter
+
+        return QuestradeOperationalAdapter
+
+    # get_broker_spec above guarantees this is unreachable unless the registry
+    # and adapter mapping drift, which is an unexpected software fault.
+    raise RuntimeError(f"Tier-1 broker adapter mapping is corrupted for '{broker_name}'")
+
+
+def get_operational_adapter(
+    broker_name: str,
+    *,
+    configuration: Dict[str, object] | None = None,
+    evidence: Dict[str, object] | None = None,
+) -> object:
+    """Return the canonical structured-state adapter for any Tier-1 broker."""
+    get_broker_spec(broker_name)
+    from backend.app.brokers.operational_adapter import get_operational_adapter as build
+
+    return build(broker_name, configuration=configuration, evidence=evidence)

@@ -10,7 +10,8 @@ Purpose:
 Rules:
 - Adapters must fail closed.
 - Adapters must never print or log secrets.
-- Adapters should raise clear exceptions for unsupported operations.
+- Expected operational conditions use canonical BrokerOperationResult values.
+- Exceptions are reserved for unexpected software faults.
 """
 
 from __future__ import annotations
@@ -76,12 +77,12 @@ class BaseBrokerAdapter(ABC):
         Raises:
             BrokerConnectionError: If connection fails.
         """
-        raise NotImplementedError
+        ...
 
     @abstractmethod
     def disconnect(self) -> None:
         """Close broker connection cleanly."""
-        raise NotImplementedError
+        ...
 
     @abstractmethod
     def get_account_info(self) -> Dict[str, Any]:
@@ -90,17 +91,17 @@ class BaseBrokerAdapter(ABC):
 
         Never return secrets in this payload.
         """
-        raise NotImplementedError
+        ...
 
     @abstractmethod
     def get_positions(self) -> List[Dict[str, Any]]:
         """Return current open positions."""
-        raise NotImplementedError
+        ...
 
     @abstractmethod
     def get_orders(self) -> List[Dict[str, Any]]:
         """Return current open/pending orders."""
-        raise NotImplementedError
+        ...
 
     @abstractmethod
     def get_candles(
@@ -112,7 +113,7 @@ class BaseBrokerAdapter(ABC):
         """
         Fetch market candles for a symbol/timeframe.
         """
-        raise NotImplementedError
+        ...
 
     @abstractmethod
     def place_order(
@@ -129,17 +130,17 @@ class BaseBrokerAdapter(ABC):
 
         Returns a broker-normalized response payload.
         """
-        raise NotImplementedError
+        ...
 
     @abstractmethod
     def cancel_order(self, order_id: str) -> Dict[str, Any]:
         """Cancel an existing order."""
-        raise NotImplementedError
+        ...
 
     @abstractmethod
     def supports_asset_class(self, asset_class: str) -> bool:
         """Return True if the broker supports the requested asset class."""
-        raise NotImplementedError
+        ...
 
     def healthcheck(self) -> Dict[str, Any]:
         """
