@@ -33,9 +33,9 @@ class TradeRuntimeService:
     def __init__(self, canonical_lifecycle: CanonicalTradeLifecycle | None = None) -> None:
         self.persistence = PersistenceService()
         self.canonical_lifecycle = canonical_lifecycle or CanonicalTradeLifecycle()
-        # Backward compatibility: default service keeps close path resilient,
-        # while explicitly injected lifecycle preserves strict fail-closed behavior.
-        self._strict_canonical_persistence = canonical_lifecycle is not None
+        # Fail-closed: canonical persistence must succeed before DB close.
+        # Lifecycle failures never silently diverge from the trade store.
+        self._strict_canonical_persistence = True
         self._legacy_trade_outcome_ledger = TradeOutcomeLedger()
 
     def open_trade(

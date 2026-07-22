@@ -1,10 +1,20 @@
 # CSS Architecture Documents
 
+> **Canonical release status:** [`../release/CSS_CANONICAL_RELEASE_STATUS.md`](../release/CSS_CANONICAL_RELEASE_STATUS.md)  
+> Production certification is currently **NOT CERTIFIED**. Controlled paper remains GO.
+
 This folder contains the core architecture and integration documents for
 Capital Strata Systems (CSS).
 
 These documents serve as the reference layer for current development,
 future refactoring, and system hardening.
+
+### Release Gate 2 (active)
+
+- [`../release/CSS_AUDIT_REMEDIATION_REGISTER.md`](../release/CSS_AUDIT_REMEDIATION_REGISTER.md)
+- [`../release/CSS_RELEASE_GATE_2_PLAN.md`](../release/CSS_RELEASE_GATE_2_PLAN.md)
+- [`../governance/CSS_REPOSITORY_OWNERSHIP_REGISTER.md`](../governance/CSS_REPOSITORY_OWNERSHIP_REGISTER.md)
+- [`../release/CSS_EVIDENCE_CUSTODY_STANDARD.md`](../release/CSS_EVIDENCE_CUSTODY_STANDARD.md)
 
 ---
 

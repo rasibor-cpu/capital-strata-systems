@@ -28,6 +28,7 @@ STARTUP_SUMMARY_FIELDS = (
     "Operator Requested Live",
     "Execution Authority",
     "Can Live Execute",
+    "Authority Reason",
     "State Hash",
 )
 

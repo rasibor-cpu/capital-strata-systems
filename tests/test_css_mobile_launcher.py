@@ -3,6 +3,11 @@ import json
 import tempfile
 import pytest
 
+# Wave 2 AR-024: legacy launcher suite exercises mutation payloads; host profile
+# for these historical tests is open_dev. Fail-closed mutation auth is covered by
+# tests/test_wave2_security_broker_integrity.py.
+os.environ.setdefault("CSS_HOST_SECURITY_PROFILE", "open_dev")
+
 from launcher.css_launcher_config import LauncherConfig
 from launcher.css_mobile_launcher import (
     get_supervisor_summary,

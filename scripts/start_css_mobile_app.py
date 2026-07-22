@@ -10,6 +10,10 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 os.environ["PYTHONPATH"] = REPO_ROOT
 
+from backend.runtime.environment_bootstrap import bootstrap_broker_environment
+
+ENVIRONMENT_BOOTSTRAP = bootstrap_broker_environment(REPO_ROOT)
+
 def get_local_ip():
     try:
         host_name = socket.gethostname()

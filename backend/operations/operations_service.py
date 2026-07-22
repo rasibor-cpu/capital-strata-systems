@@ -72,9 +72,11 @@ class OperationsService:
         results = self.monitor.execute_checks()
         health_score = self.monitor.calculate_health_score(results)
 
-        # Determine overall status
+        # Determine overall status — fail-closed when no checkers ran.
         statuses = [r.payload.get("status", "OK").upper() for r in results]
-        if "CRITICAL" in statuses:
+        if not results:
+            new_status = "CRITICAL"
+        elif "CRITICAL" in statuses:
             new_status = "CRITICAL"
         elif "WARN" in statuses or "WARNING" in statuses:
             new_status = "DEGRADED"

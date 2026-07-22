@@ -149,10 +149,20 @@ def test_warning_findings_generate_advisory_recommendations():
 def test_missing_subsystem_data_is_handled_gracefully():
     result = CertificationService().certify()
 
-    assert result.status in {"WARNING", "FAIL"}
-    assert result.overall_readiness_score >= 0.0
-    assert len(result.informational_findings) >= 1
+    assert result.status == "FAIL"
+    assert result.overall_readiness_score < 70.0
+    assert len(result.critical_findings) >= 1
     assert len(result.deployment_checklist) == 9
+
+
+def test_health_validator_missing_telemetry_never_passes():
+    from backend.certification.health_validator import HealthValidator
+
+    subsystems, findings = HealthValidator().validate()
+    assert all(item.status != "PASS" for item in subsystems)
+    assert all(item.score < 90.0 for item in subsystems)
+    assert any(item.score == 0.0 for item in subsystems)
+    assert any(finding.severity == "CRITICAL" for finding in findings)
 
 
 def test_certification_evaluation_is_read_only():

@@ -88,6 +88,7 @@ def test_complete_evidence_certifies_only_controlled_deployment_readiness() -> N
     result = ProductionReadinessCertificationEngine(
         evidence=_evidence(),
         governance_snapshot=_governance(),
+        profile="fixture_lab",
     ).evaluate()
     assert result["status"] == "CERTIFIED_FOR_CONTROLLED_DEPLOYMENT"
     assert result["certification_score"] == 100
@@ -100,6 +101,7 @@ def test_complete_evidence_certifies_only_controlled_deployment_readiness() -> N
     assert result["disaster_recovery_readiness"]["restore_performed"] is False
     assert result["execution_posture"] == "DISABLED"
     assert result["execution_authority"] == "BLOCKED"
+    assert result["certification_profile"] == "fixture_lab"
 
 
 def test_missing_evidence_blocks_certification_without_fabrication() -> None:
@@ -107,6 +109,7 @@ def test_missing_evidence_blocks_certification_without_fabrication() -> None:
     result = ProductionReadinessCertificationEngine(
         evidence=evidence,
         governance_snapshot=_governance(),
+        profile="fixture_lab",
     ).evaluate()
     assert result["status"] == "NOT_CERTIFIED"
     assert result["deployment_blockers"]
@@ -114,10 +117,31 @@ def test_missing_evidence_blocks_certification_without_fabrication() -> None:
     assert result["evidence_completeness"] < 100
 
 
+def test_production_profile_rejects_fixture_uris() -> None:
+    result = ProductionReadinessCertificationEngine(
+        evidence=_evidence(),
+        governance_snapshot=_governance(),
+        profile="production",
+    ).evaluate()
+    assert result["status"] == "NOT_CERTIFIED"
+    assert result["certification_profile"] == "production"
+    assert result["evidence_authority"]["fail_closed"] is True
+    assert result["deployment_blockers"]
+    assert any(
+        "EVIDENCE_REJECTED:synthetic_reference_rejected" in str(check.get("status", ""))
+        for framework in (
+            result["platform_certification"],
+            result["operational_acceptance"],
+        )
+        for check in framework["checks"]
+    )
+
+
 def test_a4_reports_and_reports_center_registration(tmp_path) -> None:
     certification = ProductionReadinessCertificationEngine(
         evidence=_evidence(),
         governance_snapshot=_governance(),
+        profile="fixture_lab",
     ).evaluate()
     reports = build_production_readiness_report_suite(certification)
     assert set(reports) == set(PRODUCTION_READINESS_REPORT_TITLES)
@@ -142,6 +166,7 @@ def test_production_readiness_dashboard_is_admin_only_and_read_only() -> None:
     certification = ProductionReadinessCertificationEngine(
         evidence=_evidence(),
         governance_snapshot=_governance(),
+        profile="fixture_lab",
     ).evaluate()
     state = {
         "authorization_context": {

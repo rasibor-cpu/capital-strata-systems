@@ -392,6 +392,12 @@ def sanitize_broker_profile_environment(env: MutableMapping[str, str] | None = N
 
 
 def profile_mode_alias(value: str | None) -> BrokerEnvironmentProfile | None:
+    """Map legacy runtime *mode* strings to broker profiles.
+
+    Note: ``live`` / ``production`` historically meant live-read-only operation
+    mode (not LIVE_EXECUTION). Explicit profile selection keys still reject
+    ambiguous ``LIVE`` / ``PRODUCTION`` via ``_normalize_profile``.
+    """
     text = str(value or "").strip().lower()
     if text in {"paper", "practice", "demo", "sim", "simulation"}:
         return BrokerEnvironmentProfile.PAPER
@@ -525,7 +531,14 @@ def _profile_selection_failures(
     if any(str(item.value if isinstance(item, BrokerEnvironmentProfile) else item).strip().upper() in ENGINE_MODE_VALUES for item in raw):
         failures.append("engine_mode_is_not_broker_profile")
     if raw and selected is None:
-        failures.append("unknown_broker_environment_profile")
+        raw_upper = {
+            str(item.value if isinstance(item, BrokerEnvironmentProfile) else item).strip().upper().replace("-", "_")
+            for item in raw
+        }
+        if raw_upper & {"LIVE", "PRODUCTION", "PROD"}:
+            failures.append("ambiguous_broker_environment_profile_alias")
+        else:
+            failures.append("unknown_broker_environment_profile")
     return failures
 
 
@@ -533,6 +546,9 @@ def _normalize_profile(value: Any) -> BrokerEnvironmentProfile | None:
     if isinstance(value, BrokerEnvironmentProfile):
         return value
     text = str(value or "").strip().upper().replace("-", "_").replace(" ", "_")
+    # AR-032: reject ambiguous LIVE/PRODUCTION shorthand (unknown → fail selection).
+    if text in {"LIVE", "PRODUCTION", "PROD"}:
+        return None
     aliases = {
         "PAPER": BrokerEnvironmentProfile.PAPER,
         "PRACTICE": BrokerEnvironmentProfile.PAPER,
@@ -540,7 +556,6 @@ def _normalize_profile(value: Any) -> BrokerEnvironmentProfile | None:
         "LIVE_READONLY": BrokerEnvironmentProfile.LIVE_READ_ONLY,
         "READ_ONLY": BrokerEnvironmentProfile.LIVE_READ_ONLY,
         "READONLY": BrokerEnvironmentProfile.LIVE_READ_ONLY,
-        "LIVE": BrokerEnvironmentProfile.LIVE_READ_ONLY,
         "LIVE_EXECUTION": BrokerEnvironmentProfile.LIVE_EXECUTION,
         "EXECUTION": BrokerEnvironmentProfile.LIVE_EXECUTION,
     }

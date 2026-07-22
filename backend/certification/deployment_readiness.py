@@ -22,11 +22,14 @@ DEPLOYMENT_REQUIREMENTS = (
 
 def evaluate_deployment_readiness(
     evidence: list[CertificationEvidence] | tuple[CertificationEvidence, ...],
+    *,
+    profile: str | None = None,
 ) -> dict:
     result = evaluate_required_evidence(
         "DEPLOYMENT_READINESS",
         DEPLOYMENT_REQUIREMENTS,
         evidence,
+        profile=profile,
     ).as_dict()
     result.update(
         {

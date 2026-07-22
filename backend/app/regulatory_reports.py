@@ -1,19 +1,21 @@
 """
 regulatory_reports.py
 ---------------------
-Regulatory & Management Reporting Engine (GAAP / CBN / IFRS-ready)
+Prototype regulatory & management reporting helpers (NOT Gate-2 product).
 
-Purpose:
-- Produce end-of-day (EOD) regulatory returns
-- Provide management-level summaries
-- All figures derived strictly from immutable journal + reporting_store
-- FX-normalized to base currency where required
+Gate 2 / Wave 4 (AR-047): Board / investor / regulatory packs are OUT OF SCOPE.
+This module must not be presented as delivered GAAP/CBN/IFRS product coverage.
+
+Purpose (historical / prototype):
+- Produce end-of-day (EOD) trial-balance style summaries from journal stores
+- Provide management-level aggregates
 
 Design principles:
 - Read-only
 - Deterministic
-- Auditor-safe
+- Management/advisory only — not audited statutory statements
 - No balance mutation
+- No Gate-2 customer product claim
 """
 
 from datetime import date

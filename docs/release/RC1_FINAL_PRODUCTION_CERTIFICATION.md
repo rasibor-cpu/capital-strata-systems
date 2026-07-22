@@ -1,16 +1,24 @@
 # Capital Strata Systems (CSS) RC1 Final Production Certification
 
+> **SUPERSEDED — AR-001 (2026-07-21)**  
+> This document is retained as a **historical RC1-era artifact only**.  
+> It is **not** the active production-certification authority.  
+> Current canonical status: `docs/release/CSS_CANONICAL_RELEASE_STATUS.md`  
+> Current production result: **NOT CERTIFIED**  
+> (`runtime_reports/phase181_certification/CERTIFICATION_SUMMARY.md`, Master Completion Audit).  
+> Do not use the GO / 100% scorecard below to authorize production deployment or live trading.
+
 This document is the final institutional certification report for Capital Strata Systems (CSS) Release Candidate 1 (RC1).
 
 ---
 
 ## 1. Summary Certification Scorecard
 
-* **Consolidated Go/No-Go Decision:** **GO**
-* **Canonical Readiness Score:** 100.00%
-* **Operational Acceptance Result:** **PASS**
-* **Production Governance Status:** **PASS**
-* **Release Status:** Certified Ready for controlled pilot deployment.
+* **Consolidated Go/No-Go Decision:** **GO** *(historical only — SUPERSEDED)*
+* **Canonical Readiness Score:** 100.00% *(historical only — SUPERSEDED)*
+* **Operational Acceptance Result:** **PASS** *(historical only — SUPERSEDED)*
+* **Production Governance Status:** **PASS** *(historical only — SUPERSEDED)*
+* **Release Status:** Certified Ready for controlled pilot deployment. *(historical only — SUPERSEDED)*
 
 ---
 

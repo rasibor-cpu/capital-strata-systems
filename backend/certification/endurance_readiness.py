@@ -20,11 +20,14 @@ ENDURANCE_REQUIREMENTS = (
 
 def evaluate_endurance_readiness(
     evidence: list[CertificationEvidence] | tuple[CertificationEvidence, ...],
+    *,
+    profile: str | None = None,
 ) -> dict:
     result = evaluate_required_evidence(
         "ENDURANCE_READINESS",
         ENDURANCE_REQUIREMENTS,
         evidence,
+        profile=profile,
     ).as_dict()
     result.update(
         {

@@ -7,6 +7,7 @@ from datetime import datetime
 from backend.app.persistence.services.trade_runtime_service import TradeRuntimeService
 from analytics.trade_outcome_ledger import TradeOutcomeLedger
 
+
 @pytest.fixture
 def mock_persistence():
     with patch("backend.app.persistence.services.trade_runtime_service.PersistenceService") as mock:
@@ -34,12 +35,16 @@ def test_paper_close_captured(mock_persistence, temp_ledger):
          
         service = TradeRuntimeService()
         service.persistence = mock_instance
-        
-        service.close_trade(
-            trade_id="T1",
-            exit_price=Decimal("1.1050"),
-            realized_pnl=Decimal("5.0")
-        )
+        with patch.object(
+            service.canonical_lifecycle,
+            "persist_closed_trade_outcome",
+            return_value={"trade_id": "T1"},
+        ):
+            service.close_trade(
+                trade_id="T1",
+                exit_price=Decimal("1.1050"),
+                realized_pnl=Decimal("5.0")
+            )
         
         # Verify persistence close was called
         mock_instance.trades.close_trade.assert_called_once()
@@ -70,28 +75,32 @@ def test_winning_and_losing_trades_captured(mock_persistence):
          
         service = TradeRuntimeService()
         service.persistence = mock_instance
-        
-        # Losing trade
-        service.close_trade(
-            trade_id="T2",
-            exit_price=Decimal("140.0"),
-            realized_pnl=Decimal("-100.0")
-        )
-        
-        outcome_loss = mock_append.call_args[0][0]
-        assert outcome_loss.win_loss == "LOSS"
-        assert outcome_loss.realized_pnl == -100.0
-        
-        # Winning trade
-        service.close_trade(
-            trade_id="T3",
-            exit_price=Decimal("160.0"),
-            realized_pnl=Decimal("100.0")
-        )
-        
-        outcome_win = mock_append.call_args[0][0]
-        assert outcome_win.win_loss == "WIN"
-        assert outcome_win.realized_pnl == 100.0
+        with patch.object(
+            service.canonical_lifecycle,
+            "persist_closed_trade_outcome",
+            return_value={"trade_id": "ok"},
+        ):
+            # Losing trade
+            service.close_trade(
+                trade_id="T2",
+                exit_price=Decimal("140.0"),
+                realized_pnl=Decimal("-100.0")
+            )
+            
+            outcome_loss = mock_append.call_args[0][0]
+            assert outcome_loss.win_loss == "LOSS"
+            assert outcome_loss.realized_pnl == -100.0
+            
+            # Winning trade
+            service.close_trade(
+                trade_id="T3",
+                exit_price=Decimal("160.0"),
+                realized_pnl=Decimal("100.0")
+            )
+            
+            outcome_win = mock_append.call_args[0][0]
+            assert outcome_win.win_loss == "WIN"
+            assert outcome_win.realized_pnl == 100.0
 
 def test_analytics_failure_does_not_interrupt_close_processing(mock_persistence):
     mock_instance = mock_persistence.return_value

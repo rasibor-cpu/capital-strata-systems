@@ -43,7 +43,12 @@ class UnifiedExecutionResult:
 
 
 class UnifiedExecutionPipeline:
-    """Backend-only, paper-safe foundation for shared execution routing."""
+    """Validation-only foundation for shared execution routing.
+
+    This pipeline normalizes and validates paper-mode requests. It does **not**
+    dispatch to a broker, journal fills, or claim order execution. Successful
+    validation returns ``validated_not_executed``.
+    """
 
     SUPPORTED_ASSET_CLASSES = {"FX", "CRYPTO", "OPTIONS", "FUTURES"}
 
@@ -75,8 +80,8 @@ class UnifiedExecutionPipeline:
             side=side,
             quantity=quantity,
             mode=mode,
-            status="accepted",
-            reason="paper_safe_accepted",
+            status="validated_not_executed",
+            reason="validation_only_no_broker_dispatch",
         )
 
     def _normalize_asset_class(self, value: str) -> str:

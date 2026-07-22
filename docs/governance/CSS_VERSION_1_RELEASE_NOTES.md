@@ -1,5 +1,9 @@
 # CSS Version 1.0 Release Notes
 
+> **AMENDED — AR-001 (2026-07-21)**  
+> Active release posture is defined by `docs/release/CSS_CANONICAL_RELEASE_STATUS.md`.  
+> Production certification is currently **NOT CERTIFIED**. Controlled paper remains GO.
+
 ## Release Type
 
 Version 1.0 is an engineering-completion release candidate for Capital Strata Systems. It is not a production live-trading approval.
@@ -16,11 +20,15 @@ Version 1.0 is an engineering-completion release candidate for Capital Strata Sy
 
 ## Known Production Boundary
 
-The only remaining work before production deployment is:
+**Amended (AR-001):** Production deployment is **not** limited to the three items below. The Master Completion Audit and Release Gate 2 register identify additional Critical blockers (synthetic execution acceptance, lifecycle integrity, health fail-open scoring, institutional catalogue honesty, notifications, CI/CD, endurance/DR evidence, release-authority reconciliation, and others).
+
+Historical wording retained for traceability only:
 
 1. Live broker validation
 2. Live micro-pilot
 3. Production operational certification
+
+Authoritative remaining work: `CSS_V1_MASTER_COMPLETION_AUDIT.md` and `docs/release/CSS_AUDIT_REMEDIATION_REGISTER.md`.
 
 ## Safety Notice
 

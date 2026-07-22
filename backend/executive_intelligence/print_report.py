@@ -205,7 +205,7 @@ def render_printable_pdf(
     clean = sanitize_payload(dict(brief))
     ts = print_timestamp_utc or utc_now_iso()
     lines = _pdf_lines(clean, printed_by=printed_by, ts=ts)
-    return _build_simple_pdf(
+    return build_text_pdf(
         lines,
         watermark_text=get_brand_service().organization_name,
     )
@@ -271,117 +271,11 @@ def build_text_pdf(
     lines_per_page: int = 48,
     watermark_text: str | None = None,
 ) -> bytes:
-    """Public wrapper around the Phase 175 minimal PDF writer (reuse for Reports Center)."""
-    return _build_simple_pdf(
-        lines,
-        lines_per_page=lines_per_page,
-        watermark_text=watermark_text,
-    )
+    """Compatibility entry point delegated to the canonical PDF subsystem."""
+    from backend.reporting.pdf.pdf_legacy_adapter import render_legacy_text_pdf
 
-
-def _build_simple_pdf(
-    lines: list[str],
-    *,
-    lines_per_page: int = 48,
-    watermark_text: str | None = None,
-) -> bytes:
-    """Minimal PDF 1.4 writer (Helvetica text)."""
-    pages: list[list[str]] = []
-    for i in range(0, max(len(lines), 1), lines_per_page):
-        pages.append(lines[i : i + lines_per_page])
-    if not pages:
-        pages = [["(empty)"]]
-
-    objects: list[bytes] = []
-    # 1: catalog, 2: pages tree — filled later
-    objects.append(b"")  # placeholder index 0 unused
-    objects.append(b"")  # 1 catalog
-    objects.append(b"")  # 2 pages
-
-    page_objs: list[int] = []
-    content_objs: list[int] = []
-    font_obj = 3
-    objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
-
-    next_id = 4
-    for page_index, page_lines in enumerate(pages):
-        content = _page_content_stream(
-            page_lines,
-            page_no=page_index + 1,
-            page_count=len(pages),
-            watermark_text=watermark_text,
-        )
-        content_id = next_id
-        next_id += 1
-        objects.append(f"<< /Length {len(content)} >>\nstream\n".encode("latin-1") + content + b"\nendstream")
-        content_objs.append(content_id)
-
-        page_id = next_id
-        next_id += 1
-        objects.append(
-            (
-                f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
-                f"/Contents {content_id} 0 R /Resources << /Font << /F1 {font_obj} 0 R >> >> >>"
-            ).encode("latin-1")
-        )
-        page_objs.append(page_id)
-
-    kids = " ".join(f"{pid} 0 R" for pid in page_objs)
-    objects[2] = f"<< /Type /Pages /Kids [{kids}] /Count {len(page_objs)} >>".encode("latin-1")
-    objects[1] = b"<< /Type /Catalog /Pages 2 0 R >>"
-
-    # Assemble xref
-    out = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
-    offsets = [0]
-    for i in range(1, len(objects)):
-        offsets.append(len(out))
-        out.extend(f"{i} 0 obj\n".encode("latin-1"))
-        out.extend(objects[i])
-        out.extend(b"\nendobj\n")
-    xref_pos = len(out)
-    out.extend(f"xref\n0 {len(objects)}\n".encode("latin-1"))
-    out.extend(b"0000000000 65535 f \n")
-    for i in range(1, len(objects)):
-        out.extend(f"{offsets[i]:010d} 00000 n \n".encode("latin-1"))
-    out.extend(
-        f"trailer\n<< /Size {len(objects)} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n".encode("latin-1")
-    )
-    return bytes(out)
-
-
-def _page_content_stream(
-    lines: list[str],
-    *,
-    page_no: int,
-    page_count: int,
-    watermark_text: str | None = None,
-) -> bytes:
-    # PDF text: escape special chars
-    def esc(text: str) -> str:
-        return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
-
-    y = 750
-    parts = []
-    if watermark_text:
-        watermark = esc(str(watermark_text)[:48])
-        parts.extend(
-            [
-                "q",
-                "0.92 g",
-                "BT",
-                "/F1 44 Tf",
-                "0.707 0.707 -0.707 0.707 150 280 Tm",
-                f"({watermark}) Tj",
-                "ET",
-                "Q",
-            ]
-        )
-    parts.extend(["BT", "/F1 10 Tf", "14 TL", f"1 0 0 1 40 {y} Tm"])
-    for line in lines:
-        safe = esc(line[:110])
-        parts.append(f"({safe}) Tj")
-        parts.append("T*")
-    footer = esc(f"Page {page_no} of {page_count} | {CONFIDENTIALITY}")
-    parts.append(f"1 0 0 1 40 40 Tm ({footer}) Tj")
-    parts.append("ET")
-    return "\n".join(parts).encode("latin-1", errors="replace")
+    # Branding is resolved exclusively by CSSBrandService in the canonical
+    # renderer. The historical free-form watermark argument is intentionally
+    # ignored to prevent direct branding injection.
+    _ = watermark_text
+    return render_legacy_text_pdf(lines, lines_per_page=lines_per_page)

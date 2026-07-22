@@ -24,6 +24,13 @@ class HealthMonitor:
         """Register a health checker callback for a component."""
         self._checkers[component] = checker
 
+    def require_checkers(self, required: List[str]) -> List[str]:
+        """Return names of required checkers that are not registered."""
+        return [name for name in required if name not in self._checkers]
+
+    def has_required_checkers(self, required: List[str]) -> bool:
+        return not self.require_checkers(required)
+
     def execute_checks(self) -> List[Event]:
         """Execute all registered checkers and return their result Events."""
         results = []
@@ -47,7 +54,8 @@ class HealthMonitor:
         OK = 100, WARN = 50, CRITICAL = 0.
         """
         if not results:
-            return 100.0
+            # Fail-closed: absence of health evidence is not healthy.
+            return 0.0
 
         total_weight = 0.0
         weighted_sum = 0.0

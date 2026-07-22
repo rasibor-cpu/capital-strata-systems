@@ -2,6 +2,12 @@
 
 Phase 176 — generated from canonical catalogue `backend.reports_center.catalogue`.
 
+**Gate 2 / Wave 4 honesty (AR-017 / AR-047):** This matrix is a **roadmap catalogue inventory**.
+Registered rows are **not** delivered institutional reporting coverage.
+Only `AVAILABLE` / `AVAILABLE_WITH_LIMITATIONS` rows with producers are MVP-eligible
+(see totals: Generatable). Board / investor / regulatory packs are **OUT OF SCOPE** for Gate 2
+(`docs/release/CSS_WAVE4_PRODUCT_HONESTY_SCOPE.md`).
+
 **Phase 176G note:** Every generatable report declares `primary_human_format=PDF`,
 `pdf_supported=true`, and receives plain-English PDF via `CSSReportPDFRenderer`.
 Daily Executive Brief FINAL PDF bytes remain Phase 175 distribution. See
@@ -203,6 +209,8 @@ Daily Executive Brief FINAL PDF bytes remain Phase 175 distribution. See
 
 ## Totals
 
+**Honesty:** Registered ≠ delivered. Generatable count is the Gate 2 MVP ceiling.
+
 - Registered: **191**
 - AVAILABLE: **19**
 - AVAILABLE_WITH_LIMITATIONS: **13**
@@ -210,3 +218,4 @@ Daily Executive Brief FINAL PDF bytes remain Phase 175 distribution. See
 - COMING_SOON: **145**
 - DATA_UNAVAILABLE: **13**
 - DISABLED: **1**
+- Board/investor/regulatory Gate 2 scope: **OUT OF SCOPE**

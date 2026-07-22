@@ -46,6 +46,8 @@ def test_monitor_scoring():
     score_with_crit = monitor.calculate_health_score([event_ok, event_crit])
     assert score_with_crit == 50.0
 
+    score_empty = monitor.calculate_health_score([])
+    assert score_empty == 0.0
 
 def test_state_manager_and_timeline(tmp_path):
     state_file = tmp_path / "state.json"

@@ -9,6 +9,7 @@ from backend.certification.disaster_recovery_readiness import (
     evaluate_disaster_recovery_readiness,
 )
 from backend.certification.endurance_readiness import evaluate_endurance_readiness
+from backend.certification.evidence_authority import authority_diagnostics
 from backend.certification.operational_acceptance import (
     evaluate_operational_acceptance,
 )
@@ -36,20 +37,26 @@ class ProductionReadinessCertificationEngine:
         *,
         evidence: list[CertificationEvidence] | tuple[CertificationEvidence, ...],
         governance_snapshot: Mapping[str, Any] | None = None,
+        profile: str | None = None,
     ):
         self.evidence = tuple(evidence)
         self.governance = dict(governance_snapshot or {})
+        self.profile = profile
 
-    def evaluate(self) -> dict[str, Any]:
+    def evaluate(self, *, profile: str | None = None) -> dict[str, Any]:
+        resolved = profile if profile is not None else self.profile
         platform = evaluate_required_evidence(
             "PLATFORM_CERTIFICATION",
             PLATFORM_REQUIREMENTS,
             self.evidence,
+            profile=resolved,
         ).as_dict()
-        oat = evaluate_operational_acceptance(self.evidence)
-        endurance = evaluate_endurance_readiness(self.evidence)
-        disaster_recovery = evaluate_disaster_recovery_readiness(self.evidence)
-        deployment = evaluate_deployment_readiness(self.evidence)
+        oat = evaluate_operational_acceptance(self.evidence, profile=resolved)
+        endurance = evaluate_endurance_readiness(self.evidence, profile=resolved)
+        disaster_recovery = evaluate_disaster_recovery_readiness(
+            self.evidence, profile=resolved
+        )
+        deployment = evaluate_deployment_readiness(self.evidence, profile=resolved)
         frameworks = (platform, oat, endurance, disaster_recovery, deployment)
         score = round(
             sum(float(row["percentage"]) for row in frameworks) / len(frameworks),
@@ -66,6 +73,7 @@ class ProductionReadinessCertificationEngine:
         governance_score = float(self.governance.get("governance_score") or 0)
         risks = self.governance.get("enterprise_risk_summary")
         risks = risks if isinstance(risks, Mapping) else {}
+        authority = authority_diagnostics(resolved)
         return {
             "schema_version": "css.production_readiness.certification.v1",
             "status": "CERTIFIED_FOR_CONTROLLED_DEPLOYMENT"
@@ -73,6 +81,8 @@ class ProductionReadinessCertificationEngine:
             else "NOT_CERTIFIED",
             "certification_score": score,
             "governance_score": governance_score,
+            "certification_profile": authority["certification_profile"],
+            "evidence_authority": authority,
             "platform_certification": platform,
             "operational_acceptance": oat,
             "endurance_readiness": endurance,

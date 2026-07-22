@@ -191,10 +191,17 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from backend.runtime.live_environment_loader import (
     load_css_runtime_environment,
     paper_only_coinbase_test_order_usd,
 )
+
+CSS_ENVIRONMENT_LOAD_TRACE = load_css_runtime_environment(PROJECT_ROOT)
+
 from backend.runtime.broker_startup_selection import (
     build_startup_broker_selection,
     persist_broker_selection,
@@ -873,12 +880,6 @@ def canonical_pnl_dashboard_lines(
             "=== END CANONICAL PNL DIAGNOSTIC ===",
         ]
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-CSS_ENVIRONMENT_LOAD_TRACE = load_css_runtime_environment(PROJECT_ROOT)
 
 # === PCNRASS PHASE 2 REAL MARKET PRICE FEED ===
 from backend.data.price_feed import get_price_feed

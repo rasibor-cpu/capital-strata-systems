@@ -144,6 +144,7 @@ from dashboard.runtime.api.executive_reporting import create_executive_reporting
 from dashboard.runtime.api.executive_decision_intelligence import (
     create_executive_decision_intelligence_router,
 )
+from backend.executive.executive_api import create_executive_intelligence_router
 from dashboard.runtime.api.runtime_mode import create_runtime_mode_router
 from dashboard.runtime.api.runtime_telemetry import create_runtime_telemetry_router
 from backend.options.options_income_api import create_options_income_router
@@ -4613,6 +4614,8 @@ async def api_portfolio_decision():
 
 @launcher_router.post("/api/portfolio-decision/record")
 async def api_portfolio_decision_record(request: Request):
+    from backend.security.mutation_guard import require_mutation_auth
+    require_mutation_auth(request)
     package = None
     try:
         payload = await request.json()
@@ -4793,6 +4796,8 @@ async def api_paper_validation_checkpoints():
 
 @launcher_router.post("/api/paper-validation-checkpoint/record")
 async def api_paper_validation_checkpoint_record(request: Request):
+    from backend.security.mutation_guard import require_mutation_auth
+    require_mutation_auth(request)
     payload: Dict[str, Any] = {}
     try:
         body = await request.json()
@@ -4901,14 +4906,21 @@ async def mobile_strategy_evolution():
 
 @launcher_router.get("/manifest.json")
 async def get_manifest():
+    payload = BRAND.manifest(
+        start_url="/mobile-launcher",
+        app_id="/css-mobile-launcher",
+        name="CSS Mobile Launcher",
+        short_name="CSS",
+        shell_cache=SPA_SHELL_CACHE,
+    )
+    # AR-025: launcher is non-canonical — production install must use /manifest.webmanifest
+    payload["css_canonical_install"] = False
+    payload["description"] = (
+        "CSS Mobile Launcher — local operator shell only; not the canonical production PWA. "
+        "See docs/operations/CSS_PWA_CANONICAL_INSTALL.md."
+    )
     return JSONResponse(
-        BRAND.manifest(
-            start_url="/mobile-launcher",
-            app_id="/css-mobile-launcher",
-            name="CSS Mobile Launcher",
-            short_name="CSS",
-            shell_cache=SPA_SHELL_CACHE,
-        ),
+        payload,
         media_type="application/manifest+json",
         headers={"Cache-Control": "no-cache, max-age=0, must-revalidate"},
     )
@@ -5030,6 +5042,8 @@ async def mobile_trade_paper(request: Request):
     This endpoint intentionally writes an artifact only. It does not call broker
     APIs, does not place orders, and does not enable live execution.
     """
+    from backend.security.mutation_guard import require_mutation_auth
+    require_mutation_auth(request)
     try:
         payload = await _read_mobile_trade_payload(request)
         trade_request = write_mobile_paper_trade_request(payload)
@@ -5058,6 +5072,8 @@ async def mobile_control_pause(request: Request):
     - API / XHR caller   → JSON {ok, trading_paused, timestamp}
     Safe: only mutates the pause flag. No broker calls. No secrets.
     """
+    from backend.security.mutation_guard import require_mutation_auth
+    require_mutation_auth(request)
     state = write_pause_state(paused=True, reason="mobile_user_pause")
     if _wants_json(request):
         return JSONResponse(
@@ -5074,6 +5090,8 @@ async def mobile_control_resume(request: Request):
     - API / XHR caller   → JSON {ok, trading_paused, timestamp}
     Safe: only mutates the pause flag. No broker calls. No secrets.
     """
+    from backend.security.mutation_guard import require_mutation_auth
+    require_mutation_auth(request)
     state = write_pause_state(paused=False, reason="mobile_user_resume")
     if _wants_json(request):
         return JSONResponse(
@@ -5132,6 +5150,12 @@ app.include_router(
 # Phase 179 — advisory Executive Decision Intelligence (read-only orchestration).
 app.include_router(
     create_executive_decision_intelligence_router(state_provider=_executive_brief_readiness_mc_state)
+)
+# Phase 182A — canonical GET-only Executive Intelligence Suite.
+app.include_router(
+    create_executive_intelligence_router(
+        state_provider=runtime_snapshot_state_provider()
+    )
 )
 # Phase 177A — canonical Runtime Mode Resolver (read-only).
 app.include_router(

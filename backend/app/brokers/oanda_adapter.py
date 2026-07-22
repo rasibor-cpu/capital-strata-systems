@@ -26,8 +26,8 @@ Live Firewall (hardened):
     Any missing condition blocks execution, logs the denial reason, and
     returns an explicit firewall-denied result. Never silently continues.
 
-    close_trade() and close_position() are NOT blocked — closures reduce
-    risk and must remain executable regardless of firewall state.
+    close_trade() and close_position() are quarantined with place_order under
+    AR-026 unless CSS_OANDA_LEGACY_WRITES_ENABLED=1 (default off / fail-closed).
 """
 
 from __future__ import annotations
@@ -45,6 +45,31 @@ from backend.app.brokers.operational_state import BrokerOperationalState, operat
 from engine.execution.live_order_kill_switch import evaluate_live_order_kill_switch
 from backend.app.security.live_toggle import is_live_execution_authorized
 from backend.app.observability.audit_context import get_audit_user
+
+
+def _legacy_writes_enabled() -> bool:
+    return os.getenv("CSS_OANDA_LEGACY_WRITES_ENABLED", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _legacy_write_quarantine_result(method: str) -> Dict[str, Any]:
+    logging.warning(
+        "[OANDA QUARANTINE] Legacy write method blocked method=%s",
+        method,
+    )
+    return {
+        "ok": False,
+        "status": None,
+        "data": None,
+        "error": "oanda_legacy_writes_quarantined",
+        "method": method,
+        "execution_allowed": False,
+        "implementation_status": "WRITES_QUARANTINED",
+    }
 
 
 @dataclass(frozen=True)
@@ -88,7 +113,12 @@ class OandaAdapter:
         self.account_id = str(credentials.get("OANDA_ACCOUNT_ID") or credentials.get("OANDA_PRACTICE_ACCOUNT_ID") or "").strip()
         self.base_url = str(credentials.get("OANDA_BASE_URL") or "").strip().rstrip("/")
         self.env = str(credentials.get("OANDA_ENV") or "practice").strip().lower()
-        self.allow_live_trades = str(credentials.get("OANDA_ENABLE_LIVE_TRADING") or "false").strip().lower() in ("1", "true", "yes", "on")
+        # Condition 1 source of truth is the process env; credentials may also carry the flag.
+        self.allow_live_trades = str(
+            credentials.get("OANDA_ENABLE_LIVE_TRADING")
+            or os.getenv("OANDA_ENABLE_LIVE_TRADING")
+            or "false"
+        ).strip().lower() in ("1", "true", "yes", "on")
         
         self.health_state = "GREEN"
         self.consecutive_failures = 0
@@ -418,6 +448,9 @@ class OandaAdapter:
         Denial is always logged with the specific reason.
         Practice/paper paths are unaffected — they are not routed here.
         """
+        if not _legacy_writes_enabled():
+            return _legacy_write_quarantine_result("place_order")
+
         if order is not None:
             symbol = order.symbol
             side = order.side
@@ -485,12 +518,16 @@ class OandaAdapter:
         return self._request_json("POST", f"v3/accounts/{self.account_id}/orders", payload)
 
     def close_trade(self, trade_id: str) -> Dict[str, Any]:
+        if not _legacy_writes_enabled():
+            return _legacy_write_quarantine_result("close_trade")
         tid = (trade_id or "").strip()
         if not tid:
             return {"ok": False, "status": None, "data": None, "error": "missing_trade_id"}
         return self._request_json("PUT", f"v3/accounts/{self.account_id}/trades/{tid}/close")
 
     def close_position(self, instrument: str, long_units: str = "ALL", short_units: str = "ALL") -> Dict[str, Any]:
+        if not _legacy_writes_enabled():
+            return _legacy_write_quarantine_result("close_position")
         instr = (instrument or "").strip()
         if not instr:
             return {"ok": False, "status": None, "data": None, "error": "missing_instrument"}

@@ -10,6 +10,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from backend.runtime.environment_bootstrap import bootstrap_broker_environment
+
+ENVIRONMENT_BOOTSTRAP = bootstrap_broker_environment(
+    Path(__file__).resolve().parents[2]
+)
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 
@@ -112,7 +118,37 @@ app.include_router(create_runtime_telemetry_router())
 app.include_router(create_reports_discovery_router(surface="mobile"))
 
 _SESSIONS: Dict[str, Dict[str, Any]] = {}
+_SESSIONS_FILE = PROJECT_ROOT / "artifacts" / "css_mobile_sessions.json"
 _PASSWORD_CHANGES: Dict[str, Dict[str, Any]] = {}
+
+
+def _load_sessions_from_disk() -> Dict[str, Dict[str, Any]]:
+    try:
+        if not _SESSIONS_FILE.exists():
+            return {}
+        data = json.loads(_SESSIONS_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return {}
+        return {
+            str(token): session
+            for token, session in data.items()
+            if isinstance(session, dict)
+        }
+    except Exception:
+        return {}
+
+
+def _hydrate_sessions() -> None:
+    for token, session in _load_sessions_from_disk().items():
+        _SESSIONS.setdefault(token, session)
+
+
+def _persist_sessions() -> None:
+    try:
+        _SESSIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _SESSIONS_FILE.write_text(json.dumps(_SESSIONS), encoding="utf-8")
+    except Exception:
+        pass
 
 
 @app.get("/mobile-launcher", response_class=HTMLResponse)
@@ -172,7 +208,7 @@ async def login_submit(request: Request):
         save_users(users)
         return HTMLResponse(_login_page(message=exc.message, status="error"), status_code=401)
 
-    return _login_success_response(user_ctx)
+    return _login_success_response(request, user_ctx)
 
 
 @app.get("/password-change", response_class=HTMLResponse)
@@ -210,7 +246,7 @@ async def password_change_submit(request: Request):
     if token:
         _PASSWORD_CHANGES.pop(token, None)
 
-    response = _login_success_response(user_ctx)
+    response = _login_success_response(request, user_ctx)
     response.delete_cookie(PASSWORD_CHANGE_COOKIE)
     return response
 
@@ -544,7 +580,9 @@ async def audit_screen(request: Request):
 async def logout(request: Request):
     token = request.cookies.get(SESSION_COOKIE)
     if token:
+        _hydrate_sessions()
         _SESSIONS.pop(token, None)
+        _persist_sessions()
     response = RedirectResponse("/login", status_code=303)
     response.delete_cookie(SESSION_COOKIE)
     return response
@@ -1065,20 +1103,23 @@ def _branding_file(asset_key: str) -> FileResponse:
     )
 
 
-def _login_success_response(user_ctx: Dict[str, Any]) -> RedirectResponse:
+def _login_success_response(request: Request, user_ctx: Dict[str, Any]) -> RedirectResponse:
+    from backend.security.mutation_guard import secure_cookie_kwargs
+
     token = _create_session(user_ctx)
     response = RedirectResponse("/dashboard", status_code=303)
+    kwargs = secure_cookie_kwargs(str(request.url.scheme))
     response.set_cookie(
         SESSION_COOKIE,
         token,
-        httponly=True,
-        samesite="lax",
         max_age=SESSION_MAX_SECONDS,
+        **kwargs,
     )
     return response
 
 
 def _create_session(user_ctx: Dict[str, Any]) -> str:
+    _hydrate_sessions()
     token = secrets.token_urlsafe(32)
     now = time.time()
     _SESSIONS[token] = {
@@ -1086,6 +1127,7 @@ def _create_session(user_ctx: Dict[str, Any]) -> str:
         "last_activity": now,
         "user_ctx": dict(user_ctx),
     }
+    _persist_sessions()
     return token
 
 
@@ -1096,11 +1138,15 @@ def _get_session(request: Request) -> Optional[Dict[str, Any]]:
 
     session = _SESSIONS.get(token)
     if not session:
-        return None
+        _hydrate_sessions()
+        session = _SESSIONS.get(token)
+        if not session:
+            return None
 
     now = time.time()
     if now - float(session.get("created", now)) > SESSION_MAX_SECONDS:
         _SESSIONS.pop(token, None)
+        _persist_sessions()
         return None
 
     session["last_activity"] = now

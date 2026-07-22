@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 from dotenv import load_dotenv
 
@@ -29,6 +29,7 @@ from backend.runtime.broker_environment_profiles import (
     build_broker_environment,
     profile_mode_alias,
 )
+from backend.runtime.environment_bootstrap import bootstrap_broker_environment
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -204,38 +205,104 @@ def _env_present(*names: str) -> bool:
     return any(bool(os.getenv(name)) for name in names)
 
 
+def _first_present(source: Mapping[str, Any], *names: str) -> Any:
+    for name in names:
+        value = source.get(name)
+        if value not in (None, ""):
+            return value
+    return None
+
+
 def _load_coinbase_env_credentials(mode: str) -> Optional[Dict[str, Any]]:
+    process_source = {
+        key: value
+        for key, value in os.environ.items()
+        if key.startswith("COINBASE_")
+    }
     canonical = _canonical_profile_credentials("COINBASE", mode)
     source = canonical.credentials_for_broker()
+    if any(
+        Path(path).name in {".env.live_read_only", ".env.live_execution"}
+        for path in canonical.loaded_files
+    ):
+        process_source = {}
+    process_identity_present = bool(
+        _first_present(
+            process_source,
+            "COINBASE_CDP_KEY_NAME",
+            "COINBASE_KEY_NAME",
+            "COINBASE_API_KEY",
+        )
+    )
+    process_private_key_present = bool(
+        _first_present(
+            process_source,
+            "COINBASE_CDP_PRIVATE_KEY",
+            "COINBASE_PRIVATE_KEY",
+            "COINBASE_CDP_PRIVATE_KEY_PATH",
+            "COINBASE_PRIVATE_KEY_PATH",
+            "COINBASE_KEY_JSON_PATH",
+            "COINBASE_KEY_JSON",
+            "COINBASE_KEY_FILE",
+        )
+    )
     if canonical.validation_status != "PASS" and not (
-        canonical.key_identifier_present or canonical.private_key_present
+        canonical.key_identifier_present
+        or canonical.private_key_present
+        or (process_identity_present and process_private_key_present)
     ):
         return None
 
-    for key_file in (
+    process_key_files = tuple(
+        process_source.get(name)
+        for name in (
+            "COINBASE_KEY_JSON_PATH",
+            "COINBASE_KEY_JSON",
+            "COINBASE_KEY_FILE",
+        )
+    )
+    canonical_key_files = (
         source.get("COINBASE_KEY_JSON_PATH"),
         source.get("COINBASE_KEY_JSON"),
         source.get("COINBASE_KEY_FILE"),
-    ):
+    )
+    key_file_candidates = (
+        process_key_files
+        if any(process_key_files)
+        else (() if process_private_key_present else canonical_key_files)
+    )
+    for key_file in key_file_candidates:
         json_credentials = _load_coinbase_json_credentials(key_file or "")
         if json_credentials:
             json_credentials["COINBASE_ENABLE_LIVE_ORDERS"] = source.get("COINBASE_ENABLE_LIVE_ORDERS") or "false"
             json_credentials["canonical_broker_environment"] = canonical.redacted_diagnostics()
             return json_credentials
 
-    key_name = source.get("COINBASE_CDP_KEY_NAME") or source.get("COINBASE_KEY_NAME")
-    private_key_source = (
-        source.get("COINBASE_CDP_PRIVATE_KEY")
-        or source.get("COINBASE_PRIVATE_KEY")
-        or source.get("COINBASE_CDP_PRIVATE_KEY_PATH")
-        or source.get("COINBASE_PRIVATE_KEY_PATH")
+    key_name = _first_present(
+        process_source,
+        "COINBASE_CDP_KEY_NAME",
+        "COINBASE_KEY_NAME",
+    ) or _first_present(source, "COINBASE_CDP_KEY_NAME", "COINBASE_KEY_NAME")
+    private_key_source = _first_present(
+        process_source,
+        "COINBASE_CDP_PRIVATE_KEY",
+        "COINBASE_PRIVATE_KEY",
+        "COINBASE_CDP_PRIVATE_KEY_PATH",
+        "COINBASE_PRIVATE_KEY_PATH",
+    ) or _first_present(
+        source,
+        "COINBASE_CDP_PRIVATE_KEY",
+        "COINBASE_PRIVATE_KEY",
+        "COINBASE_CDP_PRIVATE_KEY_PATH",
+        "COINBASE_PRIVATE_KEY_PATH",
     )
     private_key = _normalize_coinbase_private_key_material(private_key_source)
 
-    key_file = (
-        source.get("COINBASE_KEY_JSON_PATH")
-        or source.get("COINBASE_KEY_JSON")
-        or source.get("COINBASE_KEY_FILE")
+    key_file = next((value for value in process_key_files if value), None) or _first_present(
+        source,
+        "COINBASE_KEY_JSON_PATH",
+        "COINBASE_KEY_JSON",
+        "COINBASE_KEY_FILE",
     )
 
     if not key_name and not private_key and not key_file:
@@ -326,16 +393,27 @@ def _load_env_fallback_credentials(broker_name: str, mode: str) -> Optional[Dict
 
 
 def _canonical_profile_credentials(broker_name: str, mode: str) -> BrokerEnvironmentCredentials:
-    load_dotenv(REPO_ROOT / ".env")
+    bootstrap_broker_environment(REPO_ROOT)
     if str(mode or "").strip().lower() != "live":
         load_dotenv(REPO_ROOT / ".env.practice", override=False)
+    selected_profile = profile_mode_alias(mode)
+    profile_filename = {
+        "PAPER": ".env.paper",
+        "LIVE_READ_ONLY": ".env.live_read_only",
+        "LIVE_EXECUTION": ".env.live_execution",
+    }.get(selected_profile.value if selected_profile is not None else "")
+    profile_file_is_authoritative = bool(
+        profile_filename and (REPO_ROOT / profile_filename).is_file()
+        and selected_profile is not None
+        and selected_profile.value != "PAPER"
+    )
     return build_broker_environment(
         REPO_ROOT,
         broker=broker_name,
-        explicit_profile=profile_mode_alias(mode),
+        explicit_profile=selected_profile,
         env=dict(os.environ),
         allow_legacy=False,
-        sanitize=False,
+        sanitize=profile_file_is_authoritative,
     )
 
 
@@ -344,6 +422,34 @@ def load_credentials_for_broker(
     mode: str = "paper",
     base_dir: str = ".",
 ) -> Dict[str, Any]:
+    normalized_mode = str(mode or "paper").strip().lower()
+    # AR-033: when secret authority is enforced, live plaintext loaders fail closed.
+    enforce = os.getenv("CSS_SECRET_AUTHORITY_ENFORCE", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    } or os.getenv("CSS_ENV", "").strip().lower() in {"production", "prod"}
+    if enforce and normalized_mode in {
+        "live",
+        "live_read_only",
+        "live_execution",
+        "production",
+        "prod",
+    }:
+        allow_legacy_live = os.getenv("CSS_ALLOW_LEGACY_LIVE_CREDENTIALS", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if not allow_legacy_live:
+            raise CredentialLoadError(
+                "SECRET_AUTHORITY_REQUIRED: live credential loading via legacy "
+                "plaintext paths is blocked; use enterprise secret handles "
+                "(set CSS_ALLOW_LEGACY_LIVE_CREDENTIALS=1 only for governed migration)"
+            )
+
     spec = get_broker_spec(broker_name)
     credential_path = os.path.join(base_dir, spec.credential_file)
 

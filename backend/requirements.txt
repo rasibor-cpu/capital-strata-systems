@@ -4,6 +4,7 @@ pydantic
 python-jose
 python-dotenv
 requests
+reportlab==5.0.0
 coinbase-advanced-py
 beautifulsoup4==4.15.0
 cryptography==49.0.0

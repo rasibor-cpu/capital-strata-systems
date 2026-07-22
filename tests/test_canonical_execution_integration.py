@@ -88,7 +88,8 @@ def test_canonical_execution_approved_route() -> None:
 
     assert result.execution_decision["can_execute"] is True
     assert result.execution_decision["final_decision"] == "ALLOW"
-    assert result.execution_result["status"] == "accepted"
+    assert result.execution_result["status"] == "validated_not_executed"
+    assert result.execution_result["reason"] == "validation_only_no_broker_dispatch"
 
 
 def test_canonical_execution_blocked_by_governance() -> None:

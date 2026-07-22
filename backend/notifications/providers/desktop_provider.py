@@ -22,9 +22,15 @@ class DesktopNotificationProvider(BaseNotificationProvider):
     def send(self, event: Event) -> bool:
         title = event.payload.get("title", "Desktop Alert")
         message = event.payload.get("message", "")
-        
+
+        # Local HUD log only — not a customer pager / production notification transport (AR-022).
         logger.info(
-            f"[HUD Desktop Alert] Render Notification (sound={self.sound_enabled}): "
+            f"[HUD Desktop Alert][SIMULATED_LOCAL_LOG] Render Notification "
+            f"(sound={self.sound_enabled}): "
             f"[{event.severity}] {title}: {message}"
         )
+        return True
+
+    @property
+    def delivery_simulated(self) -> bool:
         return True

@@ -1,0 +1,13 @@
+# CODEOWNERS — Capital Strata Systems
+#
+# Remediation: AR-003 (Release Gate 2)
+#
+# Authoritative ownership (roles + Critical AR owners):
+#   docs/governance/CSS_REPOSITORY_OWNERSHIP_REGISTER.md
+#
+# This file intentionally contains no @user / @team rules yet.
+# Invalid GitHub owners would break review routing. After the Executive
+# Sponsor binds identities in Ownership Register §4, path rules will be
+# added here using those bindings.
+#
+# Until then, Gate 2 process ownership is enforced by the Ownership Register.

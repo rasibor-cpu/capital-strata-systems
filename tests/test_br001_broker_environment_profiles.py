@@ -186,6 +186,9 @@ def test_br001_credential_loader_uses_canonical_profile_object(tmp_path: Path, m
     _write(tmp_path / ".env.live_read_only", "COINBASE_KEY_NAME=key\nCOINBASE_PRIVATE_KEY=not-a-pem")
     monkeypatch.setattr(credential_loader, "REPO_ROOT", tmp_path)
     monkeypatch.setenv("CSS_BROKER_ENVIRONMENT_PROFILE", "LIVE_READ_ONLY")
+    # Profile-object unit test exercises legacy loader shape; AR-033 demotion stays opt-in.
+    monkeypatch.delenv("CSS_SECRET_AUTHORITY_ENFORCE", raising=False)
+    monkeypatch.setenv("CSS_ALLOW_LEGACY_LIVE_CREDENTIALS", "1")
 
     credentials = credential_loader.load_credentials("coinbase", mode="live", base_dir=str(tmp_path))
 

@@ -17,10 +17,12 @@ ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
 SESSION_AUTH_FILE = ARTIFACTS_DIR / "css_auth_session.json"
 
 INITIAL_ADMIN_ID = "00000"
-INITIAL_ADMIN_PASSWORD = "123456"
+# AR-023: no hardcoded bootstrap password. Require CSS_BOOTSTRAP_ADMIN_PASSWORD.
+INITIAL_ADMIN_PASSWORD = ""  # intentionally empty — never use as a shipped secret
+FORBIDDEN_DEFAULT_PASSWORDS = frozenset({"123456", "password", "admin", "css123", "CSS123"})
 INITIAL_DISPLAY_NAME = "CSS Administrator"
 INITIAL_ROLE = "SUPER_USER"
-MIN_PASSWORD_LENGTH = 6
+MIN_PASSWORD_LENGTH = 12
 PASSWORD_MAX_AGE_DAYS = 30
 PASSWORD_HISTORY_LIMIT = 2
 LOCKOUT_START_ATTEMPT = 3
@@ -67,7 +69,9 @@ def await_login_ready_state() -> Dict[str, Any]:
     Defaults to a Tk sign-on screen, with a policy-equivalent console screen when
     Tk is unavailable or CSS_AUTH_UI=cli/console/text.
     """
-    if os.getenv("CSS_AUTOMATED_INPUT") == "1":
+    from backend.security.mutation_guard import automated_auth_bypass_allowed
+
+    if automated_auth_bypass_allowed():
         return {
             "user_id": INITIAL_ADMIN_ID,
             "display_name": INITIAL_DISPLAY_NAME,
@@ -115,12 +119,25 @@ def await_login_ready_state() -> Dict[str, Any]:
         return await_console_login(users)
 
 
+def resolve_bootstrap_admin_password() -> str:
+    """Return configured bootstrap password or empty if unset (fail-closed seeding)."""
+    return str(os.getenv("CSS_BOOTSTRAP_ADMIN_PASSWORD", "") or "").strip()
+
+
 def load_users(users_file: Path = USERS_FILE) -> Dict[str, Any]:
     users_file.parent.mkdir(parents=True, exist_ok=True)
 
     changed = False
     if not users_file.exists():
-        users = {INITIAL_ADMIN_ID: _default_admin_record()}
+        bootstrap = resolve_bootstrap_admin_password()
+        if not bootstrap or len(bootstrap) < MIN_PASSWORD_LENGTH:
+            raise RuntimeError(
+                "CSS_BOOTSTRAP_REQUIRED: set CSS_BOOTSTRAP_ADMIN_PASSWORD "
+                f"(min {MIN_PASSWORD_LENGTH} chars) before first start"
+            )
+        if bootstrap.lower() in {p.lower() for p in FORBIDDEN_DEFAULT_PASSWORDS}:
+            raise RuntimeError("CSS_BOOTSTRAP_FORBIDDEN_DEFAULT_PASSWORD")
+        users = {INITIAL_ADMIN_ID: _default_admin_record(bootstrap)}
         save_users(users, users_file)
         return users
 
@@ -133,9 +150,22 @@ def load_users(users_file: Path = USERS_FILE) -> Dict[str, Any]:
     if not isinstance(users, dict):
         raise RuntimeError("CSS_USER_STORE_INVALID")
 
+    if not users:
+        bootstrap = resolve_bootstrap_admin_password()
+        if not bootstrap or len(bootstrap) < MIN_PASSWORD_LENGTH:
+            raise RuntimeError(
+                "CSS_BOOTSTRAP_REQUIRED: empty user store requires "
+                f"CSS_BOOTSTRAP_ADMIN_PASSWORD (min {MIN_PASSWORD_LENGTH} chars)"
+            )
+        if bootstrap.lower() in {p.lower() for p in FORBIDDEN_DEFAULT_PASSWORDS}:
+            raise RuntimeError("CSS_BOOTSTRAP_FORBIDDEN_DEFAULT_PASSWORD")
+        users = {INITIAL_ADMIN_ID: _default_admin_record(bootstrap)}
+        save_users(users, users_file)
+        return users
+
     if INITIAL_ADMIN_ID not in users:
-        users[INITIAL_ADMIN_ID] = _default_admin_record()
-        changed = True
+        # Do not silently inject a known default admin password.
+        pass
 
     for key, record in list(users.items()):
         if not isinstance(record, dict):
@@ -291,9 +321,9 @@ def validate_initial_password(password: str) -> None:
             f"Initial password must be at least {MIN_PASSWORD_LENGTH} characters."
         )
 
-    if password == INITIAL_ADMIN_PASSWORD:
+    if password.lower() in {p.lower() for p in FORBIDDEN_DEFAULT_PASSWORDS}:
         raise PasswordValidationError(
-            "Initial password cannot use the bootstrap administrator default password."
+            "Initial password cannot use a forbidden default password."
         )
 
 
@@ -503,9 +533,9 @@ def validate_new_password(
             f"Password must be at least {MIN_PASSWORD_LENGTH} characters."
         )
 
-    if new_password == INITIAL_ADMIN_PASSWORD:
+    if new_password.lower() in {p.lower() for p in FORBIDDEN_DEFAULT_PASSWORDS}:
         raise PasswordValidationError(
-            "New password cannot remain the initial default password."
+            "New password cannot use a forbidden default password."
         )
 
     if new_password != confirm_password:
@@ -777,8 +807,9 @@ def persist_login_session(user_ctx: Dict[str, Any]) -> None:
                 ),
                 encoding="utf-8",
             )
-        except Exception:
-            pass
+        except Exception as nested_exc:
+            sys.stderr.write(f"[SESSION PERSIST WARN] Fallback write failed: {nested_exc}\n")
+            sys.stderr.flush()
     finally:
         try:
             if temp_file.exists():
@@ -1748,14 +1779,18 @@ def hash_password(password: str) -> str:
     return hashlib.sha256(str(password).encode("utf-8")).hexdigest()
 
 
-def _default_admin_record() -> Dict[str, Any]:
+def _default_admin_record(bootstrap_password: str) -> Dict[str, Any]:
+    if not bootstrap_password or len(bootstrap_password) < MIN_PASSWORD_LENGTH:
+        raise RuntimeError("CSS_BOOTSTRAP_REQUIRED")
+    if bootstrap_password.lower() in {p.lower() for p in FORBIDDEN_DEFAULT_PASSWORDS}:
+        raise RuntimeError("CSS_BOOTSTRAP_FORBIDDEN_DEFAULT_PASSWORD")
     return {
         "user_id": INITIAL_ADMIN_ID,
         "display_name": INITIAL_DISPLAY_NAME,
         "role": INITIAL_ROLE,
         "unit_code": "CORE",
         "home_branch": "HQ",
-        "password_hash": hash_password(INITIAL_ADMIN_PASSWORD),
+        "password_hash": hash_password(bootstrap_password),
         "must_change_password": True,
         "last_password_change": None,
         "password_history": [],

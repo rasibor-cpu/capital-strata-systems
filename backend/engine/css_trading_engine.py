@@ -20,15 +20,21 @@ MIN_SIGNAL_STRENGTH = 0.65
 
 class CSSTradingEngine:
     """
-    Lightweight institutional-filter engine shell.
+    Non-authoritative advisory scanner shell (NOT the paper trading authority).
 
     Current purpose:
     - scan market
     - score opportunities
     - filter for institutional-grade setups only
 
-    This version is intentionally conservative.
+    This shell does not dispatch orders, journal fills, or own paper/live
+    execution. Canonical paper execution authority is
+    ``CanonicalExecutionIntegration`` backed by the validation-only
+    ``UnifiedExecutionPipeline`` (see
+    ``docs/governance/CSS_PAPER_TRADING_AUTHORITY.md``).
     """
+
+    AUTHORITATIVE_PAPER_ENGINE = False
 
     def __init__(self) -> None:
         self.scanner = UnifiedMarketScanner()

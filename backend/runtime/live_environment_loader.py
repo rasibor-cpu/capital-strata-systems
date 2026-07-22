@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from typing import Any, MutableMapping
 
+from backend.runtime.environment_bootstrap import bootstrap_broker_environment
 from backend.runtime.broker_environment_profiles import (
     BrokerEnvironmentProfile,
     build_broker_environment,
@@ -25,18 +26,29 @@ def load_css_runtime_environment(
 ) -> dict[str, Any]:
     target_env = env if env is not None else os.environ
     legacy_profile = profile or profile_mode_alias(mode)
+    bootstrap = (
+        bootstrap_broker_environment(project_root, env=target_env)
+        if mode is None and profile is None
+        else None
+    )
+    profile_env = dict(target_env) if bootstrap is not None else target_env
     credentials = build_broker_environment(
         project_root,
         broker=broker,
         explicit_profile=legacy_profile,
-        env=target_env,
-        allow_legacy="PYTEST_CURRENT_TEST" not in os.environ,
+        env=profile_env,
+        allow_legacy=(
+            bootstrap is None and "PYTEST_CURRENT_TEST" not in os.environ
+        ),
     )
     trace = profile_trace(credentials)
     mode_key = _mode_from_profile(credentials.profile)
     loaded = {
         **trace,
-        "env_loaded": any(Path(path).name == ".env" for path in credentials.loaded_files),
+        "env_loaded": (
+            bootstrap is not None and bootstrap.status == "LOADED"
+        )
+        or any(Path(path).name == ".env" for path in credentials.loaded_files),
         "shared_env_loaded": any(Path(path).name == ".env.shared" for path in credentials.loaded_files),
         "paper_env_loaded": any(Path(path).name == ".env.paper" for path in credentials.loaded_files),
         "live_read_only_env_loaded": any(Path(path).name == ".env.live_read_only" for path in credentials.loaded_files),
@@ -52,6 +64,9 @@ def load_css_runtime_environment(
         "live_trading_blocked": True,
         "broker_execution_armed": False,
         "advisory_only": True,
+        "environment_bootstrap": (
+            bootstrap.as_dict() if bootstrap is not None else None
+        ),
     }
     loaded["removed_live_blocked_keys"] = [
         key for key in credentials.removed_inherited_variables if key in PAPER_ONLY_LIVE_BLOCKED_KEYS

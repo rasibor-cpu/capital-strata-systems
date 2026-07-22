@@ -5,11 +5,15 @@ Centralizes the registration, unregistration, and wiring of enterprise
 subsystems to the canonical Event Bus.
 """
 
-from typing import Optional
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Optional
 from backend.events.event_bus import EventBus
-from backend.notifications.notification_service import NotificationService
-from backend.reporting.reporting_service import ReportingService
-from backend.operations.operations_service import OperationsService
+
+if TYPE_CHECKING:
+    from backend.notifications.notification_service import NotificationService
+    from backend.reporting.reporting_service import ReportingService
+
 
 class EventSubscriptionManager:
     """
@@ -60,7 +64,7 @@ class EventSubscriptionManager:
         """Unsubscribe ReportingService from all events."""
         self.event_bus.unsubscribe("*", service.handle_event)
 
-    def wire_operations_service(self, service: OperationsService) -> None:
+    def wire_operations_service(self, service: "OperationsService") -> None:
         """Subscribe OperationsService to runtime, trade, and risk events."""
         event_types = [
             "TRADE_APPROVED",
@@ -76,7 +80,7 @@ class EventSubscriptionManager:
         for etype in event_types:
             self.event_bus.subscribe(etype, service.handle_event)
 
-    def unwire_operations_service(self, service: OperationsService) -> None:
+    def unwire_operations_service(self, service: "OperationsService") -> None:
         """Unsubscribe OperationsService from runtime, trade, and risk events."""
         event_types = [
             "TRADE_APPROVED",

@@ -52,12 +52,25 @@ def catalog_payload(
     by_cat: dict[str, int] = {}
     for i in CATALOGUE:
         by_cat[i.category] = by_cat.get(i.category, 0) + 1
+    from backend.product_honesty import catalogue_honesty_summary
+
+    honesty = catalogue_honesty_summary()
     return {
         "schema_version": "css.report_catalog.v1",
         "count": len(items),
         "total_registered": len(CATALOGUE),
         "counts_by_category": by_cat,
         "reports": [i.as_dict() for i in items],
+        # AR-017 / AR-047 Gate 2 honesty — registered catalogue ≠ delivered suite
+        "honesty": honesty,
+        "generatable_count": honesty["generatable_count"],
+        "coming_soon_count": honesty["coming_soon_count"],
+        "mvp_eligible_count": honesty["mvp_eligible_count"],
+        "registered_implies_delivered": False,
+        "board_investor_regulatory_scope": "OUT_OF_SCOPE",
+        "customer_banner": honesty["customer_banner"],
+        "certification_claimed": False,
+        "execution_allowed": False,
     }
 
 

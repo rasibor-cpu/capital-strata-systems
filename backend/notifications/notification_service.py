@@ -118,6 +118,12 @@ class NotificationService:
             self.queue.append(event)
             return False
 
+    def honesty_status(self) -> dict:
+        """AR-022 customer-visible notification operational honesty."""
+        from backend.product_honesty import notification_honesty_status
+
+        return notification_honesty_status()
+
     def process_queue(self) -> int:
         """
         Process all currently queued notifications, retrying delivery.

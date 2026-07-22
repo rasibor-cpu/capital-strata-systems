@@ -110,13 +110,13 @@ class HealthValidator:
         if not isinstance(health, dict) or key not in health:
             findings.append(
                 ReadinessFinding(
-                    INFO,
+                    CRITICAL,
                     subsystem,
                     f"{subsystem} health score is not available from telemetry.",
                     "Confirm telemetry wiring before production deployment.",
                 )
             )
-            return 90.0
+            return 0.0
 
         score = clamp_score(health[key])
         if score < 70.0:
@@ -150,22 +150,22 @@ class HealthValidator:
         if recent_events:
             findings.append(
                 ReadinessFinding(
-                    INFO,
+                    WARNING,
                     "Enterprise Event Bus",
                     "Event bus instance was not supplied, but persisted events are readable.",
                     "Provide the active EventBus when certification runs in-process.",
                 )
             )
-            return 92.0
+            return 85.0
         findings.append(
             ReadinessFinding(
-                INFO,
+                CRITICAL,
                 "Enterprise Event Bus",
                 "No active event bus instance or persisted event sample was available.",
                 "Verify event persistence and bus wiring during deployment rehearsal.",
             )
         )
-        return 90.0
+        return 0.0
 
     def _reporting_score(
         self,
@@ -177,13 +177,13 @@ class HealthValidator:
         if not report_status:
             findings.append(
                 ReadinessFinding(
-                    INFO,
+                    CRITICAL,
                     "Reporting Framework",
                     "Report status data is unavailable.",
                     "Confirm report history is readable before deployment.",
                 )
             )
-            return min(score, 90.0)
+            return min(score, 0.0)
         return score
 
     def _operations_score(
@@ -226,13 +226,13 @@ class HealthValidator:
         if not metrics:
             findings.append(
                 ReadinessFinding(
-                    INFO,
+                    CRITICAL,
                     "Metrics & Telemetry",
                     "Metrics counters are empty or unavailable.",
                     "Confirm telemetry collectors are registered during deployment rehearsal.",
                 )
             )
-            return min(score, 90.0)
+            return min(score, 0.0)
         return score
 
     def _dashboard_score(self, read_model: Any, findings: List[ReadinessFinding]) -> float:
@@ -240,13 +240,13 @@ class HealthValidator:
         if read_model is None:
             findings.append(
                 ReadinessFinding(
-                    WARNING,
+                    CRITICAL,
                     "Dashboard Availability",
                     "Dashboard read model was not supplied.",
                     "Wire DashboardReadModel into certification for production dashboard checks.",
                 )
             )
-            return 80.0
+            return 0.0
         missing = [name for name in required_methods if not hasattr(read_model, name)]
         if missing:
             findings.append(
@@ -269,13 +269,13 @@ class HealthValidator:
         if event_bus is None:
             findings.append(
                 ReadinessFinding(
-                    INFO,
+                    CRITICAL,
                     "Event Subscription Integrity",
                     "Active EventBus was not supplied for subscription inspection.",
                     "Run certification in-process to verify subscriber registrations.",
                 )
             )
-            return 90.0
+            return 0.0
 
         snapshot = self._subscription_snapshot(event_bus)
         specific_count = snapshot.get("specific_subscriber_count", 0)
@@ -325,13 +325,13 @@ class HealthValidator:
         if status in ("UNKNOWN", "DEGRADED"):
             findings.append(
                 ReadinessFinding(
-                    INFO,
+                    WARNING if status == "DEGRADED" else CRITICAL,
                     "Runtime Supervisor",
                     f"Runtime supervisor status is {status}.",
                     "Confirm runtime state during deployment readiness review.",
                 )
             )
-            return min(score, 90.0)
+            return min(score, 69.0 if status == "DEGRADED" else 0.0)
         return score
 
     def _executive_dashboard_score(
@@ -343,13 +343,13 @@ class HealthValidator:
         if dashboard_service is None:
             findings.append(
                 ReadinessFinding(
-                    INFO,
+                    CRITICAL if read_model is None else WARNING,
                     "Executive Dashboard",
                     "Dashboard service was not supplied; read model availability was checked instead.",
                     "Pass DashboardService to include endpoint-level dashboard certification.",
                 )
             )
-            return 92.0 if read_model is not None else 80.0
+            return 85.0 if read_model is not None else 0.0
         if not hasattr(dashboard_service, "get_executive_summary"):
             findings.append(
                 ReadinessFinding(

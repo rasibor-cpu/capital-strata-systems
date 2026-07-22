@@ -33,6 +33,8 @@ class CanonicalEnduranceEvidence:
         self.active_blockers = []
         self.warnings = []
         self.evidence_completeness = 0.0
+        self._last_heartbeat_at = None
+        self.timing_mode = "wall_clock"
 
     @staticmethod
     def get_host_boot_time() -> float:
@@ -115,9 +117,13 @@ class CanonicalEnduranceEvidence:
         """Appends active runtime ticks to uninterrupted metrics."""
         now = time.time()
         self.elapsed_duration = now - self.validation_start_time
-        
-        # Increment uninterrupted run duration (approx interval since start)
-        self.uninterrupted_runtime_duration += 1.0
+
+        if self._last_heartbeat_at is None:
+            delta = 0.0
+        else:
+            delta = max(0.0, now - self._last_heartbeat_at)
+        self.uninterrupted_runtime_duration += delta
+        self._last_heartbeat_at = now
         self.successful_cycle_count += 1
 
         if current_memory_mb > 0.0:
@@ -167,6 +173,9 @@ class CanonicalEnduranceEvidence:
         else:
             result = "PASS"
 
+        production_evidence_eligible = (
+            not self.active_blockers and self.elapsed_duration >= target_seconds
+        )
         return {
             "result": result,
             "elapsed_duration_hours": round(self.elapsed_duration / 3600.0, 2),
@@ -178,7 +187,10 @@ class CanonicalEnduranceEvidence:
             "memory_growth_mb": round(growth, 2),
             "evidence_completeness": round(self.evidence_completeness, 2),
             "blockers": self.active_blockers,
-            "warnings": self.warnings
+            "warnings": self.warnings,
+            "production_evidence_eligible": production_evidence_eligible,
+            "timing_mode": self.timing_mode,
+            "synthetic_timing": False,
         }
 
     def _get_approx_memory(self) -> float:

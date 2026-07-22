@@ -89,7 +89,40 @@ def test_paper_mode_compatibility(runtime_service):
     assert runtime_service.persistence.trades.get_trade("paper-close-1")["status"] == "closed"
 
 
+def test_equities_lifecycle_integration(runtime_service):
+    _seed_trade(runtime_service, "equities-close-1", "AAPL", "SIM", "paper", "EQUITIES")
+    runtime_service.close_trade("equities-close-1", Decimal("109"), Decimal("9"))
+    trades = runtime_service.persistence.trades.get_all_session_trades("equities-close-1-session")
+    assert trades[0]["status"] == "closed"
+
+
+def test_equity_alias_lifecycle_integration(runtime_service):
+    _seed_trade(runtime_service, "equity-alias-close-1", "MSFT", "SIM", "paper", "equity")
+    runtime_service.close_trade("equity-alias-close-1", Decimal("110"), Decimal("10"))
+    assert runtime_service.persistence.trades.get_trade("equity-alias-close-1")["status"] == "closed"
+
+
 def test_fail_closed_unsupported_asset(runtime_service):
-    _seed_trade(runtime_service, "unsupported-close-1", "AAPL", "SIM", "paper", "equity")
+    _seed_trade(runtime_service, "unsupported-close-1", "CORN", "SIM", "paper", "COMMODITY")
     with pytest.raises(CanonicalTradeLifecycleError):
         runtime_service.close_trade("unsupported-close-1", Decimal("108"), Decimal("8"))
+    assert runtime_service.persistence.trades.get_trade("unsupported-close-1")["status"] == "open"
+
+
+def test_strict_persistence_default_fail_closed(tmp_path):
+    """Default TradeRuntimeService must not close DB when canonical persist fails."""
+    from backend.app.persistence.services.trade_runtime_service import TradeRuntimeService
+    from backend.execution.canonical_trade_lifecycle import CanonicalTradeLifecycle
+
+    repository = TradeOutcomeRepository(str(tmp_path / "outcomes.json"))
+    service = TradeRuntimeService(canonical_lifecycle=CanonicalTradeLifecycle(repository))
+    _seed_trade(service, "strict-close-1", "AAPL", "SIM", "paper", "EQUITIES")
+
+    class BoomLifecycle(CanonicalTradeLifecycle):
+        def persist_closed_trade_outcome(self, payload):
+            raise CanonicalTradeLifecycleError("forced persist failure")
+
+    service.canonical_lifecycle = BoomLifecycle(repository)
+    with pytest.raises(CanonicalTradeLifecycleError):
+        service.close_trade("strict-close-1", Decimal("111"), Decimal("11"))
+    assert service.persistence.trades.get_trade("strict-close-1")["status"] == "open"

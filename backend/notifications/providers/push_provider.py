@@ -30,11 +30,12 @@ class PushNotificationProvider(BaseNotificationProvider):
     def send(self, event: Event) -> bool:
         title = event.payload.get("title", "Push Alert")
         message = event.payload.get("message", "")
-        
+        from backend.product_honesty import notifications_operational
+
         # Abstraction-only retry policy with exponential backoff
         retries = 3
         backoff = 0.01
-        
+
         for attempt in range(retries):
             try:
                 if self.dry_run:
@@ -42,15 +43,20 @@ class PushNotificationProvider(BaseNotificationProvider):
                         f"[Dry Run - FCM Push] App ID {self.app_id} (API Key: {self.fcm_api_key}) "
                         f"pushed to {event.user_id or 'system'}: Title: {title} | Message: {message}"
                     )
-                else:
-                    # FCM API trigger simulation
-                    logger.info(
-                        f"[FCM Push Send] Dispatched App ID {self.app_id}: {title}"
+                    return True
+                if not notifications_operational():
+                    logger.warning(
+                        "[FCM Push] NON-OPERATIONAL: refusing simulated success "
+                        "(set CSS_NOTIFICATIONS_OPERATIONAL=1 with real push transport to enable)"
                     )
+                    return False
+                logger.info(
+                    f"[FCM Push Send] Dispatched App ID {self.app_id}: {title}"
+                )
                 return True
             except Exception as e:
                 logger.warning(f"[FCM Push] Attempt {attempt} failed: {e}")
                 time.sleep(backoff)
                 backoff *= 2.0
-                
+
         return False

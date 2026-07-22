@@ -1,5 +1,9 @@
 # Capital Strata Systems – Changelog
 
+> **Canonical release status:** [`docs/release/CSS_CANONICAL_RELEASE_STATUS.md`](docs/release/CSS_CANONICAL_RELEASE_STATUS.md)  
+> This changelog is historical. It does **not** authorize production certification or live trading.  
+> Current production result: **NOT CERTIFIED**. Controlled paper: **GO**.
+
 ---
 # Phase 15 – Global Reporting Architecture
 

@@ -31,11 +31,12 @@ class SMSNotificationProvider(BaseNotificationProvider):
 
     def send(self, event: Event) -> bool:
         message = event.payload.get("message", "")
-        
+        from backend.product_honesty import notifications_operational
+
         # Abstraction-only retry policy with exponential backoff
         retries = 3
         backoff = 0.01
-        
+
         for attempt in range(retries):
             try:
                 if self.dry_run:
@@ -43,15 +44,20 @@ class SMSNotificationProvider(BaseNotificationProvider):
                         f"[Dry Run - Twilio SMS] Sender {self.from_number} (SID: {self.account_sid}) "
                         f"dispatched to {event.user_id or 'system'}: {message}"
                     )
-                else:
-                    # Simulation of actual twilio client request
-                    logger.info(
-                        f"[Twilio SMS Send] Dispatched from {self.from_number} (SID: {self.account_sid}): {message}"
+                    return True
+                if not notifications_operational():
+                    logger.warning(
+                        "[Twilio SMS] NON-OPERATIONAL: refusing simulated success "
+                        "(set CSS_NOTIFICATIONS_OPERATIONAL=1 with real SMS transport to enable)"
                     )
+                    return False
+                logger.info(
+                    f"[Twilio SMS Send] Dispatched from {self.from_number} (SID: {self.account_sid}): {message}"
+                )
                 return True
             except Exception as e:
                 logger.warning(f"[Twilio SMS] Attempt {attempt} failed: {e}")
                 time.sleep(backoff)
                 backoff *= 2.0
-                
+
         return False

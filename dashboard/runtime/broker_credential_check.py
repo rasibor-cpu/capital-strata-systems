@@ -10,14 +10,17 @@ from typing import Any, Dict, Iterable, Optional, Tuple
 
 from dotenv import load_dotenv
 
+from backend.runtime.environment_bootstrap import bootstrap_broker_environment
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
-def load_local_env(mode: str | None = None) -> None:
-    load_dotenv(PROJECT_ROOT / ".env")
+def load_local_env(mode: str | None = None) -> dict[str, Any]:
+    diagnostics = bootstrap_broker_environment(PROJECT_ROOT)
     if str(mode or "").strip().lower() != "live":
         load_dotenv(PROJECT_ROOT / ".env.practice", override=False)
+    return diagnostics.as_dict()
 
 
 def check_oanda() -> bool:

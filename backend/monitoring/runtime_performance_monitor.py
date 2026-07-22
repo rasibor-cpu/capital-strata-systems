@@ -74,6 +74,9 @@ class RuntimePerformanceMonitor:
             "memory_usage": memory_usage,
             "cpu_usage": cpu_usage,
             "recommendation": recommendation,
+            "observed_samples_present": bool(all_times),
+            "synthetic_claim": bool(telemetry.get("synthetic")),
+            "production_evidence_eligible": bool(all_times) and not bool(telemetry.get("synthetic")),
             "advisory_only": True,
             "execution_allowed": False,
         }
@@ -145,6 +148,9 @@ class RuntimePerformanceMonitor:
             "memory_usage": None,
             "cpu_usage": None,
             "recommendation": f"Runtime performance telemetry unavailable: {reason}.",
+            "observed_samples_present": False,
+            "synthetic_claim": False,
+            "production_evidence_eligible": False,
             "advisory_only": True,
             "execution_allowed": False,
         }

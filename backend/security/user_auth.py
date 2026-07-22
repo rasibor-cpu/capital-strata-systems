@@ -11,10 +11,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 USER_STORE = PROJECT_ROOT / "data_store" / "users.json"
 
 MAX_LOGIN_ATTEMPTS = 3
-MIN_PASSWORD_LENGTH = 6
+MIN_PASSWORD_LENGTH = 12
 
 DEFAULT_ADMIN_ID = "00000"
-DEFAULT_ADMIN_PASSWORD = "CSS123"
+# AR-023: no shipped default password on secondary auth store.
+DEFAULT_ADMIN_PASSWORD = ""
+FORBIDDEN_DEFAULT_PASSWORDS = frozenset({"123456", "password", "admin", "css123", "CSS123"})
 
 VALID_ROLES = {
     "ADMIN",
@@ -94,7 +96,13 @@ class UserAuth:
         users = self._load_users()
 
         if DEFAULT_ADMIN_ID not in users:
-            self._bootstrap_default_admin(users)
+            # AR-023: do not auto-seed a known default password.
+            import os
+
+            bootstrap = str(os.getenv("CSS_BOOTSTRAP_ADMIN_PASSWORD", "") or "").strip()
+            if bootstrap and len(bootstrap) >= MIN_PASSWORD_LENGTH:
+                if bootstrap.lower() not in {p.lower() for p in FORBIDDEN_DEFAULT_PASSWORDS}:
+                    self._bootstrap_default_admin(users, bootstrap)
 
     def _load_users(self) -> Dict[str, Dict[str, Any]]:
         try:
@@ -145,9 +153,9 @@ class UserAuth:
 
         return role
 
-    def _bootstrap_default_admin(self, users: Dict[str, Dict[str, Any]]) -> None:
+    def _bootstrap_default_admin(self, users: Dict[str, Dict[str, Any]], password: str) -> None:
         users[DEFAULT_ADMIN_ID] = {
-            "password": self._hash_password(DEFAULT_ADMIN_PASSWORD),
+            "password": self._hash_password(password),
             "role": "ADMIN",
             "failed_attempts": 0,
             "locked": False,

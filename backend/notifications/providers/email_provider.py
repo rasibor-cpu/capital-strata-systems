@@ -36,11 +36,12 @@ class EmailNotificationProvider(BaseNotificationProvider):
     def send(self, event: Event) -> bool:
         title = event.payload.get("title", "No Title")
         message = event.payload.get("message", "")
-        
+        from backend.product_honesty import notifications_operational
+
         # Abstraction-only retry policy with exponential backoff
         retries = 3
         backoff = 0.01  # small sleep for fast tests
-        
+
         for attempt in range(retries):
             try:
                 if self.dry_run:
@@ -49,17 +50,22 @@ class EmailNotificationProvider(BaseNotificationProvider):
                         f"(User: {self.username}). Message to {event.user_id or 'system'}: "
                         f"Title: {title} | Message: {message}"
                     )
-                else:
-                    # In production this would initiate real smtplib connection.
-                    # Since this is an abstraction, we simulate success.
-                    logger.info(
-                        f"[SMTP Email Send] Connected to {self.smtp_host}:{self.smtp_port}. "
-                        f"Dispatched: {title}"
+                    return True
+                if not notifications_operational():
+                    # AR-022: never silently simulate production delivery success.
+                    logger.warning(
+                        "[SMTP Email] NON-OPERATIONAL: refusing simulated success "
+                        "(set CSS_NOTIFICATIONS_OPERATIONAL=1 with real SMTP to enable)"
                     )
+                    return False
+                logger.info(
+                    f"[SMTP Email Send] Connected to {self.smtp_host}:{self.smtp_port}. "
+                    f"Dispatched: {title}"
+                )
                 return True
             except Exception as e:
                 logger.warning(f"[SMTP Email] Attempt {attempt} failed: {e}")
                 time.sleep(backoff)
                 backoff *= 2.0
-                
+
         return False

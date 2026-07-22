@@ -14,7 +14,7 @@ def pipeline() -> UnifiedExecutionPipeline:
     return UnifiedExecutionPipeline()
 
 
-def test_fx_paper_request_accepted(pipeline: UnifiedExecutionPipeline) -> None:
+def test_fx_paper_request_validated_not_executed(pipeline: UnifiedExecutionPipeline) -> None:
     request = UnifiedExecutionRequest(
         asset_class="FX",
         symbol="eur/usd",
@@ -25,7 +25,8 @@ def test_fx_paper_request_accepted(pipeline: UnifiedExecutionPipeline) -> None:
 
     result = pipeline.execute(request)
 
-    assert result.status == "accepted"
+    assert result.status == "validated_not_executed"
+    assert result.reason == "validation_only_no_broker_dispatch"
     assert result.asset_class == "FX"
     assert result.symbol == "EUR/USD"
     assert result.side == "BUY"
@@ -34,7 +35,7 @@ def test_fx_paper_request_accepted(pipeline: UnifiedExecutionPipeline) -> None:
     assert result.trade_id
 
 
-def test_crypto_paper_request_accepted(pipeline: UnifiedExecutionPipeline) -> None:
+def test_crypto_paper_request_validated_not_executed(pipeline: UnifiedExecutionPipeline) -> None:
     request = UnifiedExecutionRequest(
         asset_class="CRYPTO",
         symbol="btc/usd",
@@ -45,7 +46,7 @@ def test_crypto_paper_request_accepted(pipeline: UnifiedExecutionPipeline) -> No
 
     result = pipeline.execute(request)
 
-    assert result.status == "accepted"
+    assert result.status == "validated_not_executed"
     assert result.asset_class == "CRYPTO"
     assert result.symbol == "BTC/USD"
     assert result.side == "SELL"
@@ -53,7 +54,7 @@ def test_crypto_paper_request_accepted(pipeline: UnifiedExecutionPipeline) -> No
     assert result.mode == "paper"
 
 
-def test_options_paper_request_accepted(pipeline: UnifiedExecutionPipeline) -> None:
+def test_options_paper_request_validated_not_executed(pipeline: UnifiedExecutionPipeline) -> None:
     request = UnifiedExecutionRequest(
         asset_class="OPTIONS",
         symbol="AAPL240119C00100000",
@@ -64,13 +65,13 @@ def test_options_paper_request_accepted(pipeline: UnifiedExecutionPipeline) -> N
 
     result = pipeline.execute(request)
 
-    assert result.status == "accepted"
+    assert result.status == "validated_not_executed"
     assert result.asset_class == "OPTIONS"
     assert result.symbol == "AAPL240119C00100000"
     assert result.quantity == 1
 
 
-def test_futures_paper_request_accepted(pipeline: UnifiedExecutionPipeline) -> None:
+def test_futures_paper_request_validated_not_executed(pipeline: UnifiedExecutionPipeline) -> None:
     request = UnifiedExecutionRequest(
         asset_class="FUTURES",
         symbol="ESM6",
@@ -81,7 +82,7 @@ def test_futures_paper_request_accepted(pipeline: UnifiedExecutionPipeline) -> N
 
     result = pipeline.execute(request)
 
-    assert result.status == "accepted"
+    assert result.status == "validated_not_executed"
     assert result.asset_class == "FUTURES"
     assert result.symbol == "ESM6"
     assert result.quantity == 1

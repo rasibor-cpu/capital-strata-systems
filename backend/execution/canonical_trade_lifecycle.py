@@ -16,7 +16,7 @@ class CanonicalTradeLifecycleError(RuntimeError):
 class CanonicalTradeLifecycle:
     """Backend-only adapter for canonical trade lifecycle normalization."""
 
-    _SUPPORTED_ASSET_CLASSES = {"FX", "CRYPTO", "OPTIONS", "FUTURES"}
+    _SUPPORTED_ASSET_CLASSES = {"FX", "CRYPTO", "OPTIONS", "FUTURES", "EQUITIES"}
     _ASSET_CLASS_ALIASES = {
         "fx": "FX",
         "forex": "FX",
@@ -24,6 +24,10 @@ class CanonicalTradeLifecycle:
         "spot_crypto": "CRYPTO",
         "options": "OPTIONS",
         "futures": "FUTURES",
+        "equities": "EQUITIES",
+        "equity": "EQUITIES",
+        "stock": "EQUITIES",
+        "stocks": "EQUITIES",
     }
 
     def __init__(self, repository: TradeOutcomeRepository | None = None) -> None:

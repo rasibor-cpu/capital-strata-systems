@@ -22,11 +22,16 @@ def test_trade_metadata_enrichment_inference():
     with patch("analytics.trade_outcome_ledger.TradeOutcomeLedger.append_trade") as mock_append:
         with patch.object(svc.persistence.trades, "get_trade", return_value=mock_trade_record):
             with patch.object(svc.persistence.trades, "close_trade"):
-                svc.close_trade(
-                    trade_id="trade_1",
-                    exit_price=Decimal("61000.00"),
-                    realized_pnl=Decimal("500.00")
-                )
+                with patch.object(
+                    svc.canonical_lifecycle,
+                    "persist_closed_trade_outcome",
+                    return_value={"trade_id": "trade_1"},
+                ):
+                    svc.close_trade(
+                        trade_id="trade_1",
+                        exit_price=Decimal("61000.00"),
+                        realized_pnl=Decimal("500.00")
+                    )
     
     assert mock_append.call_count == 1
     trade = mock_append.call_args[0][0]
@@ -50,11 +55,16 @@ def test_trade_metadata_options_inference():
     with patch("analytics.trade_outcome_ledger.TradeOutcomeLedger.append_trade") as mock_append:
         with patch.object(svc.persistence.trades, "get_trade", return_value=mock_trade_record):
             with patch.object(svc.persistence.trades, "close_trade"):
-                svc.close_trade(
-                    trade_id="trade_2",
-                    exit_price=Decimal("4.00"),
-                    realized_pnl=Decimal("10.00")
-                )
+                with patch.object(
+                    svc.canonical_lifecycle,
+                    "persist_closed_trade_outcome",
+                    return_value={"trade_id": "trade_2"},
+                ):
+                    svc.close_trade(
+                        trade_id="trade_2",
+                        exit_price=Decimal("4.00"),
+                        realized_pnl=Decimal("10.00")
+                    )
     
     assert mock_append.call_count == 1
     trade = mock_append.call_args[0][0]

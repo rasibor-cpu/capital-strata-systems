@@ -301,8 +301,12 @@ def render(state: dict) -> str:
     institutional = section(state, "institutional_executive_dashboard")
     reporting = section(state, "institutional_reporting")
     balance_summary = section(state, "broker_balance_summary")
+    from backend.product_honesty import eis_dashboard_honesty
+
+    honesty = eis_dashboard_honesty()
     return (
         page_header("Executive Overview", "Enterprise-level platform, runtime, capital, risk, readiness, and alert posture.")
+        + warning_banner(honesty["customer_banner"], status="warn")
         + warning_banner(
             "RUNTIME OFFLINE - current runtime evidence is unavailable."
             if platform.get("runtime_offline")

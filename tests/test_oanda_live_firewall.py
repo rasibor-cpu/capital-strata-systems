@@ -26,6 +26,12 @@ import pytest
 from backend.app.brokers.oanda_adapter import OandaAdapter, OandaLiveFirewallDecision, OrderRequest
 
 
+@pytest.fixture(autouse=True)
+def _enable_legacy_writes_for_firewall_unit_tests(monkeypatch):
+    """Firewall suite validates condition logic; AR-026 quarantine is covered separately."""
+    monkeypatch.setenv("CSS_OANDA_LEGACY_WRITES_ENABLED", "1")
+
+
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 SUPER_USER_CTX: Dict[str, Any] = {

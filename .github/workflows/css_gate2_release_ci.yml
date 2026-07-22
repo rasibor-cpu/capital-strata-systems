@@ -1,0 +1,65 @@
+name: CSS Gate 2 Release CI
+
+on:
+  push:
+    branches:
+      - main
+      - css-unified-consolidation-2026-07-13
+  pull_request:
+    branches:
+      - main
+      - css-unified-consolidation-2026-07-13
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gate2-ci:
+    name: Compile + bounded Gate-2 regression
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install pytest
+
+      - name: Python compile (scoped)
+        run: |
+          python -m compileall -q backend dashboard launcher scripts
+        env:
+          PYTHONPATH: .
+
+      - name: Bounded Gate-2 regression
+        run: |
+          python -m pytest \
+            tests/test_wave4_product_honesty.py \
+            tests/test_wave3_evidence_machine.py \
+            tests/test_wave2_security_broker_integrity.py \
+            tests/test_batch1_deployment_honesty.py \
+            tests/test_batch2_certification_evidence.py \
+            tests/test_phase181_production_readiness_certification.py \
+            tests/test_certification_engine.py \
+            -q --tb=line
+        env:
+          PYTHONPATH: .
+          CSS_CERTIFICATION_PROFILE: fixture_lab
+
+      - name: Record CI honesty posture
+        run: |
+          python - <<'PY'
+          from backend.product_honesty import deployment_honesty_status
+          import json
+          print(json.dumps(deployment_honesty_status(), indent=2))
+          PY
+        env:
+          PYTHONPATH: .

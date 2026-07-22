@@ -33,5 +33,6 @@ class BrokerReconciliationService:
             "reconciliation_required": bool(
                 orphan_runtime_positions or orphan_broker_positions
             ),
-            "ibkr_ready": True,
+            # IBKR is a Tier-1 roadmap-excluded placeholder; never report ready.
+            "ibkr_ready": False,
         }

@@ -3,6 +3,10 @@
 ## Overview
 This document identifies the singular authorities responsible for runtime state, execution, ledger, broker interfaces, and dashboard presentation in Capital Strata Systems (CSS).
 
+> **AR-003:** Role and Critical-AR ownership for Release Gate 2 is defined in  
+> [`CSS_REPOSITORY_OWNERSHIP_REGISTER.md`](CSS_REPOSITORY_OWNERSHIP_REGISTER.md).  
+> **Canonical release status:** [`../release/CSS_CANONICAL_RELEASE_STATUS.md`](../release/CSS_CANONICAL_RELEASE_STATUS.md).
+
 ## Runtime Ownership
 - **Canonical Runtime State Owner**: `backend/app/main.py` and `engine/engine_loop.py`
 - **Session State Owner**: `backend/app/persistence/services/session_runtime_service.py` (and `session_state.json` via governed storage)

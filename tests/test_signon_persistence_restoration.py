@@ -9,6 +9,15 @@ import pytest
 
 from dashboard.auth import css_sign_on as auth
 
+pytestmark = pytest.mark.live_session
+
+
+@pytest.fixture(autouse=True)
+def _disable_automated_auth_bypass(monkeypatch):
+    """Persistence restoration must exercise real restore/console paths (AR-023)."""
+    monkeypatch.delenv("CSS_AUTOMATED_INPUT", raising=False)
+    monkeypatch.delenv("CSS_AUTH_TEST_PROFILE", raising=False)
+
 
 @pytest.fixture
 def temp_auth_file(tmp_path):

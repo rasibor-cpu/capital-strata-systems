@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import os
+
+os.environ.setdefault("CSS_HOST_SECURITY_PROFILE", "open_dev")
+
 from fastapi.testclient import TestClient
 
 from backend.app.main import HeadlessRunRequest, _build_headless_config, app

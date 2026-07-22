@@ -1,5 +1,10 @@
 # RC1 Final Enterprise Certification Report
 
+> **HISTORICAL SCOPE NOTICE — AR-001 (2026-07-21)**  
+> This report remains valid only as **controlled RC1 paper/advisory release evidence**.  
+> It does **not** grant Production Certification.  
+> Active status: `docs/release/CSS_CANONICAL_RELEASE_STATUS.md` (production = **NOT CERTIFIED**).
+
 Date: 2026-07-14
 
 Release: CSS RC1

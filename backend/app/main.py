@@ -16,7 +16,7 @@ import inspect
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from pydantic import BaseModel, Field
 
 # -------------------------------------------------------------------
@@ -24,6 +24,19 @@ from pydantic import BaseModel, Field
 # -------------------------------------------------------------------
 
 app = FastAPI(title="REA Capital Trading Engine (Phase 1 Headless)")
+
+_ops_service = None
+
+
+@app.on_event("startup")
+def _activate_ops_on_startup() -> None:
+    global _ops_service
+    try:
+        from backend.operations.host_activation import activate_operations_service
+
+        _ops_service = activate_operations_service()
+    except Exception:
+        _ops_service = None
 
 
 # -------------------------------------------------------------------
@@ -193,6 +206,37 @@ def health() -> Dict[str, Any]:
     }
 
 
+@app.get("/ops/health")
+def ops_health() -> Dict[str, Any]:
+    global _ops_service
+    try:
+        from backend.operations.host_activation import (
+            activate_operations_service,
+            run_host_observability_tick,
+        )
+
+        service = _ops_service or activate_operations_service()
+        _ops_service = service
+        diagnostics = service.run_diagnostics()
+        tick = run_host_observability_tick(service)
+        return {
+            "ok": True,
+            "status": diagnostics.payload.get("overall_status"),
+            "health_score": diagnostics.payload.get("health_score"),
+            "observability_tick": tick,
+            "execution_allowed": False,
+            "time_utc": _utc_now_iso(),
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "status": "UNAVAILABLE",
+            "error": f"{exc.__class__.__name__}: {exc}",
+            "execution_allowed": False,
+            "time_utc": _utc_now_iso(),
+        }
+
+
 @app.get("/alerts")
 def alerts(limit: int = 50) -> Dict[str, Any]:
     from backend.monitoring.css_alert_repository import CSSAlertRepository
@@ -206,7 +250,10 @@ def alerts(limit: int = 50) -> Dict[str, Any]:
 
 
 @app.post("/engine/headless/run")
-def engine_headless_run(req: HeadlessRunRequest) -> Dict[str, Any]:
+def engine_headless_run(request: Request, req: HeadlessRunRequest) -> Dict[str, Any]:
+    from backend.security.mutation_guard import require_mutation_auth
+
+    require_mutation_auth(request)
     try:
         from backend.app.headless_guarded_entry import run_headless
     except Exception as e:

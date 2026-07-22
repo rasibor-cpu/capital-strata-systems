@@ -24,6 +24,8 @@ class CertificationEvidence:
     source: str
     remediation: str
     verified: bool = False
+    expires_at: str | None = None
+    signature: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -54,30 +56,44 @@ def evaluate_required_evidence(
     framework: str,
     requirements: tuple[str, ...],
     evidence: list[CertificationEvidence] | tuple[CertificationEvidence, ...],
+    *,
+    profile: str | None = None,
 ) -> AcceptanceResult:
+    from backend.certification.evidence_authority import (
+        evidence_rejection_reason,
+        production_evidence_accepted,
+        resolve_certification_profile,
+    )
+
+    resolved_profile = resolve_certification_profile(profile)
     by_area = {str(row.area).upper(): row for row in evidence}
     checks = []
     blockers = []
     passed = 0
     for requirement in requirements:
         row = by_area.get(requirement)
-        accepted = bool(
-            row
-            and row.status is AcceptanceStatus.PASS
-            and row.verified
-            and row.reference
-            and row.observed_at
+        accepted = bool(row and production_evidence_accepted(row, profile=resolved_profile))
+        rejection = (
+            evidence_rejection_reason(row, profile=resolved_profile)
+            if row and resolved_profile == "production"
+            else None
         )
         if accepted:
             passed += 1
         else:
             blockers.append(requirement)
+        if row is None:
+            status = "EVIDENCE_MISSING"
+        elif accepted:
+            status = "EVIDENCE_VERIFIED"
+        elif rejection:
+            status = f"EVIDENCE_REJECTED:{rejection}"
+        else:
+            status = row.status.value
         checks.append(
             {
                 "requirement": requirement,
-                "status": "EVIDENCE_VERIFIED" if accepted else (
-                    row.status.value if row else "EVIDENCE_MISSING"
-                ),
+                "status": status,
                 "evidence_id": row.evidence_id if row else None,
                 "reference": row.reference if row else None,
                 "remediation": (
@@ -85,6 +101,7 @@ def evaluate_required_evidence(
                     if row and row.remediation
                     else f"Capture and independently verify {requirement.lower()} evidence."
                 ),
+                "certification_profile": resolved_profile,
             }
         )
     total = len(requirements)
