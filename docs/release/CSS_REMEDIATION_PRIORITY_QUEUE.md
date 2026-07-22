@@ -79,9 +79,10 @@ Rules:
 7–12: AR-009, AR-010, AR-008, AR-006, AR-007 — **COMPLETE (Batch B)**; AR-034 remains OPEN
 
 ### Next executable Critical items
-**Final Close-Out Batch 2 COMPLETE** — AR-011 CLOSED (`NOT_CERTIFIED` / CERTIFIABLE AFTER OPERATIONAL VALIDATION)  
-Next: **Batch 3** when authorized (Critical honesty residuals): AR-017 / AR-022 → RB-009 / RB-010  
-Operational certification residuals (013 SHUTDOWN / 014 72h / 040 live) remain outside Batch 3 engineering scope  
+**Gate 3 OV-001 COMPLETE** — OAT 100%; AR-013 CLOSED; AR-040 partial (truthful broker FAIL_CLOSED)  
+**CONDITIONALLY APPROVE** for 72-hour endurance (AR-014) when authorized  
+Do not begin endurance until conditions in `CSS_EXECUTIVE_OPERATIONAL_VALIDATION_REPORT_OV001.md` are accepted  
+Batch 3 honesty residuals (AR-017/022) remain separately authorized  
 Wave model RETIRED — see `docs/release/CSS_RG2_FINAL_CLOSEOUT_PLAN.md`
 ### Wave 2 — Security and broker boundaries
 13–17: AR-023, AR-024, AR-026, AR-032, AR-033 — **COMPLETE** (see Wave 2 executive report; AR-033 partial)

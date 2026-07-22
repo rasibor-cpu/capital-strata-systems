@@ -112,7 +112,10 @@ class CSSServiceManager:
         self.restart_count += 1
 
     def stop(self) -> None:
-        """Stops the process gracefully, then forcefully if needed."""
+        """Stops the process gracefully, then forcefully if needed.
+
+        Never reports STOPPED while the child process is still alive.
+        """
         if self.process and self.process.poll() is None:
             try:
                 self.process.terminate()
@@ -120,8 +123,12 @@ class CSSServiceManager:
             except subprocess.TimeoutExpired:
                 self.process.kill()
                 self.process.wait()
-            self.status = "STOPPED"
-            self.pid = None
+        if self.process is not None and self.process.poll() is None:
+            # Fail-closed: do not claim clean stop if process remains.
+            self.status = "STOP_FAILED"
+            return
+        self.status = "STOPPED"
+        self.pid = None
 
     def get_info(self) -> Dict[str, Any]:
         return {

@@ -6,7 +6,7 @@
 **Authority source:** `CSS_V1_MASTER_COMPLETION_AUDIT.md` (2026-07-21)  
 **Baseline HEAD:** `4ea738d86c167373deccbe4edf217e929de4414d`  
 **Branch:** `css-unified-consolidation-2026-07-13`  
-**Register status:** ACTIVE — Final Close-Out; Batch 2 COMPLETE (AR-011 CLOSED / NOT_CERTIFIED disposition; AR-013/014/040 partial residuals operational); next Batch 3 when authorized
+**Register status:** ACTIVE — Gate 3 OV-001 COMPLETE (OAT 100%; AR-013 CLOSED; AR-040 partial with truthful broker FAIL_CLOSED); CONDITIONALLY APPROVE for 72h endurance; Phase 181 remains NOT_CERTIFIED
 
 ## Input provenance
 
@@ -51,7 +51,7 @@ Effort band: `S` ≤ 2 days · `M` 3–5 days · `L` 1–2 weeks · `XL` > 2 wee
 | AR-010 | Health / Certification | Critical | M | CLOSED | Fail-closed missing telemetry in HealthValidator |
 | AR-011 | Production Certification | Critical | L | CLOSED | Capture verified Phase 181 evidence package |
 | AR-012 | Testing Framework | Critical | M | CLOSED | Current-SHA compile and bounded regression evidence |
-| AR-013 | Readiness / OAT | Critical | L | PARTIALLY CLOSED | Execute and archive Operational Acceptance Testing |
+| AR-013 | Readiness / OAT | Critical | L | CLOSED | Execute and archive Operational Acceptance Testing |
 | AR-014 | Performance / Endurance | Critical | XL | PARTIALLY CLOSED | Wall-clock endurance evidence (non-simulated) |
 | AR-015 | Business Continuity | Critical | L | CLOSED | Backup / restore drill with measured RTO/RPO |
 | AR-016 | Deployment | Critical | XL | CLOSED | Establish CI gates and controlled CD path |
@@ -329,7 +329,6 @@ Effort band: `S` ≤ 2 days · `M` 3–5 days · `L` 1–2 weeks · `XL` > 2 wee
 - **Acceptance criteria:** OAT report PASS with verified refs or explicit failed checks with remediation IDs
 - **Dependencies:** AR-009, AR-012, AR-028
 - **Estimated effort:** L
-- **Current status:** PARTIALLY CLOSED
 - **Partial closure evidence (2026-07-22 / Wave 3):**
   - `OPERATIONAL_ACCEPTANCE_OBSERVATION.json` archived with production-profile blockers + AR remediations
   - RUNTIME_HEALTH verified from ops activation; full OAT PASS residual
@@ -337,6 +336,11 @@ Effort band: `S` ≤ 2 days · `M` 3–5 days · `L` 1–2 weeks · `XL` > 2 wee
   - Extended local OAT observations → **88.89%**; sole blocker **SHUTDOWN**
   - Pack: `runtime_reports/batch2_certification_evidence_20260722T031756Z/OPERATIONAL_ACCEPTANCE_OBSERVATION.json`
   - Residual: authorized controlled SHUTDOWN observation (operational)
+- **Closure evidence (2026-07-22 / OV-001):**
+  - Controlled shutdown observation PASS + 2 start-stop cycles
+  - OAT **100%** / `EVIDENCE_COMPLETE` — `runtime_reports/operational_validation/ov001_20260722T041013Z/`
+  - Reports: `docs/release/CSS_OV001_OAT_COMPLETION_REPORT.md`, `docs/release/CSS_EXECUTIVE_OPERATIONAL_VALIDATION_REPORT_OV001.md`
+- **Current status:** CLOSED
 
 ### AR-014 — Wall-clock endurance evidence (non-simulated)
 
@@ -769,6 +773,13 @@ Effort band: `S` ≤ 2 days · `M` 3–5 days · `L` 1–2 weeks · `XL` > 2 wee
 - **Partial closure update (2026-07-22 / Final Close-Out Batch 2):**
   - Re-archived fail-closed `NOT_TESTED` pack on Batch 2 SHA; live probe still unauthorized
   - Residual unchanged: authorized Coinbase/OANDA live read-only PASS/FAIL
+- **Partial closure update (2026-07-22 / OV-001):**
+  - Controlled RO validation executed with env load + redaction
+  - Coinbase: market PASS; account AUTH_FAILED; SECURITY_ERROR (test-order contamination)
+  - OANDA: all read_checks PASS on practice; SECURITY_ERROR (practice vs live label)
+  - Execution remained blocked; truthful `FAIL_CLOSED` results archived
+  - Report: `docs/release/CSS_OV001_CONTROLLED_BROKER_VALIDATION_REPORT.md`
+  - Residual: clear LIVE contamination / align OANDA env label before LIVE-certified claim
 
 ### AR-041 — Ingest independently verified governance evidence
 
