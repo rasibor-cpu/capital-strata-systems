@@ -32,7 +32,7 @@ Not `DO NOT APPROVE` (OAT and shutdown succeeded; broker results are truthful an
 | Branch | `css-unified-consolidation-2026-07-13` |
 | RC-001 (immutable) | `6513e6a1e45ffc42aff192e1c784171ad6fc182b` |
 | Docs tip at OV start | `b7c3d32678a42d90338d1da7f6ebe34fb200f28a` |
-| RC-002 candidate | Created for OV-001 code/docs (see Part G) |
+| RC-002 candidate | `fbcc31f9a877f8fbc2b67291b4b7ee8ba2fe4ff5` (OV-001 code/docs; not final until executive acceptance) |
 | Phase 181 | Remains `NOT_CERTIFIED` |
 | 72h endurance | **Not started** |
 
