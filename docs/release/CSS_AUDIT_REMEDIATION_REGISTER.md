@@ -6,7 +6,7 @@
 **Authority source:** `CSS_V1_MASTER_COMPLETION_AUDIT.md` (2026-07-21)  
 **Baseline HEAD:** `4ea738d86c167373deccbe4edf217e929de4414d`  
 **Branch:** `css-unified-consolidation-2026-07-13`  
-**Register status:** ACTIVE — Gate 3 OV-001 COMPLETE (OAT 100%; AR-013 CLOSED; AR-040 partial with truthful broker FAIL_CLOSED); CONDITIONALLY APPROVE for 72h endurance; Phase 181 remains NOT_CERTIFIED
+**Register status:** ACTIVE — Gate 3 OV-002 Attempt 1 **INVALIDATED** (continuity not established; ~25.2h evidenced); Attempt 2 next; AR-014/RB-012 remain PARTIALLY CLOSED; Phase 181 **NOT_CERTIFIED**
 
 ## Input provenance
 
@@ -360,6 +360,17 @@ Effort band: `S` ≤ 2 days · `M` 3–5 days · `L` 1–2 weeks · `XL` > 2 wee
 - **Partial closure update (2026-07-22 / Final Close-Out Batch 2):**
   - Re-captured short wall-clock sample; `production_evidence_eligible=false`
   - Explicit non-claim of 72h; residual remains operational
+- **OV-002 update (2026-07-22):**
+  - Controlled 72h wall-clock endurance **STARTED** — run `OV002-20260722T043023Z`
+  - Freeze SHA `34503b155d6e1274863d0b137e23b145d2901e1e`
+  - Evidence: `runtime_reports/operational_validation/ov002_72h_20260722T043023Z/`
+  - Status at start: **RUNNING** (superseded by Attempt 1 close-out below)
+- **OV-002 Attempt 1 close-out (2026-07-23):**
+  - Disposition: **`ENDURANCE INVALIDATED — CONTINUITY NOT ESTABLISHED`**
+  - Monitor reason: `active_commit_changed` at ~25.185h; 304 snapshots preserved locally
+  - Incident: `docs/release/CSS_OV002_ATTEMPT1_INCIDENT_REPORT.md`
+  - **No AR-014 credit**; do not resume elapsed time; Attempt 2 required from zero
+  - Current status remains **PARTIALLY CLOSED**
 
 ### AR-015 — Backup / restore drill with measured RTO/RPO
 

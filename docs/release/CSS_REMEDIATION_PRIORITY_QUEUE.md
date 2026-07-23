@@ -1,8 +1,8 @@
 # CSS Remediation Priority Queue
 
-**Programme:** Release Gate 2 — Audit Remediation  
-**Document type:** Strict execution order for all register items  
-**Authority sources:** `CSS_AUDIT_REMEDIATION_REGISTER.md`, `CSS_RELEASE_BLOCKER_MATRIX.md`, `CSS_RELEASE_GATE_2_PLAN.md`  
+**Programme:** Release Gate 2 — Audit Remediation
+**Document type:** Strict execution order for all register items
+**Authority sources:** `CSS_AUDIT_REMEDIATION_REGISTER.md`, `CSS_RELEASE_BLOCKER_MATRIX.md`, `CSS_RELEASE_GATE_2_PLAN.md`
 **Baseline HEAD:** `4ea738d86c167373deccbe4edf217e929de4414d`
 
 Rules:
@@ -40,7 +40,7 @@ Rules:
 | 20 | AR-040 | Fresh Coinbase/OANDA read-only evidence after boundary fixes | Broker dimension for Phase 181 | AR-026, AR-032, AR-033 — **PARTIALLY CLOSED (Batch 2 update; live residual)** |
 | 21 | AR-013 | OAT is a Phase 181 hard dimension | Operational acceptance evidence | AR-009, AR-012, AR-028 — **PARTIALLY CLOSED (Batch 2: 88.89%; SHUTDOWN residual)** |
 | 22 | AR-029 | Metrics persistence needed before credible endurance samples | Telemetry for AR-014/044 | AR-028 — **CLOSED (Wave 2 honesty)** |
-| 23 | AR-014 | Wall-clock endurance replaces simulated certificates | Endurance dimension for Phase 181 | AR-012, AR-029 — **PARTIALLY CLOSED (Batch 2; 72h residual)** |
+| 23 | AR-014 | Wall-clock endurance replaces simulated certificates | Endurance dimension for Phase 181 | AR-012, AR-029 — **PARTIALLY CLOSED (OV-002 Attempt 1 INVALIDATED; Attempt 2 residual)** |
 | 24 | AR-015 | Restore drill required for DR readiness | Continuity dimension for Phase 181 | AR-002, AR-016*(start)* — **CLOSED (Wave 3 drill)** |
 | 25 | AR-044 | Prevents modeled performance from re-entering certificates | Clean performance claims | AR-014, AR-029 — **CLOSED (Wave 3)** |
 | 26 | AR-045 | Blocks fixture URIs from minting production certificates | Honest Phase 181 re-entry | AR-011*(prep)*, AR-041*(parallel)* — **CLOSED (Wave 3)** |
@@ -79,10 +79,10 @@ Rules:
 7–12: AR-009, AR-010, AR-008, AR-006, AR-007 — **COMPLETE (Batch B)**; AR-034 remains OPEN
 
 ### Next executable Critical items
-**Gate 3 OV-001 COMPLETE** — OAT 100%; AR-013 CLOSED; AR-040 partial (truthful broker FAIL_CLOSED)  
-**CONDITIONALLY APPROVE** for 72-hour endurance (AR-014) when authorized  
-Do not begin endurance until conditions in `CSS_EXECUTIVE_OPERATIONAL_VALIDATION_REPORT_OV001.md` are accepted  
-Batch 3 honesty residuals (AR-017/022) remain separately authorized  
+**Gate 3 OV-002 Attempt 1 INVALIDATED** — continuity not established (`active_commit_changed` ~25.2h); no AR-014 credit
+**Next:** OV-002 **Attempt 2** — fresh 72h wall-clock run from zero after close-out commit
+OV-001 COMPLETE; AR-013 CLOSED; AR-040 partial residuals unchanged
+Phase 181 remains NOT_CERTIFIED
 Wave model RETIRED — see `docs/release/CSS_RG2_FINAL_CLOSEOUT_PLAN.md`
 ### Wave 2 — Security and broker boundaries
 13–17: AR-023, AR-024, AR-026, AR-032, AR-033 — **COMPLETE** (see Wave 2 executive report; AR-033 partial)
