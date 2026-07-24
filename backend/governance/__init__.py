@@ -34,6 +34,11 @@ from .enterprise_profit_protection_contracts import (
     ProfitProtectionState,
 )
 from .enterprise_profit_protection_manager import EnterpriseProfitProtectionManager
+from .enterprise_profit_protection_snapshot_adapters import (
+    EnterpriseProfitProtectionSnapshotAdapter,
+    EnterpriseProfitProtectionSnapshotResult,
+    PPFSnapshotAdapterReasonCode,
+)
 from .enterprise_risk_signal_normalizer import EnterpriseRiskSignalNormalizer
 from .governance_certification import certify_governance_readiness
 from .governance_models import (
@@ -67,6 +72,8 @@ __all__ = [
     "EnterpriseExposureState",
     "EnterpriseProfitProtectionManager",
     "EnterpriseProfitProtectionPolicy",
+    "EnterpriseProfitProtectionSnapshotAdapter",
+    "EnterpriseProfitProtectionSnapshotResult",
     "EnterpriseRiskSignalNormalizer",
     "EnterpriseRisk",
     "EnterpriseRiskRegister",
@@ -88,6 +95,7 @@ __all__ = [
     "PPFReasonCode",
     "PPFRiskDecision",
     "PPFRiskRequest",
+    "PPFSnapshotAdapterReasonCode",
     "ProfitProtectionReservation",
     "ProfitProtectionState",
     "ReadinessResult",
