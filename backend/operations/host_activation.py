@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Callable, Iterable, TYPE_CHECKING
+from typing import Iterable, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from backend.operations.operations_service import OperationsService
+    from backend.operations.health_checkers import RuntimeSnapshotSource
+    from backend.events.event_models import Event
 
 REQUIRED_CHECKERS_DEFAULT = (
     "runtime_heartbeat",
@@ -25,6 +27,9 @@ def activate_operations_service(
     artifacts_dir: str | Path | None = None,
     required_checkers: Iterable[str] | None = None,
     register_defaults: bool = True,
+    runtime_artifacts_dir: str | Path | None = None,
+    supervisor_state_path: str | Path | None = None,
+    runtime_snapshot_source: "RuntimeSnapshotSource | None" = None,
 ) -> "OperationsService":
     """
     Instantiate OperationsService for a canonical host with required checkers.
@@ -34,12 +39,11 @@ def activate_operations_service(
     # Lazy imports avoid circular import via operations package __init__.
     from backend.common.configuration import OperationsConfig
     from backend.operations.health_monitor import HealthMonitor
+    from backend.operations.health_checkers import build_production_health_checkers
     from backend.operations.operational_state_manager import OperationalStateManager
     from backend.operations.operational_timeline import OperationalTimeline
-    from backend.operations.operations_models import create_health_check_event
     from backend.operations.operations_service import OperationsService
     from backend.operations.runtime_statistics import RuntimeStatistics
-    from backend.events.event_models import Event
 
     root = Path(artifacts_dir or os.getenv("CSS_OPS_ARTIFACTS_DIR") or "artifacts/operations")
     root.mkdir(parents=True, exist_ok=True)
@@ -47,22 +51,20 @@ def activate_operations_service(
     monitor = HealthMonitor()
     required = tuple(required_checkers or REQUIRED_CHECKERS_DEFAULT)
 
-    def _default_checker(component: str, status: str = "OK") -> Callable[[], Event]:
-        def _check() -> Event:
-            return create_health_check_event(
-                component=component,
-                status=status,
-                message=f"{component} advisory heartbeat",
-                latency_ms=0.0,
-            )
-
-        return _check
-
     if register_defaults:
+        concrete = build_production_health_checkers(
+            artifacts_dir=runtime_artifacts_dir or os.getenv("CSS_RUNTIME_ARTIFACTS_DIR") or "artifacts",
+            supervisor_state_path=supervisor_state_path
+            or os.getenv("CSS_RUNTIME_SUPERVISOR_STATE_PATH")
+            or "runtime/supervisor/css_runtime_supervisor_state.json",
+            runtime_snapshot_source=runtime_snapshot_source,
+        )
         for name in required:
-            monitor.register_checker(name, _default_checker(name))
+            checker = concrete.get(name)
+            if checker is not None:
+                monitor.register_checker(name, checker)
 
-    missing = [name for name in required if name not in monitor._checkers]
+    missing = monitor.require_checkers(list(required))
     if missing:
         raise OperationsActivationError(
             f"REQUIRED_CHECKERS_MISSING:{','.join(missing)}"
@@ -79,7 +81,10 @@ def activate_operations_service(
     return service
 
 
-def run_host_observability_tick(service: "OperationsService | None" = None) -> dict:
+def run_host_observability_tick(
+    service: "OperationsService | None" = None,
+    diagnostics: "Event | None" = None,
+) -> dict:
     """
     Heartbeat: diagnostics + metrics persist + alert retention (AR-028/029/030).
     """
@@ -87,7 +92,7 @@ def run_host_observability_tick(service: "OperationsService | None" = None) -> d
     from backend.monitoring.css_alert_repository import CSSAlertRepository
 
     ops = service or activate_operations_service()
-    state = ops.run_diagnostics()
+    state = diagnostics or ops.run_diagnostics()
 
     metrics = get_default_metrics_service()
     persist_ok = False

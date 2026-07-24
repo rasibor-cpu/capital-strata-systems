@@ -175,13 +175,16 @@ def test_mc005_executive_performance_and_options_panels_are_runtime_derived() ->
     assert state["options_income_panel"]["opportunities"] == [{"symbol": "SPY"}]
 
 
-def test_mc005_options_panel_explicitly_marks_unavailable_as_not_deployed() -> None:
+def test_mc005_options_panel_uses_canonical_runtime_when_frontend_section_empty() -> None:
     payload = _runtime_payload()
     payload["sections"]["options_income"] = {}
     state = build_mission_control_state(payload, allow_mock=False)
 
-    assert state["options_income_panel"]["status"] == "NOT YET DEPLOYED"
-    assert state["options_income_panel"]["deployed"] is False
+    assert state["options_income"]["deployment_state"] == "DEPLOYED"
+    assert state["options_income"]["status"] == "ADVISORY_ONLY"
+    assert state["options_income_panel"]["status"] == "ADVISORY_ONLY"
+    assert state["options_income_panel"]["deployed"] is True
+    assert state["options_income_panel"]["execution_blocked"] is True
 
 
 def test_mc005_offline_state_fails_closed_without_demo_values() -> None:

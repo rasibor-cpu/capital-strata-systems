@@ -184,7 +184,7 @@ def capture_ops_activation_observation(output_dir: Path) -> dict[str, Any]:
     started = _utc_now()
     service = activate_operations_service(artifacts_dir=output_dir / "ops")
     diagnostics = service.run_diagnostics()
-    tick = run_host_observability_tick(service)
+    tick = run_host_observability_tick(service, diagnostics=diagnostics)
     payload = {
         "ok": True,
         "status": diagnostics.payload.get("overall_status"),

@@ -159,11 +159,11 @@ Uncommitted Phase 181A / 182A work **must not** be counted as released V1 capabi
 | Performance Monitoring | 🔴 | 55 | 25 | 65 | Modeled / simulated | No | Critical | Operations |
 | Notification System | 🔴 | 65 | 75 | 45 | Simulated providers | No | Critical | UNASSIGNED |
 | Monitoring | 🟡 | 80 | 80 | 70 | Local alerts | No | Medium-High | UNASSIGNED |
-| Health Checks | 🔴 | 72 | 70 | 57 | Fail-open defaults exist | No | Critical | Platform Operations |
+| Health Checks | 🟡 | 72 | 70 | 57 | Operations HealthMonitor fails closed; concrete runtime/risk/broker checkers now registered | No | High | Platform Operations |
 | Readiness | 🟡 | 88 | 87 | 90 | Evaluators exist | No | High | Platform Operations |
 | Production Certification | 🔴 | 85 | 55 | 95 | `NOT CERTIFIED` | No | Critical | RC1 Certification Authority |
 | Mission Control | ✅ | 98 | 95 | 95 | Read-only certified | Controlled | Medium | UNASSIGNED |
-| Operations Centre | 🔴 | 75 | 75 | 65 | Not host-activated | No | High | UNASSIGNED |
+| Operations Centre | 🟡 | 75 | 75 | 65 | Host-activated with concrete HealthCheckers; production evidence still required | No | High | UNASSIGNED |
 
 Headline overall implementation average across the matrix above: **61%**.
 
@@ -406,7 +406,7 @@ Evaluators exist (`backend/governance/iso_readiness.py`, `business_continuity.py
 | Mobile Dashboard | 🟡 | Host-active; auth and controls exist; process-memory sessions; default credentials; not globally GET-only |
 | API Layer | 🟡 | Multiple FastAPI hosts; mutations exist; launcher defaults to `0.0.0.0`; degraded-as-200 common |
 | Mission Control | ✅ | GET-only router enforcement; host-registered; MC-001..MC-007C certified for read-only scope |
-| Operations Centre | 🔴 | Service implemented; not proven in canonical production startup; empty health checkers score 100 |
+| Operations Centre | 🟡 | Service implemented with concrete runtime heartbeat, risk gate, and broker readiness checkers; canonical production startup evidence still required |
 
 ---
 
@@ -416,7 +416,7 @@ Evaluators exist (`backend/governance/iso_readiness.py`, `business_continuity.py
 | --- | --- | --- |
 | Notification System | 🔴 | Queue/retry framework exists; email/SMS/push providers simulate success; no canonical startup wiring |
 | Monitoring | 🟡 | Runtime alerts persist locally; no external monitoring backend |
-| Health Checks | 🔴 | Runtime aggregator can fail closed, but `HealthMonitor.calculate_health_score([])` returns **100.0** (`backend/operations/health_monitor.py:49-50`); launcher `/health` can report healthy without dependency checks |
+| Health Checks | 🟡 | `HealthMonitor.calculate_health_score([])` fails closed at `0.0`; Operations host activation registers concrete runtime heartbeat, risk gate, and broker readiness checkers; production evidence still required |
 | Observability | 🟡 | Strong runtime telemetry contracts; no Prometheus/OTel export; counters often process-local |
 | Performance Monitoring | 🔴 | Advisory monitors exist; endurance tests simulate elapsed time; Phase 181 correctly reports endurance unverified |
 

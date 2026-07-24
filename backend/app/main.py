@@ -218,7 +218,7 @@ def ops_health() -> Dict[str, Any]:
         service = _ops_service or activate_operations_service()
         _ops_service = service
         diagnostics = service.run_diagnostics()
-        tick = run_host_observability_tick(service)
+        tick = run_host_observability_tick(service, diagnostics=diagnostics)
         return {
             "ok": True,
             "status": diagnostics.payload.get("overall_status"),
