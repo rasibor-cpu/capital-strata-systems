@@ -7,6 +7,7 @@ def render(state: dict) -> str:
     risk = section(state, "risk")
     command = section(state, "risk_command_center")
     committee = section(state, "risk_committee")
+    profit_protection = section(state, "profit_protection_governance")
     return (
         page_header("Risk Command", "Read-only risk, gates, limits, drawdown, exposure, stress, Greeks, margin, and kill-switch visibility.")
         + warning_banner("Risk controls are display-only in MC-001; no limits or gates can be changed here.", status="bad")
@@ -49,6 +50,22 @@ def render(state: dict) -> str:
                 "overrides": command.get("overrides"),
                 "source": command.get("source"),
                 "state_hash": command.get("state_hash"),
+            }),
+            detail_table("Profit Protection Governance", {
+                "status": profit_protection.get("status"),
+                "maturity_tier": profit_protection.get("maturity_tier"),
+                "approved_banked_net_profit": profit_protection.get("approved_banked_net_profit"),
+                "effective_protection_ceiling": profit_protection.get("effective_protection_ceiling"),
+                "base_protection_budget": profit_protection.get("base_protection_budget"),
+                "adjusted_protection_budget": profit_protection.get("adjusted_protection_budget"),
+                "committed_exposure": profit_protection.get("committed_exposure"),
+                "reserved_exposure": profit_protection.get("reserved_exposure"),
+                "remaining_exposure_capacity": profit_protection.get("remaining_exposure_capacity"),
+                "enforcement_status": profit_protection.get("enforcement_status"),
+                "reason_codes": profit_protection.get("reason_codes"),
+                "data_freshness": profit_protection.get("data_freshness"),
+                "execution_allowed": profit_protection.get("execution_allowed"),
+                "read_only": profit_protection.get("read_only"),
             }),
             detail_table("Risk Committee", {
                 "risk_posture": committee.get("risk_posture"),

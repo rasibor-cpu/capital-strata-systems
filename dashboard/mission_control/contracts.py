@@ -39,6 +39,7 @@ from dashboard.mission_control.performance_attribution import build_performance_
 from dashboard.mission_control.permissions import mission_control_permissions_payload, validate_read_only_permissions
 from backend.security.vault_redaction import redact_value
 from dashboard.mission_control.portfolio_projection import build_options_income_panel, build_performance_panel, build_portfolio_command_view
+from dashboard.mission_control.profit_protection_projection import build_profit_protection_governance_projection
 from dashboard.mission_control.recommendation_projection import build_recommendation_panel
 from dashboard.mission_control.rbac_console import build_rbac_console
 from dashboard.mission_control.risk_projection import build_risk_command_view
@@ -132,6 +133,11 @@ def build_mission_control_state(
             "mock_data": frontend.get("mission_control_mock_data"),
         }
     )
+    profit_protection_source = _profit_protection_governance_source(
+        dashboard_state,
+        frontend,
+        runtime_snapshot,
+    )
 
     state = {
         **asdict(envelope),
@@ -153,6 +159,12 @@ def build_mission_control_state(
         "portfolio": _portfolio(account, positions, pnl, runtime_snapshot),
         "market_intelligence": _market(market, runtime_snapshot),
         "risk": _risk(risk, governance, runtime_snapshot),
+        "profit_protection_governance": build_profit_protection_governance_projection(
+            profit_protection_source,
+            generated_at=envelope.generated_at,
+            runtime_source=str(runtime_snapshot.get("source") or frontend.get("mission_control_data_source") or DATA_UNAVAILABLE),
+            runtime_state_hash=str(runtime_snapshot.get("state_hash") or DATA_UNAVAILABLE),
+        ),
         "options_income": _options_income(sections),
         "brokers": _brokers(broker, runtime_snapshot),
         "alerts": _alerts_from_runtime(alerts, runtime_snapshot),
@@ -1097,6 +1109,28 @@ def _runtime_unavailable(runtime_snapshot: Mapping[str, Any]) -> bool:
 def _section_mapping(sections: Mapping[str, Any], key: str) -> dict[str, Any]:
     value = sections.get(key)
     return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _profit_protection_governance_source(
+    dashboard_state: Mapping[str, Any] | None,
+    frontend: Mapping[str, Any],
+    runtime_snapshot: Mapping[str, Any],
+) -> dict[str, Any]:
+    sections = frontend.get("sections") if isinstance(frontend.get("sections"), Mapping) else {}
+    candidates = (
+        dashboard_state.get("profit_protection_governance")
+        if isinstance(dashboard_state, Mapping)
+        else None,
+        sections.get("profit_protection_governance"),
+        (sections.get("execution") or {}).get("profit_protection_governance")
+        if isinstance(sections.get("execution"), Mapping)
+        else None,
+        runtime_snapshot.get("profit_protection_governance"),
+    )
+    for candidate in candidates:
+        if isinstance(candidate, Mapping):
+            return dict(candidate)
+    return {}
 
 
 def _scan_non_finite(value: Any, *, reasons: list[str], path: str = "") -> None:
