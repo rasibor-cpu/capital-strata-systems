@@ -153,6 +153,27 @@ def test_mc001_contract_does_not_expose_execution_controls_or_secrets() -> None:
     assert "cancel_order" not in mission_control_state_json(state)
 
 
+def test_mc001_fail_closed_read_only_panels_remain_contract_safe() -> None:
+    state = build_mission_control_state()
+    safe_panel = {
+        **state["rbac_console"],
+        "status": "fail_closed",
+        "read_only": True,
+        "execution_allowed": False,
+        "live_trading_blocked": True,
+        "broker_execution_armed": False,
+        "advisory_only": True,
+    }
+    unsafe_panel = {**safe_panel, "execution_allowed": True}
+
+    safe_validation = validate_mission_control_state({**state, "rbac_console": safe_panel})
+    unsafe_validation = validate_mission_control_state({**state, "rbac_console": unsafe_panel})
+
+    assert safe_validation["valid"] is True
+    assert unsafe_validation["valid"] is False
+    assert "unsafe_fail_closed_panel:rbac_console" in unsafe_validation["reasons"]
+
+
 def test_mc001_fastapi_app_serves_shell_state_navigation_and_health() -> None:
     client = TestClient(create_app())
 

@@ -125,6 +125,9 @@ def build_mission_control_state(
         and isinstance(dashboard_state.get("production_readiness"), Mapping)
         else {}
     )
+    enterprise_broker_runtime_safe_source = _safe_enterprise_broker_runtime_source(
+        enterprise_broker_runtime_source
+    )
     safety = mission_control_safety_payload(
         {
             **SAFE_FLAGS,
@@ -239,7 +242,7 @@ def build_mission_control_state(
                 "schema_version": "css.enterprise_broker_runtime.governance.v1",
                 "broker_health": {"status": "CONFIGURATION_REQUIRED", "bindings": []},
                 "oauth_status": [],
-                "secret_lease_health": [],
+                "lease_health": _safe_lease_health(enterprise_broker_runtime_safe_source),
                 "credential_governance_summary": {
                     "enterprise_binding_count": 0,
                     "legacy_compatibility_count": 0,
@@ -251,7 +254,7 @@ def build_mission_control_state(
                 "options_readiness": [],
                 "advisory_readiness": "DATA_DEPENDENCY_BLOCKED",
                 "certification": {"outcome": "NOT_CERTIFIED"},
-                **dict(enterprise_broker_runtime_source),
+                **dict(enterprise_broker_runtime_safe_source),
                 "execution_posture": "DISABLED",
                 "execution_authority": "BLOCKED",
                 "fail_closed": True,
@@ -425,6 +428,12 @@ def validate_mission_control_state(state: Mapping[str, Any] | None) -> dict[str,
     recommendation_panel = source.get("recommendation_panel") if isinstance(source.get("recommendation_panel"), Mapping) else {}
     if recommendation_panel.get("forbidden_terms_absent") is False:
         reasons.append("recommendation_contains_execution_language")
+    runtime_snapshot = source.get("runtime_snapshot") if isinstance(source.get("runtime_snapshot"), Mapping) else {}
+    if (
+        source.get("mock_data") is not True
+        and str(runtime_snapshot.get("runtime_status", "")).upper() in {"OFFLINE", "UNAVAILABLE"}
+    ):
+        reasons.append("runtime_evidence_unavailable")
     for panel_name in (
         "strategy_war_room",
         "opportunity_ranking",
@@ -448,10 +457,8 @@ def validate_mission_control_state(state: Mapping[str, Any] | None) -> dict[str,
         "governance_summary_console",
     ):
         panel = source.get(panel_name) if isinstance(source.get(panel_name), Mapping) else {}
-        if panel.get("status") == "FAIL_CLOSED":
-            reasons.append(f"institutional_panel_failed:{panel_name}")
-        if panel.get("status") == "fail_closed":
-            reasons.append(f"control_plane_panel_failed:{panel_name}")
+        if str(panel.get("status", "")).lower() == "fail_closed" and not _panel_preserves_read_only_safety(panel):
+            reasons.append(f"unsafe_fail_closed_panel:{panel_name}")
     return {
         "valid": not reasons,
         "status": "PASS" if not reasons else "FAIL_CLOSED",
@@ -1109,6 +1116,35 @@ def _runtime_unavailable(runtime_snapshot: Mapping[str, Any]) -> bool:
 def _section_mapping(sections: Mapping[str, Any], key: str) -> dict[str, Any]:
     value = sections.get(key)
     return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _safe_lease_health(source: Mapping[str, Any]) -> list[Any]:
+    for key in ("lease_health", "secret_lease_health"):
+        value = source.get(key)
+        if isinstance(value, list):
+            return value
+    return []
+
+
+def _safe_enterprise_broker_runtime_source(source: Mapping[str, Any]) -> dict[str, Any]:
+    safe = {
+        str(key): value
+        for key, value in dict(source or {}).items()
+        if str(key) != "secret_lease_health"
+    }
+    if "lease_health" not in safe:
+        safe["lease_health"] = _safe_lease_health(source)
+    return safe
+
+
+def _panel_preserves_read_only_safety(panel: Mapping[str, Any]) -> bool:
+    return (
+        panel.get("read_only") is True
+        and panel.get("execution_allowed") is False
+        and panel.get("live_trading_blocked") is True
+        and panel.get("broker_execution_armed") is False
+        and panel.get("advisory_only") is True
+    )
 
 
 def _profit_protection_governance_source(

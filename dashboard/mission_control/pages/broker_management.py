@@ -36,7 +36,7 @@ def render(state: dict) -> str:
                 if questrade_binding.get("oauth_handle")
                 else "CONFIGURATION_REQUIRED"
             ),
-            "Token Health": enterprise_runtime.get("secret_lease_health", []),
+            "Lease Health": enterprise_runtime.get("lease_health", []),
             "API Server Health": enterprise_runtime.get("provider_health", {}),
             "Account Selection": enterprise_runtime.get("holdings_readiness", {}).get(
                 "account_id_sanitized"
@@ -164,7 +164,7 @@ def render(state: dict) -> str:
             detail_table("Questrade Secure Read-Only Onboarding", questrade_panel),
             detail_table("Enterprise Broker Health", enterprise_runtime.get("broker_health", {})),
             detail_table("OAuth Status", enterprise_runtime.get("oauth_status", [])),
-            detail_table("Secret Lease Health", enterprise_runtime.get("secret_lease_health", [])),
+            detail_table("Lease Health", enterprise_runtime.get("lease_health", [])),
             detail_table(
                 "Credential Governance Summary",
                 enterprise_runtime.get("credential_governance_summary", {}),
