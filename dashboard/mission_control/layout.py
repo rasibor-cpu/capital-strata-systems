@@ -104,6 +104,7 @@ def render_mission_control_shell(
             (active.label, None),
         ]
     )
+    route_crumb = f'<div class="mc-breadcrumb">Mission Control / {escape(active.label)}</div>'
     runtime_mode = platform_status.get("runtime_mode") or platform.get("runtime_mode") or "DISABLED"
     execution_state = platform_status.get("execution_state") or (
         "BLOCKED" if safety.get("live_trading_blocked") else "UNKNOWN"
@@ -130,6 +131,7 @@ def render_mission_control_shell(
       <header class="mc-topbar">
         <div>
           <strong>{escape(platform.get('product', 'CSS Mission Control'))}</strong>
+          {route_crumb}
           {crumbs}
         </div>
         <div class="mc-status-strip" aria-label="Global status indicators">
