@@ -111,6 +111,7 @@ archive/
 *.zip
 *_before_*.py
 *_backup*.py
+!backend/security/vault_backup.py
 *_PRE_*.py
 *_pre_*.py
 

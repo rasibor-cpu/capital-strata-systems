@@ -1,5 +1,7 @@
 import sys
 import types
+import importlib
+import copy
 from typing import Any, Mapping
 
 # 1. Define a Mock TradeQualityScoringEngine class that behaves exactly like the Phase 47A implementation
@@ -264,12 +266,44 @@ def _css_auth_test_isolation(monkeypatch, request):
     if request.node.get_closest_marker("live_session"):
         return
     monkeypatch.setenv("CSS_TRUST_INTERNAL_AUTH_HEADERS", "1")
-    monkeypatch.setattr(
-        "dashboard.auth.css_sign_on.restore_login_session",
-        lambda users=None: None,
-    )
+    auth_module = sys.modules.get("dashboard.auth.css_sign_on")
+    if auth_module is None:
+        auth_module = importlib.import_module("dashboard.auth.css_sign_on")
+    monkeypatch.setattr(auth_module, "restore_login_session", lambda users=None: None, raising=False)
     monkeypatch.setattr(
         "dashboard.auth.session_bridge._load_recovery_user_ctx",
         lambda: None,
     )
+
+
+@pytest.fixture(autouse=True)
+def _css_dashboard_global_state_isolation():
+    """Restore mutable dashboard globals that legacy tests patch in-place."""
+    dashboard = sys.modules.get("scripts.css_live_dashboard")
+    tracked_names = (
+        "BROKER_EXECUTION_ARMED",
+        "SELECTED_BROKER",
+        "SELECTED_BROKER_MODE",
+        "COINBASE_READ_ONLY_STATUS",
+        "PCNRASS_VALIDATION_SEQUENCE",
+    )
+    sentinel = object()
+    before = {}
+    if dashboard is not None:
+        for name in tracked_names:
+            before[name] = copy.deepcopy(getattr(dashboard, name, sentinel))
+    else:
+        yield
+        return
+    yield
+    dashboard = sys.modules.get("scripts.css_live_dashboard")
+    if dashboard is None:
+        return
+    for name in tracked_names:
+        value = before.get(name, sentinel)
+        if value is sentinel:
+            if hasattr(dashboard, name):
+                delattr(dashboard, name)
+        else:
+            setattr(dashboard, name, value)
 

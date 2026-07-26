@@ -373,6 +373,7 @@ def build_mission_control_state(
         dashboard_state_available=bool(frontend.get("mission_control_dashboard_state_available")),
         allow_mock=allow_mock,
     )
+    _align_runtime_source_registry(source_registry, state)
     freshness = build_freshness_summary(source_registry)
     state["source_registry"] = source_registry
     state["data_sources"] = source_registry
@@ -531,6 +532,7 @@ def _runtime(frontend: Mapping[str, Any], governance: Mapping[str, Any], certifi
     restart = telemetry.get("managed_service_restart_count")
     if restart in (None, "", "UNKNOWN", "NOT_REPORTED", "UNAVAILABLE"):
         restart = runtime_snapshot.get("restart_count", DATA_UNAVAILABLE)
+    source_contract = _runtime_source_contract(frontend, runtime_snapshot)
     return {
         "runtime_id": runtime_snapshot.get("runtime_id", DATA_UNAVAILABLE),
         "runtime_status": runtime_snapshot.get("runtime_status", certification.get("operational_state", DATA_UNAVAILABLE)),
@@ -561,13 +563,16 @@ def _runtime(frontend: Mapping[str, Any], governance: Mapping[str, Any], certifi
         "alert_count": runtime_snapshot.get("alert_count", DATA_UNAVAILABLE),
         "disconnect_count": telemetry.get("broker_disconnect_count", runtime_snapshot.get("disconnect_count", DATA_UNAVAILABLE)),
         "state_hash": telemetry.get("state_hash", runtime_snapshot.get("state_hash", DATA_UNAVAILABLE)),
-        "source": (
-            "MOCK"
-            if frontend.get("mission_control_mock_data")
-            or (isinstance(frontend.get("session"), Mapping) and frontend.get("session", {}).get("mock_data"))
-            else "RUNTIME_TELEMETRY|RUNTIME_MODE_RESOLVER"
-        ),
-        "source_diagnostics": runtime_snapshot.get("source_diagnostics", {}),
+        "source": source_contract["source"],
+        "selected_source": source_contract["selected_source"],
+        "authoritative_source": source_contract["authoritative_source"],
+        "fallback_source": source_contract["fallback_source"],
+        "available_sources": source_contract["available_sources"],
+        "source_freshness": source_contract["source_freshness"],
+        "source_confidence": source_contract["source_confidence"],
+        "source_status": source_contract["source_status"],
+        "source_disagreement": source_contract["source_disagreement"],
+        "source_diagnostics": source_contract["source_diagnostics"],
         "telemetry_provenance": telemetry.get("provenance", {}),
         "subsystem_health": {
             "audit": governance.get("audit_enabled", DATA_UNAVAILABLE),
@@ -578,6 +583,86 @@ def _runtime(frontend: Mapping[str, Any], governance: Mapping[str, Any], certifi
         },
         "controls": {"restart": "DISABLED_MC001", "shutdown": "DISABLED_MC001"},
     }
+
+
+def _runtime_source_contract(frontend: Mapping[str, Any], runtime_snapshot: Mapping[str, Any]) -> dict[str, Any]:
+    diagnostics = runtime_snapshot.get("source_diagnostics") if isinstance(runtime_snapshot.get("source_diagnostics"), Mapping) else {}
+    mock = bool(frontend.get("mission_control_mock_data")) or (
+        isinstance(frontend.get("session"), Mapping)
+        and bool(frontend.get("session", {}).get("mock_data"))
+    )
+    snapshot_source = _source_label(runtime_snapshot.get("source"))
+    selected_source = _source_label(diagnostics.get("selected_source") or snapshot_source)
+    if mock:
+        selected_source = "MOCK"
+        snapshot_source = "MOCK"
+    authoritative_source = selected_source if selected_source not in {"", "UNKNOWN", "UNAVAILABLE"} else snapshot_source
+    available_sources = []
+    candidates = diagnostics.get("candidate_sources")
+    if isinstance(candidates, list):
+        for candidate in candidates:
+            if isinstance(candidate, Mapping) and candidate.get("available"):
+                source_type = _source_label(candidate.get("source_type"))
+                if source_type not in available_sources:
+                    available_sources.append(source_type)
+    if authoritative_source not in {"", "UNKNOWN", "UNAVAILABLE"} and authoritative_source not in available_sources:
+        available_sources.append(authoritative_source)
+    source_freshness = _source_label(
+        diagnostics.get("selected_freshness_status")
+        or runtime_snapshot.get("data_freshness")
+        or runtime_snapshot.get("heartbeat_status")
+        or "UNAVAILABLE"
+    )
+    disagreement = (
+        snapshot_source not in {"", "UNKNOWN", "UNAVAILABLE"}
+        and selected_source not in {"", "UNKNOWN", "UNAVAILABLE"}
+        and snapshot_source != selected_source
+    )
+    stale = source_freshness in {"STALE", "RED", "EXPIRED"}
+    unavailable = authoritative_source in {"", "UNKNOWN", "UNAVAILABLE"}
+    if unavailable:
+        source_status = "RED"
+        confidence = "NONE"
+    elif disagreement or stale:
+        source_status = "AMBER"
+        confidence = "LOW" if stale else "MEDIUM"
+    else:
+        source_status = "GREEN" if source_freshness in {"FRESH", "GREEN"} else "AMBER"
+        confidence = "HIGH" if source_status == "GREEN" else "MEDIUM"
+    return {
+        "source": authoritative_source or "UNAVAILABLE",
+        "selected_source": selected_source or "UNAVAILABLE",
+        "authoritative_source": authoritative_source or "UNAVAILABLE",
+        "fallback_source": _source_label(diagnostics.get("fallback") or ""),
+        "available_sources": available_sources,
+        "source_freshness": source_freshness,
+        "source_confidence": confidence,
+        "source_status": source_status,
+        "source_disagreement": disagreement,
+        "source_diagnostics": dict(diagnostics),
+    }
+
+
+def _source_label(value: Any) -> str:
+    return str(value or "UNAVAILABLE").strip().upper()
+
+
+def _align_runtime_source_registry(source_registry: dict[str, dict[str, Any]], state: Mapping[str, Any]) -> None:
+    runtime = state.get("runtime") if isinstance(state.get("runtime"), Mapping) else {}
+    runtime_snapshot = state.get("runtime_snapshot") if isinstance(state.get("runtime_snapshot"), Mapping) else {}
+    runtime_source = _source_label(runtime.get("source") or runtime_snapshot.get("source"))
+    if runtime_source in {"", "UNKNOWN", "UNAVAILABLE"}:
+        return
+    for section in ("runtime", "runtime_snapshot"):
+        descriptor = source_registry.get(section)
+        if isinstance(descriptor, dict):
+            descriptor["source"] = runtime_source
+            provenance = descriptor.get("provenance") if isinstance(descriptor.get("provenance"), Mapping) else {}
+            descriptor["provenance"] = {
+                **dict(provenance),
+                "canonical_runtime_source": runtime_source,
+                "source_contract": "dashboard.mission_control.contracts.runtime_source_contract",
+            }
 
 
 def _trading(execution: Mapping[str, Any], positions: Mapping[str, Any]) -> dict[str, Any]:

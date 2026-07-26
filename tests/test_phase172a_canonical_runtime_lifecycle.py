@@ -524,7 +524,7 @@ class TestLiveRegistryPathHeartbeatWiring:
         os.utime(artifacts / "css_session_state_pcnrass.json", (stale_time, stale_time))
         os.utime(artifacts / "css_account_state_pcnrass.json", (stale_time, stale_time))
 
-        live_heartbeat = _iso(NOW)
+        live_heartbeat = _iso(datetime.now(timezone.utc))
 
         def live_registry_source():
             # Matches the shape launcher.css_mobile_launcher._mission_control_registry_source()

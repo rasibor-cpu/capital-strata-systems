@@ -127,7 +127,12 @@ def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
 def test_missing_fields_use_frontend_safe_defaults() -> None:
     payload = build_frontend_payload({})
 
-    assert payload["sections"]["account_summary"]["currency"] == "USD"
+    account = payload["sections"]["account_summary"]
+    assert account["currency"] == "UNAVAILABLE"
+    assert account["availability_state"] == "UNAVAILABLE"
+    assert account["cash_balance"] is None
+    assert account["cash_balance_availability"] == "UNAVAILABLE"
+    assert account["source"] == "UNAVAILABLE"
     assert payload["sections"]["positions"]["total"] == 0
     assert payload["sections"]["risk"]["gate_status"] == "OPEN"
     assert payload["sections"]["governance"]["audit_enabled"] is True

@@ -327,15 +327,31 @@ def account_summary(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         )
     )
     fields = canonical["account_summary"]
+    context = canonical["account_context"]
+    availability_state = account.get("availability_state") or fields["total_equity"]["availability_state"]
+    source = account.get("source") or context["data_source"]
+    if availability_state != "AVAILABLE" and all(
+        fields[name]["value"] is None
+        for name in ("cash", "total_equity", "buying_power", "margin_used", "margin_available")
+    ):
+        source = "UNAVAILABLE"
     return {
         "cash_balance": fields["cash"]["value"],
+        "cash_balance_availability": fields["cash"]["availability_state"],
         "total_equity": fields["total_equity"]["value"],
+        "total_equity_availability": fields["total_equity"]["availability_state"],
         "buying_power": fields["buying_power"]["value"],
+        "buying_power_availability": fields["buying_power"]["availability_state"],
         "margin_used": fields["margin_used"]["value"],
+        "margin_used_availability": fields["margin_used"]["availability_state"],
         "available_margin": fields["margin_available"]["value"],
-        "currency": canonical["account_context"]["base_currency"],
-        "broker": canonical["account_context"]["broker"],
-        "account_mode": canonical["account_context"]["environment"],
+        "available_margin_availability": fields["margin_available"]["availability_state"],
+        "availability_state": availability_state,
+        "source": source,
+        "freshness": account.get("freshness") or fields["total_equity"]["freshness"],
+        "currency": context["base_currency"],
+        "broker": context["broker"],
+        "account_mode": context["environment"],
         "broker_balance_summary": canonical,
     }
 
@@ -1966,7 +1982,8 @@ def build_websocket_delta(
     changed_sections = [
         section
         for section in sections_to_scan
-        if previous_sections.get(section) != current_sections.get(section)
+        if _delta_comparable_section(section, previous_sections.get(section))
+        != _delta_comparable_section(section, current_sections.get(section))
     ]
     data = {
         section: current_sections.get(section, {})
@@ -1981,6 +1998,25 @@ def build_websocket_delta(
         data=data,
         sequence=sequence,
     ).as_dict()
+
+
+def _delta_comparable_section(section: str, value: Any) -> Any:
+    if section != "broker":
+        return value
+    return _strip_volatile_delta_fields(value)
+
+
+def _strip_volatile_delta_fields(value: Any) -> Any:
+    volatile_keys = {"correlation_id", "received_at"}
+    if isinstance(value, Mapping):
+        return {
+            key: _strip_volatile_delta_fields(item)
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+            if str(key) not in volatile_keys
+        }
+    if isinstance(value, list):
+        return [_strip_volatile_delta_fields(item) for item in value]
+    return value
 
 
 def _dashboard_payload(

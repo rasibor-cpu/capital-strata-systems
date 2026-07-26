@@ -221,7 +221,81 @@ def test_mc004_mission_control_state_and_runtime_source_api_share_snapshot(tmp_p
     assert heartbeat["state_hash"] == runtime["state_hash"]
     assert source["diagnostics"]["selected_source"] == "RUNTIME_ARTIFACT"
     assert state["runtime"]["source"] == "RUNTIME_ARTIFACT"
+    assert state["runtime"]["authoritative_source"] == "RUNTIME_ARTIFACT"
+    assert state["runtime"]["selected_source"] == "RUNTIME_ARTIFACT"
+    assert state["runtime"]["source_disagreement"] is False
+    assert state["runtime"]["source_status"] in {"GREEN", "AMBER"}
     assert state["source_registry"]["runtime_snapshot"]["source"] == "RUNTIME_ARTIFACT"
+    assert state["source_registry"]["runtime"]["source"] == "RUNTIME_ARTIFACT"
+
+
+def test_mc004_source_disagreement_is_exposed_and_execution_blocked() -> None:
+    state = build_mission_control_state(
+        {
+            "runtime_snapshot": {
+                "source": "RUNTIME_ARTIFACT",
+                "runtime_status": "RUNNING",
+                "runtime_mode": "paper",
+                "engine_mode": "SAFE",
+                "source_diagnostics": {
+                    "selected_source": "RUNTIME_ENDPOINT",
+                    "selected_available": True,
+                    "selected_freshness_status": "FRESH",
+                    "candidate_sources": [
+                        {"source_type": "RUNTIME_ENDPOINT", "available": True},
+                        {"source_type": "RUNTIME_ARTIFACT", "available": True},
+                    ],
+                },
+                "execution_allowed": False,
+                "live_trading_blocked": True,
+                "broker_execution_armed": False,
+                "advisory_only": True,
+            }
+        },
+        allow_mock=False,
+    )
+
+    assert state["runtime"]["source"] == "RUNTIME_ENDPOINT"
+    assert state["runtime"]["source_disagreement"] is True
+    assert state["runtime"]["source_status"] == "AMBER"
+    assert state["runtime"]["source_confidence"] == "MEDIUM"
+    assert state["runtime"]["available_sources"] == ["RUNTIME_ENDPOINT", "RUNTIME_ARTIFACT"]
+    assert state["safety"]["execution_allowed"] is False
+    assert state["safety"]["live_trading_blocked"] is True
+    assert state["safety"]["broker_execution_armed"] is False
+
+
+def test_mc004_stale_source_is_degraded_not_execution_ready() -> None:
+    state = build_mission_control_state(
+        {
+            "runtime_snapshot": {
+                "source": "RUNTIME_ARTIFACT",
+                "runtime_status": "RUNNING",
+                "runtime_mode": "paper",
+                "engine_mode": "SAFE",
+                "source_diagnostics": {
+                    "selected_source": "RUNTIME_ARTIFACT",
+                    "selected_available": True,
+                    "selected_freshness_status": "STALE",
+                    "candidate_sources": [
+                        {"source_type": "RUNTIME_ARTIFACT", "available": True},
+                    ],
+                },
+                "execution_allowed": False,
+                "live_trading_blocked": True,
+                "broker_execution_armed": False,
+                "advisory_only": True,
+            }
+        },
+        allow_mock=False,
+    )
+
+    assert state["runtime"]["source"] == "RUNTIME_ARTIFACT"
+    assert state["runtime"]["source_freshness"] == "STALE"
+    assert state["runtime"]["source_status"] == "AMBER"
+    assert state["runtime"]["source_confidence"] == "LOW"
+    assert state["runtime"]["execution_state"] == "BLOCKED"
+    assert state["safety"]["execution_allowed"] is False
 
 
 def test_mc004_launcher_registration_exposes_runtime_source_route_read_only() -> None:

@@ -2,6 +2,8 @@ import json
 import os
 import sys
 import time
+import builtins
+import types
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -14,7 +16,16 @@ import pytest
 os.environ["CSS_AUTOMATED_INPUT"] = "1"
 os.environ["CSS_AUTH_TEST_PROFILE"] = "1"
 os.environ["CSS_TEST_MODE"] = "1"
-sys.modules["builtins"].input = lambda prompt: "1"
+
+_existing_auth_module = sys.modules.get("dashboard.auth.css_sign_on")
+if _existing_auth_module is not None and (
+    not isinstance(_existing_auth_module, types.ModuleType)
+    or not str(getattr(_existing_auth_module, "__file__", "")).endswith("css_sign_on.py")
+):
+    sys.modules.pop("dashboard.auth.css_sign_on", None)
+    auth_package = sys.modules.get("dashboard.auth")
+    if auth_package is not None and hasattr(auth_package, "css_sign_on"):
+        delattr(auth_package, "css_sign_on")
 
 from backend.security.audit_ledger import AuditLedger
 from dashboard.auth import css_sign_on as auth
@@ -36,8 +47,19 @@ def _dashboard():
 
 
 @pytest.fixture(autouse=True)
-def reset_metrics():
+def reset_metrics(monkeypatch):
     """Reset AuthMetrics between tests."""
+    monkeypatch.setenv("CSS_AUTOMATED_INPUT", "1")
+    monkeypatch.setenv("CSS_AUTH_TEST_PROFILE", "1")
+    monkeypatch.setenv("CSS_TEST_MODE", "1")
+    monkeypatch.delenv("CSS_AUTH_UI", raising=False)
+    monkeypatch.setattr(builtins, "input", lambda prompt="": "1")
+    _reset_auth_metrics()
+    yield
+    _reset_auth_metrics()
+
+
+def _reset_auth_metrics() -> None:
     auth.AuthMetrics.successful_interactive_logins = 0
     auth.AuthMetrics.failed_interactive_logins = 0
     auth.AuthMetrics.restored_sessions = 0
@@ -62,11 +84,15 @@ def temp_audit_file(tmp_path):
     # Ensure parent dir exists
     mock_file.parent.mkdir(parents=True, exist_ok=True)
 
-    # We patch get_audit_ledger() used by css_sign_on (avoid importing live dashboard).
+    # Patch the imported module object directly. Some legacy script tests replace
+    # sys.modules["dashboard.auth.css_sign_on"] during collection, so dotted
+    # patch targets can bind to a mock instead of the real auth module.
     ledger_instance = AuditLedger()
     ledger_instance.audit_file = mock_file
 
-    with patch("dashboard.auth.css_sign_on.get_audit_ledger", return_value=ledger_instance):
+    with patch.object(auth, "_audit_ledger_instance", ledger_instance), patch.object(
+        auth, "get_audit_ledger", return_value=ledger_instance
+    ):
         yield mock_file
 
 
@@ -98,6 +124,56 @@ def mock_registry():
             "last_password_change": datetime.now().isoformat()
         }
     }
+
+
+def test_phase183bd_auth_paths_are_unique_and_temporary(temp_auth_file, temp_audit_file):
+    assert temp_auth_file.parent == temp_audit_file.parent
+    assert temp_auth_file.name == "css_auth_session.json"
+    assert temp_audit_file.name == "css_audit_log.jsonl"
+    assert "artifacts" not in str(temp_auth_file)
+    assert "artifacts" not in str(temp_audit_file)
+
+
+def test_phase183bd_metrics_reset_between_auth_tests():
+    assert auth.AuthMetrics.get_metrics_dict()["restored_sessions"] == 0
+    auth.AuthMetrics.restored_sessions = 99
+
+
+def test_phase183bd_logout_uses_injected_audit_ledger(temp_audit_file):
+    auth.record_auth_audit_event(
+        "logout",
+        "00000",
+        {"auth_source": "restored", "session_age_seconds": 5, "outcome": "SUCCESS"},
+    )
+
+    events = [json.loads(line) for line in temp_audit_file.read_text().splitlines()]
+    assert events[-1]["event_type"] == "logout"
+    assert events[-1]["details"]["auth_source"] == "restored"
+
+
+def test_phase183bd_pytest_cannot_open_auth_prompt(monkeypatch, temp_auth_file, mock_registry):
+    monkeypatch.setenv("CSS_AUTH_UI", "cli")
+    monkeypatch.setattr(auth, "load_users", lambda: mock_registry)
+    monkeypatch.setattr(
+        auth,
+        "await_console_login",
+        MagicMock(side_effect=AssertionError("console prompt forbidden")),
+    )
+    temp_auth_file.write_text(
+        json.dumps(
+            {
+                "user_id": "00000",
+                "display_name": "CSS Administrator",
+                "role": "SUPER_USER",
+                "unit_code": "CORE",
+                "home_branch": "HQ",
+                "last_login": datetime.now(timezone.utc).isoformat(),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert auth.await_login_ready_state()["user_id"] == "00000"
 
 
 @pytest.mark.live_session

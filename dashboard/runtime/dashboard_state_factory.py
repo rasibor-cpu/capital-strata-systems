@@ -112,28 +112,64 @@ class DashboardStateFactory:
             positions_payload or {}
         )
 
+        account_values = dashboard_state.last_scan_results.get("_account_field_values", {})
+        account_availability = dashboard_state.last_scan_results.get("_account_field_availability", {})
+        buying_power = self._safe_number(account.get("buying_power"))
+        margin_used = self._safe_number(account.get("margin_used"))
+        available_margin = self._safe_number(account.get("available_margin"))
+        currency = account.get("currency") or account.get("base_currency")
         account_summary_state = {
+            "cash_balance": account_values.get("cash_balance"),
+            "cash_balance_availability": account_availability.get("cash_balance", "UNAVAILABLE"),
+            "total_equity": account_values.get("total_equity"),
+            "total_equity_availability": account_availability.get("total_equity", "UNAVAILABLE"),
+            "equity": account_values.get("total_equity"),
+            "balance": account_values.get("cash_balance"),
+            "realized_pnl": account_values.get("realized_pnl"),
+            "realized_pnl_availability": account_availability.get("realized_pnl", "UNAVAILABLE"),
+            "unrealized_pnl": account_values.get("unrealized_pnl"),
+            "unrealized_pnl_availability": account_availability.get("unrealized_pnl", "UNAVAILABLE"),
+            "buying_power": buying_power,
+            "buying_power_availability": "AVAILABLE" if buying_power is not None else "UNAVAILABLE",
+            "margin_used": margin_used,
+            "margin_used_availability": "AVAILABLE" if margin_used is not None else "UNAVAILABLE",
+            "available_margin": available_margin,
+            "available_margin_availability": "AVAILABLE" if available_margin is not None else "UNAVAILABLE",
+            "currency": str(currency).upper() if currency else "UNAVAILABLE",
+            "availability_state": (
+                "AVAILABLE"
+                if any(value is not None for value in account_values.values())
+                else "UNAVAILABLE"
+            ),
+            "source": account.get("source", "ACCOUNT_PAYLOAD" if account else "UNAVAILABLE"),
+            "freshness": account.get("freshness", "UNAVAILABLE"),
+            "broker": dashboard_state.broker_state.selected_broker,
+            "account_mode": dashboard_state.broker_state.broker_mode,
+        }
+        calculation_account_state = {
             "cash_balance": dashboard_state.cash_balance,
             "total_equity": dashboard_state.total_equity,
             "equity": dashboard_state.total_equity,
             "balance": dashboard_state.cash_balance,
-            "buying_power": account.get("buying_power", 0.0),
-            "margin_used": account.get("margin_used", 0.0),
-            "available_margin": account.get("available_margin", 0.0),
-            "currency": account.get("currency", "USD"),
-            "broker": dashboard_state.broker_state.selected_broker,
-            "account_mode": dashboard_state.broker_state.broker_mode,
+            "realized_pnl": dashboard_state.realized_pnl,
+            "unrealized_pnl": dashboard_state.unrealized_pnl,
+            "buying_power": buying_power if buying_power is not None else 0.0,
+            "margin_used": margin_used if margin_used is not None else 0.0,
+            "available_margin": available_margin if available_margin is not None else 0.0,
+            "currency": account_summary_state["currency"],
+            "broker": account_summary_state["broker"],
+            "account_mode": account_summary_state["account_mode"],
         }
 
         self._log_builder_stage("pnl_summary", position_state)
         pnl_summary = self.pnl_summary_builder.build(
-            account_state=account_summary_state,
+            account_state=calculation_account_state,
             position_state=position_state,
         )
 
         self._log_builder_stage("risk_summary", risk_payload)
         risk_summary = self.risk_summary_builder.build(
-            account_state=account_summary_state,
+            account_state=calculation_account_state,
             position_state=position_state,
             risk_payload=risk_payload,
         )
@@ -215,6 +251,16 @@ class DashboardStateFactory:
             isinstance(payload, Mapping) and bool(payload),
             len(payload) if isinstance(payload, Mapping) else 0,
         )
+
+    @staticmethod
+    def _safe_number(value: Any) -> float | None:
+        try:
+            if value in (None, "", "UNAVAILABLE", "DATA UNAVAILABLE", "NOT_TESTED", "N/A"):
+                return None
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        return number if number == number and number not in (float("inf"), float("-inf")) else None
 
     @staticmethod
     def _execution_history(execution_payload: Dict[str, Any]) -> list[dict[str, Any]]:

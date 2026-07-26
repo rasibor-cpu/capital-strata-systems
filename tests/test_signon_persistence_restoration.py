@@ -17,6 +17,7 @@ def _disable_automated_auth_bypass(monkeypatch):
     """Persistence restoration must exercise real restore/console paths (AR-023)."""
     monkeypatch.delenv("CSS_AUTOMATED_INPUT", raising=False)
     monkeypatch.delenv("CSS_AUTH_TEST_PROFILE", raising=False)
+    monkeypatch.delenv("CSS_AUTH_UI", raising=False)
 
 
 @pytest.fixture
@@ -333,15 +334,15 @@ def test_valid_restoration_readiness(mock_load, temp_auth_file, mock_registry):
     assert result["role"] == "SUPER_USER"
 
 
-@patch("dashboard.auth.css_sign_on.await_console_login")
-@patch("dashboard.auth.css_sign_on.load_users")
-def test_invalid_restoration_falls_through(mock_load, mock_console, temp_auth_file, mock_registry):
+def test_invalid_restoration_falls_through(monkeypatch, temp_auth_file, mock_registry):
     """17. Verify that if the persistence file is invalid, it falls through to console/gui login."""
-    mock_load.return_value = mock_registry
-    mock_console.return_value = {"user_id": "00000", "role": "SUPER_USER"}
+    mock_load = MagicMock(return_value=mock_registry)
+    mock_console = MagicMock(return_value={"user_id": "00000", "role": "SUPER_USER"})
+    monkeypatch.setattr(auth, "load_users", mock_load)
+    monkeypatch.setattr(auth, "await_console_login", mock_console)
     
-    # Set UI override to cli
-    os.environ["CSS_AUTH_UI"] = "cli"
+    # Set UI override to cli for this test only.
+    monkeypatch.setenv("CSS_AUTH_UI", "cli")
     
     # Save an invalid (expired) session file
     expired_time = datetime.now(timezone.utc) - timedelta(hours=30)
@@ -357,7 +358,8 @@ def test_invalid_restoration_falls_through(mock_load, mock_console, temp_auth_fi
     
     result = auth.await_login_ready_state()
     assert result == {"user_id": "00000", "role": "SUPER_USER"}
-    mock_console.assert_called_once()
+    mock_load.assert_called_once()
+    mock_console.assert_called_once_with(mock_registry)
     assert not temp_auth_file.exists()  # Should be invalidated/deleted
 
 

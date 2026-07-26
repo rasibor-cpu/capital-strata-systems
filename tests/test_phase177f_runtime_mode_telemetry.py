@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from backend.app.brokers.canonical_tier1 import TIER1_BROKERS, get_canonical_broker_registry
 from backend.options.options_income_surface_link import options_income_detail_link
 from backend.runtime.platform_status import build_platform_status
@@ -16,6 +18,12 @@ from backend.runtime.runtime_telemetry import (
 from dashboard.mission_control.contracts import build_mission_control_state
 from dashboard.runtime.frontend_contract import build_frontend_payload
 from dashboard.mobile.mobile_app import _system_status, load_mobile_controls
+import dashboard.mobile.mobile_app as mobile_app
+
+
+@pytest.fixture(autouse=True)
+def _isolate_mobile_controls(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(mobile_app, "MOBILE_CONTROL_FILE", tmp_path / "css_mobile_controls.json")
 
 
 def test_platform_status_runtime_mode_equals_resolver() -> None:

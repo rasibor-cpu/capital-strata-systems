@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 def dashboard():
     # Save original env to prevent contamination of other tests during execution
     old_env = dict(os.environ)
+    old_auth_module = sys.modules.get("dashboard.auth.css_sign_on")
+    old_input = sys.modules["builtins"].input
     
     os.environ["CSS_TEST_MODE"] = "1"
     os.environ["OANDA_API_KEY"] = "mock_key"
@@ -33,6 +35,22 @@ def dashboard():
     # Restore original environment variables
     os.environ.clear()
     os.environ.update(old_env)
+    if old_auth_module is None:
+        sys.modules.pop("dashboard.auth.css_sign_on", None)
+    else:
+        sys.modules["dashboard.auth.css_sign_on"] = old_auth_module
+    sys.modules["builtins"].input = old_input
+
+
+@pytest.fixture(autouse=True)
+def reset_dashboard_broker_state(dashboard):
+    dashboard.BROKER_EXECUTION_ARMED = False
+    dashboard.COINBASE_READ_ONLY_STATUS = {}
+    dashboard.PCNRASS_VALIDATION_SEQUENCE = 0
+    yield
+    dashboard.BROKER_EXECUTION_ARMED = False
+    dashboard.COINBASE_READ_ONLY_STATUS = {}
+    dashboard.PCNRASS_VALIDATION_SEQUENCE = 0
 
 def test_successful_validation_propagation(dashboard):
     # Reset sequence
@@ -173,5 +191,3 @@ def test_unchanged_execution_safety_controls(dashboard):
     assert dashboard.COINBASE_READ_ONLY_STATUS.get("execution_allowed") is False
     assert dashboard.COINBASE_READ_ONLY_STATUS.get("advisory_only") is True
     assert dashboard.BROKER_EXECUTION_ARMED is False
-
-

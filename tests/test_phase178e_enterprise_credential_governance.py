@@ -130,7 +130,37 @@ def test_rotation_backup_dependency_and_impact_analysis() -> None:
     backup_metadata, body = VaultBackupManager(vault).create_manifest()
     assert backup_metadata.contains_plaintext is False
     assert VaultBackupManager.verify(body)
+    assert body["restore_supported"] is False
+    assert body["restore_performed"] is False
+    assert body["execution_allowed"] is False
+    assert body["advisory_only"] is True
     assert "replacement-test-value" not in str(body)
+
+
+def test_vault_backup_restore_is_explicitly_unsupported_and_non_destructive() -> None:
+    result = VaultBackupManager.restore_manifest({"records": []})
+
+    assert result["status"] == "UNSUPPORTED"
+    assert result["restore_performed"] is False
+    assert result["production_filesystem_touched"] is False
+    assert result["execution_allowed"] is False
+    assert result["advisory_only"] is True
+
+
+def test_vault_backup_manifest_rejects_tampering_and_plaintext_claims() -> None:
+    vault = _vault()
+    _registered(vault)
+
+    _, body = VaultBackupManager(vault).create_manifest()
+    assert VaultBackupManager.verify(body)
+
+    tampered = dict(body)
+    tampered["contains_plaintext"] = True
+    assert VaultBackupManager.verify(tampered) is False
+
+    tampered = dict(body)
+    tampered["record_count"] = 99
+    assert VaultBackupManager.verify(tampered) is False
 
 
 def test_audit_redaction_and_enterprise_report_redaction() -> None:

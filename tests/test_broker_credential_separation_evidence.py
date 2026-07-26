@@ -6,6 +6,23 @@ from backend.app.brokers.execution_boundary import validate_execution_boundary
 from backend.app.brokers.oanda_adapter import OandaAdapter
 from backend.app.brokers.credential_loader import CredentialLoadError, _load_env_fallback_credentials
 
+
+class _EmptyCredentialProfile:
+    validation_status = "FAIL"
+    key_identifier_present = False
+    private_key_present = False
+    loaded_files = ()
+
+    def credentials_for_broker(self):
+        return {}
+
+    def redacted_diagnostics(self):
+        return {
+            "validation_status": self.validation_status,
+            "loaded_files": [],
+            "credentials_present": False,
+        }
+
 def test_paper_mode_cannot_use_live_capital_source():
     # Prove paper mode rejects LIVE capital source labels completely
     result = certify_live_readiness(
@@ -51,8 +68,12 @@ def test_live_mode_cannot_silently_fallback_to_simulated_capital():
 
 
 @mock.patch("backend.app.brokers.credential_loader.load_dotenv")
+@mock.patch(
+    "backend.app.brokers.credential_loader._canonical_profile_credentials",
+    return_value=_EmptyCredentialProfile(),
+)
 @mock.patch.dict(os.environ, clear=True)
-def test_missing_credentials_fails_closed(mock_load_dotenv):
+def test_missing_credentials_fails_closed(mock_profile, mock_load_dotenv):
     # If no env vars and no files exist, credentials load must fail
     assert _load_env_fallback_credentials("oanda", "paper") is None
     assert _load_env_fallback_credentials("coinbase", "paper") is None
