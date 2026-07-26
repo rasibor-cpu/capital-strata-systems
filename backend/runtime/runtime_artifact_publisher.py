@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
@@ -8,6 +9,10 @@ from pathlib import Path
 from typing import Any
 
 from backend.portfolio.runtime_portfolio_state_builder import RuntimePortfolioStateBuilder
+
+RUNTIME_CYCLE_STATUS_OK = "OK"
+RUNTIME_CYCLE_STATUS_NOT_REPORTED = "NOT_REPORTED"
+RUNTIME_CYCLE_STATUS_UNAVAILABLE = "UNAVAILABLE"
 
 
 class RuntimeArtifactPublisherError(RuntimeError):
@@ -53,9 +58,11 @@ class RuntimeArtifactPublisher:
         timestamp: str | None = None,
     ) -> dict[str, Any]:
         ts = timestamp or datetime.now(timezone.utc).isoformat()
-        cycle = int(runtime_cycle or self._runtime_cycle())
         warnings: list[str] = []
         published: dict[str, str] = {}
+        cycle, cycle_meta = self._resolve_runtime_cycle(runtime_cycle)
+        if cycle_meta["status"] != RUNTIME_CYCLE_STATUS_OK:
+            warnings.append(f"runtime_cycle_{cycle_meta['reason']}")
 
         state = dict(runtime_portfolio_state) if isinstance(runtime_portfolio_state, Mapping) else self._build_portfolio_state(warnings)
         decision = self._payload_or_builder(portfolio_decision, portfolio_decision_builder, warnings, "portfolio_decision")
@@ -81,6 +88,9 @@ class RuntimeArtifactPublisher:
             canonical = self._canonical(
                 payload,
                 runtime_cycle=cycle,
+                runtime_cycle_status=cycle_meta["status"],
+                runtime_cycle_reason=cycle_meta["reason"],
+                runtime_cycle_source=cycle_meta["source"],
                 timestamp=ts,
                 source_module="RuntimeArtifactPublisher",
                 session_id=sid,
@@ -97,11 +107,16 @@ class RuntimeArtifactPublisher:
         status = "OK" if len(published) == len(artifacts) else "AMBER"
         if not published:
             status = "DATA UNAVAILABLE"
+        elif cycle_meta["status"] != RUNTIME_CYCLE_STATUS_OK:
+            status = "AMBER"
         return {
             "status": status,
             "published_artifacts": published,
             "warnings": sorted(set(warnings)),
             "runtime_cycle": cycle,
+            "runtime_cycle_status": cycle_meta["status"],
+            "runtime_cycle_reason": cycle_meta["reason"],
+            "runtime_cycle_source": cycle_meta["source"],
             "timestamp": ts,
             "generated_at": ts,
             "session_id": sid,
@@ -143,19 +158,128 @@ class RuntimeArtifactPublisher:
                 warnings.append(f"{name}_builder_failed:{exc}")
         return self._unavailable(f"{name}_unavailable")
 
-    def _runtime_cycle(self) -> int:
+    def _resolve_runtime_cycle(self, explicit_runtime_cycle: Any) -> tuple[int | None, dict[str, str]]:
+        if explicit_runtime_cycle is not None:
+            return self._normalize_runtime_cycle(explicit_runtime_cycle, source="caller")
+
         for path in (self.session_state_path, self.artifacts_dir / "css_session_recovery.json"):
             payload = self._read_json(path)
             session = payload.get("session", payload) if isinstance(payload, Mapping) else {}
             if not isinstance(session, Mapping):
                 continue
             for key in ("cycle_number", "runtime_cycle", "current_cycle"):
-                value = session.get(key)
-                try:
-                    return int(value)
-                except (TypeError, ValueError):
+                if key not in session:
                     continue
-        return 0
+                return self._normalize_runtime_cycle(
+                    session.get(key),
+                    source=f"runtime_session:{path.name}:{key}",
+                )
+        return None, self._cycle_meta(
+            RUNTIME_CYCLE_STATUS_NOT_REPORTED,
+            "runtime_cycle_not_reported",
+            "runtime_session",
+        )
+
+    def _runtime_cycle(self) -> int | None:
+        cycle, _meta = self._resolve_runtime_cycle(None)
+        return cycle
+
+    @classmethod
+    def _normalize_runtime_cycle(cls, value: Any, *, source: str) -> tuple[int | None, dict[str, str]]:
+        if value is None:
+            return None, cls._cycle_meta(
+                RUNTIME_CYCLE_STATUS_NOT_REPORTED,
+                "runtime_cycle_not_reported",
+                source,
+            )
+        if isinstance(value, bool):
+            return None, cls._cycle_meta(
+                RUNTIME_CYCLE_STATUS_UNAVAILABLE,
+                "runtime_cycle_malformed",
+                source,
+            )
+        if isinstance(value, int):
+            if value < 0:
+                return None, cls._cycle_meta(
+                    RUNTIME_CYCLE_STATUS_UNAVAILABLE,
+                    "runtime_cycle_negative",
+                    source,
+                )
+            return value, cls._cycle_meta(RUNTIME_CYCLE_STATUS_OK, "runtime_cycle_valid", source)
+        if isinstance(value, float):
+            if not math.isfinite(value):
+                return None, cls._cycle_meta(
+                    RUNTIME_CYCLE_STATUS_UNAVAILABLE,
+                    "runtime_cycle_non_finite",
+                    source,
+                )
+            if value < 0:
+                return None, cls._cycle_meta(
+                    RUNTIME_CYCLE_STATUS_UNAVAILABLE,
+                    "runtime_cycle_negative",
+                    source,
+                )
+            if not value.is_integer():
+                return None, cls._cycle_meta(
+                    RUNTIME_CYCLE_STATUS_UNAVAILABLE,
+                    "runtime_cycle_non_integral",
+                    source,
+                )
+            return int(value), cls._cycle_meta(RUNTIME_CYCLE_STATUS_OK, "runtime_cycle_valid", source)
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None, cls._cycle_meta(
+                    RUNTIME_CYCLE_STATUS_NOT_REPORTED,
+                    "runtime_cycle_empty",
+                    source,
+                )
+            if text.upper() in {"NOT_REPORTED", "UNKNOWN", "UNAVAILABLE", "DATA UNAVAILABLE", "N/A"}:
+                return None, cls._cycle_meta(
+                    RUNTIME_CYCLE_STATUS_NOT_REPORTED,
+                    "runtime_cycle_not_reported",
+                    source,
+                )
+            try:
+                numeric = float(text)
+            except ValueError:
+                return None, cls._cycle_meta(
+                    RUNTIME_CYCLE_STATUS_UNAVAILABLE,
+                    "runtime_cycle_malformed",
+                    source,
+                )
+            if not math.isfinite(numeric):
+                return None, cls._cycle_meta(
+                    RUNTIME_CYCLE_STATUS_UNAVAILABLE,
+                    "runtime_cycle_non_finite",
+                    source,
+                )
+            if numeric < 0:
+                return None, cls._cycle_meta(
+                    RUNTIME_CYCLE_STATUS_UNAVAILABLE,
+                    "runtime_cycle_negative",
+                    source,
+                )
+            if not numeric.is_integer():
+                return None, cls._cycle_meta(
+                    RUNTIME_CYCLE_STATUS_UNAVAILABLE,
+                    "runtime_cycle_non_integral",
+                    source,
+                )
+            return int(numeric), cls._cycle_meta(RUNTIME_CYCLE_STATUS_OK, "runtime_cycle_valid", source)
+        return None, cls._cycle_meta(
+            RUNTIME_CYCLE_STATUS_UNAVAILABLE,
+            "runtime_cycle_malformed",
+            source,
+        )
+
+    @staticmethod
+    def _cycle_meta(status: str, reason: str, source: str) -> dict[str, str]:
+        return {
+            "status": status,
+            "reason": reason,
+            "source": source,
+        }
 
     def _account_artifact(self, runtime_state: Mapping[str, Any]) -> dict[str, Any]:
         account = self._read_json(self.account_state_path)
@@ -196,7 +320,10 @@ class RuntimeArtifactPublisher:
         cls,
         payload: Mapping[str, Any],
         *,
-        runtime_cycle: int,
+        runtime_cycle: int | None,
+        runtime_cycle_status: str,
+        runtime_cycle_reason: str,
+        runtime_cycle_source: str,
         timestamp: str,
         source_module: str,
         session_id: str | None,
@@ -208,6 +335,9 @@ class RuntimeArtifactPublisher:
                 "timestamp": result.get("timestamp") or timestamp,
                 "generated_at": timestamp,
                 "runtime_cycle": runtime_cycle,
+                "runtime_cycle_status": runtime_cycle_status,
+                "runtime_cycle_reason": runtime_cycle_reason,
+                "runtime_cycle_source": runtime_cycle_source,
                 "session_id": session_id,
                 "runtime_version": runtime_version,
                 "schema_version": cls.SCHEMA_VERSION,

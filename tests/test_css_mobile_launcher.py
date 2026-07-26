@@ -219,6 +219,50 @@ def test_mobile_dashboard_helpers_malformed_json_handled_safely(launcher_temp_di
     assert context["account"]["cash"] == 0.0
     assert "portfolio_summary" in context
 
+
+def test_mobile_runtime_artifact_publish_preserves_not_reported_cycle(launcher_temp_dir, monkeypatch):
+    import launcher.css_mobile_launcher as mod
+
+    monkeypatch.setattr(
+        mod,
+        "get_runtime_summary",
+        lambda: {
+            "runtime_mode": "DISABLED",
+            "current_cycle": "NOT_REPORTED",
+            "execution_enabled": False,
+        },
+    )
+
+    result = mod.publish_runtime_artifacts(
+        inputs={
+            "runtime_portfolio_state": {
+                "status": "OK",
+                "portfolio_state": "NO_PORTFOLIO",
+                "account": {},
+                "positions": [],
+                "trades": [],
+                "asset_allocations": {},
+                "advisory_only": True,
+                "execution_allowed": False,
+            }
+        },
+        portfolio_decision={"overall_status": "GREEN", "portfolio_recommendation": "MAINTAIN"},
+        runtime_advisory_snapshot={"snapshot_status": "OK", "advisory_only": True},
+        validation_summary={"status": "OK"},
+    )
+
+    assert result["status"] == "AMBER"
+    assert result["runtime_cycle"] is None
+    assert result["runtime_cycle_status"] == "NOT_REPORTED"
+    assert result["execution_allowed"] is False
+    artifact = json.loads(
+        open(os.path.join(LauncherConfig.ARTIFACTS_DIR, "runtime_portfolio_state.json"), encoding="utf-8").read()
+    )
+    assert artifact["runtime_cycle"] is None
+    assert artifact["runtime_cycle_status"] == "NOT_REPORTED"
+    assert artifact["runtime_cycle_reason"] == "runtime_cycle_not_reported"
+    assert artifact["execution_allowed"] is False
+
 def test_launcher_manifest_and_icon_routes():
     response = client.get("/manifest.json")
     assert response.status_code == 200
