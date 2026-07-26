@@ -3,7 +3,9 @@ import sys
 import time
 import socket
 import threading
-from typing import List
+import json
+import subprocess
+from typing import Any, List
 
 # Ensure repository root is in PYTHONPATH
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -19,9 +21,127 @@ from backend.monitoring.css_alert_models import AlertSeverity
 from launcher.css_service_manager import CSSServiceManager
 from launcher.css_launcher_config import LauncherConfig
 
+CANONICAL_LAUNCHER_MARKERS = (
+    "launcher.css_runtime_launcher",
+    "launcher\\css_runtime_launcher.py",
+    "launcher/css_runtime_launcher.py",
+)
+CANONICAL_CHILD_MARKERS = (
+    "scripts\\css_live_dashboard.py",
+    "scripts/css_live_dashboard.py",
+    "launcher.css_mobile_launcher",
+    "launcher\\css_mobile_launcher.py",
+    "launcher/css_mobile_launcher.py",
+)
+
+
 def is_port_in_use(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         return s.connect_ex(('127.0.0.1', port)) == 0
+
+
+def discover_canonical_runtime_processes(
+    *,
+    repo_root: str = REPO_ROOT,
+    current_pid: int | None = None,
+) -> list[dict[str, Any]]:
+    current_pid = int(current_pid or os.getpid())
+    repo_norm = os.path.normcase(os.path.abspath(repo_root))
+    rows: list[dict[str, Any]] = []
+
+    try:
+        if os.name == "nt":
+            completed = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    (
+                        "Get-CimInstance Win32_Process -Filter \"name='python.exe'\" | "
+                        "Select-Object ProcessId,ParentProcessId,CommandLine | "
+                        "ConvertTo-Json -Compress"
+                    ),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=20,
+            )
+            raw = (completed.stdout or "").strip()
+            if not raw:
+                return []
+            parsed = json.loads(raw)
+        else:
+            completed = subprocess.run(
+                ["ps", "-eo", "pid=,ppid=,command="],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=20,
+            )
+            parsed = []
+            for line in (completed.stdout or "").splitlines():
+                parts = line.strip().split(None, 2)
+                if len(parts) == 3:
+                    parsed.append(
+                        {
+                            "ProcessId": parts[0],
+                            "ParentProcessId": parts[1],
+                            "CommandLine": parts[2],
+                        }
+                    )
+        if isinstance(parsed, dict):
+            process_rows = [parsed]
+        elif isinstance(parsed, list):
+            process_rows = parsed
+        else:
+            process_rows = []
+    except Exception:
+        return []
+
+    for row in process_rows:
+        try:
+            pid = int(row.get("ProcessId") or row.get("PID") or 0)
+        except Exception:
+            continue
+        if pid == current_pid:
+            continue
+        cmd = str(row.get("CommandLine") or row.get("COMMAND") or "")
+        cmd_norm = os.path.normcase(cmd)
+        if repo_norm not in cmd_norm:
+            continue
+        marker = None
+        if any(item in cmd_norm for item in CANONICAL_LAUNCHER_MARKERS):
+            marker = "canonical_launcher"
+        elif any(item in cmd_norm for item in CANONICAL_CHILD_MARKERS):
+            marker = "managed_child"
+        if not marker:
+            continue
+        rows.append(
+            {
+                "pid": pid,
+                "parent_pid": row.get("ParentProcessId"),
+                "role": marker,
+                "command_line": cmd[:500],
+            }
+        )
+    return rows
+
+
+def duplicate_canonical_runtime_owners(
+    *,
+    repo_root: str = REPO_ROOT,
+    current_pid: int | None = None,
+) -> list[dict[str, Any]]:
+    return [
+        row
+        for row in discover_canonical_runtime_processes(
+            repo_root=repo_root,
+            current_pid=current_pid,
+        )
+        if row.get("role") == "canonical_launcher"
+    ]
+
 
 def check_environment() -> bool:
     print("=== CSS ENVIRONMENT CHECK ===")
@@ -84,6 +204,18 @@ def check_environment() -> bool:
     else:
         print(f"Port {LauncherConfig.PORT:<15} PASS")
 
+    duplicate_owners = duplicate_canonical_runtime_owners()
+    if duplicate_owners:
+        print("Canonical Runtime Owner FAIL")
+        for owner in duplicate_owners:
+            print(
+                "ERROR: Existing canonical launcher detected "
+                f"(pid={owner.get('pid')})."
+            )
+        checks_ok = False
+    else:
+        print("Canonical Runtime Owner PASS")
+
     if checks_ok:
         print("ENVIRONMENT READY")
     else:
@@ -124,6 +256,7 @@ def monitor_and_restart_services(
     not restarted — a clean exit is treated as intentional.
     """
     for svc in services:
+        pid_before = svc.pid
         status = svc.check_status()
 
         if status != "FAILED":
@@ -132,7 +265,11 @@ def monitor_and_restart_services(
 
         # ── Service has failed unexpectedly ───────────────────────────────────
         print(f"[{svc.service_name}] detected status FAILED")
-        supervisor.record_failure(f"{svc.service_name} exited unexpectedly")
+        supervisor.record_failure(
+            f"{svc.service_name} exited unexpectedly",
+            service_name=svc.service_name,
+            pid_before=pid_before,
+        )
         svc.record_restart_eligibility()
 
         if not supervisor.should_restart():
@@ -155,7 +292,12 @@ def monitor_and_restart_services(
         success = svc.try_restart(stdout_drain_callback=output_stream_reader)
 
         if success:
-            supervisor.record_restart_success(svc.service_name, attempt)
+            supervisor.record_restart_success(
+                svc.service_name,
+                attempt,
+                pid_before=pid_before,
+                pid_after=svc.pid,
+            )
             print(
                 f"[{svc.service_name}] back online "
                 f"(pid={svc.pid}, total_restarts={supervisor.restart_count})"
@@ -198,6 +340,10 @@ def run_launcher():
             if svc.process.stdout:
                 t = threading.Thread(target=output_stream_reader, args=(svc.process.stdout, svc.service_name), daemon=True)
                 t.start()
+
+    supervisor.record_process_tree(
+        managed_services={svc.service_name: svc.get_info() for svc in services}
+    )
 
     print("\nCSS Runtime ........ RUNNING")
     print("Mobile Launcher .... RUNNING")

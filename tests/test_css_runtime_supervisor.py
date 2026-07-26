@@ -39,22 +39,16 @@ def test_supervisor_heartbeat(supervisor):
 
 def test_supervisor_failure_recording_and_restart_decision(supervisor):
     supervisor.start()
-    
-    # 1st failure
+
     supervisor.record_failure("Test error 1")
     assert supervisor.failure_count == 1
     assert supervisor.status == "DEGRADED"
     assert supervisor.should_restart() is True
 
-    # 2nd failure
-    supervisor.record_failure("Test error 2")
-    assert supervisor.failure_count == 2
-    assert supervisor.status == "DEGRADED"
+    supervisor.record_restart_attempt("CSS Runtime", attempt=1, delay_seconds=0.0)
     assert supervisor.should_restart() is True
 
-    # 3rd failure (limit exceeded since max is 2)
-    supervisor.record_failure("Test error 3")
-    assert supervisor.failure_count == 3
+    supervisor.record_restart_attempt("CSS Runtime", attempt=2, delay_seconds=0.0)
     assert supervisor.status == "FAILED"
     assert supervisor.should_restart() is False
 
@@ -103,3 +97,85 @@ def test_get_status(supervisor):
     assert status["failure_count"] == 1
     assert status["last_failure"] == "Network drop"
     assert status["max_restart_limit"] == 2
+
+
+def test_cumulative_successful_restart_limit_below_at_and_above(temp_dir):
+    alert_mock = MagicMock()
+    sup = CSSRuntimeSupervisor(state_dir=temp_dir, max_restart_limit=2, alert_service=alert_mock)
+    sup.start()
+
+    sup.record_failure("first", service_name="CSS Runtime", pid_before=100)
+    assert sup.should_restart() is True
+    sup.record_restart_success("CSS Runtime", attempt=1, pid_before=100, pid_after=101)
+    assert sup.restart_count == 1
+    assert sup.process_generation == 1
+
+    sup.record_failure("second", service_name="CSS Runtime", pid_before=101)
+    assert sup.should_restart() is True
+    sup.record_restart_success("CSS Runtime", attempt=2, pid_before=101, pid_after=102)
+    assert sup.restart_count == 2
+    assert sup.restart_limit_exhausted is True
+
+    sup.record_failure("third", service_name="CSS Runtime", pid_before=102)
+    assert sup.should_restart() is False
+    sup.record_restart_success("CSS Runtime", attempt=3, pid_before=102, pid_after=103)
+    assert sup.restart_count == 2
+    assert sup.status == "FAILED"
+    assert sup.restart_limit_exhausted is True
+
+
+def test_durable_bounded_failure_history(temp_dir):
+    alert_mock = MagicMock()
+    sup = CSSRuntimeSupervisor(
+        state_dir=temp_dir,
+        max_restart_limit=5,
+        alert_service=alert_mock,
+        failure_history_limit=3,
+    )
+    sup.start()
+
+    for idx in range(5):
+        sup.record_failure(f"failure {idx}", service_name="CSS Runtime", pid_before=idx)
+
+    status = sup.get_status()
+    assert len(status["failure_history"]) == 3
+    assert status["failure_history"][0]["reason"] == "failure 2"
+
+    history_path = temp_dir + os.sep + "css_runtime_supervisor_failure_history.jsonl"
+    with open(history_path, "r", encoding="utf-8") as handle:
+        lines = handle.readlines()
+    assert len(lines) == 5
+    assert all("process_generation" in json.loads(line) for line in lines)
+
+
+def test_process_tree_identity_tracks_generation_and_pids(temp_dir):
+    alert_mock = MagicMock()
+    sup = CSSRuntimeSupervisor(state_dir=temp_dir, max_restart_limit=3, alert_service=alert_mock)
+    sup.start()
+    sup.record_process_tree(
+        launcher_pid=10,
+        supervisor_pid=10,
+        managed_services={"CSS Runtime": {"pid": 20}, "Mobile Launcher": {"pid": 30}},
+    )
+
+    sup.record_failure("runtime exit", service_name="CSS Runtime", pid_before=20)
+    sup.record_restart_success("CSS Runtime", attempt=1, pid_before=20, pid_after=21)
+
+    status = sup.get_status()
+    assert status["process_generation"] == 1
+    assert status["process_identity"]["launcher_pid"] == 10
+    assert status["process_identity"]["managed_services"]["CSS Runtime"]["pid"] == 21
+    assert status["failure_history"][-1]["pid_before"] == 20
+    assert status["failure_history"][-1]["pid_after"] == 21
+
+
+def test_controlled_shutdown_history_is_explicit_not_unexpected(temp_dir):
+    alert_mock = MagicMock()
+    sup = CSSRuntimeSupervisor(state_dir=temp_dir, max_restart_limit=1, alert_service=alert_mock)
+    sup.start()
+    sup.stop()
+
+    status = sup.get_status()
+    assert status["status"] == "STOPPED"
+    assert status["shutdown_requested"] is True
+    assert status["failure_history"][-1]["event_type"] == "controlled_shutdown"

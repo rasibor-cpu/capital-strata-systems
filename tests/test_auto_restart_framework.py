@@ -178,16 +178,19 @@ def test_record_restart_exhausted_persists_state(supervisor, temp_dir):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def test_should_restart_allows_up_to_limit(supervisor):
-    # max_restart_limit=3, so failures 1, 2, 3 should allow restart
-    for i in range(1, 4):
+    # max_restart_limit=3, so attempts below the cumulative limit allow restart
+    for i in range(1, 3):
         supervisor.record_failure(f"failure {i}")
-        assert supervisor.should_restart() is True, f"Expected restart allowed at failure {i}"
+        assert supervisor.should_restart() is True, f"Expected restart allowed before attempt {i}"
+        supervisor.record_restart_attempt("CSS Runtime", attempt=i, delay_seconds=0.0)
+    supervisor.record_failure("failure 3")
+    assert supervisor.should_restart() is True
 
 
 def test_should_restart_denied_beyond_limit(supervisor):
-    # 4th failure exceeds limit of 3
-    for i in range(4):
+    for i in range(3):
         supervisor.record_failure(f"failure {i}")
+        supervisor.record_restart_attempt("CSS Runtime", attempt=i + 1, delay_seconds=0.0)
     assert supervisor.should_restart() is False
 
 
@@ -335,9 +338,8 @@ def test_monitor_emits_critical_when_limit_exhausted(temp_dir, alert_mock):
     sup = _mock_supervisor(temp_dir, alert_mock, max_restart_limit=1)
     svc = _make_svc(exit_code=1)
 
-    # Exhaust the limit by recording more failures than the limit
-    for _ in range(2):
-        sup.record_failure("pre-exhausted")
+    sup.record_failure("pre-exhausted")
+    sup.record_restart_attempt("CSS Runtime", attempt=1, delay_seconds=0.0)
 
     assert sup.should_restart() is False
 
@@ -370,7 +372,7 @@ def test_monitor_does_not_restart_beyond_limit(temp_dir, alert_mock):
 
     # Exhaust the limit
     sup.record_failure("pre-failure-1")
-    sup.record_failure("pre-failure-2")
+    sup.record_restart_attempt("CSS Runtime", attempt=1, delay_seconds=0.0)
     assert sup.should_restart() is False
 
     with patch("time.sleep"), \

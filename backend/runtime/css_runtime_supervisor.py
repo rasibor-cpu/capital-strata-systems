@@ -21,6 +21,7 @@ class CSSRuntimeSupervisor:
         alert_service: Optional[CSSAlertService] = None,
         canonical_alert_bridge: Optional[CanonicalAlertBridge] = None,
         event_bus: Optional[Any] = None,
+        failure_history_limit: int = 100,
     ):
         self.supervisor_id = str(uuid.uuid4())
         self.state_dir = state_dir
@@ -28,7 +29,12 @@ class CSSRuntimeSupervisor:
             self.state_dir,
             "css_runtime_supervisor_state.json",
         )
+        self.failure_history_file = os.path.join(
+            self.state_dir,
+            "css_runtime_supervisor_failure_history.jsonl",
+        )
         self.max_restart_limit = max_restart_limit
+        self.failure_history_limit = max(1, int(failure_history_limit or 100))
         self.alert_service = alert_service or CSSAlertService()
         self.canonical_alert_bridge = canonical_alert_bridge or CanonicalAlertBridge()
         self.event_bus = event_bus
@@ -38,7 +44,17 @@ class CSSRuntimeSupervisor:
         self.last_heartbeat_at: Optional[str] = None
         self.failure_count: int = 0
         self.restart_count: int = 0
+        self.restart_attempt_count: int = 0
         self.last_failure: Optional[str] = None
+        self.failure_history: list[Dict[str, Any]] = []
+        self.restart_limit_exhausted: bool = False
+        self.process_generation: int = 0
+        self.process_identity: Dict[str, Any] = {
+            "launcher_pid": os.getpid(),
+            "supervisor_pid": os.getpid(),
+            "managed_services": {},
+        }
+        self.shutdown_requested: bool = False
         self.last_canonical_decision: Optional[Dict[str, Any]] = None
         self.last_decision_at: Optional[str] = None
         self.status: str = "STOPPED"
@@ -77,6 +93,41 @@ class CSSRuntimeSupervisor:
         except Exception:
             pass
 
+    def _record_history(self, event: Dict[str, Any]) -> None:
+        record = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "supervisor_id": self.supervisor_id,
+            "process_generation": self.process_generation,
+            "launcher_pid": self.process_identity.get("launcher_pid"),
+            "supervisor_pid": self.process_identity.get("supervisor_pid"),
+            "restart_count": self.restart_count,
+            "restart_attempt_count": self.restart_attempt_count,
+            "failure_count": self.failure_count,
+            **event,
+        }
+        self.failure_history.append(record)
+        if len(self.failure_history) > self.failure_history_limit:
+            self.failure_history = self.failure_history[-self.failure_history_limit :]
+        try:
+            with open(self.failure_history_file, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, sort_keys=True) + "\n")
+        except Exception:
+            pass
+
+    def record_process_tree(
+        self,
+        *,
+        launcher_pid: int | None = None,
+        supervisor_pid: int | None = None,
+        managed_services: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        self.process_identity = {
+            "launcher_pid": int(launcher_pid or os.getpid()),
+            "supervisor_pid": int(supervisor_pid or os.getpid()),
+            "managed_services": dict(managed_services or {}),
+        }
+        self._persist_state()
+
     def _safe_publish_event(
         self,
         event_type: str,
@@ -103,6 +154,8 @@ class CSSRuntimeSupervisor:
         self.status = "RUNNING"
         self.started_at = datetime.now(timezone.utc).isoformat()
         self.stopped_at = None
+        self.shutdown_requested = False
+        self.record_process_tree()
         self._persist_state()
         self._safe_emit("Supervisor started", AlertSeverity.INFO)
         self._safe_publish_event(
@@ -115,6 +168,15 @@ class CSSRuntimeSupervisor:
     def stop(self):
         self.status = "STOPPED"
         self.stopped_at = datetime.now(timezone.utc).isoformat()
+        self.shutdown_requested = True
+        self._record_history(
+            {
+                "event_type": "controlled_shutdown",
+                "reason": "shutdown_requested",
+                "status": self.status,
+                "stopped_at": self.stopped_at,
+            }
+        )
         self._persist_state()
         self._safe_emit("Supervisor stopped", AlertSeverity.INFO)
         self._safe_publish_event(
@@ -184,13 +246,39 @@ class CSSRuntimeSupervisor:
 
         return False
 
-    def record_failure(self, reason: str):
+    def record_failure(
+        self,
+        reason: str,
+        *,
+        service_name: str | None = None,
+        pid_before: int | None = None,
+        exit_code: int | None = None,
+    ):
         self.failure_count += 1
         self.last_failure = reason
         self.status = (
             "FAILED"
-            if self.failure_count > self.max_restart_limit
+            if self.restart_count >= self.max_restart_limit
+            or self.restart_attempt_count >= self.max_restart_limit
             else "DEGRADED"
+        )
+        self.restart_limit_exhausted = (
+            self.restart_count >= self.max_restart_limit
+            or self.restart_attempt_count >= self.max_restart_limit
+        )
+
+        self._record_history(
+            {
+                "event_type": "unexpected_failure",
+                "reason": reason,
+                "service_name": service_name,
+                "pid_before": pid_before,
+                "pid_after": None,
+                "exit_code": exit_code,
+                "status": self.status,
+                "max_restart_limit": self.max_restart_limit,
+                "restart_limit_exhausted": self.restart_limit_exhausted,
+            }
         )
 
         self._persist_state()
@@ -201,6 +289,10 @@ class CSSRuntimeSupervisor:
             {
                 "reason": reason,
                 "failure_count": self.failure_count,
+                "restart_count": self.restart_count,
+                "restart_attempt_count": self.restart_attempt_count,
+                "max_restart_limit": self.max_restart_limit,
+                "restart_limit_exhausted": self.restart_limit_exhausted,
             },
         )
 
@@ -211,6 +303,9 @@ class CSSRuntimeSupervisor:
                 details={
                     "reason": reason,
                     "failure_count": self.failure_count,
+                    "restart_count": self.restart_count,
+                    "restart_attempt_count": self.restart_attempt_count,
+                    "max_restart_limit": self.max_restart_limit,
                     "status": self.status,
                 },
                 dedupe_key=(
@@ -223,16 +318,55 @@ class CSSRuntimeSupervisor:
 
     def should_restart(self) -> bool:
         if self.status in ("FAILED", "DEGRADED"):
-            return self.failure_count <= self.max_restart_limit
+            return (
+                self.restart_count < self.max_restart_limit
+                and self.restart_attempt_count < self.max_restart_limit
+            )
         return False
 
-    def record_restart(self):
+    def record_restart(
+        self,
+        *,
+        service_name: str | None = None,
+        pid_before: int | None = None,
+        pid_after: int | None = None,
+        reason: str = "unexpected_restart_success",
+    ):
+        if self.restart_count >= self.max_restart_limit:
+            self.record_restart_exhausted(service_name or "CSS Runtime")
+            return
+
+        prior_generation = self.process_generation
         self.restart_count += 1
+        self.process_generation += 1
         self.failure_count = 0
         self.last_failure = None
         self.status = "RUNNING"
+        self.restart_limit_exhausted = self.restart_count >= self.max_restart_limit
         self.started_at = datetime.now(timezone.utc).isoformat()
         self.stopped_at = None
+        if service_name:
+            services = dict(self.process_identity.get("managed_services") or {})
+            services[service_name] = {
+                "pid": pid_after,
+                "started_at": self.started_at,
+                "generation": self.process_generation,
+            }
+            self.process_identity["managed_services"] = services
+
+        self._record_history(
+            {
+                "event_type": "unexpected_restart_success",
+                "reason": reason,
+                "service_name": service_name,
+                "pid_before": pid_before,
+                "pid_after": pid_after,
+                "prior_process_generation": prior_generation,
+                "status": self.status,
+                "max_restart_limit": self.max_restart_limit,
+                "restart_limit_exhausted": self.restart_limit_exhausted,
+            }
+        )
 
         self._persist_state()
 
@@ -242,6 +376,10 @@ class CSSRuntimeSupervisor:
             {
                 "restart_count": self.restart_count,
                 "failure_count_reset": True,
+                "process_generation": self.process_generation,
+                "pid_before": pid_before,
+                "pid_after": pid_after,
+                "restart_limit_exhausted": self.restart_limit_exhausted,
             },
         )
 
@@ -258,6 +396,24 @@ class CSSRuntimeSupervisor:
         attempt: int,
         delay_seconds: float,
     ):
+        self.restart_attempt_count += 1
+        self.restart_limit_exhausted = self.restart_attempt_count >= self.max_restart_limit
+        if self.restart_limit_exhausted:
+            self.status = "FAILED"
+        self._record_history(
+            {
+                "event_type": "restart_attempt",
+                "reason": "unexpected_restart_attempt",
+                "service_name": service_name,
+                "attempt": attempt,
+                "backoff_seconds": delay_seconds,
+                "status": self.status,
+                "max_restart_limit": self.max_restart_limit,
+                "restart_limit_exhausted": self.restart_limit_exhausted,
+            }
+        )
+        self._persist_state()
+
         msg = (
             f"Auto-restart attempt {attempt}/{self.max_restart_limit} "
             f"for service '{service_name}' after {delay_seconds:.1f}s backoff"
@@ -271,8 +427,10 @@ class CSSRuntimeSupervisor:
             {
                 "service_name": service_name,
                 "attempt": attempt,
+                "restart_attempt_count": self.restart_attempt_count,
                 "max_restart_limit": self.max_restart_limit,
                 "backoff_seconds": delay_seconds,
+                "restart_limit_exhausted": self.restart_limit_exhausted,
             },
         )
         self._safe_publish_event(
@@ -283,6 +441,7 @@ class CSSRuntimeSupervisor:
                 "supervisor_id": self.supervisor_id,
                 "service_name": service_name,
                 "attempt": attempt,
+                "restart_attempt_count": self.restart_attempt_count,
                 "max_restart_limit": self.max_restart_limit,
                 "delay_seconds": delay_seconds,
             }
@@ -292,7 +451,14 @@ class CSSRuntimeSupervisor:
         self,
         service_name: str,
         attempt: int,
+        *,
+        pid_before: int | None = None,
+        pid_after: int | None = None,
     ):
+        if self.restart_count >= self.max_restart_limit:
+            self.record_restart_exhausted(service_name)
+            return
+
         msg = (
             f"Service '{service_name}' restarted successfully "
             f"(attempt {attempt})"
@@ -300,7 +466,11 @@ class CSSRuntimeSupervisor:
 
         print(f"[SUPERVISOR] {msg}")
 
-        self.record_restart()
+        self.record_restart(
+            service_name=service_name,
+            pid_before=pid_before,
+            pid_after=pid_after,
+        )
 
         self._safe_emit(
             msg,
@@ -310,6 +480,10 @@ class CSSRuntimeSupervisor:
                 "attempt": attempt,
                 "total_restarts": self.restart_count,
                 "failure_count": self.failure_count,
+                "pid_before": pid_before,
+                "pid_after": pid_after,
+                "process_generation": self.process_generation,
+                "restart_limit_exhausted": self.restart_limit_exhausted,
             },
         )
 
@@ -321,6 +495,7 @@ class CSSRuntimeSupervisor:
                     "service_name": service_name,
                     "attempt": int(attempt),
                     "restart_count": self.restart_count,
+                    "process_generation": self.process_generation,
                 },
                 dedupe_key=(
                     f"SUPERVISOR_RECOVERY:css_runtime_supervisor:"
@@ -352,6 +527,17 @@ class CSSRuntimeSupervisor:
         print(f"[SUPERVISOR] CRITICAL: {msg}")
 
         self.status = "FAILED"
+        self.restart_limit_exhausted = True
+        self._record_history(
+            {
+                "event_type": "restart_limit_exhausted",
+                "reason": "max_restart_limit_exhausted",
+                "service_name": service_name,
+                "status": self.status,
+                "max_restart_limit": self.max_restart_limit,
+                "restart_limit_exhausted": self.restart_limit_exhausted,
+            }
+        )
         self._persist_state()
 
         self._safe_emit(
@@ -361,6 +547,10 @@ class CSSRuntimeSupervisor:
                 "service_name": service_name,
                 "max_restart_limit": self.max_restart_limit,
                 "failure_count": self.failure_count,
+                "restart_count": self.restart_count,
+                "restart_attempt_count": self.restart_attempt_count,
+                "process_generation": self.process_generation,
+                "restart_limit_exhausted": self.restart_limit_exhausted,
             },
         )
 
@@ -372,7 +562,15 @@ class CSSRuntimeSupervisor:
             "last_heartbeat_at": self.last_heartbeat_at,
             "failure_count": self.failure_count,
             "restart_count": self.restart_count,
+            "restart_attempt_count": self.restart_attempt_count,
             "last_failure": self.last_failure,
+            "failure_history": list(self.failure_history),
+            "failure_history_limit": self.failure_history_limit,
+            "failure_history_path": self.failure_history_file,
+            "restart_limit_exhausted": self.restart_limit_exhausted,
+            "process_generation": self.process_generation,
+            "process_identity": dict(self.process_identity),
+            "shutdown_requested": self.shutdown_requested,
             "last_canonical_decision": self.last_canonical_decision,
             "last_decision_at": self.last_decision_at,
             "status": self.status,
