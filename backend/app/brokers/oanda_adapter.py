@@ -56,11 +56,18 @@ def _legacy_writes_enabled() -> bool:
     }
 
 
-def _legacy_write_quarantine_result(method: str) -> Dict[str, Any]:
+def _legacy_write_quarantine_result(
+    method: str,
+    *,
+    firewall: Optional["OandaLiveFirewallDecision"] = None,
+) -> Dict[str, Any]:
     logging.warning(
         "[OANDA QUARANTINE] Legacy write method blocked method=%s",
         method,
     )
+    secondary = []
+    if firewall is not None and not firewall.allowed and firewall.denied_reason:
+        secondary.append(f"live_firewall_denied:{firewall.denied_reason}")
     return {
         "ok": False,
         "status": None,
@@ -69,6 +76,14 @@ def _legacy_write_quarantine_result(method: str) -> Dict[str, Any]:
         "method": method,
         "execution_allowed": False,
         "implementation_status": "WRITES_QUARANTINED",
+        "allowed": False,
+        "primary_denial_code": "oanda_legacy_writes_quarantined",
+        "secondary_denial_codes": secondary,
+        "quarantine_active": True,
+        "firewall_active": True,
+        "execution_authorized": False,
+        "network_attempted": False,
+        "firewall_audit": dict(firewall.audit_log) if firewall is not None else {},
     }
 
 
@@ -302,7 +317,7 @@ class OandaAdapter:
         audit: Dict[str, Any] = {}
 
         # ── Condition 1: env-var firewall ────────────────────────────────────
-        env_enabled = self.allow_live_trades
+        env_enabled = bool(getattr(self, "allow_live_trades", False))
         audit["oanda_enable_live_trading"] = env_enabled
         if not env_enabled:
             return OandaLiveFirewallDecision(
@@ -405,15 +420,17 @@ class OandaAdapter:
             )
 
         # ── Condition 8: no fail-closed conditions ────────────────────────────
-        audit["margin_rejection_lock"] = self.margin_rejection_lock
-        audit["health_state"] = self.health_state
-        if self.margin_rejection_lock:
+        margin_rejection_lock = bool(getattr(self, "margin_rejection_lock", False))
+        health_state = str(getattr(self, "health_state", "GREEN"))
+        audit["margin_rejection_lock"] = margin_rejection_lock
+        audit["health_state"] = health_state
+        if margin_rejection_lock:
             return OandaLiveFirewallDecision(
                 allowed=False,
                 denied_reason="firewall_condition_8_failed:margin_rejection_lock_active",
                 audit_log=audit,
             )
-        if self.health_state == "RED":
+        if health_state == "RED":
             return OandaLiveFirewallDecision(
                 allowed=False,
                 denied_reason="firewall_condition_8_failed:adapter_health_RED",
@@ -448,9 +465,6 @@ class OandaAdapter:
         Denial is always logged with the specific reason.
         Practice/paper paths are unaffected — they are not routed here.
         """
-        if not _legacy_writes_enabled():
-            return _legacy_write_quarantine_result("place_order")
-
         if order is not None:
             symbol = order.symbol
             side = order.side
@@ -461,7 +475,6 @@ class OandaAdapter:
         if not symbol_final:
             return {"ok": False, "status": None, "data": None, "error": "missing_symbol"}
 
-        # ── Live firewall: all 8 conditions evaluated atomically ──────────────
         firewall = self._evaluate_live_firewall(
             broker_mode=broker_mode,
             broker_execution_armed=broker_execution_armed,
@@ -469,7 +482,10 @@ class OandaAdapter:
             controls=controls,
             user_context=user_context,
         )
+        if not _legacy_writes_enabled():
+            return _legacy_write_quarantine_result("place_order", firewall=firewall)
 
+        # ── Live firewall: all 8 conditions evaluated atomically ──────────────
         if not firewall.allowed:
             logging.warning(
                 "[OANDA FIREWALL] Live order DENIED. reason=%s symbol=%s audit=%s",
@@ -482,6 +498,14 @@ class OandaAdapter:
                 "status": None,
                 "data": None,
                 "error": f"live_firewall_denied:{firewall.denied_reason}",
+                "allowed": False,
+                "primary_denial_code": f"live_firewall_denied:{firewall.denied_reason}",
+                "secondary_denial_codes": [],
+                "quarantine_active": False,
+                "firewall_active": True,
+                "execution_authorized": False,
+                "network_attempted": False,
+                "firewall_audit": dict(firewall.audit_log),
             }
 
         side_u = (side or "BUY").upper().strip()

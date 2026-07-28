@@ -151,5 +151,6 @@ def test_phase152b_no_live_execution_and_paper_mode_unchanged() -> None:
     assert report["audit"]["live_orders_submitted"] is False
     assert report["audit"]["broker_permissions_modified"] is False
     assert report["audit"]["paper_mode_changed"] is False
-    assert payload["resolved_mode"] == "paper"
+    assert payload["resolved_mode"] == "DISABLED"
+    assert payload["sections"]["runtime_status"]["degraded_reason"]
     assert payload["sections"]["live_readiness_certification"]["execution_allowed"] is False

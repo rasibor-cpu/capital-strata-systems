@@ -235,6 +235,9 @@ def _authentication_status(trace: Mapping[str, Any], *payloads: Mapping[str, Any
     if trace:
         return canonical_status(trace.get("authentication") or trace.get("status"))
     for payload in payloads:
+        explicit = payload.get("authentication_status") or payload.get("auth_status")
+        if explicit is not None:
+            return canonical_status(explicit)
         value = (
             payload.get("authentication")
             if payload.get("authentication") is not None
@@ -242,7 +245,7 @@ def _authentication_status(trace: Mapping[str, Any], *payloads: Mapping[str, Any
             if payload.get("broker_authenticated") is not None
             else payload.get("authenticated")
             if payload.get("authenticated") is not None
-            else payload.get("authentication_status")
+            else None
         )
         if value is not None:
             return STATUS_PASS if value is True else STATUS_FAIL if value is False else canonical_status(value)
@@ -251,7 +254,10 @@ def _authentication_status(trace: Mapping[str, Any], *payloads: Mapping[str, Any
 
 def _transport_status(*payloads: Mapping[str, Any]) -> str:
     for payload in payloads:
-        value = payload.get("transport_status") or payload.get("api_reachable") or payload.get("transport_reachable") or payload.get("broker_connected") or payload.get("connected")
+        explicit = payload.get("transport_status") or payload.get("connection_status")
+        if explicit is not None:
+            return canonical_status(explicit)
+        value = payload.get("api_reachable") or payload.get("transport_reachable") or payload.get("broker_connected") or payload.get("connected")
         if value is not None:
             return STATUS_PASS if value is True else STATUS_FAIL if value is False else canonical_status(value)
     return STATUS_UNKNOWN

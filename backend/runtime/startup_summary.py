@@ -11,6 +11,9 @@ from backend.runtime.canonical_broker_state_builder import canonical_state_from_
 
 
 STARTUP_SUMMARY_FIELDS = (
+    "Broker",
+    "Broker Mode",
+    "Execution Scope",
     "Credentials",
     "Authentication",
     "Connection",
@@ -29,6 +32,12 @@ STARTUP_SUMMARY_FIELDS = (
     "Execution Authority",
     "Can Live Execute",
     "Authority Reason",
+    "Pilot State",
+    "Capital Governor",
+    "Unified Trade Gate",
+    "Margin Gate",
+    "AntiBleedGuard",
+    "Broker Guard",
     "State Hash",
 )
 

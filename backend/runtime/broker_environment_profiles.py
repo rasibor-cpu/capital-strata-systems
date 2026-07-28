@@ -277,6 +277,7 @@ def build_broker_environment(
     env: MutableMapping[str, str] | None = None,
     allow_legacy: bool = True,
     sanitize: bool = True,
+    load_profile_files: bool | None = None,
 ) -> BrokerEnvironmentCredentials:
     target_env = env if env is not None else os.environ
     root = Path(project_root)
@@ -292,9 +293,10 @@ def build_broker_environment(
         selected=selected,
     )
     removed = sanitize_broker_profile_environment(target_env) if sanitize else []
-    # When an explicit environment mapping is provided, profile file loading remains
-    # deterministic and isolated from process-level pytest flags.
-    allow_legacy_files = allow_legacy or env is not None
+    # Existing callers that pass an explicit env mapping intentionally load
+    # profile files by default. Callers with fully injected test/runtime evidence
+    # can opt out so machine-local profiles cannot become authority.
+    allow_legacy_files = (allow_legacy or env is not None) if load_profile_files is None else bool(load_profile_files)
     loaded, skipped = _load_profile_files(root, selected, target_env, allow_legacy=allow_legacy_files)
     contamination = _contamination_keys(target_env, selected, broker=broker)
     removed.extend(_remove_incompatible_profile_variables(target_env, selected, broker=broker))

@@ -27,9 +27,15 @@ def test_dashboard_and_frontend_resolve_live_only_when_session_and_broker_agree(
     state = _state(session_mode="live", broker_mode="live")
     frontend = build_frontend_payload(state)
 
+    # DashboardState keeps the legacy binary display label, but the frontend
+    # contract is resolver-authoritative and cannot infer LIVE from UI/session
+    # labels without explicit runtime authority.
     assert state.resolved_mode() == "live"
     assert state.to_dict()["resolved_mode"] == "live"
-    assert frontend["resolved_mode"] == "live"
+    assert frontend["resolved_mode"] == "DISABLED"
+    assert frontend["sections"]["runtime_status"]["effective_mode"] == "DISABLED"
+    assert frontend["sections"]["runtime_status"]["execution_posture"] == "DISABLED"
+    assert frontend["sections"]["runtime_status"]["source"] == "RUNTIME_MODE_RESOLVER"
     assert frontend["session"]["resolved_mode"] == "live"
     assert frontend["sections"]["broker"]["broker_mode"] == "live"
 
@@ -46,7 +52,9 @@ def test_dashboard_and_frontend_fall_back_to_paper_on_mode_disagreement() -> Non
 
         assert state.resolved_mode() == "paper"
         assert state.to_dict()["resolved_mode"] == "paper"
-        assert frontend["resolved_mode"] == "paper"
+        assert frontend["resolved_mode"] == "DISABLED"
+        assert frontend["sections"]["runtime_status"]["effective_mode"] == "DISABLED"
+        assert frontend["sections"]["runtime_status"]["execution_posture"] == "DISABLED"
         assert frontend["session"]["resolved_mode"] == "paper"
 
 
@@ -72,11 +80,13 @@ def test_mobile_controls_report_runtime_mode_and_order_gate_consistently(
 
     assert controls["orders_enabled"] is True
     assert controls["engine_mode"] == "BALANCED"
-    assert status["runtime_mode"] == "live"
-    assert status["system_live"] is True
-    assert status["orders_enabled"] is True
+    assert status["runtime_mode"] == "DISABLED"
+    assert status["ticket_posture"] == "LIVE"
+    assert status["system_live"] is False
+    assert status["orders_enabled"] is False
     assert status["engine_mode"] == "BALANCED"
-    assert status["broker_live_gate"] == "READY"
+    assert status["broker_live_gate"] == "OFF"
+    assert status["platform_status"]["source"] == "RUNTIME_MODE_RESOLVER"
 
 
 def test_mobile_controls_normalize_unknown_modes_to_paper(monkeypatch, tmp_path) -> None:
@@ -91,8 +101,8 @@ def test_mobile_controls_normalize_unknown_modes_to_paper(monkeypatch, tmp_path)
     )
     status = mobile_app._system_status({"role": "TRADER"})
 
-    assert controls["runtime_mode"] == "paper"
+    assert controls["runtime_mode"] == "READ_ONLY"
     assert controls["engine_mode"] == "SAFE"
-    assert status["runtime_mode"] == "paper"
+    assert status["runtime_mode"] == "DISABLED"
     assert status["system_live"] is False
     assert status["engine_mode"] == "SAFE"

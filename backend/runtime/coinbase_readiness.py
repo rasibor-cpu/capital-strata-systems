@@ -143,6 +143,7 @@ def evaluate_coinbase_live_read_only(
         env=dict(env) if isinstance(env, Mapping) else dict(os.environ),
         allow_legacy="PYTEST_CURRENT_TEST" not in os.environ,
         sanitize=False,
+        load_profile_files=False,
     ).redacted_diagnostics()
     diagnostics = coinbase_credential_diagnostics(env)
     canonical_diagnostics = diagnostics.as_dict().get("broker_credential_diagnostics", diagnostics.as_dict())
@@ -233,7 +234,12 @@ def evaluate_coinbase_live_read_only(
     if not diagnostics.ready:
         result["auth_reason"] = "missing credentials"
         result["broker_health"] = "UNKNOWN"
-        result["connection_status"] = "UNKNOWN"
+        result["broker_connected"] = None
+        result["broker_authenticated"] = None
+        result["transport_status"] = "NOT_TESTED"
+        result["auth_status"] = "NOT_TESTED"
+        result["authentication_status"] = "NOT_TESTED"
+        result["connection_status"] = "NOT_TESTED"
         result["connection_error"] = "missing credentials"
         result["credential_status"] = "MISSING"
         result["authority_block_reason"] = authority_reason

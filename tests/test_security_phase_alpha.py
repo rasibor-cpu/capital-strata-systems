@@ -74,10 +74,10 @@ def test_oanda_firewall_blocks_live_orders_without_env(monkeypatch):
     response = adapter.place_order(symbol="EUR_USD", side="BUY", units=1)
 
     assert response["ok"] is False
-    # OANDA live firewall hardening: error now includes condition number and reason
-    assert response["error"].startswith("live_firewall_denied:")
-    assert "condition_1" in response["error"]
-    assert "OANDA_ENABLE_LIVE_TRADING_not_set" in response["error"]
+    assert response["error"] == "oanda_legacy_writes_quarantined"
+    assert response["primary_denial_code"] == "oanda_legacy_writes_quarantined"
+    assert any("condition_1" in item for item in response["secondary_denial_codes"])
+    assert response["network_attempted"] is False
 
 
 def test_oanda_firewall_allows_live_orders_when_enabled(monkeypatch):
@@ -107,7 +107,11 @@ def test_oanda_firewall_allows_live_orders_when_enabled(monkeypatch):
         user_context={"user_id": "99999", "role": "SUPER_USER", "role_profile": {"can_execute_live_trading": True}},
     )
 
-    assert response["ok"] is True
+    assert response["ok"] is False
+    assert response["error"] == "oanda_legacy_writes_quarantined"
+    assert response["primary_denial_code"] == "oanda_legacy_writes_quarantined"
+    assert response["secondary_denial_codes"] == []
+    assert response["network_attempted"] is False
 
 
 def test_headless_guarded_entry_execution_gate_no_arg():

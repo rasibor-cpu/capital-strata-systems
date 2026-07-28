@@ -112,8 +112,10 @@ def test_oanda_adapter_paper_mode_enforces_live_trading_firewall(mock_load_doten
 
     order_result = adapter.place_order(symbol="EUR_USD", units=10, side="BUY")
     assert order_result["ok"] is False
-    assert order_result["error"].startswith("live_firewall_denied:")
-    assert "condition_1" in order_result["error"]
+    assert order_result["error"] == "oanda_legacy_writes_quarantined"
+    assert order_result["primary_denial_code"] == "oanda_legacy_writes_quarantined"
+    assert any("condition_1" in item for item in order_result["secondary_denial_codes"])
+    assert order_result["network_attempted"] is False
 
 
 @mock.patch("backend.app.brokers.credential_loader.load_dotenv")

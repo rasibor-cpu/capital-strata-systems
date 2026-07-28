@@ -173,7 +173,8 @@ def test_phase153b_paper_mode_behavior_remains_unchanged() -> None:
         }
     )
 
-    assert payload["resolved_mode"] == "paper"
+    assert payload["resolved_mode"] == "DISABLED"
     assert payload["sections"]["broker"]["selected_broker"] == "NONE"
     assert payload["sections"]["broker"]["broker_mode"] == "paper"
     assert payload["sections"]["broker"]["broker_execution_status"] == "DISABLED"
+    assert payload["sections"]["runtime_status"]["execution_posture"] == "DISABLED"

@@ -178,7 +178,7 @@ def test_phase163b3a_dashboard_sections_share_same_snapshot_values() -> None:
     assert sections["broker"]["runtime_certification_snapshot"]["certification"] == "GREEN"
     assert sections["broker"]["certification"] == "GREEN"
     assert sections["coinbase_live_validation"]["broker_validation"] == snapshot["phase156b"]
-    assert sections["broker_operational_status"]["selected"]["operational_state"] == "OPERATIONAL"
+    assert sections["broker_operational_status"]["selected"]["operational_state"] == "READ_ONLY_READY"
     assert sections["runtime_certification_snapshot"]["telemetry"]["broker_api_calls_performed"] == 4
 
 
