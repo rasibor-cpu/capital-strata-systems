@@ -109,11 +109,14 @@ def test_fail_closed_unsupported_asset(runtime_service):
     assert runtime_service.persistence.trades.get_trade("unsupported-close-1")["status"] == "open"
 
 
-def test_strict_persistence_default_fail_closed(tmp_path):
+def test_strict_persistence_default_fail_closed(tmp_path, monkeypatch):
     """Default TradeRuntimeService must not close DB when canonical persist fails."""
     from backend.app.persistence.services.trade_runtime_service import TradeRuntimeService
     from backend.execution.canonical_trade_lifecycle import CanonicalTradeLifecycle
 
+    db_module.close_connection()
+    monkeypatch.setattr(db_module, "DEFAULT_DB_PATH", tmp_path / "strict_css_runtime.db")
+    monkeypatch.setattr(db_module, "_CONNECTION", None)
     repository = TradeOutcomeRepository(str(tmp_path / "outcomes.json"))
     service = TradeRuntimeService(canonical_lifecycle=CanonicalTradeLifecycle(repository))
     _seed_trade(service, "strict-close-1", "AAPL", "SIM", "paper", "EQUITIES")

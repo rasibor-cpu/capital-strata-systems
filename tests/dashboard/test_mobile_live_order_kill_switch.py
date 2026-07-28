@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import dashboard.mobile.mobile_app as mobile_app
+from backend.analytics.trade_outcome_repository import TradeOutcomeRepository
+from backend.execution.canonical_trade_lifecycle import CanonicalTradeLifecycle
 
 
 TRADER = {
@@ -66,6 +68,18 @@ def test_mobile_live_order_kill_switch_does_not_block_paper_tickets(
     
     from engine.execution.execution_gate import ExecutionGate
     monkeypatch.setattr(ExecutionGate, "evaluate_trade", mock_eval)
+    import backend.intelligence.trade_decision_orchestrator as tdo
+
+    outcome_repository = TradeOutcomeRepository(tmp_path / "trade_outcomes.json")
+    outcome_repository.create_storage()
+    trade_runtime_service = tdo.TradeRuntimeService
+    monkeypatch.setattr(
+        tdo,
+        "TradeRuntimeService",
+        lambda: trade_runtime_service(
+            canonical_lifecycle=CanonicalTradeLifecycle(outcome_repository)
+        ),
+    )
 
     import uuid
     result = mobile_app.execute_mobile_trade_ticket(

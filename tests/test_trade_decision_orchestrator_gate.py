@@ -6,6 +6,8 @@ from types import SimpleNamespace
 import pytest
 
 from backend.app.persistence import db
+from backend.analytics.trade_outcome_repository import TradeOutcomeRepository
+from backend.execution.canonical_trade_lifecycle import CanonicalTradeLifecycle
 
 
 @pytest.fixture()
@@ -33,10 +35,21 @@ class RecordingTradeGate:
 def test_trade_decision_orchestrator_sources_governance_from_canonical_gate(
     isolated_runtime_db,
     monkeypatch,
+    tmp_path,
 ):
     import backend.intelligence.trade_decision_orchestrator as tdo
 
     importlib.reload(tdo)
+    outcome_repository = TradeOutcomeRepository(tmp_path / "trade_outcomes.json")
+    outcome_repository.create_storage()
+    trade_runtime_service = tdo.TradeRuntimeService
+    monkeypatch.setattr(
+        tdo,
+        "TradeRuntimeService",
+        lambda: trade_runtime_service(
+            canonical_lifecycle=CanonicalTradeLifecycle(outcome_repository)
+        ),
+    )
     gate = RecordingTradeGate()
     monkeypatch.setattr(tdo, "CSSUnifiedTradeGate", lambda: gate)
 

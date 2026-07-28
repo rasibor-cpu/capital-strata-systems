@@ -6,6 +6,8 @@ from decimal import Decimal
 import pytest
 
 from backend.app.persistence import db
+from backend.analytics.trade_outcome_repository import TradeOutcomeRepository
+from backend.execution.canonical_trade_lifecycle import CanonicalTradeLifecycle
 
 
 @pytest.fixture()
@@ -161,12 +163,23 @@ def test_pnl_runtime_service_calls_repository_with_supported_arguments(
 def test_trade_decision_orchestrator_persists_pnl_snapshot(
     isolated_runtime_db,
     monkeypatch,
+    tmp_path,
 ):
     monkeypatch.setenv("CSS_TOTAL_CAPITAL", "50000")
 
     import backend.intelligence.trade_decision_orchestrator as tdo
 
     importlib.reload(tdo)
+    outcome_repository = TradeOutcomeRepository(tmp_path / "trade_outcomes.json")
+    outcome_repository.create_storage()
+    trade_runtime_service = tdo.TradeRuntimeService
+    monkeypatch.setattr(
+        tdo,
+        "TradeRuntimeService",
+        lambda: trade_runtime_service(
+            canonical_lifecycle=CanonicalTradeLifecycle(outcome_repository)
+        ),
+    )
     orchestrator = tdo.TradeDecisionOrchestrator()
 
     decision = orchestrator.evaluate_trade(

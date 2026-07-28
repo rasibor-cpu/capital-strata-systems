@@ -71,8 +71,8 @@ def _fast_policy(**gate_overrides: dict) -> dict:
     return policy
 
 
-def test_ready_path() -> None:
-    ev = ExecutiveBriefReadinessEvaluator(policy=_fast_policy())
+def test_ready_path(tmp_path: Path) -> None:
+    ev = ExecutiveBriefReadinessEvaluator(repo_root=tmp_path, policy=_fast_policy())
     result = ev.evaluate(evidence=_good_evidence())
     assert result["status"] == "READY"
     assert result["waiting_for"] == []

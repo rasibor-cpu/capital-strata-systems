@@ -20,9 +20,13 @@ mock_auth.await_login_ready_state.return_value = {
 sys.modules["dashboard.auth.css_sign_on"] = mock_auth
 sys.modules["builtins"].input = lambda prompt: "1"
 
-import scripts.css_live_dashboard as dashboard
 
-def test_manual_mode_default_pauses_for_input():
+@pytest.fixture(scope="module")
+def dashboard():
+    import scripts.css_live_dashboard as db
+    return db
+
+def test_manual_mode_default_pauses_for_input(dashboard):
     if "CSS_AUTO_CYCLE" in os.environ:
         del os.environ["CSS_AUTO_CYCLE"]
         
@@ -35,7 +39,7 @@ def test_manual_mode_default_pauses_for_input():
         mock_input.assert_called_once()
         mock_sleep.assert_not_called()
 
-def test_auto_cycle_mode_skips_input_and_sleeps():
+def test_auto_cycle_mode_skips_input_and_sleeps(dashboard):
     with patch.dict(os.environ, {"CSS_AUTO_CYCLE": "true", "CSS_CYCLE_SLEEP_SECONDS": "10"}):
         with patch("builtins.input") as mock_input, \
              patch("time.sleep") as mock_sleep:

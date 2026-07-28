@@ -22,7 +22,6 @@ mock_auth.await_login_ready_state.return_value = {
 sys.modules["dashboard.auth.css_sign_on"] = mock_auth
 sys.modules["builtins"].input = lambda prompt: "1"
 
-from scripts import css_live_dashboard
 from engine.information.alerts import AlertEventType
 
 

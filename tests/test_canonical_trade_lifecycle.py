@@ -78,7 +78,7 @@ def test_missing_timestamp_fails_closed(lifecycle):
 
 
 def test_unsupported_asset_class_fails_closed(lifecycle):
-    payload = _close_payload(asset_class="equity")
+    payload = _close_payload(asset_class="commodity")
 
     with pytest.raises(CanonicalTradeLifecycleError):
         lifecycle.persist_closed_trade_outcome(payload)

@@ -22,10 +22,14 @@ mock_auth.await_login_ready_state.return_value = {
 sys.modules["dashboard.auth.css_sign_on"] = mock_auth
 sys.modules["builtins"].input = lambda prompt: "1"
 
-import scripts.css_live_dashboard as dashboard
+
+@pytest.fixture(scope="module")
+def dashboard():
+    import scripts.css_live_dashboard as db
+    return db
 
 @pytest.fixture(autouse=True)
-def reset_state():
+def reset_state(dashboard):
     dashboard._CSS_SESSION_LOCK.clear()
     dashboard.RECONCILIATION_STATUS = "HEALTHY"
     dashboard.mtm_engine.positions.clear()
@@ -44,7 +48,7 @@ def reset_state():
         "pending_count": 0
     }
 
-def test_orphan_detection_and_two_cycle_confirmation():
+def test_orphan_detection_and_two_cycle_confirmation(dashboard):
     # 1. No mismatch initially
     with patch("backend.app.brokers.oanda_adapter.OandaAdapter.get_open_positions") as mock_get:
         mock_get.return_value = {"ok": True, "data": {"positions": []}}
@@ -85,7 +89,7 @@ def test_orphan_detection_and_two_cycle_confirmation():
         assert dashboard.is_session_locked()
         assert dashboard._CSS_SESSION_LOCK.get("reason") == "PENDING_AUTO_FLATTEN"
 
-def test_in_flight_order_suppression():
+def test_in_flight_order_suppression(dashboard):
     dashboard.register_in_flight_order("order-123")
     assert dashboard.has_in_flight_orders()
 
@@ -102,7 +106,7 @@ def test_in_flight_order_suppression():
     dashboard.clear_in_flight_order("order-123")
     assert not dashboard.has_in_flight_orders()
 
-def test_ghost_local_position_exclusion():
+def test_ghost_local_position_exclusion(dashboard):
     # Broker has 0, ledger has 1
     dashboard.mtm_engine.positions.append({
         "position_id": "pos-1", "asset_class": "FX", "symbol": "USD_JPY", "quantity": 100, "forced_exit": False
