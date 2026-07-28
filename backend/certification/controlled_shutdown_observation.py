@@ -100,6 +100,9 @@ def capture_controlled_shutdown_observation(
 
     env = dict(**{k: str(v) for k, v in __import__("os").environ.items()})
     env["PYTHONPATH"] = str(REPO_ROOT)
+    for key in list(env):
+        if key.upper().startswith("PYTEST"):
+            env.pop(key, None)
     svc = CSSServiceManager(
         "OV001_ShutdownProbe",
         probe_cmd,
@@ -107,10 +110,17 @@ def capture_controlled_shutdown_observation(
         env,
     )
     start_ok = bool(svc.start())
-    time.sleep(0.35)
     pid_before = svc.pid
-    port_bound_before = _port_in_use(port)
-    process_alive_before = _process_alive(pid_before)
+    port_bound_before = False
+    process_alive_before = False
+    ready_deadline = time.time() + 3.0
+    while time.time() < ready_deadline:
+        pid_before = svc.pid
+        process_alive_before = _process_alive(pid_before)
+        port_bound_before = _port_in_use(port)
+        if process_alive_before and port_bound_before:
+            break
+        time.sleep(0.1)
 
     stop_requested_at = _utc_now()
     svc.stop()

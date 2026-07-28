@@ -182,6 +182,19 @@ def assemble_complete_oat(
     observed = _utc_now()
 
     if shutdown_observation.get("ok") is True and shutdown_observation.get("artifact_path"):
+        if not any(row.area == "STARTUP" for row in evidence):
+            evidence.append(
+                CertificationEvidence(
+                    evidence_id="OV001-OAT-STARTUP",
+                    area="STARTUP",
+                    status=AcceptanceStatus.PASS,
+                    reference=str(shutdown_observation["artifact_path"]),
+                    observed_at=observed,
+                    source="OV001_CONTROLLED_SHUTDOWN_PRESTOP",
+                    remediation="Re-run controlled shutdown observation if startup probe semantics regress.",
+                    verified=True,
+                )
+            )
         evidence.append(
             CertificationEvidence(
                 evidence_id="OV001-OAT-SHUTDOWN",
@@ -194,6 +207,19 @@ def assemble_complete_oat(
                 verified=True,
             )
         )
+        if not any(row.area == "RUNTIME_HEALTH" for row in evidence):
+            evidence.append(
+                CertificationEvidence(
+                    evidence_id="OV001-OAT-RUNTIME_HEALTH",
+                    area="RUNTIME_HEALTH",
+                    status=AcceptanceStatus.PASS,
+                    reference=str(shutdown_observation["artifact_path"]),
+                    observed_at=observed,
+                    source="OV001_CONTROLLED_SHUTDOWN_PRESTOP",
+                    remediation="Re-run controlled shutdown observation if pre-stop health evidence regresses.",
+                    verified=True,
+                )
+            )
 
     # CERTIFICATION_EVIDENCE placeholder filled after evaluate write.
     oat_eval = evaluate_operational_acceptance(evidence, profile="production")

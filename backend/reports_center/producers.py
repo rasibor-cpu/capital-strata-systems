@@ -613,8 +613,8 @@ def _load_pnl_events(repo_root: Path, mode: str = "TEST") -> list[dict[str, Any]
     else:
         rel = os.getenv("REA_PNL_LEDGER_TEST_PATH", "reporting_store/pnl_ledger_test.jsonl")
     path = Path(rel)
-    if not path.is_file():
-        path = repo_root / rel
+    if not path.is_absolute():
+        path = repo_root / path
     if not path.is_file():
         alt = repo_root / "reporting_store" / "pnl_ledger.jsonl"
         path = alt if alt.is_file() else path
