@@ -137,9 +137,26 @@ def test_web_pages_render_within_html_budget() -> None:
 
 
 def test_mobile_pages_render_within_html_budget(monkeypatch, tmp_path) -> None:
+    from backend.runtime import runtime_telemetry
+
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(mobile_app, "MOBILE_EVENTS_FILE", tmp_path / "events.jsonl")
     monkeypatch.setattr(mobile_app, "MOBILE_CONTROL_FILE", tmp_path / "controls.json")
     monkeypatch.setattr(mobile_app, "load_local_env", lambda: None)
+    monkeypatch.setattr(runtime_telemetry, "ENGINE_SUPERVISOR_FILE", tmp_path / "runtime_supervisor.json")
+    monkeypatch.setattr(
+        runtime_telemetry,
+        "CSS_SUPERVISOR_FILE",
+        tmp_path / "runtime" / "supervisor" / "css_runtime_supervisor_state.json",
+    )
+    monkeypatch.setattr(
+        runtime_telemetry,
+        "SESSION_CANDIDATES",
+        (
+            tmp_path / "artifacts" / "css_session_state_pcnrass.json",
+            tmp_path / "artifacts" / "css_session_recovery.json",
+        ),
+    )
     
     mobile_app.save_mobile_controls({"mobile_trading_mode": "MOBILE_LIVE_TRADING_ARMED"})
     user_ctx = {
