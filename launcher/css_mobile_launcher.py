@@ -4913,12 +4913,6 @@ async def get_manifest():
         short_name="CSS",
         shell_cache=SPA_SHELL_CACHE,
     )
-    # AR-025: launcher is non-canonical — production install must use /manifest.webmanifest
-    payload["css_canonical_install"] = False
-    payload["description"] = (
-        "CSS Mobile Launcher — local operator shell only; not the canonical production PWA. "
-        "See docs/operations/CSS_PWA_CANONICAL_INSTALL.md."
-    )
     return JSONResponse(
         payload,
         media_type="application/manifest+json",

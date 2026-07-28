@@ -476,42 +476,44 @@ async def margin_api(request: Request):
 
     user_ctx = session["user_ctx"]
     
-    # Attempt to resolve broker from canonical JSON artifacts
+    # Resolve the broker from the live dashboard payload first so unavailable
+    # current state cannot be overridden by stale local artifacts.
     broker_raw = ""
-    for filename in [
-        "css_account_state_pcnrass.json",
-        "css_account_state_pcnrass_BACKUP.json",
-        "css_session_state_pcnrass.json",
-        "css_session_recovery.json"
-    ]:
-        data = _safe_load_artifact(filename)
-        if data:
-            keys = ["broker", "broker_id", "broker_name", "selected_broker", "active_broker", "execution_broker"]
-            for k in keys:
-                if k in data and data[k]:
-                    broker_raw = str(data[k]).strip()
-                    break
-            if not broker_raw and isinstance(data.get("broker_summary"), dict):
-                for k in keys:
-                    if k in data["broker_summary"] and data["broker_summary"][k]:
-                        broker_raw = str(data["broker_summary"][k]).strip()
-                        break
-            if broker_raw:
-                break
-    
-    # Fallback to existing environment/config logic
     try:
         payload = _mobile_dashboard_payload(user_ctx, session)
         def _m(v):
             return v if isinstance(v, dict) else {}
         broker_summary = _m(payload.get("broker_summary"))
         mode = str(broker_summary.get("broker_mode", "SIMULATED")).upper()
-        if not broker_raw:
-            broker_raw = str(broker_summary.get("selected_broker", "NONE")).strip()
+        broker_raw = str(broker_summary.get("selected_broker", "")).strip()
     except Exception:
         mode = "SIMULATED"
-        if not broker_raw:
-            broker_raw = "NONE"
+
+    # Fallback to canonical JSON artifacts only when the current payload does
+    # not provide an explicit broker value.
+    if not broker_raw:
+        for filename in [
+            "css_account_state_pcnrass.json",
+            "css_account_state_pcnrass_BACKUP.json",
+            "css_session_state_pcnrass.json",
+            "css_session_recovery.json"
+        ]:
+            data = _safe_load_artifact(filename)
+            if data:
+                keys = ["broker", "broker_id", "broker_name", "selected_broker", "active_broker", "execution_broker"]
+                for k in keys:
+                    if k in data and data[k]:
+                        broker_raw = str(data[k]).strip()
+                        break
+                if not broker_raw and isinstance(data.get("broker_summary"), dict):
+                    for k in keys:
+                        if k in data["broker_summary"] and data["broker_summary"][k]:
+                            broker_raw = str(data["broker_summary"][k]).strip()
+                            break
+                if broker_raw:
+                    break
+    if not broker_raw:
+        broker_raw = "NONE"
 
     # Normalize broker value safely
     broker_raw_upper = broker_raw.upper()
@@ -1740,7 +1742,7 @@ def _dashboard_page(user_ctx: Dict[str, Any], session: Dict[str, Any]) -> str:
           {_session_command_centre_panel(user_ctx, session, frontend_payload=frontend_payload)}
           {_live_micro_pilot_panel(user_ctx, session, frontend_payload=frontend_payload)}
           {_live_readiness_certification_panel_from_payload(dashboard_payload, frontend_payload=frontend_payload)}
-          {_command_center_panel(user_ctx)}
+          {_command_center_panel(user_ctx, system_status=status)}
           {_recent_tickets_panel()}
 
           <section class="terminal-panel" aria-label="Dashboard output">
@@ -2369,14 +2371,22 @@ def _account_summary_cards(dashboard_payload: Dict[str, Any]) -> str:
     """
 
 
-def _command_center_panel(user_ctx: Dict[str, Any]) -> str:
-    from backend.options.options_income_runtime_service import build_options_income_mobile_card
+def _command_center_panel(
+    user_ctx: Dict[str, Any],
+    *,
+    system_status: Dict[str, Any] | None = None,
+) -> str:
+    from backend.options.options_income_runtime_service import (
+        OptionsIncomeRuntimeContext,
+        build_options_income_mobile_card,
+    )
     from backend.options.options_income_surface_link import options_income_detail_link
     from backend.runtime.runtime_telemetry import telemetry_summary_for_ui
 
-    oi_link = options_income_detail_link()
+    status = _mapping(system_status)
+    oi_link = _mapping(status.get("options_income_link")) or options_income_detail_link()
     try:
-        oi_card = build_options_income_mobile_card()
+        oi_card = build_options_income_mobile_card(OptionsIncomeRuntimeContext(persist=False))
     except Exception:
         oi_card = {
             "options_income_status": "UNAVAILABLE",
@@ -2384,7 +2394,7 @@ def _command_center_panel(user_ctx: Dict[str, Any]) -> str:
             "certification": "UNAVAILABLE",
             "execution_blocked": True,
         }
-    tele = telemetry_summary_for_ui()
+    tele = _mapping(status.get("telemetry_summary")) or telemetry_summary_for_ui()
     cards = [
         ("Reports", "Institutional report catalogue, create, library, and print.", "/reports"),
         ("Positions", "Open position inventory and asset counts.", "/positions"),

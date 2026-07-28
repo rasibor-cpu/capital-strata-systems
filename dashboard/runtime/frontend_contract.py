@@ -207,11 +207,20 @@ def _canonical_resolved_mode(dashboard_payload: Mapping[str, Any] | None = None)
     """Phase 177F — never default to paper; use Runtime Mode Resolver (except explicit mocks)."""
     payload = _mapping(dashboard_payload)
     session = _mapping(payload.get("session"))
+    explicit_runtime = _mapping(payload.get("runtime_status"))
+    if explicit_runtime:
+        return str(
+            explicit_runtime.get("effective_mode")
+            or explicit_runtime.get("runtime_mode")
+            or "DISABLED"
+        )
     # MC-001 / explicit demo payloads remain isolated and labeled mock.
     if payload.get("mock_data") or session.get("mock_data") or payload.get("mission_control_mock_data"):
         explicit = payload.get("resolved_mode") or session.get("runtime_mode")
         if explicit not in (None, ""):
             return str(explicit).strip()
+    if "runtime_status" not in payload:
+        return "DISABLED"
     try:
         from backend.runtime.platform_status import build_platform_status
 
@@ -223,6 +232,9 @@ def _canonical_resolved_mode(dashboard_payload: Mapping[str, Any] | None = None)
 def runtime_status(dashboard_payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
     payload = _mapping(dashboard_payload)
     session = _mapping(payload.get("session"))
+    explicit = _mapping(payload.get("runtime_status"))
+    if explicit:
+        return _json_safe(explicit)
     if payload.get("mock_data") or session.get("mock_data") or payload.get("mission_control_mock_data"):
         return {
             "runtime_mode": str(payload.get("resolved_mode") or "paper"),
@@ -237,6 +249,35 @@ def runtime_status(dashboard_payload: Mapping[str, Any] | None = None) -> dict[s
             "system_mode_deprecated": True,
             "source": "MOCK",
             "provenance": {"runtime_mode": "MOCK"},
+            "generated_at": payload.get("generated_at"),
+        }
+    if "runtime_status" not in payload:
+        return {
+            "requested_mode": str(payload.get("resolved_mode") or session.get("runtime_mode") or "UNSET").upper(),
+            "observed_mode": "UNAVAILABLE",
+            "effective_mode": "DISABLED",
+            "runtime_mode": "DISABLED",
+            "runtime_mode_reason": "runtime_status_payload_unavailable",
+            "fail_closed": True,
+            "execution_authority": False,
+            "execution_authority_label": "BLOCKED",
+            "execution_state": "BLOCKED",
+            "execution_posture": "DISABLED",
+            "order_submission": "BLOCKED",
+            "engine_mode": session.get("engine_mode") or "SAFE",
+            "broker_mode": "NONE",
+            "broker_posture": "DISABLED",
+            "mobile_access_mode": "READ_ONLY",
+            "mobile_trading_mode": "MOBILE_READ_ONLY",
+            "system_live": False,
+            "system_mode": "DISABLED",
+            "system_mode_deprecated": True,
+            "source": "RUNTIME_MODE_RESOLVER",
+            "source_freshness": "UNAVAILABLE",
+            "source_confidence": "LOW",
+            "source_disagreement": False,
+            "degraded_reason": "runtime_status_payload_unavailable",
+            "provenance": {"runtime_mode": "FAIL_CLOSED_DEFAULT"},
             "generated_at": payload.get("generated_at"),
         }
     try:
@@ -256,6 +297,9 @@ def runtime_status(dashboard_payload: Mapping[str, Any] | None = None) -> dict[s
 def runtime_telemetry(dashboard_payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
     payload = _mapping(dashboard_payload)
     session = _mapping(payload.get("session"))
+    explicit = _mapping(payload.get("runtime_telemetry"))
+    if explicit:
+        return _json_safe(explicit)
     if payload.get("mock_data") or session.get("mock_data") or payload.get("mission_control_mock_data"):
         cycle = session.get("cycle_number")
         return {
@@ -265,6 +309,15 @@ def runtime_telemetry(dashboard_payload: Mapping[str, Any] | None = None) -> dic
             "managed_service_restart_count": "UNKNOWN",
             "source": "MOCK",
             "provenance": {"session_cycle": "MOCK"},
+        }
+    if "runtime_telemetry" not in payload:
+        return {
+            "display_cycle": "UNKNOWN",
+            "session_cycle": session.get("cycle_number", "UNKNOWN"),
+            "supervisor_cycles_completed": "UNKNOWN",
+            "managed_service_restart_count": "UNKNOWN",
+            "source": "FAIL_CLOSED_DEFAULT",
+            "provenance": {"runtime_telemetry": "payload_unavailable"},
         }
     try:
         from backend.runtime.runtime_telemetry import telemetry_summary_for_ui
@@ -283,7 +336,33 @@ def runtime_telemetry(dashboard_payload: Mapping[str, Any] | None = None) -> dic
 
 def options_income(dashboard_payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Phase 177D/177F — concise mobile/frontend Options Income card (advisory only)."""
-    _ = dashboard_payload
+    payload = _mapping(dashboard_payload)
+    explicit = _mapping(payload.get("options_income"))
+    if explicit:
+        card = dict(explicit)
+        card["section"] = "options_income"
+        card["advisory_only"] = True
+        card["execution_blocked"] = True
+        card["live_trading_enabled"] = False
+        card.setdefault("detail_route", "/mission-control/options-income")
+        card["same_origin_api_expected"] = False
+        return _json_safe(card)
+
+    if "options_income" not in payload:
+        return {
+            "section": "options_income",
+            "options_income_status": "UNAVAILABLE",
+            "opportunity_count": 0,
+            "certification": "NOT_EVALUATED",
+            "failure_reason": "options_income_payload_unavailable",
+            "advisory_only": True,
+            "execution_blocked": True,
+            "live_trading_enabled": False,
+            "detail_route": "/mission-control/options-income",
+            "same_origin_api_expected": False,
+            "provenance": "FRONTEND_CONTRACT",
+        }
+
     try:
         from backend.options.options_income_runtime_service import build_options_income_mobile_card
         from backend.options.options_income_surface_link import options_income_detail_link
@@ -1558,10 +1637,32 @@ def broker_credential_diagnostics(dashboard_payload: Mapping[str, Any]) -> dict[
 
 def broker_operational_status(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     broker_payload = _mapping(dashboard_payload.get("broker_summary"))
+    selected_broker = str(broker_payload.get("selected_broker", "UNKNOWN") or "UNKNOWN").upper()
+    if selected_broker not in {"COINBASE", "OANDA"} and not _mapping(dashboard_payload.get("coinbase_live_validation")) and not _mapping(dashboard_payload.get("oanda_live_validation")):
+        selected = build_broker_operational_status(
+            {
+                "broker": selected_broker,
+                "broker_type": "UNKNOWN",
+                "mode": broker_payload.get("broker_mode", "LIVE_READ_ONLY"),
+                "account_sync_status": "PENDING",
+                "market_data_status": "PENDING",
+                "balance_status": "NOT_AVAILABLE",
+                "margin_status": "READ_ONLY_PENDING_ACCOUNT",
+                "operational_state": "PENDING",
+                "failure_reasons": [{"reason": "BROKER_UNAVAILABLE"}],
+            }
+        )
+        return {
+            "selected_broker": selected_broker,
+            "selected": selected,
+            "coinbase": {},
+            "oanda": {},
+            "advisory_only": True,
+            "execution_allowed": False,
+        }
     coinbase = coinbase_live_validation(dashboard_payload)
     oanda = oanda_live_validation(dashboard_payload)
 
-    selected_broker = str(broker_payload.get("selected_broker", "UNKNOWN") or "UNKNOWN").upper()
     selected: dict[str, Any]
     if selected_broker == "OANDA":
         selected = dict(oanda.get("broker_operational_status", {}))
@@ -1581,6 +1682,18 @@ def broker_operational_status(dashboard_payload: Mapping[str, Any]) -> dict[str,
 def broker_parity(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     broker_payload = _mapping(dashboard_payload.get("broker_summary"))
     explicit_payload = _mapping(dashboard_payload.get("broker_parity"))
+    selected_broker = str(broker_payload.get("selected_broker", "UNKNOWN") or "UNKNOWN").upper()
+    if not explicit_payload and selected_broker not in {"COINBASE", "OANDA"}:
+        return {
+            "section": "broker_parity",
+            "parity_status": "NOT_APPLICABLE",
+            "authority_parity": True,
+            "fail_closed_parity": True,
+            "mismatched_fields": [],
+            "scenario_results": {},
+            "execution_allowed": False,
+            "advisory_only": True,
+        }
     report = dict(explicit_payload) if explicit_payload else broker_parity_payload(broker_payload)
     report["execution_allowed"] = False
     report["advisory_only"] = True
