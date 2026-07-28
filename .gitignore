@@ -94,6 +94,7 @@ backend/runtime/*
 !backend/runtime/canonical_runtime_authority.py
 !backend/runtime/runtime_mode.py
 !backend/runtime/platform_status.py
+!backend/runtime/operational_compatibility_validator.py
 !backend/runtime/runtime_telemetry.py
 reporting_store/
 out/
