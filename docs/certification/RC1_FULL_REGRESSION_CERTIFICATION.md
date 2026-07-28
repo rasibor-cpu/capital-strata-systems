@@ -82,6 +82,14 @@ Bounded regression suites for dashboard, Mission Control, startup, and risk surf
 
 Mobile rendering performance was repaired through read-only reuse of existing status payloads and non-persistent options-income rendering context. The repair avoids unnecessary artifact writes during page rendering.
 
+## Phase 183B Performance Stability Evidence
+
+Phase 183B recertified the committed mobile dashboard performance contract by isolating the performance-budget test's runtime evidence paths to temporary test storage. The underlying production mobile render path and the 150 ms budget were unchanged.
+
+Post-repair 30-run warm dashboard render qualification: `30 passed`, `0 failed`, minimum `8.288 ms`, median `9.247 ms`, P95 `11.096 ms`, maximum `11.106 ms`, HTML size `32691 bytes`.
+
+The earlier `3272 passed` full regression certification remains the baseline certification evidence and is now followed by committed-state performance recertification.
+
 ## Known Exclusions And Held Files
 
 Excluded local-only or generated files include local agent configuration, run logs, broker diagnostic outputs, bootstrap outputs, search results, and machine-specific run output.
@@ -111,3 +119,5 @@ Commit 4 - Phase 170 add operational compatibility validator: `9df1f38`
 Commit 5 - RC1 full regression certification evidence: `ba44bab`
 
 Commit 6 - Phase 180 complete certification readiness reconciliation: `52901a928d19261fcb122f64361091ca2dedc5d1`
+
+Commit 7 - Phase 183 stabilize mobile dashboard performance certification: `d690b653701ffc03b0f89a087fa2f2e3a514175a`
