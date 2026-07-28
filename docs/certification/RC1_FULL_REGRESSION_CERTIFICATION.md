@@ -108,4 +108,6 @@ Commit 3 - Phase 179/180 restore deterministic regression and certification isol
 
 Commit 4 - Phase 170 add operational compatibility validator: `9df1f38`
 
-Commit 5 - RC1 full regression certification evidence: `TBD_COMMIT_5`
+Commit 5 - RC1 full regression certification evidence: `ba44bab`
+
+Commit 6 - Phase 180 complete certification readiness reconciliation: `52901a928d19261fcb122f64361091ca2dedc5d1`
