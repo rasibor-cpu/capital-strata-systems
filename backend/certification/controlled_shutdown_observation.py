@@ -8,9 +8,11 @@ Never fabricates shutdown-complete while a process remains active.
 from __future__ import annotations
 
 import json
+import queue
 import socket
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -56,6 +58,30 @@ def _process_alive(pid: int | None) -> bool:
         return True
     except Exception:
         return False
+
+
+def _start_probe_readiness_monitor(
+    stdout: Any,
+    *,
+    ready_token: str = "OV001_PROBE_READY",
+) -> tuple[threading.Event, queue.Queue[str]]:
+    ready = threading.Event()
+    lines: queue.Queue[str] = queue.Queue()
+
+    def _drain_stdout() -> None:
+        try:
+            for line in iter(stdout.readline, ""):
+                text = str(line or "").strip()
+                if text:
+                    lines.put(text)
+                if ready_token in text:
+                    ready.set()
+                    break
+        except Exception:
+            return
+
+    threading.Thread(target=_drain_stdout, daemon=True).start()
+    return ready, lines
 
 
 def capture_controlled_shutdown_observation(
@@ -111,16 +137,31 @@ def capture_controlled_shutdown_observation(
     )
     start_ok = bool(svc.start())
     pid_before = svc.pid
+    readiness_event: threading.Event | None = None
+    readiness_lines: queue.Queue[str] | None = None
+    if start_ok and svc.process and svc.process.stdout:
+        readiness_event, readiness_lines = _start_probe_readiness_monitor(
+            svc.process.stdout,
+        )
     port_bound_before = False
     process_alive_before = False
+    readiness_observed = False
     ready_deadline = time.time() + 3.0
     while time.time() < ready_deadline:
         pid_before = svc.pid
         process_alive_before = _process_alive(pid_before)
         port_bound_before = _port_in_use(port)
-        if process_alive_before and port_bound_before:
+        readiness_observed = bool(readiness_event and readiness_event.is_set())
+        if process_alive_before and port_bound_before and readiness_observed:
             break
         time.sleep(0.1)
+    readiness_lines_seen: list[str] = []
+    if readiness_lines is not None:
+        while True:
+            try:
+                readiness_lines_seen.append(readiness_lines.get_nowait())
+            except queue.Empty:
+                break
 
     stop_requested_at = _utc_now()
     svc.stop()
@@ -148,6 +189,7 @@ def capture_controlled_shutdown_observation(
         and supervisor_started
         and process_alive_before
         and port_bound_before
+        and readiness_observed
         and not process_alive_after
         and not port_in_use_after
         and final_status == "STOPPED"
@@ -173,6 +215,9 @@ def capture_controlled_shutdown_observation(
         "pid_before": pid_before,
         "pid_after_cleared": svc.pid is None,
         "process_alive_before": process_alive_before,
+        "readiness_observed_before_stop": readiness_observed,
+        "readiness_signal": "OV001_PROBE_READY",
+        "readiness_lines": readiness_lines_seen[-5:],
         "process_alive_after": process_alive_after,
         "port_bound_before": port_bound_before,
         "port_in_use_after": port_in_use_after,
@@ -196,6 +241,7 @@ def capture_controlled_shutdown_observation(
                 ("probe_start_failed", not start_ok),
                 ("supervisor_not_started", not supervisor_started),
                 ("process_not_alive_before_stop", not process_alive_before),
+                ("readiness_not_observed_before_stop", not readiness_observed),
                 ("port_not_bound_before_stop", not port_bound_before),
                 ("process_still_alive_after_stop", process_alive_after),
                 ("port_still_in_use_after_stop", port_in_use_after),
