@@ -168,6 +168,17 @@ MANUAL_REMEDIATION_BACKUP/
 PHONE_RECOVERY_BACKUP/
 REPO_AUDIT_ARTIFACTS/
 
+# --- Local agent and diagnostic artifacts ---
+/.claude/
+/CLAUDE.md
+/automated_run_log.txt
+/manual_run_log.txt
+/run_output.txt
+/broker_bootstrap_*.txt
+/broker_diagnostics.txt
+/broker_search_results.txt
+/broker_diag_runner.py
+
 CSS_*_DIAGNOSTIC.txt
 CSS_*_SEARCH.txt
 CSS_*_SUMMARY.txt
