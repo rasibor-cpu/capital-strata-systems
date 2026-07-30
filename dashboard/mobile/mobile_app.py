@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from backend.governance.css_unified_trade_gate import ENGINE_MODE_PROBABILITY_THRESHOLD
 from backend.runtime.environment_bootstrap import bootstrap_broker_environment
 
 ENVIRONMENT_BOOTSTRAP = bootstrap_broker_environment(
@@ -3710,17 +3711,28 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
     }
     
     if not is_live_request:
+        # Phase 183J: paper fallback probability must clear the selected engine
+        # mode's documented CSSUnifiedTradeGate threshold (probability < threshold
+        # rejects). Never lower production thresholds; never invent a sub-threshold
+        # constant such as 0.51 (below every ENGINE_MODE_PROBABILITY_THRESHOLD).
+        engine_mode = str(ticket.get("engine_mode") or "SAFE").strip().upper()
+        paper_probability = float(
+            ENGINE_MODE_PROBABILITY_THRESHOLD.get(engine_mode, 0.58)
+        )
         market_data.update({
             "expected_value": 1.0,
+            "cost": 0.0,
             "signal_score": 1.0,
-            "probability": 0.51,
-            "confidence": 0.51,
+            "probability": paper_probability,
+            "confidence": paper_probability,
             "validation_source": "MOBILE_PAPER_TEST_DEFAULTS"
         })
         _record_mobile_event({
             "event_type": "mobile_expected_value_fallback",
             "reason": "MOBILE_PAPER_EXPECTED_VALUE_FALLBACK",
-            "validation_source": "MOBILE_PAPER_TEST_DEFAULTS"
+            "validation_source": "MOBILE_PAPER_TEST_DEFAULTS",
+            "engine_mode": engine_mode,
+            "paper_probability": paper_probability,
         })
     
     orchestrator_decision = orchestrator.evaluate_trade(market_data)
@@ -3736,6 +3748,27 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
         return result
 
     exec_gate = ExecutionGate()
+    # Live remains fail-closed on missing anti-bleed inputs (None).
+    # Paper certification path supplies finite microstructure defaults so
+    # ExecutionGate can evaluate without weakening live thresholds.
+    if is_live_request:
+        gate_regime_persistence = None
+        gate_volatility_state = None
+        gate_regime_state = None
+        gate_expected_move_bps = None
+        gate_fee_bps = None
+        gate_spread_bps = None
+        gate_slippage_bps = None
+    else:
+        gate_regime_persistence = 0.5
+        gate_volatility_state = "MEDIUM"
+        gate_regime_state = "NORMAL"
+        # Net edge must clear AntiBleedGuard minimum_required_net_edge_bps (25).
+        gate_expected_move_bps = 50.0
+        gate_fee_bps = 1.0
+        gate_spread_bps = 1.0
+        gate_slippage_bps = 1.0
+
     gate_decision = exec_gate.evaluate_trade(
         instrument=ticket["symbol"],
         side=ticket["side"],
@@ -3743,14 +3776,14 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
         stop_distance_pct=0.02,
         equity=equity,
         equity_peak=equity_peak,
-        regime_persistence=None,
+        regime_persistence=gate_regime_persistence,
         policy="core",
-        volatility_state=None,
-        regime_state=None,
-        expected_move_bps=None,
-        fee_bps=None,
-        spread_bps=None,
-        slippage_bps=None,
+        volatility_state=gate_volatility_state,
+        regime_state=gate_regime_state,
+        expected_move_bps=gate_expected_move_bps,
+        fee_bps=gate_fee_bps,
+        spread_bps=gate_spread_bps,
+        slippage_bps=gate_slippage_bps,
         margin_snapshot=margin_snapshot,
         broker_mode="live" if is_live_request else "paper"
     )

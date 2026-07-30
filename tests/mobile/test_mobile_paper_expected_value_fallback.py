@@ -43,13 +43,28 @@ def test_paper_mobile_trade_receives_expected_value_fallback():
         assert result["status"] == "MOBILE_ORDER_APPROVED"
         assert result["broker_response"]["live_order_sent"] is False
         
-        # Verify orchestrator was called with the fallback expected value
+        # Verify orchestrator was called with gate-aligned paper defaults (SAFE → 0.65)
+        from backend.governance.css_unified_trade_gate import ENGINE_MODE_PROBABILITY_THRESHOLD
+
         call_kwargs = mock_orch_inst.evaluate_trade.call_args[0][0]
+        safe_threshold = float(ENGINE_MODE_PROBABILITY_THRESHOLD["SAFE"])
         assert call_kwargs["expected_value"] == 1.0
+        assert call_kwargs["cost"] == 0.0
         assert call_kwargs["signal_score"] == 1.0
-        assert call_kwargs["probability"] == 0.51
-        assert call_kwargs["confidence"] == 0.51
+        assert call_kwargs["probability"] == safe_threshold
+        assert call_kwargs["confidence"] == safe_threshold
         assert call_kwargs["validation_source"] == "MOBILE_PAPER_TEST_DEFAULTS"
+
+        # Phase 183J: paper path supplies finite ExecutionGate anti-bleed inputs
+        gate_kwargs = mock_exec_gate_inst.evaluate_trade.call_args.kwargs
+        assert gate_kwargs["expected_move_bps"] == 50.0
+        assert gate_kwargs["fee_bps"] == 1.0
+        assert gate_kwargs["spread_bps"] == 1.0
+        assert gate_kwargs["slippage_bps"] == 1.0
+        assert gate_kwargs["regime_persistence"] == 0.5
+        assert gate_kwargs["volatility_state"] == "MEDIUM"
+        assert gate_kwargs["regime_state"] == "NORMAL"
+        assert gate_kwargs["broker_mode"] == "paper"
 
 def test_live_mobile_trade_does_not_receive_expected_value_fallback():
     # Arrange
