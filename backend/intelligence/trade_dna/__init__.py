@@ -1,22 +1,42 @@
-"""DIP-002 Trade DNA Foundation — immutable evidence schema (facts only).
-
-Does not capture live executions or modify ExecutionGate / trading behaviour.
-"""
+"""DIP-002/003 Trade DNA Foundation — schema, close events, and capture."""
 
 from __future__ import annotations
 
 from backend.intelligence.trade_dna.advisory import AdvisoryConclusion, build_advisory_conclusion
+from backend.intelligence.trade_dna.capture import (
+    TradeDNACaptureService,
+    capture_completed_trade,
+    deterministic_closed_dna_id,
+    project_trade_dna_from_close_event,
+)
+from backend.intelligence.trade_dna.close_event import (
+    CLOSE_EVENT_VERSION,
+    CanonicalCloseEvent,
+    CanonicalCloseEventError,
+    build_canonical_close_event,
+    build_canonical_close_event_from_trade_record,
+    deserialize_canonical_close_event,
+    serialize_canonical_close_event,
+    validate_canonical_close_event,
+)
 from backend.intelligence.trade_dna.constants import (
     ADVISORY_VERSION,
     ANALYSIS_VERSION,
     EVIDENCE_VERSION,
+    FIELD_OBSERVED_UNKNOWN,
+    FIELD_UNAVAILABLE,
     LAYER_ADVISORY,
     LAYER_DERIVED,
     LAYER_FACTS,
+    OUTBOX_COMPLETE,
+    OUTBOX_CONFLICT,
+    OUTBOX_DNA_COMMITTED,
+    OUTBOX_PENDING_DNA,
     SCHEMA_VERSION,
     SUPPORTED_SCHEMA_VERSIONS,
 )
 from backend.intelligence.trade_dna.derived import DerivedTradeMetrics, assert_not_embedded_in_facts
+from backend.intelligence.trade_dna.durable_store import DurableCaptureStore
 from backend.intelligence.trade_dna.evidence_graph import (
     EvidenceGraphError,
     EvidenceGraphNode,
@@ -49,16 +69,26 @@ from backend.intelligence.trade_dna.validation import TradeDNAValidationError, v
 __all__ = [
     "ADVISORY_VERSION",
     "ANALYSIS_VERSION",
+    "CLOSE_EVENT_VERSION",
     "EVIDENCE_VERSION",
+    "FIELD_OBSERVED_UNKNOWN",
+    "FIELD_UNAVAILABLE",
     "LAYER_ADVISORY",
     "LAYER_DERIVED",
     "LAYER_FACTS",
+    "OUTBOX_COMPLETE",
+    "OUTBOX_CONFLICT",
+    "OUTBOX_DNA_COMMITTED",
+    "OUTBOX_PENDING_DNA",
     "SCHEMA_VERSION",
     "SUPPORTED_SCHEMA_VERSIONS",
     "AdvisoryConclusion",
     "AppendOnlyDNAStore",
     "BrokerFacts",
+    "CanonicalCloseEvent",
+    "CanonicalCloseEventError",
     "DerivedTradeMetrics",
+    "DurableCaptureStore",
     "EvidenceCustodyFacts",
     "EvidenceGraphError",
     "EvidenceGraphNode",
@@ -73,17 +103,26 @@ __all__ = [
     "RiskFacts",
     "StrategyFacts",
     "TimingFacts",
+    "TradeDNACaptureService",
     "TradeDNARecord",
     "TradeDNAValidationError",
     "TradeIdentityFacts",
     "VolatilityFacts",
     "assert_not_embedded_in_facts",
     "build_advisory_conclusion",
+    "build_canonical_close_event",
+    "build_canonical_close_event_from_trade_record",
     "build_evidence_graph",
+    "capture_completed_trade",
     "compute_content_hash",
+    "deserialize_canonical_close_event",
     "deserialize_trade_dna",
+    "deterministic_closed_dna_id",
+    "project_trade_dna_from_close_event",
+    "serialize_canonical_close_event",
     "serialize_trade_dna",
     "trade_dna_from_dict",
+    "validate_canonical_close_event",
     "validate_trade_dna",
     "verify_content_hash",
 ]

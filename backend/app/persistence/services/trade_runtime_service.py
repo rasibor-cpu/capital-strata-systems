@@ -153,6 +153,20 @@ class TradeRuntimeService:
             if self._strict_canonical_persistence:
                 raise
 
+        # DIP-003: emit canonical close + Trade DNA capture (advisory analytics foundation).
+        # Does not alter gate/sizing/broker behaviour; failures are logged for reconciler recovery.
+        try:
+            from backend.intelligence.trade_dna.capture import capture_completed_trade
+
+            capture_completed_trade(
+                trade_record,
+                exit_price=exit_price,
+                realized_pnl=realized_pnl,
+                closed_at=closed_at,
+            )
+        except Exception as exc:
+            logging.getLogger(__name__).error("DIP-003 Trade DNA capture failed for %s: %s", trade_id, exc)
+
         self._append_legacy_trade_outcome(
             trade_id=trade_id,
             trade_record=trade_record,

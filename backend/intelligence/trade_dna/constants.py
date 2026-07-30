@@ -23,3 +23,13 @@ COMPATIBLE_SCHEMA_PREFIX = "css.trade_dna.v"
 LAYER_FACTS = "facts"
 LAYER_DERIVED = "derived"
 LAYER_ADVISORY = "advisory"
+
+# Context availability semantics (never treat bare UNKNOWN as observed truth).
+FIELD_UNAVAILABLE = "UNAVAILABLE"
+FIELD_OBSERVED_UNKNOWN = "OBSERVED_UNKNOWN"
+
+# Capture outbox statuses (durable reconciliation markers).
+OUTBOX_PENDING_DNA = "PENDING_DNA"
+OUTBOX_DNA_COMMITTED = "DNA_COMMITTED"
+OUTBOX_COMPLETE = "COMPLETE"
+OUTBOX_CONFLICT = "CONFLICT"
