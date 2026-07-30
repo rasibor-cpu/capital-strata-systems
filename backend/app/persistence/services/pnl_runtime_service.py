@@ -42,6 +42,7 @@ class PnlRuntimeService:
         losing_positions: int = 0,
         snapshot_reason: str | None = None,
         payload_json: str | None = None,
+        equity_peak: Decimal | None = None,
     ) -> None:
         del buying_power, payload_json
 
@@ -57,6 +58,9 @@ class PnlRuntimeService:
             else cash_balance
         )
 
+        # RR-001: when peak is omitted, default to equity (never silently drop peak).
+        resolved_equity_peak = equity if equity_peak is None else equity_peak
+
         self.persistence.pnl_snapshots.create_snapshot(
             session_id=session_id,
             account_id=resolved_account_id,
@@ -65,6 +69,7 @@ class PnlRuntimeService:
             realized_pnl=realized_pnl,
             unrealized_pnl=unrealized_pnl,
             equity=equity,
+            equity_peak=resolved_equity_peak,
             available_cash=resolved_available_cash,
             open_positions=open_positions,
             winning_positions=int(winning_positions),

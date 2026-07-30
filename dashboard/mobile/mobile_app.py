@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+import math
 import os
 import secrets
 import time
@@ -3520,6 +3521,23 @@ def _trade_ticket_page(
     )
 
 
+def _resolve_equity_peak_for_gate(pnl_snapshot: Dict[str, Any], equity: float) -> float:
+    """
+    RR-001 / MW-001: never coerce missing/zero peak to 0 while equity > 0.
+    Prefer an explicit finite peak > 0; otherwise use equity.
+    """
+    raw_peak = pnl_snapshot.get("equity_peak")
+    try:
+        peak = float(raw_peak) if raw_peak is not None else 0.0
+    except (TypeError, ValueError):
+        peak = 0.0
+    if math.isfinite(peak) and peak > 0.0:
+        return peak
+    if math.isfinite(equity) and equity > 0.0:
+        return equity
+    return 0.0 if not math.isfinite(peak) else max(peak, 0.0)
+
+
 def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) -> Dict[str, Any]:
     load_local_env()
 
@@ -3638,8 +3656,13 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
         _record_mobile_event({"event_type": "mobile_order_rejected", **result})
         return result
         
-    equity = float(pnl_snapshot.get("equity", 0.0))
-    equity_peak = float(pnl_snapshot.get("equity_peak", 0.0))
+    try:
+        equity = float(pnl_snapshot.get("equity", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        equity = 0.0
+    if not math.isfinite(equity):
+        equity = 0.0
+    equity_peak = _resolve_equity_peak_for_gate(pnl_snapshot, equity)
 
     # 2. Canonical Margin Snapshot
     margin_snapshot = None

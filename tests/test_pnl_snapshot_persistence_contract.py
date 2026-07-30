@@ -66,6 +66,7 @@ def test_pnl_runtime_service_maps_to_repository_contract(isolated_runtime_db):
     assert snapshot["realized_pnl"] == "15.25"
     assert snapshot["unrealized_pnl"] == "25.50"
     assert snapshot["equity"] == "10000.00"
+    assert snapshot["equity_peak"] == "10000.00"
     assert snapshot["available_cash"] == "8750.00"
     assert snapshot["open_positions"] == 3
     assert snapshot["winning_positions"] == 2
@@ -100,9 +101,65 @@ def test_pnl_runtime_service_uses_safe_defaults_for_missing_repository_fields(
     assert snapshot is not None
     assert snapshot["account_id"] == "INTERNAL-PAPER"
     assert snapshot["available_cash"] == "50000"
+    assert snapshot["equity_peak"] == "50000"
     assert snapshot["winning_positions"] == 0
     assert snapshot["losing_positions"] == 0
     assert snapshot["snapshot_reason"] is None
+
+
+def test_pnl_runtime_service_persists_explicit_equity_peak(isolated_runtime_db):
+    from backend.app.persistence.services.pnl_runtime_service import (
+        PnlRuntimeService,
+    )
+
+    service = PnlRuntimeService()
+    session_id = _create_session()
+
+    service.create_snapshot(
+        session_id=session_id,
+        broker_name="internal",
+        broker_mode="paper",
+        equity=Decimal("9500.00"),
+        cash_balance=Decimal("9500.00"),
+        buying_power=Decimal("9500.00"),
+        unrealized_pnl=Decimal("0"),
+        realized_pnl=Decimal("0"),
+        open_positions=0,
+        equity_peak=Decimal("10000.00"),
+    )
+
+    snapshot = service.get_latest_snapshot(session_id)
+
+    assert snapshot is not None
+    assert snapshot["equity"] == "9500.00"
+    assert snapshot["equity_peak"] == "10000.00"
+
+
+def test_pnl_runtime_service_defaults_equity_peak_to_equity(isolated_runtime_db):
+    from backend.app.persistence.services.pnl_runtime_service import (
+        PnlRuntimeService,
+    )
+
+    service = PnlRuntimeService()
+    session_id = _create_session()
+
+    service.create_snapshot(
+        session_id=session_id,
+        broker_name="internal",
+        broker_mode="paper",
+        equity=Decimal("12345.67"),
+        cash_balance=Decimal("12345.67"),
+        buying_power=Decimal("12345.67"),
+        unrealized_pnl=Decimal("0"),
+        realized_pnl=Decimal("0"),
+        open_positions=0,
+    )
+
+    snapshot = service.get_latest_snapshot(session_id)
+
+    assert snapshot is not None
+    assert snapshot["equity"] == "12345.67"
+    assert snapshot["equity_peak"] == "12345.67"
 
 
 def test_pnl_runtime_service_calls_repository_with_supported_arguments(
@@ -148,12 +205,14 @@ def test_pnl_runtime_service_calls_repository_with_supported_arguments(
         "realized_pnl",
         "unrealized_pnl",
         "equity",
+        "equity_peak",
         "available_cash",
         "open_positions",
         "winning_positions",
         "losing_positions",
         "snapshot_reason",
     }
+    assert captured_kwargs["equity_peak"] == Decimal("1")
     assert "snapshot_time" not in captured_kwargs
     assert "cash_balance" not in captured_kwargs
     assert "buying_power" not in captured_kwargs
@@ -204,4 +263,5 @@ def test_trade_decision_orchestrator_persists_pnl_snapshot(
     assert snapshot["broker_name"] == "internal"
     assert snapshot["broker_mode"] == "paper"
     assert snapshot["equity"] == "50000.0"
+    assert snapshot["equity_peak"] == "50000.0"
     assert snapshot["available_cash"] == "50000.0"
