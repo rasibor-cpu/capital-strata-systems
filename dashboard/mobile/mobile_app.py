@@ -3862,9 +3862,29 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
             _record_mobile_event({"event_type": "mobile_order_rejected", **result})
             return result
 
-    # Persist via TradeRuntimeService
+    # Persist via TradeRuntimeService — MW-004 ledger fidelity
     try:
         from decimal import Decimal
+
+        from backend.execution.paper_execution_economics import (
+            PaperExecutionEconomicsError,
+            build_paper_execution_economics,
+            merge_ticket_payload_with_economics,
+        )
+
+        debug = gate_decision.get("debug") if isinstance(gate_decision.get("debug"), dict) else {}
+        execution_price = gate_price if gate_price is not None else debug.get("canonical_price")
+        economics = build_paper_execution_economics(
+            ticket=ticket,
+            gate_decision=gate_decision,
+            canonical_price=execution_price,
+            price_source=gate_price_source or debug.get("canonical_price_source"),
+        )
+        payload_json = merge_ticket_payload_with_economics(
+            ticket,
+            economics,
+            gate_decision=gate_decision,
+        )
         trade_service = TradeRuntimeService()
         trade_service.open_trade(
             trade_id=ticket["ticket_id"],
@@ -3874,10 +3894,11 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
             symbol=ticket["symbol"],
             direction=ticket["side"].lower(),
             order_type="market",
-            quantity=Decimal(str(ticket["qty"])),
-            filled_quantity=Decimal(str(ticket["qty"])),
-            entry_price=Decimal("0.0"),
-            raw_payload_json=json.dumps(ticket)
+            quantity=Decimal(str(economics["requested_quantity"])),
+            filled_quantity=Decimal(str(economics["filled_quantity"])),
+            entry_price=Decimal(str(economics["entry_price"])),
+            raw_payload_json=payload_json,
+            status=str(economics["status"]),
         )
         if is_live_request:
             live_micro_pilot_governor.record_order_submitted(
@@ -3890,6 +3911,15 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
                     "mobile_trading_mode": mobile_mode,
                 }
             )
+    except (PaperExecutionEconomicsError, ValueError) as e:
+        result = {
+            "ok": False,
+            "status": "LEDGER_PERSISTENCE_FAILED",
+            "ticket": ticket,
+            "broker_response": {"error": str(e), "reason": "execution_economics_invalid"},
+        }
+        _record_mobile_event({"event_type": "mobile_order_rejected", **result})
+        return result
     except Exception as e:
         result = {
             "ok": False,
@@ -3907,7 +3937,8 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
         "broker_response": {
             "live_order_sent": is_live_request,
             "governance_decision": orchestrator_decision,
-            "execution_gate_decision": gate_decision
+            "execution_gate_decision": gate_decision,
+            "execution_economics": economics,
         },
     }
     _record_mobile_event({"event_type": "mobile_order_approved", **result})

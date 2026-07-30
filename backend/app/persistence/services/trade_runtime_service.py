@@ -51,11 +51,35 @@ class TradeRuntimeService:
         filled_quantity: Decimal,
         entry_price: Decimal,
         raw_payload_json: str | None = None,
+        status: str = "open",
     ) -> None:
 
         opened_at = (
             datetime.now(timezone.utc).isoformat()
         )
+
+        normalized_status = str(status or "open").strip().lower() or "open"
+        qty = Decimal(str(quantity))
+        filled = Decimal(str(filled_quantity))
+        price = Decimal(str(entry_price))
+
+        if not price.is_finite() or price <= 0:
+            raise ValueError("execution_price_invalid")
+        if not qty.is_finite() or qty <= 0:
+            raise ValueError("quantity_invalid")
+        if not filled.is_finite() or filled < 0:
+            raise ValueError("filled_quantity_invalid")
+        if filled > qty:
+            raise ValueError("filled_quantity_exceeds_quantity")
+
+        if normalized_status in {"open", "partially_filled"}:
+            if filled <= 0:
+                raise ValueError("filled_quantity_required_for_open_status")
+        elif normalized_status == "pending":
+            if filled != 0:
+                raise ValueError("pending_trade_must_have_zero_filled_quantity")
+        else:
+            raise ValueError(f"unsupported_trade_status:{normalized_status}")
 
         self.persistence.trades.create_trade(
             trade_id=trade_id,
@@ -64,11 +88,11 @@ class TradeRuntimeService:
             broker_mode=broker_mode,
             symbol=symbol,
             direction=direction,
-            status="open",
+            status=normalized_status,
             order_type=order_type,
-            quantity=quantity,
-            filled_quantity=filled_quantity,
-            entry_price=entry_price,
+            quantity=qty,
+            filled_quantity=filled,
+            entry_price=price,
             opened_at=opened_at,
             raw_payload_json=raw_payload_json,
         )
@@ -257,6 +281,13 @@ class TradeRuntimeService:
             except Exception:
                 holding_seconds = 0.0
 
+            try:
+                from backend.execution.paper_execution_economics import amount_traded as _amount_traded
+
+                traded = float(_amount_traded(entry_price=entry_price, quantity=quantity))
+            except Exception:
+                traded = round(max(0.0, entry_price) * max(0.0, quantity), 8)
+
             outcome = TradeOutcome(
                 trade_id=str(trade_id),
                 asset_class=asset_class,
@@ -274,7 +305,7 @@ class TradeRuntimeService:
                 max_adverse_excursion=float(raw_payload.get("mae", raw_payload.get("max_adverse_excursion", 0.0)) or 0.0),
                 win_loss="WIN" if float(realized_pnl) > 0 else "LOSS",
                 side=side,
-                amount_traded=round(entry_price * quantity, 8),
+                amount_traded=traded,
                 engine_mode=str(raw_payload.get("engine_mode") or "SAFE").upper(),
                 broker_mode=str(trade_record.get("broker_mode") or "UNKNOWN").upper(),
             )

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import time
 
@@ -141,12 +142,23 @@ class TradeDecisionOrchestrator:
     def _persist_trade_open(
         self,
         symbol: str,
+        market_data: Dict[str, Any] | None = None,
     ) -> str | None:
 
         if self._trade_already_exists(
             symbol=symbol,
             direction="long",
         ):
+            return None
+
+        from engine.risk.canonical_volatility_price import coerce_finite_positive_price
+
+        source = market_data if isinstance(market_data, dict) else {}
+        price = coerce_finite_positive_price(
+            source.get("price", source.get("last_price", source.get("current_price", source.get("market_price"))))
+        )
+        # MW-004: never fabricate entry_price=0. Skip ledger write when no price.
+        if price is None:
             return None
 
         trade_id = str(uuid4())
@@ -161,8 +173,23 @@ class TradeDecisionOrchestrator:
             order_type="market",
             quantity=Decimal("1"),
             filled_quantity=Decimal("1"),
-            entry_price=Decimal("0"),
-            raw_payload_json=None,
+            entry_price=Decimal(str(price)),
+            raw_payload_json=json.dumps(
+                {
+                    "source": "trade_decision_orchestrator_stub",
+                    "execution_economics": {
+                        "schema_version": "css.paper.execution_economics.v1",
+                        "status": "open",
+                        "requested_quantity": "1",
+                        "filled_quantity": "1",
+                        "entry_price": str(price),
+                        "quantity_contract": "requested_quantity_authoritative",
+                        "note": "orchestrator_tracking_stub",
+                    },
+                },
+                sort_keys=True,
+            ),
+            status="open",
         )
 
         return trade_id
@@ -170,6 +197,8 @@ class TradeDecisionOrchestrator:
     def _persist_trade_close(
         self,
         trade_id: str | None,
+        *,
+        exit_price: Decimal | None = None,
     ) -> None:
 
         if trade_id is None:
@@ -177,7 +206,7 @@ class TradeDecisionOrchestrator:
 
         self.trade_runtime_service.close_trade(
             trade_id=trade_id,
-            exit_price=Decimal("0"),
+            exit_price=exit_price if exit_price is not None else Decimal("0"),
             realized_pnl=Decimal("0"),
         )
 
@@ -260,19 +289,23 @@ class TradeDecisionOrchestrator:
             market_data.get("symbol", "UNKNOWN")
         )
 
-        trade_id = self._persist_trade_open(
-            symbol=symbol
+        already_open = self._trade_already_exists(
+            symbol=symbol,
+            direction="long",
+        )
+        trade_id = None if already_open else self._persist_trade_open(
+            symbol=symbol,
+            market_data=market_data,
         )
 
         self._persist_trade_close(
-            trade_id=trade_id
+            trade_id=trade_id,
+            exit_price=None,
         )
 
         self._persist_runtime_snapshot()
 
-        duplicate_trade_blocked = (
-            trade_id is None
-        )
+        duplicate_trade_blocked = already_open
 
         governance_decision = self._evaluate_governance_gate(
             market_data
