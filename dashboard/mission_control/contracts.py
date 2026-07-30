@@ -7,6 +7,10 @@ from datetime import datetime, timezone
 from math import isfinite
 from typing import Any
 
+from dashboard.mission_control.active_broker_projection import (
+    annotate_broker_list_with_inactive_evidence,
+    project_active_broker_for_runtime_profile,
+)
 from dashboard.mission_control.approval_workflow import build_approval_workflow_console
 from dashboard.mission_control.audit_console import build_audit_console
 from dashboard.mission_control.broker_registry import build_broker_registry_console
@@ -483,16 +487,35 @@ def _runtime_snapshot(dashboard_state: Any, frontend: Mapping[str, Any]) -> dict
 
 def _platform(frontend: Mapping[str, Any], broker: Mapping[str, Any], certification: Mapping[str, Any], safety: Mapping[str, Any], runtime_snapshot: Mapping[str, Any]) -> dict[str, Any]:
     runtime_broker = runtime_snapshot.get("broker") if isinstance(runtime_snapshot.get("broker"), Mapping) else {}
-    selected_broker = "UNAVAILABLE" if _runtime_unavailable(runtime_snapshot) else runtime_broker.get("selected_broker", broker.get("selected_broker", "UNAVAILABLE"))
-    broker_health = "UNAVAILABLE" if _runtime_unavailable(runtime_snapshot) else runtime_broker.get("broker_health", broker.get("broker_health", "UNAVAILABLE"))
+    runtime_mode = (
+        runtime_snapshot.get("runtime_mode")
+        or frontend.get("runtime_mode")
+        or frontend.get("resolved_mode")
+        or "DISABLED"
+    )
+    if _runtime_unavailable(runtime_snapshot):
+        selected_broker = "UNAVAILABLE"
+        broker_health = "UNAVAILABLE"
+    else:
+        projected = project_active_broker_for_runtime_profile(
+            {
+                "selected_broker": runtime_broker.get("selected_broker", broker.get("selected_broker", "UNAVAILABLE")),
+                "broker_mode": runtime_broker.get("broker_mode", broker.get("broker_mode", "UNAVAILABLE")),
+                "connection_status": runtime_broker.get("transport", broker.get("connection_status", DATA_UNAVAILABLE)),
+            },
+            broker=broker,
+            runtime_snapshot=runtime_snapshot,
+            runtime_mode=runtime_mode,
+        )
+        selected_broker = projected.get("selected_broker", "UNAVAILABLE")
+        broker_health = runtime_broker.get("broker_health", broker.get("broker_health", projected.get("connection_status", "UNAVAILABLE")))
+        if projected.get("projection_source") == "paper_runtime_profile_alignment":
+            broker_health = projected.get("connection_status", broker_health)
     return {
         "product": "CSS Mission Control",
         "platform_status": _first_status(runtime_snapshot.get("runtime_health"), certification.get("certification"), runtime_broker.get("broker_health"), "UNAVAILABLE"),
         "runtime_health": runtime_snapshot.get("runtime_health", "UNAVAILABLE"),
-        "runtime_mode": runtime_snapshot.get("runtime_mode")
-        or frontend.get("runtime_mode")
-        or frontend.get("resolved_mode")
-        or "DISABLED",
+        "runtime_mode": runtime_mode,
         "engine_mode": runtime_snapshot.get("engine_mode", "UNAVAILABLE"),
         "cycle": (
             (frontend.get("sections") or {}).get("runtime_telemetry", {}).get("display_cycle")
@@ -937,10 +960,25 @@ def _brokers(broker: Mapping[str, Any], runtime_snapshot: Mapping[str, Any]) -> 
         "failure_reason": runtime_broker.get("failure_reason", canonical.get("failure_reason", broker.get("failure_reason", DATA_UNAVAILABLE))),
         "warnings": runtime_broker.get("warnings", broker.get("warning_reasons", [])),
     }
+    active = project_active_broker_for_runtime_profile(
+        active,
+        broker=broker,
+        runtime_snapshot=runtime_snapshot,
+        runtime_mode=runtime_snapshot.get("runtime_mode"),
+    )
+    # Registry selection follows the profile-aligned active broker, not a stale live pick.
+    registry_broker = dict(broker)
+    registry_broker["selected_broker"] = active.get("selected_broker", broker.get("selected_broker"))
+    registry_broker["broker_mode"] = active.get("broker_mode", broker.get("broker_mode"))
+    registry_broker["connection_status"] = active.get("connection_status", broker.get("connection_status"))
+    broker_list = annotate_broker_list_with_inactive_evidence(
+        build_broker_registry(registry_broker),
+        active_broker=active,
+    )
     registry = get_canonical_broker_registry()
     return {
         "active_broker": active,
-        "broker_list": build_broker_registry(broker),
+        "broker_list": broker_list,
         "primary_roles": registry.primary_roles(),
         "tier1_brokers": list(registry.list_brokers()),
         "selection": {

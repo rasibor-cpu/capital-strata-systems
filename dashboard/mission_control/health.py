@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from dashboard.mission_control.active_broker_projection import canonical_broker_connection_state
+
 
 HEALTH_GREEN = "GREEN"
 HEALTH_AMBER = "AMBER"
@@ -41,9 +43,21 @@ def build_health_summary(
 
     broker = state.get("brokers") if isinstance(state.get("brokers"), Mapping) else {}
     active_broker = broker.get("active_broker") if isinstance(broker.get("active_broker"), Mapping) else {}
+    broker_name = str(active_broker.get("selected_broker") or "UNKNOWN").strip().upper() or "UNKNOWN"
     broker_health = str(active_broker.get("connection_status") or active_broker.get("readiness") or "").upper()
-    if broker_health in {"FAIL", "FAILED", "RED", "BROKER_UNAVAILABLE", "UNAVAILABLE"}:
+    broker_bucket = canonical_broker_connection_state(broker_health)
+    if not active_broker:
         reasons.append("broker_state_not_green")
+        reasons.append("active_broker_missing")
+    elif broker_bucket == "FAIL":
+        reasons.append("broker_state_not_green")
+        reasons.append(f"active_broker_fail:{broker_name}")
+    elif broker_bucket == "DEGRADED":
+        reasons.append("broker_state_not_green")
+        reasons.append(f"active_broker_degraded:{broker_name}")
+    elif broker_name in {"", "UNKNOWN", "UNAVAILABLE"} and not broker_health:
+        reasons.append("broker_state_not_green")
+        reasons.append("active_broker_missing")
 
     if any(reason.startswith("unsafe_") for reason in reasons) or "contract_validation_failed" in reasons:
         health = HEALTH_FAIL_CLOSED
