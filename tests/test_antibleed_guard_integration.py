@@ -32,6 +32,8 @@ def _valid_gate_request() -> Dict[str, Any]:
         "fee_bps": 1.0,
         "spread_bps": 1.0,
         "slippage_bps": 1.0,
+        "price": 1.10,
+        "price_instrument": "EUR_USD",
         "margin_snapshot": MarginSnapshot(
             broker="TEST",
             account_id="123",

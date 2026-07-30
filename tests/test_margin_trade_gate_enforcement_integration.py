@@ -63,6 +63,8 @@ def _gate_request(**overrides: Any) -> dict[str, Any]:
         "fee_bps": 1.0,
         "spread_bps": 1.0,
         "slippage_bps": 1.0,
+        "price": 1.10,
+        "price_instrument": "EUR_USD",
         "margin_snapshot": _margin_snapshot(),
         "broker_mode": "PAPER",
     }

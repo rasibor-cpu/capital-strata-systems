@@ -65,6 +65,9 @@ def test_paper_mobile_trade_receives_expected_value_fallback():
         assert gate_kwargs["volatility_state"] == "MEDIUM"
         assert gate_kwargs["regime_state"] == "NORMAL"
         assert gate_kwargs["broker_mode"] == "paper"
+        # MW-003: ticket-implied canonical price (amount/qty) reaches the gate
+        assert gate_kwargs["price"] == 1.0
+        assert gate_kwargs["price_instrument"] == "EUR_USD"
 
 def test_live_mobile_trade_does_not_receive_expected_value_fallback():
     # Arrange

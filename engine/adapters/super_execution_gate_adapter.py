@@ -144,6 +144,19 @@ class SuperExecutionGateAdapter:
         slippage_bps = _get(market_ctx, "slippage_bps", None)
         margin_snapshot = _get(market_ctx, "margin_snapshot", None)
         broker_mode = _get(market_ctx, "broker_mode", "PAPER") or "PAPER"
+        price = (
+            _get(market_ctx, "price", None)
+            or _get(market_ctx, "last_price", None)
+            or _get(market_ctx, "market_price", None)
+            or _get(market_ctx, "mid_price", None)
+            or _get(market_ctx, "reference_price", None)
+            or _get(market_ctx, "current_price", None)
+            or _get(equity_ctx, "price", None)
+            or _get(equity_ctx, "last_price", None)
+        )
+        price_instrument = _get(market_ctx, "price_instrument", None) or instrument
+        price_as_of = _get(market_ctx, "price_as_of", None) or _get(market_ctx, "as_of", None)
+        price_max_age_seconds = _get(market_ctx, "price_max_age_seconds", None)
 
         # Call the gate (flat interface)
         return self._gate.evaluate_trade(
@@ -166,4 +179,8 @@ class SuperExecutionGateAdapter:
             slippage_bps=slippage_bps,
             margin_snapshot=margin_snapshot,
             broker_mode=str(broker_mode),
+            price=price,
+            price_instrument=price_instrument,
+            price_as_of=price_as_of,
+            price_max_age_seconds=price_max_age_seconds,
         )

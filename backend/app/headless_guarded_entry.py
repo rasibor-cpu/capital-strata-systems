@@ -289,6 +289,17 @@ def run_headless(req: Dict[str, Any], cfg: Optional[HeadlessConfig] = None) -> D
         if req.get("slippage_bps") is not None
         else (_env_float("TRADE_SLIPPAGE_BPS") or None)
     )
+    price = (
+        _as_float(req.get("price"), 0.0)
+        if req.get("price") is not None
+        else (
+            _as_float(req.get("last_price"), 0.0)
+            if req.get("last_price") is not None
+            else (_env_float("TRADE_PRICE") or None)
+        )
+    )
+    if price is not None and float(price) <= 0.0:
+        price = None
     required_margin = (
         _as_float(req.get("required_margin"), 0.0)
         if req.get("required_margin") is not None
@@ -330,6 +341,8 @@ def run_headless(req: Dict[str, Any], cfg: Optional[HeadlessConfig] = None) -> D
             slippage_bps=slippage_bps,
             margin_snapshot=margin_snapshot,
             broker_mode=mode,
+            price=price,
+            price_instrument=symbol,
         )
     except Exception as e:
         return {

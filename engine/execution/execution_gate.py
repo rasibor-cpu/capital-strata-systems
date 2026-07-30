@@ -5,6 +5,9 @@ import logging
 import math
 from typing import Any, Dict, Optional
 
+from engine.risk.canonical_volatility_price import validate_canonical_price_for_volatility
+from engine.risk.volatility_position_sizer import VolatilityPriceError
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -15,14 +18,14 @@ class ExecutionGate:
 
     Responsibilities:
     - Compute risk_pct from CompoundingEngine
-    - Volatility-based notional sizing (VolatilityPositionSizer)  [robust call]
+    - Volatility-based notional sizing (VolatilityPositionSizer) with canonical price
     - Drawdown scaling (DrawdownScaler)
     - Final risk approval via RiskGovernor.validate_trade
     - Return a stable decision dict: {"decision": {"final": "ALLOW/BLOCK"}, "reason": str, "debug": {...}}
 
-    Key fix:
-    - VolatilityPositionSizer.size() is called using ONLY kwargs it supports,
-      preventing runtime crashes like: unexpected keyword argument 'instrument'
+    MW-003:
+    - Volatility sizing requires a validated finite positive canonical price.
+    - Missing/invalid/stale/mismatched prices fail closed (no silent base-notional ALLOW).
     """
 
     def __init__(
@@ -67,56 +70,193 @@ class ExecutionGate:
                 return fn(*fallback_args)
             raise
 
-    def _vol_size(self, *, instrument: str, base_notional: float, volatility_state: Any, debug: Dict[str, Any]) -> float:
+    def _vol_size(
+        self,
+        *,
+        instrument: str,
+        base_notional: float,
+        price: float,
+        volatility_state: Any,
+        debug: Dict[str, Any],
+    ) -> float:
         """
-        VolatilityPositionSizer.size() signature differs across iterations.
-        We call it in a signature-safe way.
+        Call VolatilityPositionSizer with an already-validated canonical price.
 
-        We intentionally try a rich kwargs set, but only pass what the method accepts.
+        Missing-price TypeError is not a normal control-flow path: callers must
+        validate price before invoking this method.
         """
-        fn = self.vol_sizer.size
+        del instrument, volatility_state  # retained for call-site compatibility / future variants
+        debug["canonical_price"] = float(price)
+        sized = self.vol_sizer.size(notional=float(base_notional), price=float(price), debug=debug)
+        return float(sized)
 
-        preferred = {
-            # common names across variants
-            "instrument": instrument,
-            "inst": instrument,
-            "symbol": instrument,
+    # -----------------------------
+    # Public API (matches your signature)
+    # -----------------------------
+    def evaluate_trade(
+        self,
+        *,
+        instrument: str = "",
+        side: Optional[str] = None,
+        notional: Optional[float] = None,
+        stop_distance_pct: Optional[float] = None,
+        equity: Optional[float] = None,
+        equity_peak: Optional[float] = None,
+        regime_persistence: Optional[float] = None,
+        policy: str = "core",
+        current_allocations: Optional[Dict[str, float]] = None,
+        rebalance_target_weights: Optional[Dict[str, float]] = None,
+        volatility_state: str = "MEDIUM",
+        regime_state: str = "NORMAL",
+        expected_move_bps: Optional[float] = None,
+        fee_bps: Optional[float] = None,
+        spread_bps: Optional[float] = None,
+        slippage_bps: Optional[float] = None,
+        margin_snapshot: Optional[Any] = None,
+        broker_mode: str = "PAPER",
+        price: Optional[Any] = None,
+        last_price: Optional[Any] = None,
+        reference_price: Optional[Any] = None,
+        market_price: Optional[Any] = None,
+        mid_price: Optional[Any] = None,
+        current_price: Optional[Any] = None,
+        price_instrument: Optional[Any] = None,
+        price_as_of: Optional[Any] = None,
+        price_max_age_seconds: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        debug: Dict[str, Any] = {}
+        try:
+            anti_bleed_decision = self._evaluate_anti_bleed(
+                instrument=instrument,
+                side=side,
+                notional=notional,
+                expected_move_bps=expected_move_bps,
+                fee_bps=fee_bps,
+                spread_bps=spread_bps,
+                slippage_bps=slippage_bps,
+            )
+            debug["anti_bleed_guard"] = anti_bleed_decision
 
-            "base_notional": base_notional,
-            "notional": base_notional,
+            if not bool(anti_bleed_decision.get("approved", False)):
+                return {
+                    "decision": {"final": "BLOCK"},
+                    "reason": f"anti_bleed_guard:{anti_bleed_decision.get('reason', 'rejected')}",
+                    "debug": debug,
+                }
 
-            "volatility_state": volatility_state,
-            "vol_state": volatility_state,
-            "state": volatility_state,
-        }
+            margin_decision = self._evaluate_margin_trade(
+                margin_snapshot=margin_snapshot,
+                broker_mode=broker_mode,
+            )
+            debug["margin_trade_gate"] = margin_decision
 
-        # Positional fallback patterns (in decreasing likelihood)
-        fallbacks = [
-            [instrument, base_notional, volatility_state],
-            [instrument, base_notional],
-            [base_notional, volatility_state],
-            [base_notional],
-        ]
+            if not bool(margin_decision.get("allowed", False)):
+                return {
+                    "decision": {"final": "BLOCK"},
+                    "reason": f"margin_trade_gate:{margin_decision.get('decision', 'BLOCK')}:{margin_decision.get('reason', 'rejected')}",
+                    "debug": debug,
+                }
 
-        last_err: Optional[Exception] = None
-        for fb in fallbacks:
+            canonical_price, price_source, price_reason = validate_canonical_price_for_volatility(
+                instrument=str(instrument or ""),
+                price=price,
+                last_price=last_price,
+                reference_price=reference_price,
+                market_price=market_price,
+                mid_price=mid_price,
+                current_price=current_price,
+                price_instrument=price_instrument,
+                price_as_of=price_as_of,
+                price_max_age_seconds=price_max_age_seconds,
+            )
+            debug["canonical_price_source"] = price_source
+            if price_reason is not None or canonical_price is None:
+                reason = price_reason or "volatility_price_missing"
+                debug["volatility_price_reason"] = reason
+                LOGGER.warning(
+                    "ExecutionGate volatility price rejected; instrument=%s reason=%s",
+                    instrument,
+                    reason,
+                )
+                return {
+                    "decision": {"final": "BLOCK"},
+                    "reason": reason,
+                    "debug": debug,
+                }
+
+            # 1) Compounding layer risk%
+            risk_pct = float(
+                self.compounding.compute_dynamic_risk(
+                    equity=float(equity),
+                    equity_peak=float(equity_peak),
+                    regime_persistence=float(regime_persistence),
+                )
+            )
+            debug["risk_pct"] = risk_pct
+
+            # 2) Volatility sizing with validated canonical price
             try:
-                sized = self._safe_kwargs_call(fn, preferred, fallback_args=fb)
-                return float(sized)
-            except Exception as e:
-                last_err = e
+                vol_scaled_notional = self._vol_size(
+                    instrument=instrument,
+                    base_notional=float(notional),
+                    price=float(canonical_price),
+                    volatility_state=volatility_state,
+                    debug=debug,
+                )
+            except VolatilityPriceError as exc:
+                debug["volatility_price_reason"] = str(exc) or "volatility_price_invalid"
+                return {
+                    "decision": {"final": "BLOCK"},
+                    "reason": "volatility_price_invalid",
+                    "debug": debug,
+                }
+            debug["vol_scaled_notional"] = vol_scaled_notional
+            debug["base_notional"] = float(notional)
 
-        debug["vol_size_error"] = str(last_err) if last_err else "unknown"
-        LOGGER.warning(
-            "ExecutionGate volatility sizing fallback invoked; "
-            "instrument=%s base_notional=%s volatility_state=%s error=%s",
-            instrument,
-            base_notional,
-            volatility_state,
-            debug["vol_size_error"],
-        )
-        # If vol sizing fails, be conservative: return base_notional unchanged (don’t crash the engine)
-        return float(base_notional)
+            # 3) Drawdown scaling
+            scaled_notional = float(
+                self.drawdown_scaler.scale(
+                    notional=float(vol_scaled_notional),
+                    equity=float(equity),
+                    equity_peak=float(equity_peak),
+                    policy=str(policy),
+                )
+            )
+            debug["scaled_notional"] = scaled_notional
+
+            # 4) RiskGovernor final approve/reject
+            gov = self._riskgov_validate(
+                instrument=instrument,
+                side=side,
+                requested_notional=scaled_notional,
+                stop_distance_pct=float(stop_distance_pct),
+                equity=float(equity),
+                risk_pct=risk_pct,
+                policy=str(policy),
+                debug=debug,
+            )
+            debug["governor_response"] = gov
+
+            if not bool(gov.get("ok", False)):
+                return {
+                    "decision": {"final": "BLOCK"},
+                    "reason": str(gov.get("reason", "governor_reject")),
+                    "debug": debug,
+                }
+
+            return {
+                "decision": {"final": "ALLOW"},
+                "reason": "approved",
+                "debug": debug,
+            }
+
+        except Exception as exc:
+            LOGGER.exception("ExecutionGate.evaluate_trade failed")
+            return {
+                "decision": {"final": "BLOCK"},
+                "reason": f"execution_gate_exception:{type(exc).__name__}",
+                "debug": {**debug, "error": f"{type(exc).__name__}: {exc}"},
+            }
 
     def _riskgov_validate(self, *, instrument: str, side: str, requested_notional: float,
                          stop_distance_pct: float, equity: float, risk_pct: float,
@@ -292,124 +432,3 @@ class ExecutionGate:
             "margin_utilization_pct": float(getattr(decision, "margin_utilization_pct", 0.0) or 0.0),
             "control": "MarginTradeGate",
         }
-
-    # -----------------------------
-    # Public API (matches your signature)
-    # -----------------------------
-    def evaluate_trade(
-        self,
-        *,
-        instrument: str = "",
-        side: Optional[str] = None,
-        notional: Optional[float] = None,
-        stop_distance_pct: Optional[float] = None,
-        equity: Optional[float] = None,
-        equity_peak: Optional[float] = None,
-        regime_persistence: Optional[float] = None,
-        policy: str = "core",
-        current_allocations: Optional[Dict[str, float]] = None,
-        rebalance_target_weights: Optional[Dict[str, float]] = None,
-        volatility_state: str = "MEDIUM",
-        regime_state: str = "NORMAL",
-        expected_move_bps: Optional[float] = None,
-        fee_bps: Optional[float] = None,
-        spread_bps: Optional[float] = None,
-        slippage_bps: Optional[float] = None,
-        margin_snapshot: Optional[Any] = None,
-        broker_mode: str = "PAPER",
-    ) -> Dict[str, Any]:
-        debug: Dict[str, Any] = {}
-        try:
-            anti_bleed_decision = self._evaluate_anti_bleed(
-                instrument=instrument,
-                side=side,
-                notional=notional,
-                expected_move_bps=expected_move_bps,
-                fee_bps=fee_bps,
-                spread_bps=spread_bps,
-                slippage_bps=slippage_bps,
-            )
-            debug["anti_bleed_guard"] = anti_bleed_decision
-
-            if not bool(anti_bleed_decision.get("approved", False)):
-                return {
-                    "decision": {"final": "BLOCK"},
-                    "reason": f"anti_bleed_guard:{anti_bleed_decision.get('reason', 'rejected')}",
-                    "debug": debug,
-                }
-
-            margin_decision = self._evaluate_margin_trade(
-                margin_snapshot=margin_snapshot,
-                broker_mode=broker_mode,
-            )
-            debug["margin_trade_gate"] = margin_decision
-
-            if not bool(margin_decision.get("allowed", False)):
-                return {
-                    "decision": {"final": "BLOCK"},
-                    "reason": f"margin_trade_gate:{margin_decision.get('decision', 'BLOCK')}:{margin_decision.get('reason', 'rejected')}",
-                    "debug": debug,
-                }
-
-            # 1) Compounding layer risk%
-            risk_pct = float(
-                self.compounding.compute_dynamic_risk(
-                    equity=float(equity),
-                    equity_peak=float(equity_peak),
-                    regime_persistence=float(regime_persistence),
-                )
-            )
-            debug["risk_pct"] = risk_pct
-
-            # 2) Volatility sizing (signature-safe)
-            vol_scaled_notional = self._vol_size(
-                instrument=instrument,
-                base_notional=float(notional),
-                volatility_state=volatility_state,
-                debug=debug,
-            )
-            debug["vol_scaled_notional"] = vol_scaled_notional
-
-            # 3) Drawdown scaling
-            scaled_notional = float(
-                self.drawdown_scaler.scale(
-                    notional=float(vol_scaled_notional),
-                    equity=float(equity),
-                    equity_peak=float(equity_peak),
-                    policy=str(policy),
-                )
-            )
-            debug["scaled_notional"] = scaled_notional
-
-            # 4) RiskGovernor final approve/reject
-            gov = self._riskgov_validate(
-                instrument=instrument,
-                side=side,
-                requested_notional=scaled_notional,
-                stop_distance_pct=float(stop_distance_pct),
-                equity=float(equity),
-                risk_pct=risk_pct,
-                policy=str(policy),
-                debug=debug,
-            )
-            debug["governor_response"] = gov
-
-            if not bool(gov.get("ok", False)):
-                return {
-                    "decision": {"final": "BLOCK"},
-                    "reason": str(gov.get("reason", "governor_reject")),
-                    "debug": debug,
-                }
-
-            return {
-                "decision": {"final": "ALLOW"},
-                "reason": "approved",
-                "debug": debug,
-            }
-
-        except Exception as e:
-            return {
-                "decision": {"final": "BLOCK"},
-                "reason": "execution_gate_exception",
-                "debug": {"exception": str(e), **debug},
-            }

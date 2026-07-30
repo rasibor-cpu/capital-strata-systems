@@ -543,6 +543,8 @@ class EngineLoop:
             slippage_bps=float(ANTI_BLEED_SLIPPAGE_BPS),
             margin_snapshot=margin_snapshot,
             broker_mode="PAPER",
+            price=float(price),
+            price_instrument=instrument,
         )
 
         if str(decision.get("decision", {}).get("final", "")).upper() != "ALLOW":

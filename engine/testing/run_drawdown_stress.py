@@ -37,6 +37,8 @@ for i in range(1, 40):
         slippage_bps=1.0,
         equity=equity,
         equity_peak=peak,
+        price=1.10,
+        price_instrument="EURUSD",
         margin_snapshot=margin_engine.calculate(
             required_margin=0.0,
             available_margin=equity,

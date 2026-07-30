@@ -3792,6 +3792,7 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
         gate_spread_bps = 1.0
         gate_slippage_bps = 1.0
 
+    gate_price, gate_price_source = _resolve_mobile_canonical_gate_price(ticket)
     gate_decision = exec_gate.evaluate_trade(
         instrument=ticket["symbol"],
         side=ticket["side"],
@@ -3808,8 +3809,19 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
         spread_bps=gate_spread_bps,
         slippage_bps=gate_slippage_bps,
         margin_snapshot=margin_snapshot,
-        broker_mode="live" if is_live_request else "paper"
+        broker_mode="live" if is_live_request else "paper",
+        price=gate_price,
+        price_instrument=ticket["symbol"],
     )
+    if gate_price_source:
+        _record_mobile_event(
+            {
+                "event_type": "mobile_gate_canonical_price",
+                "price_source": gate_price_source,
+                "symbol": ticket["symbol"],
+                "price": gate_price,
+            }
+        )
 
     if gate_decision.get("decision", {}).get("final") != "ALLOW":
         result = {
@@ -3900,6 +3912,41 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
     }
     _record_mobile_event({"event_type": "mobile_order_approved", **result})
     return result
+
+def _resolve_mobile_canonical_gate_price(ticket: Dict[str, Any]) -> tuple[Optional[float], Optional[str]]:
+    """
+    MW-003 — resolve ticket/market price for ExecutionGate volatility sizing.
+
+    Precedence uses values already on the ticket only (no network fetch):
+    price → last_price → market_price → mid_price → reference_price → current_price
+    → ticket-implied amount/qty when both are finite and > 0.
+
+    Never invents 0/1 or reuses another instrument's price.
+    """
+    from engine.risk.canonical_volatility_price import (
+        coerce_finite_positive_price,
+        resolve_canonical_price_candidates,
+    )
+
+    canonical, source = resolve_canonical_price_candidates(
+        price=ticket.get("price"),
+        last_price=ticket.get("last_price"),
+        market_price=ticket.get("market_price"),
+        mid_price=ticket.get("mid_price"),
+        reference_price=ticket.get("reference_price"),
+        current_price=ticket.get("current_price"),
+    )
+    if canonical is not None:
+        return canonical, source
+
+    amount = coerce_finite_positive_price(ticket.get("amount"))
+    qty = coerce_finite_positive_price(ticket.get("qty"))
+    if amount is not None and qty is not None:
+        implied = amount / qty
+        if coerce_finite_positive_price(implied) is not None:
+            return float(implied), "ticket_implied_amount_over_qty"
+    return None, None
+
 
 def _build_mobile_ticket(
     user_ctx: Dict[str, Any],
