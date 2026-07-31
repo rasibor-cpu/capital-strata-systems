@@ -71,7 +71,25 @@ def build_canonical_broker_runtime_state(
         margin_status = STATUS_UNAVAILABLE
     market_data_status = _read_status("market_data", runtime, trace, adapter, cert)
     product_status = _read_status("product", runtime, trace, adapter, cert)
-    readiness_score = _readiness_score(runtime, adapter, cert)
+    if authentication_status == STATUS_NOT_TESTED and not _truthy(runtime.get("operator_requested_live")):
+        account_status = _untested_if_unread(account_status)
+        balance_status = _untested_if_unread(balance_status)
+        market_data_status = _untested_if_unread(market_data_status)
+        product_status = _untested_if_unread(product_status)
+        if transport_status in {STATUS_UNKNOWN, STATUS_UNAVAILABLE}:
+            transport_status = STATUS_NOT_TESTED
+        if connection_status in {STATUS_UNKNOWN, STATUS_UNAVAILABLE}:
+            connection_status = STATUS_NOT_TESTED
+    readiness_score = _readiness_score(
+        runtime,
+        adapter,
+        cert,
+        credential_status=credential_status,
+        authentication_status=authentication_status,
+        connection_status=connection_status,
+        account_status=account_status,
+        market_data_status=market_data_status,
+    )
     overall = _overall_status(
         credential_status,
         authentication_status,
@@ -213,53 +231,110 @@ def canonical_state_from_payload(payload: Mapping[str, Any] | None = None, **ove
 
 def _credential_status(*payloads: Mapping[str, Any]) -> str:
     for payload in payloads:
-        diagnostics = _mapping(payload.get("credential_validation") or payload.get("broker_credential_diagnostics") or payload.get("credential_diagnostics"))
+        diagnostics = _mapping(
+            payload.get("credential_validation")
+            or payload.get("broker_credential_diagnostics")
+            or payload.get("credential_diagnostics")
+        )
         if diagnostics:
-            status = diagnostics.get("status") or diagnostics.get("credential_status")
-            if status:
-                return canonical_status(status)
             if diagnostics.get("credentials_present") is True:
                 return STATUS_PASS
             if diagnostics.get("credentials_present") is False:
                 return STATUS_FAIL
+            status = diagnostics.get("status") or diagnostics.get("credential_status") or diagnostics.get("readiness_status")
+            if status:
+                text = str(status).strip().upper()
+                if text in {"PRESENT", "PASS", "READY"}:
+                    return STATUS_PASS
+                if text in {"MISSING", "FAIL", "FAILED", "BLOCKED"}:
+                    return STATUS_FAIL
+                return canonical_status(status)
+        if payload.get("credentials_present") is True:
+            return STATUS_PASS
+        if payload.get("credentials_present") is False:
+            return STATUS_FAIL
         if payload.get("credential_status"):
             return canonical_status(payload.get("credential_status"))
-            if payload.get("credentials") in {"PASS", "PRESENT", "READY"}:
-                return STATUS_PASS
-            if payload.get("certification") in {"GREEN", "PASS"} and payload.get("authentication") == "PASS":
-                return STATUS_PASS
+        if payload.get("credentials") in {"PASS", "PRESENT", "READY"}:
+            return STATUS_PASS
+        if payload.get("certification") in {"GREEN", "PASS"} and payload.get("authentication") == "PASS":
+            return STATUS_PASS
     return STATUS_UNKNOWN
 
 
 def _authentication_status(trace: Mapping[str, Any], *payloads: Mapping[str, Any]) -> str:
     if trace:
-        return canonical_status(trace.get("authentication") or trace.get("status"))
+        explicit_trace = trace.get("authentication") or trace.get("status")
+        if explicit_trace is not None and str(explicit_trace).strip():
+            return canonical_status(explicit_trace)
     for payload in payloads:
         explicit = payload.get("authentication_status") or payload.get("auth_status")
-        if explicit is not None:
+        if explicit is not None and str(explicit).strip():
+            text = str(explicit).strip().upper()
+            if text in {"NOT_TESTED", "NOT_ATTEMPTED"}:
+                return STATUS_NOT_TESTED
+            if text == "NOT_AUTHENTICATED":
+                return STATUS_FAIL if _authentication_was_attempted(payload) else STATUS_NOT_TESTED
             return canonical_status(explicit)
-        value = (
-            payload.get("authentication")
-            if payload.get("authentication") is not None
-            else payload.get("broker_authenticated")
-            if payload.get("broker_authenticated") is not None
-            else payload.get("authenticated")
-            if payload.get("authenticated") is not None
-            else None
-        )
+        value = payload.get("authentication")
         if value is not None:
             return STATUS_PASS if value is True else STATUS_FAIL if value is False else canonical_status(value)
+        value = payload.get("broker_authenticated")
+        if value is None:
+            value = payload.get("authenticated")
+        if value is True:
+            return STATUS_PASS
+        if value is False:
+            return STATUS_FAIL if _authentication_was_attempted(payload) else STATUS_NOT_TESTED
     return STATUS_NOT_TESTED
+
+
+def _authentication_was_attempted(payload: Mapping[str, Any]) -> bool:
+    if payload.get("authentication_attempted") is True:
+        return True
+    if payload.get("authentication_attempted") is False:
+        return False
+    if _truthy(payload.get("operator_requested_live")):
+        return True
+    if payload.get("api_reachable") is True or payload.get("transport_reachable") is True:
+        return True
+    if payload.get("broker_connected") is True or payload.get("connected") is True:
+        return True
+    error = str(payload.get("connection_error") or payload.get("failure_reason") or "").strip().upper()
+    if error and error not in {"", "NONE", "NO_FAILURE", "ENVIRONMENT_CONTAMINATION", "MISSING_CREDENTIALS"}:
+        return True
+    return False
 
 
 def _transport_status(*payloads: Mapping[str, Any]) -> str:
     for payload in payloads:
-        explicit = payload.get("transport_status") or payload.get("connection_status")
+        explicit = payload.get("transport_status")
         if explicit is not None:
             return canonical_status(explicit)
-        value = payload.get("api_reachable") or payload.get("transport_reachable") or payload.get("broker_connected") or payload.get("connected")
+        connection_label = payload.get("connection_status")
+        if connection_label is not None:
+            label = str(connection_label).strip().upper()
+            if label in {"NOT_TESTED", "NOT_ATTEMPTED", "NOT_CONNECTED", "UNKNOWN"}:
+                return STATUS_NOT_TESTED
+            return canonical_status(connection_label)
+        value = payload.get("api_reachable")
+        if value is None:
+            value = payload.get("transport_reachable")
         if value is not None:
             return STATUS_PASS if value is True else STATUS_FAIL if value is False else canonical_status(value)
+        connected = payload.get("broker_connected")
+        if connected is None:
+            connected = payload.get("connected")
+        if connected is True:
+            return STATUS_PASS
+        if connected is False:
+            # False without an attempted auth/connection error means not tested.
+            error = str(payload.get("connection_error") or payload.get("failure_reason") or "").strip()
+            auth = payload.get("authentication_status") or payload.get("auth_status") or payload.get("authentication")
+            if not error or canonical_status(auth) == STATUS_NOT_TESTED:
+                if not _truthy(payload.get("operator_requested_live")):
+                    return STATUS_NOT_TESTED
+            return STATUS_FAIL
     return STATUS_UNKNOWN
 
 
@@ -270,6 +345,8 @@ def _connection_status(transport_status: str, authentication_status: str) -> str
         return STATUS_FAIL
     if transport_status == STATUS_FAIL:
         return STATUS_FAIL
+    if authentication_status == STATUS_NOT_TESTED and transport_status in {STATUS_UNKNOWN, STATUS_UNAVAILABLE, STATUS_NOT_TESTED}:
+        return STATUS_NOT_TESTED
     return transport_status
 
 
@@ -399,16 +476,24 @@ def _overall_status(*statuses_and_payloads: Any) -> str:
 
 
 def _failure_reason(runtime: Mapping[str, Any], trace: Mapping[str, Any], adapter: Mapping[str, Any], cert: Mapping[str, Any], environment: Mapping[str, Any]) -> str:
-    if environment.get("status") == "FAIL":
+    if _has_environment_contamination(environment):
         return "ENVIRONMENT_CONTAMINATION"
     for payload in (trace, adapter, runtime, cert):
         for key in ("failure_reason", "connection_error", "coinbase_error_code", "error_code"):
             value = payload.get(key)
-            if value:
-                return _structured_reason(value)
+            if not value:
+                continue
+            reason = _structured_reason(value)
+            # Stale ENVIRONMENT_CONTAMINATION must not survive once evidence is clean.
+            if reason == "ENVIRONMENT_CONTAMINATION" and not _has_environment_contamination(environment):
+                continue
+            return reason
         blockers = payload.get("blockers") or payload.get("blocker_reasons") or payload.get("failure_reasons")
         if isinstance(blockers, list) and blockers:
-            return _structured_reason(blockers[0])
+            reason = _structured_reason(blockers[0])
+            if reason == "ENVIRONMENT_CONTAMINATION" and not _has_environment_contamination(environment):
+                continue
+            return reason
     return _derive_structured_failure_reason(runtime, trace, adapter, cert)
 
 
@@ -466,7 +551,7 @@ def _status_provenance(
 ) -> dict[str, Any]:
     margin_source = _provenance_from_margin(margin)
     return {
-        "credentials": _provenance_for_status(credential_status, mode, runtime, trace, adapter, cert),
+        "credentials": _credential_provenance(credential_status, mode, runtime, trace, adapter, cert),
         "transport": _provenance_for_status(transport_status, mode, runtime, trace, adapter, cert),
         "authentication": _provenance_for_status(authentication_status, mode, runtime, trace, adapter, cert),
         "connection": _provenance_for_status(connection_status, mode, runtime, trace, adapter, cert),
@@ -481,6 +566,31 @@ def _status_provenance(
             for status in (credential_status, authentication_status, connection_status, account_status, balance_status, market_data_status)
         ) else "UNAVAILABLE",
     }
+
+
+def _credential_provenance(status: str, mode: str, *payloads: Mapping[str, Any]) -> str:
+    """Provenance for credential *material*, not broker-sourced account data.
+
+    Accepted enum (``canonical_account_snapshot.PROVENANCE_VALUES``):
+    ``LIVE`` | ``CACHE`` | ``HISTORICAL`` | ``SIMULATION`` | ``UNAVAILABLE`` | ``UNKNOWN``.
+
+    There is no accepted ``LOCAL_VALIDATION`` / ``SECRET_STORE`` /
+    ``CREDENTIAL_DIAGNOSTIC`` / ``ENVIRONMENT`` value. Credential presence is
+    established by local structural diagnostics (key/PEM/token checks), which
+    is neither broker-sourced ``LIVE`` data nor ``SIMULATION``. Therefore
+    ``UNKNOWN`` is required when credentials are present; ``UNAVAILABLE`` when
+    presence failed.
+    """
+    del mode  # mode does not change credential-material provenance vocabulary
+    for payload in payloads:
+        explicit = str(payload.get("credential_provenance") or "").strip().upper()
+        if explicit in {"LIVE", "CACHE", "HISTORICAL", "SIMULATION", "UNAVAILABLE", "UNKNOWN"}:
+            return explicit
+    if status == STATUS_PASS:
+        return "UNKNOWN"
+    if status in {STATUS_FAIL, STATUS_UNAVAILABLE, STATUS_BLOCKED}:
+        return "UNAVAILABLE"
+    return "UNKNOWN"
 
 
 def _provenance_for_status(status: str, mode: str, *payloads: Mapping[str, Any]) -> str:
@@ -514,13 +624,16 @@ def _derive_structured_failure_reason(*payloads: Mapping[str, Any]) -> str:
     statuses = {}
     for payload in payloads:
         statuses.update({key: payload.get(key) for key in payload if key.endswith("_status") or key in {"authentication", "balances", "account", "market_data"}})
-    if canonical_status(statuses.get("authentication")) == STATUS_FAIL:
+    auth = canonical_status(statuses.get("authentication") or statuses.get("authentication_status"))
+    if auth == STATUS_FAIL:
         return "AUTHENTICATION_FAILED"
-    if canonical_status(statuses.get("account") or statuses.get("account_status")) in {STATUS_FAIL, STATUS_UNAVAILABLE}:
+    if auth == STATUS_NOT_TESTED:
+        return "NO_FAILURE"
+    if canonical_status(statuses.get("account") or statuses.get("account_status")) == STATUS_FAIL:
         return "ACCOUNT_UNAVAILABLE"
-    if canonical_status(statuses.get("balances") or statuses.get("balance_status")) in {STATUS_FAIL, STATUS_UNAVAILABLE}:
+    if canonical_status(statuses.get("balances") or statuses.get("balance_status")) == STATUS_FAIL:
         return "BALANCE_UNAVAILABLE"
-    if canonical_status(statuses.get("market_data") or statuses.get("market_data_status")) in {STATUS_FAIL, STATUS_UNAVAILABLE}:
+    if canonical_status(statuses.get("market_data") or statuses.get("market_data_status")) == STATUS_FAIL:
         return "MARKET_DATA_UNAVAILABLE"
     return "NO_FAILURE"
 
@@ -612,35 +725,112 @@ def _environment_evidence(
         evidence["live_trading_blocked"] = True
         evidence["broker_execution_armed"] = False
         evidence["advisory_only"] = True
-        if profile_evidence.get("contamination_keys"):
+        reporting_keys = _reporting_contamination_keys(
+            mode=mode,
+            keys=list(profile_evidence.get("contamination_keys") or []),
+        )
+        if reporting_keys:
+            evidence["contamination_keys"] = reporting_keys
+            evidence["status"] = "FAIL"
+        # Profile validation FAIL caused only by live credentials present in paper
+        # is profile-isolation hygiene, not runtime environment contamination.
+        elif profile_evidence.get("validation_status") == "FAIL" and _profile_fail_is_authentic_contamination(profile_evidence, mode):
+            evidence["status"] = "FAIL"
             evidence["contamination_keys"] = list(profile_evidence.get("contamination_keys") or [])
-            evidence["status"] = "FAIL"
-        if profile_evidence.get("validation_status") == "FAIL":
-            evidence["status"] = "FAIL"
     if isinstance(runtime.get("environment_diagnostics"), Mapping):
         diag = dict(runtime.get("environment_diagnostics"))
-        if diag.get("contamination_keys"):
-            evidence["contamination_keys"] = list(diag.get("contamination_keys"))
+        reporting_keys = _reporting_contamination_keys(mode=mode, keys=list(diag.get("contamination_keys") or []))
+        if reporting_keys:
+            evidence["contamination_keys"] = reporting_keys
             evidence["status"] = "FAIL"
     if isinstance(trace.get("environment"), Mapping):
         diag = dict(trace.get("environment"))
-        if diag.get("contamination_keys"):
-            evidence["contamination_keys"] = list(diag.get("contamination_keys"))
+        reporting_keys = _reporting_contamination_keys(mode=mode, keys=list(diag.get("contamination_keys") or []))
+        if reporting_keys:
+            evidence["contamination_keys"] = reporting_keys
             evidence["status"] = "FAIL"
     source = str(margin.get("margin_source", "") or "").upper()
     if mode == "live" and source == "SIMULATED" and finite_float(margin.get("buying_power"), default=0.0) > 0:
         evidence["positive_simulated_live_margin"] = True
     if margin.get("buying_power") not in (None, ""):
         evidence["live_buying_power"] = margin.get("buying_power")
+    if not _has_environment_contamination(evidence):
+        evidence["status"] = "PASS"
+        evidence["contamination_keys"] = list(evidence.get("contamination_keys") or [])
+        if mode == "paper":
+            evidence["contamination_keys"] = _reporting_contamination_keys(
+                mode=mode,
+                keys=list(evidence.get("contamination_keys") or []),
+            )
     return evidence
 
 
-def _readiness_score(*payloads: Mapping[str, Any]) -> float:
-    for payload in payloads:
-        value = payload.get("readiness_score") or payload.get("connectivity_score")
+def _reporting_contamination_keys(*, mode: str, keys: list[str]) -> list[str]:
+    """Filter profile hygiene keys that are not runtime environment contamination."""
+    from backend.runtime.broker_environment_profiles import LIVE_CREDENTIAL_KEYS
+
+    cleaned = [str(key) for key in keys if str(key)]
+    if str(mode).lower() != "paper":
+        return list(dict.fromkeys(cleaned))
+    # Paper mode may retain credential material for local structural validation.
+    # That is not runtime environment contamination.
+    return list(dict.fromkeys(key for key in cleaned if key not in LIVE_CREDENTIAL_KEYS))
+
+
+def _profile_fail_is_authentic_contamination(profile_evidence: Mapping[str, Any], mode: str) -> bool:
+    reasons = {
+        str(item).lower()
+        for item in (profile_evidence.get("failure_reasons") or [])
+        if str(item)
+    }
+    if str(mode).lower() == "paper" and reasons and reasons <= {"live_credential_in_paper_profile"}:
+        return False
+    keys = _reporting_contamination_keys(mode=mode, keys=list(profile_evidence.get("contamination_keys") or []))
+    return bool(keys) or bool(reasons - {"live_credential_in_paper_profile"})
+
+
+def _has_environment_contamination(environment: Mapping[str, Any] | None) -> bool:
+    evidence = environment if isinstance(environment, Mapping) else {}
+    keys = [str(item) for item in evidence.get("contamination_keys", []) if str(item)]
+    return str(evidence.get("status") or "").upper() == "FAIL" and bool(keys)
+
+
+def _untested_if_unread(status: str) -> str:
+    if status in {STATUS_UNAVAILABLE, STATUS_UNKNOWN}:
+        return STATUS_NOT_TESTED
+    return status
+
+
+def _readiness_score(
+    runtime: Mapping[str, Any],
+    adapter: Mapping[str, Any],
+    cert: Mapping[str, Any],
+    *,
+    credential_status: str,
+    authentication_status: str,
+    connection_status: str,
+    account_status: str,
+    market_data_status: str,
+) -> float:
+    from backend.runtime.broker_readiness_framework import compute_broker_readiness_score
+
+    for payload in (runtime, adapter, cert):
+        value = payload.get("readiness_score")
         if value is not None:
-            return finite_float(value, default=0.0)
-    return 0.0
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                number = 0.0
+            if number > 0:
+                return finite_float(number, default=0.0)
+    return compute_broker_readiness_score(
+        credentials_present=credential_status == STATUS_PASS,
+        authenticated=authentication_status == STATUS_PASS,
+        connected=connection_status == STATUS_PASS,
+        account_loaded=account_status == STATUS_PASS,
+        market_data_ready=market_data_status == STATUS_PASS,
+        execution_enabled=False,
+    )
 
 
 def _latency(*payloads: Mapping[str, Any]) -> int | None:

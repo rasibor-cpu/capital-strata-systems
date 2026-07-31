@@ -8,6 +8,7 @@ from typing import Any, Mapping
 from backend.runtime.live_execution_authority import evaluate_live_execution_authority
 from backend.runtime.live_readiness_state_machine import evaluate_live_readiness_state
 from backend.runtime.canonical_broker_state_builder import canonical_state_from_payload
+from backend.runtime.canonical_broker_state_adapter import project_broker_reporting_fields
 
 
 STARTUP_SUMMARY_FIELDS = (
@@ -89,6 +90,18 @@ def build_live_startup_summary(
             "execution_authority": False,
         }
     )
+    reporting = project_broker_reporting_fields(
+        {
+            **merged,
+            "canonical_broker_runtime_state": canonical_state.to_dict(),
+            "readiness_state": readiness.readiness_state,
+            "operator_requested_live": operator_requested,
+            "live_authority_state": authority.live_authority_state,
+            "authority_reason": authority.authority_reason,
+        },
+        credential_diagnostics=merged.get("broker_credential_diagnostics")
+        or merged.get("credential_diagnostics"),
+    )
 
     summary = {
         "Broker": canonical_state.broker,
@@ -118,7 +131,7 @@ def build_live_startup_summary(
         "Readiness State": readiness.readiness_state,
         "GO / NO GO": readiness.go_no_go,
         "Overall Status": canonical_state.overall_status,
-        "Failure Reason": canonical_state.failure_reason or "UNKNOWN",
+        "Failure Reason": reporting["failure_reason"] or canonical_state.failure_reason or "UNKNOWN",
         "Warnings": ", ".join(canonical_state.warning_reasons) if canonical_state.warning_reasons else "NONE",
         "Provenance": _format_provenance(canonical_state.status_provenance),
         "State Hash": canonical_state.stable_hash(),
@@ -138,7 +151,11 @@ def build_live_startup_summary(
         "readiness_checklist": readiness_payload["readiness_checklist"],
         "startup_diagnostics": {
             **diagnostics,
-            "canonical_broker_runtime_state": canonical_state.to_dict(),
+            "canonical_broker_runtime_state": {
+                **canonical_state.to_dict(),
+                "readiness_score": reporting["readiness_score"],
+                "failure_reason": reporting["failure_reason"],
+            },
             "overall_status": canonical_state.overall_status,
             "status_provenance": dict(canonical_state.status_provenance),
             "state_hash": canonical_state.stable_hash(),
@@ -149,6 +166,18 @@ def build_live_startup_summary(
             "authority_reason": authority.authority_reason,
             "live_authority_state": authority.live_authority_state,
             "can_live_execute": can_live_execute,
+            "credentials_present": reporting["credentials_present"],
+            "credential_status": reporting["credential_status"],
+            "credentials": reporting["credentials"],
+            "credential_failure_reason": reporting.get("credential_failure_reason"),
+            "authentication_status": reporting["authentication_status"],
+            "connection_status": reporting["connection_status"],
+            "market_data_status": reporting["market_data_status"],
+            "failure_reason": reporting["failure_reason"],
+            "readiness_score": reporting["readiness_score"],
+            "recommended_action": reporting["recommended_action"],
+            "contamination_keys": reporting["contamination_keys"],
+            "environment_validation_status": reporting["environment_validation_status"],
             "timestamp": diagnostics.get("timestamp") or datetime.now(timezone.utc).isoformat(),
         },
     }
