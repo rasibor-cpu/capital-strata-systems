@@ -1,0 +1,87 @@
+{
+  "schema_version": "css.dip006.certification_manifest.v1",
+  "repository": "C:\\rasib\\source\\capital-strata-systems",
+  "branch": "css-v1.0.1-maintenance",
+  "assessed_head": "6cfa8862c42ef118a249c7a47a63386c60bd9f77",
+  "dip_phase_commits": {
+    "DIP-001": "99498bb",
+    "DIP-002": "99498bb",
+    "DIP-003": "6e408ca",
+    "DIP-004": "85a5ba1",
+    "DIP-005": "6cfa886"
+  },
+  "authoritative_governance_documents": {
+    "DIP-001": "docs/governance/DIP_001_ENTERPRISE_DECISION_INTELLIGENCE_ARCHITECTURE.md",
+    "DIP-002": "docs/governance/DIP_002_TRADE_DNA_SCHEMA.md",
+    "DIP-003": "docs/governance/DIP_003_CAPTURE_AND_ANALYTICS.md",
+    "DIP-004": "docs/governance/DIP_004_EDGE_INTELLIGENCE.md",
+    "DIP-005": "docs/governance/DIP_005_ENTERPRISE_INTELLIGENCE_SUITE.md",
+    "DIP-006": "docs/governance/DIP_006_ENTERPRISE_READINESS_AND_CERTIFICATION.md"
+  },
+  "validation_commands": [
+    {
+      "name": "focused_dip002_through_dip006_bundle",
+      "command": "py -m pytest -q -p no:cacheprovider tests\\test_dip002_trade_dna_schema.py tests\\test_dip003_capture_and_analytics.py tests\\test_dip004_edge_intelligence.py tests\\test_dip005_enterprise_intelligence_suite.py tests\\test_dip006_enterprise_readiness_certification.py",
+      "passed": 67,
+      "failed": 0,
+      "blocked": 0,
+      "result": "PASSED"
+    },
+    {
+      "name": "broad_practical_offline_regression",
+      "command": "py -m pytest -q -p no:cacheprovider tests\\test_mw003_volatility_sizer_price.py tests\\test_mw004_paper_ledger_fidelity.py tests\\test_asset_lifecycle_integration.py tests\\analytics\\test_trade_outcome_capture.py tests\\test_canonical_trade_lifecycle.py tests\\engine\\test_trade_lifecycle_audit.py tests\\engine\\test_risk_governor.py tests\\test_antibleed_guard_integration.py tests\\engine\\test_live_order_kill_switch.py tests\\engine\\test_pnl_snapshot_adapter.py tests\\engine\\test_pnl_reconciliation.py tests\\test_pnl_snapshot_persistence_contract.py tests\\test_ppf003_enterprise_execution_gateway.py tests\\test_mc001_mission_control_foundation.py tests\\dashboard\\test_css_mobile_controls.py tests\\mobile\\test_mobile_final_readiness.py tests\\mobile\\test_mobile_paper_margin_fallback.py tests\\mobile\\test_mobile_paper_expected_value_fallback.py",
+      "passed": 139,
+      "failed": 0,
+      "blocked": 0,
+      "result": "PASSED"
+    },
+    {
+      "name": "reportlab_environment_check",
+      "command": "py -c \"import reportlab; print('reportlab_available')\"",
+      "passed": 0,
+      "failed": 0,
+      "blocked": 1,
+      "result": "BLOCKED",
+      "blocked_reason": "ModuleNotFoundError: No module named 'reportlab'"
+    }
+  ],
+  "blocked_tests": [
+    {
+      "path": "tests/test_mc003_mission_control_runtime_snapshot_integration.py",
+      "test_function_count": 8,
+      "blocked_reason": "ModuleNotFoundError: No module named 'reportlab'"
+    },
+    {
+      "path": "tests/test_css_mobile_launcher.py",
+      "test_function_count": 64,
+      "blocked_reason": "ModuleNotFoundError: No module named 'reportlab'"
+    },
+    {
+      "path": "tests/test_phase153i_live_execution_authority.py",
+      "test_function_count": 6,
+      "blocked_reason": "ModuleNotFoundError: No module named 'reportlab'"
+    }
+  ],
+  "readiness_classifications": {
+    "decision_intelligence_library": "READY_WITH_LIMITATIONS",
+    "offline_analytical_production": "READY_WITH_LIMITATIONS",
+    "mission_control_integration": "NOT_READY",
+    "live_trading_integration": "NOT_READY",
+    "external_commercial_deployment": "NOT_READY"
+  },
+  "known_limitations": [
+    "ReportLab is not installed; Mission Control/mobile/live-authority collectors remain blocked.",
+    "DIP-006 does not claim formal third-party ISO certification.",
+    "DIP-006 does not authorize live trading, broker activation, production deployment, or commercial deployment.",
+    "Mission Control DIP panels are not fully integrated or certified.",
+    "Production artifact retention and audit export policies remain future work."
+  ],
+  "deterministic_benchmark": {
+    "dataset_size": 5,
+    "elapsed_seconds_observed": 0.994584,
+    "peak_bytes_observed": 937918,
+    "deterministic_output_hash": "756040784ed11a06f3683687783a5d934c55219b80b3c6298a7d4b036e98315a"
+  },
+  "manifest_hash_algorithm": "sha256(canonical_json_excluding_manifest_hash)",
+  "manifest_hash": "2b3c50c81b9c43d713ea255c982d3818367bc8729b724e372666741283581553"
+}
