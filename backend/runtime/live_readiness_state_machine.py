@@ -100,12 +100,23 @@ def _startup_diagnostics(data: Mapping[str, Any]) -> dict[str, Any]:
     broker_readiness_source = data.get("broker_readiness") if isinstance(data.get("broker_readiness"), Mapping) else data
     readiness = build_broker_readiness_snapshot(broker_readiness_source)
     diagnostics = data.get("credential_diagnostics") if isinstance(data.get("credential_diagnostics"), Mapping) else {}
+    credential_diag = (
+        data.get("broker_credential_diagnostics")
+        if isinstance(data.get("broker_credential_diagnostics"), Mapping)
+        else diagnostics.get("broker_credential_diagnostics")
+        if isinstance(diagnostics.get("broker_credential_diagnostics"), Mapping)
+        else diagnostics
+    )
     credential_status = str(
         data.get("credential_status")
+        or (credential_diag.get("credential_status") if isinstance(credential_diag, Mapping) else "")
         or diagnostics.get("credential_status")
-        or "MISSING"
+        or ""
     ).strip().upper()
-    credentials = "PRESENT" if readiness.credentials_present or credential_status in {"PRESENT", "PASS", "READY"} else "MISSING"
+    credentials_present = readiness.credentials_present or credential_status in {"PRESENT", "PASS", "READY"} or (
+        isinstance(credential_diag, Mapping) and bool(credential_diag.get("credentials_present"))
+    )
+    credentials = "PRESENT" if credentials_present else ("MISSING" if credential_status in {"MISSING", "FAIL", "FAILED"} else (credential_status or "MISSING"))
     operator_requested_live = _truthy(data.get("operator_requested_live", False))
     execution_enabled = readiness.execution_enabled
     can_live_execute = _truthy(data.get("can_live_execute", False)) and execution_enabled
@@ -119,6 +130,31 @@ def _startup_diagnostics(data: Mapping[str, Any]) -> dict[str, Any]:
     timestamp = str(data.get("timestamp") or datetime.now(timezone.utc).isoformat())
     pilot_state = str(data.get("live_micro_pilot_state", data.get("pilot_state", "DISARMED")) or "DISARMED").upper()
     broker_guard = str(data.get("broker_guard", data.get("broker_submission_guard", "REJECT_BEFORE_BROKER")) or "REJECT_BEFORE_BROKER")
+    auth_attempted = _truthy(data.get("authentication_attempted")) or (
+        isinstance(credential_diag, Mapping) and _truthy(credential_diag.get("authentication_attempted"))
+    )
+    if authenticated:
+        authentication_status = "AUTHENTICATED"
+    elif auth_attempted or operator_requested_live:
+        authentication_status = str(data.get("auth_status", data.get("authentication_status", "NOT_AUTHENTICATED")))
+    else:
+        authentication_status = "NOT_TESTED"
+    if connected:
+        connection_status = "CONNECTED"
+    elif auth_attempted or operator_requested_live:
+        connection_status = str(data.get("connection_status", "NOT_CONNECTED"))
+    else:
+        connection_status = "NOT_TESTED"
+    recommended_action = str(
+        data.get("recommended_action")
+        or (credential_diag.get("recommended_action") if isinstance(credential_diag, Mapping) else "")
+        or readiness.authority_block_reason
+        or ""
+    )
+    if credentials_present and "configure" in recommended_action.lower() and "credential" in recommended_action.lower():
+        recommended_action = "No credential remediation required"
+    if credentials_present and not recommended_action:
+        recommended_action = "No credential remediation required"
     return {
         "broker": readiness.broker_name,
         "broker_mode": readiness.mode,
@@ -144,8 +180,9 @@ def _startup_diagnostics(data: Mapping[str, Any]) -> dict[str, Any]:
         "broker_ready": bool(readiness.credentials_present and readiness.authenticated and readiness.connected and readiness.account_loaded and readiness.market_data_ready),
         "readiness_score": readiness.readiness_score,
         "credential_status": credentials,
-        "authentication_status": "AUTHENTICATED" if authenticated else str(data.get("auth_status", "NOT_AUTHENTICATED")),
-        "connection_status": "CONNECTED" if connected else str(data.get("connection_status", "NOT_CONNECTED")),
+        "authentication_status": authentication_status,
+        "connection_status": connection_status,
+        "recommended_action": recommended_action,
         "last_broker_sync": str(data.get("last_broker_sync", data.get("last_successful_sync", "DATA UNAVAILABLE"))),
         "timestamp": timestamp,
     }

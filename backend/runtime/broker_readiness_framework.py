@@ -124,13 +124,13 @@ def build_broker_readiness_snapshot(
         products_loaded > 0 and market_status in {"READY", "OK", "PASS", "AVAILABLE"}
     )
     execution_enabled = _truthy(data.get("execution_authority", data.get("execution_enabled", data.get("broker_execution_enabled", False))))
-    readiness_score = _score(
-        credentials_present,
-        authenticated,
-        connected,
-        account_loaded,
-        market_data_ready,
-        not execution_enabled,
+    readiness_score = compute_broker_readiness_score(
+        credentials_present=credentials_present,
+        authenticated=authenticated,
+        connected=connected,
+        account_loaded=account_loaded,
+        market_data_ready=market_data_ready,
+        execution_enabled=execution_enabled,
     )
     return BrokerReadinessSnapshot(
         broker_name=str(data.get("broker_name", data.get("selected_broker", data.get("broker", "NONE"))) or "NONE").upper(),
@@ -194,9 +194,17 @@ def broker_readiness_payload(snapshot: BrokerReadinessSnapshot | Mapping[str, An
         and payload["account_loaded"]
         and payload["market_data_ready"]
     )
+    source_map = snapshot if isinstance(snapshot, Mapping) else {}
+    operator_requested_live = _truthy(payload.get("operator_requested_live", source_map.get("operator_requested_live", False)))
+    mode = str(payload.get("mode") or source_map.get("mode") or "paper").lower()
+    auth_health = str(payload.get("authentication_health") or source_map.get("authentication_health") or "").upper()
+    auth_not_tested = auth_health in {"", "UNKNOWN", "NOT_TESTED", "NOT_ATTEMPTED"}
     if not payload["credentials_present"]:
         state = BrokerOperationalState.CREDENTIALS_REQUIRED
         action = "Configure broker credentials through the approved secret store"
+    elif not payload["authenticated"] and (not operator_requested_live or mode == "paper" or auth_not_tested):
+        state = BrokerOperationalState.AUTHENTICATION_REQUIRED
+        action = "No credential remediation required"
     elif not payload["authenticated"]:
         state = BrokerOperationalState.AUTHENTICATION_REQUIRED
         action = "Authenticate through an approved future activation workflow"
@@ -254,6 +262,52 @@ def broker_readiness_with_operational_status(
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def compute_broker_readiness_score(
+    *,
+    credentials_present: bool,
+    authenticated: bool,
+    connected: bool,
+    account_loaded: bool,
+    market_data_ready: bool,
+    execution_enabled: bool = False,
+) -> float:
+    """Phase 154A composite ``readiness_score`` (pre-existing framework contract).
+
+    Authoritative source: ``build_broker_readiness_snapshot`` in this module
+    (Phase 154A Multi-Broker Readiness Framework). Governance doc
+    ``docs/governance/PHASE_154A_MULTI_BROKER_READINESS_FRAMEWORK.md`` lists
+    ``readiness_score`` as a canonical field; the formula has lived in this
+    implementation since Phase 154A:
+
+        percent of [
+            credentials_present,
+            authenticated,
+            connected,
+            account_loaded,
+            market_data_ready,
+            not execution_enabled,
+        ]
+
+    This is a **composite** broker-readiness measure (credentials + connectivity
+    + operational checks + a pre-existing fail-closed credit for execution
+    remaining disabled). It is **not**:
+    - credential readiness alone (see ``credentials_present`` / diagnostics),
+    - live execution readiness (see ``execution_allowed`` / authority fields),
+    - or a claim that a safety block equals operational readiness.
+
+    Safety posture remains in separate fields (``execution_enabled``,
+    ``execution_allowed``, ``live_authority_state``, etc.).
+    """
+    return _score(
+        bool(credentials_present),
+        bool(authenticated),
+        bool(connected),
+        bool(account_loaded),
+        bool(market_data_ready),
+        not bool(execution_enabled),
+    )
 
 
 def _score(*checks: bool) -> float:
@@ -367,6 +421,7 @@ __all__ = [
     "broker_readiness_payload",
     "broker_readiness_with_operational_status",
     "build_broker_readiness_snapshot",
+    "compute_broker_readiness_score",
     "utc_now_iso",
     "BrokerReadOnlyInterface",
 ]

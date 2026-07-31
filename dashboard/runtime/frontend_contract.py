@@ -1418,7 +1418,11 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         "connection_health": str(canonical_state.get("connection_status", broker_payload.get("connection_health", broker_readiness.get("connection_health", "UNKNOWN")))),
         "market_data_health": str(canonical_state.get("market_data_status", broker_payload.get("market_data_health", broker_readiness.get("market_data_health", "UNKNOWN")))),
         "account_data_health": str(canonical_state.get("account_status", broker_payload.get("account_data_health", broker_readiness.get("account_data_health", "UNKNOWN")))),
-        "readiness_score": _number(canonical_state.get("readiness_score", broker_payload.get("readiness_score", broker_readiness.get("readiness_score")))),
+        "readiness_score": _number(
+            canonical_state.get("readiness_score")
+            if canonical_state and canonical_state.get("readiness_score") not in (None, "")
+            else broker_payload.get("readiness_score", broker_readiness.get("readiness_score"))
+        ),
         "broker_execution_armed": _boolean(broker_payload.get("broker_execution_armed")),
         "execution_allowed": False,
         "live_trading_blocked": True,
@@ -1465,19 +1469,58 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
             broker_payload.get("missing_credential_names", credential_diagnostics.get("missing_credentials"))
         ),
         "credential_status": str(
-            broker_payload.get("credential_status", credential_diagnostics.get("credential_status", DATA_UNAVAILABLE))
+            (
+                "PRESENT"
+                if str(canonical_state.get("credential_status", "")).upper() == "PASS"
+                else canonical_state.get("credential_status")
+            )
+            or broker_payload.get("credential_status")
+            or credential_diagnostics.get("credential_status")
+            or DATA_UNAVAILABLE
         ),
         "credentials": str(
-            broker_payload.get("credentials", broker_payload.get("credential_status", credential_diagnostics.get("credential_status", DATA_UNAVAILABLE)))
+            (
+                "PRESENT"
+                if str(canonical_state.get("credential_status", "")).upper() == "PASS"
+                else canonical_state.get("credential_status")
+            )
+            or broker_payload.get("credentials")
+            or broker_payload.get("credential_status")
+            or credential_diagnostics.get("credential_status")
+            or DATA_UNAVAILABLE
         ),
-        "auth_status": str(broker_payload.get("auth_status", "NOT_TESTED")),
-        "authentication_status": str(broker_payload.get("authentication_status", broker_payload.get("auth_status", "NOT_TESTED"))),
+        "auth_status": str(
+            broker_payload.get("auth_status")
+            or canonical_state.get("authentication_status")
+            or "NOT_TESTED"
+        ),
+        "authentication_status": str(
+            canonical_state.get("authentication_status")
+            or broker_payload.get("authentication_status")
+            or broker_payload.get("auth_status")
+            or "NOT_TESTED"
+        ),
         "connection_status": (
             "GREEN"
             if str(canonical_state.get("overall_status", "")).upper() == "GREEN"
             else str(canonical_state.get("connection_status", broker_payload.get("connection_status", "NOT_TESTED")))
         ),
-        "connection_error": str(broker_payload.get("connection_error", "")),
+        "connection_error": str(
+            ""
+            if str(broker_payload.get("connection_error") or "") == "ENVIRONMENT_CONTAMINATION"
+            and str(environment_evidence.get("status", "")).upper() != "FAIL"
+            else broker_payload.get("connection_error", "")
+        ),
+        "failure_reason": str(
+            canonical_state.get("failure_reason")
+            or broker_payload.get("failure_reason")
+            or "NO_FAILURE"
+        ),
+        "recommended_action": str(
+            broker_payload.get("recommended_action")
+            or canonical_credential_diagnostics.get("recommended_action")
+            or ""
+        ),
         "last_successful_sync": str(broker_payload.get("last_successful_sync", DATA_UNAVAILABLE)),
         "last_broker_sync": str(broker_payload.get("last_broker_sync", broker_payload.get("last_successful_sync", DATA_UNAVAILABLE))),
         "product_price_status": str(broker_payload.get("product_price_status", "NOT_TESTED")),
@@ -1575,15 +1618,17 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
 
 def broker_credential_diagnostics(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     broker_payload = _mapping(dashboard_payload.get("broker_summary"))
+    canonical_state = _mapping(broker_payload.get("canonical_broker_runtime_state"))
     source = _mapping(broker_payload.get("broker_credential_diagnostics"))
     if not source:
         source = _mapping(_mapping(broker_payload.get("credential_diagnostics")).get("broker_credential_diagnostics"))
     if not source:
         source = _mapping(broker_payload.get("credential_diagnostics"))
     if not source:
+        credentials_present = str(canonical_state.get("credential_status", "")).upper() == "PASS"
         return {
             "broker": str(broker_payload.get("selected_broker", broker_payload.get("broker", "NONE"))).upper(),
-            "credentials_present": False,
+            "credentials_present": credentials_present,
             "key_present": False,
             "secret_present": False,
             "private_key_present": False,
@@ -1594,13 +1639,13 @@ def broker_credential_diagnostics(dashboard_payload: Mapping[str, Any]) -> dict[
             "jwt_generated": False,
             "authentication_attempted": False,
             "authenticated": False,
-            "failure_reason": "MISSING_CREDENTIALS",
-            "recommended_action": "Configure broker credentials",
-            "severity": "ERROR",
+            "failure_reason": "NONE" if credentials_present else "MISSING_CREDENTIALS",
+            "recommended_action": "No credential remediation required" if credentials_present else "Configure broker credentials",
+            "severity": "INFO" if credentials_present else "ERROR",
             "timestamp": DATA_UNAVAILABLE,
             "diagnostic_timestamp": DATA_UNAVAILABLE,
             "missing_credentials": [],
-            "credential_status": "MISSING",
+            "credential_status": "PRESENT" if credentials_present else "MISSING",
             "advisory_only": True,
             "execution_allowed": False,
         }
@@ -1610,9 +1655,13 @@ def broker_credential_diagnostics(dashboard_payload: Mapping[str, Any]) -> dict[
             **source,
         }
     )
+    credentials_present = _boolean(payload.get("credentials_present")) or str(canonical_state.get("credential_status", "")).upper() == "PASS"
+    recommended_action = str(payload.get("recommended_action", "Configure broker credentials"))
+    if credentials_present and "configure" in recommended_action.lower() and "credential" in recommended_action.lower():
+        recommended_action = "No credential remediation required"
     return {
         "broker": str(payload.get("broker", "none")).upper(),
-        "credentials_present": _boolean(payload.get("credentials_present")),
+        "credentials_present": credentials_present,
         "key_present": _boolean(payload.get("key_present")),
         "secret_present": _boolean(payload.get("secret_present")),
         "private_key_present": _boolean(payload.get("private_key_present")),
@@ -1623,13 +1672,13 @@ def broker_credential_diagnostics(dashboard_payload: Mapping[str, Any]) -> dict[
         "jwt_generated": _boolean(payload.get("jwt_generated")),
         "authentication_attempted": _boolean(payload.get("authentication_attempted")),
         "authenticated": _boolean(payload.get("authenticated")),
-        "failure_reason": str(payload.get("failure_reason", "MISSING_CREDENTIALS")),
-        "recommended_action": str(payload.get("recommended_action", "Configure broker credentials")),
+        "failure_reason": str(payload.get("failure_reason", "MISSING_CREDENTIALS" if not credentials_present else "NONE")),
+        "recommended_action": recommended_action if credentials_present or recommended_action else "Configure broker credentials",
         "severity": str(payload.get("severity", "ERROR")),
         "timestamp": str(payload.get("timestamp", DATA_UNAVAILABLE)),
         "diagnostic_timestamp": str(payload.get("timestamp", DATA_UNAVAILABLE)),
         "missing_credentials": _string_list(payload.get("missing_credentials")),
-        "credential_status": "PRESENT" if _boolean(payload.get("credentials_present")) else "MISSING",
+        "credential_status": "PRESENT" if credentials_present else "MISSING",
         "advisory_only": True,
         "execution_allowed": False,
     }
