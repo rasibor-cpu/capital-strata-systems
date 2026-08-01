@@ -1,0 +1,10 @@
+{
+  "triangulation_hub": "USD",
+  "rates": {
+    "USD/CAD": {
+      "rate": 1.3600,
+      "timestamp": "2026-07-01T12:00:00Z",
+      "provenance": "synthetic_stale_usd_cad"
+    }
+  }
+}

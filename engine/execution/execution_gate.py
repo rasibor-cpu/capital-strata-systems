@@ -130,13 +130,17 @@ class ExecutionGate:
         governed_execution_context: Optional[Any] = None,
         market_snapshot: Optional[Any] = None,
         fx_conversion: Optional[Any] = None,
+        offline_provider_diagnostics: Optional[Any] = None,
     ) -> Dict[str, Any]:
         debug: Dict[str, Any] = {}
         try:
-            # Phase 185A — record market/FX contracts in diagnostics only.
+            # Phase 185A/186A — record market/FX contracts in diagnostics only.
             # Does not reorder gates; missing/unavailable data remains fail-closed.
             debug["market_snapshot"] = self._market_snapshot_debug(market_snapshot)
             debug["fx_conversion"] = self._fx_conversion_debug(fx_conversion)
+            if offline_provider_diagnostics is not None:
+                # Audit-safe diagnostics bag supplied by offline certification harness only.
+                debug["offline_provider_diagnostics"] = dict(offline_provider_diagnostics)
 
             # Phase 184A — resolve immutable AntiBleed policy before any evaluation.
             # Selection uses governed execution context only (never broker/account/env).
@@ -557,6 +561,12 @@ class ExecutionGate:
             "provider_version",
             str(getattr(fx_conversion, "provider_version", "UNKNOWN")),
         )
+        payload.setdefault("path_type", str(getattr(fx_conversion, "path_type", "NONE")))
+        payload.setdefault(
+            "conversion_path",
+            ",".join(getattr(fx_conversion, "conversion_path", ()) or ()),
+        )
+        payload.setdefault("evidence_hash", str(getattr(fx_conversion, "evidence_hash", "")))
         # Never include raw rates as authority; rate presence only.
         rate = getattr(fx_conversion, "rate", None)
         payload["rate_present"] = rate is not None

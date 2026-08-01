@@ -49,6 +49,8 @@ class LiveMarketSnapshot:
     status: str
     schema_id: str = SCHEMA_ID_LIVE_MARKET_SNAPSHOT
     schema_version: str = SCHEMA_VERSION_185A
+    evidence_hash: str = ""
+    fail_reason: str = ""
 
     def __post_init__(self) -> None:
         if not str(self.provider or "").strip():

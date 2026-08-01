@@ -1,0 +1,9 @@
+{
+  "provider": "OANDA_FIXTURE",
+  "quality": "CERTIFIED",
+  "currency": "USD",
+  "instrument": "EUR_USD",
+  "bid": 1.1005,
+  "ask": 1.1000,
+  "timestamp": "2026-08-01T12:00:00Z"
+}

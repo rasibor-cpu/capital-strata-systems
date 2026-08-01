@@ -55,6 +55,9 @@ class FeeEstimate:
     provider_version: str
     quality: str
     status: str
+    evidence_hash: str = ""
+    fail_reason: str = ""
+    instrument: str = ""
 
     def is_usable(self) -> bool:
         return self.status == "AVAILABLE" and self.fee_bps is not None
@@ -81,6 +84,9 @@ class SlippageEstimate:
     provider_version: str
     quality: str
     status: str
+    evidence_hash: str = ""
+    fail_reason: str = ""
+    instrument: str = ""
 
     def is_usable(self) -> bool:
         return self.status == "AVAILABLE" and self.slippage_bps is not None

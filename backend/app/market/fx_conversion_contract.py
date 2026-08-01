@@ -41,6 +41,13 @@ class FXConversionQuote:
     status: str
     schema_id: str = SCHEMA_ID_FX_CONVERSION
     schema_version: str = SCHEMA_VERSION_185A
+    conversion_path: tuple[str, ...] = ()
+    path_type: str = "NONE"
+    contributing_rate_ids: tuple[str, ...] = ()
+    contributing_provider_ids: tuple[str, ...] = ()
+    contributing_timestamps: tuple[str, ...] = ()
+    evidence_hash: str = ""
+    fail_reason: str = ""
 
     def __post_init__(self) -> None:
         if not str(self.base_currency or "").strip():
@@ -107,6 +114,9 @@ class FXConversionQuote:
             "provider": self.provider,
             "quality": self.quality,
             "status": self.status,
+            "path_type": self.path_type,
+            "conversion_path": ",".join(self.conversion_path),
+            "evidence_hash": self.evidence_hash,
             "framework_version": FRAMEWORK_VERSION,
         }
 
