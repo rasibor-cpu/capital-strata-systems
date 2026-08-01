@@ -3,9 +3,10 @@
 **Programme:** CSS Controlled Live Deployment Programme
 **Phase:** LDT-001 (planning / offline analysis / test design / documentation only)
 **Candidate branch:** `css-rc-live-001-candidate`
-**Candidate HEAD:** `fa35bb4f4b8f96b4b77bb74217b0fb0f35cf2204`
+**Candidate HEAD (MR-003G consolidation tip):** `fa35bb4f4b8f96b4b77bb74217b0fb0f35cf2204`
+**Phase 192 governance refresh HEAD:** `84a0e893385a624a8ebb5dfffd53f35ce4b30ba7`
 **Charter HEAD (original authoring):** `66e11d4f83600a7765b4e55afa33d19e301dd70e` on `css-unified-consolidation-2026-07-13`
-**Revision:** MR-003G (2026-08-01) — aligned to consolidated candidate; **not** an RC-LIVE freeze
+**Revision:** Phase 192 (2026-08-01) — LDT consistency refresh after 184A–191 + RC-004 package; prior MR-003G lineage retained; **not** an RC-LIVE freeze
 **Status:** CHARTER COMPLETE — **NO LIVE TEST AUTHORIZED** — **NOT FROZEN** — **NOT LIVE-READY**
 **Date (local authoring):** 2026-07-31
 
@@ -13,6 +14,9 @@
 
 - `docs/governance/LDT_001_PREFLIGHT_GATE_MATRIX.json`
 - `docs/governance/LDT_001_EVIDENCE_MANIFEST_SCHEMA.json`
+- `docs/governance/LDT_192_BLOCKER_MATRIX.json`
+- `docs/governance/RC_004_OPERATIONAL_POSTURE.md`
+- `docs/governance/PHASE_192_LDT_REFRESH_AND_RC004.md`
 - `tests/test_ldt001_controlled_live_deployment_charter.py`
 
 **Candidate lineage (MR-003):** This candidate contains the unified RC tip, maintenance (`MW-001`…`MW-004`, `DIP-001`…`DIP-006`), MI-EXT-001, RC-001, and MR-002 governance. Decision Intelligence and Market Intelligence modules are present in the tree. Presence ≠ live authorization.
@@ -74,7 +78,7 @@ For each item: governing artifact, status, evidence, limitation, live relevance.
 | RC-002B paper-environment certification | `docs/release/RC002B_PAPER_ENVIRONMENT_CERTIFICATION.md` | PRESENT — paper env gate | Profile flags, fail-closed authority claims | Does not authorize live | Paper baseline before any live arming |
 | Phase 183J paper acceptance | `docs/governance/PHASE_183J_PAPER_ACCEPTANCE_ROUTE_CERTIFICATION.md` | PRESENT — defect remediated | Route/threshold fix documented | RC-003R re-run still required | Unblocks paper path through Unified Trade Gate; not live |
 | RC-003R final acceptance | — | **NOT_FOUND** | Mentions in 183J only | No signed paper-order acceptance pack | **Preflight gap** |
-| RC-004 executive release sign-off | — | **NOT_FOUND** | Sign-off **templates** only (`docs/operations/CSS_MICRO_LIVE_PILOT_SIGN_OFF_REGISTER_2026.md`, entries `NOT_STARTED`) | No executive live release | **Hard governance gap** |
+| RC-004 operational posture | `docs/governance/RC_004_OPERATIONAL_POSTURE.md`; `RC_004_POSTURE_MATRIX.json` | **PRESENT** (Phase 192) — paper/operational only | Explicit **`LIVE_TRADING_NOT_AUTHORIZED`**; execution_authority false | Does **not** unlock live | Closes artifact gap; live unlock remains **BLOCKED** |
 | MW-001…MW-004 | maintenance tip `9a9263c1…` merged via MR-003 `d43ed196…` | **PRESENT** on candidate (ancestral) | MW audit docs + equity peak / MC projection / vol price / paper ledger | Still requires pilot re-certification on any future freeze | Paper/MC/gate residuals — **not** live unlock |
 | DIP-001…DIP-006 | maintenance tip `9a9263c1…` merged via MR-003 `d43ed196…` | **PRESENT** on candidate (ancestral) | Trade DNA / Edge / Enterprise Intelligence + DIP-006 manifest | DIP-006 `live_trading_integration: NOT_READY` | Advisory Decision Intelligence — **not** live unlock |
 | MI-EXT-001 / MR-002 | MI tip `81d48bfc…` merged via MR-003 `fa35bb4f…` | **PRESENT** on candidate (ancestral) | `backend/intelligence/external_events/*`; MR-002 docs | Advisory / fixture-only; online validation unauthorized | Market Intelligence lineage present — **not** live unlock |
@@ -86,7 +90,7 @@ For each item: governing artifact, status, evidence, limitation, live relevance.
 | RBAC (live) | `backend/security/permissions.py`; `backend/app/security/live_toggle.py`; Phase 152A SUPER_USER + `EXECUTE` | PRESENT | Code + tests | Role alone insufficient | Arm/config/disarm require SUPER_USER |
 | Unified Trade Gate | `backend/governance/css_unified_trade_gate.py` | PRESENT | Phase 110A/105F docs + tests | Separate from ExecutionGate path history | Authority condition |
 | Risk Governor | `engine/risk/risk_governor.py` (canonical) | PRESENT | Code; legacy copies quarantined | Use canonical path only | Downstream sizing/drawdown; does not raise 152A ceilings |
-| AntiBleedGuard | `backend/app/risk/anti_bleed_guard.py` | PRESENT | Defaults: min edge 25 bps; **min trade size 50** | **Conflicts with CAD 20 pilot** | Authority condition; **BLOCKED** until governed alignment |
+| AntiBleedGuard | `backend/app/risk/anti_bleed_guard.py`; `anti_bleed_policy.py` (184A) | PRESENT | `STANDARD` min size **50**; `MICRO_PILOT` min size **20** for `LIVE_MICRO_PILOT` | Default STANDARD still 50; live micro-pilot must use governed MICRO_PILOT context | Authority condition; **BLK-ANTIBLEED-CAD20 RESOLVED** by Phase 184A |
 | Margin Gate | `engine/risk/margin_trade_gate.py` | PRESENT — fail-closed | ARP-002D | Needs valid margin snapshot | Authority condition |
 | Broker quarantine | IBKR placeholder quarantine; OANDA live-write firewall tests; ARP-007/011 | PRESENT | `backend/brokers/ibkr/ibkr_adapter.py` PLACEHOLDER | Quarantine ≠ readiness | Keeps IBKR out of pilot |
 | Order-size limits | `order_limit_config.py` + Phase 152A | PRESENT | CAD 20 / daily 2 / session 4 / 1 position / ≤10 orders/session | LDT operational script further restricts to **1 entry + 1 exit** | Hard envelope |
@@ -156,7 +160,7 @@ Authoritative ceilings (stricter of conflicting controls wins; none may be raise
 | Session expiry | Session continuity / quiet-mode observers; expired session → NO-GO / abort | `runtime_session_continuity.py` |
 | CAD↔quote FX conversion | **NOT_AVAILABLE** unless approved deterministic source exists | This charter |
 
-**Conflict note:** AntiBleedGuard default `minimum_profitable_trade_size=50` is **stricter against small pilots** and conflicts with CAD 20 — charter-time Safety gate **BLOCKED**. Resolution requires a future governed remediation (out of LDT-001 production-code scope).
+**AntiBleed note (Phase 184A / 192):** The historical class-A contradiction (STANDARD min 50 vs CAD 20) is **resolved for the live micro-pilot path** by selecting the immutable `MICRO_PILOT` policy (min size 20) when governed context is `LIVE_MICRO_PILOT`. STANDARD remains min 50. Safety gate **E5 = PASS** for policy alignment; this does **not** authorize live trading.
 
 ---
 
@@ -174,7 +178,7 @@ Full machine-readable matrix: `docs/governance/LDT_001_PREFLIGHT_GATE_MATRIX.jso
 | B Runtime | NOT_TESTED for dedicated pilot runtime |
 | C Broker | C8 **BLOCKED** (LIVE mode not certified); others mostly NOT_TESTED |
 | D Portfolio | NOT_TESTED |
-| E Safety | E5 AntiBleed **BLOCKED**; E8 authority BLOCKED-until-auth **PASS**; others mixed |
+| E Safety | E5 AntiBleed **PASS** (184A MICRO_PILOT); E9 live-authority TTL **NOT_TESTED**/partial; E8 authority BLOCKED-until-auth **PASS**; others mixed |
 | F Evidence | Design PASS; freeze artifacts NOT_TESTED |
 
 **Aggregate: NO-GO. No live test authorized.**
@@ -197,7 +201,8 @@ Design only — **do not activate** in LDT-001.
 6. Final display of the **proposed order** (symbol, side, size, notional CAD, time-in-force, client order id) before authorization.
 7. Single-use authorization mechanism:
    - Prefer existing Phase 152A arm + live authority AND-gate + confirmation word `EXECUTE`.
-   - **Gap:** dedicated single-use token with TTL is **not** fully implemented as a separate primitive; treat arm state + short window + mandatory disarm as the equivalent until a future phase adds an explicit token.
+   - **Gap:** dedicated single-use **live-authority** token with TTL is **not** fully implemented as a separate primitive; treat arm state + short window + mandatory disarm as the equivalent until a future phase adds an explicit token.
+   - **TTL vocabulary (Phase 189/192):** Phase 189 **read-only operational TTL** (`READ_ONLY_OPERATIONAL`) is **not** live-authority TTL and must not be cited as live unlock.
 8. Automatic expiry: disarm at test end **or** after a short defined window (recommended ≤ **30 minutes** armed window unless a future governance doc sets otherwise). Authority must not outlive the window.
 9. **No persistence of live authority across restart** unless separately approved. After restart, `pilot_armed` must be false and `live_authority_state=BLOCKED` until the full ceremony repeats.
 
@@ -328,19 +333,20 @@ Disposition: **`NOT_CERTIFIED`** + incident package.
 
 ## 14. Open blockers
 
-Authoritative lineage and classifications: `docs/governance/LDT_002_LIVE_PILOT_BLOCKER_RESOLUTION_AUDIT.md`.
+Authoritative lineage and classifications: `docs/governance/LDT_002_LIVE_PILOT_BLOCKER_RESOLUTION_AUDIT.md` and `docs/governance/LDT_192_BLOCKER_MATRIX.json`.
 
 1. **RC-003R FINAL** — not committed (TEMP custody only per maintenance audit); Phase 183J ancestor `b0703f3` is shared; **re-certify** on freeze (`BLK-RC003R-FINAL`).
-2. **RC-004** — no committed `RC-004*` doc; executive paper sign-off cited for `b0703f3` with **`LIVE_TRADING_NOT_AUTHORIZED`**; live unlock **absent** (`BLK-RC004-SIGNOFF`).
+2. **RC-004 artifact** — **RESOLVED** (Phase 192 committed posture package). **RC-004 live unlock** remains **BLOCKED** with explicit **`LIVE_TRADING_NOT_AUTHORIZED`** (`BLK-RC004-LIVE-UNLOCK`).
 3. **MW/DIP/MI lineage** — **RESOLVED on candidate** (`BLK-LINEAGE-MW-DIP` cleared for `css-rc-live-001-candidate` after MR-003 merges). Modules are ancestral; live re-certification on a future freeze remains required.
 4. **OV-002 / endurance credit** — ER-001 sealed observational result only; **OV-002 certification not claimed** (`BLK-ENDURANCE-CREDIT`).
-5. **OANDA LIVE** not certified (practice/read-only ≠ live) (`BLK-OANDA-LIVE`).
-6. **AntiBleedGuard min trade size 50** vs **Phase 152A CAD 20** — **genuine contradiction (class A)** on ExecutionGate notional path (`BLK-ANTIBLEED-CAD20`) → live pilot **BLOCKED**.
+5. **OANDA LIVE** not certified (practice/read-only / Phase 187A–188 RO ≠ live money path) (`BLK-OANDA-LIVE`).
+6. **AntiBleed CAD20** — **RESOLVED** by Phase 184A `MICRO_PILOT` (min size 20) for `LIVE_MICRO_PILOT` (`BLK-ANTIBLEED-CAD20`).
 7. **CAD FX conversion** — no LDT-approved deterministic contract; `fx_daily_rates` cache file absent (`BLK-FX-CONVERSION`).
-8. **Authorization TTL** — `PARTIALLY_SUPPORTED` (arm/disarm exist; no TTL, no single-use scoped token; arm state may persist via file across restart) (`BLK-AUTH-TTL`).
-9. LDT **freeze SHA** **NOT_DESIGNATED** — candidate HEAD `fa35bb4f…` must **not** be treated as freeze or live-ready (`BLK-FREEZE-SHA`).
-10. Founder GO/NO-GO for live arming **not issued**.
+8. **Live-authority TTL** — `PARTIALLY_SUPPORTED` (arm/disarm exist; no live TTL, no single-use scoped token; arm state may persist via file across restart) (`BLK-AUTH-TTL`). Phase 189 RO TTL is **distinct** and is not live unlock.
+9. LDT **freeze SHA** **NOT_DESIGNATED** — candidate heads (`fa35bb4f…`, `84a0e893…`) must **not** be treated as freeze or live-ready (`BLK-FREEZE-SHA`).
+10. Founder GO/NO-GO for live arming **not issued** (`BLK-FOUNDER-LIVE-GO`).
 11. Live pilot must not run on the endurance host — dedicated pilot runtime after controlled shutdown + fresh start only.
+12. **DIP live integration** — DIP-006 `NOT_READY` (`BLK-DIP-LIVE`).
 
 ---
 

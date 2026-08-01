@@ -1,0 +1,72 @@
+{
+  "schema_version": "css.rc004.operational_posture.v1",
+  "artifact_id": "RC-004",
+  "title": "RC-004 Operational Posture Matrix",
+  "phase_completing_package": "192",
+  "candidate_branch": "css-rc-live-001-candidate",
+  "as_of_head": "84a0e893385a624a8ebb5dfffd53f35ce4b30ba7",
+  "paper_baseline_sha": "b0703f36096bf183514293ef9b83b6e7849bd087",
+  "governing_document": "docs/governance/RC_004_OPERATIONAL_POSTURE.md",
+  "live_trading_authorized": false,
+  "execution_authority": false,
+  "order_submission_allowed": false,
+  "live_arming_allowed": false,
+  "freeze_sha_designated": false,
+  "founder_live_go_issued": false,
+  "explicit_statement": "LIVE_TRADING_NOT_AUTHORIZED",
+  "postures": {
+    "operational": {
+      "status": "GOVERNANCE_ACTIVE",
+      "allowed": ["governance", "offline_tests", "registry", "fail_closed_safety_code"],
+      "forbidden": ["live_order_submit", "implied_freeze", "live_arming"]
+    },
+    "paper": {
+      "status": "ACKNOWLEDGED_BASELINE",
+      "baseline_sha": "b0703f36096bf183514293ef9b83b6e7849bd087",
+      "note": "Re-certify on any future freeze; practice ≠ LIVE"
+    },
+    "read_only": {
+      "status": "FRAMEWORK_READY_AFTER_PRECHECK",
+      "ttl_term": "READ_ONLY_OPERATIONAL",
+      "ttl_phase": "189",
+      "note": "RO TTL is not live-authority TTL"
+    },
+    "live": {
+      "status": "LIVE_TRADING_NOT_AUTHORIZED",
+      "execution_authority": false
+    }
+  },
+  "dependencies": {
+    "authorization_ttl": {
+      "read_only_operational_ttl": "DEFINED_PHASE_189",
+      "live_authority_ttl": "PARTIALLY_SUPPORTED_BLOCKER_BLK_AUTH_TTL",
+      "must_not_conflate": true
+    },
+    "freeze": {
+      "required_for_live_pilot": true,
+      "designated": false,
+      "candidate_head_is_freeze": false
+    },
+    "founder_approval": {
+      "paper_acknowledgment": "HISTORICAL_RETAINED",
+      "live_micro_pilot_go": "NOT_ISSUED",
+      "production_go": "NOT_ISSUED"
+    }
+  },
+  "blockers": {
+    "BLK-RC004-ARTIFACT": "RESOLVED",
+    "BLK-RC004-LIVE-UNLOCK": "BLOCKED",
+    "LIVE_TRADING_NOT_AUTHORIZED": "ACTIVE"
+  },
+  "supersedes": [
+    "pre-192 executive-session-only RC-004 narrative as custody form",
+    "LDT-001 inventory claim RC-004 NOT_FOUND"
+  ],
+  "does_not_authorize": [
+    "live_trading",
+    "broker_write",
+    "freeze_sha",
+    "kill_switch_clearance_for_live",
+    "ov002_certification_credit"
+  ]
+}

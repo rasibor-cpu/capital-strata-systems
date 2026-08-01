@@ -1,0 +1,113 @@
+{
+  "schema_version": "css.ldt.blocker_matrix.v1",
+  "programme": "LDT",
+  "phase": "192",
+  "title": "LDT Blocker Matrix — Phase 192 Refresh",
+  "candidate_branch": "css-rc-live-001-candidate",
+  "as_of_head": "84a0e893385a624a8ebb5dfffd53f35ce4b30ba7",
+  "freeze_sha_designated": false,
+  "live_authorized": false,
+  "charter_time_aggregate": "NO-GO",
+  "sources": [
+    "docs/governance/LDT_001_CONTROLLED_LIVE_DEPLOYMENT_TEST_CHARTER.md",
+    "docs/governance/LDT_002_LIVE_PILOT_BLOCKER_RESOLUTION_AUDIT.md",
+    "docs/governance/LDT_001_PREFLIGHT_GATE_MATRIX.json",
+    "docs/governance/RC_004_OPERATIONAL_POSTURE.md",
+    "docs/governance/PHASE_184A_ANTIBLEED_POLICY_FRAMEWORK.md",
+    "docs/governance/PHASE_189_MULTI_BROKER_OPERATIONAL_READINESS.md",
+    "docs/governance/PHASE_190_RC_LIVE_ENTERPRISE_REVIEW.md",
+    "docs/governance/PHASE_191_ENTERPRISE_CERTIFICATION_REGISTRY.md",
+    "docs/governance/PHASE_192_LDT_REFRESH_AND_RC004.md"
+  ],
+  "blockers": [
+    {
+      "id": "BLK-LINEAGE-MW-DIP",
+      "classification": "RESOLVED_ON_CANDIDATE",
+      "notes": "MW/DIP/MI/RC ancestral after MR-003; re-certify on freeze"
+    },
+    {
+      "id": "BLK-RC003R-FINAL",
+      "classification": "NOT_TESTED",
+      "notes": "TEMP-only FINAL evidence; re-certify on freeze"
+    },
+    {
+      "id": "BLK-RC004-ARTIFACT",
+      "classification": "RESOLVED",
+      "notes": "Phase 192 committed RC_004_OPERATIONAL_POSTURE.md + matrix"
+    },
+    {
+      "id": "BLK-RC004-SIGNOFF",
+      "classification": "SUPERSEDED_SPLIT",
+      "notes": "Split into BLK-RC004-ARTIFACT (resolved) and BLK-RC004-LIVE-UNLOCK (blocked)"
+    },
+    {
+      "id": "BLK-RC004-LIVE-UNLOCK",
+      "classification": "BLOCKED",
+      "notes": "Committed RC-004 explicitly states LIVE_TRADING_NOT_AUTHORIZED"
+    },
+    {
+      "id": "BLK-ANTIBLEED-CAD20",
+      "classification": "RESOLVED",
+      "notes": "Phase 184A MICRO_PILOT min size 20 for LIVE_MICRO_PILOT; STANDARD remains 50"
+    },
+    {
+      "id": "BLK-FX-CONVERSION",
+      "classification": "BLOCKED",
+      "notes": "No LDT-approved live pilot FX conversion; online FX uncertified; rates file absent"
+    },
+    {
+      "id": "BLK-AUTH-TTL",
+      "classification": "PARTIALLY_SUPPORTED",
+      "notes": "Arm/disarm exist; live-authority TTL missing; Phase 189 RO TTL is distinct and must not be conflated"
+    },
+    {
+      "id": "BLK-OANDA-LIVE",
+      "classification": "BLOCKED",
+      "notes": "LIVE execution not certified; 187A/188 RO framework ≠ live write/auth for money"
+    },
+    {
+      "id": "BLK-ENDURANCE-CREDIT",
+      "classification": "NOT_APPLICABLE",
+      "notes": "OV-002 not claimed; ER-001 observational only"
+    },
+    {
+      "id": "BLK-FREEZE-SHA",
+      "classification": "NOT_TESTED",
+      "notes": "NOT_DESIGNATED; candidate HEAD is not freeze"
+    },
+    {
+      "id": "BLK-FOUNDER-LIVE-GO",
+      "classification": "BLOCKED",
+      "notes": "Founder live GO not issued"
+    },
+    {
+      "id": "BLK-DIP-LIVE",
+      "classification": "BLOCKED",
+      "notes": "DIP-006 live_trading_integration NOT_READY"
+    }
+  ],
+  "obsolete_or_superseded_claims": [
+    {
+      "claim": "AntiBleed min 50 permanently blocks CAD 20 live micro-pilot",
+      "status": "SUPERSEDED",
+      "by": "Phase 184A MICRO_PILOT policy"
+    },
+    {
+      "claim": "RC-004 has no committed docs/**/RC-004* artifact",
+      "status": "SUPERSEDED",
+      "by": "Phase 192 RC_004_OPERATIONAL_POSTURE.md"
+    },
+    {
+      "claim": "Phase 189 RO TTL equals live execution authority",
+      "status": "CONFLICTING_REJECTED",
+      "by": "Phase 190/192 TTL alignment"
+    },
+    {
+      "claim": "Candidate HEAD is RC-LIVE freeze",
+      "status": "CONFLICTING_REJECTED",
+      "by": "LDT freeze designation rule"
+    }
+  ],
+  "aggregate": "NO-GO",
+  "aggregate_reason": "Freeze undesignated; FX conversion blocked; OANDA LIVE execution blocked; live-authority TTL incomplete; RC-004 live unlock denied; founder GO absent. AntiBleed CAD20 and RC-004 artifact gaps closed."
+}

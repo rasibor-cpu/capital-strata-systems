@@ -137,7 +137,7 @@ class MultiBrokerReadinessFramework:
         evidence_flags: Mapping[str, bool] | None = None,
         timestamp: str | None = None,
         issue_ttl_seconds: int | None = None,
-        signoff_artifact_present: bool = False,
+        signoff_artifact_present: bool | None = None,
         endpoint: str = "",
         adapter_version: str = "",
         api_version: str = "",

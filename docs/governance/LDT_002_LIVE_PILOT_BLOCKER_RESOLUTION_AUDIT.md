@@ -24,6 +24,21 @@
 
 On the candidate: MW-001…MW-004, DIP-001…DIP-006, MI-EXT-001, RC-001, and MR-002 are **ancestors**. This revision does **not** convert NO-GO to GO.
 
+### Phase 192 governance refresh (2026-08-01)
+
+| Field | Value |
+| --- | --- |
+| Refresh HEAD (pre-commit tip) | `84a0e893385a624a8ebb5dfffd53f35ce4b30ba7` |
+| RC-004 committed package | **YES** — `RC_004_OPERATIONAL_POSTURE.md` |
+| `BLK-RC004-ARTIFACT` | **RESOLVED** |
+| `BLK-RC004-LIVE-UNLOCK` | **BLOCKED** (`LIVE_TRADING_NOT_AUTHORIZED`) |
+| `BLK-ANTIBLEED-CAD20` | **RESOLVED** (Phase 184A `MICRO_PILOT`) |
+| Machine blocker matrix | `docs/governance/LDT_192_BLOCKER_MATRIX.json` |
+| Live freeze designated? | **NO** |
+| Aggregate live posture | **NO-GO** |
+
+Phase 192 is governance-only. It does **not** authorize live trading, broker contact, or freeze designation.
+
 ---
 
 ## 1. Executive summary
@@ -34,14 +49,16 @@ LDT-001 blockers were re-audited against **Git refs and repository files only**.
 
 1. **MW-001…MW-004** and **DIP-001…DIP-006** existed on **`css-v1.0.1-maintenance` only** and were **not** ancestors of consolidation HEAD `66e11d4f…` (**must not be silently credited** on that baseline).
 2. **RC-003R FINAL** evidence is **not committed**; it is cited as local `%TEMP%` packages in maintenance docs. Phase 183J (remediation) is an ancestor of both tips.
-3. **RC-004** has **no committed `docs/**/RC-004*` file**. It exists as an executive session record referenced by MW-001, approving paper baseline `b0703f3` with **`LIVE_TRADING_NOT_AUTHORIZED`**.
-4. **AntiBleed min size 50** vs **Phase 152A CAD 20** is a **genuine contradiction (class A)** on the live ExecutionGate path.
+3. **RC-004** historically had **no committed `docs/**/RC-004*` file** (executive session record only). **Phase 192** commits `RC_004_OPERATIONAL_POSTURE.md` with **`LIVE_TRADING_NOT_AUTHORIZED`** — artifact gap closed; live unlock remains denied.
+4. **AntiBleed min size 50** vs **Phase 152A CAD 20** was a **genuine contradiction (class A)** on the live ExecutionGate path. **Phase 184A** resolves the live micro-pilot path via immutable `MICRO_PILOT` (min 20) for `LIVE_MICRO_PILOT`.
 5. **No approved deterministic CAD pilot conversion contract** for live order notional (FX cache module exists for credit/accounting, not LDT-approved live pilot conversion; default rates file absent).
 6. Authorization TTL / single-use scoped token is **PARTIALLY_SUPPORTED** (arm/disarm + confirmation exist; no TTL, no scope binding, state can persist across restart via file).
 7. OANDA LIVE certification remains a **preflight NO-GO** gap (practice/read-only offline code present; LIVE not certified).
 8. Current untimed runtime may provide **observational stability evidence only** — **not** OV-002 certification credit and **not** automatic 48h credit without the OV-002 monitor/manifest/checkpoint contract.
 
-**MR-003G update:** Finding (1) lineage gap is **RESOLVED_ON_CANDIDATE** after history-preserving merges. Findings (2)–(8) and freeze designation remain unresolved. Aggregate remains **NO-GO / BLOCKED** for live micro-pilot.
+**MR-003G update:** Finding (1) lineage gap is **RESOLVED_ON_CANDIDATE** after history-preserving merges. Findings (2)–(8) and freeze designation remain unresolved at MR-003G time. Aggregate remains **NO-GO / BLOCKED** for live micro-pilot.
+
+**Phase 192 update:** Findings (3) artifact gap and (4) AntiBleed contradiction are **RESOLVED** as classified above. Live unlock, FX, OANDA LIVE money path, live-authority TTL, freeze, and founder GO remain open. Aggregate remains **NO-GO**.
 
 ---
 
@@ -122,13 +139,15 @@ Not D (stale): Both are current defaults on active HEAD; Phase 152A docs and `or
 
 ### Live-pilot status
 
-**BLOCKED** until a future governed remediation. LDT-002 does **not** weaken either control.
+**Historically BLOCKED** (class A) until governed remediation. LDT-002 did **not** weaken either control.
 
-### Governance-compatible options only (do not implement here)
+**Phase 192 classification:** `BLK-ANTIBLEED-CAD20` = **RESOLVED**. Phase 184A shipped option 1: immutable `MICRO_PILOT` min size **20** for `LIVE_MICRO_PILOT`. STANDARD min 50 remains. This does **not** authorize live trading.
 
-1. **Defer live pilot** until a dedicated governance phase defines a **pilot-scoped, asset-class-specific** AntiBleed profile that still meets fee-bleed intent **and** remains ≤ CAD 20 — with founder approval, tests, and evidence (may still be rejected if it weakens AntiBleed without compensating controls).
+### Governance-compatible options (historical; option 1 implemented in 184A)
+
+1. **~~Defer~~ Implemented (184A):** pilot-scoped AntiBleed `MICRO_PILOT` profile with min size 20, edge/cooldown fail-closed — founder-governed, tested, evidence in Phase 184A docs.
 2. **Raise the CAD capital envelope above AntiBleed min** only via a **new** Phase that explicitly supersedes 152A ceilings (currently **forbidden** to raise in LDT).
-3. **Keep NO-GO indefinitely** for real-money micro-pilot under CAD 20 while paper certification continues.
+3. **Keep NO-GO** for real-money micro-pilot for **other** remaining blockers while paper certification continues.
 
 No option that silently disables AntiBleed or silently exceeds CAD 20 is acceptable.
 
@@ -188,6 +207,8 @@ with: pinned rate source, as-of timestamp, freshness SLA, hashable snapshot, and
 
 Gate posture: **BLOCKED** (ceremony incomplete) / TTL support **NOT_TESTED** as a PASS criterion until remediated.
 
+**Phase 192 TTL vocabulary:** Phase 189 **read-only operational TTL** (`READ_ONLY_OPERATIONAL`) is defined for controlled RO sessions and **must not** be equated with live-authority TTL or execution authority.
+
 ---
 
 ## 7. OANDA live-read-only certification gap
@@ -246,6 +267,7 @@ Do not stop or modify the current run under LDT-002.
 
 Do **not** designate `66e11d4f…` as live-ready.
 Do **not** designate candidate HEAD `fa35bb4f…` as an RC-LIVE freeze SHA in this revision.
+Do **not** designate Phase 191/192 tip `84a0e893…` as an RC-LIVE freeze SHA.
 
 Future live-pilot candidate SHA may be selected only after **all** of:
 
@@ -267,18 +289,23 @@ Until then: freeze SHA = **NOT_DESIGNATED**.
 | --- | --- | --- |
 | BLK-LINEAGE-MW-DIP | `RESOLVED_ON_CANDIDATE` | MW/DIP/MI/RC ancestral on `css-rc-live-001-candidate` after MR-003; still re-certify on freeze |
 | BLK-RC003R-FINAL | `NOT_TESTED` / custody gap | TEMP-only FINAL; re-certify on freeze |
-| BLK-RC004-SIGNOFF | `BLOCKED` for live | Paper sign-off only; live unlock absent |
-| BLK-ANTIBLEED-CAD20 | `BLOCKED` | Contradiction class A |
+| BLK-RC004-ARTIFACT | `RESOLVED` | Phase 192 committed RC-004 posture package |
+| BLK-RC004-SIGNOFF | `SUPERSEDED_SPLIT` | Split into artifact vs live-unlock |
+| BLK-RC004-LIVE-UNLOCK | `BLOCKED` for live | Committed RC-004 states **`LIVE_TRADING_NOT_AUTHORIZED`** |
+| BLK-ANTIBLEED-CAD20 | `RESOLVED` | Phase 184A MICRO_PILOT min 20 for LIVE_MICRO_PILOT |
 | BLK-FX-CONVERSION | `BLOCKED` | No approved LDT contract / no rates file |
-| BLK-AUTH-TTL | `PARTIALLY_SUPPORTED` → gate `BLOCKED`/`NOT_TESTED` | No TTL/single-use/scope |
-| BLK-OANDA-LIVE | `BLOCKED` | LIVE not certified |
+| BLK-AUTH-TTL | `PARTIALLY_SUPPORTED` → gate `NOT_TESTED` | No live-authority TTL/single-use/scope; RO TTL ≠ live TTL |
+| BLK-OANDA-LIVE | `BLOCKED` | LIVE money path not certified; RO framework ≠ live |
 | BLK-ENDURANCE-CREDIT | `NOT_APPLICABLE` as OV-002 PASS | ER-001 observational only; OV-002 not claimed |
 | BLK-FREEZE-SHA | `NOT_TESTED` | Not designated (candidate ≠ freeze) |
+| BLK-FOUNDER-LIVE-GO | `BLOCKED` | Founder live GO not issued |
 
 **Aggregate:** **NO-GO**
+
+Authoritative JSON: `docs/governance/LDT_192_BLOCKER_MATRIX.json`.
 
 ---
 
 ## 11. Explicit non-authorization
 
-LDT-002 does not authorize live trading, merges, cherry-picks, broker contact, arming, kill-switch clearance, or freeze designation. MR-003G lineage resolution does **not** authorize live trading.
+LDT-002 does not authorize live trading, merges, cherry-picks, broker contact, arming, kill-switch clearance, or freeze designation. MR-003G lineage resolution and Phase 192 RC-004/LDT refresh do **not** authorize live trading.

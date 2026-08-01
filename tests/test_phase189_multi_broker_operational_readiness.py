@@ -171,6 +171,10 @@ def test_rc004_never_authorizes_live() -> None:
     rc = evaluate_rc004_readiness("COINBASE", signoff_artifact_present=True)
     assert rc.live_trading_authorized is False
     assert "LIVE_TRADING_NOT_AUTHORIZED" in rc.remaining_blockers
+    assert "BLK-RC004-LIVE-UNLOCK" in rc.remaining_blockers
+    assert rc.status == "PAPER_ONLY_NO_LIVE_UNLOCK"
+    assert rc.explicit_statement == "LIVE_TRADING_NOT_AUTHORIZED"
+    assert rc.signoff_artifact_present is True
 
 
 def test_firewall_static() -> None:

@@ -7,16 +7,20 @@ import subprocess
 from pathlib import Path
 
 from backend.app.risk.anti_bleed_guard import AntiBleedGuard
+from backend.app.risk.anti_bleed_policy import AntiBleedPolicyResolver
 from backend.config.order_limit_config import DEFAULT_ORDER_LIMIT_CONFIG
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GATE_MATRIX = REPO_ROOT / "docs" / "governance" / "LDT_001_PREFLIGHT_GATE_MATRIX.json"
 LDT002 = REPO_ROOT / "docs" / "governance" / "LDT_002_LIVE_PILOT_BLOCKER_RESOLUTION_AUDIT.md"
+LDT192_MATRIX = REPO_ROOT / "docs" / "governance" / "LDT_192_BLOCKER_MATRIX.json"
 CHARTER = REPO_ROOT / "docs" / "governance" / "LDT_001_CONTROLLED_LIVE_DEPLOYMENT_TEST_CHARTER.md"
+RC004_DOC = REPO_ROOT / "docs" / "governance" / "RC_004_OPERATIONAL_POSTURE.md"
 MAINT_TIP = "9a9263c185680353fac9319577b4a1f82d3311dd"
 UNIFIED_HEAD = "66e11d4f83600a7765b4e55afa33d19e301dd70e"
-CANDIDATE_HEAD = "fa35bb4f4b8f96b4b77bb74217b0fb0f35cf2204"
+MR003G_HEAD = "fa35bb4f4b8f96b4b77bb74217b0fb0f35cf2204"
+PHASE192_HEAD = "84a0e893385a624a8ebb5dfffd53f35ce4b30ba7"
 MI_TIP = "81d48bfc0e65274c77e28d25047b04d4617d8919"
 MERGE_BASE = "b0703f36096bf183514293ef9b83b6e7849bd087"
 
@@ -47,8 +51,11 @@ def test_ldt002_audit_document_exists_and_forbids_live_authorization() -> None:
     assert "PARTIALLY_SUPPORTED" in text
     assert "css-v1.0.1-maintenance" in text
     assert UNIFIED_HEAD in text
-    assert CANDIDATE_HEAD in text
+    assert MR003G_HEAD in text
+    assert PHASE192_HEAD in text
     assert "RESOLVED_ON_CANDIDATE" in text
+    assert "BLK-ANTIBLEED-CAD20" in text and "RESOLVED" in text
+    assert "LIVE_TRADING_NOT_AUTHORIZED" in RC004_DOC.read_text(encoding="utf-8")
     assert "does not authorize live trading" in text.lower() or "does **not** authorize live trading" in text
 
 
@@ -85,15 +92,15 @@ def test_ldt002_unresolved_blockers_force_no_go() -> None:
     assert _matrix()["charter_time_aggregate"] == "NO-GO"
     assert _matrix()["freeze_sha_designated"] is False
     assert _matrix()["live_authorized"] is False
-    assert _gate("E5")["classification"] == "BLOCKED"
+    assert _gate("E5")["classification"] == "PASS"
     assert _gate("D3")["classification"] == "BLOCKED"
     assert _gate("C8")["classification"] == "BLOCKED"
     assert _gate("A1")["classification"] == "NOT_TESTED"
 
     cad20 = float(DEFAULT_ORDER_LIMIT_CONFIG.live_pilot_max_position_cad)
-    guard = AntiBleedGuard()
-    assert cad20 < guard.minimum_profitable_trade_size
-    rejected = guard.evaluate(
+    standard = AntiBleedGuard()
+    assert cad20 < standard.minimum_profitable_trade_size
+    rejected = standard.evaluate(
         symbol="EUR_USD",
         trade_size=cad20,
         expected_move_bps=50.0,
@@ -103,6 +110,15 @@ def test_ldt002_unresolved_blockers_force_no_go() -> None:
     )
     assert rejected["approved"] is False
     assert rejected["reason"] == "trade_size_too_small"
+
+    micro = AntiBleedGuard(policy=AntiBleedPolicyResolver.resolve("LIVE_MICRO_PILOT"))
+    assert micro.minimum_profitable_trade_size == 20.0
+    assert LDT192_MATRIX.is_file()
+    blockers = json.loads(LDT192_MATRIX.read_text(encoding="utf-8"))["blockers"]
+    by_id = {b["id"]: b["classification"] for b in blockers}
+    assert by_id["BLK-ANTIBLEED-CAD20"] == "RESOLVED"
+    assert by_id["BLK-RC004-ARTIFACT"] == "RESOLVED"
+    assert by_id["BLK-RC004-LIVE-UNLOCK"] == "BLOCKED"
 
 
 def test_ldt002_absent_currency_conversion_produces_no_go() -> None:
@@ -149,5 +165,7 @@ def test_ldt002_matrix_records_maintenance_lineage_metadata() -> None:
     assert matrix["maintenance_branch"] == "origin/css-v1.0.1-maintenance"
     assert matrix["merge_base_with_maintenance"] == MERGE_BASE
     assert matrix["maintenance_merge_commit"] == "d43ed196a6d79a9efd713dfe8b30133008aa0508"
-    assert matrix["mi_merge_commit"] == CANDIDATE_HEAD
+    assert matrix["mi_merge_commit"] == MR003G_HEAD
+    assert matrix["as_of_candidate_head"] == PHASE192_HEAD
     assert matrix["ldt002_audit"].endswith("LDT_002_LIVE_PILOT_BLOCKER_RESOLUTION_AUDIT.md")
+    assert matrix["ldt192_blocker_matrix"].endswith("LDT_192_BLOCKER_MATRIX.json")
