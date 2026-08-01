@@ -33,6 +33,12 @@ from dataclasses import dataclass
 from collections import deque
 from typing import Deque, Optional, Dict, Any
 
+from engine.risk.canonical_volatility_price import coerce_finite_positive_price
+
+
+class VolatilityPriceError(ValueError):
+    """Raised when VolatilityPositionSizer receives a non-usable price."""
+
 
 @dataclass(frozen=True)
 class VolatilitySizingPolicy:
@@ -53,16 +59,16 @@ class RealizedVolatilitySizer:
         self._last_price: Optional[float] = None
 
     def update(self, price: float) -> None:
-        if price is None:
-            return
-        if price <= 0:
-            return
+        validated = coerce_finite_positive_price(price)
+        if validated is None:
+            raise VolatilityPriceError("volatility_price_invalid")
 
         if self._last_price is not None and self._last_price > 0:
-            r = math.log(price / self._last_price)
-            self._rets.append(r)
+            r = math.log(validated / self._last_price)
+            if math.isfinite(r):
+                self._rets.append(r)
 
-        self._last_price = price
+        self._last_price = validated
 
     def realized_vol(self) -> Optional[float]:
         n = len(self._rets)
@@ -101,12 +107,30 @@ class VolatilityPositionSizer:
     def size(self, notional: float, price: float, debug: Optional[Dict[str, Any]] = None) -> float:
         """
         Scale `notional` based on realized volatility computed from `price` stream.
+
+        Invalid prices raise VolatilityPriceError — callers must not treat TypeError
+        or silent mult=1.0 as the normal missing-price path.
         """
-        # Update the volatility state with the latest price
-        self._sizer.update(price)
+        validated = coerce_finite_positive_price(price)
+        if validated is None:
+            raise VolatilityPriceError("volatility_price_invalid")
+
+        try:
+            base = float(notional)
+        except (TypeError, ValueError) as exc:
+            raise VolatilityPriceError("volatility_notional_invalid") from exc
+        if not math.isfinite(base):
+            raise VolatilityPriceError("volatility_notional_invalid")
+
+        # Update the volatility state with the latest validated price
+        self._sizer.update(validated)
 
         mult = self._sizer.multiplier()
-        scaled = float(notional) * float(mult)
+        if not math.isfinite(mult):
+            raise VolatilityPriceError("volatility_multiplier_invalid")
+        scaled = float(base) * float(mult)
+        if not math.isfinite(scaled):
+            raise VolatilityPriceError("volatility_scaled_notional_invalid")
 
         if debug is not None:
             # Keep keys stable and informative
@@ -116,5 +140,6 @@ class VolatilityPositionSizer:
             rv = self._sizer.realized_vol()
             debug["realized_vol"] = rv if rv is not None else 0.0
             debug["vol_scaled_notional"] = scaled
+            debug["canonical_price"] = validated
 
         return scaled

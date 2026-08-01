@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+import math
 import os
 import secrets
 import time
@@ -3520,6 +3521,23 @@ def _trade_ticket_page(
     )
 
 
+def _resolve_equity_peak_for_gate(pnl_snapshot: Dict[str, Any], equity: float) -> float:
+    """
+    RR-001 / MW-001: never coerce missing/zero peak to 0 while equity > 0.
+    Prefer an explicit finite peak > 0; otherwise use equity.
+    """
+    raw_peak = pnl_snapshot.get("equity_peak")
+    try:
+        peak = float(raw_peak) if raw_peak is not None else 0.0
+    except (TypeError, ValueError):
+        peak = 0.0
+    if math.isfinite(peak) and peak > 0.0:
+        return peak
+    if math.isfinite(equity) and equity > 0.0:
+        return equity
+    return 0.0 if not math.isfinite(peak) else max(peak, 0.0)
+
+
 def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) -> Dict[str, Any]:
     load_local_env()
 
@@ -3638,8 +3656,13 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
         _record_mobile_event({"event_type": "mobile_order_rejected", **result})
         return result
         
-    equity = float(pnl_snapshot.get("equity", 0.0))
-    equity_peak = float(pnl_snapshot.get("equity_peak", 0.0))
+    try:
+        equity = float(pnl_snapshot.get("equity", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        equity = 0.0
+    if not math.isfinite(equity):
+        equity = 0.0
+    equity_peak = _resolve_equity_peak_for_gate(pnl_snapshot, equity)
 
     # 2. Canonical Margin Snapshot
     margin_snapshot = None
@@ -3769,6 +3792,7 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
         gate_spread_bps = 1.0
         gate_slippage_bps = 1.0
 
+    gate_price, gate_price_source = _resolve_mobile_canonical_gate_price(ticket)
     gate_decision = exec_gate.evaluate_trade(
         instrument=ticket["symbol"],
         side=ticket["side"],
@@ -3785,8 +3809,19 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
         spread_bps=gate_spread_bps,
         slippage_bps=gate_slippage_bps,
         margin_snapshot=margin_snapshot,
-        broker_mode="live" if is_live_request else "paper"
+        broker_mode="live" if is_live_request else "paper",
+        price=gate_price,
+        price_instrument=ticket["symbol"],
     )
+    if gate_price_source:
+        _record_mobile_event(
+            {
+                "event_type": "mobile_gate_canonical_price",
+                "price_source": gate_price_source,
+                "symbol": ticket["symbol"],
+                "price": gate_price,
+            }
+        )
 
     if gate_decision.get("decision", {}).get("final") != "ALLOW":
         result = {
@@ -3827,9 +3862,29 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
             _record_mobile_event({"event_type": "mobile_order_rejected", **result})
             return result
 
-    # Persist via TradeRuntimeService
+    # Persist via TradeRuntimeService — MW-004 ledger fidelity
     try:
         from decimal import Decimal
+
+        from backend.execution.paper_execution_economics import (
+            PaperExecutionEconomicsError,
+            build_paper_execution_economics,
+            merge_ticket_payload_with_economics,
+        )
+
+        debug = gate_decision.get("debug") if isinstance(gate_decision.get("debug"), dict) else {}
+        execution_price = gate_price if gate_price is not None else debug.get("canonical_price")
+        economics = build_paper_execution_economics(
+            ticket=ticket,
+            gate_decision=gate_decision,
+            canonical_price=execution_price,
+            price_source=gate_price_source or debug.get("canonical_price_source"),
+        )
+        payload_json = merge_ticket_payload_with_economics(
+            ticket,
+            economics,
+            gate_decision=gate_decision,
+        )
         trade_service = TradeRuntimeService()
         trade_service.open_trade(
             trade_id=ticket["ticket_id"],
@@ -3839,10 +3894,11 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
             symbol=ticket["symbol"],
             direction=ticket["side"].lower(),
             order_type="market",
-            quantity=Decimal(str(ticket["qty"])),
-            filled_quantity=Decimal(str(ticket["qty"])),
-            entry_price=Decimal("0.0"),
-            raw_payload_json=json.dumps(ticket)
+            quantity=Decimal(str(economics["requested_quantity"])),
+            filled_quantity=Decimal(str(economics["filled_quantity"])),
+            entry_price=Decimal(str(economics["entry_price"])),
+            raw_payload_json=payload_json,
+            status=str(economics["status"]),
         )
         if is_live_request:
             live_micro_pilot_governor.record_order_submitted(
@@ -3855,6 +3911,15 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
                     "mobile_trading_mode": mobile_mode,
                 }
             )
+    except (PaperExecutionEconomicsError, ValueError) as e:
+        result = {
+            "ok": False,
+            "status": "LEDGER_PERSISTENCE_FAILED",
+            "ticket": ticket,
+            "broker_response": {"error": str(e), "reason": "execution_economics_invalid"},
+        }
+        _record_mobile_event({"event_type": "mobile_order_rejected", **result})
+        return result
     except Exception as e:
         result = {
             "ok": False,
@@ -3872,11 +3937,47 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
         "broker_response": {
             "live_order_sent": is_live_request,
             "governance_decision": orchestrator_decision,
-            "execution_gate_decision": gate_decision
+            "execution_gate_decision": gate_decision,
+            "execution_economics": economics,
         },
     }
     _record_mobile_event({"event_type": "mobile_order_approved", **result})
     return result
+
+def _resolve_mobile_canonical_gate_price(ticket: Dict[str, Any]) -> tuple[Optional[float], Optional[str]]:
+    """
+    MW-003 — resolve ticket/market price for ExecutionGate volatility sizing.
+
+    Precedence uses values already on the ticket only (no network fetch):
+    price → last_price → market_price → mid_price → reference_price → current_price
+    → ticket-implied amount/qty when both are finite and > 0.
+
+    Never invents 0/1 or reuses another instrument's price.
+    """
+    from engine.risk.canonical_volatility_price import (
+        coerce_finite_positive_price,
+        resolve_canonical_price_candidates,
+    )
+
+    canonical, source = resolve_canonical_price_candidates(
+        price=ticket.get("price"),
+        last_price=ticket.get("last_price"),
+        market_price=ticket.get("market_price"),
+        mid_price=ticket.get("mid_price"),
+        reference_price=ticket.get("reference_price"),
+        current_price=ticket.get("current_price"),
+    )
+    if canonical is not None:
+        return canonical, source
+
+    amount = coerce_finite_positive_price(ticket.get("amount"))
+    qty = coerce_finite_positive_price(ticket.get("qty"))
+    if amount is not None and qty is not None:
+        implied = amount / qty
+        if coerce_finite_positive_price(implied) is not None:
+            return float(implied), "ticket_implied_amount_over_qty"
+    return None, None
+
 
 def _build_mobile_ticket(
     user_ctx: Dict[str, Any],

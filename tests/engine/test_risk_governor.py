@@ -189,6 +189,8 @@ def test_execution_gate_marks_precomputed_risk_governor_path(tmp_path) -> None:
         fee_bps=1.0,
         spread_bps=1.0,
         slippage_bps=1.0,
+        price=1.10,
+        price_instrument="EUR_USD",
         margin_snapshot=MarginSnapshot(
             broker="TEST",
             account_id="123",

@@ -27,7 +27,9 @@ class PnlSnapshotRepository(BaseRepository):
         winning_positions: int,
         losing_positions: int,
         snapshot_reason: str | None = None,
+        equity_peak: Decimal | None = None,
     ) -> None:
+        resolved_peak = equity if equity_peak is None else equity_peak
         self.execute(
             """
             INSERT INTO pnl_snapshots (
@@ -38,13 +40,14 @@ class PnlSnapshotRepository(BaseRepository):
                 realized_pnl,
                 unrealized_pnl,
                 equity,
+                equity_peak,
                 available_cash,
                 open_positions,
                 winning_positions,
                 losing_positions,
                 snapshot_reason
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id,
@@ -54,6 +57,7 @@ class PnlSnapshotRepository(BaseRepository):
                 str(realized_pnl),
                 str(unrealized_pnl),
                 str(equity),
+                str(resolved_peak),
                 str(available_cash),
                 open_positions,
                 winning_positions,

@@ -155,6 +155,8 @@ def test_stock_alerts_do_not_alter_execution_gate_behavior(tmp_path) -> None:
         fee_bps=1.0,
         spread_bps=1.0,
         slippage_bps=1.0,
+        price=1.10,
+        price_instrument="EUR_USD",
         margin_snapshot={
             "margin_state": "GREEN",
             "escalation_state": "NORMAL",

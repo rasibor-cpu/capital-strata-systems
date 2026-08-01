@@ -96,8 +96,12 @@ def test_mobile_live_order_kill_switch_does_not_block_paper_tickets(
 
     )
 
-    assert result["ok"] is False
+    # Kill switch must not engage on paper. RR-001 may allow the ticket to
+    # succeed when durable equity_peak is missing (peak defaults to equity);
+    # either success or a non-kill-switch rejection is acceptable here.
     assert result["status"] != "GLOBAL_LIVE_ORDER_KILL_SWITCH_ENGAGED"
+    if result.get("ok") is False:
+        assert "KILL_SWITCH" not in str(result.get("status") or "").upper()
 
 
 def test_controls_page_exposes_live_order_kill_switch(monkeypatch, tmp_path) -> None:
