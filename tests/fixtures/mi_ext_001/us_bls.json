@@ -1,0 +1,17 @@
+{
+  "events": [
+    {
+      "event_id": "bls-cpi-2026-07-30-01",
+      "title": "Consumer Price Index inflation release",
+      "normalized_summary": "BLS CPI inflation print; instruments not asserted beyond US_MACRO.",
+      "event_category": "inflation",
+      "published_at": "2026-07-30T12:30:00Z",
+      "source_url": "https://www.bls.gov/news.release/cpi.htm",
+      "publisher": "BLS",
+      "jurisdiction": "US",
+      "affected_instruments": ["US_MACRO"],
+      "affected_asset_classes": ["MACRO"],
+      "verification_status": "VERIFIED"
+    }
+  ]
+}

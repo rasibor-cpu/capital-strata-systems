@@ -1,0 +1,17 @@
+{
+  "events": [
+    {
+      "event_id": "nbs-cpi-2026-07-30-01",
+      "title": "NBS consumer price inflation statistics release",
+      "normalized_summary": "National Bureau of Statistics inflation publication.",
+      "event_category": "inflation",
+      "published_at": "2026-07-30T10:00:00Z",
+      "source_url": "https://nigerianstat.gov.ng/",
+      "publisher": "NBS",
+      "jurisdiction": "NG",
+      "affected_instruments": ["NG_MACRO"],
+      "affected_asset_classes": ["MACRO"],
+      "verification_status": "VERIFIED"
+    }
+  ]
+}

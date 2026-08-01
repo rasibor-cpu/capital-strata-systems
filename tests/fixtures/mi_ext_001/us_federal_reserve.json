@@ -1,0 +1,17 @@
+{
+  "events": [
+    {
+      "event_id": "fed-fomc-2026-07-30-01",
+      "title": "FOMC monetary policy statement — policy rate held",
+      "normalized_summary": "Federal Reserve monetary policy decision; interest rate path discussed; direction unknown without full text analysis.",
+      "event_category": "monetary_policy",
+      "published_at": "2026-07-30T18:00:00Z",
+      "source_url": "https://www.federalreserve.gov/newsevents/pressreleases.htm",
+      "publisher": "Federal Reserve",
+      "jurisdiction": "US",
+      "affected_instruments": ["USD", "US_RATES"],
+      "affected_asset_classes": ["FX", "RATES"],
+      "verification_status": "VERIFIED"
+    }
+  ]
+}

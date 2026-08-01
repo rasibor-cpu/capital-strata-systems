@@ -1,0 +1,1088 @@
+{
+  "document": "MR_002_MERGE_MATRIX",
+  "workstream": "MR-002",
+  "title": "Enterprise Merge Matrix",
+  "status": "MR_002_READY_FOR_REVIEW",
+  "package_date": "2026-08-01",
+  "authorization": {
+    "merge": false,
+    "cherry_pick": false,
+    "implementation": false,
+    "runtime_access": false,
+    "broker_access": false,
+    "commit": false,
+    "push": false,
+    "live_trading": false,
+    "controlled_online_mi_validation": false
+  },
+  "workspace_verification": {
+    "documentation_worktree_operator_path": "C:\\rasib\\source\\capital-strata-systems-mi",
+    "remote_repository": "https://github.com/rasibor-cpu/capital-strata-systems",
+    "required_branch": "css-market-intelligence-external-sources-001",
+    "expected_head": "3c7a6b61de2f7784e794b9f186a440d0f50392b2",
+    "verified_head": "3c7a6b61de2f7784e794b9f186a440d0f50392b2",
+    "verified_head_subject": "MI-EXT-001: add governed external events and source provenance",
+    "active_runtime_operator_path": "C:\\rasib\\source\\capital-strata-systems",
+    "active_runtime_branch": "css-unified-consolidation-2026-07-13",
+    "active_runtime_head": "66e11d4f83600a7765b4e55afa33d19e301dd70e",
+    "active_runtime_subject": "RC-001: Normalize broker reporting semantics and canonical readiness parity",
+    "result": "VERIFIED"
+  },
+  "branch_inventory": [
+    {
+      "branch": "codex/build-css-profitability-analytics-foundation",
+      "ref": "origin/codex/build-css-profitability-analytics-foundation",
+      "sha": "ea229cd05dfa1117cb249f080cda237e4dee28fc",
+      "sha_short": "ea229cd0",
+      "committed_at": "2026-05-25T13:42:37-05:00",
+      "subject": "Resolve Phase 56B analytics foundation merge conflicts",
+      "role": "AGENT_OR_CODEX_HISTORICAL",
+      "merge_posture": "NON_RC_LIVE",
+      "inventory_class": "AGENT_HISTORICAL",
+      "programme": "agent-codex"
+    },
+    {
+      "branch": "codex/fix-phase-54-pilot-safety-controls-test-failures",
+      "ref": "origin/codex/fix-phase-54-pilot-safety-controls-test-failures",
+      "sha": "45fbdac0d07344392744bd76b200fbc19c1548c5",
+      "sha_short": "45fbdac0",
+      "committed_at": "2026-05-22T22:27:27-05:00",
+      "subject": "Fix Phase 54 pilot safety controls compatibility",
+      "role": "AGENT_OR_CODEX_HISTORICAL",
+      "merge_posture": "NON_RC_LIVE",
+      "inventory_class": "AGENT_HISTORICAL",
+      "programme": "agent-codex"
+    },
+    {
+      "branch": "codex/fix-remaining-test-failures-for-phase-54",
+      "ref": "origin/codex/fix-remaining-test-failures-for-phase-54",
+      "sha": "d4eee30ce07ba6e19a441ee52f7124695ba0d44f",
+      "sha_short": "d4eee30c",
+      "committed_at": "2026-05-22T22:26:47-05:00",
+      "subject": "Add phase-54 pilot safety compatibility surfaces",
+      "role": "AGENT_OR_CODEX_HISTORICAL",
+      "merge_posture": "NON_RC_LIVE",
+      "inventory_class": "AGENT_HISTORICAL",
+      "programme": "agent-codex"
+    },
+    {
+      "branch": "codex/implement-opportunity-normalization-foundation",
+      "ref": "origin/codex/implement-opportunity-normalization-foundation",
+      "sha": "51dc02eab5a81ebe4090833fb7039272c321fabd",
+      "sha_short": "51dc02ea",
+      "committed_at": "2026-05-25T11:41:00-05:00",
+      "subject": "Phase 56A unified opportunity normalization foundation",
+      "role": "AGENT_OR_CODEX_HISTORICAL",
+      "merge_posture": "NON_RC_LIVE",
+      "inventory_class": "AGENT_HISTORICAL",
+      "programme": "agent-codex"
+    },
+    {
+      "branch": "consolidation/pcnrass-mainline",
+      "ref": "origin/consolidation/pcnrass-mainline",
+      "sha": "540a21e0e44d2c6162c9cff63a5de0a08e5fd413",
+      "sha_short": "540a21e0",
+      "committed_at": "2026-05-28T12:31:55-05:00",
+      "subject": "CSS canonicalization governance documentation foundation",
+      "role": "CONSOLIDATION_OR_GOVERNANCE_HISTORICAL",
+      "merge_posture": "HISTORICAL_REFERENCE",
+      "inventory_class": "CONSOLIDATION_HISTORICAL",
+      "programme": "consolidation"
+    },
+    {
+      "branch": "css-agent/dev-environment-setup-ef97",
+      "ref": "origin/css-agent/dev-environment-setup-ef97",
+      "sha": "1fcabe2ccc1b1907e9603f26be7e5cd1e3779784",
+      "sha_short": "1fcabe2c",
+      "committed_at": "2026-07-19T23:40:59+00:00",
+      "subject": "Document canonical capital-strata-systems repo directive in AGENTS.md",
+      "role": "AGENT_OR_CODEX_HISTORICAL",
+      "merge_posture": "NON_RC_LIVE",
+      "inventory_class": "AGENT_HISTORICAL",
+      "programme": "agent-codex"
+    },
+    {
+      "branch": "css-agent/healthchecker-plus-cursor-setup-a78b",
+      "ref": "origin/css-agent/healthchecker-plus-cursor-setup-a78b",
+      "sha": "e0dea39cb317bbaca9b95378b8627d3bef540280",
+      "sha_short": "e0dea39c",
+      "committed_at": "2026-07-19T17:58:21+00:00",
+      "subject": "Add HealthChecker+ foot pain engine tests to setup package",
+      "role": "AGENT_OR_CODEX_HISTORICAL",
+      "merge_posture": "NON_RC_LIVE",
+      "inventory_class": "AGENT_HISTORICAL",
+      "programme": "agent-codex"
+    },
+    {
+      "branch": "css-evening-consolidation-2026-06-09",
+      "ref": "origin/css-evening-consolidation-2026-06-09",
+      "sha": "c2c4d588df2710b23548e49bffe0b9aa337639e9",
+      "sha_short": "c2c4d588",
+      "committed_at": "2026-07-13T21:27:02-04:00",
+      "subject": "Add CSS branch consolidation and derivatives completion audit",
+      "role": "CONSOLIDATION_OR_GOVERNANCE_HISTORICAL",
+      "merge_posture": "HISTORICAL_REFERENCE",
+      "inventory_class": "CONSOLIDATION_HISTORICAL",
+      "programme": "consolidation"
+    },
+    {
+      "branch": "css-market-intelligence-external-sources-001",
+      "ref": "origin/css-market-intelligence-external-sources-001",
+      "sha": "3c7a6b61de2f7784e794b9f186a440d0f50392b2",
+      "sha_short": "3c7a6b61",
+      "committed_at": "2026-07-31T20:24:25-04:00",
+      "subject": "MI-EXT-001: add governed external events and source provenance",
+      "role": "MR_002_SUBJECT_MI_EXT_001",
+      "merge_posture": "ADDITIVE_ADVISORY_LIBRARY",
+      "programme": "MI-EXT-001",
+      "inventory_class": "PRIMARY"
+    },
+    {
+      "branch": "css-phase2-coinbase-init-fix",
+      "ref": "origin/css-phase2-coinbase-init-fix",
+      "sha": "ee5f0606c1c994683c3e0df9148eace6bbdd2205",
+      "sha_short": "ee5f0606",
+      "committed_at": "2026-05-02T00:21:07-05:00",
+      "subject": "PCNRASS: stabilize auth gate and user registry persistence",
+      "role": "HISTORICAL_FEATURE_OR_OPS",
+      "merge_posture": "HISTORICAL_REFERENCE",
+      "inventory_class": "OPS_OR_FEATURE_HISTORICAL",
+      "programme": "historical"
+    },
+    {
+      "branch": "css-phone-ops-2026-06-17",
+      "ref": "origin/css-phone-ops-2026-06-17",
+      "sha": "467ecf22095d36d00b788adc2e07bdab1632a619",
+      "sha_short": "467ecf22",
+      "committed_at": "2026-06-17T19:48:25-04:00",
+      "subject": "Phase 118A - Add Multi Broker Capital Governance Framework",
+      "role": "HISTORICAL_FEATURE_OR_OPS",
+      "merge_posture": "HISTORICAL_REFERENCE",
+      "inventory_class": "OPS_OR_FEATURE_HISTORICAL",
+      "programme": "historical"
+    },
+    {
+      "branch": "css-pnl-recovery-clean-2026-04-25",
+      "ref": "origin/css-pnl-recovery-clean-2026-04-25",
+      "sha": "16efbb778d960ca0e1182d4788cb063ed0ef9cf5",
+      "sha_short": "16efbb77",
+      "committed_at": "2026-04-23T22:02:24-05:00",
+      "subject": "Phase 14.1 - Trade Gate Integrated into Orchestrator (No Regression)",
+      "role": "HISTORICAL_FEATURE_OR_OPS",
+      "merge_posture": "HISTORICAL_REFERENCE",
+      "inventory_class": "OPS_OR_FEATURE_HISTORICAL",
+      "programme": "historical"
+    },
+    {
+      "branch": "css-profit-baseline-reference",
+      "ref": "origin/css-profit-baseline-reference",
+      "sha": "d2f0129faabcc79f8b1bf8d0d09c1d908ebc7e6e",
+      "sha_short": "d2f0129f",
+      "committed_at": "2026-04-20T09:50:34-05:00",
+      "subject": "chore: ignore artifacts folder",
+      "role": "HISTORICAL_FEATURE_OR_OPS",
+      "merge_posture": "HISTORICAL_REFERENCE",
+      "inventory_class": "OPS_OR_FEATURE_HISTORICAL",
+      "programme": "historical"
+    },
+    {
+      "branch": "css-unified-consolidation-2026-07-13",
+      "ref": "origin/css-unified-consolidation-2026-07-13",
+      "sha": "66e11d4f83600a7765b4e55afa33d19e301dd70e",
+      "sha_short": "66e11d4f",
+      "committed_at": "2026-07-31T02:19:48-04:00",
+      "subject": "RC-001: Normalize broker reporting semantics and canonical readiness parity",
+      "role": "RC_ACTIVE_RUNTIME_LINEAGE",
+      "merge_posture": "PROTECTED_DO_NOT_TOUCH",
+      "programme": "RC-001",
+      "inventory_class": "PRIMARY"
+    },
+    {
+      "branch": "css-v1.0.1-maintenance",
+      "ref": "origin/css-v1.0.1-maintenance",
+      "sha": "9a9263c185680353fac9319577b4a1f82d3311dd",
+      "sha_short": "9a9263c1",
+      "committed_at": "2026-07-31T00:28:43-04:00",
+      "subject": "DIP-006: certify enterprise readiness with limitations",
+      "role": "MR_001_DIP_DECISION_INTELLIGENCE_CARRIER",
+      "merge_posture": "DIVERGED_MERGE_CANDIDATE",
+      "programme": "DIP-001..006",
+      "inventory_class": "PRIMARY"
+    },
+    {
+      "branch": "feature/backend-core-wiring",
+      "ref": "origin/feature/backend-core-wiring",
+      "sha": "c5f62333c48f1650ce534a2fc7800fb827cec0ac",
+      "sha_short": "c5f62333",
+      "committed_at": "2026-01-30T15:31:14-06:00",
+      "subject": "Delete backend directory",
+      "role": "HISTORICAL_FEATURE_OR_OPS",
+      "merge_posture": "HISTORICAL_REFERENCE",
+      "inventory_class": "OPS_OR_FEATURE_HISTORICAL",
+      "programme": "historical"
+    },
+    {
+      "branch": "feature/broker-bootstrap",
+      "ref": "origin/feature/broker-bootstrap",
+      "sha": "407d8bc86a45ab87bea6a68c823c487449609203",
+      "sha_short": "407d8bc8",
+      "committed_at": "2026-03-06T01:17:45-06:00",
+      "subject": "Add broker bootstrap initialization module",
+      "role": "HISTORICAL_FEATURE_OR_OPS",
+      "merge_posture": "HISTORICAL_REFERENCE",
+      "inventory_class": "OPS_OR_FEATURE_HISTORICAL",
+      "programme": "historical"
+    },
+    {
+      "branch": "feature/css-world-event-intelligence",
+      "ref": "origin/feature/css-world-event-intelligence",
+      "sha": "f5c8ecf14859569239f17c817c8c9ca2aeb546f4",
+      "sha_short": "f5c8ecf1",
+      "committed_at": "2026-05-18T20:35:26-05:00",
+      "subject": "Create CSS events intelligence module structure",
+      "role": "SUPERSEDED_EVENTS_SCAFFOLD",
+      "merge_posture": "DO_NOT_MERGE_AS_PARALLEL_SPINE",
+      "inventory_class": "INTELLIGENCE_HISTORICAL",
+      "programme": "historical-intelligence"
+    },
+    {
+      "branch": "feature/futures-orchestrator-integration-spec",
+      "ref": "origin/feature/futures-orchestrator-integration-spec",
+      "sha": "0f0283083608700c15b60faa92363337d5462943",
+      "sha_short": "0f028308",
+      "committed_at": "2026-04-12T14:13:41+01:00",
+      "subject": "Create futures_orchestrator_integration_plan.md",
+      "role": "OPTIONS_FUTURES_SPEC_OR_SANDBOX",
+      "merge_posture": "NON_BLOCKING_SPEC",
+      "inventory_class": "DERIVATIVES_SPEC",
+      "programme": "options-futures-spec"
+    },
+    {
+      "branch": "feature/options-dashboard-pnl-spec",
+      "ref": "origin/feature/options-dashboard-pnl-spec",
+      "sha": "d6410e1d9fb4336403fc8b5f8ec38d65fedf023b",
+      "sha_short": "d6410e1d",
+      "committed_at": "2026-04-12T13:08:06+01:00",
+      "subject": "Add options dashboard PnL display master specification",
+      "role": "OPTIONS_FUTURES_SPEC_OR_SANDBOX",
+      "merge_posture": "NON_BLOCKING_SPEC",
+      "inventory_class": "DERIVATIVES_SPEC",
+      "programme": "options-futures-spec"
+    },
+    {
+      "branch": "feature/options-expiry-lifecycle-spec",
+      "ref": "origin/feature/options-expiry-lifecycle-spec",
+      "sha": "980630ccd6695022722667cbdcf23413942f5d4b",
+      "sha_short": "980630cc",
+      "committed_at": "2026-04-12T12:25:22+01:00",
+      "subject": "Add options expiry lifecycle master specification",
+      "role": "OPTIONS_FUTURES_SPEC_OR_SANDBOX",
+      "merge_posture": "NON_BLOCKING_SPEC",
+      "inventory_class": "DERIVATIVES_SPEC",
+      "programme": "options-futures-spec"
+    },
+    {
+      "branch": "feature/options-orchestrator-integration-spec",
+      "ref": "origin/feature/options-orchestrator-integration-spec",
+      "sha": "192aacb5a7c0624ff3244d7653825c4c0912e5b1",
+      "sha_short": "192aacb5",
+      "committed_at": "2026-04-12T12:52:44+01:00",
+      "subject": "Create options_orchestrator_integration_spec.md",
+      "role": "OPTIONS_FUTURES_SPEC_OR_SANDBOX",
+      "merge_posture": "NON_BLOCKING_SPEC",
+      "inventory_class": "DERIVATIVES_SPEC",
+      "programme": "options-futures-spec"
+    },
+    {
+      "branch": "feature/options-position-manager-spec",
+      "ref": "origin/feature/options-position-manager-spec",
+      "sha": "c41c5f90d4c2ef653a567b74d64a8085b1d3fe71",
+      "sha_short": "c41c5f90",
+      "committed_at": "2026-04-12T12:17:11+01:00",
+      "subject": "Add options position manager master specification",
+      "role": "OPTIONS_FUTURES_SPEC_OR_SANDBOX",
+      "merge_posture": "NON_BLOCKING_SPEC",
+      "inventory_class": "DERIVATIVES_SPEC",
+      "programme": "options-futures-spec"
+    },
+    {
+      "branch": "feature/options-risk-governor-spec",
+      "ref": "origin/feature/options-risk-governor-spec",
+      "sha": "15b00a0aae7b0a26ceeafb8b81d02a6d241aba0f",
+      "sha_short": "15b00a0a",
+      "committed_at": "2026-04-12T13:12:32+01:00",
+      "subject": "Create options_risk_governor_spec.md- Add options risk governor master specification",
+      "role": "OPTIONS_FUTURES_SPEC_OR_SANDBOX",
+      "merge_posture": "NON_BLOCKING_SPEC",
+      "inventory_class": "DERIVATIVES_SPEC",
+      "programme": "options-futures-spec"
+    },
+    {
+      "branch": "feature/options-sandbox-phase1",
+      "ref": "origin/feature/options-sandbox-phase1",
+      "sha": "f374539b7cd20172fe9865e1ce0f30f7755c4caf",
+      "sha_short": "f374539b",
+      "committed_at": "2026-04-12T11:44:59+01:00",
+      "subject": "Add Phase 1 options contract selector sandbox module",
+      "role": "OPTIONS_FUTURES_SPEC_OR_SANDBOX",
+      "merge_posture": "NON_BLOCKING_SPEC",
+      "inventory_class": "DERIVATIVES_SPEC",
+      "programme": "options-futures-spec"
+    },
+    {
+      "branch": "feature/options-sandbox-test-harness-spec",
+      "ref": "origin/feature/options-sandbox-test-harness-spec",
+      "sha": "a91fe7cc9d316c083117f6ef19ca8f4fcf050653",
+      "sha_short": "a91fe7cc",
+      "committed_at": "2026-04-12T12:59:57+01:00",
+      "subject": "Create options_sandbox_test_harness_spec.md",
+      "role": "OPTIONS_FUTURES_SPEC_OR_SANDBOX",
+      "merge_posture": "NON_BLOCKING_SPEC",
+      "inventory_class": "DERIVATIVES_SPEC",
+      "programme": "options-futures-spec"
+    },
+    {
+      "branch": "feature/posting-screens",
+      "ref": "origin/feature/posting-screens",
+      "sha": "f76a63378915a0f5074a085a00737a3a228def54",
+      "sha_short": "f76a6337",
+      "committed_at": "2026-01-31T12:58:03-06:00",
+      "subject": "Add submit guard enforcing customer onboarding and approved signature mandate",
+      "role": "HISTORICAL_FEATURE_OR_OPS",
+      "merge_posture": "HISTORICAL_REFERENCE",
+      "inventory_class": "OPS_OR_FEATURE_HISTORICAL",
+      "programme": "historical"
+    },
+    {
+      "branch": "governance_phase_lock",
+      "ref": "origin/governance_phase_lock",
+      "sha": "e61060d13994e66f520c175b5590f8d8687a2e04",
+      "sha_short": "e61060d1",
+      "committed_at": "2026-02-14T18:57:02-06:00",
+      "subject": "Phase 2A: finalize BrokerCapabilityGate adapter + canonical gate alignment",
+      "role": "CONSOLIDATION_OR_GOVERNANCE_HISTORICAL",
+      "merge_posture": "HISTORICAL_REFERENCE",
+      "inventory_class": "CONSOLIDATION_HISTORICAL",
+      "programme": "consolidation"
+    },
+    {
+      "branch": "live-adapters",
+      "ref": "origin/live-adapters",
+      "sha": "cb97af4409b83bf92961210f1e01d67015348104",
+      "sha_short": "cb97af44",
+      "committed_at": "2026-02-03T13:40:41-06:00",
+      "subject": "Add centralized logging with ENGINE_RUN_ID and TRACE_ID (audit-safe)",
+      "role": "HISTORICAL_FEATURE_OR_OPS",
+      "merge_posture": "HISTORICAL_REFERENCE",
+      "inventory_class": "OPS_OR_FEATURE_HISTORICAL",
+      "programme": "historical"
+    },
+    {
+      "branch": "main",
+      "ref": "origin/main",
+      "sha": "faf1485dd88d7056bbd8f7f891cb47caf7685603",
+      "sha_short": "faf1485d",
+      "committed_at": "2026-06-18T01:17:17-04:00",
+      "subject": "Phase 113Y - Add Runtime Prompting and Alert Service Framework",
+      "role": "HISTORICAL_PUBLIC_MAINLINE",
+      "merge_posture": "NOT_RC_LIVE_TARGET",
+      "programme": "legacy-main",
+      "inventory_class": "PRIMARY"
+    },
+    {
+      "branch": "master",
+      "ref": "origin/master",
+      "sha": "eaa8d538a74d5ace04766bfb21762fb221af0023",
+      "sha_short": "eaa8d538",
+      "committed_at": "2026-01-26T17:47:50-06:00",
+      "subject": "CHORE: ignore pycache/pyc and OLD_DO_NOT_USE files",
+      "role": "LEGACY",
+      "merge_posture": "ARCHIVE_IGNORE",
+      "programme": "legacy",
+      "inventory_class": "PRIMARY"
+    },
+    {
+      "branch": "origin",
+      "ref": "origin",
+      "sha": "faf1485dd88d7056bbd8f7f891cb47caf7685603",
+      "sha_short": "faf1485d",
+      "committed_at": "2026-06-18T01:17:17-04:00",
+      "subject": "Phase 113Y - Add Runtime Prompting and Alert Service Framework",
+      "role": "HISTORICAL_FEATURE_OR_OPS",
+      "merge_posture": "HISTORICAL_REFERENCE",
+      "inventory_class": "OPS_OR_FEATURE_HISTORICAL",
+      "programme": "historical"
+    },
+    {
+      "branch": "phase-10-posting-screens",
+      "ref": "origin/phase-10-posting-screens",
+      "sha": "50c23337eb4155a67667507d54e0d7975a7c11c8",
+      "sha_short": "50c23337",
+      "committed_at": "2026-01-31T15:53:08-06:00",
+      "subject": "Ignore local scratch and dev utility files",
+      "role": "HISTORICAL_FEATURE_OR_OPS",
+      "merge_posture": "HISTORICAL_REFERENCE",
+      "inventory_class": "OPS_OR_FEATURE_HISTORICAL",
+      "programme": "historical"
+    },
+    {
+      "branch": "phase-155-caie-capital-allocation-intelligence",
+      "ref": "origin/phase-155-caie-capital-allocation-intelligence",
+      "sha": "a81ce8a18f957d48fab448f019a4e72dee1934dd",
+      "sha_short": "a81ce8a1",
+      "committed_at": "2026-07-04T23:49:29-04:00",
+      "subject": "Add Phase 154A canonical multi-broker readiness framework",
+      "role": "CAIE_HISTORICAL",
+      "merge_posture": "DO_NOT_MERGE_AS_PARALLEL_SPINE",
+      "inventory_class": "INTELLIGENCE_HISTORICAL",
+      "programme": "historical-intelligence"
+    },
+    {
+      "branch": "phase1-lock-candidate-manual",
+      "ref": "origin/phase1-lock-candidate-manual",
+      "sha": "31634eaf9776fec942a664c1984457c30d2b0a84",
+      "sha_short": "31634eaf",
+      "committed_at": "2026-06-08T00:02:43-04:00",
+      "subject": "Fix capital activation order and tune asset profitability gate",
+      "role": "CONSOLIDATION_OR_GOVERNANCE_HISTORICAL",
+      "merge_posture": "HISTORICAL_REFERENCE",
+      "inventory_class": "CONSOLIDATION_HISTORICAL",
+      "programme": "consolidation"
+    },
+    {
+      "branch": "phase1c-ledger-printing",
+      "ref": "origin/phase1c-ledger-printing",
+      "sha": "dfc657c5c0b379e1ac7f0c93c51a888db39abce3",
+      "sha_short": "dfc657c5",
+      "committed_at": "2026-03-07T21:08:45-06:00",
+      "subject": "Phase 4: integrate ATR + volatility position sizing engine",
+      "role": "HISTORICAL_FEATURE_OR_OPS",
+      "merge_posture": "HISTORICAL_REFERENCE",
+      "inventory_class": "OPS_OR_FEATURE_HISTORICAL",
+      "programme": "historical"
+    },
+    {
+      "branch": "phase57-regime-governance-foundation",
+      "ref": "origin/phase57-regime-governance-foundation",
+      "sha": "ee5043d5557688af8a51d15a20145072868110dd",
+      "sha_short": "ee5043d5",
+      "committed_at": "2026-05-25T15:01:22-05:00",
+      "subject": "Add missing Phase 57 regime governance validation test",
+      "role": "REGIME_FOUNDATION_HISTORICAL",
+      "merge_posture": "DO_NOT_MERGE_AS_PARALLEL_SPINE",
+      "inventory_class": "INTELLIGENCE_HISTORICAL",
+      "programme": "historical-intelligence"
+    },
+    {
+      "branch": "phase71-church-governance-pack",
+      "ref": "origin/phase71-church-governance-pack",
+      "sha": "a758643204ad632d68ce5907b7dfccf29e614865",
+      "sha_short": "a7586432",
+      "committed_at": "2026-06-08T11:43:27-04:00",
+      "subject": "Create COINBASE_ACTIVATION_RECOVERY_PLAN.md",
+      "role": "HISTORICAL_FEATURE_OR_OPS",
+      "merge_posture": "HISTORICAL_REFERENCE",
+      "inventory_class": "OPS_OR_FEATURE_HISTORICAL",
+      "programme": "historical"
+    },
+    {
+      "branch": "phase71-phone-recovery",
+      "ref": "origin/phase71-phone-recovery",
+      "sha": "a59a0dc7ab189156979a8159aef662f24414a2de",
+      "sha_short": "a59a0dc7",
+      "committed_at": "2026-06-07T22:05:06-04:00",
+      "subject": "Recover phone generated dashboard and authentication artifacts",
+      "role": "HISTORICAL_FEATURE_OR_OPS",
+      "merge_posture": "HISTORICAL_REFERENCE",
+      "inventory_class": "OPS_OR_FEATURE_HISTORICAL",
+      "programme": "historical"
+    },
+    {
+      "branch": "phase90a-institutional-instrument-framework",
+      "ref": "origin/phase90a-institutional-instrument-framework",
+      "sha": "2f66bd66ca28942ffdf02a6d78004552864711b7",
+      "sha_short": "2f66bd66",
+      "committed_at": "2026-06-12T00:03:22-04:00",
+      "subject": "Phase 90A: complete institutional instrument framework",
+      "role": "INSTRUMENT_FRAMEWORK_HISTORICAL",
+      "merge_posture": "DO_NOT_MERGE_AS_PARALLEL_SPINE",
+      "inventory_class": "INTELLIGENCE_HISTORICAL",
+      "programme": "historical-intelligence"
+    },
+    {
+      "branch": "phase90b-institutional-registry-engine",
+      "ref": "origin/phase90b-institutional-registry-engine",
+      "sha": "7136df7ab971b7a0a33fad2e124c5f04dba29739",
+      "sha_short": "7136df7a",
+      "committed_at": "2026-06-12T00:15:20-04:00",
+      "subject": "Phase 90B: establish institutional registry engine framework",
+      "role": "REGISTRY_ENGINE_HISTORICAL",
+      "merge_posture": "DO_NOT_MERGE_AS_PARALLEL_SPINE",
+      "inventory_class": "INTELLIGENCE_HISTORICAL",
+      "programme": "historical-intelligence"
+    },
+    {
+      "branch": "phone-offline-merge",
+      "ref": "origin/phone-offline-merge",
+      "sha": "b7b01a0a37032ed9ccaebe253180b0c7fee1cd69",
+      "sha_short": "b7b01a0a",
+      "committed_at": "2026-01-28T21:20:44-06:00",
+      "subject": "feat(security): add audited runner and access audit logger (no engine edits)",
+      "role": "HISTORICAL_FEATURE_OR_OPS",
+      "merge_posture": "HISTORICAL_REFERENCE",
+      "inventory_class": "OPS_OR_FEATURE_HISTORICAL",
+      "programme": "historical"
+    },
+    {
+      "branch": "pnl-engine-safe-integration",
+      "ref": "origin/pnl-engine-safe-integration",
+      "sha": "53753f42afe7271c2b21e99accfb05ef25ef4c03",
+      "sha_short": "53753f42",
+      "committed_at": "2026-04-21T19:24:25-05:00",
+      "subject": "PHASE 9.7 BASELINE - Offensive Scaling Engine locked with equity stabilizer, dynamic risk modifier, and controlled profit expansion",
+      "role": "HISTORICAL_FEATURE_OR_OPS",
+      "merge_posture": "HISTORICAL_REFERENCE",
+      "inventory_class": "OPS_OR_FEATURE_HISTORICAL",
+      "programme": "historical"
+    },
+    {
+      "branch": "post-claude-audit-remediation-phase-a-clean",
+      "ref": "origin/post-claude-audit-remediation-phase-a-clean",
+      "sha": "8f0f33fca0116267cd48438c890b4a1a96b0dd68",
+      "sha_short": "8f0f33fc",
+      "committed_at": "2026-05-27T10:51:32-05:00",
+      "subject": "Phase A1: clean post-Claude audit baseline lock",
+      "role": "CONSOLIDATION_OR_GOVERNANCE_HISTORICAL",
+      "merge_posture": "HISTORICAL_REFERENCE",
+      "inventory_class": "CONSOLIDATION_HISTORICAL",
+      "programme": "consolidation"
+    },
+    {
+      "branch": "recover-full-dashboard-2056",
+      "ref": "origin/recover-full-dashboard-2056",
+      "sha": "2bdbfd3bc2f66ba4247244c6990975a26865239c",
+      "sha_short": "2bdbfd3b",
+      "committed_at": "2026-04-27T11:40:35-05:00",
+      "subject": "CSS PCNRASS baseline lock - include dashboard backup",
+      "role": "HISTORICAL_FEATURE_OR_OPS",
+      "merge_posture": "HISTORICAL_REFERENCE",
+      "inventory_class": "OPS_OR_FEATURE_HISTORICAL",
+      "programme": "historical"
+    },
+    {
+      "branch": "wip/intel-adapter-edits",
+      "ref": "origin/wip/intel-adapter-edits",
+      "sha": "778bc2fadfc3813ce1989032628bd5b25363a15b",
+      "sha_short": "778bc2fa",
+      "committed_at": "2026-02-02T18:04:17-06:00",
+      "subject": "WIP: refine intel adapters (volatility, events, news, realized vol)",
+      "role": "WIP_NON_SPINE",
+      "merge_posture": "DO_NOT_MERGE_AS_PARALLEL_SPINE",
+      "inventory_class": "INTELLIGENCE_HISTORICAL",
+      "programme": "historical-intelligence"
+    }
+  ],
+  "branch_inventory_count": 46,
+  "merge_dependency_graph": {
+    "nodes": [
+      {
+        "id": "main",
+        "ref": "origin/main",
+        "sha": "faf1485dd88d7056bbd8f7f891cb47caf7685603",
+        "role": "historical_mainline"
+      },
+      {
+        "id": "rc_unified",
+        "ref": "origin/css-unified-consolidation-2026-07-13",
+        "sha": "66e11d4f83600a7765b4e55afa33d19e301dd70e",
+        "role": "rc_active_runtime"
+      },
+      {
+        "id": "mi_ext",
+        "ref": "origin/css-market-intelligence-external-sources-001",
+        "sha": "3c7a6b61de2f7784e794b9f186a440d0f50392b2",
+        "role": "mr_002_subject"
+      },
+      {
+        "id": "maintenance_dip",
+        "ref": "origin/css-v1.0.1-maintenance",
+        "sha": "9a9263c185680353fac9319577b4a1f82d3311dd",
+        "role": "mr_001_carrier"
+      },
+      {
+        "id": "rc_live_freeze",
+        "ref": "TBD",
+        "sha": null,
+        "role": "future_freeze_candidate"
+      }
+    ],
+    "edges": [
+      {
+        "from": "main",
+        "to": "rc_unified",
+        "relation": "diverged_programme_lineage",
+        "blocking": false
+      },
+      {
+        "from": "rc_unified",
+        "to": "mi_ext",
+        "relation": "fast_forward_parent",
+        "commits_ahead": 1,
+        "commits_behind": 0,
+        "blocking": false
+      },
+      {
+        "from": "rc_unified",
+        "to": "maintenance_dip",
+        "relation": "divergent",
+        "maintenance_only_commits": 9,
+        "rc_only_commits": 1,
+        "blocking": true,
+        "blocker": "MR-001 decision required for DIP integration claims"
+      },
+      {
+        "from": "maintenance_dip",
+        "to": "rc_live_freeze",
+        "relation": "mr_001_decision_intelligence_merge",
+        "order": 1,
+        "blocking": true
+      },
+      {
+        "from": "mi_ext",
+        "to": "rc_live_freeze",
+        "relation": "mr_002_market_intelligence_merge",
+        "order": 2,
+        "blocking": true
+      }
+    ],
+    "recommended_order": [
+      "Protect active runtime 66e11d4f",
+      "MR-001 Decision Intelligence from css-v1.0.1-maintenance (or explicit defer)",
+      "MR-002 MI-EXT onto RC tip or post-MR-001 tip",
+      "Future Mission Control MI-EXT projection workstream",
+      "Future controlled-online validation authorization",
+      "RC-LIVE freeze after certification checkpoints"
+    ],
+    "merge_bases": {
+      "mi_vs_rc": "66e11d4f83600a7765b4e55afa33d19e301dd70e",
+      "mi_vs_maintenance": "b0703f36096bf183514293ef9b83b6e7849bd087",
+      "maintenance_vs_rc": "b0703f36096bf183514293ef9b83b6e7849bd087"
+    }
+  },
+  "semantic_conflict_matrix": [
+    {
+      "domain": "external_event_provenance",
+      "rc_tip": "gap_partial_gie_source_strings",
+      "mi_ext": "canonical_catalogue_schema_pipeline",
+      "maintenance_dip": "n_a",
+      "conflict_class": "ADDITIVE",
+      "resolution": "MI-EXT owns provenance spine"
+    },
+    {
+      "domain": "gie_intelligence_event",
+      "rc_tip": "existing_consumer_model",
+      "mi_ext": "optional_fail_safe_gie_bridge",
+      "maintenance_dip": "may_consume_later",
+      "conflict_class": "COMPATIBLE",
+      "resolution": "Bridge never becomes second scheduler/store"
+    },
+    {
+      "domain": "overnight_mi_and_phase_138",
+      "rc_tip": "active",
+      "mi_ext": "extends_via_advisory_context_no_fork",
+      "maintenance_dip": "advisory_learning_later",
+      "conflict_class": "COMPATIBLE",
+      "resolution": "No second MI engine"
+    },
+    {
+      "domain": "trade_dna_edge_enterprise_intel",
+      "rc_tip": "dip_suite_absent",
+      "mi_ext": "design_contract_absent_until_mr_001",
+      "maintenance_dip": "authoritative_dip_modules",
+      "conflict_class": "SEQUENCING",
+      "resolution": "Merge MR-001 before enabling learning wiring"
+    },
+    {
+      "domain": "execution_and_risk_gates",
+      "rc_tip": "active_authority",
+      "mi_ext": "static_boundary_no_imports_or_mutation",
+      "maintenance_dip": "advisory_only_dip",
+      "conflict_class": "NONE",
+      "resolution": "Hard fail-closed flags"
+    },
+    {
+      "domain": "source_tiers_and_contradiction",
+      "rc_tip": "weak_ad_hoc",
+      "mi_ext": "tier_1_to_4_with_tier1_dominance",
+      "maintenance_dip": "n_a",
+      "conflict_class": "ADDITIVE",
+      "resolution": "Lower tier cannot override Tier 1"
+    },
+    {
+      "domain": "live_network_fetch",
+      "rc_tip": "broker_md_separate",
+      "mi_ext": "fixture_only_live_unauthorized",
+      "maintenance_dip": "offline_dip",
+      "conflict_class": "NONE",
+      "resolution": "Keep fail-closed"
+    },
+    {
+      "domain": "mission_control_mi_page",
+      "rc_tip": "read_only_regime_signals",
+      "mi_ext": "no_panel_activation_this_phase",
+      "maintenance_dip": "mc_decision_panels_exist",
+      "conflict_class": "DEFERRED",
+      "resolution": "Future additive projection only"
+    }
+  ],
+  "runtime_conflict_matrix": [
+    {
+      "surface": "endurance_process_ports",
+      "active_runtime": "operator_owned",
+      "mi_worktree": "documentation_offline_only",
+      "risk": "HIGH_IF_TOUCHED",
+      "rule": "DO_NOT_TOUCH"
+    },
+    {
+      "surface": "broker_sessions",
+      "active_runtime": "possibly_armed_or_read_only",
+      "mi_worktree": "no_broker_access",
+      "risk": "CRITICAL_IF_TOUCHED",
+      "rule": "FORBIDDEN"
+    },
+    {
+      "surface": "execution_gate_risk_governor_antibleed",
+      "active_runtime": "live_authority_path",
+      "mi_worktree": "not_imported_by_mi_ext",
+      "risk": "NONE_IF_ISOLATED",
+      "rule": "KEEP_ISOLATED"
+    },
+    {
+      "surface": "mission_control_ui",
+      "active_runtime": "active_projections",
+      "mi_worktree": "no_mi_ext_panel_deploy",
+      "risk": "MEDIUM_IF_HOT_PATCHED",
+      "rule": "NO_HOT_PATCH"
+    },
+    {
+      "surface": "external_events_package",
+      "active_runtime": "absent_on_rc_tip",
+      "mi_worktree": "present_on_mi_tip",
+      "risk": "LOW_ADDITIVE",
+      "rule": "MERGE_ONLY_VIA_GOVERNED_RC_LIVE"
+    },
+    {
+      "surface": "persistence",
+      "active_runtime": "runtime_dbs",
+      "mi_worktree": "in_pipeline_only",
+      "risk": "NONE",
+      "rule": "NO_PRODUCTION_STORE_ACTIVATION"
+    },
+    {
+      "surface": "news_network_egress",
+      "active_runtime": "ops_controlled",
+      "mi_worktree": "fixture_only",
+      "risk": "NONE_WHILE_UNAUTHORIZED",
+      "rule": "KEEP_UNAUTHORIZED"
+    }
+  ],
+  "decision_intelligence_dependencies": {
+    "mr_001_carrier_branch": "css-v1.0.1-maintenance",
+    "mr_001_carrier_sha": "9a9263c185680353fac9319577b4a1f82d3311dd",
+    "dependencies": [
+      {
+        "id": "DIP-001",
+        "name": "Enterprise Decision Intelligence Architecture",
+        "status": "PRESENT_ON_MAINTENANCE"
+      },
+      {
+        "id": "DIP-002",
+        "name": "Trade DNA Schema",
+        "status": "PRESENT_ON_MAINTENANCE"
+      },
+      {
+        "id": "DIP-003",
+        "name": "Capture and Analytics",
+        "status": "PRESENT_ON_MAINTENANCE"
+      },
+      {
+        "id": "DIP-004",
+        "name": "Edge Intelligence",
+        "status": "PRESENT_ON_MAINTENANCE"
+      },
+      {
+        "id": "DIP-005",
+        "name": "Enterprise Intelligence Suite",
+        "status": "PRESENT_ON_MAINTENANCE"
+      },
+      {
+        "id": "DIP-006",
+        "name": "Enterprise Readiness and Certification",
+        "status": "READY_TO_COMMIT_WITH_LIMITATIONS"
+      },
+      {
+        "id": "MC-006",
+        "name": "Mission Control Decision Intelligence",
+        "status": "PRESENT_READ_ONLY_ON_RC"
+      },
+      {
+        "id": "PHASE-179-EDI",
+        "name": "Executive Decision Intelligence",
+        "status": "PRESENT_ON_RC"
+      },
+      {
+        "id": "MI-DIP-LEARNING",
+        "name": "profit_attribution_learning_contract",
+        "status": "ABSENT_UNTIL_MR_001"
+      }
+    ],
+    "auto_allocation_authority": false,
+    "rule": "MR-002 may merge MI-EXT as advisory library without DIP, but must not claim Trade DNA/Edge learning until MR-001 lands"
+  },
+  "market_intelligence_dependencies": {
+    "subject_sha": "3c7a6b61de2f7784e794b9f186a440d0f50392b2",
+    "paths_changed_vs_rc": [
+      "backend/intelligence/external_events/__init__.py",
+      "backend/intelligence/external_events/adapter.py",
+      "backend/intelligence/external_events/catalogue.py",
+      "backend/intelligence/external_events/classify.py",
+      "backend/intelligence/external_events/constants.py",
+      "backend/intelligence/external_events/decision_integration.py",
+      "backend/intelligence/external_events/dedup.py",
+      "backend/intelligence/external_events/freshness.py",
+      "backend/intelligence/external_events/gie_bridge.py",
+      "backend/intelligence/external_events/hashing.py",
+      "backend/intelligence/external_events/impact.py",
+      "backend/intelligence/external_events/models.py",
+      "backend/intelligence/external_events/pipeline.py",
+      "backend/intelligence/external_events/safety.py",
+      "docs/governance/MI_EXT_001_EVENT_SCHEMA.json",
+      "docs/governance/MI_EXT_001_EXTERNAL_EVENTS_AND_SOURCE_PROVENANCE_CHARTER.md",
+      "docs/governance/MI_EXT_001_SOURCE_CATALOGUE.json",
+      "tests/fixtures/mi_ext_001/ca_bank_of_canada.json",
+      "tests/fixtures/mi_ext_001/crypto_coinbase_public_md.json",
+      "tests/fixtures/mi_ext_001/malformed.json",
+      "tests/fixtures/mi_ext_001/ng_cbn.json",
+      "tests/fixtures/mi_ext_001/ng_nbs.json",
+      "tests/fixtures/mi_ext_001/ng_ngx.json",
+      "tests/fixtures/mi_ext_001/ng_sec.json",
+      "tests/fixtures/mi_ext_001/tier2_conflict_fixture.json",
+      "tests/fixtures/mi_ext_001/us_bls.json",
+      "tests/fixtures/mi_ext_001/us_federal_reserve.json",
+      "tests/fixtures/mi_ext_001/us_sec_edgar.json",
+      "tests/test_mi_ext_001_external_events_provenance.py",
+      "tests/test_mi_ext_001_hardening_review.py"
+    ],
+    "path_count": 30,
+    "path_overlap_with_maintenance_delta": [],
+    "components": [
+      {
+        "id": "MI-EXT-PACKAGE",
+        "path": "backend/intelligence/external_events/",
+        "role": "catalogue_provenance_dedup_freshness_impact_safety"
+      },
+      {
+        "id": "MI-EXT-GOVERNANCE",
+        "path": "docs/governance/MI_EXT_001_*",
+        "role": "governance_authority"
+      },
+      {
+        "id": "MI-EXT-FIXTURES",
+        "path": "tests/fixtures/mi_ext_001/",
+        "role": "offline_wave1"
+      },
+      {
+        "id": "MI-EXT-TESTS",
+        "path": "tests/test_mi_ext_001_*.py",
+        "role": "offline_and_hardening"
+      },
+      {
+        "id": "GIE-BRIDGE",
+        "path": "backend/intelligence/external_events/gie_bridge.py",
+        "role": "optional_fail_safe_projection"
+      },
+      {
+        "id": "DECISION-INTEGRATION",
+        "path": "backend/intelligence/external_events/decision_integration.py",
+        "role": "advisory_context_patch"
+      },
+      {
+        "id": "OVERNIGHT-MI",
+        "path": "backend/executive_intelligence/overnight_market.py",
+        "role": "existing_consumer_do_not_fork"
+      },
+      {
+        "id": "PHASE-138",
+        "path": "backend/market_intelligence/",
+        "role": "multi_factor_advisory_do_not_fork"
+      },
+      {
+        "id": "LEGACY-INTEL",
+        "path": "intel/",
+        "role": "partial_legacy_catalogue_supersedes_trust_policy"
+      }
+    ],
+    "non_spine_branches": [
+      "feature/css-world-event-intelligence",
+      "wip/intel-adapter-edits"
+    ]
+  },
+  "mission_control_dependencies": {
+    "read_only_invariants": {
+      "execution_allowed": false,
+      "live_trading_blocked": true,
+      "broker_execution_armed": false,
+      "advisory_only": true
+    },
+    "surfaces": [
+      {
+        "id": "MC-001-004",
+        "status": "PRESENT",
+        "mi_ext_impact": "NONE_THIS_PACKAGE"
+      },
+      {
+        "id": "MC-005",
+        "status": "PRESENT",
+        "mi_ext_impact": "NONE"
+      },
+      {
+        "id": "MC-006",
+        "status": "CERTIFIED_READ_ONLY",
+        "mi_ext_impact": "FUTURE_CONSUMER_OF_ADVISORY_CONTEXT"
+      },
+      {
+        "id": "MC-007A-B",
+        "status": "PRESENT",
+        "mi_ext_impact": "NONE"
+      },
+      {
+        "id": "MC-MARKET-INTELLIGENCE-PAGE",
+        "status": "REGIME_SIGNALS_DISPLAY",
+        "mi_ext_impact": "NO_PANEL_ACTIVATION"
+      },
+      {
+        "id": "SOURCE-REGISTRY",
+        "status": "SECTION_PROVENANCE",
+        "mi_ext_impact": "DISTINCT_FROM_NEWS_PROVENANCE"
+      }
+    ],
+    "rule": "Mission Control remains read-only; MI-EXT must not introduce mutating routes or live arms",
+    "known_env_blockers": [
+      "cryptography_missing_for_some_mc_phase138_launcher_tests",
+      "reportlab_gaps_on_maintenance_certification"
+    ]
+  },
+  "certification_checkpoints": [
+    {
+      "id": "CP-MR002-01",
+      "name": "branch_head_verification",
+      "required_before": "review_acceptance"
+    },
+    {
+      "id": "CP-MR002-02",
+      "name": "mi_and_mr002_governance_docs_present",
+      "required_before": "review_acceptance"
+    },
+    {
+      "id": "CP-MR002-03",
+      "name": "offline_mi_ext_provenance_tests",
+      "required_before": "code_merge_authorization"
+    },
+    {
+      "id": "CP-MR002-04",
+      "name": "hardening_boundary_catalogue_tests",
+      "required_before": "code_merge_authorization"
+    },
+    {
+      "id": "CP-MR002-05",
+      "name": "advisory_only_invariants",
+      "required_before": "code_merge_authorization"
+    },
+    {
+      "id": "CP-MR002-06",
+      "name": "no_runtime_broker_interaction",
+      "required_before": "rc_live_freeze"
+    },
+    {
+      "id": "CP-MR002-07",
+      "name": "mr_001_decision_record",
+      "required_before": "claiming_dip_integration"
+    },
+    {
+      "id": "CP-MR002-08",
+      "name": "mission_control_non_activation_attestation",
+      "required_before": "rc_live_freeze"
+    },
+    {
+      "id": "CP-MR002-09",
+      "name": "git_diff_check_clean",
+      "required_before": "package_acceptance"
+    },
+    {
+      "id": "CP-MR002-10",
+      "name": "freeze_sha_criteria_satisfied",
+      "required_before": "rc_live_candidate"
+    }
+  ],
+  "rollback_points": [
+    {
+      "id": "RP-0",
+      "sha": "66e11d4f83600a7765b4e55afa33d19e301dd70e",
+      "purpose": "active_runtime_pre_mi_rc_tip"
+    },
+    {
+      "id": "RP-1",
+      "sha": "66e11d4f83600a7765b4e55afa33d19e301dd70e",
+      "purpose": "pre_mi_parent"
+    },
+    {
+      "id": "RP-2",
+      "sha": "3c7a6b61de2f7784e794b9f186a440d0f50392b2",
+      "purpose": "known_good_mi_ext_tip"
+    },
+    {
+      "id": "RP-3",
+      "sha": null,
+      "purpose": "post_mr_001_tbd"
+    },
+    {
+      "id": "RP-4",
+      "sha": null,
+      "purpose": "rc_live_freeze_tbd"
+    }
+  ],
+  "freeze_sha_criteria": [
+    "immutable_identity_full_sha",
+    "ancestry_descendant_of_rc_or_recorded_post_mr001_parents",
+    "mi_ext_package_governance_tests_present",
+    "advisory_only_true_execution_allowed_false",
+    "live_network_fail_closed",
+    "no_endurance_mutation",
+    "cp_mr002_03_to_05_green",
+    "post_freeze_commit_invalidates_continuous_certification",
+    "dip_claim_honesty",
+    "mc_panel_non_activation_honesty"
+  ],
+  "rc_live_candidate_workflow": [
+    "isolate_integration_from_endurance_runtime",
+    "decide_mr_001_land_defer_or_waive_learning_claim",
+    "integrate_mi_ext_ff_or_rebase_post_mr001",
+    "validate_offline_tests_and_git_diff_check",
+    "attest_mc_broker_runtime_non_activation",
+    "record_freeze_sha_and_start_candidate_clock",
+    "operate_under_freeze_no_mid_run_commits",
+    "keep_rollback_points_warm"
+  ],
+  "mi_ext_delta_vs_rc": {
+    "parent": "66e11d4f83600a7765b4e55afa33d19e301dd70e",
+    "tip": "3c7a6b61de2f7784e794b9f186a440d0f50392b2",
+    "files_changed": 30,
+    "insertions_only_commit": true,
+    "textual_merge_to_current_rc": "FAST_FORWARD_CAPABLE"
+  },
+  "recommendation": {
+    "package_status": "MR_002_READY_FOR_REVIEW",
+    "merge_now_into_active_runtime": false,
+    "summary": "Accept documentation package for enterprise review. Sequence MR-001 before claiming DIP learning integration. MI-EXT is textually fast-forwardable onto current RC tip as an additive advisory library after freeze criteria, without touching the active endurance runtime."
+  }
+}
