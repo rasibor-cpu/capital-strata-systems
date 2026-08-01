@@ -71,6 +71,11 @@ from backend.runtime.live_micro_pilot_governor import (
     LiveMicroPilotConfigurationError,
     LiveMicroPilotGovernor,
 )
+from backend.app.risk.live_microstructure_provider import (
+    DEFAULT_LIVE_MICROSTRUCTURE_PROVIDER,
+)
+
+LIVE_MICROSTRUCTURE_PROVIDER = DEFAULT_LIVE_MICROSTRUCTURE_PROVIDER
 
 
 SESSION_COOKIE = "css_mobile_session"
@@ -3774,6 +3779,10 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
     # Live remains fail-closed on missing anti-bleed inputs (None).
     # Paper certification path supplies finite microstructure defaults so
     # ExecutionGate can evaluate without weakening live thresholds.
+    # Phase 184A: live uses explicit LiveMicrostructureProvider; default provider
+    # returns None → retain missing-input fail-closed (no fake values).
+    provider = LIVE_MICROSTRUCTURE_PROVIDER or DEFAULT_LIVE_MICROSTRUCTURE_PROVIDER
+
     if is_live_request:
         gate_regime_persistence = None
         gate_volatility_state = None
@@ -3782,6 +3791,18 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
         gate_fee_bps = None
         gate_spread_bps = None
         gate_slippage_bps = None
+        provided = provider.provide(
+            symbol=str(ticket["symbol"]),
+            side=str(ticket["side"]),
+            notional=float(ticket["amount"]),
+            context={"governed_execution_context": "LIVE_MICRO_PILOT"},
+        )
+        if provided is not None:
+            gate_expected_move_bps = provided.expected_move_bps
+            gate_fee_bps = provided.fee_bps
+            gate_spread_bps = provided.spread_bps
+            gate_slippage_bps = provided.slippage_bps
+        anti_bleed_context = "LIVE_MICRO_PILOT"
     else:
         gate_regime_persistence = 0.5
         gate_volatility_state = "MEDIUM"
@@ -3791,6 +3812,7 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
         gate_fee_bps = 1.0
         gate_spread_bps = 1.0
         gate_slippage_bps = 1.0
+        anti_bleed_context = "PAPER"
 
     gate_price, gate_price_source = _resolve_mobile_canonical_gate_price(ticket)
     gate_decision = exec_gate.evaluate_trade(
@@ -3812,6 +3834,7 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
         broker_mode="live" if is_live_request else "paper",
         price=gate_price,
         price_instrument=ticket["symbol"],
+        anti_bleed_context=anti_bleed_context,
     )
     if gate_price_source:
         _record_mobile_event(

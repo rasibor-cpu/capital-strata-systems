@@ -59,18 +59,18 @@ def test_antibleed_guard_is_called_in_execution_gate_path() -> None:
         **_valid_gate_request()
     )
 
-    assert guard.calls == [
-        {
-            "symbol": "EUR_USD",
-            "side": "BUY",
-            "trade_size": 100.0,
-            "expected_move_bps": 80.0,
-            "fee_bps": 1.0,
-            "spread_bps": 1.0,
-            "slippage_bps": 1.0,
-        }
-    ]
+    assert guard.calls[0]["symbol"] == "EUR_USD"
+    assert guard.calls[0]["side"] == "BUY"
+    assert guard.calls[0]["trade_size"] == 100.0
+    assert guard.calls[0]["expected_move_bps"] == 80.0
+    assert guard.calls[0]["fee_bps"] == 1.0
+    assert guard.calls[0]["spread_bps"] == 1.0
+    assert guard.calls[0]["slippage_bps"] == 1.0
+    # Phase 184A may pass resolved policy=; Recording doubles accept **kwargs.
     assert result["debug"]["anti_bleed_guard"]["approved"] is True
+    assert result["debug"]["anti_bleed_policy"] == "STANDARD"
+    assert result["debug"]["policy_id"] == "STANDARD"
+    assert result["debug"]["policy_version"] == "184A.1"
 
 
 def test_valid_trade_can_proceed_when_antibleed_allows() -> None:

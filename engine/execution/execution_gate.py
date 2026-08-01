@@ -32,9 +32,11 @@ class ExecutionGate:
         self,
         anti_bleed_guard: Optional[Any] = None,
         margin_trade_gate: Optional[Any] = None,
+        anti_bleed_policy_resolver: Optional[Any] = None,
     ) -> None:
         # Imports live here to avoid import-order traps during tooling runs
         from backend.app.risk.anti_bleed_guard import AntiBleedGuard
+        from backend.app.risk.anti_bleed_policy import AntiBleedPolicyResolver
         from engine.capital.compounding_engine import CompoundingEngine
         from engine.risk.drawdown_scaler import DrawdownScaler
         from engine.risk.margin_trade_gate import MarginTradeGate
@@ -42,6 +44,7 @@ class ExecutionGate:
         from engine.risk.volatility_position_sizer import VolatilityPositionSizer
 
         self.anti_bleed_guard = anti_bleed_guard or AntiBleedGuard()
+        self.anti_bleed_policy_resolver = anti_bleed_policy_resolver or AntiBleedPolicyResolver()
         self.margin_trade_gate = margin_trade_gate or MarginTradeGate()
         self.compounding = CompoundingEngine()
         self.drawdown_scaler = DrawdownScaler()
@@ -123,9 +126,24 @@ class ExecutionGate:
         price_instrument: Optional[Any] = None,
         price_as_of: Optional[Any] = None,
         price_max_age_seconds: Optional[Any] = None,
+        anti_bleed_context: Optional[Any] = None,
+        governed_execution_context: Optional[Any] = None,
     ) -> Dict[str, Any]:
         debug: Dict[str, Any] = {}
         try:
+            # Phase 184A — resolve immutable AntiBleed policy before any evaluation.
+            # Selection uses governed execution context only (never broker/account/env).
+            context_token = (
+                anti_bleed_context
+                if anti_bleed_context is not None
+                else governed_execution_context
+            )
+            anti_bleed_policy = self.anti_bleed_policy_resolver.resolve(context_token)
+            debug["anti_bleed_policy"] = getattr(anti_bleed_policy, "name", "UNKNOWN")
+            debug["policy_id"] = getattr(anti_bleed_policy, "policy_id", "UNKNOWN")
+            debug["policy_version"] = getattr(anti_bleed_policy, "policy_version", "UNKNOWN")
+            debug["anti_bleed_context"] = context_token
+
             anti_bleed_decision = self._evaluate_anti_bleed(
                 instrument=instrument,
                 side=side,
@@ -134,6 +152,7 @@ class ExecutionGate:
                 fee_bps=fee_bps,
                 spread_bps=spread_bps,
                 slippage_bps=slippage_bps,
+                anti_bleed_policy=anti_bleed_policy,
             )
             debug["anti_bleed_guard"] = anti_bleed_decision
 
@@ -301,7 +320,12 @@ class ExecutionGate:
         fee_bps: Any,
         spread_bps: Any,
         slippage_bps: Any,
+        anti_bleed_policy: Any = None,
     ) -> Dict[str, Any]:
+        # Phase 184A: resolved policy is passed into AntiBleedGuard.evaluate.
+        # Microstructure completeness remains fail-closed for all profiles.
+        resolved_policy = anti_bleed_policy
+
         required = {
             "instrument": instrument,
             "side": side,
@@ -368,6 +392,18 @@ class ExecutionGate:
                 }
 
         try:
+            decision = self.anti_bleed_guard.evaluate(
+                symbol=str(instrument),
+                side=str(side),
+                trade_size=numeric["notional"],
+                expected_move_bps=numeric["expected_move_bps"],
+                fee_bps=numeric["fee_bps"],
+                spread_bps=numeric["spread_bps"],
+                slippage_bps=numeric["slippage_bps"],
+                policy=resolved_policy,
+            )
+        except TypeError:
+            # Recording / legacy test doubles may not accept policy= yet.
             decision = self.anti_bleed_guard.evaluate(
                 symbol=str(instrument),
                 side=str(side),
