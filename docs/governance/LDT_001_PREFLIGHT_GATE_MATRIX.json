@@ -1,0 +1,297 @@
+{
+  "schema_version": "css.ldt001.preflight_gate_matrix.v1",
+  "programme": "LDT-001",
+  "title": "Controlled Live Deployment Test — Preflight GO/NO-GO Matrix",
+  "evaluation_rule": "Any FAIL, BLOCKED, or material NOT_TESTED produces NO-GO. PASS and NOT_APPLICABLE only do not authorize live.",
+  "classification_values": ["PASS", "FAIL", "BLOCKED", "NOT_TESTED", "NOT_APPLICABLE"],
+  "as_of_charter_head": "66e11d4f83600a7765b4e55afa33d19e301dd70e",
+  "as_of_candidate_branch": "css-rc-live-001-candidate",
+  "as_of_candidate_head": "fa35bb4f4b8f96b4b77bb74217b0fb0f35cf2204",
+  "as_of_note": "Classifications updated by LDT-002 and MR-003G. Candidate consolidates unified/maintenance/MI-EXT. NOT a live preflight execution result, NOT a freeze designation, and does not authorize live trading.",
+  "ldt002_audit": "docs/governance/LDT_002_LIVE_PILOT_BLOCKER_RESOLUTION_AUDIT.md",
+  "maintenance_tip_audited": "9a9263c185680353fac9319577b4a1f82d3311dd",
+  "maintenance_branch": "origin/css-v1.0.1-maintenance",
+  "merge_base_with_maintenance": "b0703f36096bf183514293ef9b83b6e7849bd087",
+  "maintenance_merge_commit": "d43ed196a6d79a9efd713dfe8b30133008aa0508",
+  "mi_merge_commit": "fa35bb4f4b8f96b4b77bb74217b0fb0f35cf2204",
+  "lineage_blocker_status": "RESOLVED_ON_CANDIDATE",
+  "freeze_sha_designated": false,
+  "live_authorized": false,
+  "gates": [
+    {
+      "id": "A1",
+      "category": "Repository",
+      "name": "certified_commit_loaded",
+      "classification": "NOT_TESTED",
+      "rationale": "Freeze SHA NOT_DESIGNATED (LDT-002 / MR-003G). Candidate HEAD fa35bb4f must not be treated as live-ready or as an RC-LIVE freeze."
+    },
+    {
+      "id": "A5",
+      "category": "Repository",
+      "name": "non_ancestor_certification_not_silently_credited",
+      "classification": "PASS",
+      "rationale": "MR-003G: MW-001..004, DIP-001..006, MI-EXT-001, RC-001, and MR-002 are ancestors of css-rc-live-001-candidate @ fa35bb4f. Lineage blocker RESOLVED_ON_CANDIDATE; live re-certification on a future freeze still required."
+    },
+    {
+      "id": "A2",
+      "category": "Repository",
+      "name": "clean_tracked_worktree",
+      "classification": "PASS",
+      "rationale": "Candidate tracked tree clean for governance commit scope; local pytest noise excluded from freeze claims."
+    },
+    {
+      "id": "A3",
+      "category": "Repository",
+      "name": "branch_remote_parity",
+      "classification": "NOT_TESTED",
+      "rationale": "Candidate branch not pushed; remote parity for freeze remains NOT_TESTED until authorized push + 0/0 record."
+    },
+    {
+      "id": "A4",
+      "category": "Repository",
+      "name": "release_manifest_integrity",
+      "classification": "NOT_TESTED",
+      "rationale": "No LDT-001 release manifest hashed for a live pilot freeze yet."
+    },
+    {
+      "id": "B1",
+      "category": "Runtime",
+      "name": "supervisor_healthy",
+      "classification": "NOT_TESTED",
+      "rationale": "Live pilot requires fresh startup on dedicated host; endurance instance must not be used for live."
+    },
+    {
+      "id": "B2",
+      "category": "Runtime",
+      "name": "heartbeat_fresh",
+      "classification": "NOT_TESTED",
+      "rationale": "Re-evaluate on dedicated pilot runtime only."
+    },
+    {
+      "id": "B3",
+      "category": "Runtime",
+      "name": "zero_unexpected_restarts",
+      "classification": "NOT_TESTED",
+      "rationale": "OV-002 Attempt 2 residual restarts invalidate endurance credit; pilot needs clean supervisor generation."
+    },
+    {
+      "id": "B4",
+      "category": "Runtime",
+      "name": "no_active_critical_alerts",
+      "classification": "NOT_TESTED",
+      "rationale": "Must be measured on pilot runtime after fresh start."
+    },
+    {
+      "id": "B5",
+      "category": "Runtime",
+      "name": "session_valid",
+      "classification": "NOT_TESTED",
+      "rationale": "Session continuity must be proven on pilot runtime."
+    },
+    {
+      "id": "C1",
+      "category": "Broker",
+      "name": "credentials_present",
+      "classification": "NOT_TESTED",
+      "rationale": "No broker contact in LDT-001; diagnostics deferred to future live-read-only preflight."
+    },
+    {
+      "id": "C2",
+      "category": "Broker",
+      "name": "authentication_successful",
+      "classification": "NOT_TESTED",
+      "rationale": "Forbidden in LDT-001; OV-001 left OANDA practice authenticated but LIVE not certified."
+    },
+    {
+      "id": "C3",
+      "category": "Broker",
+      "name": "connection_successful",
+      "classification": "NOT_TESTED",
+      "rationale": "Deferred."
+    },
+    {
+      "id": "C4",
+      "category": "Broker",
+      "name": "account_loaded",
+      "classification": "NOT_TESTED",
+      "rationale": "Deferred."
+    },
+    {
+      "id": "C5",
+      "category": "Broker",
+      "name": "balance_equity_loaded",
+      "classification": "NOT_TESTED",
+      "rationale": "Deferred."
+    },
+    {
+      "id": "C6",
+      "category": "Broker",
+      "name": "market_data_fresh",
+      "classification": "NOT_TESTED",
+      "rationale": "Stale market data is mandatory NO-GO when tested."
+    },
+    {
+      "id": "C7",
+      "category": "Broker",
+      "name": "instrument_supported",
+      "classification": "PASS",
+      "rationale": "EUR_USD is a supported OANDA FX instrument in codebase and historical micropilot docs."
+    },
+    {
+      "id": "C8",
+      "category": "Broker",
+      "name": "broker_mode_confirmed_live",
+      "classification": "BLOCKED",
+      "rationale": "LDT-002 BLK-OANDA-LIVE: practice/read-only offline adapters exist; OANDA LIVE authentication/account/MD certification incomplete; practice ≠ live."
+    },
+    {
+      "id": "C9",
+      "category": "Broker",
+      "name": "broker_execution_blocked_until_founder_approval",
+      "classification": "PASS",
+      "rationale": "live_authority defaults BLOCKED; pilot_enabled false; kill switch engaged by design."
+    },
+    {
+      "id": "D1",
+      "category": "Portfolio",
+      "name": "zero_open_positions_before_pilot",
+      "classification": "NOT_TESTED",
+      "rationale": "Must be verified on live account immediately before arming."
+    },
+    {
+      "id": "D2",
+      "category": "Portfolio",
+      "name": "broker_css_reconciliation_clean",
+      "classification": "NOT_TESTED",
+      "rationale": "Requires authenticated live snapshots."
+    },
+    {
+      "id": "D3",
+      "category": "Portfolio",
+      "name": "available_capital_confirmed",
+      "classification": "BLOCKED",
+      "rationale": "LDT-002 BLK-FX-CONVERSION: no approved deterministic CAD→account CCY→order notional contract; fx_daily_rates.json absent; accounting FX cache not LDT-approved for live pilot."
+    },
+    {
+      "id": "D4",
+      "category": "Portfolio",
+      "name": "margin_computable",
+      "classification": "NOT_TESTED",
+      "rationale": "Margin Gate fail-closed without valid snapshot."
+    },
+    {
+      "id": "D5",
+      "category": "Portfolio",
+      "name": "no_stale_orders",
+      "classification": "NOT_TESTED",
+      "rationale": "Deferred to live-read-only account inspection."
+    },
+    {
+      "id": "E1",
+      "category": "Safety",
+      "name": "kill_switch_tested",
+      "classification": "NOT_TESTED",
+      "rationale": "Offline unit behavior exists; operator drill on pilot runtime not yet performed for LDT."
+    },
+    {
+      "id": "E2",
+      "category": "Safety",
+      "name": "rbac_passed",
+      "classification": "PASS",
+      "rationale": "SUPER_USER required for arm/config; empty authority fails RBAC condition."
+    },
+    {
+      "id": "E3",
+      "category": "Safety",
+      "name": "unified_trade_gate_passed",
+      "classification": "NOT_TESTED",
+      "rationale": "Must PASS on pilot evidence package."
+    },
+    {
+      "id": "E4",
+      "category": "Safety",
+      "name": "risk_governor_passed",
+      "classification": "NOT_TESTED",
+      "rationale": "Canonical engine/risk/risk_governor.py must be exercised on pilot evidence."
+    },
+    {
+      "id": "E5",
+      "category": "Safety",
+      "name": "anti_bleed_guard_passed",
+      "classification": "BLOCKED",
+      "rationale": "LDT-002 BLK-ANTIBLEED-CAD20 class A: ExecutionGate passes notional into AntiBleedGuard; CAD20 max cannot satisfy min size 50 on the same live path."
+    },
+    {
+      "id": "E9",
+      "category": "Safety",
+      "name": "authorization_ttl_single_use_scoped",
+      "classification": "NOT_TESTED",
+      "rationale": "LDT-002 BLK-AUTH-TTL: PARTIALLY_SUPPORTED (arm/disarm exist) but no TTL enforcement, no single-use scoped token; arm file may persist across restart."
+    },
+    {
+      "id": "E10",
+      "category": "Safety",
+      "name": "endurance_ov002_credit_not_auto_granted",
+      "classification": "PASS",
+      "rationale": "ER-001 observational PASS with limitations; OV_002_CERTIFICATION = BLOCKED_NOT_CLAIMED; no automatic OV-002 credit."
+    },
+    {
+      "id": "E6",
+      "category": "Safety",
+      "name": "margin_gate_passed",
+      "classification": "NOT_TESTED",
+      "rationale": "Requires live account margin snapshot."
+    },
+    {
+      "id": "E7",
+      "category": "Safety",
+      "name": "capital_governor_passed",
+      "classification": "PASS",
+      "rationale": "Phase 152A governor present with fail-closed defaults; does not authorize live."
+    },
+    {
+      "id": "E8",
+      "category": "Safety",
+      "name": "live_authority_blocked_until_final_authorization",
+      "classification": "PASS",
+      "rationale": "evaluate_live_execution_authority({}) => BLOCKED. Founder GO for live arming not issued."
+    },
+    {
+      "id": "F1",
+      "category": "Evidence",
+      "name": "preflight_snapshot_archived",
+      "classification": "NOT_TESTED",
+      "rationale": "Evidence package design only in LDT-001."
+    },
+    {
+      "id": "F2",
+      "category": "Evidence",
+      "name": "exact_commit_recorded",
+      "classification": "PASS",
+      "rationale": "Charter records candidate HEAD fa35bb4f… and original authoring HEAD 66e11d4f…; live freeze SHA still required later and is not declared here."
+    },
+    {
+      "id": "F3",
+      "category": "Evidence",
+      "name": "configuration_fingerprint_recorded",
+      "classification": "NOT_TESTED",
+      "rationale": "Deferred to pilot freeze."
+    },
+    {
+      "id": "F4",
+      "category": "Evidence",
+      "name": "credentials_redacted",
+      "classification": "PASS",
+      "rationale": "Charter and schemas forbid secret material; offline tests assert redaction markers."
+    },
+    {
+      "id": "F5",
+      "category": "Evidence",
+      "name": "rollback_commands_prepared",
+      "classification": "PASS",
+      "rationale": "Abort/rollback plan documented with FUTURE_EXECUTION_COMMAND placeholders only."
+    }
+  ],
+  "charter_time_aggregate": "NO-GO",
+  "aggregate_reason": "MR-003G: lineage resolved on candidate, but BLOCKED gates remain (AntiBleed/CAD20, FX conversion, OANDA LIVE, RC-004 live unlock absent). Material NOT_TESTED remains (freeze SHA, TTL, remote parity). Founder GO not issued. No live test is authorized."
+}
