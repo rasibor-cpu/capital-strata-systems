@@ -20,10 +20,10 @@ from backend.app.governance.enterprise_certification_registry import (
 from backend.app.governance.enterprise_certification_registry.audit import RegistryAudit
 
 
-def test_seed_registers_phases_187_through_192() -> None:
+def test_seed_registers_phases_187_through_193() -> None:
     repo = seed_phase_registry()
     query = RegistryQuery(repo)
-    for phase in ("187A", "188", "189", "190", "191", "192"):
+    for phase in ("187A", "188", "189", "190", "191", "192", "193"):
         hits = query.by_phase(phase)
         assert hits, f"missing phase registration: {phase}"
     assert len(repo) >= 10
