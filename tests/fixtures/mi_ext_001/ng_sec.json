@@ -1,0 +1,17 @@
+{
+  "events": [
+    {
+      "event_id": "sec-ng-enforcement-001",
+      "title": "SEC Nigeria regulatory enforcement action notice",
+      "normalized_summary": "Official regulatory action publication.",
+      "event_category": "regulatory_action",
+      "published_at": "2026-07-30T09:00:00Z",
+      "source_url": "https://sec.gov.ng/",
+      "publisher": "SEC Nigeria",
+      "jurisdiction": "NG",
+      "affected_instruments": ["NG_EQUITIES"],
+      "affected_asset_classes": ["EQUITY"],
+      "verification_status": "VERIFIED"
+    }
+  ]
+}
