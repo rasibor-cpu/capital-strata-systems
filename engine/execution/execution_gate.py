@@ -128,9 +128,16 @@ class ExecutionGate:
         price_max_age_seconds: Optional[Any] = None,
         anti_bleed_context: Optional[Any] = None,
         governed_execution_context: Optional[Any] = None,
+        market_snapshot: Optional[Any] = None,
+        fx_conversion: Optional[Any] = None,
     ) -> Dict[str, Any]:
         debug: Dict[str, Any] = {}
         try:
+            # Phase 185A — record market/FX contracts in diagnostics only.
+            # Does not reorder gates; missing/unavailable data remains fail-closed.
+            debug["market_snapshot"] = self._market_snapshot_debug(market_snapshot)
+            debug["fx_conversion"] = self._fx_conversion_debug(fx_conversion)
+
             # Phase 184A — resolve immutable AntiBleed policy before any evaluation.
             # Selection uses governed execution context only (never broker/account/env).
             context_token = (
@@ -468,3 +475,89 @@ class ExecutionGate:
             "margin_utilization_pct": float(getattr(decision, "margin_utilization_pct", 0.0) or 0.0),
             "control": "MarginTradeGate",
         }
+
+    @staticmethod
+    def _market_snapshot_debug(market_snapshot: Any) -> Dict[str, Any]:
+        if market_snapshot is None:
+            return {
+                "status": "NOT_AVAILABLE",
+                "usable": False,
+                "source": "absent",
+                "schema_id": "LIVE_MARKET_SNAPSHOT",
+                "schema_version": "185A.1",
+                "provider_name": "UNAVAILABLE_PROVIDER",
+                "provider_version": "185A.1",
+            }
+        identity = getattr(market_snapshot, "identity", None)
+        if callable(identity):
+            payload = dict(identity())
+        else:
+            payload = {
+                "schema_id": str(getattr(market_snapshot, "schema_id", "LIVE_MARKET_SNAPSHOT")),
+                "schema_version": str(getattr(market_snapshot, "schema_version", "185A.1")),
+                "provider_name": str(getattr(market_snapshot, "provider", "UNKNOWN")),
+                "provider_version": str(getattr(market_snapshot, "provider_version", "UNKNOWN")),
+                "provider": str(getattr(market_snapshot, "provider", "UNKNOWN")),
+                "quality": str(getattr(market_snapshot, "quality", "UNKNOWN")),
+                "freshness": str(getattr(market_snapshot, "freshness", "UNKNOWN")),
+                "status": str(getattr(market_snapshot, "status", "UNKNOWN")),
+            }
+        usable = getattr(market_snapshot, "is_usable", None)
+        payload["usable"] = bool(usable()) if callable(usable) else False
+        payload["source"] = "provided"
+        payload.setdefault("schema_id", "LIVE_MARKET_SNAPSHOT")
+        payload.setdefault("schema_version", "185A.1")
+        payload.setdefault(
+            "provider_name",
+            str(payload.get("provider") or getattr(market_snapshot, "provider", "UNKNOWN")),
+        )
+        payload.setdefault(
+            "provider_version",
+            str(getattr(market_snapshot, "provider_version", "UNKNOWN")),
+        )
+        return payload
+
+    @staticmethod
+    def _fx_conversion_debug(fx_conversion: Any) -> Dict[str, Any]:
+        if fx_conversion is None:
+            return {
+                "status": "NOT_AVAILABLE",
+                "usable": False,
+                "source": "absent",
+                "schema_id": "FX_CONVERSION",
+                "schema_version": "185A.1",
+                "provider_name": "UNAVAILABLE_PROVIDER",
+                "provider_version": "185A.1",
+            }
+        identity = getattr(fx_conversion, "identity", None)
+        if callable(identity):
+            payload = dict(identity())
+        else:
+            payload = {
+                "schema_id": str(getattr(fx_conversion, "schema_id", "FX_CONVERSION")),
+                "schema_version": str(getattr(fx_conversion, "schema_version", "185A.1")),
+                "base_currency": str(getattr(fx_conversion, "base_currency", "UNKNOWN")),
+                "quote_currency": str(getattr(fx_conversion, "quote_currency", "UNKNOWN")),
+                "provider_name": str(getattr(fx_conversion, "provider", "UNKNOWN")),
+                "provider_version": str(getattr(fx_conversion, "provider_version", "UNKNOWN")),
+                "provider": str(getattr(fx_conversion, "provider", "UNKNOWN")),
+                "quality": str(getattr(fx_conversion, "quality", "UNKNOWN")),
+                "status": str(getattr(fx_conversion, "status", "UNKNOWN")),
+            }
+        usable = getattr(fx_conversion, "is_usable", None)
+        payload["usable"] = bool(usable()) if callable(usable) else False
+        payload["source"] = "provided"
+        payload.setdefault("schema_id", "FX_CONVERSION")
+        payload.setdefault("schema_version", "185A.1")
+        payload.setdefault(
+            "provider_name",
+            str(payload.get("provider") or getattr(fx_conversion, "provider", "UNKNOWN")),
+        )
+        payload.setdefault(
+            "provider_version",
+            str(getattr(fx_conversion, "provider_version", "UNKNOWN")),
+        )
+        # Never include raw rates as authority; rate presence only.
+        rate = getattr(fx_conversion, "rate", None)
+        payload["rate_present"] = rate is not None
+        return payload
