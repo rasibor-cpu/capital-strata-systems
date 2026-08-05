@@ -15,7 +15,7 @@ def temp_dir():
 @pytest.fixture
 def supervisor(temp_dir):
     alert_mock = MagicMock()
-    return CSSRuntimeSupervisor(state_dir=temp_dir, max_restart_limit=2, alert_service=alert_mock)
+    return CSSRuntimeSupervisor(state_dir=temp_dir, trusted_root=temp_dir, max_restart_limit=2, alert_service=alert_mock)
 
 def test_supervisor_start(supervisor):
     assert supervisor.status == "STOPPED"
@@ -81,7 +81,7 @@ def test_alert_failure_does_not_crash_supervisor(temp_dir):
     alert_mock.emit_system_alert.side_effect = Exception("Alert system down")
     
     # This should not raise an exception
-    sup = CSSRuntimeSupervisor(state_dir=temp_dir, alert_service=alert_mock)
+    sup = CSSRuntimeSupervisor(state_dir=temp_dir, trusted_root=temp_dir, alert_service=alert_mock)
     sup.start()
     sup.record_failure("Some error")
     
@@ -101,7 +101,7 @@ def test_get_status(supervisor):
 
 def test_cumulative_successful_restart_limit_below_at_and_above(temp_dir):
     alert_mock = MagicMock()
-    sup = CSSRuntimeSupervisor(state_dir=temp_dir, max_restart_limit=2, alert_service=alert_mock)
+    sup = CSSRuntimeSupervisor(state_dir=temp_dir, trusted_root=temp_dir, max_restart_limit=2, alert_service=alert_mock)
     sup.start()
 
     sup.record_failure("first", service_name="CSS Runtime", pid_before=100)
@@ -128,6 +128,7 @@ def test_durable_bounded_failure_history(temp_dir):
     alert_mock = MagicMock()
     sup = CSSRuntimeSupervisor(
         state_dir=temp_dir,
+        trusted_root=temp_dir,
         max_restart_limit=5,
         alert_service=alert_mock,
         failure_history_limit=3,
@@ -150,7 +151,7 @@ def test_durable_bounded_failure_history(temp_dir):
 
 def test_process_tree_identity_tracks_generation_and_pids(temp_dir):
     alert_mock = MagicMock()
-    sup = CSSRuntimeSupervisor(state_dir=temp_dir, max_restart_limit=3, alert_service=alert_mock)
+    sup = CSSRuntimeSupervisor(state_dir=temp_dir, trusted_root=temp_dir, max_restart_limit=3, alert_service=alert_mock)
     sup.start()
     sup.record_process_tree(
         launcher_pid=10,
@@ -171,7 +172,7 @@ def test_process_tree_identity_tracks_generation_and_pids(temp_dir):
 
 def test_controlled_shutdown_history_is_explicit_not_unexpected(temp_dir):
     alert_mock = MagicMock()
-    sup = CSSRuntimeSupervisor(state_dir=temp_dir, max_restart_limit=1, alert_service=alert_mock)
+    sup = CSSRuntimeSupervisor(state_dir=temp_dir, trusted_root=temp_dir, max_restart_limit=1, alert_service=alert_mock)
     sup.start()
     sup.stop()
 

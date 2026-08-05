@@ -17,6 +17,8 @@ from backend.runtime.live_environment_loader import load_css_runtime_environment
 CSS_ENVIRONMENT_LOAD_TRACE = load_css_runtime_environment(REPO_ROOT)
 
 from backend.runtime.css_runtime_supervisor import CSSRuntimeSupervisor
+from backend.certification.ov002_continuity import default_identity_probe
+from backend.certification.ov002_persistence import PersistenceError, strict_json_loads
 from backend.monitoring.css_alert_models import AlertSeverity
 from launcher.css_service_manager import CSSServiceManager
 from launcher.css_launcher_config import LauncherConfig
@@ -44,7 +46,7 @@ def discover_canonical_runtime_processes(
     *,
     repo_root: str = REPO_ROOT,
     current_pid: int | None = None,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     current_pid = int(current_pid or os.getpid())
     repo_norm = os.path.normcase(os.path.abspath(repo_root))
     rows: list[dict[str, Any]] = []
@@ -58,7 +60,7 @@ def discover_canonical_runtime_processes(
                     "-Command",
                     (
                         "Get-CimInstance Win32_Process -Filter \"name='python.exe'\" | "
-                        "Select-Object ProcessId,ParentProcessId,CommandLine | "
+                        "Select-Object ProcessId,ParentProcessId,CreationDate,ExecutablePath,CommandLine | "
                         "ConvertTo-Json -Compress"
                     ),
                 ],
@@ -67,10 +69,25 @@ def discover_canonical_runtime_processes(
                 check=False,
                 timeout=20,
             )
+            if completed.returncode != 0:
+                return {
+                    "ok": False,
+                    "processes": [],
+                    "error_code": "discovery_powershell_failed",
+                    "error_type": "subprocess_error",
+                }
             raw = (completed.stdout or "").strip()
             if not raw:
-                return []
-            parsed = json.loads(raw)
+                return {"ok": True, "processes": [], "error_code": None, "error_type": None}
+            try:
+                parsed = strict_json_loads(raw, source="runtime_process_discovery")
+            except PersistenceError:
+                return {
+                    "ok": False,
+                    "processes": [],
+                    "error_code": "discovery_output_unreadable",
+                    "error_type": "json_error",
+                }
         else:
             completed = subprocess.run(
                 ["ps", "-eo", "pid=,ppid=,command="],
@@ -79,6 +96,13 @@ def discover_canonical_runtime_processes(
                 check=False,
                 timeout=20,
             )
+            if completed.returncode != 0:
+                return {
+                    "ok": False,
+                    "processes": [],
+                    "error_code": "discovery_ps_failed",
+                    "error_type": "subprocess_error",
+                }
             parsed = []
             for line in (completed.stdout or "").splitlines():
                 parts = line.strip().split(None, 2)
@@ -96,17 +120,34 @@ def discover_canonical_runtime_processes(
             process_rows = parsed
         else:
             process_rows = []
-    except Exception:
-        return []
+    except Exception as exc:
+        return {
+            "ok": False,
+            "processes": [],
+            "error_code": "discovery_exception",
+            "error_type": type(exc).__name__,
+        }
 
     for row in process_rows:
         try:
             pid = int(row.get("ProcessId") or row.get("PID") or 0)
         except Exception:
-            continue
+            return {
+                "ok": False,
+                "processes": [],
+                "error_code": "discovery_pid_malformed",
+                "error_type": "malformed_process_row",
+            }
         if pid == current_pid:
             continue
         cmd = str(row.get("CommandLine") or row.get("COMMAND") or "")
+        if not cmd:
+            return {
+                "ok": False,
+                "processes": [],
+                "error_code": "discovery_command_unavailable",
+                "error_type": "partial_process_row",
+            }
         cmd_norm = os.path.normcase(cmd)
         if repo_norm not in cmd_norm:
             continue
@@ -121,26 +162,89 @@ def discover_canonical_runtime_processes(
             {
                 "pid": pid,
                 "parent_pid": row.get("ParentProcessId"),
+                "creation_time": row.get("CreationDate"),
+                "executable_path": row.get("ExecutablePath"),
                 "role": marker,
-                "command_line": cmd[:500],
             }
         )
-    return rows
+    return {"ok": True, "processes": rows, "error_code": None, "error_type": None}
+
+
+def _live_process_fields(pid: int | None, *, role: str) -> dict[str, Any]:
+    if pid is None:
+        raise RuntimeError(f"process_identity_pid_missing:{role}")
+    live = default_identity_probe(int(pid))
+    if not isinstance(live, dict):
+        raise RuntimeError(f"process_identity_unavailable:{role}")
+    required = ("parent_pid", "creation_time", "executable_path", "executable_sha256", "command_line")
+    missing = [field for field in required if live.get(field) in (None, "")]
+    if missing:
+        raise RuntimeError(f"process_identity_live_fields_missing:{role}:{','.join(missing)}")
+    return {
+        "parent_pid": live["parent_pid"],
+        "creation_time": live["creation_time"],
+        "executable_path": live["executable_path"],
+        "executable_sha256": live["executable_sha256"],
+        "command_line": live["command_line"],
+    }
+
+
+def _service_identity_info(svc: CSSServiceManager) -> dict[str, Any]:
+    info = dict(svc.get_info())
+    live = _live_process_fields(info.get("pid"), role=svc.service_name)
+    info.update(
+        {
+            "parent_pid": live["parent_pid"],
+            "creation_time": live["creation_time"],
+            "executable_path": live["executable_path"],
+            "executable_sha256": live["executable_sha256"],
+            "command_line": live["command_line"],
+            "service_role": svc.service_name,
+            "repo_root": REPO_ROOT,
+        }
+    )
+    return info
+
+
+def _record_strong_process_tree(supervisor: CSSRuntimeSupervisor, services: list[CSSServiceManager]) -> None:
+    current = _live_process_fields(os.getpid(), role="launcher")
+    supervisor.record_process_tree(
+        managed_services={svc.service_name: _service_identity_info(svc) for svc in services},
+        launcher_parent_pid=current["parent_pid"],
+        launcher_creation_time=current["creation_time"],
+        launcher_executable_path=current["executable_path"],
+        launcher_executable_sha256=current["executable_sha256"],
+        launcher_command_line=current["command_line"],
+        supervisor_parent_pid=current["parent_pid"],
+        supervisor_creation_time=current["creation_time"],
+        supervisor_executable_path=current["executable_path"],
+        supervisor_executable_sha256=current["executable_sha256"],
+        supervisor_command_line=current["command_line"],
+        repo_root=REPO_ROOT,
+    )
 
 
 def duplicate_canonical_runtime_owners(
     *,
     repo_root: str = REPO_ROOT,
     current_pid: int | None = None,
-) -> list[dict[str, Any]]:
-    return [
+) -> dict[str, Any]:
+    discovery = discover_canonical_runtime_processes(
+        repo_root=repo_root,
+        current_pid=current_pid,
+    )
+    if not discovery.get("ok"):
+        return {
+            "ok": False,
+            "owners": [],
+            "error_code": discovery.get("error_code") or "discovery_failed",
+        }
+    owners = [
         row
-        for row in discover_canonical_runtime_processes(
-            repo_root=repo_root,
-            current_pid=current_pid,
-        )
+        for row in discovery.get("processes") or []
         if row.get("role") == "canonical_launcher"
     ]
+    return {"ok": True, "owners": owners, "error_code": None}
 
 
 def check_environment() -> bool:
@@ -204,13 +308,20 @@ def check_environment() -> bool:
     else:
         print(f"Port {LauncherConfig.PORT:<15} PASS")
 
-    duplicate_owners = duplicate_canonical_runtime_owners()
-    if duplicate_owners:
+    discovery = duplicate_canonical_runtime_owners()
+    if not discovery.get("ok"):
         print("Canonical Runtime Owner FAIL")
-        for owner in duplicate_owners:
+        print(
+            f"ERROR: Duplicate discovery failed "
+            f"(code={discovery.get('error_code')})."
+        )
+        checks_ok = False
+    elif discovery.get("owners"):
+        print("Canonical Runtime Owner FAIL")
+        for owner in discovery["owners"]:
             print(
                 "ERROR: Existing canonical launcher detected "
-                f"(pid={owner.get('pid')})."
+                f"(pid={owner.get('pid')}, role={owner.get('role')})."
             )
         checks_ok = False
     else:
@@ -320,7 +431,7 @@ def run_launcher():
         sys.exit(1)
 
     supervisor = CSSRuntimeSupervisor()
-    supervisor.start()
+    supervisor_started = False
 
     env = os.environ.copy()
     env["PYTHONPATH"] = REPO_ROOT
@@ -333,34 +444,62 @@ def run_launcher():
     mobile_svc = CSSServiceManager("Mobile Launcher", mobile_cmd, REPO_ROOT, env)
 
     services = [runtime_svc, mobile_svc]
-
-    for svc in services:
-        if svc.start():
-            # Start thread to drain output to prevent blocking
-            if svc.process.stdout:
-                t = threading.Thread(target=output_stream_reader, args=(svc.process.stdout, svc.service_name), daemon=True)
-                t.start()
-
-    supervisor.record_process_tree(
-        managed_services={svc.service_name: svc.get_info() for svc in services}
-    )
-
-    print("\nCSS Runtime ........ RUNNING")
-    print("Mobile Launcher .... RUNNING")
-    print("Supervisor ......... RUNNING")
-    print("\nSYSTEM STATUS ...... OPERATIONAL\n")
+    started_services: list[CSSServiceManager] = []
 
     try:
+        supervisor.start()
+        supervisor_started = True
+
+        for svc in services:
+            if svc.start():
+                started_services.append(svc)
+                # Start thread to drain output to prevent blocking
+                if svc.process and svc.process.stdout:
+                    t = threading.Thread(target=output_stream_reader, args=(svc.process.stdout, svc.service_name), daemon=True)
+                    t.start()
+
+        _record_strong_process_tree(supervisor, services)
+
+        print("\nCSS Runtime ........ RUNNING")
+        print("Mobile Launcher .... RUNNING")
+        print("Supervisor ......... RUNNING")
+        print("\nSYSTEM STATUS ...... OPERATIONAL\n")
+
         while True:
             time.sleep(10)
             supervisor.heartbeat()
+            # Mid-run continuity: persist duplicate-owner discovery into supervisor state.
+            discovery = duplicate_canonical_runtime_owners()
+            if not discovery.get("ok"):
+                supervisor.record_duplicate_discovery(
+                    {
+                        "ok": False,
+                        "owners": [],
+                        "error_code": discovery.get("error_code") or "discovery_failed",
+                    }
+                )
+            else:
+                filtered = [
+                    owner
+                    for owner in discovery.get("owners") or []
+                    if int(owner.get("pid") or -1) != int(os.getpid())
+                ]
+                supervisor.record_duplicate_discovery(
+                    {
+                        "ok": True,
+                        "owners": filtered,
+                        "error_code": None,
+                    }
+                )
+            _record_strong_process_tree(supervisor, services)
             monitor_and_restart_services(services, supervisor)
     except KeyboardInterrupt:
         print("\nShutdown requested...")
     finally:
-        for svc in services:
+        for svc in started_services:
             svc.stop()
-        supervisor.stop()
+        if supervisor_started:
+            supervisor.stop()
         print("CSS Always-On Runtime Launcher stopped.")
 
 if __name__ == "__main__":

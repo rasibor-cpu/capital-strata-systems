@@ -120,7 +120,7 @@ def capture_controlled_shutdown_observation(
         ),
     ]
 
-    supervisor = CSSRuntimeSupervisor(state_dir=str(state_dir))
+    supervisor = CSSRuntimeSupervisor(state_dir=str(state_dir), trusted_root=root)
     supervisor.start()
     supervisor_started = supervisor.status == "RUNNING" or bool(supervisor.started_at)
 
