@@ -32,10 +32,13 @@ from backend.certification.ov002_continuity import (
     critical_alert_digest,
     evaluate_final_certification,
     freeze_process_identity,
+    _build_authoritative_process_identity_reconciliation,
     load_critical_event_ledger,
+    load_process_identity_evidence,
     persist_attempt_state,
     reconcile_process_identity_live,
     transition_attempt_state,
+    validate_process_identity_freeze,
     write_attempt_state,
 )
 from backend.certification.ov002_persistence import (
@@ -57,6 +60,7 @@ SUPERVISOR_FRESHNESS_SECONDS = 15 * 60
 FUTURE_SKEW_SECONDS = 5 * 60
 WRITER_ROLE = "ov002_monitor"
 CRITICAL_LEDGER_FILENAME = "CRITICAL_EVENTS.jsonl"
+INVALIDATION_BLOCKED_FILENAME = "INVALIDATION_BLOCKED.json"
 
 
 def _utc_now() -> datetime:
@@ -309,6 +313,7 @@ def reconcile_supervisor_and_alerts(
     now: datetime | None = None,
     freshness_seconds: int = SUPERVISOR_FRESHNESS_SECONDS,
     process_identity_probe: Any | None = None,
+    require_process_identity_freeze: bool = True,
 ) -> dict[str, Any]:
     now_dt = now or _utc_now()
     reasons: list[str] = []
@@ -405,8 +410,19 @@ def reconcile_supervisor_and_alerts(
                     }
                 )
 
+        if state.get("identity_verification_failed"):
+            reasons.append("identity_verification_failed")
+        if state.get("last_history_persist_error"):
+            reasons.append("supervisor_history_persist_failed")
+
         frozen_identity = run_meta.get("process_identity_freeze")
-        if isinstance(frozen_identity, dict) and frozen_identity:
+        freeze_reasons = validate_process_identity_freeze(frozen_identity)
+        if freeze_reasons:
+            # Absent/malformed freeze can never be silently skipped: reconciliation
+            # still runs and the structural fault becomes an explicit reason.
+            if require_process_identity_freeze:
+                reasons.extend(freeze_reasons)
+        else:
             for reason in reconcile_process_identity_live(
                 frozen=frozen_identity,
                 observed_supervisor_state=state,
@@ -422,6 +438,10 @@ def reconcile_supervisor_and_alerts(
                 continue
             event_type = str(item.get("event_type") or "")
             if event_type == "controlled_shutdown":
+                continue
+            if event_type == "identity_verification_failed":
+                reasons.append("identity_verification_failed")
+                events.append(item)
                 continue
             if event_type in {
                 "unexpected_failure",
@@ -990,6 +1010,24 @@ def write_checkpoint(
 
 
 def _existing_invalidation(root: Path) -> dict[str, Any] | None:
+    blocked_state = _read_optional_cert_json(root / INVALIDATION_BLOCKED_FILENAME)
+    if blocked_state["state"] == "invalid":
+        return {
+            "invalidated": True,
+            "durable_invalidation_written": False,
+            "reasons": [f"invalidation_blocked_evidence_invalid:{blocked_state['error']}"],
+            "observed_at_utc": _iso(),
+        }
+    blocked = blocked_state["payload"]
+    if blocked:
+        payload = dict(blocked)
+        payload["invalidated"] = True
+        payload["durable_invalidation_written"] = False
+        payload["reasons"] = list(
+            dict.fromkeys(list(payload.get("reasons") or []) + ["invalidation_persist_blocked"])
+        )
+        return payload
+
     invalidation_state = _read_optional_cert_json(root / "INVALIDATION.json")
     if invalidation_state["state"] == "invalid":
         return {
@@ -1026,6 +1064,48 @@ def _existing_invalidation(root: Path) -> dict[str, Any] | None:
     return None
 
 
+def _write_invalidation_blocked_marker(
+    root: Path,
+    *,
+    run_id: str,
+    frozen_sha: str,
+    invalidation: dict[str, Any],
+    error_code: str,
+) -> bool:
+    """Unlocked best-effort marker so a package can never read back as clean RUNNING.
+
+    Written without the single-writer lock precisely because the locked write is the
+    thing that failed. A stale writer lock still requires an operator to clear it;
+    this marker never steals or releases another writer's lease.
+    """
+    payload = {
+        "schema_version": "css.ov002.invalidation_blocked.v1",
+        "invalidated": True,
+        "invalidation_blocked": True,
+        "durable_invalidation_written": False,
+        "run_id": run_id,
+        "frozen_sha": frozen_sha,
+        "error_code": str(error_code),
+        "reasons": list(
+            dict.fromkeys(
+                list(invalidation.get("reasons") or [])
+                + ["invalidation_persist_blocked", f"invalidation_persist_error:{error_code}"]
+            )
+        ),
+        "events": list(invalidation.get("events") or [])[-100:],
+        "observed_at_utc": _iso(),
+        "attempt_state": STATE_INVALIDATED,
+        "certification": STATE_NOT_CERTIFIED,
+        "phase181": STATE_NOT_CERTIFIED,
+        "operator_action_required": "clear_stale_writer_lock_and_reconcile",
+    }
+    try:
+        atomic_write_json(root / INVALIDATION_BLOCKED_FILENAME, payload, expected_root=root)
+        return True
+    except PersistenceError:
+        return False
+
+
 def _write_invalidated_status(
     root: Path,
     *,
@@ -1041,30 +1121,40 @@ def _write_invalidated_status(
         return
 
     invalidation_payload = dict(invalidation)
-    _write_json_critical(
-        root / "INVALIDATION.json",
-        invalidation_payload,
-        attempt_id=run_id,
-        expected_root=root,
-    )
-    _write_json_critical(
-        root / "RUN_STATUS.json",
-        {
-            "status": "INVALIDATED",
-            "run_id": run_id,
-            "updated_at_utc": _iso(),
-            "frozen_sha": frozen_sha,
-            "reasons": invalidation.get("reasons") or [],
-            "invalidation_reasons": invalidation.get("reasons") or [],
-            "invalidation_events": invalidation.get("events") or [],
-            "recommendation_pending": "ENDURANCE INVALIDATED",
-            "attempt_state": STATE_INVALIDATED,
-            "certification": STATE_NOT_CERTIFIED,
-            "phase181": STATE_NOT_CERTIFIED,
-        },
-        attempt_id=run_id,
-        expected_root=root,
-    )
+    try:
+        _write_json_critical(
+            root / "INVALIDATION.json",
+            invalidation_payload,
+            attempt_id=run_id,
+            expected_root=root,
+        )
+        _write_json_critical(
+            root / "RUN_STATUS.json",
+            {
+                "status": "INVALIDATED",
+                "run_id": run_id,
+                "updated_at_utc": _iso(),
+                "frozen_sha": frozen_sha,
+                "reasons": invalidation.get("reasons") or [],
+                "invalidation_reasons": invalidation.get("reasons") or [],
+                "invalidation_events": invalidation.get("events") or [],
+                "recommendation_pending": "ENDURANCE INVALIDATED",
+                "attempt_state": STATE_INVALIDATED,
+                "certification": STATE_NOT_CERTIFIED,
+                "phase181": STATE_NOT_CERTIFIED,
+            },
+            attempt_id=run_id,
+            expected_root=root,
+        )
+    except PersistenceError as exc:
+        _write_invalidation_blocked_marker(
+            root,
+            run_id=run_id,
+            frozen_sha=frozen_sha,
+            invalidation=invalidation,
+            error_code=exc.code,
+        )
+        raise
     try:
         persist_attempt_state(
             root / "ATTEMPT_STATE.json",
@@ -1078,6 +1168,37 @@ def _write_invalidated_status(
     except ContinuityError as exc:
         if exc.code != "invalidated_terminal":
             raise
+
+
+def _load_independent_continuity_evidence(
+    root: Path,
+) -> tuple[str | None, str | None, dict[str, Any] | None, list[str]]:
+    """Read attempt identity and process-identity evidence from durable package files.
+
+    The expected attempt id and baseline commit deliberately come from
+    ``ATTEMPT_STATE.json`` rather than the in-memory run metadata or process
+    identity evidence, so final certification is not validating mutable evidence
+    against itself.
+    """
+    reasons: list[str] = []
+    expected_attempt_id: str | None = None
+    expected_commit: str | None = None
+
+    attempt_state = _read_optional_cert_json(root / "ATTEMPT_STATE.json")
+    if attempt_state["state"] == "invalid":
+        reasons.append(f"attempt_state_evidence_invalid:{attempt_state['error']}")
+    elif attempt_state["state"] == "absent":
+        reasons.append("attempt_state_evidence_missing")
+    else:
+        payload = attempt_state["payload"] or {}
+        expected_attempt_id = str(payload.get("attempt_id") or payload.get("run_id") or "") or None
+        expected_commit = str(payload.get("baseline_commit") or payload.get("frozen_sha") or "") or None
+        if expected_attempt_id is None or expected_commit is None:
+            reasons.append("attempt_state_identity_missing")
+
+    evidence, evidence_reasons = load_process_identity_evidence(root)
+    reasons.extend(evidence_reasons)
+    return expected_attempt_id, expected_commit, evidence, list(dict.fromkeys(reasons))
 
 
 def initialize_run(
@@ -1139,6 +1260,8 @@ def initialize_run(
         run_meta={"start_utc": _iso(start)},
         now=start,
         freshness_seconds=supervisor_freshness_seconds,
+        # The freeze is captured after preflight succeeds, so it cannot exist yet.
+        require_process_identity_freeze=False,
     )
     preflight_reasons = list(preflight.get("reasons") or [])
     preflight_reasons.extend(supervisor_payload.get("errors") or [])
@@ -1463,19 +1586,48 @@ def run_monitor_loop(
                 if str(item.get("severity") or "").upper() == "CRITICAL"
             ]
             critical_ledger = load_critical_event_ledger(root / CRITICAL_LEDGER_FILENAME)
+            (
+                expected_attempt_id,
+                expected_baseline_commit,
+                identity_evidence,
+                continuity_reasons,
+            ) = _load_independent_continuity_evidence(root)
+            reconcile_reason_list = list(reconciliation.get("reasons") or [])
+            identity_reasons = [
+                reason for reason in reconcile_reason_list if str(reason).startswith("process_identity")
+            ] + continuity_reasons
+            identity_reconciliation = None
+            freeze_for_final = meta.get("process_identity_freeze")
+            if (
+                expected_attempt_id is not None
+                and expected_baseline_commit is not None
+                and isinstance(freeze_for_final, dict)
+                and identity_evidence is not None
+            ):
+                identity_reconciliation = _build_authoritative_process_identity_reconciliation(
+                    expected_run_id=expected_attempt_id,
+                    expected_commit=expected_baseline_commit,
+                    freeze=freeze_for_final,
+                    evidence=identity_evidence,
+                    reasons=identity_reasons,
+                )
             certification = evaluate_final_certification(
                 run_meta=meta,
                 run_status={"status": "COMPLETE"},
                 invalidation=_existing_invalidation(root),
                 reconciliation_ok=bool(reconciliation.get("ok", False)),
-                reconciliation_reasons=list(reconciliation.get("reasons") or []),
+                reconciliation_reasons=reconcile_reason_list,
                 alert_errors=list(alerts.get("errors") or []),
-                expected_run_id=run_id,
-                expected_commit=str(meta.get("frozen_sha") or ""),
+                expected_run_id=expected_attempt_id,
+                expected_commit=expected_baseline_commit,
                 phase181_auto_certify=False,
                 alert_scan_complete=bool(alerts.get("scan_complete", True)),
                 critical_ledger=critical_ledger,
                 critical_alerts=critical_alerts,
+                process_identity_freeze=freeze_for_final,
+                process_identity_evidence=identity_evidence,
+                process_identity_reasons=identity_reasons,
+                process_identity_reconciliation=identity_reconciliation,
             )
             if not certification.eligible:
                 invalid = {
@@ -1536,6 +1688,7 @@ def run_monitor_loop(
 __all__ = [
     "TARGET_HOURS",
     "CRITICAL_LEDGER_FILENAME",
+    "INVALIDATION_BLOCKED_FILENAME",
     "initialize_run",
     "run_monitor_loop",
     "capture_safety_assertions",

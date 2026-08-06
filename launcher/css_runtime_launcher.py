@@ -18,6 +18,11 @@ CSS_ENVIRONMENT_LOAD_TRACE = load_css_runtime_environment(REPO_ROOT)
 
 from backend.runtime.css_runtime_supervisor import CSSRuntimeSupervisor
 from backend.certification.ov002_continuity import default_identity_probe
+from backend.certification.ov002_continuity import (
+    canonical_process_creation_time,
+    canonical_process_pid,
+    canonical_process_pid_error,
+)
 from backend.certification.ov002_persistence import PersistenceError, strict_json_loads
 from backend.monitoring.css_alert_models import AlertSeverity
 from launcher.css_service_manager import CSSServiceManager
@@ -35,6 +40,7 @@ CANONICAL_CHILD_MARKERS = (
     "launcher\\css_mobile_launcher.py",
     "launcher/css_mobile_launcher.py",
 )
+DISCOVERY_SCHEMA = "css.runtime.process_discovery.v1"
 
 
 def is_port_in_use(port: int) -> bool:
@@ -42,52 +48,133 @@ def is_port_in_use(port: int) -> bool:
         return s.connect_ex(('127.0.0.1', port)) == 0
 
 
+WINDOWS_DISCOVERY_SCRIPT = (
+    "$self = Get-CimInstance Win32_Process -Filter \"ProcessId=$PID\" "
+    "-ErrorAction SilentlyContinue; "
+    "$anchor = $null; $selfObserved = $false; "
+    "if ($null -ne $self) { $anchor = $self.ProcessId; $selfObserved = $true }; "
+    "$procs = @(Get-CimInstance Win32_Process -Filter \"name='python.exe'\" "
+    "-ErrorAction SilentlyContinue | "
+    "Select-Object ProcessId,ParentProcessId,CreationDate,ExecutablePath,CommandLine); "
+    f"[pscustomobject]@{{ schema_version = '{DISCOVERY_SCHEMA}'; ok = $true; "
+    "anchor_pid = $anchor; self_observed = $selfObserved; processes = $procs; "
+    "error_code = $null; error_type = $null } | "
+    "ConvertTo-Json -Compress -Depth 4"
+)
+
+
+def _discovery_failure(error_code: str, error_type: str) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "processes": [],
+        "anchor_pid": None,
+        "self_observed": False,
+        "error_code": error_code,
+        "error_type": error_type,
+    }
+
+
+def _parse_discovery_payload(
+    parsed: Any,
+    *,
+    expected_pid: int,
+) -> tuple[list[Any], int | None, str | None]:
+    """Split a discovery payload into process rows and an optional anchor pid."""
+    if not isinstance(parsed, dict):
+        return [], None, "discovery_envelope_malformed"
+    allowed = {
+        "schema_version",
+        "ok",
+        "anchor_pid",
+        "self_observed",
+        "processes",
+        "error_code",
+        "error_type",
+    }
+    if set(parsed) != allowed:
+        return [], None, "discovery_envelope_fields_mismatch"
+    if parsed.get("schema_version") != DISCOVERY_SCHEMA:
+        return [], None, "discovery_schema_mismatch"
+    if parsed.get("ok") is not True:
+        return [], None, "discovery_reported_failure"
+    if parsed.get("error_code") is not None or parsed.get("error_type") is not None:
+        return [], None, "discovery_success_error_fields_present"
+    anchor_raw = parsed.get("anchor_pid")
+    anchor_pid = canonical_process_pid(anchor_raw)
+    if anchor_pid is None:
+        return [], None, "discovery_anchor_malformed"
+    if anchor_pid != expected_pid:
+        return [], None, "discovery_anchor_mismatch"
+    if parsed.get("self_observed") is not True:
+        return [], None, "discovery_self_missing"
+    rows = parsed.get("processes")
+    if not isinstance(rows, list):
+        return [], None, "discovery_output_malformed"
+    observed_rows: dict[int, tuple[Any, Any, Any, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            return [], None, "discovery_row_malformed"
+        allowed_row = {"ProcessId", "ParentProcessId", "CreationDate", "ExecutablePath", "CommandLine"}
+        if set(row) != allowed_row:
+            return [], None, "discovery_row_fields_mismatch"
+        pid = canonical_process_pid(row.get("ProcessId"))
+        if pid is None:
+            return [], None, "discovery_pid_malformed"
+        if canonical_process_pid_error(row.get("ParentProcessId")):
+            return [], None, "discovery_parent_pid_malformed"
+        command = row.get("CommandLine")
+        if not isinstance(command, str) or not command.strip():
+            return [], None, "discovery_command_unavailable"
+        for optional_text in ("CreationDate", "ExecutablePath"):
+            value = row.get(optional_text)
+            if not isinstance(value, str) or not value.strip():
+                return [], None, "discovery_row_fields_mismatch"
+        if canonical_process_creation_time(row.get("CreationDate")) is None:
+            return [], None, "discovery_creation_malformed"
+        row_identity = (
+            row.get("ParentProcessId"),
+            row.get("CreationDate"),
+            os.path.normcase(os.path.abspath(row.get("ExecutablePath"))),
+            row.get("CommandLine").strip(),
+        )
+        if pid in observed_rows:
+            return [], None, "discovery_duplicate_process_id"
+        observed_rows[pid] = row_identity
+    return rows, anchor_pid, None
+
+
 def discover_canonical_runtime_processes(
     *,
     repo_root: str = REPO_ROOT,
     current_pid: int | None = None,
 ) -> dict[str, Any]:
-    current_pid = int(current_pid or os.getpid())
+    current_pid_raw = os.getpid() if current_pid is None else current_pid
+    current_pid_valid = canonical_process_pid(current_pid_raw)
+    if current_pid_valid is None:
+        return _discovery_failure("discovery_current_pid_malformed", "malformed_input")
+    current_pid = current_pid_valid
     repo_norm = os.path.normcase(os.path.abspath(repo_root))
     rows: list[dict[str, Any]] = []
 
     try:
         if os.name == "nt":
             completed = subprocess.run(
-                [
-                    "powershell",
-                    "-NoProfile",
-                    "-Command",
-                    (
-                        "Get-CimInstance Win32_Process -Filter \"name='python.exe'\" | "
-                        "Select-Object ProcessId,ParentProcessId,CreationDate,ExecutablePath,CommandLine | "
-                        "ConvertTo-Json -Compress"
-                    ),
-                ],
+                ["powershell", "-NoProfile", "-Command", WINDOWS_DISCOVERY_SCRIPT],
                 capture_output=True,
                 text=True,
                 check=False,
                 timeout=20,
             )
             if completed.returncode != 0:
-                return {
-                    "ok": False,
-                    "processes": [],
-                    "error_code": "discovery_powershell_failed",
-                    "error_type": "subprocess_error",
-                }
+                return _discovery_failure("discovery_powershell_failed", "subprocess_error")
             raw = (completed.stdout or "").strip()
             if not raw:
-                return {"ok": True, "processes": [], "error_code": None, "error_type": None}
+                # Empty output is indistinguishable from a silenced enumeration failure.
+                return _discovery_failure("discovery_empty_output", "empty_output")
             try:
                 parsed = strict_json_loads(raw, source="runtime_process_discovery")
             except PersistenceError:
-                return {
-                    "ok": False,
-                    "processes": [],
-                    "error_code": "discovery_output_unreadable",
-                    "error_type": "json_error",
-                }
+                return _discovery_failure("discovery_output_unreadable", "json_error")
         else:
             completed = subprocess.run(
                 ["ps", "-eo", "pid=,ppid=,command="],
@@ -97,67 +184,97 @@ def discover_canonical_runtime_processes(
                 timeout=20,
             )
             if completed.returncode != 0:
-                return {
-                    "ok": False,
-                    "processes": [],
-                    "error_code": "discovery_ps_failed",
-                    "error_type": "subprocess_error",
-                }
-            parsed = []
+                return _discovery_failure("discovery_ps_failed", "subprocess_error")
+            if not (completed.stdout or "").strip():
+                return _discovery_failure("discovery_empty_output", "empty_output")
+            process_rows = []
             for line in (completed.stdout or "").splitlines():
                 parts = line.strip().split(None, 2)
                 if len(parts) == 3:
-                    parsed.append(
+                    try:
+                        process_id = int(parts[0])
+                        parent_id = int(parts[1])
+                    except ValueError:
+                        return _discovery_failure("discovery_pid_malformed", "malformed_process_row")
+                    process_rows.append(
                         {
-                            "ProcessId": parts[0],
-                            "ParentProcessId": parts[1],
+                            "ProcessId": process_id,
+                            "ParentProcessId": parent_id,
+                            "CreationDate": None,
+                            "ExecutablePath": None,
                             "CommandLine": parts[2],
                         }
                     )
-        if isinstance(parsed, dict):
-            process_rows = [parsed]
-        elif isinstance(parsed, list):
-            process_rows = parsed
-        else:
-            process_rows = []
-    except Exception as exc:
-        return {
-            "ok": False,
-            "processes": [],
-            "error_code": "discovery_exception",
-            "error_type": type(exc).__name__,
-        }
-
-    for row in process_rows:
-        try:
-            pid = int(row.get("ProcessId") or row.get("PID") or 0)
-        except Exception:
-            return {
-                "ok": False,
-                "processes": [],
-                "error_code": "discovery_pid_malformed",
-                "error_type": "malformed_process_row",
+            parsed = {
+                "schema_version": DISCOVERY_SCHEMA,
+                "ok": True,
+                "anchor_pid": current_pid,
+                "self_observed": any(row["ProcessId"] == current_pid for row in process_rows),
+                "processes": process_rows,
+                "error_code": None,
+                "error_type": None,
             }
+        process_rows, anchor_pid, payload_error = _parse_discovery_payload(
+            parsed,
+            expected_pid=current_pid,
+        )
+        if payload_error:
+            return _discovery_failure(payload_error, "malformed_envelope")
+    except Exception as exc:
+        return _discovery_failure("discovery_exception", type(exc).__name__)
+
+    observed_pids: set[int] = set()
+    for row in process_rows:
+        if not isinstance(row, dict):
+            return _discovery_failure("discovery_row_malformed", "malformed_process_row")
+        pid_value = canonical_process_pid(row.get("ProcessId"))
+        if pid_value is None:
+            return _discovery_failure("discovery_pid_malformed", "malformed_process_row")
+        observed_pids.add(pid_value)
+
+    self_observed = current_pid in observed_pids or (
+        anchor_pid is not None and int(anchor_pid) == current_pid
+    )
+    if not self_observed:
+        # An enumeration that cannot even see this process (or its anchor) proves
+        # nothing about other canonical owners, including an empty `[]` result.
+        return _discovery_failure("discovery_self_missing", "unanchored_enumeration")
+
+    canonical_launcher_seen = False
+    for row in process_rows:
+        pid = canonical_process_pid(row.get("ProcessId"))
+        if pid is None:
+            return _discovery_failure("discovery_pid_malformed", "malformed_process_row")
         if pid == current_pid:
             continue
-        cmd = str(row.get("CommandLine") or row.get("COMMAND") or "")
+        cmd = row.get("CommandLine")
+        if not isinstance(cmd, str):
+            return _discovery_failure("discovery_command_unavailable", "partial_process_row")
         if not cmd:
-            return {
-                "ok": False,
-                "processes": [],
-                "error_code": "discovery_command_unavailable",
-                "error_type": "partial_process_row",
-            }
+            return _discovery_failure("discovery_command_unavailable", "partial_process_row")
         cmd_norm = os.path.normcase(cmd)
         if repo_norm not in cmd_norm:
             continue
-        marker = None
+        matched_roles = []
         if any(item in cmd_norm for item in CANONICAL_LAUNCHER_MARKERS):
-            marker = "canonical_launcher"
-        elif any(item in cmd_norm for item in CANONICAL_CHILD_MARKERS):
-            marker = "managed_child"
-        if not marker:
+            matched_roles.append("canonical_launcher")
+        if any(item in cmd_norm for item in CANONICAL_CHILD_MARKERS):
+            matched_roles.append("managed_child")
+        if len(matched_roles) > 1:
+            return _discovery_failure(
+                "discovery_conflicting_role_classification",
+                "contradictory_ownership",
+            )
+        if not matched_roles:
             continue
+        marker = matched_roles[0]
+        if marker == "canonical_launcher":
+            if canonical_launcher_seen:
+                return _discovery_failure(
+                    "discovery_duplicate_canonical_identity",
+                    "contradictory_ownership",
+                )
+            canonical_launcher_seen = True
         rows.append(
             {
                 "pid": pid,
@@ -167,7 +284,14 @@ def discover_canonical_runtime_processes(
                 "role": marker,
             }
         )
-    return {"ok": True, "processes": rows, "error_code": None, "error_type": None}
+    return {
+        "ok": True,
+        "processes": rows,
+        "anchor_pid": anchor_pid,
+        "self_observed": True,
+        "error_code": None,
+        "error_type": None,
+    }
 
 
 def _live_process_fields(pid: int | None, *, role: str) -> dict[str, Any]:
@@ -224,6 +348,26 @@ def _record_strong_process_tree(supervisor: CSSRuntimeSupervisor, services: list
     )
 
 
+def _record_process_tree_or_fail(
+    supervisor: CSSRuntimeSupervisor,
+    services: list[CSSServiceManager],
+) -> None:
+    """Record the strong process tree, classifying failures distinctly from shutdown."""
+    try:
+        _record_strong_process_tree(supervisor, services)
+    except Exception as exc:
+        recorder = getattr(supervisor, "record_identity_verification_failure", None)
+        if callable(recorder):
+            try:
+                recorder(
+                    "strong_process_identity_unavailable",
+                    detail_code=type(exc).__name__,
+                )
+            except Exception:
+                pass
+        raise
+
+
 def duplicate_canonical_runtime_owners(
     *,
     repo_root: str = REPO_ROOT,
@@ -237,6 +381,7 @@ def duplicate_canonical_runtime_owners(
         return {
             "ok": False,
             "owners": [],
+            "self_observed": bool(discovery.get("self_observed")),
             "error_code": discovery.get("error_code") or "discovery_failed",
         }
     owners = [
@@ -244,7 +389,7 @@ def duplicate_canonical_runtime_owners(
         for row in discovery.get("processes") or []
         if row.get("role") == "canonical_launcher"
     ]
-    return {"ok": True, "owners": owners, "error_code": None}
+    return {"ok": True, "owners": owners, "self_observed": True, "error_code": None}
 
 
 def check_environment() -> bool:
@@ -430,7 +575,7 @@ def run_launcher():
         print("Environment check failed. Aborting.")
         sys.exit(1)
 
-    supervisor = CSSRuntimeSupervisor()
+    supervisor = CSSRuntimeSupervisor(trusted_root=REPO_ROOT)
     supervisor_started = False
 
     env = os.environ.copy()
@@ -458,7 +603,7 @@ def run_launcher():
                     t = threading.Thread(target=output_stream_reader, args=(svc.process.stdout, svc.service_name), daemon=True)
                     t.start()
 
-        _record_strong_process_tree(supervisor, services)
+        _record_process_tree_or_fail(supervisor, services)
 
         print("\nCSS Runtime ........ RUNNING")
         print("Mobile Launcher .... RUNNING")
@@ -491,7 +636,7 @@ def run_launcher():
                         "error_code": None,
                     }
                 )
-            _record_strong_process_tree(supervisor, services)
+            _record_process_tree_or_fail(supervisor, services)
             monitor_and_restart_services(services, supervisor)
     except KeyboardInterrupt:
         print("\nShutdown requested...")

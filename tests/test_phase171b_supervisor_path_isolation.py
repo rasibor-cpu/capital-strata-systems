@@ -47,6 +47,7 @@ def _make_supervisor(tmp_path: Path, subpath: str = "supervisor") -> CSSRuntimeS
         state_dir=state_dir,
         max_restart_limit=3,
         alert_service=alert_mock,
+        trusted_root=tmp_path,
     )
 
 
@@ -76,14 +77,26 @@ class TestPathIsolationUnit:
         )
 
     def test_u02_dashboard_state_dir_is_subordinate(self, tmp_path):
-        """U-02: Dashboard supervisor uses subordinate state_dir."""
+        """U-02: Dashboard supervisor uses subordinate state_dir beneath its trusted root."""
         alert_mock = MagicMock()
         dashboard_sup = CSSRuntimeSupervisor(
             alert_service=alert_mock,
             state_dir="runtime/supervisor/dashboard",
+            trusted_root=tmp_path,
         )
-        assert dashboard_sup.state_dir == "runtime/supervisor/dashboard"
+        assert Path(dashboard_sup.state_dir) == tmp_path / "runtime" / "supervisor" / "dashboard"
         assert "dashboard" in dashboard_sup.state_dir
+
+    def test_u02b_absolute_state_dir_without_trusted_root_is_rejected(self, tmp_path):
+        """U-02b: Absolute state_dir without trusted_root still fails closed."""
+        from backend.certification.ov002_persistence import PersistenceError
+
+        with pytest.raises(PersistenceError) as exc:
+            CSSRuntimeSupervisor(
+                state_dir=str(tmp_path / "unrooted"),
+                alert_service=MagicMock(),
+            )
+        assert exc.value.code == "supervisor_trusted_root_required"
 
     def test_u03_launcher_and_dashboard_paths_do_not_collide(self, tmp_path):
         """U-03: Launcher and dashboard state files resolve to different paths."""

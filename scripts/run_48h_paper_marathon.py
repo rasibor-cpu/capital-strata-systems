@@ -22,6 +22,8 @@ from backend.certification.ov002_persistence import PersistenceError, strict_jso
 OV002_AUTHORITATIVE = False
 PHASE181_AUTHORITATIVE = False
 LEGACY_CERTIFICATION_SCOPE = "legacy_48h_paper_marathon_only"
+NON_AUTHORITATIVE_MARKER = "NON_AUTHORITATIVE_FOR_OV002_PHASE181"
+LEGACY_LABEL = "LEGACY NON-AUTHORITATIVE"
 
 
 DEFAULT_CONFIG_PATH = REPOSITORY_ROOT / "config.json"
@@ -166,10 +168,11 @@ def execute(argv: list[str] | None = None) -> int:
                 "ov002_authoritative": OV002_AUTHORITATIVE,
                 "phase181_authoritative": PHASE181_AUTHORITATIVE,
                 "legacy_scope": LEGACY_CERTIFICATION_SCOPE,
+                "non_authoritative_marker": NON_AUTHORITATIVE_MARKER,
             }
             _write_json(run_dir / "final_certification_report.json", dry_run_report)
             print("STOPPED dry-run completed with no cycle execution")
-            print("CERTIFIED DRY_RUN")
+            print(f"{LEGACY_LABEL} CERTIFIED DRY_RUN {NON_AUTHORITATIVE_MARKER}")
             return 0
 
         runner = MarathonRunner(
@@ -194,11 +197,15 @@ def execute(argv: list[str] | None = None) -> int:
             "ov002_authoritative": OV002_AUTHORITATIVE,
             "phase181_authoritative": PHASE181_AUTHORITATIVE,
             "legacy_scope": LEGACY_CERTIFICATION_SCOPE,
+            "non_authoritative_marker": NON_AUTHORITATIVE_MARKER,
         }
         _write_json(run_dir / "final_certification_report.json", certification_payload)
 
         print(f"STOPPED cycles_completed={len(result.snapshots)} stop_reason={result.stop_reason or 'COMPLETED'}")
-        print(f"CERTIFIED {result.certification_report.go_no_go}")
+        print(
+            f"{LEGACY_LABEL} CERTIFIED {result.certification_report.go_no_go} "
+            f"{NON_AUTHORITATIVE_MARKER}"
+        )
 
         return 0 if result.certification_report.go_no_go in {"GO", "CONDITIONAL_GO"} else 3
     except Exception as exc:

@@ -1,10 +1,11 @@
 # CSS OV002-R1 / R1-R1 — Supervisor and Monitor Continuity Remediation Report
 
 **Programme:** Release Gate 3 — Operational Validation OV-002
-**Workstream:** OV002-R1 + OV002-R1-R1/R2/R3/R4/R5 (blocker/high/medium repair)
+**Workstream:** OV002-R1 + OV002-R1-R1/R2/R3/R4/R5 + **OV002-R1-R6** (post-commit IR remediation)
 **Branch:** `css-v1.0.1-maintenance`
-**Base HEAD:** `9a9263c185680353fac9319577b4a1f82d3311dd`
-**Date:** 2026-08-04
+**R5 committed SHA:** `8f533b9929509b23d85d647794c55dcb3ffcb053`
+**Base HEAD (pre-R1):** `9a9263c185680353fac9319577b4a1f82d3311dd`
+**Date:** 2026-08-04 / R6: 2026-08-05
 
 **Explicit statements:**
 - Phase 181 remains **NOT_CERTIFIED**.
@@ -12,7 +13,9 @@
 - **No endurance run was started** by this workstream.
 - Live trading / broker access / desktop CSS start-stop were **not** performed.
 - Prior Attempt 1/2 evidence packages were **not** modified.
-- Changes remain **uncommitted** pending second independent review.
+- **R5 is committed** at `8f533b9929509b23d85d647794c55dcb3ffcb053`.
+- Post-commit independent review (OV002-R5-IR) decision: **CHANGES REQUIRED**.
+- **R6 remains uncommitted** pending independent R6 review.
 
 ---
 
@@ -208,10 +211,110 @@ The direct exploit reproduction for frozen `{}` and observed `{"Unexpected": <va
 4. Strong live identity probing is mandatory on the OV002 authoritative initialization path. Non-authoritative tests/helpers may still call lower-level helpers without it.
 5. ReportLab / unrelated MC gaps unchanged.
 6. Phase 181 remains **NOT_CERTIFIED**.
+7. Stale writer locks are never stolen; operator must clear the lease. When invalidation cannot be durably written, `INVALIDATION_BLOCKED.json` marks the attempt non-eligible (no silent RUNNING/clean interpretation).
 
 ---
 
-## 14. Safety confirmation
+## 14. R6 post-commit IR remediation addendum
+
+R6 addresses OV002-R5-IR findings against committed SHA `8f533b9…`:
+
+| ID | Finding | Repair |
+| --- | --- | --- |
+| B1 | Missing freeze → eligible | Reconcile + final cert require freeze/`PROCESS_IDENTITY.json`; reason `process_identity_freeze_missing` |
+| H1 | Empty probe mapping accepted | `identity_probe_empty` / `identity_probe_incomplete` under `require_live_fields` |
+| H2 | Empty discovery stdout → ok | Structured envelope + `discovery_empty_output` / `discovery_self_missing` |
+| H3 | Absolute state_dir tests/callers | Explicit `trusted_root`; absolute-without-root still rejected |
+| M1 | Meta self-compare | Expected attempt/commit from `ATTEMPT_STATE` / `PROCESS_IDENTITY` |
+| M2 | Silent history append | `last_history_persist_error` + reconcile reason (codes only) |
+| M3 | Stale lock blocks invalidation | `INVALIDATION_BLOCKED.json`; no steal |
+| M4 | Identity fail as controlled_shutdown | `identity_verification_failed` event/flag |
+| L1 | Stale “uncommitted” custody text | Corrected above |
+| L2/L3 | Legacy CERTIFIED ambiguity | Marathon labels `LEGACY NON-AUTHORITATIVE` + marker |
+
+---
+
+## 15. R6-R1 final-certification authority repair addendum
+
+R6-R1 addresses the final-certification authority findings from the independent R6 review:
+
+| ID | Finding | Repair |
+| --- | --- | --- |
+| B1 | Empty or malformed identity records could satisfy container-level validation | Canonical identity-document validation now recursively validates launcher, supervisor, and every managed-service record, including exact fields, strict PID types, canonical hashes, role/service-key agreement, and attempt/commit bindings. The `{"CSS Runtime": {}}` exploit returns `eligible=false` / `NOT_CERTIFIED`. |
+| B2 | `evaluate_final_certification` could derive expected bindings from mutable evidence | Process-identity continuity now requires independently supplied `expected_run_id` and `expected_commit`; missing values emit `expected_run_id_missing` / `expected_commit_missing` and cannot become eligible. |
+| B3 | Caller-supplied `reconciliation_ok=True` was too authoritative | Final certification now requires a structured process-identity reconciliation result with schema, expected bindings, frozen/evidence digests, verified role/service sets, classification, and deterministic reasons. Final evaluation recomputes digests and rejects booleans, malformed mappings, mismatches, and incomplete results. |
+| H4 | Live probes and launcher discovery accepted permissive types/envelopes | Live-probe fields are validated before coercion, rejecting Boolean-as-int, list/dict/object substitutions, uppercase/malformed hashes, and non-string identity fields. Launcher discovery now requires a strict schema envelope; `ok:false` can never be rewritten into success. |
+
+Authoritative final-certification path:
+
+1. `initialize_run` writes `ATTEMPT_STATE.json` and `PROCESS_IDENTITY.json` from the independent attempt boundary.
+2. `run_monitor_loop` reloads expected attempt ID and commit only from `ATTEMPT_STATE.json`.
+3. The monitor loads persisted process identity, carries live reconciliation reasons, builds a structured reconciliation result, and passes it into `evaluate_final_certification`.
+4. `evaluate_final_certification` repeats structural checks, requires the independent bindings, verifies the structured reconciliation schema, recomputes canonical digests, and remains `NOT_CERTIFIED` unless every authority check is satisfied.
+
+R6-R1 validation evidence:
+
+- Compile changed Python: **exit 0**
+- Focused R6-R1 / launcher set: **118 passed** in 161.21s
+- R1 continuity regression: **12 passed** in 92.03s
+- OV002 endurance monitor regression: **10 passed** in 196.51s
+- Supervisor/path-isolation regressions: **46 passed** in 44.68s
+- Alert delivery / auto-restart regressions: **37 passed** in 41.69s
+- Canonical decision / passive publishing regressions: **5 passed** in 4.39s
+- Endurance validation / marathon wrapper regressions: **10 passed** in 3.68s
+- `git diff --check`: **clean** except existing Git ignore permission and CRLF conversion warnings
+- Port **8765 free**; no CSS/endurance runtime or broker access performed
+
+R6-R1 remains **uncommitted** pending another independent review.
+
+---
+
+## 16. R6-R2 identity range and internal authority repair addendum
+
+R6-R2 addresses the final R6-R1 independent-review findings:
+
+| ID | Finding | Repair |
+| --- | --- | --- |
+| B1 | Non-positive process identifiers could pass structural identity validation | CSS now uses one canonical PID contract for authoritative identity records: exact `int`, Boolean rejected, `1 <= pid <= 4294967295`. Launcher, supervisor, service, live-probe, top-level binding, freeze, persisted evidence, reconciliation, discovery, and final certification paths reject zero, negative, overflow, floats, strings, nulls, lists, mappings, and objects. |
+| H1 | Discovery rows accepted incomplete process records | Runtime discovery rows now require the exact committed Windows row schema: `ProcessId`, `ParentProcessId`, `CreationDate`, `ExecutablePath`, and `CommandLine`. Missing or unknown fields and malformed row values fail the complete discovery result. |
+| M1 | Caller-created reconciliation mappings could look authoritative | Final certification now requires the exact private frozen reconciliation result produced by the authoritative in-process factory. Public JSON/dict payloads remain audit-only and are rejected as `process_identity_reconciliation_result_not_authoritative`. Serialized/deserialized copies, booleans, nulls, lookalikes, mismatched digests, and cross-attempt/cross-commit reuse fail closed. |
+
+PID range contract:
+
+- Minimum valid PID: `1`
+- Maximum valid PID: unsigned 32-bit ceiling `4294967295`
+- Parent PID for authoritative CSS identities also follows the same positive range contract.
+- No numeric string, float, Boolean, null, collection, or object coercion is accepted on authoritative paths.
+
+Exact discovery-row contract:
+
+- Envelope remains fixed schema/version, `ok is true`, exact anchor PID, `self_observed is true`, `error_code/error_type is null`, and bounded subprocess execution.
+- Every process row must have exactly the committed Windows fields. One malformed row fails the full discovery result.
+- The prior partial-row exploit containing only `ProcessId` and `CommandLine` now returns `ok=false`.
+
+Private reconciliation authority boundary:
+
+- Production final certification loads expected bindings from `ATTEMPT_STATE.json`, validates `PROCESS_IDENTITY.json`, consumes live reconciliation reasons, builds a private frozen reconciliation result, and passes that object directly to final eligibility.
+- The lower-level final evaluator does not deserialize reconciliation authority from JSON and does not treat dictionaries or booleans as authoritative.
+- This is an application-level authority boundary. No claim is made against malicious code already executing inside the Python interpreter.
+
+R6-R2 validation evidence:
+
+- Compile changed Python: **passed**
+- Focused blocker-repair file: **167 passed** in 174.45s
+- Launcher/discovery suite: **44 passed** in 39.62s
+- Continuity/endurance pair: **22 passed** in 339.73s
+- Supervisor/path/runtime lifecycle: **58 passed** in 83.90s
+- Alert/auto-restart/decision/publishing: **42 passed** in 44.52s
+- Endurance/Phase181/wrapper: **22 passed** in 17.13s
+- OV001/alert/reconciliation: **25 passed** in 51.92s
+- Complete approved OV002 battery collection: **380 tests collected**; this reconciles to the R6-R1 287-test baseline plus 93 R6-R2 matrix/regression cases.
+
+R6-R2 remains **uncommitted** pending independent review.
+
+---
+
+## 17. Safety confirmation
 
 - Port 8765 expected free; no CSS/endurance process started by this workstream.
 - No broker/credential access.

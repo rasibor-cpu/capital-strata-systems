@@ -58,6 +58,51 @@ ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
 PROCESS_IDENTITY_SCHEMA = "css.ov002.process_identity.v2"
 ATTEMPT_STATE_SCHEMA = "css.ov002.attempt_state.v2"
 CRITICAL_LEDGER_SCHEMA = "css.ov002.critical_events.v1"
+PROCESS_IDENTITY_RECONCILIATION_SCHEMA = "css.ov002.process_identity_reconciliation.v1"
+MAX_CANONICAL_PROCESS_PID = (2**32) - 1
+
+PROCESS_IDENTITY_EVIDENCE_FILENAME = "PROCESS_IDENTITY.json"
+
+# Live OS facts that must be observed directly when strong identity is required.
+REQUIRED_LIVE_IDENTITY_FIELDS = (
+    "pid",
+    "parent_pid",
+    "creation_time",
+    "executable_path",
+    "executable_sha256",
+    "command_line",
+)
+
+IDENTITY_RECORD_FIELDS = frozenset(
+    {
+        "schema_version",
+        "pid",
+        "parent_pid",
+        "creation_time",
+        "executable_path",
+        "executable_identity",
+        "executable_sha256",
+        "command_identity",
+        "command_sha256",
+        "repo_root",
+        "service_role",
+        "attempt_id",
+        "baseline_commit",
+    }
+)
+
+IDENTITY_DOCUMENT_OPTIONAL_FIELDS = frozenset(
+    {
+        "supervisor_id",
+        "started_at",
+        "process_generation",
+        "launcher_pid",
+        "supervisor_pid",
+        "failure_history_path",
+        "frozen_at_utc",
+        "note",
+    }
+)
 
 ALERT_SCAN_MAX_FILES = 100_000
 ALERT_SCAN_MAX_BYTES = 256 * 1024 * 1024
@@ -108,6 +153,57 @@ def _is_sha256_hex(value: Any) -> bool:
     return isinstance(value, str) and bool(re.fullmatch(r"[0-9a-fA-F]{64}", value.strip()))
 
 
+def _is_lower_sha256_hex(value: Any) -> bool:
+    return isinstance(value, str) and bool(re.fullmatch(r"[0-9a-f]{64}", value))
+
+
+def _strict_int(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def canonical_process_pid_error(value: Any) -> str | None:
+    if type(value) is not int:
+        return "malformed"
+    if value <= 0 or value > MAX_CANONICAL_PROCESS_PID:
+        return "out_of_range"
+    return None
+
+
+def canonical_process_pid(value: Any) -> int | None:
+    return int(value) if canonical_process_pid_error(value) is None else None
+
+
+def _require_canonical_process_pid(value: Any, *, field: str) -> int:
+    error = canonical_process_pid_error(value)
+    if error:
+        raise ContinuityError(f"{field}_{error}", str(value))
+    return int(value)
+
+
+def _canonical_parent_process_pid(value: Any, *, field: str = "parent_pid") -> int | None:
+    if value is None:
+        return None
+    error = canonical_process_pid_error(value)
+    if error:
+        raise ContinuityError(f"{field}_{error}", str(value))
+    return int(value)
+
+
+def _strict_nonempty_string(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text or None
+
+
+def _canonical_payload_digest(value: Mapping[str, Any] | None) -> str:
+    return hashlib.sha256(
+        json.dumps(value or {}, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    ).hexdigest()
+
+
 def _executable_identity_value(value: Any) -> str | None:
     if value in (None, ""):
         return None
@@ -139,6 +235,33 @@ def _same_executable_identity(left: Any, right: Any) -> bool:
 
 def _same_command_identity(left: Any, right: Any) -> bool:
     return safe_command_identity(str(left or "")) == safe_command_identity(str(right or ""))
+
+
+def _validate_required_live_probe(live: Mapping[str, Any], *, expected_pid: int) -> None:
+    pid_error = canonical_process_pid_error(live.get("pid"))
+    if pid_error:
+        raise ContinuityError("identity_probe_field_malformed", f"pid:{pid_error}")
+    pid = canonical_process_pid(live.get("pid"))
+    if pid != expected_pid:
+        raise ContinuityError("identity_probe_pid_mismatch", str(expected_pid))
+    parent_error = canonical_process_pid_error(live.get("parent_pid"))
+    if parent_error:
+        raise ContinuityError("identity_probe_field_malformed", f"parent_pid:{parent_error}")
+    creation = _strict_nonempty_string(live.get("creation_time"))
+    if creation is None:
+        raise ContinuityError("identity_probe_field_malformed", "creation_time")
+    _parse_creation_time(creation)
+    if _strict_nonempty_string(live.get("executable_path")) is None:
+        raise ContinuityError("identity_probe_field_malformed", "executable_path")
+    exe_hash = live.get("executable_sha256")
+    if not _is_lower_sha256_hex(exe_hash):
+        raise ContinuityError("identity_probe_field_malformed", "executable_sha256")
+    if _strict_nonempty_string(live.get("command_line")) is None:
+        raise ContinuityError("identity_probe_field_malformed", "command_line")
+    for optional_hash in ("command_sha256", "command_hash"):
+        if optional_hash in live and live.get(optional_hash) not in (None, ""):
+            if not _is_lower_sha256_hex(live.get(optional_hash)):
+                raise ContinuityError("identity_probe_field_malformed", optional_hash)
 
 
 def transition_attempt_state(current: str, target: str) -> str:
@@ -232,6 +355,15 @@ def _parse_creation_time(value: Any) -> str | None:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def canonical_process_creation_time(value: Any) -> str | None:
+    if not isinstance(value, (str, datetime)):
+        return None
+    try:
+        return _parse_creation_time(value)
+    except ContinuityError:
+        return None
 
 
 def safe_command_identity(command: str | None) -> str:
@@ -366,16 +498,26 @@ def build_process_identity_record(
     require_live_fields: bool = False,
 ) -> dict[str, Any]:
     """Build one strong process identity record. Fail closed when live fields required but missing."""
-    pid_i = _require_int(pid, field="pid")
+    pid_i = _require_canonical_process_pid(pid, field="pid")
+    parent_role = str(role or "process").replace(" ", "_")
+    if parent_pid is not None:
+        _canonical_parent_process_pid(parent_pid, field=f"{parent_role}_parent_pid")
     active_probe = probe
     if require_live_fields and active_probe is None:
         active_probe = default_identity_probe
     live = active_probe(pid_i) if active_probe is not None else None
-    if require_live_fields and not isinstance(live, Mapping):
-        raise ContinuityError("identity_probe_unavailable", str(pid_i))
-    if live:
-        if not _same_int(live.get("pid"), pid_i):
-            raise ContinuityError("identity_probe_pid_mismatch", str(pid_i))
+    if require_live_fields:
+        if not isinstance(live, Mapping):
+            raise ContinuityError("identity_probe_unavailable", str(pid_i))
+        if not live:
+            raise ContinuityError("identity_probe_empty", str(pid_i))
+        incomplete = [
+            field for field in REQUIRED_LIVE_IDENTITY_FIELDS if live.get(field) in (None, "")
+        ]
+        if incomplete:
+            raise ContinuityError("identity_probe_incomplete", ",".join(incomplete))
+        _validate_required_live_probe(live, expected_pid=pid_i)
+    if isinstance(live, Mapping) and live:
         supplied_checks = (
             ("parent_pid", parent_pid, live.get("parent_pid"), _same_int),
             ("creation_time", creation_time, live.get("creation_time"), _same_creation),
@@ -393,7 +535,7 @@ def build_process_identity_record(
         command_line = live.get("command_line")
 
     parsed_creation = _parse_creation_time(creation_time)
-    parent = _optional_int(parent_pid)
+    parent = _canonical_parent_process_pid(parent_pid, field=f"{parent_role}_parent_pid")
     exe_identity = _executable_identity_value(executable_path)
     exe_sha = str(executable_sha256 or _sha256_file(executable_path) or "")
     command_identity = safe_command_identity(command_line)
@@ -469,8 +611,8 @@ def freeze_process_identity(
     if not isinstance(identity, Mapping):
         raise ContinuityError("process_identity_missing")
 
-    launcher_pid = _optional_int(identity.get("launcher_pid"))
-    supervisor_pid = _optional_int(identity.get("supervisor_pid"))
+    launcher_pid = canonical_process_pid(identity.get("launcher_pid"))
+    supervisor_pid = canonical_process_pid(identity.get("supervisor_pid"))
     if launcher_pid is None or supervisor_pid is None:
         raise ContinuityError("process_identity_pid_missing")
 
@@ -484,8 +626,11 @@ def freeze_process_identity(
         for name, info in managed_raw.items():
             if not isinstance(info, Mapping):
                 raise ContinuityError("process_identity_service_malformed", str(name))
-            svc_pid = _optional_int(info.get("pid"))
+            svc_pid = canonical_process_pid(info.get("pid"))
             if svc_pid is None:
+                if "pid" in info:
+                    error = canonical_process_pid_error(info.get("pid")) or "malformed"
+                    raise ContinuityError(f"process_identity_service_pid_{error}", str(name))
                 if require_live_fields:
                     raise ContinuityError("process_identity_service_pid_missing", str(name))
                 continue
@@ -495,7 +640,7 @@ def freeze_process_identity(
                 attempt_id=attempt_id,
                 baseline_commit=baseline_commit,
                 repo_root=repo_root,
-                parent_pid=_optional_int(info.get("parent_pid")),
+                parent_pid=info.get("parent_pid") if "parent_pid" in info else None,
                 creation_time=info.get("creation_time") or info.get("create_time"),
                 executable_path=info.get("executable_path") or info.get("exe"),
                 executable_sha256=info.get("executable_sha256"),
@@ -510,7 +655,7 @@ def freeze_process_identity(
         attempt_id=attempt_id,
         baseline_commit=baseline_commit,
         repo_root=repo_root,
-        parent_pid=_optional_int(identity.get("launcher_parent_pid")),
+        parent_pid=identity.get("launcher_parent_pid") if "launcher_parent_pid" in identity else None,
         creation_time=identity.get("launcher_creation_time"),
         executable_path=identity.get("launcher_executable_path"),
         executable_sha256=identity.get("launcher_executable_sha256"),
@@ -524,7 +669,7 @@ def freeze_process_identity(
         attempt_id=attempt_id,
         baseline_commit=baseline_commit,
         repo_root=repo_root,
-        parent_pid=_optional_int(identity.get("supervisor_parent_pid")),
+        parent_pid=identity.get("supervisor_parent_pid") if "supervisor_parent_pid" in identity else None,
         creation_time=identity.get("supervisor_creation_time"),
         executable_path=identity.get("supervisor_executable_path"),
         executable_sha256=identity.get("supervisor_executable_sha256"),
@@ -849,7 +994,7 @@ def _live_reconcile_one(
     probe: IdentityProbe,
 ) -> list[str]:
     reasons: list[str] = []
-    expected_pid = _optional_int(frozen_record.get("pid"))
+    expected_pid = canonical_process_pid(frozen_record.get("pid"))
     if expected_pid is None:
         return [f"process_identity_{label}_pid_unavailable"]
     if observed_pid is None:
@@ -974,7 +1119,7 @@ def reconcile_process_identity_live(
             _live_reconcile_one(
                 label="launcher",
                 frozen_record=frozen_launcher,
-                observed_pid=_optional_int(observed.get("launcher_pid")),
+                observed_pid=canonical_process_pid(observed.get("launcher_pid")),
                 observed_detail=_observed_identity_detail(
                     observed,
                     key="launcher",
@@ -995,7 +1140,7 @@ def reconcile_process_identity_live(
             _live_reconcile_one(
                 label="supervisor",
                 frozen_record=frozen_supervisor,
-                observed_pid=_optional_int(observed.get("supervisor_pid")),
+                observed_pid=canonical_process_pid(observed.get("supervisor_pid")),
                 observed_detail=_observed_identity_detail(
                     observed,
                     key="supervisor",
@@ -1034,7 +1179,7 @@ def reconcile_process_identity_live(
             _live_reconcile_one(
                 label=f"service:{name}",
                 frozen_record=expected_info,
-                observed_pid=_optional_int(actual_detail.get("pid")),
+                observed_pid=canonical_process_pid(actual_detail.get("pid")),
                 observed_detail=actual_detail,
                 attempt_id=attempt_id,
                 baseline_commit=baseline_commit,
@@ -1043,6 +1188,431 @@ def reconcile_process_identity_live(
             )
         )
 
+    return list(dict.fromkeys(reasons))
+
+
+def _validate_identity_record_structure(
+    record: Any,
+    *,
+    label: str,
+    expected_role: str,
+    service_key: str | None = None,
+    expected_attempt_id: str | None = None,
+    expected_commit: str | None = None,
+) -> list[str]:
+    if record is None:
+        return [f"process_identity_{label}_missing"]
+    if not isinstance(record, Mapping):
+        return [f"process_identity_{label}_malformed"]
+    if not record:
+        return [f"process_identity_{label}_empty"]
+
+    reasons: list[str] = []
+    fields = set(record)
+    for field in sorted(fields - IDENTITY_RECORD_FIELDS):
+        reasons.append(f"process_identity_{label}_unknown_field:{field}")
+    for field in sorted(IDENTITY_RECORD_FIELDS - fields):
+        reasons.append(f"process_identity_{label}_{field}_missing")
+
+    if record.get("schema_version") != PROCESS_IDENTITY_SCHEMA:
+        reasons.append(f"process_identity_{label}_schema_version_mismatch")
+
+    pid_error = canonical_process_pid_error(record.get("pid"))
+    if pid_error:
+        reasons.append(f"process_identity_{label}_pid_{pid_error}")
+    parent_error = canonical_process_pid_error(record.get("parent_pid"))
+    if parent_error:
+        reasons.append(f"process_identity_{label}_parent_pid_{parent_error}")
+
+    creation = _strict_nonempty_string(record.get("creation_time"))
+    if creation is None:
+        reasons.append(f"process_identity_{label}_creation_time_malformed")
+    else:
+        try:
+            _parse_creation_time(creation)
+        except ContinuityError:
+            reasons.append(f"process_identity_{label}_creation_time_malformed")
+
+    for field in ("executable_path", "executable_identity", "executable_sha256", "command_sha256"):
+        value = record.get(field)
+        if not _is_lower_sha256_hex(value):
+            reasons.append(f"process_identity_{label}_{field}_malformed")
+    command_identity = _strict_nonempty_string(record.get("command_identity"))
+    if command_identity is None:
+        reasons.append(f"process_identity_{label}_command_identity_malformed")
+
+    repo_root = _strict_nonempty_string(record.get("repo_root"))
+    if repo_root is None:
+        reasons.append(f"process_identity_{label}_repo_root_malformed")
+    role = _strict_nonempty_string(record.get("service_role"))
+    if role is None:
+        reasons.append(f"process_identity_{label}_service_role_malformed")
+    elif role != expected_role:
+        reasons.append(f"process_identity_{label}_service_role_mismatch")
+    if service_key is not None and role is not None and role != service_key:
+        reasons.append(f"process_identity_{label}_service_key_role_mismatch")
+
+    attempt_id = _strict_nonempty_string(record.get("attempt_id"))
+    if attempt_id is None:
+        reasons.append(f"process_identity_{label}_attempt_id_malformed")
+    elif expected_attempt_id not in (None, "") and attempt_id != str(expected_attempt_id):
+        reasons.append(f"process_identity_{label}_attempt_id_mismatch")
+    commit = _strict_nonempty_string(record.get("baseline_commit"))
+    if commit is None:
+        reasons.append(f"process_identity_{label}_baseline_commit_malformed")
+    elif expected_commit not in (None, "") and commit != str(expected_commit):
+        reasons.append(f"process_identity_{label}_baseline_commit_mismatch")
+
+    return list(dict.fromkeys(reasons))
+
+
+def _validate_identity_document_structure(
+    value: Any,
+    *,
+    label: str,
+    expected_attempt_id: str | None = None,
+    expected_commit: str | None = None,
+) -> list[str]:
+    """Structural fail-closed check shared by the freeze, observed tree, and persisted evidence."""
+    if value is None:
+        return [f"process_identity_{label}_missing"]
+    if not isinstance(value, Mapping):
+        return [f"process_identity_{label}_malformed"]
+    if not value:
+        return [f"process_identity_{label}_empty"]
+
+    reasons: list[str] = []
+    allowed_document_fields = frozenset(
+        {
+            "schema_version",
+            "attempt_id",
+            "baseline_commit",
+            "repo_root",
+            "launcher",
+            "supervisor",
+            "managed_services",
+        }
+    ) | IDENTITY_DOCUMENT_OPTIONAL_FIELDS
+    for field in sorted(set(value) - allowed_document_fields):
+        reasons.append(f"process_identity_{label}_unknown_field:{field}")
+    if value.get("schema_version") != PROCESS_IDENTITY_SCHEMA:
+        reasons.append(f"process_identity_{label}_schema_version_mismatch")
+    doc_attempt = _strict_nonempty_string(value.get("attempt_id"))
+    if doc_attempt is None:
+        reasons.append(f"process_identity_{label}_attempt_id_malformed")
+    elif expected_attempt_id not in (None, "") and doc_attempt != str(expected_attempt_id):
+        reasons.append(f"process_identity_{label}_attempt_id_mismatch")
+    doc_commit = _strict_nonempty_string(value.get("baseline_commit"))
+    if doc_commit is None:
+        reasons.append(f"process_identity_{label}_baseline_commit_malformed")
+    elif expected_commit not in (None, "") and doc_commit != str(expected_commit):
+        reasons.append(f"process_identity_{label}_baseline_commit_mismatch")
+    if _strict_nonempty_string(value.get("repo_root")) is None:
+        reasons.append(f"process_identity_{label}_repo_root_malformed")
+
+    launcher = value.get("launcher")
+    supervisor = value.get("supervisor")
+    reasons.extend(
+        _validate_identity_record_structure(
+            launcher,
+            label=f"{label}_launcher",
+            expected_role="launcher",
+            expected_attempt_id=doc_attempt,
+            expected_commit=doc_commit,
+        )
+    )
+    reasons.extend(
+        _validate_identity_record_structure(
+            supervisor,
+            label=f"{label}_supervisor",
+            expected_role="supervisor",
+            expected_attempt_id=doc_attempt,
+            expected_commit=doc_commit,
+        )
+    )
+    if isinstance(launcher, Mapping):
+        launcher_pid_error = canonical_process_pid_error(value.get("launcher_pid"))
+        launcher_pid = canonical_process_pid(value.get("launcher_pid"))
+        if "launcher_pid" in value and launcher_pid_error:
+            reasons.append(f"process_identity_{label}_launcher_pid_{launcher_pid_error}")
+        elif launcher_pid is not None and launcher_pid != canonical_process_pid(launcher.get("pid")):
+            reasons.append(f"process_identity_{label}_launcher_pid_mismatch")
+    if isinstance(supervisor, Mapping):
+        supervisor_pid_error = canonical_process_pid_error(value.get("supervisor_pid"))
+        supervisor_pid = canonical_process_pid(value.get("supervisor_pid"))
+        if "supervisor_pid" in value and supervisor_pid_error:
+            reasons.append(f"process_identity_{label}_supervisor_pid_{supervisor_pid_error}")
+        elif supervisor_pid is not None and supervisor_pid != canonical_process_pid(supervisor.get("pid")):
+            reasons.append(f"process_identity_{label}_supervisor_pid_mismatch")
+
+    managed = value.get("managed_services")
+    if not isinstance(managed, Mapping):
+        reasons.append(f"process_identity_{label}_managed_services_malformed")
+    else:
+        for raw_name, record in managed.items():
+            if not isinstance(raw_name, str) or not raw_name.strip():
+                reasons.append(f"process_identity_{label}_managed_service_name_malformed")
+                continue
+            reasons.extend(
+                _validate_identity_record_structure(
+                    record,
+                    label=f"{label}_service:{raw_name}",
+                    expected_role=raw_name,
+                    service_key=raw_name,
+                    expected_attempt_id=doc_attempt,
+                    expected_commit=doc_commit,
+                )
+            )
+    return list(dict.fromkeys(reasons))
+
+
+def load_process_identity_evidence(
+    package_root: Path | str,
+    *,
+    filename: str = PROCESS_IDENTITY_EVIDENCE_FILENAME,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Strict reader for persisted PROCESS_IDENTITY.json. Missing/malformed fails closed."""
+    path = Path(package_root) / filename
+    if not path.exists():
+        return None, ["process_identity_evidence_missing"]
+    try:
+        payload = read_json_object(path)
+    except PersistenceError as exc:
+        return None, [f"process_identity_evidence_invalid:{exc.code}"]
+    return payload, []
+
+
+def validate_process_identity_evidence(
+    evidence: Any,
+    *,
+    freeze: Mapping[str, Any] | None = None,
+    expected_attempt_id: str | None = None,
+    expected_commit: str | None = None,
+) -> list[str]:
+    """Fail-closed validation of persisted process-identity evidence and its bindings."""
+    reasons = _validate_identity_document_structure(
+        evidence,
+        label="evidence",
+        expected_attempt_id=expected_attempt_id,
+        expected_commit=expected_commit,
+    )
+    if reasons:
+        return reasons
+
+    if freeze is not None:
+        freeze_reasons = _validate_identity_document_structure(
+            freeze,
+            label="freeze",
+            expected_attempt_id=expected_attempt_id,
+            expected_commit=expected_commit,
+        )
+        if freeze_reasons:
+            return list(dict.fromkeys(reasons + freeze_reasons))
+        for field in ("attempt_id", "baseline_commit"):
+            if str(evidence.get(field) or "") != str(freeze.get(field) or ""):
+                reasons.append(f"process_identity_evidence_{field}_freeze_mismatch")
+        for role in ("launcher", "supervisor"):
+            frozen_record = freeze.get(role)
+            evidence_record = evidence.get(role)
+            frozen_pid = (
+                _optional_int(frozen_record.get("pid")) if isinstance(frozen_record, Mapping) else None
+            )
+            evidence_pid = (
+                _optional_int(evidence_record.get("pid"))
+                if isinstance(evidence_record, Mapping)
+                else None
+            )
+            if frozen_pid is None or evidence_pid is None or frozen_pid != evidence_pid:
+                reasons.append(f"process_identity_evidence_{role}_pid_mismatch")
+        frozen_services = freeze.get("managed_services")
+        evidence_services = evidence.get("managed_services")
+        frozen_names = set(frozen_services) if isinstance(frozen_services, Mapping) else set()
+        evidence_names = set(evidence_services) if isinstance(evidence_services, Mapping) else set()
+        if frozen_names != evidence_names:
+            reasons.append("process_identity_evidence_managed_services_mismatch")
+
+    return list(dict.fromkeys(reasons))
+
+
+def validate_process_identity_freeze(
+    freeze: Any,
+    *,
+    package_root: Path | str | None = None,
+    evidence: Mapping[str, Any] | None = None,
+    expected_attempt_id: str | None = None,
+    expected_commit: str | None = None,
+) -> list[str]:
+    """Fail-closed validation of the process-identity freeze mapping.
+
+    When ``package_root`` is supplied the persisted ``PROCESS_IDENTITY.json`` is
+    loaded with the strict reader and reconciled against the freeze.
+    """
+    reasons = _validate_identity_document_structure(
+        freeze,
+        label="freeze",
+        expected_attempt_id=expected_attempt_id,
+        expected_commit=expected_commit,
+    )
+    if reasons:
+        return reasons
+
+    if expected_attempt_id not in (None, "") and str(freeze.get("attempt_id") or "") != str(
+        expected_attempt_id
+    ):
+        reasons.append("process_identity_freeze_attempt_id_mismatch")
+    if expected_commit not in (None, "") and str(freeze.get("baseline_commit") or "") != str(
+        expected_commit
+    ):
+        reasons.append("process_identity_freeze_commit_mismatch")
+
+    loaded_evidence = evidence
+    if package_root is not None and loaded_evidence is None:
+        loaded_evidence, load_reasons = load_process_identity_evidence(package_root)
+        if load_reasons:
+            return list(dict.fromkeys(reasons + load_reasons))
+    if loaded_evidence is not None:
+        reasons.extend(
+            validate_process_identity_evidence(
+                loaded_evidence,
+                freeze=freeze,
+                expected_attempt_id=expected_attempt_id,
+                expected_commit=expected_commit,
+            )
+        )
+    return list(dict.fromkeys(reasons))
+
+
+def _identity_service_names(value: Mapping[str, Any] | None) -> list[str]:
+    services = value.get("managed_services") if isinstance(value, Mapping) else None
+    if not isinstance(services, Mapping):
+        return []
+    return sorted(str(name) for name in services if isinstance(name, str) and name.strip())
+
+
+@dataclass(frozen=True, slots=True)
+class _ProcessIdentityReconciliationResult:
+    schema_version: str
+    expected_run_id: str
+    expected_commit: str
+    frozen_identity_digest: str
+    persisted_identity_evidence_digest: str
+    classification: str
+    verified_roles: tuple[str, ...]
+    verified_services: tuple[str, ...]
+    reasons: tuple[str, ...]
+
+
+def _reconciliation_result_payload(result: _ProcessIdentityReconciliationResult) -> dict[str, Any]:
+    return {
+        "schema_version": result.schema_version,
+        "expected_run_id": result.expected_run_id,
+        "expected_commit": result.expected_commit,
+        "frozen_identity_digest": result.frozen_identity_digest,
+        "persisted_identity_evidence_digest": result.persisted_identity_evidence_digest,
+        "classification": result.classification,
+        "verified_roles": list(result.verified_roles),
+        "verified_services": list(result.verified_services),
+        "reasons": list(result.reasons),
+    }
+
+
+def _build_authoritative_process_identity_reconciliation(
+    *,
+    expected_run_id: str,
+    expected_commit: str,
+    freeze: Mapping[str, Any],
+    evidence: Mapping[str, Any],
+    reasons: Sequence[str],
+) -> _ProcessIdentityReconciliationResult:
+    reason_list = [str(reason) for reason in reasons]
+    verified_services = tuple(_identity_service_names(freeze)) if not reason_list else ()
+    return _ProcessIdentityReconciliationResult(
+        schema_version=PROCESS_IDENTITY_RECONCILIATION_SCHEMA,
+        expected_run_id=str(expected_run_id),
+        expected_commit=str(expected_commit),
+        frozen_identity_digest=_canonical_payload_digest(freeze),
+        persisted_identity_evidence_digest=_canonical_payload_digest(evidence),
+        classification="SUCCESS" if not reason_list else "FAILED",
+        verified_roles=("launcher", "supervisor") if not reason_list else (),
+        verified_services=verified_services,
+        reasons=tuple(reason_list),
+    )
+
+
+def build_process_identity_reconciliation_result(
+    *,
+    expected_run_id: str,
+    expected_commit: str,
+    freeze: Mapping[str, Any],
+    evidence: Mapping[str, Any],
+    reasons: Sequence[str],
+) -> dict[str, Any]:
+    """Non-authoritative audit payload; final certification rejects this mapping."""
+    return _reconciliation_result_payload(
+        _build_authoritative_process_identity_reconciliation(
+            expected_run_id=expected_run_id,
+            expected_commit=expected_commit,
+            freeze=freeze,
+            evidence=evidence,
+            reasons=reasons,
+        )
+    )
+
+
+def validate_process_identity_reconciliation_result(
+    result: Any,
+    *,
+    expected_run_id: str | None,
+    expected_commit: str | None,
+    freeze: Mapping[str, Any] | None,
+    evidence: Mapping[str, Any] | None,
+) -> list[str]:
+    if result is None:
+        return ["process_identity_reconciliation_result_missing"]
+    if isinstance(result, Mapping):
+        return ["process_identity_reconciliation_result_not_authoritative"]
+    if type(result) is not _ProcessIdentityReconciliationResult:
+        return ["process_identity_reconciliation_result_malformed"]
+    reasons: list[str] = []
+    if result.schema_version != PROCESS_IDENTITY_RECONCILIATION_SCHEMA:
+        reasons.append("process_identity_reconciliation_schema_version_mismatch")
+    if expected_run_id in (None, ""):
+        reasons.append("expected_run_id_missing")
+    elif result.expected_run_id != str(expected_run_id):
+        reasons.append("process_identity_reconciliation_attempt_id_mismatch")
+    if expected_commit in (None, ""):
+        reasons.append("expected_commit_missing")
+    elif result.expected_commit != str(expected_commit):
+        reasons.append("process_identity_reconciliation_commit_mismatch")
+
+    if not _is_lower_sha256_hex(result.frozen_identity_digest):
+        reasons.append("process_identity_reconciliation_freeze_digest_malformed")
+    elif freeze is not None and result.frozen_identity_digest != _canonical_payload_digest(freeze):
+        reasons.append("process_identity_reconciliation_freeze_digest_mismatch")
+    if not _is_lower_sha256_hex(result.persisted_identity_evidence_digest):
+        reasons.append("process_identity_reconciliation_evidence_digest_malformed")
+    elif evidence is not None and result.persisted_identity_evidence_digest != _canonical_payload_digest(evidence):
+        reasons.append("process_identity_reconciliation_evidence_digest_mismatch")
+
+    result_reasons = result.reasons
+    if not isinstance(result_reasons, tuple) or any(not isinstance(item, str) for item in result_reasons):
+        reasons.append("process_identity_reconciliation_reasons_malformed")
+        result_reasons = ()
+    classification = result.classification
+    if classification not in {"SUCCESS", "FAILED"}:
+        reasons.append("process_identity_reconciliation_classification_malformed")
+    if classification != "SUCCESS":
+        reasons.append("process_identity_reconciliation_not_success")
+    if result_reasons:
+        reasons.extend(result_reasons)
+
+    verified_roles = result.verified_roles
+    if verified_roles != ("launcher", "supervisor"):
+        reasons.append("process_identity_reconciliation_verified_roles_mismatch")
+    verified_services = result.verified_services
+    expected_services = tuple(_identity_service_names(freeze))
+    if verified_services != expected_services:
+        reasons.append("process_identity_reconciliation_verified_services_mismatch")
     return list(dict.fromkeys(reasons))
 
 
@@ -1342,6 +1912,11 @@ def evaluate_final_certification(
     critical_ledger: Mapping[str, Any] | None = None,
     critical_alerts: Sequence[Mapping[str, Any]] | None = None,
     legacy_authority_payload: Mapping[str, Any] | None = None,
+    process_identity_freeze: Mapping[str, Any] | None = None,
+    process_identity_evidence: Mapping[str, Any] | None = None,
+    process_identity_reasons: Sequence[str] | None = None,
+    process_identity_reconciliation: Any | None = None,
+    require_process_identity_continuity: bool = True,
 ) -> FinalCertificationResult:
     """Final gate: never CERTIFIED while continuity faults, partial scans, or legacy authority."""
     reasons: list[str] = []
@@ -1379,6 +1954,35 @@ def evaluate_final_certification(
 
     if not alert_scan_complete:
         reasons.append("alert_scan_incomplete")
+
+    if require_process_identity_continuity:
+        if expected_run_id in (None, ""):
+            reasons.append("expected_run_id_missing")
+        if expected_commit in (None, ""):
+            reasons.append("expected_commit_missing")
+        freeze_source = process_identity_freeze
+        if freeze_source is None:
+            freeze_source = run_meta.get("process_identity_freeze") if run_meta else None
+        reasons.extend(
+            validate_process_identity_freeze(
+                freeze_source,
+                evidence=process_identity_evidence,
+                expected_attempt_id=str(expected_run_id) if expected_run_id not in (None, "") else None,
+                expected_commit=str(expected_commit) if expected_commit not in (None, "") else None,
+            )
+        )
+        if process_identity_evidence is None:
+            reasons.append("process_identity_evidence_missing")
+        reasons.extend(str(r) for r in process_identity_reasons or [])
+        reasons.extend(
+            validate_process_identity_reconciliation_result(
+                process_identity_reconciliation,
+                expected_run_id=str(expected_run_id) if expected_run_id not in (None, "") else None,
+                expected_commit=str(expected_commit) if expected_commit not in (None, "") else None,
+                freeze=freeze_source if isinstance(freeze_source, Mapping) else None,
+                evidence=process_identity_evidence,
+            )
+        )
 
     if not reconciliation_ok:
         reasons.extend(str(r) for r in reconciliation_reasons)

@@ -169,7 +169,7 @@ def test_canonical_pipeline_end_to_end(tmp_path) -> None:
     )
     alert_repo = AlertRepository(storage_dir=str(tmp_path / "alerts"))
     dispatcher = NotificationDispatcher(storage_dir=str(tmp_path / "notifications"))
-    supervisor = CSSRuntimeSupervisor(state_dir=str(tmp_path / "state"))
+    supervisor = CSSRuntimeSupervisor(state_dir=str(tmp_path / "state"), trusted_root=tmp_path)
 
     pipeline = CanonicalDecisionPipeline(
         orchestrator=orchestrator,

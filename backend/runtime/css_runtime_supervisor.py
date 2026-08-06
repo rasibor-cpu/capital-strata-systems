@@ -9,7 +9,7 @@ from typing import Dict, Any, Optional
 from backend.monitoring.css_alert_models import AlertSeverity
 from backend.monitoring.css_alert_service import CSSAlertService
 from backend.monitoring.alert_bridge import CanonicalAlertBridge
-from backend.certification.ov002_continuity import build_process_identity_record
+from backend.certification.ov002_continuity import build_process_identity_record, canonical_process_pid
 from backend.certification.ov002_persistence import (
     PersistenceError,
     atomic_append_jsonl,
@@ -86,6 +86,10 @@ class CSSRuntimeSupervisor:
             "observed_at_utc": None,
         }
         self.last_persist_error: Optional[str] = None
+        self.last_history_persist_error: Optional[str] = None
+        self.history_persist_degraded: bool = False
+        self.identity_verification_failed: bool = False
+        self.last_identity_failure_code: Optional[str] = None
         self.status: str = "STOPPED"
 
         self._ensure_state_dir()
@@ -144,8 +148,15 @@ class CSSRuntimeSupervisor:
             self.failure_history = self.failure_history[-self.failure_history_limit :]
         try:
             atomic_append_jsonl(self.failure_history_file, record, expected_root=self.trusted_root)
-        except Exception:
-            pass
+            self.last_history_persist_error = None
+            self.history_persist_degraded = False
+        except PersistenceError as exc:
+            # Error codes only — history payloads and exception text may carry paths.
+            self.last_history_persist_error = str(exc.code)
+            self.history_persist_degraded = True
+        except Exception as exc:
+            self.last_history_persist_error = f"history_append_failed:{type(exc).__name__}"
+            self.history_persist_degraded = True
 
     def record_process_tree(
         self,
@@ -165,13 +176,20 @@ class CSSRuntimeSupervisor:
         supervisor_command_line: str | None = None,
         repo_root: str | None = None,
     ) -> None:
+        launcher_pid_value = canonical_process_pid(os.getpid() if launcher_pid is None else launcher_pid)
+        supervisor_pid_value = canonical_process_pid(os.getpid() if supervisor_pid is None else supervisor_pid)
+        if launcher_pid_value is None or supervisor_pid_value is None:
+            raise PersistenceError("process_identity_pid_malformed")
         identity: Dict[str, Any] = {
-            "launcher_pid": int(launcher_pid or os.getpid()),
-            "supervisor_pid": int(supervisor_pid or os.getpid()),
+            "launcher_pid": launcher_pid_value,
+            "supervisor_pid": supervisor_pid_value,
             "managed_services": dict(managed_services or {}),
         }
         if launcher_parent_pid is not None:
-            identity["launcher_parent_pid"] = int(launcher_parent_pid)
+            launcher_parent = canonical_process_pid(launcher_parent_pid)
+            if launcher_parent is None:
+                raise PersistenceError("process_identity_parent_pid_malformed")
+            identity["launcher_parent_pid"] = launcher_parent
         if launcher_creation_time is not None:
             identity["launcher_creation_time"] = launcher_creation_time
         if launcher_executable_path is not None:
@@ -181,7 +199,10 @@ class CSSRuntimeSupervisor:
         if launcher_command_line is not None:
             identity["launcher_command_line"] = launcher_command_line
         if supervisor_parent_pid is not None:
-            identity["supervisor_parent_pid"] = int(supervisor_parent_pid)
+            supervisor_parent = canonical_process_pid(supervisor_parent_pid)
+            if supervisor_parent is None:
+                raise PersistenceError("process_identity_parent_pid_malformed")
+            identity["supervisor_parent_pid"] = supervisor_parent
         if supervisor_creation_time is not None:
             identity["supervisor_creation_time"] = supervisor_creation_time
         if supervisor_executable_path is not None:
@@ -277,6 +298,42 @@ class CSSRuntimeSupervisor:
             severity="INFO",
             category="SYSTEM",
             payload={"supervisor_id": self.supervisor_id, "started_at": self.started_at}
+        )
+
+    def record_identity_verification_failure(
+        self,
+        reason_code: str,
+        *,
+        detail_code: Optional[str] = None,
+    ) -> None:
+        """Record a strong-identity verification failure distinctly from controlled shutdown.
+
+        Monitor reconciliation skips `controlled_shutdown`; this event must survive that
+        filter so an identity failure followed by stop() is never read as an ordinary
+        operator-requested shutdown.
+        """
+        self.identity_verification_failed = True
+        self.last_identity_failure_code = str(reason_code or "identity_verification_failed")
+        self.status = "FAILED"
+        self._record_history(
+            {
+                "event_type": "identity_verification_failed",
+                "reason": self.last_identity_failure_code,
+                "detail_code": str(detail_code) if detail_code else None,
+                "status": self.status,
+            }
+        )
+        try:
+            self._persist_state()
+        except PersistenceError:
+            pass
+        self._safe_emit(
+            "Strong process identity verification failed",
+            AlertSeverity.CRITICAL,
+            {
+                "reason_code": self.last_identity_failure_code,
+                "detail_code": str(detail_code) if detail_code else None,
+            },
         )
 
     def stop(self):
@@ -716,6 +773,10 @@ class CSSRuntimeSupervisor:
             "duplicate_canonical_owners": list(self.duplicate_canonical_owners),
             "duplicate_discovery": dict(self.duplicate_discovery),
             "last_persist_error": self.last_persist_error,
+            "last_history_persist_error": self.last_history_persist_error,
+            "history_persist_degraded": self.history_persist_degraded,
+            "identity_verification_failed": self.identity_verification_failed,
+            "last_identity_failure_code": self.last_identity_failure_code,
             "shutdown_requested": self.shutdown_requested,
             "last_canonical_decision": self.last_canonical_decision,
             "last_decision_at": self.last_decision_at,

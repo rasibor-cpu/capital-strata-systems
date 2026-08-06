@@ -24,6 +24,7 @@ def test_supervisor_recovery_creates_canonical_alert(tmp_path: Path) -> None:
     repo = AlertRepository(storage_dir=str(tmp_path / "alerts"))
     supervisor = CSSRuntimeSupervisor(
         state_dir=str(tmp_path / "state"),
+        trusted_root=tmp_path,
         canonical_alert_bridge=CanonicalAlertBridge(repo),
     )
 
@@ -52,6 +53,7 @@ def test_heartbeat_stale_creates_canonical_alert(tmp_path: Path) -> None:
     repo = AlertRepository(storage_dir=str(tmp_path / "alerts"))
     supervisor = CSSRuntimeSupervisor(
         state_dir=str(tmp_path / "state"),
+        trusted_root=tmp_path,
         canonical_alert_bridge=CanonicalAlertBridge(repo),
     )
 

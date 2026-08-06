@@ -32,6 +32,7 @@ def test_supervisor_publishing(temp_dir):
     event_bus = MockEventBus()
     supervisor = CSSRuntimeSupervisor(
         state_dir=temp_dir,
+        trusted_root=temp_dir,
         max_restart_limit=2,
         event_bus=event_bus
     )
@@ -66,6 +67,7 @@ def test_supervisor_publishing_failure_isolation(temp_dir):
     event_bus = MockEventBus(should_fail=True)
     supervisor = CSSRuntimeSupervisor(
         state_dir=temp_dir,
+        trusted_root=temp_dir,
         max_restart_limit=2,
         event_bus=event_bus
     )
