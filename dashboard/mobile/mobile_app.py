@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import html
 import json
-import math
 import os
 import secrets
 import time
@@ -70,6 +69,11 @@ from backend.runtime.live_micro_pilot_governor import (
     LiveMicroPilotAuthorizationError,
     LiveMicroPilotConfigurationError,
     LiveMicroPilotGovernor,
+)
+from backend.app.live_authorization_ttl import (
+    LIVE_ENVIRONMENT,
+    LiveAuthorizationScope,
+    get_live_authorization_ttl_gate,
 )
 
 
@@ -3521,23 +3525,6 @@ def _trade_ticket_page(
     )
 
 
-def _resolve_equity_peak_for_gate(pnl_snapshot: Dict[str, Any], equity: float) -> float:
-    """
-    RR-001 / MW-001: never coerce missing/zero peak to 0 while equity > 0.
-    Prefer an explicit finite peak > 0; otherwise use equity.
-    """
-    raw_peak = pnl_snapshot.get("equity_peak")
-    try:
-        peak = float(raw_peak) if raw_peak is not None else 0.0
-    except (TypeError, ValueError):
-        peak = 0.0
-    if math.isfinite(peak) and peak > 0.0:
-        return peak
-    if math.isfinite(equity) and equity > 0.0:
-        return equity
-    return 0.0 if not math.isfinite(peak) else max(peak, 0.0)
-
-
 def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) -> Dict[str, Any]:
     load_local_env()
 
@@ -3656,13 +3643,8 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
         _record_mobile_event({"event_type": "mobile_order_rejected", **result})
         return result
         
-    try:
-        equity = float(pnl_snapshot.get("equity", 0.0) or 0.0)
-    except (TypeError, ValueError):
-        equity = 0.0
-    if not math.isfinite(equity):
-        equity = 0.0
-    equity_peak = _resolve_equity_peak_for_gate(pnl_snapshot, equity)
+    equity = float(pnl_snapshot.get("equity", 0.0))
+    equity_peak = float(pnl_snapshot.get("equity_peak", 0.0))
 
     # 2. Canonical Margin Snapshot
     margin_snapshot = None
@@ -3792,7 +3774,6 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
         gate_spread_bps = 1.0
         gate_slippage_bps = 1.0
 
-    gate_price, gate_price_source = _resolve_mobile_canonical_gate_price(ticket)
     gate_decision = exec_gate.evaluate_trade(
         instrument=ticket["symbol"],
         side=ticket["side"],
@@ -3809,19 +3790,8 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
         spread_bps=gate_spread_bps,
         slippage_bps=gate_slippage_bps,
         margin_snapshot=margin_snapshot,
-        broker_mode="live" if is_live_request else "paper",
-        price=gate_price,
-        price_instrument=ticket["symbol"],
+        broker_mode="live" if is_live_request else "paper"
     )
-    if gate_price_source:
-        _record_mobile_event(
-            {
-                "event_type": "mobile_gate_canonical_price",
-                "price_source": gate_price_source,
-                "symbol": ticket["symbol"],
-                "price": gate_price,
-            }
-        )
 
     if gate_decision.get("decision", {}).get("final") != "ALLOW":
         result = {
@@ -3857,6 +3827,62 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
                     "live_order_sent": False,
                     "reason": pilot_decision.reason,
                     "pilot_status": pilot_decision.status,
+                },
+            }
+            _record_mobile_event({"event_type": "mobile_order_rejected", **result})
+            return result
+
+        kill_switch = evaluate_live_order_kill_switch(controls)
+        try:
+            auth_scope = LiveAuthorizationScope.from_mapping(
+                {
+                    "order_identity": str(ticket.get("ticket_id") or ""),
+                    "environment": LIVE_ENVIRONMENT,
+                    "broker": broker,
+                    "account": str(form.get("account_id") or form.get("account") or f"SESSION:{session_id}"),
+                    "symbol": str(ticket.get("symbol") or ""),
+                    "side": str(ticket.get("side") or ""),
+                    "authoritative_exposure_amount": form.get("authoritative_exposure_amount", ticket.get("amount")),
+                    "authoritative_exposure_currency": form.get("authoritative_exposure_currency", ""),
+                    "quantity": ticket.get("qty"),
+                    "order_type": ticket.get("order_type"),
+                    "limit_price": ticket.get("limit_price"),
+                }
+            )
+        except Exception:
+            result = {
+                "ok": False,
+                "status": "LIVE_AUTHORIZATION_TTL_REJECTED",
+                "ticket": ticket,
+                "broker_response": {
+                    "live_order_sent": False,
+                    "reason": "malformed_authorization",
+                    "authorization_ttl": {
+                        "authorization_id": str(form.get("final_live_authorization_id") or ""),
+                        "decision": "REJECT",
+                        "rejection_reason": "malformed_authorization",
+                        "kill_switch_active": bool(kill_switch.blocked),
+                    },
+                },
+            }
+            _record_mobile_event({"event_type": "mobile_order_rejected", **result})
+            return result
+
+        ttl_gate = get_live_authorization_ttl_gate()
+        ttl_decision = ttl_gate.validate_and_consume(
+            str(form.get("final_live_authorization_id") or ""),
+            auth_scope,
+            kill_switch_active=bool(kill_switch.blocked),
+        )
+        if not ttl_decision.approved:
+            result = {
+                "ok": False,
+                "status": "LIVE_AUTHORIZATION_TTL_REJECTED",
+                "ticket": ticket,
+                "broker_response": {
+                    "live_order_sent": False,
+                    "reason": ttl_decision.reason,
+                    "authorization_ttl": ttl_decision.evidence,
                 },
             }
             _record_mobile_event({"event_type": "mobile_order_rejected", **result})
