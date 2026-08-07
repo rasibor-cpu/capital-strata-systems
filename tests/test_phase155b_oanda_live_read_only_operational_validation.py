@@ -232,3 +232,12 @@ def test_phase155b_safety_evaluations_locked() -> None:
     assert readiness["live_micro_pilot_state"] == "DISARMED"
     assert readiness["broker_guard"] == "REJECT_BEFORE_BROKER"
     assert readiness["live_authority_state"] == "BLOCKED"
+    assert readiness["read_only_ready"] is True
+    assert readiness["execution_ready"] is False
+    assert readiness["live_execution_ready"] is False
+    assert readiness["live_execution_blocked"] is True
+    assert readiness["preflight_blocker_ids"] == [
+        "BLK-OANDA-LIVE",
+        "BLK-FX-CONVERSION",
+        "BLK-ANTIBLEED-CAD20",
+    ]

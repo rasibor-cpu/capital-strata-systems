@@ -40,6 +40,7 @@ def test_paper_mode_cannot_use_live_capital_source():
     
     assert "FAIL" in result.status
     assert "paper_mode_cannot_use_live_capital" in result.blocking_reasons
+    assert result.as_dict()["live_execution_ready"] is False
 
 
 def test_live_mode_cannot_use_paper_capital_source():
