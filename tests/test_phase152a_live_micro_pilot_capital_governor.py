@@ -143,6 +143,46 @@ def test_phase152a_paper_order_is_unchanged_by_pilot(tmp_path, monkeypatch) -> N
     assert decision.reason == "not_live_request"
 
 
+@pytest.mark.parametrize(
+    ("amount", "reason"),
+    [
+        ("19.99", "anti_bleed_cad20_incompatible"),
+        ("20.00", "anti_bleed_cad20_incompatible"),
+        ("20.01", "max_position_size_breached"),
+    ],
+)
+def test_phase152a_antibleed_cad20_boundary_is_fail_closed(tmp_path, monkeypatch, amount, reason) -> None:
+    governor = _configured_and_armed(tmp_path, monkeypatch)
+
+    decision = governor.evaluate_order(_live_order(amount))
+
+    assert decision.approved is False
+    assert decision.reason == reason
+
+
+def test_phase152a_status_reports_downstream_antibleed_incompatibility(tmp_path, monkeypatch) -> None:
+    governor = _configured_and_armed(tmp_path, monkeypatch)
+
+    status = governor.status()
+
+    assert status["anti_bleed_guard_compatible_with_live_pilot"] is False
+    assert status["anti_bleed_guard_minimum_trade_size"] == "50.00"
+    assert status["anti_bleed_guard_trade_size_input"] == "EXECUTION_GATE_NOTIONAL"
+    assert status["anti_bleed_guard_trade_size_currency"] == "UNSPECIFIED"
+    assert status["anti_bleed_guard_compatibility_reason"].startswith(
+        "phase152a_cad20_below_downstream_antibleed_minimum:"
+    )
+
+
+def test_phase152a_malformed_live_notional_fails_closed_before_downstream_gates(tmp_path, monkeypatch) -> None:
+    governor = _configured_and_armed(tmp_path, monkeypatch)
+
+    decision = governor.evaluate_order(_live_order("not-a-number"))
+
+    assert decision.approved is False
+    assert decision.reason == "invalid_live_notional"
+
+
 def test_phase152a_mobile_live_pilot_rejects_before_trade_runtime_service(tmp_path, monkeypatch) -> None:
     _configured_and_armed(tmp_path, monkeypatch)
     monkeypatch.setattr(mobile_app, "MOBILE_EVENTS_FILE", tmp_path / "events.jsonl")

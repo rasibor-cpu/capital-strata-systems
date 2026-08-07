@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Mapping
 
+from backend.app.risk.anti_bleed_guard import AntiBleedGuard
 from backend.config.order_limit_config import DEFAULT_ORDER_LIMIT_CONFIG
 
 
@@ -142,6 +143,15 @@ class LiveMicroPilotDecision:
             "status": self.status,
             "audit_event_type": self.audit_event_type,
         }
+
+
+@dataclass(frozen=True)
+class LiveMicroPilotAntiBleedCompatibility:
+    compatible: bool
+    reason: str
+    minimum_trade_size: Decimal
+    trade_size_input: str = "EXECUTION_GATE_NOTIONAL"
+    trade_size_currency: str = "UNSPECIFIED"
 
 
 class LiveMicroPilotGovernor:
@@ -292,6 +302,15 @@ class LiveMicroPilotGovernor:
         if not config.allow_pyramiding and _same_direction_position_exists(positions, symbol, side):
             return self._reject("pyramiding_blocked", "pyramiding is disabled", config=config, state=state_data)
 
+        anti_bleed_compatibility = _anti_bleed_live_pilot_compatibility(config)
+        if not anti_bleed_compatibility.compatible:
+            return self._reject(
+                "anti_bleed_cad20_incompatible",
+                anti_bleed_compatibility.reason,
+                config=config,
+                state=state_data,
+            )
+
         status = self.status(config=config, config_source=config_source or "CONFIG_FILE", state=state_data)
         status["last_status_reason"] = "approved_for_downstream_gates"
         self._audit("LIVE_MICRO_PILOT_APPROVED", reason="approved_for_downstream_gates", order=order, status=status)
@@ -341,6 +360,7 @@ class LiveMicroPilotGovernor:
         remaining = max(Decimal("0.00"), config.max_live_test_capital - deployed)
         armed = bool(state_data.get("pilot_armed", False))
         renewal_time = state_data.get("last_updated_at", "")
+        anti_bleed_compatibility = _anti_bleed_live_pilot_compatibility(config)
         return {
             "section_title": "Live Micro-Pilot Status",
             "pilot_enabled": config.pilot_enabled,
@@ -370,6 +390,11 @@ class LiveMicroPilotGovernor:
             "config_source": config_source or "CONFIG_FILE",
             "config_valid": config_valid,
             "config_error": config_error,
+            "anti_bleed_guard_compatible_with_live_pilot": anti_bleed_compatibility.compatible,
+            "anti_bleed_guard_compatibility_reason": anti_bleed_compatibility.reason,
+            "anti_bleed_guard_minimum_trade_size": _money_string(anti_bleed_compatibility.minimum_trade_size),
+            "anti_bleed_guard_trade_size_input": anti_bleed_compatibility.trade_size_input,
+            "anti_bleed_guard_trade_size_currency": anti_bleed_compatibility.trade_size_currency,
             "pilot_guard_enforced": True,
             "broker_submission_guard": "REJECT_BEFORE_BROKER",
             "broker_guard": "REJECT_BEFORE_BROKER",
@@ -453,6 +478,48 @@ class LiveMicroPilotGovernor:
 
 def live_micro_pilot_status() -> dict[str, Any]:
     return LiveMicroPilotGovernor().status()
+
+
+def _anti_bleed_live_pilot_compatibility(
+    config: LiveMicroPilotConfig,
+) -> LiveMicroPilotAntiBleedCompatibility:
+    try:
+        minimum_trade_size = _decimal(AntiBleedGuard(state_file=os.devnull).minimum_profitable_trade_size)
+    except Exception as exc:
+        return LiveMicroPilotAntiBleedCompatibility(
+            compatible=False,
+            reason=f"anti_bleed_profile_unavailable:{type(exc).__name__}",
+            minimum_trade_size=Decimal("0.00"),
+        )
+
+    if minimum_trade_size <= Decimal("0.00"):
+        return LiveMicroPilotAntiBleedCompatibility(
+            compatible=False,
+            reason="anti_bleed_profile_invalid:minimum_trade_size_non_positive",
+            minimum_trade_size=minimum_trade_size,
+        )
+
+    if (
+        minimum_trade_size > config.max_position_size
+        or minimum_trade_size > config.max_live_test_capital
+    ):
+        return LiveMicroPilotAntiBleedCompatibility(
+            compatible=False,
+            reason=(
+                "phase152a_cad20_below_downstream_antibleed_minimum:"
+                f"minimum_trade_size={_money_string(minimum_trade_size)};"
+                f"max_position_size={_money_string(config.max_position_size)};"
+                f"max_live_test_capital={_money_string(config.max_live_test_capital)};"
+                "trade_size_input=EXECUTION_GATE_NOTIONAL;currency=UNSPECIFIED"
+            ),
+            minimum_trade_size=minimum_trade_size,
+        )
+
+    return LiveMicroPilotAntiBleedCompatibility(
+        compatible=True,
+        reason="compatible",
+        minimum_trade_size=minimum_trade_size,
+    )
 
 
 def _is_live_order(order: Mapping[str, Any]) -> bool:
