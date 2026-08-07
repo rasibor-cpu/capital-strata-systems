@@ -88,6 +88,7 @@ class LiveReadinessCertificationResult:
                 "operational_state": self.operational_result.get("state", "NOT_INITIALIZED"),
                 "read_only_ready": self.operational_result.get("state") == "READ_ONLY_READY",
                 "execution_ready": False,
+                "live_execution_ready": False,
             }
         )
 

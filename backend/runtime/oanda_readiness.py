@@ -346,6 +346,24 @@ def _apply_readiness_state(result: dict[str, Any]) -> dict[str, Any]:
     result["go_no_go"] = readiness["go_no_go"]
     result["readiness_checklist"] = readiness["readiness_checklist"]
     result["startup_diagnostics"] = readiness["startup_diagnostics"]
+    read_only_ready = readiness["readiness_state"] == "FULLY_OPERATIONAL"
+    is_oanda_live_path = (
+        str(result.get("selected_broker", "")).upper() == "OANDA"
+        and str(result.get("broker_mode", "")).lower() == "live"
+    )
+    result["read_only_ready"] = read_only_ready
+    result["execution_ready"] = False
+    result["live_execution_ready"] = False
+    result["live_execution_blocked"] = True
+    if is_oanda_live_path:
+        # Governance evidence: read-only operational readiness never upgrades to execution readiness.
+        result["preflight_blocker_ids"] = [
+            "BLK-OANDA-LIVE",
+            "BLK-FX-CONVERSION",
+            "BLK-ANTIBLEED-CAD20",
+        ]
+    else:
+        result["preflight_blocker_ids"] = []
     return result
 
 
