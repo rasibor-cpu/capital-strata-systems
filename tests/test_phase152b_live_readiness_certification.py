@@ -95,6 +95,22 @@ def test_phase152b_cad20_governor_verification_is_explicit() -> None:
     assert governor_checks["fails_closed"]["status"] == CHECK_PASS
 
 
+def test_phase152b_governor_status_reports_same_currency_only_policy() -> None:
+    report = LiveReadinessCertificationEngine().certify({})
+    phase152a = next(
+        check for check in report["checks"] if check["key"] == "phase_152a_live_micro_pilot_governor"
+    )
+    evidence = phase152a["evidence"]
+
+    assert phase152a["status"] == CHECK_PASS
+    assert evidence["limit_currency"] == "CAD"
+    assert evidence["fx_conversion_authorized"] is False
+    assert evidence["identity_currency_only"] is True
+    assert evidence["non_cad_live_exposure_allowed"] is False
+    assert type(evidence["authoritative_exposure_currency_required"]) is bool
+    assert evidence["authoritative_exposure_currency_required"] is True
+
+
 def test_phase152b_report_generated_correctly(tmp_path) -> None:
     report = LiveReadinessCertificationEngine().certify(_all_pass_evidence())
     path = tmp_path / "phase152b_report.json"

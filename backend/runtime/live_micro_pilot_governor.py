@@ -8,6 +8,10 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Mapping
 
+from backend.app.live_pilot_currency_authority import (
+    LIMIT_CURRENCY,
+    evaluate_live_pilot_currency_authority,
+)
 from backend.app.risk.anti_bleed_guard import AntiBleedGuard
 from backend.config.order_limit_config import DEFAULT_ORDER_LIMIT_CONFIG
 
@@ -274,10 +278,17 @@ class LiveMicroPilotGovernor:
             return self._reject("live_micro_pilot_not_armed", "manual live arming required", config=config, state=state_data)
 
         positions = [dict(item) for item in (open_positions if open_positions is not None else state_data.get("open_positions", [])) if isinstance(item, Mapping)]
-        notional = _decimal(order.get("notional", order.get("amount", "0")))
+        exposure = evaluate_live_pilot_currency_authority(order)
+        if not exposure.approved:
+            return self._reject(exposure.reason, exposure.decision, config=config, state=state_data)
+
+        capital_deployed, position_error = _sum_open_position_exposure(positions)
+        if position_error is not None:
+            return self._reject(position_error.reason, position_error.decision, config=config, state=state_data)
+
+        notional = exposure.converted_amount or Decimal("0.00")
         symbol = str(order.get("symbol", "")).upper()
         side = str(order.get("side", "")).upper()
-        capital_deployed = sum(_position_notional(item) for item in positions)
         remaining_capacity = max(Decimal("0.00"), config.max_live_test_capital - capital_deployed)
         orders_used = int(state_data.get("orders_used_this_session", 0) or 0)
         daily_loss = _decimal(daily_pnl if daily_pnl is not None else state_data.get("daily_pnl", "0"))
@@ -321,12 +332,16 @@ class LiveMicroPilotGovernor:
             return self.status()
         state = self._load_state()
         state["orders_used_this_session"] = int(state.get("orders_used_this_session", 0) or 0) + 1
+        exposure = evaluate_live_pilot_currency_authority(order)
+        recorded_amount = exposure.converted_amount if exposure.approved else Decimal("0.00")
         positions = [item for item in state.get("open_positions", []) if isinstance(item, Mapping)]
         positions.append(
             {
                 "symbol": str(order.get("symbol", "")).upper(),
                 "side": str(order.get("side", "")).upper(),
-                "notional": _money_string(_decimal(order.get("notional", order.get("amount", "0")))),
+                "notional": _money_string(recorded_amount),
+                "authoritative_exposure_amount": _money_string(recorded_amount),
+                "authoritative_exposure_currency": LIMIT_CURRENCY,
                 "unrealized_pnl": "0.00",
                 "recorded_at": _utc_now(),
             }
@@ -356,8 +371,16 @@ class LiveMicroPilotGovernor:
                 config_error = str(exc)
         state_data = dict(state or self._load_state())
         positions = [dict(item) for item in state_data.get("open_positions", []) if isinstance(item, Mapping)]
-        deployed = sum(_position_notional(item) for item in positions)
-        remaining = max(Decimal("0.00"), config.max_live_test_capital - deployed)
+        deployed, position_error = _sum_open_position_exposure(positions)
+        if position_error is not None:
+            deployed = config.max_live_test_capital
+            remaining = Decimal("0.00")
+            currency_authority_ready = False
+            currency_authority_reason = position_error.reason
+        else:
+            remaining = max(Decimal("0.00"), config.max_live_test_capital - deployed)
+            currency_authority_ready = True
+            currency_authority_reason = "cad_identity_only"
         armed = bool(state_data.get("pilot_armed", False))
         renewal_time = state_data.get("last_updated_at", "")
         anti_bleed_compatibility = _anti_bleed_live_pilot_compatibility(config)
@@ -367,6 +390,7 @@ class LiveMicroPilotGovernor:
             "pilot_armed": armed,
             "pilot_state": str(state_data.get("pilot_state", "ARMED" if armed else "DISARMED")),
             "currency": config.currency,
+            "limit_currency": LIMIT_CURRENCY,
             "max_live_test_capital": _money_string(config.max_live_test_capital),
             "canonical_live_capital_authority": "PHASE_152A_LIVE_MICRO_PILOT_GOVERNOR",
             "canonical_live_pilot_limit_cad": _money_string(config.max_live_test_capital),
@@ -395,6 +419,12 @@ class LiveMicroPilotGovernor:
             "anti_bleed_guard_minimum_trade_size": _money_string(anti_bleed_compatibility.minimum_trade_size),
             "anti_bleed_guard_trade_size_input": anti_bleed_compatibility.trade_size_input,
             "anti_bleed_guard_trade_size_currency": anti_bleed_compatibility.trade_size_currency,
+            "currency_authority_ready": currency_authority_ready,
+            "currency_authority_reason": currency_authority_reason,
+            "fx_conversion_authorized": False,
+            "identity_currency_only": True,
+            "non_cad_live_exposure_allowed": False,
+            "authoritative_exposure_currency_required": True,
             "pilot_guard_enforced": True,
             "broker_submission_guard": "REJECT_BEFORE_BROKER",
             "broker_guard": "REJECT_BEFORE_BROKER",
@@ -550,6 +580,18 @@ def _averaging_down_position_exists(positions: list[Mapping[str, Any]], symbol: 
 
 def _position_notional(position: Mapping[str, Any]) -> Decimal:
     return _decimal(position.get("notional", position.get("amount", position.get("exposure", "0"))))
+
+
+def _sum_open_position_exposure(
+    positions: list[Mapping[str, Any]],
+) -> tuple[Decimal, Any | None]:
+    total = Decimal("0.00")
+    for position in positions:
+        exposure = evaluate_live_pilot_currency_authority(position)
+        if not exposure.approved:
+            return Decimal("0.00"), exposure
+        total += exposure.converted_amount or Decimal("0.00")
+    return total, None
 
 
 def _decimal(value: Any) -> Decimal:
