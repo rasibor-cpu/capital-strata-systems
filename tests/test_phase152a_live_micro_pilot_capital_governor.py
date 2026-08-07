@@ -47,6 +47,8 @@ def _live_order(amount: str = "1.00", *, symbol: str = "BTC-USD", side: str = "B
         "symbol": symbol,
         "side": side,
         "notional": amount,
+        "authoritative_exposure_amount": amount,
+        "authoritative_exposure_currency": "CAD",
     }
 
 
@@ -83,10 +85,10 @@ def test_phase152a_missing_config_fails_closed_for_live(tmp_path, monkeypatch) -
     ("order", "positions", "reason"),
     [
         (_live_order("21.00"), [], "max_position_size_breached"),
-        (_live_order("11.00"), [{"symbol": "ETH-USD", "side": "BUY", "notional": "10.00"}], "max_live_test_capital_breached"),
-        (_live_order("1.00", symbol="ETH-USD"), [{"symbol": "BTC-USD", "side": "BUY", "notional": "1.00"}], "max_concurrent_positions_breached"),
-        (_live_order("1.00"), [{"symbol": "BTC-USD", "side": "BUY", "notional": "1.00"}], "pyramiding_blocked"),
-        (_live_order("1.00"), [{"symbol": "BTC-USD", "side": "BUY", "notional": "1.00", "unrealized_pnl": "-0.25"}], "averaging_down_blocked"),
+        (_live_order("11.00"), [{"symbol": "ETH-USD", "side": "BUY", "notional": "10.00", "authoritative_exposure_amount": "10.00", "authoritative_exposure_currency": "CAD"}], "max_live_test_capital_breached"),
+        (_live_order("1.00", symbol="ETH-USD"), [{"symbol": "BTC-USD", "side": "BUY", "notional": "1.00", "authoritative_exposure_amount": "1.00", "authoritative_exposure_currency": "CAD"}], "max_concurrent_positions_breached"),
+        (_live_order("1.00"), [{"symbol": "BTC-USD", "side": "BUY", "notional": "1.00", "authoritative_exposure_amount": "1.00", "authoritative_exposure_currency": "CAD"}], "pyramiding_blocked"),
+        (_live_order("1.00"), [{"symbol": "BTC-USD", "side": "BUY", "notional": "1.00", "authoritative_exposure_amount": "1.00", "authoritative_exposure_currency": "CAD", "unrealized_pnl": "-0.25"}], "averaging_down_blocked"),
     ],
 )
 def test_phase152a_live_limits_reject_before_broker(tmp_path, monkeypatch, order, positions, reason) -> None:
@@ -172,6 +174,10 @@ def test_phase152a_status_reports_downstream_antibleed_incompatibility(tmp_path,
     assert status["anti_bleed_guard_compatibility_reason"].startswith(
         "phase152a_cad20_below_downstream_antibleed_minimum:"
     )
+    assert status["limit_currency"] == "CAD"
+    assert status["fx_conversion_authorized"] is False
+    assert status["identity_currency_only"] is True
+    assert status["non_cad_live_exposure_allowed"] is False
 
 
 def test_phase152a_malformed_live_notional_fails_closed_before_downstream_gates(tmp_path, monkeypatch) -> None:
@@ -180,7 +186,35 @@ def test_phase152a_malformed_live_notional_fails_closed_before_downstream_gates(
     decision = governor.evaluate_order(_live_order("not-a-number"))
 
     assert decision.approved is False
-    assert decision.reason == "invalid_live_notional"
+    assert decision.reason == "invalid_authoritative_exposure"
+
+
+@pytest.mark.parametrize(
+    ("payload", "reason"),
+    [
+        ({"authoritative_exposure_amount": "1.00", "authoritative_exposure_currency": "USD"}, "non_cad_exposure_not_authorized"),
+        ({"authoritative_exposure_amount": "1.00", "authoritative_exposure_currency": ""}, "missing_exposure_currency"),
+        ({"authoritative_exposure_amount": "1.00", "authoritative_exposure_currency": "cad$"}, "invalid_exposure_currency"),
+        ({"authoritative_exposure_amount": "NaN", "authoritative_exposure_currency": "CAD"}, "invalid_authoritative_exposure"),
+        ({"authoritative_exposure_currency": "CAD", "units": "1000"}, "unit_only_exposure_not_authorized"),
+    ],
+)
+def test_phase152a_currency_authority_fail_closed_paths(tmp_path, monkeypatch, payload, reason) -> None:
+    governor = _configured_and_armed(tmp_path, monkeypatch)
+
+    order = _live_order("1.00")
+    order.update(payload)
+    if "authoritative_exposure_amount" not in payload:
+        order.pop("authoritative_exposure_amount", None)
+    if "authoritative_exposure_currency" not in payload:
+        order.pop("authoritative_exposure_currency", None)
+    if reason == "unit_only_exposure_not_authorized":
+        order.pop("notional", None)
+
+    decision = governor.evaluate_order(order)
+
+    assert decision.approved is False
+    assert decision.reason == reason
 
 
 def test_phase152a_mobile_live_pilot_rejects_before_trade_runtime_service(tmp_path, monkeypatch) -> None:
@@ -211,6 +245,8 @@ def test_phase152a_mobile_live_pilot_rejects_before_trade_runtime_service(tmp_pa
                 "symbol": "BTC-USD",
                 "side": "BUY",
                 "amount": "21.00",
+                "authoritative_exposure_amount": "21.00",
+                "authoritative_exposure_currency": "CAD",
                 "qty": "1",
                 "confirm": "MOBILE LIVE",
             },
@@ -248,6 +284,8 @@ def test_phase152a_existing_unified_execution_gate_still_blocks_live(tmp_path, m
                 "symbol": "BTC-USD",
                 "side": "BUY",
                 "amount": "10.00",
+                "authoritative_exposure_amount": "10.00",
+                "authoritative_exposure_currency": "CAD",
                 "qty": "1",
                 "confirm": "MOBILE LIVE",
             },
