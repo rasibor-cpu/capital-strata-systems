@@ -70,6 +70,11 @@ from backend.runtime.live_micro_pilot_governor import (
     LiveMicroPilotConfigurationError,
     LiveMicroPilotGovernor,
 )
+from backend.app.live_authorization_ttl import (
+    LIVE_ENVIRONMENT,
+    LiveAuthorizationScope,
+    get_live_authorization_ttl_gate,
+)
 
 
 SESSION_COOKIE = "css_mobile_session"
@@ -3822,6 +3827,62 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
                     "live_order_sent": False,
                     "reason": pilot_decision.reason,
                     "pilot_status": pilot_decision.status,
+                },
+            }
+            _record_mobile_event({"event_type": "mobile_order_rejected", **result})
+            return result
+
+        kill_switch = evaluate_live_order_kill_switch(controls)
+        try:
+            auth_scope = LiveAuthorizationScope.from_mapping(
+                {
+                    "order_identity": str(ticket.get("ticket_id") or ""),
+                    "environment": LIVE_ENVIRONMENT,
+                    "broker": broker,
+                    "account": str(form.get("account_id") or form.get("account") or f"SESSION:{session_id}"),
+                    "symbol": str(ticket.get("symbol") or ""),
+                    "side": str(ticket.get("side") or ""),
+                    "authoritative_exposure_amount": form.get("authoritative_exposure_amount", ticket.get("amount")),
+                    "authoritative_exposure_currency": form.get("authoritative_exposure_currency", ""),
+                    "quantity": ticket.get("qty"),
+                    "order_type": ticket.get("order_type"),
+                    "limit_price": ticket.get("limit_price"),
+                }
+            )
+        except Exception:
+            result = {
+                "ok": False,
+                "status": "LIVE_AUTHORIZATION_TTL_REJECTED",
+                "ticket": ticket,
+                "broker_response": {
+                    "live_order_sent": False,
+                    "reason": "malformed_authorization",
+                    "authorization_ttl": {
+                        "authorization_id": str(form.get("final_live_authorization_id") or ""),
+                        "decision": "REJECT",
+                        "rejection_reason": "malformed_authorization",
+                        "kill_switch_active": bool(kill_switch.blocked),
+                    },
+                },
+            }
+            _record_mobile_event({"event_type": "mobile_order_rejected", **result})
+            return result
+
+        ttl_gate = get_live_authorization_ttl_gate()
+        ttl_decision = ttl_gate.validate_and_consume(
+            str(form.get("final_live_authorization_id") or ""),
+            auth_scope,
+            kill_switch_active=bool(kill_switch.blocked),
+        )
+        if not ttl_decision.approved:
+            result = {
+                "ok": False,
+                "status": "LIVE_AUTHORIZATION_TTL_REJECTED",
+                "ticket": ticket,
+                "broker_response": {
+                    "live_order_sent": False,
+                    "reason": ttl_decision.reason,
+                    "authorization_ttl": ttl_decision.evidence,
                 },
             }
             _record_mobile_event({"event_type": "mobile_order_rejected", **result})
