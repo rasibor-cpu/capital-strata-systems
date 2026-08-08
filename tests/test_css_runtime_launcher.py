@@ -480,3 +480,41 @@ def test_run_launcher_cleans_started_children_on_identity_failure(monkeypatch):
         "stop:Mobile Launcher",
         "supervisor_stop",
     ]
+
+
+def test_discovery_ignores_inline_python_mentions_but_detects_real_invocations_r6(monkeypatch):
+    rows = [
+        _row(pid=4242, command_line="python self"),
+        _row(
+            pid=1001,
+            command_line="python -c import_launcher.css_runtime_launcher_c:/repo/launcher/css_runtime_launcher.py",
+        ),
+        _row(pid=1002, command_line="python c:/repo/launcher/css_runtime_launcher.py"),
+        _row(pid=1003, parent_pid=1002, command_line="python c:/repo/scripts/css_live_dashboard.py"),
+    ]
+    monkeypatch.setattr(
+        "launcher.css_runtime_launcher.subprocess.run",
+        _fake_powershell(_envelope(rows)),
+    )
+    result = discover_canonical_runtime_processes(repo_root="c:/repo", current_pid=4242)
+    assert result["ok"] is True
+    by_pid = {row["pid"]: row for row in result["processes"]}
+    assert 1001 not in by_pid
+    assert by_pid[1002]["role"] == "canonical_launcher"
+    assert by_pid[1003]["role"] == "managed_child"
+
+
+def test_discovery_detects_module_launcher_invocation_r6(monkeypatch):
+    rows = [
+        _row(pid=4242, command_line="python self"),
+        _row(pid=2001, command_line="python -m launcher.css_runtime_launcher c:/repo"),
+    ]
+    monkeypatch.setattr(
+        "launcher.css_runtime_launcher.subprocess.run",
+        _fake_powershell(_envelope(rows)),
+    )
+    result = discover_canonical_runtime_processes(repo_root="c:/repo", current_pid=4242)
+    assert result["ok"] is True
+    assert [(row["pid"], row["role"]) for row in result["processes"]] == [
+        (2001, "canonical_launcher")
+    ]

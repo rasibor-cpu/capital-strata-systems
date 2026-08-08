@@ -2283,7 +2283,7 @@ def ensure_runtime_artifacts_current(
             validation_summary=validation_summary,
         )
     supervisor_published = _publish_supervisor_heartbeat_snapshot() if supervisor_needs_publish else {"status": "SKIPPED"}
-    refreshed = get_runtime_artifact_freshness_feed(refresh=True)
+    refreshed = get_runtime_artifact_freshness_feed(refresh=False)
     return {
         "status": "OK",
         "published": published,
@@ -4109,6 +4109,50 @@ def build_launcher_context() -> Dict[str, Any]:
         "brand": BRAND.snapshot(),
     }
 
+def get_operator_session_summary() -> Dict[str, Any]:
+    """Return only current operator/session presentation fields.
+
+    Persisted supervisor lifetime counters remain diagnostic/backend-only.
+    """
+    runtime = get_runtime_summary()
+
+    # Use the canonical CSS authentication/session authority.  Mobile
+    # presentation must not create an independent authentication identity.
+    from dashboard.auth import css_sign_on as auth
+
+    users = auth.load_users()
+    identity = auth.restore_login_session(users)
+    if not isinstance(identity, dict):
+        identity = {}
+
+    recovery = _safe_load_artifact("css_session_recovery.json")
+    session_ctx = (
+        recovery.get("session_user_ctx")
+        if isinstance(recovery, dict)
+        and isinstance(recovery.get("session_user_ctx"), dict)
+        else {}
+    )
+
+    return {
+        "session_cycle": runtime.get("current_cycle"),
+        # Authentication authority owns log-on history.  Recovery/runtime
+        # artifacts are fallback presentation sources only.
+        "current_log_on": (
+            identity.get("current_log_on")
+            or identity.get("last_auth_time")
+            or session_ctx.get("current_log_on")
+            or session_ctx.get("last_auth_time")
+        ),
+        "last_log_on": (
+            identity.get("last_log_on")
+            or session_ctx.get("last_log_on")
+        ),
+        "user_id": identity.get("user_id"),
+        "display_name": identity.get("display_name"),
+        "role": identity.get("role"),
+    }
+
+
 @launcher_router.get("/", response_class=HTMLResponse)
 async def launcher_home(request: Request):
     return HTMLResponse(
@@ -4117,6 +4161,7 @@ async def launcher_home(request: Request):
             manifest_href="/manifest.json",
             title=LauncherConfig.TITLE,
             balance_summary=get_account_summary().get("broker_balance_summary"),
+            operator_summary=get_operator_session_summary(),
         )
     )
 

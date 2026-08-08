@@ -255,11 +255,16 @@ def discover_canonical_runtime_processes(
         cmd_norm = os.path.normcase(cmd)
         if repo_norm not in cmd_norm:
             continue
+        # Inline Python diagnostics/imports may mention runtime module names without
+        # actually owning a CSS runtime. Classify only executable script/module tokens.
+        tokens = cmd_norm.replace(chr(34), " ").replace(chr(39), " ").split()
+        is_python_inline = "-c" in tokens
         matched_roles = []
-        if any(item in cmd_norm for item in CANONICAL_LAUNCHER_MARKERS):
-            matched_roles.append("canonical_launcher")
-        if any(item in cmd_norm for item in CANONICAL_CHILD_MARKERS):
-            matched_roles.append("managed_child")
+        if not is_python_inline:
+            if any(token == item or token.endswith(item) for token in tokens for item in CANONICAL_LAUNCHER_MARKERS):
+                matched_roles.append("canonical_launcher")
+            if any(token == item or token.endswith(item) for token in tokens for item in CANONICAL_CHILD_MARKERS):
+                matched_roles.append("managed_child")
         if len(matched_roles) > 1:
             return _discovery_failure(
                 "discovery_conflicting_role_classification",

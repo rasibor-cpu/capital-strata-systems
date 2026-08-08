@@ -22,7 +22,7 @@ INITIAL_ADMIN_PASSWORD = ""  # intentionally empty — never use as a shipped se
 FORBIDDEN_DEFAULT_PASSWORDS = frozenset({"123456", "password", "admin", "css123", "CSS123"})
 INITIAL_DISPLAY_NAME = "CSS Administrator"
 INITIAL_ROLE = "SUPER_USER"
-MIN_PASSWORD_LENGTH = 12
+MIN_PASSWORD_LENGTH = 8
 PASSWORD_MAX_AGE_DAYS = 30
 PASSWORD_HISTORY_LIMIT = 2
 LOCKOUT_START_ATTEMPT = 3
@@ -43,6 +43,15 @@ FALLBACK_CSS_ROLES = (
 USER_ADMIN_ROLES = {"SUPER_USER"}
 
 CSS_AUTH_PANEL_WIDTH = 78
+
+RECOVERY_QUESTIONS = (
+    "What city were you born in?",
+    "What was the name of your first school?",
+    "What was the make of your first car?",
+    "What was the first company you worked for?",
+    "What was your best subject in secondary school?",
+)
+
 
 
 class AuthFailure(Exception):
@@ -130,10 +139,10 @@ def load_users(users_file: Path = USERS_FILE) -> Dict[str, Any]:
     changed = False
     if not users_file.exists():
         bootstrap = resolve_bootstrap_admin_password()
-        if not bootstrap or len(bootstrap) < MIN_PASSWORD_LENGTH:
+        if not bootstrap or len(bootstrap) != MIN_PASSWORD_LENGTH:
             raise RuntimeError(
                 "CSS_BOOTSTRAP_REQUIRED: set CSS_BOOTSTRAP_ADMIN_PASSWORD "
-                f"(min {MIN_PASSWORD_LENGTH} chars) before first start"
+                f"(exactly {MIN_PASSWORD_LENGTH} chars) before first start"
             )
         if bootstrap.lower() in {p.lower() for p in FORBIDDEN_DEFAULT_PASSWORDS}:
             raise RuntimeError("CSS_BOOTSTRAP_FORBIDDEN_DEFAULT_PASSWORD")
@@ -152,10 +161,10 @@ def load_users(users_file: Path = USERS_FILE) -> Dict[str, Any]:
 
     if not users:
         bootstrap = resolve_bootstrap_admin_password()
-        if not bootstrap or len(bootstrap) < MIN_PASSWORD_LENGTH:
+        if not bootstrap or len(bootstrap) != MIN_PASSWORD_LENGTH:
             raise RuntimeError(
                 "CSS_BOOTSTRAP_REQUIRED: empty user store requires "
-                f"CSS_BOOTSTRAP_ADMIN_PASSWORD (min {MIN_PASSWORD_LENGTH} chars)"
+                f"CSS_BOOTSTRAP_ADMIN_PASSWORD (exactly {MIN_PASSWORD_LENGTH} chars)"
             )
         if bootstrap.lower() in {p.lower() for p in FORBIDDEN_DEFAULT_PASSWORDS}:
             raise RuntimeError("CSS_BOOTSTRAP_FORBIDDEN_DEFAULT_PASSWORD")
@@ -190,6 +199,8 @@ def load_users(users_file: Path = USERS_FILE) -> Dict[str, Any]:
             "lockout_until": None,
             "lockout_seconds": 0,
             "lockout_started_at": None,
+            "recovery_question": None,
+            "recovery_answer_hash": None,
         }
         for field, default in defaults.items():
             if field not in record:
@@ -316,9 +327,9 @@ def validate_initial_password(password: str) -> None:
     if not password:
         raise PasswordValidationError("Initial password cannot be blank.")
 
-    if len(password) < MIN_PASSWORD_LENGTH:
+    if len(password) != MIN_PASSWORD_LENGTH:
         raise PasswordValidationError(
-            f"Initial password must be at least {MIN_PASSWORD_LENGTH} characters."
+            f"Initial password must be exactly {MIN_PASSWORD_LENGTH} characters."
         )
 
     if password.lower() in {p.lower() for p in FORBIDDEN_DEFAULT_PASSWORDS}:
@@ -475,9 +486,22 @@ def authenticate_credentials(users: Dict[str, Any], user_id: str, password: str)
     AuthMetrics.authentication_latency_history.append(latency)
     AuthMetrics.successful_interactive_logins += 1
     
-    # Attach audit context info to returned user context
+    # Operator log-on history.
+    #
+    # Advance this history only for a genuine interactive authentication.
+    # Restored sessions must not masquerade as a new log-on.
+    login_at = datetime.now(timezone.utc).isoformat()
+    previous_login_at = str(user_record.get("last_login_at") or "").strip()
+
+    user_record["previous_login_at"] = previous_login_at or None
+    user_record["last_login_at"] = login_at
+    save_users(users)
+
+    # Attach audit/session context to the authenticated user.
     user_ctx["auth_source"] = "interactive"
-    user_ctx["last_auth_time"] = datetime.now(timezone.utc).isoformat()
+    user_ctx["last_auth_time"] = login_at
+    user_ctx["current_log_on"] = login_at
+    user_ctx["last_log_on"] = previous_login_at or None
     user_ctx["last_auth_event"] = "interactive_login_success"
 
     record_auth_audit_event(
@@ -485,6 +509,115 @@ def authenticate_credentials(users: Dict[str, Any], user_id: str, password: str)
         normalized_user_id,
         "SUCCESS",
         auth_source="interactive"
+    )
+
+    return user_ctx
+
+
+def normalize_recovery_answer(answer: str) -> str:
+    return " ".join(str(answer or "").strip().lower().split())
+
+
+def hash_recovery_answer(answer: str) -> str:
+    normalized = normalize_recovery_answer(answer)
+    if not normalized:
+        return ""
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def recovery_is_configured(user_record: Dict[str, Any]) -> bool:
+    return bool(
+        str(user_record.get("recovery_question", "") or "").strip()
+        and str(user_record.get("recovery_answer_hash", "") or "").strip()
+    )
+
+
+def configure_password_recovery(
+    users: Dict[str, Any],
+    user_id: str,
+    current_password: str,
+    recovery_question: str,
+    recovery_answer: str,
+) -> None:
+    normalized_user_id = normalize_user_id(user_id)
+    user_record = users.get(normalized_user_id)
+    if not isinstance(user_record, dict):
+        raise AuthFailure("USER_NOT_FOUND", "User ID not recognized.")
+
+    expected_hash = str(user_record.get("password_hash", "")).strip()
+    if hash_password(current_password) != expected_hash:
+        raise AuthFailure(
+            "INVALID_CURRENT_PASSWORD",
+            "Current password is incorrect.",
+        )
+
+    question = str(recovery_question or "").strip()
+    if question not in RECOVERY_QUESTIONS:
+        raise PasswordValidationError("Select a valid recovery question.")
+
+    answer_hash = hash_recovery_answer(recovery_answer)
+    if not answer_hash:
+        raise PasswordValidationError("Recovery answer cannot be blank.")
+
+    user_record["recovery_question"] = question
+    user_record["recovery_answer_hash"] = answer_hash
+    save_users(users)
+
+    record_auth_audit_event(
+        "password_recovery_configured",
+        normalized_user_id,
+        "SUCCESS",
+        auth_source="interactive",
+    )
+
+
+def reset_password_with_recovery(
+    users: Dict[str, Any],
+    user_id: str,
+    recovery_answer: str,
+    new_password: str,
+    confirm_password: str,
+) -> Dict[str, Any]:
+    normalized_user_id = normalize_user_id(user_id)
+    user_record = users.get(normalized_user_id)
+    if not isinstance(user_record, dict):
+        raise AuthFailure("RECOVERY_FAILED", "Password recovery could not be completed.")
+
+    if not recovery_is_configured(user_record):
+        raise AuthFailure(
+            "RECOVERY_NOT_CONFIGURED",
+            "Password recovery has not been configured for this account.",
+        )
+
+    supplied_hash = hash_recovery_answer(recovery_answer)
+    expected_hash = str(user_record.get("recovery_answer_hash", "")).strip()
+
+    if not supplied_hash or supplied_hash != expected_hash:
+        record_auth_audit_event(
+            "password_recovery_failure",
+            normalized_user_id,
+            "FAIL",
+            "recovery_answer_incorrect",
+            auth_source="interactive",
+        )
+        raise AuthFailure(
+            "RECOVERY_FAILED",
+            "Password recovery could not be completed.",
+        )
+
+    user_ctx = change_password(
+        users,
+        normalized_user_id,
+        new_password,
+        confirm_password,
+    )
+    save_users(users)
+
+    record_auth_audit_event(
+        "password_recovery_success",
+        normalized_user_id,
+        "SUCCESS",
+        auth_source="interactive",
     )
 
     return user_ctx
@@ -528,9 +661,9 @@ def validate_new_password(
     if not new_password:
         raise PasswordValidationError("Password cannot be blank.")
 
-    if len(new_password) < MIN_PASSWORD_LENGTH:
+    if len(new_password) != MIN_PASSWORD_LENGTH:
         raise PasswordValidationError(
-            f"Password must be at least {MIN_PASSWORD_LENGTH} characters."
+            f"Password must be exactly {MIN_PASSWORD_LENGTH} characters."
         )
 
     if new_password.lower() in {p.lower() for p in FORBIDDEN_DEFAULT_PASSWORDS}:
@@ -1179,6 +1312,14 @@ def restore_login_session(users: Optional[Dict[str, Any]] = None) -> Optional[Di
     # Attach audit context info to returned user context
     user_ctx["auth_source"] = "restored"
     user_ctx["last_auth_time"] = last_login_str
+    user_ctx["current_log_on"] = (
+        str(user_record.get("last_login_at") or "").strip()
+        or last_login_str
+    )
+    user_ctx["last_log_on"] = (
+        str(user_record.get("previous_login_at") or "").strip()
+        or None
+    )
     user_ctx["last_auth_event"] = "restored_session_success"
 
     record_auth_audit_event(
@@ -1598,6 +1739,139 @@ def await_gui_login(users: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         root.bind("<Return>", lambda _event: submit_change())
 
 
+    def show_password_recovery(prefill_user_id: str = "") -> None:
+        clear_content()
+
+        tk.Label(
+            content,
+            text="Forgot Password",
+            bg=colors["panel"],
+            fg=colors["ink"],
+            font=title_font,
+        ).grid(row=0, column=0, sticky="w")
+
+        tk.Label(
+            content,
+            text="Recover dashboard access without another sign-on attempt.",
+            bg=colors["panel"],
+            fg=colors["muted"],
+            font=subtitle_font,
+        ).grid(row=1, column=0, sticky="w", pady=(8, 24))
+
+        user_var = tk.StringVar(value=str(prefill_user_id or "").strip())
+        answer_var = tk.StringVar()
+        new_password_var = tk.StringVar()
+        confirm_var = tk.StringVar()
+
+        tk.Label(
+            content, text="User ID",
+            bg=colors["panel"], fg=colors["ink"], font=label_font
+        ).grid(row=2, column=0, sticky="w")
+
+        user_entry = make_entry(content, user_var)
+        user_entry.grid(row=3, column=0, sticky="ew", ipady=10, pady=(6, 14))
+
+        question_var = tk.StringVar(value="Enter your User ID to load the recovery question.")
+
+        question_label = tk.Label(
+            content,
+            textvariable=question_var,
+            bg=colors["panel"],
+            fg=colors["muted"],
+            font=small_font,
+            justify="left",
+            wraplength=520,
+        )
+        question_label.grid(row=4, column=0, sticky="w", pady=(0, 12))
+
+        tk.Label(
+            content, text="Recovery answer",
+            bg=colors["panel"], fg=colors["ink"], font=label_font
+        ).grid(row=5, column=0, sticky="w")
+
+        answer_entry = make_entry(content, answer_var, show="*")
+        answer_entry.grid(row=6, column=0, sticky="ew", ipady=10, pady=(6, 14))
+
+        tk.Label(
+            content, text="New password",
+            bg=colors["panel"], fg=colors["ink"], font=label_font
+        ).grid(row=7, column=0, sticky="w")
+
+        new_entry = make_entry(content, new_password_var, show="*")
+        new_entry.grid(row=8, column=0, sticky="ew", ipady=10, pady=(6, 14))
+
+        tk.Label(
+            content, text="Confirm new password",
+            bg=colors["panel"], fg=colors["ink"], font=label_font
+        ).grid(row=9, column=0, sticky="w")
+
+        confirm_entry = make_entry(content, confirm_var, show="*")
+        confirm_entry.grid(row=10, column=0, sticky="ew", ipady=10, pady=(6, 14))
+
+        def load_question(*_args) -> None:
+            uid = normalize_user_id(user_var.get())
+            record = active_users.get(uid)
+
+            if isinstance(record, dict) and recovery_is_configured(record):
+                question_var.set(str(record.get("recovery_question", "")))
+            elif uid and isinstance(record, dict):
+                question_var.set(
+                    "Password recovery is not yet configured for this account."
+                )
+            else:
+                question_var.set(
+                    "Enter your User ID to load the recovery question."
+                )
+
+        user_var.trace_add("write", load_question)
+        load_question()
+
+        def submit_recovery() -> None:
+            try:
+                reset_password_with_recovery(
+                    active_users,
+                    user_var.get(),
+                    answer_var.get(),
+                    new_password_var.get(),
+                    confirm_var.get(),
+                )
+            except (AuthFailure, PasswordValidationError) as exc:
+                message = getattr(exc, "message", str(exc))
+                set_status(message, "error")
+                answer_var.set("")
+                new_password_var.set("")
+                confirm_var.set("")
+                answer_entry.focus_set()
+                return
+
+            set_status(
+                "Password reset successful. You may now sign on.",
+                "success",
+            )
+            root.after(900, show_login)
+
+        button_row = tk.Frame(content, bg=colors["panel"])
+        button_row.grid(row=11, column=0, sticky="ew", pady=(18, 18))
+
+        primary_button(
+            button_row, "Reset Password", submit_recovery
+        ).pack(side="left")
+
+        secondary_button(
+            button_row, "Back to Sign On", show_login
+        ).pack(side="left", padx=(12, 0))
+
+        attach_status(12)
+        set_status("Ready", "info")
+
+        if prefill_user_id:
+            answer_entry.focus_set()
+        else:
+            user_entry.focus_set()
+
+        root.bind("<Return>", lambda _event: submit_recovery())
+
+
     def show_login() -> None:
         clear_content()
         root.bind("<Return>", lambda _event: submit_login())
@@ -1668,6 +1942,11 @@ def await_gui_login(users: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
             show_post_auth_options(user_ctx)
 
         primary_button(button_row, "Sign On", submit_login).pack(side="left")
+        secondary_button(
+            button_row,
+            "Forgot Password?",
+            lambda: show_password_recovery(user_var.get()),
+        ).pack(side="left", padx=(12, 0))
         secondary_button(button_row, "Exit", root.destroy).pack(side="left", padx=(12, 0))
 
         attach_status(8)
@@ -1780,7 +2059,7 @@ def hash_password(password: str) -> str:
 
 
 def _default_admin_record(bootstrap_password: str) -> Dict[str, Any]:
-    if not bootstrap_password or len(bootstrap_password) < MIN_PASSWORD_LENGTH:
+    if not bootstrap_password or len(bootstrap_password) != MIN_PASSWORD_LENGTH:
         raise RuntimeError("CSS_BOOTSTRAP_REQUIRED")
     if bootstrap_password.lower() in {p.lower() for p in FORBIDDEN_DEFAULT_PASSWORDS}:
         raise RuntimeError("CSS_BOOTSTRAP_FORBIDDEN_DEFAULT_PASSWORD")
@@ -1800,6 +2079,8 @@ def _default_admin_record(bootstrap_password: str) -> Dict[str, Any]:
         "lockout_until": None,
         "lockout_seconds": 0,
         "lockout_started_at": None,
+        "recovery_question": None,
+        "recovery_answer_hash": None,
     }
 
 
