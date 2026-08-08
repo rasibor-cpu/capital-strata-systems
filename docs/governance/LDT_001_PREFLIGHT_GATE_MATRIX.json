@@ -1,0 +1,290 @@
+{
+  "schema_version": "css.ldt001.preflight_gate_matrix.v1",
+  "programme": "LDT-001",
+  "title": "Controlled Live Deployment Test — Preflight GO/NO-GO Matrix",
+  "evaluation_rule": "Any FAIL, BLOCKED, or material NOT_TESTED produces NO-GO. PASS and NOT_APPLICABLE only do not authorize live.",
+  "classification_values": ["PASS", "FAIL", "BLOCKED", "NOT_TESTED", "NOT_APPLICABLE"],
+  "as_of_charter_head": "66e11d4f83600a7765b4e55afa33d19e301dd70e",
+  "as_of_note": "Classifications updated by LDT-002 blocker audit. They are NOT a live preflight execution result and do not authorize live trading.",
+  "ldt002_audit": "docs/governance/LDT_002_LIVE_PILOT_BLOCKER_RESOLUTION_AUDIT.md",
+  "maintenance_tip_audited": "9a9263c185680353fac9319577b4a1f82d3311dd",
+  "maintenance_branch": "origin/css-v1.0.1-maintenance",
+  "merge_base_with_maintenance": "b0703f36096bf183514293ef9b83b6e7849bd087",
+  "gates": [
+    {
+      "id": "A1",
+      "category": "Repository",
+      "name": "certified_commit_loaded",
+      "classification": "NOT_TESTED",
+      "rationale": "Freeze SHA NOT_DESIGNATED (LDT-002). Current HEAD 66e11d4f must not be treated as live-ready. MW/DIP commits on css-v1.0.1-maintenance are non-ancestors and cannot be silently credited."
+    },
+    {
+      "id": "A5",
+      "category": "Repository",
+      "name": "non_ancestor_certification_not_silently_credited",
+      "classification": "PASS",
+      "rationale": "LDT-002 rule: MW-001..004 and DIP-001..006 on origin/css-v1.0.1-maintenance are ABSENT on active and not ancestors; credited only after merge/cherry-pick + re-certification."
+    },
+    {
+      "id": "A2",
+      "category": "Repository",
+      "name": "clean_tracked_worktree",
+      "classification": "PASS",
+      "rationale": "Tracked tree clean at charter authoring; untracked local evidence only."
+    },
+    {
+      "id": "A3",
+      "category": "Repository",
+      "name": "branch_remote_parity",
+      "classification": "PASS",
+      "rationale": "HEAD...@{upstream} = 0 0 on css-unified-consolidation-2026-07-13 at charter time."
+    },
+    {
+      "id": "A4",
+      "category": "Repository",
+      "name": "release_manifest_integrity",
+      "classification": "NOT_TESTED",
+      "rationale": "No LDT-001 release manifest hashed for a live pilot freeze yet."
+    },
+    {
+      "id": "B1",
+      "category": "Runtime",
+      "name": "supervisor_healthy",
+      "classification": "NOT_TESTED",
+      "rationale": "Live pilot requires fresh startup after controlled endurance shutdown; current endurance instance not used for live."
+    },
+    {
+      "id": "B2",
+      "category": "Runtime",
+      "name": "heartbeat_fresh",
+      "classification": "NOT_TESTED",
+      "rationale": "Re-evaluate on dedicated pilot runtime only."
+    },
+    {
+      "id": "B3",
+      "category": "Runtime",
+      "name": "zero_unexpected_restarts",
+      "classification": "NOT_TESTED",
+      "rationale": "OV-002 Attempt 2 residual restarts invalidate endurance credit; pilot needs clean supervisor generation."
+    },
+    {
+      "id": "B4",
+      "category": "Runtime",
+      "name": "no_active_critical_alerts",
+      "classification": "NOT_TESTED",
+      "rationale": "Must be measured on pilot runtime after fresh start."
+    },
+    {
+      "id": "B5",
+      "category": "Runtime",
+      "name": "session_valid",
+      "classification": "NOT_TESTED",
+      "rationale": "Session continuity must be proven on pilot runtime."
+    },
+    {
+      "id": "C1",
+      "category": "Broker",
+      "name": "credentials_present",
+      "classification": "NOT_TESTED",
+      "rationale": "No broker contact in LDT-001; diagnostics deferred to future live-read-only preflight."
+    },
+    {
+      "id": "C2",
+      "category": "Broker",
+      "name": "authentication_successful",
+      "classification": "NOT_TESTED",
+      "rationale": "Forbidden in LDT-001; OV-001 left OANDA practice authenticated but LIVE not certified."
+    },
+    {
+      "id": "C3",
+      "category": "Broker",
+      "name": "connection_successful",
+      "classification": "NOT_TESTED",
+      "rationale": "Deferred."
+    },
+    {
+      "id": "C4",
+      "category": "Broker",
+      "name": "account_loaded",
+      "classification": "NOT_TESTED",
+      "rationale": "Deferred."
+    },
+    {
+      "id": "C5",
+      "category": "Broker",
+      "name": "balance_equity_loaded",
+      "classification": "NOT_TESTED",
+      "rationale": "Deferred."
+    },
+    {
+      "id": "C6",
+      "category": "Broker",
+      "name": "market_data_fresh",
+      "classification": "NOT_TESTED",
+      "rationale": "Stale market data is mandatory NO-GO when tested."
+    },
+    {
+      "id": "C7",
+      "category": "Broker",
+      "name": "instrument_supported",
+      "classification": "PASS",
+      "rationale": "EUR_USD is a supported OANDA FX instrument in codebase and historical micropilot docs."
+    },
+    {
+      "id": "C8",
+      "category": "Broker",
+      "name": "broker_mode_confirmed_live",
+      "classification": "BLOCKED",
+      "rationale": "LDT-002 BLK-OANDA-LIVE: practice/read-only offline adapters exist; OANDA LIVE authentication/account/MD certification incomplete; practice ≠ live."
+    },
+    {
+      "id": "C9",
+      "category": "Broker",
+      "name": "broker_execution_blocked_until_founder_approval",
+      "classification": "PASS",
+      "rationale": "live_authority defaults BLOCKED; pilot_enabled false; kill switch engaged by design."
+    },
+    {
+      "id": "D1",
+      "category": "Portfolio",
+      "name": "zero_open_positions_before_pilot",
+      "classification": "NOT_TESTED",
+      "rationale": "Must be verified on live account immediately before arming."
+    },
+    {
+      "id": "D2",
+      "category": "Portfolio",
+      "name": "broker_css_reconciliation_clean",
+      "classification": "NOT_TESTED",
+      "rationale": "Requires authenticated live snapshots."
+    },
+    {
+      "id": "D3",
+      "category": "Portfolio",
+      "name": "available_capital_confirmed",
+      "classification": "BLOCKED",
+      "rationale": "LDT-002 BLK-FX-CONVERSION: current policy authorizes explicit CAD identity comparison only. Non-CAD or unit-only live exposure remains blocked; accounting FX cache and all FX fallbacks remain unauthorized for live pilot gating."
+    },
+    {
+      "id": "D4",
+      "category": "Portfolio",
+      "name": "margin_computable",
+      "classification": "NOT_TESTED",
+      "rationale": "Margin Gate fail-closed without valid snapshot."
+    },
+    {
+      "id": "D5",
+      "category": "Portfolio",
+      "name": "no_stale_orders",
+      "classification": "NOT_TESTED",
+      "rationale": "Deferred to live-read-only account inspection."
+    },
+    {
+      "id": "E1",
+      "category": "Safety",
+      "name": "kill_switch_tested",
+      "classification": "NOT_TESTED",
+      "rationale": "Offline unit behavior exists; operator drill on pilot runtime not yet performed for LDT."
+    },
+    {
+      "id": "E2",
+      "category": "Safety",
+      "name": "rbac_passed",
+      "classification": "PASS",
+      "rationale": "SUPER_USER required for arm/config; empty authority fails RBAC condition."
+    },
+    {
+      "id": "E3",
+      "category": "Safety",
+      "name": "unified_trade_gate_passed",
+      "classification": "NOT_TESTED",
+      "rationale": "Must PASS on pilot evidence package."
+    },
+    {
+      "id": "E4",
+      "category": "Safety",
+      "name": "risk_governor_passed",
+      "classification": "NOT_TESTED",
+      "rationale": "Canonical engine/risk/risk_governor.py must be exercised on pilot evidence."
+    },
+    {
+      "id": "E5",
+      "category": "Safety",
+      "name": "anti_bleed_guard_passed",
+      "classification": "BLOCKED",
+      "rationale": "LDT-002 BLK-ANTIBLEED-CAD20 class A: ExecutionGate passes notional into AntiBleedGuard; CAD20 max cannot satisfy min size 50 on the same live path."
+    },
+    {
+      "id": "E9",
+      "category": "Safety",
+      "name": "authorization_ttl_single_use_scoped",
+      "classification": "NOT_TESTED",
+      "rationale": "LDT-002 BLK-AUTH-TTL: PARTIALLY_SUPPORTED (arm/disarm exist) but no TTL enforcement, no single-use scoped token; arm file may persist across restart."
+    },
+    {
+      "id": "E10",
+      "category": "Safety",
+      "name": "endurance_ov002_credit_not_auto_granted",
+      "classification": "PASS",
+      "rationale": "LDT-002 rule: current untimed runtime is observational only; OV-002 Attempt2 residuals; no active ov002 monitor for this generation."
+    },
+    {
+      "id": "E6",
+      "category": "Safety",
+      "name": "margin_gate_passed",
+      "classification": "NOT_TESTED",
+      "rationale": "Requires live account margin snapshot."
+    },
+    {
+      "id": "E7",
+      "category": "Safety",
+      "name": "capital_governor_passed",
+      "classification": "PASS",
+      "rationale": "Phase 152A governor present with fail-closed defaults; does not authorize live."
+    },
+    {
+      "id": "E8",
+      "category": "Safety",
+      "name": "live_authority_blocked_until_final_authorization",
+      "classification": "PASS",
+      "rationale": "evaluate_live_execution_authority({}) => BLOCKED."
+    },
+    {
+      "id": "F1",
+      "category": "Evidence",
+      "name": "preflight_snapshot_archived",
+      "classification": "NOT_TESTED",
+      "rationale": "Evidence package design only in LDT-001."
+    },
+    {
+      "id": "F2",
+      "category": "Evidence",
+      "name": "exact_commit_recorded",
+      "classification": "PASS",
+      "rationale": "Charter records HEAD 66e11d4f… at authoring; live freeze SHA still required later."
+    },
+    {
+      "id": "F3",
+      "category": "Evidence",
+      "name": "configuration_fingerprint_recorded",
+      "classification": "NOT_TESTED",
+      "rationale": "Deferred to pilot freeze."
+    },
+    {
+      "id": "F4",
+      "category": "Evidence",
+      "name": "credentials_redacted",
+      "classification": "PASS",
+      "rationale": "Charter and schemas forbid secret material; offline tests assert redaction markers."
+    },
+    {
+      "id": "F5",
+      "category": "Evidence",
+      "name": "rollback_commands_prepared",
+      "classification": "PASS",
+      "rationale": "Abort/rollback plan documented with FUTURE_EXECUTION_COMMAND placeholders only."
+    }
+  ],
+  "charter_time_aggregate": "NO-GO",
+  "aggregate_reason": "LDT-002: BLOCKED gates remain (AntiBleed/CAD20, FX conversion, OANDA LIVE, RC-004 live unlock absent, non-ancestor MW/DIP). Material NOT_TESTED remains (freeze SHA, TTL). No live test is authorized."
+}

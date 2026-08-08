@@ -1,0 +1,77 @@
+{
+  "schema_version": "css.ldt001.evidence_manifest.v1",
+  "programme": "LDT-001",
+  "title": "Controlled Live Deployment Test — Evidence Manifest Schema",
+  "custody": {
+    "root": "runtime_reports/operational_validation/ldt001_<UTC_START>/",
+    "git_policy": "Local custody by default; do not commit secrets, credentials, or live account dumps. Redacted summaries may be committed only under explicit founder approval.",
+    "timestamp_format": "ISO-8601 with timezone offset for local operator notes; UTC Z for filenames and manifest timestamps",
+    "hash_algorithm": "SHA-256",
+    "naming": {
+      "run_id": "LDT001-<YYYYMMDDTHHMMSSZ>",
+      "files": "snake_or_upper_with_utc_suffix",
+      "forbidden_in_filenames": ["secret", "token", "password", "pem", "key"]
+    }
+  },
+  "required_artifacts": [
+    {"id": "workspace_verification", "path": "00_workspace_verification.json", "redaction": "none"},
+    {"id": "commit_and_manifest_hashes", "path": "01_commit_manifest_hashes.json", "redaction": "none"},
+    {"id": "environment_fingerprint", "path": "02_environment_fingerprint.json", "redaction": "strip_env_secret_values"},
+    {"id": "credential_diagnostics_redacted", "path": "03_credential_diagnostics_redacted.json", "redaction": "required"},
+    {"id": "broker_authentication_result", "path": "04_broker_authentication_result.json", "redaction": "required"},
+    {"id": "account_snapshot", "path": "05_account_snapshot.json", "redaction": "mask_account_ids"},
+    {"id": "market_data_snapshot", "path": "06_market_data_snapshot.json", "redaction": "none"},
+    {"id": "live_authority_snapshot", "path": "07_live_authority_snapshot.json", "redaction": "none"},
+    {"id": "gate_decisions", "path": "08_gate_decisions.json", "redaction": "none"},
+    {"id": "order_request", "path": "09_order_request.json", "redaction": "none"},
+    {"id": "broker_acknowledgement", "path": "10_broker_acknowledgement.json", "redaction": "mask_account_ids"},
+    {"id": "fill_or_rejection", "path": "11_fill_or_rejection.json", "redaction": "mask_account_ids"},
+    {"id": "reconciliation", "path": "12_reconciliation.json", "redaction": "mask_account_ids"},
+    {"id": "close_result", "path": "13_close_result.json", "redaction": "mask_account_ids"},
+    {"id": "realized_pnl", "path": "14_realized_pnl.json", "redaction": "none"},
+    {"id": "fees_and_slippage", "path": "15_fees_and_slippage.json", "redaction": "none"},
+    {"id": "alerts", "path": "16_alerts.json", "redaction": "none"},
+    {"id": "supervisor_state", "path": "17_supervisor_state.json", "redaction": "none"},
+    {"id": "zero_position_confirmation", "path": "18_zero_position_confirmation.json", "redaction": "mask_account_ids"},
+    {"id": "authority_revocation", "path": "19_authority_revocation.json", "redaction": "none"},
+    {"id": "operator_approval_record", "path": "20_operator_approval_record.json", "redaction": "none"},
+    {"id": "evidence_manifest", "path": "MANIFEST.json", "redaction": "none"}
+  ],
+  "manifest_object": {
+    "run_id": "string",
+    "programme": "LDT-001",
+    "generated_at_utc": "string",
+    "commit_sha": "string",
+    "branch": "string",
+    "broker": "string",
+    "instrument": "string",
+    "currency": "CAD",
+    "max_notional_cad": "20.00",
+    "artifacts": [
+      {
+        "id": "string",
+        "path": "string",
+        "sha256": "string",
+        "bytes": "integer",
+        "captured_at_utc": "string",
+        "redaction_applied": "boolean"
+      }
+    ],
+    "secrets_present": false,
+    "live_test_authorized": false,
+    "final_disposition": ["NOT_STARTED", "NO_GO", "ABORTED", "COMPLETED_NOT_CERTIFIED", "CERTIFIED_PENDING_REVIEW"]
+  },
+  "determinism_rules": [
+    "Sort artifacts by id ascending before hashing the manifest body.",
+    "Exclude volatile fields (wall-clock-only operator notes) from the integrity hash set, or record them in a separate NOTES.md that is listed but not required for PASS.",
+    "Never embed raw PEM, tokens, refresh secrets, or full Authorization headers.",
+    "Credential diagnostics must store presence/validity flags only."
+  ],
+  "forbidden_content_markers": [
+    "BEGIN PRIVATE KEY",
+    "BEGIN RSA PRIVATE KEY",
+    "client_secret",
+    "refresh_token=",
+    "Authorization: Bearer"
+  ]
+}
