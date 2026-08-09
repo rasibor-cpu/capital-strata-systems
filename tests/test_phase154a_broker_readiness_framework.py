@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from backend.runtime.broker_readiness_framework import (
     broker_readiness_payload,
     build_broker_readiness_snapshot,
@@ -7,6 +9,24 @@ from backend.runtime.broker_readiness_framework import (
 from backend.runtime.live_execution_authority import evaluate_live_execution_authority
 from backend.runtime.live_readiness_state_machine import evaluate_live_readiness_state
 
+
+def _valid_live_authority_lease(
+    broker: str,
+    environment: str = "LIVE",
+) -> dict[str, object]:
+    now = datetime.now(timezone.utc)
+    return {
+        "lease_id": f"phase196-test-{broker.lower()}",
+        "issued_at": (now - timedelta(seconds=1)).isoformat().replace("+00:00", "Z"),
+        "expires_at": (now + timedelta(seconds=299)).isoformat().replace("+00:00", "Z"),
+        "broker": broker,
+        "environment": environment,
+        "action": "LIVE_EXECUTE",
+        "scope": "LIVE_EXECUTION",
+        "consumed": False,
+        "revoked": False,
+        "generation": 1,
+    }
 
 def _ready_payload(broker_name: str) -> dict[str, object]:
     readiness = broker_readiness_payload(
@@ -39,6 +59,9 @@ def _ready_payload(broker_name: str) -> dict[str, object]:
     )
     return {
         "broker_readiness": readiness,
+        "selected_broker": broker_name,
+        "broker_mode": "LIVE",
+        "live_authority_lease": _valid_live_authority_lease(broker_name),
         "operator_requested_live": True,
         "live_micro_pilot_state": "ARMED",
         "capital_governor": "PASS",

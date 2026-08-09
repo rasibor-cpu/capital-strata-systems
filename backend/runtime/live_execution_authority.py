@@ -5,6 +5,7 @@ from typing import Any, Mapping
 
 from backend.runtime.broker_readiness_framework import build_broker_readiness_snapshot
 from backend.runtime.broker_credential_diagnostics import authority_reason_from_diagnostics, diagnostics_payload
+from backend.runtime.live_authority_lease import evaluate_live_authority_lease_evidence
 
 AUTHORITY_CONDITIONS = (
     ("operator_requested_live", "Operator Intent Missing"),
@@ -22,6 +23,7 @@ AUTHORITY_CONDITIONS = (
     ("rbac_pass", "RBAC"),
     ("kill_switch_clear", "Kill Switch"),
     ("go_no_go_allows", "GO / NO GO"),
+    ("live_authority_lease_valid", "Live Authority Lease Missing / Invalid"),
 )
 
 
@@ -51,6 +53,26 @@ def evaluate_live_execution_authority(evidence: Mapping[str, Any] | None) -> Liv
     pilot_state = str(data.get("live_micro_pilot_state") or data.get("pilot_state") or diagnostics.get("pilot_state") or "").upper()
     go_no_go = str(data.get("go_no_go") or diagnostics.get("go_no_go") or "NO GO").upper()
 
+    broker_name = str(
+        readiness.broker_name
+        or data.get("selected_broker")
+        or data.get("broker")
+        or ""
+    ).upper()
+
+    environment = str(
+        data.get("broker_mode")
+        or data.get("environment")
+        or broker_readiness_source.get("mode")
+        or ""
+    ).upper()
+
+    lease_status = evaluate_live_authority_lease_evidence(
+        data.get("live_authority_lease"),
+        broker=broker_name,
+        environment=environment,
+    )
+
     condition_status = {
         "operator_requested_live": _truthy(data.get("operator_requested_live", False)),
         "credentials_present": readiness.credentials_present,
@@ -67,6 +89,7 @@ def evaluate_live_execution_authority(evidence: Mapping[str, Any] | None) -> Liv
         "rbac_pass": _pass(data.get("rbac", diagnostics.get("rbac"))),
         "kill_switch_clear": _clear(data.get("kill_switch", diagnostics.get("kill_switch"))),
         "go_no_go_allows": go_no_go != "NO GO",
+        "live_authority_lease_valid": lease_status.valid,
     }
     failed = tuple(key for key, _reason in AUTHORITY_CONDITIONS if not condition_status.get(key, False))
     authority = not failed

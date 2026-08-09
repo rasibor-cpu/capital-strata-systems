@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from fastapi.testclient import TestClient
 
 from backend.runtime.live_execution_authority import evaluate_live_execution_authority
@@ -9,9 +11,30 @@ from dashboard.runtime.frontend_contract import build_frontend_payload
 import launcher.css_mobile_launcher as launcher
 
 
+def _valid_live_authority_lease(
+    broker: str,
+    environment: str = "LIVE",
+) -> dict[str, object]:
+    now = datetime.now(timezone.utc)
+    return {
+        "lease_id": f"phase196-test-{broker.lower()}",
+        "issued_at": (now - timedelta(seconds=1)).isoformat().replace("+00:00", "Z"),
+        "expires_at": (now + timedelta(seconds=299)).isoformat().replace("+00:00", "Z"),
+        "broker": broker,
+        "environment": environment,
+        "action": "LIVE_EXECUTE",
+        "scope": "LIVE_EXECUTION",
+        "consumed": False,
+        "revoked": False,
+        "generation": 1,
+    }
+
 def _all_pass_evidence() -> dict[str, object]:
     return {
         "operator_requested_live": True,
+        "selected_broker": "OANDA",
+        "broker_mode": "LIVE",
+        "live_authority_lease": _valid_live_authority_lease("OANDA"),
         "credential_status": "PRESENT",
         "broker_authenticated": True,
         "broker_connected": True,
@@ -34,6 +57,9 @@ def test_phase153i_arm_live_is_operator_intent_not_execution_authority() -> None
     decision = evaluate_live_execution_authority(
         {
             "operator_requested_live": True,
+        "selected_broker": "OANDA",
+        "broker_mode": "LIVE",
+        "live_authority_lease": _valid_live_authority_lease("OANDA"),
             "credential_status": "MISSING",
             "broker_authenticated": False,
             "broker_connected": False,
@@ -70,6 +96,9 @@ def test_phase153i_startup_summary_reconciles_operator_intent_with_authority() -
             "selected_broker": "COINBASE",
             "broker_mode": "live",
             "operator_requested_live": True,
+        "selected_broker": "OANDA",
+        "broker_mode": "LIVE",
+        "live_authority_lease": _valid_live_authority_lease("OANDA"),
             "broker_execution_armed": False,
             "can_live_execute": True,
         },
@@ -120,6 +149,9 @@ def test_phase153i_dashboard_and_launcher_expose_authority_fields() -> None:
                 "selected_broker": "COINBASE",
                 "broker_mode": "live",
                 "operator_requested_live": True,
+        "selected_broker": "OANDA",
+        "broker_mode": "LIVE",
+        "live_authority_lease": _valid_live_authority_lease("OANDA"),
                 "execution_authority": False,
                 "authority_reason": "Credentials Missing",
                 "live_authority_state": "BLOCKED",
@@ -143,6 +175,9 @@ def test_phase153i_launcher_authority_endpoint_is_read_only(monkeypatch) -> None
         "get_launcher_broker_read_only_status_feed",
         lambda: {
             "operator_requested_live": True,
+        "selected_broker": "OANDA",
+        "broker_mode": "LIVE",
+        "live_authority_lease": _valid_live_authority_lease("OANDA"),
             "execution_authority": False,
             "authority_reason": "Credentials Missing",
             "live_authority_state": "BLOCKED",
