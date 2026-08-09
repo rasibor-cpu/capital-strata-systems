@@ -1795,8 +1795,18 @@ def authenticate_startup_user() -> dict[str, Any]:
         except Exception as e:
             print(f"[SESSION SETTLEMENT WARN] {e}")
 
+        origin = runtime_origin_context()
+        audit_ledger.record(
+            "login_cancelled",
+            "UNKNOWN",
+            {
+                "reason": "operator_sign_on_cancelled",
+                **origin,
+            },
+        )
+
         print("[SESSION STOPPED] Keyboard interrupt received.")
-        raise
+        raise SystemExit(0)
 
     except SystemExit:
         raise
