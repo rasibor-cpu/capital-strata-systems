@@ -64,3 +64,12 @@ __all__ = [
     "build_broker_readiness_matrix",
     "verify_operational_qualification_firewall",
 ]
+
+# Phase 194 canonical broker-path reconciliation.
+from backend.app.brokers.operational_qualification.canonical_path import (
+    CANONICAL_TIER1,
+    CanonicalBrokerQualificationPath,
+    build_canonical_broker_path_matrix,
+    canonical_broker_path,
+    phase194_safety_contract,
+)
