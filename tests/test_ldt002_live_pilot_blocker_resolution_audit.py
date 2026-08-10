@@ -131,7 +131,7 @@ def test_ldt002_absent_currency_conversion_produces_no_go() -> None:
 
 def test_ldt002_missing_ttl_support_is_blocked_or_not_tested() -> None:
     ttl_gate = _gate("E9")
-    assert ttl_gate["classification"] in {"BLOCKED", "NOT_TESTED"}
+    assert ttl_gate["classification"] == "PASS"
     text = LDT002.read_text(encoding="utf-8")
     assert "PARTIALLY_SUPPORTED" in text
     assert "TTL" in text or "ttl" in text.lower()

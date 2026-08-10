@@ -47,6 +47,7 @@ def _live_order(amount: str = "1.00", *, symbol: str = "BTC-USD", side: str = "B
         "symbol": symbol,
         "side": side,
         "notional": amount,
+        "notional_currency": "CAD",
     }
 
 

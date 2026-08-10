@@ -9,6 +9,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from backend.config.order_limit_config import DEFAULT_ORDER_LIMIT_CONFIG
+from backend.app.market.provider_interfaces import (
+    DEFAULT_FX_CONVERSION_PROVIDER,
+    FXConversionProvider,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -151,10 +155,12 @@ class LiveMicroPilotGovernor:
         config_path: str | Path | None = None,
         state_path: str | Path | None = None,
         audit_path: str | Path | None = None,
+        fx_conversion_provider: FXConversionProvider | None = None,
     ) -> None:
         self.config_path = Path(config_path or os.getenv("CSS_LIVE_MICRO_PILOT_CONFIG") or DEFAULT_CONFIG_PATH)
         self.state_path = Path(state_path or os.getenv("CSS_LIVE_MICRO_PILOT_STATE") or DEFAULT_STATE_PATH)
         self.audit_path = Path(audit_path or os.getenv("CSS_LIVE_MICRO_PILOT_AUDIT") or DEFAULT_AUDIT_PATH)
+        self.fx_conversion_provider = fx_conversion_provider or DEFAULT_FX_CONVERSION_PROVIDER
 
     @staticmethod
     def default_config() -> LiveMicroPilotConfig:
@@ -264,9 +270,125 @@ class LiveMicroPilotGovernor:
             return self._reject("live_micro_pilot_not_armed", "manual live arming required", config=config, state=state_data)
 
         positions = [dict(item) for item in (open_positions if open_positions is not None else state_data.get("open_positions", [])) if isinstance(item, Mapping)]
-        notional = _decimal(order.get("notional", order.get("amount", "0")))
+        native_notional = _decimal(order.get("notional", order.get("amount", "0")))
+        native_currency = str(order.get("notional_currency", "") or "").strip().upper()
         symbol = str(order.get("symbol", "")).upper()
         side = str(order.get("side", "")).upper()
+
+        if native_notional <= Decimal("0.00"):
+            return self._reject(
+                "invalid_live_notional",
+                "live notional must be positive",
+                config=config,
+                state=state_data,
+            )
+
+        if not native_currency:
+            return self._reject(
+                "live_notional_currency_missing",
+                "live notional currency is required for CAD capital normalization",
+                config=config,
+                state=state_data,
+            )
+
+        if native_currency == config.currency:
+            notional = native_notional
+            fx_normalization = {
+                "native_notional": _money_string(native_notional),
+                "native_currency": native_currency,
+                "normalized_notional": _money_string(notional),
+                "normalized_currency": config.currency,
+                "rate": 1.0,
+                "provider": "LIVE_MICRO_PILOT_GOVERNED_IDENTITY",
+                "provider_version": "197.R4",
+                "quality": "GOVERNED_IDENTITY",
+                "status": "AVAILABLE",
+                "path_type": "IDENTITY",
+                "conversion_path": [config.currency],
+                "evidence_hash": "CAD_IDENTITY_1_0",
+            }
+        else:
+            try:
+                fx_quote = self.fx_conversion_provider.get_conversion(
+                    base_currency=native_currency,
+                    quote_currency=config.currency,
+                    context={"evaluation_time": datetime.now(timezone.utc)},
+                )
+            except Exception as exc:
+                return self._reject(
+                    "fx_conversion_unavailable",
+                    f"FX conversion failed closed: {exc}",
+                    config=config,
+                    state=state_data,
+                )
+
+            fx_base = str(getattr(fx_quote, "base_currency", "") or "").strip().upper()
+            fx_quote_currency = str(getattr(fx_quote, "quote_currency", "") or "").strip().upper()
+
+            if fx_base != native_currency or fx_quote_currency != config.currency:
+                return self._reject(
+                    "fx_conversion_pair_mismatch",
+                    "FX conversion pair does not match live notional and pilot currencies",
+                    config=config,
+                    state=state_data,
+                )
+
+            if not fx_quote.is_usable():
+                return self._reject(
+                    "fx_conversion_unavailable",
+                    "FX conversion is not usable for live CAD capital normalization",
+                    config=config,
+                    state=state_data,
+                )
+
+            converted = fx_quote.convert(float(native_notional))
+
+            if converted is None:
+                return self._reject(
+                    "fx_conversion_unavailable",
+                    "FX conversion returned no normalized amount",
+                    config=config,
+                    state=state_data,
+                )
+
+            try:
+                notional = Decimal(str(converted)).quantize(Decimal("0.01"))
+            except (InvalidOperation, TypeError, ValueError):
+                return self._reject(
+                    "fx_conversion_invalid_result",
+                    "FX conversion produced an invalid CAD notional",
+                    config=config,
+                    state=state_data,
+                )
+
+            if notional <= Decimal("0.00"):
+                return self._reject(
+                    "fx_conversion_invalid_result",
+                    "FX conversion produced a non-positive CAD notional",
+                    config=config,
+                    state=state_data,
+                )
+
+            fx_normalization = {
+                "native_notional": _money_string(native_notional),
+                "native_currency": native_currency,
+                "normalized_notional": _money_string(notional),
+                "normalized_currency": config.currency,
+                "rate": getattr(fx_quote, "rate", None),
+                "timestamp": getattr(fx_quote, "timestamp", None),
+                "provider": getattr(fx_quote, "provider", ""),
+                "provider_version": getattr(fx_quote, "provider_version", ""),
+                "quality": getattr(fx_quote, "quality", ""),
+                "status": getattr(fx_quote, "status", ""),
+                "path_type": getattr(fx_quote, "path_type", ""),
+                "conversion_path": list(getattr(fx_quote, "conversion_path", ()) or ()),
+                "contributing_rate_ids": list(getattr(fx_quote, "contributing_rate_ids", ()) or ()),
+                "contributing_provider_ids": list(getattr(fx_quote, "contributing_provider_ids", ()) or ()),
+                "contributing_timestamps": list(getattr(fx_quote, "contributing_timestamps", ()) or ()),
+                "evidence_hash": getattr(fx_quote, "evidence_hash", ""),
+                "fail_reason": getattr(fx_quote, "fail_reason", ""),
+            }
+
         capital_deployed = sum(_position_notional(item) for item in positions)
         remaining_capacity = max(Decimal("0.00"), config.max_live_test_capital - capital_deployed)
         orders_used = int(state_data.get("orders_used_this_session", 0) or 0)
@@ -279,8 +401,6 @@ class LiveMicroPilotGovernor:
             return self._reject("session_loss_limit_breached", "session loss limit reached", config=config, state=state_data)
         if orders_used >= config.max_orders_per_session:
             return self._reject("max_orders_per_session_breached", "session order count limit reached", config=config, state=state_data)
-        if notional <= Decimal("0.00"):
-            return self._reject("invalid_live_notional", "live notional must be positive", config=config, state=state_data)
         if notional > config.max_position_size:
             return self._reject("max_position_size_breached", "order exceeds CAD 20 position size", config=config, state=state_data)
         if notional > remaining_capacity:
@@ -293,29 +413,69 @@ class LiveMicroPilotGovernor:
             return self._reject("pyramiding_blocked", "pyramiding is disabled", config=config, state=state_data)
 
         status = self.status(config=config, config_source=config_source or "CONFIG_FILE", state=state_data)
+        status["fx_capital_normalization"] = fx_normalization
         status["last_status_reason"] = "approved_for_downstream_gates"
         self._audit("LIVE_MICRO_PILOT_APPROVED", reason="approved_for_downstream_gates", order=order, status=status)
         return LiveMicroPilotDecision(True, "approved_for_downstream_gates", status, "LIVE_MICRO_PILOT_APPROVED")
 
-    def record_order_submitted(self, order: Mapping[str, Any]) -> dict[str, Any]:
+    def record_order_submitted(
+        self,
+        order: Mapping[str, Any],
+        *,
+        decision: LiveMicroPilotDecision | None = None,
+    ) -> dict[str, Any]:
         if not _is_live_order(order):
             return self.status()
+
+        if decision is None or not decision.approved:
+            raise LiveMicroPilotAuthorizationError(
+                "approved live micro-pilot decision is required before recording a live order"
+            )
+
+        fx = decision.status.get("fx_capital_normalization")
+        if not isinstance(fx, Mapping):
+            raise LiveMicroPilotAuthorizationError(
+                "approved FX capital normalization evidence is required before recording a live order"
+            )
+
+        normalized_currency = str(fx.get("normalized_currency", "") or "").strip().upper()
+        normalized_notional = _decimal(fx.get("normalized_notional", "0"))
+
+        if normalized_currency != "CAD" or normalized_notional <= Decimal("0.00"):
+            raise LiveMicroPilotAuthorizationError(
+                "approved live order must contain positive CAD-normalized notional"
+            )
+
         state = self._load_state()
         state["orders_used_this_session"] = int(state.get("orders_used_this_session", 0) or 0) + 1
+
         positions = [item for item in state.get("open_positions", []) if isinstance(item, Mapping)]
+
         positions.append(
             {
                 "symbol": str(order.get("symbol", "")).upper(),
                 "side": str(order.get("side", "")).upper(),
-                "notional": _money_string(_decimal(order.get("notional", order.get("amount", "0")))),
+                "notional": _money_string(normalized_notional),
+                "notional_currency": "CAD",
+                "native_notional": str(fx.get("native_notional", "")),
+                "native_currency": str(fx.get("native_currency", "")).upper(),
+                "fx_capital_normalization": dict(fx),
                 "unrealized_pnl": "0.00",
                 "recorded_at": _utc_now(),
             }
         )
+
         state["open_positions"] = positions
         state["last_status_reason"] = "order_recorded_after_downstream_approval"
         self._save_state(state)
-        self._audit("LIVE_MICRO_PILOT_ORDER_RECORDED", reason="order_recorded_after_downstream_approval", order=order)
+
+        self._audit(
+            "LIVE_MICRO_PILOT_ORDER_RECORDED",
+            reason="order_recorded_after_downstream_approval",
+            order=order,
+            fx_capital_normalization=dict(fx),
+        )
+
         return self.status(state=state)
 
     def status(

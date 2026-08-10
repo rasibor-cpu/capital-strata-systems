@@ -232,6 +232,7 @@ def test_ldt001_unresolved_open_position_rejects_additional_entry(tmp_path, monk
             "symbol": "EUR_USD",
             "side": "BUY",
             "notional": "1.00",
+            "notional_currency": "CAD",
         },
         open_positions=[{"symbol": "EUR_USD", "side": "BUY", "notional": "1.00"}],
     )
