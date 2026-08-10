@@ -79,11 +79,13 @@ Terminology must stay distinct (Phase 189 / 190 / 192 alignment):
 | Term | Scope | RC-004 relation |
 | --- | --- | --- |
 | **Phase 189 Read-only operational TTL** | Controlled RO session window (`READ_ONLY_OPERATIONAL`) | May support RO precheck; **not** live authority |
-| **Live authority TTL** | Future single-use scoped live-arm token / expiry | **Missing / PARTIALLY_SUPPORTED** on arm path — still a live-pilot blocker (`BLK-AUTH-TTL`) |
+| **Live authority TTL** | Scoped/expiring live-authority lease with single-use consumption and revocation | **IMPLEMENTED / RESOLVED by Phase 196-R2**; this removes `BLK-AUTH-TTL` only and does not unlock RC-004 live execution |
 | **Execution authority** | Boolean AND-gate for live submit | Always false under RC-004 |
 
 RC-004 **depends** on correct TTL vocabulary: RO TTL must never be cited as live
-authorization TTL. Completing RC-004 does **not** implement live-authority TTL.
+authorization TTL. Phase 196-R2 subsequently implemented the separate live-authority
+lease/TTL control. That resolves `BLK-AUTH-TTL` but does **not** change RC-004's
+explicit `LIVE_TRADING_NOT_AUTHORIZED` posture or grant execution authority.
 
 ---
 

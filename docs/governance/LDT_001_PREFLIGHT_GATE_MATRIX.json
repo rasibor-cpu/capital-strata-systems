@@ -228,8 +228,8 @@
       "id": "E9",
       "category": "Safety",
       "name": "authorization_ttl_single_use_scoped",
-      "classification": "NOT_TESTED",
-      "rationale": "LDT-002 BLK-AUTH-TTL: live-authority TTL PARTIALLY_SUPPORTED (arm/disarm exist) but no live TTL enforcement, no single-use scoped token; arm file may persist across restart. Phase 189 RO TTL (READ_ONLY_OPERATIONAL) is distinct and is not live unlock."
+      "classification": "PASS",
+      "rationale": "Phase 196-R2 resolves BLK-AUTH-TTL with scoped live-authority lease expiry, revocation and single-use consumption enforcement. Phase 189 RO TTL remains distinct. This does not authorize live trading."
     },
     {
       "id": "E10",
@@ -296,5 +296,5 @@
     }
   ],
   "charter_time_aggregate": "NO-GO",
-  "aggregate_reason": "Phase 192: AntiBleed CAD20 and RC-004 artifact gaps closed; lineage resolved; candidate parity 0 0. BLOCKED gates remain (FX conversion, OANDA LIVE money path, RC-004 live unlock denied). Material NOT_TESTED remains (freeze SHA, live-authority TTL). Founder GO not issued. No live test is authorized."
+  "aggregate_reason": "Phase 192: AntiBleed CAD20 and RC-004 artifact gaps closed; lineage resolved; candidate parity 0 0. BLOCKED gates remain (FX conversion, OANDA LIVE money path, RC-004 live unlock denied). Material NOT_TESTED remains (freeze SHA). BLK-AUTH-TTL resolved by Phase 196-R2. Founder GO not issued. No live test is authorized."
 }

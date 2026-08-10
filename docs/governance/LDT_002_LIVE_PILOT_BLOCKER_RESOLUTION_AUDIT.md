@@ -209,6 +209,8 @@ Gate posture: **BLOCKED** (ceremony incomplete) / TTL support **NOT_TESTED** as 
 
 **Phase 192 TTL vocabulary:** Phase 189 **read-only operational TTL** (`READ_ONLY_OPERATIONAL`) is defined for controlled RO sessions and **must not** be equated with live-authority TTL or execution authority.
 
+**Phase 196-R2 supersession note:** the historical Phase 192 classification above is retained as the record of the pre-remediation state. `BLK-AUTH-TTL` is now **RESOLVED** by Phase 196-R2 live-authority lease enforcement. This resolution does **not** authorize live trading, designate a freeze SHA, clear RC-004 live unlock, certify OANDA LIVE, clear FX conversion, or constitute founder GO.
+
 ---
 
 ## 7. OANDA live-read-only certification gap
@@ -294,7 +296,7 @@ Until then: freeze SHA = **NOT_DESIGNATED**.
 | BLK-RC004-LIVE-UNLOCK | `BLOCKED` for live | Committed RC-004 states **`LIVE_TRADING_NOT_AUTHORIZED`** |
 | BLK-ANTIBLEED-CAD20 | `RESOLVED` | Phase 184A MICRO_PILOT min 20 for LIVE_MICRO_PILOT |
 | BLK-FX-CONVERSION | `BLOCKED` | No approved LDT contract / no rates file |
-| BLK-AUTH-TTL | `PARTIALLY_SUPPORTED` → gate `NOT_TESTED` | No live-authority TTL/single-use/scope; RO TTL ≠ live TTL |
+| BLK-AUTH-TTL | `RESOLVED` | Phase 196-R2 implements scoped live-authority lease validation with expiry, revocation, consumption/single-use enforcement, and fail-closed authority gating; Phase 189 RO TTL remains distinct |
 | BLK-OANDA-LIVE | `BLOCKED` | LIVE money path not certified; RO framework ≠ live |
 | BLK-ENDURANCE-CREDIT | `NOT_APPLICABLE` as OV-002 PASS | ER-001 observational only; OV-002 not claimed |
 | BLK-FREEZE-SHA | `NOT_TESTED` | Not designated (candidate ≠ freeze) |

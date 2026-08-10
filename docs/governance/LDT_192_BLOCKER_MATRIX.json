@@ -2,9 +2,9 @@
   "schema_version": "css.ldt.blocker_matrix.v1",
   "programme": "LDT",
   "phase": "192",
-  "title": "LDT Blocker Matrix — Phase 192 Refresh",
+  "title": "LDT Blocker Matrix \u2014 Phase 192 Refresh",
   "candidate_branch": "css-rc-live-001-candidate",
-  "as_of_head": "84a0e893385a624a8ebb5dfffd53f35ce4b30ba7",
+  "as_of_head": "1cca2f3091232634268c9ad6a0f9c78b83d76f72",
   "freeze_sha_designated": false,
   "live_authorized": false,
   "charter_time_aggregate": "NO-GO",
@@ -57,13 +57,13 @@
     },
     {
       "id": "BLK-AUTH-TTL",
-      "classification": "PARTIALLY_SUPPORTED",
-      "notes": "Arm/disarm exist; live-authority TTL missing; Phase 189 RO TTL is distinct and must not be conflated"
+      "classification": "RESOLVED",
+      "notes": "Resolved by Phase 196-R2: scoped live-authority lease validation enforces expiry, revocation, consumption/single-use semantics and fail-closed live execution authority. Phase 189 RO TTL remains distinct."
     },
     {
       "id": "BLK-OANDA-LIVE",
       "classification": "BLOCKED",
-      "notes": "LIVE execution not certified; 187A/188 RO framework ≠ live write/auth for money"
+      "notes": "LIVE execution not certified; 187A/188 RO framework \u2260 live write/auth for money"
     },
     {
       "id": "BLK-ENDURANCE-CREDIT",
@@ -109,5 +109,5 @@
     }
   ],
   "aggregate": "NO-GO",
-  "aggregate_reason": "Freeze undesignated; FX conversion blocked; OANDA LIVE execution blocked; live-authority TTL incomplete; RC-004 live unlock denied; founder GO absent. AntiBleed CAD20 and RC-004 artifact gaps closed."
+  "aggregate_reason": "Freeze undesignated; FX conversion blocked; OANDA LIVE execution blocked; RC-004 live unlock denied; founder GO absent; DIP live remains blocked; RC-003R FINAL custody/re-certification remains open. BLK-AUTH-TTL is resolved by Phase 196-R2. No live test or live trading is authorized."
 }
