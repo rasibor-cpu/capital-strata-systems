@@ -56,6 +56,7 @@ dashboard/runtime/**/__pycache__/
 dashboard/runtime/**/*.py[cod]
 dashboard/runtime/**/*.pyc
 backend/runtime/*
+!backend/runtime/autonomous_supervisor.py
 !backend/runtime/environment_bootstrap.py
 !backend/runtime/broker_operational_status.py
 !backend/runtime/broker_credential_diagnostics.py

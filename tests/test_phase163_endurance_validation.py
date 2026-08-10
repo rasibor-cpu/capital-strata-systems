@@ -52,7 +52,13 @@ def temp_dir():
 
 
 @pytest.fixture
-def setup_platform(temp_dir):
+def setup_platform(temp_dir, monkeypatch):
+    # Synthetic infrastructure prerequisite for canonical readiness.
+    synthetic_env = os.path.join(temp_dir, ".env")
+    with open(synthetic_env, "w", encoding="utf-8") as handle:
+        handle.write("# synthetic Phase 162/163 readiness fixture\n")
+    original_cwd = os.getcwd()
+    monkeypatch.chdir(temp_dir)
     # Setup Metrics
     m_reg = MetricsRegistry()
     m_tel = TelemetryCollector()
@@ -112,7 +118,11 @@ def setup_platform(temp_dir):
     )
     
     dashboard_service = DashboardService(read_model=read_model)
-    return dashboard_service
+    try:
+        yield dashboard_service
+    finally:
+        # Restore cwd before TemporaryDirectory teardown on Windows.
+        monkeypatch.chdir(original_cwd)
 
 
 def test_endurance_evidence_reboot_detection(temp_dir):

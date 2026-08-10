@@ -48,17 +48,17 @@ def test_mr001_plan_preserves_historical_no_merge_and_records_mr003_execution() 
 
 
 def test_mr001_historical_divergence_facts_still_documented() -> None:
-    assert _git("merge-base", UNIFIED, MAINT) == MERGE_BASE
-    assert _git("rev-list", "--count", f"{MAINT}..{UNIFIED}") == "1"
-    assert _git("rev-list", "--count", f"{UNIFIED}..{MAINT}") == "9"
-    unified_only = _git_lines("log", "--oneline", f"{MAINT}..{UNIFIED}")
+    assert _git("merge-base", UNIFIED_HEAD, MAINT_TIP) == MERGE_BASE
+    assert _git("rev-list", "--count", f"{MAINT_TIP}..{UNIFIED_HEAD}") == "1"
+    assert _git("rev-list", "--count", f"{UNIFIED_HEAD}..{MAINT_TIP}") == "9"
+    unified_only = _git_lines("log", "--oneline", f"{MAINT_TIP}..{UNIFIED_HEAD}")
     assert any(UNIFIED_HEAD[:8] in line for line in unified_only)
     assert any("RC-001" in line for line in unified_only)
 
 
 def test_mr001_zero_path_intersection_since_merge_base_historical() -> None:
-    u_files = set(_git_lines("diff", "--name-only", f"{MERGE_BASE}..{UNIFIED}"))
-    m_files = set(_git_lines("diff", "--name-only", f"{MERGE_BASE}..{MAINT}"))
+    u_files = set(_git_lines("diff", "--name-only", f"{MERGE_BASE}..{UNIFIED_HEAD}"))
+    m_files = set(_git_lines("diff", "--name-only", f"{MERGE_BASE}..{MAINT_TIP}"))
     assert u_files
     assert m_files
     assert u_files.isdisjoint(m_files)
@@ -91,7 +91,7 @@ def test_mr001_candidate_now_contains_maintenance_artifacts() -> None:
 
 def test_mr001_merge_tree_historical_preview_clean() -> None:
     completed = subprocess.run(
-        ["git", "merge-tree", "--write-tree", "--messages", UNIFIED, MAINT],
+        ["git", "merge-tree", "--write-tree", "--messages", UNIFIED_HEAD, MAINT_TIP],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -107,7 +107,7 @@ def test_mr001_merge_tree_historical_preview_clean() -> None:
 
 
 def test_mr001_hotpath_modules_not_all_touched_by_maintenance() -> None:
-    m_files = set(_git_lines("diff", "--name-only", f"{MERGE_BASE}..{MAINT}"))
+    m_files = set(_git_lines("diff", "--name-only", f"{MERGE_BASE}..{MAINT_TIP}"))
     assert "engine/execution/execution_gate.py" in m_files
     assert "backend/app/persistence/services/trade_runtime_service.py" in m_files
     for clean in (

@@ -312,10 +312,10 @@ def test_no_broker_credentials_restored(temp_auth_file, mock_registry):
         assert "password" not in key.lower()
 
 
-@patch("dashboard.auth.css_sign_on.load_users")
-def test_valid_restoration_readiness(mock_load, temp_auth_file, mock_registry):
+def test_valid_restoration_readiness(monkeypatch, temp_auth_file, mock_registry):
     """16. Verify that calling await_login_ready_state with a valid file skips prompts and returns context."""
-    mock_load.return_value = mock_registry
+    mock_load = MagicMock(return_value=mock_registry)
+    monkeypatch.setattr(auth, "load_users", mock_load)
     
     valid_payload = {
         "user_id": "00000",
@@ -372,9 +372,10 @@ def test_logout_invalidation(temp_auth_file):
     assert not temp_auth_file.exists()
 
 
-@patch("dashboard.auth.css_sign_on.load_users")
-def test_corrupted_session_does_not_crash_startup(mock_load, temp_auth_file, mock_registry):
+def test_corrupted_session_does_not_crash_startup(monkeypatch, temp_auth_file, mock_registry):
     """19. Verify that corrupted file content does not throw unhandled exception and cleanly falls back."""
+    mock_load = MagicMock(return_value=mock_registry)
+    monkeypatch.setattr(auth, "load_users", mock_load)
     mock_load.return_value = mock_registry
     temp_auth_file.write_text("random bad binary content or corruption", encoding="utf-8")
     

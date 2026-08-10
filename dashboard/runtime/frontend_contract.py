@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from backend.runtime.canonical_broker_state_adapter import map_canonical_credential_status_to_reporting
+
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -1469,20 +1471,18 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
             broker_payload.get("missing_credential_names", credential_diagnostics.get("missing_credentials"))
         ),
         "credential_status": str(
-            (
-                "PRESENT"
-                if str(canonical_state.get("credential_status", "")).upper() == "PASS"
-                else canonical_state.get("credential_status")
+            map_canonical_credential_status_to_reporting(
+                canonical_state.get("credential_status"),
+                diagnostics=credential_diagnostics,
             )
             or broker_payload.get("credential_status")
             or credential_diagnostics.get("credential_status")
             or DATA_UNAVAILABLE
         ),
         "credentials": str(
-            (
-                "PRESENT"
-                if str(canonical_state.get("credential_status", "")).upper() == "PASS"
-                else canonical_state.get("credential_status")
+            map_canonical_credential_status_to_reporting(
+                canonical_state.get("credential_status"),
+                diagnostics=credential_diagnostics,
             )
             or broker_payload.get("credentials")
             or broker_payload.get("credential_status")
