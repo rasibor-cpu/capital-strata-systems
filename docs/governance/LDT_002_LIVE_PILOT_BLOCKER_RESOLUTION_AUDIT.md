@@ -211,6 +211,8 @@ Gate posture: **BLOCKED** (ceremony incomplete) / TTL support **NOT_TESTED** as 
 
 **Phase 196-R2 supersession note:** the historical Phase 192 classification above is retained as the record of the pre-remediation state. `BLK-AUTH-TTL` is now **RESOLVED** by Phase 196-R2 live-authority lease enforcement. This resolution does **not** authorize live trading, designate a freeze SHA, clear RC-004 live unlock, certify OANDA LIVE, clear FX conversion, or constitute founder GO.
 
+**Phase 198 supersession note:** the historical Phase 192 `BLK-FX-CONVERSION` finding is retained above as the pre-remediation record. Phase 197 commit `9725802fb820628e66d1bcbb8c35c67f9a6a0b5d` resolves the live micro-pilot capital-normalization blocker by requiring explicit order currency, governed conversion into CAD before capital admission, fail-closed rejection of unavailable/mismatched/invalid FX conversion, and persistence of the exact approved CAD notional with FX provenance. This resolution does **not** certify the OANDA LIVE money path, clear RC-004 live unlock, designate a freeze SHA, issue founder GO, or authorize live trading.
+
 ---
 
 ## 7. OANDA live-read-only certification gap
@@ -295,7 +297,7 @@ Until then: freeze SHA = **NOT_DESIGNATED**.
 | BLK-RC004-SIGNOFF | `SUPERSEDED_SPLIT` | Split into artifact vs live-unlock |
 | BLK-RC004-LIVE-UNLOCK | `BLOCKED` for live | Committed RC-004 states **`LIVE_TRADING_NOT_AUTHORIZED`** |
 | BLK-ANTIBLEED-CAD20 | `RESOLVED` | Phase 184A MICRO_PILOT min 20 for LIVE_MICRO_PILOT |
-| BLK-FX-CONVERSION | `BLOCKED` | No approved LDT contract / no rates file |
+| BLK-FX-CONVERSION | `RESOLVED` | Phase 197 commit `9725802fb820628e66d1bcbb8c35c67f9a6a0b5d` adds governed live micro-pilot CAD normalization, fail-closed FX conversion, and normalized-position persistence; OANDA LIVE remains separately blocked |
 | BLK-AUTH-TTL | `RESOLVED` | Phase 196-R2 implements scoped live-authority lease validation with expiry, revocation, consumption/single-use enforcement, and fail-closed authority gating; Phase 189 RO TTL remains distinct |
 | BLK-OANDA-LIVE | `BLOCKED` | LIVE money path not certified; RO framework ≠ live |
 | BLK-ENDURANCE-CREDIT | `NOT_APPLICABLE` as OV-002 PASS | ER-001 observational only; OV-002 not claimed |

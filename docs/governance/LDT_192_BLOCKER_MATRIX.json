@@ -2,7 +2,7 @@
   "schema_version": "css.ldt.blocker_matrix.v1",
   "programme": "LDT",
   "phase": "192",
-  "title": "LDT Blocker Matrix \u2014 Phase 192 Refresh",
+  "title": "LDT Blocker Matrix — Phase 192 Refresh",
   "candidate_branch": "css-rc-live-001-candidate",
   "as_of_head": "1cca2f3091232634268c9ad6a0f9c78b83d76f72",
   "freeze_sha_designated": false,
@@ -52,8 +52,8 @@
     },
     {
       "id": "BLK-FX-CONVERSION",
-      "classification": "BLOCKED",
-      "notes": "No LDT-approved live pilot FX conversion; online FX uncertified; rates file absent"
+      "classification": "RESOLVED",
+      "notes": "Resolved by Phase 197 commit 9725802fb820628e66d1bcbb8c35c67f9a6a0b5d: governed live micro-pilot FX normalization requires explicit native currency, normalizes to CAD through FXConversionProvider before capital admission, fails closed on unavailable/mismatched/invalid conversion, and persists approved CAD notional plus FX provenance. Does not certify OANDA LIVE or authorize live trading."
     },
     {
       "id": "BLK-AUTH-TTL",
@@ -63,7 +63,7 @@
     {
       "id": "BLK-OANDA-LIVE",
       "classification": "BLOCKED",
-      "notes": "LIVE execution not certified; 187A/188 RO framework \u2260 live write/auth for money"
+      "notes": "LIVE execution not certified; 187A/188 RO framework ≠ live write/auth for money"
     },
     {
       "id": "BLK-ENDURANCE-CREDIT",
@@ -109,5 +109,5 @@
     }
   ],
   "aggregate": "NO-GO",
-  "aggregate_reason": "Freeze undesignated; FX conversion blocked; OANDA LIVE execution blocked; RC-004 live unlock denied; founder GO absent; DIP live remains blocked; RC-003R FINAL custody/re-certification remains open. BLK-AUTH-TTL is resolved by Phase 196-R2. No live test or live trading is authorized."
+  "aggregate_reason": "Freeze undesignated; Phase 197 FX conversion blocker resolved; OANDA LIVE execution blocked; RC-004 live unlock denied; founder GO absent; DIP live remains blocked; RC-003R FINAL custody/re-certification remains open. BLK-AUTH-TTL is resolved by Phase 196-R2. No live test or live trading is authorized."
 }

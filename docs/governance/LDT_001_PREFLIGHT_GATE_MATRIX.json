@@ -3,7 +3,13 @@
   "programme": "LDT-001",
   "title": "Controlled Live Deployment Test — Preflight GO/NO-GO Matrix",
   "evaluation_rule": "Any FAIL, BLOCKED, or material NOT_TESTED produces NO-GO. PASS and NOT_APPLICABLE only do not authorize live.",
-  "classification_values": ["PASS", "FAIL", "BLOCKED", "NOT_TESTED", "NOT_APPLICABLE"],
+  "classification_values": [
+    "PASS",
+    "FAIL",
+    "BLOCKED",
+    "NOT_TESTED",
+    "NOT_APPLICABLE"
+  ],
   "as_of_charter_head": "66e11d4f83600a7765b4e55afa33d19e301dd70e",
   "as_of_candidate_branch": "css-rc-live-001-candidate",
   "as_of_candidate_head": "84a0e893385a624a8ebb5dfffd53f35ce4b30ba7",
@@ -172,8 +178,8 @@
       "id": "D3",
       "category": "Portfolio",
       "name": "available_capital_confirmed",
-      "classification": "BLOCKED",
-      "rationale": "LDT-002 BLK-FX-CONVERSION: no approved deterministic CAD→account CCY→order notional contract; fx_daily_rates.json absent; accounting FX cache not LDT-approved for live pilot."
+      "classification": "PASS",
+      "rationale": "Phase 197 resolves BLK-FX-CONVERSION for live micro-pilot capital governance: native live-order notional requires explicit currency, cross-currency values are normalized through the governed FXConversionProvider contract into CAD before CAD20 admission checks, unusable or mismatched conversion fails closed, and approved normalized CAD notional plus FX provenance is persisted for subsequent capacity accounting. Phase 197 commit 9725802fb820628e66d1bcbb8c35c67f9a6a0b5d. This PASS does not certify OANDA LIVE, designate a freeze SHA, unlock RC-004, issue founder GO, or authorize live trading."
     },
     {
       "id": "D4",
@@ -296,5 +302,5 @@
     }
   ],
   "charter_time_aggregate": "NO-GO",
-  "aggregate_reason": "Phase 192: AntiBleed CAD20 and RC-004 artifact gaps closed; lineage resolved; candidate parity 0 0. BLOCKED gates remain (FX conversion, OANDA LIVE money path, RC-004 live unlock denied). Material NOT_TESTED remains (freeze SHA). BLK-AUTH-TTL resolved by Phase 196-R2. Founder GO not issued. No live test is authorized."
+  "aggregate_reason": "Phase 192: AntiBleed CAD20 and RC-004 artifact gaps closed; lineage resolved; candidate parity 0 0. BLK-FX-CONVERSION is resolved by Phase 197. BLOCKED gates remain (OANDA LIVE money path, RC-004 live unlock denied). Material NOT_TESTED remains (freeze SHA). BLK-AUTH-TTL resolved by Phase 196-R2. Founder GO not issued. No live test is authorized."
 }

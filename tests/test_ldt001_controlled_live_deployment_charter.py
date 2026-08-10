@@ -92,7 +92,7 @@ def test_ldt001_candidate_not_live_ready_and_aggregate_no_go() -> None:
     anti = next(g for g in matrix["gates"] if g["id"] == "E5")
     assert anti["classification"] == "PASS"
     assert next(g for g in matrix["gates"] if g["id"] == "C8")["classification"] == "BLOCKED"
-    assert next(g for g in matrix["gates"] if g["id"] == "D3")["classification"] == "BLOCKED"
+    assert next(g for g in matrix["gates"] if g["id"] == "D3")["classification"] == "PASS"
     assert next(g for g in matrix["gates"] if g["id"] == "A1")["classification"] == "NOT_TESTED"
     assert next(g for g in matrix["gates"] if g["id"] == "A3")["classification"] == "PASS"
     assert next(g for g in matrix["gates"] if g["id"] == "E8")["classification"] == "PASS"

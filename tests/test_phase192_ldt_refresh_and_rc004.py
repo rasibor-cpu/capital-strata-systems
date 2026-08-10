@@ -64,7 +64,7 @@ def test_phase192_blocker_matrix_aggregate_no_go() -> None:
     assert by_id["BLK-ANTIBLEED-CAD20"] == "RESOLVED"
     assert by_id["BLK-RC004-ARTIFACT"] == "RESOLVED"
     assert by_id["BLK-RC004-LIVE-UNLOCK"] == "BLOCKED"
-    assert by_id["BLK-FX-CONVERSION"] == "BLOCKED"
+    assert by_id["BLK-FX-CONVERSION"] == "RESOLVED"
     assert by_id["BLK-OANDA-LIVE"] == "BLOCKED"
 
 
