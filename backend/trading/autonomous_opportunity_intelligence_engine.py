@@ -4,6 +4,8 @@ import math
 from datetime import UTC, datetime
 from typing import Any, Mapping, Sequence
 
+from backend.intelligence.technical_intelligence import TechnicalIntelligenceEngine
+
 
 class AutonomousOpportunityIntelligenceEngineError(RuntimeError):
     """Fail-closed exception for autonomous opportunity intelligence."""
@@ -22,6 +24,12 @@ class AutonomousOpportunityIntelligenceEngine:
         "ENERGY_CAD": ("CL", "USOIL", "OIL", "USDCAD", "CAD"),
     }
 
+    def __init__(
+        self,
+        technical_intelligence_engine: TechnicalIntelligenceEngine | None = None,
+    ) -> None:
+        self.technical_intelligence_engine = technical_intelligence_engine or TechnicalIntelligenceEngine()
+
     def analyze(
         self,
         *,
@@ -39,6 +47,12 @@ class AutonomousOpportunityIntelligenceEngine:
             raise AutonomousOpportunityIntelligenceEngineError("candidate market_snapshot.candles must contain at least 3 rows")
 
         now = datetime.now(UTC)
+        technical = self._technical_intelligence(
+            symbol=symbol,
+            candidate=candidate,
+            candles=candles,
+            now=now,
+        )
         multi_tf = self._multi_timeframe_analysis(candles)
         regime = self._market_regime_confirmation(
             multi_timeframe=multi_tf,
@@ -67,12 +81,14 @@ class AutonomousOpportunityIntelligenceEngine:
             liquidity=liquidity,
             confidence=confidence,
             cross_asset=cross_asset,
+            technical=technical,
         )
         explainability = self._explainability(
             decision=decision,
             ranking=ranking,
             confidence=confidence,
             multi_tf=multi_tf,
+            technical=technical,
             regime=regime,
             liquidity=liquidity,
             session=session,
@@ -80,6 +96,7 @@ class AutonomousOpportunityIntelligenceEngine:
         )
 
         return {
+            "technical_intelligence": technical,
             "multi_timeframe": multi_tf,
             "regime_confirmation": regime,
             "cross_asset": cross_asset,
@@ -89,6 +106,48 @@ class AutonomousOpportunityIntelligenceEngine:
             "ranking_v2": ranking,
             "explainability": explainability,
         }
+
+    def _technical_intelligence(
+        self,
+        *,
+        symbol: str,
+        candidate: Mapping[str, Any],
+        candles: list[Mapping[str, Any]],
+        now: datetime,
+    ) -> dict[str, Any]:
+        market_snapshot = candidate.get("market_snapshot", {})
+        timeframe_payload = None
+        if isinstance(market_snapshot, Mapping):
+            timeframe_payload = market_snapshot.get("timeframes")
+            if timeframe_payload is None:
+                timeframe_payload = {
+                    str(market_snapshot.get("timeframe") or "1d"): candles,
+                }
+        else:
+            timeframe_payload = {"1d": candles}
+        try:
+            return self.technical_intelligence_engine.analyze_timeframes(
+                instrument=symbol,
+                timeframe_candles=timeframe_payload,
+                now=now,
+            ).to_dict()
+        except Exception as exc:
+            return {
+                "schema_version": "css.tai001.technical_intelligence.v1",
+                "instrument": symbol,
+                "timeframes": {},
+                "agreement": 0.0,
+                "dominant_direction": "NEUTRAL",
+                "directional_score": 0.0,
+                "confidence": 0.0,
+                "higher_timeframe_confirmation": False,
+                "conflict_indicators": [],
+                "evidence_reasons": ["technical_intelligence_fail_closed"],
+                "advisory_only": True,
+                "execution_allowed": False,
+                "live_trading_blocked": True,
+                "error": type(exc).__name__,
+            }
 
     def generate_adaptive_improvement_report(
         self,
@@ -417,6 +476,7 @@ class AutonomousOpportunityIntelligenceEngine:
         liquidity: Mapping[str, Any],
         confidence: Mapping[str, Any],
         cross_asset: Mapping[str, Any],
+        technical: Mapping[str, Any],
     ) -> dict[str, Any]:
         trend = max(0.0, min(1.0, self._float(multi_tf.get("normalized_score"), 0.0)))
         regime_component = max(0.0, min(1.0, self._float(regime.get("confidence"), 0.0) * self._float(regime.get("regime_stability"), 0.0)))
@@ -424,14 +484,23 @@ class AutonomousOpportunityIntelligenceEngine:
         learning_component = max(0.0, min(1.0, self._float(confidence.get("learning_feedback_score"), 0.0)))
         cross_asset_component = max(0.0, min(1.0, self._float(cross_asset.get("confirmation_score"), 0.0)))
         volatility_component = max(0.0, min(1.0, self._float(multi_tf.get("volatility_score"), 0.0)))
+        technical_component = max(
+            0.0,
+            min(
+                1.0,
+                abs(self._float(technical.get("directional_score"), 0.0))
+                * self._float(technical.get("confidence"), 0.0),
+            ),
+        )
 
         weighted = (
-            (trend * 0.30)
-            + (regime_component * 0.20)
+            (trend * 0.24)
+            + (regime_component * 0.18)
             + (liquidity_component * 0.15)
             + (learning_component * 0.15)
             + (cross_asset_component * 0.10)
             + (volatility_component * 0.10)
+            + (technical_component * 0.08)
         )
 
         if weighted >= 0.75:
@@ -453,13 +522,15 @@ class AutonomousOpportunityIntelligenceEngine:
             "expected_holding_time": expected_holding,
             "expected_reward_risk": expected_rr,
             "weights": {
-                "trend": 0.30,
-                "regime": 0.20,
+                "trend": 0.24,
+                "regime": 0.18,
                 "liquidity": 0.15,
                 "learning": 0.15,
                 "cross_asset": 0.10,
                 "volatility": 0.10,
+                "technical": 0.08,
             },
+            "technical_component": round(technical_component, 8),
         }
 
     def _explainability(
@@ -469,6 +540,7 @@ class AutonomousOpportunityIntelligenceEngine:
         ranking: Mapping[str, Any],
         confidence: Mapping[str, Any],
         multi_tf: Mapping[str, Any],
+        technical: Mapping[str, Any],
         regime: Mapping[str, Any],
         liquidity: Mapping[str, Any],
         session: Mapping[str, Any],
@@ -494,6 +566,10 @@ class AutonomousOpportunityIntelligenceEngine:
             "liquidity_score": liquidity.get("liquidity_score", 0.0),
             "cross_asset_confirmation": cross_asset.get("confirmation_score", 0.0),
             "session": session.get("session", "UNKNOWN"),
+            "technical_direction": technical.get("dominant_direction", "NEUTRAL"),
+            "technical_score": technical.get("directional_score", 0.0),
+            "technical_confidence": technical.get("confidence", 0.0),
+            "technical_higher_timeframe_confirmation": technical.get("higher_timeframe_confirmation", False),
         }
 
         return {

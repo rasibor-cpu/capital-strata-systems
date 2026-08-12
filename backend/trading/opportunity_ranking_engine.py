@@ -325,6 +325,20 @@ class OpportunityRankingEngine:
     @staticmethod
     def _fallback_intelligence_payload(error_code: str) -> dict[str, Any]:
         return {
+            "technical_intelligence": {
+                "schema_version": "css.tai001.technical_intelligence.v1",
+                "timeframes": {},
+                "agreement": 0.0,
+                "dominant_direction": "NEUTRAL",
+                "directional_score": 0.0,
+                "confidence": 0.0,
+                "higher_timeframe_confirmation": False,
+                "conflict_indicators": [],
+                "evidence_reasons": [error_code],
+                "advisory_only": True,
+                "execution_allowed": False,
+                "live_trading_blocked": True,
+            },
             "multi_timeframe": {"normalized_score": 0.0, "volatility_score": 0.0, "timeframes": {}},
             "regime_confirmation": {
                 "primary_regime": "UNKNOWN",
