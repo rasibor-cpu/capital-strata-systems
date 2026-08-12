@@ -1,12 +1,12 @@
 # CSS Agent Queue Status
 
 Last bootstrap update: 2026-08-11
-Last task claim update: 2026-08-12T02:08:05Z
-Last review update: 2026-08-12T00:00:00Z
+Last task claim update: 2026-08-12T04:23:00Z
+Last review update: 2026-08-12T04:13:15Z
 
 ## READY
 
-None.
+- `AOD-001` - Agent Orchestration Dispatcher V1 - highest-priority READY task on branch `css-agent-dispatcher-v1`; implement deterministic local agent discovery/selection/dispatch/review with fail-closed governance.
 
 ## ACTIVE
 
@@ -22,10 +22,8 @@ None.
 
 ## COMPLETE
 
-- `TAI-001` - Technical / Price-Action Intelligence Engine V1 - R3 final acceptance review PASSED; no CRITICAL/HIGH/MEDIUM findings remain. Record in `agent_tasks/COMPLETE/TAI-001_TECHNICAL_INTELLIGENCE.md`.
+- `TAI-001` - Technical / Price-Action Intelligence Engine V1 - R3 final acceptance PASSED, merged into `css-v1.0.1-maintenance`, and post-merge certified with 38 targeted tests passing.
 
 ## Dispatcher note
 
-`TAI-001` has passed independent acceptance review and is closed in `agent_tasks/COMPLETE/TAI-001_TECHNICAL_INTELLIGENCE.md`. It is ready for controlled integration/certification (not yet staged, committed, or pushed).
-
-A lead coding agent must inspect repository state and claim any new task before changing application code. The orchestration bootstrap itself lives on branch `css-agent-orchestration-v1` and does not modify the maintenance baseline.
+`AOD-001` is the next approved task. A lead coding agent must inspect repository state, claim it per `AGENTS.md`, and remain within the orchestration-only write scope. No commit, push, merge, live-trading, broker, credential, or execution-gate authority is granted by this task.
