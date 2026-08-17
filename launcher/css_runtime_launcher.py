@@ -49,9 +49,10 @@ def is_port_in_use(port: int) -> bool:
 
 
 WINDOWS_DISCOVERY_SCRIPT = (
-    "$self = Get-CimInstance Win32_Process -Filter \"ProcessId=$PID\" "
+    "$ExpectedPid = [int]$env:CSS_DISCOVERY_EXPECTED_PID; "
+    "$self = Get-CimInstance Win32_Process -Filter \"ProcessId=$ExpectedPid\" "
     "-ErrorAction SilentlyContinue; "
-    "$anchor = $null; $selfObserved = $false; "
+    "$anchor = $ExpectedPid; $selfObserved = $false; "
     "if ($null -ne $self) { $anchor = $self.ProcessId; $selfObserved = $true }; "
     "$procs = @(Get-CimInstance Win32_Process -Filter \"name='python.exe'\" "
     "-ErrorAction SilentlyContinue | "
@@ -158,12 +159,20 @@ def discover_canonical_runtime_processes(
 
     try:
         if os.name == "nt":
+            discovery_env = os.environ.copy()
+            discovery_env["CSS_DISCOVERY_EXPECTED_PID"] = str(current_pid)
             completed = subprocess.run(
-                ["powershell", "-NoProfile", "-Command", WINDOWS_DISCOVERY_SCRIPT],
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    WINDOWS_DISCOVERY_SCRIPT,
+                ],
                 capture_output=True,
                 text=True,
                 check=False,
                 timeout=20,
+                env=discovery_env,
             )
             if completed.returncode != 0:
                 return _discovery_failure("discovery_powershell_failed", "subprocess_error")

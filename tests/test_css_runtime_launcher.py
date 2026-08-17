@@ -166,6 +166,53 @@ def test_discovery_empty_json_array_without_self_fails_closed(monkeypatch):
     assert result["processes"] == []
 
 
+def test_windows_discovery_passes_expected_python_pid_as_explicit_process_input(monkeypatch, tmp_path):
+    import launcher.css_runtime_launcher as launcher
+
+    observed = {}
+
+    def _run(args, **kwargs):
+        observed["args"] = args
+        observed["kwargs"] = kwargs
+        return SimpleNamespace(
+            returncode=0,
+            stdout=_envelope([_row(pid=4242, command_line="python self")]),
+            stderr="",
+        )
+
+    monkeypatch.setattr(launcher.os, "name", "nt")
+    monkeypatch.setattr(launcher.subprocess, "run", _run)
+
+    result = discover_canonical_runtime_processes(repo_root=str(tmp_path), current_pid=4242)
+
+    assert result["ok"] is True
+    assert observed["args"] == ["powershell", "-NoProfile", "-Command", observed["args"][3]]
+    assert observed["kwargs"]["env"]["CSS_DISCOVERY_EXPECTED_PID"] == "4242"
+    assert "$ExpectedPid" in observed["args"][3]
+    assert "ProcessId=$PID" not in observed["args"][3]
+    assert observed["kwargs"]["check"] is False
+
+
+def test_windows_powershell_pid_anchor_cannot_satisfy_expected_python_anchor(monkeypatch, tmp_path):
+    import launcher.css_runtime_launcher as launcher
+
+    def _run(args, **_kwargs):
+        assert _kwargs["env"]["CSS_DISCOVERY_EXPECTED_PID"] == "4242"
+        return SimpleNamespace(
+            returncode=0,
+            stdout=_envelope([_row(pid=7777, command_line="powershell")], anchor_pid=7777),
+            stderr="",
+        )
+
+    monkeypatch.setattr(launcher.os, "name", "nt")
+    monkeypatch.setattr(launcher.subprocess, "run", _run)
+
+    result = discover_canonical_runtime_processes(repo_root=str(tmp_path), current_pid=4242)
+
+    assert result["ok"] is False
+    assert result["error_code"] == "discovery_anchor_mismatch"
+
+
 def test_discovery_envelope_without_self_or_anchor_fails_closed(monkeypatch, tmp_path):
     payload = _envelope(
         [_row()],
@@ -187,6 +234,27 @@ def test_discovery_anchor_pid_satisfies_self_observation(monkeypatch, tmp_path):
     assert result["ok"] is True
     assert result["self_observed"] is True
     assert result["processes"] == []
+
+
+def test_discovery_expected_anchor_without_observed_process_fails_self_missing(monkeypatch, tmp_path):
+    payload = _envelope([], anchor_pid=4242, self_observed=False)
+    monkeypatch.setattr("launcher.css_runtime_launcher.subprocess.run", _fake_powershell(payload))
+
+    result = discover_canonical_runtime_processes(repo_root=str(tmp_path), current_pid=4242)
+
+    assert result["ok"] is False
+    assert result["error_code"] == "discovery_self_missing"
+
+
+@pytest.mark.parametrize("anchor_pid", [None, "4242", True, 0, -1, 2**32])
+def test_discovery_malformed_anchor_fails_closed(monkeypatch, anchor_pid):
+    payload = _envelope([], anchor_pid=anchor_pid)
+    monkeypatch.setattr("launcher.css_runtime_launcher.subprocess.run", _fake_powershell(payload))
+
+    result = discover_canonical_runtime_processes(current_pid=4242)
+
+    assert result["ok"] is False
+    assert result["error_code"] == "discovery_anchor_malformed"
 
 
 def test_discovery_zero_managed_processes_after_self_filter_is_ok(monkeypatch, tmp_path):
