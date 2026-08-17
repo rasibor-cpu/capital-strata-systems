@@ -73,13 +73,23 @@ def _is_reparse_or_symlink(path: Path) -> bool:
     return bool(attrs & 0x400)
 
 
+def _raise_if_existing_reparse_or_symlink(path: Path, code: str) -> None:
+    cursor = path
+    while True:
+        if _is_reparse_or_symlink(cursor):
+            raise PersistenceError(code, str(cursor))
+        if cursor == cursor.parent:
+            break
+        cursor = cursor.parent
+
+
 def _resolve_existing_root(root: Path | str) -> Path:
+    root_path = Path(root)
+    _raise_if_existing_reparse_or_symlink(root_path, "trusted_root_reparse")
     try:
-        resolved = Path(root).resolve(strict=True)
+        resolved = root_path.resolve(strict=True)
     except OSError as exc:
         raise PersistenceError("trusted_root_unavailable", str(type(exc).__name__)) from exc
-    if _is_reparse_or_symlink(resolved):
-        raise PersistenceError("trusted_root_reparse")
     return resolved
 
 
@@ -88,6 +98,7 @@ def validate_path_contained(path: Path | str, *, expected_root: Path | str | Non
     if expected_root is None:
         return dest
     root = _resolve_existing_root(expected_root)
+    _raise_if_existing_reparse_or_symlink(dest, "path_reparse_or_symlink")
     try:
         resolved = dest.resolve(strict=False)
         resolved.relative_to(root)
@@ -98,6 +109,8 @@ def validate_path_contained(path: Path | str, *, expected_root: Path | str | Non
 
     cursor = dest if dest.exists() else dest.parent
     while True:
+        if _is_reparse_or_symlink(cursor):
+            raise PersistenceError("path_reparse_or_symlink", str(cursor))
         try:
             cursor_resolved = cursor.resolve(strict=False)
             cursor_resolved.relative_to(root)
@@ -105,8 +118,6 @@ def validate_path_contained(path: Path | str, *, expected_root: Path | str | Non
             raise PersistenceError("path_ancestor_outside_expected_root", str(cursor)) from exc
         except OSError as exc:
             raise PersistenceError("path_ancestor_resolve_failed", str(type(exc).__name__)) from exc
-        if cursor.exists() and _is_reparse_or_symlink(cursor):
-            raise PersistenceError("path_reparse_or_symlink", str(cursor))
         if cursor_resolved == root or cursor == cursor.parent:
             break
         cursor = cursor.parent
