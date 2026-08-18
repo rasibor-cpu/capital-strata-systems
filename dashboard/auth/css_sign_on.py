@@ -1384,6 +1384,16 @@ def await_console_login(users: Optional[Dict[str, Any]] = None) -> Dict[str, Any
             render_console_auth_status(exc.code, exc.message)
 
 
+def _resolve_gui_login_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Resolve the Tk lifecycle without treating an unclassified teardown as cancel."""
+    user_ctx = result.get("ctx")
+    if isinstance(user_ctx, dict) and user_ctx:
+        return user_ctx
+    if result.get("cancelled"):
+        raise KeyboardInterrupt("CSS_SIGN_ON_CANCELLED")
+    raise RuntimeError("CSS_SIGN_ON_UI_TERMINATED")
+
+
 def force_console_password_change(users: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     render_console_auth_status(
         "PASSWORD CHANGE REQUIRED",
@@ -1573,6 +1583,11 @@ def await_gui_login(users: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         result["ctx"] = user_ctx
         root.destroy()
 
+    def cancel_login(reason: str) -> None:
+        result["cancelled"] = True
+        result["cancel_reason"] = reason
+        root.destroy()
+
     def show_password_change(user_id: str) -> None:
         clear_content()
         pending_user_id["value"] = user_id
@@ -1637,7 +1652,9 @@ def await_gui_login(users: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
             finish(user_ctx)
 
         primary_button(button_row, "Update Password", submit_change).pack(side="left")
-        secondary_button(button_row, "Cancel", root.destroy).pack(side="left", padx=(12, 0))
+        secondary_button(button_row, "Cancel", lambda: cancel_login("password_change_cancel")).pack(
+            side="left", padx=(12, 0)
+        )
 
         attach_status(8)
         set_status("Password change required.", "info")
@@ -1947,24 +1964,22 @@ def await_gui_login(users: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
             "Forgot Password?",
             lambda: show_password_recovery(user_var.get()),
         ).pack(side="left", padx=(12, 0))
-        secondary_button(button_row, "Exit", root.destroy).pack(side="left", padx=(12, 0))
+        secondary_button(button_row, "Exit", lambda: cancel_login("operator_exit")).pack(
+            side="left", padx=(12, 0)
+        )
 
         attach_status(8)
         set_status("Ready", "info")
         password_entry.focus_set()
 
     def on_close() -> None:
-        result["cancelled"] = True
-        root.destroy()
+        cancel_login("window_close")
 
     root.protocol("WM_DELETE_WINDOW", on_close)
     show_login()
     root.mainloop()
 
-    if result.get("ctx"):
-        return result["ctx"]
-
-    raise KeyboardInterrupt("CSS_SIGN_ON_CANCELLED")
+    return _resolve_gui_login_result(result)
 
 
 def _policy_badge(parent, text: str, bg: str, fg: str, font) -> None:

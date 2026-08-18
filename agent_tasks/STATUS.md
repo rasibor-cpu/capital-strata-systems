@@ -26,6 +26,7 @@ None.
 
 ## COMPLETE
 
+- `OV002-R1-R9` - Sign-On Lifecycle / Runtime Establishment Remediation - independent review accepted; controlled publication authorized.
 - `AOD-001` - Agent Orchestration Dispatcher V1 - R4 acceptance PASSED and task closed; publication commit/push remains blocked by task front matter `commit_authority: NONE` and `push_authority: NONE`.
 - `TAI-001` - Technical / Price-Action Intelligence Engine V1 - R3 final acceptance PASSED, merged into `css-v1.0.1-maintenance`, and post-merge certified with 38 targeted tests passing.
 
