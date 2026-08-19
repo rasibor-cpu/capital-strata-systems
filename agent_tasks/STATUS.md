@@ -20,7 +20,7 @@ None.
 
 ## REVIEW
 
-- `MI-EXT-001` - External Events Recovery R2 - recovered on `css-mi-ext-001-recovery-r2`; targeted validation PASS; independently review-ready for `css-v1.0.1-maintenance`. Record in `agent_tasks/REVIEW/MI-EXT-001_EXTERNAL_EVENTS_RECOVERY.md`.
+- `MI-EXT-001` - External Events Recovery R2 - recovered on `css-mi-ext-001-recovery-r2`; targeted validation PASS; independently review-ready for `css-v1.0.1-maintenance` via draft PR #59. Record in `agent_tasks/REVIEW/MI-EXT-001_EXTERNAL_EVENTS_RECOVERY.md`.
 - `RC-LIVE-W1-001` - Autonomous Supervisor Safe Restoration - restored on `css-rclive-w1-autonomous-supervisor`; runtime validation PASS; independently review-ready and authorized to land on `css-v1.0.1-maintenance` via draft PR #58. Record in `agent_tasks/REVIEW/RC-LIVE-W1-001_AUTONOMOUS_SUPERVISOR_SAFE_RESTORATION.md`.
 
 ## BLOCKED
@@ -38,6 +38,6 @@ None.
 
 Stale draft PR #54 (`css-tai-002-runtime-validation`) remains open/conflicting and must not be merged. Replacement is PR #57.
 
-MI-EXT-001 R2 grants no live-trading, broker, credential, order-submission, or execution-gate authority. Live network ingestion remains unauthorized. Draft PR remains unmerged pending independent review.
+MI-EXT-001 R2 grants no live-trading, broker, credential, order-submission, or execution-gate authority. Live network ingestion remains unauthorized. Draft PR #59 remains unmerged pending independent review.
 
 RC-LIVE-W1-001 grants no live-trading, broker, credential, order-submission, or execution-gate authority. Targeted runtime validation has passed. Draft PR #58 remains unmerged pending independent review.

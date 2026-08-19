@@ -9,11 +9,12 @@ starting_head: e0676ce896b2eae682946e3619994d1dc0300da6
 claimed_branch: css-mi-ext-001-recovery-r2
 claimed_starting_head: e0676ce896b2eae682946e3619994d1dc0300da6
 claimed_at_utc: 2026-08-19T17:15:00Z
-review_ready_at_utc: 2026-08-19T17:40:00Z
+review_ready_at_utc: 2026-08-19T17:55:00Z
 commit_authority: FEATURE_BRANCH
 push_authority: FEATURE_BRANCH
 pr_authority: DRAFT_TO_MAINTENANCE
 live_trading_authority: NONE
+draft_pr: 59
 historical_reference_commit: 3c7a6b61de2f7784e794b9f186a440d0f50392b2
 ---
 
