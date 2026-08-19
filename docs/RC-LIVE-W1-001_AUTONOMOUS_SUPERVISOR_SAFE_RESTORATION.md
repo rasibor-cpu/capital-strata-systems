@@ -16,13 +16,22 @@ The supervisor returns only advisory runtime actions (`CONTINUE`, `REDUCE_EXPOSU
 
 No changes were made to Unified Trade Gate, AntiBleedGuard, Capital Governor, Margin Gate, RBAC, kill switches, broker adapters, live authorization TTL, live/paper defaults, order routing, order submission, MI-EXT, OANDA connectivity, or FX governor logic.
 
-## Validation gate
+Safety review PASS:
 
-Static contract inspection confirms alignment with `tests/test_autonomous_supervisor.py`. Runtime validation remains required before merge:
+- no broker, credential, order-submission, live-authority, execution-gate,
+  governor, OANDA, MI-EXT, or FX capability introduced
 
-- Python compile check
-- `tests/test_autonomous_supervisor.py`
-- any immediately dependent narrow runtime tests
-- `git diff --check`
+## Validation
 
-Do not merge until those checks pass in an execution environment.
+Runtime validation has been executed. This task is independently review-ready and authorized to land via draft PR #58.
+
+Exact results:
+
+- `python3 -m py_compile backend/runtime/autonomous_supervisor.py` — PASS
+- `python3 -m pytest tests/test_autonomous_supervisor.py -v` — 5 passed / 0 failed
+- no other Python runtime importers found
+- `git diff --check` — PASS
+- working tree clean
+- safety review PASS:
+  no broker, credential, order-submission, live-authority, execution-gate,
+  governor, OANDA, MI-EXT, or FX capability introduced

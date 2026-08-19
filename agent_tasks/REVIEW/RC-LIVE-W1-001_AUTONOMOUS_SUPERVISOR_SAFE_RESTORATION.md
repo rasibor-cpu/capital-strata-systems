@@ -1,6 +1,8 @@
 ---
 id: RC-LIVE-W1-001
 status: REVIEW
+review_ready_at_utc: 2026-08-19T17:01:00Z
+validated_utc: 2026-08-19T16:58:00Z
 priority: 120
 risk: LOW
 owner: ChatGPT GitHub connector
@@ -11,6 +13,7 @@ commit_authority: FEATURE_BRANCH
 push_authority: FEATURE_BRANCH
 pr_authority: DRAFT_TO_MAINTENANCE
 live_trading_authority: NONE
+draft_pr: 58
 ---
 
 # RC-LIVE-W1-001 — Autonomous Supervisor Safe Restoration
@@ -35,7 +38,18 @@ The implementation restored on this branch matches that narrow contract and reta
 
 ## Validation status
 
-Static contract inspection complete. Runtime/pytest execution still requires an execution environment and independent validation before merge.
+Runtime validation has been executed on `css-rclive-w1-autonomous-supervisor`. Independently review-ready and authorized to land on `css-v1.0.1-maintenance` via draft PR #58.
+
+Exact results:
+
+- `python3 -m py_compile backend/runtime/autonomous_supervisor.py` — PASS
+- `python3 -m pytest tests/test_autonomous_supervisor.py -v` — 5 passed / 0 failed
+- no other Python runtime importers found
+- `git diff --check` — PASS
+- working tree clean
+- safety review PASS:
+  no broker, credential, order-submission, live-authority, execution-gate,
+  governor, OANDA, MI-EXT, or FX capability introduced
 
 ## Safety
 
@@ -48,4 +62,4 @@ Static contract inspection complete. Runtime/pytest execution still requires an 
 
 ## Review gate
 
-Do not merge until `tests/test_autonomous_supervisor.py` and compile checks are executed successfully in a repository runtime and the branch diff is independently reviewed.
+Implementation and targeted runtime validation are complete. Independent review of draft PR #58 is required before merge. Do not self-merge.
