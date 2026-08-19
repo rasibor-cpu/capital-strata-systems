@@ -1,6 +1,10 @@
 ---
 id: CSS-CONSOL-CERT-001
-status: REVIEW
+status: COMPLETE
+closed_at_utc: 2026-08-19T18:57:34Z
+merged_pr: 61
+merge_commit: d53e6658267ab4fe281c7be58a2fad1a6412eef7
+lifecycle_reconciled_utc: 2026-08-19T18:59:40Z
 priority: 140
 risk: LOW
 owner: Cursor Cloud Agent CSS-CONSOL-CERT-001

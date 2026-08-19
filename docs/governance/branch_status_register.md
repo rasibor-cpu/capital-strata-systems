@@ -2,7 +2,10 @@
 
 Date: 2026-05-28
 Scope: Branch hygiene / canonical-lineage clarification
-Status: Non-destructive documentation only
+Status: **HISTORICAL** — current classification is `docs/governance/CSS_BRANCH_DISPOSITION_REGISTER.md` (CSS-PKG-D-001, 2026-08-19)
+
+This 2026-05-28 register is retained as a non-destructive caution. It must **not** be used as the current canonical-branch map. Canonical development is `css-v1.0.1-maintenance`. GitHub default `main` remains a stale Phase 113Y archive until an admin retargets it.
+
 
 ## Purpose
 
