@@ -5,6 +5,7 @@
 **Canonical base:** `css-v1.0.1-maintenance`
 **Verified starting HEAD:** `d53e6658267ab4fe281c7be58a2fad1a6412eef7`
 **Branch:** `css-package-d-governance-hygiene`
+**Draft PR:** #62
 **Live trading authority:** NONE
 **Runtime/code mutation:** NONE (stale **test** pins only)
 
