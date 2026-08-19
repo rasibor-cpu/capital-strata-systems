@@ -20,7 +20,7 @@ None.
 
 ## REVIEW
 
-None.
+- `RC-LIVE-W1-001` - Autonomous Supervisor Safe Restoration - narrow fail-closed module restored on `css-rclive-w1-autonomous-supervisor`; compile/pytest execution still required before merge.
 
 ## BLOCKED
 
@@ -36,3 +36,5 @@ None.
 ## Dispatcher note
 
 Stale draft PR #54 (`css-tai-002-runtime-validation`) remains open/conflicting and must not be merged. Replacement is PR #57.
+
+RC-LIVE-W1-001 grants no live-trading, broker, credential, order-submission, or execution-gate authority. Do not merge until targeted validation passes in an execution environment.
