@@ -1,0 +1,10 @@
+{
+  "model_id": "OANDA_FX_SLIPPAGE_V1",
+  "model_version": "186A.1",
+  "asset_class": "FX",
+  "instruments": {
+    "EUR_USD": {
+      "slippage_bps": 0.2
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "model_id": "OANDA_FX_FEE_V1",
+  "model_version": "186A.1",
+  "currency": "CAD",
+  "broker": "OANDA",
+  "asset_class": "FX",
+  "instruments": {
+    "EUR_USD": {
+      "fee_bps": 0.5,
+      "currency": "CAD"
+    }
+  }
+}

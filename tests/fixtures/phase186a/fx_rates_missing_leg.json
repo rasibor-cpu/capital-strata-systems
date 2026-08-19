@@ -1,0 +1,10 @@
+{
+  "triangulation_hub": "USD",
+  "rates": {
+    "EUR/USD": {
+      "rate": 1.1000,
+      "timestamp": "2026-08-01T12:00:00Z",
+      "provenance": "synthetic_offline_eur_usd_only"
+    }
+  }
+}
