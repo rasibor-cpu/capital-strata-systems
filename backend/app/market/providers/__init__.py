@@ -13,9 +13,9 @@ from backend.app.market.providers.oanda_fixture_market_provider import OandaFixt
 from backend.app.market.providers.offline_certification_microstructure_provider import (
     COMPOSITE_PROVIDER_NAME,
     OfflineCertificationMicrostructureProvider,
-    OfflineMicrostructureInputs,
     OfflineMicrostructureResult,
 )
+from backend.app.market.providers.offline_quote_facts import OfflineCertificationQuoteFacts
 from backend.app.market.providers._common import PROVIDER_FRAMEWORK_VERSION
 
 __all__ = [
@@ -28,6 +28,6 @@ __all__ = [
     "FixtureFeeModelProvider",
     "FixtureSlippageProvider",
     "OfflineCertificationMicrostructureProvider",
-    "OfflineMicrostructureInputs",
+    "OfflineCertificationQuoteFacts",
     "OfflineMicrostructureResult",
 ]

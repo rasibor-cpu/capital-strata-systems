@@ -9,7 +9,7 @@ starting_head: f3c59ee4326261957e16500cf0519aad687c3865
 claimed_branch: css-rclive-offline-market-readiness-consolidated
 claimed_starting_head: f3c59ee4326261957e16500cf0519aad687c3865
 claimed_at_utc: 2026-08-19T17:30:00Z
-review_ready_at_utc: 2026-08-19T17:50:00Z
+review_ready_at_utc: 2026-08-19T18:20:00Z
 commit_authority: FEATURE_BRANCH
 push_authority: FEATURE_BRANCH
 pr_authority: DRAFT_TO_MAINTENANCE
@@ -43,16 +43,23 @@ are `OFFLINE_CERTIFICATION_ONLY`. Live network construction fails closed.
 Not wired into ExecutionGate, AntiBleedGuard, Unified Trade Gate, capital
 sizing, or live authority.
 
+The historical AntiBleed-shaped return type (`LiveMicrostructureInputs` from
+`backend.app.risk.live_microstructure_provider`) is **not recovered**. The
+composite holds four diagnostic numbers in
+`OfflineCertificationQuoteFacts` — a passive, non-authoritative value object
+that cannot evaluate risk or authorize execution.
+
 ## Validation
 
 - `python3 -m py_compile` on changed Python files — PASS
 - Phase 185A: 13 passed / 0 failed
 - Phase 186A: 15 passed / 0 failed
 - Phase 187A: 22 passed / 0 failed
-- RC-LIVE-CONSOL-001 isolation: 8 passed / 0 failed
+- RC-LIVE-CONSOL-001 isolation: 11 passed / 0 failed
 - MI-EXT + TAI-001 + TAI-002 + AOI + ranking: 84 passed / 0 failed
 - `test_phase154a_broker_readiness_framework.py`: 3 passed / 0 failed
-- `git diff --check` — PASS after addendum whitespace fix
+- Clean targeted total: **148 passed / 0 failed / 0 skipped**
+- `git diff --check` — PASS
 - Blocked by missing `dotenv` (live-environment dependency, not this change):
   `test_phase166a_canonical_broker_readiness.py` (collection ERROR);
   `test_oanda_live_firewall.py` (30 failed constructing `OandaAdapter`)

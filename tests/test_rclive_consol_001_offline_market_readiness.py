@@ -23,6 +23,7 @@ from backend.app.market.providers import (
     LiveNetworkMarketProvider,
     OandaFixtureMarketProvider,
     OfflineCertificationMicrostructureProvider,
+    OfflineCertificationQuoteFacts,
 )
 from backend.app.market.providers._common import classify_freshness, parse_utc_timestamp
 from backend.app.market.status import ADVISORY_ONLY, EXECUTION_ALLOWED, LIVE_NETWORK_INGESTION
@@ -35,6 +36,8 @@ EVAL = "2026-08-01T12:00:05Z"
 FORBIDDEN_IMPORT_FRAGMENTS = (
     "backend.app.brokers",
     "backend.app.risk.anti_bleed_guard",
+    "backend.app.risk.anti_bleed_policy",
+    "backend.app.risk.live_microstructure_provider",
     "backend.app.risk.capital_allocation_governor",
     "backend.governance.css_unified_trade_gate",
     "engine.execution.execution_gate",
@@ -44,6 +47,9 @@ FORBIDDEN_IMPORT_FRAGMENTS = (
     "backend.runtime.live_micro_pilot_governor",
     "backend.runtime.live_execution_authority",
     "backend.app.brokers.credential_loader",
+    "requests",
+    "httpx",
+    "aiohttp",
 )
 
 FORBIDDEN_CALLS = (
@@ -54,6 +60,7 @@ FORBIDDEN_CALLS = (
     "create_order",
     "arm_live_authority",
     "load_credentials",
+    "urlopen",
 )
 
 UNTOUCHED_PATHS = (
@@ -63,6 +70,7 @@ UNTOUCHED_PATHS = (
     "backend/runtime/live_authorization_ttl.py",
     "backend/runtime/live_authority_lease.py",
     "backend/runtime/live_micro_pilot_governor.py",
+    "backend/app/risk/live_microstructure_provider.py",
 )
 
 
@@ -179,7 +187,91 @@ def test_market_package_ast_rejects_execution_network_and_gates() -> None:
         for token in ("place_order(", "submit_order(", "cancel_order(", "modify_order("):
             if token in source and path.name not in {"boundary.py", "framework.py"}:
                 violations.append(f"{path.name}: token {token}")
+        if "execution_allowed=True" in source.replace(" ", "") or "EXECUTION_ALLOWED=True" in source.replace(" ", ""):
+            violations.append(f"{path.name}: execution_allowed=True")
     assert violations == []
+
+
+def test_localized_quote_facts_are_not_antibleed() -> None:
+    facts = OfflineCertificationQuoteFacts(
+        expected_move_bps=50.0,
+        fee_bps=0.5,
+        spread_bps=1.8,
+        slippage_bps=1.0,
+    )
+    assert facts.ADVISORY_ONLY is True
+    assert facts.EXECUTION_ALLOWED is False
+    assert facts.IS_ANTIBLEED_CONTROL is False
+    assert facts.GRANTS_LIVE_AUTHORITY is False
+    assert facts.MAY_SUBMIT_ORDERS is False
+    assert facts.MAY_MUTATE_UNIFIED_TRADE_GATE is False
+    assert "LiveMicrostructureInputs" not in facts.__class__.__name__
+    assert "AntiBleed" not in facts.__class__.__name__
+    for method in ("evaluate", "approve", "authorize", "place_order", "submit_order"):
+        assert not hasattr(facts, method)
+    source = inspect.getsource(OfflineCertificationQuoteFacts)
+    assert "anti_bleed_guard" not in source
+    assert "execution_gate" not in source
+
+
+def test_composite_uses_localized_facts_and_fail_closes() -> None:
+    composite = OfflineCertificationMicrostructureProvider(
+        market_snapshot_provider=OandaFixtureMarketProvider(FIX / "oanda_eurusd_valid.json"),
+        fee_model_provider=FixtureFeeModelProvider(FIX / "fee_model.json"),
+        slippage_provider=FixtureSlippageProvider(FIX / "slippage_model.json"),
+    )
+    ok = composite.provide_detailed(
+        symbol="EUR_USD", side="BUY", notional=20.0, context=_ctx()
+    )
+    assert ok.available is True
+    assert isinstance(ok.inputs, OfflineCertificationQuoteFacts)
+    assert ok.inputs.EXECUTION_ALLOWED is False
+    assert ok.inputs.IS_ANTIBLEED_CONTROL is False
+
+    stale = OfflineCertificationMicrostructureProvider(
+        market_snapshot_provider=OandaFixtureMarketProvider(FIX / "oanda_eurusd_stale.json"),
+        fee_model_provider=FixtureFeeModelProvider(FIX / "fee_model.json"),
+        slippage_provider=FixtureSlippageProvider(FIX / "slippage_model.json"),
+    ).provide_detailed(symbol="EUR_USD", side="BUY", notional=20.0, context=_ctx())
+    assert stale.available is False
+    assert stale.inputs is None
+
+    malformed = OandaFixtureMarketProvider(FIX / "oanda_eurusd_malformed.json").get_snapshot(
+        symbol="EUR_USD", context=_ctx()
+    )
+    assert malformed.status == "NOT_AVAILABLE"
+
+    unsupported = OandaFixtureMarketProvider(FIX / "oanda_eurusd_valid.json").get_snapshot(
+        symbol="GBP_USD", context=_ctx()
+    )
+    assert unsupported.status == "NOT_AVAILABLE"
+
+    missing_ts = OandaFixtureMarketProvider(FIX / "oanda_eurusd_missing_timestamp.json").get_snapshot(
+        symbol="EUR_USD", context=_ctx()
+    )
+    assert missing_ts.status == "NOT_AVAILABLE"
+
+
+def test_package_does_not_import_antibleed_or_execution_controls() -> None:
+    forbidden = (
+        "backend.app.risk.anti_bleed_guard",
+        "backend.app.risk.anti_bleed_policy",
+        "backend.app.risk.live_microstructure_provider",
+        "engine.execution.execution_gate",
+        "backend.governance.css_unified_trade_gate",
+        "backend.app.brokers.credential_loader",
+    )
+    for path in MARKET.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        imported: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.extend(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                imported.append(node.module or "")
+        joined = " ".join(imported)
+        for fragment in forbidden:
+            assert fragment not in joined, f"{path.name} imports {fragment}"
 
 
 def test_oanda_readonly_ast_firewall() -> None:

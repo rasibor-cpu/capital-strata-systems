@@ -70,13 +70,19 @@ Insufficient facts → `NOT_AVAILABLE`.
 Instrument-scoped `slippage_bps` with `evidence_hash`. Zero forbidden unless
 `allow_zero=true`.
 
-## 9. Composite microstructure provider
+## 9. Composite provider (localized, non-AntiBleed)
 
 `OfflineCertificationMicrostructureProvider` requires usable snapshot/fee/slippage,
 matching instrument scope, expected_move_bps **and** non-empty
-`expected_move_provenance`, and valid component hashes. Emits market/fee/slippage/
-composite hashes in an immutable `OfflineMicrostructureResult`.
-Default runtime provider remains unavailable. Not auto-wired into mobile live paths.
+`expected_move_provenance`, and valid component hashes. It returns an immutable
+`OfflineMicrostructureResult` whose `inputs` are
+`OfflineCertificationQuoteFacts` — a **passive diagnostic bundle** of four
+numbers (`expected_move_bps`, `fee_bps`, `spread_bps`, `slippage_bps`).
+
+That object is **not** `LiveMicrostructureInputs` and **not** AntiBleedGuard.
+The historical `backend.app.risk.live_microstructure_provider` AntiBleed bridge
+was **not recovered**. Default runtime providers remain unavailable. Not
+auto-wired into ExecutionGate or mobile live paths.
 
 ## 10. Freshness and quality rules
 

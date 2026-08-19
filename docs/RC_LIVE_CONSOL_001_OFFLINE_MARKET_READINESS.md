@@ -10,5 +10,8 @@ Reference only (not merged, not cherry-picked wholesale):
 
 Recovered as one governed package under `backend/app/market/`.
 
-Not recovered: ExecutionGate wiring, AntiBleed/risk microstructure bridge,
+Not recovered: ExecutionGate wiring, AntiBleed/risk microstructure bridge
+(`backend.app.risk.live_microstructure_provider` / `LiveMicrostructureInputs`).
+The composite uses localized `OfflineCertificationQuoteFacts` only.
+
 live authority, credentials, network OANDA, Phases 184A / 188+.

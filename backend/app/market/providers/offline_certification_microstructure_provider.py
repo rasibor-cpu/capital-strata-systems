@@ -1,7 +1,8 @@
-"""Phase 186A-R1 — offline certification composite microstructure provider.
+"""Phase 186A-R1 — offline certification composite quote provider.
 
-Combines fixture snapshot + fee + slippage for diagnostics/certification.
+Combines fixture snapshot + fee + slippage into passive diagnostic facts.
 Not wired into ExecutionGate, AntiBleedGuard, or live authority.
+Does not import ``backend.app.risk.live_microstructure_provider``.
 """
 
 from __future__ import annotations
@@ -20,24 +21,19 @@ from backend.app.market.provider_interfaces import (
 )
 from backend.app.market.providers._common import COMPOSITE_PROVIDER_NAME, PROVIDER_FRAMEWORK_VERSION
 from backend.app.market.providers.evidence import canonical_evidence_hash
-
-
-@dataclass(frozen=True)
-class OfflineMicrostructureInputs:
-    """Offline composite quote inputs. Diagnostic/certification only — not order authority."""
-
-    expected_move_bps: float
-    fee_bps: float
-    spread_bps: float
-    slippage_bps: float
+from backend.app.market.providers.offline_quote_facts import OfflineCertificationQuoteFacts
 
 
 @dataclass(frozen=True)
 class OfflineMicrostructureResult:
-    """Detailed offline composite result with immutable evidence custody."""
+    """Detailed offline composite result with immutable evidence custody.
+
+    ``inputs`` is a passive diagnostic bundle only. It is not AntiBleedGuard
+    output and cannot authorize execution.
+    """
 
     available: bool
-    inputs: Optional[OfflineMicrostructureInputs]
+    inputs: Optional[OfflineCertificationQuoteFacts]
     reasons: tuple[str, ...] = ()
     diagnostics: Mapping[str, Any] = field(default_factory=dict)
     market_hash: str = ""
@@ -79,7 +75,7 @@ class OfflineCertificationMicrostructureProvider:
         side: str,
         notional: float,
         context: Mapping[str, Any] | None = None,
-    ) -> Optional[OfflineMicrostructureInputs]:
+    ) -> Optional[OfflineCertificationQuoteFacts]:
         return self.provide_detailed(
             symbol=symbol, side=side, notional=notional, context=context
         ).inputs
@@ -198,7 +194,7 @@ class OfflineCertificationMicrostructureProvider:
         assert fee.fee_bps is not None
         assert slip.slippage_bps is not None
 
-        inputs = OfflineMicrostructureInputs(
+        inputs = OfflineCertificationQuoteFacts(
             expected_move_bps=float(expected_move_bps),
             fee_bps=float(fee.fee_bps),
             spread_bps=float(snapshot.spread_bps),
@@ -218,7 +214,7 @@ class OfflineCertificationMicrostructureProvider:
 
 
 __all__ = [
-    "OfflineMicrostructureInputs",
+    "OfflineCertificationQuoteFacts",
     "OfflineMicrostructureResult",
     "OfflineCertificationMicrostructureProvider",
     "COMPOSITE_PROVIDER_NAME",
