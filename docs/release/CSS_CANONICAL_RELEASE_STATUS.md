@@ -19,11 +19,12 @@ These are **different** facts. Do not collapse them.
 | Kind | Ref | Meaning |
 | --- | --- | --- |
 | **Current canonical development branch** | `css-v1.0.1-maintenance` | Authoritative engineering line. Recent PRs #53–#61 target this branch. |
-| **Current canonical development HEAD** (Package D start) | `d53e6658267ab4fe281c7be58a2fad1a6412eef7` | Merge PR #61 (CSS-CONSOL-CERT-001). Not a production-certification freeze. |
+| **Current canonical development HEAD** (landed maintenance) | `d53e6658267ab4fe281c7be58a2fad1a6412eef7` | Merge PR #61 (CSS-CONSOL-CERT-001). Not a production-certification freeze. Package D hygiene (PR #62) is **proposed** on `css-package-d-governance-hygiene` and is not landed until independently reviewed. |
 | **GitHub default branch** | `main` @ `faf1485dd88d7056bbd8f7f891cb47caf7685603` | Stale Phase 113Y. **Not** canonical. Do not develop on it. Admin retarget recommended (see branch disposition register). |
 | **Last Gate 2 / AR-001 evidence-bound baseline** | `4ea738d86c167373deccbe4edf217e929de4414d` on `css-unified-consolidation-2026-07-13` | Historical SHA that bound the 2026-07-21 release-status remediation. **Not** current HEAD. |
 | **Last controlled-paper operational proof** | OP-003 / `docs/release/CSS_V1_REMAINING_BLOCKERS.md` | Historical `CERTIFIED_CONTROLLED_PAPER_OPERATION`. **Not** re-proven on `d53e665`. |
 | **Last offline post-merge cert pass** | CSS-CONSOL-CERT-001 @ `fc7a6c99` (merged as `d53e665` via PR #61) | Offline regression + backlog. **Not** production certification. |
+| **Next operating milestone** | **COW-001** | Start canonical CSS as-is for ≥24h controlled operation. Charter: `docs/release/CSS_COW_001_CONTROLLED_OPERATING_WINDOW.md`. Not started. Not a certification result. |
 | **Phase 181 production certification** | `runtime_reports/phase181_certification/CERTIFICATION_SUMMARY.md` | **`NOT_CERTIFIED`** until a new freeze SHA has verified observations. |
 
 Historical evidence is **not** rewritten onto `d53e665`. OP-003 GO is not a new certification of the current SHA.
@@ -41,6 +42,7 @@ Historical evidence is **not** rewritten onto `d53e665`. OP-003 GO is not a new 
 | Broker execution armed | **false** | Safety locks |
 | Advisory-only | **true** | Safety locks |
 | Release Gate 2 | **IN PROGRESS** | `docs/release/CSS_RELEASE_GATE_2_PLAN.md` |
+| Next operating milestone | **COW-001 — not started** | `docs/release/CSS_COW_001_CONTROLLED_OPERATING_WINDOW.md` |
 
 ### Required safety posture (unchanged)
 
@@ -58,7 +60,8 @@ Posture label: `DISABLED / BLOCKED / FAIL_CLOSED / ADVISORY_ONLY`
 1. CSS may be operated as **controlled paper / advisory / read-only** software under existing fail-closed controls, under the historical OP-003 proof (not a new SHA-bound recert).
 2. Mission Control read-only certification and RC1.1 branding/reporting baseline remain valid within their documented scopes.
 3. Historical RC1 paper/controlled-release engineering work remains historical evidence only.
-4. Canonical **development** happens on `css-v1.0.1-maintenance`, currently at `d53e665` (plus subsequent reviewed merges).
+4. Canonical **development** happens on `css-v1.0.1-maintenance`. Landed HEAD at Package D start is `d53e665` (plus subsequent **reviewed** merges). Package D (PR #62) is proposed hygiene only until merged.
+5. After Package D lands, the next milestone is **COW-001**: start the current canonical system as-is in controlled/paper mode for ≥24 hours. That run is not production certification until its observations are recorded.
 
 ## What must not be claimed
 
@@ -70,8 +73,22 @@ Posture label: `DISABLED / BLOCKED / FAIL_CLOSED / ADVISORY_ONLY`
 6. Untracked `runtime_reports/` packages are **not** release proof unless SHA-bound under Gate 2 evidence custody (AR-002).
 7. Current maintenance HEAD is **not** automatically an evidence freeze SHA.
 8. CSS-CONSOL-CERT-001 offline pass is **not** production certification.
+9. COW-001 is **not** complete, **not** a smoke-test substitute for operation, and **not** live-trading authorization.
 
 ---
+
+## Next operating milestone (COW-001)
+
+**Start the current canonical CSS as-is in controlled mode and keep it running.**
+
+Authority: `docs/release/CSS_COW_001_CONTROLLED_OPERATING_WINDOW.md`
+
+- Minimum 24 hours; do not stop at 24h if healthy; continue to 48/72h when practical.
+- Live/current market data within existing safe support — **not** funded live execution.
+- Defects do not auto-invalidate the window except SEV-1 safety-critical (immediate controlled shutdown).
+- Do not start Phase 184A / 188+ / 196 / 197 / 198 or MI-EXT live ingestion as the next activity.
+
+Cloud Agents must not start COW-001 (`BLOCKED — OPERATOR_RUNTIME_REQUIRED`).
 
 ## Supersession table
 
@@ -100,7 +117,7 @@ Posture label: `DISABLED / BLOCKED / FAIL_CLOSED / ADVISORY_ONLY`
 7. Root entry point: `README.md` *(AR-004)*
 8. Branch disposition: `docs/governance/CSS_BRANCH_DISPOSITION_REGISTER.md` *(CSS-PKG-D-001)*
 
-Production Certification may become GO only after Critical Gate 2 blockers are CLOSED/WAIVED and Phase 181 is re-run with verified observations (not fixtures) on an explicit freeze SHA.
+Production Certification may become GO only after Critical Gate 2 blockers are CLOSED/WAIVED and Phase 181 is re-run with verified observations (not fixtures) on an explicit freeze SHA. COW-001 is the intended path to generate **current-SHA operational observations**; it does not by itself flip Phase 181 to CERTIFIED.
 
 ---
 

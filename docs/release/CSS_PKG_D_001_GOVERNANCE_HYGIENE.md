@@ -9,7 +9,7 @@
 **Live trading authority:** NONE
 **Runtime/code mutation:** NONE (stale **test** pins only)
 
-Follows CSS-CONSOL-CERT-001 (PR #61 merged). Prepares the repository for the next implementation package without granting live authority.
+Follows CSS-CONSOL-CERT-001 (PR #61 merged). Finalizes Package D as governance/release-metadata reconciliation. Next milestone is **COW-001** (controlled operating window), not another development/feature-recovery phase. No live authority granted.
 
 ---
 
@@ -51,7 +51,9 @@ No runtime code changed.
 
 **MR-001:** live assertions against current HEAD / moving branch names replaced with freeze-time SHAs `66e11d4f` vs `9a9263c1` plus an explicit “current HEAD is not the unified freeze” check. Historical path-disjoint / merge-tree / hotpath invariants preserved **at the freeze**, not weakened against current maintenance.
 
-Result: `tests/test_ldt002_live_pilot_blocker_resolution_audit.py` + `tests/test_mr001_branch_consolidation_plan.py` → **15 passed / 0 failed**.
+Result: `tests/test_ldt002_live_pilot_blocker_resolution_audit.py` + `tests/test_mr001_branch_consolidation_plan.py` → **15 passed / 0 failed** (reconfirmed 2026-08-19T19:10:53Z).
+
+No runtime implementation changed. No execution/safety boundary changed.
 
 ---
 
@@ -105,12 +107,29 @@ See `docs/governance/CSS_DOTENV_CI_ENVIRONMENT_ACTION.md`. Imports **not** redes
 
 ---
 
-## Recommended next package
+## Next milestone — COW-001 (not another development phase)
 
-After this hygiene PR is reviewed/landed:
+After Package D is independently reviewed, **do not** start another smoke test, pre-operation cert gate, 72-hour-before-operate programme, or feature-recovery phase.
 
-- **Package B** (user execution modes, no live authority) if the owner wants product UX next; or
-- **Package A** (evidence closeout) when laptop/runtime is available; or
-- **Package C** (live-readiness architecture **review only**) if the owner wants TTL/FX conflict analysis before UX.
+**Start the current canonical CSS as-is in controlled mode and keep it running.**
 
-Do **not** begin 184A / 188+ / 196 / 197 / 198 or MI-EXT live ingestion from this package.
+Charter: `docs/release/CSS_COW_001_CONTROLLED_OPERATING_WINDOW.md`
+
+- Minimum 24 hours; if healthy at 24h, continue; 48/72h when practical; no restart solely to manufacture a 72h test
+- Live/current market data where already safely supported; **not** funded live execution
+- SEV-1: immediate controlled shutdown; SEV-2/3: repair and continue; defects do not auto-invalidate the window
+- Backlog only (do not start now): 184A, 188+, 196, 197, 198, MI-EXT live ingestion, new FX live governor, new autonomous live authority
+
+Package A/B/C remain optional later backlog. They are **not** the next milestone.
+
+---
+
+## Package D finalization flags
+
+| Flag | Value |
+| --- | --- |
+| RUNTIME_FILES_CHANGED | NO |
+| BROKER_FILES_CHANGED | NO |
+| EXECUTION_AUTHORITY_CHANGED | NO |
+| SAFETY_GATE_CHANGED | NO |
+| CSS-PKG-D-001 status | REVIEW (draft PR #62; not COMPLETE until merged) |
