@@ -1,7 +1,9 @@
 ---
 id: TAI-002
-status: REVIEW
+status: COMPLETE
 review_ready_at_utc: 2026-08-19T16:00:00Z
+verified_utc: 2026-08-19T16:05:00Z
+closed_at_utc: 2026-08-19T16:05:00Z
 priority: 110
 risk: HIGH
 owner: Cursor Cloud Agent TAI-002 R2
@@ -317,4 +319,31 @@ Safety-boundary verification:
 - Unified Trade Gate, AntiBleedGuard, Capital Governor, RBAC, and kill-switch modules were not modified.
 - Favorable TAI evidence cannot override a denying Unified Trade Gate.
 - Forged `execution_allowed=True` TAI payloads are forced back to advisory-only before ranking/Mission Control.
+
+## Verification review record
+
+Status: COMPLETE
+
+Verified UTC: 2026-08-19T16:05:00Z
+
+Operator follow-up authorized verification and landing onto `css-v1.0.1-maintenance` after PR #57 review. PR #54 remains untouched and must not be merged. `main` remains untouched.
+
+Re-verified:
+
+- Base still `ba3ff07478164fb1f5011fbc6f5d44955fb3f42d`
+- Feature HEAD `f9bae4c2e7c25552bbc4ac92cb097712a52d82a7` is 1 commit ahead of maintenance, mergeable
+- Diff confined to TAI integration overlay, Mission Control read-only projection, tests, and task records
+- Unified Trade Gate / AntiBleedGuard / Capital Governor / RBAC / kill-switch source not modified
+- `python3 -m py_compile` PASS
+- TAI-002 + TAI-001 + ranking/regime suite: 52 passed
+- Mission Control mc001 + mc007a: 20 passed, 1 pre-existing Starlette/httpx warning
+
+Informational (non-blocking):
+
+- Bullish integration assertion allows `NEUTRAL` as well as `UP`
+- Conflicting-MTF assertion is conservative (`confidence < 0.99`) rather than requiring `conflict_indicators`
+- `FORBIDDEN_AUTHORITY_TOKENS` helper in the test file is unused; the test inlines a subset
+
+Verdict: **TAI-002 R2 VERIFICATION PASS**. Authorized to land on `css-v1.0.1-maintenance` only.
+
 
