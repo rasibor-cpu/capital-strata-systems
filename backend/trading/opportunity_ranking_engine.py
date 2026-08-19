@@ -325,6 +325,35 @@ class OpportunityRankingEngine:
         if isinstance(technical, Mapping):
             payload = dict(payload)
             payload["technical_intelligence"] = AutonomousOpportunityIntelligenceEngine._advisory_safety_overlay(technical)
+        events = payload.get("external_event_intelligence")
+        if not isinstance(events, Mapping):
+            payload = dict(payload)
+            payload["external_event_intelligence"] = {
+                "schema_version": "css.mi_ext_001.external_event_intelligence.v1",
+                "external_event_score": 0.0,
+                "event_confidence": 0.0,
+                "event_freshness": "UNKNOWN",
+                "event_categories": [],
+                "event_provenance_count": 0,
+                "event_conflict_state": "NONE",
+                "event_reasons": ["empty_event_set"],
+                "advisory_only": True,
+                "execution_allowed": False,
+                "live_trading_blocked": True,
+                "broker_execution_armed": False,
+                "direct_execution_influence": False,
+                "live_network_ingestion": False,
+            }
+        else:
+            safe_events = dict(events)
+            safe_events["advisory_only"] = True
+            safe_events["execution_allowed"] = False
+            safe_events["live_trading_blocked"] = True
+            safe_events["broker_execution_armed"] = False
+            safe_events["direct_execution_influence"] = False
+            safe_events["live_network_ingestion"] = False
+            payload = dict(payload)
+            payload["external_event_intelligence"] = safe_events
         return payload
 
     @staticmethod
@@ -343,6 +372,22 @@ class OpportunityRankingEngine:
                 "advisory_only": True,
                 "execution_allowed": False,
                 "live_trading_blocked": True,
+            },
+            "external_event_intelligence": {
+                "schema_version": "css.mi_ext_001.external_event_intelligence.v1",
+                "external_event_score": 0.0,
+                "event_confidence": 0.0,
+                "event_freshness": "UNKNOWN",
+                "event_categories": [],
+                "event_provenance_count": 0,
+                "event_conflict_state": "NONE",
+                "event_reasons": [error_code],
+                "advisory_only": True,
+                "execution_allowed": False,
+                "live_trading_blocked": True,
+                "broker_execution_armed": False,
+                "direct_execution_influence": False,
+                "live_network_ingestion": False,
             },
             "multi_timeframe": {"normalized_score": 0.0, "volatility_score": 0.0, "timeframes": {}},
             "regime_confirmation": {
@@ -516,6 +561,7 @@ class OpportunityRankingEngine:
                 "candles": candles,
                 "display_name": display_name,
             },
+            "external_events": list(instrument.get("external_events") or []),
             "portfolio_snapshot": {
                 "available_capital": 100000.0,
                 "positions": [],

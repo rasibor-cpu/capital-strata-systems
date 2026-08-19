@@ -1,0 +1,17 @@
+{
+  "events": [
+    {
+      "event_id": "ngx-outage-001",
+      "title": "NGX exchange outage matching engine notice",
+      "normalized_summary": "Official exchange outage / market disruption notice.",
+      "event_category": "exchange_outage",
+      "published_at": "2026-07-30T08:30:00Z",
+      "source_url": "https://ngxgroup.com/",
+      "publisher": "NGX",
+      "jurisdiction": "NG",
+      "affected_instruments": ["NG_EQUITIES"],
+      "affected_asset_classes": ["EQUITY"],
+      "verification_status": "VERIFIED"
+    }
+  ]
+}

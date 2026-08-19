@@ -1,0 +1,17 @@
+{
+  "events": [
+    {
+      "event_id": "coinbase-md-btc-001",
+      "title": "Coinbase public market-data snapshot BTC-USD",
+      "normalized_summary": "Public MD fixture; price fields intentionally UNAVAILABLE to avoid invented prices.",
+      "event_category": "digital_asset_protocol_exchange",
+      "published_at": "2026-07-30T08:00:00Z",
+      "source_url": "https://www.coinbase.com/",
+      "publisher": "Coinbase",
+      "jurisdiction": "GLOBAL",
+      "affected_instruments": ["BTC-USD"],
+      "affected_asset_classes": ["CRYPTO"],
+      "verification_status": "FIXTURE"
+    }
+  ]
+}

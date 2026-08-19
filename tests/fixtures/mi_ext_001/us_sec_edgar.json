@@ -1,0 +1,17 @@
+{
+  "events": [
+    {
+      "event_id": "sec-edgar-filing-001",
+      "title": "Issuer quarterly results filing (10-Q)",
+      "normalized_summary": "EDGAR issuer earnings-related filing notice; tickers UNAVAILABLE in fixture.",
+      "event_category": "issuer_earnings",
+      "published_at": "2026-07-30T15:00:00Z",
+      "source_url": "https://www.sec.gov/edgar",
+      "publisher": "US SEC",
+      "jurisdiction": "US",
+      "affected_instruments": [],
+      "affected_asset_classes": ["EQUITY"],
+      "verification_status": "VERIFIED"
+    }
+  ]
+}

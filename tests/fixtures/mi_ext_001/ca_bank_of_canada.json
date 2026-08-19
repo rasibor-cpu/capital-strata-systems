@@ -1,0 +1,17 @@
+{
+  "events": [
+    {
+      "event_id": "boc-rate-2026-07-30-01",
+      "title": "Bank of Canada interest rate announcement",
+      "normalized_summary": "BoC policy rate decision release.",
+      "event_category": "interest_rates",
+      "published_at": "2026-07-30T14:00:00Z",
+      "source_url": "https://www.bankofcanada.ca/",
+      "publisher": "Bank of Canada",
+      "jurisdiction": "CA",
+      "affected_instruments": ["CAD", "CA_RATES"],
+      "affected_asset_classes": ["FX", "RATES"],
+      "verification_status": "VERIFIED"
+    }
+  ]
+}
