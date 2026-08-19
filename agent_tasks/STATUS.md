@@ -20,7 +20,7 @@ None.
 
 ## REVIEW
 
-- `RC-LIVE-CONSOL-001` - Offline Market Contracts, Deterministic Providers & Read-Only Broker Certification - recovered on `css-rclive-offline-market-readiness-consolidated`; targeted validation PASS; independently review-ready for `css-v1.0.1-maintenance`. Record in `agent_tasks/REVIEW/RC-LIVE-CONSOL-001_OFFLINE_MARKET_READINESS.md`.
+- `RC-LIVE-CONSOL-001` - Offline Market Contracts, Deterministic Providers & Read-Only Broker Certification - recovered on `css-rclive-offline-market-readiness-consolidated`; targeted validation PASS; independently review-ready for `css-v1.0.1-maintenance` via draft PR #60. Record in `agent_tasks/REVIEW/RC-LIVE-CONSOL-001_OFFLINE_MARKET_READINESS.md`.
 - `RC-LIVE-W1-001` - Autonomous Supervisor Safe Restoration - restored on `css-rclive-w1-autonomous-supervisor`; runtime validation PASS; independently review-ready and authorized to land on `css-v1.0.1-maintenance` via draft PR #58. Record in `agent_tasks/REVIEW/RC-LIVE-W1-001_AUTONOMOUS_SUPERVISOR_SAFE_RESTORATION.md`.
 
 ## BLOCKED
@@ -39,7 +39,7 @@ None.
 
 Stale draft PR #54 (`css-tai-002-runtime-validation`) remains open/conflicting and must not be merged. Replacement is PR #57.
 
-RC-LIVE-CONSOL-001 grants no live-trading, broker, credential, order-submission, or execution-gate authority. Live network market access fails closed. Draft PR remains unmerged pending independent review.
+RC-LIVE-CONSOL-001 grants no live-trading, broker, credential, order-submission, or execution-gate authority. Live network market access fails closed. Draft PR #60 remains unmerged pending independent review.
 
 MI-EXT-001 R2 landed on `css-v1.0.1-maintenance` via PR #59.
 

@@ -14,6 +14,7 @@ commit_authority: FEATURE_BRANCH
 push_authority: FEATURE_BRANCH
 pr_authority: DRAFT_TO_MAINTENANCE
 live_trading_authority: NONE
+draft_pr: 60
 historical_reference_commits: 15b83a32, f0efcba3, 840c56f5
 ---
 
