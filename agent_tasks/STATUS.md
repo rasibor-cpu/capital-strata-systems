@@ -23,7 +23,7 @@ None.
 
 ## REVIEW
 
-- `CSS-CONSOL-CERT-001` - Post-merge certification and backlog consolidation after TAI-001, TAI-002, Autonomous Supervisor, MI-EXT-001 R2, and RC-LIVE-CONSOL-001. Documentation-only. Record in `agent_tasks/REVIEW/CSS-CONSOL-CERT-001_POST_MERGE_CERTIFICATION.md` and `docs/release/CSS_CONSOL_CERT_001_POST_MERGE_CERTIFICATION.md`. Next package: governance hygiene (Package D). Live implementation must not start from this pass.
+- `CSS-CONSOL-CERT-001` - Post-merge certification and backlog consolidation after TAI-001, TAI-002, Autonomous Supervisor, MI-EXT-001 R2, and RC-LIVE-CONSOL-001. Documentation-only. Draft PR #61. Record in `agent_tasks/REVIEW/CSS-CONSOL-CERT-001_POST_MERGE_CERTIFICATION.md` and `docs/release/CSS_CONSOL_CERT_001_POST_MERGE_CERTIFICATION.md`. Next package: governance hygiene (Package D). Live implementation must not start from this pass.
 
 Task *files* for landed recoveries may still sit under `agent_tasks/REVIEW/` until Package D moves them to `COMPLETE/`. Merge state below is authoritative.
 
