@@ -43,7 +43,62 @@ def _opportunity(state: Mapping[str, Any], item: Any, rank: int) -> dict[str, An
         "blocking_reason": payload.get("blocking_reason", payload.get("reason", DATA_UNAVAILABLE)),
         "committee_outcome": payload.get("committee_outcome", committee),
         "ranking": payload.get("ranking", payload.get("rank", rank)),
+        "technical_intelligence": _technical_intelligence_observability(payload),
         **_metadata(state, "opportunity_ranking.opportunity"),
+    }
+
+
+def _technical_intelligence_observability(payload: Mapping[str, Any]) -> dict[str, Any]:
+    source = payload.get("technical_intelligence")
+    if not isinstance(source, Mapping):
+        diagnostics = _mapping(payload.get("diagnostics"))
+        intelligence = _mapping(diagnostics.get("intelligence"))
+        source = intelligence.get("technical_intelligence")
+    source = source if isinstance(source, Mapping) else {}
+    supporting = _mapping(_mapping(payload.get("explainability")).get("supporting_indicators"))
+    timeframes = source.get("timeframes") if isinstance(source.get("timeframes"), Mapping) else {}
+    snapshot_fields = [
+        _mapping(item)
+        for item in timeframes.values()
+        if isinstance(item, Mapping)
+    ]
+    freshness = next((item.get("freshness") for item in snapshot_fields if item.get("freshness") not in {None, ""}), DATA_UNAVAILABLE)
+    data_quality = next((item.get("data_quality") for item in snapshot_fields if item.get("data_quality") not in {None, ""}), DATA_UNAVAILABLE)
+    regime = next((item.get("regime") for item in snapshot_fields if item.get("regime") not in {None, ""}), DATA_UNAVAILABLE)
+    contributions = DATA_UNAVAILABLE
+    for item in snapshot_fields:
+        value = item.get("component_contributions")
+        if value not in (None, [], ()):
+            contributions = value
+            break
+    insufficient = False
+    if "insufficient_data" in source:
+        insufficient = bool(source.get("insufficient_data"))
+    elif snapshot_fields:
+        insufficient = all(bool(item.get("insufficient_data")) for item in snapshot_fields)
+    return {
+        "schema_version": source.get("schema_version", "css.tai001.technical_intelligence.v1"),
+        "directional_score": source.get("directional_score", supporting.get("technical_score", DATA_UNAVAILABLE)),
+        "confidence": source.get("confidence", supporting.get("technical_confidence", DATA_UNAVAILABLE)),
+        "dominant_direction": source.get("dominant_direction", supporting.get("technical_direction", DATA_UNAVAILABLE)),
+        "agreement": source.get("agreement", DATA_UNAVAILABLE),
+        "conflict_indicators": list(source.get("conflict_indicators") or []),
+        "higher_timeframe_confirmation": source.get(
+            "higher_timeframe_confirmation",
+            supporting.get("technical_higher_timeframe_confirmation", DATA_UNAVAILABLE),
+        ),
+        "freshness": source.get("freshness", freshness),
+        "data_quality": source.get("data_quality", data_quality),
+        "insufficient_data": source.get("insufficient_data", insufficient if snapshot_fields or source else DATA_UNAVAILABLE),
+        "regime": source.get("regime", regime),
+        "evidence_reasons": list(source.get("evidence_reasons") or []),
+        "component_contributions": source.get("component_contributions", contributions),
+        "advisory_only": True,
+        "execution_allowed": False,
+        "live_trading_blocked": True,
+        "broker_execution_armed": False,
+        "read_only": True,
+        "execution_authority": "NONE",
     }
 
 

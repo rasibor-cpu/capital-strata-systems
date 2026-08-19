@@ -311,16 +311,21 @@ class OpportunityRankingEngine:
         decision: Mapping[str, Any],
     ) -> dict[str, Any]:
         try:
-            return self.autonomous_intelligence_engine.analyze(
+            payload = self.autonomous_intelligence_engine.analyze(
                 instrument=instrument,
                 candidate=candidate,
                 decision=decision,
                 historical_records=self.historical_learning_records,
             )
         except AutonomousOpportunityIntelligenceEngineError:
-            return self._fallback_intelligence_payload("autonomous_intelligence_error")
+            payload = self._fallback_intelligence_payload("autonomous_intelligence_error")
         except Exception:
-            return self._fallback_intelligence_payload("autonomous_intelligence_exception")
+            payload = self._fallback_intelligence_payload("autonomous_intelligence_exception")
+        technical = payload.get("technical_intelligence")
+        if isinstance(technical, Mapping):
+            payload = dict(payload)
+            payload["technical_intelligence"] = AutonomousOpportunityIntelligenceEngine._advisory_safety_overlay(technical)
+        return payload
 
     @staticmethod
     def _fallback_intelligence_payload(error_code: str) -> dict[str, Any]:
