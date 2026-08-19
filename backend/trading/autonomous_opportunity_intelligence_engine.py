@@ -126,13 +126,13 @@ class AutonomousOpportunityIntelligenceEngine:
         else:
             timeframe_payload = {"1d": candles}
         try:
-            return self.technical_intelligence_engine.analyze_timeframes(
+            payload = self.technical_intelligence_engine.analyze_timeframes(
                 instrument=symbol,
                 timeframe_candles=timeframe_payload,
                 now=now,
             ).to_dict()
         except Exception as exc:
-            return {
+            payload = {
                 "schema_version": "css.tai001.technical_intelligence.v1",
                 "instrument": symbol,
                 "timeframes": {},
@@ -143,11 +143,34 @@ class AutonomousOpportunityIntelligenceEngine:
                 "higher_timeframe_confirmation": False,
                 "conflict_indicators": [],
                 "evidence_reasons": ["technical_intelligence_fail_closed"],
-                "advisory_only": True,
-                "execution_allowed": False,
-                "live_trading_blocked": True,
                 "error": type(exc).__name__,
             }
+        return self._advisory_safety_overlay(payload)
+
+    @staticmethod
+    def _advisory_safety_overlay(payload: Mapping[str, Any]) -> dict[str, Any]:
+        """Force advisory-only markers so TAI cannot advertise execution authority."""
+
+        safe = dict(payload)
+        safe["advisory_only"] = True
+        safe["execution_allowed"] = False
+        safe["live_trading_blocked"] = True
+        safe["broker_execution_armed"] = False
+        timeframes = safe.get("timeframes")
+        if isinstance(timeframes, Mapping):
+            overlaid: dict[str, Any] = {}
+            for key, snapshot in timeframes.items():
+                if isinstance(snapshot, Mapping):
+                    item = dict(snapshot)
+                    item["advisory_only"] = True
+                    item["execution_allowed"] = False
+                    item["live_trading_blocked"] = True
+                    item["broker_execution_armed"] = False
+                    overlaid[str(key)] = item
+                else:
+                    overlaid[str(key)] = snapshot
+            safe["timeframes"] = overlaid
+        return safe
 
     def generate_adaptive_improvement_report(
         self,
