@@ -4,6 +4,11 @@ import math
 from datetime import UTC, datetime
 from typing import Any, Mapping, Sequence
 
+from backend.intelligence.external_events.decision_integration import (
+    build_external_event_intelligence,
+    coerce_external_events,
+    empty_external_event_intelligence,
+)
 from backend.intelligence.technical_intelligence import TechnicalIntelligenceEngine
 
 
@@ -53,6 +58,12 @@ class AutonomousOpportunityIntelligenceEngine:
             candles=candles,
             now=now,
         )
+        evaluation_time = self._evaluation_time(candidate=candidate, now=now)
+        external_events = self._external_event_intelligence(
+            candidate=candidate,
+            symbol=symbol,
+            evaluation_time=evaluation_time,
+        )
         multi_tf = self._multi_timeframe_analysis(candles)
         regime = self._market_regime_confirmation(
             multi_timeframe=multi_tf,
@@ -97,6 +108,7 @@ class AutonomousOpportunityIntelligenceEngine:
 
         return {
             "technical_intelligence": technical,
+            "external_event_intelligence": external_events,
             "multi_timeframe": multi_tf,
             "regime_confirmation": regime,
             "cross_asset": cross_asset,
@@ -146,6 +158,54 @@ class AutonomousOpportunityIntelligenceEngine:
                 "error": type(exc).__name__,
             }
         return self._advisory_safety_overlay(payload)
+
+    def _external_event_intelligence(
+        self,
+        *,
+        candidate: Mapping[str, Any],
+        symbol: str,
+        evaluation_time: datetime,
+    ) -> dict[str, Any]:
+        raw = candidate.get("external_events")
+        if raw in (None, "", [], ()):
+            snapshot = candidate.get("market_snapshot")
+            if isinstance(snapshot, Mapping):
+                raw = snapshot.get("external_events")
+        events = coerce_external_events(raw)
+        if not events:
+            return empty_external_event_intelligence("empty_event_set")
+        overlay = build_external_event_intelligence(
+            events,
+            instrument=symbol,
+            evaluation_time=evaluation_time,
+        )
+        overlay["advisory_only"] = True
+        overlay["execution_allowed"] = False
+        overlay["live_trading_blocked"] = True
+        overlay["broker_execution_armed"] = False
+        overlay["direct_execution_influence"] = False
+        overlay["live_network_ingestion"] = False
+        return overlay
+
+    @staticmethod
+    def _evaluation_time(*, candidate: Mapping[str, Any], now: datetime) -> datetime:
+        snapshot = candidate.get("market_snapshot")
+        raw = None
+        if isinstance(snapshot, Mapping):
+            raw = snapshot.get("timestamp") or snapshot.get("as_of") or snapshot.get("evaluation_time")
+        raw = candidate.get("evaluation_time", raw)
+        if raw in (None, ""):
+            return now
+        text = str(raw).strip()
+        try:
+            if text.endswith("Z"):
+                text = text[:-1] + "+00:00"
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            return now
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC)
 
     @staticmethod
     def _advisory_safety_overlay(payload: Mapping[str, Any]) -> dict[str, Any]:

@@ -1,0 +1,17 @@
+{
+  "events": [
+    {
+      "event_id": "cbn-mpr-2026-07-30-01",
+      "title": "CBN Monetary Policy Committee interest rate decision",
+      "normalized_summary": "Central Bank of Nigeria MPC policy rate announcement.",
+      "event_category": "monetary_policy",
+      "published_at": "2026-07-30T11:00:00Z",
+      "source_url": "https://www.cbn.gov.ng/",
+      "publisher": "CBN",
+      "jurisdiction": "NG",
+      "affected_instruments": ["NGN", "NG_RATES"],
+      "affected_asset_classes": ["FX", "RATES"],
+      "verification_status": "VERIFIED"
+    }
+  ]
+}

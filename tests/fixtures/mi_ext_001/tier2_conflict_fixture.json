@@ -1,0 +1,17 @@
+{
+  "events": [
+    {
+      "event_id": "tier2-conflict-hawkish",
+      "title": "FOMC monetary policy statement — policy rate held",
+      "normalized_summary": "Secondary institutional note claims hawkish tightening surprise.",
+      "event_category": "monetary_policy",
+      "published_at": "2026-07-30T18:05:00Z",
+      "source_url": "https://example.test/research",
+      "publisher": "Example Bank Research",
+      "jurisdiction": "US",
+      "affected_instruments": ["USD", "US_RATES"],
+      "affected_asset_classes": ["FX", "RATES"],
+      "verification_status": "UNVERIFIED"
+    }
+  ]
+}

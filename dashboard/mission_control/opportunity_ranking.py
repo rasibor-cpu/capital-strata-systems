@@ -44,6 +44,7 @@ def _opportunity(state: Mapping[str, Any], item: Any, rank: int) -> dict[str, An
         "committee_outcome": payload.get("committee_outcome", committee),
         "ranking": payload.get("ranking", payload.get("rank", rank)),
         "technical_intelligence": _technical_intelligence_observability(payload),
+        "external_event_intelligence": _external_event_observability(payload),
         **_metadata(state, "opportunity_ranking.opportunity"),
     }
 
@@ -97,6 +98,33 @@ def _technical_intelligence_observability(payload: Mapping[str, Any]) -> dict[st
         "execution_allowed": False,
         "live_trading_blocked": True,
         "broker_execution_armed": False,
+        "read_only": True,
+        "execution_authority": "NONE",
+    }
+
+
+def _external_event_observability(payload: Mapping[str, Any]) -> dict[str, Any]:
+    source = payload.get("external_event_intelligence")
+    if not isinstance(source, Mapping):
+        diagnostics = _mapping(payload.get("diagnostics"))
+        intelligence = _mapping(diagnostics.get("intelligence"))
+        source = intelligence.get("external_event_intelligence")
+    source = source if isinstance(source, Mapping) else {}
+    return {
+        "schema_version": source.get("schema_version", "css.mi_ext_001.external_event_intelligence.v1"),
+        "external_event_score": source.get("external_event_score", 0.0),
+        "event_confidence": source.get("event_confidence", 0.0),
+        "event_freshness": source.get("event_freshness", DATA_UNAVAILABLE),
+        "event_categories": list(source.get("event_categories") or []),
+        "event_provenance_count": source.get("event_provenance_count", 0),
+        "event_conflict_state": source.get("event_conflict_state", "NONE"),
+        "event_reasons": list(source.get("event_reasons") or []),
+        "advisory_only": True,
+        "execution_allowed": False,
+        "live_trading_blocked": True,
+        "broker_execution_armed": False,
+        "direct_execution_influence": False,
+        "live_network_ingestion": False,
         "read_only": True,
         "execution_authority": "NONE",
     }
