@@ -30,6 +30,7 @@ def _load_dashboard_display_helpers(tmp_path=None, positions=None):
         "_margin_dashboard_mode_is_live",
         "_margin_dashboard_adapter_for_context",
         "margin_dashboard_lines",
+        "command_dashboard_lines",
         "render_trade_dashboard_summary",
     }
 
@@ -162,7 +163,9 @@ def test_existing_dashboard_summary_behavior_remains_intact(tmp_path):
     ns["render_trade_dashboard_summary"]()
     rendered = "\n".join(ns["_output"])
 
+    assert "CSS COMMAND DASHBOARD" in rendered
     assert "=== TRADE DASHBOARD SUMMARY ===" in rendered
+    assert rendered.find("CSS COMMAND DASHBOARD") < rendered.find("=== TRADE DASHBOARD SUMMARY ===")
     assert "=== OPEN POSITIONS BY ASSET CLASS ===" in rendered
     assert "=== PNL BY ASSET CATEGORY ===" in rendered
     assert "Last Trade: NONE" in rendered
