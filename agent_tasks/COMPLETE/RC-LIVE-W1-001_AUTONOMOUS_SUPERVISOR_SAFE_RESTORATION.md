@@ -1,8 +1,12 @@
 ---
 id: RC-LIVE-W1-001
-status: REVIEW
+status: COMPLETE
 review_ready_at_utc: 2026-08-19T17:01:00Z
 validated_utc: 2026-08-19T16:58:00Z
+closed_at_utc: 2026-08-19T17:04:06Z
+merged_pr: 58
+merge_commit: e0676ce896b2eae682946e3619994d1dc0300da6
+lifecycle_reconciled_utc: 2026-08-19T18:59:40Z
 priority: 120
 risk: LOW
 owner: ChatGPT GitHub connector

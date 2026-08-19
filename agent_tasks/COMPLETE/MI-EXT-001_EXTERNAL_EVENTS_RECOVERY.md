@@ -1,6 +1,10 @@
 ---
 id: MI-EXT-001
-status: REVIEW
+status: COMPLETE
+closed_at_utc: 2026-08-19T17:25:29Z
+merged_pr: 59
+merge_commit: f3c59ee4326261957e16500cf0519aad687c3865
+lifecycle_reconciled_utc: 2026-08-19T18:59:40Z
 priority: 125
 risk: HIGH
 owner: Cursor Cloud Agent MI-EXT-001 R2

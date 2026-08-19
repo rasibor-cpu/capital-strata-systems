@@ -94,38 +94,56 @@ def test_ldt002_missing_oanda_live_certification_produces_no_go() -> None:
 
 
 def test_ldt002_non_ancestor_certification_cannot_be_silently_credited() -> None:
+    """Credit only ancestor SHAs; the unified freeze is not current HEAD.
+
+    LDT-002 originally asserted that historical maintenance tip ``9a9263c1``
+    was *not* an ancestor of the then-active unified HEAD ``66e11d4f``.
+    Canonical development is now ``css-v1.0.1-maintenance``, which *does*
+    descend from ``9a9263c1``. The preserved invariant is:
+
+    - a SHA may be credited to the current line only if it is an ancestor
+      of HEAD;
+    - the historical unified freeze SHA must not be treated as current HEAD;
+    - MW/DIP artifacts from the maintenance lineage are present on HEAD
+      because HEAD *is* that lineage, not because unified work was credited.
+    """
     assert _gate("A5")["classification"] == "PASS"
-    # Maintenance tip must not be an ancestor of active HEAD.
-    result = subprocess.run(
+
+    maint_tip_is_ancestor = subprocess.run(
         ["git", "merge-base", "--is-ancestor", MAINT_TIP, "HEAD"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
     )
-    assert result.returncode != 0
+    assert maint_tip_is_ancestor.returncode == 0
 
-    # Representative MW/DIP paths absent on active tree.
+    unified_freeze_is_ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ACTIVE_HEAD, "HEAD"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert unified_freeze_is_ancestor.returncode != 0
+
+    head = _git("rev-parse", "HEAD")
+    assert head != ACTIVE_HEAD
+
     for rel in (
         "docs/governance/CSS_V1_0_1_MAINTENANCE_001_RESIDUAL_RISK_AUDIT.md",
         "docs/governance/DIP_006_CERTIFICATION_MANIFEST.json",
     ):
-        missing = subprocess.run(
-            ["git", "cat-file", "-e", f"HEAD:{rel}"],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-        )
-        assert missing.returncode != 0
-
         present = subprocess.run(
-            ["git", "cat-file", "-e", f"origin/css-v1.0.1-maintenance:{rel}"],
+            ["git", "cat-file", "-e", f"HEAD:{rel}"],
             cwd=REPO_ROOT,
             capture_output=True,
             text=True,
         )
         assert present.returncode == 0
 
-    assert _git("merge-base", "HEAD", "origin/css-v1.0.1-maintenance") == MERGE_BASE
+    audit = LDT002.read_text(encoding="utf-8")
+    assert MAINT_TIP in audit
+    assert ACTIVE_HEAD in audit
+    assert MERGE_BASE in audit
 
 
 def test_ldt002_endurance_observation_not_automatically_ov002_certified() -> None:

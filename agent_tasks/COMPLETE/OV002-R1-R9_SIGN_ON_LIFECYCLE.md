@@ -11,6 +11,7 @@ claimed_at_utc: 2026-08-18T00:38:05Z
 review_ready_at_utc: 2026-08-18T00:58:49Z
 review_accepted_at_utc: 2026-08-18T01:58:00Z
 closed_at_utc: 2026-08-18T01:58:00Z
+lifecycle_reconciled_utc: 2026-08-19T18:59:40Z
 commit_authority: NONE
 push_authority: NONE
 live_trading_authority: NONE
