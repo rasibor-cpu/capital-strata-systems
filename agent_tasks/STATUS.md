@@ -20,7 +20,7 @@ None.
 
 ## REVIEW
 
-- `CSS-PKG-D-001` - Repository / governance hygiene after CSS-CONSOL-CERT-001. Documentation, task lifecycle, stale test pins, stale PR close-without-merge. No runtime/broker/execution changes. Record in `agent_tasks/REVIEW/CSS-PKG-D-001_GOVERNANCE_HYGIENE.md` and `docs/release/CSS_PKG_D_001_GOVERNANCE_HYGIENE.md`.
+- `CSS-PKG-D-001` - Repository / governance hygiene after CSS-CONSOL-CERT-001. Documentation, task lifecycle, stale test pins, stale PR close-without-merge. Draft PR #62. No runtime/broker/execution changes. Record in `agent_tasks/REVIEW/CSS-PKG-D-001_GOVERNANCE_HYGIENE.md` and `docs/release/CSS_PKG_D_001_GOVERNANCE_HYGIENE.md`.
 
 ## BLOCKED
 
