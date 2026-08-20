@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import time
 import socket
@@ -21,18 +22,26 @@ from backend.monitoring.css_alert_models import AlertSeverity
 from launcher.css_service_manager import CSSServiceManager
 from launcher.css_launcher_config import LauncherConfig
 
-CANONICAL_LAUNCHER_MARKERS = (
-    "launcher.css_runtime_launcher",
-    "launcher\\css_runtime_launcher.py",
-    "launcher/css_runtime_launcher.py",
+# Consolidation discovery envelope — structured fail-closed reporting without
+# adopting COW001's full OV002 EXPECTED_PID / self_observed schema wholesale.
+DISCOVERY_SCHEMA = "css.runtime.process_discovery.consolidation.v1"
+CANONICAL_LAUNCHER_MODULE = "launcher.css_runtime_launcher"
+CANONICAL_MOBILE_MODULE = "launcher.css_mobile_launcher"
+CANONICAL_LAUNCHER_SCRIPT_SUFFIX = os.path.normcase(
+    os.path.join("launcher", "css_runtime_launcher.py")
 )
-CANONICAL_CHILD_MARKERS = (
-    "scripts\\css_live_dashboard.py",
-    "scripts/css_live_dashboard.py",
-    "launcher.css_mobile_launcher",
-    "launcher\\css_mobile_launcher.py",
-    "launcher/css_mobile_launcher.py",
+CANONICAL_DASHBOARD_SCRIPT_SUFFIX = os.path.normcase(
+    os.path.join("scripts", "css_live_dashboard.py")
 )
+CANONICAL_MOBILE_SCRIPT_SUFFIX = os.path.normcase(
+    os.path.join("launcher", "css_mobile_launcher.py")
+)
+_PYTHON_INTERPRETER_NAMES = {
+    "python",
+    "python.exe",
+    "pythonw",
+    "pythonw.exe",
+}
 
 
 def is_port_in_use(port: int) -> bool:
@@ -40,14 +49,191 @@ def is_port_in_use(port: int) -> bool:
         return s.connect_ex(('127.0.0.1', port)) == 0
 
 
+def _discovery_failure(error_code: str, error_type: str) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "schema_version": DISCOVERY_SCHEMA,
+        "processes": [],
+        "error_code": error_code,
+        "error_type": error_type,
+    }
+
+
+def _discovery_success(processes: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "schema_version": DISCOVERY_SCHEMA,
+        "processes": processes,
+        "error_code": None,
+        "error_type": None,
+    }
+
+
+def _tokenize_command(command_line: str) -> list[str]:
+    return os.path.normcase(command_line).replace('"', " ").replace("'", " ").split()
+
+
+def _interpreter_basename(token: str) -> str:
+    return os.path.basename(token.rstrip("\\/"))
+
+
+def _is_python_interpreter_token(token: str) -> bool:
+    base = _interpreter_basename(token)
+    if base in _PYTHON_INTERPRETER_NAMES:
+        return True
+    # Versioned interpreters only (python3, python3.12, python3.12.exe, pythonw3).
+    return re.fullmatch(r"pythonw?\d+(?:\.\d+)*(\.exe)?", base) is not None
+
+
+def _is_python_inline_invocation(args_after_interpreter: list[str]) -> bool:
+    """Return True only for ``python [options] -c ...`` interpreter mode."""
+    index = 0
+    while index < len(args_after_interpreter):
+        arg = args_after_interpreter[index]
+        if arg == "-c":
+            return True
+        if arg == "-m":
+            return False
+        if arg.startswith("-"):
+            # Interpreter option (e.g. -u, -O, -X...). Values for options that
+            # take arguments are uncommon before -c/-m/script; keep scanning.
+            index += 1
+            continue
+        # First non-option token is a script path — not inline -c mode.
+        return False
+    return False
+
+
+def _path_has_canonical_suffix(token: str, suffix_norm: str) -> bool:
+    """Exact path-suffix match using path separators (not arbitrary endswith)."""
+    if not token or token.startswith("-") or "=" in token:
+        return False
+    normalized = os.path.normcase(token.replace("/", os.sep).replace("\\", os.sep))
+    if normalized == suffix_norm:
+        return True
+    return normalized.endswith(os.sep + suffix_norm)
+
+
+def _classify_python_invocation(args_after_interpreter: list[str]) -> str | None:
+    if _is_python_inline_invocation(args_after_interpreter):
+        return None
+
+    index = 0
+    while index < len(args_after_interpreter):
+        arg = args_after_interpreter[index]
+        if arg == "-m":
+            if index + 1 >= len(args_after_interpreter):
+                return None
+            module = args_after_interpreter[index + 1]
+            if module == CANONICAL_LAUNCHER_MODULE:
+                return "canonical_launcher"
+            if module == CANONICAL_MOBILE_MODULE:
+                return "managed_child"
+            return None
+        if arg.startswith("-"):
+            index += 1
+            continue
+        if _path_has_canonical_suffix(arg, CANONICAL_LAUNCHER_SCRIPT_SUFFIX):
+            return "canonical_launcher"
+        if _path_has_canonical_suffix(arg, CANONICAL_DASHBOARD_SCRIPT_SUFFIX):
+            return "managed_child"
+        if _path_has_canonical_suffix(arg, CANONICAL_MOBILE_SCRIPT_SUFFIX):
+            return "managed_child"
+        # First non-option argument is some other script — not canonical.
+        return None
+    return None
+
+
+def classify_canonical_process_command(command_line: str) -> str | None:
+    """Classify a process command line as canonical_launcher, managed_child, or None.
+
+    Non-Python wrappers (cmd, PowerShell, explorers, etc.) never become owners
+    merely because a marker string appears in their command text. Only a Python
+    interpreter invocation in supported -m / script forms qualifies.
+    """
+    tokens = _tokenize_command(command_line)
+    for index, token in enumerate(tokens):
+        if not _is_python_interpreter_token(token):
+            continue
+        return _classify_python_invocation(tokens[index + 1 :])
+    return None
+
+
+def is_proven_non_owner_wrapper(command_line: str) -> bool:
+    """True when the process is positively identified as a non-owner wrapper.
+
+    Used for explicit shim classification evidence. Wrappers are never treated
+    as canonical owners by classify_canonical_process_command either.
+    """
+    tokens = _tokenize_command(command_line)
+    if not tokens:
+        return False
+    base = _interpreter_basename(tokens[0])
+    wrapper_names = {
+        "cmd.exe",
+        "cmd",
+        "powershell.exe",
+        "powershell",
+        "pwsh.exe",
+        "pwsh",
+        "explorer.exe",
+        "explorer",
+        "conhost.exe",
+        "conhost",
+    }
+    if base not in wrapper_names:
+        return False
+    return classify_canonical_process_command(command_line) is None
+
+
+def _windows_discovery_command() -> str:
+    # Always emit a JSON object envelope so empty process sets remain parseable
+    # (PowerShell ConvertTo-Json of @() alone can yield empty stdout).
+    return (
+        "$procs = @(Get-CimInstance Win32_Process -Filter \"name='python.exe'\" "
+        "-ErrorAction Stop | Select-Object ProcessId,ParentProcessId,CommandLine); "
+        f"[pscustomobject]@{{ schema_version = '{DISCOVERY_SCHEMA}'; ok = $true; "
+        "processes = $procs; error_code = $null } | "
+        "ConvertTo-Json -Compress -Depth 4"
+    )
+
+
+def _parse_windows_discovery_payload(parsed: Any) -> tuple[list[dict[str, Any]] | None, str | None]:
+    if not isinstance(parsed, dict):
+        return None, "discovery_envelope_malformed"
+    if parsed.get("schema_version") != DISCOVERY_SCHEMA:
+        return None, "discovery_schema_mismatch"
+    if parsed.get("ok") is not True:
+        return None, "discovery_reported_failure"
+    if parsed.get("error_code") not in (None, ""):
+        return None, "discovery_success_error_fields_present"
+    processes = parsed.get("processes")
+    if processes is None:
+        processes = []
+    if isinstance(processes, dict):
+        processes = [processes]
+    if not isinstance(processes, list):
+        return None, "discovery_output_malformed"
+    return processes, None
+
+
 def discover_canonical_runtime_processes(
     *,
     repo_root: str = REPO_ROOT,
     current_pid: int | None = None,
-) -> list[dict[str, Any]]:
-    current_pid = int(current_pid or os.getpid())
+) -> dict[str, Any]:
+    """Discover canonical CSS runtime processes with fail-closed semantics.
+
+    Returns a structured envelope:
+      ok=True  → processes may be empty (SUCCESS_WITH_ZERO_OWNERS)
+      ok=False → discovery failed / ambiguous; processes is always []
+    """
+    try:
+        current_pid = int(current_pid if current_pid is not None else os.getpid())
+    except (TypeError, ValueError):
+        return _discovery_failure("discovery_current_pid_malformed", "malformed_input")
+
     repo_norm = os.path.normcase(os.path.abspath(repo_root))
-    rows: list[dict[str, Any]] = []
 
     try:
         if os.name == "nt":
@@ -56,21 +242,25 @@ def discover_canonical_runtime_processes(
                     "powershell",
                     "-NoProfile",
                     "-Command",
-                    (
-                        "Get-CimInstance Win32_Process -Filter \"name='python.exe'\" | "
-                        "Select-Object ProcessId,ParentProcessId,CommandLine | "
-                        "ConvertTo-Json -Compress"
-                    ),
+                    _windows_discovery_command(),
                 ],
                 capture_output=True,
                 text=True,
                 check=False,
                 timeout=20,
             )
+            if completed.returncode != 0:
+                return _discovery_failure("discovery_powershell_failed", "subprocess_error")
             raw = (completed.stdout or "").strip()
             if not raw:
-                return []
-            parsed = json.loads(raw)
+                return _discovery_failure("discovery_empty_output", "empty_output")
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                return _discovery_failure("discovery_output_unreadable", "json_error")
+            process_rows, payload_error = _parse_windows_discovery_payload(parsed)
+            if payload_error:
+                return _discovery_failure(payload_error, "malformed_envelope")
         else:
             completed = subprocess.run(
                 ["ps", "-eo", "pid=,ppid=,command="],
@@ -79,68 +269,102 @@ def discover_canonical_runtime_processes(
                 check=False,
                 timeout=20,
             )
-            parsed = []
+            if completed.returncode != 0:
+                return _discovery_failure("discovery_ps_failed", "subprocess_error")
+            process_rows = []
             for line in (completed.stdout or "").splitlines():
                 parts = line.strip().split(None, 2)
-                if len(parts) == 3:
-                    parsed.append(
-                        {
-                            "ProcessId": parts[0],
-                            "ParentProcessId": parts[1],
-                            "CommandLine": parts[2],
-                        }
-                    )
-        if isinstance(parsed, dict):
-            process_rows = [parsed]
-        elif isinstance(parsed, list):
-            process_rows = parsed
-        else:
-            process_rows = []
+                if len(parts) != 3:
+                    if line.strip():
+                        return _discovery_failure(
+                            "discovery_row_malformed", "malformed_process_row"
+                        )
+                    continue
+                process_rows.append(
+                    {
+                        "ProcessId": parts[0],
+                        "ParentProcessId": parts[1],
+                        "CommandLine": parts[2],
+                    }
+                )
     except Exception:
-        return []
+        return _discovery_failure("discovery_enumeration_exception", "subprocess_error")
 
-    for row in process_rows:
+    rows: list[dict[str, Any]] = []
+    seen_pids: set[int] = set()
+
+    for row in process_rows or []:
+        if not isinstance(row, dict):
+            return _discovery_failure("discovery_row_malformed", "malformed_process_row")
         try:
             pid = int(row.get("ProcessId") or row.get("PID") or 0)
-        except Exception:
-            continue
+        except (TypeError, ValueError):
+            return _discovery_failure("discovery_pid_malformed", "malformed_process_row")
+        if pid <= 0:
+            return _discovery_failure("discovery_pid_malformed", "malformed_process_row")
+        if pid in seen_pids:
+            return _discovery_failure(
+                "discovery_duplicate_process_id", "contradictory_ownership"
+            )
+        seen_pids.add(pid)
         if pid == current_pid:
             continue
-        cmd = str(row.get("CommandLine") or row.get("COMMAND") or "")
+
+        cmd = row.get("CommandLine") or row.get("COMMAND")
+        if not isinstance(cmd, str) or not cmd.strip():
+            # Windows often returns null CommandLine under ACL denial. Such rows
+            # cannot be classified as owners and are skipped (not counted).
+            # Envelope/subprocess failures still fail closed above.
+            continue
+
         cmd_norm = os.path.normcase(cmd)
         if repo_norm not in cmd_norm:
             continue
-        marker = None
-        if any(item in cmd_norm for item in CANONICAL_LAUNCHER_MARKERS):
-            marker = "canonical_launcher"
-        elif any(item in cmd_norm for item in CANONICAL_CHILD_MARKERS):
-            marker = "managed_child"
-        if not marker:
+
+        role = classify_canonical_process_command(cmd)
+        if not role:
             continue
+
         rows.append(
             {
                 "pid": pid,
                 "parent_pid": row.get("ParentProcessId"),
-                "role": marker,
+                "role": role,
                 "command_line": cmd[:500],
             }
         )
-    return rows
+
+    return _discovery_success(rows)
 
 
 def duplicate_canonical_runtime_owners(
     *,
     repo_root: str = REPO_ROOT,
     current_pid: int | None = None,
-) -> list[dict[str, Any]]:
-    return [
+) -> dict[str, Any]:
+    """Return fail-closed owner discovery for canonical launchers only."""
+    discovery = discover_canonical_runtime_processes(
+        repo_root=repo_root,
+        current_pid=current_pid,
+    )
+    if not discovery.get("ok"):
+        return {
+            "ok": False,
+            "owners": [],
+            "error_code": discovery.get("error_code"),
+            "error_type": discovery.get("error_type"),
+        }
+    owners = [
         row
-        for row in discover_canonical_runtime_processes(
-            repo_root=repo_root,
-            current_pid=current_pid,
-        )
+        for row in discovery.get("processes") or []
         if row.get("role") == "canonical_launcher"
     ]
+    return {
+        "ok": True,
+        "owners": owners,
+        "error_code": None,
+        "error_type": None,
+    }
 
 
 def check_environment() -> bool:
@@ -204,10 +428,18 @@ def check_environment() -> bool:
     else:
         print(f"Port {LauncherConfig.PORT:<15} PASS")
 
-    duplicate_owners = duplicate_canonical_runtime_owners()
-    if duplicate_owners:
+    owner_discovery = duplicate_canonical_runtime_owners()
+    if not owner_discovery.get("ok"):
         print("Canonical Runtime Owner FAIL")
-        for owner in duplicate_owners:
+        print(
+            "ERROR: Canonical runtime discovery failed "
+            f"(error_code={owner_discovery.get('error_code')}, "
+            f"error_type={owner_discovery.get('error_type')})."
+        )
+        checks_ok = False
+    elif owner_discovery.get("owners"):
+        print("Canonical Runtime Owner FAIL")
+        for owner in owner_discovery["owners"]:
             print(
                 "ERROR: Existing canonical launcher detected "
                 f"(pid={owner.get('pid')})."
