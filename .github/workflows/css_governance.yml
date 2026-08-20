@@ -3,13 +3,19 @@ name: CSS Governance Validation
 # AR-016 / RB-011: fail-closed Gate-2 CI (replaces structurally broken prior workflow).
 # Automated production deploy is NOT performed by this workflow.
 
+# Canonical development line is css-v1.0.1-maintenance.
+# main remains a stale GitHub default (Phase 113Y) and is not treated as
+# the product baseline. Historical consolidation is retained so old PRs
+# still receive the same named checks.
 on:
   push:
     branches:
+      - css-v1.0.1-maintenance
       - main
       - css-unified-consolidation-2026-07-13
   pull_request:
     branches:
+      - css-v1.0.1-maintenance
       - main
       - css-unified-consolidation-2026-07-13
   workflow_dispatch:
