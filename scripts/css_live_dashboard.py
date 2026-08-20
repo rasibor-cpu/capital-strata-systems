@@ -1789,11 +1789,15 @@ def authenticate_startup_user() -> dict[str, Any]:
         )
         return user_ctx
 
-    except KeyboardInterrupt:
+    except KeyboardInterrupt as exc:
         try:
             pcnrass_close_session_to_account()
         except Exception as e:
             print(f"[SESSION SETTLEMENT WARN] {e}")
+
+        if str(exc) == "CSS_SIGN_ON_CANCELLED":
+            print("[SESSION STOPPED] Sign-on cancelled by operator.")
+            raise SystemExit(0) from exc
 
         print("[SESSION STOPPED] Keyboard interrupt received.")
         raise
@@ -4316,6 +4320,12 @@ def apply_defensive_exposure_reduction() -> int:
 def print_authentication_status_panel(current_status: dict) -> None:
     auth_state = "AUTHENTICATED" if SESSION_USER_CTX.get("user_id") else "UNAUTHENTICATED"
     auth_source = SESSION_USER_CTX.get("auth_source", "UNKNOWN")
+    current_log_on = (
+        SESSION_USER_CTX.get("current_log_on")
+        or SESSION_USER_CTX.get("last_auth_time")
+        or "NOT RECORDED"
+    )
+    last_log_on = SESSION_USER_CTX.get("last_log_on") or "NOT PREVIOUSLY RECORDED"
 
     now_epoch = time.time()
     created = current_status.get("created", now_epoch)
@@ -4330,6 +4340,8 @@ def print_authentication_status_panel(current_status: dict) -> None:
     print("--- OPERATIONAL AUTHENTICATION STATUS ---")
     print(f"Auth State: {auth_state}")
     print(f"Auth Source: {auth_source}")
+    print(f"Current Log On: {current_log_on}")
+    print(f"Last Log On: {last_log_on}")
     print(f"Session Age: {session_age_seconds} seconds")
     print(f"Last Auth Time: {last_auth_time}")
     print(f"Last Auth Event: {last_auth_event}")
@@ -5402,11 +5414,12 @@ try:
                 engine_mode=str(ENGINE_MODE)
             )
             
+            # Lifetime supervisor telemetry remains available to backend
+            # diagnostics and artifact publication, but is not operator-facing.
             stats = runtime_supervisor.get_stats()
-            print("--- RUNTIME SUPERVISOR ---")
-            print(f"UPTIME: {stats.get('uptime_seconds', 0)}s | CYCLES: {stats.get('cycles_completed', 0)}")
-            print(f"RECOVERIES: {stats.get('recovery_attempts', 0)} | ALERTS: {stats.get('alerts_generated', 0)}")
-            print(f"DISCONNECTS: {stats.get('broker_disconnects', 0)} | ERRORS: {stats.get('runtime_errors', 0)}")
+
+            print("--- SESSION RUNTIME ---")
+            print(f"SESSION CYCLE: {cycle}")
 
             publish_result = pcnrass_publish_runtime_artifacts(
                 cycle,
