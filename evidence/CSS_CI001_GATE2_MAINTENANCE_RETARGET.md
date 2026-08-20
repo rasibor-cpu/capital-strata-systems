@@ -137,14 +137,23 @@ GitHub `pull_request` workflows are taken from the PR head; adding maintenance t
 
 ```
 YAML_VALIDATION=OK (PyYAML safe_load; GitHub `on:` key parses as True in YAML 1.1, accepted by Actions)
-PR_CREATED=YES (filled after open)
-PR_NUMBER=
-PR_URL=
+PR_CREATED=YES
+PR_NUMBER=65
+PR_URL=https://github.com/rasibor-cpu/capital-strata-systems/pull/65
 PR_BASE=css-v1.0.1-maintenance
 PR_MERGED=NO
-GITHUB_ACTIONS_TRIGGERED=PENDING_OBSERVATION
-GITHUB_ACTIONS_RESULT=PENDING_OBSERVATION
+GITHUB_ACTIONS_TRIGGERED=YES
+GITHUB_ACTIONS_RESULT=IN_PROGRESS
 ```
+
+Observed immediately after open (draft PR #65 → `css-v1.0.1-maintenance`, head `db8b7b33`):
+
+| Workflow | Event | Run | Job | Status |
+| --- | --- | --- | --- | --- |
+| CSS Gate 2 Release CI | `pull_request` | 32384140893 | Compile + bounded Gate-2 regression | queued/in progress |
+| CSS Governance Validation | `pull_request` | 32384142387 | governance-ci | queued/in progress |
+
+Trigger diagnosis: **not required**. Adding `css-v1.0.1-maintenance` to `pull_request.branches` in the PR head caused both Gate-2 workflows to start. Feature-branch `push` is correctly **not** a Gate-2 trigger (branch is not in `push.branches`). Final conclusions pending CI completion.
 
 ---
 
