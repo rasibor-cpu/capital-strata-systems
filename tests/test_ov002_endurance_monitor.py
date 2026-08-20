@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -14,6 +16,18 @@ from backend.certification.ov002_endurance_monitor import (
     reconcile_supervisor_and_alerts,
     run_monitor_loop,
 )
+from backend.certification.ov002_continuity import build_process_identity_record
+
+
+def _identity(pid: int, role: str, now: datetime) -> dict:
+    return build_process_identity_record(
+        pid=pid,
+        role=role,
+        attempt_id="",
+        baseline_commit="",
+        repo_root="C:/rasib/source/capital-strata-systems",
+        require_live_fields=True,
+    )
 
 
 def test_safety_assertions_pass_with_mocks() -> None:
@@ -162,6 +176,8 @@ def _http_responses() -> dict[str, tuple[int, dict]]:
 
 def _write_supervisor_state(path: Path, *, now: datetime, **overrides) -> dict:
     path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_identity = _identity(os.getpid(), "launcher", now)
+    supervisor_identity = _identity(os.getpid(), "supervisor", now)
     payload = {
         "supervisor_id": "sup-1",
         "started_at": (now - timedelta(minutes=1)).isoformat(),
@@ -175,11 +191,13 @@ def _write_supervisor_state(path: Path, *, now: datetime, **overrides) -> dict:
         "restart_limit_exhausted": False,
         "process_generation": 0,
         "process_identity": {
-            "launcher_pid": 10,
-            "supervisor_pid": 10,
+            "launcher_pid": os.getpid(),
+            "supervisor_pid": os.getpid(),
+            "launcher": launcher_identity,
+            "supervisor": supervisor_identity,
             "managed_services": {
-                "CSS Runtime": {"pid": 20, "generation": 0},
-                "Mobile Launcher": {"pid": 30, "generation": 0},
+                "CSS Runtime": {**_identity(os.getpid(), "CSS Runtime", now), "generation": 0},
+                "Mobile Launcher": {**_identity(os.getpid(), "Mobile Launcher", now), "generation": 0},
             },
         },
         "shutdown_requested": False,
@@ -246,9 +264,11 @@ def _run_once(init: dict, supervisor_path: Path, alerts_dir: Path) -> dict:
 def test_http_healthy_plus_engine_heartbeat_lost_invalidates(tmp_path: Path) -> None:
     now = datetime.now(timezone.utc)
     init, supervisor_path, alerts_dir = _initialized_run(tmp_path, now=now)
+    run_meta = json.loads((Path(init["package_dir"]) / "RUN_META.json").read_text(encoding="utf-8"))
+    alert_timestamp = datetime.fromisoformat(run_meta["start_utc"]) + timedelta(seconds=1)
     _write_alert(
         alerts_dir / "heartbeat_lost.json",
-        timestamp=now + timedelta(seconds=1),
+        timestamp=alert_timestamp,
         severity="CRITICAL",
         message="ENGINE_HEARTBEAT_LOST - Engine heartbeat lost",
     )
@@ -292,9 +312,11 @@ def test_supervisor_restart_observed_by_monitor_invalidates(tmp_path: Path) -> N
 def test_irreversible_invalidation_cannot_become_pass(tmp_path: Path) -> None:
     now = datetime.now(timezone.utc)
     init, supervisor_path, alerts_dir = _initialized_run(tmp_path, now=now)
+    run_meta = json.loads((Path(init["package_dir"]) / "RUN_META.json").read_text(encoding="utf-8"))
+    alert_timestamp = datetime.fromisoformat(run_meta["start_utc"]) + timedelta(seconds=1)
     _write_alert(
         alerts_dir / "heartbeat_lost.json",
-        timestamp=now + timedelta(seconds=1),
+        timestamp=alert_timestamp,
         severity="CRITICAL",
         message="ENGINE_HEARTBEAT_LOST",
     )
@@ -333,7 +355,12 @@ def test_clean_uninterrupted_advisory_run_can_complete(tmp_path: Path) -> None:
 
     assert result["status"] == "COMPLETE"
     status = json.loads((Path(init["package_dir"]) / "RUN_STATUS.json").read_text(encoding="utf-8"))
-    assert status["recommendation_pending"] == "ENDURANCE PASS WITH RESIDUALS"
+    assert status["attempt_state"] == "COMPLETED_ELIGIBLE"
+    assert status["certification"] == "NOT_CERTIFIED"
+    assert status["phase181"] == "NOT_CERTIFIED"
+    assert "COMPLETED_ELIGIBLE" in status["recommendation_pending"]
+    assert (Path(init["package_dir"]) / "PROCESS_IDENTITY.json").is_file()
+    assert (Path(init["package_dir"]) / "ATTEMPT_STATE.json").is_file()
 
 
 def test_controlled_shutdown_history_not_misclassified_as_unexpected(tmp_path: Path) -> None:

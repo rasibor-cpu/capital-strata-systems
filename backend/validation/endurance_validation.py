@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping
 
+OV002_AUTHORITATIVE = False
+PHASE181_AUTHORITATIVE = False
+NON_AUTHORITATIVE_MARKER = "NON_AUTHORITATIVE_FOR_OV002_PHASE181"
+
 
 class EnduranceValidationError(RuntimeError):
     """Fail-closed exception for endurance validation."""
@@ -20,7 +24,11 @@ class EnduranceValidationResult:
     metrics: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        payload["ov002_authoritative"] = OV002_AUTHORITATIVE
+        payload["phase181_authoritative"] = PHASE181_AUTHORITATIVE
+        payload["non_authoritative_marker"] = NON_AUTHORITATIVE_MARKER
+        return payload
 
 
 class EnduranceValidationEngine:
@@ -144,6 +152,9 @@ class EnduranceValidationEngine:
                 "resume_supported": resume_supported,
                 "runtime_status": runtime_status,
                 "heartbeat_status": heartbeat_status,
+                "ov002_authoritative": OV002_AUTHORITATIVE,
+                "phase181_authoritative": PHASE181_AUTHORITATIVE,
+                "non_authoritative_marker": NON_AUTHORITATIVE_MARKER,
             },
         )
 

@@ -125,27 +125,45 @@ def test_duplicate_owner_filters_to_canonical_launcher(monkeypatch, tmp_path):
     assert result["owners"] == [rows[0]]
 
 
-def _patch_windows_discovery(monkeypatch, process_rows, *, returncode=0, raw=None):
+def _patch_windows_discovery(
+    monkeypatch,
+    process_rows,
+    *,
+    returncode=0,
+    raw=None,
+    self_observed=True,
+    anchor_pid=None,
+):
     monkeypatch.setattr(runtime_launcher.os, "name", "nt")
 
-    if raw is None:
+    def _fake_run(*args, **kwargs):
+        if raw is not None:
+            return SimpleNamespace(stdout=raw, stderr="", returncode=returncode)
+        env = kwargs.get("env") or {}
+        expected = env.get(runtime_launcher.DISCOVERY_EXPECTED_PID_ENV)
+        try:
+            expected_i = int(expected) if expected is not None else None
+        except (TypeError, ValueError):
+            expected_i = None
+        resolved_anchor = (
+            anchor_pid if anchor_pid is not None else expected_i
+        )
         payload = {
             "schema_version": runtime_launcher.DISCOVERY_SCHEMA,
             "ok": True,
+            "anchor_pid": resolved_anchor,
+            "self_observed": self_observed,
             "processes": process_rows,
             "error_code": None,
+            "error_type": None,
         }
-        raw = json.dumps(payload)
-
-    monkeypatch.setattr(
-        runtime_launcher.subprocess,
-        "run",
-        lambda *args, **kwargs: SimpleNamespace(
-            stdout=raw,
+        return SimpleNamespace(
+            stdout=json.dumps(payload),
             stderr="",
             returncode=returncode,
-        ),
-    )
+        )
+
+    monkeypatch.setattr(runtime_launcher.subprocess, "run", _fake_run)
 
 
 def test_parent_canonical_launcher_remains_visible(monkeypatch, tmp_path):
@@ -319,9 +337,60 @@ def test_empty_valid_enumeration_means_zero_owners(monkeypatch, tmp_path):
     )
     assert discovery["ok"] is True
     assert discovery["processes"] == []
+    assert discovery["self_observed"] is True
+    assert discovery["anchor_pid"] == 1
+    assert discovery["expected_pid"] == 1
     owners = duplicate_canonical_runtime_owners(repo_root=str(tmp_path), current_pid=1)
     assert owners["ok"] is True
     assert owners["owners"] == []
+    assert owners["self_observed"] is True
+
+
+def test_missing_self_observed_fails_closed(monkeypatch, tmp_path):
+    _patch_windows_discovery(monkeypatch, [], self_observed=False)
+    discovery = discover_canonical_runtime_processes(
+        repo_root=str(tmp_path), current_pid=1
+    )
+    assert discovery["ok"] is False
+    assert discovery["error_code"] == "discovery_self_missing"
+    assert discovery["self_observed"] is False
+
+
+def test_anchor_mismatch_fails_closed(monkeypatch, tmp_path):
+    _patch_windows_discovery(monkeypatch, [], anchor_pid=999)
+    discovery = discover_canonical_runtime_processes(
+        repo_root=str(tmp_path), current_pid=1
+    )
+    assert discovery["ok"] is False
+    assert discovery["error_code"] == "discovery_anchor_mismatch"
+
+
+def test_malformed_expected_pid_fails_closed(tmp_path):
+    class DerivedPid(int):
+        pass
+
+    discovery = discover_canonical_runtime_processes(
+        repo_root=str(tmp_path), current_pid=DerivedPid(7)
+    )
+    assert discovery["ok"] is False
+    assert discovery["error_code"] == "discovery_current_pid_malformed"
+
+
+def test_parent_discovery_reports_anchor_and_self(monkeypatch, tmp_path):
+    repo = str(tmp_path)
+    parent_cmd = f'"{sys.executable}" -m launcher.css_runtime_launcher "{repo}"'
+    child_cmd = f'"{sys.executable}" -m launcher.css_runtime_launcher "{repo}" CHILD'
+    process_rows = [
+        {"ProcessId": 777, "ParentProcessId": 1, "CommandLine": parent_cmd},
+        {"ProcessId": 888, "ParentProcessId": 777, "CommandLine": child_cmd},
+    ]
+    _patch_windows_discovery(monkeypatch, process_rows)
+    discovery = discover_canonical_runtime_processes(repo_root=repo, current_pid=888)
+    assert discovery["ok"] is True
+    assert discovery["self_observed"] is True
+    assert discovery["anchor_pid"] == 888
+    assert discovery["expected_pid"] == 888
+    assert 777 in {row["pid"] for row in discovery["processes"]}
 
 
 def test_duplicate_genuine_owners_reported(monkeypatch, tmp_path):
@@ -368,3 +437,71 @@ def test_missing_command_line_rows_are_skipped_not_owners(monkeypatch, tmp_path)
     discovery = discover_canonical_runtime_processes(repo_root=repo, current_pid=1)
     assert discovery["ok"] is True
     assert [row["pid"] for row in discovery["processes"]] == [57]
+
+
+def test_python_exe_canonical_owner_detected(monkeypatch, tmp_path):
+    repo = str(tmp_path)
+    cmd = f'"C:\\Python312\\python.exe" -m launcher.css_runtime_launcher "{repo}"'
+    _patch_windows_discovery(
+        monkeypatch,
+        [{"ProcessId": 42, "ParentProcessId": 1, "CommandLine": cmd}],
+    )
+    discovery = discover_canonical_runtime_processes(repo_root=repo, current_pid=1)
+    assert discovery["ok"] is True
+    assert discovery["processes"][0]["role"] == "canonical_launcher"
+
+
+def test_pythonw_exe_canonical_owner_detected(monkeypatch, tmp_path):
+    repo = str(tmp_path)
+    cmd = f'"C:\\Python312\\pythonw.exe" -m launcher.css_runtime_launcher "{repo}"'
+    assert classify_canonical_process_command(cmd) == "canonical_launcher"
+    _patch_windows_discovery(
+        monkeypatch,
+        [{"ProcessId": 43, "ParentProcessId": 1, "CommandLine": cmd}],
+    )
+    discovery = discover_canonical_runtime_processes(repo_root=repo, current_pid=1)
+    assert discovery["ok"] is True
+    assert [row["pid"] for row in discovery["processes"]] == [43]
+    script = runtime_launcher._windows_discovery_command()
+    assert "pythonw?" in script or "pythonw" in script.lower()
+
+
+def test_versioned_python_interpreter_owner_detected(monkeypatch, tmp_path):
+    repo = str(tmp_path)
+    cmd = f'"C:\\Python312\\python3.12.exe" -m launcher.css_runtime_launcher "{repo}"'
+    assert classify_canonical_process_command(cmd) == "canonical_launcher"
+    _patch_windows_discovery(
+        monkeypatch,
+        [{"ProcessId": 44, "ParentProcessId": 1, "CommandLine": cmd}],
+    )
+    discovery = discover_canonical_runtime_processes(repo_root=repo, current_pid=1)
+    assert discovery["ok"] is True
+    assert discovery["processes"][0]["pid"] == 44
+
+
+def test_unsupported_interpreter_does_not_falsely_match():
+    cmd = '"C:\\Tools\\notpython.exe" -m launcher.css_runtime_launcher C:\\repo'
+    assert classify_canonical_process_command(cmd) is None
+
+
+def test_discovery_duplicate_process_id_fails_closed(monkeypatch, tmp_path):
+    repo = str(tmp_path)
+    cmd = f'"{sys.executable}" -m launcher.css_runtime_launcher "{repo}"'
+    process_rows = [
+        {"ProcessId": 70, "ParentProcessId": 1, "CommandLine": cmd},
+        {"ProcessId": 70, "ParentProcessId": 2, "CommandLine": cmd + " B"},
+    ]
+    _patch_windows_discovery(monkeypatch, process_rows)
+    discovery = discover_canonical_runtime_processes(repo_root=repo, current_pid=1)
+    assert discovery["ok"] is False
+    assert discovery["error_code"] == "discovery_duplicate_process_id"
+    owners = duplicate_canonical_runtime_owners(repo_root=repo, current_pid=1)
+    assert owners["ok"] is False
+
+
+def test_windows_discovery_command_enumerates_supported_interpreters():
+    script = runtime_launcher._windows_discovery_command()
+    assert "pythonw?" in script or "pythonw" in script.lower()
+    assert "name='python.exe'" not in script
+    assert "Where-Object" in script
+    assert runtime_launcher.DISCOVERY_EXPECTED_PID_ENV in script

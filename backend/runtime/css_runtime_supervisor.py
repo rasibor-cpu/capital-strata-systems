@@ -2,12 +2,20 @@ import json
 import math
 import uuid
 import os
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
 from backend.monitoring.css_alert_models import AlertSeverity
 from backend.monitoring.css_alert_service import CSSAlertService
 from backend.monitoring.alert_bridge import CanonicalAlertBridge
+from backend.certification.ov002_continuity import build_process_identity_record, canonical_process_pid
+from backend.certification.ov002_persistence import (
+    PersistenceError,
+    atomic_append_jsonl,
+    atomic_write_json,
+    validate_path_contained,
+)
 
 BASE_RESTART_DELAY_SECONDS: float = 5.0
 MAX_RESTART_DELAY_SECONDS: float = 120.0
@@ -22,9 +30,22 @@ class CSSRuntimeSupervisor:
         canonical_alert_bridge: Optional[CanonicalAlertBridge] = None,
         event_bus: Optional[Any] = None,
         failure_history_limit: int = 100,
+        trusted_root: str | os.PathLike[str] | None = None,
     ):
         self.supervisor_id = str(uuid.uuid4())
-        self.state_dir = state_dir
+        default_trusted_root = Path(__file__).resolve().parents[2]
+        if trusted_root is not None:
+            self.trusted_root = validate_path_contained(trusted_root, expected_root=trusted_root)
+        else:
+            self.trusted_root = default_trusted_root
+        requested_state_dir = Path(state_dir)
+        if requested_state_dir.is_absolute():
+            if trusted_root is None:
+                raise PersistenceError("supervisor_trusted_root_required")
+            resolved_state_dir = requested_state_dir
+        else:
+            resolved_state_dir = self.trusted_root / requested_state_dir
+        self.state_dir = str(validate_path_contained(resolved_state_dir, expected_root=self.trusted_root))
         self.state_file = os.path.join(
             self.state_dir,
             "css_runtime_supervisor_state.json",
@@ -57,12 +78,26 @@ class CSSRuntimeSupervisor:
         self.shutdown_requested: bool = False
         self.last_canonical_decision: Optional[Dict[str, Any]] = None
         self.last_decision_at: Optional[str] = None
+        self.duplicate_canonical_owners: list[Dict[str, Any]] = []
+        self.duplicate_discovery: Dict[str, Any] = {
+            "ok": True,
+            "owners": [],
+            "error_code": None,
+            "observed_at_utc": None,
+        }
+        self.last_persist_error: Optional[str] = None
+        self.last_history_persist_error: Optional[str] = None
+        self.history_persist_degraded: bool = False
+        self.identity_verification_failed: bool = False
+        self.last_identity_failure_code: Optional[str] = None
         self.status: str = "STOPPED"
 
         self._ensure_state_dir()
 
     def _ensure_state_dir(self):
+        validate_path_contained(self.state_dir, expected_root=self.trusted_root)
         os.makedirs(self.state_dir, exist_ok=True)
+        validate_path_contained(self.state_dir, expected_root=self.trusted_root)
 
     def _safe_emit(
         self,
@@ -88,10 +123,13 @@ class CSSRuntimeSupervisor:
     def _persist_state(self):
         state = self.get_status()
         try:
-            with open(self.state_file, "w", encoding="utf-8") as handle:
-                json.dump(state, handle, indent=2)
-        except Exception:
-            pass
+            if self.trusted_root is None:
+                raise PersistenceError("supervisor_trusted_root_missing")
+            atomic_write_json(self.state_file, state, expected_root=self.trusted_root)
+            self.last_persist_error = None
+        except PersistenceError as exc:
+            self.last_persist_error = exc.code
+            raise
 
     def _record_history(self, event: Dict[str, Any]) -> None:
         record = {
@@ -109,10 +147,16 @@ class CSSRuntimeSupervisor:
         if len(self.failure_history) > self.failure_history_limit:
             self.failure_history = self.failure_history[-self.failure_history_limit :]
         try:
-            with open(self.failure_history_file, "a", encoding="utf-8") as handle:
-                handle.write(json.dumps(record, sort_keys=True) + "\n")
-        except Exception:
-            pass
+            atomic_append_jsonl(self.failure_history_file, record, expected_root=self.trusted_root)
+            self.last_history_persist_error = None
+            self.history_persist_degraded = False
+        except PersistenceError as exc:
+            # Error codes only — history payloads and exception text may carry paths.
+            self.last_history_persist_error = str(exc.code)
+            self.history_persist_degraded = True
+        except Exception as exc:
+            self.last_history_persist_error = f"history_append_failed:{type(exc).__name__}"
+            self.history_persist_degraded = True
 
     def record_process_tree(
         self,
@@ -120,12 +164,103 @@ class CSSRuntimeSupervisor:
         launcher_pid: int | None = None,
         supervisor_pid: int | None = None,
         managed_services: Optional[Dict[str, Any]] = None,
+        launcher_parent_pid: int | None = None,
+        launcher_creation_time: str | None = None,
+        launcher_executable_path: str | None = None,
+        launcher_executable_sha256: str | None = None,
+        launcher_command_line: str | None = None,
+        supervisor_parent_pid: int | None = None,
+        supervisor_creation_time: str | None = None,
+        supervisor_executable_path: str | None = None,
+        supervisor_executable_sha256: str | None = None,
+        supervisor_command_line: str | None = None,
+        repo_root: str | None = None,
     ) -> None:
-        self.process_identity = {
-            "launcher_pid": int(launcher_pid or os.getpid()),
-            "supervisor_pid": int(supervisor_pid or os.getpid()),
+        launcher_pid_value = canonical_process_pid(os.getpid() if launcher_pid is None else launcher_pid)
+        supervisor_pid_value = canonical_process_pid(os.getpid() if supervisor_pid is None else supervisor_pid)
+        if launcher_pid_value is None or supervisor_pid_value is None:
+            raise PersistenceError("process_identity_pid_malformed")
+        identity: Dict[str, Any] = {
+            "launcher_pid": launcher_pid_value,
+            "supervisor_pid": supervisor_pid_value,
             "managed_services": dict(managed_services or {}),
         }
+        if launcher_parent_pid is not None:
+            launcher_parent = canonical_process_pid(launcher_parent_pid)
+            if launcher_parent is None:
+                raise PersistenceError("process_identity_parent_pid_malformed")
+            identity["launcher_parent_pid"] = launcher_parent
+        if launcher_creation_time is not None:
+            identity["launcher_creation_time"] = launcher_creation_time
+        if launcher_executable_path is not None:
+            identity["launcher_executable_path"] = launcher_executable_path
+        if launcher_executable_sha256 is not None:
+            identity["launcher_executable_sha256"] = launcher_executable_sha256
+        if launcher_command_line is not None:
+            identity["launcher_command_line"] = launcher_command_line
+        if supervisor_parent_pid is not None:
+            supervisor_parent = canonical_process_pid(supervisor_parent_pid)
+            if supervisor_parent is None:
+                raise PersistenceError("process_identity_parent_pid_malformed")
+            identity["supervisor_parent_pid"] = supervisor_parent
+        if supervisor_creation_time is not None:
+            identity["supervisor_creation_time"] = supervisor_creation_time
+        if supervisor_executable_path is not None:
+            identity["supervisor_executable_path"] = supervisor_executable_path
+        if supervisor_executable_sha256 is not None:
+            identity["supervisor_executable_sha256"] = supervisor_executable_sha256
+        if supervisor_command_line is not None:
+            identity["supervisor_command_line"] = supervisor_command_line
+        if repo_root is not None:
+            identity["repo_root"] = repo_root
+            identity["launcher_repo_root"] = repo_root
+            identity["supervisor_repo_root"] = repo_root
+        try:
+            identity["launcher"] = build_process_identity_record(
+                pid=identity["launcher_pid"],
+                role="launcher",
+                attempt_id="",
+                baseline_commit="",
+                repo_root=repo_root or "",
+                parent_pid=identity.get("launcher_parent_pid"),
+                creation_time=identity.get("launcher_creation_time"),
+                executable_path=identity.get("launcher_executable_path"),
+                executable_sha256=identity.get("launcher_executable_sha256"),
+                command_line=identity.get("launcher_command_line"),
+            )
+            identity["supervisor"] = build_process_identity_record(
+                pid=identity["supervisor_pid"],
+                role="supervisor",
+                attempt_id="",
+                baseline_commit="",
+                repo_root=repo_root or "",
+                parent_pid=identity.get("supervisor_parent_pid"),
+                creation_time=identity.get("supervisor_creation_time"),
+                executable_path=identity.get("supervisor_executable_path"),
+                executable_sha256=identity.get("supervisor_executable_sha256"),
+                command_line=identity.get("supervisor_command_line"),
+            )
+            normalized_services: Dict[str, Any] = {}
+            for name, info in dict(managed_services or {}).items():
+                if isinstance(info, dict) and info.get("pid") is not None:
+                    normalized_services[str(name)] = build_process_identity_record(
+                        pid=info.get("pid"),
+                        role=str(info.get("service_role") or info.get("role") or name),
+                        attempt_id="",
+                        baseline_commit="",
+                        repo_root=repo_root or info.get("repo_root") or "",
+                        parent_pid=info.get("parent_pid"),
+                        creation_time=info.get("creation_time") or info.get("create_time"),
+                        executable_path=info.get("executable_path") or info.get("exe"),
+                        executable_sha256=info.get("executable_sha256"),
+                        command_line=info.get("command_line") or info.get("cmdline"),
+                    )
+                else:
+                    normalized_services[str(name)] = info
+            identity["managed_services"] = normalized_services
+        except Exception as exc:
+            identity["process_identity_error"] = f"{type(exc).__name__}:{exc}"
+        self.process_identity = identity
         self._persist_state()
 
     def _safe_publish_event(
@@ -163,6 +298,42 @@ class CSSRuntimeSupervisor:
             severity="INFO",
             category="SYSTEM",
             payload={"supervisor_id": self.supervisor_id, "started_at": self.started_at}
+        )
+
+    def record_identity_verification_failure(
+        self,
+        reason_code: str,
+        *,
+        detail_code: Optional[str] = None,
+    ) -> None:
+        """Record a strong-identity verification failure distinctly from controlled shutdown.
+
+        Monitor reconciliation skips `controlled_shutdown`; this event must survive that
+        filter so an identity failure followed by stop() is never read as an ordinary
+        operator-requested shutdown.
+        """
+        self.identity_verification_failed = True
+        self.last_identity_failure_code = str(reason_code or "identity_verification_failed")
+        self.status = "FAILED"
+        self._record_history(
+            {
+                "event_type": "identity_verification_failed",
+                "reason": self.last_identity_failure_code,
+                "detail_code": str(detail_code) if detail_code else None,
+                "status": self.status,
+            }
+        )
+        try:
+            self._persist_state()
+        except PersistenceError:
+            pass
+        self._safe_emit(
+            "Strong process identity verification failed",
+            AlertSeverity.CRITICAL,
+            {
+                "reason_code": self.last_identity_failure_code,
+                "detail_code": str(detail_code) if detail_code else None,
+            },
         )
 
     def stop(self):
@@ -554,6 +725,35 @@ class CSSRuntimeSupervisor:
             },
         )
 
+    def record_duplicate_discovery(self, result: dict[str, Any]) -> None:
+        if not isinstance(result, dict):
+            raise ValueError("duplicate_discovery result must be a dict")
+        ok = bool(result.get("ok"))
+        owners = list(result.get("owners") or [])
+        error_code = result.get("error_code")
+        self.duplicate_discovery = {
+            "ok": ok,
+            "owners": owners,
+            "error_code": str(error_code) if error_code not in (None, "") else None,
+            "observed_at_utc": datetime.now(timezone.utc).isoformat(),
+        }
+        if ok and owners:
+            self.duplicate_canonical_owners = owners
+        elif ok and not owners:
+            self.duplicate_canonical_owners = []
+        self._persist_state()
+
+    def record_duplicate_canonical_owners(self, owners: list[Dict[str, Any]] | None) -> None:
+        owner_list = list(owners or [])
+        self.duplicate_canonical_owners = owner_list
+        self.record_duplicate_discovery(
+            {
+                "ok": True,
+                "owners": owner_list,
+                "error_code": None,
+            }
+        )
+
     def get_status(self) -> Dict[str, Any]:
         return {
             "supervisor_id": self.supervisor_id,
@@ -570,6 +770,13 @@ class CSSRuntimeSupervisor:
             "restart_limit_exhausted": self.restart_limit_exhausted,
             "process_generation": self.process_generation,
             "process_identity": dict(self.process_identity),
+            "duplicate_canonical_owners": list(self.duplicate_canonical_owners),
+            "duplicate_discovery": dict(self.duplicate_discovery),
+            "last_persist_error": self.last_persist_error,
+            "last_history_persist_error": self.last_history_persist_error,
+            "history_persist_degraded": self.history_persist_degraded,
+            "identity_verification_failed": self.identity_verification_failed,
+            "last_identity_failure_code": self.last_identity_failure_code,
             "shutdown_requested": self.shutdown_requested,
             "last_canonical_decision": self.last_canonical_decision,
             "last_decision_at": self.last_decision_at,

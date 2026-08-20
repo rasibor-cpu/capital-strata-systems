@@ -15,6 +15,15 @@ if str(REPOSITORY_ROOT) not in sys.path:
 
 from backend.validation.marathon_readiness import MarathonReadiness
 from backend.validation.marathon_runner import MarathonRunner
+from backend.certification.ov002_persistence import PersistenceError, strict_json_loads
+
+# OV002 / Phase 181 authority boundary: this script's PASS/GO/CERTIFIED output is
+# NON-AUTHORITATIVE for OV-002 endurance and Phase 181. Scope: legacy 48h paper marathon only.
+OV002_AUTHORITATIVE = False
+PHASE181_AUTHORITATIVE = False
+LEGACY_CERTIFICATION_SCOPE = "legacy_48h_paper_marathon_only"
+NON_AUTHORITATIVE_MARKER = "NON_AUTHORITATIVE_FOR_OV002_PHASE181"
+LEGACY_LABEL = "LEGACY NON-AUTHORITATIVE"
 
 
 DEFAULT_CONFIG_PATH = REPOSITORY_ROOT / "config.json"
@@ -46,8 +55,8 @@ def _load_config(config_path: Path) -> dict[str, Any]:
     if not config_path.exists():
         raise MarathonExecutionPrepError(f"config not found: {config_path}")
     try:
-        payload = json.loads(config_path.read_text(encoding="utf-8"))
-    except Exception as exc:
+        payload = strict_json_loads(config_path.read_text(encoding="utf-8"), source=str(config_path))
+    except (OSError, PersistenceError) as exc:
         raise MarathonExecutionPrepError(f"config unreadable: {exc}") from exc
     if not isinstance(payload, dict):
         raise MarathonExecutionPrepError("config must be a JSON object")
@@ -156,10 +165,14 @@ def execute(argv: list[str] | None = None) -> int:
                 "stop_reason": "DRY_RUN",
                 "readiness_status": readiness_report.go_no_go,
                 "planned_cycles": execution_plan["planned_cycles"],
+                "ov002_authoritative": OV002_AUTHORITATIVE,
+                "phase181_authoritative": PHASE181_AUTHORITATIVE,
+                "legacy_scope": LEGACY_CERTIFICATION_SCOPE,
+                "non_authoritative_marker": NON_AUTHORITATIVE_MARKER,
             }
             _write_json(run_dir / "final_certification_report.json", dry_run_report)
             print("STOPPED dry-run completed with no cycle execution")
-            print("CERTIFIED DRY_RUN")
+            print(f"{LEGACY_LABEL} CERTIFIED DRY_RUN {NON_AUTHORITATIVE_MARKER}")
             return 0
 
         runner = MarathonRunner(
@@ -179,10 +192,20 @@ def execute(argv: list[str] | None = None) -> int:
             if hasattr(result.certification_report, "to_dict")
             else asdict(result.certification_report)
         )
+        certification_payload = {
+            **certification_payload,
+            "ov002_authoritative": OV002_AUTHORITATIVE,
+            "phase181_authoritative": PHASE181_AUTHORITATIVE,
+            "legacy_scope": LEGACY_CERTIFICATION_SCOPE,
+            "non_authoritative_marker": NON_AUTHORITATIVE_MARKER,
+        }
         _write_json(run_dir / "final_certification_report.json", certification_payload)
 
         print(f"STOPPED cycles_completed={len(result.snapshots)} stop_reason={result.stop_reason or 'COMPLETED'}")
-        print(f"CERTIFIED {result.certification_report.go_no_go}")
+        print(
+            f"{LEGACY_LABEL} CERTIFIED {result.certification_report.go_no_go} "
+            f"{NON_AUTHORITATIVE_MARKER}"
+        )
 
         return 0 if result.certification_report.go_no_go in {"GO", "CONDITIONAL_GO"} else 3
     except Exception as exc:
