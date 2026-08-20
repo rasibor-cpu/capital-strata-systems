@@ -101,7 +101,9 @@ tests/test_phase181_production_readiness_certification.py
 tests/test_certification_engine.py
 ```
 
-Also ran `python3 -m compileall -q backend dashboard launcher scripts` (COMPILE_OK).
+Also ran `python3 -m compileall -q backend dashboard launcher scripts` on the **cloud agent** (`Python 3.12.3`) → COMPILE_OK.
+
+GitHub Actions uses **Python 3.11** (`3.11.16`). That compile step **fails on canonical maintenance** before pytest (see Phase 5). Local 3.12 does not catch the f-string backslash restriction. This YAML patch did not change `shell.py`.
 
 ```
 GATE2_COLLECTED=51
@@ -114,7 +116,7 @@ Pre-existing on maintenance HEAD (this YAML patch does not touch Python):
 1. `test_ar023_no_hardcoded_bootstrap_password` — `MIN_PASSWORD_LENGTH` is 8, test asserts `>= 12`
 2. `test_ar023_bootstrap_seeds_with_strong_secret` — `CSS_BOOTSTRAP_REQUIRED: set CSS_BOOTSTRAP_ADMIN_PASSWORD (exactly 8 chars)`
 
-**Not repaired in CI-001.** Not OV-002. Classification: `PREEXISTING_AR023_PASSWORD_POLICY_MISMATCH_ON_MAINTENANCE`. These will likely fail GitHub Gate-2 until a later honesty/auth task.
+**Not repaired in CI-001.** Not OV-002. Classification: `PREEXISTING_AR023_PASSWORD_POLICY_MISMATCH_ON_MAINTENANCE`. GitHub Actions never reached this pytest list because compileall failed first on 3.11. These remain a second-layer Gate-2 blocker after the compile issue is addressed.
 
 ### OV-002 identity (not in Gate-2 list; not repaired)
 
@@ -143,17 +145,30 @@ PR_URL=https://github.com/rasibor-cpu/capital-strata-systems/pull/65
 PR_BASE=css-v1.0.1-maintenance
 PR_MERGED=NO
 GITHUB_ACTIONS_TRIGGERED=YES
-GITHUB_ACTIONS_RESULT=IN_PROGRESS
+GITHUB_ACTIONS_RESULT=FAILURE
 ```
 
-Observed immediately after open (draft PR #65 → `css-v1.0.1-maintenance`, head `db8b7b33`):
+Draft PR #65 → `css-v1.0.1-maintenance`. Not merged.
 
-| Workflow | Event | Run | Job | Status |
-| --- | --- | --- | --- | --- |
-| CSS Gate 2 Release CI | `pull_request` | 32384140893 | Compile + bounded Gate-2 regression | queued/in progress |
-| CSS Governance Validation | `pull_request` | 32384142387 | governance-ci | queued/in progress |
+Trigger diagnosis: **not required**. Adding `css-v1.0.1-maintenance` to `pull_request.branches` in the PR head caused both Gate-2 workflows to start. Feature-branch `push` is correctly **not** a Gate-2 trigger (branch is not in `push.branches`).
 
-Trigger diagnosis: **not required**. Adding `css-v1.0.1-maintenance` to `pull_request.branches` in the PR head caused both Gate-2 workflows to start. Feature-branch `push` is correctly **not** a Gate-2 trigger (branch is not in `push.branches`). Final conclusions pending CI completion.
+| SHA | Workflow | Event | Run | Job | Result |
+| --- | --- | --- | --- | --- | --- |
+| `db8b7b33` | CSS Gate 2 Release CI | `pull_request` | 32384140893 | Compile + bounded Gate-2 regression | **failure** |
+| `db8b7b33` | CSS Governance Validation | `pull_request` | 32384142387 | governance-ci | **failure** |
+| `f09be417` | CSS Gate 2 Release CI | `pull_request` | 32384186647 | Compile + bounded Gate-2 regression | **failure** |
+| `f09be417` | CSS Governance Validation | `pull_request` | 32384186305 | governance-ci | **failure** |
+
+Both jobs fail at the **compileall** step (pytest never starts) with:
+
+```
+dashboard/enterprise_shell/shell.py:142
+SyntaxError: f-string expression part cannot include a backslash
+```
+
+GitHub runner: Python **3.11.16**. Cloud agent local compile: Python **3.12.3** (allowed). This is **pre-existing on `2b39141e`**, not introduced by the YAML patch. CI-001 did **not** modify `shell.py` (product Python is out of scope). Classification: `PREEXISTING_PY311_FSTRING_BACKSLASH_ON_MAINTENANCE`. Newly visible because Gate-2 now actually runs against maintenance.
+
+Second-layer (local 3.12 pytest, not reached on GitHub): the two AR-023 password-policy tests above.
 
 ---
 
@@ -172,11 +187,18 @@ From RSM-001 ledger, highest remaining with `can_do_from_cloud=YES` and `require
 
 RSM-P1-02 (PR #63 review) is not both-conditions (needs FINANCE for live dashboard proof). RSM-P1-04 execution modes is deferred until after COW-001.
 
+**Newly discovered (not a ledger ID):** GitHub Gate-2 compile fails on maintenance under Python 3.11 because of `dashboard/enterprise_shell/shell.py` f-string backslash. Cloud-safe, `requires_FINANCE=NO`. Not started here because CI-001 is trigger-only. Recommend as an immediate follow-up **before or with** RSM-P1-03 if the operator wants a green Gate-2 check.
+
 ---
 
 ## Safety
 
 ```
+CSS_CI001_RESULT=SUCCESS_RETARGET_PREEXISTING_CI_FAILURE
+CANONICAL_BASE_BRANCH=css-v1.0.1-maintenance
+CANONICAL_BASE_SHA=2b39141e
+WORK_BRANCH=css-agent/css-ci001-gate2-maintenance-target-af15
+FILES_CHANGED=.github/workflows/css_gate2_release_ci.yml; .github/workflows/css_governance.yml; evidence/CSS_CI001_GATE2_MAINTENANCE_RETARGET.md
 TRADING_LOGIC_CHANGED=NO
 R7_CHANGED=NO
 R14F_CHANGED=NO
@@ -187,5 +209,31 @@ COW001_TOUCHED=NO
 FINANCE_TOUCHED=NO
 BROKER_CONTACTED=NO
 LIVE_ORDER_SUBMITTED=NO
+
+GATE2_WORKFLOW=css_gate2_release_ci.yml + css_governance.yml
+OLD_TRIGGER_BRANCHES=main, css-unified-consolidation-2026-07-13
+NEW_TRIGGER_BRANCHES=css-v1.0.1-maintenance, main, css-unified-consolidation-2026-07-13
+MAINTENANCE_PUSH_TRIGGER=YES
+MAINTENANCE_PR_TRIGGER=YES
+WORKFLOW_DISPATCH_AVAILABLE=YES
+OBSOLETE_TRIGGER_REMOVED=NO
+
+YAML_VALIDATION=OK
+CLOUD_SAFE_TEST_COUNT=51
+CLOUD_SAFE_TEST_PASSED=49
+CLOUD_SAFE_TEST_FAILED=2
+OV002_IDENTITY_FAILURE_COUNT=5
+OV002_FAILURE_CLASSIFICATION=EXPECTED_CLOUD_ENV_IDENTITY_PROBE_INCOMPLETE
+
+PR_CREATED=YES
+PR_NUMBER=65
+PR_BASE=css-v1.0.1-maintenance
 PR_MERGED=NO
+GITHUB_ACTIONS_TRIGGERED=YES
+GITHUB_ACTIONS_RESULT=FAILURE
+
+NEXT_CLOUD_TASK_ID=RSM-P1-03
+NEXT_CLOUD_TASK=Reconcile Package D metadata drift (STATUS.md + canonical status vs merged PR #62)
+NEXT_CLOUD_TASK_SCOPE=SMALL
+NEXT_CLOUD_TASK_REQUIRES_FINANCE=NO
 ```
