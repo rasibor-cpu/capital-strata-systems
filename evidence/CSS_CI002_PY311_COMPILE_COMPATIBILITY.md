@@ -178,18 +178,25 @@ No rebase, no force-push, no merge.
 - compileall → **FAIL** (Python 3.11, `shell.py` f-string backslash)
 - pytest → **NOT STARTED**
 
-### GitHub Actions after this commit
+### GitHub Actions after this commit (`e9f97705`, Python 3.11.16)
 
-Recorded after the push / CI observation in a follow-up evidence update if needed.
-Initial push expects compileall to pass and pytest to start. Entire Gate-2 job
-may still fail on the known AR-023 tests.
+Both named checks ran on the `pull_request` event.
+
+| Workflow | Run | Compile step | Pytest started | Job result |
+| --- | --- | --- | --- | --- |
+| CSS Gate 2 Release CI | [32388277442](https://github.com/rasibor-cpu/capital-strata-systems/actions/runs/32388277442) | **PASS** (`Python compile (scoped)`) | **YES** | FAILURE (pytest) |
+| CSS Governance Validation | [32388277428](https://github.com/rasibor-cpu/capital-strata-systems/actions/runs/32388277428) | **PASS** (`Python Syntax Validation (scoped)`) | **YES** | FAILURE (pytest) |
+
+GitHub pytest: **2 failed, 49 passed** — same AR-023 pair as local. No new compile error. No new P0/P1 functional blocker before pytest.
+
+`PYTHON311_COMPILE_BLOCKER_CLEARED=YES`
 
 ---
 
 ## Phase 7 — additional compile errors
 
-None observed locally under 3.12 scoped compileall. If GitHub 3.11 compileall
-exposes a new syntax error, stop and classify (see follow-up observation).
+GitHub 3.11 compileall advanced past `shell.py` with **no further syntax
+errors**. No additional compatibility repair was required.
 
 ---
 
@@ -205,10 +212,9 @@ still vs `d53e665` even though PR #62 is merged). Small, cloud-safe, no FINANCE.
 
 ## Recommendation
 
-Land this compile-only fix on PR #65 after GitHub shows `compileall` **PASS**
-and pytest **STARTED**. Do not merge until the operator accepts CI-001+CI-002
-together. Do not treat remaining AR-023 pytest failures as CI-002 scope.
+CI-002 acceptance is met: Python 3.11 compileall **PASS**, pytest **STARTED**.
+Keep PR #65 draft and unmerged until the operator accepts CI-001+CI-002
+together. Remaining Gate-2 red is **AR-023 only** and is out of this gate.
 Do not start RSM-P1-03 here.
 
-`PYTHON311_COMPILE_BLOCKER_CLEARED` is **YES** locally under 3.12 parse/rewrite
-and is **pending GitHub 3.11 compileall** until Actions observation.
+`PYTHON311_COMPILE_BLOCKER_CLEARED=YES`
