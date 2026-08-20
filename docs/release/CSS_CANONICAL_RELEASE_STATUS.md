@@ -4,6 +4,7 @@
 
 - Posture labels effective: 2026-07-21 (AR-001)
 - Package D metadata reconciliation: 2026-08-19 (CSS-PKG-D-001)
+- Package D merge reconciliation: 2026-08-20 (RSM-P1-03; PR #62 landed)
 - This page does not re-run or re-issue certification evidence.
 
 This document is the **sole active release-status authority** for Capital Strata Systems until superseded by a later Gate 2 / Phase 181 verified certification package bound to a **freeze SHA**.
@@ -18,16 +19,17 @@ These are **different** facts. Do not collapse them.
 
 | Kind | Ref | Meaning |
 | --- | --- | --- |
-| **Current canonical development branch** | `css-v1.0.1-maintenance` | Authoritative engineering line. Recent PRs #53–#61 target this branch. |
-| **Current canonical development HEAD** (landed maintenance) | `d53e6658267ab4fe281c7be58a2fad1a6412eef7` | Merge PR #61 (CSS-CONSOL-CERT-001). Not a production-certification freeze. Package D hygiene (PR #62) is **proposed** on `css-package-d-governance-hygiene` and is not landed until independently reviewed. |
+| **Current canonical development branch** | `css-v1.0.1-maintenance` | Authoritative engineering line. Recent PRs #53–#62 target this branch. |
+| **Current canonical development HEAD** (landed maintenance) | `2b39141e18fcfa2f1ee2dfcf7806061ab42e79f5` | Merge PR #62 (CSS-PKG-D-001). Not a production-certification freeze. |
+| **Package D start HEAD** (historical) | `d53e6658267ab4fe281c7be58a2fad1a6412eef7` | Merge PR #61 (CSS-CONSOL-CERT-001). Starting SHA for Package D work; **superseded as current HEAD** by PR #62. |
 | **GitHub default branch** | `main` @ `faf1485dd88d7056bbd8f7f891cb47caf7685603` | Stale Phase 113Y. **Not** canonical. Do not develop on it. Admin retarget recommended (see branch disposition register). |
 | **Last Gate 2 / AR-001 evidence-bound baseline** | `4ea738d86c167373deccbe4edf217e929de4414d` on `css-unified-consolidation-2026-07-13` | Historical SHA that bound the 2026-07-21 release-status remediation. **Not** current HEAD. |
-| **Last controlled-paper operational proof** | OP-003 / `docs/release/CSS_V1_REMAINING_BLOCKERS.md` | Historical `CERTIFIED_CONTROLLED_PAPER_OPERATION`. **Not** re-proven on `d53e665`. |
+| **Last controlled-paper operational proof** | OP-003 / `docs/release/CSS_V1_REMAINING_BLOCKERS.md` | Historical `CERTIFIED_CONTROLLED_PAPER_OPERATION`. **Not** re-proven on `d53e665` or `2b39141e`. |
 | **Last offline post-merge cert pass** | CSS-CONSOL-CERT-001 @ `fc7a6c99` (merged as `d53e665` via PR #61) | Offline regression + backlog. **Not** production certification. |
 | **Next operating milestone** | **COW-001** | Start canonical CSS as-is for ≥24h controlled operation. Charter: `docs/release/CSS_COW_001_CONTROLLED_OPERATING_WINDOW.md`. Not started. Not a certification result. |
 | **Phase 181 production certification** | `runtime_reports/phase181_certification/CERTIFICATION_SUMMARY.md` | **`NOT_CERTIFIED`** until a new freeze SHA has verified observations. |
 
-Historical evidence is **not** rewritten onto `d53e665`. OP-003 GO is not a new certification of the current SHA.
+Historical evidence is **not** rewritten onto `d53e665` or `2b39141e`. OP-003 GO is not a new certification of the current SHA.
 
 ---
 
@@ -60,8 +62,8 @@ Posture label: `DISABLED / BLOCKED / FAIL_CLOSED / ADVISORY_ONLY`
 1. CSS may be operated as **controlled paper / advisory / read-only** software under existing fail-closed controls, under the historical OP-003 proof (not a new SHA-bound recert).
 2. Mission Control read-only certification and RC1.1 branding/reporting baseline remain valid within their documented scopes.
 3. Historical RC1 paper/controlled-release engineering work remains historical evidence only.
-4. Canonical **development** happens on `css-v1.0.1-maintenance`. Landed HEAD at Package D start is `d53e665` (plus subsequent **reviewed** merges). Package D (PR #62) is proposed hygiene only until merged.
-5. After Package D lands, the next milestone is **COW-001**: start the current canonical system as-is in controlled/paper mode for ≥24 hours. That run is not production certification until its observations are recorded.
+4. Canonical **development** happens on `css-v1.0.1-maintenance`. Landed HEAD is `2b39141e` (PR #62, CSS-PKG-D-001 merged). `d53e665` is the historical Package D *start* SHA (PR #61), not current HEAD.
+5. Package D has landed. The next milestone is **COW-001**: start the current canonical system as-is in controlled/paper mode for ≥24 hours. That run is not production certification until its observations are recorded.
 
 ## What must not be claimed
 
@@ -121,4 +123,4 @@ Production Certification may become GO only after Critical Gate 2 blockers are C
 
 ---
 
-*AR-001 remediation artifact; CSS-PKG-D-001 reconciled development-HEAD metadata. This page does not authorize deployment, restart, broker authentication, or live trading.*
+*AR-001 remediation artifact; CSS-PKG-D-001 reconciled development-HEAD metadata; RSM-P1-03 recorded PR #62 merge. This page does not authorize deployment, restart, broker authentication, or live trading.*

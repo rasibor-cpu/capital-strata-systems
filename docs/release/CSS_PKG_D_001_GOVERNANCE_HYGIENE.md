@@ -1,11 +1,12 @@
 # CSS-PKG-D-001 — Repository / Governance Hygiene
 
 **Task ID:** `CSS-PKG-D-001`
-**Date (UTC):** 2026-08-19
+**Date (UTC):** 2026-08-19 (work); 2026-08-20 (RSM-P1-03 post-merge reconciliation)
 **Canonical base:** `css-v1.0.1-maintenance`
 **Verified starting HEAD:** `d53e6658267ab4fe281c7be58a2fad1a6412eef7`
+**Landed HEAD:** `2b39141e18fcfa2f1ee2dfcf7806061ab42e79f5`
 **Branch:** `css-package-d-governance-hygiene`
-**Draft PR:** #62
+**PR:** #62 **MERGED** 2026-08-19T19:19:51Z
 **Live trading authority:** NONE
 **Runtime/code mutation:** NONE (stale **test** pins only)
 
@@ -37,7 +38,7 @@ Moved `agent_tasks/REVIEW/` → `agent_tasks/COMPLETE/` after confirming merge:
 | CSS-CONSOL-CERT-001 | #61 | `d53e6658` | Confirmed merged |
 | OV002-R1-R9 | n/a | already COMPLETE | File was stranded in REVIEW; endurance **evidence** remains open |
 
-`agent_tasks/STATUS.md` updated: REVIEW contains only CSS-PKG-D-001; stale “draft remains unmerged” text removed.
+`agent_tasks/STATUS.md` updated at Package D finalize: REVIEW contained only CSS-PKG-D-001. **RSM-P1-03 (2026-08-20):** after PR #62 merged, that REVIEW row was stale; CSS-PKG-D-001 is now COMPLETE.
 
 ---
 
@@ -93,7 +94,8 @@ Not executed here. Exact admin action is in the branch register. Do not merge ma
 
 `docs/release/CSS_CANONICAL_RELEASE_STATUS.md` now distinguishes:
 
-- current development HEAD `d53e665` on maintenance
+- current development HEAD **at Package D start** `d53e665` on maintenance
+- current development HEAD **after PR #62** `2b39141e` (RSM-P1-03)
 - last evidence-bound Gate 2 SHA `4ea738d8`
 - historical OP-003 paper GO (not re-certified on current SHA)
 - Phase 181 **NOT_CERTIFIED**
@@ -109,7 +111,7 @@ See `docs/governance/CSS_DOTENV_CI_ENVIRONMENT_ACTION.md`. Imports **not** redes
 
 ## Next milestone — COW-001 (not another development phase)
 
-After Package D is independently reviewed, **do not** start another smoke test, pre-operation cert gate, 72-hour-before-operate programme, or feature-recovery phase.
+After Package D is independently reviewed **and merged (PR #62 / `2b39141e`)**, **do not** start another smoke test, pre-operation cert gate, 72-hour-before-operate programme, or feature-recovery phase.
 
 **Start the current canonical CSS as-is in controlled mode and keep it running.**
 
@@ -132,4 +134,4 @@ Package A/B/C remain optional later backlog. They are **not** the next milestone
 | BROKER_FILES_CHANGED | NO |
 | EXECUTION_AUTHORITY_CHANGED | NO |
 | SAFETY_GATE_CHANGED | NO |
-| CSS-PKG-D-001 status | REVIEW (draft PR #62; not COMPLETE until merged) |
+| CSS-PKG-D-001 status | COMPLETE (PR #62 merged as `2b39141e`; historical start SHA `d53e665`) |
