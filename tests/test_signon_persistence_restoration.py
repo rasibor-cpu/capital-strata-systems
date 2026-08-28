@@ -83,6 +83,7 @@ def test_valid_session_restoration(temp_auth_file, mock_registry):
         "role": "SUPER_USER",
         "unit_code": "CORE",
         "home_branch": "HQ",
+        "auth_session_id": "test-session-id",
         "last_login": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "login_persistence": True
     }
@@ -121,6 +122,7 @@ def test_missing_required_fields(temp_auth_file, mock_registry):
         "role": "SUPER_USER",
         # unit_code is missing
         "home_branch": "HQ",
+        "auth_session_id": "test-session-id",
         "last_login": datetime.now(timezone.utc).isoformat(timespec="seconds")
     }
     temp_auth_file.write_text(json.dumps(payload), encoding="utf-8")
@@ -138,6 +140,7 @@ def test_wrong_field_types(temp_auth_file, mock_registry):
         "role": "SUPER_USER",
         "unit_code": "CORE",
         "home_branch": "HQ",
+        "auth_session_id": "test-session-id",
         "last_login": datetime.now(timezone.utc).isoformat(timespec="seconds")
     }
     temp_auth_file.write_text(json.dumps(payload), encoding="utf-8")
@@ -155,6 +158,7 @@ def test_unknown_user(temp_auth_file, mock_registry):
         "role": "VIEWER",
         "unit_code": "CORE",
         "home_branch": "HQ",
+        "auth_session_id": "test-session-id",
         "last_login": datetime.now(timezone.utc).isoformat(timespec="seconds")
     }
     temp_auth_file.write_text(json.dumps(payload), encoding="utf-8")
@@ -173,6 +177,7 @@ def test_locked_out_user(temp_auth_file, mock_registry):
         "role": "TRADER",
         "unit_code": "CORE",
         "home_branch": "HQ",
+        "auth_session_id": "test-session-id",
         "last_login": datetime.now(timezone.utc).isoformat(timespec="seconds")
     }
     temp_auth_file.write_text(json.dumps(payload), encoding="utf-8")
@@ -191,6 +196,7 @@ def test_expired_session(temp_auth_file, mock_registry):
         "role": "SUPER_USER",
         "unit_code": "CORE",
         "home_branch": "HQ",
+        "auth_session_id": "expired-session-id",
         "last_login": expired_time.isoformat(),
     }
     temp_auth_file.write_text(json.dumps(payload), encoding="utf-8")
@@ -208,6 +214,7 @@ def test_malformed_timestamp(temp_auth_file, mock_registry):
         "role": "SUPER_USER",
         "unit_code": "CORE",
         "home_branch": "HQ",
+        "auth_session_id": "invalid-ts-session-id",
         "last_login": "invalid-timestamp",
     }
     temp_auth_file.write_text(json.dumps(payload), encoding="utf-8")
@@ -226,6 +233,7 @@ def test_future_dated_session(temp_auth_file, mock_registry):
         "role": "SUPER_USER",
         "unit_code": "CORE",
         "home_branch": "HQ",
+        "auth_session_id": "future-session-id",
         "last_login": future_time.isoformat(),
     }
     temp_auth_file.write_text(json.dumps(payload), encoding="utf-8")
@@ -243,6 +251,7 @@ def test_role_mismatch(temp_auth_file, mock_registry):
         "role": "SUPER_USER",  # Persisted role mismatch!
         "unit_code": "CORE",
         "home_branch": "HQ",
+        "auth_session_id": "test-session-id",
         "last_login": datetime.now(timezone.utc).isoformat(timespec="seconds")
     }
     temp_auth_file.write_text(json.dumps(payload), encoding="utf-8")
@@ -260,6 +269,7 @@ def test_permissions_are_derived_canonically(temp_auth_file, mock_registry):
         "role": "VIEWER",
         "unit_code": "CORE",
         "home_branch": "HQ",
+        "auth_session_id": "test-session-id",
         "last_login": datetime.now(timezone.utc).isoformat(timespec="seconds")
     }
     temp_auth_file.write_text(json.dumps(payload), encoding="utf-8")
@@ -298,6 +308,7 @@ def test_no_broker_credentials_restored(temp_auth_file, mock_registry):
         "role": "SUPER_USER",
         "unit_code": "CORE",
         "home_branch": "HQ",
+        "auth_session_id": "test-session-id",
         "last_login": datetime.now(timezone.utc).isoformat(timespec="seconds")
     }
     temp_auth_file.write_text(json.dumps(valid_payload), encoding="utf-8")
@@ -313,9 +324,10 @@ def test_no_broker_credentials_restored(temp_auth_file, mock_registry):
 
 
 @patch("dashboard.auth.css_sign_on.load_users")
-def test_valid_restoration_readiness(mock_load, temp_auth_file, mock_registry):
-    """16. Verify that calling await_login_ready_state with a valid file skips prompts and returns context."""
+def test_valid_restoration_readiness(mock_load, temp_auth_file, mock_registry, monkeypatch):
+    """16. Verify explicit session restore policy returns restored context."""
     mock_load.return_value = mock_registry
+    monkeypatch.setenv("CSS_AUTH_ALLOW_SESSION_RESTORE", "1")
     
     valid_payload = {
         "user_id": "00000",
@@ -323,15 +335,16 @@ def test_valid_restoration_readiness(mock_load, temp_auth_file, mock_registry):
         "role": "SUPER_USER",
         "unit_code": "CORE",
         "home_branch": "HQ",
+        "auth_session_id": "restore-session-001",
         "last_login": datetime.now(timezone.utc).isoformat(timespec="seconds")
     }
     temp_auth_file.write_text(json.dumps(valid_payload), encoding="utf-8")
     
-    # Execute entry point
     result = auth.await_login_ready_state()
     assert result is not None
     assert result["user_id"] == "00000"
     assert result["role"] == "SUPER_USER"
+    assert result["auth_provenance"] == auth.AUTH_PROVENANCE_SESSION_RESUME
 
 
 def test_invalid_restoration_falls_through(monkeypatch, temp_auth_file, mock_registry):
@@ -343,6 +356,7 @@ def test_invalid_restoration_falls_through(monkeypatch, temp_auth_file, mock_reg
     
     # Set UI override to cli for this test only.
     monkeypatch.setenv("CSS_AUTH_UI", "cli")
+    monkeypatch.setenv("CSS_AUTH_ALLOW_SESSION_RESTORE", "1")
     
     # Save an invalid (expired) session file
     expired_time = datetime.now(timezone.utc) - timedelta(hours=30)
@@ -352,6 +366,7 @@ def test_invalid_restoration_falls_through(monkeypatch, temp_auth_file, mock_reg
         "role": "SUPER_USER",
         "unit_code": "CORE",
         "home_branch": "HQ",
+        "auth_session_id": "expired-session-id",
         "last_login": expired_time.isoformat(),
     }
     temp_auth_file.write_text(json.dumps(payload), encoding="utf-8")
@@ -393,6 +408,7 @@ def test_backward_compatibility_naive_timestamp(temp_auth_file, mock_registry):
         "role": "SUPER_USER",
         "unit_code": "CORE",
         "home_branch": "HQ",
+        "auth_session_id": "naive-session-id",
         "last_login": naive_str,
     }
     temp_auth_file.write_text(json.dumps(payload), encoding="utf-8")

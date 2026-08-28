@@ -1500,10 +1500,10 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
             or broker_payload.get("auth_status")
             or "NOT_TESTED"
         ),
-        "connection_status": (
-            "GREEN"
-            if str(canonical_state.get("overall_status", "")).upper() == "GREEN"
-            else str(canonical_state.get("connection_status", broker_payload.get("connection_status", "NOT_TESTED")))
+        "connection_status": str(
+            broker_payload.get("connection_status")
+            or canonical_state.get("connection_status")
+            or "NOT_TESTED"
         ),
         "connection_error": str(
             ""

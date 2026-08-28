@@ -224,12 +224,20 @@ def _launcher_auth_identity(session_state: Dict[str, Any]) -> Dict[str, str]:
 
     auth_file = _safe_load_artifact("css_auth_session.json")
     if isinstance(auth_file, dict) and auth_file.get("user_id") and auth_file.get("role"):
-        return {
-            "user_id": str(auth_file.get("user_id")),
-            "role": str(auth_file.get("role")).upper(),
-            "session_id": "",
-            "display_name": str(auth_file.get("display_name") or ""),
-        }
+        try:
+            from dashboard.auth.css_sign_on import restore_login_session
+
+            restored = restore_login_session()
+            if restored and str(restored.get("user_id")) == str(auth_file.get("user_id")):
+                return {
+                    "user_id": str(restored.get("user_id")),
+                    "role": str(restored.get("role")).upper(),
+                    "session_id": str(restored.get("auth_session_id") or ""),
+                    "display_name": str(restored.get("display_name") or ""),
+                    "auth_provenance": str(restored.get("auth_provenance") or ""),
+                }
+        except Exception:
+            pass
 
     if isinstance(session_state, dict):
         nested = session_state.get("session_user_ctx")
@@ -573,18 +581,51 @@ def get_runtime_summary() -> Dict[str, Any]:
     return summary
 
 def get_account_summary() -> Dict[str, Any]:
+    broker_startup = get_broker_startup_summary()
     state = _safe_load_artifact("css_account_state_pcnrass.json") or _safe_load_artifact("css_account_state_pcnrass_BACKUP.json")
+    selected_broker = str(
+        broker_startup.get("selected_broker") or broker_startup.get("broker") or state.get("broker") or "NONE"
+    ).upper()
+    broker_mode = str(broker_startup.get("broker_mode") or state.get("account_mode") or state.get("mode") or "ADVISORY")
+    canonical_state = (
+        broker_startup.get("canonical_broker_runtime_state")
+        if isinstance(broker_startup.get("canonical_broker_runtime_state"), dict)
+        else {}
+    )
+    account_snapshot = (
+        broker_startup.get("canonical_account_snapshot")
+        or broker_startup.get("account_snapshot")
+        or canonical_state.get("account_snapshot")
+        or {}
+    )
+    balances_loaded = (
+        account_snapshot.get("balances_loaded") is True
+        or broker_startup.get("balances_loaded") is True
+        or canonical_state.get("account_status") == "PASS"
+    )
+    live_broker_family = selected_broker in {"COINBASE", "OANDA"} and broker_mode.lower() == "live"
+    balance_source = dict(state)
+    if live_broker_family and balances_loaded and isinstance(account_snapshot, dict):
+        balance_source.update(
+            {
+                "cash": account_snapshot.get("cash", state.get("account_balance")),
+                "total_equity": account_snapshot.get("equity", state.get("total_equity")),
+                "buying_power": account_snapshot.get("buying_power", state.get("buying_power")),
+                "unrealized_pnl": account_snapshot.get("unrealized_pnl", state.get("unrealized_pnl")),
+                "realized_pnl": account_snapshot.get("realized_pnl", state.get("lifetime_realized_pnl")),
+            }
+        )
     canonical = build_broker_balance_summary(
         {
-            **state,
-            "cash": state.get("account_balance"),
-            "total_equity": state.get("total_equity"),
-            "buying_power": state.get("buying_power"),
-            "unrealized_pnl": state.get("unrealized_pnl"),
-            "realized_pnl": state.get("lifetime_realized_pnl"),
+            **balance_source,
+            "cash": balance_source.get("cash", balance_source.get("account_balance")),
+            "total_equity": balance_source.get("total_equity"),
+            "buying_power": balance_source.get("buying_power"),
+            "unrealized_pnl": balance_source.get("unrealized_pnl"),
+            "realized_pnl": balance_source.get("realized_pnl", balance_source.get("lifetime_realized_pnl")),
         },
-        broker=str(state.get("broker") or "NONE"),
-        mode=str(state.get("account_mode") or state.get("mode") or "ADVISORY"),
+        broker=selected_broker,
+        mode=broker_mode,
     )
     fields = canonical["account_summary"]
     return {
@@ -969,6 +1010,40 @@ def build_launcher_frontend_state(
         # live, in-process, by this launcher session.
         "canonical_runtime_supervisor": get_supervisor_summary(),
     }
+    reporting_overlay = {
+        key: broker_startup.get(key)
+        for key in (
+            "canonical_broker_runtime_state",
+            "state_hash",
+            "status_provenance",
+            "overall_status",
+            "connection_status",
+            "authentication_status",
+            "credential_status",
+            "credentials_present",
+            "market_data_status",
+            "readiness_state",
+            "go_no_go",
+            "recommended_action",
+            "broker_connected",
+            "broker_authenticated",
+            "authenticated",
+            "connected",
+            "account_loaded",
+            "market_data_ready",
+            "execution_authority",
+            "can_live_execute",
+            "live_micro_pilot_state",
+            "broker_execution_armed",
+            "execution_scope",
+            "live_authority_state",
+        )
+        if key in broker_startup
+    }
+    dashboard_payload["broker_summary"].update(reporting_overlay)
+    if str(broker).upper() != "COINBASE":
+        dashboard_payload["broker_summary"]["coinbase_key_present"] = False
+        dashboard_payload["broker_summary"]["coinbase_private_key_present"] = False
     return build_frontend_payload(dashboard_payload)
 
 
@@ -1168,6 +1243,9 @@ def get_launcher_broker_parity_feed() -> Dict[str, Any]:
     return broker_parity_payload(broker if isinstance(broker, dict) else {})
 
 
+from backend.runtime.canonical_broker_state_adapter import broker_scoped_validation_feed as _broker_scoped_validation_feed
+
+
 def get_launcher_coinbase_live_validation_feed() -> Dict[str, Any]:
     artifacts = load_coinbase_operational_validation_artifacts(LauncherConfig.ARTIFACTS_DIR)
     broker_validation = artifacts.get("broker_validation", {})
@@ -1194,7 +1272,7 @@ def get_launcher_coinbase_live_validation_feed() -> Dict[str, Any]:
             }
         )
 
-    return {
+    feed = {
         "validation_status": str(broker_validation.get("validation_status", "DATA UNAVAILABLE")),
         "api_reachable": bool(broker_validation.get("api_reachable", False)),
         "authentication": bool(broker_validation.get("authentication", False)),
@@ -1216,16 +1294,16 @@ def get_launcher_coinbase_live_validation_feed() -> Dict[str, Any]:
         if isinstance(broker_validation.get("read_checks"), dict)
         else {},
         "broker_operational_status": operational,
-        "endpoint": str(operational.get("endpoint", "NOT_AVAILABLE")),
-        "api_version": str(operational.get("api_version", "NOT_AVAILABLE")),
-        "server_time": str(operational.get("server_time", "NOT_AVAILABLE")),
+        "endpoint": str(operational.get("endpoint", "NOT AVAILABLE")),
+        "api_version": str(operational.get("api_version", "NOT AVAILABLE")),
+        "server_time": str(operational.get("server_time", "NOT AVAILABLE")),
         "latency_ms": operational.get("latency_ms"),
         "rate_limit_status": str(operational.get("rate_limit_status", "UNKNOWN")),
-        "last_failed_sync": str(operational.get("last_failed_sync", "NOT_AVAILABLE")),
+        "last_failed_sync": str(operational.get("last_failed_sync", "NOT AVAILABLE")),
         "account_sync_status": str(operational.get("account_sync_status", "PENDING")),
         "product_count": int(operational.get("product_count", broker_validation.get("products_loaded", 0)) or 0),
-        "market_data_status": str(operational.get("market_data_status", "NOT_AVAILABLE")),
-        "balance_status": str(operational.get("balance_status", "NOT_AVAILABLE")),
+        "market_data_status": str(operational.get("market_data_status", "NOT AVAILABLE")),
+        "balance_status": str(operational.get("balance_status", "NOT AVAILABLE")),
         "margin_status": str(operational.get("margin_status", "READ_ONLY_PENDING_ACCOUNT")),
         "operational_state": str(operational.get("operational_state", "PENDING")),
         "failure_reason": str(operational.get("failure_reason", "NONE")),
@@ -1239,6 +1317,7 @@ def get_launcher_coinbase_live_validation_feed() -> Dict[str, Any]:
         "advisory_only": True,
         "execution_allowed": False,
     }
+    return _broker_scoped_validation_feed(feed, "COINBASE")
 
 
 def get_launcher_oanda_live_validation_feed() -> Dict[str, Any]:
@@ -1267,7 +1346,7 @@ def get_launcher_oanda_live_validation_feed() -> Dict[str, Any]:
             }
         )
 
-    return {
+    feed = {
         "validation_status": str(broker_validation.get("validation_status", "DATA UNAVAILABLE")),
         "api_reachable": bool(broker_validation.get("api_reachable", False)),
         "authentication": bool(broker_validation.get("authentication", False)),
@@ -1289,16 +1368,16 @@ def get_launcher_oanda_live_validation_feed() -> Dict[str, Any]:
         if isinstance(broker_validation.get("read_checks"), dict)
         else {},
         "broker_operational_status": operational,
-        "endpoint": str(operational.get("endpoint", "NOT_AVAILABLE")),
-        "api_version": str(operational.get("api_version", "NOT_AVAILABLE")),
-        "server_time": str(operational.get("server_time", "NOT_AVAILABLE")),
+        "endpoint": str(operational.get("endpoint", "NOT AVAILABLE")),
+        "api_version": str(operational.get("api_version", "NOT AVAILABLE")),
+        "server_time": str(operational.get("server_time", "NOT AVAILABLE")),
         "latency_ms": operational.get("latency_ms"),
         "rate_limit_status": str(operational.get("rate_limit_status", "UNKNOWN")),
-        "last_failed_sync": str(operational.get("last_failed_sync", "NOT_AVAILABLE")),
+        "last_failed_sync": str(operational.get("last_failed_sync", "NOT AVAILABLE")),
         "account_sync_status": str(operational.get("account_sync_status", "PENDING")),
         "product_count": int(operational.get("product_count", broker_validation.get("products_loaded", 0)) or 0),
-        "market_data_status": str(operational.get("market_data_status", "NOT_AVAILABLE")),
-        "balance_status": str(operational.get("balance_status", "NOT_AVAILABLE")),
+        "market_data_status": str(operational.get("market_data_status", "NOT AVAILABLE")),
+        "balance_status": str(operational.get("balance_status", "NOT AVAILABLE")),
         "margin_status": str(operational.get("margin_status", "READ_ONLY_PENDING_ACCOUNT")),
         "operational_state": str(operational.get("operational_state", "PENDING")),
         "failure_reason": str(operational.get("failure_reason", "NONE")),
@@ -1312,6 +1391,7 @@ def get_launcher_oanda_live_validation_feed() -> Dict[str, Any]:
         "advisory_only": True,
         "execution_allowed": False,
     }
+    return _broker_scoped_validation_feed(feed, "OANDA")
 
 
 def get_launcher_live_readiness_blockers_feed() -> Dict[str, Any]:
@@ -4075,7 +4155,11 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         from backend.runtime.platform_status import build_platform_status
         from dashboard.enterprise_shell.nav_contract import build_enterprise_navigation_contract
 
-        platform_status = build_platform_status()
+        platform_status = build_platform_status(
+            session=session_state.get("session", session_state) if isinstance(session_state, dict) else {},
+            broker_startup=broker_startup if isinstance(broker_startup, dict) else {},
+            evidence=broker_startup if isinstance(broker_startup, dict) else {},
+        )
     except Exception:
         platform_status = {
             "runtime_mode": "DISABLED",

@@ -415,10 +415,78 @@ def _recommended_action(
     return diagnostic_action or "Configure broker credentials"
 
 
+def broker_scoped_validation_feed(feed: Mapping[str, Any] | None, expected_broker: str) -> dict[str, Any]:
+    """Prevent cross-broker validation contamination in presentation feeds."""
+    expected = str(expected_broker or "").strip().upper()
+    if not isinstance(feed, Mapping):
+        return {
+            "validation_status": "DATA UNAVAILABLE",
+            "endpoint": "DATA UNAVAILABLE",
+            "api_version": "NOT TESTED",
+        }
+    payload = dict(feed)
+    operational = payload.get("broker_operational_status")
+    operational_broker = ""
+    if isinstance(operational, Mapping):
+        operational_broker = str(operational.get("broker") or "").strip().upper()
+    endpoint = str(payload.get("endpoint") or "")
+    if operational_broker and operational_broker != expected:
+        return {
+            **payload,
+            "validation_status": "NOT TESTED",
+            "endpoint": "DATA UNAVAILABLE",
+            "api_version": "NOT TESTED",
+            "broker_operational_status": {},
+        }
+    if expected == "OANDA" and "coinbase" in endpoint.lower():
+        payload["endpoint"] = "DATA UNAVAILABLE"
+        payload["api_version"] = "NOT TESTED"
+        payload["validation_status"] = "NOT TESTED"
+        return payload
+    if expected == "COINBASE" and "oanda" in endpoint.lower():
+        payload["endpoint"] = "DATA UNAVAILABLE"
+        payload["api_version"] = "NOT TESTED"
+        payload["validation_status"] = "NOT TESTED"
+        return payload
+    return payload
+
+
+def reconcile_broker_summary_from_artifacts(summary: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Reconcile launcher/mobile broker summaries with canonical reporting projection."""
+    payload = dict(summary or {})
+    credential_diagnostics = payload.get("broker_credential_diagnostics") or payload.get("credential_diagnostics")
+    if not isinstance(credential_diagnostics, Mapping):
+        credential_diagnostics = {}
+    reporting = project_broker_reporting_fields(
+        payload,
+        credential_diagnostics=credential_diagnostics,
+    )
+    merged = {**payload, **reporting}
+    merged["selected_broker"] = str(
+        payload.get("selected_broker") or reporting.get("broker") or "NONE"
+    ).upper()
+    merged["broker_mode"] = str(
+        payload.get("broker_mode") or reporting.get("broker_mode") or "paper"
+    ).lower()
+    merged.update(
+        {
+            "execution_authority": False,
+            "can_live_execute": False,
+            "broker_execution_armed": False,
+            "execution_allowed": False,
+            "live_trading_blocked": True,
+            "order_submission_status": "DISABLED",
+        }
+    )
+    return merged
+
+
 __all__ = [
     "adapt_canonical_state_to_legacy_broker_payload",
     "adapt_legacy_payload_to_canonical_state",
     "broker_environment_profile_view",
+    "broker_scoped_validation_feed",
     "map_canonical_credential_status_to_reporting",
     "project_broker_reporting_fields",
+    "reconcile_broker_summary_from_artifacts",
 ]

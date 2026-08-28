@@ -1774,6 +1774,12 @@ def authenticate_startup_user() -> dict[str, Any]:
                 "role": user_ctx.get("role"),
                 "unit_code": user_ctx.get("unit_code"),
                 "home_branch": user_ctx.get("home_branch"),
+                "auth_session_id": user_ctx.get("auth_session_id"),
+                "auth_source": user_ctx.get("auth_source"),
+                "auth_provenance": user_ctx.get("auth_provenance"),
+                "last_auth_time": user_ctx.get("last_auth_time"),
+                "last_auth_event": user_ctx.get("last_auth_event"),
+                "login_channel": user_ctx.get("login_channel"),
                 **origin,
                 **session_policy_context(),
             },
@@ -2065,7 +2071,7 @@ def _run_operator_startup_state_machine_once() -> Any:
     machine_state = result.state
     STARTUP_WIZARD_STATE = StartupWizardState(
         step=str(machine_state.state).lower(),
-        authenticated=True,
+        authenticated=str(SESSION_USER_CTX.get("auth_provenance") or "").upper() == "INTERACTIVE_LOGIN",
         global_mode=machine_state.global_mode or "paper",
         selected_broker=machine_state.selected_broker or "NONE",
         broker_mode=machine_state.broker_mode or "paper",
@@ -2435,26 +2441,28 @@ STARTUP_BROKER_SELECTION = build_startup_broker_selection(
     live_authority_state="BLOCKED",
 )
 if SELECTED_BROKER == "OANDA":
-    COINBASE_READ_ONLY_STATUS = evaluate_oanda_live_read_only(
+    BROKER_READ_ONLY_STATUS = evaluate_oanda_live_read_only(
         STARTUP_BROKER_SELECTION,
         legacy_limit_usd=1.0,
     )
 else:
-    COINBASE_READ_ONLY_STATUS = evaluate_coinbase_live_read_only(
+    BROKER_READ_ONLY_STATUS = evaluate_coinbase_live_read_only(
         STARTUP_BROKER_SELECTION,
         env=os.environ,
         legacy_limit_usd=COINBASE_MAX_LIVE_ORDER_USD,
     )
+COINBASE_READ_ONLY_STATUS = BROKER_READ_ONLY_STATUS
 BROKER_VALIDATION_DISPLAY = broker_validation_display(
     selected_broker=SELECTED_BROKER,
     broker_mode=SELECTED_BROKER_MODE,
     readiness={
-        **COINBASE_READ_ONLY_STATUS,
+        **BROKER_READ_ONLY_STATUS,
         "broker_execution_armed": BROKER_EXECUTION_ARMED,
     },
     env=os.environ,
 )
-COINBASE_READ_ONLY_STATUS.update(BROKER_VALIDATION_DISPLAY)
+BROKER_READ_ONLY_STATUS.update(BROKER_VALIDATION_DISPLAY)
+COINBASE_READ_ONLY_STATUS = BROKER_READ_ONLY_STATUS
 if (
     SELECTED_BROKER == "COINBASE"
     and SELECTED_BROKER_MODE == "paper"
@@ -2463,7 +2471,7 @@ if (
     COINBASE_READ_ONLY_STATUS["auth_reason"] = str(COINBASE_LIVE_CONFIRMATION_STATUS["reason"])
     COINBASE_READ_ONLY_STATUS["execution_scope"] = "PAPER_FALLBACK_AFTER_INVALID_LIVE_CONFIRMATION"
 def pcnrass_update_authoritative_broker_state(val_data: dict[str, Any], validation_source: str) -> None:
-    global COINBASE_READ_ONLY_STATUS
+    global BROKER_READ_ONLY_STATUS, COINBASE_READ_ONLY_STATUS
     if not val_data:
         return
         
@@ -2471,73 +2479,73 @@ def pcnrass_update_authoritative_broker_state(val_data: dict[str, Any], validati
     is_success = (status == "PASS")
     
     # Base connection & auth fields
-    COINBASE_READ_ONLY_STATUS["broker_connected"] = bool(val_data.get("api_reachable", False))
-    COINBASE_READ_ONLY_STATUS["broker_authenticated"] = bool(val_data.get("authenticated", False))
-    COINBASE_READ_ONLY_STATUS["credential_status"] = "PASS" if is_success else "FAIL"
-    COINBASE_READ_ONLY_STATUS["auth_status"] = "PASS" if val_data.get("authenticated") else "FAIL"
-    COINBASE_READ_ONLY_STATUS["connection_status"] = "PASS" if val_data.get("api_reachable") else "FAIL"
-    COINBASE_READ_ONLY_STATUS["account_loaded"] = bool(val_data.get("account_loaded", False))
-    COINBASE_READ_ONLY_STATUS["balances_loaded"] = bool(val_data.get("balances_loaded", False))
-    COINBASE_READ_ONLY_STATUS["market_data_loaded"] = bool(val_data.get("market_data_loaded", False))
-    COINBASE_READ_ONLY_STATUS["products_loaded"] = int(val_data.get("products_loaded", 0))
-    COINBASE_READ_ONLY_STATUS["market_data_status"] = "OK" if val_data.get("market_data_loaded") else "FAIL"
+    BROKER_READ_ONLY_STATUS["broker_connected"] = bool(val_data.get("api_reachable", False))
+    BROKER_READ_ONLY_STATUS["broker_authenticated"] = bool(val_data.get("authenticated", False))
+    BROKER_READ_ONLY_STATUS["credential_status"] = "PASS" if is_success else "FAIL"
+    BROKER_READ_ONLY_STATUS["auth_status"] = "PASS" if val_data.get("authenticated") else "FAIL"
+    BROKER_READ_ONLY_STATUS["connection_status"] = "PASS" if val_data.get("api_reachable") else "FAIL"
+    BROKER_READ_ONLY_STATUS["account_loaded"] = bool(val_data.get("account_loaded", False))
+    BROKER_READ_ONLY_STATUS["balances_loaded"] = bool(val_data.get("balances_loaded", False))
+    BROKER_READ_ONLY_STATUS["market_data_loaded"] = bool(val_data.get("market_data_loaded", False))
+    BROKER_READ_ONLY_STATUS["products_loaded"] = int(val_data.get("products_loaded", 0))
+    BROKER_READ_ONLY_STATUS["market_data_status"] = "OK" if val_data.get("market_data_loaded") else "FAIL"
     
     failures = val_data.get("failure_reasons", [])
-    COINBASE_READ_ONLY_STATUS["connection_error"] = ", ".join([f.get("message", "") for f in failures]) if failures else ""
+    BROKER_READ_ONLY_STATUS["connection_error"] = ", ".join([f.get("message", "") for f in failures]) if failures else ""
     
     # Freshness metadata
-    COINBASE_READ_ONLY_STATUS["generated_at"] = val_data.get("validation_timestamp", datetime.now(timezone.utc).isoformat())
-    COINBASE_READ_ONLY_STATUS["validation_completed"] = True
-    COINBASE_READ_ONLY_STATUS["validation_source"] = validation_source
+    BROKER_READ_ONLY_STATUS["generated_at"] = val_data.get("validation_timestamp", datetime.now(timezone.utc).isoformat())
+    BROKER_READ_ONLY_STATUS["validation_completed"] = True
+    BROKER_READ_ONLY_STATUS["validation_source"] = validation_source
     
     # Sequence tracking
     seq = globals().get("PCNRASS_VALIDATION_SEQUENCE", 0) + 1
     globals()["PCNRASS_VALIDATION_SEQUENCE"] = seq
-    COINBASE_READ_ONLY_STATUS["validation_sequence"] = seq
+    BROKER_READ_ONLY_STATUS["validation_sequence"] = seq
     
     if is_success:
-        COINBASE_READ_ONLY_STATUS["last_successful_validation_at"] = val_data.get("validation_timestamp", datetime.now(timezone.utc).isoformat())
-        COINBASE_READ_ONLY_STATUS["readiness_state"] = "FULLY_OPERATIONAL"
-        COINBASE_READ_ONLY_STATUS["go_no_go"] = "GO"
+        BROKER_READ_ONLY_STATUS["last_successful_validation_at"] = val_data.get("validation_timestamp", datetime.now(timezone.utc).isoformat())
+        BROKER_READ_ONLY_STATUS["readiness_state"] = "FULLY_OPERATIONAL"
+        BROKER_READ_ONLY_STATUS["go_no_go"] = "GO"
     else:
-        COINBASE_READ_ONLY_STATUS["readiness_state"] = "FAIL_CLOSED"
-        COINBASE_READ_ONLY_STATUS["go_no_go"] = "NO GO"
+        BROKER_READ_ONLY_STATUS["readiness_state"] = "FAIL_CLOSED"
+        BROKER_READ_ONLY_STATUS["go_no_go"] = "NO GO"
         # Clear/None-out fields to prevent stale-success leakage
-        COINBASE_READ_ONLY_STATUS["account_equity"] = None
-        COINBASE_READ_ONLY_STATUS["cash"] = None
-        COINBASE_READ_ONLY_STATUS["buying_power"] = None
-        COINBASE_READ_ONLY_STATUS["available_balance"] = None
+        BROKER_READ_ONLY_STATUS["account_equity"] = None
+        BROKER_READ_ONLY_STATUS["cash"] = None
+        BROKER_READ_ONLY_STATUS["buying_power"] = None
+        BROKER_READ_ONLY_STATUS["available_balance"] = None
         
     op_status = val_data.get("broker_operational_status", {})
     if op_status and is_success:
         op_snapshot = op_status.get("canonical_account_snapshot") or op_status.get("account_snapshot") or {}
         if isinstance(op_snapshot, dict) and op_snapshot:
-            COINBASE_READ_ONLY_STATUS["canonical_account_snapshot"] = op_snapshot
-            COINBASE_READ_ONLY_STATUS["account_snapshot"] = op_snapshot
-            COINBASE_READ_ONLY_STATUS["account_equity"] = op_snapshot.get("equity")
-            COINBASE_READ_ONLY_STATUS["cash"] = op_snapshot.get("cash")
-            COINBASE_READ_ONLY_STATUS["buying_power"] = op_snapshot.get("buying_power")
-            COINBASE_READ_ONLY_STATUS["available_balance"] = op_snapshot.get("available_balance")
-            COINBASE_READ_ONLY_STATUS["margin_available"] = op_snapshot.get("margin_available")
-            COINBASE_READ_ONLY_STATUS["currency"] = op_snapshot.get("currency", COINBASE_READ_ONLY_STATUS.get("currency", "USD"))
+            BROKER_READ_ONLY_STATUS["canonical_account_snapshot"] = op_snapshot
+            BROKER_READ_ONLY_STATUS["account_snapshot"] = op_snapshot
+            BROKER_READ_ONLY_STATUS["account_equity"] = op_snapshot.get("equity")
+            BROKER_READ_ONLY_STATUS["cash"] = op_snapshot.get("cash")
+            BROKER_READ_ONLY_STATUS["buying_power"] = op_snapshot.get("buying_power")
+            BROKER_READ_ONLY_STATUS["available_balance"] = op_snapshot.get("available_balance")
+            BROKER_READ_ONLY_STATUS["margin_available"] = op_snapshot.get("margin_available")
+            BROKER_READ_ONLY_STATUS["currency"] = op_snapshot.get("currency", BROKER_READ_ONLY_STATUS.get("currency", "USD"))
         else:
-            COINBASE_READ_ONLY_STATUS["account_equity"] = op_status.get("equity", 0.0)
-            COINBASE_READ_ONLY_STATUS["cash"] = op_status.get("cash", 0.0)
-            COINBASE_READ_ONLY_STATUS["buying_power"] = op_status.get("buying_power", 0.0)
-            COINBASE_READ_ONLY_STATUS["available_balance"] = op_status.get("available_balance", 0.0)
+            BROKER_READ_ONLY_STATUS["account_equity"] = op_status.get("equity", 0.0)
+            BROKER_READ_ONLY_STATUS["cash"] = op_status.get("cash", 0.0)
+            BROKER_READ_ONLY_STATUS["buying_power"] = op_status.get("buying_power", 0.0)
+            BROKER_READ_ONLY_STATUS["available_balance"] = op_status.get("available_balance", 0.0)
     inferred_broker = str(
         val_data.get("broker")
-        or COINBASE_READ_ONLY_STATUS.get("selected_broker")
+        or BROKER_READ_ONLY_STATUS.get("selected_broker")
         or ("OANDA" if "OANDA" in str(validation_source).upper() else "COINBASE")
     )
-    inferred_mode = str(val_data.get("mode") or COINBASE_READ_ONLY_STATUS.get("broker_mode") or "live")
-    COINBASE_READ_ONLY_STATUS["selected_broker"] = inferred_broker.upper()
-    COINBASE_READ_ONLY_STATUS["broker"] = inferred_broker.upper()
-    COINBASE_READ_ONLY_STATUS["broker_mode"] = inferred_mode.lower()
+    inferred_mode = str(val_data.get("mode") or BROKER_READ_ONLY_STATUS.get("broker_mode") or "live")
+    BROKER_READ_ONLY_STATUS["selected_broker"] = inferred_broker.upper()
+    BROKER_READ_ONLY_STATUS["broker"] = inferred_broker.upper()
+    BROKER_READ_ONLY_STATUS["broker_mode"] = inferred_mode.lower()
     canonical = build_canonical_broker_runtime_state(
         broker=inferred_broker,
         mode=inferred_mode,
-        runtime_payload=COINBASE_READ_ONLY_STATUS,
+        runtime_payload=BROKER_READ_ONLY_STATUS,
         certification=val_data,
         env=val_data.get("env") if isinstance(val_data.get("env"), dict) else {},
         source_modules=(
@@ -2545,52 +2553,54 @@ def pcnrass_update_authoritative_broker_state(val_data: dict[str, Any], validati
             validation_source,
         ),
     )
-    COINBASE_READ_ONLY_STATUS["canonical_broker_runtime_state"] = canonical.to_dict()
-    COINBASE_READ_ONLY_STATUS["overall_status"] = canonical.overall_status
-    COINBASE_READ_ONLY_STATUS["state_hash"] = canonical.stable_hash()
-    COINBASE_READ_ONLY_STATUS.update(
+    BROKER_READ_ONLY_STATUS["canonical_broker_runtime_state"] = canonical.to_dict()
+    BROKER_READ_ONLY_STATUS["overall_status"] = canonical.overall_status
+    BROKER_READ_ONLY_STATUS["state_hash"] = canonical.stable_hash()
+    BROKER_READ_ONLY_STATUS.update(
         adapt_canonical_state_to_legacy_broker_payload(
             canonical,
-            base_payload=COINBASE_READ_ONLY_STATUS,
+            base_payload=BROKER_READ_ONLY_STATUS,
         )
     )
-    COINBASE_READ_ONLY_STATUS["credential_status"] = "PASS" if canonical.credential_status == "PASS" else "FAIL"
-    COINBASE_READ_ONLY_STATUS["auth_status"] = "PASS" if canonical.authentication_status == "PASS" else "FAIL"
-    COINBASE_READ_ONLY_STATUS["connection_status"] = "PASS" if canonical.connection_status == "PASS" else "FAIL"
+    BROKER_READ_ONLY_STATUS["credential_status"] = "PASS" if canonical.credential_status == "PASS" else "FAIL"
+    BROKER_READ_ONLY_STATUS["auth_status"] = "PASS" if canonical.authentication_status == "PASS" else "FAIL"
+    BROKER_READ_ONLY_STATUS["connection_status"] = "PASS" if canonical.connection_status == "PASS" else "FAIL"
     if failures:
-        COINBASE_READ_ONLY_STATUS["connection_error"] = ", ".join([str(f.get("message", "")) for f in failures if isinstance(f, dict)])
+        BROKER_READ_ONLY_STATUS["connection_error"] = ", ".join([str(f.get("message", "")) for f in failures if isinstance(f, dict)])
     elif canonical.failure_reason == "NO_FAILURE":
-        COINBASE_READ_ONLY_STATUS["connection_error"] = ""
+        BROKER_READ_ONLY_STATUS["connection_error"] = ""
+    COINBASE_READ_ONLY_STATUS = BROKER_READ_ONLY_STATUS
 
 if SELECTED_BROKER == "COINBASE" and SELECTED_BROKER_MODE == "live":
     COINBASE_OPERATIONAL_VALIDATION = validate_coinbase_live_read_only_operational(
         artifacts_dir=ARTIFACTS_DIR,
     )
-    COINBASE_READ_ONLY_STATUS["coinbase_live_validation"] = COINBASE_OPERATIONAL_VALIDATION
+    BROKER_READ_ONLY_STATUS["coinbase_live_validation"] = COINBASE_OPERATIONAL_VALIDATION
     pcnrass_update_authoritative_broker_state(COINBASE_OPERATIONAL_VALIDATION, "COINBASE_LIVE_VALIDATOR")
 elif SELECTED_BROKER == "OANDA" and SELECTED_BROKER_MODE == "live":
     OANDA_OPERATIONAL_VALIDATION = validate_oanda_live_read_only_operational(
         artifacts_dir=ARTIFACTS_DIR,
     )
-    COINBASE_READ_ONLY_STATUS["oanda_live_validation"] = OANDA_OPERATIONAL_VALIDATION
+    BROKER_READ_ONLY_STATUS["oanda_live_validation"] = OANDA_OPERATIONAL_VALIDATION
     pcnrass_update_authoritative_broker_state(OANDA_OPERATIONAL_VALIDATION, "OANDA_LIVE_VALIDATOR")
+COINBASE_READ_ONLY_STATUS = BROKER_READ_ONLY_STATUS
 if SELECTED_BROKER == "OANDA":
     STARTUP_BROKER_SELECTION = selection_with_oanda_readiness(
         STARTUP_BROKER_SELECTION,
-        COINBASE_READ_ONLY_STATUS,
+        BROKER_READ_ONLY_STATUS,
     )
     STARTUP_BROKER_STATE = merge_oanda_readiness_into_broker_state(
         STARTUP_BROKER_SELECTION,
-        COINBASE_READ_ONLY_STATUS,
+        BROKER_READ_ONLY_STATUS,
     )
 else:
     STARTUP_BROKER_SELECTION = selection_with_coinbase_readiness(
         STARTUP_BROKER_SELECTION,
-        COINBASE_READ_ONLY_STATUS,
+        BROKER_READ_ONLY_STATUS,
     )
     STARTUP_BROKER_STATE = merge_readiness_into_broker_state(
         STARTUP_BROKER_SELECTION,
-        COINBASE_READ_ONLY_STATUS,
+        BROKER_READ_ONLY_STATUS,
     )
 STARTUP_BROKER_STATE["broker_parity"] = broker_parity_payload(STARTUP_BROKER_STATE)
 try:
@@ -4479,8 +4489,11 @@ def apply_defensive_exposure_reduction() -> int:
 
 
 def print_authentication_status_panel(current_status: dict) -> None:
-    auth_state = "AUTHENTICATED" if SESSION_USER_CTX.get("user_id") else "UNAUTHENTICATED"
+    from dashboard.auth.css_sign_on import resolve_auth_state_label
+
+    auth_state = resolve_auth_state_label(SESSION_USER_CTX)
     auth_source = SESSION_USER_CTX.get("auth_source", "UNKNOWN")
+    auth_provenance = SESSION_USER_CTX.get("auth_provenance", "UNKNOWN")
     current_log_on = (
         SESSION_USER_CTX.get("current_log_on")
         or SESSION_USER_CTX.get("last_auth_time")
@@ -4501,6 +4514,7 @@ def print_authentication_status_panel(current_status: dict) -> None:
     print("--- OPERATIONAL AUTHENTICATION STATUS ---")
     print(f"Auth State: {auth_state}")
     print(f"Auth Source: {auth_source}")
+    print(f"Auth Provenance: {auth_provenance}")
     print(f"Current Log On: {current_log_on}")
     print(f"Last Log On: {last_log_on}")
     print(f"Session Age: {session_age_seconds} seconds")

@@ -22,6 +22,9 @@ INITIAL_ADMIN_PASSWORD = ""  # intentionally empty — never use as a shipped se
 FORBIDDEN_DEFAULT_PASSWORDS = frozenset({"123456", "password", "admin", "css123", "CSS123"})
 INITIAL_DISPLAY_NAME = "CSS Administrator"
 INITIAL_ROLE = "SUPER_USER"
+AUTH_PROVENANCE_INTERACTIVE = "INTERACTIVE_LOGIN"
+AUTH_PROVENANCE_SESSION_RESUME = "EXPLICIT_SESSION_RESUME"
+AUTH_PROVENANCE_NONE = "NO_VALID_AUTHENTICATION"
 MIN_PASSWORD_LENGTH = 8
 PASSWORD_MAX_AGE_DAYS = 30
 PASSWORD_HISTORY_LIMIT = 2
@@ -71,6 +74,43 @@ class PasswordValidationError(ValueError):
     pass
 
 
+def session_restore_explicitly_allowed() -> bool:
+    """Session restore requires deliberate operator/policy opt-in."""
+    return os.getenv("CSS_AUTH_ALLOW_SESSION_RESTORE", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def map_auth_provenance(auth_source: Optional[str]) -> str:
+    source = str(auth_source or "").strip().lower()
+    if source == "interactive":
+        return AUTH_PROVENANCE_INTERACTIVE
+    if source == "restored":
+        return AUTH_PROVENANCE_SESSION_RESUME
+    return AUTH_PROVENANCE_NONE
+
+
+def attach_auth_provenance(user_ctx: Dict[str, Any]) -> Dict[str, Any]:
+    user_ctx["auth_provenance"] = map_auth_provenance(user_ctx.get("auth_source"))
+    return user_ctx
+
+
+def resolve_auth_state_label(user_ctx: Optional[Dict[str, Any]]) -> str:
+    if not isinstance(user_ctx, dict) or not user_ctx.get("user_id"):
+        return AUTH_PROVENANCE_NONE
+    provenance = str(
+        user_ctx.get("auth_provenance") or map_auth_provenance(user_ctx.get("auth_source"))
+    )
+    if provenance == AUTH_PROVENANCE_INTERACTIVE:
+        return "AUTHENTICATED"
+    if provenance == AUTH_PROVENANCE_SESSION_RESUME:
+        return "SESSION_RESTORED"
+    return AUTH_PROVENANCE_NONE
+
+
 def await_login_ready_state() -> Dict[str, Any]:
     """
     Dashboard entry auth gate.
@@ -101,9 +141,10 @@ def await_login_ready_state() -> Dict[str, Any]:
             }
         }
     users = load_users()
-    restored = restore_login_session(users)
-    if restored is not None:
-        return restored
+    if session_restore_explicitly_allowed():
+        restored = restore_login_session(users)
+        if restored is not None:
+            return attach_auth_provenance(restored)
 
     auth_ui = os.getenv("CSS_AUTH_UI", "gui").strip().lower()
 
@@ -503,6 +544,7 @@ def authenticate_credentials(users: Dict[str, Any], user_id: str, password: str)
     user_ctx["current_log_on"] = login_at
     user_ctx["last_log_on"] = previous_login_at or None
     user_ctx["last_auth_event"] = "interactive_login_success"
+    attach_auth_provenance(user_ctx)
 
     record_auth_audit_event(
         "interactive_login_success",
@@ -922,6 +964,13 @@ def persist_login_session(user_ctx: Dict[str, Any]) -> None:
                     "auth_session_id": auth_session_id,
                     "last_login": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                     "login_persistence": True,
+                    "auth_source": str(user_ctx.get("auth_source") or "interactive"),
+                    "auth_provenance": str(
+                        user_ctx.get("auth_provenance")
+                        or map_auth_provenance(user_ctx.get("auth_source"))
+                    ),
+                    "last_auth_event": str(user_ctx.get("last_auth_event") or ""),
+                    "login_channel": str(user_ctx.get("login_channel") or ""),
                 },
                 indent=2,
             ),
@@ -1387,6 +1436,7 @@ def restore_login_session(users: Optional[Dict[str, Any]] = None) -> Optional[Di
         or None
     )
     user_ctx["last_auth_event"] = "restored_session_success"
+    attach_auth_provenance(user_ctx)
 
     record_auth_audit_event(
         "restored_session_success",

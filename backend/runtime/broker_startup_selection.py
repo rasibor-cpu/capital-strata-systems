@@ -298,7 +298,9 @@ def broker_summary_from_artifacts(
     for key, value in broker_state.items():
         if key not in summary or key in override_keys:
             summary[key] = value
-    return summary
+    from backend.runtime.canonical_broker_state_adapter import reconcile_broker_summary_from_artifacts
+
+    return reconcile_broker_summary_from_artifacts(summary)
 
 
 def persist_broker_selection(
