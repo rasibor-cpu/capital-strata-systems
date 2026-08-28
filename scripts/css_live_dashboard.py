@@ -2242,11 +2242,40 @@ def close_active_session(reason: str, extra: Optional[dict[str, Any]] = None) ->
 
     SESSION_CLOSED = True
     try:
-        from dashboard.auth.css_sign_on import invalidate_login_session
-        invalidate_login_session()
+        from dashboard.auth.css_sign_on import invalidate_login_session_if_authoritative
+        invalidate_login_session_if_authoritative(
+            str(SESSION_USER_CTX.get("user_id") or ""),
+            str(SESSION_USER_CTX.get("auth_session_id") or ""),
+        )
     except Exception:
         pass
 
+
+
+def enforce_authoritative_auth_session() -> None:
+    """Fail closed when this runtime has been superseded by a newer login."""
+    from dashboard.auth.css_sign_on import is_auth_session_authoritative
+
+    user_id = str(SESSION_USER_CTX.get("user_id") or "")
+    auth_session_id = str(SESSION_USER_CTX.get("auth_session_id") or "")
+
+    if is_auth_session_authoritative(user_id, auth_session_id):
+        return
+
+    print(
+        f"[AUTH SESSION SUPERSEDED] user_id={user_id} "
+        "This runtime no longer owns the authoritative login lease."
+    )
+
+    close_active_session(
+        "auth_session_superseded",
+        {
+            "auth_session_authoritative": False,
+            "controlled_shutdown": True,
+        },
+    )
+
+    raise SystemExit("CSS_AUTH_SESSION_SUPERSEDED")
 
 
 # === PCNRASS RESTORED CSS AUTHENTICATION ===
@@ -2259,6 +2288,12 @@ def close_active_session(reason: str, extra: Optional[dict[str, Any]] = None) ->
 
 
 SESSION_USER_CTX = authenticate_startup_user()
+
+# COW-001: load the canonical repository environment before broker/readiness
+# evaluation. bootstrap_broker_environment preserves existing process values
+# while forcibly neutralizing truthy live-enable authority flags.
+from backend.runtime.environment_bootstrap import bootstrap_broker_environment
+COW001_ENV_BOOTSTRAP = bootstrap_broker_environment(PROJECT_ROOT)
 
 GLOBAL_BROKER_MODE = select_global_broker_mode()
 
@@ -3101,6 +3136,10 @@ def pcnrass_read_mobile_controls() -> dict:
 
 def pcnrass_wait_for_next_cycle(cycle: int) -> bool:
     while True:
+
+        # Single-active-session enforcement.
+        # A newer same-ID login immediately supersedes this runtime.
+        enforce_authoritative_auth_session()
         controls = pcnrass_read_mobile_controls()
 
         if controls["trading_paused"]:

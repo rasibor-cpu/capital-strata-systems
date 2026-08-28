@@ -902,6 +902,13 @@ def record_auth_audit_event(
 
 def persist_login_session(user_ctx: Dict[str, Any]) -> None:
     SESSION_AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    # Single-active-session authority.
+    # A newly authenticated context receives a unique lease ID.
+    # Re-persisting the same context preserves that lease.
+    auth_session_id = str(user_ctx.get("auth_session_id") or uuid.uuid4())
+    user_ctx["auth_session_id"] = auth_session_id
+
     temp_file = SESSION_AUTH_FILE.with_name(SESSION_AUTH_FILE.name + ".tmp")
     try:
         temp_file.write_text(
@@ -912,6 +919,7 @@ def persist_login_session(user_ctx: Dict[str, Any]) -> None:
                     "role": user_ctx.get("role"),
                     "unit_code": user_ctx.get("unit_code"),
                     "home_branch": user_ctx.get("home_branch"),
+                    "auth_session_id": auth_session_id,
                     "last_login": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                     "login_persistence": True,
                 },
@@ -933,6 +941,7 @@ def persist_login_session(user_ctx: Dict[str, Any]) -> None:
                         "role": user_ctx.get("role"),
                         "unit_code": user_ctx.get("unit_code"),
                         "home_branch": user_ctx.get("home_branch"),
+                    "auth_session_id": auth_session_id,
                         "last_login": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                         "login_persistence": True,
                     },
@@ -966,6 +975,62 @@ def invalidate_login_session() -> None:
         import sys
         sys.stderr.write(f"[SESSION INVALIDATION WARN] Failed to delete session file: {exc}\n")
         sys.stderr.flush()
+
+
+def read_authoritative_auth_session() -> Optional[Dict[str, Any]]:
+    """Read the current persisted authentication lease without mutation."""
+    if not SESSION_AUTH_FILE.exists():
+        return None
+
+    try:
+        raw = SESSION_AUTH_FILE.read_text(encoding="utf-8").strip()
+        if not raw:
+            return None
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def is_auth_session_authoritative(
+    user_id: str,
+    auth_session_id: str,
+) -> bool:
+    """True only when this exact user/session lease remains authoritative."""
+    if not user_id or not auth_session_id:
+        return False
+
+    current = read_authoritative_auth_session()
+    if not current:
+        return False
+
+    return (
+        normalize_user_id(current.get("user_id")) == normalize_user_id(user_id)
+        and str(current.get("auth_session_id") or "") == str(auth_session_id)
+    )
+
+
+def invalidate_login_session_if_authoritative(
+    user_id: str,
+    auth_session_id: str,
+) -> bool:
+    """
+    Remove the persisted lease only when the caller still owns it.
+
+    A superseded runtime must never delete a newer runtime's lease.
+    """
+    if not is_auth_session_authoritative(user_id, auth_session_id):
+        record_auth_audit_event(
+            "session_invalidation_skipped",
+            str(user_id or "UNKNOWN"),
+            "SUCCESS",
+            failure_reason="session_superseded_or_not_authoritative",
+            auth_source="runtime",
+        )
+        return False
+
+    invalidate_login_session()
+    return True
 
 
 def restore_login_session(users: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
@@ -1045,7 +1110,7 @@ def restore_login_session(users: Optional[Dict[str, Any]] = None) -> Optional[Di
         return None
 
     # Required fields validation
-    required_fields = ["user_id", "display_name", "role", "unit_code", "home_branch", "last_login"]
+    required_fields = ["user_id", "display_name", "role", "unit_code", "home_branch", "auth_session_id", "last_login"]
     for field in required_fields:
         if field not in data or data[field] is None:
             import sys
@@ -1300,6 +1365,7 @@ def restore_login_session(users: Optional[Dict[str, Any]] = None) -> Optional[Di
 
     # Build context using canonical registry data to avoid trust issues
     user_ctx = build_user_context(user_record, user_id)
+    user_ctx["auth_session_id"] = str(data.get("auth_session_id") or "")
     
     # Successful restored session
     AuthMetrics.restored_sessions += 1
