@@ -1909,6 +1909,126 @@ def _startup_timeout_seconds() -> int:
         return 120
 
 
+# COW001_V4_COINBASE_PRE_SUMMARY_PROVIDER
+def _cow001_pre_summary_broker_status(machine_state: Any) -> dict[str, Any]:
+    """
+    Resolve current broker READ-ONLY readiness immediately before the final
+    operator startup summary.
+
+    Safety contract:
+      - no order placement
+      - no broker execution arming
+      - no live execution authority
+      - advisory/read-only evidence only
+    """
+    broker = str(getattr(machine_state, "selected_broker", "") or "NONE").upper()
+    mode = str(getattr(machine_state, "broker_mode", "") or "paper").lower()
+
+    fail_closed = {
+        "execution_allowed": False,
+        "advisory_only": True,
+        "broker_execution_armed": False,
+        "broker_execution_enabled": False,
+        "can_live_execute": False,
+        "live_trading_blocked": True,
+        "live_order_permission": False,
+    }
+
+    if broker != "COINBASE" or mode != "live":
+        return {
+            **fail_closed,
+            "selected_broker": broker,
+            "broker_mode": mode,
+        }
+
+    validation = validate_coinbase_live_read_only_operational(
+        artifacts_dir=ARTIFACTS_DIR,
+    )
+
+    passed = str(
+        validation.get("validation_status", "FAIL_CLOSED")
+    ).upper() == "PASS"
+
+    connected = bool(validation.get("api_reachable", False))
+    authenticated = bool(validation.get("authenticated", False))
+    account_loaded = bool(validation.get("account_loaded", False))
+    balances_loaded = bool(validation.get("balances_loaded", False))
+    market_data_loaded = bool(validation.get("market_data_loaded", False))
+    products_loaded = int(validation.get("products_loaded", 0) or 0)
+
+    failures = validation.get("failure_reasons", [])
+    if not isinstance(failures, list):
+        failures = []
+
+    failure_text = ", ".join(
+        str(item.get("message", ""))
+        for item in failures
+        if isinstance(item, dict) and item.get("message")
+    )
+
+    return {
+        **fail_closed,
+        "selected_broker": "COINBASE",
+        "broker_mode": "live",
+        "execution_scope": "LIVE READ-ONLY VALIDATION",
+
+        "credential_status": "PASS" if passed else "FAIL",
+        "credential_diagnostics": {
+            "credential_status": "PRESENT" if passed else "MISSING",
+            "redacted": True,
+        },
+
+        "broker_connected": connected,
+        "broker_authenticated": authenticated,
+        "broker_health": "GREEN" if connected else "RED",
+        "infrastructure_health": "GREEN" if connected else "RED",
+
+        "auth_status": "PASS" if authenticated else "FAIL",
+        "authentication_status": (
+            "AUTHENTICATED" if authenticated else "NOT_AUTHENTICATED"
+        ),
+        "connection_status": "PASS" if connected else "FAIL",
+
+        "account_loaded": account_loaded,
+        "balances_loaded": balances_loaded,
+        "market_data_loaded": market_data_loaded,
+        "products_loaded": products_loaded,
+
+        "market_data_status": "OK" if market_data_loaded else "FAIL",
+
+        "read_checks": {
+            "account": "PASS" if account_loaded else "FAIL",
+            "balances": "PASS" if balances_loaded else "FAIL",
+            "positions": "UNAVAILABLE",
+            "products_or_prices": (
+                "PASS"
+                if market_data_loaded and products_loaded > 0
+                else "FAIL"
+            ),
+        },
+
+        "auth_reason": (
+            "coinbase_live_read_only_operational_validation_passed"
+            if passed
+            else (
+                failure_text
+                or "coinbase_live_read_only_operational_validation_failed"
+            )
+        ),
+
+        "validation_status": validation.get(
+            "validation_status",
+            "FAIL_CLOSED",
+        ),
+        "validation_timestamp": validation.get(
+            "validation_timestamp",
+            "",
+        ),
+        "validation_source": "COINBASE_LIVE_VALIDATOR_PRE_SUMMARY",
+        "coinbase_live_validation": validation,
+    }
+
+
 def _run_operator_startup_state_machine_once() -> Any:
     global STARTUP_STATE_MACHINE_RESULT, STARTUP_WIZARD_STATE, COINBASE_LIVE_CONFIRMATION_STATUS
     if STARTUP_STATE_MACHINE_RESULT is not None:
@@ -1937,6 +2057,7 @@ def _run_operator_startup_state_machine_once() -> Any:
         ),
         role_profile=role_profile,
         env=os.environ,
+        broker_status_provider=_cow001_pre_summary_broker_status,
         pilot_status=pilot_status,
         allowed_engine_modes=role_profile.get("allowed_engine_modes", []),
     )
@@ -2321,6 +2442,7 @@ if SELECTED_BROKER == "OANDA":
 else:
     COINBASE_READ_ONLY_STATUS = evaluate_coinbase_live_read_only(
         STARTUP_BROKER_SELECTION,
+        env=os.environ,
         legacy_limit_usd=COINBASE_MAX_LIVE_ORDER_USD,
     )
 BROKER_VALIDATION_DISPLAY = broker_validation_display(

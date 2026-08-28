@@ -5,6 +5,9 @@ import socket
 import threading
 import json
 import subprocess
+import time
+import urllib.request
+import webbrowser
 from typing import Any, List
 
 # Ensure repository root is in PYTHONPATH
@@ -604,6 +607,199 @@ def run_launcher():
 
     services = [runtime_svc, mobile_svc]
     started_services: list[CSSServiceManager] = []
+
+    # COW001_CLEAN_STARTUP_TRANSITION_V3
+    #
+    # Startup UX observer only.
+    #
+    # IMPORTANT:
+    # HTTP health alone is NOT runtime-start readiness because the mobile
+    # launcher can become healthy while the interactive CSS runtime is still
+    # collecting startup selections.
+    #
+    # This observer therefore requires BOTH:
+    #   1. a fresh START_RUNTIME state transition appended after this launcher
+    #      invocation began; and
+    #   2. localhost /health == HTTP 200.
+    #
+    # No broker calls. No execution authority. No risk/trading changes.
+
+    def _cow001_wait_for_confirmed_runtime_and_open() -> None:
+        import json
+
+        app_url = "http://127.0.0.1:8765/"
+        health_url = "http://127.0.0.1:8765/health"
+        startup_log = os.path.join(
+            REPO_ROOT,
+            "audit_logs",
+            "startup_state_machine.jsonl",
+        )
+
+        timeout_seconds = 300.0
+        poll_seconds = 0.5
+        started_monotonic = time.monotonic()
+
+        # Record the current startup-log byte boundary so historical
+        # START_RUNTIME events cannot satisfy this launch.
+        baseline_size = 0
+        try:
+            if os.path.exists(startup_log):
+                baseline_size = os.path.getsize(startup_log)
+        except OSError:
+            baseline_size = 0
+
+        print("")
+        print("[STARTING CSS] Runtime services are being launched...")
+        print("[STARTING CSS] Complete the operator startup selections.")
+        print("[STARTING CSS] Waiting for final runtime confirmation...")
+
+        runtime_confirmed = False
+        last_health_error = ""
+
+        while (time.monotonic() - started_monotonic) < timeout_seconds:
+
+            # --------------------------------------------------------
+            # Gate 1: require a NEW state transition to START_RUNTIME.
+            # --------------------------------------------------------
+            if not runtime_confirmed:
+                try:
+                    if os.path.exists(startup_log):
+                        current_size = os.path.getsize(startup_log)
+
+                        if current_size > baseline_size:
+                            with open(
+                                startup_log,
+                                "r",
+                                encoding="utf-8",
+                                errors="replace",
+                            ) as fh:
+                                fh.seek(baseline_size)
+                                new_text = fh.read()
+
+                            for raw_line in new_text.splitlines():
+                                try:
+                                    event = json.loads(raw_line)
+                                except Exception:
+                                    continue
+
+                                details = event.get("details") or {}
+
+                                if (
+                                    event.get("event_type")
+                                    == "STATE_TRANSITION"
+                                    and details.get("next_state")
+                                    == "START_RUNTIME"
+                                    and details.get("reason")
+                                    == "final_confirmation_yes"
+                                ):
+                                    runtime_confirmed = True
+                                    print(
+                                        "[RUNTIME CONFIRMED] "
+                                        "Final operator confirmation accepted."
+                                    )
+                                    break
+
+                except Exception as exc:
+                    # Continue waiting; this observer must never affect
+                    # canonical runtime supervision.
+                    pass
+
+            # --------------------------------------------------------
+            # Gate 2: after runtime confirmation, require app health.
+            # --------------------------------------------------------
+            if runtime_confirmed:
+                try:
+                    with urllib.request.urlopen(
+                        health_url,
+                        timeout=2.0,
+                    ) as response:
+                        status = int(
+                            getattr(response, "status", 0) or 0
+                        )
+
+                    if status == 200:
+                        elapsed = (
+                            time.monotonic()
+                            - started_monotonic
+                        )
+
+                        print(
+                            f"[CSS APP READY] "
+                            f"health=200 elapsed={elapsed:.1f}s"
+                        )
+                        print(f"[CSS APP READY] {app_url}")
+                        print(
+                            "[OPENING CSS] "
+                            "Launching application in default browser..."
+                        )
+
+                        try:
+                            opened = bool(
+                                webbrowser.open(
+                                    app_url,
+                                    new=1,
+                                    autoraise=True,
+                                )
+                            )
+                            print(
+                                f"[OPENING CSS] "
+                                f"browser_request={opened}"
+                            )
+                        except Exception as exc:
+                            print(
+                                "[OPENING CSS WARNING] "
+                                f"{type(exc).__name__}: {exc}"
+                            )
+                            print(
+                                f"[OPENING CSS] "
+                                f"Open manually: {app_url}"
+                            )
+
+                        print(
+                            "[CSS STARTUP COMPLETE] "
+                            "Confirmed runtime and application are ready."
+                        )
+                        return
+
+                except Exception as exc:
+                    last_health_error = (
+                        f"{type(exc).__name__}: {exc}"
+                    )
+
+            time.sleep(poll_seconds)
+
+        print("")
+        print("[CSS STARTUP TIMEOUT] Clean startup was not completed.")
+
+        if not runtime_confirmed:
+            print(
+                "[CSS STARTUP TIMEOUT] "
+                "No fresh START_RUNTIME confirmation was observed."
+            )
+        else:
+            print(
+                "[CSS STARTUP TIMEOUT] "
+                "Runtime was confirmed but application health failed."
+            )
+
+        if last_health_error:
+            print(
+                "[CSS STARTUP TIMEOUT] "
+                f"last_health_error={last_health_error}"
+            )
+
+        print(
+            "[CSS STARTUP TIMEOUT] "
+            "Supervisor remains available for diagnostics."
+        )
+
+    _cow001_transition_thread = threading.Thread(
+        target=_cow001_wait_for_confirmed_runtime_and_open,
+        name="css-cow001-startup-transition-v3",
+        daemon=True,
+    )
+    _cow001_transition_thread.start()
+
 
     try:
         supervisor.start()

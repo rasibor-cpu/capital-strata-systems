@@ -115,6 +115,7 @@ class OperatorStartupStateMachine:
         role_profile: Mapping[str, Any] | None = None,
         env: Mapping[str, Any] | None = None,
         broker_status: Mapping[str, Any] | None = None,
+        broker_status_provider: Callable[[StartupRuntimeState], Mapping[str, Any]] | None = None,
         pilot_status: Mapping[str, Any] | None = None,
         allowed_engine_modes: Iterable[str] | None = None,
     ) -> None:
@@ -126,6 +127,11 @@ class OperatorStartupStateMachine:
         self.role_profile = role_profile if isinstance(role_profile, Mapping) else {}
         self.env = env if isinstance(env, Mapping) else {}
         self.broker_status = broker_status if isinstance(broker_status, Mapping) else {}
+        # COW001_V4_PRE_SUMMARY_STATUS_PROVIDER
+        # Optional read-only status refresh immediately before the operator
+        # sees the final startup summary. This callback cannot grant execution
+        # authority; StartupRuntimeState remains fail-closed.
+        self.broker_status_provider = broker_status_provider
         self.pilot_status = pilot_status if isinstance(pilot_status, Mapping) else {}
         self.allowed_engine_modes = tuple(allowed_engine_modes or self.role_profile.get("allowed_engine_modes", ()) or ("SAFE", "CONSERVATIVE", "BALANCED"))
         self.audit_events: list[dict[str, Any]] = []
@@ -305,6 +311,44 @@ class OperatorStartupStateMachine:
         return self._advance(replace(state, cycle_mode="continuous", cycle_interval_seconds=60, last_input=value, last_error=""), "STARTUP_SUMMARY", "cycle_continuous_selected")
 
     def _handle_startup_summary(self, state: StartupRuntimeState) -> StartupRuntimeState:
+        # COW-001 V4: refresh read-only broker evidence before rendering
+        # the operator-facing final summary.
+        if self.broker_status_provider is not None:
+            try:
+                refreshed = self.broker_status_provider(state)
+                if isinstance(refreshed, Mapping):
+                    self.broker_status = dict(refreshed)
+                    self._audit(
+                        "PRE_SUMMARY_BROKER_STATUS_REFRESHED",
+                        state,
+                        broker=str(state.selected_broker or "NONE"),
+                        broker_mode=str(state.broker_mode or "paper"),
+                        execution_allowed=False,
+                    )
+            except Exception as exc:
+                # Fail closed. A readiness-refresh failure must never grant
+                # execution authority or bypass final confirmation.
+                self.broker_status = {
+                    **dict(self.broker_status),
+                    "broker_connected": False,
+                    "broker_authenticated": False,
+                    "credential_status": "FAIL",
+                    "auth_status": "FAIL",
+                    "connection_status": "FAIL",
+                    "market_data_status": "FAIL",
+                    "auth_reason": f"pre_summary_readiness_failed:{type(exc).__name__}",
+                    "execution_allowed": False,
+                    "advisory_only": True,
+                    "broker_execution_armed": False,
+                    "can_live_execute": False,
+                }
+                self._audit(
+                    "PRE_SUMMARY_BROKER_STATUS_FAILED",
+                    state,
+                    error_type=type(exc).__name__,
+                    execution_allowed=False,
+                )
+
         summary = self._summary(state)
         for line in format_live_startup_summary(summary):
             self.output_func(line)
