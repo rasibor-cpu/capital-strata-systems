@@ -137,10 +137,16 @@ def render_mobile_enterprise_nav(
     if can_users:
         more_items.append(("users", "Users and Governance", ROUTES.mobile_users))
 
-    more_links = "".join(
-        f'<li><a href="{_esc(href)}"{" aria-current=\"page\"" if active == key else ""}>{_esc(label)}</a></li>'
-        for key, label, href in more_items
-    )
+    more_html: list[str] = []
+    for key, label, href in more_items:
+        # Compute the attribute outside the f-string. Python 3.11 rejects a
+        # backslash inside an f-string expression (PEP 498); Python 3.12
+        # accepts it (PEP 701). Gate-2 CI is Python 3.11.
+        cur = ' aria-current="page"' if active == key else ""
+        more_html.append(
+            f'<li><a href="{_esc(href)}"{cur}>{_esc(label)}</a></li>'
+        )
+    more_links = "".join(more_html)
     more_panel = render_disclosure(
         panel_id="css-more-menu",
         title="More modules",

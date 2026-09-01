@@ -61,6 +61,20 @@ def test_brand_and_home_links_point_to_landing():
     assert "Home" in footer
 
 
+def test_more_menu_aria_current_markup_is_plain_attribute():
+    """CI-002: More-menu current page uses a Py3.11-safe attribute string.
+
+    Rendered HTML must stay identical to the previous inline f-string form:
+    active -> ` aria-current="page"`; inactive -> empty.
+    """
+    nav_risk = render_mobile_enterprise_nav({"role": "VIEWER"}, "risk", can_view_reports=True)
+    nav_home = render_mobile_enterprise_nav({"role": "VIEWER"}, "home", can_view_reports=True)
+    assert '<li><a href="/risk" aria-current="page">Risk Command</a></li>' in nav_risk
+    assert '<li><a href="/positions">Positions</a></li>' in nav_risk
+    assert '<li><a href="/risk">Risk Command</a></li>' in nav_home
+    assert '<li><a href="/risk" aria-current="page">' not in nav_home
+
+
 def test_reports_hub_groups_and_honest_coming_soon():
     hub = build_reports_hub_payload(role="VIEWER", surface="mobile")
     assert hub["ok"] is True
