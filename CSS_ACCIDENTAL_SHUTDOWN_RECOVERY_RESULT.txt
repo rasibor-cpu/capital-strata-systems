@@ -1,0 +1,397 @@
+ACCIDENTAL_SHUTDOWN_RECOVERY
+================================
+procedure: CSS_ACCIDENTAL_SHUTDOWN_RECOVERY
+incident_claimed: FINANCE workstation accidentally powered off on 2026-08-21
+expected_repository: C:\rasib\source\capital-strata-systems
+recovery_host_role: NOT the FINANCE workstation. This run executed on a Cursor Cloud Agent Linux VM with a GitHub clone of capital-strata-systems.
+
+timestamp
+---------
+report_generated_utc: 2026-08-22T02:21:00Z
+host_date_utc: 2026-08-22T02:19:46Z
+host_date_local: Sat Aug 22 02:19:46 AM UTC 2026
+timezone: Etc/UTC (TZ environment variable UNSET)
+timedatectl: UNAVAILABLE
+hostname: cursor
+kernel: Linux 6.12.94+ x86_64
+cloud_agent_url: https://cursor.com/agents/bc-94ff5bc2-c9e2-4652-918e-ea7033c892e6
+cloud_agent_bcId: bc-94ff5bc2-c9e2-4652-918e-ea7033c892e6
+owning_user: Robert Asibor <rasibor@gmail.com>
+
+HOST_IDENTITY_BLOCKER
+---------------------
+WINDOWS_FINANCE_HOST_REACHABLE=NO
+WINDOWS_PATH_PRESENT=NO
+C:\rasib\source\capital-strata-systems = NOT FOUND on this host
+/mnt/c / cygdrive / Windows mount = NOT FOUND
+This agent cannot inspect, hash, or restore the FINANCE disk image from 2026-08-21.
+Any runtime files present here are GitHub-tracked copies checked out at clone time (mtime 2026-08-22 02:17 UTC), not FINANCE last-write times.
+
+repository
+----------
+repository_path_expected: C:\rasib\source\capital-strata-systems
+repository_path_actual: /workspace
+remote: github.com/rasibor-cpu/capital-strata-systems
+working_tree_reset: NOT PERFORMED
+working_tree_cleaned: NOT PERFORMED
+
+branch
+------
+branch_at_reconnaissance: css-agent/access-check-92e6
+report_preservation_branch: css-agent/accidental-shutdown-recovery-92e6
+canonical_development_branch: css-v1.0.1-maintenance
+github_default_branch: main
+this_clone_is_not_canonical_line: YES (access-check is 1 commit on stale main)
+
+HEAD
+----
+HEAD_at_reconnaissance: 999cac19b83b1c0f9427f1b42265bb03a0268bf4
+HEAD_subject: Confirm read and write access to CSS repo
+HEAD_report_preservation_base: 2b39141e18fcfa2f1ee2dfcf7806061ab42e79f5
+HEAD_report_preservation_branch: css-agent/accidental-shutdown-recovery-92e6
+HEAD_of_this_report_commit: 501a5308c9c608205a29e1311f7e241111ada902
+origin/main: faf1485dd88d7056bbd8f7f891cb47caf7685603 (2026-06-18; Phase 113Y)
+origin/css-v1.0.1-maintenance: 2b39141e18fcfa2f1ee2dfcf7806061ab42e79f5 (2026-08-19; Merge PR #62: repository and governance hygiene)
+remote HEAD (origin/HEAD): origin/main = faf1485dd88d7056bbd8f7f891cb47caf7685603
+FINANCE workstation HEAD on 2026-08-21: UNKNOWN / NOT_CONFIRMED
+
+git state
+---------
+git_status_short: (empty) working tree clean at reconnaissance
+uncommitted_tracked_changes: NONE
+untracked_files_at_reconnaissance: NONE
+active_git_operation: NONE (no MERGE_HEAD, CHERRY_PICK_HEAD, REBASE_HEAD, sequencer)
+ahead_behind_vs_origin/main: this HEAD 1 ahead / 0 behind (the access-check empty commit)
+ahead_behind_vs_origin/css-v1.0.1-maintenance: this HEAD 6 unique / 432 behind
+accidental_shutdown_interrupted_git_on_THIS_clone: NO (clean tree, no in-progress git op)
+accidental_shutdown_interrupted_git_on_FINANCE: NOT_CONFIRMED
+recent_commits_this_HEAD:
+  999cac19 Confirm read and write access to CSS repo
+  faf1485d Phase 113Y - Add Runtime Prompting and Alert Service Framework
+  171a15d9 Merge CSS Phase 2 margin governance stack
+working_tree_modified_for_recovery: this result file only (after reconnaissance)
+
+================================
+PHASE 1 — REPOSITORY / HOST RECOVERY RECONNAISSANCE
+================================
+STATUS: COMPLETED ON THIS CLOUD HOST ONLY
+FINANCE_HOST_RECON: NOT_PERFORMED (host not reachable)
+
+================================
+PHASE 2 — CURRENT CSS PROCESS / PORT STATE
+================================
+inspection_scope: this Linux VM only; no process was killed
+
+CSS-related processes: NONE
+python processes relevant to CSS: NONE
+python processes present (not CSS):
+  PID 2367 PPID 2343 STARTED 2026-08-22 02:17:27 UTC
+  CMD: python3 -m websockify --web /usr/local/novnc/noVNC-1.2.0/utils/../ 26058 localhost:5901
+  PURPOSE: Cloud Agent noVNC display proxy; not CSS
+
+PowerShell/runtime wrappers relevant to CSS: NONE (this is Linux; no powershell CSS wrappers running)
+Windows services/tasks relevant to CSS: NOT APPLICABLE / NOT_CONFIRMED (not a Windows host)
+startup/supervisor state (this host): NO systemd CSS units; NO user crontab CSS entries
+
+listeners this host:
+  0.0.0.0:2375
+  127.0.0.1:5901 Xtigervnc
+  0.0.0.0:50052
+  0.0.0.0:26055 node
+  0.0.0.0:26058 python3 websockify (PID 2367)
+  0.0.0.0:26500
+  :::26053 node
+  :::26054 node
+  NOT 8765
+  NOT 8766
+
+PORT_8765_LISTENER=NO
+PORT_8765_LISTENER_PID=NONE
+PORT_8765_EXECUTABLE=NONE
+PORT_8765_COMMAND_LINE=NONE
+PORT_8765_START_TIME=NONE
+PORT_8765_PARENT=NONE
+PORT_8766_LISTENER=NO
+PORT_8766_UNTOUCHED=YES
+HealthChecker code/config: NOT MODIFIED
+CSS 8765 vs HealthChecker 8766: ports remain separate; neither listener present here; neither was started or stopped by this recovery
+
+existing PID/lock files: NONE found under /workspace, /tmp, /var/tmp, /home matching CSS/engine pid/lock runtime files
+PID_FILE_DOES_NOT_PROVE_PROCESS_ALIVE: noted; no CSS PID files were found to interpret
+DO_NOT_KILL: observed; no CSS process was killed
+
+FINANCE process state immediately before 2026-08-21 power-off: UNKNOWN / NOT_CONFIRMED
+Typical CSS desktop listener from repository docs on origin/css-v1.0.1-maintenance (NOT observed live here):
+  launcher.css_mobile_launcher on port 8765
+  launch_css.bat (present on maintenance; NOT present in this stale-main checkout)
+  HealthChecker is a separate operations concern on port 8766 per recovery instructions
+  This documentation is not evidence that those processes were running on FINANCE at shutdown.
+
+================================
+PHASE 3 — PRESERVE PRE-SHUTDOWN EVIDENCE
+================================
+FINANCE_RUNTIME_EVIDENCE_PRESERVED=NOT_CONFIRMED
+reason: FINANCE disk/runtime directories are not on this host.
+
+Typical runtime locations ABSENT from this clone (gitignored and not present):
+  PATH=state TYPE=directory SIZE=N/A LAST_WRITE=N/A PURPOSE=runtime state (ABSENT)
+  PATH=runtime TYPE=directory SIZE=N/A LAST_WRITE=N/A PURPOSE=runtime (ABSENT)
+  PATH=logs TYPE=directory SIZE=N/A LAST_WRITE=N/A PURPOSE=runtime logs (ABSENT)
+  PATH=out TYPE=directory SIZE=N/A LAST_WRITE=N/A PURPOSE=config.json logging out_dir trade/order/price/signal logs (ABSENT)
+  PATH=reporting_store TYPE=directory SIZE=N/A LAST_WRITE=N/A PURPOSE=reporting store (ABSENT)
+  PATH=.env TYPE=file SIZE=N/A LAST_WRITE=N/A PURPOSE=credentials (ABSENT; .env.example present)
+  PATH=*.sqlite / *.db TYPE=database SIZE=N/A LAST_WRITE=N/A PURPOSE=sqlite/db (NONE FOUND)
+  PATH=*.pid TYPE=pid SIZE=N/A LAST_WRITE=N/A PURPOSE=pid files (NONE FOUND)
+  PATH=artifacts/anti_bleed_state.json TYPE=json SIZE=N/A LAST_WRITE=N/A PURPOSE=AntiBleedGuard state (ABSENT)
+  PATH=crash/error dumps TYPE=dump SIZE=N/A LAST_WRITE=N/A PURPOSE=crash dumps (NONE FOUND)
+  PATH=stdout/stderr captures TYPE=log SIZE=N/A LAST_WRITE=N/A PURPOSE=process stdio (NONE FOUND)
+  PATH=Windows scheduled-task evidence TYPE=task SIZE=N/A LAST_WRITE=N/A PURPOSE=schtasks (NOT APPLICABLE ON THIS HOST)
+
+Tracked/copied files present in this clone. LAST_WRITE is clone checkout time (2026-08-22 02:17 UTC), NOT FINANCE last-write. Content timestamps inside files are historical committed samples unless noted.
+
+PATH=/workspace/artifacts/audit/decision_ledger.jsonl
+TYPE=jsonl
+SIZE=10797
+LAST_WRITE=2026-08-22 02:17:19 UTC (clone mtime; NOT FINANCE)
+PURPOSE=committed ENGINE_DECISION sample ledger; csv_replay; execution=false; last decision_time_utc in file=2026-01-22T14:54:00+00:00
+SHA256=b942502a71834fe61fc42c93063e42d81cadc4bc253bbdae08388c40fcf578bc
+
+PATH=/workspace/audit_logs/access_audit.jsonl
+TYPE=jsonl
+SIZE=162558
+LAST_WRITE=2026-08-22 02:17:19 UTC (clone mtime; NOT FINANCE)
+PURPOSE=committed access/session audit from host ROBERT-HP-DESKTOP; first ts_utc=2026-01-29T03:26:05+00:00; last ts_utc=2026-01-29T04:54:09+00:00 session_end user=rasib runner=run_fx_live_prompts
+SHA256=cb6cc4cee0bc8867f1e72839714ab04cdb625ffc9f9436bd43b2450469d665e9
+NOTE: host name ROBERT-HP-DESKTOP is not proven to be the FINANCE workstation.
+
+PATH=/workspace/data/metrics.json
+TYPE=json
+SIZE=178
+LAST_WRITE=2026-08-22 02:17:19 UTC (clone mtime; NOT FINANCE)
+PURPOSE=small EURUSD/USDJPY trade counters (EURUSD 2 trades, USDJPY 1 trade); not a live position book
+SHA256=00d847e7aae884bfc13d83f01b17b23496ca9454a0d99fe31fc6343e54c842a7
+
+PATH=/workspace/futures_exposure.json
+TYPE=json
+SIZE=28
+LAST_WRITE=2026-08-22 02:17:19 UTC (clone mtime; NOT FINANCE)
+PURPOSE=open_futures_risk: 500.0 (committed sample/config-like value; not proven open futures on FINANCE)
+SHA256=3ecfabe04c9075245ea0e80f8712fc6ffa8150c45e1af2201bc1db50c87a07c5
+
+PATH=/workspace/config.json
+TYPE=json
+SIZE=1667
+LAST_WRITE=2026-08-22 02:17:19 UTC (clone mtime; NOT FINANCE)
+PURPOSE=tracked config; system.mode=live_manual_confirm; oanda.environment=practice; risk.trading_enabled=true; manual_confirm_required=true; kill_switch=false; logging to out\*.log (directory ABSENT here)
+SHA256=9709fae6a9fbc67d11a6f702ac87273092e0da435263d37853f433b2cc166b43
+NOTE: this is repository config, not proof of the process that was running on FINANCE.
+
+PATH=/workspace/config/execution_policy.json
+TYPE=json
+SIZE=1358
+LAST_WRITE=2026-08-22 02:17:19 UTC (clone mtime; NOT FINANCE)
+PURPOSE=LOCKED execution_gate_policy; notes say no broker execution is enabled by this policy
+SHA256=0629ac0107587f74c01199d2f6356670d03bc7130337b4517063984179c09248
+
+PATH=/workspace/live_tick_oanda_REA_FX_EURUSD_20260207T045217Z.json
+TYPE=json
+SIZE=1662
+LAST_WRITE=2026-08-22 02:17:19 UTC (clone mtime; NOT FINANCE)
+PURPOSE=sample OANDA PRICE snapshot; instrument EUR_USD; time=2026-02-06T21:59:05.176136400Z; ts_utc=2026-02-07T04:52:17.335251+00:00; status=non-tradeable
+SHA256=f551ed454a37ec540ce5a46cb8fa094778de88e15dcdb4d111fcf82c39b6db99
+
+PATH=/workspace/BASELINE-REA-V1-0001.json
+TYPE=json
+SIZE=1559
+LAST_WRITE=2026-08-22 02:17:19 UTC (clone mtime; NOT FINANCE)
+PURPOSE=analytics harness SAMPLE-DRYRUN; timestamp_utc=2026-01-29T23:57:50+00:00; classification=RESEARCH_ONLY; analysis_only=true
+SHA256=65a0cd41596cb0f24e2f63f498a7f5b815d0a353dde9147bca9f2178f1bbcc83
+
+PATH=/workspace/LIVE_ENABLE.md
+TYPE=markdown
+SIZE=1755
+LAST_WRITE=2026-08-22 02:17:19 UTC (clone mtime; NOT FINANCE)
+PURPOSE=governance: LIVE EXECUTION MUST REMAIN DISABLED BY DEFAULT
+SHA256=9a5cc3124e2fb665397c3a0b9dab072996fd04a122eeb1960817f80a02e3a3dd
+
+PATH=/workspace/certification/runtime/PHASE_103A_CONTROLLED_PAPER_RUN/08_shutdown_sequence.txt
+TYPE=text
+SIZE=UNKNOWN_BYTES_NOT_REHASHED_AS_CRITICAL_MUTABLE_RUNTIME
+LAST_WRITE=clone mtime 2026-08-22 02:17 UTC
+PURPOSE=historical certification graceful shutdown record for PHASE103A-CONTROLLED-PAPER-RUN; Shutdown started UTC=2026-06-14T01:47:21.873250+00:00; Graceful shutdown: COMPLETED; Mode PAPER; Live mode NOT ENABLED. THIS IS NOT A 2026-08-21 FINANCE SHUTDOWN RECORD.
+
+PATH=/workspace/launchers/CSS Dashboard.cmd
+TYPE=cmd
+PURPOSE=Windows GUI launcher for scripts\css_live_dashboard.py; not running here
+
+LAST VALID PRE-SHUTDOWN TIMESTAMP AVAILABLE FROM CSS EVIDENCE ON FINANCE: UNKNOWN / NOT_CONFIRMED
+newest_content_timestamp_in_THIS_clone_tracked_css_sample_files:
+  access_audit.jsonl last ts_utc=2026-01-29T04:54:09+00:00 (committed sample; host ROBERT-HP-DESKTOP)
+  live_tick ts_utc=2026-02-07T04:52:17.335251+00:00 (committed sample)
+  PHASE_103A shutdown=2026-06-14T01:47:21.873250+00:00 (certification, not this incident)
+  none of these is a 2026-08-21 FINANCE runtime heartbeat
+
+SHA-256 of critical FINANCE mutable state files before restart: NOT_CAPTURED (files not on this host)
+SHA-256 of clone copies listed above: captured before any restart; restart was not performed
+
+logs recovered: NO FINANCE runtime logs recovered (out\, engine, supervisor, heartbeat logs ABSENT)
+databases/state stores recovered: NONE (no sqlite/db present)
+runtime snapshots recovered: NONE from FINANCE; committed samples only as inventoried
+
+================================
+PHASE 4 — ABNORMAL SHUTDOWN RECONCILIATION
+================================
+graceful shutdown recorded for 2026-08-21 FINANCE incident: NOT_CONFIRMED
+abrupt termination: NOT_CONFIRMED (power-off is alleged by the operator request; this host has no FINANCE OS/event logs)
+missing final heartbeat: NOT_CONFIRMED
+ENGINE_HEARTBEAT_LOST for this incident: NOT_CONFIRMED
+  (ENGINE_HEARTBEAT_LOST exists as an alert type in origin/css-v1.0.1-maintenance code/docs; historical OV002 examples are from 2026-07-23, not this incident)
+incomplete transaction/order lifecycle: NOT_CONFIRMED
+incomplete write/checkpoint: NOT_CONFIRMED
+stale PID/lock: NOT_CONFIRMED (no PID/lock files found here)
+partially written state: NOT_CONFIRMED
+database integrity problem: NOT_CONFIRMED (no database present to check)
+unfinished agent/task operation on FINANCE: NOT_CONFIRMED
+outstanding paper orders: NOT_CONFIRMED
+open paper positions: NOT_CONFIRMED
+live-order/live-position indication: NOT_CONFIRMED
+unresolved broker/exchange reconciliation requirement: NOT_CONFIRMED (cannot be ruled out)
+
+safe read-only database integrity check: NOT PERFORMED (no project database file present on this host)
+database auto-repair: NOT PERFORMED
+
+most recent graceful-shutdown record found in this clone:
+  PHASE_103A 2026-06-14T01:47:21Z COMPLETED — unrelated to 2026-08-21 accidental power-off
+
+================================
+PHASE 5 — TRADING STATE RECONCILIATION
+================================
+execution mode before shutdown (FINANCE): UNKNOWN / NOT_CONFIRMED
+LIVE_TRADING status (FINANCE): NOT_CONFIRMED
+paper/simulation status (FINANCE): NOT_CONFIRMED
+open positions: NOT_CONFIRMED
+pending orders: NOT_CONFIRMED
+staged/manual-confirmation orders: NOT_CONFIRMED
+last known balances: NOT_CONFIRMED
+last completed trading cycle: NOT_CONFIRMED
+last valid market-data timestamp (FINANCE runtime): NOT_CONFIRMED
+last risk evaluation: NOT_CONFIRMED
+last heartbeat: NOT_CONFIRMED
+last snapshot/checkpoint: NOT_CONFIRMED
+
+repository-tracked config on this clone (NOT FINANCE runtime proof):
+  system.mode=live_manual_confirm
+  oanda.environment=practice
+  risk.trading_enabled=true
+  manual_confirm_required=true
+  kill_switch=false
+  LIVE_ENABLE.md: live execution must remain disabled by default
+  execution_policy.json: LOCKED; "No broker execution is enabled by this policy."
+Do not treat config.json trading_enabled=true as confirmation that live trading was active.
+
+BROKER_RECONCILIATION=NOT_CONFIRMED
+external broker state was not queried (no safe configured broker tooling run; no credentials/.env present)
+possibility of unresolved live exposure: CANNOT BE RULED OUT
+autonomous execution start: NOT PERFORMED
+
+================================
+PHASE 6 — RECOVERY DECISION
+================================
+classification: BLOCKED_STATE_RECONCILIATION
+reason: FINANCE workstation disk, processes, ports, PID/locks, logs, databases, heartbeats, positions, and orders are not observable from this Cloud Agent. Evidence is incomplete. Safer default applied.
+not selected:
+  SAFE_TO_RESTART_OBSERVE_ONLY — FINANCE pre-shutdown state unknown
+  SAFE_TO_RESTART_PAPER_ONLY — same
+  ALREADY_RUNNING_HEALTHY — PORT_8765_LISTENER=NO on this host; FINANCE unknown
+  BLOCKED_DATA_INTEGRITY — no FINANCE DB present to fail or pass integrity
+  BLOCKED_UNRESOLVED_TRADING_STATE — trading state also unknown; recorded as remaining blocker, but governing class is host/state non-observability
+
+================================
+PHASE 7 — CONTROLLED RESTORE
+================================
+restart action actually taken: NONE
+governed startup/recovery procedure consulted:
+  docs/operations/CSS_RECOVERY_AND_RESTART_RUNBOOK.md
+  docs/operations/CSS_STARTUP_RUNBOOK.md
+  docs/operations/CSS_EMERGENCY_SHUTDOWN_RUNBOOK.md (not executed)
+runbook preconditions not met on this host:
+  live mode / live arm / broker orders / prior-run logs on FINANCE cannot be confirmed
+  runbook target branch css-evening-consolidation-2026-06-09 is not this clone's HEAD
+authoritative launcher not invoked (would be launch_css.bat / launcher.css_mobile_launcher on Windows FINANCE if that is the live tree; inventing a replacement launcher is forbidden)
+LIVE_TRADING remained disabled (never enabled)
+no observe-only or paper restart was started
+HealthChecker / port 8766: not modified, not started, not stopped
+
+post-restart health: NOT APPLICABLE (no restart)
+expected process exists: N/A
+port 8765 listener exists: NO (unchanged)
+HTTP/health endpoint: NOT QUERIED (no listener; querying would not recover FINANCE)
+engine heartbeat: NOT OBSERVED
+risk gates / R7 / R14F / AntiBleedGuard loaded: NOT_CONFIRMED (runtime not started)
+position caps preserved: NOT_CONFIRMED (FINANCE state not present)
+persisted state loaded: NOT APPLICABLE
+duplicate engine instance: NO new instance started
+unexpected order submission: NO
+live trading: NOT ENABLED
+CSS logs append vs destroy: logs were not truncated or rotated; FINANCE logs were not present to append to
+
+================================
+PHASE 8 — INFORMATION RECOVERY REPORT
+================================
+pre-shutdown CSS state found: NOT_CONFIRMED on FINANCE. This clone contains committed samples and certification artifacts only.
+last valid CSS timestamp: UNKNOWN / NOT_CONFIRMED for FINANCE 2026-08-21
+process state before recovery as inferable from persisted evidence: UNKNOWN / NOT_CONFIRMED for FINANCE
+current process state (this host): no CSS engine/dashboard/supervisor; websockify PID 2367 for noVNC only
+8765 status: PORT_8765_LISTENER=NO
+8766 untouched confirmation: PORT_8766_UNTOUCHED=YES
+logs recovered: NO FINANCE runtime logs
+databases/state stores recovered: NONE
+runtime snapshots recovered: NONE from FINANCE
+positions recovered: NOT_CONFIRMED
+pending orders recovered: NOT_CONFIRMED
+paper/live mode determination: NOT_CONFIRMED (FINANCE); clone config.json says live_manual_confirm + oanda practice; LIVE_ENABLE.md requires live disabled by default
+last heartbeat: NOT_CONFIRMED
+last trading/runtime cycle: NOT_CONFIRMED
+risk-control state: NOT_CONFIRMED for FINANCE runtime; tracked execution_policy.json is LOCKED fail-closed policy text
+PID/lock reconciliation: no CSS PID/lock files found on this host; FINANCE PID/lock UNKNOWN
+data-integrity checks: NOT PERFORMED (no DB file); no automatic repair
+files hashed: 9 clone-copy files listed in Phase 3 (SHA-256 recorded). FINANCE originals NOT hashed.
+anything unrecoverable from this host:
+  FINANCE pre-shutdown process table
+  FINANCE listeners 8765/8766
+  FINANCE PID/lock files
+  FINANCE runtime logs under out\ and untracked dirs
+  FINANCE databases
+  FINANCE positions/orders/balances/heartbeats/checkpoints
+  FINANCE last-write timestamps
+  Windows Event Log / unexpected-shutdown record
+  OANDA/broker live vs practice actual account state
+anything ambiguous:
+  whether FINANCE was on main, css-v1.0.1-maintenance, or another checkout
+  whether CSS was actually running at power-off (operator asserts it was; this host cannot confirm)
+  whether ROBERT-HP-DESKTOP in access_audit.jsonl is the FINANCE workstation
+  whether config.json live_manual_confirm was the live process mode
+  whether futures_exposure.json 500.0 was a live open risk figure
+restart decision: BLOCKED_STATE_RECONCILIATION
+restart action actually taken: NONE
+post-restart health: NOT APPLICABLE
+LIVE_TRADING status: NOT ENABLED on this host; FINANCE LIVE_TRADING=NOT_CONFIRMED
+remaining blockers:
+  1. Recovery must be re-run ON the FINANCE Windows host at C:\rasib\source\capital-strata-systems (or from a preserved disk image of that host).
+  2. Preserve (copy) FINANCE logs/state/DB/PID/lock BEFORE any restart; hash critical mutable files.
+  3. Reconcile positions/orders/balances and broker state; until then BROKER_RECONCILIATION=NOT_CONFIRMED.
+  4. Do not start autonomous execution while unresolved live exposure cannot be ruled out.
+  5. If restart later becomes authorized, use existing governed launcher in safest non-live mode; keep LIVE_TRADING disabled; do not modify HealthChecker/port 8766.
+
+DATA_DELETED=NO
+LOGS_TRUNCATED=NO
+STATE_RESET=NO
+LIVE_TRADES_SUBMITTED=NO
+HEALTHCHECKER_MODIFIED=NO
+
+NOTEPAD_LAUNCH=FAILED
+NOTEPAD_LAUNCH_DETAIL: notepad.exe is not available on this Linux Cloud Agent (hostname cursor). Path C:\rasib\source\capital-strata-systems\CSS_ACCIDENTAL_SHUTDOWN_RECOVERY_RESULT.txt does not exist here. Report written to /workspace/CSS_ACCIDENTAL_SHUTDOWN_RECOVERY_RESULT.txt. No Windows Notepad process was started.
+
+FINAL_STATUS=BLOCKED_STATE_RECONCILIATION
+
+STOP. No CSS restart. No live trading. No new CSS development. No additional CSS gate started.
