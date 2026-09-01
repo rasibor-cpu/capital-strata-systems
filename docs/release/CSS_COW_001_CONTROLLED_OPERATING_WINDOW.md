@@ -157,7 +157,7 @@ Those remain backlog. They are not the next milestone.
 
 ## Start conditions
 
-1. CSS-PKG-D-001 independently reviewed and landed, **or** operator explicitly starts from current landed maintenance HEAD if Package D is not yet merged (record the exact SHA either way).
+1. CSS-PKG-D-001 independently reviewed and landed (PR #62 merged as `2b39141e` on `css-v1.0.1-maintenance`). Record the exact start SHA of the window.
 2. Operator laptop/runtime with declared dependencies (including `python-dotenv==1.2.2` from `requirements.txt`).
 3. Current/live market-data path that CSS already supports safely.
 4. Controlled/paper execution profile; live funded orders blocked.

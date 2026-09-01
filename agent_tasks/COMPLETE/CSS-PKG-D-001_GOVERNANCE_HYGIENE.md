@@ -1,6 +1,6 @@
 ---
 id: CSS-PKG-D-001
-status: REVIEW
+status: COMPLETE
 priority: 150
 risk: LOW
 owner: Cursor Cloud Agent CSS-PKG-D-001
@@ -11,14 +11,22 @@ claimed_starting_head: d53e6658267ab4fe281c7be58a2fad1a6412eef7
 claimed_at_utc: 2026-08-19T18:59:40Z
 review_ready_at_utc: 2026-08-19T19:10:53Z
 finalized_utc: 2026-08-19T19:10:53Z
+closed_at_utc: 2026-08-19T19:19:51Z
+lifecycle_reconciled_utc: 2026-08-20T15:52:00Z
 commit_authority: FEATURE_BRANCH
 push_authority: FEATURE_BRANCH
 pr_authority: DRAFT_TO_MAINTENANCE
 live_trading_authority: NONE
 draft_pr: 62
+merged_pr: 62
+merge_commit: 2b39141e18fcfa2f1ee2dfcf7806061ab42e79f5
 ---
 
 # CSS-PKG-D-001 — Repository / Governance Hygiene
+
+## Merge / lifecycle (RSM-P1-03)
+
+Independently reviewed and **merged** into `css-v1.0.1-maintenance` via PR **#62** on 2026-08-19T19:19:51Z. Merge commit: `2b39141e18fcfa2f1ee2dfcf7806061ab42e79f5`. This record moved `REVIEW` → `COMPLETE`. Starting HEAD `d53e665` remains the historical Package D *start* SHA (PR #61); it is **not** current canonical HEAD.
 
 ## Objective
 

@@ -2,8 +2,9 @@
 
 **Document type:** Governance / repository hygiene
 **Task:** CSS-PKG-D-001
-**Date (UTC):** 2026-08-19
-**Canonical development HEAD at register:** `d53e6658267ab4fe281c7be58a2fad1a6412eef7`
+**Date (UTC):** 2026-08-19 (register created); 2026-08-20 (RSM-P1-03 current-HEAD refresh)
+**Canonical development HEAD at register creation:** `d53e6658267ab4fe281c7be58a2fad1a6412eef7`
+**Current canonical development HEAD:** `2b39141e18fcfa2f1ee2dfcf7806061ab42e79f5` (Merge PR #62)
 **Destructive operations in this package:** none (no branch deletes; no default-branch change)
 
 This register supersedes `docs/governance/branch_status_register.md` (2026-05-28) for **current** classification. The older file is retained as a historical caution against unverified deletion.
@@ -25,7 +26,7 @@ Branches were **not** deleted.
 
 | Branch | Tip (2026-08-19) | Classification | Notes |
 | --- | --- | --- | --- |
-| `css-v1.0.1-maintenance` | `d53e6658` Merge PR #61 | **CANONICAL** | Required base for new work. |
+| `css-v1.0.1-maintenance` | `2b39141e` Merge PR #62 | **CANONICAL** | Required base for new work. Tip at register creation was `d53e6658` (PR #61). |
 | `main` | `faf1485d` Phase 113Y | **WRONG BASE** / **DO NOT DEVELOP** | GitHub default (stale). See default-branch decision. |
 | `css-rc-live-001-candidate` | `fbff1180` Phase 198 | **PRESERVE FOR REFERENCE** | Do not wholesale merge. Live-architecture fork (184A/188+/196/197/198). |
 | `css-market-intelligence-external-sources-001` | `81d48bfc` MR-002 | **PRESERVE FOR REFERENCE** / **WRONG BASE** for PRs | Historical MI-EXT/RC freeze line. PR #52 closed without merge. |
@@ -36,6 +37,7 @@ Branches were **not** deleted.
 | `css-mi-ext-001-recovery-r2` | `bb434599` | **MERGED/HISTORICAL** | PR #59. |
 | `css-rclive-offline-market-readiness-consolidated` | `b51e605c` | **MERGED/HISTORICAL** | PR #60. |
 | `css-consol-cert-001` | `4deb7ec3` | **MERGED/HISTORICAL** | PR #61 merge commit is `d53e6658` on maintenance. |
+| `css-package-d-governance-hygiene` | `5875ff53` | **MERGED/HISTORICAL** | PR #62 merge commit is `2b39141e` on maintenance. |
 
 ## Additional notable refs (not deleted)
 
