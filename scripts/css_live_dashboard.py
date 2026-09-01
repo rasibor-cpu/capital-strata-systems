@@ -4227,9 +4227,305 @@ def should_take_dashboard_paper_profit(pos: dict) -> bool:
 # R17 EXIT EXECUTION LAYER
 # =========================
 
-def render_trade_dashboard_summary() -> None:
+def collect_command_dashboard_snapshot() -> dict:
+    """Read-only operator snapshot from existing runtime/accounting/tracker authority.
+
+    Display layer only. Does not recompute P&L, mutate positions, or call
+    execution/risk gates. Missing safety fields stay UNKNOWN.
+    """
+    snapshot: dict = {
+        "status": "RUNNING",
+        "mode": "UNKNOWN",
+        "engine": "UNKNOWN",
+        "cycle": None,
+        "broker": "UNKNOWN",
+        "execution": "UNKNOWN",
+        "live_execute": "NO",
+        "starting_balance": None,
+        "current_balance": None,
+        "realized_pnl": None,
+        "unrealized_pnl": None,
+        "total_pnl": None,
+        "tracker_equity": None,
+        "peak_equity": None,
+        "drawdown_display": None,
+        "positions_total": None,
+        "positions_limit": None,
+        "positions_by_asset": {},
+        "caps_by_asset": {},
+        "pnl_by_asset": {},
+        "last_trade": None,
+        "unified_trade_gate": "UNKNOWN",
+        "margin_gate": "UNKNOWN",
+        "margin_state": "UNKNOWN",
+        "broker_execution": "UNKNOWN",
+        "defensive_mode": "UNKNOWN",
+        "auto_flatten": "UNKNOWN",
+        "kill_switch": "UNKNOWN",
+        "cycle_interval": None,
+        "runtime_duration": "UNKNOWN",
+        "health": "UNKNOWN",
+    }
+    snapshot["mode"] = str(globals().get("SELECTED_BROKER_MODE") or "UNKNOWN")
+    snapshot["engine"] = str(globals().get("ENGINE_MODE") or "UNKNOWN")
+    snapshot["cycle"] = globals().get("cycle")
+    snapshot["broker"] = str(globals().get("SELECTED_BROKER") or "UNKNOWN")
+    snapshot["last_trade"] = globals().get("last_trade")
+
+    try:
+        snapshot["execution"] = str(active_execution_scope_label())
+    except Exception:
+        snapshot["execution"] = "UNKNOWN"
+    try:
+        snapshot["broker_execution"] = str(broker_execution_status_label())
+    except Exception:
+        snapshot["broker_execution"] = "UNKNOWN"
+
+    session = globals().get("SESSION_USER_CTX") or {}
+    role_profile = session.get("role_profile") if isinstance(session, dict) else {}
+    if not isinstance(role_profile, dict):
+        role_profile = {}
+    snapshot["live_execute"] = "YES" if bool(role_profile.get("can_execute_live_trading")) else "NO"
+
+    tracker = globals().get("pnl_tracker")
+    tracker_snap = None
+    if tracker is not None:
+        try:
+            tracker_snap = tracker.equity_snapshot()
+        except Exception:
+            tracker_snap = None
+    if isinstance(tracker_snap, dict):
+        snapshot["tracker_equity"] = tracker_snap.get("current_equity")
+        snapshot["peak_equity"] = tracker_snap.get("peak_equity")
+        try:
+            capital_governor_obj = globals().get("capital_governor")
+            capital_snapshot = getattr(capital_governor_obj, "balance_snapshot", {}) or {}
+            drawdown = canonical_drawdown_display(
+                current_equity=tracker_snap.get("current_equity"),
+                peak_equity=tracker_snap.get("peak_equity"),
+                max_drawdown_pct=5.0,
+                capital_state=capital_snapshot.get("capital_state", "CAPITAL_UNAVAILABLE"),
+                drawdown_reason=str(capital_snapshot.get("drawdown_reason", "")),
+            )
+            snapshot["drawdown_display"] = drawdown.get("drawdown_display")
+        except Exception:
+            snapshot["drawdown_display"] = None
+
+    observer = globals().get("pnl_observer")
+    if observer is not None:
+        snapshot["starting_balance"] = getattr(observer, "starting_balance", None)
+        snapshot["current_balance"] = getattr(observer, "current_balance", None)
+
+    try:
+        snapshot["realized_pnl"] = float(total_realized_pnl())
+    except Exception:
+        snapshot["realized_pnl"] = None
+
+    mtm = globals().get("mtm_engine")
+    active_positions = []
+    try:
+        if mtm is not None:
+            floating = mtm.floating_by_asset(funded_only=False)
+            snapshot["unrealized_pnl"] = round(sum(float(v) for v in (floating or {}).values()), 4)
+            active_positions = [pos for pos in list(getattr(mtm, "positions", []) or []) if not pos.get("forced_exit")]
+            snapshot["positions_total"] = int(mtm.count_open_positions())
+            snapshot["positions_by_asset"] = dict(mtm.count_open_positions_by_asset())
+    except Exception:
+        snapshot["unrealized_pnl"] = snapshot.get("unrealized_pnl")
+
+    try:
+        snapshot["positions_limit"] = int(hard_position_limit())
+        snapshot["caps_by_asset"] = {
+            key: int(hard_asset_cap(key)) for key in ("CRYPTO", "FX", "FUTURES", "OPTIONS")
+        }
+    except Exception:
+        pass
+
+    try:
+        rows = aggregate_pnl_by_asset_category(
+            realized_pnl_maps=current_realized_pnl_maps_by_asset_category(),
+            positions=active_positions,
+        )
+        snapshot["pnl_by_asset"] = {
+            str(row.get("asset_category")): row.get("total_pnl") for row in (rows or [])
+        }
+    except Exception:
+        snapshot["pnl_by_asset"] = {}
+
+    realized = snapshot.get("realized_pnl")
+    unrealized = snapshot.get("unrealized_pnl")
+    if realized is not None and unrealized is not None:
+        try:
+            snapshot["total_pnl"] = round(float(realized) + float(unrealized), 4)
+        except Exception:
+            snapshot["total_pnl"] = None
+
+    locker = globals().get("is_session_locked")
+    if callable(locker):
+        try:
+            snapshot["defensive_mode"] = "YES" if locker() else "NO"
+        except Exception:
+            snapshot["defensive_mode"] = "UNKNOWN"
+
+    divergence = globals().get("_DIVERGENCE_STATE")
+    if isinstance(divergence, dict):
+        snapshot["auto_flatten"] = (
+            "SIMULATION pending="
+            f"{divergence.get('pending_count', 0)} confirmed={divergence.get('confirmed_count', 0)}"
+        )
+
+    kill_raw = os.environ.get("CSS_LIVE_ORDER_KILL_SWITCH")
+    if kill_raw is None or str(kill_raw).strip() == "":
+        snapshot["kill_switch"] = "UNKNOWN"
+    else:
+        snapshot["kill_switch"] = (
+            "ON" if str(kill_raw).strip().lower() in {"1", "true", "yes", "on"} else "OFF"
+        )
+
+    try:
+        controls = pcnrass_read_mobile_controls()
+        snapshot["cycle_interval"] = int((controls or {}).get("cycle_interval_seconds") or 60)
+    except Exception:
+        raw_interval = os.environ.get("CSS_CYCLE_SLEEP_SECONDS")
+        try:
+            snapshot["cycle_interval"] = int(raw_interval) if raw_interval else None
+        except Exception:
+            snapshot["cycle_interval"] = None
+
+    created = None
+    if isinstance(session, dict):
+        created = session.get("created")
+        status = session.get("session_status") or {}
+        if created is None and isinstance(status, dict):
+            created = status.get("created")
+    if created is not None:
+        try:
+            elapsed = max(0, int(time.time() - float(created)))
+            hours, remainder = divmod(elapsed, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            if hours:
+                snapshot["runtime_duration"] = f"{hours}h {minutes:02d}m {seconds:02d}s"
+            else:
+                snapshot["runtime_duration"] = f"{minutes}m {seconds:02d}s"
+        except Exception:
+            snapshot["runtime_duration"] = "UNKNOWN"
+
+    if isinstance(snapshot.get("tracker_equity"), (int, float)):
+        snapshot["health"] = "OK"
+    return snapshot
+
+
+def command_dashboard_lines(snapshot: dict | None) -> list[str]:
+    """Pure renderer for the compact CSS COMMAND DASHBOARD. Display only."""
+    data = dict(snapshot or {})
+
+    def _fmt_money(value) -> str:
+        if value is None or value == "":
+            return "N/A"
+        try:
+            return f"{float(value):+.4f}"
+        except (TypeError, ValueError):
+            return "N/A"
+
+    def _fmt_plain(value) -> str:
+        if value is None or value == "":
+            return "N/A"
+        return str(value)
+
+    def _fmt_or_unknown(value) -> str:
+        if value is None or value == "":
+            return "UNKNOWN"
+        return str(value)
+
+    def _pos_line(label: str, key: str) -> str:
+        positions = data.get("positions_by_asset") or {}
+        caps = data.get("caps_by_asset") or {}
+        open_count = positions.get(key)
+        cap = caps.get(key)
+        if open_count is None and cap is None:
+            return f"  {label}: UNKNOWN"
+        return f"  {label}: {_fmt_plain(open_count)} / {_fmt_plain(cap)}"
+
+    pnl_by_asset = data.get("pnl_by_asset") or {}
+    last_trade = data.get("last_trade")
+    last_action = _fmt_plain(last_trade) if last_trade not in (None, "") else "NONE"
+    cycle = data.get("cycle")
+    interval = data.get("cycle_interval")
+    interval_text = "N/A" if interval is None or interval == "" else f"{interval}s"
+    return [
+        "",
+        "============================================================",
+        "CSS COMMAND DASHBOARD",
+        "============================================================",
+        f"STATUS: {_fmt_plain(data.get('status') or 'RUNNING')}",
+        f"MODE: {_fmt_plain(data.get('mode')).upper()}",
+        f"ENGINE: {_fmt_plain(data.get('engine')).upper()}",
+        f"CYCLE: {_fmt_plain(cycle)}",
+        f"BROKER: {_fmt_plain(data.get('broker')).upper()}",
+        f"EXECUTION: {_fmt_plain(data.get('execution'))}",
+        "",
+        "PORTFOLIO",
+        f"  Equity: {_fmt_money(data.get('tracker_equity'))}",
+        f"  Balance: {_fmt_money(data.get('current_balance') if data.get('current_balance') is not None else data.get('starting_balance'))}",
+        f"  Realized P&L: {_fmt_money(data.get('realized_pnl'))}",
+        f"  Unrealized P&L: {_fmt_money(data.get('unrealized_pnl'))}",
+        f"  Total P&L: {_fmt_money(data.get('total_pnl'))}",
+        f"  Peak Equity: {_fmt_money(data.get('peak_equity'))}",
+        f"  Drawdown: {_fmt_plain(data.get('drawdown_display'))}",
+        "",
+        "POSITIONS",
+        f"  Total open / limit: {_fmt_plain(data.get('positions_total'))} / {_fmt_plain(data.get('positions_limit'))}",
+        _pos_line("Crypto open / cap", "CRYPTO"),
+        _pos_line("FX open / cap", "FX"),
+        _pos_line("Futures open / cap", "FUTURES"),
+        _pos_line("Options open / cap", "OPTIONS"),
+        "",
+        "PERFORMANCE BY ASSET",
+        f"  Crypto P&L: {_fmt_money(pnl_by_asset.get('CRYPTO'))}",
+        f"  FX P&L: {_fmt_money(pnl_by_asset.get('FX'))}",
+        f"  Futures P&L: {_fmt_money(pnl_by_asset.get('FUTURES'))}",
+        f"  Options P&L: {_fmt_money(pnl_by_asset.get('OPTIONS'))}",
+        "",
+        "LAST ACTION",
+        f"  {last_action}",
+        "",
+        "RISK / SAFETY",
+        f"  Unified Trade Gate: {_fmt_or_unknown(data.get('unified_trade_gate'))}",
+        f"  Margin Gate: {_fmt_or_unknown(data.get('margin_gate'))}",
+        f"  Margin State: {_fmt_or_unknown(data.get('margin_state'))}",
+        f"  Broker Execution: {_fmt_or_unknown(data.get('broker_execution'))}",
+        f"  Live Execution: {_fmt_plain(data.get('live_execute') or 'NO')}",
+        f"  Defensive Mode: {_fmt_or_unknown(data.get('defensive_mode'))}",
+        f"  Auto Flatten: {_fmt_or_unknown(data.get('auto_flatten'))}",
+        f"  Kill Switch: {_fmt_or_unknown(data.get('kill_switch'))}",
+        "",
+        "COW-001",
+        f"  Cycle: {_fmt_plain(cycle)}",
+        f"  Cycle interval: {interval_text}",
+        f"  Runtime duration: {_fmt_plain(data.get('runtime_duration'))}",
+        f"  Health: {_fmt_or_unknown(data.get('health'))}",
+        "============================================================",
+        "",
+    ]
+
+
+def render_trade_dashboard_summary(command_snapshot: dict | None = None) -> None:
     """TRADE_DASHBOARD_SUMMARY: dynamic display-only cycle summary; no trading decisions."""
     try:
+        snapshot = command_snapshot
+        if snapshot is None:
+            collector = globals().get("collect_command_dashboard_snapshot")
+            if callable(collector):
+                try:
+                    snapshot = collector()
+                except Exception:
+                    snapshot = {}
+            else:
+                snapshot = {}
+        snapshot = dict(snapshot or {})
+        for line in command_dashboard_lines(snapshot):
+            print(line)
+
         active_positions = [p for p in mtm_engine.positions if not p.get("forced_exit")]
 
         pnl_maps = current_realized_pnl_maps_by_asset_category()
@@ -4271,17 +4567,44 @@ def render_trade_dashboard_summary() -> None:
         if position_limit is None:
             position_limit = globals().get("MAX_PAPER_OPEN_POSITIONS", "N/A")
 
-        tracker_value = globals().get("tracker_equity", None)
+        tracker_value = snapshot.get("tracker_equity")
+        if tracker_value is None:
+            tracker_value = globals().get("tracker_equity", None)
         if tracker_value is None:
             tracker_value = globals().get("TRACKER_EQUITY", None)
 
-        peak_value = globals().get("peak_equity", None)
+        peak_value = snapshot.get("peak_equity")
+        if peak_value is None:
+            peak_value = globals().get("peak_equity", None)
         if peak_value is None:
             peak_value = globals().get("PEAK_EQUITY", None)
 
+        drawdown_display_text = snapshot.get("drawdown_display")
         drawdown_value = globals().get("drawdown_pct", None)
         if drawdown_value is None:
             drawdown_value = globals().get("DRAWDOWN_PCT", None)
+
+        tracker_obj = globals().get("pnl_tracker")
+        if tracker_obj is not None and (tracker_value is None or peak_value is None or drawdown_display_text is None):
+            try:
+                tracker_snap = tracker_obj.equity_snapshot()
+                if tracker_value is None:
+                    tracker_value = tracker_snap.get("current_equity")
+                if peak_value is None:
+                    peak_value = tracker_snap.get("peak_equity")
+                if drawdown_display_text is None:
+                    capital_governor_obj = globals().get("capital_governor")
+                    capital_snapshot = getattr(capital_governor_obj, "balance_snapshot", {}) or {}
+                    drawdown = canonical_drawdown_display(
+                        current_equity=tracker_snap.get("current_equity"),
+                        peak_equity=tracker_snap.get("peak_equity"),
+                        max_drawdown_pct=5.0,
+                        capital_state=capital_snapshot.get("capital_state", "CAPITAL_UNAVAILABLE"),
+                        drawdown_reason=str(capital_snapshot.get("drawdown_reason", "")),
+                    )
+                    drawdown_display_text = drawdown.get("drawdown_display")
+            except Exception:
+                pass
 
         ledger_exists = CLOSED_TRADE_LEDGER_PATH.exists() if "CLOSED_TRADE_LEDGER_PATH" in globals() else False
 
@@ -4330,7 +4653,9 @@ def render_trade_dashboard_summary() -> None:
         else:
             print(f"Peak Equity: {float(peak_value):+.4f}")
 
-        if drawdown_value is None:
+        if drawdown_display_text not in (None, ""):
+            print(f"Drawdown: {drawdown_display_text}")
+        elif drawdown_value is None:
             print("Drawdown: N/A")
         else:
             print(f"Drawdown: {float(drawdown_value):.4f}%")
@@ -4342,6 +4667,8 @@ def render_trade_dashboard_summary() -> None:
         try:
             from analytics.trade_outcome_ledger import print_profitability_dashboard
             print_profitability_dashboard()
+            print("  NOTE: Phase 126C ledger (artifacts/trade_outcomes.json) is not MTM/accounting authority.")
+            print("  Authoritative realized P&L is shown in CSS COMMAND DASHBOARD.")
         except Exception as analytics_exc:
             print(f"[PROFITABILITY ANALYTICS WARN] {analytics_exc}")
         # --- END PHASE 126C ---
