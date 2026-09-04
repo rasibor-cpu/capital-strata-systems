@@ -111,6 +111,11 @@ from backend.runtime.broker_credential_diagnostics import diagnostics_payload
 from backend.runtime.coinbase_live_read_only_operational_validation import (
     load_coinbase_operational_validation_artifacts,
 )
+from backend.runtime.coinbase_live_read_only_balance_promotion import (
+    apply_coinbase_balance_only_promotion,
+    proven_independent_pnl_evidence,
+    proven_independent_position_evidence,
+)
 from backend.runtime.oanda_live_read_only_operational_validation import (
     load_oanda_operational_validation_artifacts,
 )
@@ -805,31 +810,54 @@ def build_launcher_frontend_state(
             "user_id": str(auth_identity.get("user_id") or session.get("user_id") or "UNAUTHENTICATED"),
         },
         "account_summary": {
-            "account_balance": account.get("cash", 0.0),
-            "cash_balance": account.get("cash", 0.0),
-            "total_equity": account.get("equity", 0.0),
-            "equity": account.get("equity", 0.0),
-            "buying_power": account.get("buying_power", 0.0),
+            "account_balance": account.get("cash"),
+            "cash_balance": account.get("cash"),
+            "total_equity": account.get("equity"),
+            "equity": account.get("equity"),
+            "buying_power": account.get("buying_power"),
             "currency": account.get("broker_balance_summary", {}).get(
                 "account_context", {}
             ).get("base_currency", "UNAVAILABLE"),
             "broker": broker,
             "account_mode": broker_mode,
             "broker_balance_summary": account.get("broker_balance_summary"),
+            "cash_balance_availability": "AVAILABLE" if account.get("cash") is not None else "UNAVAILABLE",
+            "total_equity_availability": "AVAILABLE" if account.get("equity") is not None else "UNAVAILABLE",
+            "buying_power_availability": "AVAILABLE" if account.get("buying_power") is not None else "UNAVAILABLE",
+            "availability_state": (
+                "AVAILABLE"
+                if any(account.get(key) is not None for key in ("cash", "equity", "buying_power"))
+                else "UNAVAILABLE"
+            ),
+            "source": "LAUNCHER_ACCOUNT_ARTIFACT" if any(account.get(key) is not None for key in ("cash", "equity", "buying_power")) else "UNAVAILABLE",
         },
         "pnl_summary": {
-            "realized_pnl": account.get("realized_pnl", 0.0),
-            "unrealized_pnl": account.get("open_pnl", 0.0),
-            "net_pnl": account.get("total_pnl", 0.0),
-            "account_equity": account.get("equity", 0.0),
+            "realized_pnl": account.get("realized_pnl") if account.get("realized_pnl") is not None else 0.0,
+            "unrealized_pnl": account.get("open_pnl") if account.get("open_pnl") is not None else 0.0,
+            "net_pnl": account.get("total_pnl") if account.get("total_pnl") is not None else 0.0,
+            "account_equity": account.get("equity") if account.get("equity") is not None else 0.0,
+            "realized_pnl_availability": "AVAILABLE" if account.get("realized_pnl") is not None else "UNAVAILABLE",
+            "unrealized_pnl_availability": "AVAILABLE" if account.get("open_pnl") is not None else "UNAVAILABLE",
+            "net_pnl_availability": "AVAILABLE" if account.get("total_pnl") is not None else "UNAVAILABLE",
+            "account_equity_availability": "AVAILABLE" if account.get("equity") is not None else "UNAVAILABLE",
+            "availability_state": (
+                "AVAILABLE"
+                if any(account.get(key) is not None for key in ("realized_pnl", "open_pnl", "total_pnl"))
+                else "UNAVAILABLE"
+            ),
+            "source": "LAUNCHER_ACCOUNT_ARTIFACT" if any(account.get(key) is not None for key in ("realized_pnl", "open_pnl", "total_pnl")) else "UNAVAILABLE",
         },
         "position_state": {
             "open_count": trade.get("open_trades_count", len(positions)),
+            "open_count_availability": "AVAILABLE" if positions else "UNAVAILABLE",
             "positions": positions,
+            "source": "LAUNCHER_POSITION_ARTIFACT" if positions else "UNAVAILABLE",
         },
         "open_positions": {
             "total": trade.get("open_trades_count", len(positions)),
+            "total_availability": "AVAILABLE" if positions else "UNAVAILABLE",
             "by_asset": {},
+            "source": "LAUNCHER_POSITION_ARTIFACT" if positions else "UNAVAILABLE",
         },
         "risk_summary": {
             "risk_state": str(health.get("overall_operational_health", "UNKNOWN")),
@@ -969,7 +997,43 @@ def build_launcher_frontend_state(
         # live, in-process, by this launcher session.
         "canonical_runtime_supervisor": get_supervisor_summary(),
     }
+    dashboard_payload = apply_launcher_coinbase_balance_only_promotion(
+        dashboard_payload,
+        selected_broker=broker,
+        canonical_mode=canonical_mode,
+        coinbase_validation=coinbase_validation if isinstance(coinbase_validation, dict) else {},
+    )
     return build_frontend_payload(dashboard_payload)
+
+
+def apply_launcher_coinbase_balance_only_promotion(
+    dashboard_payload: Dict[str, Any],
+    *,
+    selected_broker: Any,
+    canonical_mode: Any,
+    coinbase_validation: Dict[str, Any] | None,
+    now: datetime.datetime | None = None,
+) -> Dict[str, Any]:
+    """Promote Coinbase balances without treating launcher artifacts as P&L/position proof.
+
+    Legacy account P&L fields (including 0.0) and a non-empty positions list are not
+    independent evidence. P&L/positions stay UNAVAILABLE unless same-source Coinbase
+    provenance plus freshness-gated timestamps are explicitly established.
+    """
+    payload = dict(dashboard_payload) if isinstance(dashboard_payload, dict) else {}
+    pnl_summary = payload.get("pnl_summary") if isinstance(payload.get("pnl_summary"), dict) else {}
+    position_state = payload.get("position_state") if isinstance(payload.get("position_state"), dict) else {}
+    return apply_coinbase_balance_only_promotion(
+        payload,
+        selected_broker=selected_broker,
+        canonical_mode=canonical_mode,
+        coinbase_validation=coinbase_validation if isinstance(coinbase_validation, dict) else {},
+        pnl_evidence=pnl_summary if proven_independent_pnl_evidence(pnl_summary, now=now) else False,
+        position_evidence=(
+            position_state if proven_independent_position_evidence(position_state, now=now) else False
+        ),
+        now=now,
+    )
 
 
 def get_launcher_trade_summary_feed() -> Dict[str, Any]:

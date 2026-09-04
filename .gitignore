@@ -66,6 +66,7 @@ backend/runtime/*
 !backend/runtime/coinbase_readiness.py
 !backend/runtime/coinbase_live_adapter.py
 !backend/runtime/coinbase_live_read_only_operational_validation.py
+!backend/runtime/coinbase_live_read_only_balance_promotion.py
 !backend/runtime/live_execution_authority.py
 !backend/runtime/oanda_live_read_only_adapter.py
 !backend/runtime/oanda_readiness.py

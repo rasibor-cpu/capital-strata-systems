@@ -287,6 +287,32 @@ def _financial_reporting_card(state: dict) -> str:
         )
 
 
+def _cockpit_status(value: object) -> str:
+    text = str(value or "").strip().upper()
+    if text in {"UNAVAILABLE", "DATA UNAVAILABLE", "SOURCE_UNAVAILABLE", "NOT_AVAILABLE"}:
+        return "unavailable"
+    return "neutral"
+
+
+def _cockpit_holdings_rows(portfolio: dict) -> object:
+    holdings = portfolio.get("holdings")
+    if holdings in (None, "", "UNAVAILABLE", "DATA UNAVAILABLE"):
+        return {"status": "UNAVAILABLE", "note": "No independent position evidence."}
+    if isinstance(holdings, list):
+        return holdings
+    return {"status": "UNAVAILABLE", "note": "No independent position evidence."}
+
+
+def _session_pnl_by_instrument_rows(portfolio: dict) -> dict:
+    value = portfolio.get("session_pnl_by_instrument")
+    if value in (None, "", "UNAVAILABLE", "DATA UNAVAILABLE") or value == []:
+        return {
+            "status": "UNAVAILABLE",
+            "note": "Per-instrument P&L is unavailable. Asset-class P&L is not relabeled as instrument-level P&L.",
+        }
+    return {"status": "AVAILABLE", "rows": value}
+
+
 def render(state: dict) -> str:
     platform = section(state, "platform")
     runtime = section(state, "runtime")
@@ -301,6 +327,10 @@ def render(state: dict) -> str:
     institutional = section(state, "institutional_executive_dashboard")
     reporting = section(state, "institutional_reporting")
     balance_summary = section(state, "broker_balance_summary")
+    safety = section(state, "safety")
+    operating = portfolio.get("operating_context") if isinstance(portfolio.get("operating_context"), dict) else {}
+    liquidity = portfolio.get("liquidity_margin") if isinstance(portfolio.get("liquidity_margin"), dict) else {}
+    maturity = portfolio.get("maturity_expiry") if isinstance(portfolio.get("maturity_expiry"), dict) else {}
     from backend.product_honesty import eis_dashboard_honesty
 
     honesty = eis_dashboard_honesty()
@@ -314,6 +344,53 @@ def render(state: dict) -> str:
             status="bad" if platform.get("runtime_offline") else "good",
         )
         + warning_banner(state.get("mock_data_label", "RUNTIME DATA"), status="warn" if state.get("mock_data") else "good")
+        + warning_banner(
+            "Advisory / read-only cockpit. Execution allowed: false. Live trading blocked. Broker execution unarmed.",
+            status="warn",
+        )
+        + metric_grid(
+            (
+                ("Cash", portfolio.get("cash"), _cockpit_status(portfolio.get("cash"))),
+                ("Available / Free", portfolio.get("available_free"), _cockpit_status(portfolio.get("available_free"))),
+                ("Portfolio Value", portfolio.get("portfolio_value"), _cockpit_status(portfolio.get("portfolio_value"))),
+                ("Session P&L", portfolio.get("session_pnl"), _cockpit_status(portfolio.get("session_pnl"))),
+                ("Realized P&L", portfolio.get("realized_pnl"), _cockpit_status(portfolio.get("realized_pnl"))),
+                ("Unrealized P&L", portfolio.get("unrealized_pnl"), _cockpit_status(portfolio.get("unrealized_pnl"))),
+                ("Open Positions", portfolio.get("open_positions"), _cockpit_status(portfolio.get("open_positions"))),
+                ("Execution Status", portfolio.get("execution_status"), _cockpit_status(portfolio.get("execution_status"))),
+            )
+        )
+        + split_panels(
+            detail_table("Session P&L by Instrument", _session_pnl_by_instrument_rows(portfolio)),
+            detail_table("Current Holdings / Positions", _cockpit_holdings_rows(portfolio)),
+            detail_table("Liquidity / Margin", {
+                "cash": liquidity.get("cash", portfolio.get("cash")),
+                "available_free": liquidity.get("available_free", portfolio.get("available_free")),
+                "buying_power": liquidity.get("buying_power", portfolio.get("buying_power")),
+                "margin_used": liquidity.get("margin_used", "UNAVAILABLE"),
+                "available_margin": liquidity.get("available_margin", "UNAVAILABLE"),
+                "reserved_balance": "UNAVAILABLE",
+                "source": liquidity.get("source", portfolio.get("source", "UNAVAILABLE")),
+            }),
+            detail_table("Maturity / Expiry Profile", {
+                "status": maturity.get("status", "UNAVAILABLE"),
+                "profile": maturity.get("profile", "UNAVAILABLE"),
+                "next_maturity": maturity.get("next_maturity", "UNAVAILABLE"),
+                "source": maturity.get("source", "UNAVAILABLE"),
+                "note": "Maturity fields are shown only when launcher/runtime evidence exists.",
+            }),
+            detail_table("Operating Context", {
+                "runtime_mode": operating.get("runtime_mode", platform.get("runtime_mode")),
+                "advisory_only": operating.get("advisory_only", True),
+                "read_only": operating.get("read_only", True),
+                "execution_allowed": operating.get("execution_allowed", safety.get("execution_allowed", False)),
+                "live_trading_blocked": operating.get("live_trading_blocked", safety.get("live_trading_blocked", True)),
+                "broker_execution_armed": operating.get("broker_execution_armed", safety.get("broker_execution_armed", False)),
+                "risk_state": risk.get("overall_risk_state", "UNAVAILABLE"),
+                "safety_status": safety.get("safety_status", "UNAVAILABLE"),
+                "source": operating.get("source", portfolio.get("source", "UNAVAILABLE")),
+            }),
+        )
         + _executive_brief_readiness_card(state)
         + _financial_reporting_card(state)
         + _executive_decision_intelligence_card(state)
