@@ -141,3 +141,22 @@ def test_coinbase_balance_only_shows_balances_and_hides_unevidenced_pnl() -> Non
     assert state["safety"]["execution_allowed"] is False
     assert state["safety"]["live_trading_blocked"] is True
     assert state["safety"]["broker_execution_armed"] is False
+
+
+def test_offline_runtime_mode_projects_disabled_consistently() -> None:
+    state = build_mission_control_state(
+        {
+            "runtime_snapshot": {
+                "source": "UNAVAILABLE",
+                "runtime_status": "OFFLINE",
+                "runtime_mode": "UNAVAILABLE",
+            }
+        },
+        allow_mock=False,
+    )
+
+    assert state["platform"]["runtime_mode"] == "DISABLED"
+    assert state["runtime"]["runtime_mode"] == "DISABLED"
+    assert state["safety"]["execution_allowed"] is False
+    assert state["safety"]["live_trading_blocked"] is True
+    assert state["safety"]["broker_execution_armed"] is False
