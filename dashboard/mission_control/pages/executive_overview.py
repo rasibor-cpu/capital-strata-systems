@@ -367,19 +367,93 @@ def _open_positions_exposure_rows(portfolio: dict) -> dict[str, object]:
     }
 
 
+def _exposure_kind_rows(portfolio: dict, kind: str) -> list[dict[str, object]] | dict[str, object]:
+    canonical = portfolio.get("canonical_broker_portfolio") if isinstance(portfolio.get("canonical_broker_portfolio"), dict) else {}
+    rows = [
+        row
+        for row in canonical.get("exposures") or []
+        if isinstance(row, dict) and row.get("exposure_kind") == kind
+    ]
+    if not rows:
+        if kind == "ACCOUNT_ASSET_BALANCE":
+            return _spot_asset_balance_display_rows(portfolio)
+        if kind == "POSITION":
+            return _open_positions_exposure_rows(portfolio)
+        return {"status": "UNAVAILABLE", "note": f"No authoritative {kind} evidence."}
+    display = []
+    for raw in rows:
+        item: dict[str, object] = {
+            "kind": raw.get("exposure_kind"),
+            "instrument": raw.get("instrument") or raw.get("asset"),
+            "provenance": raw.get("provenance") or "UNAVAILABLE",
+            "source": raw.get("source") or "UNAVAILABLE",
+        }
+        if kind == "ACCOUNT_ASSET_BALANCE":
+            item.update(
+                {
+                    "available_qty": raw.get("available_quantity")
+                    if str(raw.get("available_quantity_availability") or "").upper() == "AVAILABLE"
+                    else "UNAVAILABLE",
+                    "held_qty": raw.get("held_quantity")
+                    if str(raw.get("held_quantity_availability") or "").upper() == "AVAILABLE"
+                    else "UNAVAILABLE",
+                    "total_qty": raw.get("total_quantity")
+                    if str(raw.get("total_quantity_availability") or "").upper() == "AVAILABLE"
+                    else "UNAVAILABLE",
+                    "total_provenance": raw.get("total_quantity_provenance") or "UNAVAILABLE",
+                    "market_value": "UNAVAILABLE",
+                    "not_a_position": True,
+                }
+            )
+        elif kind == "HOLDING":
+            item.update(
+                {
+                    "quantity": raw.get("quantity"),
+                    "market_value": raw.get("market_value")
+                    if str(raw.get("market_value_availability") or "").upper() == "AVAILABLE"
+                    else "UNAVAILABLE",
+                    "unrealized_pnl": raw.get("unrealized_pnl")
+                    if str(raw.get("unrealized_pnl_availability") or "").upper() == "AVAILABLE"
+                    else "UNAVAILABLE",
+                    "security_type": raw.get("security_type") or "UNAVAILABLE",
+                    "maturity": "UNAVAILABLE",
+                }
+            )
+        else:
+            item.update(
+                {
+                    "units": raw.get("units", raw.get("quantity")),
+                    "side": raw.get("side") or "UNAVAILABLE",
+                    "unrealized_pnl": raw.get("unrealized_pnl")
+                    if str(raw.get("unrealized_pnl_availability") or "").upper() == "AVAILABLE"
+                    else "UNAVAILABLE",
+                    "realized_pnl": "UNAVAILABLE"
+                    if str(raw.get("realized_pnl_availability") or "UNAVAILABLE").upper() != "AVAILABLE"
+                    else raw.get("realized_pnl"),
+                    "maturity": raw.get("maturity")
+                    if str(raw.get("maturity_availability") or "").upper() == "AVAILABLE"
+                    else "UNAVAILABLE",
+                }
+            )
+        display.append(item)
+    return display
+
+
 def _current_holdings_exposure_panel(portfolio: dict) -> str:
     balances = portfolio.get("spot_asset_balances") if isinstance(portfolio.get("spot_asset_balances"), dict) else {}
     label = str(balances.get("section_label") or "Account Asset Balances")
-    balance_rows = _spot_asset_balance_display_rows(portfolio)
     return (
         '<section class="mc-panel" id="current-holdings-exposure" '
         'aria-label="Current Holdings / Exposure" data-section="current-holdings-exposure">'
         "<h2>Current Holdings / Exposure</h2>"
-        '<p class="mc-muted">Account asset quantities are not open positions, trades, or leveraged inventory.</p>'
+        '<p class="mc-muted">Account asset balances, holdings, and positions are distinct. '
+        "Account asset quantities are not open positions, trades, futures, options, or leveraged inventory.</p>"
         f'<h3 data-section="account-asset-balances" data-not-positions="true">{escape(label)}</h3>'
-        + _inner_detail_table(balance_rows)
+        + _inner_detail_table(_exposure_kind_rows(portfolio, "ACCOUNT_ASSET_BALANCE"))
+        + '<h3 data-section="holdings">Holdings</h3>'
+        + _inner_detail_table(_exposure_kind_rows(portfolio, "HOLDING"))
         + '<h3 data-section="open-positions">Open Positions</h3>'
-        + _inner_detail_table(_open_positions_exposure_rows(portfolio))
+        + _inner_detail_table(_exposure_kind_rows(portfolio, "POSITION"))
         + "</section>"
     )
 
@@ -448,6 +522,7 @@ def render(state: dict) -> str:
                 ("Realized P&L", portfolio.get("realized_pnl"), _cockpit_status(portfolio.get("realized_pnl"))),
                 ("Unrealized P&L", portfolio.get("unrealized_pnl"), _cockpit_status(portfolio.get("unrealized_pnl"))),
                 ("Open Positions", portfolio.get("open_positions"), _cockpit_status(portfolio.get("open_positions"))),
+                ("Next Maturity", portfolio.get("next_maturity"), _cockpit_status(portfolio.get("next_maturity"))),
                 ("Execution Status", portfolio.get("execution_status"), _cockpit_status(portfolio.get("execution_status"))),
             )
         )
