@@ -57,6 +57,16 @@ from dashboard.mission_control.trade_lifecycle import build_trade_lifecycle
 from dashboard.runtime.frontend_contract import DATA_UNAVAILABLE
 from backend.brokers.account_balance_contract import build_broker_balance_summary
 
+_UNAVAILABLE_STATES = frozenset(
+    {
+        "UNAVAILABLE",
+        "SOURCE_UNAVAILABLE",
+        "DATA UNAVAILABLE",
+        "DATA_UNAVAILABLE",
+        "NOT_AVAILABLE",
+    }
+)
+
 
 MISSION_CONTROL_SCHEMA_VERSION = "css.mission_control.state.v1"
 
@@ -159,7 +169,7 @@ def build_mission_control_state(
                 as_of=str(frontend.get("generated_at") or ""),
             )
         ),
-        "portfolio": _portfolio(account, positions, pnl, runtime_snapshot),
+        "portfolio": _portfolio(account, positions, pnl, runtime_snapshot, frontend, execution),
         "market_intelligence": _market(market, runtime_snapshot),
         "risk": _risk(risk, governance, runtime_snapshot),
         "profit_protection_governance": build_profit_protection_governance_projection(
@@ -685,53 +695,189 @@ def _trading(execution: Mapping[str, Any], positions: Mapping[str, Any]) -> dict
     }
 
 
-def _portfolio(account: Mapping[str, Any], positions: Mapping[str, Any], pnl: Mapping[str, Any], runtime_snapshot: Mapping[str, Any]) -> dict[str, Any]:
+def _portfolio(
+    account: Mapping[str, Any],
+    positions: Mapping[str, Any],
+    pnl: Mapping[str, Any],
+    runtime_snapshot: Mapping[str, Any],
+    frontend: Mapping[str, Any] | None = None,
+    execution: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     runtime_portfolio = runtime_snapshot.get("portfolio") if isinstance(runtime_snapshot.get("portfolio"), Mapping) else {}
     if _runtime_unavailable(runtime_snapshot):
-        return {
-            "equity": "UNAVAILABLE",
-            "cash": "UNAVAILABLE",
-            "buying_power": "UNAVAILABLE",
-            "total_exposure": "UNAVAILABLE",
-            "capital_deployed": "UNAVAILABLE",
-            "capital_available": "UNAVAILABLE",
-            "realized_pnl": "UNAVAILABLE",
-            "unrealized_pnl": "UNAVAILABLE",
-            "net_pnl": "UNAVAILABLE",
-            "open_positions": "UNAVAILABLE",
-            "positions": [],
-            "asset_allocation": {},
-            "sector_allocation": "UNAVAILABLE",
-            "currency_exposure": "UNAVAILABLE",
-            "pnl_by_asset_class": {},
-            "pnl_by_strategy": "UNAVAILABLE",
-            "collateral_utilization": "UNAVAILABLE",
-            "capital_efficiency": "UNAVAILABLE",
-            "drawdown": "UNAVAILABLE",
-            "performance_attribution": "UNAVAILABLE",
-        }
+        runtime_portfolio = {}
+    execution_payload = execution if isinstance(execution, Mapping) else {}
+    frontend_payload = frontend if isinstance(frontend, Mapping) else {}
+    cash = _honest_metric(
+        account.get("cash_balance"),
+        runtime_portfolio.get("cash"),
+        availability=_field_availability(account, "cash_balance", runtime_portfolio.get("cash_availability")),
+    )
+    equity = _honest_metric(
+        account.get("total_equity"),
+        runtime_portfolio.get("equity"),
+        availability=_field_availability(account, "total_equity", runtime_portfolio.get("equity_availability")),
+    )
+    buying_power = _honest_metric(
+        account.get("buying_power"),
+        runtime_portfolio.get("buying_power"),
+        availability=_field_availability(account, "buying_power", runtime_portfolio.get("buying_power_availability")),
+    )
+    available_free = _honest_metric(
+        account.get("available_margin"),
+        account.get("available_balance"),
+        buying_power if buying_power != "UNAVAILABLE" else None,
+        availability=account.get("available_margin_availability")
+        or account.get("buying_power_availability")
+        or ("AVAILABLE" if buying_power != "UNAVAILABLE" else "UNAVAILABLE"),
+    )
+    realized = _honest_metric(
+        pnl.get("realized_pnl"),
+        runtime_portfolio.get("realized_pnl"),
+        availability=_field_availability(pnl, "realized_pnl", runtime_portfolio.get("realized_pnl_availability")),
+    )
+    unrealized = _honest_metric(
+        pnl.get("unrealized_pnl"),
+        runtime_portfolio.get("unrealized_pnl"),
+        availability=_field_availability(pnl, "unrealized_pnl", runtime_portfolio.get("unrealized_pnl_availability")),
+    )
+    net_pnl = _honest_metric(
+        pnl.get("net_pnl"),
+        runtime_portfolio.get("net_pnl"),
+        availability=_field_availability(pnl, "net_pnl", runtime_portfolio.get("net_pnl_availability")),
+    )
+    open_count = _honest_metric(
+        positions.get("total"),
+        positions.get("open_count"),
+        runtime_portfolio.get("open_positions"),
+        availability=_field_availability(
+            positions,
+            "total",
+            positions.get("open_count_availability"),
+            runtime_portfolio.get("open_positions_availability"),
+        ),
+    )
+    holdings = runtime_portfolio.get("positions") or positions.get("items") or positions.get("open_positions") or []
+    if not isinstance(holdings, list):
+        holdings = []
+    if _unavailable_token(positions.get("total_availability") or positions.get("open_count_availability")):
+        holdings = []
+    source = str(
+        account.get("source")
+        or pnl.get("source")
+        or positions.get("source")
+        or runtime_snapshot.get("source")
+        or DATA_UNAVAILABLE
+    )
     return {
-        "equity": normalize_metric(runtime_portfolio.get("equity", account.get("total_equity"))),
-        "cash": normalize_metric(runtime_portfolio.get("cash", account.get("cash_balance"))),
-        "buying_power": normalize_metric(runtime_portfolio.get("buying_power", account.get("buying_power"))),
-        "total_exposure": normalize_metric(runtime_portfolio.get("exposure", positions.get("total_exposure", DATA_UNAVAILABLE))),
-        "capital_deployed": normalize_metric(runtime_portfolio.get("capital_deployed", positions.get("total_exposure", DATA_UNAVAILABLE))),
-        "capital_available": normalize_metric(runtime_portfolio.get("capital_available", account.get("buying_power"))),
-        "realized_pnl": normalize_metric(runtime_portfolio.get("realized_pnl", pnl.get("realized_pnl", DATA_UNAVAILABLE))),
-        "unrealized_pnl": normalize_metric(runtime_portfolio.get("unrealized_pnl", pnl.get("unrealized_pnl", DATA_UNAVAILABLE))),
-        "net_pnl": normalize_metric(runtime_portfolio.get("net_pnl", pnl.get("net_pnl", DATA_UNAVAILABLE))),
-        "open_positions": runtime_portfolio.get("open_positions", positions.get("total", DATA_UNAVAILABLE)),
-        "positions": runtime_portfolio.get("positions", positions.get("open_positions", [])),
+        "equity": equity,
+        "cash": cash,
+        "buying_power": buying_power,
+        "available_free": available_free,
+        "portfolio_value": equity,
+        "session_pnl": net_pnl,
+        "total_exposure": _honest_metric(
+            runtime_portfolio.get("exposure"),
+            positions.get("total_exposure"),
+            pnl.get("total_exposure"),
+            availability=pnl.get("total_exposure_availability"),
+        ),
+        "capital_deployed": _honest_metric(
+            runtime_portfolio.get("capital_deployed"),
+            positions.get("total_exposure"),
+        ),
+        "capital_available": available_free if available_free != "UNAVAILABLE" else buying_power,
+        "realized_pnl": realized,
+        "unrealized_pnl": unrealized,
+        "net_pnl": net_pnl,
+        "open_positions": open_count,
+        "positions": holdings,
+        "session_pnl_by_instrument": "UNAVAILABLE",
+        "holdings": holdings if holdings else "UNAVAILABLE",
+        "liquidity_margin": {
+            "cash": cash,
+            "available_free": available_free,
+            "buying_power": buying_power,
+            "margin_used": _honest_metric(
+                account.get("margin_used"),
+                availability=account.get("margin_used_availability"),
+            ),
+            "available_margin": _honest_metric(
+                account.get("available_margin"),
+                availability=account.get("available_margin_availability"),
+            ),
+            "source": source,
+        },
+        "maturity_expiry": {
+            "status": "UNAVAILABLE",
+            "profile": "UNAVAILABLE",
+            "next_maturity": "UNAVAILABLE",
+            "source": "UNAVAILABLE",
+        },
+        "execution_status": execution_payload.get("execution_state", DATA_UNAVAILABLE),
+        "operating_context": {
+            "runtime_mode": frontend_payload.get("resolved_mode") or runtime_snapshot.get("runtime_mode") or DATA_UNAVAILABLE,
+            "advisory_only": True,
+            "read_only": True,
+            "execution_allowed": False,
+            "live_trading_blocked": True,
+            "broker_execution_armed": False,
+            "source": source,
+        },
         "asset_allocation": runtime_portfolio.get("asset_allocation", positions.get("asset_counts", {})),
         "sector_allocation": DATA_UNAVAILABLE,
-        "currency_exposure": account.get("currency", "USD"),
-        "pnl_by_asset_class": runtime_portfolio.get("pnl_by_asset", pnl.get("asset_unrealized_pnl", {})),
-        "pnl_by_strategy": runtime_portfolio.get("pnl_by_strategy", DATA_UNAVAILABLE),
-        "collateral_utilization": normalize_metric(account.get("margin_used")),
+        "currency_exposure": account.get("currency") or "UNAVAILABLE",
+        "pnl_by_asset_class": "UNAVAILABLE"
+        if _unavailable_token(pnl.get("availability_state"))
+        else runtime_portfolio.get("pnl_by_asset", pnl.get("asset_unrealized_pnl", {})),
+        "pnl_by_strategy": DATA_UNAVAILABLE,
+        "collateral_utilization": _honest_metric(
+            account.get("margin_used"),
+            availability=account.get("margin_used_availability"),
+        ),
         "capital_efficiency": DATA_UNAVAILABLE,
-        "drawdown": normalize_metric(runtime_portfolio.get("drawdown", DATA_UNAVAILABLE)),
+        "drawdown": _honest_metric(runtime_portfolio.get("drawdown")),
         "performance_attribution": DATA_UNAVAILABLE,
+        "cash_availability": account.get("cash_balance_availability", "UNAVAILABLE" if cash == "UNAVAILABLE" else "AVAILABLE"),
+        "equity_availability": account.get("total_equity_availability", "UNAVAILABLE" if equity == "UNAVAILABLE" else "AVAILABLE"),
+        "buying_power_availability": account.get("buying_power_availability", "UNAVAILABLE" if buying_power == "UNAVAILABLE" else "AVAILABLE"),
+        "realized_pnl_availability": pnl.get("realized_pnl_availability", "UNAVAILABLE" if realized == "UNAVAILABLE" else "AVAILABLE"),
+        "unrealized_pnl_availability": pnl.get("unrealized_pnl_availability", "UNAVAILABLE" if unrealized == "UNAVAILABLE" else "AVAILABLE"),
+        "net_pnl_availability": pnl.get("net_pnl_availability", "UNAVAILABLE" if net_pnl == "UNAVAILABLE" else "AVAILABLE"),
+        "open_positions_availability": positions.get("total_availability")
+        or positions.get("open_count_availability")
+        or ("UNAVAILABLE" if open_count == "UNAVAILABLE" else "AVAILABLE"),
+        "source": source,
+        "availability_state": account.get("availability_state") or pnl.get("availability_state") or "UNAVAILABLE",
     }
+
+
+def _unavailable_token(value: Any) -> bool:
+    return str(value or "").strip().upper().replace(" ", "_") in {
+        token.replace(" ", "_") for token in _UNAVAILABLE_STATES
+    }
+
+
+def _field_availability(payload: Mapping[str, Any], field: str, *fallbacks: Any) -> Any:
+    explicit = payload.get(f"{field}_availability")
+    if explicit not in (None, ""):
+        return explicit
+    for fallback in fallbacks:
+        if fallback not in (None, ""):
+            return fallback
+    return None
+
+
+def _honest_metric(*values: Any, availability: Any = None) -> Any:
+    if _unavailable_token(availability):
+        return "UNAVAILABLE"
+    for value in values:
+        if value in (None, "", DATA_UNAVAILABLE, "UNAVAILABLE"):
+            continue
+        if availability is None and _unavailable_token(value):
+            continue
+        return normalize_metric(value)
+    return "UNAVAILABLE"
 
 
 def _market(market: Mapping[str, Any], runtime_snapshot: Mapping[str, Any]) -> dict[str, Any]:

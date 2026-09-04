@@ -83,6 +83,20 @@ FRONTEND_SECTIONS = (
 )
 
 DATA_UNAVAILABLE = "DATA UNAVAILABLE"
+SOURCE_UNAVAILABLE = "SOURCE_UNAVAILABLE"
+_UNAVAILABLE_TOKENS = frozenset(
+    {
+        "",
+        "UNAVAILABLE",
+        "DATA UNAVAILABLE",
+        "SOURCE_UNAVAILABLE",
+        "NOT_AVAILABLE",
+        "N/A",
+        "NONE",
+        "NULL",
+        "UNKNOWN",
+    }
+)
 
 _TRADE_UNIVERSE_CACHE: dict[str, Any] = {
     "updated_at": 0.0,
@@ -602,9 +616,22 @@ def positions(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
             }
         )
 
+    total_raw = open_positions.get("total", position_state.get("open_count"))
+    open_count_raw = position_state.get("open_count", open_positions.get("total"))
+    total_availability = _numeric_availability(
+        total_raw,
+        open_positions.get("total_availability")
+        or position_state.get("open_count_availability"),
+    )
     return {
-        "total": _integer(
-            open_positions.get("total", position_state.get("open_count"))
+        "total": _integer(total_raw),
+        "total_availability": total_availability,
+        "open_count": _integer(open_count_raw),
+        "open_count_availability": _numeric_availability(
+            open_count_raw,
+            position_state.get("open_count_availability")
+            or open_positions.get("total_availability")
+            or total_availability,
         ),
         "by_asset": {str(key): _integer(value) for key, value in by_asset.items()},
         "long_count": _integer(position_state.get("long_count")),
@@ -613,15 +640,44 @@ def positions(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         "loser_count": _integer(position_state.get("loser_count")),
         "active_symbols": _string_list(position_state.get("active_symbols")),
         "items": items,
+        "availability_state": total_availability,
+        "source": str(
+            open_positions.get("source")
+            or position_state.get("source")
+            or (SOURCE_UNAVAILABLE if total_availability != "AVAILABLE" else "dashboard.runtime.frontend_contract")
+        ),
     }
 
 
 def pnl_summary(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     pnl = _mapping(dashboard_payload.get("pnl_summary"))
+    realized_availability = _numeric_availability(
+        pnl.get("realized_pnl"), pnl.get("realized_pnl_availability")
+    )
+    unrealized_availability = _numeric_availability(
+        pnl.get("unrealized_pnl"), pnl.get("unrealized_pnl_availability")
+    )
+    net_availability = _numeric_availability(pnl.get("net_pnl"), pnl.get("net_pnl_availability"))
+    equity_availability = _numeric_availability(
+        pnl.get("account_equity"), pnl.get("account_equity_availability")
+    )
+    availability_state = (
+        "AVAILABLE"
+        if "AVAILABLE" in {
+            realized_availability,
+            unrealized_availability,
+            net_availability,
+            equity_availability,
+        }
+        else "UNAVAILABLE"
+    )
     return {
         "realized_pnl": _number(pnl.get("realized_pnl")),
+        "realized_pnl_availability": realized_availability,
         "unrealized_pnl": _number(pnl.get("unrealized_pnl")),
+        "unrealized_pnl_availability": unrealized_availability,
         "net_pnl": _number(pnl.get("net_pnl")),
+        "net_pnl_availability": net_availability,
         "total_exposure": _number(pnl.get("total_exposure")),
         "exposure_utilization_pct": _number(
             pnl.get("exposure_utilization_pct")
@@ -630,6 +686,13 @@ def pnl_summary(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         "loser_count": _integer(pnl.get("loser_count")),
         "win_rate_pct": _number(pnl.get("win_rate_pct")),
         "account_equity": _number(pnl.get("account_equity")),
+        "account_equity_availability": equity_availability,
+        "availability_state": pnl.get("availability_state") or availability_state,
+        "source": str(
+            pnl.get("source")
+            or pnl.get("data_source")
+            or (SOURCE_UNAVAILABLE if availability_state != "AVAILABLE" else "dashboard.runtime.frontend_contract")
+        ),
     }
 
 
@@ -2229,9 +2292,27 @@ def _number(value: Any, default: float = 0.0) -> float:
     try:
         if value is None:
             return float(default)
+        if isinstance(value, str) and value.strip().upper() in _UNAVAILABLE_TOKENS:
+            return float(default)
         return float(value)
     except (TypeError, ValueError):
         return float(default)
+
+
+def _numeric_availability(value: Any, explicit: Any = None) -> str:
+    if explicit not in (None, ""):
+        token = str(explicit).strip().upper().replace(" ", "_")
+        if token in {"AVAILABLE", "UNAVAILABLE", "SOURCE_UNAVAILABLE", "DATA_UNAVAILABLE", "NOT_AVAILABLE"}:
+            return "AVAILABLE" if token == "AVAILABLE" else "UNAVAILABLE"
+    if value is None:
+        return "UNAVAILABLE"
+    if isinstance(value, str) and value.strip().upper() in _UNAVAILABLE_TOKENS:
+        return "UNAVAILABLE"
+    try:
+        float(value)
+        return "AVAILABLE"
+    except (TypeError, ValueError):
+        return "UNAVAILABLE"
 
 
 def _first_available(*values: Any) -> Any:
@@ -2291,6 +2372,8 @@ def _ai_market_narrative(
 def _integer(value: Any, default: int = 0) -> int:
     try:
         if value is None:
+            return int(default)
+        if isinstance(value, str) and value.strip().upper() in _UNAVAILABLE_TOKENS:
             return int(default)
         return int(value)
     except (TypeError, ValueError):

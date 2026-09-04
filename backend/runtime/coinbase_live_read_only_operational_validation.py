@@ -107,13 +107,23 @@ class CoinbaseLiveReadOnlyOperationalValidator:
             self.publish_artifacts(result)
             return result
 
-        try:
-            import sys
-            from backend.app.security.environment_validator import validate_startup_security_environment
-            if not ("pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ):
-                validate_startup_security_environment("COINBASE", "live", adapter._env)
-        except Exception as e:
-            failures.append(_failure("SECURITY_ERROR", str(e)))
+        security_failure = self._startup_security_failure(adapter)
+        if security_failure is not None:
+            failures.append(security_failure)
+            result = self._result(
+                adapter=adapter,
+                timestamp=timestamp,
+                read_checks=read_checks,
+                failures=failures,
+                server_time=None,
+                account=None,
+                portfolio=None,
+                balances=None,
+                products=None,
+                ticker=None,
+            )
+            self.publish_artifacts(result)
+            return result
 
         # Consume only the canonical BrokerReadOnlyInterface methods
         server_time_res, read_checks["server_time"], failure = _read(lambda: adapter.server_time())
@@ -162,6 +172,21 @@ class CoinbaseLiveReadOnlyOperationalValidator:
         )
         self.publish_artifacts(result)
         return result
+
+    def _startup_security_failure(self, adapter: CoinbaseLiveReadOnlyAdapter) -> dict[str, str] | None:
+        try:
+            from backend.app.security.environment_validator import validate_startup_security_environment
+
+            if self._should_validate_startup_security():
+                validate_startup_security_environment("COINBASE", "live", adapter._env)
+        except Exception as exc:
+            return _failure("SECURITY_ERROR", str(exc))
+        return None
+
+    def _should_validate_startup_security(self) -> bool:
+        import sys
+
+        return not ("pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ)
 
     def publish_artifacts(self, result: Mapping[str, Any]) -> None:
         if self.artifacts_dir is None:
