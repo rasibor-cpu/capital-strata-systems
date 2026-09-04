@@ -39,8 +39,15 @@ def _validation() -> dict:
 def test_launcher_source_does_not_use_presence_as_evidence() -> None:
     source = LAUNCHER_SOURCE.read_text(encoding="utf-8")
     assert "position_evidence=bool(positions)" not in source
-    assert 'account.get(key) is not None for key in ("realized_pnl"' not in source
-    assert "apply_launcher_coinbase_balance_only_promotion" in source
+    assert "position_evidence=bool(" not in source
+    assert "pnl_evidence=any(" not in source
+    assert "def apply_launcher_coinbase_balance_only_promotion" in source
+    start = source.index("def apply_launcher_coinbase_balance_only_promotion")
+    helper = source[start : start + 1800]
+    assert "proven_independent_pnl_evidence" in helper
+    assert "proven_independent_position_evidence" in helper
+    assert "bool(positions)" not in helper
+    assert "is not None" not in helper
 
 
 def test_launcher_stale_legacy_zero_pnl_is_unavailable_under_balance_only() -> None:
