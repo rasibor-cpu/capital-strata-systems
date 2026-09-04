@@ -2,42 +2,182 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 from backend.brokers.account_balance_contract import build_broker_balance_summary
+from backend.executive_intelligence.freshness_policy import gate_config, load_freshness_policy
 
 
 SOURCE_COINBASE_LIVE_READ_ONLY_BALANCE_ONLY = "COINBASE_LIVE_READ_ONLY_BALANCE_ONLY"
-ALLOWED_PROMOTION_MODES = frozenset({"LIVE", "LIVE_READ_ONLY"})
-BROKER_SNAPSHOT_MAX_AGE_SECONDS = 300
+# Balance-only promotion is a LIVE_READ_ONLY evidence contract. RuntimeMode.LIVE is a
+# distinct execution-capable mode and is excluded to avoid provenance ambiguity.
+# This grant is read-only: it never arms a broker, starts an engine, or enables orders.
+ALLOWED_PROMOTION_MODES = frozenset({"LIVE_READ_ONLY"})
+COMPATIBLE_PNL_SOURCES = frozenset(
+    {
+        "COINBASE_LIVE_READ_ONLY",
+        "COINBASE_LIVE_READ_ONLY_PNL",
+    }
+)
+COMPATIBLE_POSITION_SOURCES = frozenset(
+    {
+        "COINBASE_LIVE_READ_ONLY",
+        "COINBASE_LIVE_READ_ONLY_POSITIONS",
+    }
+)
 _UNAVAILABLE = "UNAVAILABLE"
 _AVAILABLE = "AVAILABLE"
+_BROKER_SNAPSHOT_GATE = "broker_snapshot"
+
+
+def resolve_broker_snapshot_max_age_seconds(
+    policy: Mapping[str, Any] | None = None,
+    *,
+    policy_path: Path | str | None = None,
+) -> dict[str, Any]:
+    """Resolve canonical broker_snapshot max age. Fail closed if unusable."""
+    try:
+        if policy is None:
+            loaded = load_freshness_policy(policy_path=policy_path)
+        elif isinstance(policy, Mapping):
+            loaded = dict(policy)
+        else:
+            return {"ok": False, "max_age_seconds": None, "reason": "policy_unusable"}
+    except Exception:
+        return {"ok": False, "max_age_seconds": None, "reason": "policy_unusable"}
+
+    if not isinstance(loaded, dict) or not loaded:
+        return {"ok": False, "max_age_seconds": None, "reason": "policy_missing"}
+
+    gates = loaded.get("gates")
+    if not isinstance(gates, dict):
+        return {"ok": False, "max_age_seconds": None, "reason": "policy_malformed"}
+
+    raw_gate = gates.get(_BROKER_SNAPSHOT_GATE)
+    if raw_gate is None:
+        return {"ok": False, "max_age_seconds": None, "reason": "broker_snapshot_gate_missing"}
+    if not isinstance(raw_gate, dict):
+        return {"ok": False, "max_age_seconds": None, "reason": "broker_snapshot_gate_malformed"}
+    if "max_age_seconds" not in raw_gate:
+        return {"ok": False, "max_age_seconds": None, "reason": "max_age_missing"}
+
+    try:
+        cfg = gate_config(loaded, _BROKER_SNAPSHOT_GATE)
+    except Exception:
+        return {"ok": False, "max_age_seconds": None, "reason": "gate_config_unusable"}
+    if not isinstance(cfg, dict) or not cfg:
+        return {"ok": False, "max_age_seconds": None, "reason": "broker_snapshot_gate_missing"}
+
+    max_age = _positive_max_age(cfg.get("max_age_seconds"))
+    if max_age is None:
+        return {"ok": False, "max_age_seconds": None, "reason": "max_age_unusable"}
+    return {"ok": True, "max_age_seconds": max_age, "reason": "ok"}
 
 
 def evaluate_canonical_broker_snapshot_freshness(
     snapshot: Mapping[str, Any] | None,
     *,
     now: datetime | None = None,
-    max_age_seconds: int = BROKER_SNAPSHOT_MAX_AGE_SECONDS,
+    policy: Mapping[str, Any] | None = None,
+    policy_path: Path | str | None = None,
 ) -> dict[str, Any]:
     """Fail closed on missing, malformed, naive, future, or stale timestamps."""
+    age_decision = resolve_broker_snapshot_max_age_seconds(policy, policy_path=policy_path)
+    if not age_decision["ok"]:
+        return {
+            "ok": False,
+            "reason": f"policy_{age_decision['reason']}",
+            "age_seconds": None,
+            "max_age_seconds": None,
+        }
+    max_age_seconds = float(age_decision["max_age_seconds"])
     if not isinstance(snapshot, Mapping) or not snapshot:
-        return {"ok": False, "reason": "missing_canonical_account_snapshot", "age_seconds": None}
+        return {
+            "ok": False,
+            "reason": "missing_canonical_account_snapshot",
+            "age_seconds": None,
+            "max_age_seconds": max_age_seconds,
+        }
     raw = _first_timestamp(snapshot)
     if raw in (None, ""):
-        return {"ok": False, "reason": "missing_timestamp", "age_seconds": None}
+        return {
+            "ok": False,
+            "reason": "missing_timestamp",
+            "age_seconds": None,
+            "max_age_seconds": max_age_seconds,
+        }
     parsed, parse_reason = _parse_aware_utc(raw)
     if parsed is None:
-        return {"ok": False, "reason": parse_reason, "age_seconds": None}
+        return {
+            "ok": False,
+            "reason": parse_reason,
+            "age_seconds": None,
+            "max_age_seconds": max_age_seconds,
+        }
     clock = now if isinstance(now, datetime) else datetime.now(timezone.utc)
     if clock.tzinfo is None:
-        return {"ok": False, "reason": "naive_now_timestamp", "age_seconds": None}
+        return {
+            "ok": False,
+            "reason": "naive_now_timestamp",
+            "age_seconds": None,
+            "max_age_seconds": max_age_seconds,
+        }
     if parsed > clock + timedelta(seconds=1):
-        return {"ok": False, "reason": "future_timestamp", "age_seconds": None}
+        return {
+            "ok": False,
+            "reason": "future_timestamp",
+            "age_seconds": None,
+            "max_age_seconds": max_age_seconds,
+        }
     age = (clock - parsed).total_seconds()
-    if age > float(max_age_seconds):
-        return {"ok": False, "reason": "stale_timestamp", "age_seconds": age}
-    return {"ok": True, "reason": "fresh", "age_seconds": age}
+    if age > max_age_seconds:
+        return {
+            "ok": False,
+            "reason": "stale_timestamp",
+            "age_seconds": age,
+            "max_age_seconds": max_age_seconds,
+        }
+    return {
+        "ok": True,
+        "reason": "fresh",
+        "age_seconds": age,
+        "max_age_seconds": max_age_seconds,
+    }
+
+
+def proven_independent_pnl_evidence(
+    evidence: Any,
+    *,
+    now: datetime | None = None,
+    policy: Mapping[str, Any] | None = None,
+    policy_path: Path | str | None = None,
+) -> bool:
+    """True only with compatible Coinbase source plus freshness-gated timestamp."""
+    return _proven_independent_evidence(
+        evidence,
+        compatible_sources=COMPATIBLE_PNL_SOURCES,
+        now=now,
+        policy=policy,
+        policy_path=policy_path,
+    )
+
+
+def proven_independent_position_evidence(
+    evidence: Any,
+    *,
+    now: datetime | None = None,
+    policy: Mapping[str, Any] | None = None,
+    policy_path: Path | str | None = None,
+) -> bool:
+    """True only with compatible Coinbase source plus freshness-gated timestamp."""
+    return _proven_independent_evidence(
+        evidence,
+        compatible_sources=COMPATIBLE_POSITION_SOURCES,
+        now=now,
+        policy=policy,
+        policy_path=policy_path,
+    )
 
 
 def coinbase_balance_only_promotion_allowed(
@@ -46,6 +186,8 @@ def coinbase_balance_only_promotion_allowed(
     canonical_mode: Any,
     coinbase_validation: Mapping[str, Any] | None,
     now: datetime | None = None,
+    policy: Mapping[str, Any] | None = None,
+    policy_path: Path | str | None = None,
 ) -> dict[str, Any]:
     broker = str(selected_broker or "").strip().upper()
     mode = str(canonical_mode or "").strip().upper()
@@ -56,9 +198,7 @@ def coinbase_balance_only_promotion_allowed(
         broker_validation.get("validation_status") or validation.get("validation_status") or ""
     ).strip().upper()
     balances_loaded = _is_true(
-        snapshot.get("balances_loaded")
-        if snapshot
-        else None,
+        snapshot.get("balances_loaded") if snapshot else None,
         broker_validation.get("balances_loaded"),
         validation.get("balances_loaded"),
     )
@@ -66,14 +206,19 @@ def coinbase_balance_only_promotion_allowed(
     if broker != "COINBASE":
         reasons.append("selected_broker_not_coinbase")
     if mode not in ALLOWED_PROMOTION_MODES:
-        reasons.append("canonical_mode_not_live_read_family")
+        reasons.append("canonical_mode_not_live_read_only")
     if validation_status != "PASS":
         reasons.append("validation_status_not_pass")
     if not balances_loaded:
         reasons.append("balances_not_loaded")
     if not snapshot:
         reasons.append("canonical_account_snapshot_missing")
-    freshness = evaluate_canonical_broker_snapshot_freshness(snapshot, now=now)
+    freshness = evaluate_canonical_broker_snapshot_freshness(
+        snapshot,
+        now=now,
+        policy=policy,
+        policy_path=policy_path,
+    )
     if not freshness["ok"]:
         reasons.append(f"freshness_{freshness['reason']}")
     return {
@@ -95,9 +240,11 @@ def apply_coinbase_balance_only_promotion(
     selected_broker: Any,
     canonical_mode: Any,
     coinbase_validation: Mapping[str, Any] | None,
-    position_evidence: bool = False,
-    pnl_evidence: bool = False,
+    position_evidence: Any = False,
+    pnl_evidence: Any = False,
     now: datetime | None = None,
+    policy: Mapping[str, Any] | None = None,
+    policy_path: Path | str | None = None,
 ) -> dict[str, Any]:
     payload = dict(dashboard_payload) if isinstance(dashboard_payload, Mapping) else {}
     decision = coinbase_balance_only_promotion_allowed(
@@ -105,6 +252,8 @@ def apply_coinbase_balance_only_promotion(
         canonical_mode=canonical_mode,
         coinbase_validation=coinbase_validation,
         now=now,
+        policy=policy,
+        policy_path=policy_path,
     )
     payload["coinbase_balance_only_promotion"] = {
         "allowed": decision["allowed"],
@@ -160,7 +309,15 @@ def apply_coinbase_balance_only_promotion(
     payload["account_summary"] = account
 
     pnl = dict(_mapping(payload.get("pnl_summary")))
-    if not pnl_evidence:
+    retain_pnl = _retain_independent_evidence(
+        pnl_evidence,
+        fallback=pnl,
+        compatible_sources=COMPATIBLE_PNL_SOURCES,
+        now=now,
+        policy=policy,
+        policy_path=policy_path,
+    )
+    if not retain_pnl:
         for field in ("realized_pnl", "unrealized_pnl", "net_pnl", "account_equity"):
             current = pnl.get(field)
             pnl[field] = current if _is_number(current) else 0.0
@@ -169,15 +326,23 @@ def apply_coinbase_balance_only_promotion(
         pnl["availability_state"] = _UNAVAILABLE
     payload["pnl_summary"] = pnl
 
-    if not position_evidence:
-        position_state = dict(_mapping(payload.get("position_state")))
-        open_positions = dict(_mapping(payload.get("open_positions")))
+    position_state = dict(_mapping(payload.get("position_state")))
+    open_positions = dict(_mapping(payload.get("open_positions")))
+    retain_positions = _retain_independent_evidence(
+        position_evidence,
+        fallback=position_state,
+        compatible_sources=COMPATIBLE_POSITION_SOURCES,
+        now=now,
+        policy=policy,
+        policy_path=policy_path,
+    )
+    if not retain_positions:
         current_count = position_state.get("open_count", open_positions.get("total"))
         count = current_count if _is_int_like(current_count) else 0
         position_state["open_count"] = count
         position_state["open_count_availability"] = _UNAVAILABLE
         position_state["source"] = SOURCE_COINBASE_LIVE_READ_ONLY_BALANCE_ONLY
-        if not position_state.get("positions"):
+        if not isinstance(position_state.get("positions"), list):
             position_state["positions"] = []
         open_positions["total"] = count
         open_positions["total_availability"] = _UNAVAILABLE
@@ -185,6 +350,56 @@ def apply_coinbase_balance_only_promotion(
         payload["position_state"] = position_state
         payload["open_positions"] = open_positions
     return payload
+
+
+def _retain_independent_evidence(
+    candidate: Any,
+    *,
+    fallback: Mapping[str, Any],
+    compatible_sources: frozenset[str],
+    now: datetime | None,
+    policy: Mapping[str, Any] | None,
+    policy_path: Path | str | None,
+) -> bool:
+    if candidate is False or candidate is None:
+        return False
+    evidence = candidate if isinstance(candidate, Mapping) else fallback
+    if candidate is True:
+        evidence = fallback
+    return _proven_independent_evidence(
+        evidence,
+        compatible_sources=compatible_sources,
+        now=now,
+        policy=policy,
+        policy_path=policy_path,
+    )
+
+
+def _proven_independent_evidence(
+    evidence: Any,
+    *,
+    compatible_sources: frozenset[str],
+    now: datetime | None,
+    policy: Mapping[str, Any] | None,
+    policy_path: Path | str | None,
+) -> bool:
+    if evidence is True or evidence is False or evidence is None:
+        return False
+    if not isinstance(evidence, Mapping) or not evidence:
+        return False
+    source = str(evidence.get("source") or "").strip().upper()
+    if source not in compatible_sources:
+        return False
+    status = str(evidence.get("validation_status") or "").strip().upper()
+    if status and status != "PASS":
+        return False
+    freshness = evaluate_canonical_broker_snapshot_freshness(
+        evidence,
+        now=now,
+        policy=policy,
+        policy_path=policy_path,
+    )
+    return bool(freshness.get("ok"))
 
 
 def _canonical_account_snapshot(validation: Mapping[str, Any]) -> dict[str, Any]:
@@ -213,6 +428,8 @@ def _first_timestamp(snapshot: Mapping[str, Any]) -> Any:
         "as_of",
         "last_successful_sync",
         "validation_timestamp",
+        "pnl_timestamp",
+        "positions_timestamp",
     ):
         value = snapshot.get(key)
         if value not in (None, ""):
@@ -272,11 +489,32 @@ def _available_if_number(value: Any) -> str:
     return _AVAILABLE if _is_number(value) else _UNAVAILABLE
 
 
+def _positive_max_age(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        value = text
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed != parsed or parsed <= 0 or parsed == float("inf"):
+        return None
+    return parsed
+
+
 __all__ = [
     "ALLOWED_PROMOTION_MODES",
-    "BROKER_SNAPSHOT_MAX_AGE_SECONDS",
+    "COMPATIBLE_PNL_SOURCES",
+    "COMPATIBLE_POSITION_SOURCES",
     "SOURCE_COINBASE_LIVE_READ_ONLY_BALANCE_ONLY",
     "apply_coinbase_balance_only_promotion",
     "coinbase_balance_only_promotion_allowed",
     "evaluate_canonical_broker_snapshot_freshness",
+    "proven_independent_pnl_evidence",
+    "proven_independent_position_evidence",
+    "resolve_broker_snapshot_max_age_seconds",
 ]

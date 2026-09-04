@@ -113,6 +113,8 @@ from backend.runtime.coinbase_live_read_only_operational_validation import (
 )
 from backend.runtime.coinbase_live_read_only_balance_promotion import (
     apply_coinbase_balance_only_promotion,
+    proven_independent_pnl_evidence,
+    proven_independent_position_evidence,
 )
 from backend.runtime.oanda_live_read_only_operational_validation import (
     load_oanda_operational_validation_artifacts,
@@ -995,17 +997,43 @@ def build_launcher_frontend_state(
         # live, in-process, by this launcher session.
         "canonical_runtime_supervisor": get_supervisor_summary(),
     }
-    dashboard_payload = apply_coinbase_balance_only_promotion(
+    dashboard_payload = apply_launcher_coinbase_balance_only_promotion(
         dashboard_payload,
         selected_broker=broker,
         canonical_mode=canonical_mode,
         coinbase_validation=coinbase_validation if isinstance(coinbase_validation, dict) else {},
-        position_evidence=bool(positions),
-        pnl_evidence=any(
-            account.get(key) is not None for key in ("realized_pnl", "open_pnl", "total_pnl")
-        ),
     )
     return build_frontend_payload(dashboard_payload)
+
+
+def apply_launcher_coinbase_balance_only_promotion(
+    dashboard_payload: Dict[str, Any],
+    *,
+    selected_broker: Any,
+    canonical_mode: Any,
+    coinbase_validation: Dict[str, Any] | None,
+    now: datetime.datetime | None = None,
+) -> Dict[str, Any]:
+    """Promote Coinbase balances without treating launcher artifacts as P&L/position proof.
+
+    Legacy account P&L fields (including 0.0) and a non-empty positions list are not
+    independent evidence. P&L/positions stay UNAVAILABLE unless same-source Coinbase
+    provenance plus freshness-gated timestamps are explicitly established.
+    """
+    payload = dict(dashboard_payload) if isinstance(dashboard_payload, dict) else {}
+    pnl_summary = payload.get("pnl_summary") if isinstance(payload.get("pnl_summary"), dict) else {}
+    position_state = payload.get("position_state") if isinstance(payload.get("position_state"), dict) else {}
+    return apply_coinbase_balance_only_promotion(
+        payload,
+        selected_broker=selected_broker,
+        canonical_mode=canonical_mode,
+        coinbase_validation=coinbase_validation if isinstance(coinbase_validation, dict) else {},
+        pnl_evidence=pnl_summary if proven_independent_pnl_evidence(pnl_summary, now=now) else False,
+        position_evidence=(
+            position_state if proven_independent_position_evidence(position_state, now=now) else False
+        ),
+        now=now,
+    )
 
 
 def get_launcher_trade_summary_feed() -> Dict[str, Any]:
