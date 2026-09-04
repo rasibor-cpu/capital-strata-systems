@@ -81,6 +81,7 @@ FRONTEND_SECTIONS = (
     "runtime_status",
     "runtime_telemetry",
     "spot_asset_balances",
+    "canonical_broker_portfolio",
 )
 
 DATA_UNAVAILABLE = "DATA UNAVAILABLE"
@@ -146,7 +147,9 @@ class WebsocketDelta:
 def build_frontend_payload(
     dashboard_state: DashboardState | Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    dashboard_payload = _dashboard_payload(dashboard_state)
+    from backend.runtime.canonical_broker_portfolio import apply_canonical_broker_portfolio_bridge
+
+    dashboard_payload = apply_canonical_broker_portfolio_bridge(_dashboard_payload(dashboard_state))
     envelope = FrontendEnvelope()
 
     payload = {
@@ -213,6 +216,7 @@ def build_frontend_payload(
             "runtime_status": runtime_status(dashboard_payload),
             "runtime_telemetry": runtime_telemetry(dashboard_payload),
             "spot_asset_balances": spot_asset_balances(dashboard_payload),
+            "canonical_broker_portfolio": canonical_broker_portfolio(dashboard_payload),
         },
     }
 
@@ -406,6 +410,20 @@ def options_income(dashboard_payload: Mapping[str, Any] | None = None) -> dict[s
             "same_origin_api_expected": False,
             "provenance": "RUNTIME",
         }
+
+
+def canonical_broker_portfolio(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
+    from backend.runtime.canonical_broker_portfolio import (
+        apply_canonical_broker_portfolio_bridge,
+        empty_canonical_portfolio,
+    )
+
+    raw = _mapping(dashboard_payload.get("canonical_broker_portfolio"))
+    if not raw:
+        raw = apply_canonical_broker_portfolio_bridge(dashboard_payload).get("canonical_broker_portfolio")
+    if not isinstance(raw, Mapping) or not raw:
+        return empty_canonical_portfolio(reason="missing_canonical_broker_portfolio")
+    return dict(raw)
 
 
 def spot_asset_balances(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -2601,4 +2619,5 @@ __all__ = [
     "positions",
     "risk",
     "spot_asset_balances",
+    "canonical_broker_portfolio",
 ]

@@ -773,12 +773,88 @@ def _portfolio(
         or runtime_snapshot.get("source")
         or DATA_UNAVAILABLE
     )
+    canonical = _canonical_broker_portfolio(frontend_payload)
+    freshness_blocked = _canonical_freshness_blocked(canonical)
+    if freshness_blocked:
+        cash = "UNAVAILABLE"
+        equity = "UNAVAILABLE"
+        buying_power = "UNAVAILABLE"
+        available_free = "UNAVAILABLE"
+        realized = "UNAVAILABLE"
+        unrealized = "UNAVAILABLE"
+        net_pnl = "UNAVAILABLE"
+        open_count = "UNAVAILABLE"
+        holdings = []
+        next_maturity = "UNAVAILABLE"
+        session_pnl_by_instrument = "UNAVAILABLE"
+        maturity_expiry = {
+            "status": "UNAVAILABLE",
+            "profile": "UNAVAILABLE",
+            "next_maturity": "UNAVAILABLE",
+            "source": "UNAVAILABLE",
+        }
+        holding_rows: list[Any] = []
+        position_rows: list[Any] = []
+        margin_used = "UNAVAILABLE"
+        available_margin = "UNAVAILABLE"
+        portfolio_value = "UNAVAILABLE"
+    else:
+        cash = _overlay_canonical_metric(cash, canonical, "cash")
+        equity = _overlay_canonical_metric(equity, canonical, "equity")
+        buying_power = _overlay_canonical_metric(buying_power, canonical, "buying_power")
+        available_free = _overlay_canonical_metric(available_free, canonical, "available_balance")
+        if available_free == "UNAVAILABLE":
+            available_free = _overlay_canonical_metric(available_free, canonical, "margin_available")
+        realized = _overlay_canonical_metric(realized, canonical, "realized_pnl")
+        unrealized = _overlay_canonical_metric(unrealized, canonical, "unrealized_pnl")
+        net_pnl = _overlay_canonical_metric(net_pnl, canonical, "session_pnl")
+        open_count = _overlay_canonical_metric(open_count, canonical, "open_positions")
+        next_maturity = _canonical_metric_value(canonical, "next_maturity")
+        if next_maturity in (None, "", "UNAVAILABLE"):
+            next_maturity = (canonical.get("maturity") or {}).get("next_maturity") or "UNAVAILABLE"
+        session_pnl_by_instrument = _canonical_session_pnl(canonical)
+        maturity_expiry = _canonical_maturity(canonical)
+        holding_rows = [
+            row
+            for row in canonical.get("exposures") or []
+            if isinstance(row, Mapping) and row.get("exposure_kind") == "HOLDING"
+        ]
+        position_rows = [
+            row
+            for row in canonical.get("exposures") or []
+            if isinstance(row, Mapping) and row.get("exposure_kind") == "POSITION"
+        ]
+        if holding_rows:
+            holdings = holding_rows
+        if position_rows:
+            holdings = position_rows if not holding_rows else holdings
+        margin_used = _overlay_canonical_metric(
+            _honest_metric(
+                account.get("margin_used"),
+                availability=account.get("margin_used_availability"),
+            ),
+            canonical,
+            "margin_used",
+        )
+        available_margin = _overlay_canonical_metric(
+            _honest_metric(
+                account.get("available_margin"),
+                availability=account.get("available_margin_availability"),
+            ),
+            canonical,
+            "margin_available",
+        )
+        portfolio_value = (
+            _overlay_canonical_metric(equity, canonical, "portfolio_value")
+            if _canonical_metric_available(canonical, "portfolio_value")
+            else equity
+        )
     return {
         "equity": equity,
         "cash": cash,
         "buying_power": buying_power,
         "available_free": available_free,
-        "portfolio_value": equity,
+        "portfolio_value": portfolio_value,
         "session_pnl": net_pnl,
         "total_exposure": _honest_metric(
             runtime_portfolio.get("exposure"),
@@ -795,30 +871,21 @@ def _portfolio(
         "unrealized_pnl": unrealized,
         "net_pnl": net_pnl,
         "open_positions": open_count,
-        "positions": holdings,
-        "session_pnl_by_instrument": "UNAVAILABLE",
-        "holdings": holdings if holdings else "UNAVAILABLE",
+        "positions": position_rows or holdings,
+        "session_pnl_by_instrument": session_pnl_by_instrument,
+        "holdings": holding_rows if holding_rows else (holdings if holdings else "UNAVAILABLE"),
         "spot_asset_balances": _spot_asset_balances(frontend_payload),
+        "canonical_broker_portfolio": canonical,
+        "next_maturity": next_maturity if next_maturity not in (None, "") else "UNAVAILABLE",
         "liquidity_margin": {
             "cash": cash,
             "available_free": available_free,
             "buying_power": buying_power,
-            "margin_used": _honest_metric(
-                account.get("margin_used"),
-                availability=account.get("margin_used_availability"),
-            ),
-            "available_margin": _honest_metric(
-                account.get("available_margin"),
-                availability=account.get("available_margin_availability"),
-            ),
+            "margin_used": margin_used,
+            "available_margin": available_margin,
             "source": source,
         },
-        "maturity_expiry": {
-            "status": "UNAVAILABLE",
-            "profile": "UNAVAILABLE",
-            "next_maturity": "UNAVAILABLE",
-            "source": "UNAVAILABLE",
-        },
+        "maturity_expiry": maturity_expiry,
         "execution_status": execution_payload.get("execution_state", DATA_UNAVAILABLE),
         "operating_context": {
             "runtime_mode": frontend_payload.get("resolved_mode") or runtime_snapshot.get("runtime_mode") or DATA_UNAVAILABLE,
@@ -836,24 +903,126 @@ def _portfolio(
         if _unavailable_token(pnl.get("availability_state"))
         else runtime_portfolio.get("pnl_by_asset", pnl.get("asset_unrealized_pnl", {})),
         "pnl_by_strategy": DATA_UNAVAILABLE,
-        "collateral_utilization": _honest_metric(
-            account.get("margin_used"),
-            availability=account.get("margin_used_availability"),
-        ),
+        "collateral_utilization": margin_used,
         "capital_efficiency": DATA_UNAVAILABLE,
         "drawdown": _honest_metric(runtime_portfolio.get("drawdown")),
         "performance_attribution": DATA_UNAVAILABLE,
-        "cash_availability": account.get("cash_balance_availability", "UNAVAILABLE" if cash == "UNAVAILABLE" else "AVAILABLE"),
-        "equity_availability": account.get("total_equity_availability", "UNAVAILABLE" if equity == "UNAVAILABLE" else "AVAILABLE"),
-        "buying_power_availability": account.get("buying_power_availability", "UNAVAILABLE" if buying_power == "UNAVAILABLE" else "AVAILABLE"),
-        "realized_pnl_availability": pnl.get("realized_pnl_availability", "UNAVAILABLE" if realized == "UNAVAILABLE" else "AVAILABLE"),
-        "unrealized_pnl_availability": pnl.get("unrealized_pnl_availability", "UNAVAILABLE" if unrealized == "UNAVAILABLE" else "AVAILABLE"),
-        "net_pnl_availability": pnl.get("net_pnl_availability", "UNAVAILABLE" if net_pnl == "UNAVAILABLE" else "AVAILABLE"),
-        "open_positions_availability": positions.get("total_availability")
-        or positions.get("open_count_availability")
-        or ("UNAVAILABLE" if open_count == "UNAVAILABLE" else "AVAILABLE"),
+        "cash_availability": (
+            "UNAVAILABLE"
+            if freshness_blocked
+            else account.get("cash_balance_availability", "UNAVAILABLE" if cash == "UNAVAILABLE" else "AVAILABLE")
+        ),
+        "equity_availability": (
+            "UNAVAILABLE"
+            if freshness_blocked
+            else account.get("total_equity_availability", "UNAVAILABLE" if equity == "UNAVAILABLE" else "AVAILABLE")
+        ),
+        "buying_power_availability": (
+            "UNAVAILABLE"
+            if freshness_blocked
+            else account.get("buying_power_availability", "UNAVAILABLE" if buying_power == "UNAVAILABLE" else "AVAILABLE")
+        ),
+        "realized_pnl_availability": (
+            "UNAVAILABLE"
+            if freshness_blocked
+            else pnl.get("realized_pnl_availability", "UNAVAILABLE" if realized == "UNAVAILABLE" else "AVAILABLE")
+        ),
+        "unrealized_pnl_availability": (
+            "UNAVAILABLE"
+            if freshness_blocked
+            else pnl.get("unrealized_pnl_availability", "UNAVAILABLE" if unrealized == "UNAVAILABLE" else "AVAILABLE")
+        ),
+        "net_pnl_availability": (
+            "UNAVAILABLE"
+            if freshness_blocked
+            else pnl.get("net_pnl_availability", "UNAVAILABLE" if net_pnl == "UNAVAILABLE" else "AVAILABLE")
+        ),
+        "open_positions_availability": (
+            "UNAVAILABLE"
+            if freshness_blocked
+            else (
+                "AVAILABLE"
+                if _canonical_metric_available(canonical, "open_positions")
+                else positions.get("total_availability")
+                or positions.get("open_count_availability")
+                or ("UNAVAILABLE" if open_count == "UNAVAILABLE" else "AVAILABLE")
+            )
+        ),
         "source": source,
         "availability_state": account.get("availability_state") or pnl.get("availability_state") or "UNAVAILABLE",
+    }
+
+
+def _canonical_freshness_blocked(canonical: Mapping[str, Any]) -> bool:
+    if not isinstance(canonical, Mapping) or not canonical:
+        return False
+    status = str(canonical.get("status") or "").strip().upper()
+    if status == "AVAILABLE":
+        return False
+    reason = str(canonical.get("reason") or "").strip().lower()
+    return reason.startswith("freshness_")
+
+
+def _canonical_broker_portfolio(frontend_payload: Mapping[str, Any]) -> dict[str, Any]:
+    from backend.runtime.canonical_broker_portfolio import empty_canonical_portfolio
+
+    sections = (
+        frontend_payload.get("sections")
+        if isinstance(frontend_payload.get("sections"), Mapping)
+        else {}
+    )
+    candidate = None
+    if isinstance(sections, Mapping):
+        candidate = sections.get("canonical_broker_portfolio")
+    if not isinstance(candidate, Mapping):
+        candidate = frontend_payload.get("canonical_broker_portfolio")
+    if not isinstance(candidate, Mapping) or not candidate:
+        return empty_canonical_portfolio(reason="missing_canonical_broker_portfolio")
+    return dict(candidate)
+
+
+def _canonical_metric_available(canonical: Mapping[str, Any], name: str) -> bool:
+    metrics = canonical.get("metrics") if isinstance(canonical.get("metrics"), Mapping) else {}
+    metric = metrics.get(name) if isinstance(metrics.get(name), Mapping) else {}
+    return str(metric.get("availability") or "").upper() == "AVAILABLE"
+
+
+def _canonical_metric_value(canonical: Mapping[str, Any], name: str) -> Any:
+    metrics = canonical.get("metrics") if isinstance(canonical.get("metrics"), Mapping) else {}
+    metric = metrics.get(name) if isinstance(metrics.get(name), Mapping) else {}
+    if str(metric.get("availability") or "").upper() != "AVAILABLE":
+        return "UNAVAILABLE"
+    return metric.get("value")
+
+
+def _overlay_canonical_metric(existing: Any, canonical: Mapping[str, Any], name: str) -> Any:
+    if _canonical_metric_available(canonical, name):
+        return _canonical_metric_value(canonical, name)
+    return existing
+
+
+def _canonical_session_pnl(canonical: Mapping[str, Any]) -> Any:
+    section = canonical.get("session_pnl_by_instrument")
+    if isinstance(section, Mapping) and str(section.get("status") or "").upper() == "AVAILABLE" and section.get("rows"):
+        return list(section.get("rows") or [])
+    return "UNAVAILABLE"
+
+
+def _canonical_maturity(canonical: Mapping[str, Any]) -> dict[str, Any]:
+    section = canonical.get("maturity") if isinstance(canonical.get("maturity"), Mapping) else {}
+    if str(section.get("status") or "").upper() == "AVAILABLE" and section.get("rows"):
+        return {
+            "status": "AVAILABLE",
+            "profile": section.get("profile") or "BROKER_REPORTED_EXPIRY",
+            "next_maturity": section.get("next_maturity") or "UNAVAILABLE",
+            "rows": list(section.get("rows") or []),
+            "source": section.get("source") or "UNAVAILABLE",
+        }
+    return {
+        "status": "UNAVAILABLE",
+        "profile": "UNAVAILABLE",
+        "next_maturity": "UNAVAILABLE",
+        "source": "UNAVAILABLE",
     }
 
 

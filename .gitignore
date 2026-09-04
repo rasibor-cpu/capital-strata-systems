@@ -66,6 +66,8 @@ backend/runtime/*
 !backend/runtime/coinbase_readiness.py
 !backend/runtime/coinbase_live_adapter.py
 !backend/runtime/coinbase_live_read_only_operational_validation.py
+!backend/runtime/binance_live_read_only_operational_validation.py
+!backend/runtime/canonical_broker_portfolio.py
 !backend/runtime/coinbase_live_read_only_balance_promotion.py
 !backend/runtime/coinbase_spot_asset_balances.py
 !backend/runtime/live_execution_authority.py
