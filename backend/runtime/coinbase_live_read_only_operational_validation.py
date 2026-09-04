@@ -287,6 +287,10 @@ class CoinbaseLiveReadOnlyOperationalValidator:
             "execution_allowed": False,
             "canonical_account_snapshot": account_snapshot.to_dict(),
             "account_snapshot": account_snapshot.to_dict(),
+            "account_asset_balances": _account_asset_balances_from_validation_inputs(
+                account=account_plain,
+                balances=balances,
+            ),
         }
         server_time_value = "NOT_AVAILABLE"
         plain_server_time = _plain(server_time)
@@ -501,6 +505,35 @@ def _value_present(value: Any) -> bool:
     if isinstance(value, dict):
         return bool(value)
     return True
+
+
+def _account_asset_balances_from_validation_inputs(
+    *,
+    account: Mapping[str, Any],
+    balances: Any,
+) -> list[dict[str, Any]]:
+    """Persist already-read account-balance rows. Do not invent hold/total/value."""
+    rows: list[dict[str, Any]] = []
+    candidates = balances if isinstance(balances, list) else []
+    account_id = account.get("account_id") if isinstance(account, Mapping) else None
+    for raw in candidates:
+        if not isinstance(raw, Mapping):
+            continue
+        currency = raw.get("currency")
+        if currency in (None, ""):
+            continue
+        if "available_balance" not in raw and "available" not in raw:
+            continue
+        available = raw.get("available_balance", raw.get("available"))
+        row: dict[str, Any] = {
+            "currency": currency,
+            "available_balance": available,
+        }
+        raw_account_id = raw.get("account_id") or account_id
+        if raw_account_id not in (None, "", "UNKNOWN", "UNKNOWN_ID", "FALLBACK-COINBASE"):
+            row["account_id"] = raw_account_id
+        rows.append(row)
+    return rows
 
 
 def _sensitive_key(key: str) -> bool:

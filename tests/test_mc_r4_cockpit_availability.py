@@ -21,7 +21,8 @@ REQUIRED_LABELS = (
     "Session P&L",
     "Execution Status",
     "Liquidity / Margin",
-    "Current Holdings / Positions",
+    "Current Holdings / Exposure",
+    "Account Asset Balances",
     "Maturity / Expiry Profile",
 )
 

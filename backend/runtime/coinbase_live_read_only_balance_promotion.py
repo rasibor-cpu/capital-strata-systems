@@ -264,7 +264,15 @@ def apply_coinbase_balance_only_promotion(
         "balances_loaded": decision["balances_loaded"],
     }
     if not decision["allowed"]:
-        return payload
+        from backend.runtime.coinbase_spot_asset_balances import attach_spot_asset_balances
+
+        return attach_spot_asset_balances(
+            payload,
+            decision=decision,
+            coinbase_validation=coinbase_validation,
+            selected_broker=selected_broker,
+            canonical_mode=canonical_mode,
+        )
 
     snapshot = decision["snapshot"]
     account = dict(_mapping(payload.get("account_summary")))
@@ -349,7 +357,15 @@ def apply_coinbase_balance_only_promotion(
         open_positions["source"] = SOURCE_COINBASE_LIVE_READ_ONLY_BALANCE_ONLY
         payload["position_state"] = position_state
         payload["open_positions"] = open_positions
-    return payload
+    from backend.runtime.coinbase_spot_asset_balances import attach_spot_asset_balances
+
+    return attach_spot_asset_balances(
+        payload,
+        decision=decision,
+        coinbase_validation=coinbase_validation,
+        selected_broker=selected_broker,
+        canonical_mode=canonical_mode,
+    )
 
 
 def _retain_independent_evidence(
