@@ -80,6 +80,7 @@ FRONTEND_SECTIONS = (
     "options_income",
     "runtime_status",
     "runtime_telemetry",
+    "spot_asset_balances",
 )
 
 DATA_UNAVAILABLE = "DATA UNAVAILABLE"
@@ -211,6 +212,7 @@ def build_frontend_payload(
             "options_income": options_income(dashboard_payload),
             "runtime_status": runtime_status(dashboard_payload),
             "runtime_telemetry": runtime_telemetry(dashboard_payload),
+            "spot_asset_balances": spot_asset_balances(dashboard_payload),
         },
     }
 
@@ -404,6 +406,93 @@ def options_income(dashboard_payload: Mapping[str, Any] | None = None) -> dict[s
             "same_origin_api_expected": False,
             "provenance": "RUNTIME",
         }
+
+
+def spot_asset_balances(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Pass through the Coinbase account-asset balance contract. Quantity only."""
+    from backend.runtime.coinbase_spot_asset_balances import (
+        SECTION_KIND,
+        SECTION_LABEL,
+        unavailable_spot_asset_balances,
+    )
+
+    raw = _mapping(dashboard_payload.get("spot_asset_balances"))
+    if not raw:
+        return unavailable_spot_asset_balances(reason="missing_spot_asset_balances")
+    status = str(raw.get("status") or "UNAVAILABLE").strip().upper()
+    if status not in {"AVAILABLE", "UNAVAILABLE"}:
+        status = "UNAVAILABLE"
+    rows: list[dict[str, Any]] = []
+    for item in _list(raw.get("rows")):
+        row = _mapping(item)
+        if not row:
+            continue
+        available = _optional_quantity(row.get("available_quantity"))
+        held = _optional_quantity(row.get("held_quantity"))
+        total = _optional_quantity(row.get("total_quantity"))
+        rows.append(
+            {
+                "asset": str(row.get("asset") or "").strip().upper() or "UNAVAILABLE",
+                "available_quantity": available,
+                "available_quantity_availability": _quantity_availability(
+                    available, row.get("available_quantity_availability")
+                ),
+                "held_quantity": held,
+                "held_quantity_availability": _quantity_availability(
+                    held, row.get("held_quantity_availability")
+                ),
+                "total_quantity": total,
+                "total_quantity_availability": _quantity_availability(
+                    total, row.get("total_quantity_availability")
+                ),
+                "total_quantity_provenance": str(
+                    row.get("total_quantity_provenance") or "UNAVAILABLE"
+                ),
+                "market_value": None,
+                "market_value_availability": "UNAVAILABLE",
+                "availability": str(row.get("availability") or "UNAVAILABLE").strip().upper(),
+                "provenance": str(row.get("provenance") or raw.get("source") or "UNAVAILABLE"),
+                **(
+                    {"account_id": row.get("account_id")}
+                    if row.get("account_id") not in (None, "")
+                    else {}
+                ),
+            }
+        )
+    if status == "AVAILABLE" and not rows:
+        status = "UNAVAILABLE"
+    return {
+        "status": status,
+        "source": str(raw.get("source") or "UNAVAILABLE"),
+        "timestamp": str(raw.get("timestamp") or "UNAVAILABLE"),
+        "section_kind": str(raw.get("section_kind") or SECTION_KIND),
+        "section_label": str(raw.get("section_label") or SECTION_LABEL),
+        "market_value_availability": "UNAVAILABLE",
+        "rows": rows,
+        "reason": str(raw.get("reason") or ("ok" if status == "AVAILABLE" else "UNAVAILABLE")),
+        "freshness": _mapping(raw.get("freshness")),
+        "reasons": list(raw.get("reasons") or []),
+    }
+
+
+def _optional_quantity(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, str) and value.strip().upper() in _UNAVAILABLE_TOKENS:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _quantity_availability(value: Any, explicit: Any = None) -> str:
+    if explicit not in (None, ""):
+        token = str(explicit).strip().upper().replace(" ", "_")
+        if token == "AVAILABLE":
+            return "AVAILABLE"
+        return "UNAVAILABLE"
+    return "AVAILABLE" if value is not None else "UNAVAILABLE"
 
 
 def account_summary(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -2511,4 +2600,5 @@ __all__ = [
     "pnl_summary",
     "positions",
     "risk",
+    "spot_asset_balances",
 ]

@@ -798,6 +798,7 @@ def _portfolio(
         "positions": holdings,
         "session_pnl_by_instrument": "UNAVAILABLE",
         "holdings": holdings if holdings else "UNAVAILABLE",
+        "spot_asset_balances": _spot_asset_balances(frontend_payload),
         "liquidity_margin": {
             "cash": cash,
             "available_free": available_free,
@@ -853,6 +854,46 @@ def _portfolio(
         or ("UNAVAILABLE" if open_count == "UNAVAILABLE" else "AVAILABLE"),
         "source": source,
         "availability_state": account.get("availability_state") or pnl.get("availability_state") or "UNAVAILABLE",
+    }
+
+
+def _spot_asset_balances(frontend_payload: Mapping[str, Any]) -> dict[str, Any]:
+    from backend.runtime.coinbase_spot_asset_balances import (
+        SECTION_KIND,
+        SECTION_LABEL,
+        unavailable_spot_asset_balances,
+    )
+
+    sections = (
+        frontend_payload.get("sections")
+        if isinstance(frontend_payload.get("sections"), Mapping)
+        else {}
+    )
+    candidate = None
+    if isinstance(sections, Mapping):
+        candidate = sections.get("spot_asset_balances")
+    if not isinstance(candidate, Mapping):
+        candidate = frontend_payload.get("spot_asset_balances")
+    if not isinstance(candidate, Mapping) or not candidate:
+        return unavailable_spot_asset_balances(reason="missing_spot_asset_balances")
+    status = str(candidate.get("status") or "UNAVAILABLE").strip().upper()
+    rows = candidate.get("rows") if isinstance(candidate.get("rows"), list) else []
+    if status != "AVAILABLE":
+        status = "UNAVAILABLE"
+        rows = []
+    return {
+        "status": status,
+        "source": str(candidate.get("source") or "UNAVAILABLE"),
+        "timestamp": str(candidate.get("timestamp") or "UNAVAILABLE"),
+        "section_kind": str(candidate.get("section_kind") or SECTION_KIND),
+        "section_label": str(candidate.get("section_label") or SECTION_LABEL),
+        "market_value_availability": "UNAVAILABLE",
+        "rows": list(rows),
+        "reason": str(candidate.get("reason") or ("ok" if status == "AVAILABLE" else "UNAVAILABLE")),
+        "freshness": dict(candidate.get("freshness"))
+        if isinstance(candidate.get("freshness"), Mapping)
+        else {},
+        "reasons": list(candidate.get("reasons") or []),
     }
 
 
