@@ -499,10 +499,14 @@ def _platform(frontend: Mapping[str, Any], broker: Mapping[str, Any], certificat
         "product": "CSS Mission Control",
         "platform_status": _first_status(runtime_snapshot.get("runtime_health"), certification.get("certification"), runtime_broker.get("broker_health"), "UNAVAILABLE"),
         "runtime_health": runtime_snapshot.get("runtime_health", "UNAVAILABLE"),
-        "runtime_mode": runtime_snapshot.get("runtime_mode")
-        or frontend.get("runtime_mode")
-        or frontend.get("resolved_mode")
-        or "DISABLED",
+        "runtime_mode": "DISABLED"
+        if _runtime_unavailable(runtime_snapshot)
+        else (
+            runtime_snapshot.get("runtime_mode")
+            or frontend.get("runtime_mode")
+            or frontend.get("resolved_mode")
+            or "DISABLED"
+        ),
         "engine_mode": runtime_snapshot.get("engine_mode", "UNAVAILABLE"),
         "cycle": (
             (frontend.get("sections") or {}).get("runtime_telemetry", {}).get("display_cycle")
