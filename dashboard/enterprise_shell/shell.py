@@ -137,10 +137,13 @@ def render_mobile_enterprise_nav(
     if can_users:
         more_items.append(("users", "Users and Governance", ROUTES.mobile_users))
 
-    more_links = "".join(
-        f'<li><a href="{_esc(href)}"{" aria-current=\"page\"" if active == key else ""}>{_esc(label)}</a></li>'
-        for key, label, href in more_items
-    )
+    more_links_parts: list[str] = []
+    for key, label, href in more_items:
+        current = ' aria-current="page"' if active == key else ""
+        more_links_parts.append(
+            f'<li><a href="{_esc(href)}"{current}>{_esc(label)}</a></li>'
+        )
+    more_links = "".join(more_links_parts)
     more_panel = render_disclosure(
         panel_id="css-more-menu",
         title="More modules",
