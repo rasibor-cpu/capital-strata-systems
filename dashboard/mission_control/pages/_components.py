@@ -15,7 +15,12 @@ def page_header(title: str, description: str) -> str:
     )
 
 
-def metric_grid(items: Sequence[tuple[str, Any, str]]) -> str:
+def metric_grid(
+    items: Sequence[tuple[str, Any, str]],
+    *,
+    css_class: str = "mc-metric-grid",
+    aria_label: str | None = None,
+) -> str:
     cards = []
     for label, value, status in items:
         cards.append(
@@ -25,7 +30,8 @@ def metric_grid(items: Sequence[tuple[str, Any, str]]) -> str:
             f'<em class="mc-status {status_class(status)}">{escape(status)}</em>'
             "</article>"
         )
-    return f'<section class="mc-metric-grid">{"".join(cards)}</section>'
+    aria = f' aria-label="{escape(aria_label)}"' if aria_label else ""
+    return f'<section class="{escape(css_class)}"{aria}>{"".join(cards)}</section>'
 
 
 def detail_table(title: str, rows: Mapping[str, Any] | Sequence[Mapping[str, Any]]) -> str:
@@ -50,7 +56,13 @@ def detail_table(title: str, rows: Mapping[str, Any] | Sequence[Mapping[str, Any
             for row in normalized
         )
         body = header + f"<tbody>{body_rows}</tbody>" if body_rows else '<tbody><tr><td>No evidence available.</td></tr></tbody>'
-    return f'<section class="mc-panel"><h2>{escape(title)}</h2><table>{body}</table></section>'
+    heading = f"<h2>{escape(title)}</h2>" if title else ""
+    return (
+        f'<section class="mc-panel">'
+        f"{heading}"
+        f'<div class="mc-table-wrap"><table>{body}</table></div>'
+        "</section>"
+    )
 
 
 def split_panels(*panels: str) -> str:
@@ -69,14 +81,24 @@ def escape(value: Any) -> str:
     return html.escape(str(value), quote=True)
 
 
+def _status_tokens(value: Any) -> frozenset[str]:
+    text = str(value or "").strip().lower().replace("_", "-").replace("/", "-")
+    parts = [part for part in text.replace(" ", "-").split("-") if part]
+    return frozenset(parts)
+
+
 def status_class(value: Any) -> str:
-    text = str(value or "").strip().lower().replace(" ", "-")
-    if any(token in text for token in ("green", "pass", "ready", "normal", "available", "ok")):
-        return "good"
-    if any(token in text for token in ("amber", "warning", "monitor")):
-        return "warn"
-    if any(token in text for token in ("red", "fail", "blocked", "unavailable", "disabled")):
+    tokens = _status_tokens(value)
+    if not tokens:
+        return "neutral"
+    if tokens & {"unavailable", "disabled", "blocked", "red", "fail", "failed", "error"}:
         return "bad"
+    if "not" in tokens and "ready" in tokens:
+        return "bad"
+    if tokens & {"amber", "warning", "monitor", "warn"}:
+        return "warn"
+    if tokens & {"green", "pass", "ready", "normal", "available", "ok", "good"}:
+        return "good"
     return "neutral"
 
 

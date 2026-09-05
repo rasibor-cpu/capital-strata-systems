@@ -70,7 +70,7 @@ def test_mission_control_navigation_does_not_render_icon_registry_names() -> Non
             "safety": {},
         }
     )
-    sidebar = re.search(r'<aside class="mc-sidebar">(.*?)</aside>', html, re.S)
+    sidebar = re.search(r'<aside[^>]*class="mc-sidebar"[^>]*>(.*?)</aside>', html, re.S)
     assert sidebar
     visible = re.sub(r"<[^>]+>", " ", sidebar.group(1))
     for token in (
