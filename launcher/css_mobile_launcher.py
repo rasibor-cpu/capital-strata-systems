@@ -20,6 +20,7 @@ from dashboard.enterprise_shell.nav_contract import (
     SPA_SHELL_CACHE,
     build_enterprise_navigation_contract,
 )
+from backend.brokers.questrade.mission_control_cache import QuestradeMissionControlCache
 from backend.brokers.account_balance_contract import build_broker_balance_summary
 from backend.common.branding import get_brand_service
 from backend.monitoring.alert_repository import (
@@ -164,6 +165,25 @@ BRAND = get_brand_service()
 launcher_router = APIRouter()
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
 _LAUNCHER_RUNTIME_CERTIFICATION_SNAPSHOT_CACHE: Dict[str, Dict[str, Any]] = {}
+
+_QUESTRADE_MISSION_CONTROL_CACHE = QuestradeMissionControlCache()
+
+
+def apply_launcher_questrade_read_only_cache(dashboard_payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Overlay fresh cached Questrade read-only evidence without altering runtime authority."""
+    payload = dict(dashboard_payload) if isinstance(dashboard_payload, dict) else {}
+    snapshot = _QUESTRADE_MISSION_CONTROL_CACHE.read()
+    if not snapshot:
+        return payload
+    payload["selected_broker"] = "QUESTRADE"
+    payload["canonical_mode"] = "LIVE_READ_ONLY"
+    payload["questrade"] = dict(snapshot)
+    payload["execution_allowed"] = False
+    payload["live_trading_blocked"] = True
+    payload["broker_execution_armed"] = False
+    payload["advisory_only"] = True
+    return payload
+
 
 
 def _utc_iso_z() -> str:
@@ -1003,6 +1023,7 @@ def build_launcher_frontend_state(
         canonical_mode=canonical_mode,
         coinbase_validation=coinbase_validation if isinstance(coinbase_validation, dict) else {},
     )
+    dashboard_payload = apply_launcher_questrade_read_only_cache(dashboard_payload)
     return build_frontend_payload(dashboard_payload)
 
 
