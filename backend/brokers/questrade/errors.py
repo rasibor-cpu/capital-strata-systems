@@ -48,6 +48,14 @@ class UnsafeApiServerError(QuestradeAdvisoryError):
     code = "API_SERVER_REJECTED"
 
 
+class TokenStoreError(QuestradeAdvisoryError):
+    code = "QUESTRADE_TOKEN_STORE_UNAVAILABLE"
+
+
+class WriteMethodBlockedError(QuestradeAdvisoryError):
+    code = "QUESTRADE_WRITE_METHOD_BLOCKED"
+
+
 def sanitize_error_message(exc: BaseException) -> str:
     return f"{type(exc).__name__}:[redacted]"
 
@@ -61,6 +69,8 @@ __all__ = [
     "QuestradeAdvisoryError",
     "RateLimitError",
     "SymbolUnsupportedError",
+    "TokenStoreError",
     "UnsafeApiServerError",
+    "WriteMethodBlockedError",
     "sanitize_error_message",
 ]
