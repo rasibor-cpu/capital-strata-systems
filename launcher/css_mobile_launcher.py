@@ -21,6 +21,7 @@ from dashboard.enterprise_shell.nav_contract import (
     build_enterprise_navigation_contract,
 )
 from backend.brokers.questrade.mission_control_cache import QuestradeMissionControlCache
+from backend.brokers.questrade.mission_control_activation import QuestradeMissionControlActivationCoordinator
 from backend.brokers.account_balance_contract import build_broker_balance_summary
 from backend.common.branding import get_brand_service
 from backend.monitoring.alert_repository import (
@@ -167,6 +168,7 @@ templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "t
 _LAUNCHER_RUNTIME_CERTIFICATION_SNAPSHOT_CACHE: Dict[str, Dict[str, Any]] = {}
 
 _QUESTRADE_MISSION_CONTROL_CACHE = QuestradeMissionControlCache()
+_QUESTRADE_MISSION_CONTROL_ACTIVATION = QuestradeMissionControlActivationCoordinator(_QUESTRADE_MISSION_CONTROL_CACHE)
 
 
 def apply_launcher_questrade_read_only_cache(dashboard_payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -5222,6 +5224,31 @@ async def mobile_control_resume(request: Request):
             {"ok": True, "trading_paused": state["trading_paused"], "timestamp": state["timestamp"]}
         )
     return RedirectResponse(_BROWSER_REDIRECT_TARGET, status_code=303)
+
+def _questrade_refresh_token_store_path() -> str:
+    root = os.environ.get("LOCALAPPDATA", "").strip()
+    if not root:
+        return ""
+    return os.path.join(root, "CapitalStrataSystems", "secrets", "questrade_refresh_token.dpapi")
+
+
+@launcher_router.post("/api/v1/questrade/mission-control/activate")
+async def questrade_mission_control_activate(request: Request):
+    from backend.security.mutation_guard import require_mutation_auth
+    require_mutation_auth(request)
+    path = _questrade_refresh_token_store_path()
+    if not path:
+        raise HTTPException(status_code=503, detail="QUESTRADE_TOKEN_PATH_UNAVAILABLE")
+    result = _QUESTRADE_MISSION_CONTROL_ACTIVATION.activate(refresh_token_store_path=path)
+    return JSONResponse(result)
+
+
+@launcher_router.post("/api/v1/questrade/mission-control/refresh")
+async def questrade_mission_control_refresh(request: Request):
+    from backend.security.mutation_guard import require_mutation_auth
+    require_mutation_auth(request)
+    return JSONResponse(_QUESTRADE_MISSION_CONTROL_ACTIVATION.refresh())
+
 
 def _mission_control_registry_source() -> Dict[str, Any]:
     # Phase 172A: build_launcher_frontend_state() reads the canonical
