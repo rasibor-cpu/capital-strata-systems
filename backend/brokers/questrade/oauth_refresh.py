@@ -189,15 +189,25 @@ class QuestradeOAuthFormTransportImpl:
                 raw = response.read(_MAX_BODY_BYTES + 1)
                 status = int(getattr(response, "status", 200))
         except urllib.error.HTTPError as exc:
-            if int(exc.code) in {301, 302, 303, 307, 308}:
+            status = int(exc.code)
+            if status in {301, 302, 303, 307, 308}:
                 raise QuestradeAdvisoryError(
                     "QUESTRADE_OAUTH_REDIRECT_REJECTED",
                     code="QUESTRADE_OAUTH_REDIRECT_REJECTED",
                 ) from None
-            raise QuestradeAdvisoryError(
-                "QUESTRADE_OAUTH_TRANSPORT_FAILED",
-                code="QUESTRADE_OAUTH_TRANSPORT_FAILED",
-            ) from None
+            raw = exc.read(_MAX_BODY_BYTES + 1)
+            if len(raw) > _MAX_BODY_BYTES:
+                raise QuestradeAdvisoryError(
+                    "QUESTRADE_OAUTH_BODY_TOO_LARGE",
+                    code="QUESTRADE_OAUTH_BODY_TOO_LARGE",
+                ) from None
+            try:
+                parsed = json.loads(raw.decode("utf-8")) if raw else {}
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                parsed = {}
+            if not isinstance(parsed, dict):
+                parsed = {}
+            return QuestradeOAuthHttpResponse(status_code=status, payload=parsed)
         except QuestradeAdvisoryError:
             raise
         except Exception:

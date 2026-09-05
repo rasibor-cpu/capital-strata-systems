@@ -545,3 +545,51 @@ def test_repository_relative_secret_path_rejected() -> None:
     with pytest.raises(Exception) as exc:
         WindowsDpapiRefreshTokenStore("secrets/questrade_refresh_token.dpapi", protect_backend=_FakeDpapi())
     assert "ABSOLUTE" in str(getattr(exc.value, "code", exc.value)) or "ABSOLUTE" in str(exc.value)
+
+
+def test_25_production_oauth_transport_preserves_http_error_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    import io
+    import urllib.error
+    import urllib.request
+
+    class _HttpErrorOpener:
+        def open(self, request: Any, timeout: float) -> Any:
+            raise urllib.error.HTTPError(
+                request.full_url,
+                400,
+                "Bad Request",
+                {},
+                io.BytesIO(b'{"error":"invalid_grant"}'),
+            )
+
+    monkeypatch.setattr(urllib.request, "build_opener", lambda *args: _HttpErrorOpener())
+    from backend.brokers.questrade.oauth_refresh import QuestradeOAuthFormTransportImpl
+    response = QuestradeOAuthFormTransportImpl().post_form(
+        url=QUESTRADE_TOKEN_URL,
+        data={"grant_type": "refresh_token", "refresh_token": SYNTHETIC_REFRESH},
+        headers={"Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"},
+        timeout_seconds=10.0,
+        allow_redirects=False,
+    )
+    assert response.status_code == 400
+    assert response.payload == {"error": "invalid_grant"}
+
+
+def test_26_http_401_reaches_oauth_authorization_classifier(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import io
+    import urllib.error
+    import urllib.request
+
+    class _UnauthorizedOpener:
+        def open(self, request: Any, timeout: float) -> Any:
+            raise urllib.error.HTTPError(request.full_url, 401, "Unauthorized", {}, io.BytesIO(b'{"error":"invalid_token"}'))
+
+    monkeypatch.setattr(urllib.request, "build_opener", lambda *args: _UnauthorizedOpener())
+    from backend.brokers.questrade.oauth_refresh import QuestradeOAuthFormTransportImpl
+    store = _seed_store(tmp_path / "questrade_refresh_token.dpapi", _FakeDpapi())
+    result = QuestradeBoundedOAuthRefresh(store, transport=QuestradeOAuthFormTransportImpl(), now=NOW).refresh()
+    assert result["success"] is False
+    assert result["reason"] == "QUESTRADE_AUTHORIZATION_REVOKED"
+    assert result["oauth_refresh_attempted"] is True
+    assert result["refresh_token_persisted"] is False
+    _assert_no_secrets(result)
