@@ -122,7 +122,7 @@ def map_positions(payload: Mapping[str, Any], *, generated_at: str | None = None
             "symbol": norm.get("canonical"),
             "provider_native_symbol": symbol,
             "security_type": security_type,
-            "quantity": raw.get("currentQuantity"),
+            "quantity": raw.get("currentQuantity") if raw.get("currentQuantity") is not None else raw.get("openQuantity"),
             "open_quantity": raw.get("openQuantity"),
             "encumbered_quantity": raw.get("encumberedQuantity"),
             "average_cost": raw.get("averageEntryPrice"),
@@ -138,7 +138,7 @@ def map_positions(payload: Mapping[str, Any], *, generated_at: str | None = None
                 "expiry": raw.get("expiryDate"),
                 "strike": raw.get("strikePrice"),
                 "option_type": str(raw.get("optionType") or "UNKNOWN").upper(),
-                "side": "LONG" if (raw.get("currentQuantity") or 0) > 0 else "SHORT",
+                "side": "LONG" if ((raw.get("currentQuantity") if raw.get("currentQuantity") is not None else raw.get("openQuantity")) or 0) > 0 else "SHORT",
                 "contract_multiplier": raw.get("multiplier") or 100,
             }
             option_positions.append(option)

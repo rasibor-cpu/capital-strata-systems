@@ -459,10 +459,10 @@ def _from_questrade(
     if snapshot["timestamp"] in (None, ""):
         balances = qt.get("balances")
         if isinstance(balances, Mapping):
-            snapshot["timestamp"] = _first_present(balances.get("timestamp"), balances.get("provider_timestamp"))
+            snapshot["timestamp"] = _first_present(balances.get("timestamp"), balances.get("provider_timestamp"), balances.get("acquisition_timestamp"))
         positions = qt.get("positions") if isinstance(qt.get("positions"), Mapping) else qt
         if snapshot["timestamp"] in (None, "") and isinstance(positions, Mapping):
-            snapshot["timestamp"] = _first_present(positions.get("timestamp"), positions.get("provider_timestamp"))
+            snapshot["timestamp"] = _first_present(positions.get("timestamp"), positions.get("provider_timestamp"), positions.get("acquisition_timestamp"))
     freshness = evaluate_canonical_broker_snapshot_freshness(snapshot, now=now, policy=policy, policy_path=policy_path)
     if not freshness.get("ok"):
         return empty_canonical_portfolio(broker="QUESTRADE", reason=f"freshness_{freshness.get('reason')}")
@@ -863,6 +863,9 @@ def _questrade_balance_rows(qt: Mapping[str, Any]) -> list[Mapping[str, Any]]:
 
 
 def _questrade_holdings(qt: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    rows = qt.get("holdings")
+    if isinstance(rows, list):
+        return [row for row in rows if isinstance(row, Mapping)]
     positions = qt.get("positions") if isinstance(qt.get("positions"), Mapping) else qt
     rows = positions.get("holdings") if isinstance(positions, Mapping) else None
     if isinstance(rows, list):
@@ -871,6 +874,9 @@ def _questrade_holdings(qt: Mapping[str, Any]) -> list[Mapping[str, Any]]:
 
 
 def _questrade_option_positions(qt: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    rows = qt.get("option_positions")
+    if isinstance(rows, list):
+        return [row for row in rows if isinstance(row, Mapping)]
     positions = qt.get("positions") if isinstance(qt.get("positions"), Mapping) else qt
     rows = positions.get("option_positions") if isinstance(positions, Mapping) else None
     if isinstance(rows, list):

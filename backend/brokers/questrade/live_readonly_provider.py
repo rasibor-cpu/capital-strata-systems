@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from backend.brokers.questrade.errors import ConfigurationRequiredError, ProviderUnavailableError
@@ -47,7 +48,9 @@ class QuestradeLiveReadOnlyDataProvider:
         result = self._client.request(path, method="GET")
         if not result.success:
             raise ProviderUnavailableError(result.failure_code or "QUESTRADE_PROVIDER_UNAVAILABLE")
-        return dict(result.payload)
+        payload = dict(result.payload)
+        payload.setdefault("acquisition_timestamp", datetime.now(timezone.utc).isoformat())
+        return payload
 
     def _path_for(self, operation: str, parameters: Mapping[str, Any]) -> str:
         if operation == "ACCOUNTS":
