@@ -180,6 +180,7 @@ class QuestradeOAuthFormTransportImpl:
             headers={
                 "Accept": "application/json",
                 "Content-Type": "application/x-www-form-urlencoded",
+                "User-Agent": "CapitalStrataSystems-Questrade-ReadOnly/1.0",
             },
             method="POST",
         )

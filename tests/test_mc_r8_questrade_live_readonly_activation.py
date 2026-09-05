@@ -593,3 +593,22 @@ def test_26_http_401_reaches_oauth_authorization_classifier(tmp_path: Path, monk
     assert result["oauth_refresh_attempted"] is True
     assert result["refresh_token_persisted"] is False
     _assert_no_secrets(result)
+
+
+def test_27_production_oauth_transport_sends_css_user_agent(monkeypatch):
+    captured = {}
+    class FakeResponse:
+        status = 400
+        def read(self, limit): return b'{}'
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+    class FakeOpener:
+        def open(self, request, timeout):
+            captured['user_agent'] = request.get_header('User-agent')
+            return FakeResponse()
+    monkeypatch.setattr('backend.brokers.questrade.oauth_refresh.urllib.request.build_opener', lambda *args: FakeOpener())
+    from backend.brokers.questrade.oauth_refresh import QuestradeOAuthFormTransportImpl
+    transport = QuestradeOAuthFormTransportImpl()
+    response = transport.post_form(url=QUESTRADE_TOKEN_URL, data={'grant_type':'refresh_token','refresh_token':'synthetic'}, headers={}, timeout_seconds=1.0, allow_redirects=False)
+    assert response.status_code == 400
+    assert captured['user_agent'] == 'CapitalStrataSystems-Questrade-ReadOnly/1.0'
