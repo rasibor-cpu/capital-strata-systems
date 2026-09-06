@@ -120,7 +120,20 @@ def render_mission_control_shell(
 </head>
 <body class="mc-body">
   <div class="mc-shell" data-mission-control-schema="{escape(state_dict.get('schema_version'))}" data-mc-nav="native-anchor-176h1">
-    <aside class="mc-sidebar">
+    <input type="checkbox" id="mc-nav-toggle" class="mc-nav-toggle" aria-controls="mc-sidebar" aria-label="Open Mission Control navigation">
+    <div class="mc-mobile-chrome">
+      <label class="mc-nav-toggle-btn" for="mc-nav-toggle">
+        <span class="mc-nav-toggle-icon" aria-hidden="true"></span>
+        <span class="mc-nav-toggle-text">Menu</span>
+      </label>
+      <div class="mc-mobile-chrome-copy">
+        <strong>CSS Mission Control</strong>
+        <span>{escape(active.label)}</span>
+      </div>
+    </div>
+    <label class="mc-nav-backdrop" for="mc-nav-toggle" aria-hidden="true"></label>
+    <aside class="mc-sidebar" id="mc-sidebar">
+      <label class="mc-nav-close" for="mc-nav-toggle">Close</label>
       <div class="mc-brand">{brand}<span>Enterprise shell · Phase 177H</span></div>
       <nav class="mc-nav-home" aria-label="CSS Home">
         <a href="{escape(home_href)}" data-css-home="1">{_nav_icon()}<span class="mc-nav-label">Home</span></a>
@@ -182,7 +195,19 @@ def _nav_icon() -> str:
 
 def _badge(label: str, value: Any) -> str:
     text = "UNAVAILABLE" if value in (None, "") else str(value)
-    return f'<span class="mc-badge {status_class(text)}">{escape(label)}: {escape(text)}</span>'
+    key = "".join(ch.lower() if ch.isalnum() else "-" for ch in label).strip("-")
+    lowered = text.lower()
+    if any(token in lowered for token in ("unavailable", "disabled", "blocked")) or lowered == "red":
+        tone = "bad"
+    else:
+        tone = status_class(text)
+    return (
+        f'<span class="mc-badge {tone}" data-mc-status="{escape(key)}">'
+        f'<span class="mc-badge-label">{escape(label)}</span>'
+        f'<span class="mc-badge-sep">: </span>'
+        f'<span class="mc-badge-value">{escape(text)}</span>'
+        "</span>"
+    )
 
 
 def _mapping(value: Any) -> dict[str, Any]:

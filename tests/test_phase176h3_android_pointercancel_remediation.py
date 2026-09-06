@@ -123,6 +123,8 @@ def test_playwright_mobile_document_is_not_scroll_owner_and_nav_hit_target() -> 
               const shell = document.querySelector('.mc-shell');
               const aside = document.querySelector('.mc-sidebar');
               const main = document.querySelector('.mc-main');
+              const toggle = document.querySelector('.mc-nav-toggle-btn');
+              if (toggle) toggle.click();
               const a = document.querySelector('.mc-nav a[href="/mission-control/reports"]');
               const r = a.getBoundingClientRect();
               const top = document.elementFromPoint(r.left + r.width/2, r.top + r.height/2);

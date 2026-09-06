@@ -461,11 +461,17 @@ def _current_holdings_exposure_panel(portfolio: dict) -> str:
 def _inner_detail_table(rows: object) -> str:
     rendered = detail_table("", rows if isinstance(rows, (dict, list)) else {"status": "UNAVAILABLE"})
     # Strip the wrapping panel/heading from detail_table so this can nest under Exposure.
-    start = rendered.find("<table>")
-    end = rendered.rfind("</table>")
-    if start == -1 or end == -1:
-        return "<table><tbody><tr><td>UNAVAILABLE</td></tr></tbody></table>"
-    return rendered[start : end + len("</table>")]
+    start = rendered.find('<div class="mc-table-wrap">')
+    if start == -1:
+        start = rendered.find("<table>")
+        end = rendered.rfind("</table>")
+        if start == -1 or end == -1:
+            return '<div class="mc-table-wrap"><table><tbody><tr><td>UNAVAILABLE</td></tr></tbody></table></div>'
+        return f'<div class="mc-table-wrap">{rendered[start : end + len("</table>")]}</div>'
+    end = rendered.rfind("</div>")
+    if end == -1:
+        return '<div class="mc-table-wrap"><table><tbody><tr><td>UNAVAILABLE</td></tr></tbody></table></div>'
+    return rendered[start : end + len("</div>")]
 
 
 def _session_pnl_by_instrument_rows(portfolio: dict) -> dict:
@@ -501,6 +507,27 @@ def render(state: dict) -> str:
     honesty = eis_dashboard_honesty()
     return (
         page_header("Executive Overview", "Enterprise-level platform, runtime, capital, risk, readiness, and alert posture.")
+        + metric_grid(
+            (
+                ("Execution Status", portfolio.get("execution_status"), _cockpit_status(portfolio.get("execution_status"))),
+                ("Cash", portfolio.get("cash"), _cockpit_status(portfolio.get("cash"))),
+                ("Portfolio Value", portfolio.get("portfolio_value"), _cockpit_status(portfolio.get("portfolio_value"))),
+                ("Session P&L", portfolio.get("session_pnl"), _cockpit_status(portfolio.get("session_pnl"))),
+                ("Open Positions", portfolio.get("open_positions"), _cockpit_status(portfolio.get("open_positions"))),
+                ("Next Maturity", portfolio.get("next_maturity"), _cockpit_status(portfolio.get("next_maturity"))),
+            ),
+            css_class="mc-metric-grid mc-metric-grid-priority",
+            aria_label="Executive cockpit priority",
+        )
+        + metric_grid(
+            (
+                ("Available / Free", portfolio.get("available_free"), _cockpit_status(portfolio.get("available_free"))),
+                ("Realized P&L", portfolio.get("realized_pnl"), _cockpit_status(portfolio.get("realized_pnl"))),
+                ("Unrealized P&L", portfolio.get("unrealized_pnl"), _cockpit_status(portfolio.get("unrealized_pnl"))),
+            ),
+            css_class="mc-metric-grid mc-metric-grid-secondary",
+            aria_label="Executive cockpit secondary metrics",
+        )
         + warning_banner(honesty["customer_banner"], status="warn")
         + warning_banner(
             "RUNTIME OFFLINE - current runtime evidence is unavailable."
@@ -512,19 +539,6 @@ def render(state: dict) -> str:
         + warning_banner(
             "Advisory / read-only cockpit. Execution allowed: false. Live trading blocked. Broker execution unarmed.",
             status="warn",
-        )
-        + metric_grid(
-            (
-                ("Cash", portfolio.get("cash"), _cockpit_status(portfolio.get("cash"))),
-                ("Available / Free", portfolio.get("available_free"), _cockpit_status(portfolio.get("available_free"))),
-                ("Portfolio Value", portfolio.get("portfolio_value"), _cockpit_status(portfolio.get("portfolio_value"))),
-                ("Session P&L", portfolio.get("session_pnl"), _cockpit_status(portfolio.get("session_pnl"))),
-                ("Realized P&L", portfolio.get("realized_pnl"), _cockpit_status(portfolio.get("realized_pnl"))),
-                ("Unrealized P&L", portfolio.get("unrealized_pnl"), _cockpit_status(portfolio.get("unrealized_pnl"))),
-                ("Open Positions", portfolio.get("open_positions"), _cockpit_status(portfolio.get("open_positions"))),
-                ("Next Maturity", portfolio.get("next_maturity"), _cockpit_status(portfolio.get("next_maturity"))),
-                ("Execution Status", portfolio.get("execution_status"), _cockpit_status(portfolio.get("execution_status"))),
-            )
         )
         + split_panels(
             detail_table("Session P&L by Instrument", _session_pnl_by_instrument_rows(portfolio)),
