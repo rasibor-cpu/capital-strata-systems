@@ -71,19 +71,59 @@ def validate_csrf(request: Request) -> None:
             raise HTTPException(status_code=403, detail="CSRF_TOKEN_INVALID")
 
 
+def _canonical_bridged_session_identity() -> Optional[dict[str, Any]]:
+    """Resolve an already-authenticated canonical CSS session without trust elevation."""
+    try:
+        from dashboard.auth.session_bridge import load_bridged_session_context
+
+        auth = load_bridged_session_context(channel="mutation_guard")
+    except Exception:
+        return None
+
+    if not bool(getattr(auth, "authenticated", False)):
+        return None
+    if not bool(getattr(auth, "active", False)):
+        return None
+
+    user_id = str(getattr(auth, "user_id", "") or "").strip()
+    role = str(getattr(auth, "role", "") or "").strip()
+    if not user_id or not role:
+        return None
+
+    return {
+        "user_id": user_id,
+        "role": role,
+        "source": "bridged_session",
+        "session_id": str(getattr(auth, "session_id", "") or ""),
+    }
+
+
 def require_mutation_auth(request: Request) -> dict[str, Any]:
     """Fail closed for unauthorized mutations on secured host profiles."""
     if not mutation_auth_required():
         return {"user_id": "open_dev", "role": "OPEN_DEV", "source": "profile"}
 
     identity = extract_bearer_or_session_identity(request)
+
+    if identity is None:
+        # Never allow forged/untrusted identity headers to fall through into the
+        # server-side session bridge.
+        supplied_user = (request.headers.get("X-CSS-User-Id") or "").strip()
+        supplied_role = (request.headers.get("X-CSS-Role") or "").strip()
+        if supplied_user or supplied_role:
+            raise HTTPException(status_code=401, detail="MUTATION_AUTH_REQUIRED")
+
+        identity = _canonical_bridged_session_identity()
+
     if identity is None:
         raise HTTPException(status_code=401, detail="MUTATION_AUTH_REQUIRED")
 
-    # Cookie sessions must present CSRF; header bridge under test profile may skip.
-    if identity.get("source") == "cookie":
+    # All production mutation identities require CSRF evidence.  Test-only
+    # trusted headers retain the historical explicit test-profile exception.
+    source = identity.get("source")
+    if source in {"cookie", "bridged_session"}:
         validate_csrf(request)
-    elif identity.get("source") == "headers" and not auth_test_profile_enabled():
+    elif source == "headers" and not auth_test_profile_enabled():
         validate_csrf(request)
 
     return identity
