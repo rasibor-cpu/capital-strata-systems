@@ -452,6 +452,54 @@ def test_18_zero_survives_normalization(tmp_path: Path) -> None:
     assert bridged["canonical_broker_portfolio"]["metrics"]["cash"]["availability"] == "AVAILABLE"
 
 
+
+def test_18b_combined_balances_are_canonical_account_values() -> None:
+    raw = {
+        "perCurrencyBalances": [
+            {
+                "currency": "CAD",
+                "cash": 948.305,
+                "marketValue": 133.9,
+                "totalEquity": 1082.205,
+                "buyingPower": 3469.27725,
+            },
+            {
+                "currency": "USD",
+                "cash": -756.9485,
+                "marketValue": 1109.05,
+                "totalEquity": 352.1015,
+                "buyingPower": 64.557045,
+            },
+        ],
+        "combinedBalances": [
+            {
+                "currency": "CAD",
+                "cash": -99.130056,
+                "marketValue": 1668.559028,
+                "totalEquity": 1569.428972,
+                "buyingPower": 3556.642978,
+            },
+            {
+                "currency": "USD",
+                "cash": -71.638186,
+                "marketValue": 1205.815335,
+                "totalEquity": 1134.177149,
+                "buyingPower": 2516.525729,
+            },
+        ],
+    }
+
+    mapped = map_balances(raw, account_type="MARGIN", generated_at=NOW.isoformat())
+
+    assert len(mapped["balances"]) == 2
+    assert mapped["balances"][0]["currency"] == "CAD"
+    assert mapped["balances"][0]["cash"] == -99.130056
+    assert mapped["balances"][0]["equity"] == 1569.428972
+    assert mapped["balances"][0]["market_value"] == 1668.559028
+    assert mapped["balances"][0]["buying_power"] == 3556.642978
+    assert mapped["execution_allowed"] is False
+
+
 def test_19_option_expiry_survives_when_supplied(tmp_path: Path) -> None:
     activation = _activated(tmp_path)
     raw = activation.provider.fetch(

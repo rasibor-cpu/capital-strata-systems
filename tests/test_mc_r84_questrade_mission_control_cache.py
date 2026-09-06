@@ -58,3 +58,32 @@ def test_r84_clear_removes_cached_snapshot():
     cache.publish(_snapshot())
     cache.clear()
     assert cache.read() is None
+
+
+def test_r86_read_last_known_exposes_stale_snapshot_for_display_only():
+    cache = QuestradeMissionControlCache()
+    cache.publish(_snapshot())
+    cache._snapshot = _snapshot(age_seconds=301)
+    assert cache.read() is None
+    loaded = cache.read_last_known()
+    assert loaded is not None
+    assert loaded["selected_broker"] == "QUESTRADE"
+    assert loaded["canonical_mode"] == "LIVE_READ_ONLY"
+    assert loaded["stale"] is True
+    assert loaded["freshness_status"] == "STALE"
+    assert loaded["freshness"]["ok"] is False
+    assert loaded["freshness"]["reason"] == "stale_timestamp"
+    assert loaded["execution_allowed"] is False
+    assert loaded["live_trading_blocked"] is True
+    assert loaded["broker_execution_armed"] is False
+    assert loaded["advisory_only"] is True
+
+
+def test_r86_read_last_known_marks_fresh_snapshot_fresh():
+    cache = QuestradeMissionControlCache()
+    cache.publish(_snapshot())
+    loaded = cache.read_last_known()
+    assert loaded is not None
+    assert loaded["stale"] is False
+    assert loaded["freshness_status"] == "FRESH"
+    assert loaded["freshness"]["ok"] is True

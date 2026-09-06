@@ -45,12 +45,40 @@ def test_r84_launcher_cache_overlay_preserves_fail_closed_runtime(monkeypatch):
     assert overlaid["broker_execution_armed"] is False
     assert overlaid["advisory_only"] is True
 
+    # R8.6: the same fresh Questrade evidence must promote the legacy
+    # account/broker summaries used by Mission Control.
+    account = overlaid["account_summary"]
+    assert account["broker"] == "QUESTRADE"
+    assert account["account_mode"] == "LIVE_READ_ONLY"
+    assert account["cash_balance"] == -95.0
+    assert account["total_equity"] == 1585.0
+    assert account["buying_power"] == 3597.0
+    assert account["cash_balance_availability"] == "AVAILABLE"
+    assert account["total_equity_availability"] == "AVAILABLE"
+    assert account["buying_power_availability"] == "AVAILABLE"
+    assert account["source"] == "QUESTRADE_LIVE_READ_ONLY"
+
+    broker = overlaid["broker_summary"]
+    assert broker["selected_broker"] == "QUESTRADE"
+    assert broker["broker_mode"] == "LIVE_READ_ONLY"
+    assert broker["broker_execution_armed"] is False
+    assert broker["execution_authority"] is False
+    assert broker["can_live_execute"] is False
+    assert broker["live_order_permission"] is False
+
     frontend = build_frontend_payload(overlaid)
     assert frontend["resolved_mode"] == "DISABLED"
     portfolio = frontend["sections"]["canonical_broker_portfolio"]
     assert portfolio["status"] == "AVAILABLE"
     assert portfolio["broker"] == "QUESTRADE"
     assert len(portfolio["exposures"]) == 3
+
+    frontend_account = frontend["sections"]["account_summary"]
+    assert frontend_account["broker"] == "QUESTRADE"
+    assert frontend_account["account_mode"] == "LIVE_READ_ONLY"
+    assert frontend_account["cash_balance"] == -95.0
+    assert frontend_account["total_equity"] == 1585.0
+    assert frontend_account["buying_power"] == 3597.0
     assert [row["instrument"] for row in portfolio["exposures"]] == ["TD", "T.TO", "ENB"]
     assert portfolio["metrics"]["session_pnl"]["availability"] == "UNAVAILABLE"
     assert portfolio["metrics"]["realized_pnl"]["availability"] == "UNAVAILABLE"
@@ -61,3 +89,69 @@ def test_r84_empty_cache_does_not_modify_launcher_payload(monkeypatch):
     monkeypatch.setattr(launcher._QUESTRADE_MISSION_CONTROL_CACHE, "read", lambda: None)
     base = {"runtime_status": {"runtime_mode": "DISABLED"}, "selected_broker": "NONE"}
     assert launcher.apply_launcher_questrade_read_only_cache(base) == base
+
+def test_r86_stale_questrade_remains_visible_but_not_current(monkeypatch):
+    stale = _snapshot()
+    old = datetime.fromtimestamp(
+        datetime.now(timezone.utc).timestamp() - 301,
+        timezone.utc,
+    ).isoformat()
+
+    stale["acquisition_timestamp"] = old
+    stale["balances"]["acquisition_timestamp"] = old
+    stale["positions"]["acquisition_timestamp"] = old
+    stale["stale"] = True
+    stale["freshness_status"] = "STALE"
+    stale["freshness"] = {"ok": False, "reason": "stale_timestamp"}
+
+    monkeypatch.setattr(
+        launcher._QUESTRADE_MISSION_CONTROL_CACHE,
+        "read",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        launcher._QUESTRADE_MISSION_CONTROL_CACHE,
+        "read_last_known",
+        lambda: stale,
+    )
+
+    base = {
+        "runtime_status": {"runtime_mode": "DISABLED"},
+        "selected_broker": "NONE",
+        "execution_allowed": False,
+        "live_trading_blocked": True,
+        "broker_execution_armed": False,
+        "advisory_only": True,
+    }
+
+    overlaid = launcher.apply_launcher_questrade_read_only_cache(base)
+
+    assert overlaid["selected_broker"] == "QUESTRADE"
+    assert overlaid["canonical_mode"] == "LIVE_READ_ONLY"
+    assert overlaid["questrade"]["stale"] is True
+    assert overlaid["questrade"]["freshness_status"] == "STALE"
+
+    assert overlaid["execution_allowed"] is False
+    assert overlaid["live_trading_blocked"] is True
+    assert overlaid["broker_execution_armed"] is False
+    assert overlaid["advisory_only"] is True
+
+    # R8.6: last-known account values remain visible for presentation,
+    # but are explicitly identified as stale read-only evidence.
+    account = overlaid["account_summary"]
+    assert account["broker"] == "QUESTRADE"
+    assert account["account_mode"] == "LIVE_READ_ONLY"
+    assert account["cash_balance"] == -95.0
+    assert account["total_equity"] == 1585.0
+    assert account["buying_power"] == 3597.0
+    assert account["source"] == "QUESTRADE_LAST_KNOWN_READ_ONLY"
+    assert account["freshness_status"] == "STALE"
+    assert account["freshness"]["ok"] is False
+    assert account["freshness"]["reason"] == "stale_timestamp"
+
+    frontend = build_frontend_payload(overlaid)
+    portfolio = frontend["sections"]["canonical_broker_portfolio"]
+
+    assert portfolio["broker"] == "QUESTRADE"
+    assert portfolio["status"] == "UNAVAILABLE"
+    assert "stale" in portfolio["reason"].lower()

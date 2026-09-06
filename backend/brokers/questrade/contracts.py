@@ -79,7 +79,7 @@ def map_balances(
     generated_at: str | None = None,
 ) -> dict[str, Any]:
     ts = generated_at or _utc_now()
-    rows = _rows(payload, "perCurrencyBalances") or _rows(payload, "combinedBalances") or _rows(payload, "balances")
+    rows = _rows(payload, "combinedBalances") or _rows(payload, "perCurrencyBalances") or _rows(payload, "balances")
     balances = [
         {
             "currency": row.get("currency"),

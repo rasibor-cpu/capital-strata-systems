@@ -1,4 +1,4 @@
-import os
+﻿import os
 import json
 import datetime
 import time
@@ -172,18 +172,173 @@ _QUESTRADE_MISSION_CONTROL_ACTIVATION = QuestradeMissionControlActivationCoordin
 
 
 def apply_launcher_questrade_read_only_cache(dashboard_payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Overlay fresh cached Questrade read-only evidence without altering runtime authority."""
+    """Promote fresh Questrade read-only evidence into canonical frontend fields.
+
+    Runtime/execution authority remains fail-closed.  The Questrade cache is
+    presentation/read-only evidence only and cannot arm broker execution.
+    """
     payload = dict(dashboard_payload) if isinstance(dashboard_payload, dict) else {}
     snapshot = _QUESTRADE_MISSION_CONTROL_CACHE.read()
     if not snapshot:
+        snapshot = _QUESTRADE_MISSION_CONTROL_CACHE.read_last_known()
+    if not snapshot:
         return payload
+
     payload["selected_broker"] = "QUESTRADE"
     payload["canonical_mode"] = "LIVE_READ_ONLY"
     payload["questrade"] = dict(snapshot)
+
+    # Safety invariants are authoritative and may never be promoted open.
     payload["execution_allowed"] = False
     payload["live_trading_blocked"] = True
     payload["broker_execution_armed"] = False
     payload["advisory_only"] = True
+
+    # Build once from the fresh Questrade evidence, then project only
+    # broker-reported AVAILABLE values into legacy frontend summary fields.
+    from backend.runtime.canonical_broker_portfolio import build_canonical_broker_portfolio
+
+    canonical = build_canonical_broker_portfolio(payload)
+    payload["canonical_broker_portfolio"] = canonical
+
+    # R8.6: preserve aged authenticated Questrade evidence for display only.
+    # Stale presentation never grants execution authority.
+    if (
+        snapshot.get("stale") is True
+        and snapshot.get("freshness_status") == "STALE"
+        and isinstance(snapshot.get("freshness"), dict)
+        and snapshot["freshness"].get("reason") == "stale_timestamp"
+    ):
+        balances = snapshot.get("balances")
+        rows = balances.get("combinedBalances") if isinstance(balances, dict) else None
+        row = rows[0] if isinstance(rows, list) and rows and isinstance(rows[0], dict) else {}
+
+        cash = row.get("cash")
+        equity = row.get("totalEquity")
+        buying_power = row.get("buyingPower")
+
+        account = (
+            dict(payload.get("account_summary"))
+            if isinstance(payload.get("account_summary"), dict)
+            else {}
+        )
+        account.pop("broker_balance_summary", None)
+        account.update(
+            {
+                "account_balance": cash,
+                "cash_balance": cash,
+                "total_equity": equity,
+                "equity": equity,
+                "buying_power": buying_power,
+                "broker": "QUESTRADE",
+                "account_mode": "LIVE_READ_ONLY",
+                "availability_state": (
+                    "AVAILABLE"
+                    if any(value is not None for value in (cash, equity, buying_power))
+                    else "UNAVAILABLE"
+                ),
+                "source": "QUESTRADE_LAST_KNOWN_READ_ONLY",
+                "freshness": dict(snapshot["freshness"]),
+                "freshness_status": "STALE",
+            }
+        )
+        payload["account_summary"] = account
+
+        broker = (
+            dict(payload.get("broker_summary"))
+            if isinstance(payload.get("broker_summary"), dict)
+            else {}
+        )
+        broker.update(
+            {
+                "selected_broker": "QUESTRADE",
+                "broker_mode": "LIVE_READ_ONLY",
+                "broker_execution_armed": False,
+                "execution_authority": False,
+                "broker_execution_enabled": False,
+                "broker_execution_status": "DISABLED",
+                "live_trading_enabled": False,
+                "can_live_execute": False,
+                "live_order_permission": False,
+                "order_submission_status": "DISABLED",
+                "execution_scope": "LIVE_READ_ONLY",
+                "freshness_status": "STALE",
+            }
+        )
+        payload["broker_summary"] = broker
+        return payload
+
+    if (
+        canonical.get("status") == "AVAILABLE"
+        and canonical.get("broker") == "QUESTRADE"
+    ):
+        payload["canonical_broker_portfolio"] = canonical
+        metrics = canonical.get("metrics") if isinstance(canonical.get("metrics"), dict) else {}
+
+        def available_value(name):
+            metric = metrics.get(name)
+            if (
+                isinstance(metric, dict)
+                and metric.get("availability") == "AVAILABLE"
+            ):
+                return metric.get("value")
+            return None
+
+        cash = available_value("cash")
+        equity = available_value("equity")
+        buying_power = available_value("buying_power")
+
+        account = (
+            dict(payload.get("account_summary"))
+            if isinstance(payload.get("account_summary"), dict)
+            else {}
+        )
+        account.pop("broker_balance_summary", None)
+
+        account.update(
+            {
+                "account_balance": cash,
+                "cash_balance": cash,
+                "total_equity": equity,
+                "equity": equity,
+                "buying_power": buying_power,
+                "broker": "QUESTRADE",
+                "account_mode": "LIVE_READ_ONLY",
+                "cash_balance_availability": "AVAILABLE" if cash is not None else "UNAVAILABLE",
+                "total_equity_availability": "AVAILABLE" if equity is not None else "UNAVAILABLE",
+                "buying_power_availability": "AVAILABLE" if buying_power is not None else "UNAVAILABLE",
+                "availability_state": (
+                    "AVAILABLE"
+                    if any(value is not None for value in (cash, equity, buying_power))
+                    else "UNAVAILABLE"
+                ),
+                "source": "QUESTRADE_LIVE_READ_ONLY",
+            }
+        )
+        payload["account_summary"] = account
+
+        broker = (
+            dict(payload.get("broker_summary"))
+            if isinstance(payload.get("broker_summary"), dict)
+            else {}
+        )
+        broker.update(
+            {
+                "selected_broker": "QUESTRADE",
+                "broker_mode": "LIVE_READ_ONLY",
+                "broker_execution_armed": False,
+                "execution_authority": False,
+                "broker_execution_enabled": False,
+                "broker_execution_status": "DISABLED",
+                "live_trading_enabled": False,
+                "can_live_execute": False,
+                "live_order_permission": False,
+                "order_submission_status": "DISABLED",
+                "execution_scope": "LIVE_READ_ONLY",
+            }
+        )
+        payload["broker_summary"] = broker
+
     return payload
 
 
@@ -197,7 +352,7 @@ def _canonical_runtime_resolution(
     session: Optional[Dict[str, Any]] = None,
     broker_startup: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Phase 177A — single launcher entry to the canonical Runtime Mode Resolver."""
+    """Phase 177A â€” single launcher entry to the canonical Runtime Mode Resolver."""
     try:
         return resolve_runtime_mode(
             session=session or {},
@@ -205,7 +360,7 @@ def _canonical_runtime_resolution(
             evidence=(broker_startup or {}),
         ).as_dict()
     except Exception:
-        return resolve_runtime_mode().as_dict()  # fail-closed → DISABLED
+        return resolve_runtime_mode().as_dict()  # fail-closed â†’ DISABLED
 
 
 def _safe_load_artifact(filename: str) -> Dict[str, Any]:
@@ -270,7 +425,7 @@ def _launcher_auth_identity(session_state: Dict[str, Any]) -> Dict[str, str]:
     return {}
 
 
-# ── PAUSE / RESUME CONTROL ARTIFACT ─────────────────────────────────────────
+# â”€â”€ PAUSE / RESUME CONTROL ARTIFACT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 MOBILE_CONTROLS_FILE = os.path.join(LauncherConfig.ARTIFACTS_DIR, "css_mobile_controls.json")
 
@@ -346,7 +501,7 @@ def write_pause_state(paused: bool, reason: str) -> Dict[str, Any]:
 
 
 
-# ── MOBILE PAPER TRADE REQUESTS ─────────────────────────────────────────────
+# â”€â”€ MOBILE PAPER TRADE REQUESTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 MOBILE_TRADE_REQUESTS_FILE = os.path.join(
     LauncherConfig.ARTIFACTS_DIR,
@@ -4157,7 +4312,7 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
             "dashboard_status": "ONLINE"
         }
     }
-    # Phase 177H.1 — canonical enterprise navigation contract for the launcher SPA.
+    # Phase 177H.1 â€” canonical enterprise navigation contract for the launcher SPA.
     try:
         from backend.runtime.platform_status import build_platform_status
         from dashboard.enterprise_shell.nav_contract import build_enterprise_navigation_contract
@@ -5132,7 +5287,7 @@ async def css_pwa_icon_maskable_512():
     )
 
 
-# ── PAUSE / RESUME ROUTES ────────────────────────────────────────────────────
+# â”€â”€ PAUSE / RESUME ROUTES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @launcher_router.get("/apple-touch-icon.png")
 @launcher_router.get("/static/apple_touch_icon_180.png")
@@ -5194,8 +5349,8 @@ async def mobile_trade_paper(request: Request):
 async def mobile_control_pause(request: Request):
     """Write trading_paused=true to the controls artifact.
 
-    - Browser form POST  → 303 redirect to /mobile#risk (Risk tab auto-opens)
-    - API / XHR caller   → JSON {ok, trading_paused, timestamp}
+    - Browser form POST  â†’ 303 redirect to /mobile#risk (Risk tab auto-opens)
+    - API / XHR caller   â†’ JSON {ok, trading_paused, timestamp}
     Safe: only mutates the pause flag. No broker calls. No secrets.
     """
     from backend.security.mutation_guard import require_mutation_auth
@@ -5212,8 +5367,8 @@ async def mobile_control_pause(request: Request):
 async def mobile_control_resume(request: Request):
     """Write trading_paused=false to the controls artifact.
 
-    - Browser form POST  → 303 redirect to /mobile#risk (Risk tab auto-opens)
-    - API / XHR caller   → JSON {ok, trading_paused, timestamp}
+    - Browser form POST  â†’ 303 redirect to /mobile#risk (Risk tab auto-opens)
+    - API / XHR caller   â†’ JSON {ok, trading_paused, timestamp}
     Safe: only mutates the pause flag. No broker calls. No secrets.
     """
     from backend.security.mutation_guard import require_mutation_auth
@@ -5248,6 +5403,7 @@ async def questrade_mission_control_refresh(request: Request):
     from backend.security.mutation_guard import require_mutation_auth
     require_mutation_auth(request)
     return JSONResponse(_QUESTRADE_MISSION_CONTROL_ACTIVATION.refresh())
+
 
 
 def _mission_control_registry_source() -> Dict[str, Any]:
@@ -5286,35 +5442,35 @@ def _executive_brief_readiness_mc_state() -> Dict[str, Any]:
 # routes remain on /mission-control/api/reports/*.
 app.include_router(create_reports_center_router())
 app.include_router(create_executive_brief_distribution_router())
-# Phase 176J — advisory Executive Brief readiness (read-only).
+# Phase 176J â€” advisory Executive Brief readiness (read-only).
 app.include_router(
     create_executive_brief_readiness_router(state_provider=_executive_brief_readiness_mc_state)
 )
-# Phase 177 — advisory Canonical Financial Reporting (read-only).
+# Phase 177 â€” advisory Canonical Financial Reporting (read-only).
 app.include_router(
     create_financial_reporting_router(state_provider=_executive_brief_readiness_mc_state)
 )
-# Phase 178 — advisory Executive Financial Reporting Suite (read-only).
+# Phase 178 â€” advisory Executive Financial Reporting Suite (read-only).
 app.include_router(
     create_executive_reporting_router(state_provider=_executive_brief_readiness_mc_state)
 )
-# Phase 179 — advisory Executive Decision Intelligence (read-only orchestration).
+# Phase 179 â€” advisory Executive Decision Intelligence (read-only orchestration).
 app.include_router(
     create_executive_decision_intelligence_router(state_provider=_executive_brief_readiness_mc_state)
 )
-# Phase 182A — canonical GET-only Executive Intelligence Suite.
+# Phase 182A â€” canonical GET-only Executive Intelligence Suite.
 app.include_router(
     create_executive_intelligence_router(
         state_provider=runtime_snapshot_state_provider()
     )
 )
-# Phase 177A — canonical Runtime Mode Resolver (read-only).
+# Phase 177A â€” canonical Runtime Mode Resolver (read-only).
 app.include_router(
     create_runtime_mode_router(state_provider=_executive_brief_readiness_mc_state)
 )
-# Phase 177F — canonical Runtime Telemetry (read-only).
+# Phase 177F â€” canonical Runtime Telemetry (read-only).
 app.include_router(create_runtime_telemetry_router())
-# Phase 177H — read-only report discovery + paginated viewer (Options Income).
+# Phase 177H â€” read-only report discovery + paginated viewer (Options Income).
 from dashboard.runtime.api.reports_discovery import create_reports_discovery_router
 
 app.include_router(
@@ -5326,7 +5482,7 @@ app.include_router(
 from dashboard.runtime.api.enterprise_navigation import create_enterprise_navigation_router
 
 app.include_router(create_enterprise_navigation_router(surface="launcher_spa"))
-# Phase 177D — Options Income Engine runtime APIs (read-only, advisory, execution blocked).
+# Phase 177D â€” Options Income Engine runtime APIs (read-only, advisory, execution blocked).
 app.include_router(create_options_income_router(payload_provider=get_cached_options_income_payload))
 app.include_router(launcher_router)
 app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")

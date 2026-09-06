@@ -65,6 +65,27 @@ class QuestradeMissionControlCache:
         candidate["advisory_only"] = True
         return candidate
 
+    def read_last_known(self) -> dict[str, Any] | None:
+        with self._lock:
+            candidate = deepcopy(self._snapshot)
+        if not candidate:
+            return None
+        freshness = dict(_evaluate_freshness(candidate))
+
+        # Last-known presentation may retain evidence that aged normally,
+        # but must reject malformed, missing, or future-dated timestamps.
+        if not freshness.get("ok") and freshness.get("reason") != "stale_timestamp":
+            return None
+
+        candidate["freshness"] = freshness
+        candidate["stale"] = not bool(freshness.get("ok"))
+        candidate["freshness_status"] = "FRESH" if freshness.get("ok") else "STALE"
+        candidate["execution_allowed"] = False
+        candidate["live_trading_blocked"] = True
+        candidate["broker_execution_armed"] = False
+        candidate["advisory_only"] = True
+        return candidate
+
     def clear(self) -> None:
         with self._lock:
             self._snapshot = None
