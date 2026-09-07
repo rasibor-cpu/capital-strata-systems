@@ -22,6 +22,7 @@ from dashboard.enterprise_shell.nav_contract import (
 )
 from backend.brokers.questrade.mission_control_cache import QuestradeMissionControlCache
 from backend.brokers.questrade.mission_control_activation import QuestradeMissionControlActivationCoordinator
+from backend.brokers.questrade.mission_control_refresh_scheduler import QuestradeMissionControlRefreshScheduler
 from backend.brokers.account_balance_contract import build_broker_balance_summary
 from backend.common.branding import get_brand_service
 from backend.monitoring.alert_repository import (
@@ -169,6 +170,24 @@ _LAUNCHER_RUNTIME_CERTIFICATION_SNAPSHOT_CACHE: Dict[str, Dict[str, Any]] = {}
 
 _QUESTRADE_MISSION_CONTROL_CACHE = QuestradeMissionControlCache()
 _QUESTRADE_MISSION_CONTROL_ACTIVATION = QuestradeMissionControlActivationCoordinator(_QUESTRADE_MISSION_CONTROL_CACHE)
+_QUESTRADE_MISSION_CONTROL_REFRESH = QuestradeMissionControlRefreshScheduler(
+    _QUESTRADE_MISSION_CONTROL_ACTIVATION,
+    interval_seconds=60.0,
+)
+
+
+def _start_questrade_mission_control_refresh() -> None:
+    """Start bounded polling; explicit Questrade activation remains required."""
+    _QUESTRADE_MISSION_CONTROL_REFRESH.start()
+
+
+def _stop_questrade_mission_control_refresh() -> None:
+    """Stop the read-only refresh worker during launcher shutdown."""
+    _QUESTRADE_MISSION_CONTROL_REFRESH.stop()
+
+
+app.router.add_event_handler("startup", _start_questrade_mission_control_refresh)
+app.router.add_event_handler("shutdown", _stop_questrade_mission_control_refresh)
 
 
 def apply_launcher_questrade_read_only_cache(dashboard_payload: Dict[str, Any]) -> Dict[str, Any]:

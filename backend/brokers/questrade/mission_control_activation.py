@@ -81,7 +81,13 @@ class QuestradeMissionControlActivationCoordinator:
                 self._state = {"status": "READY", "reason": "refreshed", "attempted": True, "provider_available": True, **SAFETY}
                 return dict(self._state)
         except Exception as exc:
-            return self._fail(getattr(exc, "code", None) or type(exc).__name__)
+            return self._refresh_fail(getattr(exc, "code", None) or type(exc).__name__)
+
+    def _refresh_fail(self, reason: str) -> dict[str, Any]:
+        """Keep the activated in-memory provider retryable after a transient refresh failure."""
+        with self._lock:
+            self._state = {"status": "UNAVAILABLE", "reason": str(reason), "attempted": True, "provider_available": True, **SAFETY}
+            return dict(self._state)
 
 
     def _fail(self, reason: str) -> dict[str, Any]:
