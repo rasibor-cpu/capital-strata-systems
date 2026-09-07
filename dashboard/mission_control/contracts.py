@@ -775,10 +775,37 @@ def _portfolio(
     )
     canonical = _canonical_broker_portfolio(frontend_payload)
     freshness_blocked = _canonical_freshness_blocked(canonical)
+    stale_qt_presentation = False
     if freshness_blocked:
-        cash = "UNAVAILABLE"
-        equity = "UNAVAILABLE"
-        buying_power = "UNAVAILABLE"
+        stale_qt_presentation = (
+            str(account.get("source") or "").upper() == "QUESTRADE_LAST_KNOWN_READ_ONLY"
+            and str(account.get("account_mode") or "").upper() == "LIVE_READ_ONLY"
+        )
+
+        cash = (
+            _honest_metric(
+                account.get("cash_balance"),
+                availability=account.get("cash_balance_availability"),
+            )
+            if stale_qt_presentation
+            else "UNAVAILABLE"
+        )
+        equity = (
+            _honest_metric(
+                account.get("total_equity"),
+                availability=account.get("total_equity_availability"),
+            )
+            if stale_qt_presentation
+            else "UNAVAILABLE"
+        )
+        buying_power = (
+            _honest_metric(
+                account.get("buying_power"),
+                availability=account.get("buying_power_availability"),
+            )
+            if stale_qt_presentation
+            else "UNAVAILABLE"
+        )
         available_free = "UNAVAILABLE"
         realized = "UNAVAILABLE"
         unrealized = "UNAVAILABLE"
@@ -949,6 +976,12 @@ def _portfolio(
             )
         ),
         "source": source,
+        "presentation_freshness": "STALE" if stale_qt_presentation else "CURRENT",
+        "presentation_source": (
+            "QUESTRADE_LAST_KNOWN_READ_ONLY"
+            if stale_qt_presentation
+            else source
+        ),
         "availability_state": account.get("availability_state") or pnl.get("availability_state") or "UNAVAILABLE",
     }
 

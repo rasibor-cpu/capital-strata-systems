@@ -505,8 +505,17 @@ def render(state: dict) -> str:
     from backend.product_honesty import eis_dashboard_honesty
 
     honesty = eis_dashboard_honesty()
+    stale_last_known = str(portfolio.get("presentation_freshness") or "").strip().upper() == "STALE"
     return (
         page_header("Executive Overview", "Enterprise-level platform, runtime, capital, risk, readiness, and alert posture.")
+        + (
+            warning_banner(
+                "STALE / LAST KNOWN — Questrade account values are older than the freshness threshold and are shown for read-only reference only.",
+                status="warn",
+            )
+            if stale_last_known
+            else ""
+        )
         + metric_grid(
             (
                 ("Execution Status", portfolio.get("execution_status"), _cockpit_status(portfolio.get("execution_status"))),

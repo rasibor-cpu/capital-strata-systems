@@ -155,3 +155,21 @@ def test_r86_stale_questrade_remains_visible_but_not_current(monkeypatch):
     assert portfolio["broker"] == "QUESTRADE"
     assert portfolio["status"] == "UNAVAILABLE"
     assert "stale" in portfolio["reason"].lower()
+
+    from dashboard.mission_control.contracts import _portfolio
+
+    state = _portfolio(
+        frontend["sections"]["account_summary"],
+        frontend["sections"].get("positions", {}),
+        frontend["sections"].get("pnl_summary", {}),
+        frontend["sections"].get("runtime_snapshot", {}),
+        frontend=frontend,
+    )
+
+    assert state["cash"] == -95.0
+    assert state["equity"] == 1585.0
+    assert state["buying_power"] == 3597.0
+    assert state["portfolio_value"] == "UNAVAILABLE"
+    assert state["session_pnl"] == "UNAVAILABLE"
+    assert state["open_positions"] == "UNAVAILABLE"
+    assert state["maturity_expiry"]["status"] == "UNAVAILABLE"

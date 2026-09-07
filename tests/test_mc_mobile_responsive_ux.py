@@ -191,6 +191,48 @@ def test_executive_overview_priority_and_sections() -> None:
     assert "advisory_only" in body
 
 
+def test_executive_overview_labels_stale_questrade_last_known_values() -> None:
+    body = render_executive_overview(
+        {
+            "platform": {"runtime_mode": "DISABLED", "platform_status": "RED"},
+            "safety": {
+                "advisory_only": True,
+                "execution_allowed": False,
+                "live_trading_blocked": True,
+                "broker_execution_armed": False,
+                "safety_status": "PASS",
+            },
+            "portfolio": {
+                "cash": -99.130056,
+                "portfolio_value": 1569.428972,
+                "session_pnl": "UNAVAILABLE",
+                "open_positions": 0,
+                "next_maturity": "UNAVAILABLE",
+                "execution_status": "BLOCKED",
+                "presentation_freshness": "STALE",
+                "presentation_source": "QUESTRADE_LAST_KNOWN_READ_ONLY",
+                "operating_context": {
+                    "advisory_only": True,
+                    "read_only": True,
+                    "execution_allowed": False,
+                    "live_trading_blocked": True,
+                    "broker_execution_armed": False,
+                },
+            },
+            "mock_data_label": "RUNTIME DATA",
+        }
+    )
+
+    assert "STALE / LAST KNOWN" in body
+    assert "older than the freshness threshold" in body
+    assert "-99.130056" in body
+    assert "1569.428972" in body
+    assert "execution_allowed" in body
+    assert "False" in body
+    assert "live_trading_blocked" in body
+    assert "True" in body
+
+
 def test_safety_semantics_unchanged_in_shell() -> None:
     html = _shell()
     assert "ADVISORY / READ-ONLY" in html
