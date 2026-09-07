@@ -44,6 +44,7 @@ class RuntimeArtifactPublisher:
         *,
         runtime_cycle: int | None = None,
         account_state: Mapping[str, Any] | None = None,
+        publish_account_state: bool = True,
         session_state: Mapping[str, Any] | None = None,
         runtime_portfolio_state: Mapping[str, Any] | None = None,
         runtime_advisory_snapshot: Mapping[str, Any] | None = None,
@@ -75,7 +76,6 @@ class RuntimeArtifactPublisher:
         version = runtime_version or str(os.getenv("CSS_RUNTIME_VERSION") or os.getenv("CSS_VERSION") or "")
 
         artifacts = {
-            "css_account_state_pcnrass.json": account,
             "css_session_state_pcnrass.json": session,
             "runtime_portfolio_state.json": state,
             "runtime_advisory_snapshot.json": advisory,
@@ -84,6 +84,12 @@ class RuntimeArtifactPublisher:
             "validation_summary.json": summary,
         }
 
+
+        # R8.9: account freshness must represent new account evidence.
+        # If account publication is disabled, leave the existing account
+        # artifact and its filesystem mtime completely untouched.
+        if publish_account_state:
+            artifacts["css_account_state_pcnrass.json"] = account
         for filename, payload in artifacts.items():
             canonical = self._canonical(
                 payload,
@@ -109,6 +115,98 @@ class RuntimeArtifactPublisher:
             status = "DATA UNAVAILABLE"
         elif cycle_meta["status"] != RUNTIME_CYCLE_STATUS_OK:
             status = "AMBER"
+        return {
+            "status": status,
+            "published_artifacts": published,
+            "warnings": sorted(set(warnings)),
+            "runtime_cycle": cycle,
+            "runtime_cycle_status": cycle_meta["status"],
+            "runtime_cycle_reason": cycle_meta["reason"],
+            "runtime_cycle_source": cycle_meta["source"],
+            "timestamp": ts,
+            "generated_at": ts,
+            "session_id": sid,
+            "runtime_version": version or None,
+            "schema_version": self.SCHEMA_VERSION,
+            "advisory_only": True,
+            "execution_allowed": False,
+        }
+
+    def publish_account_state(
+        self,
+        account_state: Mapping[str, Any],
+        *,
+        runtime_cycle: int | None = None,
+        session_id: str | None = None,
+        runtime_version: str | None = None,
+        timestamp: str | None = None,
+    ) -> dict[str, Any]:
+        """Publish only fresh canonical account evidence.
+
+        R8.9: this leaves every unrelated runtime artifact and its filesystem
+        mtime untouched.
+        """
+        if not isinstance(account_state, Mapping):
+            raise RuntimeArtifactPublisherError(
+                "account_state_must_be_mapping"
+            )
+
+        ts = timestamp or datetime.now(timezone.utc).isoformat()
+        warnings: list[str] = []
+        cycle, cycle_meta = self._resolve_runtime_cycle(runtime_cycle)
+
+        if cycle_meta["status"] != RUNTIME_CYCLE_STATUS_OK:
+            warnings.append(
+                f"runtime_cycle_{cycle_meta['reason']}"
+            )
+
+        account = dict(account_state)
+        sid = (
+            session_id
+            or self._session_id(account)
+            or self._session_id(self._session_artifact())
+        )
+        version = runtime_version or str(
+            os.getenv("CSS_RUNTIME_VERSION")
+            or os.getenv("CSS_VERSION")
+            or ""
+        )
+
+        canonical = self._canonical(
+            account,
+            runtime_cycle=cycle,
+            runtime_cycle_status=cycle_meta["status"],
+            runtime_cycle_reason=cycle_meta["reason"],
+            runtime_cycle_source=cycle_meta["source"],
+            timestamp=ts,
+            source_module="RuntimeArtifactPublisher",
+            session_id=sid,
+            runtime_version=version or None,
+        )
+
+        filename = "css_account_state_pcnrass.json"
+        published: dict[str, str] = {}
+
+        try:
+            self.artifacts_dir.mkdir(parents=True, exist_ok=True)
+            path = self.artifacts_dir / filename
+            path.write_text(
+                json.dumps(
+                    canonical,
+                    indent=2,
+                    sort_keys=True,
+                    default=str,
+                ),
+                encoding="utf-8",
+            )
+            published[filename] = str(path)
+        except Exception as exc:
+            warnings.append(f"write_failed_{filename}:{exc}")
+
+        status = "OK" if published else "DATA UNAVAILABLE"
+        if published and cycle_meta["status"] != RUNTIME_CYCLE_STATUS_OK:
+            status = "AMBER"
+
         return {
             "status": status,
             "published_artifacts": published,

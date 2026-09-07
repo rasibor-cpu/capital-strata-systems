@@ -169,7 +169,44 @@ templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "t
 _LAUNCHER_RUNTIME_CERTIFICATION_SNAPSHOT_CACHE: Dict[str, Dict[str, Any]] = {}
 
 _QUESTRADE_MISSION_CONTROL_CACHE = QuestradeMissionControlCache()
-_QUESTRADE_MISSION_CONTROL_ACTIVATION = QuestradeMissionControlActivationCoordinator(_QUESTRADE_MISSION_CONTROL_CACHE)
+
+
+def _publish_fresh_questrade_account_artifact() -> Dict[str, Any]:
+    """Persist only strict-fresh Questrade read-only account evidence."""
+    helper = globals().get("_fresh_questrade_canonical_account_state")
+    if not callable(helper):
+        return {
+            "status": "SKIPPED",
+            "reason": "QUESTRADE_ACCOUNT_HELPER_UNAVAILABLE",
+            "advisory_only": True,
+            "execution_allowed": False,
+        }
+
+    account_state = helper()
+    if account_state is None:
+        return {
+            "status": "SKIPPED",
+            "reason": "NO_FRESH_QUESTRADE_ACCOUNT_EVIDENCE",
+            "advisory_only": True,
+            "execution_allowed": False,
+        }
+
+    publisher = RuntimeArtifactPublisher(
+        artifacts_dir=LauncherConfig.ARTIFACTS_DIR,
+    )
+    result = publisher.publish_account_state(account_state)
+
+    result["advisory_only"] = True
+    result["execution_allowed"] = False
+    result["live_trading_blocked"] = True
+    result["broker_execution_armed"] = False
+    return result
+
+
+_QUESTRADE_MISSION_CONTROL_ACTIVATION = QuestradeMissionControlActivationCoordinator(
+    _QUESTRADE_MISSION_CONTROL_CACHE,
+    on_fresh_snapshot=_publish_fresh_questrade_account_artifact,
+)
 _QUESTRADE_MISSION_CONTROL_REFRESH = QuestradeMissionControlRefreshScheduler(
     _QUESTRADE_MISSION_CONTROL_ACTIVATION,
     interval_seconds=60.0,
@@ -2537,11 +2574,42 @@ def ensure_runtime_artifacts_current(
 
     published: Dict[str, Any] = {"status": "SKIPPED", "reason": "critical_artifacts_current"}
     if critical_needs_publish:
+        account_artifact = (
+            critical_artifacts.get("account_state", {})
+            if isinstance(critical_artifacts, dict)
+            else {}
+        )
+        account_needs_publish = (
+            isinstance(account_artifact, dict)
+            and account_artifact.get("freshness") in {"MISSING", "STALE"}
+        )
+
+        fresh_questrade_account = (
+            _fresh_questrade_canonical_account_state()
+            if account_needs_publish
+            else None
+        )
+
         published = publish_runtime_artifacts(
             inputs=inputs,
             portfolio_decision=portfolio_decision,
             runtime_advisory_snapshot=runtime_advisory_snapshot,
             validation_summary=validation_summary,
+            account_state=fresh_questrade_account,
+            # R8.9 V8:
+            # Canonical Questrade account-state mtime represents
+            # fresh broker evidence, not generic runtime publication.
+            #
+            # Never rewrite an existing FRESH, AGING, or STALE
+            # account artifact merely because some unrelated runtime
+            # artifact needs publication.
+            #
+            # Only strict _QUESTRADE_MISSION_CONTROL_CACHE.read()
+            # evidence may create or update the canonical account
+            # artifact.
+            publish_account_state=(
+                fresh_questrade_account is not None
+            ),
         )
     supervisor_published = _publish_supervisor_heartbeat_snapshot() if supervisor_needs_publish else {"status": "SKIPPED"}
     refreshed = get_runtime_artifact_freshness_feed(refresh=False)
@@ -2607,12 +2675,126 @@ def get_session_renewal_status_feed() -> Dict[str, Any]:
     )
 
 
+
+
+def _fresh_questrade_canonical_account_state() -> Optional[Dict[str, Any]]:
+    """Build account state only from currently fresh Questrade evidence.
+
+    Last-known stale Questrade data is presentation-only and must never
+    refresh the canonical account-state artifact.
+    """
+    snapshot = _QUESTRADE_MISSION_CONTROL_CACHE.read()
+    if not isinstance(snapshot, dict):
+        return None
+
+    try:
+        from backend.runtime.canonical_broker_portfolio import (
+            build_canonical_broker_portfolio,
+        )
+
+        source = {
+            "selected_broker": "QUESTRADE",
+            "broker": "QUESTRADE",
+            "broker_mode": "live",
+            "canonical_mode": "LIVE_READ_ONLY",
+            "questrade": dict(snapshot),
+            "execution_allowed": False,
+            "live_trading_blocked": True,
+            "broker_execution_armed": False,
+            "advisory_only": True,
+        }
+
+        canonical = build_canonical_broker_portfolio(source)
+    except Exception:
+        return None
+
+    if not isinstance(canonical, dict):
+        return None
+
+    if canonical.get("status") != "AVAILABLE":
+        return None
+
+    if str(canonical.get("broker") or "").upper() != "QUESTRADE":
+        return None
+
+    freshness = canonical.get("freshness")
+    if not isinstance(freshness, dict):
+        return None
+
+    if freshness.get("ok") is not True:
+        return None
+
+    timestamp = canonical.get("timestamp")
+    if not timestamp or str(timestamp).upper() == "UNAVAILABLE":
+        return None
+
+    metrics = canonical.get("metrics")
+    if not isinstance(metrics, dict):
+        metrics = {}
+
+    def metric_value(name: str) -> Any:
+        metric = metrics.get(name)
+        if not isinstance(metric, dict):
+            return None
+        if metric.get("availability") != "AVAILABLE":
+            return None
+        return metric.get("value")
+
+    cash = metric_value("cash")
+    equity = metric_value("equity")
+    buying_power = metric_value("buying_power")
+    available_balance = metric_value("available_balance")
+
+    return {
+        "status": "AVAILABLE",
+        "broker": "QUESTRADE",
+        "selected_broker": "QUESTRADE",
+        "broker_mode": "live",
+        "account_mode": "LIVE_READ_ONLY",
+        "source": "QUESTRADE_LIVE_READ_ONLY",
+        "timestamp": timestamp,
+        "cash": cash,
+        "cash_balance": cash,
+        "account_balance": cash,
+        "equity": equity,
+        "total_equity": equity,
+        "buying_power": buying_power,
+        "available_balance": available_balance,
+        "cash_availability": (
+            "AVAILABLE" if cash is not None else "UNAVAILABLE"
+        ),
+        "equity_availability": (
+            "AVAILABLE" if equity is not None else "UNAVAILABLE"
+        ),
+        "buying_power_availability": (
+            "AVAILABLE" if buying_power is not None else "UNAVAILABLE"
+        ),
+        "available_balance_availability": (
+            "AVAILABLE" if available_balance is not None else "UNAVAILABLE"
+        ),
+        "freshness": dict(freshness),
+        "advisory_only": True,
+        "execution_allowed": False,
+        "live_trading_blocked": True,
+        "broker_execution_armed": False,
+        "execution_authority": False,
+        "broker_execution_enabled": False,
+        "live_trading_enabled": False,
+        "can_live_execute": False,
+        "live_order_permission": False,
+        "order_submission_status": "DISABLED",
+        "execution_scope": "LIVE_READ_ONLY",
+    }
+
+
 def publish_runtime_artifacts(
     *,
     inputs: Optional[Dict[str, Any]] = None,
     portfolio_decision: Optional[Dict[str, Any]] = None,
     runtime_advisory_snapshot: Optional[Dict[str, Any]] = None,
     validation_summary: Optional[Dict[str, Any]] = None,
+    account_state: Optional[Dict[str, Any]] = None,
+    publish_account_state: bool = True,
 ) -> Dict[str, Any]:
     payload = inputs or _portfolio_decision_inputs()
     decision = portfolio_decision or get_portfolio_decision_feed(inputs=payload, persist=False)
@@ -2625,6 +2807,8 @@ def publish_runtime_artifacts(
         closed_trade_ledger_path=LauncherConfig.CLOSED_TRADE_LEDGER_PATH,
         supervisor_state_path=LauncherConfig.SUPERVISOR_STATE_FILE,
     ).publish(
+        account_state=account_state,
+        publish_account_state=publish_account_state,
         runtime_cycle=get_runtime_summary().get("current_cycle", 0),
         runtime_portfolio_state=payload.get("runtime_portfolio_state"),
         runtime_advisory_snapshot=snapshot,

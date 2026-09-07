@@ -14,9 +14,16 @@ SAFETY = {"execution_allowed": False, "live_trading_blocked": True, "broker_exec
 class QuestradeMissionControlActivationCoordinator:
     """Activate once per process, fetch GET-only evidence, and publish a sanitized cache snapshot."""
 
-    def __init__(self, cache: QuestradeMissionControlCache, *, composer: Callable[..., Any] = compose_questrade_live_read_only_activation) -> None:
+    def __init__(
+        self,
+        cache: QuestradeMissionControlCache,
+        *,
+        composer: Callable[..., Any] = compose_questrade_live_read_only_activation,
+        on_fresh_snapshot: Callable[[], Any] | None = None,
+    ) -> None:
         self._cache = cache
         self._composer = composer
+        self._on_fresh_snapshot = on_fresh_snapshot
         self._lock = RLock()
         self._attempted = False
         self._activation: Any = None
@@ -55,6 +62,7 @@ class QuestradeMissionControlActivationCoordinator:
             positions = provider.fetch("POSITIONS", authorization=lease, parameters={"account_reference": account_reference})
             snapshot = {"status": "AVAILABLE", "selected_broker": "QUESTRADE", "canonical_mode": "LIVE_READ_ONLY", "balances": dict(balances), "positions": dict(positions), **SAFETY}
             self._cache.publish(snapshot)
+            self._notify_fresh_snapshot()
             with self._lock:
                 self._activation = activation
                 self._account_reference = account_reference
@@ -77,11 +85,26 @@ class QuestradeMissionControlActivationCoordinator:
             positions = provider.fetch("POSITIONS", authorization=lease, parameters={"account_reference": account_reference})
             snapshot = {"status": "AVAILABLE", "selected_broker": "QUESTRADE", "canonical_mode": "LIVE_READ_ONLY", "balances": dict(balances), "positions": dict(positions), **SAFETY}
             self._cache.publish(snapshot)
+            self._notify_fresh_snapshot()
             with self._lock:
                 self._state = {"status": "READY", "reason": "refreshed", "attempted": True, "provider_available": True, **SAFETY}
                 return dict(self._state)
         except Exception as exc:
             return self._refresh_fail(getattr(exc, "code", None) or type(exc).__name__)
+
+    def _notify_fresh_snapshot(self) -> None:
+        """Best-effort notification after fresh cache evidence is accepted.
+
+        Callback failure must never create execution authority or invalidate
+        successfully acquired read-only broker evidence.
+        """
+        callback = self._on_fresh_snapshot
+        if callback is None:
+            return
+        try:
+            callback()
+        except Exception:
+            return
 
     def _refresh_fail(self, reason: str) -> dict[str, Any]:
         """Keep the activated in-memory provider retryable after a transient refresh failure."""
