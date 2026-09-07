@@ -876,6 +876,28 @@ def _portfolio(
             if _canonical_metric_available(canonical, "portfolio_value")
             else equity
         )
+
+    # R8.10: preserve the established meaning of open_positions as true
+    # broker POSITION exposure while separately reporting broker holdings.
+    # ACCOUNT_ASSET_BALANCE rows are intentionally excluded.
+    canonical_exposure_authoritative = (
+        isinstance(canonical, Mapping)
+        and canonical.get("status") == "AVAILABLE"
+        and not freshness_blocked
+    )
+    if canonical_exposure_authoritative:
+        holdings_count = len(holding_rows)
+        broker_exposure_count = len(holding_rows) + len(position_rows)
+        holdings_count_availability = "AVAILABLE"
+        broker_exposure_count_availability = "AVAILABLE"
+        presented_positions = position_rows
+    else:
+        holdings_count = "UNAVAILABLE"
+        broker_exposure_count = "UNAVAILABLE"
+        holdings_count_availability = "UNAVAILABLE"
+        broker_exposure_count_availability = "UNAVAILABLE"
+        presented_positions = holdings
+
     return {
         "equity": equity,
         "cash": cash,
@@ -898,7 +920,11 @@ def _portfolio(
         "unrealized_pnl": unrealized,
         "net_pnl": net_pnl,
         "open_positions": open_count,
-        "positions": position_rows or holdings,
+        "holdings_count": holdings_count,
+        "holdings_count_availability": holdings_count_availability,
+        "broker_exposure_count": broker_exposure_count,
+        "broker_exposure_count_availability": broker_exposure_count_availability,
+        "positions": presented_positions,
         "session_pnl_by_instrument": session_pnl_by_instrument,
         "holdings": holding_rows if holding_rows else (holdings if holdings else "UNAVAILABLE"),
         "spot_asset_balances": _spot_asset_balances(frontend_payload),
