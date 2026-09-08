@@ -27,6 +27,12 @@ from backend.app.persistence.repositories.performance_compensation_terms_reposit
 from backend.app.persistence.repositories.shadow_compensation_entitlement_repository import (
     ShadowCompensationEntitlementRepository,
 )
+from backend.app.persistence.repositories.performance_compensation_lifecycle_policy_repository import (
+    PerformanceCompensationLifecyclePolicyRepository,
+)
+from backend.app.persistence.repositories.crystallization_assessment_repository import (
+    CrystallizationAssessmentRepository,
+)
 from backend.app.persistence.migrations.runner import run_migrations
 
 
@@ -61,6 +67,12 @@ class PersistenceService:
         self.shadow_compensation_entitlements = (
             ShadowCompensationEntitlementRepository()
         )
+        self.performance_compensation_lifecycle_policies = (
+            PerformanceCompensationLifecyclePolicyRepository()
+        )
+        self.crystallization_assessments = (
+            CrystallizationAssessmentRepository()
+        )
         self.pnl_snapshots = (
             PnlSnapshotRepository()
         )
@@ -84,6 +96,8 @@ class PersistenceService:
                 "performance_accounting_transitions": True,
                 "performance_compensation_terms": True,
                 "shadow_compensation_entitlements": True,
+                "performance_compensation_lifecycle_policies": True,
+                "crystallization_assessments": True,
                 "pnl_snapshots": True,
                 "legal_acceptances": True,
             },
