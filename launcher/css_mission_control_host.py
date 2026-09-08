@@ -1,6 +1,7 @@
 """Mission Control-only persistent host for launcher.css_mobile_launcher.
 
-Starts only the canonical Mission Control surface on 127.0.0.1:8765.
+Starts only the canonical Mission Control surface on loopback by default.
+CSS_LAUNCHER_HOST may explicitly select a private LAN IPv4 interface.
 Does not start the trading engine, activate Questrade, or open the DPAPI store.
 
 Windows agents that `Start-Process` uvicorn directly typically place the child
@@ -12,6 +13,7 @@ child is terminated even after /health succeeded. This host detaches the child
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import signal
@@ -27,7 +29,16 @@ from urllib.request import urlopen
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-HOST = "127.0.0.1"
+def _bind_host() -> str:
+    value = os.environ.get("CSS_LAUNCHER_HOST", "127.0.0.1")
+    address = ipaddress.IPv4Address(value)
+    allowed = ("127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+    if not any(address in ipaddress.IPv4Network(network) for network in allowed):
+        raise ValueError("Mission Control requires a loopback or private LAN IPv4 address")
+    return str(address)
+
+
+HOST = _bind_host()
 PORT = 8765
 STATE_DIR = REPO_ROOT / "runtime" / "mission_control_host"
 STATE_PATH = STATE_DIR / "state.json"

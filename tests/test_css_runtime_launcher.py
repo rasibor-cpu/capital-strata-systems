@@ -12,6 +12,8 @@ from launcher.css_runtime_launcher import (
     discover_canonical_runtime_processes,
     duplicate_canonical_runtime_owners,
     is_proven_non_owner_wrapper,
+    _record_process_tree_or_fail,
+    _supervised_runtime_tick,
 )
 import launcher.css_runtime_launcher as runtime_launcher
 
@@ -505,3 +507,245 @@ def test_windows_discovery_command_enumerates_supported_interpreters():
     assert "name='python.exe'" not in script
     assert "Where-Object" in script
     assert runtime_launcher.DISCOVERY_EXPECTED_PID_ENV in script
+    assert "ExecutablePath" in script
+    assert "CreatedUtc" in script
+
+
+def test_cim_created_utc_accepts_powershell_roundtrip_format():
+    parsed = runtime_launcher._parse_cim_created_utc("2026-09-08T17:00:00.1234567Z")
+    assert parsed.tzinfo is not None
+    assert parsed.year == 2026
+    assert parsed.microsecond == 123456
+
+
+def _redirector_pair(tmp_path, monkeypatch):
+    wrapper = tmp_path / ".venv" / "Scripts" / "python.exe"
+    wrapper.parent.mkdir(parents=True)
+    wrapper.write_bytes(b"known redirector")
+    reference = tmp_path / "stdlib" / "venv" / "scripts" / "nt" / "python.exe"
+    reference.parent.mkdir(parents=True)
+    reference.write_bytes(b"known redirector")
+    base = tmp_path / "base" / "python.exe"
+    monkeypatch.setattr(runtime_launcher.sys, "_base_executable", str(base))
+    monkeypatch.setattr(
+        runtime_launcher.sysconfig, "get_path", lambda key: str(tmp_path / "stdlib")
+    )
+    parent = {
+        "ProcessId": 777,
+        "ParentProcessId": 1,
+        "ExecutablePath": str(wrapper),
+        "CommandLine": f'"{wrapper}" -u -m launcher.css_runtime_launcher',
+        "CreatedUtc": "2026-09-08T17:00:00.0000000Z",
+    }
+    child = {
+        "ProcessId": 888,
+        "ParentProcessId": 777,
+        "ExecutablePath": str(base),
+        "CommandLine": f'"{base}" -u -m launcher.css_runtime_launcher',
+        "CreatedUtc": "2026-09-08T17:00:01.0000001Z",
+    }
+    return parent, child, wrapper
+
+
+def test_verified_venv_redirector_parent_and_child_are_one_owner(tmp_path, monkeypatch):
+    parent, child, _ = _redirector_pair(tmp_path, monkeypatch)
+    assert runtime_launcher._verified_venv_redirector(parent, child, str(tmp_path))
+    _patch_windows_discovery(monkeypatch, [parent, child])
+    discovery = discover_canonical_runtime_processes(
+        repo_root=str(tmp_path), current_pid=888
+    )
+    owners = duplicate_canonical_runtime_owners(
+        repo_root=str(tmp_path), current_pid=888
+    )
+    assert discovery["ok"] is True
+    assert discovery["processes"] == []
+    assert owners["ok"] is True
+    assert owners["owners"] == []
+    assert owners["expected_pid"] == 888
+
+
+def test_unrelated_python_parent_is_rejected_as_duplicate(tmp_path, monkeypatch):
+    repo = str(tmp_path)
+    parent_exe = tmp_path / "other" / "python.exe"
+    child_exe = tmp_path / "base" / "python.exe"
+    monkeypatch.setattr(runtime_launcher.sys, "_base_executable", str(child_exe))
+    parent = {
+        "ProcessId": 777,
+        "ParentProcessId": 1,
+        "ExecutablePath": str(parent_exe),
+        "CommandLine": f'"{parent_exe}" -m launcher.css_runtime_launcher "{repo}"',
+        "CreatedUtc": "2026-09-08T17:00:00+00:00",
+    }
+    child = {
+        "ProcessId": 888,
+        "ParentProcessId": 777,
+        "ExecutablePath": str(child_exe),
+        "CommandLine": f'"{child_exe}" -m launcher.css_runtime_launcher "{repo}"',
+        "CreatedUtc": "2026-09-08T17:00:01+00:00",
+    }
+    assert not runtime_launcher._verified_venv_redirector(parent, child, repo)
+    _patch_windows_discovery(monkeypatch, [parent, child])
+    owners = duplicate_canonical_runtime_owners(repo_root=repo, current_pid=888)
+    assert owners["ok"] is True
+    assert [row["pid"] for row in owners["owners"]] == [777]
+
+
+def test_two_independent_canonical_launchers_are_rejected(tmp_path, monkeypatch):
+    parent, child, _ = _redirector_pair(tmp_path, monkeypatch)
+    other = dict(parent, ProcessId=999, ParentProcessId=2)
+    _patch_windows_discovery(monkeypatch, [parent, child, other])
+    owners = duplicate_canonical_runtime_owners(
+        repo_root=str(tmp_path), current_pid=888
+    )
+    assert owners["ok"] is True
+    assert [row["pid"] for row in owners["owners"]] == [999]
+
+
+def test_current_process_is_not_double_counted(tmp_path, monkeypatch):
+    parent, child, _ = _redirector_pair(tmp_path, monkeypatch)
+    _patch_windows_discovery(monkeypatch, [parent, child])
+    discovery = discover_canonical_runtime_processes(
+        repo_root=str(tmp_path), current_pid=888
+    )
+    owners = duplicate_canonical_runtime_owners(
+        repo_root=str(tmp_path), current_pid=888
+    )
+    assert 888 not in {row["pid"] for row in discovery["processes"]}
+    assert 888 not in {row["pid"] for row in owners["owners"]}
+    assert discovery["expected_pid"] == 888
+    assert owners["self_observed"] is True
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "pid_reuse",
+        "missing_metadata",
+        "different_args",
+        "different_binary",
+        "independent_child",
+    ],
+)
+def test_unproven_venv_relationship_remains_an_owner(tmp_path, monkeypatch, change):
+    parent, child, wrapper = _redirector_pair(tmp_path, monkeypatch)
+    if change == "pid_reuse":
+        parent["CreatedUtc"] = "2026-09-08T17:00:02.0000000Z"
+    if change == "missing_metadata":
+        parent.pop("ExecutablePath")
+    if change == "different_args":
+        child["CommandLine"] += " DIFFERENT"
+    if change == "different_binary":
+        wrapper.write_bytes(b"not a redirector")
+    if change == "independent_child":
+        child["ParentProcessId"] = 999
+    assert not runtime_launcher._verified_venv_redirector(parent, child, str(tmp_path))
+    _patch_windows_discovery(monkeypatch, [parent, child])
+    result = duplicate_canonical_runtime_owners(
+        repo_root=str(tmp_path), current_pid=888
+    )
+    assert [row["pid"] for row in result["owners"]] == [777]
+
+
+def test_stale_or_nonexistent_pid_is_not_a_legitimate_owner(tmp_path, monkeypatch):
+    parent, child, _ = _redirector_pair(tmp_path, monkeypatch)
+    stale_parent = dict(parent)
+    stale_parent["CreatedUtc"] = "2026-09-08T17:00:02.0000000Z"
+    assert not runtime_launcher._verified_venv_redirector(
+        stale_parent, child, str(tmp_path)
+    )
+    _patch_windows_discovery(monkeypatch, [stale_parent, child])
+    reused = duplicate_canonical_runtime_owners(
+        repo_root=str(tmp_path), current_pid=888
+    )
+    assert [row["pid"] for row in reused["owners"]] == [777]
+
+    _patch_windows_discovery(monkeypatch, [parent], self_observed=True, anchor_pid=424242)
+    missing_self = duplicate_canonical_runtime_owners(
+        repo_root=str(tmp_path), current_pid=424242
+    )
+    assert missing_self["ok"] is True
+    assert [row["pid"] for row in missing_self["owners"]] == [777]
+    assert not runtime_launcher._verified_venv_redirector(parent, {}, str(tmp_path))
+
+    _patch_windows_discovery(
+        monkeypatch,
+        [
+            {
+                "ProcessId": 0,
+                "ParentProcessId": 1,
+                "CommandLine": f'"{sys.executable}" -m launcher.css_runtime_launcher "{tmp_path}"',
+            }
+        ],
+    )
+    invalid = discover_canonical_runtime_processes(
+        repo_root=str(tmp_path), current_pid=1
+    )
+    assert invalid["ok"] is False
+    assert invalid["error_code"] == "discovery_pid_malformed"
+    invalid_owners = duplicate_canonical_runtime_owners(
+        repo_root=str(tmp_path), current_pid=1
+    )
+    assert invalid_owners["ok"] is False
+    assert invalid_owners["owners"] == []
+
+
+def test_startup_process_tree_recording_still_fail_closed():
+    class _Supervisor:
+        def record_process_tree(self, **kwargs):
+            raise AssertionError("dead managed child must fail closed before persist")
+
+        def record_identity_verification_failure(self, *args, **kwargs):
+            self.recorded = True
+
+    class _DeadService:
+        service_name = "CSS Runtime"
+
+        def get_info(self):
+            return {"pid": None, "service_name": self.service_name}
+
+    supervisor = _Supervisor()
+    with pytest.raises(RuntimeError, match="process_identity_pid_missing:CSS Runtime"):
+        _record_process_tree_or_fail(supervisor, [_DeadService()])
+    assert supervisor.recorded is True
+
+
+def test_supervised_runtime_tick_restarts_before_identity_and_survives_dead_child(
+    monkeypatch,
+):
+    order = []
+
+    class _Supervisor:
+        def heartbeat(self):
+            order.append("heartbeat")
+
+        def record_duplicate_discovery(self, payload):
+            order.append("discovery")
+            self.discovery = payload
+
+        def record_process_tree(self, **kwargs):
+            raise AssertionError("dead managed child must not persist a process tree")
+
+        def record_identity_verification_failure(self, reason, detail_code=None):
+            order.append("identity_failure")
+            self.identity_reason = reason
+            self.identity_detail = detail_code
+
+    class _DeadService:
+        service_name = "CSS Runtime"
+
+        def get_info(self):
+            return {"pid": None, "service_name": self.service_name}
+
+    monkeypatch.setattr(
+        runtime_launcher,
+        "duplicate_canonical_runtime_owners",
+        lambda: {"ok": True, "owners": [], "error_code": None},
+    )
+
+    def _monitor(services, supervisor):
+        order.append("monitor")
+
+    monkeypatch.setattr(runtime_launcher, "monitor_and_restart_services", _monitor)
+
+    _supervised_runtime_tick(_Supervisor(), [_DeadService()])
+    assert order == ["heartbeat", "discovery", "monitor", "identity_failure"]

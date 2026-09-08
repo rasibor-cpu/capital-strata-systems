@@ -6,6 +6,10 @@ import socket
 import threading
 import json
 import subprocess
+import hashlib
+import sysconfig
+from pathlib import Path
+from datetime import datetime
 from typing import Any, List
 
 # Ensure repository root is in PYTHONPATH
@@ -219,12 +223,67 @@ def _windows_discovery_command() -> str:
         "$namePattern = '^(?i)pythonw?(\\d+(\\.\\d+)*)?\\.exe$'; "
         "$procs = @(Get-CimInstance Win32_Process -ErrorAction Stop | "
         "Where-Object { $_.Name -match $namePattern } | "
-        "Select-Object ProcessId,ParentProcessId,CommandLine); "
+        "Select-Object ProcessId,ParentProcessId,CommandLine,ExecutablePath,"
+        "@{n='CreatedUtc';e={$_.CreationDate.ToUniversalTime().ToString('o')}}); "
         f"[pscustomobject]@{{ schema_version = '{DISCOVERY_SCHEMA}'; ok = $true; "
         "anchor_pid = $anchor; self_observed = $selfObserved; processes = $procs; "
         "error_code = $null; error_type = $null } | "
         "ConvertTo-Json -Compress -Depth 4"
     )
+
+
+def _same_resolved_path(left: str, right: str) -> bool:
+    return os.path.normcase(str(Path(left).resolve())) == os.path.normcase(
+        str(Path(right).resolve())
+    )
+
+
+def _parse_cim_created_utc(value: Any) -> datetime:
+    """Parse Win32_Process CreationDate emitted by PowerShell round-trip 'o'."""
+    if not isinstance(value, str):
+        raise TypeError("created_utc_not_string")
+    text = value.strip()
+    if not text:
+        raise ValueError("created_utc_empty")
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    if "." in text:
+        head, fraction_and_tz = text.split(".", 1)
+        tz_index = len(fraction_and_tz)
+        for index, char in enumerate(fraction_and_tz):
+            if char in "+-":
+                tz_index = index
+                break
+        fraction = fraction_and_tz[:tz_index]
+        tz_suffix = fraction_and_tz[tz_index:] if tz_index < len(fraction_and_tz) else "+00:00"
+        text = f"{head}.{(fraction + '000000')[:6]}{tz_suffix or '+00:00'}"
+    parsed = datetime.fromisoformat(text)
+    if parsed.tzinfo is None:
+        raise ValueError("created_utc_naive")
+    return parsed
+
+
+def _command_args_after_interpreter(command_line: str) -> list[str] | None:
+    if not isinstance(command_line, str) or not command_line.strip():
+        return None
+    tokens = _tokenize_command(command_line)
+    for index, token in enumerate(tokens):
+        if _is_python_interpreter_token(token):
+            rest = tokens[index + 1 :]
+            return rest if rest else None
+    return None
+
+
+def _row_matches_expected_pid(row: dict[str, Any], expected_pid: int) -> bool:
+    pid = canonical_process_pid(row.get("ProcessId"))
+    if pid is not None:
+        return pid == expected_pid
+    try:
+        pid_candidate = int(row.get("ProcessId") or row.get("PID") or 0)
+    except (TypeError, ValueError):
+        return False
+    pid = canonical_process_pid(pid_candidate)
+    return pid == expected_pid
 
 
 def _parse_windows_discovery_payload(
@@ -258,6 +317,69 @@ def _parse_windows_discovery_payload(
     if not isinstance(processes, list):
         return None, None, "discovery_output_malformed"
     return processes, anchor_pid, None
+
+
+def _verified_venv_redirector(parent: dict, child: dict, repo_root: str) -> bool:
+    """Prove this is the installed CPython venv stub, never exclude by PID alone.
+
+    Only the executing interpreter's own direct wrapper can be excluded.
+    Independent launchers (including their wrappers) remain visible to the guard.
+    Missing metadata, different binaries/arguments, or PID reuse fails closed.
+    """
+    try:
+        if not isinstance(parent, dict) or not isinstance(child, dict):
+            return False
+        parent_pid = canonical_process_pid(parent.get("ProcessId"))
+        child_pid = canonical_process_pid(child.get("ProcessId"))
+        child_parent_pid = canonical_process_pid(child.get("ParentProcessId"))
+        if (
+            parent_pid is None
+            or child_pid is None
+            or child_parent_pid is None
+            or child_parent_pid != parent_pid
+        ):
+            return False
+
+        parent_exe = parent.get("ExecutablePath")
+        child_exe = child.get("ExecutablePath")
+        parent_cmd = parent.get("CommandLine")
+        child_cmd = child.get("CommandLine")
+        if not all(isinstance(value, str) and value.strip() for value in (
+            parent_exe,
+            child_exe,
+            parent_cmd,
+            child_cmd,
+        )):
+            return False
+
+        wrapper = Path(repo_root) / ".venv" / "Scripts" / "python.exe"
+        base = Path(getattr(sys, "_base_executable", sys.executable))
+        if not _same_resolved_path(parent_exe, str(wrapper)):
+            return False
+        if not _same_resolved_path(child_exe, str(base)):
+            return False
+        if _parse_cim_created_utc(parent.get("CreatedUtc")) >= _parse_cim_created_utc(
+            child.get("CreatedUtc")
+        ):
+            return False
+
+        parent_args = _command_args_after_interpreter(parent_cmd)
+        child_args = _command_args_after_interpreter(child_cmd)
+        if parent_args is None or child_args is None or parent_args != child_args:
+            return False
+        if classify_canonical_process_command(parent_cmd) != "canonical_launcher":
+            return False
+        if classify_canonical_process_command(child_cmd) != "canonical_launcher":
+            return False
+
+        reference = (
+            Path(sysconfig.get_path("stdlib")) / "venv" / "scripts" / "nt" / "python.exe"
+        )
+        wrapper_digest = hashlib.sha256(wrapper.read_bytes()).digest()
+        reference_digest = hashlib.sha256(reference.read_bytes()).digest()
+        return wrapper_digest == reference_digest
+    except (OSError, KeyError, TypeError, ValueError):
+        return False
 
 
 def discover_canonical_runtime_processes(
@@ -366,6 +488,14 @@ def discover_canonical_runtime_processes(
     rows: list[dict[str, Any]] = []
     seen_pids: set[int] = set()
     observed_pids: set[int] = set()
+    self_row = next(
+        (
+            row
+            for row in process_rows or []
+            if isinstance(row, dict) and _row_matches_expected_pid(row, expected_pid)
+        ),
+        {},
+    )
 
     for row in process_rows or []:
         if not isinstance(row, dict):
@@ -391,6 +521,10 @@ def discover_canonical_runtime_processes(
             continue
 
         # Do NOT skip pid == os.getppid() — parent canonical owners must remain visible.
+        # The sole exception is a positively verified CPython venv redirector
+        # whose child is this anchored executing interpreter, not another core.
+        if os.name == "nt" and _verified_venv_redirector(row, self_row, repo_root):
+            continue
 
         cmd = row.get("CommandLine") or row.get("COMMAND")
         if not isinstance(cmd, str) or not cmd.strip():
@@ -738,6 +872,54 @@ def monitor_and_restart_services(
                 supervisor.record_restart_exhausted(svc.service_name)
 
 
+def _persist_duplicate_owner_discovery(supervisor: CSSRuntimeSupervisor) -> None:
+    discovery = duplicate_canonical_runtime_owners()
+    if not discovery.get("ok"):
+        supervisor.record_duplicate_discovery(
+            {
+                "ok": False,
+                "owners": [],
+                "error_code": discovery.get("error_code") or "discovery_failed",
+            }
+        )
+        return
+    filtered = [
+        owner
+        for owner in discovery.get("owners") or []
+        if int(owner.get("pid") or -1) != int(os.getpid())
+    ]
+    supervisor.record_duplicate_discovery(
+        {
+            "ok": True,
+            "owners": filtered,
+            "error_code": None,
+        }
+    )
+
+
+def _supervised_runtime_tick(
+    supervisor: CSSRuntimeSupervisor,
+    services: list[CSSServiceManager],
+) -> None:
+    """One mid-run supervision cycle.
+
+    A dead managed child must not tear down the canonical owner. Restart
+    first, then record identity. Identity probe failure is persisted but
+    does not abort Mission Control. Startup still uses fail-closed
+    ``_record_process_tree_or_fail``.
+    """
+    supervisor.heartbeat()
+    _persist_duplicate_owner_discovery(supervisor)
+    monitor_and_restart_services(services, supervisor)
+    try:
+        _record_process_tree_or_fail(supervisor, services)
+    except Exception as exc:
+        print(
+            "Mid-run process identity unavailable; "
+            f"canonical owner continues ({exc})."
+        )
+
+
 def run_launcher():
     print("Starting CSS Always-On Runtime Launcher...")
 
@@ -786,32 +968,7 @@ def run_launcher():
 
         while True:
             time.sleep(10)
-            supervisor.heartbeat()
-            # Mid-run continuity: persist duplicate-owner discovery into supervisor state.
-            discovery = duplicate_canonical_runtime_owners()
-            if not discovery.get("ok"):
-                supervisor.record_duplicate_discovery(
-                    {
-                        "ok": False,
-                        "owners": [],
-                        "error_code": discovery.get("error_code") or "discovery_failed",
-                    }
-                )
-            else:
-                filtered = [
-                    owner
-                    for owner in discovery.get("owners") or []
-                    if int(owner.get("pid") or -1) != int(os.getpid())
-                ]
-                supervisor.record_duplicate_discovery(
-                    {
-                        "ok": True,
-                        "owners": filtered,
-                        "error_code": None,
-                    }
-                )
-            _record_process_tree_or_fail(supervisor, services)
-            monitor_and_restart_services(services, supervisor)
+            _supervised_runtime_tick(supervisor, services)
     except KeyboardInterrupt:
         print("\nShutdown requested...")
     finally:
