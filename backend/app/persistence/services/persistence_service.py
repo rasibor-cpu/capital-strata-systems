@@ -12,6 +12,12 @@ from backend.app.persistence.repositories.session_repository import (
 from backend.app.persistence.repositories.trade_repository import (
     TradeRepository,
 )
+from backend.app.persistence.repositories.trade_provenance_repository import (
+    TradeProvenanceRepository,
+)
+from backend.app.persistence.repositories.attributable_performance_repository import (
+    AttributablePerformanceRepository,
+)
 from backend.app.persistence.migrations.runner import run_migrations
 
 
@@ -34,6 +40,9 @@ class PersistenceService:
         self.sessions = SessionRepository()
         self.trades = TradeRepository()
         self.trade_provenance = TradeProvenanceRepository()
+        self.attributable_performance = (
+            AttributablePerformanceRepository()
+        )
         self.pnl_snapshots = (
             PnlSnapshotRepository()
         )
@@ -53,6 +62,7 @@ class PersistenceService:
                 "sessions": True,
                 "trades": True,
                 "trade_provenance": True,
+                "attributable_performance": True,
                 "pnl_snapshots": True,
                 "legal_acceptances": True,
             },
