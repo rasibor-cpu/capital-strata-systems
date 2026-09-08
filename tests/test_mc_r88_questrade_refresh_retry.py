@@ -98,7 +98,7 @@ def test_r88_transient_refresh_failure_keeps_existing_provider_retryable():
     assert activated["broker_execution_armed"] is False
     assert activated["advisory_only"] is True
     assert composer_calls == 1
-    assert provider.calls == ["ACCOUNTS", "BALANCES", "POSITIONS"]
+    assert provider.calls == ["ACCOUNTS", "BALANCES", "POSITIONS", "ACTIVITIES"]
 
     provider.fail_next_balances = True
 
@@ -125,7 +125,9 @@ def test_r88_transient_refresh_failure_keeps_existing_provider_retryable():
         "ACCOUNTS",
         "BALANCES",
         "POSITIONS",
+        "ACTIVITIES",
         "BALANCES",
         "BALANCES",
         "POSITIONS",
+        "ACTIVITIES",
     ]

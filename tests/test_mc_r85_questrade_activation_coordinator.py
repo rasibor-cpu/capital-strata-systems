@@ -45,7 +45,7 @@ def test_r85_activation_fetches_once_and_publishes_sanitized_snapshot():
     result = coordinator.activate(refresh_token_store_path="C:/fake/token.dpapi")
     assert result["status"] == "READY"
     assert calls["compose"] == 1
-    assert [row[0] for row in provider.calls] == ["ACCOUNTS", "BALANCES", "POSITIONS"]
+    assert [row[0] for row in provider.calls] == ["ACCOUNTS", "BALANCES", "POSITIONS", "ACTIVITIES"]
     assert provider.bound == "SECRET-1234"
     snapshot = cache.read()
     assert snapshot is not None
@@ -115,8 +115,8 @@ def test_r85_refresh_reuses_provider_without_second_oauth():
     assert refreshed["status"] == "READY"
     assert refreshed["reason"] == "refreshed"
     assert calls["compose"] == 1
-    assert len(provider.calls) == initial_calls + 2
-    assert [row[0] for row in provider.calls[-2:]] == ["BALANCES", "POSITIONS"]
+    assert len(provider.calls) == initial_calls + 3
+    assert [row[0] for row in provider.calls[-3:]] == ["BALANCES", "POSITIONS", "ACTIVITIES"]
 
 
 def test_r85_refresh_before_activation_fails_closed_without_oauth():

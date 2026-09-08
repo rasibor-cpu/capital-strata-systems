@@ -1,6 +1,7 @@
 """Explicit one-attempt Questrade read-only activation for Mission Control."""
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from threading import RLock
 from typing import Any, Callable, Mapping
 
@@ -60,7 +61,20 @@ class QuestradeMissionControlActivationCoordinator:
                 provider.bind_account_reference(account_reference)
             balances = provider.fetch("BALANCES", authorization=lease, parameters={"account_reference": account_reference})
             positions = provider.fetch("POSITIONS", authorization=lease, parameters={"account_reference": account_reference})
-            snapshot = {"status": "AVAILABLE", "selected_broker": "QUESTRADE", "canonical_mode": "LIVE_READ_ONLY", "balances": dict(balances), "positions": dict(positions), **SAFETY}
+            activities = _fetch_recent_activities(
+                provider,
+                lease=lease,
+                account_reference=account_reference,
+            )
+            snapshot = {
+                "status": "AVAILABLE",
+                "selected_broker": "QUESTRADE",
+                "canonical_mode": "LIVE_READ_ONLY",
+                "balances": dict(balances),
+                "positions": dict(positions),
+                "activities": dict(activities),
+                **SAFETY,
+            }
             self._cache.publish(snapshot)
             self._notify_fresh_snapshot()
             with self._lock:
@@ -83,7 +97,20 @@ class QuestradeMissionControlActivationCoordinator:
             lease = memoryview(b"CSS_QUESTRADE_READ_ONLY")
             balances = provider.fetch("BALANCES", authorization=lease, parameters={"account_reference": account_reference})
             positions = provider.fetch("POSITIONS", authorization=lease, parameters={"account_reference": account_reference})
-            snapshot = {"status": "AVAILABLE", "selected_broker": "QUESTRADE", "canonical_mode": "LIVE_READ_ONLY", "balances": dict(balances), "positions": dict(positions), **SAFETY}
+            activities = _fetch_recent_activities(
+                provider,
+                lease=lease,
+                account_reference=account_reference,
+            )
+            snapshot = {
+                "status": "AVAILABLE",
+                "selected_broker": "QUESTRADE",
+                "canonical_mode": "LIVE_READ_ONLY",
+                "balances": dict(balances),
+                "positions": dict(positions),
+                "activities": dict(activities),
+                **SAFETY,
+            }
             self._cache.publish(snapshot)
             self._notify_fresh_snapshot()
             with self._lock:
@@ -117,6 +144,56 @@ class QuestradeMissionControlActivationCoordinator:
         with self._lock:
             self._state = {"status": "UNAVAILABLE", "reason": str(reason), "attempted": True, "provider_available": False, **SAFETY}
             return dict(self._state)
+
+
+def _fetch_recent_activities(
+    provider: Any,
+    *,
+    lease: memoryview,
+    account_reference: str,
+    lookback_days: int = 7,
+) -> dict[str, Any]:
+    """Acquire optional recent account-history telemetry without weakening core evidence."""
+
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=max(1, int(lookback_days)))
+
+    parameters = {
+        "account_reference": account_reference,
+        "startTime": start.isoformat(timespec="seconds"),
+        "endTime": now.isoformat(timespec="seconds"),
+    }
+
+    try:
+        payload = dict(
+            provider.fetch(
+                "ACTIVITIES",
+                authorization=lease,
+                parameters=parameters,
+            )
+        )
+    except Exception as exc:
+        return {
+            "status": "UNAVAILABLE",
+            "reason": str(getattr(exc, "code", None) or type(exc).__name__),
+            "activities": [],
+            "activity_count": 0,
+            "acquisition_timestamp": now.isoformat(),
+            "provenance": "QUESTRADE_ACTIVITIES",
+            **SAFETY,
+        }
+
+    rows = payload.get("activities")
+    activities = [dict(row) for row in rows if isinstance(row, Mapping)] if isinstance(rows, list) else []
+
+    return {
+        **payload,
+        "status": "AVAILABLE",
+        "activities": activities,
+        "activity_count": len(activities),
+        "provenance": "QUESTRADE_ACTIVITIES",
+        **SAFETY,
+    }
 
 
 def _select_account_reference(payload: Mapping[str, Any]) -> str | None:

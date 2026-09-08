@@ -16,7 +16,7 @@ def _snapshot_timestamp(snapshot: Mapping[str, Any]) -> Any:
         value = snapshot.get(key)
         if value not in (None, ""):
             return value
-    for key in ("balances", "positions"):
+    for key in ("balances", "positions", "activities"):
         nested = snapshot.get(key)
         if isinstance(nested, Mapping):
             value = nested.get("acquisition_timestamp")
