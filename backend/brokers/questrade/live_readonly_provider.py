@@ -9,11 +9,11 @@ from backend.brokers.questrade.errors import ConfigurationRequiredError, Provide
 from backend.brokers.questrade.readonly_client import QuestradeReadOnlyClient
 
 
-_SUPPORTED_DATASETS = frozenset({"ACCOUNTS", "BALANCES", "POSITIONS"})
+_SUPPORTED_DATASETS = frozenset({"ACCOUNTS", "BALANCES", "POSITIONS", "ACTIVITIES"})
 
 
 class QuestradeLiveReadOnlyDataProvider:
-    """Map ACCOUNTS/BALANCES/POSITIONS onto the existing GET-only client."""
+    """Map ACCOUNTS/BALANCES/POSITIONS/ACTIVITIES onto the existing GET-only client."""
 
     execution_allowed = False
     live_trading_blocked = True
@@ -45,7 +45,23 @@ class QuestradeLiveReadOnlyDataProvider:
         if operation not in _SUPPORTED_DATASETS:
             raise ProviderUnavailableError("QUESTRADE_DATASET_UNSUPPORTED")
         path = self._path_for(operation, parameters)
-        result = self._client.request(path, method="GET")
+
+        request_params: dict[str, Any] = {}
+        if operation == "ACTIVITIES":
+            start_time = str(parameters.get("startTime") or "").strip()
+            end_time = str(parameters.get("endTime") or "").strip()
+            if not start_time or not end_time:
+                raise ProviderUnavailableError("QUESTRADE_ACTIVITIES_DATE_RANGE_REQUIRED")
+            request_params = {
+                "startTime": start_time,
+                "endTime": end_time,
+            }
+
+        result = self._client.request(
+            path,
+            method="GET",
+            params=request_params,
+        )
         if not result.success:
             raise ProviderUnavailableError(result.failure_code or "QUESTRADE_PROVIDER_UNAVAILABLE")
         payload = dict(result.payload)
@@ -61,12 +77,14 @@ class QuestradeLiveReadOnlyDataProvider:
         )
         if operation == "BALANCES":
             return f"/accounts/{reference}/balances"
+        if operation == "ACTIVITIES":
+            return f"/accounts/{reference}/activities"
         return f"/accounts/{reference}/positions"
 
     def __repr__(self) -> str:
         return (
             "QuestradeLiveReadOnlyDataProvider("
-            "datasets=('ACCOUNTS','BALANCES','POSITIONS'), "
+            "datasets=('ACCOUNTS','BALANCES','POSITIONS','ACTIVITIES'), "
             f"account_reference_bound={bool(self._account_reference)}, "
             "execution_allowed=False, secret_material_redacted=True)"
         )
