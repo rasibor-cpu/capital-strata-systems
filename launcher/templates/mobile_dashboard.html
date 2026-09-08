@@ -915,6 +915,78 @@
             <div class="status-row"><span>Account Balance</span><strong>{{ phase140b_trade_summary.account_balance | default('DATA UNAVAILABLE') }}</strong></div>
             <div class="status-row"><span>Equity</span><strong>{{ phase140b_trade_summary.equity | default('DATA UNAVAILABLE') }}</strong></div>
             <div class="status-row"><span>Open Positions</span><strong>{{ phase140b_trade_summary.open_positions | default('DATA UNAVAILABLE') }}</strong></div>
+
+            {% set broker_activity = recent_broker_activity | default({}) %}
+            <div id="recent-broker-activity" class="card">
+                <div class="card-header">
+                    <h3>Recent Broker Activity</h3>
+                    <span class="data-freshness-pill">
+                        {{ broker_activity.get('status', 'UNAVAILABLE') }}
+                    </span>
+                </div>
+
+                <div class="status-row">
+                    <span>Source</span>
+                    <strong>{{ broker_activity.get('source', 'QUESTRADE_ACTIVITIES') }}</strong>
+                </div>
+
+                <div class="status-row">
+                    <span>Recent items</span>
+                    <strong>{{ broker_activity.get('activity_count', 0) }}</strong>
+                </div>
+
+                {% if broker_activity.get('status') == 'AVAILABLE' %}
+                    {% set activity_rows = broker_activity.get('rows', []) %}
+                    {% if activity_rows %}
+                        <div class="activity-list">
+                            {% for item in activity_rows[:8] %}
+                                <div class="status-row broker-activity-row">
+                                    <span>
+                                        <strong>{{ item.get('classification', 'OTHER') }}</strong>
+                                        {% if item.get('symbol') %}
+                                            · {{ item.get('symbol') }}
+                                        {% endif %}
+                                        <br>
+                                        <small>
+                                            {{ item.get('description', '') }}
+                                        </small>
+                                    </span>
+
+                                    <strong>
+                                        {% if item.get('net_amount') is not none %}
+                                            {{ item.get('currency', '') }}
+                                            {{ "%.2f"|format(item.get('net_amount')) }}
+                                        {% else %}
+                                            —
+                                        {% endif %}
+                                    </strong>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="status-row">
+                            <span>No recent broker activity</span>
+                            <strong>0</strong>
+                        </div>
+                    {% endif %}
+                {% else %}
+                    <div class="status-row">
+                        <span>Broker activity history</span>
+                        <strong>UNAVAILABLE</strong>
+                    </div>
+                {% endif %}
+
+                <div class="status-row">
+                    <span>Feed semantics</span>
+                    <strong>ACCOUNT HISTORY</strong>
+                </div>
+
+                <div class="status-row">
+                    <span>Execution feed</span>
+                    <strong>NO</strong>
+                </div>
+            </div>
+
             <div class="status-row"><span>Realized / Unrealized PnL</span><strong>{{ phase140b_trade_summary.realized_pnl | default('DATA UNAVAILABLE') }} / {{ phase140b_trade_summary.unrealized_pnl | default('DATA UNAVAILABLE') }}</strong></div>
             <div class="status-row"><span>Last Cycle / Update</span><strong>{{ phase140b_trade_summary.last_cycle | default('DATA UNAVAILABLE') }} / {{ phase140b_trade_summary.last_update | default('DATA UNAVAILABLE') }}</strong></div>
             <div class="status-row"><span>Execution Status</span><strong>{{ phase140b_trade_summary.execution_status | default('DATA UNAVAILABLE') }}</strong></div>

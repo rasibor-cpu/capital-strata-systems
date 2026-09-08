@@ -118,11 +118,38 @@ def map_positions(payload: Mapping[str, Any], *, generated_at: str | None = None
         symbol = str(raw.get("symbol") or "")
         norm = normalize_equity_symbol(symbol)
         security_type = str(raw.get("securityType") or raw.get("security_type") or "UNKNOWN").upper()
+
+        quantity = (
+            raw.get("currentQuantity")
+            if raw.get("currentQuantity") is not None
+            else raw.get("openQuantity")
+        )
+
+        # R8.11: Questrade may retain fully closed rows in /positions.
+        # An explicitly zero effective quantity is historical broker
+        # evidence, not a current holding or option position.
+        #
+        # Preserve positive long and negative short quantities.  If the
+        # provider supplies a non-numeric/unknown quantity, do not invent
+        # a zero quantity here; downstream availability semantics remain
+        # responsible for incomplete evidence.
+        try:
+            explicitly_zero_quantity = (
+                quantity is not None
+                and not isinstance(quantity, bool)
+                and float(quantity) == 0.0
+            )
+        except (TypeError, ValueError):
+            explicitly_zero_quantity = False
+
+        if explicitly_zero_quantity:
+            continue
+
         row = {
             "symbol": norm.get("canonical"),
             "provider_native_symbol": symbol,
             "security_type": security_type,
-            "quantity": raw.get("currentQuantity") if raw.get("currentQuantity") is not None else raw.get("openQuantity"),
+            "quantity": quantity,
             "open_quantity": raw.get("openQuantity"),
             "encumbered_quantity": raw.get("encumberedQuantity"),
             "average_cost": raw.get("averageEntryPrice"),
@@ -138,7 +165,7 @@ def map_positions(payload: Mapping[str, Any], *, generated_at: str | None = None
                 "expiry": raw.get("expiryDate"),
                 "strike": raw.get("strikePrice"),
                 "option_type": str(raw.get("optionType") or "UNKNOWN").upper(),
-                "side": "LONG" if ((raw.get("currentQuantity") if raw.get("currentQuantity") is not None else raw.get("openQuantity")) or 0) > 0 else "SHORT",
+                "side": "LONG" if float(quantity or 0) > 0 else "SHORT",
                 "contract_multiplier": raw.get("multiplier") or 100,
             }
             option_positions.append(option)

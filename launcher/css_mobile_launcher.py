@@ -227,6 +227,156 @@ app.router.add_event_handler("startup", _start_questrade_mission_control_refresh
 app.router.add_event_handler("shutdown", _stop_questrade_mission_control_refresh)
 
 
+
+def _classify_questrade_activity(row: Dict[str, Any]) -> str:
+    """Classify broker-reported account history for presentation only."""
+    if not isinstance(row, dict):
+        return "OTHER"
+
+    activity_type = str(row.get("type") or "").strip().upper()
+    action = str(row.get("action") or "").strip().upper()
+    description = str(row.get("description") or "").strip().upper()
+
+    text = " ".join(
+        value
+        for value in (activity_type, action, description)
+        if value
+    )
+
+    if (
+        action in {"BUY", "SELL", "BTO", "BTC", "STO", "STC"}
+        or "TRADE" in activity_type
+        or "EXECUTION" in activity_type
+    ):
+        return "TRADE"
+
+    if (
+        action == "DIV"
+        or "DIVIDEND" in text
+        or "DISTRIBUTION" in text
+    ):
+        return "DIVIDEND"
+
+    if (
+        "COMMISSION" in text
+        or "FEE" in text
+        or "ECN" in text
+    ):
+        return "FEE"
+
+    if (
+        "DEPOSIT" in text
+        or "WITHDRAW" in text
+        or "TRANSFER" in text
+        or "JOURNAL" in text
+    ):
+        return "TRANSFER"
+
+    if "INTEREST" in text:
+        return "INTEREST"
+
+    if (
+        "WITHHOLDING TAX" in text
+        or "WITHHOLDING" in text
+        or activity_type == "TAX"
+        or action == "TAX"
+    ):
+        return "TAX"
+
+    return "OTHER"
+
+
+def _build_questrade_activity_presentation(
+    snapshot: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Project Questrade account-history telemetry without changing portfolio state."""
+    activities = (
+        snapshot.get("activities")
+        if isinstance(snapshot, dict)
+        else None
+    )
+
+    if not isinstance(activities, dict):
+        activities = {}
+
+    status = str(
+        activities.get("status") or "UNAVAILABLE"
+    ).upper()
+
+    raw_rows = activities.get("activities")
+    if not isinstance(raw_rows, list):
+        raw_rows = []
+
+    rows = []
+
+    for raw in raw_rows:
+        if not isinstance(raw, dict):
+            continue
+
+        rows.append(
+            {
+                "classification": _classify_questrade_activity(raw),
+                "trade_date": raw.get("tradeDate"),
+                "transaction_date": raw.get("transactionDate"),
+                "settlement_date": raw.get("settlementDate"),
+                "action": raw.get("action"),
+                "symbol": raw.get("symbol"),
+                "description": raw.get("description"),
+                "quantity": raw.get("quantity"),
+                "price": raw.get("price"),
+                "gross_amount": raw.get("grossAmount"),
+                "net_amount": raw.get("netAmount"),
+                "currency": raw.get("currency"),
+                "broker_activity_type": raw.get("type"),
+            }
+        )
+
+    counts = {
+        "TRADE": 0,
+        "DIVIDEND": 0,
+        "FEE": 0,
+        "TRANSFER": 0,
+        "INTEREST": 0,
+        "TAX": 0,
+        "OTHER": 0,
+    }
+
+    for row in rows:
+        classification = row["classification"]
+        counts[classification] = counts.get(classification, 0) + 1
+
+    available = status == "AVAILABLE"
+
+    return {
+        "status": "AVAILABLE" if available else "UNAVAILABLE",
+        "source": "QUESTRADE_ACTIVITIES",
+        "provenance": activities.get(
+            "provenance",
+            "QUESTRADE_ACTIVITIES",
+        ),
+        "acquisition_timestamp": activities.get(
+            "acquisition_timestamp"
+        ),
+        "activity_count": len(rows),
+        "classification_counts": counts,
+        "rows": rows,
+        "telemetry_semantics": "ACCOUNT_HISTORY",
+        "real_time_fill_feed": False,
+        "portfolio_mutation_authority": False,
+        "execution_authority": False,
+        "reason": (
+            None
+            if available
+            else activities.get("reason")
+            or "questrade_activities_unavailable"
+        ),
+        "execution_allowed": False,
+        "live_trading_blocked": True,
+        "broker_execution_armed": False,
+        "advisory_only": True,
+    }
+
+
 def apply_launcher_questrade_read_only_cache(dashboard_payload: Dict[str, Any]) -> Dict[str, Any]:
     """Promote fresh Questrade read-only evidence into canonical frontend fields.
 
@@ -243,6 +393,13 @@ def apply_launcher_questrade_read_only_cache(dashboard_payload: Dict[str, Any]) 
     payload["selected_broker"] = "QUESTRADE"
     payload["canonical_mode"] = "LIVE_READ_ONLY"
     payload["questrade"] = dict(snapshot)
+
+    # QT-004: broker account history is a presentation-only stream.
+    # It must never be interpreted as holdings, portfolio P&L, or
+    # real-time execution/fill authority.
+    payload["broker_activity"] = (
+        _build_questrade_activity_presentation(snapshot)
+    )
 
     # Safety invariants are authoritative and may never be promoted open.
     payload["execution_allowed"] = False
@@ -1237,7 +1394,45 @@ def build_launcher_frontend_state(
         coinbase_validation=coinbase_validation if isinstance(coinbase_validation, dict) else {},
     )
     dashboard_payload = apply_launcher_questrade_read_only_cache(dashboard_payload)
-    return build_frontend_payload(dashboard_payload)
+
+    # QT-004: explicit template-facing recent broker activity contract.
+    # Presentation only; account-history telemetry is not execution/fill state.
+    dashboard_payload["recent_broker_activity"] = (
+        dict(dashboard_payload.get("broker_activity"))
+        if isinstance(dashboard_payload.get("broker_activity"), dict)
+        else {
+            "status": "UNAVAILABLE",
+            "activity_count": 0,
+            "rows": [],
+            "telemetry_semantics": "ACCOUNT_HISTORY",
+            "real_time_fill_feed": False,
+            "portfolio_mutation_authority": False,
+            "execution_authority": False,
+        }
+    )
+    frontend_payload = build_frontend_payload(dashboard_payload)
+
+    # QT-004: preserve presentation-only broker account history across
+    # the frontend transformation.  This is not position, P&L, order,
+    # execution, or real-time fill evidence.
+    frontend_payload["recent_broker_activity"] = (
+        dict(dashboard_payload.get("recent_broker_activity"))
+        if isinstance(
+            dashboard_payload.get("recent_broker_activity"),
+            dict,
+        )
+        else {
+            "status": "UNAVAILABLE",
+            "activity_count": 0,
+            "rows": [],
+            "telemetry_semantics": "ACCOUNT_HISTORY",
+            "real_time_fill_feed": False,
+            "portfolio_mutation_authority": False,
+            "execution_authority": False,
+        }
+    )
+
+    return frontend_payload
 
 
 def apply_launcher_coinbase_balance_only_promotion(
@@ -4418,6 +4613,26 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
     )
     launcher_sections = launcher_frontend_state.get("sections", {}) if isinstance(launcher_frontend_state, dict) else {}
 
+    recent_broker_activity = (
+        dict(launcher_frontend_state.get("recent_broker_activity"))
+        if (
+            isinstance(launcher_frontend_state, dict)
+            and isinstance(
+                launcher_frontend_state.get("recent_broker_activity"),
+                dict,
+            )
+        )
+        else {
+            "status": "UNAVAILABLE",
+            "activity_count": 0,
+            "rows": [],
+            "telemetry_semantics": "ACCOUNT_HISTORY",
+            "real_time_fill_feed": False,
+            "portfolio_mutation_authority": False,
+            "execution_authority": False,
+        }
+    )
+
     context = {
         "title": "CSS Mobile Dashboard",
         "version": LauncherConfig.VERSION,
@@ -4500,6 +4715,8 @@ def build_mobile_dashboard_context() -> Dict[str, Any]:
         "long_duration_validation": long_duration_validation,
         "strategy_evolution": strategy_evolution,
         "launcher_frontend_state": launcher_frontend_state,
+        # QT-004: visible account-history telemetry, presentation only.
+        "recent_broker_activity": recent_broker_activity,
         "phase140b_trade_summary": launcher_sections.get("trade_summary", {}),
         "phase141_session_command_center": launcher_sections.get("session_command_centre", {}),
         "phase140a_opportunities": launcher_sections.get("opportunities", {}),
