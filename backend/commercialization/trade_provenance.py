@@ -102,12 +102,15 @@ class TradeProvenance:
                 )
 
     @property
-    def css_performance_attributable(self) -> bool:
+    def css_performance_attribution_eligible(self) -> bool:
         """
-        Fail-closed gate for later COM-002B accounting.
+        Fail-closed eligibility gate for later COM-002B attribution.
 
-        True means only that the trade may be considered by the future
-        performance-attribution engine. It does not mean a fee is earned.
+        True means only that this trade has sufficient provenance to be
+        considered by a future performance-attribution engine.
+
+        Eligibility does not establish performance, fee entitlement,
+        fee accrual, money-movement authority or execution authority.
         """
 
         return (
@@ -122,22 +125,21 @@ class TradeProvenance:
 
     @property
     def customer_directed(self) -> bool:
-        return self.attribution_class in {
-            AttributionClass.CUSTOMER_DIRECTED,
-            AttributionClass.CSS_MODIFIED,
-            AttributionClass.EXTERNAL,
-        }
+        """True only for a trade originated directly by the customer."""
+        return (
+            self.attribution_class
+            == AttributionClass.CUSTOMER_DIRECTED
+        )
 
     @property
-    def shadow_fee_attribution_eligible(self) -> bool:
-        """
-        COM-002A establishes attribution eligibility only.
+    def customer_modified_css_advice(self) -> bool:
+        """True when the customer materially modified CSS advice."""
+        return self.attribution_class == AttributionClass.CSS_MODIFIED
 
-        COM-002B/C/D will additionally require verified P&L,
-        loss recovery, high-water mark and hurdle calculations.
-        """
-
-        return self.css_performance_attributable
+    @property
+    def outside_css(self) -> bool:
+        """True for activity whose origin is external to CSS."""
+        return self.attribution_class == AttributionClass.EXTERNAL
 
     @property
     def real_fee_collection_allowed(self) -> bool:
@@ -173,7 +175,7 @@ def attribution_reason(
     Stable human/audit explanation of attribution status.
     """
 
-    if provenance.css_performance_attributable:
+    if provenance.css_performance_attribution_eligible:
         return "css_advice_accepted_and_mandate_compliant"
 
     if provenance.attribution_class == AttributionClass.CSS_MODIFIED:

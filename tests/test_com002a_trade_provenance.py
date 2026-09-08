@@ -25,9 +25,10 @@ def _accepted_css_trade() -> TradeProvenance:
 def test_compliant_accepted_css_advice_is_attributable():
     record = _accepted_css_trade()
 
-    assert record.css_performance_attributable is True
-    assert record.shadow_fee_attribution_eligible is True
+    assert record.css_performance_attribution_eligible is True
     assert record.customer_directed is False
+    assert record.customer_modified_css_advice is False
+    assert record.outside_css is False
 
     assert (
         attribution_reason(record)
@@ -45,8 +46,7 @@ def test_css_advice_without_acceptance_is_not_attributable():
         evidence_refs=("trade-card:ADVICE-002",),
     )
 
-    assert record.css_performance_attributable is False
-    assert record.shadow_fee_attribution_eligible is False
+    assert record.css_performance_attribution_eligible is False
 
     assert (
         attribution_reason(record)
@@ -62,14 +62,15 @@ def test_customer_directed_trade_never_enters_css_performance_book():
         evidence_refs=("customer-order:TRADE-003",),
     )
 
-    assert record.css_performance_attributable is False
-    assert record.shadow_fee_attribution_eligible is False
+    assert record.css_performance_attribution_eligible is False
     assert record.customer_directed is True
+    assert record.customer_modified_css_advice is False
+    assert record.outside_css is False
 
     assert attribution_reason(record) == "customer_originated_trade"
 
 
-def test_materially_modified_css_trade_is_customer_directed():
+def test_materially_modified_css_trade_is_distinct_from_customer_directed():
     record = TradeProvenance(
         trade_id="TRADE-004",
         advice_id="ADVICE-004",
@@ -83,8 +84,10 @@ def test_materially_modified_css_trade_is_customer_directed():
         ),
     )
 
-    assert record.css_performance_attributable is False
-    assert record.customer_directed is True
+    assert record.css_performance_attribution_eligible is False
+    assert record.customer_directed is False
+    assert record.customer_modified_css_advice is True
+    assert record.outside_css is False
 
     assert (
         attribution_reason(record)
@@ -92,7 +95,7 @@ def test_materially_modified_css_trade_is_customer_directed():
     )
 
 
-def test_external_trade_is_not_css_performance_attributable():
+def test_external_trade_is_not_css_performance_attribution_eligible():
     record = TradeProvenance(
         trade_id="TRADE-005",
         attribution_class=AttributionClass.EXTERNAL,
@@ -100,8 +103,10 @@ def test_external_trade_is_not_css_performance_attributable():
         evidence_refs=("broker-import:TRADE-005",),
     )
 
-    assert record.css_performance_attributable is False
-    assert record.customer_directed is True
+    assert record.css_performance_attribution_eligible is False
+    assert record.customer_directed is False
+    assert record.customer_modified_css_advice is False
+    assert record.outside_css is True
     assert attribution_reason(record) == "activity_outside_css"
 
 
