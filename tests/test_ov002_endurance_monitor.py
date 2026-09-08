@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+from backend.certification.evidence_machine import REPO_ROOT
 from backend.certification.ov002_endurance_monitor import (
     capture_safety_assertions,
     evaluate_invalidation,
@@ -25,7 +26,7 @@ def _identity(pid: int, role: str, now: datetime) -> dict:
         role=role,
         attempt_id="",
         baseline_commit="",
-        repo_root="C:/rasib/source/capital-strata-systems",
+        repo_root=REPO_ROOT,
         require_live_fields=True,
     )
 

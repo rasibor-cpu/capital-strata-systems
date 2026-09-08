@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
+from backend.certification.evidence_machine import REPO_ROOT
 from backend.certification.ov002_continuity import (
     STATE_COMPLETED_ELIGIBLE,
     STATE_INVALIDATED,
@@ -38,7 +39,7 @@ def _identity(pid: int, role: str, now: datetime) -> dict:
         role=role,
         attempt_id="",
         baseline_commit="",
-        repo_root="C:/rasib/source/capital-strata-systems",
+        repo_root=REPO_ROOT,
         require_live_fields=True,
     )
 
