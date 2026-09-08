@@ -79,6 +79,7 @@ from backend.analytics.strategy_evolution_engine import (
     StrategyEvolutionEngineError,
 )
 from backend.analytics.trade_outcome_repository import TradeOutcomeRepository
+from backend.reconciliation.questrade_activity_reconciliation import reconcile_questrade_activity_history
 from backend.portfolio.adaptive_portfolio_manager import AdaptivePortfolioManager
 from backend.portfolio.advisory_consistency_checker import AdvisoryConsistencyChecker
 from backend.portfolio.advisory_history_store import AdvisoryHistoryStore
@@ -399,6 +400,29 @@ def apply_launcher_questrade_read_only_cache(dashboard_payload: Dict[str, Any]) 
     # real-time execution/fill authority.
     payload["broker_activity"] = (
         _build_questrade_activity_presentation(snapshot)
+    )
+
+    # QT-005: read-only corroboration against CSS completed outcomes.
+    # Broker ACCOUNT_HISTORY never writes the outcome repository and never
+    # promotes positions, realized/session P&L, or execution authority.
+    outcome_source_available = True
+    try:
+        outcomes_path = os.path.join(
+            LauncherConfig.ARTIFACTS_DIR,
+            "trade_outcomes.json",
+        )
+        outcomes_repository = TradeOutcomeRepository(outcomes_path)
+        broker_trade_outcomes = outcomes_repository.load_outcomes()
+    except Exception:
+        broker_trade_outcomes = []
+        outcome_source_available = False
+
+    payload["broker_activity_reconciliation"] = (
+        reconcile_questrade_activity_history(
+            payload["broker_activity"],
+            broker_trade_outcomes,
+            outcome_source_available=outcome_source_available,
+        )
     )
 
     # Safety invariants are authoritative and may never be promoted open.
@@ -1428,6 +1452,29 @@ def build_launcher_frontend_state(
             "telemetry_semantics": "ACCOUNT_HISTORY",
             "real_time_fill_feed": False,
             "portfolio_mutation_authority": False,
+            "execution_authority": False,
+        }
+    )
+
+    frontend_payload["broker_activity_reconciliation"] = (
+        dict(dashboard_payload.get("broker_activity_reconciliation"))
+        if isinstance(
+            dashboard_payload.get("broker_activity_reconciliation"),
+            dict,
+        )
+        else {
+            "status": "UNAVAILABLE",
+            "rows": [],
+            "reconciliation_semantics": "CORROBORATION_ONLY",
+            "execution_allowed": False,
+            "live_trading_blocked": True,
+            "broker_execution_armed": False,
+            "advisory_only": True,
+            "stable_broker_activity_id_available": False,
+            "real_time_fill_feed": False,
+            "portfolio_mutation_authority": False,
+            "trade_outcome_write_authority": False,
+            "pnl_promotion_authority": False,
             "execution_authority": False,
         }
     )
