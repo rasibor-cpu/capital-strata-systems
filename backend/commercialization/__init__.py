@@ -1,4 +1,4 @@
-﻿"""
+"""
 CSS commercialization domain contracts.
 
 COM-002A begins with provenance only.
