@@ -18,6 +18,9 @@ from backend.app.persistence.repositories.trade_provenance_repository import (
 from backend.app.persistence.repositories.attributable_performance_repository import (
     AttributablePerformanceRepository,
 )
+from backend.app.persistence.repositories.performance_accounting_transition_repository import (
+    PerformanceAccountingTransitionRepository,
+)
 from backend.app.persistence.migrations.runner import run_migrations
 
 
@@ -43,6 +46,9 @@ class PersistenceService:
         self.attributable_performance = (
             AttributablePerformanceRepository()
         )
+        self.performance_accounting_transitions = (
+            PerformanceAccountingTransitionRepository()
+        )
         self.pnl_snapshots = (
             PnlSnapshotRepository()
         )
@@ -63,6 +69,7 @@ class PersistenceService:
                 "trades": True,
                 "trade_provenance": True,
                 "attributable_performance": True,
+                "performance_accounting_transitions": True,
                 "pnl_snapshots": True,
                 "legal_acceptances": True,
             },
