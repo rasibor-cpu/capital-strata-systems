@@ -33,6 +33,7 @@ class PersistenceService:
         run_migrations()
         self.sessions = SessionRepository()
         self.trades = TradeRepository()
+        self.trade_provenance = TradeProvenanceRepository()
         self.pnl_snapshots = (
             PnlSnapshotRepository()
         )
@@ -51,6 +52,7 @@ class PersistenceService:
             "repositories": {
                 "sessions": True,
                 "trades": True,
+                "trade_provenance": True,
                 "pnl_snapshots": True,
                 "legal_acceptances": True,
             },
