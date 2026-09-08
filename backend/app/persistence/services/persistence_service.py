@@ -21,6 +21,12 @@ from backend.app.persistence.repositories.attributable_performance_repository im
 from backend.app.persistence.repositories.performance_accounting_transition_repository import (
     PerformanceAccountingTransitionRepository,
 )
+from backend.app.persistence.repositories.performance_compensation_terms_repository import (
+    PerformanceCompensationTermsRepository,
+)
+from backend.app.persistence.repositories.shadow_compensation_entitlement_repository import (
+    ShadowCompensationEntitlementRepository,
+)
 from backend.app.persistence.migrations.runner import run_migrations
 
 
@@ -49,6 +55,12 @@ class PersistenceService:
         self.performance_accounting_transitions = (
             PerformanceAccountingTransitionRepository()
         )
+        self.performance_compensation_terms = (
+            PerformanceCompensationTermsRepository()
+        )
+        self.shadow_compensation_entitlements = (
+            ShadowCompensationEntitlementRepository()
+        )
         self.pnl_snapshots = (
             PnlSnapshotRepository()
         )
@@ -70,6 +82,8 @@ class PersistenceService:
                 "trade_provenance": True,
                 "attributable_performance": True,
                 "performance_accounting_transitions": True,
+                "performance_compensation_terms": True,
+                "shadow_compensation_entitlements": True,
                 "pnl_snapshots": True,
                 "legal_acceptances": True,
             },
