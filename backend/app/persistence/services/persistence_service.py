@@ -57,6 +57,9 @@ from backend.app.persistence.repositories.invoice_correction_repository import (
 from backend.app.persistence.repositories.receivable_recognition_repository import (
     ReceivableRecognitionRepository,
 )
+from backend.app.persistence.repositories.receivable_reversal_repository import (
+    ReceivableReversalRepository,
+)
 from backend.app.persistence.migrations.runner import run_migrations
 
 
@@ -107,6 +110,7 @@ class PersistenceService:
         self.invoice_issued_records = InvoiceIssuedRepository()
         self.invoice_corrections = InvoiceCorrectionRepository()
         self.receivable_recognitions = ReceivableRecognitionRepository()
+        self.receivable_reversals = ReceivableReversalRepository()
         self.pnl_snapshots = (
             PnlSnapshotRepository()
         )
@@ -140,6 +144,7 @@ class PersistenceService:
                 "invoice_issued_records": True,
                 "invoice_corrections": True,
                 "receivable_recognitions": True,
+                "receivable_reversals": True,
                 "pnl_snapshots": True,
                 "legal_acceptances": True,
             },
