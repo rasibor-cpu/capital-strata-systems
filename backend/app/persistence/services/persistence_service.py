@@ -78,6 +78,8 @@ from backend.app.persistence.repositories.receivable_writeoff_repository import 
 from backend.app.persistence.repositories.platform_access_fee_terms_repository import (
     PlatformAccessFeeTermsRepository,
 )
+from backend.app.persistence.repositories.fx_conversion_repository import FxConversionEvidenceRepository
+from backend.app.persistence.repositories.final_fee_selection_repository import FinalFeeSelectionRepository
 from backend.app.persistence.migrations.runner import run_migrations
 
 
@@ -110,6 +112,8 @@ class PersistenceService:
             PerformanceCompensationTermsRepository()
         )
         self.platform_access_fee_terms = PlatformAccessFeeTermsRepository()
+        self.fx_conversion_evidence = FxConversionEvidenceRepository()
+        self.final_fee_selections = FinalFeeSelectionRepository()
         self.shadow_compensation_entitlements = (
             ShadowCompensationEntitlementRepository()
         )
@@ -160,6 +164,8 @@ class PersistenceService:
                 "performance_accounting_transitions": True,
                 "performance_compensation_terms": True,
                 "platform_access_fee_terms": True,
+                "fx_conversion_evidence": True,
+                "final_fee_selections": True,
                 "shadow_compensation_entitlements": True,
                 "performance_compensation_lifecycle_policies": True,
                 "crystallization_assessments": True,
