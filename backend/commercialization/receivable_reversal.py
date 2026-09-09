@@ -1,0 +1,277 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from decimal import Decimal
+from typing import Sequence, Tuple
+
+from backend.commercialization.invoice_correction import (
+    CommercialInvoiceCorrectionRecord,
+    InvoiceCorrectionType,
+)
+from backend.commercialization.receivable_recognition import (
+    CommercialReceivableRecognitionRecord,
+)
+
+
+class ReceivableReversalError(ValueError):
+    """Base COM-002O receivable-reversal contract error."""
+
+
+class ReceivableReversalIneligibleError(ReceivableReversalError):
+    """Raised when a full receivable reversal cannot proceed."""
+
+
+def _require_canonical_id(name: str, value: str) -> None:
+    if not value or value != value.strip():
+        raise ValueError(
+            f"{name} is required and must be canonical"
+        )
+
+
+def _require_canonical_currency(currency: str) -> None:
+    if (
+        not currency
+        or currency != currency.strip()
+        or currency != currency.upper()
+    ):
+        raise ValueError(
+            "currency must be canonical uppercase text"
+        )
+
+
+def _require_finite_decimal(name: str, value: object) -> Decimal:
+    if not isinstance(value, Decimal):
+        raise TypeError(f"{name} must be Decimal")
+
+    if not value.is_finite():
+        raise ValueError(f"{name} must be finite")
+
+    return value
+
+
+def _require_evidence_refs(evidence_refs: Sequence[str]) -> None:
+    if not evidence_refs:
+        raise ValueError("evidence_refs must be non-empty")
+
+    for ref in evidence_refs:
+        if not isinstance(ref, str) or not ref or ref != ref.strip():
+            raise ValueError(
+                "evidence refs must be nonblank canonical strings"
+            )
+
+
+def _parse_canonical_utc_timestamp(name: str, value: str) -> datetime:
+    """
+    Localized COM-002O datetime rule.
+
+    Accepts timezone-aware ISO-8601 timestamps whose offset is UTC
+    (+00:00 or Z). Naive datetimes and non-UTC offsets are rejected.
+    """
+
+    if not value or value != value.strip():
+        raise ValueError(
+            f"{name} is required and must be canonical"
+        )
+
+    text = value.strip()
+    try:
+        parsed = datetime.fromisoformat(
+            text.replace("Z", "+00:00")
+        )
+    except ValueError as exc:
+        raise ValueError(
+            f"{name} must be timezone-aware UTC ISO-8601"
+        ) from exc
+
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(
+            f"{name} must be timezone-aware UTC ISO-8601"
+        )
+
+    if parsed.utcoffset() != timezone.utc.utcoffset(parsed):
+        raise ValueError(
+            f"{name} must use UTC offset only"
+        )
+
+    return parsed.astimezone(timezone.utc)
+
+
+@dataclass(frozen=True, slots=True)
+class CommercialReceivableReversalRecord:
+    """
+    Immutable documentary full reversal of one commercial receivable
+    recognition after a VOID or SUPERSEDE invoice correction.
+
+    Presence of this record means full documentary reversal only. It does
+    not mutate the receivable, create partial adjustments, credit notes,
+    write-offs, GL reversals, refunds, payments, or replacement
+    receivables.
+    """
+
+    reversal_id: str
+    receivable_id: str
+    invoice_id: str
+    correction_id: str
+    currency: str
+    reversal_amount: Decimal
+    reversed_at: str
+    reason_reference: str
+    evidence_refs: Tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        _require_canonical_id("reversal_id", self.reversal_id)
+        _require_canonical_id("receivable_id", self.receivable_id)
+        _require_canonical_id("invoice_id", self.invoice_id)
+        _require_canonical_id("correction_id", self.correction_id)
+        _require_canonical_id(
+            "reason_reference",
+            self.reason_reference,
+        )
+        _require_canonical_currency(self.currency)
+        _parse_canonical_utc_timestamp(
+            "reversed_at",
+            self.reversed_at,
+        )
+
+        amount = _require_finite_decimal(
+            "reversal_amount",
+            self.reversal_amount,
+        )
+
+        if amount < Decimal("0"):
+            raise ValueError(
+                "reversal_amount cannot be negative"
+            )
+
+        _require_evidence_refs(self.evidence_refs)
+
+    @property
+    def receivable_mutation_allowed(self) -> bool:
+        return False
+
+    @property
+    def partial_adjustment_allowed(self) -> bool:
+        return False
+
+    @property
+    def credit_note_creation_allowed(self) -> bool:
+        return False
+
+    @property
+    def writeoff_allowed(self) -> bool:
+        return False
+
+    @property
+    def ledger_reversal_allowed(self) -> bool:
+        return False
+
+    @property
+    def revenue_reversal_posting_allowed(self) -> bool:
+        return False
+
+    @property
+    def outstanding_balance_mutation_allowed(self) -> bool:
+        return False
+
+    @property
+    def payment_allocation_allowed(self) -> bool:
+        return False
+
+    @property
+    def refund_allowed(self) -> bool:
+        return False
+
+    @property
+    def real_fee_collection_allowed(self) -> bool:
+        return False
+
+    @property
+    def client_funds_deduction_allowed(self) -> bool:
+        return False
+
+    @property
+    def automatic_debit_allowed(self) -> bool:
+        return False
+
+    @property
+    def payment_initiation_allowed(self) -> bool:
+        return False
+
+    @property
+    def money_movement_allowed(self) -> bool:
+        return False
+
+    @property
+    def replacement_receivable_creation_allowed(self) -> bool:
+        return False
+
+    @property
+    def broker_withdrawal_allowed(self) -> bool:
+        return False
+
+    @property
+    def execution_authority(self) -> bool:
+        return False
+
+
+def build_receivable_reversal(
+    receivable: CommercialReceivableRecognitionRecord,
+    correction: CommercialInvoiceCorrectionRecord,
+    *,
+    reversal_id: str,
+    reversed_at: str,
+    reason_reference: str,
+    evidence_refs: Tuple[str, ...],
+) -> CommercialReceivableReversalRecord:
+    """
+    Fail-closed COM-002O full receivable-reversal builder.
+
+    Links a receivable recognition to a VOID/SUPERSEDE invoice correction
+    for the same invoice_id. Copies full receivable amount as a positive
+    magnitude. Does not mutate receivable/invoice/correction, create
+    replacement receivables, or post/refund.
+    """
+
+    if not isinstance(
+        receivable,
+        CommercialReceivableRecognitionRecord,
+    ):
+        raise TypeError(
+            "receivable must be CommercialReceivableRecognitionRecord"
+        )
+
+    if not isinstance(correction, CommercialInvoiceCorrectionRecord):
+        raise TypeError(
+            "correction must be CommercialInvoiceCorrectionRecord"
+        )
+
+    _require_canonical_id("reversal_id", reversal_id)
+    _require_canonical_id("reason_reference", reason_reference)
+    _parse_canonical_utc_timestamp("reversed_at", reversed_at)
+    _require_evidence_refs(evidence_refs)
+
+    if correction.correction_type not in (
+        InvoiceCorrectionType.VOID,
+        InvoiceCorrectionType.SUPERSEDE,
+    ):
+        raise ReceivableReversalIneligibleError(
+            "reversal requires VOID or SUPERSEDE correction"
+        )
+
+    if correction.invoice_id != receivable.invoice_id:
+        raise ReceivableReversalIneligibleError(
+            "correction invoice_id must match receivable invoice_id"
+        )
+
+    return CommercialReceivableReversalRecord(
+        reversal_id=reversal_id,
+        receivable_id=receivable.receivable_id,
+        invoice_id=receivable.invoice_id,
+        correction_id=correction.correction_id,
+        currency=receivable.currency,
+        reversal_amount=receivable.receivable_amount,
+        reversed_at=reversed_at,
+        reason_reference=reason_reference,
+        evidence_refs=evidence_refs,
+    )
