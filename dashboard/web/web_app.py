@@ -552,6 +552,91 @@ def _dashboard_page() -> str:
 </html>"""
 
 
+def _billing_page() -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111820">
+  <title>CSS Client Billing</title>
+  <style>{{_css()}}</style>
+</head>
+<body><div style="background-color:#ffebee;color:#b71c1c;text-align:center;padding:8px;font-weight:bold;font-size:0.85em;border-bottom:1px solid #b71c1c;" aria-label="Risk Warning">Trading involves substantial risk. Loss of capital may occur. Past performance does not guarantee future results.</div>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">CSS</div>
+        <div>
+          <p class="eyebrow">Capital Strata Systems</p>
+          <h1>Client Billing</h1>
+        </div>
+      </div>
+      <section class="status-strip" aria-label="System status">
+        <span>Read-only advisory</span>
+        <span>No broker withdrawal authority</span>
+        <span>Commercial summary only</span>
+      </section>
+    </header>
+    {_app_nav("billing")}
+
+    <section class="metric-band" aria-label="Commercial metrics">
+      <article><strong>Period Profit</strong><span>$112.50</span></article>
+      <article><strong>CSS-Attributable New Gain</strong><span>$130.00</span></article>
+      <article><strong>CSS Charge This Period</strong><span>$45.00</span></article>
+      <article><strong>Net Earnings After CSS Fee</strong><span>$85.00</span></article>
+      <article><strong>Available to Withdraw</strong><span class="positive">$141.00</span></article>
+      <article><strong>Restricted / Pending Funds</strong><span>$39.00</span></article>
+    </section>
+
+    <section class="dashboard-grid">
+      <article class="panel wide">
+        <div class="panel-head">
+          <h2>Available to Withdraw</h2>
+          <span>advisory estimate from current broker/account state</span>
+        </div>
+        <div class="kv-grid two">
+          <div><strong>Available cash / settled cash</strong><span>$180.00</span></div>
+          <div><strong>minus open-order reserve</strong><span>-$10.00</span></div>
+          <div><strong>minus margin/position reserve</strong><span>-$20.00</span></div>
+          <div><strong>minus pending CSS obligation</strong><span>-$5.00</span></div>
+          <div><strong>minus other restrictions</strong><span>-$4.00</span></div>
+          <div><strong>Available to Withdraw</strong><span class="positive">$141.00</span></div>
+        </div>
+        <p class="panel-note">Available to Withdraw — advisory estimate from current broker/account state.</p>
+        <p class="panel-note">Withdrawal availability cannot yet be determined reliably.</p>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <h2>Restriction Reasons</h2>
+          <span>current state</span>
+        </div>
+        <ul class="compact-list">
+          <li>OPEN_ORDER_RESERVE</li>
+          <li>MARGIN_OR_POSITION_RESERVE</li>
+          <li>PENDING_CSS_CHARGE</li>
+        </ul>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <h2>Period History</h2>
+          <span>current + prior periods</span>
+        </div>
+        <div class="kv-grid two">
+          <div><strong>Current period</strong><span>2026-09-01 → 2026-10-01</span></div>
+          <div><strong>Selected basis</strong><span>PERFORMANCE_COMPENSATION</span></div>
+          <div><strong>Final CSS charge</strong><span>$45.00</span></div>
+          <div><strong>Net earnings after CSS fee</strong><span>$85.00</span></div>
+        </div>
+      </article>
+    </section>
+  </main>
+</body>
+</html>"""
+
+
 def _positions_page() -> str:
     return f"""<!doctype html>
 <html lang="en">
