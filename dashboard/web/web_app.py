@@ -13,6 +13,7 @@ from dashboard.runtime.api_bridge import (
 from dashboard.runtime.dashboard_hydration_coordinator import (
     DashboardHydrationCoordinator,
 )
+from dashboard.runtime.client_earnings_router import create_client_earnings_router
 from dashboard.runtime.dashboard_state import DashboardState
 from dashboard.runtime.runtime_smoke_test import build_smoke_payloads
 from dashboard.runtime.ws_bridge import create_ws_router
@@ -39,6 +40,7 @@ def create_app(
     )
     app.include_router(create_dashboard_state_router(provider))
     app.include_router(create_ws_router(provider))
+    app.include_router(create_client_earnings_router())
 
     @app.get("/", include_in_schema=False)
     async def index() -> RedirectResponse:
@@ -71,6 +73,10 @@ def create_app(
     @app.get("/margin", response_class=HTMLResponse)
     async def margin_view() -> HTMLResponse:
         return HTMLResponse(_margin_page())
+
+    @app.get("/billing", response_class=HTMLResponse)
+    async def billing_view() -> HTMLResponse:
+        return HTMLResponse(_billing_page())
 
     @app.get("/api/v1/margin-snapshot")
     async def margin_api() -> dict[str, Any]:
@@ -139,6 +145,7 @@ def _app_nav(active: str) -> str:
         ("broker", "/broker", "Broker"),
     
         ("margin", "/margin", "Margin"),
+        ("billing", "/billing", "Billing"),
     ]
 
     return "\n".join(
@@ -1657,6 +1664,152 @@ def _margin_page() -> str:
   </script>
 </body>
 </html>"""
+
+
+def _billing_page() -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111820">
+  <title>CSS Client Earnings &amp; Charges</title>
+  <style>{_css()}</style>
+</head>
+<body><div style="background-color:#ffebee;color:#b71c1c;text-align:center;padding:8px;font-weight:bold;font-size:0.85em;border-bottom:1px solid #b71c1c;" aria-label="Risk Warning">Trading involves substantial risk. Loss of capital may occur. Past performance does not guarantee future results.</div>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">CSS</div>
+        <div>
+          <p class="eyebrow">Capital Strata Systems</p>
+          <h1>Client Earnings &amp; Charges</h1>
+        </div>
+      </div>
+      <section class="status-strip" aria-label="Billing period status">
+        <span id="billing-status">Status pending</span>
+        <span id="billing-period">Period pending</span>
+      </section>
+    </header>
+    {_app_nav("billing")}
+
+    <section class="control-row" aria-label="Billing controls">
+      <label>Policy ID <input id="billing-policy-id" type="text" placeholder="POLICY-A"></label>
+      <label>Period Start <input id="billing-period-start" type="text" placeholder="2026-09-01T00:00:00Z"></label>
+      <label>Period End <input id="billing-period-end" type="text" placeholder="2026-10-01T00:00:00Z"></label>
+      <button type="button" data-refresh-billing>Load</button>
+      <span>Read-only presentation</span>
+      <span>No payment execution from this view</span>
+    </section>
+
+    <section class="metric-band" aria-label="Client earnings summary">
+      <article>
+        <strong>Period Profit</strong>
+        <span id="billing-period-profit">$0.00</span>
+      </article>
+      <article>
+        <strong>CSS-Attributable New Gain</strong>
+        <span id="billing-new-gain">$0.00</span>
+      </article>
+      <article>
+        <strong>CSS Charge This Period</strong>
+        <span id="billing-charge">$0.00</span>
+      </article>
+      <article>
+        <strong>Net Earnings After CSS Fee</strong>
+        <span id="billing-net-earnings">$0.00</span>
+      </article>
+    </section>
+
+    <section class="dashboard-grid" aria-label="Charge calculation panel">
+      <article class="panel wide" data-panel="charge-calculation">
+        <div class="panel-head">
+          <h2>Charge Calculation</h2>
+          <span id="billing-basis-badge">--</span>
+        </div>
+        <div class="kv-grid two">
+          <div><strong>Step 1: CSS-attributable realized gain</strong><span id="billing-step-1">--</span></div>
+          <div><strong>Step 2: HWM / loss recovery adjustment</strong><span id="billing-step-2">--</span></div>
+          <div><strong>Step 3: New economic gain</strong><span id="billing-step-3">--</span></div>
+          <div><strong>Step 4: Performance fee rate</strong><span id="billing-step-4">--</span></div>
+          <div><strong>Step 5: Performance fee</strong><span id="billing-step-5">--</span></div>
+          <div><strong>Step 6: Platform minimum</strong><span id="billing-step-6">--</span></div>
+          <div><strong>Step 7: Final CSS charge</strong><span id="billing-step-7">--</span></div>
+        </div>
+        <p class="panel-note" id="billing-fee-rule">CSS charges the higher of your platform minimum or your performance fee. You never pay both.</p>
+        <p class="panel-note" id="billing-fx-note" style="display:none;"></p>
+        <p class="panel-note" id="billing-withdrawable-note"></p>
+        <div id="billing-error" style="display:none; color:#df5b52; padding:16px; font-weight:bold;">
+          No commercial earnings data is available for this period.
+        </div>
+      </article>
+    </section>
+  </main>
+  <script>{_billing_script()}</script>
+</body>
+</html>"""
+
+
+def _billing_script() -> str:
+    return """
+function money(value, currency) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD" }).format(Number(value || 0));
+}
+
+async function refreshBilling() {
+  const policyId = document.getElementById("billing-policy-id").value.trim();
+  const periodStart = document.getElementById("billing-period-start").value.trim();
+  const periodEnd = document.getElementById("billing-period-end").value.trim();
+  const errorBox = document.getElementById("billing-error");
+  if (!policyId || !periodStart || !periodEnd) return;
+
+  const params = new URLSearchParams({ policy_id: policyId, period_start: periodStart, period_end: periodEnd });
+  const response = await fetch(`/api/v1/client-earnings-summary?${params.toString()}`, { cache: "no-store" });
+  if (!response.ok) {
+    errorBox.style.display = "block";
+    return;
+  }
+  errorBox.style.display = "none";
+  const data = await response.json();
+  const billingCurrency = data.billing_currency || data.performance_currency;
+
+  document.getElementById("billing-status").textContent = `Status ${data.commercial_status}`;
+  document.getElementById("billing-period").textContent = `Period ${data.billing_period_start} - ${data.billing_period_end}`;
+  document.getElementById("billing-period-profit").textContent = money(data.realized_attributable_profit, data.performance_currency);
+  document.getElementById("billing-new-gain").textContent = money(data.new_economic_gain, data.performance_currency);
+  document.getElementById("billing-charge").textContent = data.selected_fee_amount !== null ? money(data.selected_fee_amount, billingCurrency) : "N/A";
+  document.getElementById("billing-net-earnings").textContent = data.net_earnings_after_css_fee !== null ? money(data.net_earnings_after_css_fee, billingCurrency) : "N/A";
+
+  document.getElementById("billing-step-1").textContent = money(data.realized_attributable_profit, data.performance_currency);
+  document.getElementById("billing-step-2").textContent = money(data.recovered_loss, data.performance_currency);
+  document.getElementById("billing-step-3").textContent = money(data.new_economic_gain, data.performance_currency);
+  document.getElementById("billing-step-4").textContent = data.performance_fee_rate !== null ? `${(Number(data.performance_fee_rate) * 100).toFixed(2)}%` : "N/A";
+  document.getElementById("billing-step-5").textContent = data.performance_fee_billing_currency_amount !== null ? money(data.performance_fee_billing_currency_amount, billingCurrency) : "N/A";
+  document.getElementById("billing-step-6").textContent = data.platform_access_fee_amount !== null ? money(data.platform_access_fee_amount, billingCurrency) : "N/A";
+  document.getElementById("billing-step-7").textContent = data.selected_fee_amount !== null ? money(data.selected_fee_amount, billingCurrency) : "N/A";
+
+  const badge = document.getElementById("billing-basis-badge");
+  if (data.selected_fee_basis === "PERFORMANCE_COMPENSATION") {
+    badge.textContent = "PERFORMANCE FEE APPLIED";
+  } else if (data.selected_fee_basis === "PLATFORM_ACCESS") {
+    badge.textContent = "PLATFORM MINIMUM APPLIED";
+  } else {
+    badge.textContent = "NOT YET BILLABLE";
+  }
+
+  const fxNote = document.getElementById("billing-fx-note");
+  if (data.fx_language) {
+    fxNote.textContent = data.fx_language;
+    fxNote.style.display = "block";
+  } else {
+    fxNote.style.display = "none";
+  }
+
+  document.getElementById("billing-withdrawable-note").textContent = data.withdrawable_funds_note;
+}
+
+document.querySelector("[data-refresh-billing]").addEventListener("click", refreshBilling);
+"""
 
 
 def _css() -> str:
