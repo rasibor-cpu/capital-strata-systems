@@ -51,6 +51,9 @@ from backend.app.persistence.repositories.invoice_identity_repository import (
 from backend.app.persistence.repositories.invoice_issued_repository import (
     InvoiceIssuedRepository,
 )
+from backend.app.persistence.repositories.invoice_correction_repository import (
+    InvoiceCorrectionRepository,
+)
 from backend.app.persistence.migrations.runner import run_migrations
 
 
@@ -99,6 +102,7 @@ class PersistenceService:
         self.invoice_candidates = InvoiceCandidateRepository()
         self.invoice_identity_allocations = InvoiceIdentityRepository()
         self.invoice_issued_records = InvoiceIssuedRepository()
+        self.invoice_corrections = InvoiceCorrectionRepository()
         self.pnl_snapshots = (
             PnlSnapshotRepository()
         )
@@ -130,6 +134,7 @@ class PersistenceService:
                 "invoice_candidates": True,
                 "invoice_identity_allocations": True,
                 "invoice_issued_records": True,
+                "invoice_corrections": True,
                 "pnl_snapshots": True,
                 "legal_acceptances": True,
             },
