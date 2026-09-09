@@ -39,6 +39,9 @@ from backend.app.persistence.repositories.settlement_readiness_repository import
 from backend.app.persistence.repositories.billable_obligation_repository import (
     BillableObligationRepository,
 )
+from backend.app.persistence.repositories.billing_profile_repository import (
+    BillingProfileRepository,
+)
 from backend.app.persistence.migrations.runner import run_migrations
 
 
@@ -83,6 +86,7 @@ class PersistenceService:
             SettlementReadinessRepository()
         )
         self.billable_obligations = BillableObligationRepository()
+        self.billing_profiles = BillingProfileRepository()
         self.pnl_snapshots = (
             PnlSnapshotRepository()
         )
@@ -110,6 +114,7 @@ class PersistenceService:
                 "crystallization_assessments": True,
                 "settlement_readiness": True,
                 "billable_obligations": True,
+                "billing_profiles": True,
                 "pnl_snapshots": True,
                 "legal_acceptances": True,
             },
