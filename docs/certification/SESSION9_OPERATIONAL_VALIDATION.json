@@ -1,0 +1,88 @@
+{
+  "repository": "capital-strata-systems",
+  "branch": "css-com002c-performance-accounting",
+  "head_before": "c8a22987",
+  "validation_date": "2026-09-09",
+  "full_collection": {
+    "count": 1768,
+    "exit": 0
+  },
+  "session8_full_suite": {
+    "passed": 1768,
+    "failed": 0,
+    "warnings": 49
+  },
+  "session9_full_suite": {
+    "collected": 1768,
+    "collection_exit": 0,
+    "passed": 1768,
+    "failed": 0,
+    "warnings": 49,
+    "duration_seconds": 24.78
+  },
+  "paper_validation": {
+    "start_utc": "2026-09-09T23:33:16.512281+00:00",
+    "end_utc": "2026-09-09T23:33:16.649990+00:00",
+    "duration_seconds": 0.137709,
+    "mode": "TEST",
+    "broker": "css_paper",
+    "simulated_fills": 5,
+    "successful_closes": 5,
+    "exit": 0,
+    "real_order_endpoint_invoked": false,
+    "heartbeat_loss_count": 0,
+    "restart_count": 0,
+    "unexpected_restart_count": 0,
+    "api_health_failures": 0,
+    "broker_stale_incidents": 0,
+    "reconciliation_mismatches": 0,
+    "critical_alerts": 0,
+    "high_alerts": 0,
+    "final_runtime_state": "PAPER_SIMULATION_COMPLETED"
+  },
+  "safety": {
+    "execution_allowed": false,
+    "live_trading_blocked": true,
+    "broker_execution_armed": false,
+    "advisory_only": true
+  },
+  "regressions": {
+    "required_group_passed": 198,
+    "required_group_warnings": 5,
+    "runtime_smoke": "PASS",
+    "slippage_protection_passed": 9
+  },
+  "questrade_real_account_validation": {
+    "status": "BLOCKED_EXTERNAL",
+    "auth": "BLOCKED_EXTERNAL",
+    "account_discovery": "BLOCKED_EXTERNAL",
+    "balances": "BLOCKED_EXTERNAL",
+    "positions": "BLOCKED_EXTERNAL",
+    "activities": "BLOCKED_EXTERNAL",
+    "freshness": "BLOCKED_EXTERNAL",
+    "reason": "No configured Questrade credentials or provider access; no network request attempted"
+  },
+  "portfolio_reset": {
+    "ENB": "UNAVAILABLE",
+    "TELUS": "UNAVAILABLE",
+    "TD": "UNAVAILABLE"
+  },
+  "supported_brokers": ["OANDA", "Coinbase"],
+  "read_only_brokers": ["Questrade"],
+  "paper_only_brokers": ["IBKR"],
+  "unsupported_brokers": ["Alpaca"],
+  "recommendation": "NOT_READY_FOR_FINAL_MICRO_LIVE_REVIEW",
+  "open_code_blockers": [],
+  "open_external_blockers": [
+    "Questrade real-account read-only credentials/provider unavailable",
+    "Sustained overnight continuity window not performed"
+  ],
+  "runtime_supervisor_touched": false,
+  "live_execution_authority_added": false,
+  "broker_execution_armed": false,
+  "real_order_submitted": false,
+  "withdrawal_submitted": false,
+  "transfer_submitted": false,
+  "money_movement_added": false,
+  "safety_gate_weakened": false
+}

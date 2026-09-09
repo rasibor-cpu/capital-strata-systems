@@ -272,7 +272,7 @@ def validate_builders(payloads: Dict[str, Dict[str, Any]], failures: List[str]) 
     )
     require(position_state["open_count"] == 2, "position builder count mismatch", failures)
     require(
-        pnl_summary["unrealized_pnl"] == 27.50,
+        position_state["total_unrealized_pnl"] == 27.50,
         "PnL summary unrealized mismatch",
         failures,
     )

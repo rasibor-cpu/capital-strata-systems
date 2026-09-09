@@ -27,7 +27,9 @@ def dashboard():
     yield db
 
 @pytest.fixture(autouse=True)
-def reset_dashboard_state(dashboard):
+def reset_dashboard_state(dashboard, monkeypatch):
+    monkeypatch.setattr(dashboard, "oanda_has_open_trade", lambda: False)
+    monkeypatch.setattr(dashboard, "get_oanda_open_trade_count", lambda: 0)
     dashboard._CSS_SESSION_LOCK.clear()
     dashboard.RECONCILIATION_STATUS = "HEALTHY"
     dashboard.mtm_engine.positions.clear()
@@ -37,7 +39,9 @@ def reset_dashboard_state(dashboard):
     dashboard.SESSION_USER_CTX["role_profile"] = {"can_execute_paper_trading": True}
 
 def test_successful_execution_within_bounds(dashboard):
-    with patch("backend.app.brokers.oanda_adapter.OandaAdapter.place_order") as mock_place:
+    with patch.object(dashboard, "oanda_has_open_trade", return_value=False), \
+            patch.object(dashboard, "get_oanda_open_trade_count", return_value=0), \
+            patch("backend.app.brokers.oanda_adapter.OandaAdapter.place_order") as mock_place:
         mock_place.return_value = {
             "ok": True,
             "data": {
