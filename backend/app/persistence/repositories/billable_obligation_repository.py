@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from typing import Any
 
 from backend.app.persistence.repositories.base_repository import (
@@ -28,6 +29,19 @@ class BillableObligationRepository(BaseRepository):
         self,
         obligation: CommercialBillableObligation,
     ) -> None:
+        readiness = self.fetch_one(
+            "SELECT * FROM commercial_settlement_readiness "
+            "WHERE policy_id = ? AND period_start = ? AND period_end = ?",
+            (obligation.policy_id, obligation.period_start, obligation.period_end),
+        )
+        if readiness is not None and "final_fee_selection_id" in readiness.keys() and readiness["final_fee_selection_id"] is not None:
+            for name in ("terms_id", "currency"):
+                if getattr(obligation, name) != readiness[name]:
+                    raise ValueError(f"billable {name} mismatches final-fee readiness")
+            if obligation.billable_amount != Decimal(readiness["economic_amount"]):
+                raise ValueError("billable amount mismatches final-fee readiness")
+            if obligation.status.value == "BILLABLE" and readiness["status"] != "READY":
+                raise ValueError("BILLABLE requires READY final-fee readiness")
         self.execute(
             """
             INSERT INTO commercial_billable_obligations (

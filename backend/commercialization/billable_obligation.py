@@ -6,6 +6,9 @@ from decimal import Decimal
 from enum import Enum
 from typing import Sequence, Tuple
 
+from backend.commercialization.final_fee_settlement_readiness import (
+    CommercialFinalFeeSettlementReadiness,
+)
 from backend.commercialization.settlement_readiness import (
     CommercialSettlementReadiness,
     SettlementReadinessStatus,
@@ -115,7 +118,7 @@ def _parse_canonical_utc_timestamp(name: str, value: str) -> datetime:
 class CommercialBillableObligation:
     """
     Immutable pre-accounting billable recognition for one
-    crystallized commercial period.
+    commercial period sourced from final-fee or legacy readiness.
 
     Keyed one-to-one with COM-002F readiness / COM-002E period by:
     (policy_id, period_start, period_end)
@@ -230,7 +233,7 @@ class CommercialBillableObligation:
 
 
 def build_billable_obligation(
-    readiness: CommercialSettlementReadiness,
+    readiness: CommercialSettlementReadiness | CommercialFinalFeeSettlementReadiness,
     status: BillableObligationStatus,
     recognized_at: str,
     evidence_refs: Tuple[str, ...],
@@ -238,14 +241,19 @@ def build_billable_obligation(
     """
     Fail-closed COM-002G billable-obligation builder.
 
-    Copies crystallized economics from upstream COM-002F readiness.
+    Copies the final selected fee from COM-002X readiness, or legacy
+    crystallized economics from COM-002F readiness. The final fee is never
+    recalculated or added to any other amount. The canonical period key
+    links persisted obligations back to readiness and its final selection.
     Does not recalculate compensation and does not infer billable
     gates. BILLABLE requires SettlementReadinessStatus.READY.
     """
 
-    if not isinstance(readiness, CommercialSettlementReadiness):
+    if not isinstance(
+        readiness, (CommercialSettlementReadiness, CommercialFinalFeeSettlementReadiness),
+    ):
         raise TypeError(
-            "readiness must be CommercialSettlementReadiness"
+            "readiness must be CommercialSettlementReadiness or CommercialFinalFeeSettlementReadiness"
         )
 
     if not isinstance(status, BillableObligationStatus):
@@ -269,7 +277,11 @@ def build_billable_obligation(
         currency=readiness.currency,
         period_start=readiness.period_start,
         period_end=readiness.period_end,
-        billable_amount=readiness.crystallizable_amount,
+        billable_amount=(
+            readiness.selected_fee_amount
+            if isinstance(readiness, CommercialFinalFeeSettlementReadiness)
+            else readiness.crystallizable_amount
+        ),
         recognized_at=recognized_at,
         status=status,
         evidence_refs=evidence_refs,
