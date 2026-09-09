@@ -75,6 +75,9 @@ from backend.app.persistence.repositories.receivable_credit_repository import (
 from backend.app.persistence.repositories.receivable_writeoff_repository import (
     ReceivableWriteOffRepository,
 )
+from backend.app.persistence.repositories.platform_access_fee_terms_repository import (
+    PlatformAccessFeeTermsRepository,
+)
 from backend.app.persistence.migrations.runner import run_migrations
 
 
@@ -106,6 +109,7 @@ class PersistenceService:
         self.performance_compensation_terms = (
             PerformanceCompensationTermsRepository()
         )
+        self.platform_access_fee_terms = PlatformAccessFeeTermsRepository()
         self.shadow_compensation_entitlements = (
             ShadowCompensationEntitlementRepository()
         )
@@ -155,6 +159,7 @@ class PersistenceService:
                 "attributable_performance": True,
                 "performance_accounting_transitions": True,
                 "performance_compensation_terms": True,
+                "platform_access_fee_terms": True,
                 "shadow_compensation_entitlements": True,
                 "performance_compensation_lifecycle_policies": True,
                 "crystallization_assessments": True,
