@@ -46,6 +46,7 @@ audit_logs/
 audit/
 state/
 runtime/
+runtime_supervisor.json
 reporting_store/
 out/
 feeds/
@@ -103,6 +104,10 @@ Thumbs.db
 !live_data/*.py
 live_data/__pycache__/
 live_data/**/*.log
+
+# Dashboard runtime Python is source; runtime state/artifacts remain ignored.
+!dashboard/runtime/
+!dashboard/runtime/**/*.py
 # --- Runtime artifacts ---
 artifacts/
 data_cache/

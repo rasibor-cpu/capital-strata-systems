@@ -1,5 +1,4 @@
 import pytest
-from bs4 import BeautifulSoup
 from dashboard.mobile import mobile_app
 from backend.app.persistence.services.session_runtime_service import SessionRuntimeService
 from backend.app.persistence.services.pnl_runtime_service import PnlRuntimeService

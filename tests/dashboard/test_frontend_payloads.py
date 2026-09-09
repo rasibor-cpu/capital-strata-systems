@@ -24,7 +24,24 @@ from dashboard.runtime.ws_bridge import (
     build_delta_ws_message,
     build_heartbeat_ws_message,
     build_initial_ws_message,
+    create_ws_router,
 )
+
+
+def _registered_route_paths(app) -> set[str]:
+    paths = set(app.openapi()["paths"])
+
+    def visit(routes) -> None:
+        for route in routes:
+            nested = getattr(route, "routes", None)
+            if nested:
+                visit(nested)
+            path = getattr(route, "path", "")
+            if path:
+                paths.add(path)
+
+    visit(app.routes)
+    return paths
 
 
 def test_dashboard_state_to_dict_is_json_safe_and_redacted() -> None:
@@ -80,7 +97,7 @@ def test_frontend_payload_schema_integrity_and_size() -> None:
 def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
     state = DashboardHydrationCoordinator().hydrate(**build_smoke_payloads())
     app = create_app(lambda: state)
-    routes = {getattr(route, "path", "") for route in app.routes}
+    routes = _registered_route_paths(app)
 
     required_routes = {
         "/api/v1/dashboard-state",
@@ -92,10 +109,15 @@ def test_api_bridge_routes_are_read_only_and_dashboard_state_fed() -> None:
         "/api/v1/opportunities",
         "/api/v1/broker",
         "/api/v1/broker-reconciliation",
-        "/ws/v1/dashboard-state",
     }
 
     assert required_routes <= routes
+    assert any(
+        getattr(route, "path", "") == "/ws/v1/dashboard-state"
+        for route in create_ws_router(lambda: state).routes
+    )
+    for path, methods in app.openapi()["paths"].items():
+        assert set(methods) <= {"get"}
     assert get_dashboard_state_payload(lambda: state)["session_id"] == "SMOKE-SESSION"
     assert get_frontend_payload(lambda: state)["sections"]["positions"]["total"] == 2
     assert (

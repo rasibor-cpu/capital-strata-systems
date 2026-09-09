@@ -26,6 +26,22 @@ from dashboard.runtime.payload_validator import FrontendPayloadValidator
 from dashboard.runtime.runtime_smoke_test import build_smoke_payloads
 
 
+def _registered_route_paths(app) -> set[str]:
+    paths = set(app.openapi()["paths"])
+
+    def visit(routes) -> None:
+        for route in routes:
+            nested = getattr(route, "routes", None)
+            if nested:
+                visit(nested)
+            path = getattr(route, "path", "")
+            if path:
+                paths.add(path)
+
+    visit(app.routes)
+    return paths
+
+
 def test_broker_reconciliation_passes_for_matching_snapshots() -> None:
     report = reconcile_broker_snapshots(
         css_account={
@@ -151,7 +167,7 @@ def test_frontend_and_api_expose_broker_reconciliation_section() -> None:
     frontend_payload = build_frontend_payload(state)
     section_payload = build_section_payload(state, "broker_reconciliation")
     app = create_app(lambda: state)
-    routes = {getattr(route, "path", "") for route in app.routes}
+    routes = _registered_route_paths(app)
     direct_payload = get_broker_reconciliation_payload(lambda: state)
 
     assert FrontendPayloadValidator().validate(frontend_payload) is True
@@ -159,6 +175,7 @@ def test_frontend_and_api_expose_broker_reconciliation_section() -> None:
     assert section_payload["section"] == "broker_reconciliation"
     assert section_payload["data"]["payload_version"] == "css.broker_reconciliation.v1"
     assert "/api/v1/broker-reconciliation" in routes
+    assert "get" in app.openapi()["paths"]["/api/v1/broker-reconciliation"]
     assert direct_payload["payload_version"] == "css.broker_reconciliation.v1"
 
 
