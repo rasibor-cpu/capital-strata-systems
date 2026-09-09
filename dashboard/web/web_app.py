@@ -323,6 +323,9 @@ def _dashboard_page() -> str:
         <div><strong>Session P&amp;L</strong><span id="mission-pnl">UNAVAILABLE</span></div>
         <div><strong>Connectivity</strong><span id="mission-connectivity">UNAVAILABLE</span></div>
         <div><strong>Reconciliation</strong><span id="mission-reconciliation">UNAVAILABLE</span></div>
+        <div><strong>Runtime / Heartbeat</strong><span id="mission-runtime">UNKNOWN / UNAVAILABLE</span></div>
+        <div><strong>Supervisor / Restarts</strong><span id="mission-supervisor">UNKNOWN / 0</span></div>
+        <div><strong>Unattended Ready</strong><span id="mission-unattended">NO</span></div>
         <div><strong>Execution Allowed</strong><span id="mission-execution">NO</span></div>
         <div><strong>Safety</strong><span id="mission-safety">LIVE FUNDED EXECUTION BLOCKED</span></div>
       </div>
@@ -514,6 +517,10 @@ def _dashboard_page() -> str:
       document.getElementById("mission-pnl").textContent = value("session_total_pnl");
       document.getElementById("mission-connectivity").textContent = value("broker_connected") ? "CONNECTED" : "NOT CONNECTED";
       document.getElementById("mission-reconciliation").textContent = value("reconciliation_status");
+      const runtime = state.mission.runtime_operational_state || {{}};
+      document.getElementById("mission-runtime").textContent = `${{runtime.runtime_status || "UNKNOWN"}} / ${{runtime.heartbeat_status || "UNAVAILABLE"}}`;
+      document.getElementById("mission-supervisor").textContent = `${{runtime.supervisor_status || "UNKNOWN"}} / ${{runtime.restart_count ?? "UNAVAILABLE"}}`;
+      document.getElementById("mission-unattended").textContent = runtime.unattended_ready ? "YES" : "NO";
       document.getElementById("mission-execution").textContent = value("execution_allowed", false) ? "YES" : "NO";
       document.getElementById("mission-safety").textContent = value("live_trading_blocked", true) ? "LIVE FUNDED EXECUTION BLOCKED" : "CHECK SAFETY STATE";
       const reasons = value("state_reason_codes", []);

@@ -18,6 +18,9 @@ from dashboard.runtime.broker_balance_reconciliation import (
 )
 from dashboard.runtime.ws_bridge import create_ws_router
 from dashboard.runtime.mission_control_state import build_mission_control_state
+from dashboard.runtime.runtime_operational_state import (
+    build_runtime_operational_state,
+)
 
 
 DashboardStateProvider = Callable[[], DashboardState]
@@ -83,11 +86,36 @@ def get_mission_control_payload(
         "execution_allowed": False,
         "evidence_refs": ["DashboardState.broker_state", "DashboardState.account_summary"],
     }
-    return build_mission_control_state(
+    mission = build_mission_control_state(
         broker_payload,
         local_account=account,
         local_positions=payload.get("position_state", {}).get("positions", []),
     ).as_dict()
+    mission["runtime_operational_state"] = get_runtime_health_payload(state_provider)
+    return mission
+
+
+def get_runtime_health_payload(
+    state_provider: DashboardStateProvider | None = None,
+) -> dict[str, Any]:
+    state = _state_from_provider(state_provider)
+    snapshot = state.last_scan_results.get("runtime_operational_state")
+    if not isinstance(snapshot, dict):
+        snapshot = state.last_scan_results.get("runtime_health", {})
+    return build_runtime_operational_state(snapshot).as_dict()
+
+
+def get_runtime_alerts_payload(
+    state_provider: DashboardStateProvider | None = None,
+) -> dict[str, Any]:
+    health = get_runtime_health_payload(state_provider)
+    alerts = health.get("alerts", [])
+    return {
+        "read_only": True,
+        "generated_utc": health.get("assessed_at"),
+        "total_returned": len(alerts),
+        "alerts": alerts,
+    }
 
 
 def create_dashboard_state_router(
@@ -171,6 +199,14 @@ def create_dashboard_state_router(
             }
         return payload
 
+    @router.get("/api/v1/runtime-health")
+    def read_runtime_health() -> dict[str, Any]:
+        return get_runtime_health_payload(state_provider)
+
+    @router.get("/api/v1/runtime-alerts")
+    def read_runtime_alerts() -> dict[str, Any]:
+        return get_runtime_alerts_payload(state_provider)
+
     return router
 
 
@@ -199,4 +235,6 @@ __all__ = [
     "get_dashboard_state_payload",
     "get_frontend_payload",
     "get_mission_control_payload",
+    "get_runtime_alerts_payload",
+    "get_runtime_health_payload",
 ]
