@@ -33,6 +33,9 @@ from backend.app.persistence.repositories.performance_compensation_lifecycle_pol
 from backend.app.persistence.repositories.crystallization_assessment_repository import (
     CrystallizationAssessmentRepository,
 )
+from backend.app.persistence.repositories.settlement_readiness_repository import (
+    SettlementReadinessRepository,
+)
 from backend.app.persistence.migrations.runner import run_migrations
 
 
@@ -73,6 +76,9 @@ class PersistenceService:
         self.crystallization_assessments = (
             CrystallizationAssessmentRepository()
         )
+        self.settlement_readiness = (
+            SettlementReadinessRepository()
+        )
         self.pnl_snapshots = (
             PnlSnapshotRepository()
         )
@@ -98,6 +104,7 @@ class PersistenceService:
                 "shadow_compensation_entitlements": True,
                 "performance_compensation_lifecycle_policies": True,
                 "crystallization_assessments": True,
+                "settlement_readiness": True,
                 "pnl_snapshots": True,
                 "legal_acceptances": True,
             },
