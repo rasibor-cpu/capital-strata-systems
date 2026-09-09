@@ -310,6 +310,25 @@ def _dashboard_page() -> str:
       </article>
     </section>
 
+    <section class="panel wide" aria-label="Mission Control authoritative broker state" id="mission-control-panel">
+      <div class="panel-head">
+        <h2>Mission Control</h2>
+        <span id="mission-freshness">UNAVAILABLE</span>
+      </div>
+      <div class="kv-grid two">
+        <div><strong>Broker / Account</strong><span id="mission-broker">UNKNOWN</span></div>
+        <div><strong>Capital Provenance</strong><span id="mission-provenance">UNKNOWN</span></div>
+        <div><strong>Cash / Equity</strong><span id="mission-cash">UNAVAILABLE</span></div>
+        <div><strong>Positions</strong><span id="mission-positions">UNAVAILABLE</span></div>
+        <div><strong>Session P&amp;L</strong><span id="mission-pnl">UNAVAILABLE</span></div>
+        <div><strong>Connectivity</strong><span id="mission-connectivity">UNAVAILABLE</span></div>
+        <div><strong>Reconciliation</strong><span id="mission-reconciliation">UNAVAILABLE</span></div>
+        <div><strong>Execution Allowed</strong><span id="mission-execution">NO</span></div>
+        <div><strong>Safety</strong><span id="mission-safety">LIVE FUNDED EXECUTION BLOCKED</span></div>
+      </div>
+      <p class="panel-note" id="mission-reasons">Authoritative broker state unavailable.</p>
+    </section>
+
     <section class="dashboard-grid" aria-label="Institutional dashboard panels">
       <article class="panel wide" data-panel="account_summary">
         <div class="panel-head">
@@ -418,7 +437,7 @@ def _dashboard_page() -> str:
 
   <script>
     const PANEL_IDS = {panel_ids};
-    const state = {{ payload: null, sections: {{}} }};
+    const state = {{ payload: null, sections: {{}}, mission: null }};
 
     function money(value) {{
       return new Intl.NumberFormat("en-US", {{ style: "currency", currency: "USD" }}).format(Number(value || 0));
@@ -484,6 +503,23 @@ def _dashboard_page() -> str:
       renderOpportunities();
     }}
 
+    function renderMissionControl(mission) {{
+      state.mission = mission || {{}};
+      const value = (key, fallback = "UNAVAILABLE") => state.mission[key] ?? fallback;
+      document.getElementById("mission-freshness").textContent = value("data_freshness");
+      document.getElementById("mission-broker").textContent = `${{value("broker_name", "UNKNOWN")}} / ${{value("account_reference", "UNKNOWN")}}`;
+      document.getElementById("mission-provenance").textContent = value("capital_provenance", "UNKNOWN");
+      document.getElementById("mission-cash").textContent = `${{value("cash")}} / ${{value("total_equity")}}`;
+      document.getElementById("mission-positions").textContent = value("positions_count");
+      document.getElementById("mission-pnl").textContent = value("session_total_pnl");
+      document.getElementById("mission-connectivity").textContent = value("broker_connected") ? "CONNECTED" : "NOT CONNECTED";
+      document.getElementById("mission-reconciliation").textContent = value("reconciliation_status");
+      document.getElementById("mission-execution").textContent = value("execution_allowed", false) ? "YES" : "NO";
+      document.getElementById("mission-safety").textContent = value("live_trading_blocked", true) ? "LIVE FUNDED EXECUTION BLOCKED" : "CHECK SAFETY STATE";
+      const reasons = value("state_reason_codes", []);
+      document.getElementById("mission-reasons").textContent = reasons.length ? reasons.join(" | ") : "State complete";
+    }}
+
     function renderPositions() {{
       const positions = state.sections.positions || {{}};
       const table = document.getElementById("positions-table");
@@ -520,8 +556,12 @@ def _dashboard_page() -> str:
     }}
 
     async function refresh() {{
-      const response = await fetch("/api/v1/frontend-state", {{ cache: "no-store" }});
-      render(await response.json());
+      const [frontendResponse, missionResponse] = await Promise.all([
+        fetch("/api/v1/frontend-state", {{ cache: "no-store" }}),
+        fetch("/api/v1/mission-control", {{ cache: "no-store" }})
+      ]);
+      render(await frontendResponse.json());
+      renderMissionControl(await missionResponse.json());
     }}
 
     function connectSocket() {{

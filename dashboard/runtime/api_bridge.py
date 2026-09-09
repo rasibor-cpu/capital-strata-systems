@@ -17,6 +17,7 @@ from dashboard.runtime.broker_balance_reconciliation import (
     build_broker_reconciliation_payload,
 )
 from dashboard.runtime.ws_bridge import create_ws_router
+from dashboard.runtime.mission_control_state import build_mission_control_state
 
 
 DashboardStateProvider = Callable[[], DashboardState]
@@ -62,6 +63,31 @@ def get_broker_reconciliation_payload(
 ) -> dict[str, Any]:
     state = _state_from_provider(state_provider)
     return build_broker_reconciliation_payload(state.to_dict())
+
+
+def get_mission_control_payload(
+    state_provider: DashboardStateProvider | None = None,
+) -> dict[str, Any]:
+    state = _state_from_provider(state_provider)
+    payload = state.to_dict()
+    account = payload.get("account_summary", {})
+    broker = payload.get("broker_summary", {})
+    broker_payload = {
+        **broker,
+        "broker_name": broker.get("selected_broker", "UNKNOWN"),
+        "account_mode": broker.get("broker_mode", "UNKNOWN"),
+        "broker_connected": broker.get("connected", False),
+        "account": broker.get("account_snapshot", {}),
+        "positions": broker.get("position_snapshot"),
+        "balances": account,
+        "execution_allowed": False,
+        "evidence_refs": ["DashboardState.broker_state", "DashboardState.account_summary"],
+    }
+    return build_mission_control_state(
+        broker_payload,
+        local_account=account,
+        local_positions=payload.get("position_state", {}).get("positions", []),
+    ).as_dict()
 
 
 def create_dashboard_state_router(
@@ -126,6 +152,25 @@ def create_dashboard_state_router(
             "broker_reconciliation",
         )
 
+    @router.get("/api/v1/mission-control")
+    def read_mission_control() -> dict[str, Any]:
+        return get_mission_control_payload(state_provider)
+
+    @router.get("/api/v1/broker-state")
+    def read_broker_state() -> dict[str, Any]:
+        return get_mission_control_payload(state_provider)
+
+    @router.get("/api/v1/questrade/account-summary")
+    def read_questrade_account_summary() -> dict[str, Any]:
+        payload = get_mission_control_payload(state_provider)
+        if payload.get("broker_name") != "QUESTRADE":
+            return {
+                "status": "UNAVAILABLE",
+                "reason_codes": ["BROKER_NOT_CONNECTED"],
+                "read_only": True,
+            }
+        return payload
+
     return router
 
 
@@ -153,4 +198,5 @@ __all__ = [
     "get_broker_reconciliation_payload",
     "get_dashboard_state_payload",
     "get_frontend_payload",
+    "get_mission_control_payload",
 ]
