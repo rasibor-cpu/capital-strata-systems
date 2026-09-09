@@ -63,6 +63,12 @@ from backend.app.persistence.repositories.receivable_reversal_repository import 
 from backend.app.persistence.repositories.receivable_due_repository import (
     ReceivableDueRepository,
 )
+from backend.app.persistence.repositories.receivable_payment_repository import (
+    ReceivablePaymentRepository,
+)
+from backend.app.persistence.repositories.receivable_payment_allocation_repository import (
+    ReceivablePaymentAllocationRepository,
+)
 from backend.app.persistence.migrations.runner import run_migrations
 
 
@@ -115,6 +121,10 @@ class PersistenceService:
         self.receivable_recognitions = ReceivableRecognitionRepository()
         self.receivable_reversals = ReceivableReversalRepository()
         self.receivable_due_records = ReceivableDueRepository()
+        self.receivable_payments = ReceivablePaymentRepository()
+        self.receivable_payment_allocations = (
+            ReceivablePaymentAllocationRepository()
+        )
         self.pnl_snapshots = (
             PnlSnapshotRepository()
         )
@@ -150,6 +160,8 @@ class PersistenceService:
                 "receivable_recognitions": True,
                 "receivable_reversals": True,
                 "receivable_due_records": True,
+                "receivable_payments": True,
+                "receivable_payment_allocations": True,
                 "pnl_snapshots": True,
                 "legal_acceptances": True,
             },
