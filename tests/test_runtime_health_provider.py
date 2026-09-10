@@ -26,7 +26,10 @@ def test_provider_reads_runtime_state_without_mutating_file(tmp_path):
 
 
 def test_provider_missing_state_preserves_unknown_telemetry(tmp_path):
-    snapshot = read_runtime_health_snapshot(tmp_path / "missing.json")
+    snapshot = read_runtime_health_snapshot(
+        tmp_path / "missing.json",
+        supervisor_state_path=tmp_path / "missing-supervisor.json",
+    )
 
     assert snapshot["process_alive"] is True
     assert snapshot["api_health"] == "HEALTHY"

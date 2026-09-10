@@ -85,6 +85,7 @@ class RuntimeOperationalState:
     api_health: str = UNAVAILABLE
     supervisor_status: str = UNKNOWN
     restart_count: int = 0
+    unexpected_restart_count: int = 0
     last_restart_at: str | None = None
     last_failure_at: str | None = None
     last_failure_reason: str | None = None
@@ -245,6 +246,11 @@ def build_runtime_operational_state(
         api_health=api_health,
         supervisor_status=supervisor_status,
         restart_count=restart_count,
+        unexpected_restart_count=(
+            int(raw.get("unexpected_restart_count", 0))
+            if isinstance(raw.get("unexpected_restart_count", 0), int)
+            else 0
+        ),
         last_restart_at=str(raw.get("last_restart_at")) if raw.get("last_restart_at") else None,
         last_failure_at=str(raw.get("last_failure_at")) if raw.get("last_failure_at") else None,
         last_failure_reason=str(raw.get("last_failure_reason")) if raw.get("last_failure_reason") else None,
