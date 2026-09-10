@@ -21,6 +21,7 @@ from dashboard.runtime.mission_control_state import build_mission_control_state
 from dashboard.runtime.runtime_operational_state import (
     build_runtime_operational_state,
 )
+from dashboard.runtime.runtime_health_provider import read_runtime_health_snapshot
 
 
 DashboardStateProvider = Callable[[], DashboardState]
@@ -102,6 +103,8 @@ def get_runtime_health_payload(
     snapshot = state.last_scan_results.get("runtime_operational_state")
     if not isinstance(snapshot, dict):
         snapshot = state.last_scan_results.get("runtime_health", {})
+    if not snapshot:
+        snapshot = read_runtime_health_snapshot()
     return build_runtime_operational_state(snapshot).as_dict()
 
 
