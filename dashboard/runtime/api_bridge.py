@@ -104,7 +104,10 @@ def get_runtime_health_payload(
     if not isinstance(snapshot, dict):
         snapshot = state.last_scan_results.get("runtime_health", {})
     if not snapshot:
-        snapshot = read_runtime_health_snapshot()
+        snapshot = read_runtime_health_snapshot(
+            broker_mode=state.broker_state.broker_mode,
+            broker_name=state.broker_state.selected_broker,
+        )
     return build_runtime_operational_state(snapshot).as_dict()
 
 

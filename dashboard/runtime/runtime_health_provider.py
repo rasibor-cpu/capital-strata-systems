@@ -6,17 +6,36 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from dashboard.runtime.runtime_heartbeat import (
+    read_runtime_heartbeat,
+    start_runtime_heartbeat,
+)
+
 
 def read_runtime_health_snapshot(
     state_path: str | Path | None = None,
+    *,
+    broker_mode: str = "UNKNOWN",
+    broker_name: str = "UNKNOWN",
 ) -> dict[str, Any]:
     """Read existing runtime state without changing or treating it as authority."""
     path = Path(state_path) if state_path else Path(__file__).resolve().parents[2] / "runtime_supervisor.json"
     snapshot: dict[str, Any] = {
         "process_alive": True,
         "api_health": "HEALTHY",
+        "broker_mode": str(broker_mode).upper(),
+        "broker_state": str(broker_name).upper(),
         "evidence_refs": ["runtime_health_provider.current_process"],
     }
+    start_runtime_heartbeat()
+    snapshot.update(read_runtime_heartbeat())
+    if str(broker_mode).lower() in {"paper", "simulated"}:
+        snapshot.update(
+            {
+                "broker_data_freshness": "NOT_APPLICABLE",
+                "broker_freshness_reason": "SIMULATED_PAPER_RUNTIME_HAS_NO_LIVE_BROKER_SNAPSHOT",
+            }
+        )
     try:
         with path.open("r", encoding="utf-8") as handle:
             persisted = json.load(handle)

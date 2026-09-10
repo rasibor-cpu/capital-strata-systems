@@ -16,6 +16,7 @@ HEALTHY = "HEALTHY"
 STALE = "STALE"
 LOST = "LOST"
 UNAVAILABLE = "UNAVAILABLE"
+NOT_APPLICABLE = "NOT_APPLICABLE"
 
 NOT_REQUIRED = "NOT_REQUIRED"
 RECOVERY_PENDING = "RECOVERY_PENDING"
@@ -232,7 +233,8 @@ def build_runtime_operational_state(
     critical_alert = any(alert.severity == "CRITICAL" for alert in alerts)
     healthy = process_alive is True and heartbeat_status == HEALTHY and api_health == "HEALTHY" and supervisor_status == HEALTHY
     runtime_status = RUNNING if healthy and not critical_alert else (STOPPED if process_alive is False else DEGRADED)
-    unattended_ready = healthy and broker_freshness == "CURRENT" and recovery_status not in {RECOVERY_FAILED, MANUAL_INTERVENTION_REQUIRED} and not critical_alert
+    broker_ready = broker_freshness in {"CURRENT", NOT_APPLICABLE}
+    unattended_ready = healthy and broker_ready and recovery_status not in {RECOVERY_FAILED, MANUAL_INTERVENTION_REQUIRED} and not critical_alert
     return RuntimeOperationalState(
         runtime_status=runtime_status,
         process_alive=process_alive,
