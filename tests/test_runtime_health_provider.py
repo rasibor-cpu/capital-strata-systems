@@ -32,4 +32,4 @@ def test_provider_missing_state_preserves_unknown_telemetry(tmp_path):
     assert snapshot["api_health"] == "HEALTHY"
     assert snapshot["state_reason_codes"] == ["RUNTIME_STATE_UNAVAILABLE"]
     assert "heartbeat_status" not in snapshot
-    assert "supervisor_status" not in snapshot
+    assert snapshot["supervisor_status"] == "UNKNOWN"

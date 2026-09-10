@@ -17,6 +17,7 @@ def read_runtime_health_snapshot(
     *,
     broker_mode: str = "UNKNOWN",
     broker_name: str = "UNKNOWN",
+    supervisor_state_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Read existing runtime state without changing or treating it as authority."""
     path = Path(state_path) if state_path else Path(__file__).resolve().parents[2] / "runtime_supervisor.json"
@@ -36,6 +37,35 @@ def read_runtime_health_snapshot(
                 "broker_freshness_reason": "SIMULATED_PAPER_RUNTIME_HAS_NO_LIVE_BROKER_SNAPSHOT",
             }
         )
+    supervisor_path = Path(supervisor_state_path) if supervisor_state_path else Path(__file__).resolve().parents[2] / "runtime" / "css_supervisor_state.json"
+    try:
+        supervisor = json.loads(supervisor_path.read_text(encoding="utf-8"))
+        if isinstance(supervisor, dict):
+            observed_at = supervisor.get("last_observed_at_utc")
+            supervisor_status = supervisor.get("status", "UNKNOWN")
+            if observed_at:
+                try:
+                    age = (
+                        datetime.now(timezone.utc)
+                        - datetime.fromisoformat(str(observed_at).replace("Z", "+00:00")).astimezone(timezone.utc)
+                    ).total_seconds()
+                    if age > 300:
+                        supervisor_status = "DEGRADED"
+                except ValueError:
+                    supervisor_status = "UNKNOWN"
+            snapshot.update(
+                {
+                    "supervisor_status": supervisor_status,
+                    "supervisor_pid": supervisor.get("supervisor_pid"),
+                    "child_pid": supervisor.get("child_pid"),
+                    "restart_count": supervisor.get("restart_count", 0),
+                    "unexpected_restart_count": supervisor.get("unexpected_restart_count", 0),
+                    "last_restart_at": supervisor.get("last_restart_at_utc"),
+                    "supervisor_state_path": str(supervisor_path),
+                }
+            )
+    except (OSError, ValueError, json.JSONDecodeError):
+        snapshot.setdefault("supervisor_status", "UNKNOWN")
     try:
         with path.open("r", encoding="utf-8") as handle:
             persisted = json.load(handle)
