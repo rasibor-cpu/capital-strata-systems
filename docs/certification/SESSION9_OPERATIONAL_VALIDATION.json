@@ -20,6 +20,14 @@
     "warnings": 49,
     "duration_seconds": 24.78
   },
+  "session9b_full_suite": {
+    "collected": 1772,
+    "collection_exit": 0,
+    "passed": 1772,
+    "failed": 0,
+    "warnings": 49,
+    "duration_seconds": 24.90
+  },
   "paper_validation": {
     "start_utc": "2026-09-09T23:33:16.512281+00:00",
     "end_utc": "2026-09-09T23:33:16.649990+00:00",
@@ -52,6 +60,25 @@
     "runtime_smoke": "PASS",
     "slippage_protection_passed": 9
   },
+  "cost_to_serve_telemetry": {
+    "status": "IMPLEMENTED_AND_TESTED",
+    "model": "backend/commercialization/cost_to_serve_telemetry.py",
+    "tests": "tests/test_cost_to_serve_telemetry.py",
+    "tests_passed": 4,
+    "unknown_cost_is_null": true,
+    "cost_basis_complete_requires_caller_basis": true,
+    "decimal_preserved": true,
+    "customer_charge_affected": false,
+    "performance_fee_affected": false,
+    "platform_minimum_affected": false,
+    "trade_decision_affected": false,
+    "execution_affected": false
+  },
+  "sustained_continuity": {
+    "status": "NOT_PROVEN",
+    "canonical_duration_found": false,
+    "reason": "No canonical multi-hour operating-window duration found; no fabricated wait was recorded"
+  },
   "questrade_real_account_validation": {
     "status": "BLOCKED_EXTERNAL",
     "auth": "BLOCKED_EXTERNAL",
@@ -75,7 +102,7 @@
   "open_code_blockers": [],
   "open_external_blockers": [
     "Questrade real-account read-only credentials/provider unavailable",
-    "Sustained overnight continuity window not performed"
+    "Genuine multi-hour/overnight continuity window not performed"
   ],
   "runtime_supervisor_touched": false,
   "live_execution_authority_added": false,

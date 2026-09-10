@@ -39,6 +39,23 @@ This is a bounded validation run, not an overnight or long-duration continuity w
 - Slippage-protection module after test isolation: 9 passed
 - Full-suite run: 1,768 passed, 49 warnings in 24.78 seconds
 - Full collection: 1,768 collected, exit 0
+- Session 9B collection: 1,772 collected, exit 0
+- Session 9B full suite: 1,772 passed, 49 warnings in 24.90 seconds
+
+## Session 9B Addendum
+
+- Cost-to-serve telemetry: IMPLEMENTED_AND_TESTED
+- Model: `backend/commercialization/cost_to_serve_telemetry.py`
+- Tests: `tests/test_cost_to_serve_telemetry.py`, 4 passed
+- Unknown cost basis remains `estimated_cost=None` and `cost_basis_complete=False`.
+- Telemetry is immutable, Decimal-preserving, caller-basis-only, and read-only.
+- Customer charge affected: False
+- Performance fee affected: False
+- Platform minimum affected: False
+- Trade decision affected: False
+- Execution affected: False
+
+No canonical multi-hour operating-window duration was found in repository history or certification specifications. A genuine sustained window was not run in this session; the prior 0.137709-second paper smoke remains bounded evidence only. Continuity is therefore `NOT_PROVEN`, not PASS.
 
 ## Questrade Real-Account Validation
 
