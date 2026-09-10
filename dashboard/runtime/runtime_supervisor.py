@@ -142,6 +142,8 @@ class RuntimeSupervisor:
                 exit_code = self.observe_child()
                 if exit_code is not None and not self.handle_child_exit(exit_code):
                     return 1
+                if exit_code is None:
+                    self.write_state()
                 time.sleep(self.config.poll_seconds)
         finally:
             self.shutdown()

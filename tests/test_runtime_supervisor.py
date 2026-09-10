@@ -68,6 +68,25 @@ def test_shutdown_preserves_fail_closed_authority(tmp_path: Path):
     assert supervisor.state["status"] == "STOPPED"
 
 
+def test_supervisor_refreshes_liveness_while_child_is_active(tmp_path: Path, monkeypatch):
+    supervisor = RuntimeSupervisor(
+        SupervisorConfig(state_path=tmp_path / "state.json", poll_seconds=0),
+        process_factory=FakeProcess,
+    )
+    supervisor.shutdown = lambda: None
+
+    def stop_after_observation(_seconds):
+        supervisor.shutdown_requested = True
+
+    monkeypatch.setattr("dashboard.runtime.runtime_supervisor.time.sleep", stop_after_observation)
+    assert supervisor.run() == 0
+
+    state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    observed_at = datetime.fromisoformat(state["last_observed_at_utc"])
+    assert state["status"] == "HEALTHY"
+    assert (datetime.now(timezone.utc) - observed_at).total_seconds() < 5
+
+
 def test_stale_supervisor_state_is_degraded(tmp_path: Path):
     path = tmp_path / "state.json"
     old = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
