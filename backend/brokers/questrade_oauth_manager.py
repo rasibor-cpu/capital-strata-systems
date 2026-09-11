@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import os
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping, Protocol
@@ -21,6 +24,42 @@ class TokenRefreshFailedError(RuntimeError):
 class CredentialStore(Protocol):
     def read_refresh_token(self) -> str | None: ...
     def replace_refresh_token(self, refresh_token: str) -> None: ...
+
+
+class FileQuestradeCredentialStore:
+    def __init__(self, path: str) -> None:
+        self.path = os.path.abspath(path)
+
+    def read_refresh_token(self) -> str | None:
+        try:
+            with open(self.path, encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            if isinstance(exc, FileNotFoundError):
+                return None
+            raise ConfigurationRequiredError("Questrade credential storage is invalid") from exc
+        token = payload.get("refresh_token") if isinstance(payload, dict) else None
+        return token if isinstance(token, str) and token else None
+
+    def replace_refresh_token(self, refresh_token: str) -> None:
+        if not isinstance(refresh_token, str) or not refresh_token:
+            raise ConfigurationRequiredError("refresh token is required")
+        directory = os.path.dirname(self.path)
+        os.makedirs(directory, mode=0o700, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(prefix=".questrade-", dir=directory, text=True)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump({"refresh_token": refresh_token}, handle)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.chmod(temporary, 0o600)
+            os.replace(temporary, self.path)
+        except Exception:
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+            raise
 
 
 @dataclass(frozen=True)
@@ -98,6 +137,7 @@ class QuestradeOAuthManager:
 
 __all__ = [
     "AuthRequiredError", "ConfigurationRequiredError", "CredentialStore",
+    "FileQuestradeCredentialStore",
     "QuestradeOAuthManager", "QuestradeTokenSession", "TokenRefreshFailedError",
     "parse_token_response",
 ]
