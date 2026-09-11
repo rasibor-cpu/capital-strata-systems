@@ -68,7 +68,7 @@ def test_authenticated_read_only_mission_control_remains_fail_closed():
 def test_bootstrap_uses_hidden_input_and_redacts_status(monkeypatch, tmp_path):
     class FakeTokenTransport:
         def post_token(self, **kwargs):
-            assert kwargs["authorization_token"] == "authorization-secret"
+            assert kwargs == {"refresh_token": "authorization-secret"}
             return {
                 "token_type": "Bearer",
                 "access_token": "access-secret",
@@ -86,8 +86,6 @@ def test_bootstrap_uses_hidden_input_and_redacts_status(monkeypatch, tmp_path):
     monkeypatch.setattr(questrade_readonly_bootstrap, "_ValidationTransport", FakeValidationTransport)
     monkeypatch.setattr(questrade_readonly_bootstrap.getpass, "getpass", lambda prompt: "authorization-secret")
     result = questrade_readonly_bootstrap.bootstrap(
-        client_id="client",
-        client_secret="secret",
         store_path=tmp_path / "credentials.json",
     )
 
@@ -95,6 +93,20 @@ def test_bootstrap_uses_hidden_input_and_redacts_status(monkeypatch, tmp_path):
     assert "access-secret" not in json.dumps(result)
     assert "refresh-secret" not in json.dumps(result)
     assert FileQuestradeCredentialStore(str(tmp_path / "credentials.json")).read_refresh_token() == "refresh-secret"
+
+
+def test_manual_bootstrap_does_not_persist_failed_redemption(monkeypatch, tmp_path):
+    class FailedTokenTransport:
+        def post_token(self, **kwargs):
+            assert kwargs == {"refresh_token": "manual-token"}
+            raise RuntimeError("mocked provider failure")
+
+    monkeypatch.setattr(questrade_readonly_bootstrap, "_TokenTransport", FailedTokenTransport)
+    monkeypatch.setattr(questrade_readonly_bootstrap.getpass, "getpass", lambda prompt: "manual-token")
+
+    with pytest.raises(RuntimeError, match="mocked provider failure"):
+        questrade_readonly_bootstrap.bootstrap(store_path=tmp_path / "credentials.json")
+    assert not (tmp_path / "credentials.json").exists()
 
 
 def test_readonly_validation_is_redacted_and_failures_are_classified():

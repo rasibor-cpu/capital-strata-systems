@@ -129,15 +129,15 @@ def parse_token_response(payload: Mapping[str, Any], *, refresh_token: str | Non
 
 
 class QuestradeOAuthManager:
-    def __init__(self, *, client_id: str, client_secret: str, token_transport: Any, credential_store: CredentialStore) -> None:
-        if not client_id or not client_secret:
-            raise ConfigurationRequiredError("Questrade OAuth client configuration is required")
+    def __init__(self, *, client_id: str | None = None, client_secret: str | None = None, token_transport: Any, credential_store: CredentialStore) -> None:
         self._client_id = client_id
         self._client_secret = client_secret
         self._transport = token_transport
         self._store = credential_store
 
     def refresh(self) -> QuestradeTokenSession:
+        if not self._client_id or not self._client_secret:
+            raise ConfigurationRequiredError("Questrade OAuth client configuration is required")
         old = self._store.read_refresh_token()
         if not old:
             raise AuthRequiredError("Questrade refresh token is required")
@@ -158,9 +158,7 @@ class QuestradeOAuthManager:
             raise AuthRequiredError("Questrade authorization token is required")
         try:
             response = self._transport.post_token(
-                client_id=self._client_id,
-                client_secret=self._client_secret,
-                authorization_token=authorization_token,
+                refresh_token=authorization_token,
             )
             session = parse_token_response(response)
         except (ConfigurationRequiredError, AuthRequiredError) as exc:

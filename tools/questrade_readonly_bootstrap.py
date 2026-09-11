@@ -19,8 +19,8 @@ DEFAULT_STORE = Path("state") / "questrade" / "credentials.json"
 
 class _TokenTransport:
     def post_token(self, **kwargs: str) -> dict[str, Any]:
-        token = kwargs.pop("authorization_token", "")
-        body = urllib.parse.urlencode({"grant_type": "authorization_code", "code": token, **kwargs}).encode("ascii")
+        token = kwargs.pop("refresh_token", "")
+        body = urllib.parse.urlencode({"grant_type": "refresh_token", "refresh_token": token}).encode("ascii")
         request = urllib.request.Request(TOKEN_ENDPOINT, data=body, method="POST")
         request.add_header("Content-Type", "application/x-www-form-urlencoded")
         with urllib.request.urlopen(request, timeout=20) as response:
@@ -57,13 +57,13 @@ def verify_secure_credential_destination(path: str | os.PathLike[str]) -> Path:
     return destination
 
 
-def bootstrap(*, client_id: str, client_secret: str, store_path: Path = DEFAULT_STORE, authorization_token: str | None = None) -> dict[str, Any]:
+def bootstrap(*, store_path: Path = DEFAULT_STORE, authorization_token: str | None = None) -> dict[str, Any]:
     destination = verify_secure_credential_destination(store_path)
     token = authorization_token or getpass.getpass("Paste the Questrade manual authorization token locally (input hidden): ")
     if not token:
         raise RuntimeError("authorization token is required")
     store = FileQuestradeCredentialStore(str(destination))
-    oauth = QuestradeOAuthManager(client_id=client_id, client_secret=client_secret, token_transport=_TokenTransport(), credential_store=store)
+    oauth = QuestradeOAuthManager(token_transport=_TokenTransport(), credential_store=store)
     session = oauth.redeem_authorization_token(token)
     QuestradeReadOnlyClient(session=session, transport=_ValidationTransport()).get_time()
     return {"provider_health": "AVAILABLE", "provider": "QUESTRADE", "credential_status": "STORED", "api_server": session.api_server, "token_type": session.token_type, "read_only": True, "execution_allowed": False, "live_trading_blocked": True, "broker_execution_armed": False, "advisory_only": True}
@@ -74,7 +74,7 @@ def main() -> int:
     parser.add_argument("--credentials", default=str(DEFAULT_STORE))
     args = parser.parse_args()
     try:
-        result = bootstrap(client_id=os.environ.get("QUESTRADE_CLIENT_ID", ""), client_secret=os.environ.get("QUESTRADE_CLIENT_SECRET", ""), store_path=Path(args.credentials))
+        result = bootstrap(store_path=Path(args.credentials))
     except Exception as error:
         print(json.dumps({"provider_health": "UNAVAILABLE", "status": provider_failure_status(error), "read_only": True}))
         return 1
