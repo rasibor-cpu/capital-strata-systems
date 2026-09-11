@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import math
 import os
+import stat
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -39,7 +41,20 @@ class FileQuestradeCredentialStore:
                 return None
             raise ConfigurationRequiredError("Questrade credential storage is invalid") from exc
         token = payload.get("refresh_token") if isinstance(payload, dict) else None
-        return token if isinstance(token, str) and token else None
+        if not isinstance(payload, dict) or not isinstance(token, str) or not token:
+            raise ConfigurationRequiredError("Questrade credential storage is invalid")
+        self._enforce_permissions()
+        return token
+
+    def _enforce_permissions(self) -> None:
+        try:
+            mode = stat.S_IMODE(os.stat(self.path).st_mode)
+            if mode & 0o077:
+                os.chmod(self.path, 0o600)
+        except OSError:
+            # Windows may not expose POSIX permission bits; opening the file
+            # still remains restricted by the platform ACL.
+            return
 
     def replace_refresh_token(self, refresh_token: str) -> None:
         if not isinstance(refresh_token, str) or not refresh_token:
@@ -54,6 +69,7 @@ class FileQuestradeCredentialStore:
                 os.fsync(handle.fileno())
             os.chmod(temporary, 0o600)
             os.replace(temporary, self.path)
+            self._enforce_permissions()
         except Exception:
             try:
                 os.unlink(temporary)
@@ -94,9 +110,12 @@ def parse_token_response(payload: Mapping[str, Any], *, refresh_token: str | Non
     access = payload.get("access_token")
     rotated = payload.get("refresh_token") or refresh_token
     expires = payload.get("expires_in")
+    token_type = payload.get("token_type")
     if not isinstance(access, str) or not access or not isinstance(rotated, str) or not rotated:
         raise AuthRequiredError("token response is incomplete")
-    if isinstance(expires, bool) or not isinstance(expires, (int, float)) or expires <= 0:
+    if token_type is not None and (not isinstance(token_type, str) or token_type.lower() != "bearer"):
+        raise AuthRequiredError("token type is invalid")
+    if isinstance(expires, bool) or not isinstance(expires, (int, float)) or not math.isfinite(float(expires)) or expires <= 0:
         raise AuthRequiredError("token expiry is invalid")
     api_server = _https_url(payload.get("api_server"), "api_server")
     issued = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
@@ -105,7 +124,7 @@ def parse_token_response(payload: Mapping[str, Any], *, refresh_token: str | Non
         refresh_token=rotated,
         api_server=api_server,
         expires_at_utc=issued + timedelta(seconds=float(expires)),
-        token_type=str(payload.get("token_type") or "Bearer"),
+        token_type=str(token_type or "Bearer"),
     )
 
 
@@ -131,6 +150,21 @@ class QuestradeOAuthManager:
             session = parse_token_response(response, refresh_token=old)
         except (ConfigurationRequiredError, AuthRequiredError) as exc:
             raise TokenRefreshFailedError("Questrade token refresh failed") from exc
+        self._store.replace_refresh_token(session.refresh_token)
+        return session
+
+    def redeem_authorization_token(self, authorization_token: str) -> QuestradeTokenSession:
+        if not isinstance(authorization_token, str) or not authorization_token.strip():
+            raise AuthRequiredError("Questrade authorization token is required")
+        try:
+            response = self._transport.post_token(
+                client_id=self._client_id,
+                client_secret=self._client_secret,
+                authorization_token=authorization_token,
+            )
+            session = parse_token_response(response)
+        except (ConfigurationRequiredError, AuthRequiredError) as exc:
+            raise TokenRefreshFailedError("Questrade token redemption failed") from exc
         self._store.replace_refresh_token(session.refresh_token)
         return session
 

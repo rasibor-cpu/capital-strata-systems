@@ -1,11 +1,16 @@
 import json
 from datetime import timedelta
+from types import SimpleNamespace
 
 import pytest
 
+from backend.brokers.questrade_client import ProviderUnavailableError
+from backend.brokers.questrade_oauth_manager import AuthRequiredError
 from backend.brokers.questrade_oauth_manager import FileQuestradeCredentialStore
 from backend.brokers.questrade_provider_config import QuestradeProviderConfig, mask_account_identifier, select_account
+from backend.brokers.questrade_readonly_service import provider_failure_status, validate_readonly_provider
 from dashboard.runtime.mission_control_state import build_mission_control_state
+from tools import questrade_readonly_bootstrap
 
 
 def test_file_store_rotates_atomically_without_exposing_token(tmp_path):
@@ -58,3 +63,51 @@ def test_authenticated_read_only_mission_control_remains_fail_closed():
     assert state.live_trading_blocked is True
     assert state.broker_execution_armed is False
     assert state.advisory_only is True
+
+
+def test_bootstrap_uses_hidden_input_and_redacts_status(monkeypatch, tmp_path):
+    class FakeTokenTransport:
+        def post_token(self, **kwargs):
+            assert kwargs["authorization_token"] == "authorization-secret"
+            return {
+                "token_type": "Bearer",
+                "access_token": "access-secret",
+                "refresh_token": "refresh-secret",
+                "expires_in": 300,
+                "api_server": "https://api.example.test",
+            }
+
+    class FakeValidationTransport:
+        def get(self, url, *, headers, timeout):
+            assert "access-secret" in headers["Authorization"]
+            return SimpleNamespace(status_code=200, headers={}, json=lambda: {"time": "ok"})
+
+    monkeypatch.setattr(questrade_readonly_bootstrap, "_TokenTransport", FakeTokenTransport)
+    monkeypatch.setattr(questrade_readonly_bootstrap, "_ValidationTransport", FakeValidationTransport)
+    monkeypatch.setattr(questrade_readonly_bootstrap.getpass, "getpass", lambda prompt: "authorization-secret")
+    result = questrade_readonly_bootstrap.bootstrap(
+        client_id="client",
+        client_secret="secret",
+        store_path=tmp_path / "credentials.json",
+    )
+
+    assert result["credential_status"] == "STORED"
+    assert "access-secret" not in json.dumps(result)
+    assert "refresh-secret" not in json.dumps(result)
+    assert FileQuestradeCredentialStore(str(tmp_path / "credentials.json")).read_refresh_token() == "refresh-secret"
+
+
+def test_readonly_validation_is_redacted_and_failures_are_classified():
+    client = SimpleNamespace(
+        last_rate_limit=SimpleNamespace(remaining="7", reset="42"),
+        get_accounts=lambda: {"accounts": [{"number": "123456789", "currency": "CAD"}]},
+        get_balances=lambda account_id: {"cash": "12.00"},
+        get_positions=lambda account_id: {"positions": [{"symbol": "ABC"}]},
+    )
+    result = validate_readonly_provider(client, QuestradeProviderConfig(enabled=True), now=None)
+
+    assert result["masked_account_id"] == "*****6789"
+    assert "123456789" not in json.dumps(result)
+    assert result["execution_allowed"] is False
+    assert provider_failure_status(AuthRequiredError("redacted")) == "AUTH_REQUIRED"
+    assert provider_failure_status(ProviderUnavailableError("unavailable")) == "PROVIDER_UNAVAILABLE"

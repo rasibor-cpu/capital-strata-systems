@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from backend.brokers.questrade_readonly import parse_questrade_readonly_response
+from backend.brokers.questrade_provider_config import mask_account_identifier
 from dashboard.runtime.broker_balance_reconciliation import reconcile_broker_snapshots
 
 
@@ -157,9 +158,12 @@ def build_mission_control_state(
             "BROKER_UNAVAILABLE": "UNAVAILABLE",
         }.get(report.status, "UNAVAILABLE")
         reconciliation_findings = tuple(item.as_dict() for item in report.findings)
+    account_value = account.get("account_reference", account.get("accountId"))
+    if str(normalized.get("broker_name", normalized.get("selected_broker", "UNKNOWN"))).upper() == "QUESTRADE" and account_value is not None:
+        account_value = mask_account_identifier(account_value)
     return MissionControlBrokerState(
         broker_name=str(normalized.get("broker_name", normalized.get("selected_broker", "UNKNOWN"))).upper(),
-        account_reference=str(account.get("account_reference", account.get("accountId"))) if account.get("account_reference", account.get("accountId")) is not None else None,
+        account_reference=str(account_value) if account_value is not None else None,
         account_mode=mode,
         capital_provenance=provenance,
         broker_connected=connected,

@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Mapping
 
+from .questrade_client import ProviderResponseError
+
 
 @dataclass(frozen=True)
 class QuestradeProviderConfig:
@@ -35,15 +37,20 @@ class QuestradeProviderConfig:
         if not self.enabled:
             raise RuntimeError("CONFIGURATION_REQUIRED")
 
+    def credential_path(self) -> str:
+        if not self.credential_source.strip():
+            raise RuntimeError("CONFIGURATION_REQUIRED")
+        return self.credential_source
+
 
 def select_account(accounts: list[Mapping[str, object]], configured_id: str | None = None) -> Mapping[str, object]:
     if not accounts:
-        raise RuntimeError("PROVIDER_RESPONSE_ERROR")
+        raise ProviderResponseError("PROVIDER_RESPONSE_ERROR")
     if configured_id:
         for account in accounts:
             if str(account.get("number")) == configured_id or str(account.get("accountId")) == configured_id:
                 return account
-        raise RuntimeError("PROVIDER_RESPONSE_ERROR")
+        raise ProviderResponseError("PROVIDER_RESPONSE_ERROR")
     if len(accounts) != 1:
         raise RuntimeError("CONFIGURATION_REQUIRED")
     return accounts[0]

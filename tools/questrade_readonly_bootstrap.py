@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import getpass
 import json
 import os
@@ -9,78 +10,75 @@ from pathlib import Path
 from typing import Any
 
 from backend.brokers.questrade_client import QuestradeReadOnlyClient
-from backend.brokers.questrade_oauth_manager import (
-    FileQuestradeCredentialStore,
-    QuestradeTokenSession,
-    parse_token_response,
-)
+from backend.brokers.questrade_oauth_manager import FileQuestradeCredentialStore, QuestradeOAuthManager
+from backend.brokers.questrade_readonly_service import provider_failure_status
 
 TOKEN_ENDPOINT = "https://login.questrade.com/oauth2/token"
 DEFAULT_STORE = Path("state") / "questrade" / "credentials.json"
 
 
 class _TokenTransport:
-    def post_authorization_code(self, *, client_id: str, client_secret: str, code: str) -> dict[str, Any]:
-        body = urllib.parse.urlencode({
-            "grant_type": "authorization_code",
-            "code": code,
-            "client_id": client_id,
-            "client_secret": client_secret,
-        }).encode("ascii")
+    def post_token(self, **kwargs: str) -> dict[str, Any]:
+        token = kwargs.pop("authorization_token", "")
+        body = urllib.parse.urlencode({"grant_type": "authorization_code", "code": token, **kwargs}).encode("ascii")
         request = urllib.request.Request(TOKEN_ENDPOINT, data=body, method="POST")
         request.add_header("Content-Type", "application/x-www-form-urlencoded")
-        try:
-            with urllib.request.urlopen(request, timeout=20) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except Exception as exc:
-            raise RuntimeError("Questrade authorization redemption failed") from exc
+        with urllib.request.urlopen(request, timeout=20) as response:
+            payload = json.loads(response.read().decode("utf-8"))
         if not isinstance(payload, dict):
             raise RuntimeError("Questrade token response was malformed")
         return payload
 
 
-class _ValidationTransport:
-    def get(self, url: str, *, headers: dict[str, str], timeout: float) -> Any:
-        request = urllib.request.Request(url, headers=dict(headers), method="GET")
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-        return _Response(payload, response.status, dict(response.headers))
-
-
 class _Response:
-    def __init__(self, payload: Any, status_code: int, headers: dict[str, str]) -> None:
+    def __init__(self, payload: Any, status_code: int, headers: Any) -> None:
         self.payload = payload
         self.status_code = status_code
-        self.headers = headers
+        self.headers = dict(headers)
 
     def json(self) -> Any:
         return self.payload
 
 
-def bootstrap(*, client_id: str, client_secret: str, store_path: Path = DEFAULT_STORE) -> QuestradeTokenSession:
-    code = getpass.getpass("Paste the Questrade manual authorization token locally (input hidden): ")
-    if not code:
+class _ValidationTransport:
+    def get(self, url: str, *, headers: dict[str, str], timeout: float) -> _Response:
+        request = urllib.request.Request(url, headers=dict(headers), method="GET")
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return _Response(json.loads(response.read().decode("utf-8")), response.status, response.headers)
+
+
+def verify_secure_credential_destination(path: str | os.PathLike[str]) -> Path:
+    destination = Path(path).expanduser().resolve()
+    if destination.name != "credentials.json" or any(part in {"backend", "tests", "tools", ".git"} for part in destination.parts):
+        raise RuntimeError("credential destination must be a local runtime credentials.json path")
+    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if destination.exists() and destination.is_dir():
+        raise RuntimeError("credential destination is a directory")
+    return destination
+
+
+def bootstrap(*, client_id: str, client_secret: str, store_path: Path = DEFAULT_STORE, authorization_token: str | None = None) -> dict[str, Any]:
+    destination = verify_secure_credential_destination(store_path)
+    token = authorization_token or getpass.getpass("Paste the Questrade manual authorization token locally (input hidden): ")
+    if not token:
         raise RuntimeError("authorization token is required")
-    payload = _TokenTransport().post_authorization_code(client_id=client_id, client_secret=client_secret, code=code)
-    session = parse_token_response(payload)
-    client = QuestradeReadOnlyClient(session=session, transport=_ValidationTransport())
-    client.get_time()
-    FileQuestradeCredentialStore(str(store_path)).replace_refresh_token(session.refresh_token)
-    print(f"Questrade read-only bootstrap validated; api_server={session.api_server}; credential_store={store_path}")
-    return session
+    store = FileQuestradeCredentialStore(str(destination))
+    oauth = QuestradeOAuthManager(client_id=client_id, client_secret=client_secret, token_transport=_TokenTransport(), credential_store=store)
+    session = oauth.redeem_authorization_token(token)
+    QuestradeReadOnlyClient(session=session, transport=_ValidationTransport()).get_time()
+    return {"provider_health": "AVAILABLE", "provider": "QUESTRADE", "credential_status": "STORED", "api_server": session.api_server, "token_type": session.token_type, "read_only": True, "execution_allowed": False, "live_trading_blocked": True, "broker_execution_armed": False, "advisory_only": True}
 
 
 def main() -> int:
-    client_id = os.environ.get("QUESTRADE_CLIENT_ID")
-    client_secret = os.environ.get("QUESTRADE_CLIENT_SECRET")
-    if not client_id or not client_secret:
-        print("CONFIGURATION_REQUIRED: set Questrade client configuration locally")
-        return 2
+    parser = argparse.ArgumentParser(description="Bootstrap Questrade read-only credentials locally")
+    parser.add_argument("--credentials", default=str(DEFAULT_STORE))
+    args = parser.parse_args()
     try:
-        bootstrap(client_id=client_id, client_secret=client_secret)
-    except Exception as exc:
-        print(f"BOOTSTRAP_FAILED: {type(exc).__name__}")
+        result = bootstrap(client_id=os.environ.get("QUESTRADE_CLIENT_ID", ""), client_secret=os.environ.get("QUESTRADE_CLIENT_SECRET", ""), store_path=Path(args.credentials))
+    except Exception as error:
+        print(json.dumps({"provider_health": "UNAVAILABLE", "status": provider_failure_status(error), "read_only": True}))
         return 1
+    print(json.dumps(result, sort_keys=True))
     return 0
 
 
