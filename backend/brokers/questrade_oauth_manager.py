@@ -66,6 +66,32 @@ def safe_token_response_diagnostics(payload: Any, *, http_status: int | None = N
     return diagnostics
 
 
+def safe_gateway_headers(headers: Any) -> dict[str, str]:
+    if headers is None:
+        return {}
+    allowed = {
+        "server": "server",
+        "via": "via",
+        "x-request-id": "request_id",
+        "x-correlation-id": "correlation_id",
+        "cf-ray": "gateway_trace_id",
+        "x-azure-ref": "gateway_trace_id",
+        "retry-after": "retry_after",
+    }
+    normalized = {}
+    try:
+        items = headers.items()
+    except AttributeError:
+        return {}
+    for name, value in items:
+        output_name = allowed.get(str(name).lower())
+        if output_name and output_name not in normalized:
+            safe_value = redact_provider_description(value)
+            if safe_value:
+                normalized[output_name] = safe_value
+    return normalized
+
+
 class CredentialStore(Protocol):
     def read_refresh_token(self) -> str | None: ...
     def replace_refresh_token(self, refresh_token: str) -> None: ...

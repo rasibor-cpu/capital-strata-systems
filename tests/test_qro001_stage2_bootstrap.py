@@ -199,6 +199,19 @@ def test_token_endpoint_success_missing_required_field_is_malformed(monkeypatch)
 
 def test_token_endpoint_plain_text_error_is_safely_described(monkeypatch):
     class ResponseHeaders:
+        def items(self):
+            return [
+                ("Server", "gateway.example"),
+                ("Via", "edge.example"),
+                ("X-Request-ID", "request-123"),
+                ("X-Correlation-ID", "correlation-456"),
+                ("CF-Ray", "trace-789"),
+                ("Retry-After", "30"),
+                ("Set-Cookie", "session=secret"),
+                ("Authorization", "Bearer token-secret"),
+                ("X-Internal-Token", "internal-token-secret"),
+            ]
+
         def get(self, key):
             return "text/plain; charset=UTF-8"
 
@@ -213,8 +226,35 @@ def test_token_endpoint_plain_text_error_is_safely_described(monkeypatch):
     assert diagnostics["content_type"] == "text/plain; charset=UTF-8"
     assert diagnostics["response_keys"] == []
     assert diagnostics["safe_error_description"] == "Forbidden refresh_token=<redacted> access_token=<redacted>"
+    assert diagnostics["server"] == "gateway.example"
+    assert diagnostics["via"] == "edge.example"
+    assert diagnostics["request_id"] == "request-123"
+    assert diagnostics["correlation_id"] == "correlation-456"
+    assert diagnostics["gateway_trace_id"] == "trace-789"
+    assert diagnostics["retry_after"] == "30"
+    assert "Set-Cookie" not in json.dumps(diagnostics)
+    assert "session=secret" not in json.dumps(diagnostics)
+    assert "Authorization" not in json.dumps(diagnostics)
+    assert "internal-token-secret" not in json.dumps(diagnostics)
     assert "manual-secret" not in json.dumps(diagnostics)
     assert "access-secret" not in json.dumps(diagnostics)
+
+
+def test_gateway_header_values_are_bounded_and_redacted(monkeypatch):
+    class ResponseHeaders:
+        def items(self):
+            return [("X-Request-ID", "a" * 300 + " refresh_token=header-secret")]
+
+        def get(self, key):
+            return "text/plain"
+
+    error = HTTPError("https://login.example.test", 403, "provider", ResponseHeaders(), BytesIO(b"error code: 1010"))
+    monkeypatch.setattr(questrade_readonly_bootstrap.urllib.request, "urlopen", lambda *args, **kwargs: (_ for _ in ()).throw(error))
+    with pytest.raises(TokenEndpointError) as raised:
+        questrade_readonly_bootstrap._TokenTransport().post_token(refresh_token="manual-secret")
+    value = raised.value.diagnostics["request_id"]
+    assert len(value) <= 240
+    assert "header-secret" not in value
 
 
 def test_readonly_validation_is_redacted_and_failures_are_classified():

@@ -17,6 +17,7 @@ from backend.brokers.questrade_oauth_manager import (
     QuestradeOAuthManager,
     TokenEndpointError,
     redact_provider_description,
+    safe_gateway_headers,
     safe_token_response_diagnostics,
 )
 from backend.brokers.questrade_readonly_service import provider_failure_status
@@ -76,12 +77,12 @@ class _TokenTransport:
         except HTTPError as error:
             content_type = error.headers.get("Content-Type") if error.headers else None
             raw = error.read()
-            diagnostics = self._diagnostics_from_body(raw, status=error.code, content_type=content_type)
+            diagnostics = self._diagnostics_from_body(raw, status=error.code, content_type=content_type, headers=error.headers)
             category = "AUTH_REQUIRED" if error.code in {400, 401, 403} else "PROVIDER_RATE_LIMITED" if error.code == 429 else "PROVIDER_UNAVAILABLE" if error.code >= 500 else "PROVIDER_RESPONSE_ERROR"
             raise TokenEndpointError("Questrade token endpoint rejected the request", category=category, diagnostics=diagnostics) from None
         except (TimeoutError, URLError, OSError) as error:
             raise TokenEndpointError(f"Questrade token endpoint unavailable: {type(error).__name__}", category="PROVIDER_UNAVAILABLE") from None
-        diagnostics = self._diagnostics_from_body(raw, status=status, content_type=content_type)
+        diagnostics = self._diagnostics_from_body(raw, status=status, content_type=content_type, headers=response.headers)
         self.last_diagnostics = diagnostics
         try:
             payload = json.loads(raw.decode("utf-8"))
@@ -94,7 +95,7 @@ class _TokenTransport:
             raise TokenEndpointError("Questrade token response is missing required fields", category="MALFORMED_RESPONSE", diagnostics=diagnostics)
         return payload
 
-    def _diagnostics_from_body(self, raw: bytes, *, status: int | None, content_type: str | None) -> dict[str, Any]:
+    def _diagnostics_from_body(self, raw: bytes, *, status: int | None, content_type: str | None, headers: Any = None) -> dict[str, Any]:
         try:
             payload = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, ValueError):
@@ -105,6 +106,7 @@ class _TokenTransport:
                 diagnostics["safe_error_description"] = redact_provider_description(raw.decode("utf-8"))
             except UnicodeDecodeError:
                 diagnostics["safe_error_description"] = "non-text provider error response"
+            diagnostics.update(safe_gateway_headers(headers))
         return diagnostics
 
 
