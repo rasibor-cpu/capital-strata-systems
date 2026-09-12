@@ -4,6 +4,7 @@ import argparse
 import getpass
 import json
 import os
+import sys
 import urllib.parse
 import urllib.request
 from urllib.error import HTTPError, URLError
@@ -22,6 +23,40 @@ from backend.brokers.questrade_readonly_service import provider_failure_status
 
 TOKEN_ENDPOINT = "https://login.questrade.com/oauth2/token"
 DEFAULT_STORE = Path("state") / "questrade" / "credentials.json"
+
+
+def _read_masked_token(*, prompt: str = "Paste the Questrade manual authorization token locally: ", get_char: Any = None, write: Any = None) -> str:
+    """Read a local token while displaying only one mask character per input character."""
+    if get_char is None:
+        if os.name != "nt":
+            return getpass.getpass(prompt)
+        import msvcrt
+
+        get_char = msvcrt.getwch
+    output = write or sys.stdout.write
+    output(prompt)
+    sys.stdout.flush()
+    buffer: list[str] = []
+    while True:
+        character = get_char()
+        if character in {"\r", "\n"}:
+            output("\n")
+            sys.stdout.flush()
+            return "".join(buffer)
+        if character in {"\x03"}:
+            output("\n")
+            sys.stdout.flush()
+            raise KeyboardInterrupt
+        if character in {"\b", "\x7f"}:
+            if buffer:
+                buffer.pop()
+                output("\b \b")
+                sys.stdout.flush()
+            continue
+        if character.isprintable() and not character.isspace():
+            buffer.append(character)
+            output("#")
+            sys.stdout.flush()
 
 
 class _TokenTransport:
@@ -102,7 +137,7 @@ def verify_secure_credential_destination(path: str | os.PathLike[str]) -> Path:
 
 def bootstrap(*, store_path: Path = DEFAULT_STORE, authorization_token: str | None = None) -> dict[str, Any]:
     destination = verify_secure_credential_destination(store_path)
-    token = authorization_token or getpass.getpass("Paste the Questrade manual authorization token locally (input hidden): ")
+    token = authorization_token or _read_masked_token()
     if not token:
         raise RuntimeError("authorization token is required")
     store = FileQuestradeCredentialStore(str(destination))
@@ -119,6 +154,9 @@ def main() -> int:
     args = parser.parse_args()
     try:
         result = bootstrap(store_path=Path(args.credentials))
+    except KeyboardInterrupt:
+        print(json.dumps({"provider_health": "UNAVAILABLE", "status": "AUTH_REQUIRED", "read_only": True}, sort_keys=True))
+        return 130
     except Exception as error:
         diagnostics = error.diagnostics if isinstance(error, TokenEndpointError) else {}
         print(json.dumps({"provider_health": "UNAVAILABLE", "status": provider_failure_status(error), "read_only": True, **diagnostics}, sort_keys=True))

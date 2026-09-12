@@ -86,7 +86,7 @@ def test_bootstrap_uses_hidden_input_and_redacts_status(monkeypatch, tmp_path):
 
     monkeypatch.setattr(questrade_readonly_bootstrap, "_TokenTransport", FakeTokenTransport)
     monkeypatch.setattr(questrade_readonly_bootstrap, "_ValidationTransport", FakeValidationTransport)
-    monkeypatch.setattr(questrade_readonly_bootstrap.getpass, "getpass", lambda prompt: "authorization-secret")
+    monkeypatch.setattr(questrade_readonly_bootstrap, "_read_masked_token", lambda: "authorization-secret")
     result = questrade_readonly_bootstrap.bootstrap(
         store_path=tmp_path / "credentials.json",
     )
@@ -104,7 +104,7 @@ def test_manual_bootstrap_does_not_persist_failed_redemption(monkeypatch, tmp_pa
             raise RuntimeError("mocked provider failure")
 
     monkeypatch.setattr(questrade_readonly_bootstrap, "_TokenTransport", FailedTokenTransport)
-    monkeypatch.setattr(questrade_readonly_bootstrap.getpass, "getpass", lambda prompt: "manual-token")
+    monkeypatch.setattr(questrade_readonly_bootstrap, "_read_masked_token", lambda: "manual-token")
 
     with pytest.raises(RuntimeError, match="mocked provider failure"):
         questrade_readonly_bootstrap.bootstrap(store_path=tmp_path / "credentials.json")
@@ -231,3 +231,38 @@ def test_readonly_validation_is_redacted_and_failures_are_classified():
     assert result["execution_allowed"] is False
     assert provider_failure_status(AuthRequiredError("redacted")) == "AUTH_REQUIRED"
     assert provider_failure_status(ProviderUnavailableError("unavailable")) == "PROVIDER_UNAVAILABLE"
+
+
+def test_masked_input_returns_exact_token_and_never_echoes_it():
+    output: list[str] = []
+    keys = iter("manual-token\r")
+    token = questrade_readonly_bootstrap._read_masked_token(get_char=lambda: next(keys), write=output.append)
+
+    assert token == "manual-token"
+    rendered = "".join(output)
+    assert "manual-token" not in rendered
+    assert rendered.endswith("############\n")
+
+
+def test_masked_input_supports_paste_and_backspace():
+    output: list[str] = []
+    keys = iter("manuaX\bl-token\r")
+    token = questrade_readonly_bootstrap._read_masked_token(get_char=lambda: next(keys), write=output.append)
+
+    assert token == "manual-token"
+    assert "manual-token" not in "".join(output)
+    assert "\b \b" in output
+
+
+def test_masked_input_ctrl_c_aborts_without_token_output():
+    output: list[str] = []
+    keys = iter("partial\x03")
+    with pytest.raises(KeyboardInterrupt):
+        questrade_readonly_bootstrap._read_masked_token(get_char=lambda: next(keys), write=output.append)
+    assert "partial" not in "".join(output)
+
+
+def test_masked_input_falls_back_to_getpass_on_unsupported_platform(monkeypatch):
+    monkeypatch.setattr(questrade_readonly_bootstrap.os, "name", "posix")
+    monkeypatch.setattr(questrade_readonly_bootstrap.getpass, "getpass", lambda prompt: "fallback-token")
+    assert questrade_readonly_bootstrap._read_masked_token() == "fallback-token"
