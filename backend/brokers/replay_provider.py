@@ -137,6 +137,10 @@ class ReplayBrokerProvider:
             snapshot_source=SnapshotSource.STALE if stale else SnapshotSource.REPLAY,
             last_successful_sync_utc=balance.as_of_utc,
             reason="PARTIAL_RESPONSE" if partial else None,
+            provider="REPLAY",
+            snapshot_id=f"replay-{account.account_id}-{balance.as_of_utc.strftime('%Y%m%dT%H%M%SZ')}-{self.scenario.value.lower()}",
+            ingestion_utc=self.now,
+            validation_status="VALIDATED" if not partial else "PARTIAL",
         )
 
 

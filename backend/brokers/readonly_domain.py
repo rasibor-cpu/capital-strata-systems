@@ -157,11 +157,18 @@ class PortfolioSnapshot:
     snapshot_source: SnapshotSource = SnapshotSource.REPLAY
     last_successful_sync_utc: datetime | None = None
     reason: str | None = None
+    provider: str = "REPLAY"
+    snapshot_id: str = ""
+    prior_snapshot_id: str | None = None
+    ingestion_utc: datetime | None = None
+    validation_status: str = "VALIDATED"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "as_of_utc", utc(self.as_of_utc))
         if self.last_successful_sync_utc is not None:
             object.__setattr__(self, "last_successful_sync_utc", utc(self.last_successful_sync_utc))
+        if self.ingestion_utc is not None:
+            object.__setattr__(self, "ingestion_utc", utc(self.ingestion_utc))
         for name in ("cash", "buying_power", "total_equity", "market_value", "total_realized_pnl", "total_unrealized_pnl", "total_pnl"):
             object.__setattr__(self, name, money(getattr(self, name)))
 
@@ -189,6 +196,11 @@ class PortfolioSnapshot:
             "snapshot_source": self.snapshot_source.value,
             "last_successful_sync_utc": serialize(self.last_successful_sync_utc),
             "reason": self.reason,
+            "provider": self.provider,
+            "snapshot_id": self.snapshot_id,
+            "prior_snapshot_id": self.prior_snapshot_id,
+            "ingestion_utc": serialize(self.ingestion_utc),
+            "validation_status": self.validation_status,
         }
 
 
