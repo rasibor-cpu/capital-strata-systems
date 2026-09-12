@@ -1,12 +1,14 @@
 import json
+from io import BytesIO
 from datetime import timedelta
 from types import SimpleNamespace
+from urllib.error import HTTPError
 
 import pytest
 
 from backend.brokers.questrade_client import ProviderUnavailableError
 from backend.brokers.questrade_oauth_manager import AuthRequiredError
-from backend.brokers.questrade_oauth_manager import FileQuestradeCredentialStore
+from backend.brokers.questrade_oauth_manager import FileQuestradeCredentialStore, TokenEndpointError
 from backend.brokers.questrade_provider_config import QuestradeProviderConfig, mask_account_identifier, select_account
 from backend.brokers.questrade_readonly_service import provider_failure_status, validate_readonly_provider
 from dashboard.runtime.mission_control_state import build_mission_control_state
@@ -107,6 +109,92 @@ def test_manual_bootstrap_does_not_persist_failed_redemption(monkeypatch, tmp_pa
     with pytest.raises(RuntimeError, match="mocked provider failure"):
         questrade_readonly_bootstrap.bootstrap(store_path=tmp_path / "credentials.json")
     assert not (tmp_path / "credentials.json").exists()
+
+
+@pytest.mark.parametrize(
+    ("status", "category"),
+    [(400, "AUTH_REQUIRED"), (401, "AUTH_REQUIRED"), (403, "AUTH_REQUIRED"), (429, "PROVIDER_RATE_LIMITED"), (500, "PROVIDER_UNAVAILABLE")],
+)
+def test_token_endpoint_http_errors_are_classified_and_redacted(monkeypatch, status, category):
+    body = json.dumps({
+        "error": "invalid_grant",
+        "error_description": "refresh_token=manual-secret access_token=access-secret",
+    }).encode("utf-8")
+    error = HTTPError("https://login.example.test", status, "provider", {"Content-Type": "application/json"}, BytesIO(body))
+    monkeypatch.setattr(questrade_readonly_bootstrap.urllib.request, "urlopen", lambda *args, **kwargs: (_ for _ in ()).throw(error))
+
+    with pytest.raises(TokenEndpointError) as raised:
+        questrade_readonly_bootstrap._TokenTransport().post_token(refresh_token="manual-secret")
+    assert raised.value.category == category
+    assert raised.value.diagnostics["http_status"] == status
+    assert raised.value.diagnostics["safe_error_code"] == "invalid_grant"
+    assert "manual-secret" not in json.dumps(raised.value.diagnostics)
+    assert "access-secret" not in json.dumps(raised.value.diagnostics)
+
+
+def test_token_endpoint_success_reports_safe_presence_metadata(monkeypatch):
+    class Response:
+        status = 200
+        headers = {"Content-Type": "application/json"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return json.dumps({"access_token": "access-secret", "refresh_token": "refresh-secret", "expires_in": 300, "api_server": "https://api.example.test", "token_type": "Bearer"}).encode("utf-8")
+
+    monkeypatch.setattr(questrade_readonly_bootstrap.urllib.request, "urlopen", lambda *args, **kwargs: Response())
+    transport = questrade_readonly_bootstrap._TokenTransport()
+    transport.post_token(refresh_token="manual-secret")
+    assert transport.last_diagnostics["http_status"] == 200
+    assert all(transport.last_diagnostics[key] for key in ("access_token_present", "refresh_token_present", "expires_in_present", "api_server_present", "token_type_present"))
+    assert "access-secret" not in json.dumps(transport.last_diagnostics)
+
+
+def test_token_endpoint_invalid_json_is_malformed(monkeypatch):
+    class Response:
+        status = 200
+        headers = {"Content-Type": "text/plain"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b"not-json"
+
+    monkeypatch.setattr(questrade_readonly_bootstrap.urllib.request, "urlopen", lambda *args, **kwargs: Response())
+    with pytest.raises(TokenEndpointError) as raised:
+        questrade_readonly_bootstrap._TokenTransport().post_token(refresh_token="manual-secret")
+    assert raised.value.category == "MALFORMED_RESPONSE"
+    assert raised.value.diagnostics["response_keys"] == []
+
+
+def test_token_endpoint_success_missing_required_field_is_malformed(monkeypatch):
+    class Response:
+        status = 200
+        headers = {"Content-Type": "application/json"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return json.dumps({"access_token": "access-secret", "expires_in": 300, "api_server": "https://api.example.test"}).encode("utf-8")
+
+    monkeypatch.setattr(questrade_readonly_bootstrap.urllib.request, "urlopen", lambda *args, **kwargs: Response())
+    with pytest.raises(TokenEndpointError) as raised:
+        questrade_readonly_bootstrap._TokenTransport().post_token(refresh_token="manual-secret")
+    assert raised.value.category == "MALFORMED_RESPONSE"
+    assert raised.value.diagnostics["access_token_present"] is True
+    assert raised.value.diagnostics["refresh_token_present"] is False
 
 
 def test_readonly_validation_is_redacted_and_failures_are_classified():

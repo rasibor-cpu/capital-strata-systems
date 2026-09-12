@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import stat
 import tempfile
 from dataclasses import dataclass
@@ -21,6 +22,48 @@ class AuthRequiredError(RuntimeError):
 
 class TokenRefreshFailedError(RuntimeError):
     pass
+
+
+class TokenEndpointError(RuntimeError):
+    def __init__(self, message: str, *, category: str, diagnostics: Mapping[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.category = category
+        self.diagnostics = dict(diagnostics or {})
+
+
+def redact_provider_description(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = re.sub(r"(?i)(access[_-]?token|refresh[_-]?token|authorization|token)\s*[:=]\s*[^,;\s]+", r"\1=<redacted>", value)
+    text = re.sub(r"\b[A-Za-z0-9_-]{32,}\b", "<redacted>", text)
+    return " ".join(text.split())[:240] or None
+
+
+def safe_token_response_diagnostics(payload: Any, *, http_status: int | None = None, content_type: str | None = None) -> dict[str, Any]:
+    mapping = payload if isinstance(payload, Mapping) else {}
+    diagnostics = {
+        "http_status": http_status,
+        "content_type": content_type,
+        "response_keys": sorted(str(key) for key in mapping.keys()),
+        "safe_error_code": None,
+        "safe_error_description": None,
+        "access_token_present": bool(mapping.get("access_token")),
+        "refresh_token_present": bool(mapping.get("refresh_token")),
+        "expires_in_present": "expires_in" in mapping,
+        "api_server_present": bool(mapping.get("api_server")),
+        "token_type_present": "token_type" in mapping,
+    }
+    for key in ("error", "error_code", "code", "errorCode"):
+        value = mapping.get(key)
+        if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", value):
+            diagnostics["safe_error_code"] = value
+            break
+    for key in ("error_description", "description", "message"):
+        description = redact_provider_description(mapping.get(key))
+        if description:
+            diagnostics["safe_error_description"] = description
+            break
+    return diagnostics
 
 
 class CredentialStore(Protocol):

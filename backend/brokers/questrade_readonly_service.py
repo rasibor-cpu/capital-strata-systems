@@ -4,11 +4,13 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .questrade_client import ProviderError, ProviderUnavailableError, QuestradeReadOnlyClient
-from .questrade_oauth_manager import AuthRequiredError, ConfigurationRequiredError, TokenRefreshFailedError
+from .questrade_oauth_manager import AuthRequiredError, ConfigurationRequiredError, TokenEndpointError, TokenRefreshFailedError
 from .questrade_provider_config import QuestradeProviderConfig, mask_account_identifier, select_account
 
 
 def provider_failure_status(error: BaseException) -> str:
+    if isinstance(error, TokenEndpointError):
+        return error.category
     if isinstance(error, (AuthRequiredError, TokenRefreshFailedError)):
         return "AUTH_REQUIRED"
     if isinstance(error, ConfigurationRequiredError):
