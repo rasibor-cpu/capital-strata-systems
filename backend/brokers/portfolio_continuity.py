@@ -4,7 +4,7 @@ import hashlib
 import json
 import os
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -155,6 +155,7 @@ class PortfolioContinuity:
         status, snapshot = self.store.load()
         timestamp = utc(now or datetime.now(timezone.utc))
         if snapshot is not None:
+            snapshot = replace(snapshot, snapshot_source=SnapshotSource.STALE, broker_data_freshness="STALE", validation_status="RELOADED_STALE", reason="RELOADED_LAST_KNOWN_GOOD")
             self.audit.append(AuditEvent("reload-" + (snapshot.snapshot_id or _checksum(snapshot.as_dict())), "SNAPSHOT_RELOADED", timestamp, snapshot.snapshot_id, snapshot.account_id_masked, "warning", "Last-known-good snapshot reloaded; provider freshness is not asserted."))
         elif status == "CORRUPT":
             self.audit.append(AuditEvent("snapshot-corrupt", "SNAPSHOT_REJECTED", timestamp, None, "<unknown>", "error", "Persisted portfolio snapshot failed integrity validation."))

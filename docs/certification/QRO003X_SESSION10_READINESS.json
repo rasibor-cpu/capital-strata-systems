@@ -1,0 +1,21 @@
+{
+  "schema": "css.qro003x.session10_readiness.v1",
+  "status": "BLOCKED_EXTERNAL",
+  "live_questrade_oauth": "BLOCKED_EXTERNAL_403_CLOUDFLARE_1010",
+  "broker_provider_abstraction": true,
+  "portfolio_normalization": true,
+  "reconciliation": true,
+  "snapshot_persistence": true,
+  "restart_recovery": true,
+  "staleness": true,
+  "mission_control": true,
+  "audit_history": true,
+  "credential_separation": true,
+  "execution_disabled": true,
+  "rollback_recovery_path": true,
+  "real_account_validation": false,
+  "execution_allowed": false,
+  "live_trading_blocked": true,
+  "broker_execution_armed": false,
+  "advisory_only": true
+}

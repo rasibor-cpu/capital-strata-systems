@@ -25,7 +25,8 @@ def test_snapshot_store_is_atomic_decimal_safe_and_reloadable(tmp_path):
     assert loaded is not None
     assert loaded.cash == Decimal("5000")
     assert loaded.snapshot_id == source.snapshot_id
-    assert loaded.snapshot_source is SnapshotSource.REPLAY
+    assert loaded.snapshot_source is SnapshotSource.STALE
+    assert loaded.broker_data_freshness == "STALE"
     assert len(manager.audit.read()) == 2
 
 
@@ -49,8 +50,9 @@ def test_restart_stale_reload_and_provider_recovery_are_explicit(tmp_path):
     fresh = ReplayBrokerProvider(now=NOW).snapshot()
     recovered = continuity(tmp_path)
     assert recovered.accept(fresh)
-    _, current = recovered.reload(now=NOW)
-    assert current.snapshot_source is SnapshotSource.REPLAY
+    assert fresh.snapshot_source is SnapshotSource.REPLAY
+    _, reloaded = recovered.reload(now=NOW)
+    assert reloaded.snapshot_source is SnapshotSource.STALE
 
 
 def test_audit_history_is_append_only_and_deduplicated(tmp_path):
