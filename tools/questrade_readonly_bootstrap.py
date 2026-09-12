@@ -15,6 +15,7 @@ from backend.brokers.questrade_oauth_manager import (
     FileQuestradeCredentialStore,
     QuestradeOAuthManager,
     TokenEndpointError,
+    redact_provider_description,
     safe_token_response_diagnostics,
 )
 from backend.brokers.questrade_readonly_service import provider_failure_status
@@ -63,7 +64,13 @@ class _TokenTransport:
             payload = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, ValueError):
             payload = None
-        return safe_token_response_diagnostics(payload, http_status=status, content_type=content_type)
+        diagnostics = safe_token_response_diagnostics(payload, http_status=status, content_type=content_type)
+        if payload is None:
+            try:
+                diagnostics["safe_error_description"] = redact_provider_description(raw.decode("utf-8"))
+            except UnicodeDecodeError:
+                diagnostics["safe_error_description"] = "non-text provider error response"
+        return diagnostics
 
 
 class _Response:

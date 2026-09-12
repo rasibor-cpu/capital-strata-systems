@@ -197,6 +197,26 @@ def test_token_endpoint_success_missing_required_field_is_malformed(monkeypatch)
     assert raised.value.diagnostics["refresh_token_present"] is False
 
 
+def test_token_endpoint_plain_text_error_is_safely_described(monkeypatch):
+    class ResponseHeaders:
+        def get(self, key):
+            return "text/plain; charset=UTF-8"
+
+    body = b"Forbidden refresh_token=manual-secret access_token=access-secret"
+    error = HTTPError("https://login.example.test", 403, "provider", ResponseHeaders(), BytesIO(body))
+    monkeypatch.setattr(questrade_readonly_bootstrap.urllib.request, "urlopen", lambda *args, **kwargs: (_ for _ in ()).throw(error))
+
+    with pytest.raises(TokenEndpointError) as raised:
+        questrade_readonly_bootstrap._TokenTransport().post_token(refresh_token="manual-secret")
+    diagnostics = raised.value.diagnostics
+    assert diagnostics["http_status"] == 403
+    assert diagnostics["content_type"] == "text/plain; charset=UTF-8"
+    assert diagnostics["response_keys"] == []
+    assert diagnostics["safe_error_description"] == "Forbidden refresh_token=<redacted> access_token=<redacted>"
+    assert "manual-secret" not in json.dumps(diagnostics)
+    assert "access-secret" not in json.dumps(diagnostics)
+
+
 def test_readonly_validation_is_redacted_and_failures_are_classified():
     client = SimpleNamespace(
         last_rate_limit=SimpleNamespace(remaining="7", reset="42"),
