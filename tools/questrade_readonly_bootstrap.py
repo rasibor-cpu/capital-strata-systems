@@ -69,6 +69,9 @@ class _TokenTransport:
         body = urllib.parse.urlencode({"grant_type": "refresh_token", "refresh_token": token}).encode("ascii")
         request = urllib.request.Request(TOKEN_ENDPOINT, data=body, method="POST")
         request.add_header("Content-Type", "application/x-www-form-urlencoded")
+        return self._request_token(request)
+
+    def _request_token(self, request: urllib.request.Request) -> dict[str, Any]:
         try:
             with urllib.request.urlopen(request, timeout=20) as response:
                 content_type = response.headers.get("Content-Type")
@@ -106,8 +109,16 @@ class _TokenTransport:
                 diagnostics["safe_error_description"] = redact_provider_description(raw.decode("utf-8"))
             except UnicodeDecodeError:
                 diagnostics["safe_error_description"] = "non-text provider error response"
-            diagnostics.update(safe_gateway_headers(headers))
+        diagnostics.update(safe_gateway_headers(headers))
         return diagnostics
+
+
+class _ManualQueryTokenTransport(_TokenTransport):
+    def post_token(self, **kwargs: str) -> dict[str, Any]:
+        token = kwargs.pop("refresh_token", "")
+        query = urllib.parse.urlencode({"grant_type": "refresh_token", "refresh_token": token})
+        request = urllib.request.Request(f"{TOKEN_ENDPOINT}?{query}", method="GET")
+        return self._request_token(request)
 
 
 class _Response:
@@ -143,11 +154,11 @@ def bootstrap(*, store_path: Path = DEFAULT_STORE, authorization_token: str | No
     if not token:
         raise RuntimeError("authorization token is required")
     store = FileQuestradeCredentialStore(str(destination))
-    transport = _TokenTransport()
+    transport = _ManualQueryTokenTransport()
     oauth = QuestradeOAuthManager(token_transport=transport, credential_store=store)
     session = oauth.redeem_authorization_token(token)
     QuestradeReadOnlyClient(session=session, transport=_ValidationTransport()).get_time()
-    return {"provider_health": "AVAILABLE", "provider": "QUESTRADE", "credential_status": "STORED", "api_server": session.api_server, "token_type": session.token_type, "read_only": True, "execution_allowed": False, "live_trading_blocked": True, "broker_execution_armed": False, "advisory_only": True, **getattr(transport, "last_diagnostics", {})}
+    return {"provider_health": "AVAILABLE", "provider": "QUESTRADE", "credential_status": "STORED", "api_server": session.api_server, "token_type": session.token_type, "manual_redemption_method": "GET", "manual_parameter_location": "QUERY", "token_url_encoded": True, "read_only": True, "execution_allowed": False, "live_trading_blocked": True, "broker_execution_armed": False, "advisory_only": True, **getattr(transport, "last_diagnostics", {})}
 
 
 def main() -> int:

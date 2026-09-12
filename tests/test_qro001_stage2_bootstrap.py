@@ -2,6 +2,7 @@ import json
 from io import BytesIO
 from datetime import timedelta
 from types import SimpleNamespace
+import urllib.parse
 from urllib.error import HTTPError
 
 import pytest
@@ -84,7 +85,7 @@ def test_bootstrap_uses_hidden_input_and_redacts_status(monkeypatch, tmp_path):
             assert "access-secret" in headers["Authorization"]
             return SimpleNamespace(status_code=200, headers={}, json=lambda: {"time": "ok"})
 
-    monkeypatch.setattr(questrade_readonly_bootstrap, "_TokenTransport", FakeTokenTransport)
+    monkeypatch.setattr(questrade_readonly_bootstrap, "_ManualQueryTokenTransport", FakeTokenTransport)
     monkeypatch.setattr(questrade_readonly_bootstrap, "_ValidationTransport", FakeValidationTransport)
     monkeypatch.setattr(questrade_readonly_bootstrap, "_read_masked_token", lambda: "authorization-secret")
     result = questrade_readonly_bootstrap.bootstrap(
@@ -103,7 +104,7 @@ def test_manual_bootstrap_does_not_persist_failed_redemption(monkeypatch, tmp_pa
             assert kwargs == {"refresh_token": "manual-token"}
             raise RuntimeError("mocked provider failure")
 
-    monkeypatch.setattr(questrade_readonly_bootstrap, "_TokenTransport", FailedTokenTransport)
+    monkeypatch.setattr(questrade_readonly_bootstrap, "_ManualQueryTokenTransport", FailedTokenTransport)
     monkeypatch.setattr(questrade_readonly_bootstrap, "_read_masked_token", lambda: "manual-token")
 
     with pytest.raises(RuntimeError, match="mocked provider failure"):
@@ -255,6 +256,60 @@ def test_gateway_header_values_are_bounded_and_redacted(monkeypatch):
     value = raised.value.diagnostics["request_id"]
     assert len(value) <= 240
     assert "header-secret" not in value
+
+
+def test_json_gateway_error_preserves_safe_headers_only(monkeypatch):
+    class ResponseHeaders:
+        def items(self):
+            return [("Server", "cloudflare"), ("CF-Ray", "ray-123"), ("Set-Cookie", "secret-cookie")]
+
+        def get(self, key):
+            return "application/json"
+
+    body = json.dumps({"code": 1010, "message": "invalid gateway response"}).encode("utf-8")
+    error = HTTPError("https://login.example.test", 502, "provider", ResponseHeaders(), BytesIO(body))
+    monkeypatch.setattr(questrade_readonly_bootstrap.urllib.request, "urlopen", lambda *args, **kwargs: (_ for _ in ()).throw(error))
+    with pytest.raises(TokenEndpointError) as raised:
+        questrade_readonly_bootstrap._TokenTransport().post_token(refresh_token="manual-secret")
+    diagnostics = raised.value.diagnostics
+    assert diagnostics["http_status"] == 502
+    assert diagnostics["safe_error_code"] == "1010"
+    assert diagnostics["server"] == "cloudflare"
+    assert diagnostics["gateway_trace_id"] == "ray-123"
+    assert "Set-Cookie" not in json.dumps(diagnostics)
+
+
+def test_manual_query_transport_uses_encoded_get_without_exposing_url(monkeypatch):
+    captured = {}
+
+    class Response:
+        status = 200
+        headers = {"Content-Type": "application/json"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return json.dumps({"access_token": "access-secret", "refresh_token": "refresh-secret", "expires_in": 300, "api_server": "https://api.example.test"}).encode("utf-8")
+
+    def fake_urlopen(request, *, timeout):
+        captured["method"] = request.get_method()
+        captured["url"] = request.full_url
+        return Response()
+
+    monkeypatch.setattr(questrade_readonly_bootstrap.urllib.request, "urlopen", fake_urlopen)
+    transport = questrade_readonly_bootstrap._ManualQueryTokenTransport()
+    transport.post_token(refresh_token="a+b/=?secret")
+
+    parsed = urllib.parse.urlparse(captured["url"])
+    query = urllib.parse.parse_qs(parsed.query)
+    assert captured["method"] == "GET"
+    assert parsed.path == "/oauth2/token"
+    assert query == {"grant_type": ["refresh_token"], "refresh_token": ["a+b/=?secret"]}
+    assert "a+b/=?secret" not in json.dumps(transport.last_diagnostics)
 
 
 def test_readonly_validation_is_redacted_and_failures_are_classified():

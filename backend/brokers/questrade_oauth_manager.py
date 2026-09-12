@@ -55,8 +55,9 @@ def safe_token_response_diagnostics(payload: Any, *, http_status: int | None = N
     }
     for key in ("error", "error_code", "code", "errorCode"):
         value = mapping.get(key)
-        if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", value):
-            diagnostics["safe_error_code"] = value
+        safe_value = str(value) if isinstance(value, (str, int)) and not isinstance(value, bool) else None
+        if safe_value and re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", safe_value):
+            diagnostics["safe_error_code"] = safe_value
             break
     for key in ("error_description", "description", "message"):
         description = redact_provider_description(mapping.get(key))
