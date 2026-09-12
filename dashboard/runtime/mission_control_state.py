@@ -72,13 +72,24 @@ class MissionControlBrokerState:
     maturity_profile: tuple[dict[str, Any], ...] = field(default_factory=tuple)
     reconciliation_status: str = "UNAVAILABLE"
     reconciliation_findings: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    portfolio_snapshot_source: str = "UNAVAILABLE"
+    portfolio_broker_health: str = "UNAVAILABLE"
+    portfolio_data_freshness: str = "UNKNOWN"
+    portfolio_last_successful_sync: str | None = None
+    market_value: Decimal | None = None
+    total_realized_pnl: Decimal | None = None
+    total_unrealized_pnl: Decimal | None = None
+    total_pnl: Decimal | None = None
+    reconciliation_issue_count: int = 0
+    reconciliation_highest_severity: str = "info"
 
     def as_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         for key in (
             "total_equity", "cash", "buying_power", "margin_used",
             "margin_available", "session_realized_pnl", "session_unrealized_pnl",
-            "session_total_pnl",
+            "session_total_pnl", "market_value", "total_realized_pnl",
+            "total_unrealized_pnl", "total_pnl",
         ):
             payload[key] = _money(payload[key])
         payload["state_reason_codes"] = list(self.state_reason_codes)
@@ -94,8 +105,12 @@ def build_mission_control_state(
     *,
     local_account: dict[str, Any] | None = None,
     local_positions: list[dict[str, Any]] | None = None,
+    portfolio_snapshot: Any | None = None,
 ) -> MissionControlBrokerState:
     raw = dict(broker_payload or {})
+    if portfolio_snapshot is not None:
+        snapshot_payload = portfolio_snapshot.as_dict() if hasattr(portfolio_snapshot, "as_dict") else dict(portfolio_snapshot)
+        raw["portfolio_snapshot"] = snapshot_payload
     requested_provenance = str(raw.get("capital_provenance", "")).upper()
     if str(raw.get("broker_name", raw.get("selected_broker", "UNKNOWN"))).upper() == "QUESTRADE":
         normalized = parse_questrade_readonly_response(raw.get("response", raw))
@@ -158,6 +173,9 @@ def build_mission_control_state(
             "BROKER_UNAVAILABLE": "UNAVAILABLE",
         }.get(report.status, "UNAVAILABLE")
         reconciliation_findings = tuple(item.as_dict() for item in report.findings)
+    snapshot = normalized.get("portfolio_snapshot") if isinstance(normalized.get("portfolio_snapshot"), dict) else {}
+    reconciliation_payload = normalized.get("portfolio_reconciliation") if isinstance(normalized.get("portfolio_reconciliation"), dict) else {}
+    portfolio_positions = snapshot.get("positions") if isinstance(snapshot.get("positions"), list) else position_rows
     account_value = account.get("account_reference", account.get("accountId"))
     if str(normalized.get("broker_name", normalized.get("selected_broker", "UNKNOWN"))).upper() == "QUESTRADE" and account_value is not None:
         account_value = mask_account_identifier(account_value)
@@ -196,6 +214,16 @@ def build_mission_control_state(
         maturity_profile=tuple(dict(item) for item in normalized.get("maturity_profile", []) if isinstance(item, dict)),
         reconciliation_status=reconciliation_status,
         reconciliation_findings=reconciliation_findings,
+        portfolio_snapshot_source=str(snapshot.get("snapshot_source", "UNAVAILABLE")),
+        portfolio_broker_health=str(snapshot.get("broker_health", "UNAVAILABLE")),
+        portfolio_data_freshness=str(snapshot.get("broker_data_freshness", "UNKNOWN")),
+        portfolio_last_successful_sync=snapshot.get("last_successful_sync_utc"),
+        market_value=_decimal(snapshot.get("market_value")),
+        total_realized_pnl=_decimal(snapshot.get("total_realized_pnl")),
+        total_unrealized_pnl=_decimal(snapshot.get("total_unrealized_pnl")),
+        total_pnl=_decimal(snapshot.get("total_pnl")),
+        reconciliation_issue_count=int(reconciliation_payload.get("issue_count", 0)),
+        reconciliation_highest_severity=str(reconciliation_payload.get("highest_severity", "info")),
     )
 
 
