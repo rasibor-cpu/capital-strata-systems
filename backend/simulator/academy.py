@@ -41,8 +41,6 @@ class LessonProgress:
         if self.completed_at_utc is not None:
             if self.completed_at_utc.tzinfo is None or self.completed_at_utc.utcoffset() != timedelta(0):
                 raise ValueError("completed_at_utc must be timezone-aware UTC")
-        if self.status == LessonStatus.COMPLETED and self.completed_at_utc is None:
-            raise ValueError("completed lessons require completed_at_utc")
 
 
 class DecisionAction(str, Enum):
