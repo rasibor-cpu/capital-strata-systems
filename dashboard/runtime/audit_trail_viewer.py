@@ -184,7 +184,11 @@ def _category_for_status(status: str, raw: Mapping[str, Any]) -> str:
         return "kill_switch"
     if normalized == "MOBILE_AUTHORITY_DENIED":
         return "permission_denial"
-    if normalized in {"MOBILE_ORDERS_DISABLED", "LIVE_CONFIRMATION_REQUIRED"}:
+    if normalized in {
+        "MOBILE_ORDERS_DISABLED",
+        "LIVE_CONFIRMATION_REQUIRED",
+        "MOBILE_LIVE_EXECUTION_NOT_AUTHORIZED",
+    }:
         return "governance_block"
     if "MODE" in normalized and ("LIVE" in normalized or "PAPER" in normalized):
         return "live_paper_transition"
