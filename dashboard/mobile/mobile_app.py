@@ -1896,29 +1896,32 @@ def _opportunity_rows(
     user_ctx: Dict[str, Any],
     session: Dict[str, Any],
 ) -> tuple[Dict[str, Any], ...]:
-    payloads = _mobile_runtime_payloads(user_ctx, session)
-    market = payloads["market_payload"]
-    positions = payloads["positions_payload"].get("positions", [])
-    rows = [
-        {
-            "symbol": position.get("symbol", "N/A"),
-            "asset_class": position.get("asset_class", "N/A"),
-            "bias": position.get("side", "N/A"),
-            "state": market.get("signal_confluence_state", "UNKNOWN"),
-            "action": "Monitor open exposure",
-        }
-        for position in positions
-        if isinstance(position, dict)
-    ]
-    rows.append(
-        {
-            "symbol": "CL",
-            "asset_class": "FUTURES",
-            "bias": "WATCH",
-            "state": market.get("execution_cost_state", "UNKNOWN"),
-            "action": "Await governed ticket",
-        }
-    )
+    """Project only canonical opportunity records; never invent watch ideas."""
+
+    dashboard_payload = _mobile_dashboard_payload(user_ctx, session)
+    raw = dashboard_payload.get("opportunities", [])
+    if not isinstance(raw, list):
+        return ()
+
+    rows: list[Dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        rows.append(
+            {
+                "symbol": item.get("symbol", "N/A"),
+                "asset_class": item.get("asset_class", "N/A"),
+                "bias": item.get("side", item.get("direction", "WATCH")),
+                "state": item.get(
+                    "status",
+                    item.get("signal_state", "MONITOR_ONLY"),
+                ),
+                "action": item.get(
+                    "reason",
+                    item.get("note", "Monitor canonical opportunity"),
+                ),
+            }
+        )
     return tuple(rows)
 
 
