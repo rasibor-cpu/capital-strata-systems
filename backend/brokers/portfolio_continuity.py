@@ -55,7 +55,7 @@ def snapshot_from_dict(payload: dict[str, Any]) -> PortfolioSnapshot:
             cash=_decimal(payload.get("cash")), buying_power=_decimal(payload.get("buying_power")), total_equity=_decimal(payload.get("total_equity")), market_value=_decimal(payload.get("market_value")),
             positions=tuple(_position(item) for item in payload.get("positions", [])), total_realized_pnl=_decimal(payload.get("total_realized_pnl")), total_unrealized_pnl=_decimal(payload.get("total_unrealized_pnl")), total_pnl=_decimal(payload.get("total_pnl")),
             broker_health=BrokerHealth(str(payload.get("broker_health", "UNAVAILABLE"))), broker_data_freshness=str(payload.get("broker_data_freshness", "UNKNOWN")), snapshot_source=SnapshotSource(str(payload.get("snapshot_source", "UNAVAILABLE"))),
-            last_successful_sync_utc=_datetime(payload.get("last_successful_sync_utc")), reason=payload.get("reason"), provider=str(payload.get("provider", "UNKNOWN")), snapshot_id=str(payload.get("snapshot_id", "")), prior_snapshot_id=payload.get("prior_snapshot_id"), ingestion_utc=_datetime(payload.get("ingestion_utc")), validation_status=str(payload.get("validation_status", "VALIDATED")),
+            last_successful_sync_utc=_datetime(payload.get("last_successful_sync_utc")), reason=payload.get("reason"), provider=str(payload.get("provider", "UNKNOWN")), snapshot_id=str(payload.get("snapshot_id", "")), prior_snapshot_id=payload.get("prior_snapshot_id"), ingestion_utc=_datetime(payload.get("ingestion_utc")), validation_status=str(payload.get("validation_status", "VALIDATED")), observation_ids=tuple(str(item) for item in payload.get("observation_ids", [])),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise SnapshotStoreError("portfolio snapshot is malformed") from exc
@@ -141,7 +141,9 @@ class PortfolioContinuity:
         self.audit = audit
         self._seen: set[str] = set()
 
-    def accept(self, snapshot: PortfolioSnapshot, *, now: datetime | None = None) -> bool:
+    def accept(self, snapshot: PortfolioSnapshot, *, now: datetime | None = None, observation_ids: tuple[str, ...] = ()) -> bool:
+        if observation_ids:
+            snapshot = replace(snapshot, observation_ids=tuple(observation_ids))
         identity = snapshot.snapshot_id or _checksum(snapshot.as_dict())
         if identity in self._seen:
             return False

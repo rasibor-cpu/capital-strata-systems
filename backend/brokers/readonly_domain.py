@@ -162,6 +162,7 @@ class PortfolioSnapshot:
     prior_snapshot_id: str | None = None
     ingestion_utc: datetime | None = None
     validation_status: str = "VALIDATED"
+    observation_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "as_of_utc", utc(self.as_of_utc))
@@ -201,6 +202,7 @@ class PortfolioSnapshot:
             "prior_snapshot_id": self.prior_snapshot_id,
             "ingestion_utc": serialize(self.ingestion_utc),
             "validation_status": self.validation_status,
+            "observation_ids": list(self.observation_ids),
         }
 
 
