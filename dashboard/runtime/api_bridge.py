@@ -18,6 +18,7 @@ from dashboard.runtime.broker_balance_reconciliation import (
 )
 from dashboard.runtime.ws_bridge import create_ws_router
 from dashboard.runtime.mission_control_state import build_mission_control_state
+from backend.brokers.continuity_projection import build_continuity_state
 from dashboard.runtime.runtime_operational_state import (
     build_runtime_operational_state,
 )
@@ -92,8 +93,19 @@ def get_mission_control_payload(
         local_account=account,
         local_positions=payload.get("position_state", {}).get("positions", []),
     ).as_dict()
+    mission["continuity"] = get_continuity_payload(state_provider)
     mission["runtime_operational_state"] = get_runtime_health_payload(state_provider)
     return mission
+
+
+def get_continuity_payload(
+    state_provider: DashboardStateProvider | None = None,
+) -> dict[str, Any]:
+    state = _state_from_provider(state_provider)
+    continuity = state.last_scan_results.get("broker_continuity")
+    if isinstance(continuity, dict):
+        return dict(continuity)
+    return build_continuity_state(None)
 
 
 def get_runtime_health_payload(
@@ -194,6 +206,10 @@ def create_dashboard_state_router(
     def read_broker_state() -> dict[str, Any]:
         return get_mission_control_payload(state_provider)
 
+    @router.get("/api/v1/broker-continuity")
+    def read_broker_continuity() -> dict[str, Any]:
+        return get_continuity_payload(state_provider)
+
     @router.get("/api/v1/questrade/account-summary")
     def read_questrade_account_summary() -> dict[str, Any]:
         payload = get_mission_control_payload(state_provider)
@@ -240,6 +256,7 @@ __all__ = [
     "get_broker_reconciliation_payload",
     "get_dashboard_state_payload",
     "get_frontend_payload",
+    "get_continuity_payload",
     "get_mission_control_payload",
     "get_runtime_alerts_payload",
     "get_runtime_health_payload",

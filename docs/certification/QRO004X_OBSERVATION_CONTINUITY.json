@@ -1,0 +1,17 @@
+{
+  "schema": "css.qro004x.observation_continuity.v1",
+  "ledger_design": true,
+  "dedupe_policy": "deterministic_normalized_observation_hash",
+  "restart_safe_dedupe": true,
+  "snapshot_lineage": true,
+  "reconciliation_lifecycle": true,
+  "api_mission_control_parity": true,
+  "evidence_export": true,
+  "commercialization_separation": true,
+  "execution_allowed": false,
+  "live_trading_blocked": true,
+  "broker_execution_armed": false,
+  "advisory_only": true,
+  "questrade_live_auth_status": "BLOCKED_EXTERNAL_403_CLOUDFLARE_1010",
+  "real_account_validation": false
+}
