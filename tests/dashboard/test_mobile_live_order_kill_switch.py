@@ -42,8 +42,9 @@ def test_mobile_live_order_kill_switch_blocks_live_orders(monkeypatch, tmp_path)
     status = mobile_app._system_status(SUPER_USER)
 
     assert result["ok"] is False
-    assert result["status"] == "GLOBAL_LIVE_ORDER_KILL_SWITCH_ENGAGED"
+    assert result["status"] == "MOBILE_LIVE_EXECUTION_NOT_AUTHORIZED"
     assert result["broker_response"]["live_order_sent"] is False
+    assert result["broker_response"]["read_only"] is True
     assert status["live_order_kill_switch"] is True
 
 
