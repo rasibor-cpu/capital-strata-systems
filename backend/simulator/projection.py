@@ -45,6 +45,9 @@ def build_simulator_projection(
         "execution_allowed": False,
         "broker_execution_armed": False,
         "money_movement_allowed": False,
+        "commercialization_attribution_allowed": False,
+        "fee_entitlement_allowed": False,
+        "live_trading_eligible": False,
         "portfolio": {
             "cash": _decimal(portfolio.cash),
             "market_value": _decimal(portfolio.market_value),

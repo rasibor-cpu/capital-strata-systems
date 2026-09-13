@@ -108,6 +108,9 @@ def test_phone_preview_contract_is_stable_and_simulation_only():
     assert payload["broker_execution_armed"] is False
     assert payload["money_movement_allowed"] is False
     assert payload["live_execution_authorized"] is False
+    assert payload["commercialization_attribution_allowed"] is False
+    assert payload["fee_entitlement_allowed"] is False
+    assert payload["live_trading_eligible"] is False
     assert payload["readiness"]["level"] == "BROKER_READONLY_READY"
     assert payload["session"]["scenario_id"] == "range-false-breakout"
 

@@ -106,4 +106,7 @@ def test_demo_phone_preview_fixture_is_json_serializable_and_fail_closed():
     assert payload["broker_execution_armed"] is False
     assert payload["money_movement_allowed"] is False
     assert payload["live_execution_authorized"] is False
+    assert payload["commercialization_attribution_allowed"] is False
+    assert payload["fee_entitlement_allowed"] is False
+    assert payload["live_trading_eligible"] is False
     assert payload["replay_score"]["score_pct"] == "1"

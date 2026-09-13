@@ -30,6 +30,9 @@ def build_phone_preview_contract(
         "broker_execution_armed": False,
         "money_movement_allowed": False,
         "live_execution_authorized": False,
+        "commercialization_attribution_allowed": False,
+        "fee_entitlement_allowed": False,
+        "live_trading_eligible": False,
         "session": {
             "learner_id": session.learner_id,
             "scenario_id": session.scenario_id,
