@@ -30,6 +30,59 @@ class ClientEarningsSummaryService:
     def __init__(self, persistence_service: Optional[PersistenceService] = None) -> None:
         self._service = persistence_service or PersistenceService()
 
+    def list_summaries(
+        self,
+        *,
+        policy_id: str | None = None,
+        account_reference: str | None = None,
+        period_start: str | None = None,
+        period_end: str | None = None,
+    ) -> list[CommercialClientEarningsSummary]:
+        """Return canonical earnings history without synthesizing records.
+
+        Every returned entry is rebuilt from persisted authoritative
+        commercialization state through build_summary. Incomplete or
+        inconsistent canonical periods fail closed rather than being silently
+        replaced with sample/default values.
+        """
+
+        service = self._service
+        assessments = (
+            service.crystallization_assessments.get_by_policy_id(policy_id)
+            if policy_id is not None
+            else service.crystallization_assessments.list_all()
+        )
+
+        summaries: list[CommercialClientEarningsSummary] = []
+        for assessment in assessments:
+            start = assessment["period_start"]
+            end = assessment["period_end"]
+            if period_start is not None and start < period_start:
+                continue
+            if period_end is not None and end > period_end:
+                continue
+
+            summary = self.build_summary(
+                assessment["policy_id"],
+                start,
+                end,
+            )
+            if (
+                account_reference is not None
+                and summary.account_reference != account_reference
+            ):
+                continue
+            summaries.append(summary)
+
+        return sorted(
+            summaries,
+            key=lambda item: (
+                item.billing_period_start,
+                item.billing_period_end,
+                item.policy_id,
+            ),
+        )
+
     def build_summary(
         self,
         policy_id: str,
