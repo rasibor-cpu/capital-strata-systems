@@ -70,13 +70,15 @@ def test_mobile_controls_report_runtime_mode_and_order_gate_consistently(
         }
     )
 
-    assert controls["orders_enabled"] is True
+    assert controls["mobile_trading_mode"] == "MOBILE_LIVE_READ_ONLY"
+    assert controls["orders_enabled"] is False
     assert controls["engine_mode"] == "BALANCED"
     assert status["runtime_mode"] == "live"
     assert status["system_live"] is True
-    assert status["orders_enabled"] is True
+    assert status["orders_enabled"] is False
     assert status["engine_mode"] == "BALANCED"
-    assert status["broker_live_gate"] == "READY"
+    assert status["broker_live_gate"] == "READ_ONLY"
+    assert status["live_orders_enabled"] is False
 
 
 def test_mobile_controls_normalize_unknown_modes_to_paper(monkeypatch, tmp_path) -> None:
