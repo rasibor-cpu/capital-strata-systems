@@ -22,8 +22,8 @@ The mobile backend connects to the unified core CSS infrastructure.
 
 This mobile surface uses the same CSS sign-on and password rules as the desktop dashboard. Authenticated users see only the actions allowed by their CSS role.
 
-- `/controls` lets a `SUPER_USER` switch mobile runtime between paper/live, enable or disable order submission, and set the displayed engine mode.
+- `/controls` lets a `SUPER_USER` select read-only, paper-trading, or live-data/read-only mode and set the displayed engine mode. Live broker execution is not authorized on this release.
 - `/users` lets a `SUPER_USER` create additional CSS users with role-based authority and required first sign-on password changes.
 - Every mobile screen shows system mode, engine mode, order state, and live broker gate state.
 
-Live broker tickets still route through CSS credentials, broker availability, live-order flags, explicit `MOBILE LIVE` confirmation, and audit logging.
+Live broker data may be observed in `MOBILE_LIVE_READ_ONLY`, but mobile live orders are fail-closed regardless of role. Paper tickets continue to route through the canonical CSS governance/execution gates. Real trading, money movement, fee collection, and production live execution require separate owner authorization.
