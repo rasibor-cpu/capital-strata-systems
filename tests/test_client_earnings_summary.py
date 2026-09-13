@@ -369,3 +369,25 @@ def test_scenario_b_cad_20_client_example(service):
     assert summary.performance_fee_billing_currency_amount == Decimal("15")
     assert summary.selected_fee_basis is FinalFeeBasis.PLATFORM_ACCESS
     assert summary.selected_fee_amount == ACCESS_FEE
+
+
+def test_history_is_built_only_from_canonical_persisted_periods(service):
+    build_chain(service, trades=[("T1", Decimal("100"))])
+    history = ClientEarningsSummaryService(service).list_summaries()
+
+    assert len(history) == 1
+    assert history[0].policy_id == "POLICY-A"
+    assert history[0].billing_period_start == START
+    assert history[0].billing_period_end == END
+    assert history[0].selected_fee_amount == ACCESS_FEE
+    assert history[0].invoice_id is None
+    assert history[0].receivable_id is None
+
+
+def test_history_filters_without_inventing_missing_records(service):
+    build_chain(service, trades=[("T1", Decimal("100"))])
+    history = ClientEarningsSummaryService(service).list_summaries(
+        account_reference="account:DOES-NOT-EXIST",
+    )
+
+    assert history == []
