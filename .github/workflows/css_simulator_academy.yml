@@ -31,4 +31,4 @@ jobs:
       - name: Compile simulator package
         run: python -m compileall -q backend/simulator
       - name: Run simulator academy tests
-        run: python -m pytest -q tests/test_css_simulator_academy.py tests/test_css_simulator_academy_progression.py tests/test_css_simulator_academy_phase3.py tests/test_css_simulator_academy_phase4.py
+        run: python -m pytest -q tests/test_css_simulator_academy.py tests/test_css_simulator_academy_progression.py tests/test_css_simulator_academy_phase3.py tests/test_css_simulator_academy_phase4.py tests/test_css_simulator_academy_phase5.py
