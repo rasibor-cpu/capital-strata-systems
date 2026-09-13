@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - css-phone-remote-work-2026-09-13
+      - css-qro004x-integration-2026-09-13
   pull_request:
   workflow_dispatch:
 

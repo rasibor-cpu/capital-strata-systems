@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - css-phone-remote-work-2026-09-13
+      - css-qro004x-integration-2026-09-13
     paths:
       - "backend/simulator/**"
       - "tests/test_css_simulator_academy*.py"
