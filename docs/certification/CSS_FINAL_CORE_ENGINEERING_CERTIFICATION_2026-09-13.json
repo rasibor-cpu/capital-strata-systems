@@ -1,0 +1,34 @@
+{
+  "date": "2026-09-13",
+  "overall_disposition": "CORE_ENGINEERING_COMPLETE_RELEASE_HELD_AT_EXTERNAL_AND_REGULATORY_GATES",
+  "branch": "css-qro004x-integration-2026-09-13",
+  "certified_code_head": "c10a0771b5af18093a34cec7c6e392b9b42416c0",
+  "integration_commit": "aacc6fbb71e475e36c5df1499333f577f26ec888",
+  "qro004x_head": "5cf618175671ba7bbd585ae5efddf2588e8c706e",
+  "validation": {
+    "qro004x_focused_passed": 10,
+    "simulator_integrated_passed": 27,
+    "full_integrated_regression_passed": 1874,
+    "governance": "PASS",
+    "simulator_ci": "PASS",
+    "full_regression_ci": "PASS"
+  },
+  "session10": {
+    "status": "CLOSED_AS_BLOCKED_EXTERNAL",
+    "blocker": "QUESTRADE_HTTP_403_CLOUDFLARE_1010"
+  },
+  "safety": {
+    "execution_allowed": false,
+    "live_trading_blocked": true,
+    "broker_execution_armed": false,
+    "advisory_only": true,
+    "commercialization_attribution_from_simulator": false,
+    "fee_entitlement_from_simulator": false,
+    "live_trading_eligibility_from_simulator": false
+  },
+  "external_release_gates": [
+    "QUESTRADE_LIVE_READ_ONLY_AUTHORIZATION",
+    "REGULATORY_COMMERCIAL_SPECIALIST_REVIEW"
+  ],
+  "live_broker_production_certified": false
+}
