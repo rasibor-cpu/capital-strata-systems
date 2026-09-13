@@ -12,3 +12,5 @@ Repair scope:
 - include the isolated phone-work branch so the repaired workflow can be validated before canonical merge.
 
 No trading, broker, execution, transfer, withdrawal, funding, credential, or commercialization logic is changed by this repair.
+
+Validation trigger commit: low-level Git ref update used to exercise the repaired workflow on this branch.
