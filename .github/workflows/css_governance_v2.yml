@@ -1,0 +1,34 @@
+name: CSS Governance Validation V2
+
+on:
+  push:
+    branches:
+      - main
+      - css-phone-remote-work-2026-09-13
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  css-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Set Up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Validate Governance Instruction File
+        run: |
+          test -f .codex-instructions.md
+          echo "Governance instruction file present."
+      - name: Python Syntax Validation
+        run: |
+          python -m compileall -q backend dashboard engine tests
+      - name: Governance Success Banner
+        run: |
+          echo "CSS GOVERNANCE VALIDATION PASSED"
+          echo "PCNRASS STATUS: STABLE"
