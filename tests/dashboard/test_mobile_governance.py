@@ -84,10 +84,41 @@ def test_mobile_live_trade_routes_to_execution_gate(monkeypatch, tmp_path):
     monkeypatch.setattr(mobile_app, "MOBILE_CONTROL_FILE", tmp_path / "controls.json")
     mobile_app.save_mobile_controls({"mobile_trading_mode": "MOBILE_LIVE_TRADING_ARMED"})
 
+    from backend.app.persistence.services.session_runtime_service import SessionRuntimeService
+    from backend.app.persistence.services.pnl_runtime_service import PnlRuntimeService
+    from backend.intelligence.trade_decision_orchestrator import TradeDecisionOrchestrator
+    from engine.execution.execution_gate import ExecutionGate
+    from engine.risk.coinbase_margin_adapter import CoinbaseMarginAdapter
+
+    monkeypatch.setattr(
+        SessionRuntimeService,
+        "get_active_sessions",
+        lambda self: [{"session_id": "TEST-SESSION"}],
+    )
+    monkeypatch.setattr(
+        PnlRuntimeService,
+        "get_latest_snapshot",
+        lambda self, session_id: {"equity": 10000.0, "equity_peak": 10000.0},
+    )
+    monkeypatch.setattr(
+        CoinbaseMarginAdapter,
+        "get_margin_snapshot",
+        lambda self: object(),
+    )
+    monkeypatch.setattr(
+        TradeDecisionOrchestrator,
+        "evaluate_trade",
+        lambda self, market_data: {
+            "filters": {
+                "governance_approved": True,
+                "governance_reason": "approved_for_test",
+            }
+        },
+    )
+
     def mock_eval(*args, **kwargs):
         return {"decision": {"final": "BLOCK"}, "reason": "margin_trade_gate_rejected"}
 
-    from engine.execution.execution_gate import ExecutionGate
     monkeypatch.setattr(ExecutionGate, "evaluate_trade", mock_eval)
 
     result = mobile_app.execute_mobile_trade_ticket(
@@ -103,5 +134,5 @@ def test_mobile_live_trade_routes_to_execution_gate(monkeypatch, tmp_path):
         },
     )
     assert result["ok"] is False
-    assert result["status"] == "ORCHESTRATOR_GATE_REJECTED"
+    assert result["status"] == "EXECUTION_GATE_REJECTED"
 
