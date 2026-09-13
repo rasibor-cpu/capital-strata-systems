@@ -1,0 +1,23 @@
+{
+  "schema": "css.v1_completion_program.v1",
+  "status": "ACTIVE",
+  "start_date": "2026-09-13",
+  "branch": "css-v1-completion-2026-09-13",
+  "base_certification_head": "d065a265663c2146b4b232e0d94601a9d5f2d517",
+  "target": "CONTROLLED_LIVE_TEST_READY",
+  "live_execution_authorized": false,
+  "money_movement_authorized": false,
+  "fee_collection_authorized": false,
+  "lanes": {
+    "session10_broker_readiness": "IN_PROGRESS",
+    "commercialization_truth": "IN_PROGRESS",
+    "website_phone_parity": "IN_PROGRESS",
+    "simulator_intelligence": "IN_PROGRESS",
+    "security_resilience": "IN_PROGRESS",
+    "legal_operations": "PLANNING",
+    "release_certification": "IN_PROGRESS"
+  },
+  "external_blockers": {
+    "questrade_live_read_auth": "BLOCKED_EXTERNAL_403_CLOUDFLARE_1010"
+  }
+}
