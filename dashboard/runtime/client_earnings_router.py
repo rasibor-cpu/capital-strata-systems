@@ -15,7 +15,6 @@ from backend.commercialization.client_earnings_summary import (
 from backend.commercialization.withdrawable_funds import (
     CommercialWithdrawableFundsSummary,
     build_withdrawable_funds_summary,
-    build_client_earnings_history,
 )
 
 
@@ -149,43 +148,19 @@ def create_client_earnings_router(
         period_start: str | None = Query(default=None),
         period_end: str | None = Query(default=None),
     ) -> list[dict[str, Any]]:
-        records: list[dict[str, Any]] = []
-        if account_reference is not None:
-            records.append({
-                "account_reference": account_reference,
-                "period_start": period_start or "2026-09-01T00:00:00Z",
-                "period_end": period_end or "2026-10-01T00:00:00Z",
-                "performance_currency": "CAD",
-                "billing_currency": "USD",
-                "realized_attributable_profit": Decimal("150"),
-                "recovered_loss": Decimal("20"),
-                "new_economic_gain": Decimal("130"),
-                "selected_fee_basis": "PERFORMANCE_COMPENSATION",
-                "selected_fee_amount": Decimal("45"),
-                "net_earnings_after_css_fee": Decimal("85"),
-                "invoice_id": "INV-001",
-                "receivable_id": "REC-001",
-                "evidence_refs": ("api:history:default",),
-            })
-        if policy_id is not None:
-            records.append({
-                "account_reference": account_reference or "UNKNOWN",
-                "policy_id": policy_id,
-                "terms_id": "TERMS-DEFAULT",
-                "period_start": period_start or "2026-08-01T00:00:00Z",
-                "period_end": period_end or "2026-09-01T00:00:00Z",
-                "performance_currency": "USD",
-                "billing_currency": "USD",
-                "realized_attributable_profit": Decimal("100"),
-                "recovered_loss": Decimal("0"),
-                "new_economic_gain": Decimal("100"),
-                "selected_fee_basis": "PLATFORM_ACCESS",
-                "selected_fee_amount": Decimal("29.99"),
-                "net_earnings_after_css_fee": Decimal("70.01"),
-                "invoice_id": "INV-002",
-                "receivable_id": "REC-002",
-                "evidence_refs": ("api:history:prior",),
-            })
-        return build_client_earnings_history(records)
+        try:
+            summaries = factory().list_summaries(
+                account_reference=account_reference,
+                policy_id=policy_id,
+                period_start=period_start,
+                period_end=period_end,
+            )
+        except ClientEarningsSummaryUnavailableError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        return [
+            build_client_earnings_summary_payload(summary)
+            for summary in summaries
+        ]
 
     return router
