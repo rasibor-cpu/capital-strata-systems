@@ -6,19 +6,19 @@ on:
       - css-phone-remote-work-2026-09-13
     paths:
       - "backend/simulator/**"
-      - "tests/test_css_simulator_academy.py"
-      - "docs/CSS_SIMULATOR_ACADEMY_FOUNDATION.md"
+      - "tests/test_css_simulator_academy*.py"
+      - "docs/CSS_SIMULATOR_ACADEMY_*.md"
       - ".github/workflows/css_simulator_academy.yml"
   pull_request:
     paths:
       - "backend/simulator/**"
-      - "tests/test_css_simulator_academy.py"
-      - "docs/CSS_SIMULATOR_ACADEMY_FOUNDATION.md"
+      - "tests/test_css_simulator_academy*.py"
+      - "docs/CSS_SIMULATOR_ACADEMY_*.md"
       - ".github/workflows/css_simulator_academy.yml"
   workflow_dispatch:
 
 jobs:
-  simulator-foundation:
+  simulator-academy:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -30,5 +30,5 @@ jobs:
         run: python -m pip install --upgrade pytest
       - name: Compile simulator package
         run: python -m compileall -q backend/simulator
-      - name: Run simulator foundation tests
-        run: python -m pytest -q tests/test_css_simulator_academy.py
+      - name: Run simulator academy tests
+        run: python -m pytest -q tests/test_css_simulator_academy.py tests/test_css_simulator_academy_progression.py
