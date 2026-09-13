@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Mapping
@@ -11,7 +11,7 @@ ZERO = Decimal("0")
 
 
 def _require_utc(value: datetime, field_name: str) -> None:
-    if value.tzinfo is None or value.utcoffset() != ZERO:
+    if value.tzinfo is None or value.utcoffset() != timedelta(0):
         raise ValueError(f"{field_name} must be timezone-aware UTC")
 
 
