@@ -57,16 +57,16 @@ def test_mobile_audit_page_renders_filtered_redacted_events(monkeypatch, tmp_pat
     )
     page = mobile_app._audit_page(
         SUPER_USER,
-        category="kill_switch",
-        status="KILL_SWITCH",
+        category="governance_block",
+        status="NOT_AUTHORIZED",
         actor="00017",
     )
 
-    assert result["status"] == "GLOBAL_LIVE_ORDER_KILL_SWITCH_ENGAGED"
+    assert result["status"] == "MOBILE_LIVE_EXECUTION_NOT_AUTHORIZED"
     assert "Audit Trail Viewer" in page
-    assert "Kill Switch" in page
-    assert "GLOBAL_LIVE_ORDER_KILL_SWITCH_ENGAGED" in page
-    assert "/api/audit/export?category=kill_switch" in page
+    assert "Governance Block" in page
+    assert "MOBILE_LIVE_EXECUTION_NOT_AUTHORIZED" in page
+    assert "/api/audit/export?category=governance_block" in page
     assert "/api/audit/replay" in page
     assert "api_secret" not in page.lower()
 
