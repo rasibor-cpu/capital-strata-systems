@@ -999,100 +999,145 @@ def _mobile_runtime_payloads(
     user_ctx: Dict[str, Any],
     session: Dict[str, Any],
 ) -> Dict[str, Dict[str, Any]]:
+    """Build a fail-closed mobile shell from canonical runtime availability.
+
+    The phone surface must never invent balances, positions, market regimes,
+    risk limits, or PnL. Until canonical runtime/broker observations are
+    available, those fields remain explicitly unavailable. Live-data mode is
+    observation-only; only paper mode may submit governed tickets.
+    """
+
     controls = load_mobile_controls()
     runtime_mode = str(controls["runtime_mode"])
     engine_mode = str(controls["engine_mode"])
     orders_enabled = bool(controls["orders_enabled"])
+
+    active_session = None
+    pnl_snapshot = None
+    try:
+        active_sessions = SessionRuntimeService().get_active_sessions()
+        if active_sessions:
+            active_session = active_sessions[0]
+            session_id = str(active_session.get("session_id", ""))
+            if session_id:
+                pnl_snapshot = PnlRuntimeService().get_latest_snapshot(
+                    session_id
+                )
+    except Exception:
+        active_session = None
+        pnl_snapshot = None
+
+    broker_name = (
+        str(active_session.get("broker_name", "NONE")).upper()
+        if isinstance(active_session, dict)
+        else "NONE"
+    )
+    broker_mode = (
+        str(active_session.get("broker_mode", runtime_mode)).lower()
+        if isinstance(active_session, dict)
+        else runtime_mode
+    )
+    canonical_available = isinstance(pnl_snapshot, dict)
+
+    account_payload: Dict[str, Any] = {
+        "currency": "USD",
+        "broker": broker_name,
+        "account_mode": broker_mode,
+        "connected": canonical_available,
+        "api_health": "AVAILABLE" if canonical_available else "UNAVAILABLE",
+        "account_readiness": (
+            "CANONICAL_RUNTIME"
+            if canonical_available
+            else "DATA_UNAVAILABLE"
+        ),
+        "live_trading_enabled": False,
+    }
+    if canonical_available:
+        account_payload.update(
+            {
+                "cash_balance": pnl_snapshot.get("available_cash", 0),
+                "total_equity": pnl_snapshot.get("equity", 0),
+                "realized_pnl": pnl_snapshot.get("realized_pnl", 0),
+                "unrealized_pnl": pnl_snapshot.get("unrealized_pnl", 0),
+                "total_open_positions": pnl_snapshot.get(
+                    "open_positions", 0
+                ),
+            }
+        )
+
     return {
-        "account_payload": {
-            "cash_balance": 10000.00,
-            "total_equity": 10250.00,
-            "buying_power": 5000.00,
-            "margin_used": 0.00,
-            "available_margin": 5000.00,
-            "currency": "USD",
-            "broker": "MOBILE",
-            "account_mode": runtime_mode,
+        "account_payload": account_payload,
+        "broker_payload": {
+            "selected_broker": broker_name,
+            "broker_mode": broker_mode,
+            "connected": canonical_available,
+            "live_trading_enabled": False,
+            "account_readiness": account_payload["account_readiness"],
+            "api_health": account_payload["api_health"],
+            "missing_credentials": not canonical_available,
         },
-        "positions_payload": {
-            "positions": [
-                {
-                    "symbol": "BTC-USD",
-                    "asset_class": "CRYPTO",
-                    "side": "LONG",
-                    "qty": 0.05,
-                    "entry_price": 65000.00,
-                    "current_price": 65500.00,
-                    "unrealized_pnl": 25.00,
-                    "realized_pnl": 0.00,
-                },
-                {
-                    "symbol": "EUR_USD",
-                    "asset_class": "FX",
-                    "side": "SHORT",
-                    "qty": 1000,
-                    "entry_price": 1.0900,
-                    "current_price": 1.0875,
-                    "unrealized_pnl": 2.50,
-                    "realized_pnl": 0.00,
-                },
-            ]
-        },
+        "positions_payload": {"positions": []},
         "market_payload": {
-            "trend_state": "UPTREND",
-            "volatility_state": "NORMAL",
-            "liquidity_state": "HEALTHY",
-            "mean_reversion_state": "NEUTRAL",
-            "probability_state": "FAVORABLE",
-            "velocity_state": "RISING",
-            "vwap_state": "ABOVE_VWAP",
-            "vwap_distance": 0.0125,
-            "vwap_elasticity": 0.8300,
-            "momentum_state": "POSITIVE",
-            "pressure_state": "BUY_PRESSURE",
-            "acceleration_state": "STABLE",
-            "regime_state": f"MOBILE_{runtime_mode.upper()}",
-            "spread_state": "TIGHT",
-            "execution_cost_state": "MOBILE_GOVERNED",
-            "signal_confluence_state": "CONFIRMED",
+            "trend_state": "UNKNOWN",
+            "volatility_state": "UNKNOWN",
+            "liquidity_state": "UNKNOWN",
+            "mean_reversion_state": "UNKNOWN",
+            "probability_state": "UNKNOWN",
+            "velocity_state": "UNKNOWN",
+            "vwap_state": "UNKNOWN",
+            "momentum_state": "UNKNOWN",
+            "pressure_state": "UNKNOWN",
+            "acceleration_state": "UNKNOWN",
+            "regime_state": "DATA_UNAVAILABLE",
+            "spread_state": "UNKNOWN",
+            "execution_cost_state": "UNKNOWN",
+            "signal_confluence_state": "UNKNOWN",
         },
         "governance_payload": {
             "governance_enabled": True,
             "session_locked": False,
-            "defensive_mode_active": False,
+            "defensive_mode_active": not canonical_available,
             "unified_trade_gate_active": True,
             "audit_enabled": True,
             "last_governance_event": (
-                f"Mobile dashboard authenticated; mode={runtime_mode}; "
-                f"orders={'enabled' if orders_enabled else 'disabled'}"
+                f"Mobile authenticated; mode={runtime_mode}; "
+                f"orders={'paper-enabled' if orders_enabled else 'disabled'}; "
+                f"runtime_data={'available' if canonical_available else 'unavailable'}"
             ),
         },
         "risk_payload": {
-            "risk_state": "AUTHENTICATED",
-            "gate_status": f"MOBILE_{runtime_mode.upper()}_ACCESS",
-            "current_drawdown_pct": 0.35,
-            "max_drawdown_pct": 2.00,
-            "daily_loss_limit": 500.00,
-            "position_limit": 10,
-            "exposure_limit": 25000.00,
+            "risk_state": (
+                "CANONICAL_RUNTIME"
+                if canonical_available
+                else "DATA_UNAVAILABLE"
+            ),
+            "gate_status": (
+                "PAPER_ONLY"
+                if orders_enabled
+                else "READ_ONLY"
+            ),
             "risk_limits_breached": [],
         },
         "execution_payload": {
-            "execution_state": "AUTHORIZED_MOBILE" if orders_enabled else "MOBILE_ORDERS_DISABLED",
+            "execution_state": (
+                "PAPER_GOVERNED"
+                if orders_enabled
+                else "MOBILE_ORDERS_DISABLED"
+            ),
             "accepted_trade_count": 0,
             "rejected_trade_count": 0,
             "pending_trade_count": 0,
-            "total_execution_cost": 0.00,
-            "slippage_cost": 0.00,
-            "spread_cost": 0.00,
-            "fee_cost": 0.00,
-            "avg_slippage_bps": 0.00,
-            "avg_spread_bps": 0.00,
-            "execution_cost_state": "GOVERNED_BY_CSS",
-            "last_execution_event": "Phone dashboard is governed by mobile runtime controls",
+            "execution_cost_state": "UNKNOWN",
+            "last_execution_event": (
+                "Mobile execution is paper-only; live execution not authorized"
+            ),
         },
         "session_payload": {
-            "session_id": "MOBILE-SESSION",
+            "session_id": (
+                str(active_session.get("session_id", ""))
+                if isinstance(active_session, dict)
+                else ""
+            ),
             "user_id": str(user_ctx.get("user_id", "mobile_user")),
             "role": str(user_ctx.get("role", "VIEWER")),
             "cycle_number": 1,
@@ -1100,7 +1145,11 @@ def _mobile_runtime_payloads(
             "live_or_paper": runtime_mode,
         },
         "diagnostics_payload": {
-            "message": f"Mobile session created={int(float(session.get('created', 0)))}"
+            "message": (
+                "Canonical runtime snapshot available"
+                if canonical_available
+                else "DATA_UNAVAILABLE: no canonical runtime snapshot"
+            )
         },
     }
 
@@ -1140,7 +1189,7 @@ def _command_center_panel(user_ctx: Dict[str, Any]) -> str:
     if _can_view_audit_logs(user_ctx):
         cards.append(("Audit", "Filter, export, and review governed event trails.", "/audit"))
     if _can_submit_trade(user_ctx):
-        cards.append(("Trade", "Submit governed paper/live tickets.", "/trade"))
+        cards.append(("Trade", "Submit governed paper tickets; live data remains read-only.", "/trade"))
     if _can_manage_mobile_controls(user_ctx):
         cards.append(("Controls", "Change mobile mode and order state.", "/controls"))
     if can_manage_users(user_ctx):
