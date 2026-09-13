@@ -677,11 +677,17 @@ def load_mobile_controls() -> Dict[str, Any]:
         controls = dict(DEFAULT_MOBILE_CONTROLS)
 
     mode = str(controls.get("mobile_trading_mode", "MOBILE_READ_ONLY")).strip().upper()
-    controls["mobile_trading_mode"] = mode if mode in {"MOBILE_READ_ONLY", "MOBILE_PAPER_TRADING", "MOBILE_LIVE_TRADING_ARMED"} else "MOBILE_READ_ONLY"
+    if mode == "MOBILE_LIVE_TRADING_ARMED":
+        mode = "MOBILE_LIVE_READ_ONLY"
+    controls["mobile_trading_mode"] = (
+        mode
+        if mode in {"MOBILE_READ_ONLY", "MOBILE_PAPER_TRADING", "MOBILE_LIVE_READ_ONLY"}
+        else "MOBILE_READ_ONLY"
+    )
 
-    # Backward compatibility mappings
-    controls["runtime_mode"] = "live" if mode == "MOBILE_LIVE_TRADING_ARMED" else "paper"
-    controls["orders_enabled"] = mode != "MOBILE_READ_ONLY"
+    # Live market/broker observation is permitted; live order execution is not.
+    controls["runtime_mode"] = "live" if mode == "MOBILE_LIVE_READ_ONLY" else "paper"
+    controls["orders_enabled"] = mode == "MOBILE_PAPER_TRADING"
 
     engine_mode = str(controls.get("engine_mode", "SAFE")).strip().upper()
     controls["engine_mode"] = engine_mode if engine_mode in ENGINE_MODES else "SAFE"
@@ -694,9 +700,15 @@ def save_mobile_controls(controls: Dict[str, Any]) -> Dict[str, Any]:
     normalized = dict(DEFAULT_MOBILE_CONTROLS)
     normalized.update(controls)
     mode = str(normalized.get("mobile_trading_mode", "MOBILE_READ_ONLY")).strip().upper()
-    normalized["mobile_trading_mode"] = mode if mode in {"MOBILE_READ_ONLY", "MOBILE_PAPER_TRADING", "MOBILE_LIVE_TRADING_ARMED"} else "MOBILE_READ_ONLY"
-    normalized["runtime_mode"] = "live" if mode == "MOBILE_LIVE_TRADING_ARMED" else "paper"
-    normalized["orders_enabled"] = mode != "MOBILE_READ_ONLY"
+    if mode == "MOBILE_LIVE_TRADING_ARMED":
+        mode = "MOBILE_LIVE_READ_ONLY"
+    normalized["mobile_trading_mode"] = (
+        mode
+        if mode in {"MOBILE_READ_ONLY", "MOBILE_PAPER_TRADING", "MOBILE_LIVE_READ_ONLY"}
+        else "MOBILE_READ_ONLY"
+    )
+    normalized["runtime_mode"] = "live" if mode == "MOBILE_LIVE_READ_ONLY" else "paper"
+    normalized["orders_enabled"] = mode == "MOBILE_PAPER_TRADING"
     engine_mode = str(normalized.get("engine_mode", "SAFE")).strip().upper()
     normalized["engine_mode"] = engine_mode if engine_mode in ENGINE_MODES else "SAFE"
     normalized["live_order_kill_switch"] = bool(
@@ -723,7 +735,7 @@ def _update_mobile_controls(form: Dict[str, str]) -> Dict[str, Any]:
 
 def _system_status(user_ctx: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     controls = load_mobile_controls()
-    broker_ready = controls.get("mobile_trading_mode") == "MOBILE_LIVE_TRADING_ARMED"
+    broker_read_ready = controls.get("mobile_trading_mode") == "MOBILE_LIVE_READ_ONLY"
 
     kill_switch = evaluate_live_order_kill_switch(controls)
     return {
@@ -734,9 +746,9 @@ def _system_status(user_ctx: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         "mobile_trading_mode": controls["mobile_trading_mode"],
         "live_order_kill_switch": kill_switch.blocked,
         "live_order_kill_switch_reason": kill_switch.reason,
-        "broker_live_ready": broker_ready,
-        "broker_live_gate": "READY" if broker_ready else "OFF",
-        "live_orders_enabled": broker_ready and not kill_switch.blocked,
+        "broker_live_ready": broker_read_ready,
+        "broker_live_gate": "READ_ONLY" if broker_read_ready else "OFF",
+        "live_orders_enabled": False,
         "can_trade": _can_submit_trade(user_ctx or {}),
         "can_manage_controls": _can_manage_mobile_controls(user_ctx or {}),
         "can_manage_users": can_manage_users(user_ctx or {}),
@@ -1613,16 +1625,15 @@ def _controls_page(
               <select id="mobile_trading_mode" name="mobile_trading_mode"{disabled}>
                 <option value="MOBILE_READ_ONLY"{_selected("MOBILE_READ_ONLY", mobile_mode)}>READ ONLY</option>
                 <option value="MOBILE_PAPER_TRADING"{_selected("MOBILE_PAPER_TRADING", mobile_mode)}>PAPER TRADING</option>
-                <option value="MOBILE_LIVE_TRADING_ARMED"{_selected("MOBILE_LIVE_TRADING_ARMED", mobile_mode)}>LIVE TRADING ARMED</option>
+                <option value="MOBILE_LIVE_READ_ONLY"{_selected("MOBILE_LIVE_READ_ONLY", mobile_mode)}>LIVE DATA — READ ONLY</option>
               </select>
 
               <div id="live-warning-modal" style="display:none; border:2px solid red; padding: 10px; margin: 10px 0; background: #ffebee; color: #b71c1c;">
-                <strong>LIVE CAPITAL WARNING: Real capital may be lost. Orders executed in LIVE mode may result in financial loss.</strong>
-                <label style="display:block; margin-top:10px;"><input type="checkbox" id="legal_acceptance" name="legal_acceptance" value="on"> I explicitly acknowledge and accept these risks.</label>
+                <strong>LIVE EXECUTION DISABLED: CSS mobile may observe live broker data, but cannot submit live orders under the current authorization.</strong>
               </div>
               <script>
                 document.getElementById('mobile_trading_mode').addEventListener('change', function() {{
-                  document.getElementById('live-warning-modal').style.display = this.value === 'MOBILE_LIVE_TRADING_ARMED' ? 'block' : 'none';
+                  document.getElementById('live-warning-modal').style.display = 'none';
                 }});
                 if(document.getElementById('mobile_trading_mode').value === 'MOBILE_LIVE_TRADING_ARMED') {{
                   document.getElementById('live-warning-modal').style.display = 'block';
@@ -1647,7 +1658,7 @@ def _controls_page(
           <section class="metric-grid" aria-label="Control guardrails">
             <article><strong>Live Broker Gate</strong><span>{html.escape(broker_gate)}</span></article>
             <article><strong>Kill Switch</strong><span>{html.escape(kill_switch_state)}</span></article>
-            <article><strong>Live Confirmation</strong><span>Required</span></article>
+            <article><strong>Live Execution</strong><span>Not Authorized</span></article>
             <article><strong>User Gate</strong><span>{'Manage' if can_manage else 'View'}</span></article>
             <article><strong>Audit</strong><span>On</span></article>
           </section>
@@ -1969,8 +1980,9 @@ def _trade_readiness_panel(user_ctx: Dict[str, Any]) -> str:
         kind = "info" if kind == "success" else kind
         messages.append("System mode is PAPER. Tickets will be recorded to the CSS paper ledger, not sent to a broker.")
 
-    if not messages:
-        messages.append("Live trade path is armed. A live ticket still requires the confirmation word EXECUTE.")
+    if status["system_live"]:
+        kind = "info" if kind == "success" else kind
+        messages.append("Live broker data may be observed, but live order execution is not authorized.")
 
     body = " ".join(messages)
     return f'<section class="status {kind}"><strong>Trade Activation Status</strong><p>{html.escape(body)}</p></section>'
@@ -1993,6 +2005,7 @@ def _trade_status_headline(code: str) -> str:
     labels = {
         "PAPER_TICKET_RECORDED": "Paper ticket recorded",
         "LIVE_CONFIRMATION_REQUIRED": "Live confirmation required",
+        "MOBILE_LIVE_EXECUTION_NOT_AUTHORIZED": "Live execution not authorized",
         "GLOBAL_LIVE_ORDER_KILL_SWITCH_ENGAGED": "Live order kill switch engaged",
         "MOBILE_ORDERS_DISABLED": "Mobile orders are disabled",
         "MOBILE_AUTHORITY_DENIED": "Trading authority denied",
@@ -2014,13 +2027,15 @@ def _trade_status_detail(result: Dict[str, Any]) -> str:
     if code == "PAPER_TICKET_RECORDED":
         return "The ticket was saved in CSS paper mode. No live broker order was sent."
     if code == "LIVE_CONFIRMATION_REQUIRED":
-        return "Type MOBILE LIVE in the confirmation field and submit again while system mode is LIVE."
+        return "Live execution is not authorized on this release."
+    if code == "MOBILE_LIVE_EXECUTION_NOT_AUTHORIZED":
+        return "CSS may display live broker data, but this release cannot submit live orders."
     if code == "GLOBAL_LIVE_ORDER_KILL_SWITCH_ENGAGED":
         return "The global live-order kill switch is engaged. Clear it from Controls before any live order can leave CSS."
     if code == "COINBASE_LIVE_ORDERS_FLAG_OFF":
         return "The Coinbase credential check may pass, but live orders remain blocked until the live-order flag is enabled in CSS environment controls."
     if code == "MOBILE_ORDERS_DISABLED":
-        return "Open Controls as a super user and set Orders to Enabled."
+        return "Mobile order submission is disabled. Paper trading can be enabled from Controls."
     if code == "MOBILE_AUTHORITY_DENIED":
         return "Ask a super user to assign a trading role such as TRADER, TREASURY, HEAD_TREASURY, ADMIN, or SUPER_USER."
     if bool(result.get("ok")):
@@ -2039,14 +2054,14 @@ def _trade_ticket_page(
 
     controls = load_mobile_controls()
     system_mode = str(controls.get("mobile_trading_mode", "MOBILE_READ_ONLY"))
-    orders_enabled = system_mode != "MOBILE_READ_ONLY"
-    trade_allowed = _can_submit_trade(user_ctx)
-    live_flag = "READY" if system_mode == "MOBILE_LIVE_TRADING_ARMED" else "OFF"
+    orders_enabled = system_mode == "MOBILE_PAPER_TRADING"
+    trade_allowed = _can_submit_trade(user_ctx) and orders_enabled
+    live_flag = "READ_ONLY" if system_mode == "MOBILE_LIVE_READ_ONLY" else "OFF"
     if trade_allowed:
         trade_form_markup = f"""
           <section class="form-panel trade-form-panel" aria-label="Mobile trade ticket form">
             <h2>Submit Trade Ticket</h2>
-            <p class="muted">Tickets use the current mobile system mode. Live tickets require broker credentials, CSS live flags, and confirmation.</p>
+            <p class="muted">Paper tickets may be submitted when PAPER TRADING is enabled. Live broker data is observation-only and cannot submit orders.</p>
             <form method="post" action="/trade" autocomplete="off">
               <label for="mode_display">Mobile Mode</label>
               <input id="mode_display" value="{html.escape(system_mode.upper())}" disabled>
@@ -2082,9 +2097,6 @@ def _trade_ticket_page(
               <label for="qty">Quantity / Units</label>
               <input id="qty" name="qty" inputmode="decimal" value="1">
 
-              <label for="confirm">Live Confirmation</label>
-              <input id="confirm" name="confirm" placeholder="Type MOBILE LIVE for live orders">
-
               <button type="submit">Submit Ticket</button>
             </form>
           </section>
@@ -2110,7 +2122,7 @@ def _trade_ticket_page(
             <article><strong>Ticket Mode</strong><span>{html.escape(system_mode.title())}</span></article>
             <article><strong>Orders</strong><span>{'Enabled' if orders_enabled else 'Disabled'}</span></article>
             <article><strong>Authority</strong><span>{'Submit' if trade_allowed else 'View'}</span></article>
-            <article><strong>Live Confirm</strong><span>EXECUTE</span></article>
+            <article><strong>Live Execution</strong><span>Not Authorized</span></article>
           </section>
 
           {result_markup}
@@ -2149,6 +2161,20 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
         _record_mobile_event({"event_type": "mobile_order_rejected", **result})
         return result
 
+    if mobile_mode == "MOBILE_LIVE_READ_ONLY":
+        result = {
+            "ok": False,
+            "status": "MOBILE_LIVE_EXECUTION_NOT_AUTHORIZED",
+            "ticket": ticket,
+            "broker_response": {
+                "live_order_sent": False,
+                "read_only": True,
+                "required_authorization": "SEPARATE_OWNER_LIVE_EXECUTION_APPROVAL",
+            },
+        }
+        _record_mobile_event({"event_type": "mobile_order_rejected", **result})
+        return result
+
     if mobile_mode == "MOBILE_READ_ONLY":
         result = {
             "ok": False,
@@ -2162,7 +2188,7 @@ def execute_mobile_trade_ticket(user_ctx: Dict[str, Any], form: Dict[str, str]) 
         _record_mobile_event({"event_type": "mobile_order_rejected", **result})
         return result
 
-    is_live_request = mobile_mode == "MOBILE_LIVE_TRADING_ARMED" and broker != "CSS_PAPER"
+    is_live_request = False
 
     if is_live_request:
         kill_switch = evaluate_live_order_kill_switch(controls)
