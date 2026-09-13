@@ -239,8 +239,15 @@ def create_app(
         title="Capital Strata Systems Dashboard Runtime API",
         version="0.1.0",
     )
-    app.include_router(create_dashboard_state_router(state_provider))
-    app.include_router(create_ws_router(state_provider))
+    # FastAPI/Starlette version drift in cloud CI exposed an include_router
+    # compatibility issue where nested router routes were not materialized on
+    # the application. Extend the application route table from the already
+    # constructed read-only routers instead. This preserves the same endpoint
+    # callables and does not introduce any mutation surface.
+    dashboard_router = create_dashboard_state_router(state_provider)
+    websocket_router = create_ws_router(state_provider)
+    app.router.routes.extend(dashboard_router.routes)
+    app.router.routes.extend(websocket_router.routes)
     return app
 
 

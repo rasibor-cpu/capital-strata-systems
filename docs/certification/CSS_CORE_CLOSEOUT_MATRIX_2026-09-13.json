@@ -1,0 +1,54 @@
+{
+  "as_of": "2026-09-13",
+  "overall_status": "IN_PROGRESS_LOCAL_QRO_SYNC_REQUIRED",
+  "remote_branch": "css-phone-remote-work-2026-09-13",
+  "validated_remote_head": "b9ab7fc9d579ae5e0622c6ab9979131a234b4a82",
+  "remote_regression": {
+    "status": "PASS",
+    "run_id": 34768912992,
+    "pytest_passed": 535,
+    "pytest_failed": 0
+  },
+  "governance": {
+    "status": "PASS"
+  },
+  "simulator_academy": {
+    "status": "PASS",
+    "phases": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ]
+  },
+  "qro_002x": {
+    "status": "LOCAL_COMPLETE_NOT_SYNCED",
+    "commit": "23bc915c40230297a9a9c2313ce994be21310d84"
+  },
+  "qro_003x": {
+    "status": "LOCAL_COMPLETE_NOT_SYNCED",
+    "commit": "feaa42bd036bf1dc945aef09c306b6d28f82530f"
+  },
+  "qro_004x": {
+    "status": "BLOCKED_LOCAL_SYNC"
+  },
+  "integrated_regression": {
+    "status": "BLOCKED_LOCAL_SYNC"
+  },
+  "questrade_live_auth": {
+    "status": "BLOCKED_EXTERNAL_403_CLOUDFLARE_1010"
+  },
+  "session10": {
+    "status": "BLOCKED_EXTERNAL_AND_LOCAL_SYNC"
+  },
+  "live_execution": {
+    "execution_allowed": false,
+    "live_trading_blocked": true,
+    "broker_execution_armed": false,
+    "advisory_only": true
+  },
+  "final_certification": {
+    "status": "BLOCKED_DEPENDENCIES"
+  }
+}
