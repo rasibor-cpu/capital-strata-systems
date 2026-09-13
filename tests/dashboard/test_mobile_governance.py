@@ -93,7 +93,7 @@ def test_mobile_status_never_enables_live_orders(monkeypatch, tmp_path):
     assert status["live_orders_enabled"] is False
 
 
-def test_mobile_paper_trade_still_routes_to_canonical_execution_gate(
+def test_mobile_paper_trade_fails_closed_when_margin_snapshot_unavailable(
     monkeypatch, tmp_path
 ):
     monkeypatch.setattr(mobile_app, "MOBILE_EVENTS_FILE", tmp_path / "events.jsonl")
@@ -156,4 +156,4 @@ def test_mobile_paper_trade_still_routes_to_canonical_execution_gate(
     )
 
     assert result["ok"] is False
-    assert result["status"] == "EXECUTION_GATE_REJECTED"
+    assert result["status"] == "MARGIN_SNAPSHOT_UNAVAILABLE"
