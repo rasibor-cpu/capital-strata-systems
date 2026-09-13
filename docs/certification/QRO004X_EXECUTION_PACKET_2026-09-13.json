@@ -1,0 +1,61 @@
+{
+  "packet": "QRO-004X",
+  "title": "Durable Observation Ledger, Idempotent Ingestion, API Continuity & Evidence Export",
+  "status": "READY_FOR_EXECUTION_AFTER_LOCAL_QRO_SYNC",
+  "expected_qro_base": "feaa42bd036bf1dc945aef09c306b6d28f82530f",
+  "max_commits": 2,
+  "commits": [
+    "add durable broker observation ledger",
+    "certify broker continuity API projection"
+  ],
+  "safety": {
+    "execution_allowed": false,
+    "live_trading_blocked": true,
+    "broker_execution_armed": false,
+    "advisory_only": true,
+    "prohibited": [
+      "order_submit",
+      "order_cancel",
+      "order_replace",
+      "transfer",
+      "withdrawal",
+      "deposit",
+      "funding",
+      "money_movement",
+      "live_questrade_auth",
+      "real_credentials"
+    ]
+  },
+  "observation_types": [
+    "ACCOUNT",
+    "BALANCE",
+    "POSITION",
+    "ORDER",
+    "EXECUTION",
+    "ACTIVITY",
+    "RECONCILIATION"
+  ],
+  "reconciliation_states": [
+    "CREATED",
+    "UNCHANGED",
+    "RESOLVED",
+    "REOPENED"
+  ],
+  "failure_matrix": [
+    "restart",
+    "duplicate_after_restart",
+    "corrupt_ledger",
+    "missing_ledger",
+    "provider_unavailable",
+    "timeout",
+    "http_403",
+    "http_429",
+    "http_500",
+    "http_502"
+  ],
+  "classifications": [
+    "FAIL_CLOSED",
+    "IDEMPOTENT",
+    "STATE_EXPLICIT"
+  ]
+}
