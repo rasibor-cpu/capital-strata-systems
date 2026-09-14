@@ -8,12 +8,12 @@ from backend.institutional_hardening.config_governance import ConfigChangeRecord
 from backend.institutional_hardening.incident_drill import run_incident_drill
 from backend.institutional_hardening.live_mode_gate import LiveModeGuardrailInput, evaluate_live_mode_guardrail
 from backend.institutional_hardening.mobile_certification import certify_mobile_flows, REQUIRED_MOBILE_FLOWS
-from backend.institutional_hardening.operator_approval import OperatorApproval, validate_operator_approval
+from backend.institutional_hardening.operator_approval import OperatorApproval, validate_operator_approval, append_operator_approval_audit
 from backend.institutional_hardening.order_intent_simulator import OrderIntent, simulate_order_intent
 from backend.institutional_hardening.performance_budget import assess_performance_budget
 from backend.institutional_hardening.recovery_drill import evaluate_recovery_drill
-from backend.institutional_hardening.release_integrity import build_release_manifest
-from backend.institutional_hardening.retention_policy import redact_export
+from backend.institutional_hardening.release_integrity import build_release_manifest, write_release_manifest
+from backend.institutional_hardening.retention_policy import redact_export, archive_rotation_required
 
 NOW = datetime(2026, 9, 14, tzinfo=timezone.utc)
 
@@ -106,3 +106,24 @@ def test_release_manifest_hashes_files(tmp_path):
     result = build_release_manifest([a], validation_commands=["python -m pytest -q"])
     assert len(result["files"][0]["sha256"]) == 64
     assert len(result["manifest_sha256"]) == 64
+
+
+def test_operator_approval_audit_is_jsonl_and_scoped(tmp_path):
+    path = tmp_path / "approval.jsonl"
+    event = append_operator_approval_audit(path, approval(), required_scope="RESTRICTED_LIVE_REVIEW", now_utc=NOW)
+    assert event["valid"] is True
+    assert "RESTRICTED_LIVE_REVIEW" in path.read_text(encoding="utf-8")
+
+
+def test_archive_rotation_guardrail():
+    assert archive_rotation_required(2_000_000_000) is True
+    assert archive_rotation_required(1) is False
+
+
+def test_release_manifest_writer_is_atomic_shape(tmp_path):
+    src = tmp_path / "source.txt"
+    src.write_text("content", encoding="utf-8")
+    out = tmp_path / "release_manifest.json"
+    payload = write_release_manifest(out, [src], validation_commands=["python -m pytest -q"])
+    assert out.exists()
+    assert payload["manifest_sha256"] in out.read_text(encoding="utf-8")

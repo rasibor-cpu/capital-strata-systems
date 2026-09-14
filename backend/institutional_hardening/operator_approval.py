@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
+import json
+from pathlib import Path
 
 ALLOWED_APPROVER_ROLES = {"ADMIN", "SUPER_USER"}
 
@@ -60,3 +62,30 @@ def validate_operator_approval(
     if now_utc >= approval.expires_at_utc:
         return False, "OPERATOR_APPROVAL_EXPIRED"
     return True, "OPERATOR_APPROVAL_VALID"
+
+
+def append_operator_approval_audit(
+    path: str | Path,
+    approval: OperatorApproval | None,
+    *,
+    required_scope: str,
+    now_utc: datetime,
+) -> dict[str, Any]:
+    valid, reason = validate_operator_approval(
+        approval,
+        required_scope=required_scope,
+        now_utc=now_utc,
+    )
+    event = {
+        "event_type": "operator_approval_validation",
+        "recorded_at_utc": now_utc.isoformat(),
+        "required_scope": required_scope,
+        "valid": valid,
+        "reason": reason,
+        "approval": approval.as_audit_dict() if approval is not None else None,
+    }
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(event, sort_keys=True) + "\n")
+    return event

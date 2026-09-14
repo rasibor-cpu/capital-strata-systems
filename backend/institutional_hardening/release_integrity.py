@@ -30,3 +30,18 @@ def build_release_manifest(files: list[str | Path], *, validation_commands: list
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     payload["manifest_sha256"] = hashlib.sha256(canonical).hexdigest()
     return payload
+
+
+def write_release_manifest(
+    output_path: str | Path,
+    files: list[str | Path],
+    *,
+    validation_commands: list[str],
+) -> dict:
+    target = Path(output_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    payload = build_release_manifest(files, validation_commands=validation_commands)
+    temp = target.with_suffix(target.suffix + ".tmp")
+    temp.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    temp.replace(target)
+    return payload

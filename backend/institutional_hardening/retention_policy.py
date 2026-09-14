@@ -32,3 +32,21 @@ def redact_export(value: Any) -> Any:
     if isinstance(value, list):
         return [redact_export(item) for item in value]
     return value
+
+
+def archive_rotation_required(current_archive_bytes: int, policy: RetentionPolicy | None = None) -> bool:
+    active = policy or RetentionPolicy()
+    if current_archive_bytes < 0:
+        raise ValueError("archive size cannot be negative")
+    return current_archive_bytes >= active.max_archive_bytes
+
+
+def build_retention_summary(policy: RetentionPolicy | None = None) -> dict[str, int]:
+    active = policy or RetentionPolicy()
+    return {
+        "audit_days": active.audit_days,
+        "replay_days": active.replay_days,
+        "alert_days": active.alert_days,
+        "release_summary_days": active.release_summary_days,
+        "max_archive_bytes": active.max_archive_bytes,
+    }

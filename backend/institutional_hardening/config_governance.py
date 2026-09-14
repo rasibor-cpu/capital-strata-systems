@@ -28,3 +28,15 @@ class ConfigChangeRecord:
             for key in keys
             if self.before.get(key) != self.after.get(key)
         }
+
+
+    def as_audit_dict(self) -> dict[str, Any]:
+        return {
+            "event_type": "configuration_change_review",
+            "change_id": self.change_id,
+            "changed_by": self.changed_by,
+            "approver_id": self.approver_id,
+            "changed_at_utc": self.changed_at_utc.isoformat(),
+            "rollback_reference": self.rollback_reference,
+            "diff": self.diff(),
+        }
