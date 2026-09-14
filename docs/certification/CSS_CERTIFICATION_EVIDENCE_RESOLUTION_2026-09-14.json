@@ -1,0 +1,37 @@
+{
+  "schema_version": "css.certification_evidence_resolution.v1",
+  "status": "CLOUD_EVIDENCE_CONSOLIDATION_PASS",
+  "validated_commit": "8ad0d37529b0a10677258b1eb788689645095665",
+  "workflow_run_id": 34904227703,
+  "results": {
+    "risk_margin_passed": 47,
+    "broker_runtime_passed": 41,
+    "security_dashboard_passed": 36,
+    "full_regression_passed": 1903
+  },
+  "cloud_verifiable_status": "PASS",
+  "operator_evidence": [
+    "COW001_24H_RUN",
+    "REAL_RUNTIME_STARTUP_SHUTDOWN",
+    "REAL_RESTART_CORRUPTION_DRILL",
+    "BROWSER_MOBILE_CAPTURE",
+    "OPERATOR_SIGNON_EVIDENCE"
+  ],
+  "external_blockers": [
+    "QUESTRADE_HTTP_403_CLOUDFLARE_1010",
+    "REGULATORY_COMMERCIAL_SPECIALIST_REVIEW"
+  ],
+  "human_approvals": [
+    "ROBERT_FINAL_ACCEPTANCE_WHERE_REQUIRED",
+    "OPERATIONS_SIGNOFF_WHERE_REQUIRED",
+    "LEGAL_SCOPE_APPROVAL_WHERE_REQUIRED",
+    "RISK_ACCEPTANCE_WHERE_REQUIRED"
+  ],
+  "safety": {
+    "execution_allowed": false,
+    "live_trading_blocked": true,
+    "broker_execution_armed": false,
+    "advisory_only": true,
+    "money_movement_authorized": false
+  }
+}

@@ -1,0 +1,49 @@
+name: CSS Certification Evidence Consolidation
+
+on:
+  push:
+    branches:
+      - css-certification-evidence-consolidation
+    paths:
+      - "backend/**"
+      - "dashboard/**"
+      - "engine/**"
+      - "tests/**"
+      - "certification/**"
+      - "docs/**"
+      - ".github/workflows/css_certification_evidence_consolidation.yml"
+  workflow_dispatch:
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Set Up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest
+      - name: Compile Primary Python Trees
+        run: |
+          python -m compileall -q backend dashboard engine tests
+      - name: Risk And Margin Evidence Tests
+        run: |
+          python -m pytest -q             tests/engine/test_risk_governor.py             tests/test_margin_engine.py             tests/test_margin_snapshot.py             tests/test_margin_trade_gate.py             tests/test_margin_trade_gate_enforcement_integration.py             tests/test_broker_margin_contract.py             tests/test_oanda_margin_adapter.py             tests/test_coinbase_margin_adapter.py
+      - name: Broker And Runtime Evidence Tests
+        run: |
+          python -m pytest -q             tests/dashboard/test_postfoundation_broker_guardrails.py             tests/test_broker_registry.py             tests/test_broker_credential_separation_evidence.py             tests/test_qro002x_broker_portfolio_replay.py             tests/test_runtime_health_provider.py             tests/test_runtime_heartbeat_source.py             tests/test_runtime_operational_state.py             tests/test_runtime_supervisor.py
+      - name: Security And Dashboard Evidence Tests
+        run: |
+          python -m pytest -q             tests/test_security_phase_alpha.py             tests/test_password_reset_recovery.py             tests/test_dashboard_auth_canonical.py             tests/dashboard/test_permission_matrix.py             tests/dashboard/test_mobile_governance.py             tests/dashboard/test_mobile_live_order_kill_switch.py             tests/dashboard/test_mode_reconciliation.py             tests/test_margin_dashboard_integration.py
+      - name: Full Regression
+        run: |
+          python -m pytest -q
