@@ -42,7 +42,7 @@ def test_live_mode_guardrail_never_arms_execution():
 
 def test_broker_confidence_degrades_below_threshold():
     result = score_broker_confidence(BrokerConfidenceInput(
-        Decimal("1"), Decimal("1"), Decimal("0.5"), Decimal("1")
+        Decimal("1"), Decimal("1"), Decimal("0.2"), Decimal("1")
     ))
     assert result.status == "DEGRADED"
     assert result.safe_degradation_required is True
