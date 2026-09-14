@@ -1,0 +1,57 @@
+{
+  "schema_version": "css.certification_evidence_resolution.v1",
+  "status": "CLOUD_EVIDENCE_CONSOLIDATION_IN_PROGRESS",
+  "classification": {
+    "cloud_verifiable": [
+      "risk_governor",
+      "margin_engine",
+      "margin_snapshot",
+      "margin_trade_gate",
+      "margin_enforcement_integration",
+      "broker_margin_contract",
+      "oanda_adapter_safe_behavior",
+      "coinbase_adapter_safe_behavior",
+      "postfoundation_broker_guardrails",
+      "broker_registry",
+      "credential_separation",
+      "qro_replay_portfolio",
+      "runtime_health",
+      "runtime_heartbeat",
+      "runtime_operational_state",
+      "runtime_supervisor",
+      "security_controls",
+      "password_reset_recovery",
+      "dashboard_auth",
+      "permission_matrix",
+      "mobile_governance",
+      "mobile_kill_switch",
+      "mode_reconciliation",
+      "margin_dashboard_integration",
+      "full_regression"
+    ],
+    "operator_evidence": [
+      "COW001_24H_RUN",
+      "real_runtime_startup_shutdown",
+      "browser_mobile_screenshots",
+      "real_restart_corruption_drill",
+      "operator_signon_evidence"
+    ],
+    "external_blocker": [
+      "QUESTRADE_HTTP_403_CLOUDFLARE_1010",
+      "REGULATORY_COMMERCIAL_SPECIALIST_REVIEW"
+    ],
+    "human_approval": [
+      "ROBERT_FINAL_ACCEPTANCE",
+      "OPERATIONS_SIGNOFF",
+      "LEGAL_SCOPE_APPROVAL",
+      "RISK_ACCEPTANCE"
+    ]
+  },
+  "safety": {
+    "execution_allowed": false,
+    "live_trading_blocked": true,
+    "broker_execution_armed": false,
+    "advisory_only": true,
+    "money_movement_authorized": false
+  }
+}
