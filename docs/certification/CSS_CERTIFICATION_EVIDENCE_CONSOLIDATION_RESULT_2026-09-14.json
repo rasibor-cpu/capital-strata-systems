@@ -1,0 +1,41 @@
+{
+  "schema_version": "css.certification_evidence_consolidation_result.v1",
+  "date": "2026-09-14",
+  "status": "PASS_CLOUD_VERIFIABLE_EVIDENCE_CONSOLIDATED",
+  "validated_source_commit": "8ad0d37529b0a10677258b1eb788689645095665",
+  "github_actions_run_id": 34904227703,
+  "validation": {
+    "compile": "PASS",
+    "risk_margin_passed": 47,
+    "broker_runtime_passed": 41,
+    "security_dashboard_passed": 36,
+    "full_regression_passed": 1903,
+    "failures": 0
+  },
+  "unresolved": {
+    "operator_evidence": [
+      "COW001_24H_CONTROLLED_OPERATING_WINDOW",
+      "REAL_RUNTIME_STARTUP_SHUTDOWN",
+      "PHYSICAL_RESTART_CORRUPTION_DRILL",
+      "BROWSER_MOBILE_CAPTURE",
+      "OPERATOR_SIGNON_EVIDENCE"
+    ],
+    "external": [
+      "QUESTRADE_HTTP_403_CLOUDFLARE_1010",
+      "REGULATORY_COMMERCIAL_SPECIALIST_REVIEW"
+    ],
+    "human_approval": [
+      "ROBERT_FINAL_ACCEPTANCE_WHERE_REQUIRED",
+      "OPERATIONS_SIGNOFF",
+      "LEGAL_SCOPE_APPROVAL",
+      "RISK_ACCEPTANCE"
+    ]
+  },
+  "safety": {
+    "execution_allowed": false,
+    "live_trading_blocked": true,
+    "broker_execution_armed": false,
+    "advisory_only": true,
+    "money_movement_authorized": false
+  }
+}

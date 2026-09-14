@@ -1,75 +1,85 @@
-# CSS Certification Evidence Consolidation — Validation Result
+# CSS Certification Evidence Consolidation Result — 2026-09-14
 
-Date: 2026-09-14
+## Disposition
 
-## Result
+**PASS — CLOUD-VERIFIABLE EVIDENCE CONSOLIDATED**
 
-**PASS**
+Validated branch: `css-certification-evidence-consolidation`
 
-Workflow: `CSS Certification Evidence Consolidation`
+Validated source commit: `8ad0d37529b0a10677258b1eb788689645095665`
 
-Run ID: `34904227703`
+GitHub Actions run: `34904227703`
 
-Validated commit: `8ad0d37529b0a10677258b1eb788689645095665`
+## Retained validation result
 
-## Focused evidence results
+The dedicated evidence-consolidation workflow completed successfully.
 
-- Risk & Margin evidence suite: **47 passed**
-- Broker & Runtime evidence suite: **41 passed**
-- Security & Dashboard evidence suite: **36 passed**
+- Compile primary Python trees: PASS
+- Risk & margin evidence tests: **47 passed**
+- Broker & runtime evidence tests: **41 passed**
+- Security & dashboard evidence tests: **36 passed**
 - Full regression: **1903 passed**
-
-All workflow stages completed successfully.
+- Failed tests: **0**
 
 ## Certification interpretation
 
-The PASS result closes the current cloud-verifiable evidence gap for the tested
-domains. It does not convert operator evidence, external dependencies, or human
-approval items into completed status.
+The successful run closes the *cloud-verifiable evidence gap* for the tested
+domains. It does not convert evidence that intrinsically requires a real
+operator/runtime, external provider, legal/regulatory specialist, or human
+acceptance into a completed state.
 
-Cloud-verified evidence now covers:
+### Cloud evidence now captured
 
-- risk governor;
-- margin engine and snapshot behavior;
+- risk governor deterministic behavior;
+- margin engine and canonical margin behavior;
 - MarginTradeGate and enforcement integration;
 - broker margin contracts and safe adapter behavior;
-- broker guardrails and registry behavior;
-- credential separation;
+- post-foundation broker guardrails;
+- broker registry behavior;
+- credential-separation controls;
 - QRO replay/portfolio behavior;
-- runtime health, heartbeat, operational state, and supervisor;
-- security/authentication controls;
-- password reset/recovery;
-- dashboard authentication and permissions;
-- mobile governance and kill-switch visibility;
+- runtime health and heartbeat logic;
+- runtime operational-state logic;
+- runtime supervisor behavior;
+- authentication/security controls;
+- password-reset/recovery controls;
+- dashboard authentication;
+- permission matrix;
+- mobile governance and kill-switch behavior;
 - mode reconciliation;
 - margin dashboard integration;
-- integrated full regression.
+- full-system regression.
 
-## Remaining genuine bottlenecks
+### Still operator evidence
 
-### Operator evidence
-
-- COW-001 24-hour sustained operating window;
+- COW-001 24-hour sustained controlled operating window;
 - real runtime startup/shutdown evidence;
-- physical restart/corruption drill evidence;
-- browser/mobile captures where explicitly required;
-- operator sign-on evidence where explicitly required.
+- physical restart/corruption drill capture;
+- browser/mobile screenshots or operator observations where required;
+- operator sign-on evidence.
 
-### External
+### Still externally blocked
 
-- Questrade read-only authorization remains blocked by HTTP 403 / Cloudflare 1010;
-- regulatory/commercial specialist review remains required before commercialization.
+- Questrade live read-only authorization: HTTP 403 / Cloudflare 1010;
+- specialist regulatory/commercial review before commercialization.
 
-### Human approval
+### Still human approval
 
-- Robert final acceptance where a certification register explicitly requires it;
-- formal operations/legal/risk sign-off where applicable.
+- Robert final acceptance where a certification record explicitly requires it;
+- operations sign-off;
+- legal scope approval;
+- formal risk acceptance.
 
 ## Safety
 
-No live execution or money movement authority was added.
+No cloud evidence run authorized or enabled:
 
-- execution_allowed=false
-- live_trading_blocked=true
-- broker_execution_armed=false
-- advisory_only=true
+- live trading;
+- broker execution arming;
+- order submission;
+- client-fund authority;
+- transfer, withdrawal, deposit, or funding;
+- fee collection;
+- credential disclosure.
+
+The CSS fail-closed operating posture remains unchanged.
