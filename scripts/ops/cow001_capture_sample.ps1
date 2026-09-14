@@ -42,6 +42,30 @@ $runtimeProcesses = Get-CimInstance Win32_Process |
     Select-Object ProcessId, ParentProcessId, Name, CommandLine
 $runtimeProcesses | Format-List | Out-File -Encoding UTF8 (Join-Path $sampleDir "runtime_processes.txt")
 
+$resourceRows = @()
+foreach ($proc in $runtimeProcesses) {
+    try {
+        $p = Get-Process -Id $proc.ProcessId -ErrorAction Stop
+        $resourceRows += [PSCustomObject]@{
+            process_id = $p.Id
+            process_name = $p.ProcessName
+            cpu_seconds = $p.CPU
+            working_set_bytes = $p.WorkingSet64
+            private_memory_bytes = $p.PrivateMemorySize64
+            started_at = $p.StartTime.ToUniversalTime().ToString("o")
+        }
+    } catch {}
+}
+$resourceSummary = [ordered]@{
+    recorded_at_utc = $now
+    process_count = $resourceRows.Count
+    total_working_set_bytes = ($resourceRows | Measure-Object -Property working_set_bytes -Sum).Sum
+    total_private_memory_bytes = ($resourceRows | Measure-Object -Property private_memory_bytes -Sum).Sum
+    processes = $resourceRows
+}
+$resourceSummary | ConvertTo-Json -Depth 6 |
+    Set-Content -Encoding UTF8 (Join-Path $sampleDir "resource_usage.json")
+
 try {
     python scripts/css_session_analyzer.py *>&1 |
         Out-File -Encoding UTF8 (Join-Path $sampleDir "session_analyzer.txt")
@@ -71,6 +95,25 @@ $hashRows | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 (Join-Path $sam
 $net = Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue |
     Select-Object LocalAddress, LocalPort, OwningProcess, State
 $net | Format-List | Out-File -Encoding UTF8 (Join-Path $sampleDir "port_8765.txt")
+
+function Capture-ReadOnlyApi([string]$Uri, [string]$Name) {
+    try {
+        $payload = Invoke-RestMethod -Method Get -Uri $Uri -TimeoutSec 5
+        $payload | ConvertTo-Json -Depth 12 |
+            Set-Content -Encoding UTF8 (Join-Path $sampleDir $Name)
+    } catch {
+        @{
+            ok = $false
+            uri = $Uri
+            error = $_.Exception.Message
+            captured_at_utc = $now
+        } | ConvertTo-Json -Depth 4 |
+            Set-Content -Encoding UTF8 (Join-Path $sampleDir ($Name -replace "\.json$", "_error.json"))
+    }
+}
+
+Capture-ReadOnlyApi "http://127.0.0.1:8765/api/v1/runtime-health" "runtime_health.json"
+Capture-ReadOnlyApi "http://127.0.0.1:8765/api/v1/broker-continuity" "broker_continuity.json"
 
 Write-Host "COW001_SAMPLE_CAPTURED=$safeLabel"
 Write-Host "UTC=$now"

@@ -68,6 +68,9 @@ Capture:
 - market-data freshness/source evidence if available;
 - PnL/session analyzer output;
 - hashes of key state files;
+- process CPU and memory footprint;
+- read-only runtime-health projection;
+- read-only broker-continuity projection, including freshness and fail-closed safety flags;
 - any warnings/errors.
 
 ### Every 6 hours
@@ -108,8 +111,10 @@ COW-001 is PASS only if all mandatory criteria hold:
 8. Supervisor telemetry remains coherent.
 9. Any restart is fully explained, bounded, and does not violate safety invariants.
 10. Market-data freshness remains observable and stale states are labeled explicitly.
-11. No credential/token leakage in retained evidence.
-12. Final shutdown is graceful.
+11. Aggregate runtime working-set growth from first to final captured sample is <=15%.
+12. Every captured broker-continuity projection preserves execution_allowed=false, live_trading_blocked=true, broker_execution_armed=false, and advisory_only=true.
+13. No credential/token leakage in retained evidence.
+14. Final shutdown is graceful.
 
 ## Failure criteria
 

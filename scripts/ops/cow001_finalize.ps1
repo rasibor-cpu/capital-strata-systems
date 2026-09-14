@@ -52,7 +52,62 @@ $durationPass = $hours -ge 24.0
 $samplesPass = $sampleDirs.Count -ge 25
 $supervisorPass = -not $criticalSupervisorState
 
-$automaticDisposition = if ($durationPass -and $samplesPass -and $supervisorPass) {
+$resourceSamples = @()
+foreach ($sample in $sampleDirs) {
+    $resourcePath = Join-Path $sample.FullName "resource_usage.json"
+    if (Test-Path $resourcePath) {
+        try {
+            $resource = Get-Content $resourcePath -Raw | ConvertFrom-Json
+            $resourceSamples += [PSCustomObject]@{
+                label = $sample.Name
+                total_working_set_bytes = [double]$resource.total_working_set_bytes
+                total_private_memory_bytes = [double]$resource.total_private_memory_bytes
+            }
+        } catch {}
+    }
+}
+
+$memoryGatePass = $false
+$memoryGrowthPct = $null
+if ($resourceSamples.Count -ge 2) {
+    $firstMemory = [double]$resourceSamples[0].total_working_set_bytes
+    $lastMemory = [double]$resourceSamples[-1].total_working_set_bytes
+    if ($firstMemory -gt 0) {
+        $memoryGrowthPct = (($lastMemory - $firstMemory) / $firstMemory) * 100.0
+        $memoryGatePass = $memoryGrowthPct -le 15.0
+    }
+}
+
+$continuitySamples = @()
+foreach ($sample in $sampleDirs) {
+    $continuityPath = Join-Path $sample.FullName "broker_continuity.json"
+    if (Test-Path $continuityPath) {
+        try {
+            $continuity = Get-Content $continuityPath -Raw | ConvertFrom-Json
+            $continuitySamples += [PSCustomObject]@{
+                label = $sample.Name
+                snapshot_status = $continuity.snapshot_status
+                freshness = $continuity.freshness
+                execution_allowed = $continuity.execution_allowed
+                live_trading_blocked = $continuity.live_trading_blocked
+                broker_execution_armed = $continuity.broker_execution_armed
+                advisory_only = $continuity.advisory_only
+            }
+        } catch {}
+    }
+}
+
+$continuitySafetyPass = $continuitySamples.Count -gt 0
+foreach ($row in $continuitySamples) {
+    if ($row.execution_allowed -ne $false -or
+        $row.live_trading_blocked -ne $true -or
+        $row.broker_execution_armed -ne $false -or
+        $row.advisory_only -ne $true) {
+        $continuitySafetyPass = $false
+    }
+}
+
+$automaticDisposition = if ($durationPass -and $samplesPass -and $supervisorPass -and $memoryGatePass -and $continuitySafetyPass) {
     "AUTOMATED_GATES_PASS_OPERATOR_REVIEW_REQUIRED"
 } else {
     "AUTOMATED_GATES_INCOMPLETE_OR_FAIL"
@@ -67,6 +122,10 @@ $summary = [ordered]@{
     duration_gate_pass = $durationPass
     sample_count_gate_pass = $samplesPass
     supervisor_gate_pass = $supervisorPass
+    memory_gate_pass = $memoryGatePass
+    memory_growth_pct = if ($null -eq $memoryGrowthPct) { $null } else { [Math]::Round($memoryGrowthPct, 4) }
+    continuity_safety_gate_pass = $continuitySafetyPass
+    continuity_sample_count = $continuitySamples.Count
     automated_disposition = $automaticDisposition
     operator_review_required = $true
     live_execution_authorized = $false
@@ -79,6 +138,12 @@ $summary | ConvertTo-Json -Depth 6 |
 $supervisorStates | ConvertTo-Json -Depth 6 |
     Set-Content -Encoding UTF8 (Join-Path $dir "COW001_SUPERVISOR_TIMELINE.json")
 
+$resourceSamples | ConvertTo-Json -Depth 6 |
+    Set-Content -Encoding UTF8 (Join-Path $dir "COW001_RESOURCE_TIMELINE.json")
+
+$continuitySamples | ConvertTo-Json -Depth 6 |
+    Set-Content -Encoding UTF8 (Join-Path $dir "COW001_CONTINUITY_TIMELINE.json")
+
 python scripts/css_session_analyzer.py *>&1 |
     Out-File -Encoding UTF8 (Join-Path $dir "COW001_FINAL_SESSION_ANALYZER.txt")
 
@@ -88,5 +153,7 @@ git status --short |
 Write-Host "COW001_FINALIZED=True"
 Write-Host "ELAPSED_HOURS=$([Math]::Round($hours, 4))"
 Write-Host "SAMPLE_COUNT=$($sampleDirs.Count)"
+Write-Host "MEMORY_GATE_PASS=$memoryGatePass"
+Write-Host "CONTINUITY_SAFETY_GATE_PASS=$continuitySafetyPass"
 Write-Host "AUTOMATED_DISPOSITION=$automaticDisposition"
 Write-Host "OPERATOR_REVIEW_REQUIRED=True"
