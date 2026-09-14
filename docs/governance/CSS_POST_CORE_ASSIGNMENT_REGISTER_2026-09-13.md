@@ -6,6 +6,9 @@ Purpose: keep all newly assigned, required-to-complete, and nice-to-have CSS wor
 
 | Assignment | Class | Status |
 |---|---|---|
+| Phase 41 Broker Live Dry-Run Certification Foundation | Required | COMPLETE |
+| Phase 42 Broker Adapter Conformance Foundation | Required | COMPLETE |
+| Phase 43 Live Credential Readiness Attestation Foundation | Required | COMPLETE |
 | Phase 44 Operator Approval Workflow | Required | COMPLETE |
 | Phase 45 Restricted Live-Review Guardrail | Required | COMPLETE |
 | Phase 46 Broker Confidence Scoring | Required | COMPLETE |
@@ -19,13 +22,17 @@ Purpose: keep all newly assigned, required-to-complete, and nice-to-have CSS wor
 | Phase 54 Release Artifact Integrity | Required | COMPLETE |
 | Phase 55 Companion App Wireframe Planning Boundary | Nice-to-have / queued product preparation | COMPLETE FOR PLANNING |
 
-Validation: 22 focused tests passed and 1896 full-regression tests passed.
+Validation:
+- Phase 41-43 focused guardrails: 7 passed;
+- Institutional hardening Phases 44-55: 22 passed;
+- Current canonical integrated full regression: 1903 passed;
+- Governance validation: PASS.
 
 ## B. Prepared and waiting only for operator runtime
 
 | Assignment | Class | Status |
 |---|---|---|
-| CSS-COW-001 Controlled Operating Window | Required operational evidence | READY_FOR_OPERATOR_RUN |
+| CSS-COW-001 Controlled Operating Window | Required operational evidence | READY_FOR_OPERATOR_RUN — evidence tooling hardened and merged |
 | Runtime recovery/corruption drill evidence | Required evidence | READY_AFTER_COW_OR_OPERATOR_WINDOW |
 | Browser/mobile evidence capture where required | Required evidence | READY_FOR_OPERATOR_CAPTURE |
 

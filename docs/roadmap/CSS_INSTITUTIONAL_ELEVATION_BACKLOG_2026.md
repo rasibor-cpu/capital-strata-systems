@@ -63,8 +63,8 @@ Implemented:
 - `dashboard/runtime/broker_adapter_conformance.py`
 - `/api/v1/broker-adapter-conformance`
 - canonical paper adapter conformance report
-- capability registry coverage for OANDA, Alpaca, IBKR, and Binance paper adapters
-- denied-envelope refusal checks
+- capability registry coverage for current registry brokers: Coinbase, OANDA, and Alpaca
+- unsupported or unavailable adapters fail closed
 - focused conformance tests
 
 Remaining:
@@ -310,3 +310,25 @@ foundation:
 - runtime recovery/mobile evidence where required;
 - Questrade external authorization blocker;
 - regulatory/commercial specialist review.
+
+
+### 2026-09-13 Phase 41-43 Repository Reconciliation
+
+The certified integration tree was audited against the backlog. The Phase 41-43
+module/API claims were missing from that tree and have now been repaired and
+merged.
+
+Validated current posture:
+- Phase 41 broker live dry-run certification foundation: COMPLETE
+- Phase 42 broker adapter conformance foundation: COMPLETE
+- Phase 43 live credential readiness attestation foundation: COMPLETE
+- focused Phase 41-43 tests: 7 passed
+- current integrated full regression: 1903 passed
+- current governance validation: PASS
+
+Scope clarification:
+- Phase 42 currently evaluates the brokers present in the active registry:
+  Coinbase, OANDA, and Alpaca.
+- IBKR/Binance conformance is not claimed by this repair unless/until those
+  adapters are present in the active registry and pass the same contract.
+- No Phase 41-43 PASS authorizes live trading.
