@@ -23,6 +23,12 @@ from dashboard.runtime.runtime_operational_state import (
     build_runtime_operational_state,
 )
 from dashboard.runtime.runtime_health_provider import read_runtime_health_snapshot
+from dashboard.runtime.broker_live_dry_run_certification import build_from_dashboard_state
+from dashboard.runtime.broker_adapter_conformance import build_broker_adapter_conformance_payload
+from dashboard.runtime.live_credential_attestation import (
+    attest_live_credentials,
+    build_live_credential_attestation_payload,
+)
 
 
 DashboardStateProvider = Callable[[], DashboardState]
@@ -136,6 +142,32 @@ def get_runtime_alerts_payload(
     }
 
 
+def get_broker_live_dry_run_certification_payload(
+    state_provider: DashboardStateProvider | None = None,
+) -> dict[str, Any]:
+    state = _state_from_provider(state_provider)
+    payload = state.to_dict()
+    broker = payload.get("broker_summary", {})
+    selected_broker = str(
+        broker.get("selected_broker")
+        or broker.get("broker_name")
+        or "NONE"
+    ).strip().lower()
+    credential_ready = False
+    if selected_broker not in {"", "none", "unknown"}:
+        try:
+            credential_ready = (
+                attest_live_credentials(selected_broker).get("status") == "READY"
+            )
+        except Exception:
+            credential_ready = False
+    return build_from_dashboard_state(
+        payload,
+        credential_ready=credential_ready,
+        dry_run_probe=None,
+    )
+
+
 def create_dashboard_state_router(
     state_provider: DashboardStateProvider | None = None,
 ) -> APIRouter:
@@ -221,6 +253,18 @@ def create_dashboard_state_router(
             }
         return payload
 
+    @router.get("/api/v1/broker-live-dry-run-certification")
+    def read_broker_live_dry_run_certification() -> dict[str, Any]:
+        return get_broker_live_dry_run_certification_payload(state_provider)
+
+    @router.get("/api/v1/broker-adapter-conformance")
+    def read_broker_adapter_conformance() -> dict[str, Any]:
+        return build_broker_adapter_conformance_payload()
+
+    @router.get("/api/v1/live-credential-attestation")
+    def read_live_credential_attestation() -> dict[str, Any]:
+        return build_live_credential_attestation_payload()
+
     @router.get("/api/v1/runtime-health")
     def read_runtime_health() -> dict[str, Any]:
         return get_runtime_health_payload(state_provider)
@@ -261,6 +305,7 @@ __all__ = [
     "create_dashboard_state_router",
     "default_dashboard_state_provider",
     "get_broker_reconciliation_payload",
+    "get_broker_live_dry_run_certification_payload",
     "get_dashboard_state_payload",
     "get_frontend_payload",
     "get_continuity_payload",

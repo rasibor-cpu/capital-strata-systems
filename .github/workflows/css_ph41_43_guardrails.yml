@@ -1,0 +1,42 @@
+name: CSS Phase 41-43 Guardrails
+
+on:
+  push:
+    branches:
+      - css-ph41-43-foundation-repair
+    paths:
+      - "dashboard/runtime/broker_live_dry_run_certification.py"
+      - "dashboard/runtime/broker_adapter_conformance.py"
+      - "dashboard/runtime/live_credential_attestation.py"
+      - "dashboard/runtime/api_bridge.py"
+      - "tests/dashboard/test_postfoundation_broker_guardrails.py"
+      - ".github/workflows/css_ph41_43_guardrails.yml"
+  workflow_dispatch:
+
+jobs:
+  guardrails:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Set Up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest
+      - name: Compile
+        run: |
+          python -m compileall -q dashboard/runtime tests/dashboard/test_postfoundation_broker_guardrails.py
+      - name: Focused Tests
+        run: |
+          python -m pytest -q tests/dashboard/test_postfoundation_broker_guardrails.py
+      - name: Full Regression
+        run: |
+          python -m pytest -q
