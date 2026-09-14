@@ -142,6 +142,36 @@ def get_runtime_alerts_payload(
     }
 
 
+def get_caie_shadow_payload(
+    state_provider: DashboardStateProvider | None = None,
+) -> dict[str, Any]:
+    state = _state_from_provider(state_provider)
+    payload = state.last_scan_results.get("caie_shadow")
+    if not isinstance(payload, dict):
+        return {
+            "schema_version": "css.caie.shadow-runtime.v1",
+            "status": "UNAVAILABLE",
+            "reason": "NO_CAIE_SHADOW_DATA",
+            "trade_eligible": False,
+            "allocations": [],
+            "deployed_capital": "0",
+            "remaining_cash": "0",
+            "execution_allowed": False,
+            "broker_execution_armed": False,
+            "money_movement_allowed": False,
+            "live_trading_authorized": False,
+            "mode": "SHADOW_ONLY",
+        }
+
+    safe = dict(payload)
+    safe["execution_allowed"] = False
+    safe["broker_execution_armed"] = False
+    safe["money_movement_allowed"] = False
+    safe["live_trading_authorized"] = False
+    safe["mode"] = "SHADOW_ONLY"
+    return safe
+
+
 def get_broker_live_dry_run_certification_payload(
     state_provider: DashboardStateProvider | None = None,
 ) -> dict[str, Any]:
@@ -265,6 +295,10 @@ def create_dashboard_state_router(
     def read_live_credential_attestation() -> dict[str, Any]:
         return build_live_credential_attestation_payload()
 
+    @router.get("/api/v1/caie-shadow")
+    def read_caie_shadow() -> dict[str, Any]:
+        return get_caie_shadow_payload(state_provider)
+
     @router.get("/api/v1/runtime-health")
     def read_runtime_health() -> dict[str, Any]:
         return get_runtime_health_payload(state_provider)
@@ -309,6 +343,7 @@ __all__ = [
     "get_dashboard_state_payload",
     "get_frontend_payload",
     "get_continuity_payload",
+    "get_caie_shadow_payload",
     "get_mission_control_payload",
     "get_runtime_alerts_payload",
     "get_runtime_health_payload",
