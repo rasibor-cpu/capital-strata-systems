@@ -50,3 +50,23 @@ def build_retention_summary(policy: RetentionPolicy | None = None) -> dict[str, 
         "release_summary_days": active.release_summary_days,
         "max_archive_bytes": active.max_archive_bytes,
     }
+
+
+def build_archive_plan(
+    *,
+    current_archive_bytes: int,
+    export_name: str,
+    policy: RetentionPolicy | None = None,
+) -> dict[str, Any]:
+    if not export_name.strip():
+        raise ValueError("export name is required")
+    active = policy or RetentionPolicy()
+    rotate = archive_rotation_required(current_archive_bytes, active)
+    return {
+        "export_name": export_name,
+        "current_archive_bytes": current_archive_bytes,
+        "max_archive_bytes": active.max_archive_bytes,
+        "rotation_required": rotate,
+        "retention": build_retention_summary(active),
+        "export_must_be_redacted": True,
+    }

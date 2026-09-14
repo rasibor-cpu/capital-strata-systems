@@ -45,3 +45,27 @@ def write_release_manifest(
     temp.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
     temp.replace(target)
     return payload
+
+
+def build_pcnrass_release_summary(
+    *,
+    manifest: dict,
+    compile_passed: bool,
+    focused_tests_passed: bool,
+    full_regression_passed: bool,
+    governance_passed: bool,
+) -> dict:
+    checks = {
+        "compile": bool(compile_passed),
+        "focused_tests": bool(focused_tests_passed),
+        "full_regression": bool(full_regression_passed),
+        "governance": bool(governance_passed),
+        "manifest_present": bool(manifest.get("manifest_sha256")),
+    }
+    return {
+        "schema_version": "css.pcnrass_release_summary.v1",
+        "status": "PASS" if all(checks.values()) else "BLOCKED",
+        "checks": checks,
+        "manifest_sha256": manifest.get("manifest_sha256"),
+        "execution_authority_changed": False,
+    }

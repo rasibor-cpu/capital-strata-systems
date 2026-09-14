@@ -7,13 +7,13 @@ from backend.institutional_hardening.broker_confidence import BrokerConfidenceIn
 from backend.institutional_hardening.config_governance import ConfigChangeRecord
 from backend.institutional_hardening.incident_drill import run_incident_drill
 from backend.institutional_hardening.live_mode_gate import LiveModeGuardrailInput, evaluate_live_mode_guardrail
-from backend.institutional_hardening.mobile_certification import certify_mobile_flows, REQUIRED_MOBILE_FLOWS
+from backend.institutional_hardening.mobile_certification import certify_mobile_flows, certify_mobile_route_surface, REQUIRED_MOBILE_FLOWS
 from backend.institutional_hardening.operator_approval import OperatorApproval, validate_operator_approval, append_operator_approval_audit
 from backend.institutional_hardening.order_intent_simulator import OrderIntent, simulate_order_intent
 from backend.institutional_hardening.performance_budget import assess_performance_budget
-from backend.institutional_hardening.recovery_drill import evaluate_recovery_drill
-from backend.institutional_hardening.release_integrity import build_release_manifest, write_release_manifest
-from backend.institutional_hardening.retention_policy import redact_export, archive_rotation_required
+from backend.institutional_hardening.recovery_drill import evaluate_recovery_drill, build_recovery_report
+from backend.institutional_hardening.release_integrity import build_release_manifest, write_release_manifest, build_pcnrass_release_summary
+from backend.institutional_hardening.retention_policy import redact_export, archive_rotation_required, build_archive_plan
 
 NOW = datetime(2026, 9, 14, tzinfo=timezone.utc)
 
@@ -127,3 +127,50 @@ def test_release_manifest_writer_is_atomic_shape(tmp_path):
     payload = write_release_manifest(out, [src], validation_commands=["python -m pytest -q"])
     assert out.exists()
     assert payload["manifest_sha256"] in out.read_text(encoding="utf-8")
+
+
+def test_archive_plan_requires_redacted_export_and_rotation():
+    plan = build_archive_plan(current_archive_bytes=2_000_000_000, export_name="audit-archive")
+    assert plan["rotation_required"] is True
+    assert plan["export_must_be_redacted"] is True
+
+
+def test_recovery_report_is_pcnrass_reviewable_and_fail_closed():
+    report = build_recovery_report(
+        "corrupt-artifact",
+        restart_ok=True,
+        session_restored=True,
+        artifact_integrity_ok=False,
+        stale_state_explicit=True,
+    )
+    assert report["status"] == "FAIL_CLOSED"
+    assert report["pcnrass_review_required"] is True
+
+
+def test_mobile_route_surface_requires_core_readonly_paths():
+    routes = {"/login", "/dashboard", "/broker", "/audit", "/other"}
+    result = certify_mobile_route_surface(routes, frontend_broker_calls_detected=False)
+    assert result["status"] == "PASS"
+    assert result["execution_allowed"] is False
+
+
+def test_pcnrass_release_summary_blocks_any_missing_gate(tmp_path):
+    src = tmp_path / "x.txt"
+    src.write_text("x", encoding="utf-8")
+    manifest = build_release_manifest([src], validation_commands=["pytest"])
+    good = build_pcnrass_release_summary(
+        manifest=manifest,
+        compile_passed=True,
+        focused_tests_passed=True,
+        full_regression_passed=True,
+        governance_passed=True,
+    )
+    assert good["status"] == "PASS"
+    blocked = build_pcnrass_release_summary(
+        manifest=manifest,
+        compile_passed=True,
+        focused_tests_passed=True,
+        full_regression_passed=False,
+        governance_passed=True,
+    )
+    assert blocked["status"] == "BLOCKED"

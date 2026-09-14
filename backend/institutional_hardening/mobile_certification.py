@@ -20,3 +20,22 @@ def certify_mobile_flows(results: dict[str, bool]) -> dict:
         "execution_allowed": False,
         "frontend_broker_calls_allowed": False,
     }
+
+
+REQUIRED_ROUTE_HINTS = (
+    "/login",
+    "/dashboard",
+    "/broker",
+    "/audit",
+)
+
+
+def certify_mobile_route_surface(route_paths: set[str], *, frontend_broker_calls_detected: bool) -> dict:
+    route_checks = {path: path in route_paths for path in REQUIRED_ROUTE_HINTS}
+    passed = all(route_checks.values()) and not frontend_broker_calls_detected
+    return {
+        "status": "PASS" if passed else "FAIL",
+        "route_checks": route_checks,
+        "frontend_broker_calls_detected": bool(frontend_broker_calls_detected),
+        "execution_allowed": False,
+    }
