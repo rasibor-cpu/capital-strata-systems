@@ -16,6 +16,9 @@ from backend.commercialization.withdrawable_funds import (
     CommercialWithdrawableFundsSummary,
     build_withdrawable_funds_summary,
 )
+from backend.commercialization.customer_profitability import (
+    CustomerProfitabilitySummary,
+)
 
 
 def _decimal_or_none(value: Decimal | None) -> str | None:
@@ -61,6 +64,36 @@ def build_client_earnings_summary_payload(
         "fx_language": summary.fx_language,
         "withdrawable_funds_note": summary.withdrawable_funds_note,
         "explanation": summary.explain(),
+    }
+
+
+def build_customer_profitability_payload(
+    summary: CustomerProfitabilitySummary,
+) -> dict[str, Any]:
+    """Read-only combined profitability projection for dashboard presentation."""
+
+    return {
+        "account_reference": summary.account_reference,
+        "period_start": summary.period_start,
+        "period_end": summary.period_end,
+        "currency": summary.currency,
+        "css_realized_profit": str(summary.css_realized_profit),
+        "css_recovered_loss": str(summary.css_recovered_loss),
+        "css_new_economic_gain": str(summary.css_new_economic_gain),
+        "css_performance_fee": str(summary.css_performance_fee),
+        "independent_realized_profit": str(summary.independent_realized_profit),
+        "independent_platform_charge": str(summary.independent_platform_charge),
+        "gross_customer_profit": str(summary.gross_customer_profit),
+        "total_css_charges": str(summary.total_css_charges),
+        "net_customer_profit_after_css_charges": str(
+            summary.net_customer_profit_after_css_charges
+        ),
+        "independent_trade_count": summary.independent_trade_count,
+        "evidence_refs": list(summary.evidence_refs),
+        "explanation": summary.explain(),
+        "money_movement_allowed": False,
+        "invoice_creation_allowed": False,
+        "execution_authority": False,
     }
 
 
