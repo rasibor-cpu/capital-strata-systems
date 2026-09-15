@@ -140,9 +140,8 @@ def test_exact_product_under_low_precision():
 
 
 @pytest.mark.parametrize("amount,expected,basis", [
-    ("0", "29.99", FinalFeeBasis.PLATFORM_ACCESS),
-    ("10", "29.99", FinalFeeBasis.PLATFORM_ACCESS),
-    ("29.98", "29.99", FinalFeeBasis.PLATFORM_ACCESS),
+    ("10", "10", FinalFeeBasis.PERFORMANCE_COMPENSATION),
+    ("29.98", "29.98", FinalFeeBasis.PERFORMANCE_COMPENSATION),
     ("29.99", "29.99", FinalFeeBasis.PERFORMANCE_COMPENSATION),
     ("30", "30", FinalFeeBasis.PERFORMANCE_COMPENSATION),
     ("300", "300", FinalFeeBasis.PERFORMANCE_COMPENSATION),
@@ -160,7 +159,7 @@ def test_maximum_never_additive(amount, expected, basis):
 
 
 @pytest.mark.parametrize("currency,amount,rate,expected", [
-    ("CAD", "10", "0.75", "29.99"), ("CAD", "100", "0.75", "75"),
+    ("CAD", "10", "0.75", "7.50"), ("CAD", "100", "0.75", "75"),
     ("EUR", "100", "1.1", "110"), ("NGN", "100000", "0.00065", "65"),
 ])
 def test_fx_normalized_selection(currency, amount, rate, expected):
@@ -172,10 +171,9 @@ def test_fx_normalized_selection(currency, amount, rate, expected):
     assert result.billing_currency == "USD"
 
 
-def test_zero_zero_tie():
-    result = select("0", access_terms=replace(access(), access_fee_amount=Decimal("0")))
-    assert result.selected_fee_amount == 0
-    assert result.selected_fee_basis is FinalFeeBasis.PERFORMANCE_COMPENSATION
+def test_zero_qualifying_gain_cannot_select_css_fee():
+    with pytest.raises(ValueError, match="positive qualifying economic gain"):
+        select("0", access_terms=replace(access(), access_fee_amount=Decimal("0")))
 
 
 def test_missing_fx_rejected():
@@ -210,7 +208,7 @@ def test_access_must_cover_entire_period(change):
 
 
 def test_open_ended_access_covers_period():
-    assert select(access_terms=replace(access(), effective_to=None)).selected_fee_amount == Decimal("29.99")
+    assert select(access_terms=replace(access(), effective_to=None)).selected_fee_amount == Decimal("10")
 
 
 @pytest.mark.parametrize("which", ["access", "performance"])
@@ -236,7 +234,7 @@ def test_noneligible_assessment_rejected(status):
 
 @pytest.mark.parametrize("field,value", [("billing_currency", "CAD"),
     ("selected_fee_amount", Decimal("39.99")),
-    ("selected_fee_basis", FinalFeeBasis.PERFORMANCE_COMPENSATION),
+    ("selected_fee_basis", FinalFeeBasis.PLATFORM_ACCESS),
     ("performance_fee_billing_currency_amount", Decimal("11")),
     ("selected_at", "2026-10-01T12:00:00"), ("selected_at", "2026-10-01T12:00:00+01:00"),
     ("period_start", "2026-09-01"), ("period_end", START),
@@ -273,7 +271,8 @@ def test_uses_compensation_after_loss_recovery_and_rate():
                     CrystallizationStatus.ELIGIBLE, REFS)
     result = select(performance=period)
     assert result.performance_fee_source_amount == Decimal("10")
-    assert result.selected_fee_amount == Decimal("29.99")
+    assert result.selected_fee_amount == Decimal("10")
+    assert result.selected_fee_basis is FinalFeeBasis.PERFORMANCE_COMPENSATION
 
 
 @pytest.fixture

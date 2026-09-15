@@ -145,3 +145,10 @@ def test_automatic_trial_conversion_never_grants_trading_or_collection_authority
     assert assessment.payment_execution_allowed is False
     assert assessment.money_movement_allowed is False
     assert assessment.execution_authority is False
+
+
+def test_platform_access_reference_is_not_rendered_as_selected_css_charge():
+    markup = _billing_page()
+    assert "Platform access reference" in markup
+    assert "PLATFORM MINIMUM APPLIED" not in markup
+    assert "higher of your platform minimum or your performance fee" not in markup
