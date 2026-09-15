@@ -38,6 +38,8 @@ def _prov(attribution_class, mandate):
 def test_customer_directed_trade_uses_separate_platform_economics():
     record = build_independent_trade_economics(
         _prov(AttributionClass.CUSTOMER_DIRECTED, MandateCompliance.OVERRIDDEN),
+        account_reference="account:A",
+        calculation_timestamp="2026-09-15T00:00:00Z",
         realized_pnl=Decimal("100"),
         currency="USD",
         platform_charge_rate=Decimal("0.01"),
@@ -54,6 +56,8 @@ def test_customer_directed_trade_uses_separate_platform_economics():
 def test_css_modified_trade_is_independent_not_performance_attributable():
     record = build_independent_trade_economics(
         _prov(AttributionClass.CSS_MODIFIED, MandateCompliance.MODIFIED),
+        account_reference="account:A",
+        calculation_timestamp="2026-09-15T00:00:00Z",
         realized_pnl=Decimal("80"),
         currency="CAD",
         platform_charge_rate=Decimal("0.005"),
@@ -66,6 +70,8 @@ def test_css_modified_trade_is_independent_not_performance_attributable():
 def test_independent_trade_loss_never_creates_platform_charge():
     record = build_independent_trade_economics(
         _prov(AttributionClass.CUSTOMER_DIRECTED, MandateCompliance.OVERRIDDEN),
+        account_reference="account:A",
+        calculation_timestamp="2026-09-15T00:00:00Z",
         realized_pnl=Decimal("-250"),
         currency="USD",
         platform_charge_rate=Decimal("0.01"),
@@ -81,7 +87,9 @@ def test_css_accepted_trade_cannot_enter_independent_path():
     ):
         build_independent_trade_economics(
             _prov(AttributionClass.CSS_ADVISED_ACCEPTED, MandateCompliance.COMPLIANT),
-            realized_pnl=Decimal("100"),
+            account_reference="account:A",
+        calculation_timestamp="2026-09-15T00:00:00Z",
+        realized_pnl=Decimal("100"),
             currency="USD",
             platform_charge_rate=Decimal("0.01"),
             evidence_refs=REFS,
@@ -95,7 +103,9 @@ def test_external_trade_cannot_create_css_economics():
     ):
         build_independent_trade_economics(
             _prov(AttributionClass.EXTERNAL, MandateCompliance.OUTSIDE_CSS),
-            realized_pnl=Decimal("100"),
+            account_reference="account:A",
+        calculation_timestamp="2026-09-15T00:00:00Z",
+        realized_pnl=Decimal("100"),
             currency="USD",
             platform_charge_rate=Decimal("0.01"),
             evidence_refs=REFS,
@@ -105,6 +115,8 @@ def test_external_trade_cannot_create_css_economics():
 def test_shadow_record_has_no_money_or_execution_authority():
     record = build_independent_trade_economics(
         _prov(AttributionClass.CUSTOMER_DIRECTED, MandateCompliance.OVERRIDDEN),
+        account_reference="account:A",
+        calculation_timestamp="2026-09-15T00:00:00Z",
         realized_pnl=Decimal("100"),
         currency="USD",
         platform_charge_rate=Decimal("0.01"),
