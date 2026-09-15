@@ -9,7 +9,7 @@ declared commercially complete while any BLOCKER remains open.
 
 Status: OPEN — RELEASE BLOCKER
 
-Technical foundation implemented on `css-costing-improvements-2`: versioned agreement snapshot, immutable trial enrollment, exact trial expiry, immutable cancellation evidence, fail-closed persisted conversion assessment, and no payment/money-movement authority. Final contract drafting, jurisdiction-specific legal review, customer UX acceptance flow, and production certification remain outstanding.
+Technical foundation is implemented and regression-validated: versioned agreement snapshot, immutable trial enrollment, system-derived exact trial expiry, immutable cancellation evidence, fail-closed persisted conversion assessment, mandatory affirmative acceptance UX, and a counsel-review customer-agreement draft. Jurisdiction-specific counsel approval remains outstanding and must be evidenced per agreement version before production charging.
 
 Before any production charging is enabled, CSS must have a jurisdictionally
 reviewed customer agreement that clearly and prominently states:
@@ -69,7 +69,7 @@ This disclosure must not be hidden solely in linked terms or fine print.
 
 ## BLOCKER 2 — Commercial Accounting / Costing Integrity
 
-Status: IMPLEMENTED IN BRANCH — VALIDATION / CERTIFICATION PENDING
+Status: IMPLEMENTED AND FULL-REGRESSION VALIDATED — PRODUCTION CERTIFICATION PENDING
 
 - CSS-attributable performance fees use qualifying new economic gain only.
 - Prior CSS-attributable losses must be recovered before fresh gain is
@@ -101,15 +101,13 @@ Customer surfaces must separately show:
 
 ## BLOCKER 4 — Production Charging / Money-Movement Gate
 
-Status: OPEN
+Status: TECHNICAL GATE IMPLEMENTED — APPROVAL EVIDENCE / PRODUCTION CERTIFICATION PENDING
 
-Current commercialization work remains documentary/shadow/read-only.
+A conjunctive fail-closed production charging gate is implemented. It requires canonical evidence of customer acceptance and paid-service eligibility, jurisdiction-specific legal approval for the exact agreement version, production commercialization certification, reconciliation verification, security/release-blocker clearance, charging-control verification, and separately evidenced payment-collection authority.
 
-No production release may enable fee debit, broker withdrawal, automatic
-payment execution, settlement, receivable collection, or other customer-funds
-movement until the legal-contract blocker, regulatory review, charging
-authorization controls, reconciliation, and production certification are all
-complete.
+Missing, pending, rejected, expired, stale, or scope-mismatched evidence blocks charging. The readiness API is GET/read-only and does not initiate payment.
+
+No production release may enable fee debit, broker withdrawal, automatic payment execution, settlement, receivable collection, or other customer-funds movement until the remaining external approvals and production certification are complete.
 
 ## Release rule
 

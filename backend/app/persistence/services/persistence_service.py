@@ -82,6 +82,7 @@ from backend.app.persistence.repositories.fx_conversion_repository import FxConv
 from backend.app.persistence.repositories.final_fee_selection_repository import FinalFeeSelectionRepository
 from backend.app.persistence.repositories.trial_contract_repository import TrialContractRepository
 from backend.app.persistence.repositories.independent_trade_economics_repository import IndependentTradeEconomicsRepository
+from backend.app.persistence.repositories.production_charging_approval_repository import ProductionChargingApprovalRepository
 from backend.app.persistence.migrations.runner import run_migrations
 
 
@@ -118,6 +119,7 @@ class PersistenceService:
         self.final_fee_selections = FinalFeeSelectionRepository()
         self.trial_contracts = TrialContractRepository()
         self.independent_trade_economics = IndependentTradeEconomicsRepository()
+        self.production_charging_approvals = ProductionChargingApprovalRepository()
         self.shadow_compensation_entitlements = (
             ShadowCompensationEntitlementRepository()
         )
@@ -172,6 +174,7 @@ class PersistenceService:
                 "final_fee_selections": True,
                 "trial_contracts": True,
                 "independent_trade_economics": True,
+                "production_charging_approvals": True,
                 "shadow_compensation_entitlements": True,
                 "performance_compensation_lifecycle_policies": True,
                 "crystallization_assessments": True,
