@@ -39,6 +39,8 @@ def test_customer_directed_economics_never_becomes_performance_fee_eligible():
     )
     record = build_independent_trade_economics(
         provenance,
+        account_reference="account:A",
+        calculation_timestamp="2026-09-15T00:00:00Z",
         realized_pnl=Decimal("100"),
         currency="USD",
         platform_charge_rate=Decimal("0.01"),
