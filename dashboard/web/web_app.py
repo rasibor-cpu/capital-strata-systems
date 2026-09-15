@@ -17,6 +17,7 @@ from dashboard.runtime.client_earnings_router import create_client_earnings_rout
 from dashboard.runtime.trial_contract_router import create_trial_contract_router
 from dashboard.runtime.production_charging_router import create_production_charging_router
 from dashboard.runtime.commercialization_release_router import create_commercialization_release_router
+from dashboard.runtime.commercialization_operations_router import create_commercialization_operations_router
 from dashboard.runtime.dashboard_state import DashboardState
 from dashboard.runtime.runtime_smoke_test import build_smoke_payloads
 from dashboard.runtime.ws_bridge import create_ws_router
@@ -47,6 +48,7 @@ def create_app(
     app.include_router(create_trial_contract_router())
     app.include_router(create_production_charging_router())
     app.include_router(create_commercialization_release_router())
+    app.include_router(create_commercialization_operations_router())
 
     @app.get("/", include_in_schema=False)
     async def index() -> RedirectResponse:
@@ -87,6 +89,10 @@ def create_app(
     @app.get("/trial-contract", response_class=HTMLResponse)
     async def trial_contract_view() -> HTMLResponse:
         return HTMLResponse(_trial_contract_page())
+
+    @app.get("/commercialization-operations", response_class=HTMLResponse)
+    async def commercialization_operations_view() -> HTMLResponse:
+        return HTMLResponse(_commercialization_operations_page())
 
     @app.get("/api/v1/margin-snapshot")
     async def margin_api() -> dict[str, Any]:
@@ -157,6 +163,7 @@ def _app_nav(active: str) -> str:
         ("margin", "/margin", "Margin"),
         ("billing", "/billing", "Billing"),
         ("trial_contract", "/trial-contract", "Trial & Contract"),
+        ("commercialization_operations", "/commercialization-operations", "Launch Ops"),
     ]
 
     return "\n".join(
@@ -2235,6 +2242,156 @@ document.getElementById("trial-load-agreement").addEventListener("click", loadTr
 document.getElementById("trial-enroll").addEventListener("click", enrollTrial);
 document.getElementById("trial-cancel").addEventListener("click", cancelTrial);
 document.getElementById("trial-status").addEventListener("click", checkTrialStatus);
+"""
+
+def _commercialization_operations_page() -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111820">
+  <title>CSS Commercialization Operations</title>
+  <style>{_css()}</style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">CSS</div>
+        <div>
+          <p class="eyebrow">Capital Strata Systems</p>
+          <h1>Commercialization Operations</h1>
+        </div>
+      </div>
+      <section class="status-strip">
+        <span>Read-only launch control</span>
+        <span>No payment execution</span>
+        <span>No trading authority</span>
+      </section>
+    </header>
+    {_app_nav("commercialization_operations")}
+
+    <section class="control-row">
+      <label>Customer <input id="ops-customer-id" value="CUST-1"></label>
+      <label>Account <input id="ops-account-reference" value="account:A"></label>
+      <label>Agreement <input id="ops-agreement-id" value="AGR-1"></label>
+      <label>Version <input id="ops-agreement-version" value="v1"></label>
+      <label>Jurisdiction <input id="ops-jurisdiction" value="CA-ON"></label>
+      <label>UAT Run <input id="ops-uat-run" value="UAT-1"></label>
+      <label>Dossier <input id="ops-dossier-id" value="DOSSIER-1"></label>
+      <button type="button" id="ops-refresh">Refresh Status</button>
+    </section>
+
+    <section class="metric-band">
+      <article><strong>Commercial Ready</strong><span id="ops-ready">NO</span></article>
+      <article><strong>UAT Complete</strong><span id="ops-uat-complete">NO</span></article>
+      <article><strong>Dossier Complete</strong><span id="ops-dossier-complete">NO</span></article>
+      <article><strong>Notifications</strong><span id="ops-notification-count">0</span></article>
+      <article><strong>Execution Authority</strong><span>NO</span></article>
+      <article><strong>Money Movement</strong><span>NO</span></article>
+    </section>
+
+    <section class="dashboard-grid">
+      <article class="panel wide">
+        <div class="panel-head"><h2>Release Blockers</h2><span>fail-closed</span></div>
+        <ul class="compact-list" id="ops-release-reasons"></ul>
+      </article>
+
+      <article class="panel wide">
+        <div class="panel-head"><h2>UAT Coverage</h2><span>required production-like scenarios</span></div>
+        <div class="kv-grid two">
+          <div><strong>Missing</strong><span id="ops-uat-missing">--</span></div>
+          <div><strong>Failed / Blocked</strong><span id="ops-uat-failed">--</span></div>
+        </div>
+      </article>
+
+      <article class="panel wide">
+        <div class="panel-head"><h2>Launch Evidence Dossier</h2><span>immutable evidence</span></div>
+        <div class="kv-grid two">
+          <div><strong>Missing Categories</strong><span id="ops-dossier-missing">--</span></div>
+          <div><strong>Unapproved Categories</strong><span id="ops-dossier-unapproved">--</span></div>
+        </div>
+      </article>
+
+      <article class="panel wide">
+        <div class="panel-head"><h2>Jurisdiction Service Modes</h2><span>Discover / Confirm / Auto</span></div>
+        <div class="kv-grid">
+          <div><strong>Discover</strong><span id="ops-mode-discover">MISSING</span></div>
+          <div><strong>Confirm</strong><span id="ops-mode-confirm">MISSING</span></div>
+          <div><strong>Auto</strong><span id="ops-mode-auto">MISSING</span></div>
+        </div>
+      </article>
+
+      <article class="panel wide">
+        <div class="panel-head"><h2>Customer Notification Intents</h2><span>delivery not authorized here</span></div>
+        <div id="ops-notifications" class="empty-state">No notification intents loaded.</div>
+      </article>
+    </section>
+  </main>
+  <script>{_commercialization_operations_script()}</script>
+</body>
+</html>"""
+
+
+def _commercialization_operations_script() -> str:
+    return """
+function opsNow() {
+  return new Date().toISOString().replace(".000Z", "Z");
+}
+
+function opsText(values) {
+  return values && values.length ? values.join(", ") : "None";
+}
+
+async function refreshCommercializationOperations() {
+  const params = new URLSearchParams({
+    customer_id: document.getElementById("ops-customer-id").value.trim(),
+    account_reference: document.getElementById("ops-account-reference").value.trim(),
+    agreement_id: document.getElementById("ops-agreement-id").value.trim(),
+    agreement_version: document.getElementById("ops-agreement-version").value.trim(),
+    jurisdiction_code: document.getElementById("ops-jurisdiction").value.trim(),
+    assessed_at: opsNow(),
+    uat_run_id: document.getElementById("ops-uat-run").value.trim(),
+    dossier_id: document.getElementById("ops-dossier-id").value.trim()
+  });
+  const response = await fetch(
+    "/api/v1/commercialization-operations/status?" + params.toString(),
+    {cache: "no-store"}
+  );
+  if (!response.ok) return;
+  const data = await response.json();
+
+  document.getElementById("ops-ready").textContent = data.production_commercial_ready ? "YES" : "NO";
+  document.getElementById("ops-uat-complete").textContent = data.uat_complete ? "YES" : "NO";
+  document.getElementById("ops-dossier-complete").textContent = data.launch_dossier_complete ? "YES" : "NO";
+  document.getElementById("ops-notification-count").textContent = String(data.notification_intent_count || 0);
+
+  const reasons = document.getElementById("ops-release-reasons");
+  reasons.innerHTML = (data.release_reason_codes || []).length
+    ? data.release_reason_codes.map((reason) => "<li>" + reason + "</li>").join("")
+    : "<li>No release blockers reported.</li>";
+
+  document.getElementById("ops-uat-missing").textContent = opsText(data.uat_missing_scenarios);
+  document.getElementById("ops-uat-failed").textContent = opsText(
+    (data.uat_failed_scenarios || []).concat(data.uat_blocked_scenarios || [])
+  );
+  document.getElementById("ops-dossier-missing").textContent = opsText(data.launch_dossier_missing_categories);
+  document.getElementById("ops-dossier-unapproved").textContent = opsText(data.launch_dossier_unapproved_categories);
+
+  const modes = data.jurisdiction_service_modes || {};
+  document.getElementById("ops-mode-discover").textContent = (modes.DISCOVER || {}).status || "MISSING";
+  document.getElementById("ops-mode-confirm").textContent = (modes.CONFIRM || {}).status || "MISSING";
+  document.getElementById("ops-mode-auto").textContent = (modes.AUTO || {}).status || "MISSING";
+
+  const target = document.getElementById("ops-notifications");
+  const notifications = data.notification_intents || [];
+  target.innerHTML = notifications.length
+    ? notifications.map((n) => n.notification_type + " — " + n.scheduled_for).join("<br>")
+    : "No notification intents loaded.";
+}
+
+document.getElementById("ops-refresh").addEventListener("click", refreshCommercializationOperations);
 """
 def _css() -> str:
     return """
