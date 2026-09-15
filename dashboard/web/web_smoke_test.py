@@ -49,6 +49,8 @@ def main() -> int:
         "/api/v1/commercial-trial/status",
         "/api/v1/production-charging/readiness",
         "/api/v1/payment-collection/preflight",
+        "/api/v1/customer-notifications/preflight",
+        "/api/v1/launch-dossier/export",
         "/api/v1/commercialization-operations/status",
         "/api/v1/commercialization-release/readiness",
         "/ws/v1/dashboard-state",
