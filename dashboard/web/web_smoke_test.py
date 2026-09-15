@@ -37,6 +37,7 @@ def main() -> int:
         "/api/v1/broker",
         "/api/v1/client-earnings-summary",
         "/api/v1/client-earnings-history",
+        "/api/v1/customer-profitability-summary",
         "/api/v1/advice-profitability-history",
         "/ws/v1/dashboard-state",
     }
@@ -150,8 +151,14 @@ def main() -> int:
         "Platform access reference",
         "Final CSS performance charge",
         "Advice Profitability History",
+        "Independent / Customer-Directed P&amp;L",
+        "Independent Platform Charge",
+        "Gross Customer Profit",
+        "Total CSS Charges",
+        "Customer Net After All CSS Charges",
         "customer result → loss recovery → fresh gain → CSS fee → customer retained",
         "/api/v1/client-earnings-summary",
+        "/api/v1/customer-profitability-summary",
         "/api/v1/advice-profitability-history",
     ]
     for expected in expected_billing_markup:
