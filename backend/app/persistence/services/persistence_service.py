@@ -83,6 +83,7 @@ from backend.app.persistence.repositories.final_fee_selection_repository import 
 from backend.app.persistence.repositories.trial_contract_repository import TrialContractRepository
 from backend.app.persistence.repositories.independent_trade_economics_repository import IndependentTradeEconomicsRepository
 from backend.app.persistence.repositories.commercialization_technical_validation_repository import CommercializationTechnicalValidationRepository
+from backend.app.persistence.repositories.commercial_policy_approval_repository import CommercialPolicyApprovalRepository
 from backend.app.persistence.repositories.production_charging_approval_repository import ProductionChargingApprovalRepository
 from backend.app.persistence.migrations.runner import run_migrations
 
@@ -121,6 +122,7 @@ class PersistenceService:
         self.trial_contracts = TrialContractRepository()
         self.independent_trade_economics = IndependentTradeEconomicsRepository()
         self.commercialization_technical_validations = CommercializationTechnicalValidationRepository()
+        self.commercial_policy_approvals = CommercialPolicyApprovalRepository()
         self.production_charging_approvals = ProductionChargingApprovalRepository()
         self.shadow_compensation_entitlements = (
             ShadowCompensationEntitlementRepository()
@@ -177,6 +179,7 @@ class PersistenceService:
                 "trial_contracts": True,
                 "independent_trade_economics": True,
                 "commercialization_technical_validations": True,
+                "commercial_policy_approvals": True,
                 "production_charging_approvals": True,
                 "shadow_compensation_entitlements": True,
                 "performance_compensation_lifecycle_policies": True,
