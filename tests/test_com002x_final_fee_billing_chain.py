@@ -56,7 +56,7 @@ def service(monkeypatch):
         conn.close()
 
 
-def upstream(service, amount="0", currency="USD", rate="0.75", access_changes=None):
+def upstream(service, amount="20", currency="USD", rate="0.75", access_changes=None):
     access = CommercialPlatformAccessFeeTerms(
         "ACCESS-A", "USD", Decimal("29.99"), PlatformAccessBillingFrequency.MONTHLY,
         START, REFS, True, END,
@@ -100,6 +100,16 @@ def upstream(service, amount="0", currency="USD", rate="0.75", access_changes=No
     return selection, assessment
 
 
+
+
+def test_zero_qualifying_gain_never_enters_billable_chain(service):
+    with pytest.raises(ValueError, match="positive qualifying economic gain"):
+        upstream(service, "0")
+    assert service.final_fee_selections.list_all() == []
+    assert service.settlement_readiness.list_all() == []
+    assert service.billable_obligations.list_all() == []
+
+
 def ready_and_billable(service, selection):
     readiness = build_final_fee_settlement_readiness(selection, SettlementReadinessStatus.READY, AT, REFS)
     service.settlement_readiness.create_readiness(readiness)
@@ -135,10 +145,10 @@ def invoice_and_receivable(service, obligation):
 
 
 @pytest.mark.parametrize("amount,currency,rate,expected", [
-    ("0", "USD", "1", "29.99"), ("20.00", "USD", "1", "29.99"),
+    ("20.00", "USD", "1", "20.00"),
     ("29.99", "USD", "1", "29.99"), ("150.00", "USD", "1", "150.00"),
-    ("100", "CAD", "0.75", "75"), ("20", "CAD", "0.75", "29.99"),
-    ("20", "EUR", "1.10", "29.99"), ("150", "EUR", "1.10", "165"),
+    ("100", "CAD", "0.75", "75"), ("20", "CAD", "0.75", "15.00"),
+    ("20", "EUR", "1.10", "22.00"), ("150", "EUR", "1.10", "165"),
     ("100000", "NGN", "0.00065", "65"),
     ("150.12345678901234567890123456789", "USD", "1", "150.12345678901234567890123456789"),
 ])
