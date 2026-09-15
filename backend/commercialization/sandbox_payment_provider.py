@@ -68,3 +68,18 @@ class SandboxPaymentCollectionProvider:
         idempotency_key: str,
     ) -> SandboxPaymentReceipt | None:
         return self._receipts_by_idempotency.get(idempotency_key)
+
+
+def build_sandbox_payment_preflight() -> PaymentCollectionPreflight:
+    """Create test-only preflight for the deterministic sandbox adapter."""
+    import os
+
+    if os.getenv("CSS_FULL_TEST_MODE") != "1":
+        raise RuntimeError(
+            "sandbox payment preflight requires CSS_FULL_TEST_MODE=1"
+        )
+    return PaymentCollectionPreflight(
+        allowed=True,
+        reason_codes=("TEST_ONLY:SANDBOX_PREFLIGHT",),
+        provider_id="CSS-SANDBOX-PAYMENTS",
+    )
