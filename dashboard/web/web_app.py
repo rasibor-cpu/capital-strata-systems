@@ -19,6 +19,8 @@ from dashboard.runtime.production_charging_router import create_production_charg
 from dashboard.runtime.commercialization_release_router import create_commercialization_release_router
 from dashboard.runtime.commercialization_operations_router import create_commercialization_operations_router
 from dashboard.runtime.payment_collection_preflight_router import create_payment_collection_preflight_router
+from dashboard.runtime.notification_delivery_preflight_router import create_notification_delivery_preflight_router
+from dashboard.runtime.launch_dossier_router import create_launch_dossier_router
 from dashboard.runtime.dashboard_state import DashboardState
 from dashboard.runtime.runtime_smoke_test import build_smoke_payloads
 from dashboard.runtime.ws_bridge import create_ws_router
@@ -51,6 +53,8 @@ def create_app(
     app.include_router(create_commercialization_release_router())
     app.include_router(create_commercialization_operations_router())
     app.include_router(create_payment_collection_preflight_router())
+    app.include_router(create_notification_delivery_preflight_router())
+    app.include_router(create_launch_dossier_router())
 
     @app.get("/", include_in_schema=False)
     async def index() -> RedirectResponse:

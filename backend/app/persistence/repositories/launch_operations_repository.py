@@ -9,9 +9,49 @@ from backend.commercialization.customer_notifications import (
     CustomerNotificationPolicy,
 )
 from backend.commercialization.launch_evidence_dossier import LaunchEvidenceItem
+from backend.commercialization.notification_delivery_provider import (
+    NotificationProviderConfiguration,
+)
 
 
 class LaunchOperationsRepository(BaseRepository):
+    def create_notification_provider_configuration(
+        self,
+        record: NotificationProviderConfiguration,
+    ) -> None:
+        self.execute(
+            """
+            INSERT INTO notification_delivery_provider_configurations (
+                provider_id, channel, status, environment,
+                provider_account_reference, approval_reference,
+                evidence_refs_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record.provider_id,
+                record.channel.value,
+                record.status.value,
+                record.environment,
+                record.provider_account_reference,
+                record.approval_reference,
+                json.dumps(list(record.evidence_refs), separators=(",", ":")),
+            ),
+        )
+
+    def get_notification_provider_configuration(
+        self,
+        provider_id: str,
+    ) -> dict[str, Any] | None:
+        row = self.fetch_one(
+            """
+            SELECT *
+            FROM notification_delivery_provider_configurations
+            WHERE provider_id = ?
+            """,
+            (provider_id,),
+        )
+        return dict(row) if row is not None else None
+
     def create_notification_policy(
         self,
         policy: CustomerNotificationPolicy,
@@ -91,6 +131,20 @@ class LaunchOperationsRepository(BaseRepository):
             (dossier_id,),
         )
         return [dict(row) for row in rows]
+
+    def get_notification_intent(
+        self,
+        notification_id: str,
+    ) -> dict[str, Any] | None:
+        row = self.fetch_one(
+            """
+            SELECT *
+            FROM customer_notification_intents
+            WHERE notification_id = ?
+            """,
+            (notification_id,),
+        )
+        return dict(row) if row is not None else None
 
     def list_notification_intents(
         self,
