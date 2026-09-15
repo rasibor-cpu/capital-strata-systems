@@ -151,6 +151,29 @@ The canonical launch dossier can be exported through a read-only API and compare
 
 CSS now has an evidence-based commercialization release assessment. The release status requires an immutable technical-validation record plus a successful canonical production-charging assessment. The read-only `/api/v1/commercialization-release/readiness` surface reports explicit blocker codes and never grants trading or broker execution authority.
 
+## Full-test release-candidate status
+
+Status: RELEASE-CANDIDATE TOOLING IMPLEMENTED — VALIDATION PENDING
+
+CSS now has a guarded isolated full-test mode with deterministic sandbox payment
+and notification providers, synthetic TEST_ONLY evidence, a disposable database,
+and an integrated readiness runner.
+
+Full-test readiness is intentionally distinct from production-commercial
+readiness. The sandbox provider is prohibited from satisfying production
+payment preflight, so a full-test release candidate must show:
+
+- ready_for_full_testing = true;
+- production_commercial_ready = false;
+- mandatory UAT complete;
+- synthetic launch dossier complete;
+- sandbox payment and notification simulations successful;
+- trading/broker execution authority = false; and
+- external money movement = false.
+
+The release-candidate workflow must pass governance, full regression, dedicated
+commercialization UAT, and integrated full-test readiness on the candidate SHA.
+
 ## External evidence still required
 
 The remaining blockers cannot be truthfully self-approved by the application:
