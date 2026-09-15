@@ -64,6 +64,8 @@ def _independent(trade_id, pnl, rate=Decimal("0.01"), currency="USD"):
     )
     return build_independent_trade_economics(
         provenance,
+        account_reference="account:A",
+        calculation_timestamp="2026-09-15T00:00:00Z",
         realized_pnl=pnl,
         currency=currency,
         platform_charge_rate=rate,
