@@ -11,6 +11,9 @@ from backend.app.persistence.services.client_earnings_summary_service import (
 from backend.app.persistence.services.advice_profitability_history_service import (
     AdviceProfitabilityHistoryService,
 )
+from backend.app.persistence.services.customer_profitability_summary_service import (
+    CustomerProfitabilitySummaryService,
+)
 from backend.commercialization.advice_profitability import AdviceProfitability
 from backend.commercialization.client_earnings_summary import (
     ClientEarningsSummaryUnavailableError,
@@ -172,6 +175,22 @@ def create_client_earnings_router(
         except ClientEarningsSummaryUnavailableError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return build_client_earnings_summary_payload(summary)
+
+    @router.get("/api/v1/customer-profitability-summary")
+    def read_customer_profitability_summary(
+        policy_id: str = Query(...),
+        period_start: str = Query(...),
+        period_end: str = Query(...),
+    ) -> dict[str, Any]:
+        try:
+            summary = CustomerProfitabilitySummaryService().build_summary(
+                policy_id=policy_id,
+                period_start=period_start,
+                period_end=period_end,
+            )
+        except ClientEarningsSummaryUnavailableError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return build_customer_profitability_payload(summary)
 
     @router.get("/api/v1/advice-profitability-history")
     def read_advice_profitability_history(
