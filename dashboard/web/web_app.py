@@ -1865,15 +1865,26 @@ def _billing_page() -> str:
           <div><strong>Step 3: New economic gain</strong><span id="billing-step-3">--</span></div>
           <div><strong>Step 4: Performance fee rate</strong><span id="billing-step-4">--</span></div>
           <div><strong>Step 5: Performance fee</strong><span id="billing-step-5">--</span></div>
-          <div><strong>Step 6: Platform minimum</strong><span id="billing-step-6">--</span></div>
-          <div><strong>Step 7: Final CSS charge</strong><span id="billing-step-7">--</span></div>
+          <div><strong>Step 6: Platform access reference</strong><span id="billing-step-6">--</span></div>
+          <div><strong>Step 7: Final CSS performance charge</strong><span id="billing-step-7">--</span></div>
         </div>
-        <p class="panel-note" id="billing-fee-rule">CSS charges the higher of your platform minimum or your performance fee. You never pay both.</p>
+        <p class="panel-note" id="billing-fee-rule">CSS performance charges apply only to qualifying new economic gain after loss recovery. A platform access reference does not override the performance fee.</p>
         <p class="panel-note" id="billing-fx-note" style="display:none;"></p>
         <p class="panel-note" id="billing-withdrawable-note"></p>
         <div id="billing-error" style="display:none; color:#df5b52; padding:16px; font-weight:bold;">
           No commercial earnings data is available for this period.
         </div>
+      </article>
+
+      <article class="panel wide" data-panel="advice-profitability">
+        <div class="panel-head">
+          <h2>Advice Profitability History</h2>
+          <span>customer result → loss recovery → fresh gain → CSS fee → customer retained</span>
+        </div>
+        <div id="advice-profitability-table" class="summary-table">
+          <div class="empty-state">Load a commercial period to view advice-level economics.</div>
+        </div>
+        <p class="panel-note">Read-only audit view. Advice-level records do not authorize collection, deduction, or trade execution.</p>
       </article>
     </section>
   </main>
@@ -1917,16 +1928,14 @@ async function refreshBilling() {
   document.getElementById("billing-step-3").textContent = money(data.new_economic_gain, data.performance_currency);
   document.getElementById("billing-step-4").textContent = data.performance_fee_rate !== null ? `${(Number(data.performance_fee_rate) * 100).toFixed(2)}%` : "N/A";
   document.getElementById("billing-step-5").textContent = data.performance_fee_billing_currency_amount !== null ? money(data.performance_fee_billing_currency_amount, billingCurrency) : "N/A";
-  document.getElementById("billing-step-6").textContent = data.platform_access_fee_amount !== null ? money(data.platform_access_fee_amount, billingCurrency) : "N/A";
+  document.getElementById("billing-step-6").textContent = data.platform_access_fee_amount !== null ? `${money(data.platform_access_fee_amount, billingCurrency)} reference only` : "N/A";
   document.getElementById("billing-step-7").textContent = data.selected_fee_amount !== null ? money(data.selected_fee_amount, billingCurrency) : "N/A";
 
   const badge = document.getElementById("billing-basis-badge");
   if (data.selected_fee_basis === "PERFORMANCE_COMPENSATION") {
     badge.textContent = "PERFORMANCE FEE APPLIED";
-  } else if (data.selected_fee_basis === "PLATFORM_ACCESS") {
-    badge.textContent = "PLATFORM MINIMUM APPLIED";
   } else {
-    badge.textContent = "NOT YET BILLABLE";
+    badge.textContent = "NO CSS PERFORMANCE FEE";
   }
 
   const fxNote = document.getElementById("billing-fx-note");
@@ -1937,7 +1946,63 @@ async function refreshBilling() {
     fxNote.style.display = "none";
   }
 
+  document.getElementById("billing-fee-rule").textContent = data.fee_rule_language || document.getElementById("billing-fee-rule").textContent;
   document.getElementById("billing-withdrawable-note").textContent = data.withdrawable_funds_note;
+  await refreshAdviceProfitability(data.terms_id, billingCurrency);
+}
+
+function escapeBillingHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\\"": "&quot;",
+    "'": "&#39;"
+  }[char]));
+}
+
+async function refreshAdviceProfitability(termsId, currency) {
+  const target = document.getElementById("advice-profitability-table");
+  if (!termsId) {
+    target.innerHTML = '<div class="empty-state">No commercial terms are available for this period.</div>';
+    return;
+  }
+
+  const response = await fetch(
+    `/api/v1/advice-profitability-history?terms_id=${encodeURIComponent(termsId)}`,
+    { cache: "no-store" }
+  );
+  if (!response.ok) {
+    target.innerHTML = '<div class="empty-state">Advice-level profitability history is unavailable.</div>';
+    return;
+  }
+
+  const rows = await response.json();
+  if (!rows.length) {
+    target.innerHTML = '<div class="empty-state">No CSS-attributable advice outcomes exist for this period.</div>';
+    return;
+  }
+
+  target.innerHTML = `
+    <div class="summary-row">
+      <strong>Advice / Trade</strong>
+      <strong>Customer P&amp;L</strong>
+      <strong>Loss Recovery</strong>
+      <strong>Fresh Gain</strong>
+      <strong>CSS Fee</strong>
+      <strong>Customer Retained</strong>
+    </div>
+    ${rows.map((row) => `
+      <div class="summary-row">
+        <span>${escapeBillingHtml(row.advice_id)} / ${escapeBillingHtml(row.trade_id)}</span>
+        <span>${money(row.realized_pnl, currency)}</span>
+        <span>${money(row.recovered_loss, currency)}</span>
+        <span>${money(row.new_economic_gain, currency)}</span>
+        <span>${money(row.css_shadow_fee, currency)}</span>
+        <span>${money(row.customer_retained_after_css_fee, currency)}</span>
+      </div>
+    `).join("")}
+  `;
 }
 
 document.querySelector("[data-refresh-billing]").addEventListener("click", refreshBilling);
