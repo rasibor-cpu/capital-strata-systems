@@ -103,9 +103,11 @@ Customer surfaces must separately show:
 
 Status: TECHNICAL GATE IMPLEMENTED — APPROVAL EVIDENCE / PRODUCTION CERTIFICATION PENDING
 
-A conjunctive fail-closed production charging gate is implemented. It requires canonical evidence of customer acceptance and paid-service eligibility, jurisdiction-specific legal approval for the exact agreement version, production commercialization certification, reconciliation verification, security/release-blocker clearance, charging-control verification, and separately evidenced payment-collection authority.
+A conjunctive fail-closed production charging gate is implemented. It requires canonical evidence of customer acceptance and paid-service eligibility, jurisdiction-specific legal approval for the exact agreement version, production commercialization certification, reconciliation verification, a structured production security/operations certification covering secrets, TLS, access control, audit logging, monitoring, backup/restore, rollback, incident response and dependency review, charging-control verification, and separately evidenced payment-collection authority.
 
 Missing, pending, rejected, expired, stale, or scope-mismatched evidence blocks charging. The readiness API is GET/read-only and does not initiate payment.
+
+Commercial release readiness additionally requires a named payment provider configuration to pass the read-only collection preflight. CSS ships with a disabled provider by default and exposes no live collection endpoint. An approved live adapter requires provider contract/account approval, idempotency, webhook verification, reconciliation, refund/chargeback controls, credential isolation, payment UAT, and rollback evidence.
 
 No production release may enable fee debit, broker withdrawal, automatic payment execution, settlement, receivable collection, or other customer-funds movement until the remaining external approvals and production certification are complete.
 
