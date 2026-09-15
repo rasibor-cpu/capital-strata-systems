@@ -102,3 +102,46 @@ def test_production_commercialization_remains_fail_closed():
     markup = _billing_page()
     assert "No payment execution from this view" in markup
     assert "Read-only presentation" in markup
+
+
+def test_automatic_trial_conversion_never_grants_trading_or_collection_authority():
+    disclosure = (
+        "Your free trial ends on 2026-10-01T00:00:00Z. If you do not cancel "
+        "before that time, your paid CSS service begins automatically."
+    )
+    pricing = "20% of qualifying CSS new economic gain."
+    agreement = CommercialAgreementSnapshot(
+        agreement_id="AGR-CONSISTENCY",
+        agreement_version="v1",
+        jurisdiction_code="CA-ON",
+        pricing_plan_id="PLAN-CONSISTENCY",
+        pricing_summary=pricing,
+        trial_duration_days=30,
+        automatic_conversion_disclosure=disclosure,
+        effective_from="2026-09-01T00:00:00Z",
+        evidence_refs=REFS,
+    )
+    enrollment = TrialEnrollment(
+        customer_id="CUST-CONSISTENCY",
+        account_reference="account:consistency",
+        agreement_id=agreement.agreement_id,
+        agreement_version=agreement.agreement_version,
+        pricing_plan_id=agreement.pricing_plan_id,
+        accepted_at="2026-09-01T00:00:00Z",
+        trial_start_at="2026-09-01T00:00:00Z",
+        trial_expires_at="2026-10-01T00:00:00Z",
+        displayed_pricing_summary=pricing,
+        displayed_conversion_disclosure=disclosure,
+        acceptance_audit_reference="accept:consistency",
+        evidence_refs=REFS,
+    )
+    assessment = assess_trial_conversion(
+        agreement,
+        enrollment,
+        assessed_at="2026-10-02T00:00:00Z",
+    )
+
+    assert assessment.automatic_conversion_allowed is True
+    assert assessment.payment_execution_allowed is False
+    assert assessment.money_movement_allowed is False
+    assert assessment.execution_authority is False
