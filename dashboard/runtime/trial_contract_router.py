@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -24,6 +24,8 @@ class TrialEnrollmentRequest(BaseModel):
     displayed_conversion_disclosure: str = Field(min_length=1)
     acceptance_audit_reference: str = Field(min_length=1)
     evidence_refs: list[str] = Field(min_length=1)
+    affirm_terms_acceptance: Literal[True]
+    affirm_automatic_conversion_disclosure: Literal[True]
 
 
 class TrialCancellationRequest(BaseModel):
