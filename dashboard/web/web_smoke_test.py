@@ -9,6 +9,7 @@ from dashboard.web.web_app import (
     _market_opportunities_page,
     _positions_page,
     _risk_governance_page,
+    _trial_contract_page,
     create_app,
     demo_dashboard_state_provider,
 )
@@ -26,6 +27,7 @@ def main() -> int:
         "/market-opportunities",
         "/positions",
         "/risk-governance",
+        "/trial-contract",
         "/health",
         "/api/v1/dashboard-state",
         "/api/v1/frontend-state",
@@ -39,6 +41,10 @@ def main() -> int:
         "/api/v1/client-earnings-history",
         "/api/v1/customer-profitability-summary",
         "/api/v1/advice-profitability-history",
+        "/api/v1/commercial-trial/agreement",
+        "/api/v1/commercial-trial/enroll",
+        "/api/v1/commercial-trial/cancel",
+        "/api/v1/commercial-trial/status",
         "/ws/v1/dashboard-state",
     }
     missing = required_routes - routes
@@ -173,6 +179,26 @@ def main() -> int:
         if forbidden in billing_markup:
             raise AssertionError(
                 f"Stale commercialization language remains in billing UI: {forbidden}"
+            )
+
+    trial_contract_markup = _trial_contract_page()
+    expected_trial_contract_markup = [
+        "CSS Trial &amp; Customer Agreement",
+        "Commercial Terms Presented to Customer",
+        "Affirmative Acceptance",
+        "Both confirmations are mandatory",
+        "I have reviewed and accept the exact agreement version and pricing shown above.",
+        "paid CSS service begins automatically if I do not cancel before the exact trial expiry",
+        "No payment execution",
+        "/api/v1/commercial-trial/agreement",
+        "/api/v1/commercial-trial/enroll",
+        "/api/v1/commercial-trial/cancel",
+        "/api/v1/commercial-trial/status",
+    ]
+    for expected in expected_trial_contract_markup:
+        if expected not in trial_contract_markup:
+            raise AssertionError(
+                f"Web trial contract markup missing: {expected}"
             )
 
     payload = get_frontend_payload(demo_dashboard_state_provider)
