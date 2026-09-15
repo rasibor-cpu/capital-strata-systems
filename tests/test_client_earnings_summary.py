@@ -15,7 +15,7 @@ from backend.commercialization.client_earnings_summary import (
     CLIENT_LANGUAGE_FEE_RULE,
 )
 from backend.commercialization.final_fee_selection import (
-    FinalFeeBasis, build_final_fee_selection,
+    FinalFeeBasis, FinalFeeSelectionIneligibleError, build_final_fee_selection,
 )
 from backend.commercialization.fx_conversion import build_fx_conversion_evidence
 from backend.commercialization.performance_accounting import (
@@ -204,7 +204,7 @@ def summarize(service):
 
 
 def test_zero_performance_cannot_select_css_fee(service):
-    with pytest.raises(Exception, match="positive qualifying economic gain"):
+    with pytest.raises(FinalFeeSelectionIneligibleError, match="positive qualifying economic gain"):
         build_chain(service, trades=[("T1", Decimal("0"))])
 
 
@@ -255,7 +255,7 @@ def test_prior_loss_recovery_gross_gain_exists_but_new_gain_lower(service):
 
 
 def test_full_loss_recovery_zero_new_economic_gain_cannot_select_css_fee(service):
-    with pytest.raises(Exception, match="positive qualifying economic gain"):
+    with pytest.raises(FinalFeeSelectionIneligibleError, match="positive qualifying economic gain"):
         build_chain(service, trades=[("T1", Decimal("-50")), ("T2", Decimal("50"))])
 
 
