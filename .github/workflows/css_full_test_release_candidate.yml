@@ -1,0 +1,50 @@
+name: CSS Full Test Release Candidate
+
+on:
+  pull_request:
+    branches:
+      - css-v1-completion-2026-09-13
+    paths:
+      - "backend/**"
+      - "dashboard/**"
+      - "engine/**"
+      - "scripts/run_css_full_test_readiness.py"
+      - "tests/**"
+      - ".github/workflows/css_full_test_release_candidate.yml"
+  push:
+    branches:
+      - css-v1-completion-2026-09-13
+  workflow_dispatch:
+
+jobs:
+  full-test-release-candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONPATH: "."
+      CSS_FULL_TEST_MODE: "1"
+      CSS_FULL_TEST_DB: "data/css_full_test_rc.db"
+      CSS_VALIDATED_COMMIT_SHA: "${{ github.sha }}"
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Set Up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest
+      - name: Compile Primary Trees
+        run: |
+          python -m compileall -q backend dashboard engine tests scripts
+      - name: Run Full Regression
+        run: |
+          python -m pytest -q
+      - name: Run Integrated Full-Test Readiness
+        run: |
+          python scripts/run_css_full_test_readiness.py
