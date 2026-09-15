@@ -8,6 +8,10 @@ from fastapi import APIRouter, HTTPException, Query
 from backend.app.persistence.services.client_earnings_summary_service import (
     ClientEarningsSummaryService,
 )
+from backend.app.persistence.services.advice_profitability_history_service import (
+    AdviceProfitabilityHistoryService,
+)
+from backend.commercialization.advice_profitability import AdviceProfitability
 from backend.commercialization.client_earnings_summary import (
     ClientEarningsSummaryUnavailableError,
     CommercialClientEarningsSummary,
@@ -64,6 +68,32 @@ def build_client_earnings_summary_payload(
         "fx_language": summary.fx_language,
         "withdrawable_funds_note": summary.withdrawable_funds_note,
         "explanation": summary.explain(),
+    }
+
+
+def build_advice_profitability_payload(
+    summary: AdviceProfitability,
+) -> dict[str, Any]:
+    """Read-only advice-level profitability projection."""
+
+    return {
+        "advice_id": summary.advice_id,
+        "trade_id": summary.trade_id,
+        "currency": summary.currency,
+        "realized_pnl": str(summary.realized_pnl),
+        "recovered_loss": str(summary.recovered_loss),
+        "new_economic_gain": str(summary.new_economic_gain),
+        "performance_fee_rate": str(summary.performance_fee_rate),
+        "css_shadow_fee": str(summary.css_shadow_fee),
+        "customer_retained_after_css_fee": str(
+            summary.customer_retained_after_css_fee
+        ),
+        "fee_applies": summary.fee_applies,
+        "evidence_refs": list(summary.evidence_refs),
+        "explanation": summary.explain(),
+        "money_movement_allowed": False,
+        "invoice_creation_allowed": False,
+        "execution_authority": False,
     }
 
 
@@ -142,6 +172,13 @@ def create_client_earnings_router(
         except ClientEarningsSummaryUnavailableError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return build_client_earnings_summary_payload(summary)
+
+    @router.get("/api/v1/advice-profitability-history")
+    def read_advice_profitability_history(
+        terms_id: str = Query(...),
+    ) -> list[dict[str, Any]]:
+        history = AdviceProfitabilityHistoryService().list_by_terms_id(terms_id)
+        return [build_advice_profitability_payload(item) for item in history]
 
     @router.get("/api/v1/withdrawable-funds-summary")
     def read_withdrawable_funds_summary(
