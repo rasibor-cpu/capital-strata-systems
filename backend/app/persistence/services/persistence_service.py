@@ -87,6 +87,7 @@ from backend.app.persistence.repositories.commercial_policy_approval_repository 
 from backend.app.persistence.repositories.production_charging_approval_repository import ProductionChargingApprovalRepository
 from backend.app.persistence.repositories.commercialization_uat_repository import CommercializationUatRepository
 from backend.app.persistence.repositories.launch_operations_repository import LaunchOperationsRepository
+from backend.app.persistence.repositories.production_infrastructure_repository import ProductionInfrastructureRepository
 from backend.app.persistence.migrations.runner import run_migrations
 
 
@@ -128,6 +129,7 @@ class PersistenceService:
         self.production_charging_approvals = ProductionChargingApprovalRepository()
         self.commercialization_uat = CommercializationUatRepository()
         self.launch_operations = LaunchOperationsRepository()
+        self.production_infrastructure = ProductionInfrastructureRepository()
         self.shadow_compensation_entitlements = (
             ShadowCompensationEntitlementRepository()
         )
@@ -187,6 +189,7 @@ class PersistenceService:
                 "production_charging_approvals": True,
                 "commercialization_uat": True,
                 "launch_operations": True,
+                "production_infrastructure": True,
                 "shadow_compensation_entitlements": True,
                 "performance_compensation_lifecycle_policies": True,
                 "crystallization_assessments": True,
