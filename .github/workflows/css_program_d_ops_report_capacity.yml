@@ -1,0 +1,40 @@
+name: CSS Program D Ops Report Capacity
+
+on:
+  push:
+    branches:
+      - program-d-ops-report-capacity-2026-09-15
+    paths:
+      - "backend/operations/**"
+      - "tests/test_program_d_ops_report_capacity.py"
+      - "docs/governance/PROGRAM_D_OPERATIONAL_REPORT_CAPACITY.md"
+      - ".github/workflows/css_program_d_ops_report_capacity.yml"
+  workflow_dispatch:
+
+jobs:
+  program-d-ops-report-capacity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Set Up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest
+      - name: Compile
+        run: |
+          python -m compileall -q backend/operations tests/test_program_d_ops_report_capacity.py
+      - name: Focused Tests
+        run: |
+          python -m pytest -q tests/test_program_d_executive_command.py tests/test_program_d_ops_report_capacity.py
+      - name: Full Regression
+        run: |
+          python -m pytest -q
