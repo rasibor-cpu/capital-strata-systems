@@ -1851,6 +1851,26 @@ def _billing_page() -> str:
         <strong>Net Earnings After CSS Fee</strong>
         <span id="billing-net-earnings">$0.00</span>
       </article>
+      <article>
+        <strong>Independent / Customer-Directed P&amp;L</strong>
+        <span id="billing-independent-profit">$0.00</span>
+      </article>
+      <article>
+        <strong>Independent Platform Charge</strong>
+        <span id="billing-independent-charge">$0.00</span>
+      </article>
+      <article>
+        <strong>Gross Customer Profit</strong>
+        <span id="billing-gross-profit">$0.00</span>
+      </article>
+      <article>
+        <strong>Total CSS Charges</strong>
+        <span id="billing-total-charges">$0.00</span>
+      </article>
+      <article>
+        <strong>Customer Net After All CSS Charges</strong>
+        <span id="billing-customer-net">$0.00</span>
+      </article>
     </section>
 
     <section class="dashboard-grid" aria-label="Charge calculation panel">
@@ -1916,12 +1936,25 @@ async function refreshBilling() {
   const data = await response.json();
   const billingCurrency = data.billing_currency || data.performance_currency;
 
+  const profitabilityResponse = await fetch(
+    `/api/v1/customer-profitability-summary?${params.toString()}`,
+    { cache: "no-store" }
+  );
+  const profitability = profitabilityResponse.ok
+    ? await profitabilityResponse.json()
+    : null;
+
   document.getElementById("billing-status").textContent = `Status ${data.commercial_status}`;
   document.getElementById("billing-period").textContent = `Period ${data.billing_period_start} - ${data.billing_period_end}`;
   document.getElementById("billing-period-profit").textContent = money(data.realized_attributable_profit, data.performance_currency);
   document.getElementById("billing-new-gain").textContent = money(data.new_economic_gain, data.performance_currency);
   document.getElementById("billing-charge").textContent = data.selected_fee_amount !== null ? money(data.selected_fee_amount, billingCurrency) : "N/A";
   document.getElementById("billing-net-earnings").textContent = data.net_earnings_after_css_fee !== null ? money(data.net_earnings_after_css_fee, billingCurrency) : "N/A";
+  document.getElementById("billing-independent-profit").textContent = profitability ? money(profitability.independent_realized_profit, profitability.currency) : "N/A";
+  document.getElementById("billing-independent-charge").textContent = profitability ? money(profitability.independent_platform_charge, profitability.currency) : "N/A";
+  document.getElementById("billing-gross-profit").textContent = profitability ? money(profitability.gross_customer_profit, profitability.currency) : "N/A";
+  document.getElementById("billing-total-charges").textContent = profitability ? money(profitability.total_css_charges, profitability.currency) : "N/A";
+  document.getElementById("billing-customer-net").textContent = profitability ? money(profitability.net_customer_profit_after_css_charges, profitability.currency) : "N/A";
 
   document.getElementById("billing-step-1").textContent = money(data.realized_attributable_profit, data.performance_currency);
   document.getElementById("billing-step-2").textContent = money(data.recovered_loss, data.performance_currency);
