@@ -150,10 +150,10 @@ def assess_production_charging(
     agreement_version: str,
     jurisdiction_code: str,
     contract_accepted: bool,
-    trial_assessment: TrialConversionAssessment,
-    legal_review: JurisdictionLegalReview,
-    certification: ProductionCommercializationCertification,
-    payment_authority: PaymentCollectionAuthorityApproval,
+    trial_assessment: TrialConversionAssessment | None,
+    legal_review: JurisdictionLegalReview | None,
+    certification: ProductionCommercializationCertification | None,
+    payment_authority: PaymentCollectionAuthorityApproval | None,
 ) -> ProductionChargingAssessment:
     """Conjunctive fail-closed production charging gate.
 
@@ -167,14 +167,18 @@ def assess_production_charging(
     if not contract_accepted:
         reasons.append("CONTRACT_NOT_ACCEPTED")
 
-    if not isinstance(trial_assessment, TrialConversionAssessment):
-        raise TypeError("trial_assessment must be TrialConversionAssessment")
-    if trial_assessment.status != TrialConversionStatus.ELIGIBLE_TO_CONVERT:
+    if trial_assessment is None:
+        reasons.append("TRIAL_ASSESSMENT_MISSING")
+    elif not isinstance(trial_assessment, TrialConversionAssessment):
+        raise TypeError("trial_assessment must be TrialConversionAssessment or None")
+    elif trial_assessment.status != TrialConversionStatus.ELIGIBLE_TO_CONVERT:
         reasons.append("TRIAL_NOT_ELIGIBLE_FOR_PAID_SERVICE")
 
-    if not isinstance(legal_review, JurisdictionLegalReview):
-        raise TypeError("legal_review must be JurisdictionLegalReview")
-    if (
+    if legal_review is None:
+        reasons.append("LEGAL_REVIEW_MISSING")
+    elif not isinstance(legal_review, JurisdictionLegalReview):
+        raise TypeError("legal_review must be JurisdictionLegalReview or None")
+    elif (
         legal_review.agreement_id != agreement_id
         or legal_review.agreement_version != agreement_version
         or legal_review.jurisdiction_code != jurisdiction_code
@@ -183,11 +187,13 @@ def assess_production_charging(
     elif legal_review.status != ApprovalStatus.APPROVED:
         reasons.append("LEGAL_REVIEW_NOT_APPROVED")
 
-    if not isinstance(certification, ProductionCommercializationCertification):
+    if certification is None:
+        reasons.append("PRODUCTION_CERTIFICATION_MISSING")
+    elif not isinstance(certification, ProductionCommercializationCertification):
         raise TypeError(
-            "certification must be ProductionCommercializationCertification"
+            "certification must be ProductionCommercializationCertification or None"
         )
-    if (
+    elif (
         certification.agreement_id != agreement_id
         or certification.agreement_version != agreement_version
         or certification.jurisdiction_code != jurisdiction_code
@@ -203,9 +209,13 @@ def assess_production_charging(
         if not certification.charging_controls_verified:
             reasons.append("CHARGING_CONTROLS_NOT_VERIFIED")
 
-    if not isinstance(payment_authority, PaymentCollectionAuthorityApproval):
-        raise TypeError("payment_authority must be PaymentCollectionAuthorityApproval")
-    if (
+    if payment_authority is None:
+        reasons.append("PAYMENT_COLLECTION_AUTHORITY_MISSING")
+    elif not isinstance(payment_authority, PaymentCollectionAuthorityApproval):
+        raise TypeError(
+            "payment_authority must be PaymentCollectionAuthorityApproval or None"
+        )
+    elif (
         payment_authority.agreement_id != agreement_id
         or payment_authority.agreement_version != agreement_version
         or payment_authority.jurisdiction_code != jurisdiction_code
