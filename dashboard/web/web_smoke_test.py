@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dashboard.runtime.api_bridge import get_frontend_payload
 from dashboard.web.web_app import (
+    _billing_page,
     _broker_page,
     _dashboard_page,
     _execution_page,
@@ -18,6 +19,7 @@ def main() -> int:
     routes = {getattr(route, "path", "") for route in app.routes}
     required_routes = {
         "/",
+        "/billing",
         "/broker",
         "/dashboard",
         "/execution",
@@ -33,6 +35,9 @@ def main() -> int:
         "/api/v1/governance",
         "/api/v1/opportunities",
         "/api/v1/broker",
+        "/api/v1/client-earnings-summary",
+        "/api/v1/client-earnings-history",
+        "/api/v1/advice-profitability-history",
         "/ws/v1/dashboard-state",
     }
     missing = required_routes - routes
@@ -137,6 +142,31 @@ def main() -> int:
     for expected in expected_broker_markup:
         if expected not in broker_markup:
             raise AssertionError(f"Web broker markup missing: {expected}")
+
+    billing_markup = _billing_page()
+    expected_billing_markup = [
+        "CSS Client Earnings &amp; Charges",
+        "CSS-Attributable New Gain",
+        "Platform access reference",
+        "Final CSS performance charge",
+        "Advice Profitability History",
+        "customer result → loss recovery → fresh gain → CSS fee → customer retained",
+        "/api/v1/client-earnings-summary",
+        "/api/v1/advice-profitability-history",
+    ]
+    for expected in expected_billing_markup:
+        if expected not in billing_markup:
+            raise AssertionError(f"Web billing markup missing: {expected}")
+
+    forbidden_billing_language = [
+        "higher of your platform minimum or your performance fee",
+        "PLATFORM MINIMUM APPLIED",
+    ]
+    for forbidden in forbidden_billing_language:
+        if forbidden in billing_markup:
+            raise AssertionError(
+                f"Stale commercialization language remains in billing UI: {forbidden}"
+            )
 
     payload = get_frontend_payload(demo_dashboard_state_provider)
     sections = payload.get("sections", {})
