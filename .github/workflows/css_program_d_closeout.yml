@@ -1,0 +1,42 @@
+name: CSS Program D Closeout
+
+on:
+  push:
+    branches:
+      - program-d-closeout-2026-09-15
+    paths:
+      - "backend/operations/**"
+      - "dashboard/runtime/program_d_api.py"
+      - "tests/test_program_d_closeout.py"
+      - "docs/governance/PROGRAM_D_PROJECT_ATLAS_FRAMEWORK.md"
+      - "docs/governance/PROGRAM_D_CLOSEOUT_ISSUE_48.md"
+      - ".github/workflows/css_program_d_closeout.yml"
+  workflow_dispatch:
+
+jobs:
+  program-d-closeout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Set Up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest
+      - name: Compile
+        run: |
+          python -m compileall -q backend/operations dashboard/runtime/program_d_api.py tests/test_program_d_closeout.py
+      - name: Program D Focused Tests
+        run: |
+          python -m pytest -q             tests/test_program_d_executive_command.py             tests/test_program_d_ops_report_capacity.py             tests/test_program_d_closeout.py
+      - name: Full Regression
+        run: |
+          python -m pytest -q
