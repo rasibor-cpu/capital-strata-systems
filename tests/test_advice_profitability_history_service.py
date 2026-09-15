@@ -16,6 +16,11 @@ from backend.commercialization.performance_compensation import (
     PerformanceCompensationTerms,
     build_shadow_compensation_entitlement,
 )
+from backend.commercialization.trade_provenance import (
+    AttributionClass,
+    MandateCompliance,
+    TradeProvenance,
+)
 
 
 REFS = ("evidence:1",)
@@ -36,11 +41,45 @@ def test_history_reconstructs_advice_level_customer_and_css_economics(monkeypatc
         )
         service.performance_compensation_terms.create_terms(terms)
 
+        service.sessions.create_session(
+            session_id="SESSION-A",
+            status="closed",
+            mode="paper",
+            broker_name="SIM",
+            broker_mode="paper",
+            started_at=AT,
+        )
+
         state = initial_performance_account("USD")
         for trade_id, advice_id, pnl in (
             ("T1", "A1", Decimal("-50")),
             ("T2", "A2", Decimal("80")),
         ):
+            service.trades.create_trade(
+                trade_id=trade_id,
+                session_id="SESSION-A",
+                broker_name="SIM",
+                broker_mode="paper",
+                symbol="EURUSD",
+                direction="LONG",
+                status="closed",
+                order_type="MARKET",
+                quantity=Decimal("1"),
+                filled_quantity=Decimal("1"),
+                entry_price=Decimal("1"),
+                opened_at=AT,
+            )
+            service.trade_provenance.create_provenance(
+                TradeProvenance(
+                    trade_id=trade_id,
+                    attribution_class=AttributionClass.CSS_ADVISED_ACCEPTED,
+                    mandate_compliance=MandateCompliance.COMPLIANT,
+                    advice_id=advice_id,
+                    recommendation_timestamp=AT,
+                    acceptance_timestamp=AT,
+                    evidence_refs=REFS,
+                )
+            )
             perf = AttributablePerformance(
                 trade_id=trade_id,
                 advice_id=advice_id,
