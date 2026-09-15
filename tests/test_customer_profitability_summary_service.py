@@ -93,6 +93,40 @@ def test_service_combines_persisted_css_and_independent_economics(monkeypatch):
             )
         )
 
+        service.sessions.create_session(
+            session_id="SESSION-A",
+            status="closed",
+            mode="paper",
+            broker_name="SIM",
+            broker_mode="paper",
+            started_at=AT,
+        )
+        service.trades.create_trade(
+            trade_id="CSS-1",
+            session_id="SESSION-A",
+            broker_name="SIM",
+            broker_mode="paper",
+            symbol="EURUSD",
+            direction="LONG",
+            status="closed",
+            order_type="MARKET",
+            quantity=Decimal("1"),
+            filled_quantity=Decimal("1"),
+            entry_price=Decimal("1"),
+            opened_at=AT,
+        )
+        service.trade_provenance.create_provenance(
+            TradeProvenance(
+                trade_id="CSS-1",
+                attribution_class=AttributionClass.CSS_ADVISED_ACCEPTED,
+                mandate_compliance=MandateCompliance.COMPLIANT,
+                advice_id="ADVICE-1",
+                recommendation_timestamp=AT,
+                acceptance_timestamp=AT,
+                evidence_refs=REFS,
+            )
+        )
+
         perf = AttributablePerformance(
             trade_id="CSS-1",
             advice_id="ADVICE-1",
@@ -102,6 +136,7 @@ def test_service_combines_persisted_css_and_independent_economics(monkeypatch):
             provenance_evidence_refs=REFS,
             economics_evidence_refs=REFS,
         )
+        service.attributable_performance.create_attributable_performance(perf)
         transition = apply_attributable_performance(
             initial_performance_account("USD"), perf
         )
