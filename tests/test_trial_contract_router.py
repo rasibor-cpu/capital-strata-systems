@@ -5,7 +5,7 @@ from fastapi import FastAPI
 def test_trial_contract_router_exposes_required_routes():
     app = FastAPI()
     app.include_router(create_trial_contract_router())
-    routes = {route.path for route in app.routes}
+    routes = {getattr(route, "path", "") for route in app.routes}
     assert "/api/v1/commercial-trial/agreement" in routes
     assert "/api/v1/commercial-trial/enroll" in routes
     assert "/api/v1/commercial-trial/cancel" in routes
