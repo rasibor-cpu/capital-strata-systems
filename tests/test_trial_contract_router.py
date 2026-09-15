@@ -1,5 +1,3 @@
-from fastapi.testclient import TestClient
-
 from dashboard.runtime.trial_contract_router import create_trial_contract_router
 from fastapi import FastAPI
 
@@ -17,7 +15,7 @@ def test_trial_contract_router_exposes_required_routes():
 def test_trial_contract_openapi_keeps_acceptance_and_cancellation_explicit():
     app = FastAPI()
     app.include_router(create_trial_contract_router())
-    schema = TestClient(app).get("/openapi.json").json()
+    schema = app.openapi()
     paths = schema["paths"]
     assert "post" in paths["/api/v1/commercial-trial/enroll"]
     assert "post" in paths["/api/v1/commercial-trial/cancel"]
