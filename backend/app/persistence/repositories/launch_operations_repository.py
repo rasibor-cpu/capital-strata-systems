@@ -132,6 +132,20 @@ class LaunchOperationsRepository(BaseRepository):
         )
         return [dict(row) for row in rows]
 
+    def get_notification_intent(
+        self,
+        notification_id: str,
+    ) -> dict[str, Any] | None:
+        row = self.fetch_one(
+            """
+            SELECT *
+            FROM customer_notification_intents
+            WHERE notification_id = ?
+            """,
+            (notification_id,),
+        )
+        return dict(row) if row is not None else None
+
     def list_notification_intents(
         self,
         customer_id: str,
