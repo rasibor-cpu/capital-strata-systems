@@ -46,6 +46,7 @@ def main() -> int:
         "/api/v1/commercial-trial/cancel",
         "/api/v1/commercial-trial/status",
         "/api/v1/production-charging/readiness",
+        "/api/v1/commercialization-release/readiness",
         "/ws/v1/dashboard-state",
     }
     missing = required_routes - routes
