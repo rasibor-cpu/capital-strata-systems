@@ -20,6 +20,7 @@ def create_commercialization_release_router() -> APIRouter:
         agreement_version: str = Query(...),
         jurisdiction_code: str = Query(...),
         assessed_at: str = Query(...),
+        provider_id: str = Query(...),
         validation_id: str | None = Query(default=None),
     ) -> dict[str, Any]:
         assessment = CommercializationReleaseStatusService().assess(
@@ -29,6 +30,7 @@ def create_commercialization_release_router() -> APIRouter:
             agreement_version=agreement_version,
             jurisdiction_code=jurisdiction_code,
             assessed_at=assessed_at,
+            provider_id=provider_id,
             validation_id=validation_id,
         )
         return {
@@ -37,6 +39,7 @@ def create_commercialization_release_router() -> APIRouter:
                 assessment.live_fee_collection_release_allowed
             ),
             "charging_allowed": assessment.charging_allowed,
+            "payment_provider_ready": assessment.payment_provider_ready,
             "reason_codes": list(assessment.reason_codes),
             "validation_id": assessment.validation_id,
             "validated_commit_sha": assessment.validated_commit_sha,
