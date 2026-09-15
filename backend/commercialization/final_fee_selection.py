@@ -29,7 +29,12 @@ class FinalFeeBasis(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class CommercialFinalFeeSelection:
-    """COM-002W documentary maximum of two alternatives, never their sum.
+    """COM-002W documentary performance-fee selection for qualifying CSS gains.
+
+    ``platform_access_fee_amount`` remains contractual reference metadata, but
+    it must not override performance compensation for CSS-attributable trading
+    performance. Independent/customer-directed platform economics belong to a
+    separate charging path.
 
     policy_id preserves the canonical crystallization period identity.
     This record authorizes no invoice, receivable, payment, tax or GL posting.
@@ -70,11 +75,18 @@ class CommercialFinalFeeSelection:
                 raise ValueError(f"{name} cannot be negative")
         if not isinstance(self.selected_fee_basis, FinalFeeBasis):
             raise TypeError("selected_fee_basis must be FinalFeeBasis")
-        performance_wins = self.performance_fee_billing_currency_amount >= self.platform_access_fee_amount
-        basis = FinalFeeBasis.PERFORMANCE_COMPENSATION if performance_wins else FinalFeeBasis.PLATFORM_ACCESS
-        amount = max(self.platform_access_fee_amount, self.performance_fee_billing_currency_amount)
-        if self.selected_fee_amount != amount or self.selected_fee_basis != basis:
-            raise ValueError("selected fee must be the maximum candidate; performance wins ties")
+        if self.performance_fee_billing_currency_amount <= Decimal("0"):
+            raise ValueError(
+                "qualifying CSS performance must be positive before a fee can be selected"
+            )
+        if self.selected_fee_amount != self.performance_fee_billing_currency_amount:
+            raise ValueError(
+                "selected fee must equal performance compensation on qualifying CSS gains"
+            )
+        if self.selected_fee_basis != FinalFeeBasis.PERFORMANCE_COMPENSATION:
+            raise ValueError(
+                "CSS-attributable performance cannot be charged on a platform-minimum basis"
+            )
         if self.performance_fee_source_currency == self.billing_currency:
             if self.fx_conversion_id is not None:
                 raise ValueError("USD performance must bypass FX evidence")
@@ -149,7 +161,10 @@ def build_final_fee_selection(
         if fx_conversion.source_amount != source_amount:
             raise FinalFeeSelectionIneligibleError("FX source amount mismatch")
         normalized = fx_conversion.converted_amount
-    performance_wins = normalized >= access_terms.access_fee_amount
+    if normalized <= Decimal("0"):
+        raise FinalFeeSelectionIneligibleError(
+            "no CSS fee may be selected without positive qualifying economic gain"
+        )
     return CommercialFinalFeeSelection(
         fee_selection_id=fee_selection_id, access_terms_id=access_terms.access_terms_id,
         terms_id=performance.terms_id, policy_id=performance.policy_id,
@@ -159,9 +174,8 @@ def build_final_fee_selection(
         performance_fee_source_currency=performance.currency,
         performance_fee_source_amount=source_amount,
         performance_fee_billing_currency_amount=normalized,
-        selected_fee_amount=max(access_terms.access_fee_amount, normalized),
-        selected_fee_basis=(FinalFeeBasis.PERFORMANCE_COMPENSATION if performance_wins
-                            else FinalFeeBasis.PLATFORM_ACCESS),
+        selected_fee_amount=normalized,
+        selected_fee_basis=FinalFeeBasis.PERFORMANCE_COMPENSATION,
         selected_at=selected_at, evidence_refs=evidence_refs,
         fx_conversion_id=fx_conversion.fx_conversion_id if fx_conversion else None,
     )
