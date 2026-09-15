@@ -2,6 +2,7 @@ from backend.commercialization.production_charging_gate import (
     ApprovalStatus,
     JurisdictionLegalReview,
     ProductionCommercializationCertification,
+    PaymentCollectionAuthorityApproval,
     assess_production_charging,
 )
 from backend.commercialization.trial_contract import (
@@ -36,6 +37,19 @@ def _legal(status=ApprovalStatus.APPROVED):
     )
 
 
+def _payment_authority(status=ApprovalStatus.APPROVED):
+    return PaymentCollectionAuthorityApproval(
+        authority_id="AUTH-1",
+        agreement_id="AGR-1",
+        agreement_version="v1",
+        jurisdiction_code="CA-ON",
+        status=status,
+        approved_at="2026-10-16T00:00:00Z",
+        authority_reference="payments:approval",
+        evidence_refs=REFS,
+    )
+
+
 def _cert(**changes):
     values = dict(
         certification_id="CERT-1",
@@ -62,7 +76,7 @@ def _assess(**changes):
         trial_assessment=_trial(),
         legal_review=_legal(),
         certification=_cert(),
-        payment_collection_authority_approved=True,
+        payment_authority=_payment_authority(),
     )
     values.update(changes)
     return assess_production_charging(**values)
@@ -113,7 +127,9 @@ def test_any_production_control_failure_blocks_charging():
 
 
 def test_payment_authority_is_independent_required_gate():
-    result = _assess(payment_collection_authority_approved=False)
+    result = _assess(
+        payment_authority=_payment_authority(ApprovalStatus.PENDING)
+    )
     assert result.allowed is False
     assert "PAYMENT_COLLECTION_AUTHORITY_NOT_APPROVED" in result.reason_codes
 
