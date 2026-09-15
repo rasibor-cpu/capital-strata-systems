@@ -9,6 +9,8 @@ declared commercially complete while any BLOCKER remains open.
 
 Status: OPEN — RELEASE BLOCKER
 
+Technical foundation implemented on `css-costing-improvements-2`: versioned agreement snapshot, immutable trial enrollment, exact trial expiry, immutable cancellation evidence, fail-closed persisted conversion assessment, and no payment/money-movement authority. Final contract drafting, jurisdiction-specific legal review, customer UX acceptance flow, and production certification remain outstanding.
+
 Before any production charging is enabled, CSS must have a jurisdictionally
 reviewed customer agreement that clearly and prominently states:
 
@@ -67,7 +69,7 @@ This disclosure must not be hidden solely in linked terms or fine print.
 
 ## BLOCKER 2 — Commercial Accounting / Costing Integrity
 
-Status: IN PROGRESS
+Status: IMPLEMENTED IN BRANCH — VALIDATION / CERTIFICATION PENDING
 
 - CSS-attributable performance fees use qualifying new economic gain only.
 - Prior CSS-attributable losses must be recovered before fresh gain is
@@ -81,7 +83,7 @@ Status: IN PROGRESS
 
 ## BLOCKER 3 — Customer Profitability Transparency
 
-Status: IN PROGRESS
+Status: IMPLEMENTED IN BRANCH — VALIDATION / CERTIFICATION PENDING
 
 Customer surfaces must separately show:
 
