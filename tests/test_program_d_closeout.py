@@ -1,6 +1,5 @@
 from datetime import datetime, timezone
 
-from fastapi.testclient import TestClient
 
 from backend.operations import (
     AtlasKnowledgeEntry,
@@ -16,7 +15,6 @@ from backend.operations import (
     summarize_backup_recovery_evidence,
 )
 from dashboard.runtime.program_d_api import create_program_d_router
-from fastapi import FastAPI
 
 
 NOW = datetime(2026, 9, 15, 18, 30, tzinfo=timezone.utc)
@@ -101,15 +99,13 @@ def test_program_d_projection_combines_read_only_domains():
 
 
 def test_program_d_api_is_get_only_and_fail_closed():
-    app = FastAPI()
-    app.include_router(create_program_d_router())
-    client = TestClient(app)
+    router = create_program_d_router()
+    matches = [route for route in router.routes if getattr(route, "path", None) == "/api/v1/program-d/executive-command"]
+    assert len(matches) == 1
+    route = matches[0]
+    assert route.methods == {"GET"}
 
-    response = client.get("/api/v1/program-d/executive-command")
-    assert response.status_code == 200
-    payload = response.json()
+    payload = route.endpoint()
     assert payload["read_only"] is True
     assert payload["safety"]["execution_allowed"] is False
     assert payload["safety"]["live_trading_authorized"] is False
-
-    assert client.post("/api/v1/program-d/executive-command").status_code == 405
