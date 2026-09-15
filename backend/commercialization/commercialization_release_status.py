@@ -6,6 +6,9 @@ from typing import Tuple
 from backend.commercialization.production_charging_gate import (
     ProductionChargingAssessment,
 )
+from backend.commercialization.payment_collection_provider import (
+    PaymentCollectionPreflight,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +48,7 @@ class CommercializationReleaseAssessment:
     validation_id: str | None
     validated_commit_sha: str | None
     charging_allowed: bool
+    payment_provider_ready: bool
 
     @property
     def live_fee_collection_release_allowed(self) -> bool:
@@ -63,6 +67,7 @@ def assess_commercialization_release(
     *,
     technical_validation: CommercializationTechnicalValidation | None,
     charging_assessment: ProductionChargingAssessment,
+    payment_preflight: PaymentCollectionPreflight | None,
 ) -> CommercializationReleaseAssessment:
     reasons: list[str] = []
 
@@ -92,6 +97,21 @@ def assess_commercialization_release(
             for code in charging_assessment.reason_codes
         )
 
+    if payment_preflight is None:
+        reasons.append("PAYMENT_PROVIDER_PREFLIGHT_MISSING")
+        payment_provider_ready = False
+    elif not isinstance(payment_preflight, PaymentCollectionPreflight):
+        raise TypeError(
+            "payment_preflight must be PaymentCollectionPreflight or None"
+        )
+    else:
+        payment_provider_ready = payment_preflight.allowed
+        if not payment_preflight.allowed:
+            reasons.extend(
+                f"PAYMENT_PREFLIGHT:{code}"
+                for code in payment_preflight.reason_codes
+            )
+
     return CommercializationReleaseAssessment(
         production_ready=not reasons,
         reason_codes=tuple(dict.fromkeys(reasons)),
@@ -106,4 +126,5 @@ def assess_commercialization_release(
             else None
         ),
         charging_allowed=charging_assessment.allowed,
+        payment_provider_ready=payment_provider_ready,
     )
