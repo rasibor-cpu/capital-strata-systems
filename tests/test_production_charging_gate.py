@@ -138,3 +138,17 @@ def test_contract_acceptance_is_required():
     result = _assess(contract_accepted=False)
     assert result.allowed is False
     assert "CONTRACT_NOT_ACCEPTED" in result.reason_codes
+
+
+def test_missing_approval_evidence_fails_closed():
+    result = _assess(
+        legal_review=None,
+        certification=None,
+        payment_authority=None,
+        trial_assessment=None,
+    )
+    assert result.allowed is False
+    assert "LEGAL_REVIEW_MISSING" in result.reason_codes
+    assert "PRODUCTION_CERTIFICATION_MISSING" in result.reason_codes
+    assert "PAYMENT_COLLECTION_AUTHORITY_MISSING" in result.reason_codes
+    assert "TRIAL_ASSESSMENT_MISSING" in result.reason_codes
