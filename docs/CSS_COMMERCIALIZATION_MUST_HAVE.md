@@ -113,7 +113,7 @@ No production release may enable fee debit, broker withdrawal, automatic payment
 
 ## BLOCKER 5 — Production-like UAT & Launch Operations
 
-Status: TECHNICAL FRAMEWORK IMPLEMENTED — REAL EVIDENCE RUNS PENDING
+Status: INTERNAL TOOLING IMPLEMENTED — REAL PRODUCTION-LIKE EVIDENCE / EXTERNAL APPROVALS PENDING
 
 Commercial launch requires successful evidence for every mandatory production-like UAT scenario:
 
@@ -141,9 +141,35 @@ Launch operations must also maintain:
 
 The launch dossier requires approved evidence for the customer agreement, jurisdiction legal review, technical validation, security certification, reconciliation certification, payment-provider/collection authority, production UAT, rollback plan, and owner sign-off.
 
+A dedicated commercialization-UAT CI workflow now exercises the core trial, attribution, loss-recovery, independent-charge, FX, correction/reversal, payment-observation, security, and charging-gate test families. This automated evidence does not replace production-like environment UAT.
+
+Customer notification delivery is provider-gated and disabled by default. CSS exposes a read-only notification delivery preflight but no send endpoint until a provider/channel is separately approved.
+
+The canonical launch dossier can be exported through a read-only API and compared against the required evidence categories.
+
 ## Release-status evidence
 
 CSS now has an evidence-based commercialization release assessment. The release status requires an immutable technical-validation record plus a successful canonical production-charging assessment. The read-only `/api/v1/commercialization-release/readiness` surface reports explicit blocker codes and never grants trading or broker execution authority.
+
+## External evidence still required
+
+The remaining blockers cannot be truthfully self-approved by the application:
+
+- jurisdiction-specific counsel/regulatory approval for the exact customer
+  agreement and each service mode offered;
+- final approval of the independent/customer-directed platform-charge policy;
+- production security/operations certification based on real environment
+  evidence, including restore and rollback tests;
+- selection/contracting/configuration of a live payment provider and approved
+  collection authority;
+- approval of jurisdiction-specific customer notification policies and a live
+  delivery provider;
+- production-like UAT evidence for all mandatory scenarios;
+- reconciliation certification against the selected provider/environment; and
+- authorized owner/release sign-off.
+
+Until these records exist and are approved, the system remains fail-closed for
+commercial release and live collection.
 
 ## Release rule
 
