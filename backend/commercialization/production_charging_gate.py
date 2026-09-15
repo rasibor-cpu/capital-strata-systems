@@ -8,6 +8,9 @@ from backend.commercialization.trial_contract import (
     TrialConversionAssessment,
     TrialConversionStatus,
 )
+from backend.commercialization.production_security_certification import (
+    ProductionSecurityOperationalCertification,
+)
 
 
 class ProductionChargingGateError(ValueError):
@@ -153,6 +156,7 @@ def assess_production_charging(
     trial_assessment: TrialConversionAssessment | None,
     legal_review: JurisdictionLegalReview | None,
     certification: ProductionCommercializationCertification | None,
+    security_certification: ProductionSecurityOperationalCertification | None,
     payment_authority: PaymentCollectionAuthorityApproval | None,
 ) -> ProductionChargingAssessment:
     """Conjunctive fail-closed production charging gate.
@@ -208,6 +212,19 @@ def assess_production_charging(
             reasons.append("SECURITY_RELEASE_BLOCKERS_ACTIVE")
         if not certification.charging_controls_verified:
             reasons.append("CHARGING_CONTROLS_NOT_VERIFIED")
+
+    if security_certification is None:
+        reasons.append("SECURITY_OPERATIONAL_CERTIFICATION_MISSING")
+    elif not isinstance(
+        security_certification,
+        ProductionSecurityOperationalCertification,
+    ):
+        raise TypeError(
+            "security_certification must be "
+            "ProductionSecurityOperationalCertification or None"
+        )
+    elif not security_certification.production_security_ready:
+        reasons.append("SECURITY_OPERATIONAL_CERTIFICATION_NOT_READY")
 
     if payment_authority is None:
         reasons.append("PAYMENT_COLLECTION_AUTHORITY_MISSING")
