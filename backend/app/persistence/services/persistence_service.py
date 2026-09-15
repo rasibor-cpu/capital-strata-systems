@@ -85,6 +85,8 @@ from backend.app.persistence.repositories.independent_trade_economics_repository
 from backend.app.persistence.repositories.commercialization_technical_validation_repository import CommercializationTechnicalValidationRepository
 from backend.app.persistence.repositories.commercial_policy_approval_repository import CommercialPolicyApprovalRepository
 from backend.app.persistence.repositories.production_charging_approval_repository import ProductionChargingApprovalRepository
+from backend.app.persistence.repositories.commercialization_uat_repository import CommercializationUatRepository
+from backend.app.persistence.repositories.launch_operations_repository import LaunchOperationsRepository
 from backend.app.persistence.migrations.runner import run_migrations
 
 
@@ -124,6 +126,8 @@ class PersistenceService:
         self.commercialization_technical_validations = CommercializationTechnicalValidationRepository()
         self.commercial_policy_approvals = CommercialPolicyApprovalRepository()
         self.production_charging_approvals = ProductionChargingApprovalRepository()
+        self.commercialization_uat = CommercializationUatRepository()
+        self.launch_operations = LaunchOperationsRepository()
         self.shadow_compensation_entitlements = (
             ShadowCompensationEntitlementRepository()
         )
@@ -181,6 +185,8 @@ class PersistenceService:
                 "commercialization_technical_validations": True,
                 "commercial_policy_approvals": True,
                 "production_charging_approvals": True,
+                "commercialization_uat": True,
+                "launch_operations": True,
                 "shadow_compensation_entitlements": True,
                 "performance_compensation_lifecycle_policies": True,
                 "crystallization_assessments": True,
