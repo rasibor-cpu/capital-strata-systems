@@ -5,6 +5,9 @@ from backend.commercialization.commercialization_release_status import (
 from backend.commercialization.production_charging_gate import (
     ProductionChargingAssessment,
 )
+from backend.commercialization.payment_collection_provider import (
+    PaymentCollectionPreflight,
+)
 
 
 REFS = ("ci:run",)
@@ -35,10 +38,19 @@ def _charging(allowed=True, reasons=()):
     )
 
 
+def _preflight(allowed=True, reasons=()):
+    return PaymentCollectionPreflight(
+        allowed=allowed,
+        reason_codes=tuple(reasons),
+        provider_id="PROVIDER-1",
+    )
+
+
 def test_release_requires_both_technical_validation_and_charging_gate():
     result = assess_commercialization_release(
         technical_validation=_validation(),
         charging_assessment=_charging(),
+        payment_preflight=_preflight(),
     )
     assert result.production_ready is True
     assert result.live_fee_collection_release_allowed is True
@@ -49,6 +61,7 @@ def test_missing_technical_validation_blocks_release():
     result = assess_commercialization_release(
         technical_validation=None,
         charging_assessment=_charging(),
+        payment_preflight=_preflight(),
     )
     assert result.production_ready is False
     assert "TECHNICAL_VALIDATION_MISSING" in result.reason_codes
@@ -61,6 +74,7 @@ def test_charging_blockers_are_preserved_in_release_reasons():
             False,
             ("LEGAL_REVIEW_MISSING", "PAYMENT_COLLECTION_AUTHORITY_MISSING"),
         ),
+        payment_preflight=_preflight(),
     )
     assert result.production_ready is False
     assert "CHARGING_GATE:LEGAL_REVIEW_MISSING" in result.reason_codes
@@ -74,6 +88,21 @@ def test_failed_ci_component_blocks_release():
     result = assess_commercialization_release(
         technical_validation=_validation(full_regression_passed=False),
         charging_assessment=_charging(),
+        payment_preflight=_preflight(),
     )
     assert result.production_ready is False
     assert "FULL_REGRESSION_NOT_PASSED" in result.reason_codes
+
+
+def test_payment_provider_preflight_is_required_for_release():
+    result = assess_commercialization_release(
+        technical_validation=_validation(),
+        charging_assessment=_charging(),
+        payment_preflight=_preflight(
+            False,
+            ("PAYMENT_PROVIDER_NOT_APPROVED",),
+        ),
+    )
+    assert result.production_ready is False
+    assert "PAYMENT_PREFLIGHT:PAYMENT_PROVIDER_NOT_APPROVED" in result.reason_codes
+    assert result.payment_provider_ready is False

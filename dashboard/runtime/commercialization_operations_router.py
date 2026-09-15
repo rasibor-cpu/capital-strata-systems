@@ -20,6 +20,7 @@ def create_commercialization_operations_router() -> APIRouter:
         agreement_version: str = Query(...),
         jurisdiction_code: str = Query(...),
         assessed_at: str = Query(...),
+        provider_id: str = Query(...),
         uat_run_id: str = Query(...),
         dossier_id: str = Query(...),
     ) -> dict[str, Any]:
@@ -30,6 +31,7 @@ def create_commercialization_operations_router() -> APIRouter:
             agreement_version=agreement_version,
             jurisdiction_code=jurisdiction_code,
             assessed_at=assessed_at,
+            provider_id=provider_id,
             uat_run_id=uat_run_id,
             dossier_id=dossier_id,
         )

@@ -7,6 +7,9 @@ from backend.app.persistence.services.persistence_service import PersistenceServ
 from backend.app.persistence.services.production_charging_assessment_service import (
     ProductionChargingAssessmentService,
 )
+from backend.app.persistence.services.payment_collection_preflight_service import (
+    PaymentCollectionPreflightService,
+)
 from backend.commercialization.commercialization_release_status import (
     CommercializationReleaseAssessment,
     CommercializationTechnicalValidation,
@@ -29,6 +32,7 @@ class CommercializationReleaseStatusService:
         agreement_version: str,
         jurisdiction_code: str,
         assessed_at: str,
+        provider_id: str,
         validation_id: str | None = None,
     ) -> CommercializationReleaseAssessment:
         repo = self._service.commercialization_technical_validations
@@ -64,7 +68,20 @@ class CommercializationReleaseStatusService:
             assessed_at=assessed_at,
         )
 
+        payment_preflight = PaymentCollectionPreflightService(
+            self._service
+        ).assess(
+            provider_id=provider_id,
+            customer_id=customer_id,
+            account_reference=account_reference,
+            agreement_id=agreement_id,
+            agreement_version=agreement_version,
+            jurisdiction_code=jurisdiction_code,
+            assessed_at=assessed_at,
+        )
+
         return assess_commercialization_release(
             technical_validation=validation,
             charging_assessment=charging,
+            payment_preflight=payment_preflight,
         )

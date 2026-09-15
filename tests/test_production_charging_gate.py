@@ -9,6 +9,10 @@ from backend.commercialization.trial_contract import (
     TrialConversionAssessment,
     TrialConversionStatus,
 )
+from backend.commercialization.production_security_certification import (
+    ProductionSecurityOperationalCertification,
+    SecurityOperationalApprovalStatus,
+)
 
 
 REFS = ("evidence:1",)
@@ -35,6 +39,28 @@ def _legal(status=ApprovalStatus.APPROVED):
         reviewer_reference="counsel:approval",
         evidence_refs=REFS,
     )
+
+
+def _security(**changes):
+    values = dict(
+        certification_id="SEC-1",
+        status=SecurityOperationalApprovalStatus.APPROVED,
+        certified_at="2026-10-14T00:00:00Z",
+        secrets_management_verified=True,
+        tls_transport_verified=True,
+        access_control_verified=True,
+        audit_logging_verified=True,
+        monitoring_alerting_verified=True,
+        backup_restore_tested=True,
+        rollback_tested=True,
+        reconciliation_verified=True,
+        incident_response_verified=True,
+        dependency_vulnerability_reviewed=True,
+        reviewer_reference="security:approval",
+        evidence_refs=REFS,
+    )
+    values.update(changes)
+    return ProductionSecurityOperationalCertification(**values)
 
 
 def _payment_authority(status=ApprovalStatus.APPROVED):
@@ -76,6 +102,7 @@ def _assess(**changes):
         trial_assessment=_trial(),
         legal_review=_legal(),
         certification=_cert(),
+        security_certification=_security(),
         payment_authority=_payment_authority(),
     )
     values.update(changes)
@@ -144,11 +171,21 @@ def test_missing_approval_evidence_fails_closed():
     result = _assess(
         legal_review=None,
         certification=None,
+        security_certification=None,
         payment_authority=None,
         trial_assessment=None,
     )
     assert result.allowed is False
     assert "LEGAL_REVIEW_MISSING" in result.reason_codes
     assert "PRODUCTION_CERTIFICATION_MISSING" in result.reason_codes
+    assert "SECURITY_OPERATIONAL_CERTIFICATION_MISSING" in result.reason_codes
     assert "PAYMENT_COLLECTION_AUTHORITY_MISSING" in result.reason_codes
     assert "TRIAL_ASSESSMENT_MISSING" in result.reason_codes
+
+
+def test_incomplete_structured_security_certification_blocks_charging():
+    result = _assess(
+        security_certification=_security(rollback_tested=False)
+    )
+    assert result.allowed is False
+    assert "SECURITY_OPERATIONAL_CERTIFICATION_NOT_READY" in result.reason_codes

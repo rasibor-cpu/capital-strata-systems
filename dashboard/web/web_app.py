@@ -18,6 +18,7 @@ from dashboard.runtime.trial_contract_router import create_trial_contract_router
 from dashboard.runtime.production_charging_router import create_production_charging_router
 from dashboard.runtime.commercialization_release_router import create_commercialization_release_router
 from dashboard.runtime.commercialization_operations_router import create_commercialization_operations_router
+from dashboard.runtime.payment_collection_preflight_router import create_payment_collection_preflight_router
 from dashboard.runtime.dashboard_state import DashboardState
 from dashboard.runtime.runtime_smoke_test import build_smoke_payloads
 from dashboard.runtime.ws_bridge import create_ws_router
@@ -49,6 +50,7 @@ def create_app(
     app.include_router(create_production_charging_router())
     app.include_router(create_commercialization_release_router())
     app.include_router(create_commercialization_operations_router())
+    app.include_router(create_payment_collection_preflight_router())
 
     @app.get("/", include_in_schema=False)
     async def index() -> RedirectResponse:
@@ -2278,6 +2280,7 @@ def _commercialization_operations_page() -> str:
       <label>Agreement <input id="ops-agreement-id" value="AGR-1"></label>
       <label>Version <input id="ops-agreement-version" value="v1"></label>
       <label>Jurisdiction <input id="ops-jurisdiction" value="CA-ON"></label>
+      <label>Payment Provider <input id="ops-provider-id" value="PAYMENTS-DISABLED"></label>
       <label>UAT Run <input id="ops-uat-run" value="UAT-1"></label>
       <label>Dossier <input id="ops-dossier-id" value="DOSSIER-1"></label>
       <button type="button" id="ops-refresh">Refresh Status</button>
@@ -2288,6 +2291,7 @@ def _commercialization_operations_page() -> str:
       <article><strong>UAT Complete</strong><span id="ops-uat-complete">NO</span></article>
       <article><strong>Dossier Complete</strong><span id="ops-dossier-complete">NO</span></article>
       <article><strong>Notifications</strong><span id="ops-notification-count">0</span></article>
+      <article><strong>Payment Provider Ready</strong><span id="ops-provider-ready">NO</span></article>
       <article><strong>Execution Authority</strong><span>NO</span></article>
       <article><strong>Money Movement</strong><span>NO</span></article>
     </section>
@@ -2352,6 +2356,7 @@ async function refreshCommercializationOperations() {
     agreement_version: document.getElementById("ops-agreement-version").value.trim(),
     jurisdiction_code: document.getElementById("ops-jurisdiction").value.trim(),
     assessed_at: opsNow(),
+    provider_id: document.getElementById("ops-provider-id").value.trim(),
     uat_run_id: document.getElementById("ops-uat-run").value.trim(),
     dossier_id: document.getElementById("ops-dossier-id").value.trim()
   });
@@ -2366,6 +2371,7 @@ async function refreshCommercializationOperations() {
   document.getElementById("ops-uat-complete").textContent = data.uat_complete ? "YES" : "NO";
   document.getElementById("ops-dossier-complete").textContent = data.launch_dossier_complete ? "YES" : "NO";
   document.getElementById("ops-notification-count").textContent = String(data.notification_intent_count || 0);
+  document.getElementById("ops-provider-ready").textContent = data.payment_provider_ready ? "YES" : "NO";
 
   const reasons = document.getElementById("ops-release-reasons");
   reasons.innerHTML = (data.release_reason_codes || []).length

@@ -33,9 +33,14 @@ def test_missing_technical_and_commercial_evidence_stays_blocked(monkeypatch):
             agreement_version="v1",
             jurisdiction_code="CA-ON",
             assessed_at="2026-10-05T00:00:00Z",
+            provider_id="MISSING-PROVIDER",
         )
         assert result.production_ready is False
         assert "TECHNICAL_VALIDATION_MISSING" in result.reason_codes
+        assert (
+            "PAYMENT_PREFLIGHT:PAYMENT_PROVIDER_CONFIGURATION_MISSING"
+            in result.reason_codes
+        )
         assert any(
             reason.startswith("CHARGING_GATE:")
             for reason in result.reason_codes
@@ -67,6 +72,7 @@ def test_stored_green_ci_removes_technical_blocker_but_not_legal_blockers(monkey
             agreement_version="v1",
             jurisdiction_code="CA-ON",
             assessed_at="2026-10-05T00:00:00Z",
+            provider_id="MISSING-PROVIDER",
         )
         assert result.production_ready is False
         assert result.validation_id == "VAL-1931"

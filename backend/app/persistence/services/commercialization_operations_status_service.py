@@ -36,6 +36,7 @@ class CommercializationOperationsStatusService:
         agreement_version: str,
         jurisdiction_code: str,
         assessed_at: str,
+        provider_id: str,
         uat_run_id: str,
         dossier_id: str,
     ) -> dict[str, Any]:
@@ -46,6 +47,7 @@ class CommercializationOperationsStatusService:
             agreement_version=agreement_version,
             jurisdiction_code=jurisdiction_code,
             assessed_at=assessed_at,
+            provider_id=provider_id,
         )
 
         uat_results = []
@@ -103,6 +105,7 @@ class CommercializationOperationsStatusService:
             "release_reason_codes": list(release.reason_codes),
             "validation_id": release.validation_id,
             "validated_commit_sha": release.validated_commit_sha,
+            "payment_provider_ready": release.payment_provider_ready,
             "uat_complete": uat.complete,
             "uat_missing_scenarios": [s.value for s in uat.missing_scenarios],
             "uat_failed_scenarios": [s.value for s in uat.failed_scenarios],

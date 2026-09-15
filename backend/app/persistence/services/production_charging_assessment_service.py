@@ -16,6 +16,10 @@ from backend.commercialization.production_charging_gate import (
     assess_production_charging,
 )
 from backend.commercialization.trial_contract import TrialContractError
+from backend.commercialization.production_security_certification import (
+    ProductionSecurityOperationalCertification,
+    SecurityOperationalApprovalStatus,
+)
 
 
 class ProductionChargingAssessmentService:
@@ -104,6 +108,47 @@ class ProductionChargingAssessmentService:
                 ),
             )
 
+        security_row = self._service.production_infrastructure.latest_security_certification()
+        security_certification = None
+        if security_row is not None:
+            security_certification = ProductionSecurityOperationalCertification(
+                certification_id=security_row["certification_id"],
+                status=SecurityOperationalApprovalStatus(security_row["status"]),
+                certified_at=security_row["certified_at"],
+                secrets_management_verified=bool(
+                    security_row["secrets_management_verified"]
+                ),
+                tls_transport_verified=bool(
+                    security_row["tls_transport_verified"]
+                ),
+                access_control_verified=bool(
+                    security_row["access_control_verified"]
+                ),
+                audit_logging_verified=bool(
+                    security_row["audit_logging_verified"]
+                ),
+                monitoring_alerting_verified=bool(
+                    security_row["monitoring_alerting_verified"]
+                ),
+                backup_restore_tested=bool(
+                    security_row["backup_restore_tested"]
+                ),
+                rollback_tested=bool(security_row["rollback_tested"]),
+                reconciliation_verified=bool(
+                    security_row["reconciliation_verified"]
+                ),
+                incident_response_verified=bool(
+                    security_row["incident_response_verified"]
+                ),
+                dependency_vulnerability_reviewed=bool(
+                    security_row["dependency_vulnerability_reviewed"]
+                ),
+                reviewer_reference=security_row["reviewer_reference"],
+                evidence_refs=tuple(
+                    json.loads(security_row["evidence_refs_json"])
+                ),
+            )
+
         authority_row = approvals.latest_payment_authority(
             jurisdiction_code,
             agreement_id,
@@ -132,5 +177,6 @@ class ProductionChargingAssessmentService:
             trial_assessment=trial_assessment,
             legal_review=legal_review,
             certification=certification,
+            security_certification=security_certification,
             payment_authority=payment_authority,
         )

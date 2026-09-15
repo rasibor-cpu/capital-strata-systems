@@ -16,6 +16,10 @@ from backend.commercialization.trial_contract import (
     CommercialAgreementSnapshot,
     TrialEnrollment,
 )
+from backend.commercialization.production_security_certification import (
+    ProductionSecurityOperationalCertification,
+    SecurityOperationalApprovalStatus,
+)
 
 
 REFS = ("evidence:1",)
@@ -101,6 +105,25 @@ def _seed_approvals(service):
             evidence_refs=REFS,
         )
     )
+    service.production_infrastructure.create_security_certification(
+        ProductionSecurityOperationalCertification(
+            certification_id="SEC-1",
+            status=SecurityOperationalApprovalStatus.APPROVED,
+            certified_at="2026-10-04T00:00:00Z",
+            secrets_management_verified=True,
+            tls_transport_verified=True,
+            access_control_verified=True,
+            audit_logging_verified=True,
+            monitoring_alerting_verified=True,
+            backup_restore_tested=True,
+            rollback_tested=True,
+            reconciliation_verified=True,
+            incident_response_verified=True,
+            dependency_vulnerability_reviewed=True,
+            reviewer_reference="security:1",
+            evidence_refs=REFS,
+        )
+    )
 
 
 def test_no_stored_approvals_means_charging_is_blocked(monkeypatch):
@@ -118,6 +141,7 @@ def test_no_stored_approvals_means_charging_is_blocked(monkeypatch):
         assert result.allowed is False
         assert "LEGAL_REVIEW_MISSING" in result.reason_codes
         assert "PRODUCTION_CERTIFICATION_MISSING" in result.reason_codes
+        assert "SECURITY_OPERATIONAL_CERTIFICATION_MISSING" in result.reason_codes
         assert "PAYMENT_COLLECTION_AUTHORITY_MISSING" in result.reason_codes
     finally:
         conn.close()
