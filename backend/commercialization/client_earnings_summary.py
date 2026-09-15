@@ -23,8 +23,9 @@ class ClientEarningsSummaryUnavailableError(ClientEarningsSummaryError):
 
 
 CLIENT_LANGUAGE_FEE_RULE = (
-    "CSS charges the higher of your platform minimum or your performance fee. "
-    "You never pay both."
+    "For CSS-attributable trading performance, your CSS charge is the agreed "
+    "performance fee on qualifying new economic gain after loss recovery. "
+    "A platform minimum does not override that amount."
 )
 
 CLIENT_LANGUAGE_FX_NOTE = (
@@ -146,19 +147,17 @@ class CommercialClientEarningsSummary:
                 if getattr(self, name) < 0:
                     raise ValueError(f"{name} cannot be negative")
 
-            winner = max(self.platform_access_fee_amount, self.performance_fee_billing_currency_amount)
-            if self.selected_fee_amount != winner:
+            if self.performance_fee_billing_currency_amount <= Decimal("0"):
                 raise ValueError(
-                    "selected_fee_amount must equal the higher of platform minimum or "
-                    "performance fee; CSS never charges both"
+                    "billable CSS-attributable performance must have a positive performance fee"
                 )
-            performance_wins = self.performance_fee_billing_currency_amount >= self.platform_access_fee_amount
-            expected_basis = (
-                FinalFeeBasis.PERFORMANCE_COMPENSATION if performance_wins else FinalFeeBasis.PLATFORM_ACCESS
-            )
-            if self.selected_fee_basis != expected_basis:
+            if self.selected_fee_amount != self.performance_fee_billing_currency_amount:
                 raise ValueError(
-                    "selected_fee_basis inconsistent with compared amounts (performance wins exact ties)"
+                    "selected_fee_amount must equal the performance fee on qualifying CSS gains"
+                )
+            if self.selected_fee_basis != FinalFeeBasis.PERFORMANCE_COMPENSATION:
+                raise ValueError(
+                    "CSS-attributable performance cannot use platform-minimum fee selection"
                 )
 
             if self.performance_currency == self.billing_currency:
@@ -286,10 +285,11 @@ class CommercialClientEarningsSummary:
                 "billing_currency": self.billing_currency,
             }
             final_charge = {
-                "platform_minimum_amount": str(self.platform_access_fee_amount),
+                "platform_access_reference_amount": str(self.platform_access_fee_amount),
                 "performance_fee_amount": str(self.performance_fee_billing_currency_amount),
                 "selected_fee_basis": self.selected_fee_basis.value,
                 "selected_fee_amount": str(self.selected_fee_amount),
+                "platform_minimum_overrides_performance_fee": False,
                 "customer_pays_both": False,
                 "client_language": self.fee_rule_language,
             }
