@@ -10,6 +10,7 @@ from dashboard.web.web_app import (
     _positions_page,
     _risk_governance_page,
     _trial_contract_page,
+    _commercialization_operations_page,
     create_app,
     demo_dashboard_state_provider,
 )
@@ -28,6 +29,7 @@ def main() -> int:
         "/positions",
         "/risk-governance",
         "/trial-contract",
+        "/commercialization-operations",
         "/health",
         "/api/v1/dashboard-state",
         "/api/v1/frontend-state",
@@ -46,6 +48,7 @@ def main() -> int:
         "/api/v1/commercial-trial/cancel",
         "/api/v1/commercial-trial/status",
         "/api/v1/production-charging/readiness",
+        "/api/v1/commercialization-operations/status",
         "/api/v1/commercialization-release/readiness",
         "/ws/v1/dashboard-state",
     }
@@ -201,6 +204,26 @@ def main() -> int:
         if expected not in trial_contract_markup:
             raise AssertionError(
                 f"Web trial contract markup missing: {expected}"
+            )
+
+    operations_markup = _commercialization_operations_page()
+    expected_operations_markup = [
+        "CSS Commercialization Operations",
+        "Commercialization Operations",
+        "Read-only launch control",
+        "Release Blockers",
+        "UAT Coverage",
+        "Launch Evidence Dossier",
+        "Jurisdiction Service Modes",
+        "Customer Notification Intents",
+        "No payment execution",
+        "No trading authority",
+        "/api/v1/commercialization-operations/status",
+    ]
+    for expected in expected_operations_markup:
+        if expected not in operations_markup:
+            raise AssertionError(
+                f"Commercialization operations markup missing: {expected}"
             )
 
     payload = get_frontend_payload(demo_dashboard_state_provider)
