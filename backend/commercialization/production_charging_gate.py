@@ -79,6 +79,35 @@ class ProductionCommercializationCertification:
 
 
 @dataclass(frozen=True, slots=True)
+class PaymentCollectionAuthorityApproval:
+    authority_id: str
+    agreement_id: str
+    agreement_version: str
+    jurisdiction_code: str
+    status: ApprovalStatus
+    approved_at: str
+    authority_reference: str
+    evidence_refs: Tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        for name in (
+            "authority_id",
+            "agreement_id",
+            "agreement_version",
+            "jurisdiction_code",
+            "approved_at",
+            "authority_reference",
+        ):
+            value = getattr(self, name)
+            if not value or value != value.strip():
+                raise ValueError(f"{name} is required and must be canonical")
+        if not isinstance(self.status, ApprovalStatus):
+            raise TypeError("status must be ApprovalStatus")
+        if not isinstance(self.evidence_refs, tuple) or not self.evidence_refs:
+            raise ValueError("payment authority requires immutable evidence refs")
+
+
+@dataclass(frozen=True, slots=True)
 class ProductionChargingAssessment:
     allowed: bool
     reason_codes: Tuple[str, ...]
@@ -124,7 +153,7 @@ def assess_production_charging(
     trial_assessment: TrialConversionAssessment,
     legal_review: JurisdictionLegalReview,
     certification: ProductionCommercializationCertification,
-    payment_collection_authority_approved: bool,
+    payment_authority: PaymentCollectionAuthorityApproval,
 ) -> ProductionChargingAssessment:
     """Conjunctive fail-closed production charging gate.
 
@@ -174,7 +203,15 @@ def assess_production_charging(
         if not certification.charging_controls_verified:
             reasons.append("CHARGING_CONTROLS_NOT_VERIFIED")
 
-    if not payment_collection_authority_approved:
+    if not isinstance(payment_authority, PaymentCollectionAuthorityApproval):
+        raise TypeError("payment_authority must be PaymentCollectionAuthorityApproval")
+    if (
+        payment_authority.agreement_id != agreement_id
+        or payment_authority.agreement_version != agreement_version
+        or payment_authority.jurisdiction_code != jurisdiction_code
+    ):
+        reasons.append("PAYMENT_AUTHORITY_SCOPE_MISMATCH")
+    elif payment_authority.status != ApprovalStatus.APPROVED:
         reasons.append("PAYMENT_COLLECTION_AUTHORITY_NOT_APPROVED")
 
     return ProductionChargingAssessment(
