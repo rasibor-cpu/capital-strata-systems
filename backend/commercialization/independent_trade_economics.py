@@ -37,6 +37,8 @@ class IndependentTradeEconomics:
     """
 
     trade_id: str
+    account_reference: str
+    calculation_timestamp: str
     attribution_class: AttributionClass
     realized_pnl: Decimal
     currency: str
@@ -48,6 +50,10 @@ class IndependentTradeEconomics:
     def __post_init__(self) -> None:
         if not self.trade_id or self.trade_id != self.trade_id.strip():
             raise ValueError("trade_id is required and must be canonical")
+        if not self.account_reference or self.account_reference != self.account_reference.strip():
+            raise ValueError("account_reference is required and must be canonical")
+        if not self.calculation_timestamp or self.calculation_timestamp != self.calculation_timestamp.strip():
+            raise ValueError("calculation_timestamp is required and must be canonical")
         if self.attribution_class not in {
             AttributionClass.CUSTOMER_DIRECTED,
             AttributionClass.CSS_MODIFIED,
@@ -120,6 +126,8 @@ class IndependentTradeEconomics:
 def build_independent_trade_economics(
     provenance: TradeProvenance,
     *,
+    account_reference: str,
+    calculation_timestamp: str,
     realized_pnl: Decimal,
     currency: str,
     platform_charge_rate: Decimal,
@@ -165,6 +173,8 @@ def build_independent_trade_economics(
 
     return IndependentTradeEconomics(
         trade_id=provenance.trade_id,
+        account_reference=account_reference,
+        calculation_timestamp=calculation_timestamp,
         attribution_class=provenance.attribution_class,
         realized_pnl=realized_pnl,
         currency=currency,
