@@ -17,6 +17,11 @@ from backend.commercialization.launch_evidence_dossier import (
     LaunchEvidenceCategory,
     LaunchEvidenceItem,
 )
+from backend.commercialization.notification_delivery_provider import (
+    NotificationChannel,
+    NotificationProviderConfiguration,
+    NotificationProviderStatus,
+)
 
 
 REFS = ("evidence:1",)
@@ -73,6 +78,23 @@ def test_launch_operations_evidence_persists(monkeypatch):
         )
         assert len(intents) == 1
         assert intents[0]["notification_type"] == "CANCELLATION_CONFIRMATION"
+
+        service.launch_operations.create_notification_provider_configuration(
+            NotificationProviderConfiguration(
+                provider_id="NOTIFY-1",
+                channel=NotificationChannel.EMAIL,
+                status=NotificationProviderStatus.DISABLED,
+                environment="production",
+                provider_account_reference=None,
+                approval_reference=None,
+                evidence_refs=REFS,
+            )
+        )
+        notify_provider = (
+            service.launch_operations
+            .get_notification_provider_configuration("NOTIFY-1")
+        )
+        assert notify_provider["status"] == "DISABLED"
 
         service.launch_operations.create_launch_evidence_item(
             "DOSSIER-1",
