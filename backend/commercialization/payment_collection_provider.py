@@ -98,6 +98,8 @@ def assess_payment_collection_preflight(
         )
     if provider.status != PaymentProviderStatus.APPROVED:
         reasons.append("PAYMENT_PROVIDER_NOT_APPROVED")
+    if provider.environment.lower() != "production":
+        reasons.append("PAYMENT_PROVIDER_NOT_PRODUCTION_ENVIRONMENT")
 
     return PaymentCollectionPreflight(
         allowed=not reasons,
