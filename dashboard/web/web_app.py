@@ -18,6 +18,7 @@ from dashboard.runtime.trial_contract_router import create_trial_contract_router
 from dashboard.runtime.production_charging_router import create_production_charging_router
 from dashboard.runtime.commercialization_release_router import create_commercialization_release_router
 from dashboard.runtime.commercialization_operations_router import create_commercialization_operations_router
+from dashboard.runtime.payment_collection_preflight_router import create_payment_collection_preflight_router
 from dashboard.runtime.dashboard_state import DashboardState
 from dashboard.runtime.runtime_smoke_test import build_smoke_payloads
 from dashboard.runtime.ws_bridge import create_ws_router
@@ -49,6 +50,7 @@ def create_app(
     app.include_router(create_production_charging_router())
     app.include_router(create_commercialization_release_router())
     app.include_router(create_commercialization_operations_router())
+    app.include_router(create_payment_collection_preflight_router())
 
     @app.get("/", include_in_schema=False)
     async def index() -> RedirectResponse:
