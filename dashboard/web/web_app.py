@@ -14,6 +14,7 @@ from dashboard.runtime.dashboard_hydration_coordinator import (
     DashboardHydrationCoordinator,
 )
 from dashboard.runtime.client_earnings_router import create_client_earnings_router
+from dashboard.runtime.trial_contract_router import create_trial_contract_router
 from dashboard.runtime.dashboard_state import DashboardState
 from dashboard.runtime.runtime_smoke_test import build_smoke_payloads
 from dashboard.runtime.ws_bridge import create_ws_router
@@ -41,6 +42,7 @@ def create_app(
     app.include_router(create_dashboard_state_router(provider))
     app.include_router(create_ws_router(provider))
     app.include_router(create_client_earnings_router())
+    app.include_router(create_trial_contract_router())
 
     @app.get("/", include_in_schema=False)
     async def index() -> RedirectResponse:
@@ -77,6 +79,10 @@ def create_app(
     @app.get("/billing", response_class=HTMLResponse)
     async def billing_view() -> HTMLResponse:
         return HTMLResponse(_billing_page())
+
+    @app.get("/trial-contract", response_class=HTMLResponse)
+    async def trial_contract_view() -> HTMLResponse:
+        return HTMLResponse(_trial_contract_page())
 
     @app.get("/api/v1/margin-snapshot")
     async def margin_api() -> dict[str, Any]:
@@ -146,6 +152,7 @@ def _app_nav(active: str) -> str:
     
         ("margin", "/margin", "Margin"),
         ("billing", "/billing", "Billing"),
+        ("trial_contract", "/trial-contract", "Trial & Contract"),
     ]
 
     return "\n".join(
@@ -2042,6 +2049,189 @@ document.querySelector("[data-refresh-billing]").addEventListener("click", refre
 """
 
 
+
+def _trial_contract_page() -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111820">
+  <title>CSS Trial &amp; Customer Agreement</title>
+  <style>{_css()}</style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">CSS</div>
+        <div>
+          <p class="eyebrow">Capital Strata Systems</p>
+          <h1>Trial &amp; Customer Agreement</h1>
+        </div>
+      </div>
+      <section class="status-strip">
+        <span>Pre-production legal workflow</span>
+        <span>No payment execution</span>
+        <span>No trading authority</span>
+      </section>
+    </header>
+    {_app_nav("trial_contract")}
+
+    <section class="control-row">
+      <label>Agreement ID <input id="trial-agreement-id" value="AGR-1"></label>
+      <label>Version <input id="trial-agreement-version" value="v1"></label>
+      <button type="button" id="trial-load-agreement">Load Agreement</button>
+    </section>
+
+    <section class="dashboard-grid">
+      <article class="panel wide">
+        <div class="panel-head">
+          <h2>Commercial Terms Presented to Customer</h2>
+          <span id="trial-jurisdiction">Not loaded</span>
+        </div>
+        <div class="kv-grid two">
+          <div><strong>Pricing Plan</strong><span id="trial-pricing-plan">--</span></div>
+          <div><strong>Trial Duration</strong><span id="trial-duration">--</span></div>
+          <div><strong>Effective From</strong><span id="trial-effective-from">--</span></div>
+          <div><strong>Agreement Version</strong><span id="trial-version-display">--</span></div>
+        </div>
+        <p class="panel-note" id="trial-pricing-summary">Load the governing agreement.</p>
+        <p class="panel-note" id="trial-conversion-disclosure">Automatic conversion disclosure will appear here.</p>
+      </article>
+
+      <article class="panel wide">
+        <div class="panel-head">
+          <h2>Affirmative Acceptance</h2>
+          <span>Both confirmations are mandatory</span>
+        </div>
+        <div class="control-row">
+          <label>Customer ID <input id="trial-customer-id" type="text"></label>
+          <label>Account Reference <input id="trial-account-reference" type="text"></label>
+        </div>
+        <label><input id="trial-affirm-terms" type="checkbox"> I have reviewed and accept the exact agreement version and pricing shown above.</label>
+        <br>
+        <label><input id="trial-affirm-conversion" type="checkbox"> I understand the stated trial period and that paid CSS service begins automatically if I do not cancel before the exact trial expiry.</label>
+        <div class="control-row">
+          <button type="button" id="trial-enroll">Start Trial</button>
+          <button type="button" id="trial-cancel">Cancel Trial</button>
+          <button type="button" id="trial-status">Check Status</button>
+        </div>
+        <p class="panel-note" id="trial-result">No enrollment action taken.</p>
+        <p class="panel-note">This interface records contractual evidence only. It cannot debit funds, start payment execution, or authorize trades.</p>
+      </article>
+    </section>
+  </main>
+  <script>{_trial_contract_script()}</script>
+</body>
+</html>"""
+
+
+def _trial_contract_script() -> str:
+    return """
+let governingAgreement = null;
+
+function trialNow() {
+  return new Date().toISOString().replace(".000Z", "Z");
+}
+
+async function loadTrialAgreement() {
+  const agreementId = document.getElementById("trial-agreement-id").value.trim();
+  const version = document.getElementById("trial-agreement-version").value.trim();
+  const params = new URLSearchParams({agreement_id: agreementId, agreement_version: version});
+  const response = await fetch(`/api/v1/commercial-trial/agreement?${params.toString()}`, {cache: "no-store"});
+  const result = document.getElementById("trial-result");
+  if (!response.ok) {
+    governingAgreement = null;
+    result.textContent = "Governing agreement is unavailable.";
+    return;
+  }
+  governingAgreement = await response.json();
+  document.getElementById("trial-jurisdiction").textContent = `Jurisdiction ${governingAgreement.jurisdiction_code}`;
+  document.getElementById("trial-pricing-plan").textContent = governingAgreement.pricing_plan_id;
+  document.getElementById("trial-duration").textContent = `${governingAgreement.trial_duration_days} days`;
+  document.getElementById("trial-effective-from").textContent = governingAgreement.effective_from;
+  document.getElementById("trial-version-display").textContent = governingAgreement.agreement_version;
+  document.getElementById("trial-pricing-summary").textContent = governingAgreement.pricing_summary;
+  document.getElementById("trial-conversion-disclosure").textContent = governingAgreement.automatic_conversion_disclosure;
+  result.textContent = "Agreement loaded. Review the exact terms before accepting.";
+}
+
+async function enrollTrial() {
+  const result = document.getElementById("trial-result");
+  if (!governingAgreement) {
+    result.textContent = "Load the governing agreement first.";
+    return;
+  }
+  if (!document.getElementById("trial-affirm-terms").checked ||
+      !document.getElementById("trial-affirm-conversion").checked) {
+    result.textContent = "Both affirmative confirmations are required.";
+    return;
+  }
+  const payload = {
+    customer_id: document.getElementById("trial-customer-id").value.trim(),
+    account_reference: document.getElementById("trial-account-reference").value.trim(),
+    agreement_id: governingAgreement.agreement_id,
+    agreement_version: governingAgreement.agreement_version,
+    accepted_at: trialNow(),
+    displayed_pricing_summary: governingAgreement.pricing_summary,
+    displayed_conversion_disclosure: governingAgreement.automatic_conversion_disclosure,
+    acceptance_audit_reference: `web-accept:${Date.now()}`,
+    evidence_refs: governingAgreement.evidence_refs,
+    affirm_terms_acceptance: true,
+    affirm_automatic_conversion_disclosure: true
+  };
+  const response = await fetch("/api/v1/commercial-trial/enroll", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(payload)
+  });
+  const data = await response.json();
+  result.textContent = response.ok
+    ? `Trial accepted. Exact expiry: ${data.trial_expires_at}. No payment has been executed.`
+    : `Enrollment blocked: ${data.detail || "validation failed"}`;
+}
+
+async function cancelTrial() {
+  const payload = {
+    customer_id: document.getElementById("trial-customer-id").value.trim(),
+    account_reference: document.getElementById("trial-account-reference").value.trim(),
+    canceled_at: trialNow(),
+    cancellation_audit_reference: `web-cancel:${Date.now()}`,
+    evidence_refs: ["customer:web-cancellation"]
+  };
+  const response = await fetch("/api/v1/commercial-trial/cancel", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(payload)
+  });
+  const data = await response.json();
+  document.getElementById("trial-result").textContent = response.ok
+    ? `Cancellation recorded at ${data.canceled_at}. Conversion is blocked if cancellation occurred before expiry.`
+    : `Cancellation blocked: ${data.detail || "validation failed"}`;
+}
+
+async function checkTrialStatus() {
+  if (!governingAgreement) return;
+  const params = new URLSearchParams({
+    customer_id: document.getElementById("trial-customer-id").value.trim(),
+    account_reference: document.getElementById("trial-account-reference").value.trim(),
+    agreement_id: governingAgreement.agreement_id,
+    agreement_version: governingAgreement.agreement_version,
+    assessed_at: trialNow()
+  });
+  const response = await fetch(`/api/v1/commercial-trial/status?${params.toString()}`, {cache: "no-store"});
+  const data = await response.json();
+  document.getElementById("trial-result").textContent = response.ok
+    ? `Status: ${data.status}. ${data.reason}. Payment execution remains disabled.`
+    : `Status unavailable: ${data.detail || "validation failed"}`;
+}
+
+document.getElementById("trial-load-agreement").addEventListener("click", loadTrialAgreement);
+document.getElementById("trial-enroll").addEventListener("click", enrollTrial);
+document.getElementById("trial-cancel").addEventListener("click", cancelTrial);
+document.getElementById("trial-status").addEventListener("click", checkTrialStatus);
+"""
 def _css() -> str:
     return """
 :root {
