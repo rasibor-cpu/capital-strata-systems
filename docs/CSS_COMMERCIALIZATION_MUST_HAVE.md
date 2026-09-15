@@ -83,7 +83,7 @@ Status: IMPLEMENTED AND FULL-REGRESSION VALIDATED — PRODUCTION CERTIFICATION P
 
 ## BLOCKER 3 — Customer Profitability Transparency
 
-Status: IMPLEMENTED IN BRANCH — VALIDATION / CERTIFICATION PENDING
+Status: IMPLEMENTED AND FULL-REGRESSION VALIDATED — PRODUCTION CERTIFICATION PENDING
 
 Customer surfaces must separately show:
 
@@ -108,6 +108,10 @@ A conjunctive fail-closed production charging gate is implemented. It requires c
 Missing, pending, rejected, expired, stale, or scope-mismatched evidence blocks charging. The readiness API is GET/read-only and does not initiate payment.
 
 No production release may enable fee debit, broker withdrawal, automatic payment execution, settlement, receivable collection, or other customer-funds movement until the remaining external approvals and production certification are complete.
+
+## Release-status evidence
+
+CSS now has an evidence-based commercialization release assessment. The release status requires an immutable technical-validation record plus a successful canonical production-charging assessment. The read-only `/api/v1/commercialization-release/readiness` surface reports explicit blocker codes and never grants trading or broker execution authority.
 
 ## Release rule
 
