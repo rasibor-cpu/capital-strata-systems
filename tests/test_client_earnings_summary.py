@@ -203,20 +203,17 @@ def summarize(service):
     return ClientEarningsSummaryService(service).build_summary("POLICY-A", START, END)
 
 
-def test_zero_performance_platform_minimum_applies(service):
-    build_chain(service, trades=[("T1", Decimal("0"))])
-    summary = summarize(service)
-    assert summary.new_economic_gain == Decimal("0")
-    assert summary.selected_fee_basis is FinalFeeBasis.PLATFORM_ACCESS
-    assert summary.selected_fee_amount == ACCESS_FEE
+def test_zero_performance_cannot_select_css_fee(service):
+    with pytest.raises(Exception, match="positive qualifying economic gain"):
+        build_chain(service, trades=[("T1", Decimal("0"))])
 
 
-def test_low_performance_below_minimum_platform_minimum_applies(service):
-    build_chain(service, trades=[("T1", Decimal("100"))])  # entitlement = 100*0.20 = 20 < 29.99
+def test_low_positive_performance_uses_performance_fee_not_platform_minimum(service):
+    build_chain(service, trades=[("T1", Decimal("100"))])  # entitlement = 100*0.20 = 20
     summary = summarize(service)
     assert summary.performance_fee_billing_currency_amount == Decimal("20")
-    assert summary.selected_fee_basis is FinalFeeBasis.PLATFORM_ACCESS
-    assert summary.selected_fee_amount == ACCESS_FEE
+    assert summary.selected_fee_basis is FinalFeeBasis.PERFORMANCE_COMPENSATION
+    assert summary.selected_fee_amount == Decimal("20")
 
 
 def test_exact_tie_performance_fee_applies(service):
@@ -257,14 +254,9 @@ def test_prior_loss_recovery_gross_gain_exists_but_new_gain_lower(service):
     assert summary.new_economic_gain == Decimal("30")  # only the excess above prior HWM
 
 
-def test_full_loss_recovery_zero_new_economic_gain(service):
-    build_chain(service, trades=[("T1", Decimal("-50")), ("T2", Decimal("50"))])
-    summary = summarize(service)
-    assert summary.realized_attributable_profit == Decimal("0")
-    assert summary.recovered_loss == Decimal("50")
-    assert summary.new_economic_gain == Decimal("0")
-    assert summary.selected_fee_basis is FinalFeeBasis.PLATFORM_ACCESS
-    assert summary.selected_fee_amount == ACCESS_FEE
+def test_full_loss_recovery_zero_new_economic_gain_cannot_select_css_fee(service):
+    with pytest.raises(Exception, match="positive qualifying economic gain"):
+        build_chain(service, trades=[("T1", Decimal("-50")), ("T2", Decimal("50"))])
 
 
 def test_blocked_not_ready_period_has_no_fee_fields(service):
@@ -314,9 +306,7 @@ def test_no_additive_charging(service):
     build_chain(service, trades=[("T1", Decimal("750"))])
     summary = summarize(service)
     assert summary.selected_fee_amount != summary.platform_access_fee_amount + summary.performance_fee_billing_currency_amount
-    assert summary.selected_fee_amount == max(
-        summary.platform_access_fee_amount, summary.performance_fee_billing_currency_amount,
-    )
+    assert summary.selected_fee_amount == summary.performance_fee_billing_currency_amount
 
 
 def test_exact_decimal_preservation(service):
@@ -327,14 +317,14 @@ def test_exact_decimal_preservation(service):
 
 
 def test_correct_period_reported(service):
-    build_chain(service, trades=[("T1", Decimal("0"))])
+    build_chain(service, trades=[("T1", Decimal("100"))])
     summary = summarize(service)
     assert summary.billing_period_start == START
     assert summary.billing_period_end == END
 
 
 def test_client_language_fee_rule_present(service):
-    build_chain(service, trades=[("T1", Decimal("0"))])
+    build_chain(service, trades=[("T1", Decimal("100"))])
     summary = summarize(service)
     assert summary.fee_rule_language == CLIENT_LANGUAGE_FEE_RULE
     explanation = summary.explain()
@@ -343,7 +333,7 @@ def test_client_language_fee_rule_present(service):
 
 
 def test_projection_is_immutable(service):
-    build_chain(service, trades=[("T1", Decimal("0"))])
+    build_chain(service, trades=[("T1", Decimal("100"))])
     summary = summarize(service)
     with pytest.raises(FrozenInstanceError):
         summary.selected_fee_amount = Decimal("1")
@@ -361,14 +351,14 @@ def test_scenario_a_cad_150_client_example(service):
 
 
 def test_scenario_b_cad_20_client_example(service):
-    # Qualifying new gain = CAD 20 (crystallizable amount): gross gain 100 CAD * 0.20 = 20 CAD,
-    # normalized at 0.75 -> 15 USD, below the USD 29.99 platform minimum.
+    # Qualifying new gain = CAD 20; normalized performance fee = USD 15.
+    # The USD 29.99 platform reference must not override it.
     build_chain(service, trades=[("T1", Decimal("100"))], currency="CAD", fx_rate=Decimal("0.75"))
     summary = summarize(service)
     assert summary.performance_fee_source_amount == Decimal("20")
     assert summary.performance_fee_billing_currency_amount == Decimal("15")
-    assert summary.selected_fee_basis is FinalFeeBasis.PLATFORM_ACCESS
-    assert summary.selected_fee_amount == ACCESS_FEE
+    assert summary.selected_fee_basis is FinalFeeBasis.PERFORMANCE_COMPENSATION
+    assert summary.selected_fee_amount == Decimal("15")
 
 
 def test_history_is_built_only_from_canonical_persisted_periods(service):
@@ -379,7 +369,7 @@ def test_history_is_built_only_from_canonical_persisted_periods(service):
     assert history[0].policy_id == "POLICY-A"
     assert history[0].billing_period_start == START
     assert history[0].billing_period_end == END
-    assert history[0].selected_fee_amount == ACCESS_FEE
+    assert history[0].selected_fee_amount == Decimal("20")
     assert history[0].invoice_id is None
     assert history[0].receivable_id is None
 
