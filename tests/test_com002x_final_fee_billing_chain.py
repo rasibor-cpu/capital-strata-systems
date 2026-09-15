@@ -227,10 +227,13 @@ def test_inconsistent_selection_snapshot_rejected_before_billable(service, field
 
 def test_inconsistent_selected_amount_rejected(service):
     selection, _ = upstream(service)
-    forged = replace(selection, platform_access_fee_amount=Decimal("40"), selected_fee_amount=Decimal("40"))
-    with pytest.raises(ValueError, match="amount"):
-        service.settlement_readiness.create_readiness(build_final_fee_settlement_readiness(
-            forged, SettlementReadinessStatus.READY, AT, REFS))
+    with pytest.raises(ValueError, match="performance compensation"):
+        replace(
+            selection,
+            platform_access_fee_amount=Decimal("40"),
+            selected_fee_amount=Decimal("40"),
+        )
+    assert service.settlement_readiness.list_all() == []
 
 
 @pytest.mark.parametrize("field,value", [("currency", "CAD"), ("terms_id", "OTHER"),
