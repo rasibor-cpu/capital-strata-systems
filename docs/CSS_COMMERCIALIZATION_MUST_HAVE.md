@@ -109,6 +109,36 @@ Missing, pending, rejected, expired, stale, or scope-mismatched evidence blocks 
 
 No production release may enable fee debit, broker withdrawal, automatic payment execution, settlement, receivable collection, or other customer-funds movement until the remaining external approvals and production certification are complete.
 
+## BLOCKER 5 — Production-like UAT & Launch Operations
+
+Status: TECHNICAL FRAMEWORK IMPLEMENTED — REAL EVIDENCE RUNS PENDING
+
+Commercial launch requires successful evidence for every mandatory production-like UAT scenario:
+
+- trial signup;
+- pre-expiry cancellation;
+- automatic trial conversion;
+- CSS loss period;
+- loss-recovery-only period;
+- fresh-gain performance fee;
+- independent/customer-directed activity;
+- FX conversion;
+- correction/reversal;
+- dispute/refund handling; and
+- customer-statement reconciliation.
+
+Missing, failed, pending, or blocked UAT scenarios prevent UAT completion.
+
+Launch operations must also maintain:
+
+- jurisdiction-approved customer-notification policies;
+- immutable notification intents;
+- jurisdiction/service-mode approval status;
+- launch evidence dossier completeness; and
+- a read-only commercialization operations console exposing blockers.
+
+The launch dossier requires approved evidence for the customer agreement, jurisdiction legal review, technical validation, security certification, reconciliation certification, payment-provider/collection authority, production UAT, rollback plan, and owner sign-off.
+
 ## Release-status evidence
 
 CSS now has an evidence-based commercialization release assessment. The release status requires an immutable technical-validation record plus a successful canonical production-charging assessment. The read-only `/api/v1/commercialization-release/readiness` surface reports explicit blocker codes and never grants trading or broker execution authority.
