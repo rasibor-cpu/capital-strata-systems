@@ -3,9 +3,15 @@ CSS Institutional Dashboard Specification
 Project: Capital Strata Systems (CSS)
 Branch: phase71-church-governance-pack
 Document Version: 1.0
-Status: Draft for Governance Approval
+Status: V1 Controlled-Test Implementation Baseline — Future Expansion Deferred
 
 ---
+
+Current implementation note:
+The current dashboard/web runtime has passed customer/operator smoke testing,
+read-only export coverage, UAT, and production-readiness technical drills.
+Advanced future asset-class analytics remain governed by their separate
+roadmaps and do not authorize unsupported live execution.
 
 1. Purpose
 

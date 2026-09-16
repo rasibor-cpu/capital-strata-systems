@@ -3,9 +3,16 @@ CSS Incident Response Framework
 Project: Capital Strata Systems (CSS)
 Branch: phase71-church-governance-pack
 Version: 1.0
-Status: Draft for Governance Approval
+Status: Operational Framework Implemented — Production Tabletop / Owner Sign-Off Pending
 
 ---
+
+Current implementation note:
+The recovery, rollback, reconciliation, runtime-health and fail-closed controls
+referenced by this framework now have automated technical evidence. Production
+incident-response certification still requires a real operator tabletop/drill
+and authorized sign-off; this document does not self-approve those external
+activities.
 
 1. Purpose
 

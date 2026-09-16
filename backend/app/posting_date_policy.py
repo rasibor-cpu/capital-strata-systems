@@ -118,6 +118,10 @@ def evaluate_posting_date(
             reason=str(override.get("reason", "")).strip() or "Override: posting date outside today",
             scope={**scope, "posting_date": posting_date_iso, "today_utc": today.isoformat(), "delta_days": delta_days},
             approval_level=str(override.get("approval_level", "CHECKER")).strip() or "CHECKER",
+            approver_user_id=str(override.get("approver_id", "")).strip(),
+            target="posting_date",
+            old_value=today.isoformat(),
+            new_value=posting_date_iso,
             override_id=override.get("override_id"),
         )
         return PostingDateDecision(
@@ -144,6 +148,10 @@ def evaluate_posting_date(
             reason=str(override.get("reason", "")).strip() or "Override: backdate beyond policy window",
             scope={**scope, "posting_date": posting_date_iso, "today_utc": today.isoformat(), "delta_days": delta_days},
             approval_level=str(override.get("approval_level", "CHECKER")).strip() or "CHECKER",
+            approver_user_id=str(override.get("approver_id", "")).strip(),
+            target="posting_date",
+            old_value=today.isoformat(),
+            new_value=posting_date_iso,
             override_id=override.get("override_id"),
         )
         return PostingDateDecision(
@@ -169,6 +177,10 @@ def evaluate_posting_date(
             reason=str(override.get("reason", "")).strip() or "Override: future-date beyond policy window",
             scope={**scope, "posting_date": posting_date_iso, "today_utc": today.isoformat(), "delta_days": delta_days},
             approval_level=str(override.get("approval_level", "CHECKER")).strip() or "CHECKER",
+            approver_user_id=str(override.get("approver_id", "")).strip(),
+            target="posting_date",
+            old_value=today.isoformat(),
+            new_value=posting_date_iso,
             override_id=override.get("override_id"),
         )
         return PostingDateDecision(

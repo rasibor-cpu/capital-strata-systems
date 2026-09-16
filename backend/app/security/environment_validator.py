@@ -74,5 +74,13 @@ def validate_startup_security_environment(broker_name: str, mode: str) -> dict[s
             if not acc or not acc.strip():
                 status["BROKER_CONFIG_VALID"] = False
                 raise EnvironmentValidationError("OANDA paper mode requires a non-empty account ID.")
+
+        elif broker == "COINBASE":
+            live_orders = (os.getenv("COINBASE_ENABLE_LIVE_ORDERS") or "").strip().lower()
+            if live_orders in ("1", "true", "yes", "on"):
+                status["LIVE_PRACTICE_CONSISTENT"] = False
+                raise EnvironmentValidationError(
+                    "Coinbase PAPER mode cannot enable live orders."
+                )
     
     return status

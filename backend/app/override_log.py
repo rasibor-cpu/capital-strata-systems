@@ -64,33 +64,35 @@ def _canonical_json(obj: Dict[str, Any]) -> str:
 def _read_last_hash(path: Path) -> str:
     if not path.exists():
         return "GENESIS"
-    try:
-        # Read last non-empty line
-        with path.open("rb") as f:
-            f.seek(0, 2)
-            size = f.tell()
-            if size == 0:
-                return "GENESIS"
 
-            # Scan backwards for newline
-            step = 4096
-            pos = max(0, size - step)
-            while True:
-                f.seek(pos)
-                chunk = f.read(size - pos)
-                lines = chunk.splitlines()
-                if len(lines) >= 1:
-                    last = lines[-1].decode("utf-8", errors="ignore").strip()
-                    if last:
-                        rec = json.loads(last)
-                        return str(rec.get("hash", "GENESIS"))
-                if pos == 0:
-                    break
-                size = pos
-                pos = max(0, pos - step)
-    except Exception:
-        return "GENESIS"
-    return "GENESIS"
+    with path.open("rb") as f:
+        f.seek(0, 2)
+        size = f.tell()
+        if size == 0:
+            return "GENESIS"
+
+        step = 4096
+        pos = max(0, size - step)
+        while True:
+            f.seek(pos)
+            chunk = f.read(size - pos)
+            lines = chunk.splitlines()
+            if lines:
+                last = lines[-1].decode("utf-8", errors="strict").strip()
+                if last:
+                    rec = json.loads(last)
+                    previous_hash = str(rec.get("hash", "")).strip()
+                    if not previous_hash:
+                        raise ValueError(
+                            "existing override log record has no hash"
+                        )
+                    return previous_hash
+            if pos == 0:
+                break
+            size = pos
+            pos = max(0, pos - step)
+
+    raise ValueError("existing override log has no readable record")
 
 
 def write_override(
@@ -100,6 +102,10 @@ def write_override(
     reason: str,
     scope: Optional[Dict[str, Any]] = None,
     approval_level: str = "CHECKER",
+    approver_user_id: Optional[str] = None,
+    target: Optional[str] = None,
+    old_value: Any = None,
+    new_value: Any = None,
     override_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
@@ -109,15 +115,24 @@ def write_override(
 
     Raises on any failure (caller should fail-closed).
     """
-    actor_user_id = (actor_user_id or "").strip() or "unknown_actor"
+    actor_user_id = (actor_user_id or "").strip()
     override_type = (override_type or "").strip()
     reason = (reason or "").strip()
+    approval_level = (approval_level or "").strip()
+    approver_user_id = (approver_user_id or "").strip()
+    target = (target or "").strip()
     scope = scope or {}
 
+    if not actor_user_id:
+        raise ValueError("actor_user_id is required")
     if not override_type:
         raise ValueError("override_type is required")
     if not reason:
         raise ValueError("reason is required for override logging")
+    if not approval_level:
+        raise ValueError("approval_level is required")
+    if not approver_user_id:
+        raise ValueError("approver_user_id is required")
 
     path = _log_path()
     prev_hash = _read_last_hash(path)
@@ -130,6 +145,10 @@ def write_override(
         "override_type": override_type,
         "reason": reason,
         "scope": scope,
+        "target": target or None,
+        "old_value": old_value,
+        "new_value": new_value,
+        "approver_user_id": approver_user_id,
         "approval_level": approval_level,
         "prev_hash": prev_hash,
     }

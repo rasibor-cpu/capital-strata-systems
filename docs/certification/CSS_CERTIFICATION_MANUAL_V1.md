@@ -3,9 +3,15 @@ CSS Certification Manual v1
 Project: Capital Strata Systems (CSS)
 Branch: phase71-church-governance-pack
 Document Version: 1.0
-Status: Draft for Governance Approval
+Status: Active Controlled-Test Framework — Production Certification Not Granted
 
 ---
+
+Current certification note:
+UAT Cycle 1 and the internal production-readiness technical drill have passed.
+This activates the framework for controlled testing evidence collection only.
+Live-capital/production certification remains prohibited until the manual's
+external/environmental evidence and authorized sign-offs are completed.
 
 1. Purpose
 

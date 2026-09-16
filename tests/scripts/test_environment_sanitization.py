@@ -73,3 +73,49 @@ def test_credential_loader_isolation_oanda():
 def test_coinbase_missing_live():
     with pytest.raises(EnvironmentValidationError, match="COINBASE live mode requires valid CDP credentials."):
         validate_startup_security_environment("COINBASE", "live")
+
+
+def test_coinbase_live_order_flag_cannot_leak_into_paper_mode():
+    os.environ["COINBASE_CDP_KEY_NAME"] = "organizations/test/apiKeys/test"
+    os.environ["COINBASE_CDP_PRIVATE_KEY"] = "-----BEGIN EC PRIVATE KEY-----\nTEST\n-----END EC PRIVATE KEY-----"
+    os.environ["COINBASE_ENABLE_LIVE_ORDERS"] = "true"
+
+    with pytest.raises(
+        EnvironmentValidationError,
+        match="Coinbase PAPER mode cannot enable live orders",
+    ):
+        validate_startup_security_environment("COINBASE", "paper")
+
+
+def test_coinbase_paper_adapter_never_uses_live_credentials(monkeypatch):
+    from backend.broker.coinbase_adapter import CoinbaseAdapter
+
+    os.environ["COINBASE_CDP_KEY_NAME"] = "organizations/test/apiKeys/test"
+    os.environ["COINBASE_CDP_PRIVATE_KEY"] = "secret-test-value"
+
+    adapter = CoinbaseAdapter(
+        api_key_name=os.environ["COINBASE_CDP_KEY_NAME"],
+        paper_mode=True,
+    )
+    monkeypatch.setattr(
+        adapter,
+        "_get_rest_client",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("paper mode must not instantiate live client")
+        ),
+    )
+
+    buy = adapter.place_market_buy(
+        product_id="BTC-USD",
+        size_usd=25.0,
+    )
+    sell = adapter.place_market_sell(
+        product_id="BTC-USD",
+        size_asset=0.001,
+    )
+    balance = adapter.get_account_balance()
+
+    assert buy["status"] == "paper_filled"
+    assert sell["status"] == "paper_filled"
+    assert balance["mode"] == "paper"
+    assert balance["source"] == "COINBASE_PAPER"

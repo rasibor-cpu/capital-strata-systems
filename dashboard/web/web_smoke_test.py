@@ -51,6 +51,7 @@ def main() -> int:
         "/api/v1/payment-collection/preflight",
         "/api/v1/customer-notifications/preflight",
         "/api/v1/launch-dossier/export",
+        "/api/v1/report-export",
         "/api/v1/commercialization-operations/status",
         "/api/v1/commercialization-release/readiness",
         "/ws/v1/dashboard-state",
@@ -76,6 +77,7 @@ def main() -> int:
         'href="/market-opportunities"',
         'href="/positions"',
         'href="/risk-governance"',
+        'href="/api/v1/report-export?format=html"',
         "/api/v1/frontend-state",
         "/ws/v1/dashboard-state",
     ]
