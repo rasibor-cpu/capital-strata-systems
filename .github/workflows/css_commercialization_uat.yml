@@ -21,11 +21,11 @@ jobs:
       PYTHONPATH: "."
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: false
       - name: Set Up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: Install Dependencies
@@ -35,4 +35,25 @@ jobs:
           python -m pip install pytest
       - name: Run Commercialization UAT Evidence Suite
         run: |
-          pytest -q             tests/test_trial_contract.py             tests/test_trial_contract_enrollment_service.py             tests/test_trial_conversion_assessment_service.py             tests/test_advice_profitability.py             tests/test_advice_profitability_history_service.py             tests/test_customer_profitability.py             tests/test_customer_profitability_summary_service.py             tests/test_independent_trade_economics.py             tests/test_independent_platform_charge_policy.py             tests/test_com002vw_fx_and_final_fee_selection.py             tests/test_com002m_invoice_correction.py             tests/test_com002o_receivable_reversal.py             tests/test_com002q_receivable_payment.py             tests/test_com002q_receivable_payment_allocation.py             tests/test_com002s_receivable_credit.py             tests/test_commercialization_consistency.py             tests/test_commercialization_uat.py             tests/test_production_charging_gate.py             tests/test_production_charging_assessment_service.py             tests/test_production_security_and_payment_provider.py             tests/test_production_infrastructure_persistence.py
+          python -m pytest -q \
+            tests/test_trial_contract.py \
+            tests/test_trial_contract_enrollment_service.py \
+            tests/test_trial_conversion_assessment_service.py \
+            tests/test_advice_profitability.py \
+            tests/test_advice_profitability_history_service.py \
+            tests/test_customer_profitability.py \
+            tests/test_customer_profitability_summary_service.py \
+            tests/test_independent_trade_economics.py \
+            tests/test_independent_platform_charge_policy.py \
+            tests/test_com002vw_fx_and_final_fee_selection.py \
+            tests/test_com002m_invoice_correction.py \
+            tests/test_com002o_receivable_reversal.py \
+            tests/test_com002q_receivable_payment.py \
+            tests/test_com002q_receivable_payment_allocation.py \
+            tests/test_com002s_receivable_credit.py \
+            tests/test_commercialization_consistency.py \
+            tests/test_commercialization_uat.py \
+            tests/test_production_charging_gate.py \
+            tests/test_production_charging_assessment_service.py \
+            tests/test_production_security_and_payment_provider.py \
+            tests/test_production_infrastructure_persistence.py
