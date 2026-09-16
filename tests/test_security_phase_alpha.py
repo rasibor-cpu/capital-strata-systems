@@ -260,3 +260,55 @@ def test_css_unified_trade_gate_normalizes_asset_class():
     )
 
     assert decision.approved is True
+
+
+def test_oanda_close_trade_requires_canonical_live_authorization(monkeypatch):
+    monkeypatch.setenv("OANDA_API_KEY", "dummy")
+    monkeypatch.setenv("OANDA_ACCOUNT_ID", "123")
+    monkeypatch.setenv("OANDA_BASE_URL", "https://api-fxpractice.oanda.com")
+    monkeypatch.setenv("OANDA_ENABLE_LIVE_TRADING", "1")
+    monkeypatch.setenv("REA_ENGINE_MODE", "LIVE")
+    monkeypatch.delenv("REA_LIVE_ARM", raising=False)
+    monkeypatch.delenv("REA_CONFIRM_LIVE", raising=False)
+
+    from backend.app.brokers.oanda_adapter import OandaAdapter
+
+    response = OandaAdapter().close_trade(
+        "trade-1",
+        user_context={
+            "user_id": "22222",
+            "role": "TRADER",
+            "role_profile": {"can_execute_live_trading": True},
+        },
+    )
+
+    assert response["ok"] is False
+    assert response["error"].startswith(
+        "live_execution_blocked_by_canonical_gate"
+    )
+
+
+def test_oanda_close_position_requires_canonical_live_authorization(monkeypatch):
+    monkeypatch.setenv("OANDA_API_KEY", "dummy")
+    monkeypatch.setenv("OANDA_ACCOUNT_ID", "123")
+    monkeypatch.setenv("OANDA_BASE_URL", "https://api-fxpractice.oanda.com")
+    monkeypatch.setenv("OANDA_ENABLE_LIVE_TRADING", "1")
+    monkeypatch.setenv("REA_ENGINE_MODE", "LIVE")
+    monkeypatch.delenv("REA_LIVE_ARM", raising=False)
+    monkeypatch.delenv("REA_CONFIRM_LIVE", raising=False)
+
+    from backend.app.brokers.oanda_adapter import OandaAdapter
+
+    response = OandaAdapter().close_position(
+        "EUR_USD",
+        user_context={
+            "user_id": "22222",
+            "role": "TRADER",
+            "role_profile": {"can_execute_live_trading": True},
+        },
+    )
+
+    assert response["ok"] is False
+    assert response["error"].startswith(
+        "live_execution_blocked_by_canonical_gate"
+    )
