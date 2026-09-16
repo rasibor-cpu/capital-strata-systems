@@ -16,7 +16,7 @@ Conventions:
 ## Index
 - 2026-02: Phase 1 replay runner issues, output overload, long-run stalls
 - 2026-02: Reporting/printing requirements expansion + governance controls
-- 2026-02: Posting calendar/date-control + overrides not yet implemented
+- 2026-02: Posting calendar/date-control + override controls (subsequently closed)
 
 ---
 
