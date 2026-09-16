@@ -66,3 +66,17 @@ This technical closure does not enable production live execution. Production
 still requires the separately governed execution certification, broker
 credentials/environment approval, operational evidence, and release-owner
 authorization. Current test and commercialization controls remain fail-closed.
+
+
+## Closure validation criteria
+
+This closure may be merged only after the same candidate SHA passes:
+
+- CSS Governance Validation;
+- CSS Full Regression Remote;
+- CSS Commercialization UAT; and
+- CSS Full Test Release Candidate.
+
+The full-test release candidate must continue to prove production-commercial
+readiness is false in the sandbox fixture, external money movement is false,
+and broker/trading execution authority remains false.
