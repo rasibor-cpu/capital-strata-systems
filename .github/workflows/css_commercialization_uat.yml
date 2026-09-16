@@ -56,4 +56,12 @@ jobs:
             tests/test_production_charging_gate.py \
             tests/test_production_charging_assessment_service.py \
             tests/test_production_security_and_payment_provider.py \
-            tests/test_production_infrastructure_persistence.py
+            tests/test_production_infrastructure_persistence.py \
+            tests/test_sandbox_commercial_providers.py \
+            tests/test_full_test_readiness_runner.py \
+            tests/test_final_launch_readonly_routers.py \
+            tests/test_security_phase_alpha.py \
+            tests/test_uat_restart_persistence.py
+      - name: Run Customer and Operator Web Smoke
+        run: |
+          python dashboard/web/web_smoke_test.py

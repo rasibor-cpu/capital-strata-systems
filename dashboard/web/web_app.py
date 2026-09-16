@@ -45,16 +45,26 @@ def create_app(
         title="Capital Strata Systems Institutional Web Dashboard",
         version="0.1.0",
     )
-    app.include_router(create_dashboard_state_router(provider))
-    app.include_router(create_ws_router(provider))
-    app.include_router(create_client_earnings_router())
-    app.include_router(create_trial_contract_router())
-    app.include_router(create_production_charging_router())
-    app.include_router(create_commercialization_release_router())
-    app.include_router(create_commercialization_operations_router())
-    app.include_router(create_payment_collection_preflight_router())
-    app.include_router(create_notification_delivery_preflight_router())
-    app.include_router(create_launch_dossier_router())
+    # Materialize routes directly from the constructed routers.
+    # Current FastAPI/Starlette cloud-CI versions can leave nested
+    # include_router routes absent from app.routes. The runtime API bridge uses
+    # the same compatibility pattern. All mounted commercialization routers
+    # remain read-only except the explicitly governed trial enroll/cancel
+    # endpoints.
+    runtime_routers = (
+        create_dashboard_state_router(provider),
+        create_ws_router(provider),
+        create_client_earnings_router(),
+        create_trial_contract_router(),
+        create_production_charging_router(),
+        create_commercialization_release_router(),
+        create_commercialization_operations_router(),
+        create_payment_collection_preflight_router(),
+        create_notification_delivery_preflight_router(),
+        create_launch_dossier_router(),
+    )
+    for runtime_router in runtime_routers:
+        app.router.routes.extend(runtime_router.routes)
 
     @app.get("/", include_in_schema=False)
     async def index() -> RedirectResponse:

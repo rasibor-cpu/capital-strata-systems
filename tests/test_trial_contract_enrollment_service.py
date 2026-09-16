@@ -85,3 +85,23 @@ def test_customer_cannot_enroll_against_mismatched_pricing(monkeypatch):
             )
     finally:
         conn.close()
+
+
+def test_customer_cannot_enroll_against_unknown_agreement_version(monkeypatch):
+    conn, persistence = _service(monkeypatch)
+    try:
+        agreement = _seed(persistence)
+        with pytest.raises(TrialContractError, match="governing commercial agreement is missing"):
+            TrialContractEnrollmentService(persistence).enroll(
+                customer_id="CUST-1",
+                account_reference="account:A",
+                agreement_id="AGR-1",
+                agreement_version="v2",
+                accepted_at="2026-09-15T14:00:00Z",
+                displayed_pricing_summary=agreement.pricing_summary,
+                displayed_conversion_disclosure=DISCLOSURE,
+                acceptance_audit_reference="accept:stale-version",
+                evidence_refs=("accept:evidence",),
+            )
+    finally:
+        conn.close()
