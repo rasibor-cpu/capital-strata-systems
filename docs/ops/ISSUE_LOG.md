@@ -129,7 +129,7 @@ Conventions:
 
 ### CSS-ISSUE-0006 — Missing override logging framework (audit weakness)
 - Date first seen: 2026-02
-- Status: OPEN
+- Status: CLOSED
 - Severity: P0
 - Category: GOVERNANCE / REPORTING
 - Symptom:
@@ -138,17 +138,23 @@ Conventions:
   - Requirements expansion: authority gating + override evidence.
 - Root cause:
   - Override model not yet implemented in posting pipeline.
-- Fix (planned):
-  - Append-only override log:
-    - timestamp_utc, user_id, override_type, target, old_value, new_value, reason, approver_id, approval_level, hash_prev, hash_this
+- Fix:
+  - Implemented append-only, hash-chained override log with actor, override type,
+    target, old/new values, reason, approver, approval level, previous hash and
+    current hash.
+  - Existing malformed audit history now fails closed instead of silently
+    restarting from GENESIS.
+  - Evidence: backend/app/override_log.py and
+    tests/test_override_and_posting_date_governance.py.
 - Prevention:
-  - Fail closed: posting requiring override must not proceed without a valid override record.
+  - Fail closed: posting requiring override must not proceed without a valid,
+    approved override record.
 
 ---
 
 ### CSS-ISSUE-0007 — Posting calendar accepts invalid dates / uncontrolled backdating
 - Date first seen: 2026-02
-- Status: OPEN
+- Status: CLOSED
 - Severity: P0
 - Category: GOVERNANCE
 - Symptom:
@@ -157,19 +163,21 @@ Conventions:
   - Cheques and postings can be backdated without proper authority.
 - Root cause:
   - Missing “PostingDatePolicy” gate and override enforcement.
-- Fix (planned):
-  - Add PostingDatePolicy:
-    - reject invalid dates
-    - backdating beyond threshold requires override + approval
+- Fix:
+  - PostingDatePolicy is implemented with invalid-date rejection, hard
+    closed-period rejection, same-day/backdate/future-date controls and
+    approver-backed immutable override evidence.
+  - Closed/locked periods cannot be bypassed by override.
+  - Evidence: backend/app/posting_date_policy.py and
+    tests/test_override_and_posting_date_governance.py.
 - Prevention:
-  - Every posting stores:
-    - input_date, effective_date, policy_result, override_id (optional)
+  - Every exceptional posting-date decision is attributable and auditable.
 
 ---
 
 ### CSS-ISSUE-0008 — Need structured end-of-day / month-end / year-end snapshots
 - Date first seen: 2026-02
-- Status: OPEN
+- Status: CLOSED
 - Severity: P1
 - Category: REPORTING
 - Symptom:
@@ -178,21 +186,22 @@ Conventions:
   - New requirement: daily pages per user; month-end GL snapshots; year-end consolidated BS/IS.
 - Root cause:
   - Snapshot engine not yet implemented.
-- Fix (planned):
-  - EOD snapshot: journal digest + GL balances freeze
-  - Month-end: GL snapshot with integrity hash
-  - Year-end: consolidated BS/IS; auto rollover to new FY
+- Fix:
+  - Implemented DAY/MONTH/YEAR snapshot artifacts with journal digest, GL
+    balances, optional financial statements, version, SHA-256 integrity hash
+    and printable text report.
+  - MONTH/YEAR snapshots require the period to be CLOSED/LOCKED.
+  - Tampering is detected by snapshot verification.
+  - Evidence: backend/app/period_snapshot.py and
+    tests/test_period_snapshot.py.
 - Prevention:
-  - Period close produces:
-    - snapshot.json
-    - printable report
-    - integrity hash + version
+  - Period-close snapshot evidence is immutable/tamper-evident and printable.
 
 ---
 
 ### CSS-ISSUE-0009 — Need “Print from any screen” review capability
 - Date first seen: 2026-02
-- Status: OPEN
+- Status: CLOSED
 - Severity: P2
 - Category: UX / REPORTING
 - Symptom:
@@ -201,10 +210,15 @@ Conventions:
   - Auditor/end-of-day batch review requirement.
 - Root cause:
   - Reporting not yet wired into UI workflows.
-- Fix (planned):
-  - Standard ReportRegistry + ExportService (PDF/HTML later; start with text/CSV).
+- Fix:
+  - Implemented a read-only multi-format export service supporting JSON, CSV,
+    HTML and text.
+  - Mounted /api/v1/report-export and added a common Export link to dashboard
+    navigation so every dashboard screen has an export/print path.
+  - Evidence: backend/app/reporting/export_service.py,
+    dashboard/runtime/report_export_router.py and tests/test_report_export.py.
 - Prevention:
-  - Every UI module registers its reports and can generate print artifacts by date range.
+  - Export remains GET-only/read-only and is covered by dashboard smoke tests.
 
 ---
 
