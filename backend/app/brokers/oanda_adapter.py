@@ -206,6 +206,15 @@ class OandaAdapter:
     # -------------------------
     # trade/order endpoints
     # -------------------------
+    def _allow_live_order_execution(self) -> bool:
+        """Legacy introspection shim.
+
+        This reports only the broker firewall flag. It is not sufficient to
+        authorize a mutation; public mutation methods also require the
+        canonical live-toggle RBAC/live-arm gate.
+        """
+        return self.allow_live_trades
+
     def place_order(
         self,
         order: Optional[OrderRequest] = None,
