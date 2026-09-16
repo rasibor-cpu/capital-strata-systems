@@ -110,7 +110,12 @@ def test_prevent_orders_after_margin_rejection():
     oanda.margin_rejection_lock = True
     
     with patch("backend.app.brokers.oanda_adapter.requests.request") as mock_req:
-        resp = oanda._request_json("POST", "orders", {"units": 100})
+        resp = oanda._request_json(
+            "POST",
+            "orders",
+            {"units": 100},
+            mutation_authorized=True,
+        )
         
         assert resp["ok"] is False
         assert resp["error"] == "margin_rejection_lock_active"
