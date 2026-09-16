@@ -182,6 +182,7 @@ def _app_nav(active: str) -> str:
         ("billing", "/billing", "Billing"),
         ("trial_contract", "/trial-contract", "Trial & Contract"),
         ("commercialization_operations", "/commercialization-operations", "Launch Ops"),
+        ("report_export", "/api/v1/report-export?format=html", "Export"),
     ]
 
     return "\n".join(
