@@ -248,7 +248,7 @@ It should not weaken broker gates.
 
 It should produce the implementation roadmap for completing multi-asset readiness.
 
-STATUS: OPEN FOR IMPLEMENTATION ROADMAP
+STATUS: ROADMAP SUPERSEDED — CURRENT V1 SAFETY SCOPE CLOSED; ADVANCED ASSET FEATURES DEFERRED
 
 # OPTIONS CAPABILITY MATRIX
 
@@ -463,3 +463,35 @@ CSS progresses from basic options representation to institutional-grade options 
 | IV Percentile             | NOT PRESENT |
 | Liquidity Scoring         | NOT PRESENT |
 | Bid/Ask Spread Risk       | NOT PRESENT |
+
+
+---
+
+## 2026-09-16 Reconciliation With Current Baseline
+
+This historical audit predates subsequent implementation.
+
+Current verified changes include:
+
+- Options position Greeks fields: delta, gamma, theta, vega and rho.
+- Explicit UNKNOWN handling when Greeks are unavailable.
+- Greeks-source attribution.
+- Options Greeks persistence into closed-trade evidence.
+- Portfolio-level Greeks aggregation.
+- Dashboard rendering for position and portfolio Greeks.
+- Asset-class PnL visibility for OPTIONS/FUTURES.
+- Futures/options live execution remains blocked/gated.
+
+Evidence includes:
+
+- tests/test_options_greeks_data_model.py
+- tests/test_options_greeks_dashboard.py
+- tests/test_portfolio_greeks_aggregation.py
+- current full regression and UAT evidence.
+
+Advanced option-chain analytics, Black-Scholes fallback, assignment/exercise
+analytics, multi-leg strategy engines, and contract-specific futures metadata
+remain planned asset-expansion work. They are not prerequisites for the current
+V1 controlled release because those unsupported live execution capabilities
+remain blocked. Any future enablement of those capabilities requires its own
+implementation, tests, risk review and certification.
