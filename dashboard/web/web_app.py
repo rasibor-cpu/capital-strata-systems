@@ -21,6 +21,7 @@ from dashboard.runtime.commercialization_operations_router import create_commerc
 from dashboard.runtime.payment_collection_preflight_router import create_payment_collection_preflight_router
 from dashboard.runtime.notification_delivery_preflight_router import create_notification_delivery_preflight_router
 from dashboard.runtime.launch_dossier_router import create_launch_dossier_router
+from dashboard.runtime.report_export_router import create_report_export_router
 from dashboard.runtime.dashboard_state import DashboardState
 from dashboard.runtime.runtime_smoke_test import build_smoke_payloads
 from dashboard.runtime.ws_bridge import create_ws_router
@@ -62,6 +63,7 @@ def create_app(
         create_payment_collection_preflight_router(),
         create_notification_delivery_preflight_router(),
         create_launch_dossier_router(),
+        create_report_export_router(provider),
     )
     for runtime_router in runtime_routers:
         app.router.routes.extend(runtime_router.routes)
