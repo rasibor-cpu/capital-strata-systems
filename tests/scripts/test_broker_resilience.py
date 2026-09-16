@@ -100,7 +100,7 @@ def test_insufficient_margin_response():
             json=lambda: {"errorMessage": "INSUFFICIENT MARGIN"}
         )
         
-        resp = oanda._request_json("POST", "orders", {"units": 100})
+        resp = oanda._request_json("POST", "orders", {"units": 100}, mutation_authorized=True)
         
         assert resp["ok"] is False
         assert resp["error"] == "insufficient_margin"
