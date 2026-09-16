@@ -20,9 +20,11 @@ import json
 import time
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Optional, List, Mapping
 
 import requests
+
+from backend.app.security.live_toggle import require_live_allowed
 
 
 @dataclass(frozen=True)
@@ -48,10 +50,37 @@ class OandaAdapter:
         self.base_url = (os.getenv("OANDA_BASE_URL") or "").strip().rstrip("/")
         self.env = (os.getenv("OANDA_ENV") or "").strip().lower()
         self.allow_live_trades = os.getenv("OANDA_ENABLE_LIVE_TRADING", "0").strip().lower() in ("1", "true", "yes", "on")
+        self.max_order_units = self._parse_positive_int_env("OANDA_MAX_ORDER_UNITS", 100000)
         
         self.health_state = "GREEN"
         self.consecutive_failures = 0
         self.margin_rejection_lock = False
+
+    @staticmethod
+    def _parse_positive_int_env(name: str, default: int) -> int:
+        raw = (os.getenv(name) or "").strip()
+        if not raw:
+            return default
+        try:
+            value = int(raw)
+        except ValueError:
+            return default
+        return value if value > 0 else default
+
+    def _authorize_broker_mutation(
+        self,
+        user_context: Optional[Mapping[str, Any]] = None,
+    ) -> Optional[str]:
+        if not self.allow_live_trades:
+            return "live_execution_blocked_by_firewall"
+        try:
+            require_live_allowed(user_context)
+        except Exception as exc:
+            return (
+                "live_execution_blocked_by_canonical_gate:"
+                f"{type(exc).__name__}:{exc}"
+            )
+        return None
 
     # -------------------------
     # configuration
@@ -65,9 +94,24 @@ class OandaAdapter:
             "Content-Type": "application/json",
         }
 
-    def _request_json(self, method: str, path: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _request_json(
+        self,
+        method: str,
+        path: str,
+        payload: Optional[Dict[str, Any]] = None,
+        *,
+        mutation_authorized: bool = False,
+    ) -> Dict[str, Any]:
         if not self.is_configured():
             raise RuntimeError("OANDA not configured: set OANDA_API_KEY, OANDA_ACCOUNT_ID and OANDA_BASE_URL.")
+
+        if method.upper() in ("POST", "PUT", "PATCH", "DELETE") and not mutation_authorized:
+            return {
+                "ok": False,
+                "status": None,
+                "data": None,
+                "error": "broker_mutation_requires_canonical_authorization",
+            }
 
         if self.margin_rejection_lock and method.upper() in ("POST", "PUT"):
             # Block new orders if margin rejected
@@ -163,6 +207,12 @@ class OandaAdapter:
     # trade/order endpoints
     # -------------------------
     def _allow_live_order_execution(self) -> bool:
+        """Legacy introspection shim.
+
+        This reports only the broker firewall flag. It is not sufficient to
+        authorize a mutation; public mutation methods also require the
+        canonical live-toggle RBAC/live-arm gate.
+        """
         return self.allow_live_trades
 
     def place_order(
@@ -173,6 +223,8 @@ class OandaAdapter:
         units: int = 1,
         order_type: str = "MARKET",
         price_bound: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
+        user_context: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Accept either:
@@ -189,8 +241,9 @@ class OandaAdapter:
         if not symbol_final:
             return {"ok": False, "status": None, "data": None, "error": "missing_symbol"}
 
-        if not self._allow_live_order_execution():
-            return {"ok": False, "status": None, "data": None, "error": "live_execution_blocked_by_firewall"}
+        mutation_error = self._authorize_broker_mutation(user_context)
+        if mutation_error is not None:
+            return {"ok": False, "status": None, "data": None, "error": mutation_error}
 
         side_u = (side or "BUY").upper().strip()
         if side_u not in ("BUY", "SELL"):
@@ -199,6 +252,23 @@ class OandaAdapter:
         units_i = int(units)
         if units_i <= 0:
             return {"ok": False, "status": None, "data": None, "error": "invalid_units"}
+
+        if units_i > self.max_order_units:
+            return {
+                "ok": False,
+                "status": None,
+                "data": None,
+                "error": "order_units_exceed_configured_ceiling",
+            }
+
+        idem = (idempotency_key or "").strip()
+        if not idem:
+            return {
+                "ok": False,
+                "status": None,
+                "data": None,
+                "error": "missing_idempotency_key",
+            }
 
         signed_units = units_i if side_u == "BUY" else -units_i
 
@@ -213,26 +283,59 @@ class OandaAdapter:
                 "units": str(signed_units),
                 "timeInForce": "FOK",
                 "positionFill": "DEFAULT",
+                "clientExtensions": {"id": idem},
             }
         }
         
         if price_bound is not None:
             payload["order"]["priceBound"] = str(price_bound)
 
-        return self._request_json("POST", f"v3/accounts/{self.account_id}/orders", payload)
+        return self._request_json(
+            "POST",
+            f"v3/accounts/{self.account_id}/orders",
+            payload,
+            mutation_authorized=True,
+        )
 
-    def close_trade(self, trade_id: str) -> Dict[str, Any]:
+    def close_trade(
+        self,
+        trade_id: str,
+        *,
+        user_context: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Any]:
         tid = (trade_id or "").strip()
         if not tid:
             return {"ok": False, "status": None, "data": None, "error": "missing_trade_id"}
-        return self._request_json("PUT", f"v3/accounts/{self.account_id}/trades/{tid}/close")
+        mutation_error = self._authorize_broker_mutation(user_context)
+        if mutation_error is not None:
+            return {"ok": False, "status": None, "data": None, "error": mutation_error}
+        return self._request_json(
+            "PUT",
+            f"v3/accounts/{self.account_id}/trades/{tid}/close",
+            mutation_authorized=True,
+        )
 
-    def close_position(self, instrument: str, long_units: str = "ALL", short_units: str = "ALL") -> Dict[str, Any]:
+    def close_position(
+        self,
+        instrument: str,
+        long_units: str = "ALL",
+        short_units: str = "ALL",
+        *,
+        user_context: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Any]:
         instr = (instrument or "").strip()
         if not instr:
             return {"ok": False, "status": None, "data": None, "error": "missing_instrument"}
+        mutation_error = self._authorize_broker_mutation(user_context)
+        if mutation_error is not None:
+            return {"ok": False, "status": None, "data": None, "error": mutation_error}
         payload = {"longUnits": long_units, "shortUnits": short_units}
-        return self._request_json("PUT", f"v3/accounts/{self.account_id}/positions/{instr}/close", payload)
+        return self._request_json(
+            "PUT",
+            f"v3/accounts/{self.account_id}/positions/{instr}/close",
+            payload,
+            mutation_authorized=True,
+        )
 
     # -------------------------
     # small helpers for guarded runner
