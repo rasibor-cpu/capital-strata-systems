@@ -155,3 +155,37 @@ Robert's Test is NOT COMPLETE.
 
 Reason:
 Items 1 through 4 have passed, but controlled runtime testing has not yet been completed item by item for Items 5 through 10.
+
+---
+
+## 2026-09-16 Current-State Reconciliation
+
+This checklist is retained as historical manual-test evidence. Its original
+item statuses above are not rewritten.
+
+Current automated evidence supersedes the old NOT STARTED / BUILT NOT TESTED
+labels for the controlled test environment:
+
+- FX/crypto visibility and block-reason paths are covered by current dashboard,
+  scanner, governance and web/runtime tests.
+- Paper position creation/gating and lifecycle behavior are covered by the
+  current full regression suite.
+- Paper exits, closed-trade evidence and realized PnL are covered by current
+  regression tests.
+- PnL by asset class and options Greeks/dashboard visibility are covered by
+  current dashboard and asset-category tests.
+- Coinbase PAPER/live-order segregation and OANDA canonical live mutation
+  controls are now explicitly tested.
+- UAT Cycle 1 is accepted and the production-readiness technical drill passes.
+
+Current evidence baseline on this closure branch:
+
+- full regression: 1,995 tests passed;
+- expanded commercialization UAT: 292 tests passed;
+- production-readiness drill: 41 tests passed;
+- integrated full-test RC: passed.
+
+The historical OANDA real-balance item still requires genuine approved live
+broker/environment evidence if OANDA live operation is ever requested. That is
+an external/environmental certification task and does not weaken the current
+fail-closed controlled-test release.
