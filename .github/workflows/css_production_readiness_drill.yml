@@ -1,0 +1,54 @@
+name: CSS Production Readiness Drill
+
+on:
+  pull_request:
+    branches:
+      - css-v1-completion-2026-09-13
+    paths:
+      - "backend/**"
+      - "dashboard/**"
+      - "scripts/**"
+      - "tests/**"
+      - "certification/**"
+      - "docs/**"
+      - ".github/workflows/css_production_readiness_drill.yml"
+  push:
+    branches:
+      - css-v1-completion-2026-09-13
+  workflow_dispatch:
+
+jobs:
+  production-readiness-drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONPATH: "."
+      CSS_FULL_TEST_MODE: "1"
+      CSS_FULL_TEST_DB: "data/css_prod_readiness_drill.db"
+      CSS_VALIDATED_COMMIT_SHA: "${{ github.sha }}"
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+        with:
+          submodules: false
+      - name: Set Up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest
+      - name: Compile Production Readiness Trees
+        run: |
+          python -m compileall -q backend dashboard engine scripts tests
+      - name: Run Recovery Rollback and Reconciliation Drill
+        run: |
+          python -m pytest -q             tests/test_production_backup_restore_drill.py             tests/test_uat_restart_persistence.py             tests/scripts/test_startup_reconciliation.py             tests/scripts/test_continuous_reconciliation.py             tests/scripts/test_post_trade_reconciliation.py             tests/test_runtime_health_provider.py             tests/test_production_security_and_payment_provider.py             tests/test_production_infrastructure_persistence.py             tests/test_security_phase_alpha.py
+      - name: Run Customer and Operator Web Smoke
+        run: |
+          python dashboard/web/web_smoke_test.py
+      - name: Run Integrated Release Candidate Readiness
+        run: |
+          python scripts/run_css_full_test_readiness.py
