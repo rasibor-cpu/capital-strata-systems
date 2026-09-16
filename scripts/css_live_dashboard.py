@@ -2369,12 +2369,21 @@ def attempt_oanda_fx_execution(symbol: str, expected_price: float | None = None)
 
     try:
         price_bound_val = str(expected_price + OANDA_MAX_SLIPPAGE) if expected_price is not None else None
+        order_identity = (
+            f"{SESSION_USER_CTX.get('session_id', 'session')}|"
+            f"{symbol}|{globals().get('cycle', 0)}"
+        )
+        order_idempotency_key = hashlib.sha256(
+            order_identity.encode("utf-8")
+        ).hexdigest()[:32]
         response = oanda.place_order(
             symbol=symbol,
             side="BUY",
             units=FX_LIVE_UNITS,
             order_type="MARKET",
             price_bound=price_bound_val,
+            idempotency_key=order_idempotency_key,
+            user_context=SESSION_USER_CTX,
         )
 
         if response.get("ok"):
