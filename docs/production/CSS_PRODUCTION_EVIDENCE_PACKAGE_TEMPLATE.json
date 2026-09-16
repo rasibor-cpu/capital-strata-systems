@@ -1,0 +1,148 @@
+{
+  "package_id": "REPLACE-WITH-PRODUCTION-EVIDENCE-PACKAGE-ID",
+  "jurisdiction_code": "REPLACE-WITH-JURISDICTION",
+  "agreement_id": "REPLACE-WITH-AGREEMENT-ID",
+  "agreement_version": "REPLACE-WITH-AGREEMENT-VERSION",
+  "evidence": {
+    "CUSTOMER_AGREEMENT": {
+      "status": "APPROVED",
+      "evidence_reference": "REPLACE-WITH-IMMUTABLE-REFERENCE",
+      "reviewer_reference": "REPLACE-WITH-AUTHORITY-REFERENCE",
+      "approved_at": "REPLACE-WITH-UTC-TIMESTAMP",
+      "jurisdiction_code": "REPLACE-WITH-JURISDICTION",
+      "agreement_id": "REPLACE-WITH-AGREEMENT-ID",
+      "agreement_version": "REPLACE-WITH-AGREEMENT-VERSION"
+    },
+    "JURISDICTION_LEGAL_REVIEW": {
+      "status": "APPROVED",
+      "evidence_reference": "REPLACE-WITH-COUNSEL-OPINION-REFERENCE",
+      "reviewer_reference": "REPLACE-WITH-COUNSEL-REFERENCE",
+      "reviewed_at": "REPLACE-WITH-UTC-TIMESTAMP",
+      "jurisdiction_code": "REPLACE-WITH-JURISDICTION",
+      "agreement_id": "REPLACE-WITH-AGREEMENT-ID",
+      "agreement_version": "REPLACE-WITH-AGREEMENT-VERSION"
+    },
+    "SERVICE_MODE_APPROVALS": {
+      "status": "APPROVED",
+      "evidence_reference": "REPLACE-WITH-SERVICE-MODE-REVIEW-REFERENCE",
+      "reviewer_reference": "REPLACE-WITH-AUTHORITY-REFERENCE",
+      "approved_at": "REPLACE-WITH-UTC-TIMESTAMP",
+      "jurisdiction_code": "REPLACE-WITH-JURISDICTION",
+      "agreement_id": "REPLACE-WITH-AGREEMENT-ID",
+      "agreement_version": "REPLACE-WITH-AGREEMENT-VERSION",
+      "modes": {
+        "DISCOVER": "APPROVED",
+        "CONFIRM": "RESTRICTED",
+        "AUTO": "PROHIBITED"
+      }
+    },
+    "PAYMENT_PROVIDER": {
+      "status": "APPROVED",
+      "evidence_reference": "REPLACE-WITH-PROVIDER-CONTRACT-REFERENCE",
+      "provider_reference": "REPLACE-WITH-PROVIDER-AUTHORITY-REFERENCE",
+      "approved_at": "REPLACE-WITH-UTC-TIMESTAMP",
+      "provider_id": "REPLACE-WITH-PRODUCTION-PROVIDER-ID",
+      "environment": "production",
+      "jurisdiction_code": "REPLACE-WITH-JURISDICTION",
+      "agreement_id": "REPLACE-WITH-AGREEMENT-ID",
+      "agreement_version": "REPLACE-WITH-AGREEMENT-VERSION"
+    },
+    "PAYMENT_COLLECTION_AUTHORITY": {
+      "status": "APPROVED",
+      "evidence_reference": "REPLACE-WITH-COLLECTION-AUTHORITY-REFERENCE",
+      "reviewer_reference": "REPLACE-WITH-AUTHORITY-REFERENCE",
+      "approved_at": "REPLACE-WITH-UTC-TIMESTAMP",
+      "jurisdiction_code": "REPLACE-WITH-JURISDICTION",
+      "agreement_id": "REPLACE-WITH-AGREEMENT-ID",
+      "agreement_version": "REPLACE-WITH-AGREEMENT-VERSION"
+    },
+    "NOTIFICATION_PROVIDER": {
+      "status": "APPROVED",
+      "evidence_reference": "REPLACE-WITH-NOTIFICATION-PROVIDER-REFERENCE",
+      "provider_reference": "REPLACE-WITH-PROVIDER-AUTHORITY-REFERENCE",
+      "approved_at": "REPLACE-WITH-UTC-TIMESTAMP",
+      "provider_id": "REPLACE-WITH-PRODUCTION-NOTIFICATION-PROVIDER-ID",
+      "environment": "production",
+      "jurisdiction_code": "REPLACE-WITH-JURISDICTION",
+      "agreement_id": "REPLACE-WITH-AGREEMENT-ID",
+      "agreement_version": "REPLACE-WITH-AGREEMENT-VERSION"
+    },
+    "NOTIFICATION_POLICY": {
+      "status": "APPROVED",
+      "evidence_reference": "REPLACE-WITH-NOTICE-POLICY-REFERENCE",
+      "reviewer_reference": "REPLACE-WITH-LEGAL-OR-COMPLIANCE-REFERENCE",
+      "approved_at": "REPLACE-WITH-UTC-TIMESTAMP",
+      "jurisdiction_code": "REPLACE-WITH-JURISDICTION",
+      "agreement_id": "REPLACE-WITH-AGREEMENT-ID",
+      "agreement_version": "REPLACE-WITH-AGREEMENT-VERSION"
+    },
+    "SECURITY_OPERATIONS": {
+      "status": "APPROVED",
+      "evidence_reference": "REPLACE-WITH-SECURITY-CERTIFICATION-REFERENCE",
+      "reviewer_reference": "REPLACE-WITH-SECURITY-REVIEWER-REFERENCE",
+      "approved_at": "REPLACE-WITH-UTC-TIMESTAMP",
+      "jurisdiction_code": "REPLACE-WITH-JURISDICTION",
+      "agreement_id": "REPLACE-WITH-AGREEMENT-ID",
+      "agreement_version": "REPLACE-WITH-AGREEMENT-VERSION",
+      "controls": {
+        "secrets_management": true,
+        "tls_transport": true,
+        "access_control": true,
+        "audit_logging": true,
+        "monitoring_alerting": true,
+        "backup_restore": true,
+        "rollback": true,
+        "reconciliation": true,
+        "incident_response": true,
+        "dependency_vulnerability_review": true
+      }
+    },
+    "BACKUP_RESTORE": {
+      "status": "APPROVED",
+      "evidence_reference": "REPLACE-WITH-REAL-ENVIRONMENT-DRILL-REFERENCE",
+      "reviewer_reference": "REPLACE-WITH-OPERATIONS-REVIEWER",
+      "completed_at": "REPLACE-WITH-UTC-TIMESTAMP",
+      "jurisdiction_code": "REPLACE-WITH-JURISDICTION",
+      "agreement_id": "REPLACE-WITH-AGREEMENT-ID",
+      "agreement_version": "REPLACE-WITH-AGREEMENT-VERSION"
+    },
+    "INCIDENT_TABLETOP": {
+      "status": "APPROVED",
+      "evidence_reference": "REPLACE-WITH-TABLETOP-REFERENCE",
+      "reviewer_reference": "REPLACE-WITH-INCIDENT-OWNER-REFERENCE",
+      "completed_at": "REPLACE-WITH-UTC-TIMESTAMP",
+      "jurisdiction_code": "REPLACE-WITH-JURISDICTION",
+      "agreement_id": "REPLACE-WITH-AGREEMENT-ID",
+      "agreement_version": "REPLACE-WITH-AGREEMENT-VERSION"
+    },
+    "PRODUCTION_UAT": {
+      "status": "APPROVED",
+      "evidence_reference": "REPLACE-WITH-PRODUCTION-UAT-REFERENCE",
+      "reviewer_reference": "REPLACE-WITH-UAT-OWNER-REFERENCE",
+      "approved_at": "REPLACE-WITH-UTC-TIMESTAMP",
+      "jurisdiction_code": "REPLACE-WITH-JURISDICTION",
+      "agreement_id": "REPLACE-WITH-AGREEMENT-ID",
+      "agreement_version": "REPLACE-WITH-AGREEMENT-VERSION"
+    },
+    "RECONCILIATION": {
+      "status": "APPROVED",
+      "evidence_reference": "REPLACE-WITH-SETTLEMENT-RECONCILIATION-REFERENCE",
+      "reviewer_reference": "REPLACE-WITH-FINANCE-OR-OPS-REFERENCE",
+      "approved_at": "REPLACE-WITH-UTC-TIMESTAMP",
+      "jurisdiction_code": "REPLACE-WITH-JURISDICTION",
+      "agreement_id": "REPLACE-WITH-AGREEMENT-ID",
+      "agreement_version": "REPLACE-WITH-AGREEMENT-VERSION"
+    },
+    "OWNER_SIGNOFF": {
+      "status": "APPROVED",
+      "evidence_reference": "REPLACE-WITH-SIGNED-RELEASE-DECISION-REFERENCE",
+      "signer_reference": "REPLACE-WITH-OWNER-IDENTITY-REFERENCE",
+      "signed_at": "REPLACE-WITH-UTC-TIMESTAMP",
+      "signed_by": "REPLACE-WITH-RELEASE-OWNER",
+      "decision": "APPROVE",
+      "jurisdiction_code": "REPLACE-WITH-JURISDICTION",
+      "agreement_id": "REPLACE-WITH-AGREEMENT-ID",
+      "agreement_version": "REPLACE-WITH-AGREEMENT-VERSION"
+    }
+  }
+}
