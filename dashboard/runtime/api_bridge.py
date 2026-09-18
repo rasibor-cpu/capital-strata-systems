@@ -19,6 +19,7 @@ from dashboard.runtime.broker_balance_reconciliation import (
 from dashboard.runtime.ws_bridge import create_ws_router
 from dashboard.runtime.mission_control_state import build_mission_control_state
 from backend.brokers.continuity_projection import build_continuity_state
+from backend.brokers.session10_readiness import build_session10_readiness
 from dashboard.runtime.runtime_operational_state import (
     build_runtime_operational_state,
 )
@@ -112,6 +113,23 @@ def get_continuity_payload(
     if isinstance(continuity, dict):
         return dict(continuity)
     return build_continuity_state(None)
+
+
+def get_session10_readiness_payload(
+    state_provider: DashboardStateProvider | None = None,
+) -> dict[str, Any]:
+    state = _state_from_provider(state_provider)
+    mission = get_mission_control_payload(state_provider)
+    continuity = mission.get("continuity", {})
+    live_evidence = state.last_scan_results.get("questrade_live_read_validation")
+    return build_session10_readiness(
+        mission,
+        continuity if isinstance(continuity, dict) else {},
+        live_validation_evidence=bool(
+            isinstance(live_evidence, dict)
+            and live_evidence.get("validated") is True
+        ),
+    )
 
 
 def get_runtime_health_payload(
@@ -283,6 +301,10 @@ def create_dashboard_state_router(
             }
         return payload
 
+    @router.get("/api/v1/session10-readiness")
+    def read_session10_readiness() -> dict[str, Any]:
+        return get_session10_readiness_payload(state_provider)
+
     @router.get("/api/v1/broker-live-dry-run-certification")
     def read_broker_live_dry_run_certification() -> dict[str, Any]:
         return get_broker_live_dry_run_certification_payload(state_provider)
@@ -346,5 +368,6 @@ __all__ = [
     "get_caie_shadow_payload",
     "get_mission_control_payload",
     "get_runtime_alerts_payload",
+    "get_session10_readiness_payload",
     "get_runtime_health_payload",
 ]
