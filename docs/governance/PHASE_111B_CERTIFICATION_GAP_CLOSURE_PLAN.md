@@ -23,7 +23,7 @@ Live execution remains separately governed and fail-closed.
 ## 3. Categorized Gaps
 - **Governance:** 0 Gaps
 - **Risk:** 0 Gaps
-- **Broker Controls:** 1 Gap (GAP-111B-001)
+- **Broker Controls:** 0 Open Gaps (GAP-111B-001 CLOSED)
 - **Operations:** 0 Gaps
 - **Recovery:** 0 Gaps
 - **Certification:** 0 Gaps
@@ -56,4 +56,4 @@ Based on the evidence mapping and closure roadmap:
     regulatory approval, owner sign-off, or live execution authority.
 - **Readiness after closing High gaps:** 100%
   - *Rationale:* No high gaps exist.
-- **Final Target Readiness:** 100% (Fully Certified for Live Capital Deployment)
+- **Historical gap-closure target:** COMPLETE. Live-capital certification remains subject to the current production evidence gates and is not granted by this document.
