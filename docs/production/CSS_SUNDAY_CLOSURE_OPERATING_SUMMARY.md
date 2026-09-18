@@ -44,7 +44,7 @@ release-owner authorization.
 2. External evidence collection
    - counsel/compliance;
    - service-mode determinations;
-   - independent pricing approval;
+   - counsel confirmation that the initial-launch agreement reflects no independent/customer-directed CSS charge;
    - payment provider and collection authority;
    - notification provider/policy;
    - production security/backup/restore evidence;
