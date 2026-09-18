@@ -23,7 +23,7 @@ Production authorization is a separate decision and cannot be inferred from item
 | --- | --- | --- | --- | --- |
 | Legal/regulatory | External counsel / compliance | JURISDICTION_LEGAL_REVIEW | Exact agreement/version/jurisdiction approved | EXTERNAL BLOCKED |
 | Service modes | External counsel / compliance | SERVICE_MODE_APPROVALS | DISCOVER/CONFIRM/AUTO each determined | EXTERNAL BLOCKED |
-| Independent pricing | Commercial owner + counsel | Approved pricing decision incorporated into agreement | Final formula documented and approved | EXTERNAL BLOCKED |
+| Independent pricing | Commercial owner + counsel | Initial launch pricing decision + counsel-confirmed agreement wording | No independent/customer-directed CSS charge at initial launch; future charge requires new version | INTERNAL CLOSED — COUNSEL WORDING CONFIRMATION REMAINS UNDER LEGAL REVIEW |
 | Payment provider | Finance/payments | PAYMENT_PROVIDER | Production provider/merchant account approved | EXTERNAL BLOCKED |
 | Payment authority | Finance + counsel | PAYMENT_COLLECTION_AUTHORITY | Exact agreement/version/jurisdiction approved | EXTERNAL BLOCKED |
 | Notification provider | Operations/comms | NOTIFICATION_PROVIDER | Production provider/channel approved | EXTERNAL BLOCKED |
