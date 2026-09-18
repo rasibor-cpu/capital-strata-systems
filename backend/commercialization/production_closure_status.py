@@ -72,8 +72,8 @@ CLOSURE_ITEMS: Tuple[ClosureItem, ...] = (
         ClosureWorkstream.PRICING_POLICY,
         "Commercial owner + counsel",
         "CUSTOMER_AGREEMENT",
-        "Independent/customer-directed charge formula is approved and matches the agreement/pricing schedule.",
-        True,
+        "Initial launch policy states no independent/customer-directed CSS charge; counsel confirms the agreement wording.",
+        False,
     ),
     ClosureItem(
         ClosureWorkstream.PAYMENT_PROVIDER,
@@ -152,7 +152,6 @@ def assess_production_closure(
     *,
     internal_engineering_complete: bool,
     evidence_validation: ProductionEvidenceValidation | None,
-    pricing_policy_approved: bool,
     deadline: str = "2026-09-20T18:00:00-04:00",
 ) -> ProductionClosureStatus:
     reasons: list[str] = []
@@ -190,11 +189,6 @@ def assess_production_closure(
             if item.evidence_category in blocked_categories:
                 open_workstreams.append(item.workstream.value)
 
-    if not pricing_policy_approved:
-        reasons.append("INDEPENDENT_CHARGE_POLICY_APPROVAL_MISSING")
-        if ClosureWorkstream.PRICING_POLICY.value not in open_workstreams:
-            open_workstreams.append(ClosureWorkstream.PRICING_POLICY.value)
-
     # This assessment intentionally cannot grant production authority. Final
     # production authorization remains a separately controlled human action
     # after package validation and canonical evidence import.
@@ -203,7 +197,6 @@ def assess_production_closure(
     work_items_closed = (
         internal_engineering_complete
         and valid_for_review
-        and pricing_policy_approved
         and not open_workstreams
     )
 
