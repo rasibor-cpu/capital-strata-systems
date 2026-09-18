@@ -50,7 +50,7 @@ Production authorization is a separate decision and cannot be inferred from item
 
 Run:
 
-    python scripts/report_css_production_closure.py       --internal-engineering-complete       --evidence-package <production-evidence.json>       --pricing-policy-approved
+    python scripts/report_css_production_closure.py       --internal-engineering-complete       --evidence-package <production-evidence.json>
 
 Exit code 0 means all identified workstreams have acceptable evidence ready for controlled review. It still does not authorize production.
 
@@ -60,6 +60,6 @@ A final audit is scheduled one hour before the target. It must verify:
 - branch convergence;
 - all CI/UAT/readiness gates;
 - evidence-package validity;
-- pricing-policy approval evidence;
+- initial-launch zero-charge pricing decision reflected in the reviewed agreement;
 - zero INTERNAL BLOCKED workstreams;
 - any remaining EXTERNAL BLOCKED workstream reported explicitly.
