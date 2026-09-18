@@ -14,7 +14,7 @@ Required:
   - APPROVED;
   - RESTRICTED; or
   - PROHIBITED;
-- approved independent/customer-directed platform charge formula;
+- confirmation that the initial-launch agreement correctly states no separate CSS charge on CUSTOMER_DIRECTED/CSS_MODIFIED independent activity, and that any future charge requires a new versioned pricing change;
 - trial/automatic-conversion disclosure approval;
 - cancellation/refund/negative-option requirements;
 - required customer notices and timing;
