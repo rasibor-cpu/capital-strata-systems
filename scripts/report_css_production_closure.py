@@ -23,11 +23,6 @@ def main() -> int:
         help="Optional production evidence JSON package.",
     )
     parser.add_argument(
-        "--pricing-policy-approved",
-        action="store_true",
-        help="Set only after the independent/customer-directed pricing policy is genuinely approved.",
-    )
-    parser.add_argument(
         "--internal-engineering-complete",
         action="store_true",
         help="Assert the validated internal engineering baseline is complete.",
@@ -42,7 +37,6 @@ def main() -> int:
     status = assess_production_closure(
         internal_engineering_complete=args.internal_engineering_complete,
         evidence_validation=evidence,
-        pricing_policy_approved=args.pricing_policy_approved,
     )
 
     print(
