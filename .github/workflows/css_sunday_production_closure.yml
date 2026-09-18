@@ -49,6 +49,10 @@ jobs:
           test -f docs/production/requests/CSS_SECURITY_OPERATIONS_EVIDENCE_REQUEST.md
           test -f docs/production/requests/CSS_PRODUCTION_UAT_RECONCILIATION_EVIDENCE_REQUEST.md
           test -f docs/production/requests/CSS_RELEASE_OWNER_SIGNOFF_REQUEST.md
+          test -f docs/production/requests/CSS_INCIDENT_TABLETOP_EVIDENCE_PACK.md
+          test -f docs/production/CSS_REAL_ENVIRONMENT_RESTORE_DRILL_RUNBOOK.md
+          test -f docs/production/research/CSS_CANADA_ONTARIO_PRELIMINARY_REGULATORY_BRIEF.md
+          test -f docs/production/research/CSS_PROVIDER_DECISION_BRIEF_CANADA.md
       - name: Assert Missing Evidence Remains Fail Closed
         run: |
           set +e
