@@ -153,7 +153,7 @@ CSS now has an evidence-based commercialization release assessment. The release 
 
 ## Full-test release-candidate status
 
-Status: RELEASE-CANDIDATE TOOLING IMPLEMENTED — VALIDATION PENDING
+Status: VALIDATED — UAT CYCLE 1 ACCEPTED / PRODUCTION TECHNICAL DRILL PASSED
 
 CSS now has a guarded isolated full-test mode with deterministic sandbox payment
 and notification providers, synthetic TEST_ONLY evidence, a disposable database,
@@ -180,7 +180,7 @@ The remaining blockers cannot be truthfully self-approved by the application:
 
 - jurisdiction-specific counsel/regulatory approval for the exact customer
   agreement and each service mode offered;
-- final approval of the independent/customer-directed platform-charge policy;
+- counsel confirmation that the initial-launch agreement reflects the approved zero-charge policy for independent/customer-directed activity;
 - production security/operations certification based on real environment
   evidence, including restore and rollback tests;
 - selection/contracting/configuration of a live payment provider and approved
