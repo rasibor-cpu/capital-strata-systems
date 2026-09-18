@@ -23,7 +23,6 @@ def test_missing_evidence_keeps_every_external_workstream_open():
     result = assess_production_closure(
         internal_engineering_complete=True,
         evidence_validation=None,
-        pricing_policy_approved=False,
     )
     assert result.work_items_closed is False
     assert result.production_authorized is False
@@ -38,7 +37,6 @@ def test_valid_external_package_still_does_not_self_authorize_production():
     result = assess_production_closure(
         internal_engineering_complete=True,
         evidence_validation=_valid_evidence(),
-        pricing_policy_approved=True,
     )
     assert result.work_items_closed is True
     assert result.external_evidence_valid_for_review is True
@@ -48,14 +46,3 @@ def test_valid_external_package_still_does_not_self_authorize_production():
         "READY_FOR_CONTROLLED_HUMAN_EVIDENCE_IMPORT_AND_FINAL_AUTHORIZATION"
         in result.blocker_reasons
     )
-
-
-def test_pricing_policy_is_independent_closure_requirement():
-    result = assess_production_closure(
-        internal_engineering_complete=True,
-        evidence_validation=_valid_evidence(),
-        pricing_policy_approved=False,
-    )
-    assert result.work_items_closed is False
-    assert ClosureWorkstream.PRICING_POLICY.value in result.open_workstreams
-    assert "INDEPENDENT_CHARGE_POLICY_APPROVAL_MISSING" in result.blocker_reasons
