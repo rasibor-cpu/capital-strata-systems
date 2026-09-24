@@ -33,7 +33,7 @@ def render(state: dict) -> str:
             (
                 ("Execution Status", trading.get("execution_status"), trading.get("execution_status")),
                 ("Decision Status", decision.get("status"), decision.get("status")),
-                ("Available to Trade", _display_value(account_values.get("available_to_trade")), _metric_status(_display_value(account_values.get("available_to_trade")))),
+                ("Available to Trade", _display_value(account_values.get("available_to_trade")), _display_status(account_values.get("available_to_trade"))),
                 ("Open Positions", len(trading.get("open_positions", []) or []), "neutral"),
             ),
             css_class="mc-metric-grid mc-metric-grid-priority mc-trade-priority",
@@ -41,9 +41,9 @@ def render(state: dict) -> str:
         )
         + metric_grid(
             (
-                ("Account Value", _display_value(account_values.get("total_account_value")), _metric_status(_display_value(account_values.get("total_account_value")))),
-                ("Buying Power", _display_value(account_values.get("buying_power")), _metric_status(_display_value(account_values.get("buying_power")))),
-                ("Margin Available", _display_value(account_values.get("margin_available")), _metric_status(_display_value(account_values.get("margin_available")))),
+                ("Account Value", _display_value(account_values.get("total_account_value")), _display_status(account_values.get("total_account_value"))),
+                ("Buying Power", _display_value(account_values.get("buying_power")), _display_status(account_values.get("buying_power"))),
+                ("Margin Available", _display_value(account_values.get("margin_available")), _display_status(account_values.get("margin_available"))),
                 ("Accepted Decisions", trading.get("accepted_decisions"), "neutral"),
                 ("Rejected Decisions", trading.get("rejected_decisions"), "neutral"),
                 ("Orders", len(trading.get("orders", []) or []), "neutral"),
@@ -95,4 +95,19 @@ def _display_value(value: object) -> str:
     row = value if isinstance(value, dict) else {}
     if row.get("availability_state") != "AVAILABLE":
         return "UNAVAILABLE"
-    return f"{row.get('value')} {row.get('currency')}"
+    amount = row.get("value")
+    currency = str(row.get("currency") or "").strip()
+    if currency and currency.upper() != "UNAVAILABLE":
+        return f"{amount} {currency}"
+    return str(amount) if amount not in (None, "") else "UNAVAILABLE"
+
+
+def _display_status(value: object) -> str:
+    row = value if isinstance(value, dict) else {}
+    if row.get("availability_state") != "AVAILABLE":
+        return "UNAVAILABLE"
+    currency = str(row.get("currency") or "").strip().upper()
+    freshness = str(row.get("freshness") or "").strip().upper()
+    if currency in {"", "UNAVAILABLE"} or freshness in {"", "UNAVAILABLE", "STALE"}:
+        return "WARNING"
+    return "AVAILABLE"
