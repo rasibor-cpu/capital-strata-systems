@@ -372,3 +372,42 @@ def test_unavailable_trade_balance_metrics_are_not_neutral() -> None:
     assert '<span>Account Value</span><strong>UNAVAILABLE</strong><em class="mc-status bad">UNAVAILABLE</em>' in body
     assert '<span>Buying Power</span><strong>UNAVAILABLE</strong><em class="mc-status bad">UNAVAILABLE</em>' in body
     assert '<span>Margin Available</span><strong>UNAVAILABLE</strong><em class="mc-status bad">UNAVAILABLE</em>' in body
+
+
+def test_trade_balance_value_does_not_append_unavailable_currency() -> None:
+    body = render_trade_operations({
+        "trading": {"execution_status": "BLOCKED"},
+        "decision_panel": {"status": "BLOCKED"},
+        "broker_balance_summary": {
+            "account_summary": {
+                "available_to_trade": {
+                    "availability_state": "AVAILABLE",
+                    "value": 601.0005,
+                    "currency": "UNAVAILABLE",
+                    "freshness": "UNAVAILABLE",
+                },
+                "total_account_value": {
+                    "availability_state": "AVAILABLE",
+                    "value": 601.0005,
+                    "currency": "UNAVAILABLE",
+                    "freshness": "UNAVAILABLE",
+                },
+                "buying_power": {
+                    "availability_state": "AVAILABLE",
+                    "value": 596.7317,
+                    "currency": "UNAVAILABLE",
+                    "freshness": "UNAVAILABLE",
+                },
+                "margin_available": {
+                    "availability_state": "AVAILABLE",
+                    "value": 601.0005,
+                    "currency": "UNAVAILABLE",
+                    "freshness": "UNAVAILABLE",
+                },
+            }
+        },
+    })
+    assert "<strong>601.0005</strong>" in body
+    assert "<strong>596.7317</strong>" in body
+    assert "<strong>601.0005 UNAVAILABLE</strong>" not in body
+    assert '<em class="mc-status warn">WARNING</em>' in body
