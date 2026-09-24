@@ -435,3 +435,28 @@ th { color: var(--mc-muted); width: 34%; font-weight: 600; }
 
 
 __all__ = ["MISSION_CONTROL_CSS"]
+
+
+.mc-evidence-disclosure details {
+  border: 1px solid var(--mc-line);
+  border-radius: 10px;
+  background: var(--mc-panel);
+  overflow: hidden;
+}
+.mc-evidence-disclosure summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--mc-info);
+}
+.mc-evidence-disclosure details[open] summary {
+  border-bottom: 1px solid var(--mc-line);
+}
+.mc-evidence-disclosure .mc-panel {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
