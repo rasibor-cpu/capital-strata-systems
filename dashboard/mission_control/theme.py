@@ -431,12 +431,6 @@ th { color: var(--mc-muted); width: 34%; font-weight: 600; }
   .mc-trade-priority { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .mc-operator-stack { gap: 10px; }
 }
-""" + CSS_DISCLOSURE
-
-
-__all__ = ["MISSION_CONTROL_CSS"]
-
-
 .mc-evidence-disclosure details {
   border: 1px solid var(--mc-line);
   border-radius: 10px;
@@ -460,3 +454,7 @@ __all__ = ["MISSION_CONTROL_CSS"]
   border: 0;
   border-radius: 0;
 }
+""" + CSS_DISCLOSURE
+
+
+__all__ = ["MISSION_CONTROL_CSS"]
