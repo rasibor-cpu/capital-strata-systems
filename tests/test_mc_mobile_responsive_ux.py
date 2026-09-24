@@ -548,3 +548,45 @@ def test_trade_full_evidence_is_collapsed_by_default() -> None:
 def test_trade_evidence_disclosure_has_touch_target_css() -> None:
     assert ".mc-evidence-disclosure summary" in MISSION_CONTROL_CSS
     assert "min-height: 44px" in MISSION_CONTROL_CSS
+
+
+def test_trade_operations_compacts_execution_and_lifecycle() -> None:
+    body = render_trade_operations({
+        "trading": {
+            "execution_status": "BLOCKED",
+            "execution_quality": "UNKNOWN",
+            "slippage": "DATA UNAVAILABLE",
+            "fees": 0.0,
+            "fills": [],
+            "rejections": [],
+        },
+        "decision_panel": {"status": "BLOCKED", "read_only": True},
+        "execution_committee": {
+            "execution_quality": "UNKNOWN",
+            "latency": 0.0,
+            "slippage": "DATA UNAVAILABLE",
+            "routing_quality": {"quality": "UNKNOWN", "slippage": "DATA UNAVAILABLE"},
+            "controls": "READ_ONLY_DISABLED",
+        },
+        "trade_lifecycle": {
+            "stages": [
+                {"stage": "candidate", "count": 0, "freshness": "DATA UNAVAILABLE", "state_hash": "hash"},
+                {"stage": "approved", "count": 5353, "freshness": "DATA UNAVAILABLE", "state_hash": "hash"},
+            ],
+            "events": [],
+        },
+    })
+    assert "Execution Snapshot" in body
+    assert "Lifecycle Summary" in body
+    assert "<summary>Show full execution committee evidence</summary>" in body
+    assert "<summary>Show full execution-quality evidence</summary>" in body
+    assert "<summary>Show full lifecycle evidence</summary>" in body
+    lifecycle_start = body.find("Lifecycle Summary")
+    lifecycle_full = body.find("Trade Lifecycle Evidence (Full)")
+    assert 0 <= lifecycle_start < lifecycle_full
+    compact = body[lifecycle_start:lifecycle_full]
+    assert "candidate" in compact
+    assert "approved" in compact
+    assert "5353" in compact
+    assert "state_hash" not in compact
+    assert "provenance" not in compact
