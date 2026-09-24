@@ -582,9 +582,10 @@ def test_trade_operations_compacts_execution_and_lifecycle() -> None:
     assert "<summary>Show full execution-quality evidence</summary>" in body
     assert "<summary>Show full lifecycle evidence</summary>" in body
     lifecycle_start = body.find("Lifecycle Summary")
+    execution_full = body.find("<summary>Show full execution committee evidence</summary>")
     lifecycle_full = body.find("Trade Lifecycle Evidence (Full)")
-    assert 0 <= lifecycle_start < lifecycle_full
-    compact = body[lifecycle_start:lifecycle_full]
+    assert 0 <= lifecycle_start < execution_full < lifecycle_full
+    compact = body[lifecycle_start:execution_full]
     assert "candidate" in compact
     assert "approved" in compact
     assert "5353" in compact
