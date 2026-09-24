@@ -1382,3 +1382,25 @@ def test_enterprise_governance_mobile_priority_and_disclosures_are_read_only() -
     assert "<summary>Show continuity and risk evidence</summary>" in body
     assert "<summary>Show certification evidence</summary>" in body
     assert "<details open" not in body
+
+
+def test_enterprise_governance_missing_evidence_does_not_render_reassuring_zeroes() -> None:
+    body = render_enterprise_governance({
+        "authorization_context": {"authenticated": True, "active": True, "role": "ADMIN"},
+        "enterprise_governance": {
+            "overall_certification_readiness": 0,
+            "governance_score": 0,
+            "iso_27001": {"percentage": 0},
+            "iso_9001": {"percentage": 0},
+            "broker_readiness": "EVIDENCE_MISSING",
+            "runtime_readiness": "EVIDENCE_MISSING",
+            "security_posture": "EVIDENCE_MISSING",
+            "compliance_posture": "EVIDENCE_MISSING",
+        },
+    })
+    assert '<span>Overall Readiness</span><strong>0%</strong><em class="mc-status bad">EVIDENCE_MISSING</em>' in body
+    assert '<span>Governance Score</span><strong>0%</strong><em class="mc-status bad">EVIDENCE_MISSING</em>' in body
+    assert '<span>Critical Risks</span><strong>EVIDENCE_MISSING</strong>' in body
+    assert "<th>risk_register_count</th><td>EVIDENCE_MISSING</td>" in body
+    assert "<th>blocker_count</th><td>EVIDENCE_MISSING</td>" in body
+    assert "<th>blockers</th><td>EVIDENCE_MISSING</td>" in body
