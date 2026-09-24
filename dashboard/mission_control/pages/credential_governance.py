@@ -23,6 +23,15 @@ def _evidence_panel(anchor: str, title: str, content: str) -> str:
     )
 
 
+def _evidence_count(source: dict, key: str) -> object:
+    if key not in source:
+        return "EVIDENCE_MISSING"
+    value = source.get(key)
+    if isinstance(value, (list, dict, tuple, set)):
+        return len(value)
+    return "EVIDENCE_MISSING"
+
+
 def render(state: dict) -> str:
     auth = state.get("authorization_context") if isinstance(state.get("authorization_context"), dict) else {}
     allowed = bool(
@@ -39,7 +48,8 @@ def render(state: dict) -> str:
             + warning_banner("Administrator authentication is required to view credential metadata.")
         )
     raw = state.get("credential_governance")
-    governance = redact_value(raw if isinstance(raw, dict) else {})
+    source = raw if isinstance(raw, dict) else {}
+    governance = redact_value(source)
     health = governance.get("vault_health") if isinstance(governance.get("vault_health"), dict) else {}
     inventory = governance.get("credential_inventory") if isinstance(governance.get("credential_inventory"), list) else []
     rotation = governance.get("rotation_queue") if isinstance(governance.get("rotation_queue"), list) else []
@@ -63,17 +73,17 @@ def render(state: dict) -> str:
             (
                 ("Vault Health", health.get("status", "UNCONFIGURED"), health.get("status", "UNCONFIGURED")),
                 ("Compliance", compliance.get("outcome", "EVIDENCE_PENDING"), compliance.get("outcome", "EVIDENCE_PENDING")),
-                ("Credentials", len(inventory), "neutral"),
-                ("Expiring Soon", len(expiring), "warning" if expiring else "normal"),
+                ("Credentials", _evidence_count(source, "credential_inventory"), _evidence_count(source, "credential_inventory")),
+                ("Expiring Soon", _evidence_count(source, "expiring_soon"), "warning" if expiring else _evidence_count(source, "expiring_soon")),
             ),
             css_class="mc-metric-grid mc-metric-grid-priority mc-cred-priority",
             aria_label="Credential Governance priority",
         )
         + metric_grid(
             (
-                ("Rotation Queue", len(rotation), "warning" if rotation else "normal"),
-                ("Audit Events", len(audit), "neutral"),
-                ("Dependencies", len(dependencies), "neutral"),
+                ("Rotation Queue", _evidence_count(source, "rotation_queue"), "warning" if rotation else _evidence_count(source, "rotation_queue")),
+                ("Audit Events", _evidence_count(source, "audit_events"), _evidence_count(source, "audit_events")),
+                ("Dependencies", _evidence_count(source, "dependency_graph"), _evidence_count(source, "dependency_graph")),
             ),
             css_class="mc-metric-grid mc-metric-grid-secondary",
             aria_label="Credential Governance secondary metrics",
@@ -81,17 +91,17 @@ def render(state: dict) -> str:
         + '<div class="mc-operator-stack">'
         + _anchor_panel("mc-cred-status", detail_table("Credential Governance Snapshot", {
             "vault_health": health.get("status", "UNCONFIGURED"),
-            "credential_count": len(inventory),
+            "credential_count": _evidence_count(source, "credential_inventory"),
             "compliance": compliance.get("outcome", "EVIDENCE_PENDING"),
         }))
         + _anchor_panel("mc-cred-rotation", detail_table("Rotation Snapshot", {
-            "rotation_queue_count": len(rotation),
-            "expiring_soon_count": len(expiring),
+            "rotation_queue_count": _evidence_count(source, "rotation_queue"),
+            "expiring_soon_count": _evidence_count(source, "expiring_soon"),
         }))
         + _anchor_panel("mc-cred-compliance", detail_table("Compliance Snapshot", {
             "outcome": compliance.get("outcome", "EVIDENCE_PENDING"),
-            "audit_event_count": len(audit),
-            "dependency_node_count": len(dependencies),
+            "audit_event_count": _evidence_count(source, "audit_events"),
+            "dependency_node_count": _evidence_count(source, "dependency_graph"),
         }))
         + _evidence_panel("mc-cred-evidence", "Show credential inventory metadata", detail_table("Credential Inventory", inventory))
         + _evidence_panel("mc-cred-selected", "Show selected credential metadata", detail_table("Selected Credential", {
