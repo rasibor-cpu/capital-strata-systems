@@ -18,6 +18,7 @@ from dashboard.mission_control.pages.audit_explainability import render as rende
 from dashboard.mission_control.pages.production_readiness import render as render_production_readiness
 from dashboard.enterprise_shell.mobile_landing import render_mobile_landing
 from dashboard.mission_control.pages.options_income import render as render_options_income
+from dashboard.mission_control.pages.users_governance import render as render_users_governance
 from dashboard.mission_control.theme import MISSION_CONTROL_CSS
 
 
@@ -1189,3 +1190,43 @@ def test_reports_mobile_shortlist_and_library_are_compact() -> None:
     assert "id5" not in library
     assert "<pre class=\"rc-result\">" not in library
     assert "<dt>status</dt><dd>UNAVAILABLE</dd>" in library
+
+
+def test_users_governance_mobile_priority_and_disclosures_are_read_only() -> None:
+    body = render_users_governance({
+        "governance": {
+            "current_user": "operator",
+            "role": "ADMIN",
+            "unit": "RISK",
+            "governance_status": "PASS",
+            "rbac_summary": "PASS",
+            "session": "ACTIVE",
+            "session_age": "10m",
+            "authentication_source": "CANONICAL",
+            "allowed_engine_modes": ["ADVISORY"],
+            "permissions": {"reports_view": True},
+        },
+        "rbac_console": {
+            "current_role": "ADMIN",
+            "roles": ["ADMIN"],
+            "role_editing": False,
+            "write_routes_enabled": False,
+            "state_hash": "hash",
+        },
+        "operator_console": {
+            "available_actions": ["VIEW"],
+            "disabled_actions": ["EXECUTE"],
+        },
+        "approval_workflow_console": {"workflows": []},
+        "governance_summary_console": {"security_posture": "PASS"},
+    })
+    assert 'aria-label="Users and Governance sections"' in body
+    assert 'aria-label="Users and Governance priority"' in body
+    assert "Identity &amp; Governance Snapshot" in body
+    assert "Session Snapshot" in body
+    assert "Operator Action Snapshot" in body
+    assert "Governance Summary" in body
+    assert "<summary>Show permissions and RBAC evidence</summary>" in body
+    assert "<summary>Show operator-console evidence</summary>" in body
+    assert "<summary>Show approval workflow evidence</summary>" in body
+    assert "<details open" not in body
