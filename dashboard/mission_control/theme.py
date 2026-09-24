@@ -413,6 +413,10 @@ th { color: var(--mc-muted); width: 34%; font-weight: 600; }
   .mc-trade-priority { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .mc-operator-stack { gap: 12px; }
   .rc-card-grid, .rc-filters { grid-template-columns: 1fr; }
+  .rc-subnav { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .rc-subnav-link { min-height:44px; justify-content:center; text-align:center; padding:8px 10px; }
+  .rc-actions .rc-btn { min-height:44px; }
+  .rc-meta div { grid-template-columns:96px minmax(0,1fr); }
   .mc-nav a { min-height: 48px; }
   .mc-page-header h1 { font-size: 1.25rem; }
 }
